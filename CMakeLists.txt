@@ -49,7 +49,16 @@ if(OPENCASCADE_FOUND)
     list(APPEND LIBRARIES ${OPENCASCADE_LIBS})
 endif()
 
-file(GLOB sources src/*.cpp)
+# file(GLOB sources src/*.cpp)
+set(sources 
+    src/main.cpp
+    src/Scene.cpp
+    src/Camera.cpp
+    src/CADObject.cpp
+    src/CADKernel.cpp
+    src/MeshRenderer.cpp
+    src/CADMeshConverter.cpp
+)
 
 add_executable(designer ${sources} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 

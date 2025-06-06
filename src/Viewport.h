@@ -3,16 +3,20 @@
 #include "imgui.h"
 #include <vulkan/vulkan.h>
 #include <memory>
+#include <vector>
 
 class Camera;
 class Scene;
+class MeshRenderer;
+class CADObject;
 
 class Viewport {
 public:
     Viewport();
     ~Viewport();
 
-    bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue, uint32_t queueFamily);
+    bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue, 
+                   uint32_t queueFamily, VkCommandPool commandPool);
     void Shutdown();
 
     void Update(float deltaTime);
@@ -39,8 +43,10 @@ private:
 
     // Vulkan resources for offscreen rendering
     VkDevice m_device;
+    VkPhysicalDevice m_physicalDevice;
     VkQueue m_queue;
     uint32_t m_queueFamily;
+    VkCommandPool m_commandPool;
     
     VkImage m_colorImage;
     VkDeviceMemory m_colorImageMemory;
@@ -51,11 +57,19 @@ private:
     
     VkRenderPass m_renderPass;
     VkFramebuffer m_framebuffer;
-    VkCommandPool m_commandPool;
     VkCommandBuffer m_commandBuffer;
     
     // ImGui texture for displaying the viewport
     VkDescriptorSet m_descriptorSet;
+    
+    // 3D Rendering
+    std::unique_ptr<MeshRenderer> m_meshRenderer;
+    
+    // Object management
+    void UpdateSceneObjects(Scene* scene);
+    void AddCADObject(CADObject* cadObject);
+    void RemoveCADObject(CADObject* cadObject);
+    std::vector<uint32_t> m_objectMeshIds;
     
     // Grid rendering
     void RenderGrid(Camera* camera);

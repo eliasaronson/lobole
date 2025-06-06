@@ -7,6 +7,8 @@
 #include "Scene.h"
 #include "Camera.h"
 #include "CADObject.h"
+#include "MeshRenderer.h"
+#include "CADMeshConverter.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory>
@@ -36,6 +38,7 @@ static bool                     g_SwapChainRebuild = false;
 // Application objects
 static std::unique_ptr<Scene> g_Scene;
 static std::unique_ptr<Camera> g_Camera;
+static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 
 static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);

@@ -1,6 +1,7 @@
 #include "Viewport.h"
 #include "Camera.h"
 #include "Scene.h"
+#include "MeshRenderer.h"
 #include <iostream>
 
 Viewport::Viewport()
@@ -31,7 +32,7 @@ Viewport::~Viewport() {
     Shutdown();
 }
 
-bool Viewport::Initialize(VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue, uint32_t queueFamily) {
+bool Viewport::Initialize(VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue, uint32_t queueFamily, VkCommandPool commandPool) {
     m_device = device;
     m_queue = queue;
     m_queueFamily = queueFamily;
