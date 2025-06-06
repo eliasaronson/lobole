@@ -1,4 +1,5 @@
 #include "Scene.h"
+#include <algorithm>
 
 uint32_t SceneObject::s_nextId = 1;
 
