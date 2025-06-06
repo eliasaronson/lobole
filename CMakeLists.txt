@@ -21,9 +21,33 @@ find_package(glm REQUIRED)
 set(IMGUI_DIR deps/imgui)
 include_directories(${IMGUI_DIR} ${IMGUI_DIR}/backends ..)
 
+# OpenCASCADE - manual setup
+set(OPENCASCADE_INCLUDE_DIR "/usr/include/opencascade")
+if(EXISTS ${OPENCASCADE_INCLUDE_DIR})
+    include_directories(${OPENCASCADE_INCLUDE_DIR})
+    message(STATUS "OpenCASCADE includes found at: ${OPENCASCADE_INCLUDE_DIR}")
+    
+    # Core OpenCASCADE libraries we need
+    set(OPENCASCADE_LIBS
+        TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo
+        TKTopAlgo TKPrim TKMesh TKBO TKDESTEP TKDESTL TKXSBase
+    )
+    
+    set(OPENCASCADE_FOUND TRUE)
+    add_definitions(-DHAVE_OPENCASCADE)
+else()
+    message(WARNING "OpenCASCADE not found - CAD functionality will be limited")
+    set(OPENCASCADE_FOUND FALSE)
+endif()
+
 # Libraries
 find_package(Vulkan REQUIRED)
 set(LIBRARIES "glfw;Vulkan::Vulkan")
+
+# Add OpenCASCADE libraries if available
+if(OPENCASCADE_FOUND)
+    list(APPEND LIBRARIES ${OPENCASCADE_LIBS})
+endif()
 
 file(GLOB sources src/*.cpp)
 

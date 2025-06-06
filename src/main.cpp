@@ -6,6 +6,7 @@
 #include "imgui_impl_vulkan.h"
 #include "Scene.h"
 #include "Camera.h"
+#include "CADObject.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory>
@@ -306,6 +307,30 @@ void RenderCADUI() {
             ImGui::EndMenu();
         }
         
+        if (ImGui::BeginMenu("Create")) {
+            if (ImGui::MenuItem("Box")) {
+                if (g_Scene) {
+                    auto box = CADObject::CreateBox("Box " + std::to_string(g_Scene->GetObjects().size() + 1), 2.0, 2.0, 2.0);
+                    g_Scene->AddObject(std::move(box));
+                }
+            }
+            if (ImGui::MenuItem("Sphere")) {
+                if (g_Scene) {
+                    auto sphere = CADObject::CreateSphere("Sphere " + std::to_string(g_Scene->GetObjects().size() + 1), 
+                                                         glm::vec3(0, 0, 0), 1.0);
+                    g_Scene->AddObject(std::move(sphere));
+                }
+            }
+            if (ImGui::MenuItem("Cylinder")) {
+                if (g_Scene) {
+                    auto cylinder = CADObject::CreateCylinder("Cylinder " + std::to_string(g_Scene->GetObjects().size() + 1),
+                                                            glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 1.0, 2.0);
+                    g_Scene->AddObject(std::move(cylinder));
+                }
+            }
+            ImGui::EndMenu();
+        }
+        
         if (ImGui::BeginMenu("View")) {
             if (ImGui::MenuItem("Reset Camera")) {
                 if (g_Camera) {
@@ -348,8 +373,26 @@ void RenderCADUI() {
     ImGui::Begin("Scene");
     if (g_Scene) {
         for (const auto& object : g_Scene->GetObjects()) {
-            ImGui::Text("%s (ID: %u)", object->GetName().c_str(), object->GetId());
+            // Check if it's a CAD object
+            if (auto cadObject = dynamic_cast<CADObject*>(object.get())) {
+                if (ImGui::TreeNode(object->GetName().c_str())) {
+                    ImGui::Text("ID: %u", object->GetId());
+                    ImGui::Text("Type: CAD Object");
+                    ImGui::Text("Volume: %.3f", cadObject->GetVolume());
+                    
+                    glm::vec3 min, max;
+                    cadObject->GetBoundingBox(min, max);
+                    ImGui::Text("Bounds: (%.2f,%.2f,%.2f) - (%.2f,%.2f,%.2f)", 
+                               min.x, min.y, min.z, max.x, max.y, max.z);
+                    
+                    ImGui::TreePop();
+                }
+            } else {
+                ImGui::Text("%s (ID: %u)", object->GetName().c_str(), object->GetId());
+            }
         }
+        
+        ImGui::Separator();
         if (ImGui::Button("Add Test Object")) {
             g_Scene->AddObject(std::make_unique<SceneObject>("Test Object " + std::to_string(g_Scene->GetObjects().size() + 1)));
         }
