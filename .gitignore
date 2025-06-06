@@ -36,3 +36,6 @@ build/*
 
 # Dependencies
 deps/*
+
+# CAD files
+CAD_files/*
