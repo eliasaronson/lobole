@@ -58,6 +58,9 @@ set(sources
     src/CADKernel.cpp
     src/MeshRenderer.cpp
     src/CADMeshConverter.cpp
+    src/SketchPlane.cpp
+    src/Sketch.cpp
+    src/SketchManager.cpp
 )
 
 add_executable(designer ${sources} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)

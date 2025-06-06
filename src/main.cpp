@@ -9,6 +9,7 @@
 #include "CADObject.h"
 #include "MeshRenderer.h"
 #include "CADMeshConverter.h"
+#include "SketchManager.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory>
@@ -40,20 +41,39 @@ static bool                     g_SwapChainRebuild = false;
 static std::unique_ptr<Scene> g_Scene;
 static std::unique_ptr<Camera> g_Camera;
 static std::unique_ptr<MeshRenderer> g_MeshRenderer;
+static std::unique_ptr<SketchManager> g_SketchManager;
 
 static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
 static void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
-    if (g_Camera) {
-        g_Camera->OnMouseMove(xpos, ypos);
+    if (g_SketchManager && g_SketchManager->IsSketchMode()) {
+        // In sketch mode, handle sketching
+        if (g_Camera) {
+            g_SketchManager->OnMouseMove(xpos, ypos, *g_Camera);
+        }
+    } else {
+        // In 3D mode, handle camera
+        if (g_Camera) {
+            g_Camera->OnMouseMove(xpos, ypos);
+        }
     }
 }
 
 static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
-    if (g_Camera) {
-        g_Camera->OnMouseButton(button, action, mods);
+    if (g_SketchManager && g_SketchManager->IsSketchMode()) {
+        // In sketch mode, handle sketching
+        if (action == GLFW_PRESS && g_Camera) {
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            g_SketchManager->OnMouseClick(xpos, ypos, *g_Camera);
+        }
+    } else {
+        // In 3D mode, handle camera
+        if (g_Camera) {
+            g_Camera->OnMouseButton(button, action, mods);
+        }
     }
 }
 
@@ -346,6 +366,43 @@ void RenderCADUI() {
         }
         
         if (ImGui::BeginMenu("Create")) {
+            // Sketch options
+            if (ImGui::BeginMenu("Sketch")) {
+                if (ImGui::MenuItem("Sketch on Front Plane")) {
+                    if (g_SketchManager) {
+                        g_SketchManager->StartSketch(PlaneType::XY);
+                        std::cout << "Started sketch on Front Plane" << std::endl;
+                    }
+                }
+                if (ImGui::MenuItem("Sketch on Top Plane")) {
+                    if (g_SketchManager) {
+                        g_SketchManager->StartSketch(PlaneType::XZ);
+                        std::cout << "Started sketch on Top Plane" << std::endl;
+                    }
+                }
+                if (ImGui::MenuItem("Sketch on Right Plane")) {
+                    if (g_SketchManager) {
+                        g_SketchManager->StartSketch(PlaneType::YZ);
+                        std::cout << "Started sketch on Right Plane" << std::endl;
+                    }
+                }
+                
+                ImGui::Separator();
+                
+                if (ImGui::MenuItem("Exit Sketch", nullptr, false, g_SketchManager && g_SketchManager->IsSketchMode())) {
+                    if (g_SketchManager) {
+                        g_SketchManager->ExitSketch();
+                        std::cout << "Exited sketch mode" << std::endl;
+                    }
+                }
+                
+                ImGui::EndMenu();
+            }
+            
+            ImGui::Separator();
+            
+            // Legacy primitive creation (for comparison)
+            if (ImGui::BeginMenu("Primitives (Legacy)")) {
             if (ImGui::MenuItem("Box")) {
                 if (g_Scene && g_MeshRenderer) {
                     int objectCount = g_Scene->GetObjects().size();
@@ -417,7 +474,9 @@ void RenderCADUI() {
                     g_Scene->AddObject(std::move(cylinder));
                 }
             }
-            ImGui::EndMenu();
+            ImGui::EndMenu();  // End Primitives (Legacy)
+            }
+            ImGui::EndMenu();  // End Create
         }
         
         if (ImGui::BeginMenu("View")) {
@@ -431,6 +490,58 @@ void RenderCADUI() {
         }
         
         ImGui::EndMainMenuBar();
+    }
+    
+    // Sketch toolbar (only shown in sketch mode)
+    if (g_SketchManager && g_SketchManager->IsSketchMode()) {
+        ImGui::Begin("Sketch Tools");
+        
+        ImGui::Text("Sketch Mode Active");
+        ImGui::Separator();
+        
+        // Drawing tools
+        if (ImGui::Button("Select")) {
+            g_SketchManager->SetSketchMode(SketchMode::Select);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Point")) {
+            g_SketchManager->SetSketchMode(SketchMode::Point);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Line")) {
+            g_SketchManager->SetSketchMode(SketchMode::Line);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Circle")) {
+            g_SketchManager->SetSketchMode(SketchMode::Circle);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Rectangle")) {
+            g_SketchManager->SetSketchMode(SketchMode::Rectangle);
+        }
+        
+        ImGui::Separator();
+        
+        // Current mode display
+        SketchMode currentMode = g_SketchManager->GetSketchMode();
+        const char* modeNames[] = {"Select", "Point", "Line", "Circle", "Rectangle"};
+        ImGui::Text("Current Tool: %s", modeNames[(int)currentMode]);
+        
+        // Sketch info
+        if (auto sketch = g_SketchManager->GetActiveSketch()) {
+            ImGui::Text("Elements: %zu", sketch->GetElementCount());
+            ImGui::Text("Can Extrude: %s", g_SketchManager->CanExtrude() ? "Yes" : "No");
+        }
+        
+        ImGui::Separator();
+        
+        // Exit sketch button
+        if (ImGui::Button("Exit Sketch")) {
+            g_SketchManager->ExitSketch();
+            std::cout << "Exited sketch mode" << std::endl;
+        }
+        
+        ImGui::End();
     }
 
     // 3D Viewport placeholder
@@ -549,11 +660,15 @@ int main(int, char**) {
     // Initialize application objects
     g_Scene = std::make_unique<Scene>();
     g_Camera = std::make_unique<Camera>();
+    g_SketchManager = std::make_unique<SketchManager>();
     
     // Set up camera for good 3D view
     g_Camera->SetPosition(glm::vec3(8.0f, 6.0f, 8.0f));
     g_Camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
     g_Camera->SetAspectRatio(1280.0f / 720.0f);
+    
+    // Set viewport size for sketch manager
+    g_SketchManager->SetViewportSize(1280, 720);
     
     // Initialize MeshRenderer with Vulkan context
     g_MeshRenderer = std::make_unique<MeshRenderer>();
@@ -643,6 +758,7 @@ int main(int, char**) {
     g_Scene.reset();
     g_Camera.reset();
     g_MeshRenderer.reset();
+    g_SketchManager.reset();
     
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();
