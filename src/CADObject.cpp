@@ -29,6 +29,8 @@ std::unique_ptr<CADObject> CADObject::CreateBox(const std::string& name,
     auto object = std::make_unique<CADObject>(name, CADPrimitiveType::Box);
     
     CADShape shape = CADKernel::Instance().CreateBox(width, height, depth);
+    std::cout << "Created box shape. Valid: " << (shape.IsValid() ? "YES" : "NO") 
+              << ", Volume: " << shape.Volume() << std::endl;
     object->SetShape(shape);
     
     return object;
@@ -39,6 +41,8 @@ std::unique_ptr<CADObject> CADObject::CreateSphere(const std::string& name,
     auto object = std::make_unique<CADObject>(name, CADPrimitiveType::Sphere);
     
     CADShape shape = CADKernel::Instance().CreateSphere(center, radius);
+    std::cout << "Created sphere shape. Valid: " << (shape.IsValid() ? "YES" : "NO") 
+              << ", Volume: " << shape.Volume() << std::endl;
     object->SetShape(shape);
     
     return object;

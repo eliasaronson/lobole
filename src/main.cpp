@@ -30,6 +30,7 @@ static uint32_t                 g_QueueFamily = (uint32_t)-1;
 static VkQueue                  g_Queue = VK_NULL_HANDLE;
 static VkPipelineCache          g_PipelineCache = VK_NULL_HANDLE;
 static VkDescriptorPool         g_DescriptorPool = VK_NULL_HANDLE;
+static VkCommandPool            g_CommandPool = VK_NULL_HANDLE;
 
 static ImGui_ImplVulkanH_Window g_MainWindowData;
 static uint32_t                 g_MinImageCount = 2;
@@ -42,6 +43,24 @@ static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 
 static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+}
+
+static void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (g_Camera) {
+        g_Camera->OnMouseMove(xpos, ypos);
+    }
+}
+
+static void mouse_button_callback(GLFWwindow* window, int button, int action, int mods) {
+    if (g_Camera) {
+        g_Camera->OnMouseButton(button, action, mods);
+    }
+}
+
+static void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
+    if (g_Camera) {
+        g_Camera->OnScroll(xoffset, yoffset);
+    }
 }
 
 static void check_vk_result(VkResult err) {
@@ -172,6 +191,16 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
         err = vkCreateDescriptorPool(g_Device, &pool_info, g_Allocator, &g_DescriptorPool);
         check_vk_result(err);
     }
+    
+    // Create Command Pool
+    {
+        VkCommandPoolCreateInfo pool_info = {};
+        pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pool_info.queueFamilyIndex = g_QueueFamily;
+        err = vkCreateCommandPool(g_Device, &pool_info, g_Allocator, &g_CommandPool);
+        check_vk_result(err);
+    }
 }
 
 static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface, int width, int height) {
@@ -196,6 +225,7 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd, VkSurfaceKHR surface
 }
 
 static void CleanupVulkan() {
+    vkDestroyCommandPool(g_Device, g_CommandPool, g_Allocator);
     vkDestroyDescriptorPool(g_Device, g_DescriptorPool, g_Allocator);
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
@@ -251,6 +281,11 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
     }
 
     ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
+    
+    // Render 3D meshes
+    if (g_MeshRenderer) {
+        g_MeshRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
+    }
 
     vkCmdEndRenderPass(fd->CommandBuffer);
     {
@@ -312,22 +347,73 @@ void RenderCADUI() {
         
         if (ImGui::BeginMenu("Create")) {
             if (ImGui::MenuItem("Box")) {
-                if (g_Scene) {
-                    auto box = CADObject::CreateBox("Box " + std::to_string(g_Scene->GetObjects().size() + 1), 2.0, 2.0, 2.0);
+                if (g_Scene && g_MeshRenderer) {
+                    int objectCount = g_Scene->GetObjects().size();
+                    auto box = CADObject::CreateBox("Box " + std::to_string(objectCount + 1), 2.0, 2.0, 2.0);
+                    
+                    // Convert CAD shape to mesh and add to renderer
+                    if (box->GetVolume() > 0.0) {
+                        CADShape::Mesh cadMesh = box->GetShape().GenerateMesh(0.1);
+                        if (!cadMesh.vertices.empty()) {
+                            std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, glm::vec3(0.6f, 0.8f, 1.0f));
+                            uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
+                            
+                            // Position objects at different locations
+                            glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 0.0f));
+                            g_MeshRenderer->SetMeshTransform(meshId, transform);
+                            
+                            std::cout << "Added box mesh with ID: " << meshId << std::endl;
+                        }
+                    }
+                    
                     g_Scene->AddObject(std::move(box));
                 }
             }
             if (ImGui::MenuItem("Sphere")) {
-                if (g_Scene) {
-                    auto sphere = CADObject::CreateSphere("Sphere " + std::to_string(g_Scene->GetObjects().size() + 1), 
+                if (g_Scene && g_MeshRenderer) {
+                    int objectCount = g_Scene->GetObjects().size();
+                    auto sphere = CADObject::CreateSphere("Sphere " + std::to_string(objectCount + 1), 
                                                          glm::vec3(0, 0, 0), 1.0);
+                    
+                    // Convert CAD shape to mesh and add to renderer
+                    if (sphere->GetVolume() > 0.0) {
+                        CADShape::Mesh cadMesh = sphere->GetShape().GenerateMesh(0.1);
+                        if (!cadMesh.vertices.empty()) {
+                            std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, glm::vec3(1.0f, 0.6f, 0.6f));
+                            uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
+                            
+                            // Position objects at different locations
+                            glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 2.0f));
+                            g_MeshRenderer->SetMeshTransform(meshId, transform);
+                            
+                            std::cout << "Added sphere mesh with ID: " << meshId << std::endl;
+                        }
+                    }
+                    
                     g_Scene->AddObject(std::move(sphere));
                 }
             }
             if (ImGui::MenuItem("Cylinder")) {
-                if (g_Scene) {
-                    auto cylinder = CADObject::CreateCylinder("Cylinder " + std::to_string(g_Scene->GetObjects().size() + 1),
+                if (g_Scene && g_MeshRenderer) {
+                    int objectCount = g_Scene->GetObjects().size();
+                    auto cylinder = CADObject::CreateCylinder("Cylinder " + std::to_string(objectCount + 1),
                                                             glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 1.0, 2.0);
+                    
+                    // Convert CAD shape to mesh and add to renderer
+                    if (cylinder->GetVolume() > 0.0) {
+                        CADShape::Mesh cadMesh = cylinder->GetShape().GenerateMesh(0.1);
+                        if (!cadMesh.vertices.empty()) {
+                            std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, glm::vec3(0.6f, 1.0f, 0.6f));
+                            uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
+                            
+                            // Position objects at different locations
+                            glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, -2.0f));
+                            g_MeshRenderer->SetMeshTransform(meshId, transform);
+                            
+                            std::cout << "Added cylinder mesh with ID: " << meshId << std::endl;
+                        }
+                    }
+                    
                     g_Scene->AddObject(std::move(cylinder));
                 }
             }
@@ -409,6 +495,11 @@ int main(int, char**) {
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     GLFWwindow* window = glfwCreateWindow(1280, 720, "Designer - 3D CAD Software", nullptr, nullptr);
+    
+    // Set up input callbacks
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+    glfwSetScrollCallback(window, scroll_callback);
     if (!glfwVulkanSupported()) {
         printf("GLFW: Vulkan Not Supported\n");
         return 1;
@@ -458,6 +549,36 @@ int main(int, char**) {
     // Initialize application objects
     g_Scene = std::make_unique<Scene>();
     g_Camera = std::make_unique<Camera>();
+    
+    // Set up camera for good 3D view
+    g_Camera->SetPosition(glm::vec3(8.0f, 6.0f, 8.0f));
+    g_Camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+    g_Camera->SetAspectRatio(1280.0f / 720.0f);
+    
+    // Initialize MeshRenderer with Vulkan context
+    g_MeshRenderer = std::make_unique<MeshRenderer>();
+    bool meshRendererInitialized = g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, 
+                                                             wd->RenderPass, g_Queue, 
+                                                             g_QueueFamily, g_CommandPool);
+    if (!meshRendererInitialized) {
+        std::cout << "Warning: MeshRenderer initialization failed" << std::endl;
+    } else {
+        std::cout << "MeshRenderer initialized successfully" << std::endl;
+    }
+    
+    // Test OpenCASCADE directly
+    std::cout << "=== Testing OpenCASCADE directly ===" << std::endl;
+    CADShape testShape = CADKernel::Instance().CreateBox(1.0, 1.0, 1.0);
+    std::cout << "Test shape valid: " << (testShape.IsValid() ? "YES" : "NO") << std::endl;
+    std::cout << "Test shape volume: " << testShape.Volume() << std::endl;
+    
+    // Test mesh generation
+    if (testShape.IsValid()) {
+        std::cout << "=== Testing mesh generation ===" << std::endl;
+        CADShape::Mesh mesh = testShape.GenerateMesh(0.1);
+        std::cout << "Generated mesh - Vertices: " << mesh.vertices.size() 
+                  << ", Triangles: " << mesh.indices.size() / 3 << std::endl;
+    }
 
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
@@ -496,6 +617,11 @@ int main(int, char**) {
         // Render CAD UI
         RenderCADUI();
 
+        // Update camera matrices for 3D rendering
+        if (g_MeshRenderer && g_Camera) {
+            g_MeshRenderer->UpdateCamera(g_Camera->GetViewMatrix(), g_Camera->GetProjectionMatrix());
+        }
+
         // Rendering
         ImGui::Render();
         ImDrawData* draw_data = ImGui::GetDrawData();
@@ -516,6 +642,7 @@ int main(int, char**) {
     
     g_Scene.reset();
     g_Camera.reset();
+    g_MeshRenderer.reset();
     
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();

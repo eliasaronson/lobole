@@ -1,6 +1,7 @@
 #include "CADKernel.h"
 
 #ifdef HAVE_OPENCASCADE
+#pragma message("Compiling with OpenCASCADE support")
 
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
@@ -30,6 +31,9 @@
 #include <StlAPI_Reader.hxx>
 #include <StlAPI_Writer.hxx>
 #include <Interface_Static.hxx>
+#include <Standard_Version.hxx>
+#include <Standard_Failure.hxx>
+#include <Precision.hxx>
 
 // CADShape implementation
 CADShape::CADShape() {
@@ -190,6 +194,18 @@ CADShape::Mesh CADShape::GenerateMesh(double deflection) const {
 // CADKernel implementation
 CADKernel& CADKernel::Instance() {
     static CADKernel instance;
+    static bool initialized = false;
+    
+    if (!initialized) {
+        // Initialize OpenCASCADE - basic validation
+        try {
+            gp_Pnt testPoint(0.0, 0.0, 0.0);  // Basic test to ensure libraries are loaded
+        } catch (...) {
+            // OpenCASCADE initialization failed
+        }
+        initialized = true;
+    }
+    
     return instance;
 }
 
@@ -198,6 +214,10 @@ CADShape CADKernel::CreateBox(const glm::vec3& corner1, const glm::vec3& corner2
     gp_Pnt p2 = ToOCCPoint(corner2);
     
     BRepPrimAPI_MakeBox boxMaker(p1, p2);
+    if (!boxMaker.IsDone()) {
+        boxMaker.Build();
+    }
+    
     if (boxMaker.IsDone()) {
         return CADShape(boxMaker.Shape());
     }
@@ -205,46 +225,106 @@ CADShape CADKernel::CreateBox(const glm::vec3& corner1, const glm::vec3& corner2
 }
 
 CADShape CADKernel::CreateBox(double width, double height, double depth) {
-    BRepPrimAPI_MakeBox boxMaker(width, height, depth);
-    if (boxMaker.IsDone()) {
-        return CADShape(boxMaker.Shape());
+    // Validate input parameters against Precision::Confusion
+    if (width <= Precision::Confusion() || height <= Precision::Confusion() || depth <= Precision::Confusion()) {
+        return CADShape();
     }
+    
+    try {
+        BRepPrimAPI_MakeBox boxMaker(width, height, depth);
+        
+        // Call Build() to ensure construction is complete
+        if (!boxMaker.IsDone()) {
+            boxMaker.Build();
+        }
+        
+        if (boxMaker.IsDone()) {
+            return CADShape(boxMaker.Shape());
+        }
+    } catch (const Standard_Failure& e) {
+        // Log error if needed, but return empty shape
+    }
+    
     return CADShape();
 }
 
 CADShape CADKernel::CreateSphere(const glm::vec3& center, double radius) {
-    gp_Pnt centerPnt = ToOCCPoint(center);
-    
-    BRepPrimAPI_MakeSphere sphereMaker(centerPnt, radius);
-    if (sphereMaker.IsDone()) {
-        return CADShape(sphereMaker.Shape());
+    if (radius <= Precision::Confusion()) {
+        return CADShape();
     }
+    
+    try {
+        gp_Pnt centerPnt = ToOCCPoint(center);
+        BRepPrimAPI_MakeSphere sphereMaker(centerPnt, radius);
+        
+        // Call Build() to ensure construction is complete
+        if (!sphereMaker.IsDone()) {
+            sphereMaker.Build();
+        }
+        
+        if (sphereMaker.IsDone()) {
+            return CADShape(sphereMaker.Shape());
+        }
+    } catch (const Standard_Failure& e) {
+        // Log error if needed, but return empty shape
+    }
+    
     return CADShape();
 }
 
 CADShape CADKernel::CreateCylinder(const glm::vec3& center, const glm::vec3& direction, 
                                   double radius, double height) {
-    gp_Pnt centerPnt = ToOCCPoint(center);
-    gp_Dir dir = ToOCCDirection(direction);
-    gp_Ax2 axis(centerPnt, dir);
-    
-    BRepPrimAPI_MakeCylinder cylinderMaker(axis, radius, height);
-    if (cylinderMaker.IsDone()) {
-        return CADShape(cylinderMaker.Shape());
+    if (radius <= Precision::Confusion() || height <= Precision::Confusion()) {
+        return CADShape();
     }
+    
+    try {
+        gp_Pnt centerPnt = ToOCCPoint(center);
+        gp_Dir dir = ToOCCDirection(direction);
+        gp_Ax2 axis(centerPnt, dir);
+        
+        BRepPrimAPI_MakeCylinder cylinderMaker(axis, radius, height);
+        
+        // Call Build() to ensure construction is complete
+        if (!cylinderMaker.IsDone()) {
+            cylinderMaker.Build();
+        }
+        
+        if (cylinderMaker.IsDone()) {
+            return CADShape(cylinderMaker.Shape());
+        }
+    } catch (const Standard_Failure& e) {
+        // Log error if needed, but return empty shape
+    }
+    
     return CADShape();
 }
 
 CADShape CADKernel::CreateCone(const glm::vec3& center, const glm::vec3& direction,
                               double radius1, double radius2, double height) {
-    gp_Pnt centerPnt = ToOCCPoint(center);
-    gp_Dir dir = ToOCCDirection(direction);
-    gp_Ax2 axis(centerPnt, dir);
-    
-    BRepPrimAPI_MakeCone coneMaker(axis, radius1, radius2, height);
-    if (coneMaker.IsDone()) {
-        return CADShape(coneMaker.Shape());
+    if (radius1 <= Precision::Confusion() || radius2 <= Precision::Confusion() || height <= Precision::Confusion()) {
+        return CADShape();
     }
+    
+    try {
+        gp_Pnt centerPnt = ToOCCPoint(center);
+        gp_Dir dir = ToOCCDirection(direction);
+        gp_Ax2 axis(centerPnt, dir);
+        
+        BRepPrimAPI_MakeCone coneMaker(axis, radius1, radius2, height);
+        
+        // Call Build() to ensure construction is complete
+        if (!coneMaker.IsDone()) {
+            coneMaker.Build();
+        }
+        
+        if (coneMaker.IsDone()) {
+            return CADShape(coneMaker.Shape());
+        }
+    } catch (const Standard_Failure& e) {
+        // Log error if needed, but return empty shape
+    }
+    
     return CADShape();
 }
 
