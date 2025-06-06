@@ -175,8 +175,14 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     UniformBufferObject ubo{};
     ubo.view = m_viewMatrix;
     ubo.proj = m_projectionMatrix;
-    ubo.lightDir = glm::vec4(0.5f, 1.0f, 0.5f, 0.0f); // Light direction
-    ubo.lightColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f); // White light
+    
+    // Better lighting setup
+    ubo.lightDir = glm::normalize(glm::vec4(1.0f, 1.5f, 1.0f, 0.0f)); // Light from upper right
+    ubo.lightColor = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f); // Slightly warm white light
+    
+    // Extract camera position from inverse view matrix
+    glm::mat4 invView = glm::inverse(m_viewMatrix);
+    ubo.viewPos = glm::vec4(invView[3][0], invView[3][1], invView[3][2], 1.0f);
     
     // Bind pipeline
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);

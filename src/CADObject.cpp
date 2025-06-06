@@ -11,6 +11,17 @@ CADObject::CADObject(const std::string& name, CADPrimitiveType type)
     , m_meshDirty(true) {
 }
 
+CADObject::CADObject(const std::string& name, const CADShape& shape, CADPrimitiveType type)
+    : SceneObject(name)
+    , m_primitiveType(type)
+    , m_shape(shape)
+    , m_position(0.0f, 0.0f, 0.0f)
+    , m_rotationAxis(0.0f, 0.0f, 1.0f)
+    , m_rotationAngle(0.0)
+    , m_scale(1.0)
+    , m_meshDirty(true) {
+}
+
 void CADObject::Update(float deltaTime) {
     // Update CAD object logic here
 }

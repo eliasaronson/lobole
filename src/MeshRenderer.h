@@ -19,8 +19,9 @@ struct UniformBufferObject {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
-    glm::vec4 lightDir;  // Light direction
+    glm::vec4 lightDir;   // Light direction
     glm::vec4 lightColor; // Light color
+    glm::vec4 viewPos;    // Camera position
 };
 
 class Mesh {

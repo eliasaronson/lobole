@@ -13,6 +13,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory>
+#include <filesystem>
+#include <algorithm>
 #define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -42,6 +44,14 @@ static std::unique_ptr<Scene> g_Scene;
 static std::unique_ptr<Camera> g_Camera;
 static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 static std::unique_ptr<SketchManager> g_SketchManager;
+
+// File browser state
+static bool g_ShowFileBrowser = false;
+static std::string g_CurrentPath = "CAD_files";
+static std::vector<std::string> g_DirectoryContents;
+
+// Forward declarations
+void LoadSTEPFile(const std::string& filename);
 
 static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
@@ -346,12 +356,167 @@ static void FramePresent(ImGui_ImplVulkanH_Window* wd) {
     wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount;
 }
 
+void UpdateDirectoryContents() {
+    g_DirectoryContents.clear();
+    
+    try {
+        if (std::filesystem::exists(g_CurrentPath) && std::filesystem::is_directory(g_CurrentPath)) {
+            // Add parent directory entry if not at root
+            if (g_CurrentPath != "." && g_CurrentPath != "/" && g_CurrentPath.find("..") == std::string::npos) {
+                g_DirectoryContents.push_back("..");
+            }
+            
+            for (const auto& entry : std::filesystem::directory_iterator(g_CurrentPath)) {
+                std::string filename = entry.path().filename().string();
+                
+                if (entry.is_directory()) {
+                    g_DirectoryContents.push_back("[DIR] " + filename);
+                } else {
+                    // Show all files, highlight CAD files
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    
+                    if (ext == ".step" || ext == ".stp" || ext == ".iges" || ext == ".igs") {
+                        g_DirectoryContents.push_back("[CAD] " + filename);
+                    } else {
+                        g_DirectoryContents.push_back(filename);
+                    }
+                }
+            }
+        }
+    } catch (const std::exception& e) {
+        g_DirectoryContents.push_back("Error reading directory");
+    }
+    
+    // Sort contents
+    std::sort(g_DirectoryContents.begin(), g_DirectoryContents.end());
+}
+
+void RenderFileBrowser() {
+    if (!g_ShowFileBrowser) return;
+    
+    ImGui::Begin("Open STEP File", &g_ShowFileBrowser, ImGuiWindowFlags_AlwaysAutoResize);
+    
+    ImGui::Text("Current Path: %s", g_CurrentPath.c_str());
+    ImGui::Separator();
+    
+    if (ImGui::Button("Refresh")) {
+        UpdateDirectoryContents();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+        g_ShowFileBrowser = false;
+    }
+    
+    ImGui::Separator();
+    
+    // File list
+    if (ImGui::BeginListBox("##files", ImVec2(400, 300))) {
+        for (const auto& item : g_DirectoryContents) {
+            bool isSelected = false;
+            
+            if (ImGui::Selectable(item.c_str(), isSelected, ImGuiSelectableFlags_AllowDoubleClick)) {
+                if (ImGui::IsMouseDoubleClicked(0)) {
+                    if (item == "..") {
+                        // Go to parent directory
+                        std::filesystem::path parentPath = std::filesystem::path(g_CurrentPath).parent_path();
+                        g_CurrentPath = parentPath.string();
+                        if (g_CurrentPath.empty()) g_CurrentPath = ".";
+                        UpdateDirectoryContents();
+                    } else if (item.starts_with("[DIR]")) {
+                        // Enter directory
+                        std::string dirName = item.substr(6); // Remove "[DIR] " prefix
+                        g_CurrentPath = (std::filesystem::path(g_CurrentPath) / dirName).string();
+                        UpdateDirectoryContents();
+                    } else if (item.starts_with("[CAD]")) {
+                        // Load CAD file
+                        std::string fileName = item.substr(6); // Remove "[CAD] " prefix
+                        std::string fullPath = (std::filesystem::path(g_CurrentPath) / fileName).string();
+                        std::cout << "Loading selected file: " << fullPath << std::endl;
+                        LoadSTEPFile(fullPath);
+                        g_ShowFileBrowser = false;
+                    }
+                }
+            }
+        }
+        ImGui::EndListBox();
+    }
+    
+    ImGui::Text("Double-click directories to enter, CAD files to load");
+    
+    ImGui::End();
+}
+
+void LoadSTEPFile(const std::string& filename) {
+    if (!g_Scene || !g_MeshRenderer) return;
+    
+    std::cout << "Loading STEP file: " << filename << std::endl;
+    
+    // Use OpenCASCADE to load STEP file
+    std::vector<CADShape> shapes;
+    bool success = CADKernel::Instance().LoadSTEP(filename, shapes);
+    
+    if (!success) {
+        std::cout << "Failed to load STEP file: " << filename << std::endl;
+        return;
+    }
+    
+    std::cout << "Loaded " << shapes.size() << " shapes from STEP file" << std::endl;
+    
+    // Convert each shape to a mesh and add to renderer (limit to first 20 shapes for performance)
+    int shapeIndex = 0;
+    int maxShapes = std::min((int)shapes.size(), 20);
+    std::cout << "Processing first " << maxShapes << " shapes..." << std::endl;
+    
+    for (int i = 0; i < maxShapes; i++) {
+        const auto& shape = shapes[i];
+        std::cout << "Processing shape " << (i + 1) << "/" << maxShapes << "..." << std::endl;
+        if (shape.IsValid() && shape.Volume() > 1e-6) {
+            // Generate mesh from the shape
+            CADShape::Mesh cadMesh = shape.GenerateMesh(0.5); // Good balance of quality and performance
+            
+            if (!cadMesh.vertices.empty()) {
+                // Convert to renderer format with aluminum-like colors
+                glm::vec3 color;
+                if (shapeIndex == 0) {
+                    color = glm::vec3(0.8f, 0.85f, 0.9f); // Light aluminum
+                } else {
+                    color = glm::vec3(0.7f + 0.2f * (shapeIndex % 3) / 3.0f, 
+                                    0.7f + 0.2f * ((shapeIndex + 1) % 3) / 3.0f, 
+                                    0.8f + 0.2f * ((shapeIndex + 2) % 3) / 3.0f); // Varied metallic colors
+                }
+                std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, color);
+                uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
+                
+                // Create a CAD object for the shape
+                auto cadObject = std::make_unique<CADObject>("STEP Shape " + std::to_string(shapeIndex + 1), shape);
+                g_Scene->AddObject(std::move(cadObject));
+                
+                std::cout << "Added shape " << shapeIndex + 1 << " with " << cadMesh.vertices.size() 
+                         << " vertices and " << cadMesh.indices.size() / 3 << " triangles (Mesh ID: " << meshId << ")" << std::endl;
+                shapeIndex++;
+            }
+        }
+    }
+    
+    if (shapeIndex > 0) {
+        std::cout << "Successfully loaded " << shapeIndex << " shapes from STEP file" << std::endl;
+    } else {
+        std::cout << "No valid shapes found in STEP file" << std::endl;
+    }
+}
+
 void RenderCADUI() {
     // Main menu bar
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
             if (ImGui::MenuItem("New")) {}
-            if (ImGui::MenuItem("Open")) {}
+            
+            if (ImGui::MenuItem("Open STEP File...")) {
+                g_ShowFileBrowser = true;
+                UpdateDirectoryContents();
+            }
+            
             if (ImGui::MenuItem("Save")) {}
             if (ImGui::MenuItem("Exit")) {
                 glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
@@ -543,6 +708,9 @@ void RenderCADUI() {
         
         ImGui::End();
     }
+    
+    // File browser
+    RenderFileBrowser();
 
     // 3D Viewport placeholder
     ImGui::Begin("3D Viewport");

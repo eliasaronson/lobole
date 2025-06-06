@@ -16,6 +16,7 @@ enum class CADPrimitiveType {
 class CADObject : public SceneObject {
 public:
     CADObject(const std::string& name, CADPrimitiveType type = CADPrimitiveType::Custom);
+    CADObject(const std::string& name, const CADShape& shape, CADPrimitiveType type = CADPrimitiveType::Custom);
     virtual ~CADObject() = default;
 
     // SceneObject overrides
