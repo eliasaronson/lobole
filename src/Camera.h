@@ -1,0 +1,84 @@
+#pragma once
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+enum class CameraMode {
+    Orbit,
+    Pan,
+    Zoom
+};
+
+class Camera {
+public:
+    Camera();
+    ~Camera() = default;
+
+    void Update(float deltaTime);
+    
+    // Camera controls
+    void OnMouseMove(double xpos, double ypos);
+    void OnMouseButton(int button, int action, int mods);
+    void OnScroll(double xoffset, double yoffset);
+    void OnKey(int key, int scancode, int action, int mods);
+
+    // Camera properties
+    void SetPosition(const glm::vec3& position) { m_position = position; UpdateViewMatrix(); }
+    void SetTarget(const glm::vec3& target) { m_target = target; UpdateViewMatrix(); }
+    void SetUp(const glm::vec3& up) { m_up = up; UpdateViewMatrix(); }
+    
+    void SetFOV(float fov) { m_fov = fov; UpdateProjectionMatrix(); }
+    void SetAspectRatio(float aspect) { m_aspectRatio = aspect; UpdateProjectionMatrix(); }
+    void SetNearPlane(float nearPlane) { m_nearPlane = nearPlane; UpdateProjectionMatrix(); }
+    void SetFarPlane(float farPlane) { m_farPlane = farPlane; UpdateProjectionMatrix(); }
+
+    // Matrix getters
+    const glm::mat4& GetViewMatrix() const { return m_viewMatrix; }
+    const glm::mat4& GetProjectionMatrix() const { return m_projectionMatrix; }
+    glm::mat4 GetViewProjectionMatrix() const { return m_projectionMatrix * m_viewMatrix; }
+
+    // Camera vectors
+    glm::vec3 GetPosition() const { return m_position; }
+    glm::vec3 GetTarget() const { return m_target; }
+    glm::vec3 GetForward() const { return glm::normalize(m_target - m_position); }
+    glm::vec3 GetRight() const { return glm::normalize(glm::cross(GetForward(), m_up)); }
+    glm::vec3 GetUp() const { return m_up; }
+
+    // Camera distance from target
+    float GetDistance() const { return glm::length(m_position - m_target); }
+    void SetDistance(float distance);
+
+private:
+    void UpdateViewMatrix();
+    void UpdateProjectionMatrix();
+    
+    void HandleOrbitMode(double deltaX, double deltaY);
+    void HandlePanMode(double deltaX, double deltaY);
+    void HandleZoomMode(double deltaY);
+
+    // Camera parameters
+    glm::vec3 m_position;
+    glm::vec3 m_target;
+    glm::vec3 m_up;
+    
+    float m_fov;
+    float m_aspectRatio;
+    float m_nearPlane;
+    float m_farPlane;
+
+    // Matrices
+    glm::mat4 m_viewMatrix;
+    glm::mat4 m_projectionMatrix;
+
+    // Input state
+    bool m_mousePressed[3];
+    double m_lastMouseX, m_lastMouseY;
+    CameraMode m_currentMode;
+    
+    // Camera settings
+    float m_orbitSensitivity;
+    float m_panSensitivity;
+    float m_zoomSensitivity;
+    float m_minDistance;
+    float m_maxDistance;
+};
