@@ -218,7 +218,7 @@ bool OutlineRenderer::CreateOutlinePipeline() {
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_FRONT_BIT; // Cull front faces to show outline
+    rasterizer.cullMode = VK_CULL_MODE_NONE; // No culling for outlines
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     
@@ -229,9 +229,9 @@ bool OutlineRenderer::CreateOutlinePipeline() {
     
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
+    depthStencil.depthTestEnable = VK_FALSE; // Disable depth testing for outlines
     depthStencil.depthWriteEnable = VK_FALSE; // Don't write depth for outlines
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_ALWAYS;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
     
@@ -823,7 +823,8 @@ void OutlineRenderer::SetViewportSize(uint32_t width, uint32_t height) {
 }
 
 void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
-    // For now, use identity transform for all meshes
+    // We need to update uniform buffer for each mesh individually, but for now use identity
+    // TODO: This should be updated per-mesh in the render loop
     glm::mat4 model = glm::mat4(1.0f);
     
     // Update outline uniform buffer
@@ -840,7 +841,7 @@ void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
     memcpy(data, &outlineUBO, sizeof(outlineUBO));
     vkUnmapMemory(m_device, m_outlineUniformBuffersMemory[currentFrame]);
     
-    // Update wireframe uniform buffer
+    // Update wireframe uniform buffer  
     WireframeUniformBufferObject wireframeUBO{};
     wireframeUBO.model = model;
     wireframeUBO.view = m_viewMatrix;

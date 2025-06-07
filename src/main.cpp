@@ -660,6 +660,14 @@ void RenderCADUI() {
                             std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, glm::vec3(0.6f, 0.8f, 1.0f));
                             uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
                             
+                            // Add outline mesh
+                            if (g_OutlineRenderer) {
+                                uint32_t outlineMeshId = g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
+                                glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 0.0f));
+                                g_OutlineRenderer->SetMeshTransform(outlineMeshId, transform);
+                                std::cout << "Added box outline mesh with ID: " << outlineMeshId << std::endl;
+                            }
+                            
                             // Position objects at different locations
                             glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 0.0f));
                             g_MeshRenderer->SetMeshTransform(meshId, transform);
@@ -684,6 +692,14 @@ void RenderCADUI() {
                             std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, glm::vec3(1.0f, 0.6f, 0.6f));
                             uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
                             
+                            // Add outline mesh
+                            if (g_OutlineRenderer) {
+                                uint32_t outlineMeshId = g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
+                                glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 2.0f));
+                                g_OutlineRenderer->SetMeshTransform(outlineMeshId, transform);
+                                std::cout << "Added sphere outline mesh with ID: " << outlineMeshId << std::endl;
+                            }
+                            
                             // Position objects at different locations
                             glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 2.0f));
                             g_MeshRenderer->SetMeshTransform(meshId, transform);
@@ -707,6 +723,14 @@ void RenderCADUI() {
                         if (!cadMesh.vertices.empty()) {
                             std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, glm::vec3(0.6f, 1.0f, 0.6f));
                             uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
+                            
+                            // Add outline mesh
+                            if (g_OutlineRenderer) {
+                                uint32_t outlineMeshId = g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
+                                glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, -2.0f));
+                                g_OutlineRenderer->SetMeshTransform(outlineMeshId, transform);
+                                std::cout << "Added cylinder outline mesh with ID: " << outlineMeshId << std::endl;
+                            }
                             
                             // Position objects at different locations
                             glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, -2.0f));
@@ -1024,6 +1048,19 @@ int main(int, char**) {
     } else {
         std::cout << "OutlineRenderer initialized successfully" << std::endl;
         g_OutlineRenderer->SetViewportSize(1280, 720);
+        
+        // Set default outline settings for visibility testing
+        OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
+        std::cout << "Default outline mode: " << static_cast<int>(settings.mode) << std::endl;
+        std::cout << "Default outline color: (" << settings.outlineColor.r << ", " << settings.outlineColor.g 
+                  << ", " << settings.outlineColor.b << ", " << settings.outlineColor.a << ")" << std::endl;
+        std::cout << "Default outline width: " << settings.outlineWidth << std::endl;
+        
+        // Force enable wireframe rendering for testing  
+        settings.mode = OutlineMode::WIREFRAME;
+        settings.lineWidth = 3.0f; // Make wireframe lines thicker
+        g_OutlineRenderer->SetOutlineSettings(settings);
+        std::cout << "Set outline mode to WIREFRAME with line width " << settings.lineWidth << std::endl;
     }
     
     // Initialize RayTracingRenderer

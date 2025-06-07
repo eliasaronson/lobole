@@ -19,7 +19,7 @@ void main() {
     
     // Expand vertex along normal in view space for outline
     vec3 viewNormal = normalize(mat3(ubo.view * ubo.model) * inNormal);
-    viewPos.xyz += viewNormal * ubo.outlineWidth * 0.01;
+    viewPos.xyz += viewNormal * ubo.outlineWidth * 0.1;
     
     gl_Position = ubo.proj * viewPos;
 }
