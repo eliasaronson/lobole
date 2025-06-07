@@ -14,7 +14,7 @@ void main() {
     vec3 lightDir = normalize(fragLightDir);
     vec3 viewDir = normalize(fragViewPos - fragWorldPos);
     
-    // Material properties for aluminum/metal
+    // Material properties for aluminum/metal  
     vec3 albedo = fragColor;
     float metallic = 0.8;
     float roughness = 0.3;

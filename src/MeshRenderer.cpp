@@ -3,6 +3,22 @@
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
+#include <filesystem>
+#include <unistd.h>
+#include <limits.h>
+
+// Utility function to get the directory of the current executable
+std::string GetExecutableDirectory() {
+    char result[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+    if (count != -1) {
+        result[count] = '\0';
+        std::filesystem::path execPath(result);
+        return execPath.parent_path().string();
+    }
+    // Fallback to current directory if readlink fails
+    return ".";
+}
 
 // Vertex3D implementation
 VkVertexInputBindingDescription Vertex3D::getBindingDescription() {
@@ -184,6 +200,7 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     glm::mat4 invView = glm::inverse(m_viewMatrix);
     ubo.viewPos = glm::vec4(invView[3][0], invView[3][1], invView[3][2], 1.0f);
     
+    
     // Bind pipeline
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
     
@@ -254,12 +271,19 @@ bool MeshRenderer::CreateDescriptorSetLayout() {
 }
 
 bool MeshRenderer::CreateGraphicsPipeline() {
+    // Get executable directory and construct shader paths
+    std::string execDir = GetExecutableDirectory();
+    std::string vertShaderPath = execDir + "/libraries/shaders/mesh_vert.spv";
+    std::string fragShaderPath = execDir + "/libraries/shaders/mesh_frag.spv";
+    
     // Load shaders
-    auto vertShaderCode = ReadFile("build/shaders/mesh_vert.spv");
-    auto fragShaderCode = ReadFile("build/shaders/mesh_frag.spv");
+    auto vertShaderCode = ReadFile(vertShaderPath);
+    auto fragShaderCode = ReadFile(fragShaderPath);
     
     if (vertShaderCode.empty() || fragShaderCode.empty()) {
-        std::cerr << "Failed to load shader files!" << std::endl;
+        std::cerr << "Failed to load shader files from: " << execDir << "/libraries/shaders/" << std::endl;
+        std::cerr << "Vertex shader path: " << vertShaderPath << std::endl;
+        std::cerr << "Fragment shader path: " << fragShaderPath << std::endl;
         return false;
     }
     

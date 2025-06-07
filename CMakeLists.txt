@@ -67,3 +67,41 @@ add_executable(designer ${sources} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${I
 
 target_link_libraries(designer ${LIBRARIES})
 
+# Find glslc (Vulkan shader compiler)
+find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
+if(NOT GLSLC)
+    message(FATAL_ERROR "glslc not found! Make sure Vulkan SDK is installed and glslc is in PATH")
+endif()
+message(STATUS "Found glslc: ${GLSLC}")
+
+# Create shader output directory
+set(SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/libraries/shaders")
+file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+
+# Function to compile a shader
+function(compile_shader TARGET SHADER_SOURCE SHADER_OUTPUT)
+    add_custom_command(
+        OUTPUT ${SHADER_OUTPUT}
+        COMMAND ${GLSLC} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+        DEPENDS ${SHADER_SOURCE}
+        COMMENT "Compiling shader ${SHADER_SOURCE}"
+    )
+    add_custom_target(${TARGET} DEPENDS ${SHADER_OUTPUT})
+endfunction()
+
+# Compile vertex shader
+set(VERTEX_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/mesh.vert")
+set(VERTEX_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/mesh_vert.spv")
+compile_shader(mesh_vert_shader ${VERTEX_SHADER_SOURCE} ${VERTEX_SHADER_OUTPUT})
+
+# Compile fragment shader
+set(FRAGMENT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/mesh.frag")
+set(FRAGMENT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/mesh_frag.spv")
+compile_shader(mesh_frag_shader ${FRAGMENT_SHADER_SOURCE} ${FRAGMENT_SHADER_OUTPUT})
+
+# Create a target for all shaders
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader)
+
+# Make sure shaders are built before the main executable
+add_dependencies(designer shaders)
+

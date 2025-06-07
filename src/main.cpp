@@ -47,7 +47,7 @@ static std::unique_ptr<SketchManager> g_SketchManager;
 
 // File browser state
 static bool g_ShowFileBrowser = false;
-static std::string g_CurrentPath = "CAD_files";
+static std::string g_CurrentPath = "../CAD_files";
 static std::vector<std::string> g_DirectoryContents;
 
 // Forward declarations
@@ -385,6 +385,7 @@ void UpdateDirectoryContents() {
             }
         }
     } catch (const std::exception& e) {
+        std::cerr << "Error reading directory '" << g_CurrentPath << "': " << e.what() << std::endl;
         g_DirectoryContents.push_back("Error reading directory");
     }
     
@@ -419,15 +420,30 @@ void RenderFileBrowser() {
                 if (ImGui::IsMouseDoubleClicked(0)) {
                     if (item == "..") {
                         // Go to parent directory
-                        std::filesystem::path parentPath = std::filesystem::path(g_CurrentPath).parent_path();
-                        g_CurrentPath = parentPath.string();
-                        if (g_CurrentPath.empty()) g_CurrentPath = ".";
-                        UpdateDirectoryContents();
+                        try {
+                            std::filesystem::path currentPath(g_CurrentPath);
+                            std::filesystem::path parentPath = currentPath.parent_path();
+                            if (!parentPath.empty()) {
+                                g_CurrentPath = parentPath.string();
+                                // Normalize the path to avoid issues
+                                g_CurrentPath = std::filesystem::weakly_canonical(g_CurrentPath).string();
+                            } else {
+                                g_CurrentPath = ".";
+                            }
+                            UpdateDirectoryContents();
+                        } catch (const std::exception& e) {
+                            std::cout << "Error navigating to parent directory: " << e.what() << std::endl;
+                        }
                     } else if (item.starts_with("[DIR]")) {
                         // Enter directory
-                        std::string dirName = item.substr(6); // Remove "[DIR] " prefix
-                        g_CurrentPath = (std::filesystem::path(g_CurrentPath) / dirName).string();
-                        UpdateDirectoryContents();
+                        try {
+                            std::string dirName = item.substr(6); // Remove "[DIR] " prefix
+                            std::filesystem::path newPath = std::filesystem::path(g_CurrentPath) / dirName;
+                            g_CurrentPath = std::filesystem::weakly_canonical(newPath).string();
+                            UpdateDirectoryContents();
+                        } catch (const std::exception& e) {
+                            std::cout << "Error entering directory: " << e.what() << std::endl;
+                        }
                     } else if (item.starts_with("[CAD]")) {
                         // Load CAD file
                         std::string fileName = item.substr(6); // Remove "[CAD] " prefix
