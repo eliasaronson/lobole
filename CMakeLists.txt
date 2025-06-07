@@ -58,6 +58,7 @@ set(sources
     src/CADKernel.cpp
     src/MeshRenderer.cpp
     src/CADMeshConverter.cpp
+    src/CADMaterials.cpp
     src/SketchPlane.cpp
     src/Sketch.cpp
     src/SketchManager.cpp

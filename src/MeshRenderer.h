@@ -15,13 +15,20 @@ struct Vertex3D {
     static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions();
 };
 
+struct Light {
+    glm::vec4 direction;  // xyz = direction, w = intensity
+    glm::vec4 color;      // rgb = color, a = unused
+};
+
 struct UniformBufferObject {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
-    glm::vec4 lightDir;   // Light direction
-    glm::vec4 lightColor; // Light color
-    glm::vec4 viewPos;    // Camera position
+    glm::vec4 viewPos;     // Camera position
+    Light primaryLight;    // Main directional light
+    Light fillLight;       // Fill light (opposite direction, lower intensity)
+    Light rimLight;        // Rim light (side lighting)
+    glm::vec4 ambientColor; // rgb = ambient color, a = intensity
 };
 
 class Mesh {

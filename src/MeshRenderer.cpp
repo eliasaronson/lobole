@@ -192,13 +192,26 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     ubo.view = m_viewMatrix;
     ubo.proj = m_projectionMatrix;
     
-    // Better lighting setup
-    ubo.lightDir = glm::normalize(glm::vec4(1.0f, 1.5f, 1.0f, 0.0f)); // Light from upper right
-    ubo.lightColor = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f); // Slightly warm white light
-    
     // Extract camera position from inverse view matrix
     glm::mat4 invView = glm::inverse(m_viewMatrix);
     ubo.viewPos = glm::vec4(invView[3][0], invView[3][1], invView[3][2], 1.0f);
+    
+    // FreeCAD-style multi-light setup for professional CAD lighting
+    
+    // Primary directional light (main illumination from upper right)
+    ubo.primaryLight.direction = glm::vec4(glm::normalize(glm::vec3(1.0f, 1.5f, 1.0f)), 1.8f); // High intensity
+    ubo.primaryLight.color = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f); // Slightly warm white
+    
+    // Fill light (softer light from opposite direction to reduce harsh shadows)
+    ubo.fillLight.direction = glm::vec4(glm::normalize(glm::vec3(-0.5f, -0.8f, -0.5f)), 0.4f); // Lower intensity
+    ubo.fillLight.color = glm::vec4(0.8f, 0.85f, 1.0f, 1.0f); // Slightly cool blue fill
+    
+    // Rim light (side lighting for edge definition)
+    ubo.rimLight.direction = glm::vec4(glm::normalize(glm::vec3(0.8f, 0.2f, -0.9f)), 0.6f); // Medium intensity
+    ubo.rimLight.color = glm::vec4(1.0f, 1.0f, 0.9f, 1.0f); // Neutral white
+    
+    // Ambient light (reduced for better contrast)
+    ubo.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 0.8f); // Cool ambient with intensity
     
     
     // Bind pipeline

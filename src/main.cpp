@@ -10,6 +10,7 @@
 #include "MeshRenderer.h"
 #include "CADMeshConverter.h"
 #include "SketchManager.h"
+#include "CADMaterials.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory>
@@ -492,19 +493,23 @@ void LoadSTEPFile(const std::string& filename) {
             CADShape::Mesh cadMesh = shape.GenerateMesh(0.5); // Good balance of quality and performance
             
             if (!cadMesh.vertices.empty()) {
-                // Convert to renderer format with more vibrant metallic colors
-                glm::vec3 color;
+                // Determine material type based on filename or shape index
+                CADMaterials::MaterialType materialType;
                 if (shapeIndex == 0) {
-                    color = glm::vec3(0.9f, 0.6f, 0.2f); // Gold/bronze
+                    // First shape uses filename-based material detection
+                    materialType = CADMaterials::MaterialLibrary::GetMaterialFromFilename(filename);
                 } else {
-                    // More distinct metallic colors
-                    switch (shapeIndex % 4) {
-                        case 1: color = glm::vec3(0.8f, 0.8f, 0.9f); break; // Silver
-                        case 2: color = glm::vec3(0.9f, 0.4f, 0.3f); break; // Copper  
-                        case 3: color = glm::vec3(0.6f, 0.8f, 0.9f); break; // Steel blue
-                        default: color = glm::vec3(0.7f, 0.9f, 0.7f); break; // Light green
-                    }
+                    // Additional shapes cycle through different materials
+                    materialType = CADMaterials::MaterialLibrary::GetMaterialFromShapeIndex(shapeIndex);
                 }
+                
+                // Get professional CAD material properties
+                const auto& material = CADMaterials::MaterialLibrary::GetMaterial(materialType);
+                glm::vec3 color = material.baseColor;
+                
+                std::cout << "Shape " << (shapeIndex + 1) << " assigned material: " << material.name 
+                         << " (Color: " << color.r << ", " << color.g << ", " << color.b << ")" << std::endl;
+                
                 std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, color);
                 uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
                 
