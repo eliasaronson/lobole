@@ -8,6 +8,7 @@
 #include "Camera.h"
 #include "CADObject.h"
 #include "MeshRenderer.h"
+#include "OutlineRenderer.h"
 #include "RayTracingRenderer.h"
 #include "CADMeshConverter.h"
 #include "SketchManager.h"
@@ -45,6 +46,7 @@ static bool                     g_SwapChainRebuild = false;
 static std::unique_ptr<Scene> g_Scene;
 static std::unique_ptr<Camera> g_Camera;
 static std::unique_ptr<MeshRenderer> g_MeshRenderer;
+static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<SketchManager> g_SketchManager;
 
@@ -359,6 +361,11 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
     if (g_MeshRenderer) {
         g_MeshRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
     }
+    
+    // Render outlines
+    if (g_OutlineRenderer) {
+        g_OutlineRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
+    }
 
     vkCmdEndRenderPass(fd->CommandBuffer);
     {
@@ -555,6 +562,12 @@ void LoadSTEPFile(const std::string& filename) {
                 std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, color);
                 uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
                 
+                // Add outline mesh
+                if (g_OutlineRenderer) {
+                    uint32_t outlineMeshId = g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
+                    // Outline mesh will use the same transform as the main mesh
+                }
+                
                 // Create a CAD object for the shape
                 auto cadObject = std::make_unique<CADObject>("STEP Shape " + std::to_string(shapeIndex + 1), shape);
                 g_Scene->AddObject(std::move(cadObject));
@@ -743,6 +756,59 @@ void RenderCADUI() {
                     static int samples = 1;
                     if (ImGui::SliderInt("Samples Per Pixel", &samples, 1, 4)) {
                         g_RayTracingRenderer->SetSamplesPerPixel(samples);
+                    }
+                    
+                    ImGui::EndMenu();
+                }
+            }
+            
+            ImGui::Separator();
+            
+            // Outline rendering controls
+            if (g_OutlineRenderer && g_OutlineRenderer->IsInitialized()) {
+                if (ImGui::BeginMenu("Outline Rendering")) {
+                    OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
+                    bool changed = false;
+                    
+                    // Outline mode
+                    const char* outlineModes[] = {"None", "Edges", "Wireframe", "Silhouette"};
+                    int currentMode = static_cast<int>(settings.mode);
+                    if (ImGui::Combo("Mode", &currentMode, outlineModes, 4)) {
+                        settings.mode = static_cast<OutlineMode>(currentMode);
+                        changed = true;
+                    }
+                    
+                    // Outline settings
+                    if (settings.mode != OutlineMode::NONE) {
+                        if (ImGui::ColorEdit3("Outline Color", &settings.outlineColor.x)) {
+                            changed = true;
+                        }
+                        
+                        if (ImGui::SliderFloat("Outline Width", &settings.outlineWidth, 0.1f, 5.0f)) {
+                            changed = true;
+                        }
+                        
+                        if (settings.mode == OutlineMode::WIREFRAME) {
+                            if (ImGui::ColorEdit3("Wireframe Color", &settings.wireframeColor.x)) {
+                                changed = true;
+                            }
+                            
+                            if (ImGui::SliderFloat("Line Width", &settings.lineWidth, 0.5f, 3.0f)) {
+                                changed = true;
+                            }
+                        }
+                        
+                        if (ImGui::Checkbox("Depth Test", &settings.enableDepthTest)) {
+                            changed = true;
+                        }
+                        
+                        if (ImGui::Checkbox("Blending", &settings.enableBlending)) {
+                            changed = true;
+                        }
+                    }
+                    
+                    if (changed) {
+                        g_OutlineRenderer->SetOutlineSettings(settings);
                     }
                     
                     ImGui::EndMenu();
@@ -945,6 +1011,19 @@ int main(int, char**) {
         std::cout << "Warning: MeshRenderer initialization failed" << std::endl;
     } else {
         std::cout << "MeshRenderer initialized successfully" << std::endl;
+        g_MeshRenderer->SetViewportSize(1280, 720);
+    }
+    
+    // Initialize OutlineRenderer
+    g_OutlineRenderer = std::make_unique<OutlineRenderer>();
+    bool outlineInitialized = g_OutlineRenderer->Initialize(g_Device, g_PhysicalDevice, 
+                                                            wd->RenderPass, g_Queue, 
+                                                            g_QueueFamily, g_CommandPool);
+    if (!outlineInitialized) {
+        std::cout << "Warning: OutlineRenderer initialization failed" << std::endl;
+    } else {
+        std::cout << "OutlineRenderer initialized successfully" << std::endl;
+        g_OutlineRenderer->SetViewportSize(1280, 720);
     }
     
     // Initialize RayTracingRenderer
@@ -985,6 +1064,17 @@ int main(int, char**) {
             ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData, g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount);
             g_MainWindowData.FrameIndex = 0;
             g_SwapChainRebuild = false;
+            
+            // Update viewport sizes for renderers
+            if (g_MeshRenderer) {
+                g_MeshRenderer->SetViewportSize(fb_width, fb_height);
+            }
+            if (g_OutlineRenderer) {
+                g_OutlineRenderer->SetViewportSize(fb_width, fb_height);
+            }
+            if (g_Camera) {
+                g_Camera->SetAspectRatio(static_cast<float>(fb_width) / static_cast<float>(fb_height));
+            }
         }
         if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) {
             ImGui_ImplGlfw_Sleep(10);
@@ -1012,6 +1102,10 @@ int main(int, char**) {
         if (g_MeshRenderer && g_Camera) {
             g_MeshRenderer->UpdateCamera(g_Camera->GetViewMatrix(), g_Camera->GetProjectionMatrix());
         }
+        
+        if (g_OutlineRenderer && g_Camera) {
+            g_OutlineRenderer->UpdateCamera(g_Camera->GetViewMatrix(), g_Camera->GetProjectionMatrix());
+        }
 
         // Rendering
         ImGui::Render();
@@ -1034,6 +1128,7 @@ int main(int, char**) {
     g_Scene.reset();
     g_Camera.reset();
     g_MeshRenderer.reset();
+    g_OutlineRenderer.reset();
     g_RayTracingRenderer.reset();
     g_SketchManager.reset();
     

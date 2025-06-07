@@ -57,6 +57,7 @@ set(sources
     src/CADObject.cpp
     src/CADKernel.cpp
     src/MeshRenderer.cpp
+    src/OutlineRenderer.cpp
     src/CADMeshConverter.cpp
     src/CADMaterials.cpp
     src/SketchPlane.cpp
@@ -129,8 +130,25 @@ set(SHADOW_MISS_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/shadow.rmiss")
 set(SHADOW_MISS_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/shadow.spv")
 compile_rt_shader(shadow_miss_shader ${SHADOW_MISS_SHADER_SOURCE} ${SHADOW_MISS_SHADER_OUTPUT})
 
+# Compile outline shaders
+set(OUTLINE_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/outline.vert")
+set(OUTLINE_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/outline_vert.spv")
+compile_shader(outline_vert_shader ${OUTLINE_VERT_SHADER_SOURCE} ${OUTLINE_VERT_SHADER_OUTPUT})
+
+set(OUTLINE_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/outline.frag")
+set(OUTLINE_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/outline_frag.spv")
+compile_shader(outline_frag_shader ${OUTLINE_FRAG_SHADER_SOURCE} ${OUTLINE_FRAG_SHADER_OUTPUT})
+
+set(WIREFRAME_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/wireframe.vert")
+set(WIREFRAME_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/wireframe_vert.spv")
+compile_shader(wireframe_vert_shader ${WIREFRAME_VERT_SHADER_SOURCE} ${WIREFRAME_VERT_SHADER_OUTPUT})
+
+set(WIREFRAME_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/wireframe.frag")
+set(WIREFRAME_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/wireframe_frag.spv")
+compile_shader(wireframe_frag_shader ${WIREFRAME_FRAG_SHADER_SOURCE} ${WIREFRAME_FRAG_SHADER_OUTPUT})
+
 # Create a target for all shaders
-add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader)
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader)
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)
