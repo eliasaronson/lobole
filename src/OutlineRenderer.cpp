@@ -671,19 +671,76 @@ void OutlineRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFram
 
 // Utility function implementations
 std::vector<uint32_t> OutlineRenderer::ExtractEdges(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
-    // Simple edge extraction - convert triangles to lines
+    // Extract feature edges and boundary edges for CAD-style wireframe
+    std::map<std::pair<uint32_t, uint32_t>, std::vector<glm::vec3>> edgeToNormals;
     std::vector<uint32_t> edges;
     
+    // Calculate triangle normals and associate them with edges
     for (size_t i = 0; i < indices.size(); i += 3) {
-        // Add edges for each triangle
-        edges.push_back(indices[i]);
-        edges.push_back(indices[i + 1]);
+        uint32_t v0 = indices[i];
+        uint32_t v1 = indices[i + 1];
+        uint32_t v2 = indices[i + 2];
         
-        edges.push_back(indices[i + 1]);
-        edges.push_back(indices[i + 2]);
+        // Calculate triangle normal
+        glm::vec3 p0 = glm::vec3(vertices[v0].position[0], vertices[v0].position[1], vertices[v0].position[2]);
+        glm::vec3 p1 = glm::vec3(vertices[v1].position[0], vertices[v1].position[1], vertices[v1].position[2]);
+        glm::vec3 p2 = glm::vec3(vertices[v2].position[0], vertices[v2].position[1], vertices[v2].position[2]);
         
-        edges.push_back(indices[i + 2]);
-        edges.push_back(indices[i]);
+        glm::vec3 normal = glm::normalize(glm::cross(p1 - p0, p2 - p0));
+        
+        // Add this normal to all three edges of the triangle
+        auto addEdgeNormal = [&](uint32_t a, uint32_t b) {
+            if (a > b) std::swap(a, b);
+            edgeToNormals[{a, b}].push_back(normal);
+        };
+        
+        addEdgeNormal(v0, v1);
+        addEdgeNormal(v1, v2);
+        addEdgeNormal(v2, v0);
+    }
+    
+    // Extract edges based on criteria
+    const float featureAngleThreshold = 0.5f; // cos(60 degrees) - adjust for sharper/softer features
+    
+    for (const auto& edgeData : edgeToNormals) {
+        bool shouldIncludeEdge = false;
+        
+        if (edgeData.second.size() == 1) {
+            // Boundary edge (only one adjacent triangle)
+            shouldIncludeEdge = true;
+        } else if (edgeData.second.size() == 2) {
+            // Internal edge - check if it's a feature edge (sharp angle between normals)
+            float dotProduct = glm::dot(edgeData.second[0], edgeData.second[1]);
+            if (dotProduct < featureAngleThreshold) {
+                shouldIncludeEdge = true;
+            }
+        }
+        
+        if (shouldIncludeEdge) {
+            edges.push_back(edgeData.first.first);
+            edges.push_back(edgeData.first.second);
+        }
+    }
+    
+    // If we got very few edges, the threshold might be too strict for this mesh
+    if (edges.size() < 6) { // Less than 3 edges total
+        edges.clear();
+        // Use a more lenient threshold
+        const float lenientThreshold = 0.8f; // cos(36 degrees)
+        
+        for (const auto& edgeData : edgeToNormals) {
+            if (edgeData.second.size() == 1) {
+                // Always include boundary edges
+                edges.push_back(edgeData.first.first);
+                edges.push_back(edgeData.first.second);
+            } else if (edgeData.second.size() == 2) {
+                float dotProduct = glm::dot(edgeData.second[0], edgeData.second[1]);
+                if (dotProduct < lenientThreshold) {
+                    edges.push_back(edgeData.first.first);
+                    edges.push_back(edgeData.first.second);
+                }
+            }
+        }
     }
     
     return edges;

@@ -18,9 +18,9 @@ enum class OutlineMode {
 struct OutlineSettings {
     OutlineMode mode = OutlineMode::EDGES;
     glm::vec4 outlineColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f); // Bright red for testing
-    glm::vec4 wireframeColor = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f); // Bright green for testing
+    glm::vec4 wireframeColor = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f); // Subtle dark gray
     float outlineWidth = 5.0f; // Larger for visibility
-    float lineWidth = 1.0f;
+    float lineWidth = 1.5f;
     bool enableDepthTest = true;
     bool enableBlending = true;
 };

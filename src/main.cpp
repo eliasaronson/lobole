@@ -1056,11 +1056,10 @@ int main(int, char**) {
                   << ", " << settings.outlineColor.b << ", " << settings.outlineColor.a << ")" << std::endl;
         std::cout << "Default outline width: " << settings.outlineWidth << std::endl;
         
-        // Force enable wireframe rendering for testing  
+        // Enable wireframe rendering with subtle appearance
         settings.mode = OutlineMode::WIREFRAME;
-        settings.lineWidth = 3.0f; // Make wireframe lines thicker
         g_OutlineRenderer->SetOutlineSettings(settings);
-        std::cout << "Set outline mode to WIREFRAME with line width " << settings.lineWidth << std::endl;
+        std::cout << "Set outline mode to WIREFRAME with subtle styling" << std::endl;
     }
     
     // Initialize RayTracingRenderer
