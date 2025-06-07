@@ -8,6 +8,7 @@
 #include "Camera.h"
 #include "CADObject.h"
 #include "MeshRenderer.h"
+#include "RayTracingRenderer.h"
 #include "CADMeshConverter.h"
 #include "SketchManager.h"
 #include "CADMaterials.h"
@@ -44,6 +45,7 @@ static bool                     g_SwapChainRebuild = false;
 static std::unique_ptr<Scene> g_Scene;
 static std::unique_ptr<Camera> g_Camera;
 static std::unique_ptr<MeshRenderer> g_MeshRenderer;
+static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<SketchManager> g_SketchManager;
 
 // File browser state
@@ -184,6 +186,29 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
         vkEnumerateDeviceExtensionProperties(g_PhysicalDevice, nullptr, &properties_count, nullptr);
         properties.resize(properties_count);
         vkEnumerateDeviceExtensionProperties(g_PhysicalDevice, nullptr, &properties_count, properties.Data);
+        
+        // Add ray tracing extensions if available
+        if (IsExtensionAvailable(properties, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
+            device_extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+            std::cout << "Ray Tracing: Added acceleration structure extension" << std::endl;
+        }
+        if (IsExtensionAvailable(properties, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
+            device_extensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+            std::cout << "Ray Tracing: Added ray tracing pipeline extension" << std::endl;
+        }
+        if (IsExtensionAvailable(properties, VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
+            device_extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+            std::cout << "Ray Tracing: Added ray query extension" << std::endl;
+        }
+        if (IsExtensionAvailable(properties, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)) {
+            device_extensions.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+            std::cout << "Ray Tracing: Added deferred host operations extension" << std::endl;
+        }
+        if (IsExtensionAvailable(properties, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) {
+            device_extensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+            std::cout << "Ray Tracing: Added buffer device address extension" << std::endl;
+        }
+        
 #ifdef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
         if (IsExtensionAvailable(properties, VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME))
             device_extensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
@@ -195,8 +220,25 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
         queue_info[0].queueFamilyIndex = g_QueueFamily;
         queue_info[0].queueCount = 1;
         queue_info[0].pQueuePriorities = queue_priority;
+        
+        // Enable ray tracing features if available
+        VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures{};
+        bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        bufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
+        
+        VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeatures{};
+        rtPipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+        rtPipelineFeatures.rayTracingPipeline = VK_TRUE;
+        rtPipelineFeatures.pNext = &bufferDeviceAddressFeatures;
+        
+        VkPhysicalDeviceAccelerationStructureFeaturesKHR asFeatures{};
+        asFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+        asFeatures.accelerationStructure = VK_TRUE;
+        asFeatures.pNext = &rtPipelineFeatures;
+        
         VkDeviceCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+        create_info.pNext = &asFeatures;
         create_info.queueCreateInfoCount = sizeof(queue_info) / sizeof(queue_info[0]);
         create_info.pQueueCreateInfos = queue_info;
         create_info.enabledExtensionCount = (uint32_t)device_extensions.Size;
@@ -679,6 +721,37 @@ void RenderCADUI() {
             ImGui::EndMenu();
         }
         
+        if (ImGui::BeginMenu("View")) {
+            static bool useRayTracing = false;
+            if (ImGui::Checkbox("Ray Tracing", &useRayTracing)) {
+                if (g_RayTracingRenderer && g_RayTracingRenderer->IsInitialized()) {
+                    g_RayTracingRenderer->SetRenderMode(useRayTracing);
+                    std::cout << "Ray Tracing: " << (useRayTracing ? "Enabled" : "Disabled") << std::endl;
+                } else {
+                    useRayTracing = false;
+                    std::cout << "Ray Tracing: Not available on this hardware" << std::endl;
+                }
+            }
+            
+            if (g_RayTracingRenderer && g_RayTracingRenderer->IsInitialized()) {
+                if (ImGui::BeginMenu("Ray Tracing Settings")) {
+                    static int maxDepth = 4;
+                    if (ImGui::SliderInt("Max Ray Depth", &maxDepth, 1, 10)) {
+                        g_RayTracingRenderer->SetMaxRayDepth(maxDepth);
+                    }
+                    
+                    static int samples = 1;
+                    if (ImGui::SliderInt("Samples Per Pixel", &samples, 1, 4)) {
+                        g_RayTracingRenderer->SetSamplesPerPixel(samples);
+                    }
+                    
+                    ImGui::EndMenu();
+                }
+            }
+            
+            ImGui::EndMenu();
+        }
+        
         ImGui::EndMainMenuBar();
     }
     
@@ -874,6 +947,16 @@ int main(int, char**) {
         std::cout << "MeshRenderer initialized successfully" << std::endl;
     }
     
+    // Initialize RayTracingRenderer
+    g_RayTracingRenderer = std::make_unique<RayTracingRenderer>();
+    bool rtInitialized = g_RayTracingRenderer->Initialize(g_Device, g_PhysicalDevice, 
+                                                         g_Queue, g_QueueFamily, g_CommandPool);
+    if (!rtInitialized) {
+        std::cout << "Ray Tracing: Initialization failed, falling back to rasterization" << std::endl;
+    } else {
+        std::cout << "Ray Tracing: Initialization successful!" << std::endl;
+    }
+    
     // Test OpenCASCADE directly
     std::cout << "=== Testing OpenCASCADE directly ===" << std::endl;
     CADShape testShape = CADKernel::Instance().CreateBox(1.0, 1.0, 1.0);
@@ -951,6 +1034,7 @@ int main(int, char**) {
     g_Scene.reset();
     g_Camera.reset();
     g_MeshRenderer.reset();
+    g_RayTracingRenderer.reset();
     g_SketchManager.reset();
     
     ImGui_ImplVulkan_Shutdown();

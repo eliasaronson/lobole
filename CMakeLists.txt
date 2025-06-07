@@ -62,6 +62,7 @@ set(sources
     src/SketchPlane.cpp
     src/Sketch.cpp
     src/SketchManager.cpp
+    src/RayTracingRenderer.cpp
 )
 
 add_executable(designer ${sources} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
@@ -90,6 +91,17 @@ function(compile_shader TARGET SHADER_SOURCE SHADER_OUTPUT)
     add_custom_target(${TARGET} DEPENDS ${SHADER_OUTPUT})
 endfunction()
 
+# Function to compile a ray tracing shader
+function(compile_rt_shader TARGET SHADER_SOURCE SHADER_OUTPUT)
+    add_custom_command(
+        OUTPUT ${SHADER_OUTPUT}
+        COMMAND ${GLSLC} --target-spv=spv1.4 ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+        DEPENDS ${SHADER_SOURCE}
+        COMMENT "Compiling RT shader ${SHADER_SOURCE}"
+    )
+    add_custom_target(${TARGET} DEPENDS ${SHADER_OUTPUT})
+endfunction()
+
 # Compile vertex shader
 set(VERTEX_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/mesh.vert")
 set(VERTEX_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/mesh_vert.spv")
@@ -100,8 +112,25 @@ set(FRAGMENT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/mesh.frag")
 set(FRAGMENT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/mesh_frag.spv")
 compile_shader(mesh_frag_shader ${FRAGMENT_SHADER_SOURCE} ${FRAGMENT_SHADER_OUTPUT})
 
+# Compile ray tracing shaders
+set(RAYGEN_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/raygen.rgen")
+set(RAYGEN_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/raygen.spv")
+compile_rt_shader(raygen_shader ${RAYGEN_SHADER_SOURCE} ${RAYGEN_SHADER_OUTPUT})
+
+set(MISS_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/miss.rmiss")
+set(MISS_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/miss.spv")
+compile_rt_shader(miss_shader ${MISS_SHADER_SOURCE} ${MISS_SHADER_OUTPUT})
+
+set(CLOSESTHIT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/closesthit.rchit")
+set(CLOSESTHIT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/closesthit.spv")
+compile_rt_shader(closesthit_shader ${CLOSESTHIT_SHADER_SOURCE} ${CLOSESTHIT_SHADER_OUTPUT})
+
+set(SHADOW_MISS_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/shadow.rmiss")
+set(SHADOW_MISS_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/shadow.spv")
+compile_rt_shader(shadow_miss_shader ${SHADOW_MISS_SHADER_SOURCE} ${SHADOW_MISS_SHADER_OUTPUT})
+
 # Create a target for all shaders
-add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader)
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader)
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)
