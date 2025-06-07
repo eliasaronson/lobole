@@ -956,7 +956,43 @@ void RenderCADUI() {
     ImGui::End();
 }
 
-int main(int, char**) {
+void printUsage(const char* programName) {
+    std::cout << "Usage: " << programName << " [OPTIONS]" << std::endl;
+    std::cout << "Options:" << std::endl;
+    std::cout << "  -f, --file <path>    Load STEP file on startup" << std::endl;
+    std::cout << "  -h, --help          Show this help message" << std::endl;
+}
+
+std::string parseCommandLineArgs(int argc, char** argv) {
+    std::string fileToLoad;
+    
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        
+        if (arg == "-h" || arg == "--help") {
+            printUsage(argv[0]);
+            exit(0);
+        } else if (arg == "-f" || arg == "--file") {
+            if (i + 1 < argc) {
+                fileToLoad = argv[i + 1];
+                i++; // Skip the next argument since we consumed it
+            } else {
+                std::cerr << "Error: --file option requires a file path" << std::endl;
+                printUsage(argv[0]);
+                exit(1);
+            }
+        } else {
+            std::cerr << "Error: Unknown option '" << arg << "'" << std::endl;
+            printUsage(argv[0]);
+            exit(1);
+        }
+    }
+    
+    return fileToLoad;
+}
+
+int main(int argc, char** argv) {
+    std::string startupFile = parseCommandLineArgs(argc, argv);
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit()) return 1;
 
@@ -1084,6 +1120,12 @@ int main(int, char**) {
         CADShape::Mesh mesh = testShape.GenerateMesh(0.1);
         std::cout << "Generated mesh - Vertices: " << mesh.vertices.size() 
                   << ", Triangles: " << mesh.indices.size() / 3 << std::endl;
+    }
+    
+    // Load startup file if specified
+    if (!startupFile.empty()) {
+        std::cout << "=== Loading startup file: " << startupFile << " ===" << std::endl;
+        LoadSTEPFile(startupFile);
     }
 
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);

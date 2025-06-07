@@ -67,6 +67,11 @@ private:
         uint32_t indexCount = 0;
         uint32_t edgeIndexCount = 0;
         glm::mat4 transform = glm::mat4(1.0f);
+        
+        // Store original data for view-dependent edge calculation
+        std::vector<Vertex3D> originalVertices;
+        std::vector<uint32_t> originalIndices;
+        bool needsEdgeUpdate = true;
     };
 
     struct OutlineUniformBufferObject {
@@ -100,6 +105,7 @@ private:
     // Edge detection
     std::vector<uint32_t> ExtractEdges(const std::vector<Vertex3D>& vertices,
                                       const std::vector<uint32_t>& indices);
+    void UpdateMeshEdgesForView(OutlineMesh& mesh);
     
     // Rendering helpers
     void UpdateUniformBuffers(uint32_t currentFrame);

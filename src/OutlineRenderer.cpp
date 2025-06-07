@@ -371,7 +371,10 @@ bool OutlineRenderer::CreateWireframePipeline() {
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_NONE;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    rasterizer.depthBiasEnable = VK_TRUE;
+    rasterizer.depthBiasConstantFactor = -1.0f; // Pull wireframe toward camera
+    rasterizer.depthBiasClamp = 0.0f;
+    rasterizer.depthBiasSlopeFactor = -1.0f;
     
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -382,7 +385,7 @@ bool OutlineRenderer::CreateWireframePipeline() {
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; // Stricter depth test to hide back edges
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
     
@@ -562,6 +565,10 @@ uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices, const s
     mesh->vertexCount = static_cast<uint32_t>(vertices.size());
     mesh->indexCount = static_cast<uint32_t>(indices.size());
     
+    // Store original data for view-dependent edge calculation
+    mesh->originalVertices = vertices;
+    mesh->originalIndices = indices;
+    
     // Create vertex buffer
     VkDeviceSize vertexBufferSize = sizeof(Vertex3D) * vertices.size();
     VkBuffer stagingBuffer;
@@ -637,12 +644,26 @@ uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices, const s
 }
 
 void OutlineRenderer::UpdateCamera(const glm::mat4& view, const glm::mat4& projection) {
+    glm::mat4 prevView = m_viewMatrix;
     m_viewMatrix = view;
     m_projectionMatrix = projection;
     
     // Extract camera position from view matrix
     glm::mat4 invView = glm::inverse(view);
-    m_cameraPosition = glm::vec3(invView[3]);
+    glm::vec3 newCameraPosition = glm::vec3(invView[3]);
+    
+    // Check if camera moved significantly
+    float cameraMoveDistance = glm::length(newCameraPosition - m_cameraPosition);
+    if (cameraMoveDistance > 0.01f || glm::length(glm::vec3(view[0] - prevView[0])) > 0.01f) {
+        // Camera moved or rotated, mark all meshes for edge update
+        for (auto& mesh : m_meshes) {
+            if (mesh) {
+                mesh->needsEdgeUpdate = true;
+            }
+        }
+    }
+    
+    m_cameraPosition = newCameraPosition;
 }
 
 void OutlineRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) {
@@ -744,6 +765,128 @@ std::vector<uint32_t> OutlineRenderer::ExtractEdges(const std::vector<Vertex3D>&
     }
     
     return edges;
+}
+
+void OutlineRenderer::UpdateMeshEdgesForView(OutlineMesh& mesh) {
+    if (!mesh.needsEdgeUpdate && !mesh.originalVertices.empty()) {
+        return; // Skip if no update needed
+    }
+    
+    if (mesh.originalVertices.empty()) {
+        return;
+    }
+    
+    // Calculate view-dependent silhouette edges
+    std::map<std::pair<uint32_t, uint32_t>, std::vector<std::pair<glm::vec3, bool>>> edgeToTriangles;
+    std::vector<uint32_t> visibleEdges;
+    
+    glm::vec3 viewDir = glm::normalize(m_cameraPosition);
+    
+    // Group triangles by edges and calculate their visibility
+    for (size_t i = 0; i < mesh.originalIndices.size(); i += 3) {
+        uint32_t v0 = mesh.originalIndices[i];
+        uint32_t v1 = mesh.originalIndices[i + 1];
+        uint32_t v2 = mesh.originalIndices[i + 2];
+        
+        // Transform vertices by mesh transform
+        glm::vec4 p0_4 = mesh.transform * glm::vec4(mesh.originalVertices[v0].position[0], 
+                                                   mesh.originalVertices[v0].position[1], 
+                                                   mesh.originalVertices[v0].position[2], 1.0f);
+        glm::vec4 p1_4 = mesh.transform * glm::vec4(mesh.originalVertices[v1].position[0], 
+                                                   mesh.originalVertices[v1].position[1], 
+                                                   mesh.originalVertices[v1].position[2], 1.0f);
+        glm::vec4 p2_4 = mesh.transform * glm::vec4(mesh.originalVertices[v2].position[0], 
+                                                   mesh.originalVertices[v2].position[1], 
+                                                   mesh.originalVertices[v2].position[2], 1.0f);
+        
+        glm::vec3 p0 = glm::vec3(p0_4);
+        glm::vec3 p1 = glm::vec3(p1_4);
+        glm::vec3 p2 = glm::vec3(p2_4);
+        
+        // Calculate triangle normal
+        glm::vec3 normal = glm::normalize(glm::cross(p1 - p0, p2 - p0));
+        
+        // Calculate triangle center for view direction
+        glm::vec3 center = (p0 + p1 + p2) / 3.0f;
+        glm::vec3 toCamera = glm::normalize(m_cameraPosition - center);
+        
+        // Determine if triangle is front-facing
+        bool isFrontFacing = glm::dot(normal, toCamera) > 0.0f;
+        
+        // Add triangle info to each edge
+        auto addEdgeTriangle = [&](uint32_t a, uint32_t b) {
+            if (a > b) std::swap(a, b);
+            edgeToTriangles[{a, b}].push_back({normal, isFrontFacing});
+        };
+        
+        addEdgeTriangle(v0, v1);
+        addEdgeTriangle(v1, v2);
+        addEdgeTriangle(v2, v0);
+    }
+    
+    // Find only true silhouette edges - much more aggressive filtering
+    int boundaryEdges = 0, silhouetteEdges = 0, featureEdges = 0, hiddenEdges = 0;
+    
+    for (const auto& edgeData : edgeToTriangles) {
+        if (edgeData.second.size() == 2) {
+            // Only process internal edges (shared by exactly 2 triangles)
+            bool firstFront = edgeData.second[0].second;
+            bool secondFront = edgeData.second[1].second;
+            
+            if (firstFront != secondFront) {
+                // True silhouette edge - one side faces camera, other faces away
+                visibleEdges.push_back(edgeData.first.first);
+                visibleEdges.push_back(edgeData.first.second);
+                silhouetteEdges++;
+            } else {
+                // Both triangles face same direction - hide this edge
+                hiddenEdges++;
+            }
+        } else if (edgeData.second.size() == 1) {
+            // Boundary edges - only show if they're on front-facing triangles
+            if (edgeData.second[0].second) {
+                visibleEdges.push_back(edgeData.first.first);
+                visibleEdges.push_back(edgeData.first.second);
+                boundaryEdges++;
+            }
+        }
+    }
+    
+    
+    
+    // Update the edge buffer if we have visible edges and they changed
+    if (!visibleEdges.empty() && visibleEdges.size() != mesh.edgeIndexCount) {
+        // Recreate edge index buffer with new data
+        if (mesh.edgeIndexBuffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(m_device, mesh.edgeIndexBuffer, nullptr);
+            vkFreeMemory(m_device, mesh.edgeIndexBufferMemory, nullptr);
+        }
+        
+        mesh.edgeIndexCount = static_cast<uint32_t>(visibleEdges.size());
+        
+        VkDeviceSize edgeIndexBufferSize = sizeof(uint32_t) * visibleEdges.size();
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        
+        stagingBuffer = CreateBuffer(edgeIndexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                    stagingBufferMemory);
+        
+        void* data;
+        vkMapMemory(m_device, stagingBufferMemory, 0, edgeIndexBufferSize, 0, &data);
+        memcpy(data, visibleEdges.data(), (size_t) edgeIndexBufferSize);
+        vkUnmapMemory(m_device, stagingBufferMemory);
+        
+        mesh.edgeIndexBuffer = CreateBuffer(edgeIndexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh.edgeIndexBufferMemory);
+        
+        CopyBuffer(stagingBuffer, mesh.edgeIndexBuffer, edgeIndexBufferSize);
+        
+        vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+        vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+    }
+    
+    mesh.needsEdgeUpdate = false;
 }
 
 // Rest of utility functions (same as in MeshRenderer/RayTracingRenderer)
@@ -880,6 +1023,13 @@ void OutlineRenderer::SetViewportSize(uint32_t width, uint32_t height) {
 }
 
 void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
+    // Update wireframe edges based on current camera view for each mesh
+    for (auto& mesh : m_meshes) {
+        if (mesh) {
+            UpdateMeshEdgesForView(*mesh);
+        }
+    }
+    
     // We need to update uniform buffer for each mesh individually, but for now use identity
     // TODO: This should be updated per-mesh in the render loop
     glm::mat4 model = glm::mat4(1.0f);
