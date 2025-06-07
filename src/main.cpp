@@ -492,14 +492,18 @@ void LoadSTEPFile(const std::string& filename) {
             CADShape::Mesh cadMesh = shape.GenerateMesh(0.5); // Good balance of quality and performance
             
             if (!cadMesh.vertices.empty()) {
-                // Convert to renderer format with aluminum-like colors
+                // Convert to renderer format with more vibrant metallic colors
                 glm::vec3 color;
                 if (shapeIndex == 0) {
-                    color = glm::vec3(0.8f, 0.85f, 0.9f); // Light aluminum
+                    color = glm::vec3(0.9f, 0.6f, 0.2f); // Gold/bronze
                 } else {
-                    color = glm::vec3(0.7f + 0.2f * (shapeIndex % 3) / 3.0f, 
-                                    0.7f + 0.2f * ((shapeIndex + 1) % 3) / 3.0f, 
-                                    0.8f + 0.2f * ((shapeIndex + 2) % 3) / 3.0f); // Varied metallic colors
+                    // More distinct metallic colors
+                    switch (shapeIndex % 4) {
+                        case 1: color = glm::vec3(0.8f, 0.8f, 0.9f); break; // Silver
+                        case 2: color = glm::vec3(0.9f, 0.4f, 0.3f); break; // Copper  
+                        case 3: color = glm::vec3(0.6f, 0.8f, 0.9f); break; // Steel blue
+                        default: color = glm::vec3(0.7f, 0.9f, 0.7f); break; // Light green
+                    }
                 }
                 std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, color);
                 uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);

@@ -16,16 +16,16 @@ void main() {
     
     // Material properties for aluminum/metal  
     vec3 albedo = fragColor;
-    float metallic = 0.8;
-    float roughness = 0.3;
+    float metallic = 0.9;   // More metallic for stronger effect
+    float roughness = 0.2;  // Lower roughness for shinier surface
     float ao = 1.0;
     
-    // Light properties
+    // Light properties - stronger lighting
     vec3 lightColor = vec3(1.0, 0.95, 0.8); // Slightly warm white
-    float lightIntensity = 1.2;
+    float lightIntensity = 2.0;  // Increased intensity
     
-    // Ambient lighting
-    vec3 ambient = vec3(0.15, 0.17, 0.2) * albedo * ao; // Slight blue ambient
+    // Ambient lighting - reduced to make directional lighting more visible
+    vec3 ambient = vec3(0.05, 0.06, 0.08) * albedo * ao; // Darker ambient
     
     // Diffuse lighting (Lambert)
     float NdotL = max(dot(normal, lightDir), 0.0);
@@ -50,5 +50,6 @@ void main() {
     finalColor = finalColor / (finalColor + vec3(1.0));
     finalColor = pow(finalColor, vec3(1.0/2.2));
     
+    // Enhanced lighting for better visibility
     outColor = vec4(finalColor, 1.0);
 }
