@@ -652,10 +652,12 @@ void OutlineRenderer::UpdateCamera(const glm::mat4& view, const glm::mat4& proje
     glm::mat4 invView = glm::inverse(view);
     glm::vec3 newCameraPosition = glm::vec3(invView[3]);
     
-    // Check if camera moved significantly
+    // Check if camera moved significantly (increased threshold for performance)
     float cameraMoveDistance = glm::length(newCameraPosition - m_cameraPosition);
-    if (cameraMoveDistance > 0.01f || glm::length(glm::vec3(view[0] - prevView[0])) > 0.01f) {
-        // Camera moved or rotated, mark all meshes for edge update
+    float viewChangeAmount = glm::length(glm::vec3(view[0] - prevView[0]));
+    
+    if (cameraMoveDistance > 0.05f || viewChangeAmount > 0.05f) {
+        // Camera moved or rotated significantly, mark all meshes for edge update
         for (auto& mesh : m_meshes) {
             if (mesh) {
                 mesh->needsEdgeUpdate = true;
@@ -825,7 +827,7 @@ void OutlineRenderer::UpdateMeshEdgesForView(OutlineMesh& mesh) {
     }
     
     // Find only true silhouette edges - much more aggressive filtering
-    int boundaryEdges = 0, silhouetteEdges = 0, featureEdges = 0, hiddenEdges = 0;
+    int boundaryEdges = 0, silhouetteEdges = 0, hiddenEdges = 0;
     
     for (const auto& edgeData : edgeToTriangles) {
         if (edgeData.second.size() == 2) {
@@ -844,6 +846,7 @@ void OutlineRenderer::UpdateMeshEdgesForView(OutlineMesh& mesh) {
             }
         } else if (edgeData.second.size() == 1) {
             // Boundary edges - only show if they're on front-facing triangles
+            // For complex shapes, be more selective about boundary edges
             if (edgeData.second[0].second) {
                 visibleEdges.push_back(edgeData.first.first);
                 visibleEdges.push_back(edgeData.first.second);
@@ -851,8 +854,6 @@ void OutlineRenderer::UpdateMeshEdgesForView(OutlineMesh& mesh) {
             }
         }
     }
-    
-    
     
     // Update the edge buffer if we have visible edges and they changed
     if (!visibleEdges.empty() && visibleEdges.size() != mesh.edgeIndexCount) {
