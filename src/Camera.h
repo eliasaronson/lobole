@@ -51,6 +51,7 @@ public:
     // Face alignment for sketching
     void AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNormal, float distance = 5.0f);
     void AnimateToPosition(const glm::vec3& position, const glm::vec3& target, float duration = 1.0f);
+    void StopAnimation() { m_isAnimating = false; }
 
 private:
     void UpdateViewMatrix();

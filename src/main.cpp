@@ -94,61 +94,59 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
         
         // Handle face selection on left-click FIRST (before camera)
         if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS && g_FaceSelector && g_Camera) {
-            std::cout << "=== LEFT CLICK DETECTED ===" << std::endl;
-            
             double xpos, ypos;
             glfwGetCursorPos(window, &xpos, &ypos);
             
             int width, height;
             glfwGetFramebufferSize(window, &width, &height);
             
-            std::cout << "Left-click at screen pos: (" << xpos << ", " << ypos << "), window size: (" << width << "x" << height << ")" << std::endl;
-            
-            // Debug camera state extensively
-            glm::vec3 camPos = g_Camera->GetPosition();
-            glm::vec3 camTarget = g_Camera->GetTarget();
-            glm::mat4 view = g_Camera->GetViewMatrix();
-            glm::mat4 proj = g_Camera->GetProjectionMatrix();
-            
-            std::cout << "Camera state:" << std::endl;
-            std::cout << "  Position: (" << camPos.x << ", " << camPos.y << ", " << camPos.z << ")" << std::endl;
-            std::cout << "  Target: (" << camTarget.x << ", " << camTarget.y << ", " << camTarget.z << ")" << std::endl;
-            std::cout << "  Distance: " << g_Camera->GetDistance() << std::endl;
-            
-            // Check if camera matrices match what's used in rendering
-            if (g_MeshRenderer) {
-                std::cout << "Renderer has camera matrices: YES" << std::endl;
-            } else {
-                std::cout << "Warning: No mesh renderer available" << std::endl;
-            }
+            std::cout << "Left-click at (" << xpos << ", " << ypos << ")" << std::endl;
             
             Ray ray = g_FaceSelector->ScreenToWorldRay(xpos, ypos, width, height, *g_Camera);
-            std::cout << "Generated ray - Origin: (" << ray.origin.x << ", " << ray.origin.y << ", " << ray.origin.z 
-                     << "), Direction: (" << ray.direction.x << ", " << ray.direction.y << ", " << ray.direction.z << ")" << std::endl;
-                     
             RayHit hit = g_FaceSelector->PickFace(ray);
-            std::cout << "Face selection result: " << (hit.hit ? "HIT" : "MISS") << std::endl;
             
             if (hit.hit) {
                 g_FaceSelector->SetSelectedFace(hit.meshId, hit.faceIndex);
-                std::cout << "✓ FACE SELECTED: " << hit.faceIndex << " on mesh " << hit.meshId << std::endl;
-                std::cout << "Face normal: (" << hit.normal.x << ", " << hit.normal.y << ", " << hit.normal.z << ")" << std::endl;
-                std::cout << "Hit point: (" << hit.point.x << ", " << hit.point.y << ", " << hit.point.z << ")" << std::endl;
-                std::cout << "Hit distance: " << hit.distance << std::endl;
+                std::cout << "✓ Selected face " << hit.faceIndex << " on mesh " << hit.meshId << std::endl;
                 
-                // Try to align camera to the selected face for visual feedback
+                // Highlight the selected face by making the outline more prominent
+                if (g_OutlineRenderer) {
+                    OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
+                    settings.outlineColor = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f); // Orange highlight
+                    settings.outlineWidth = 8.0f; // Thicker outline
+                    settings.mode = OutlineMode::EDGES; // Switch to edge mode for better visibility
+                    g_OutlineRenderer->SetOutlineSettings(settings);
+                    std::cout << "🟠 Face highlighted" << std::endl;
+                }
+                
+                // Align camera to the selected face for visual feedback
                 if (g_Camera) {
                     g_Camera->AlignToFace(hit.point, hit.normal, 5.0f);
-                    std::cout << "Camera aligned to selected face" << std::endl;
+                    std::cout << "📷 Camera aligned to face" << std::endl;
                 }
             } else {
                 g_FaceSelector->ClearSelection();
-                std::cout << "No face selected - no intersection found" << std::endl;
+                
+                // Reset outline to default when no face is selected
+                if (g_OutlineRenderer) {
+                    OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
+                    settings.outlineColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f); // Default red
+                    settings.outlineWidth = 5.0f; // Default width
+                    settings.mode = OutlineMode::WIREFRAME; // Default mode
+                    g_OutlineRenderer->SetOutlineSettings(settings);
+                }
+                
+                std::cout << "❌ No face selected" << std::endl;
             }
         }
         
         // Handle camera controls (right-click and middle-click only, to avoid conflicts)
         if (g_Camera && (button == GLFW_MOUSE_BUTTON_RIGHT || button == GLFW_MOUSE_BUTTON_MIDDLE)) {
+            // Stop any camera animation when user wants to control manually
+            if (action == GLFW_PRESS) {
+                std::cout << "🖱️ Manual camera control" << std::endl;
+                g_Camera->StopAnimation();
+            }
             g_Camera->OnMouseButton(button, action, mods);
         }
     }
