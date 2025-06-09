@@ -119,10 +119,12 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
                     std::cout << "🟠 Face highlighted" << std::endl;
                 }
                 
-                // Align camera to the selected face for visual feedback
-                if (g_Camera) {
+                // Only align camera if Ctrl is held down
+                if ((mods & GLFW_MOD_CONTROL) && g_Camera) {
                     g_Camera->AlignToFace(hit.point, hit.normal, 5.0f);
-                    std::cout << "📷 Camera aligned to face" << std::endl;
+                    std::cout << "📷 Camera aligned to face (Ctrl+Click)" << std::endl;
+                } else {
+                    std::cout << "💡 Tip: Use Ctrl+Left-click to align camera to face" << std::endl;
                 }
             } else {
                 g_FaceSelector->ClearSelection();
@@ -1031,8 +1033,9 @@ void RenderCADUI(GLFWwindow* window) {
     
     ImGui::Separator();
     ImGui::Text("Controls:");
-    ImGui::Text("• Left mouse: Select faces");
-    ImGui::Text("• Right mouse: Orbit camera");
+    ImGui::Text("• Left click: Select faces");
+    ImGui::Text("• Ctrl+Left click: Select + align camera");
+    ImGui::Text("• Right click: Orbit camera");
     ImGui::Text("• Scroll: Zoom in/out");
     
     ImGui::Separator();
@@ -1046,7 +1049,7 @@ void RenderCADUI(GLFWwindow* window) {
             ImGui::Text("  Normal: (%.3f, %.3f, %.3f)", normal.x, normal.y, normal.z);
         } else {
             ImGui::Text("No face selected");
-            ImGui::Text("Right-click on the model to select");
+            ImGui::Text("Left-click on the model to select");
         }
     }
     
@@ -1259,7 +1262,7 @@ int main(int argc, char** argv) {
         LoadSTEPFile(startupFile);
     }
     
-    std::cout << "=== APPLICATION READY - Right-click on the 3D model to select faces ===" << std::endl;
+    std::cout << "=== APPLICATION READY - Left-click to select faces, Ctrl+Left-click to align camera ===" << std::endl;
 
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
