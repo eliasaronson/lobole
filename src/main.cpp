@@ -13,6 +13,7 @@
 #include "CADMeshConverter.h"
 #include "SketchManager.h"
 #include "CADMaterials.h"
+#include "FaceSelector.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory>
@@ -49,14 +50,18 @@ static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<SketchManager> g_SketchManager;
+static std::unique_ptr<FaceSelector> g_FaceSelector;
 
 // File browser state
 static bool g_ShowFileBrowser = false;
 static std::string g_CurrentPath = "../CAD_files";
 static std::vector<std::string> g_DirectoryContents;
 
+// 3D rendering happens full-screen - no separate viewport needed
+
 // Forward declarations
 void LoadSTEPFile(const std::string& filename);
+void RenderCADUI(GLFWwindow* window);
 
 static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
@@ -69,7 +74,7 @@ static void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
             g_SketchManager->OnMouseMove(xpos, ypos, *g_Camera);
         }
     } else {
-        // In 3D mode, handle camera
+        // In 3D mode, handle camera (only when mouse is pressed)
         if (g_Camera) {
             g_Camera->OnMouseMove(xpos, ypos);
         }
@@ -85,8 +90,65 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
             g_SketchManager->OnMouseClick(xpos, ypos, *g_Camera);
         }
     } else {
-        // In 3D mode, handle camera
-        if (g_Camera) {
+        // In 3D mode, handle camera and face selection
+        
+        // Handle face selection on left-click FIRST (before camera)
+        if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS && g_FaceSelector && g_Camera) {
+            std::cout << "=== LEFT CLICK DETECTED ===" << std::endl;
+            
+            double xpos, ypos;
+            glfwGetCursorPos(window, &xpos, &ypos);
+            
+            int width, height;
+            glfwGetFramebufferSize(window, &width, &height);
+            
+            std::cout << "Left-click at screen pos: (" << xpos << ", " << ypos << "), window size: (" << width << "x" << height << ")" << std::endl;
+            
+            // Debug camera state extensively
+            glm::vec3 camPos = g_Camera->GetPosition();
+            glm::vec3 camTarget = g_Camera->GetTarget();
+            glm::mat4 view = g_Camera->GetViewMatrix();
+            glm::mat4 proj = g_Camera->GetProjectionMatrix();
+            
+            std::cout << "Camera state:" << std::endl;
+            std::cout << "  Position: (" << camPos.x << ", " << camPos.y << ", " << camPos.z << ")" << std::endl;
+            std::cout << "  Target: (" << camTarget.x << ", " << camTarget.y << ", " << camTarget.z << ")" << std::endl;
+            std::cout << "  Distance: " << g_Camera->GetDistance() << std::endl;
+            
+            // Check if camera matrices match what's used in rendering
+            if (g_MeshRenderer) {
+                std::cout << "Renderer has camera matrices: YES" << std::endl;
+            } else {
+                std::cout << "Warning: No mesh renderer available" << std::endl;
+            }
+            
+            Ray ray = g_FaceSelector->ScreenToWorldRay(xpos, ypos, width, height, *g_Camera);
+            std::cout << "Generated ray - Origin: (" << ray.origin.x << ", " << ray.origin.y << ", " << ray.origin.z 
+                     << "), Direction: (" << ray.direction.x << ", " << ray.direction.y << ", " << ray.direction.z << ")" << std::endl;
+                     
+            RayHit hit = g_FaceSelector->PickFace(ray);
+            std::cout << "Face selection result: " << (hit.hit ? "HIT" : "MISS") << std::endl;
+            
+            if (hit.hit) {
+                g_FaceSelector->SetSelectedFace(hit.meshId, hit.faceIndex);
+                std::cout << "✓ FACE SELECTED: " << hit.faceIndex << " on mesh " << hit.meshId << std::endl;
+                std::cout << "Face normal: (" << hit.normal.x << ", " << hit.normal.y << ", " << hit.normal.z << ")" << std::endl;
+                std::cout << "Hit point: (" << hit.point.x << ", " << hit.point.y << ", " << hit.point.z << ")" << std::endl;
+                std::cout << "Hit distance: " << hit.distance << std::endl;
+                
+                // Try to align camera to the selected face for visual feedback
+                if (g_Camera) {
+                    g_Camera->AlignToFace(hit.point, hit.normal, 5.0f);
+                    std::cout << "Camera aligned to selected face" << std::endl;
+                }
+            } else {
+                g_FaceSelector->ClearSelection();
+                std::cout << "No face selected - no intersection found" << std::endl;
+            }
+        }
+        
+        // Handle camera controls (right-click and middle-click only, to avoid conflicts)
+        if (g_Camera && (button == GLFW_MOUSE_BUTTON_RIGHT || button == GLFW_MOUSE_BUTTON_MIDDLE)) {
             g_Camera->OnMouseButton(button, action, mods);
         }
     }
@@ -513,6 +575,7 @@ void RenderFileBrowser() {
     ImGui::End();
 }
 
+
 void LoadSTEPFile(const std::string& filename) {
     if (!g_Scene || !g_MeshRenderer) return;
     
@@ -559,17 +622,40 @@ void LoadSTEPFile(const std::string& filename) {
                 std::cout << "Shape " << (shapeIndex + 1) << " assigned material: " << material.name 
                          << " (Color: " << color.r << ", " << color.g << ", " << color.b << ")" << std::endl;
                 
+                // Create a CAD object for the shape first (to get bounding box)
+                auto cadObject = std::make_unique<CADObject>("STEP Shape " + std::to_string(shapeIndex + 1), shape);
+                
+                // Calculate bounding box for automatic centering
+                glm::vec3 minBounds, maxBounds;
+                cadObject->GetBoundingBox(minBounds, maxBounds);
+                glm::vec3 center = (minBounds + maxBounds) * 0.5f;
+                glm::vec3 size = maxBounds - minBounds;
+                
+                std::cout << "Mesh bounds: min(" << minBounds.x << "," << minBounds.y << "," << minBounds.z 
+                         << ") max(" << maxBounds.x << "," << maxBounds.y << "," << maxBounds.z << ")" << std::endl;
+                std::cout << "Mesh center: (" << center.x << "," << center.y << "," << center.z 
+                         << "), size: (" << size.x << "," << size.y << "," << size.z << ")" << std::endl;
+                
                 std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh, color);
                 uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
                 
-                // Add outline mesh
+                // Apply centering transform to move the object to origin
+                glm::mat4 centeringTransform = glm::translate(glm::mat4(1.0f), -center);
+                g_MeshRenderer->SetMeshTransform(meshId, centeringTransform);
+                
+                std::cout << "Applied centering transform to mesh " << meshId << std::endl;
+                
+                // Add outline mesh with same transform
                 if (g_OutlineRenderer) {
                     uint32_t outlineMeshId = g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
-                    // Outline mesh will use the same transform as the main mesh
+                    g_OutlineRenderer->SetMeshTransform(outlineMeshId, centeringTransform);
                 }
                 
-                // Create a CAD object for the shape
-                auto cadObject = std::make_unique<CADObject>("STEP Shape " + std::to_string(shapeIndex + 1), shape);
+                // Add face selection mesh with same transform
+                if (g_FaceSelector) {
+                    g_FaceSelector->AddMesh(meshId, vertices, cadMesh.indices, centeringTransform);
+                }
+                
                 g_Scene->AddObject(std::move(cadObject));
                 
                 std::cout << "Added shape " << shapeIndex + 1 << " with " << cadMesh.vertices.size() 
@@ -586,7 +672,7 @@ void LoadSTEPFile(const std::string& filename) {
     }
 }
 
-void RenderCADUI() {
+void RenderCADUI(GLFWwindow* window) {
     // Main menu bar
     if (ImGui::BeginMainMenuBar()) {
         if (ImGui::BeginMenu("File")) {
@@ -641,6 +727,26 @@ void RenderCADUI() {
                     }
                 }
                 
+                ImGui::Separator();
+                
+                // Face-based sketching
+                bool hasSelectedFace = g_FaceSelector && g_FaceSelector->GetSelectedFace() != nullptr;
+                if (ImGui::MenuItem("Sketch on Selected Face", nullptr, false, hasSelectedFace && (!g_SketchManager || !g_SketchManager->IsSketchMode()))) {
+                    if (g_SketchManager && g_FaceSelector && g_Camera) {
+                        const Face* selectedFace = g_FaceSelector->GetSelectedFace();
+                        if (selectedFace) {
+                            // Align camera to face
+                            glm::vec3 faceCenter = g_FaceSelector->GetFaceCenter(selectedFace->meshId, selectedFace->faceIndex);
+                            glm::vec3 faceNormal = g_FaceSelector->GetFaceNormal(selectedFace->meshId, selectedFace->faceIndex);
+                            g_Camera->AlignToFace(faceCenter, faceNormal, 5.0f);
+                            
+                            // Start sketch
+                            g_SketchManager->StartSketch(PlaneType::XY); // Will be customized for face
+                            std::cout << "Started sketch on selected face" << std::endl;
+                        }
+                    }
+                }
+                
                 ImGui::EndMenu();
             }
             
@@ -668,9 +774,17 @@ void RenderCADUI() {
                                 std::cout << "Added box outline mesh with ID: " << outlineMeshId << std::endl;
                             }
                             
+                            // Add face selection mesh
+                            if (g_FaceSelector) {
+                                g_FaceSelector->AddMesh(meshId, vertices, cadMesh.indices);
+                            }
+                            
                             // Position objects at different locations
                             glm::mat4 transform = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 0.0f));
                             g_MeshRenderer->SetMeshTransform(meshId, transform);
+                            if (g_FaceSelector) {
+                                g_FaceSelector->UpdateMeshTransform(meshId, transform);
+                            }
                             
                             std::cout << "Added box mesh with ID: " << meshId << std::endl;
                         }
@@ -900,20 +1014,13 @@ void RenderCADUI() {
     // File browser
     RenderFileBrowser();
 
-    // 3D Viewport placeholder
-    ImGui::Begin("3D Viewport");
-    ImVec2 contentRegion = ImGui::GetContentRegionAvail();
-    
-    // Update camera aspect ratio
-    if (g_Camera && contentRegion.x > 0 && contentRegion.y > 0) {
-        g_Camera->SetAspectRatio(contentRegion.x / contentRegion.y);
+    // 3D rendering happens full-screen behind the UI panels
+    // Update camera aspect ratio based on window size
+    int fb_width, fb_height;
+    glfwGetFramebufferSize(window, &fb_width, &fb_height);
+    if (g_Camera && fb_width > 0 && fb_height > 0) {
+        g_Camera->SetAspectRatio(static_cast<float>(fb_width) / static_cast<float>(fb_height));
     }
-    
-    // Placeholder for 3D content
-    ImGui::Text("3D Viewport (%dx%d)", (int)contentRegion.x, (int)contentRegion.y);
-    ImGui::Text("Camera controls will be implemented here");
-    
-    ImGui::End();
 
     // Properties panel
     ImGui::Begin("Properties");
@@ -923,6 +1030,28 @@ void RenderCADUI() {
         ImGui::Text("Camera Position: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z);
         ImGui::Text("Camera Distance: %.2f", g_Camera->GetDistance());
     }
+    
+    ImGui::Separator();
+    ImGui::Text("Controls:");
+    ImGui::Text("• Left mouse: Select faces");
+    ImGui::Text("• Right mouse: Orbit camera");
+    ImGui::Text("• Scroll: Zoom in/out");
+    
+    ImGui::Separator();
+    if (g_FaceSelector) {
+        const Face* selectedFace = g_FaceSelector->GetSelectedFace();
+        if (selectedFace) {
+            ImGui::Text("Selected Face:");
+            ImGui::Text("  Mesh ID: %u", selectedFace->meshId);
+            ImGui::Text("  Face Index: %u", selectedFace->faceIndex);
+            glm::vec3 normal = g_FaceSelector->GetFaceNormal(selectedFace->meshId, selectedFace->faceIndex);
+            ImGui::Text("  Normal: (%.3f, %.3f, %.3f)", normal.x, normal.y, normal.z);
+        } else {
+            ImGui::Text("No face selected");
+            ImGui::Text("Right-click on the model to select");
+        }
+    }
+    
     ImGui::End();
 
     // Scene hierarchy
@@ -1074,6 +1203,10 @@ int main(int argc, char** argv) {
         g_MeshRenderer->SetViewportSize(1280, 720);
     }
     
+    // Initialize FaceSelector
+    g_FaceSelector = std::make_unique<FaceSelector>();
+    std::cout << "FaceSelector initialized successfully" << std::endl;
+    
     // Initialize OutlineRenderer
     g_OutlineRenderer = std::make_unique<OutlineRenderer>();
     bool outlineInitialized = g_OutlineRenderer->Initialize(g_Device, g_PhysicalDevice, 
@@ -1127,6 +1260,8 @@ int main(int argc, char** argv) {
         std::cout << "=== Loading startup file: " << startupFile << " ===" << std::endl;
         LoadSTEPFile(startupFile);
     }
+    
+    std::cout << "=== APPLICATION READY - Right-click on the 3D model to select faces ===" << std::endl;
 
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
@@ -1174,7 +1309,7 @@ int main(int argc, char** argv) {
         ImGui::NewFrame();
 
         // Render CAD UI
-        RenderCADUI();
+        RenderCADUI(window);
 
         // Update camera matrices for 3D rendering
         if (g_MeshRenderer && g_Camera) {
@@ -1209,6 +1344,7 @@ int main(int argc, char** argv) {
     g_OutlineRenderer.reset();
     g_RayTracingRenderer.reset();
     g_SketchManager.reset();
+    g_FaceSelector.reset();
     
     ImGui_ImplVulkan_Shutdown();
     ImGui_ImplGlfw_Shutdown();

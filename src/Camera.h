@@ -47,6 +47,10 @@ public:
     // Camera distance from target
     float GetDistance() const { return glm::length(m_position - m_target); }
     void SetDistance(float distance);
+    
+    // Face alignment for sketching
+    void AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNormal, float distance = 5.0f);
+    void AnimateToPosition(const glm::vec3& position, const glm::vec3& target, float duration = 1.0f);
 
 private:
     void UpdateViewMatrix();
@@ -81,4 +85,13 @@ private:
     float m_zoomSensitivity;
     float m_minDistance;
     float m_maxDistance;
+    
+    // Animation state
+    bool m_isAnimating = false;
+    float m_animationTime = 0.0f;
+    float m_animationDuration = 1.0f;
+    glm::vec3 m_animationStartPos;
+    glm::vec3 m_animationStartTarget;
+    glm::vec3 m_animationEndPos;
+    glm::vec3 m_animationEndTarget;
 };

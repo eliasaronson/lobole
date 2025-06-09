@@ -64,6 +64,7 @@ set(sources
     src/Sketch.cpp
     src/SketchManager.cpp
     src/RayTracingRenderer.cpp
+    src/FaceSelector.cpp
 )
 
 add_executable(designer ${sources} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)

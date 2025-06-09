@@ -28,7 +28,23 @@ Camera::Camera()
 }
 
 void Camera::Update(float deltaTime) {
-    // Update camera state if needed
+    // Handle animation
+    if (m_isAnimating) {
+        m_animationTime += deltaTime;
+        float t = std::min(m_animationTime / m_animationDuration, 1.0f);
+        
+        // Smooth interpolation (ease-in-out)
+        t = t * t * (3.0f - 2.0f * t);
+        
+        m_position = glm::mix(m_animationStartPos, m_animationEndPos, t);
+        m_target = glm::mix(m_animationStartTarget, m_animationEndTarget, t);
+        
+        UpdateViewMatrix();
+        
+        if (t >= 1.0f) {
+            m_isAnimating = false;
+        }
+    }
 }
 
 void Camera::OnMouseMove(double xpos, double ypos) {
@@ -120,4 +136,31 @@ void Camera::HandleZoomMode(double deltaY) {
     float currentDistance = GetDistance();
     float newDistance = currentDistance * (1.0f + deltaY * m_zoomSensitivity);
     SetDistance(newDistance);
+}
+
+void Camera::AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNormal, float distance) {
+    // Calculate the camera position to look at the face perpendicularly
+    glm::vec3 newTarget = faceCenter;
+    glm::vec3 newPosition = faceCenter + glm::normalize(faceNormal) * distance;
+    
+    // Use world up as our up vector, but adjust if face normal is too close to up
+    glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 newUp = worldUp;
+    
+    // If face normal is nearly parallel to world up, use a different up vector
+    if (glm::abs(glm::dot(faceNormal, worldUp)) > 0.95f) {
+        newUp = glm::vec3(1.0f, 0.0f, 0.0f);
+    }
+    
+    AnimateToPosition(newPosition, newTarget, 1.0f);
+}
+
+void Camera::AnimateToPosition(const glm::vec3& position, const glm::vec3& target, float duration) {
+    m_animationStartPos = m_position;
+    m_animationStartTarget = m_target;
+    m_animationEndPos = position;
+    m_animationEndTarget = target;
+    m_animationTime = 0.0f;
+    m_animationDuration = duration;
+    m_isAnimating = true;
 }
