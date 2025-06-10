@@ -14,6 +14,7 @@
 #include "SketchManager.h"
 #include "CADMaterials.h"
 #include "FaceSelector.h"
+#include "Logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory>
@@ -100,14 +101,14 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
             int width, height;
             glfwGetFramebufferSize(window, &width, &height);
             
-            std::cout << "Left-click at (" << xpos << ", " << ypos << ")" << std::endl;
+            LOG_DEBUG("Left-click at ({}, {})", xpos, ypos);
             
             Ray ray = g_FaceSelector->ScreenToWorldRay(xpos, ypos, width, height, *g_Camera);
             RayHit hit = g_FaceSelector->PickFace(ray);
             
             if (hit.hit) {
                 g_FaceSelector->SetSelectedFace(hit.meshId, hit.faceIndex);
-                std::cout << "✓ Selected face " << hit.faceIndex << " on mesh " << hit.meshId << std::endl;
+                LOG_INFO("✓ Selected face {} on mesh {}", hit.faceIndex, hit.meshId);
                 
                 // Highlight the selected face by making the outline more prominent
                 if (g_OutlineRenderer) {
@@ -116,15 +117,15 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
                     settings.outlineWidth = 8.0f; // Thicker outline
                     settings.mode = OutlineMode::EDGES; // Switch to edge mode for better visibility
                     g_OutlineRenderer->SetOutlineSettings(settings);
-                    std::cout << "🟠 Face highlighted" << std::endl;
+                    LOG_DEBUG("🟠 Face highlighted with orange outline");
                 }
                 
                 // Only align camera if Ctrl is held down
                 if ((mods & GLFW_MOD_CONTROL) && g_Camera) {
                     g_Camera->AlignToFace(hit.point, hit.normal, 5.0f);
-                    std::cout << "📷 Camera aligned to face (Ctrl+Click)" << std::endl;
+                    LOG_INFO("📷 Camera aligned to face (Ctrl+Click)");
                 } else {
-                    std::cout << "💡 Tip: Use Ctrl+Left-click to align camera to face" << std::endl;
+                    LOG_DEBUG("💡 Tip: Use Ctrl+Left-click to align camera to face");
                 }
             } else {
                 g_FaceSelector->ClearSelection();
@@ -138,7 +139,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
                     g_OutlineRenderer->SetOutlineSettings(settings);
                 }
                 
-                std::cout << "❌ No face selected" << std::endl;
+                LOG_DEBUG("❌ No face selected");
             }
         }
         
@@ -146,7 +147,7 @@ static void mouse_button_callback(GLFWwindow* window, int button, int action, in
         if (g_Camera && (button == GLFW_MOUSE_BUTTON_RIGHT || button == GLFW_MOUSE_BUTTON_MIDDLE)) {
             // Stop any camera animation when user wants to control manually
             if (action == GLFW_PRESS) {
-                std::cout << "🖱️ Manual camera control" << std::endl;
+                LOG_DEBUG("🖱️ Manual camera control");
                 g_Camera->StopAnimation();
             }
             g_Camera->OnMouseButton(button, action, mods);
@@ -579,18 +580,18 @@ void RenderFileBrowser() {
 void LoadSTEPFile(const std::string& filename) {
     if (!g_Scene || !g_MeshRenderer) return;
     
-    std::cout << "Loading STEP file: " << filename << std::endl;
+    LOG_INFO("Loading STEP file: {}", filename);
     
     // Use OpenCASCADE to load STEP file
     std::vector<CADShape> shapes;
     bool success = CADKernel::Instance().LoadSTEP(filename, shapes);
     
     if (!success) {
-        std::cout << "Failed to load STEP file: " << filename << std::endl;
+        LOG_ERROR("Failed to load STEP file: {}", filename);
         return;
     }
     
-    std::cout << "Loaded " << shapes.size() << " shapes from STEP file" << std::endl;
+    LOG_INFO("Loaded {} shapes from STEP file", shapes.size());
     
     // Convert each shape to a mesh and add to renderer (limit to first 20 shapes for performance)
     int shapeIndex = 0;
@@ -1090,11 +1091,18 @@ void printUsage(const char* programName) {
     std::cout << "Usage: " << programName << " [OPTIONS]" << std::endl;
     std::cout << "Options:" << std::endl;
     std::cout << "  -f, --file <path>    Load STEP file on startup" << std::endl;
-    std::cout << "  -h, --help          Show this help message" << std::endl;
+    std::cout << "  -v, --verbose        Enable verbose logging (debug level)" << std::endl;
+    std::cout << "  -vv                  Enable very verbose logging (trace level)" << std::endl;
+    std::cout << "  -h, --help           Show this help message" << std::endl;
 }
 
-std::string parseCommandLineArgs(int argc, char** argv) {
+struct CommandLineArgs {
     std::string fileToLoad;
+    spdlog::level::level_enum logLevel = spdlog::level::info;
+};
+
+CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
+    CommandLineArgs args;
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -1104,13 +1112,17 @@ std::string parseCommandLineArgs(int argc, char** argv) {
             exit(0);
         } else if (arg == "-f" || arg == "--file") {
             if (i + 1 < argc) {
-                fileToLoad = argv[i + 1];
+                args.fileToLoad = argv[i + 1];
                 i++; // Skip the next argument since we consumed it
             } else {
                 std::cerr << "Error: --file option requires a file path" << std::endl;
                 printUsage(argv[0]);
                 exit(1);
             }
+        } else if (arg == "-v" || arg == "--verbose") {
+            args.logLevel = spdlog::level::debug;
+        } else if (arg == "-vv") {
+            args.logLevel = spdlog::level::trace;
         } else {
             std::cerr << "Error: Unknown option '" << arg << "'" << std::endl;
             printUsage(argv[0]);
@@ -1118,11 +1130,15 @@ std::string parseCommandLineArgs(int argc, char** argv) {
         }
     }
     
-    return fileToLoad;
+    return args;
 }
 
 int main(int argc, char** argv) {
-    std::string startupFile = parseCommandLineArgs(argc, argv);
+    CommandLineArgs args = parseCommandLineArgs(argc, argv);
+    
+    // Initialize logger with specified level
+    Logger::Initialize(args.logLevel);
+    
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit()) return 1;
 
@@ -1198,15 +1214,15 @@ int main(int argc, char** argv) {
                                                              wd->RenderPass, g_Queue, 
                                                              g_QueueFamily, g_CommandPool);
     if (!meshRendererInitialized) {
-        std::cout << "Warning: MeshRenderer initialization failed" << std::endl;
+        LOG_ERROR("MeshRenderer initialization failed");
     } else {
-        std::cout << "MeshRenderer initialized successfully" << std::endl;
+        LOG_INFO("MeshRenderer initialized successfully");
         g_MeshRenderer->SetViewportSize(1280, 720);
     }
     
     // Initialize FaceSelector
     g_FaceSelector = std::make_unique<FaceSelector>();
-    std::cout << "FaceSelector initialized successfully" << std::endl;
+    LOG_INFO("FaceSelector initialized successfully");
     
     // Initialize OutlineRenderer
     g_OutlineRenderer = std::make_unique<OutlineRenderer>();
@@ -1257,12 +1273,12 @@ int main(int argc, char** argv) {
     }
     
     // Load startup file if specified
-    if (!startupFile.empty()) {
-        std::cout << "=== Loading startup file: " << startupFile << " ===" << std::endl;
-        LoadSTEPFile(startupFile);
+    if (!args.fileToLoad.empty()) {
+        LOG_INFO("Loading startup file: {}", args.fileToLoad);
+        LoadSTEPFile(args.fileToLoad);
     }
     
-    std::cout << "=== APPLICATION READY - Left-click to select faces, Ctrl+Left-click to align camera ===" << std::endl;
+    LOG_INFO("=== APPLICATION READY - Left-click to select faces, Ctrl+Left-click to align camera ===");
 
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 

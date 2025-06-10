@@ -16,6 +16,7 @@ set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES")
 
 find_package(glfw3 REQUIRED)
 find_package(glm REQUIRED)
+find_package(spdlog REQUIRED)
 
 # Dear ImGui
 set(IMGUI_DIR deps/imgui)
@@ -42,7 +43,7 @@ endif()
 
 # Libraries
 find_package(Vulkan REQUIRED)
-set(LIBRARIES "glfw;Vulkan::Vulkan")
+set(LIBRARIES "glfw;Vulkan::Vulkan;spdlog::spdlog")
 
 # Add OpenCASCADE libraries if available
 if(OPENCASCADE_FOUND)
@@ -52,6 +53,7 @@ endif()
 # file(GLOB sources src/*.cpp)
 set(sources 
     src/main.cpp
+    src/Logger.cpp
     src/Scene.cpp
     src/Camera.cpp
     src/CADObject.cpp

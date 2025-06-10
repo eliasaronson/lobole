@@ -1,6 +1,7 @@
 #include "FaceSelector.h"
 #include "MeshRenderer.h"
 #include "Camera.h"
+#include "Logger.h"
 #include <algorithm>
 #include <iostream>
 #include <limits>
@@ -22,21 +23,23 @@ void FaceSelector::AddMesh(uint32_t meshId, const std::vector<Vertex3D>& vertice
     
     ExtractFaces(*meshData);
     
-    std::cout << "FaceSelector: Adding mesh " << meshId << " with " 
-              << indices.size() / 3 << " triangles (" << meshData->faces.size() << " faces)" << std::endl;
+    LOG_INFO("FaceSelector: Adding mesh {} with {} triangles ({} faces)", 
+             meshId, indices.size() / 3, meshData->faces.size());
     
     // Debug: Show first few faces
     if (meshData->faces.size() > 0) {
         const auto& firstFace = meshData->faces[0];
-        std::cout << "  First face - vertices: " << firstFace.vertexIndices[0] << ", " 
-                  << firstFace.vertexIndices[1] << ", " << firstFace.vertexIndices[2] << std::endl;
-        std::cout << "  First face - center: (" << firstFace.center.x << ", " << firstFace.center.y << ", " << firstFace.center.z << ")" << std::endl;
-        std::cout << "  First face - normal: (" << firstFace.normal.x << ", " << firstFace.normal.y << ", " << firstFace.normal.z << ")" << std::endl;
+        LOG_DEBUG("  First face - vertices: {}, {}, {}", 
+                  firstFace.vertexIndices[0], firstFace.vertexIndices[1], firstFace.vertexIndices[2]);
+        LOG_TRACE("  First face - center: ({}, {}, {})", 
+                  firstFace.center.x, firstFace.center.y, firstFace.center.z);
+        LOG_TRACE("  First face - normal: ({}, {}, {})", 
+                  firstFace.normal.x, firstFace.normal.y, firstFace.normal.z);
     }
     
     m_meshes.push_back(std::move(meshData));
     
-    std::cout << "FaceSelector: Total meshes now: " << m_meshes.size() << std::endl;
+    LOG_DEBUG("FaceSelector: Total meshes now: {}", m_meshes.size());
 }
 
 void FaceSelector::UpdateMeshTransform(uint32_t meshId, const glm::mat4& transform) {
@@ -118,12 +121,7 @@ Ray FaceSelector::ScreenToWorldRay(float screenX, float screenY, int screenWidth
     float ndcX = (2.0f * screenX) / screenWidth - 1.0f;
     float ndcY = 1.0f - (2.0f * screenY) / screenHeight; // Flip Y axis
     
-    // Minimal debug output
-    static int rayCount = 0;
-    rayCount++;
-    if (rayCount % 5 == 0) { // Only show every 5th ray to reduce spam
-        std::cout << "Ray: Screen(" << screenX << ", " << screenY << ") -> NDC(" << ndcX << ", " << ndcY << ")" << std::endl;
-    }
+    LOG_TRACE("Ray: Screen({}, {}) -> NDC({}, {})", screenX, screenY, ndcX, ndcY);
     
     // Get view and projection matrices
     glm::mat4 view = camera.GetViewMatrix();
@@ -146,10 +144,9 @@ Ray FaceSelector::ScreenToWorldRay(float screenX, float screenY, int screenWidth
     ray.origin = glm::vec3(rayStartWorld);
     ray.direction = glm::normalize(glm::vec3(rayEndWorld) - glm::vec3(rayStartWorld));
     
-    if (rayCount % 5 == 0) { // Only show every 5th ray
-        std::cout << "Ray: Origin(" << ray.origin.x << ", " << ray.origin.y << ", " << ray.origin.z 
-                  << "), Dir(" << ray.direction.x << ", " << ray.direction.y << ", " << ray.direction.z << ")" << std::endl;
-    }
+    LOG_TRACE("Ray: Origin({}, {}, {}), Dir({}, {}, {})", 
+              ray.origin.x, ray.origin.y, ray.origin.z,
+              ray.direction.x, ray.direction.y, ray.direction.z);
     
     return ray;
 }
@@ -161,14 +158,7 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
     int totalFacesChecked = 0;
     int totalMeshes = m_meshes.size();
     
-    // Reduced debug output for face picking
-    static int pickCount = 0;
-    pickCount++;
-    bool showDebug = (pickCount % 5 == 0); // Only show every 5th pick
-    
-    if (showDebug) {
-        std::cout << "Testing ray against " << totalMeshes << " meshes:" << std::endl;
-    }
+    LOG_TRACE("Testing ray against {} meshes", totalMeshes);
     
     for (size_t meshIdx = 0; meshIdx < m_meshes.size(); meshIdx++) {
         const auto& mesh = m_meshes[meshIdx];
@@ -204,17 +194,15 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
             }
         }
         
-        if (showDebug) {
-            std::cout << "  Mesh " << mesh->meshId << ": " << mesh->faces.size() << " faces checked" << std::endl;
-        }
+        LOG_TRACE("  Mesh {}: {} faces checked", mesh->meshId, mesh->faces.size());
     }
     
     // Always show hit/miss results, but only detailed info occasionally
     if (closestHit.hit) {
-        std::cout << "HIT: face " << closestHit.faceIndex << " on mesh " << closestHit.meshId 
-                  << " (dist: " << closestHit.distance << ")" << std::endl;
-    } else if (showDebug) {
-        std::cout << "MISS: No face intersection found" << std::endl;
+        LOG_DEBUG("HIT: face {} on mesh {} (dist: {})", 
+                  closestHit.faceIndex, closestHit.meshId, closestHit.distance);
+    } else {
+        LOG_TRACE("MISS: No face intersection found");
     }
     
     return closestHit;
