@@ -104,7 +104,7 @@ void Camera::HandleOrbitMode(double deltaX, double deltaY) {
     
     // Apply rotation
     theta -= deltaX * m_orbitSensitivity;
-    phi += deltaY * m_orbitSensitivity;
+    phi -= deltaY * m_orbitSensitivity;
     
     // Clamp phi to avoid flipping
     phi = std::clamp(phi, 0.01f, 3.14f - 0.01f);
@@ -121,10 +121,16 @@ void Camera::HandlePanMode(double deltaX, double deltaY) {
     glm::vec3 right = GetRight();
     glm::vec3 up = GetUp();
     
-    float distance = GetDistance();
-    float panScale = distance * m_panSensitivity;
+    // Use a fixed pan scale that's proportional to the viewport, not distance
+    // This makes panning feel more direct and mouse-like
+    float panScale = 0.001f; // Much smaller base scale
     
-    glm::vec3 offset = right * (float)(-deltaX * panScale) + up * (float)(deltaY * panScale);
+    // Apply distance scaling more moderately
+    float distance = GetDistance();
+    panScale *= (distance * 0.1f); // Reduced distance influence
+    
+    // Fix Y inversion: when mouse moves up (positive deltaY), camera should move down (negative up)
+    glm::vec3 offset = right * (float)(-deltaX * panScale) + up * (float)(-deltaY * panScale);
     
     m_position += offset;
     m_target += offset;
