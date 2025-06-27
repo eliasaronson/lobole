@@ -121,13 +121,12 @@ void Camera::HandlePanMode(double deltaX, double deltaY) {
     glm::vec3 right = GetRight();
     glm::vec3 up = GetUp();
     
-    // Use a fixed pan scale that's proportional to the viewport, not distance
-    // This makes panning feel more direct and mouse-like
-    float panScale = 0.001f; // Much smaller base scale
+    // Use a more responsive pan scale
+    float panScale = 0.005f; // Increased from 0.001f for better responsiveness
     
     // Apply distance scaling more moderately
     float distance = GetDistance();
-    panScale *= (distance * 0.1f); // Reduced distance influence
+    panScale *= (distance * 0.2f); // Slightly increased distance influence
     
     // Fix Y inversion: when mouse moves up (positive deltaY), camera should move down (negative up)
     glm::vec3 offset = right * (float)(-deltaX * panScale) + up * (float)(-deltaY * panScale);
