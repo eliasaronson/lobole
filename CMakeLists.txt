@@ -22,6 +22,7 @@ find_package(spdlog REQUIRED)
 set(IMGUI_DIR deps/imgui)
 include_directories(${IMGUI_DIR} ${IMGUI_DIR}/backends ..)
 
+
 # OpenCASCADE - manual setup
 set(OPENCASCADE_INCLUDE_DIR "/usr/include/opencascade")
 if(EXISTS ${OPENCASCADE_INCLUDE_DIR})
@@ -41,9 +42,51 @@ else()
     set(OPENCASCADE_FOUND FALSE)
 endif()
 
+# nativefiledialog - build from submodule
+set(NFD_DIR deps/nativefiledialog)
+if(EXISTS ${CMAKE_SOURCE_DIR}/${NFD_DIR}/src/include/nfd.h)
+    message(STATUS "Building nativefiledialog from submodule")
+    
+    # Include nativefiledialog headers
+    include_directories(${NFD_DIR}/src/include)
+    add_definitions(-DHAVE_NATIVEFILEDIALOG)
+    
+    # Platform-specific source files
+    if(WIN32)
+        set(NFD_SOURCES ${NFD_DIR}/src/nfd_common.c ${NFD_DIR}/src/nfd_win.cpp)
+        set(NFD_LIBS "")
+    elseif(APPLE)
+        set(NFD_SOURCES ${NFD_DIR}/src/nfd_common.c ${NFD_DIR}/src/nfd_cocoa.m)
+        set(NFD_LIBS "-framework Cocoa")
+    else()
+        # Linux - check for GTK3 or fall back to Zenity
+        find_package(PkgConfig)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(GTK3 gtk+-3.0)
+        endif()
+        
+        if(GTK3_FOUND)
+            set(NFD_SOURCES ${NFD_DIR}/src/nfd_common.c ${NFD_DIR}/src/nfd_gtk.c)
+            set(NFD_LIBS ${GTK3_LIBRARIES})
+            include_directories(${GTK3_INCLUDE_DIRS})
+            link_directories(${GTK3_LIBRARY_DIRS})
+            add_definitions(${GTK3_CFLAGS_OTHER})
+            message(STATUS "Using GTK3 for nativefiledialog")
+        else()
+            set(NFD_SOURCES ${NFD_DIR}/src/nfd_common.c ${NFD_DIR}/src/nfd_zenity.c)
+            set(NFD_LIBS "")
+            message(STATUS "Using Zenity fallback for nativefiledialog")
+        endif()
+    endif()
+else()
+    message(WARNING "nativefiledialog submodule not found - will use ImGui file browser fallback")
+    set(NFD_SOURCES "")
+    set(NFD_LIBS "")
+endif()
+
 # Libraries
 find_package(Vulkan REQUIRED)
-set(LIBRARIES "glfw;Vulkan::Vulkan;spdlog::spdlog")
+set(LIBRARIES "glfw;Vulkan::Vulkan;spdlog::spdlog;${NFD_LIBS}")
 
 # Add OpenCASCADE libraries if available
 if(OPENCASCADE_FOUND)
@@ -69,7 +112,7 @@ set(sources
     src/FaceSelector.cpp
 )
 
-add_executable(designer ${sources} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+add_executable(designer ${sources} ${NFD_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 
 target_link_libraries(designer ${LIBRARIES})
 
