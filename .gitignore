@@ -40,3 +40,6 @@ deps/*
 # CAD files
 CAD_files/*
 example_projects/*
+
+# ImGui layout (generated at runtime)
+imgui.ini
