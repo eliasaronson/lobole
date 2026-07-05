@@ -18,6 +18,7 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
+#include "imgui_internal.h" // DockBuilder API
 #include "imgui_te_engine.h"
 #include <algorithm>
 #include <cfloat>
@@ -66,6 +67,7 @@ static std::unique_ptr<FaceSelector> g_FaceSelector;
 static std::unique_ptr<Document> g_Document;
 static std::unique_ptr<CommandStack> g_CommandStack;
 static uint64_t g_SyncedDocumentVersion = 0;
+static bool g_BuildDefaultDockLayout = false;
 
 #ifndef HAVE_NATIVEFILEDIALOG
 // File browser state (fallback when nativefiledialog is not available)
@@ -87,8 +89,8 @@ static void glfw_error_callback(int error, const char *description) {
 
 static void mouse_callback(GLFWwindow *window, double xpos, double ypos) {
   if (g_SketchManager && g_SketchManager->IsSketchMode()) {
-    // In sketch mode, handle sketching
-    if (g_Camera) {
+    // In sketch mode, handle sketching (unless the cursor is over the UI)
+    if (g_Camera && !ImGui::GetIO().WantCaptureMouse) {
       g_SketchManager->OnMouseMove(xpos, ypos, *g_Camera);
     }
   } else {
@@ -101,6 +103,12 @@ static void mouse_callback(GLFWwindow *window, double xpos, double ypos) {
 
 static void mouse_button_callback(GLFWwindow *window, int button, int action,
                                   int mods) {
+  // Presses over the UI belong to ImGui. Releases always reach the camera so
+  // a drag that ends over a panel doesn't get stuck.
+  if (action == GLFW_PRESS && ImGui::GetIO().WantCaptureMouse) {
+    return;
+  }
+
   if (g_SketchManager && g_SketchManager->IsSketchMode()) {
     // In sketch mode, handle sketching
     if (action == GLFW_PRESS && g_Camera) {
@@ -182,6 +190,9 @@ static void mouse_button_callback(GLFWwindow *window, int button, int action,
 
 static void scroll_callback(GLFWwindow *window, double xoffset,
                             double yoffset) {
+  if (ImGui::GetIO().WantCaptureMouse) {
+    return;
+  }
   if (g_Camera) {
     g_Camera->OnScroll(xoffset, yoffset);
   }
@@ -518,17 +529,15 @@ static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
     vkCmdBeginRenderPass(fd->CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
   }
 
-  ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
-
-  // Render 3D meshes
+  // 3D scene first, UI on top
   if (g_MeshRenderer) {
     g_MeshRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
-
-  // Render outlines
   if (g_OutlineRenderer) {
     g_OutlineRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
+
+  ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
   vkCmdEndRenderPass(fd->CommandBuffer);
   {
@@ -1086,6 +1095,28 @@ void RenderCADUI(GLFWwindow *window) {
     ImGui::EndMainMenuBar();
   }
 
+  // Workbench dockspace: panels dock left/right, the 3D scene shows through
+  // the empty central node (rendered fullscreen behind the UI).
+  ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(
+      0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+  if (g_BuildDefaultDockLayout) {
+    g_BuildDefaultDockLayout = false;
+    ImGui::DockBuilderRemoveNode(dockspaceId);
+    ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspaceId,
+                                  ImGui::GetMainViewport()->WorkSize);
+    ImGuiID center = dockspaceId;
+    ImGuiID left =
+        ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr,
+                                    &center);
+    ImGuiID right =
+        ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.25f, nullptr,
+                                    &center);
+    ImGui::DockBuilderDockWindow("Scene", left);
+    ImGui::DockBuilderDockWindow("Properties", right);
+    ImGui::DockBuilderFinish(dockspaceId);
+  }
+
   // Sketch toolbar (only shown in sketch mode)
   if (g_SketchManager && g_SketchManager->IsSketchMode()) {
     ImGui::Begin("Sketch Tools");
@@ -1355,6 +1386,16 @@ int main(int argc, char **argv) {
   ImGui::CreateContext();
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+  // Build the default dock layout when there is no saved one. GUI tests
+  // always use the default layout and never persist, for determinism.
+  if (args.runGuiTests) {
+    io.IniFilename = nullptr;
+    g_BuildDefaultDockLayout = true;
+  } else {
+    g_BuildDefaultDockLayout = !std::filesystem::exists("imgui.ini");
+  }
 
   ImGui::StyleColorsDark();
 
