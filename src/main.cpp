@@ -10,11 +10,14 @@
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "RayTracingRenderer.h"
+#include "GuiTests.h"
 #include "Scene.h"
 #include "SketchManager.h"
+#include "core/Command.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
+#include "imgui_te_engine.h"
 #include <algorithm>
 #include <filesystem>
 #include <memory>
@@ -46,6 +49,7 @@ static VkCommandPool g_CommandPool = VK_NULL_HANDLE;
 static ImGui_ImplVulkanH_Window g_MainWindowData;
 static uint32_t g_MinImageCount = 2;
 static bool g_SwapChainRebuild = false;
+static bool g_DisableVSync = false;
 
 // Application objects
 static std::unique_ptr<Scene> g_Scene;
@@ -55,6 +59,10 @@ static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<SketchManager> g_SketchManager;
 static std::unique_ptr<FaceSelector> g_FaceSelector;
+
+// Parametric document (the model source of truth) and its undo stack
+static std::unique_ptr<Document> g_Document;
+static std::unique_ptr<CommandStack> g_CommandStack;
 
 #ifndef HAVE_NATIVEFILEDIALOG
 // File browser state (fallback when nativefiledialog is not available)
@@ -68,6 +76,7 @@ static std::vector<std::string> g_DirectoryContents;
 // Forward declarations
 void LoadSTEPFile(const std::string &filename);
 void RenderCADUI(GLFWwindow *window);
+void SyncDocumentRenderers();
 
 static void glfw_error_callback(int error, const char *description) {
   fprintf(stderr, "GLFW Error %d: %s\n", error, description);
@@ -421,10 +430,21 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window *wd,
       (size_t)IM_ARRAYSIZE(requestSurfaceImageFormat),
       requestSurfaceColorSpace);
 
-  VkPresentModeKHR present_modes[] = {VK_PRESENT_MODE_FIFO_KHR};
-  wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(
-      g_PhysicalDevice, wd->Surface, &present_modes[0],
-      IM_ARRAYSIZE(present_modes));
+  if (g_DisableVSync) {
+    // Uncapped presents: vsynced (FIFO) presents of an occluded window get
+    // throttled to ~1 fps by the compositor, which stalls GUI tests.
+    VkPresentModeKHR present_modes[] = {VK_PRESENT_MODE_IMMEDIATE_KHR,
+                                        VK_PRESENT_MODE_MAILBOX_KHR,
+                                        VK_PRESENT_MODE_FIFO_KHR};
+    wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(
+        g_PhysicalDevice, wd->Surface, &present_modes[0],
+        IM_ARRAYSIZE(present_modes));
+  } else {
+    VkPresentModeKHR present_modes[] = {VK_PRESENT_MODE_FIFO_KHR};
+    wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(
+        g_PhysicalDevice, wd->Surface, &present_modes[0],
+        IM_ARRAYSIZE(present_modes));
+  }
 
   IM_ASSERT(g_MinImageCount >= 2);
   ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device,
@@ -814,6 +834,51 @@ void LoadSTEPFile(const std::string &filename) {
   }
 }
 
+// Rebuilds render/picking meshes from the document's bodies whenever the
+// document version changes (feature added/removed, undo, redo). The document
+// is the source of truth; renderers only mirror it.
+struct DocumentRenderMesh {
+  uint32_t meshId;
+  uint32_t outlineId;
+};
+static std::vector<DocumentRenderMesh> g_DocumentMeshes;
+static uint64_t g_SyncedDocumentVersion = 0;
+
+void SyncDocumentRenderers() {
+  if (!g_Document || !g_MeshRenderer)
+    return;
+  if (g_Document->Version() == g_SyncedDocumentVersion)
+    return;
+  g_SyncedDocumentVersion = g_Document->Version();
+
+  for (const auto &m : g_DocumentMeshes) {
+    g_MeshRenderer->RemoveMesh(m.meshId);
+    if (g_OutlineRenderer)
+      g_OutlineRenderer->RemoveMesh(m.outlineId);
+    if (g_FaceSelector)
+      g_FaceSelector->RemoveMesh(m.meshId);
+  }
+  g_DocumentMeshes.clear();
+
+  for (const auto &body : g_Document->GetBodies()) {
+    CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
+    if (cadMesh.vertices.empty())
+      continue;
+
+    std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(
+        cadMesh, glm::vec3(0.8f, 0.7f, 0.4f));
+    uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
+    uint32_t outlineId = 0;
+    if (g_OutlineRenderer)
+      outlineId = g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
+    if (g_FaceSelector)
+      g_FaceSelector->AddMesh(meshId, vertices, cadMesh.indices);
+    g_DocumentMeshes.push_back({meshId, outlineId});
+  }
+  LOG_INFO("Document synced: {} features, {} bodies",
+           g_Document->FeatureCount(), g_Document->GetBodies().size());
+}
+
 void RenderCADUI(GLFWwindow *window) {
   // Main menu bar
   if (ImGui::BeginMainMenuBar()) {
@@ -834,14 +899,31 @@ void RenderCADUI(GLFWwindow *window) {
     }
 
     if (ImGui::BeginMenu("Edit")) {
-      if (ImGui::MenuItem("Undo")) {
+      const bool canUndo = g_CommandStack && g_CommandStack->CanUndo();
+      const bool canRedo = g_CommandStack && g_CommandStack->CanRedo();
+      if (ImGui::MenuItem("Undo", "Ctrl+Z", false, canUndo)) {
+        g_CommandStack->Undo(*g_Document);
       }
-      if (ImGui::MenuItem("Redo")) {
+      if (ImGui::MenuItem("Redo", "Ctrl+Y", false, canRedo)) {
+        g_CommandStack->Redo(*g_Document);
       }
       ImGui::EndMenu();
     }
 
     if (ImGui::BeginMenu("Create")) {
+      if (ImGui::MenuItem("Box")) {
+        if (g_Document && g_CommandStack) {
+          const int n = static_cast<int>(g_Document->FeatureCount()) + 1;
+          auto feature = std::make_unique<BoxFeature>(
+              "Box " + std::to_string(n),
+              glm::vec3(-4.0f + (n - 1) * 2.5f, 0.0f, 0.0f), 2.0, 2.0, 2.0);
+          g_CommandStack->Execute(
+              std::make_unique<AddFeatureCommand>(std::move(feature)),
+              *g_Document);
+        }
+      }
+      ImGui::Separator();
+
       // Sketch options
       if (ImGui::BeginMenu("Sketch")) {
         if (ImGui::MenuItem("Sketch on Front Plane")) {
@@ -1297,11 +1379,14 @@ void printUsage(const char *programName) {
       << "  -vv                  Enable very verbose logging (trace level)"
       << std::endl;
   std::cout << "  -h, --help           Show this help message" << std::endl;
+  std::cout << "  --gui-tests          Run GUI test suite and exit"
+            << std::endl;
 }
 
 struct CommandLineArgs {
   std::string fileToLoad;
   spdlog::level::level_enum logLevel = spdlog::level::info;
+  bool runGuiTests = false;
 };
 
 CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
@@ -1322,6 +1407,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
         printUsage(argv[0]);
         exit(1);
       }
+    } else if (arg == "--gui-tests") {
+      args.runGuiTests = true;
     } else if (arg == "-v" || arg == "--verbose") {
       args.logLevel = spdlog::level::debug;
     } else if (arg == "-vv") {
@@ -1338,6 +1425,7 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
 
 int main(int argc, char **argv) {
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
+  g_DisableVSync = args.runGuiTests;
 
   // Initialize logger with specified level
   Logger::Initialize(args.logLevel);
@@ -1412,6 +1500,8 @@ int main(int argc, char **argv) {
   g_Scene = std::make_unique<Scene>();
   g_Camera = std::make_unique<Camera>();
   g_SketchManager = std::make_unique<SketchManager>();
+  g_Document = std::make_unique<Document>();
+  g_CommandStack = std::make_unique<CommandStack>();
 
   // Set up camera for good 3D view
   g_Camera->SetPosition(glm::vec3(8.0f, 6.0f, 8.0f));
@@ -1501,6 +1591,22 @@ int main(int argc, char **argv) {
   LOG_INFO("=== APPLICATION READY - Left-click to select faces, "
            "Ctrl+Left-click to align camera ===");
 
+  // GUI test engine: always started so tests can also be run interactively;
+  // --gui-tests queues the whole suite and exits with a pass/fail code.
+  ImGuiTestEngine *testEngine = ImGuiTestEngine_CreateContext();
+  ImGuiTestEngineIO &testEngineIO = ImGuiTestEngine_GetIO(testEngine);
+  testEngineIO.ConfigVerboseLevel = ImGuiTestVerboseLevel_Info;
+  testEngineIO.ConfigVerboseLevelOnError = ImGuiTestVerboseLevel_Debug;
+  testEngineIO.ConfigRunSpeed = ImGuiTestRunSpeed_Fast;
+  testEngineIO.ConfigLogToTTY = args.runGuiTests;
+  testEngineIO.ConfigWatchdogWarning = 60.0f;
+  testEngineIO.ConfigWatchdogKillTest = 300.0f;
+  ImGuiTestEngine_Start(testEngine, ImGui::GetCurrentContext());
+  RegisterGuiTests(testEngine, g_Scene.get(), g_Document.get());
+  if (args.runGuiTests) {
+    ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests, "all");
+  }
+
   ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
   // Main loop
@@ -1548,6 +1654,9 @@ int main(int argc, char **argv) {
     if (g_Scene)
       g_Scene->Update(deltaTime);
 
+    // Mirror document changes (edits, undo, redo) into the renderers
+    SyncDocumentRenderers();
+
     // Start ImGui frame
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -1579,13 +1688,30 @@ int main(int argc, char **argv) {
       wd->ClearValue.color.float32[3] = clear_color.w;
       FrameRender(wd, draw_data);
       FramePresent(wd);
+      ImGuiTestEngine_PostSwap(testEngine);
+    }
+
+    if (args.runGuiTests && ImGuiTestEngine_IsTestQueueEmpty(testEngine)) {
+      glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
   }
+
+  // Collect GUI test results before teardown
+  int exitCode = 0;
+  if (args.runGuiTests) {
+    int countTested = 0, countSuccess = 0;
+    ImGuiTestEngine_GetResult(testEngine, countTested, countSuccess);
+    LOG_INFO("GUI tests: {}/{} passed", countSuccess, countTested);
+    exitCode = (countTested > 0 && countTested == countSuccess) ? 0 : 1;
+  }
+  ImGuiTestEngine_Stop(testEngine);
 
   // Cleanup
   err = vkDeviceWaitIdle(g_Device);
   check_vk_result(err);
 
+  g_Document.reset();
+  g_CommandStack.reset();
   g_Scene.reset();
   g_Camera.reset();
   g_MeshRenderer.reset();
@@ -1597,6 +1723,8 @@ int main(int argc, char **argv) {
   ImGui_ImplVulkan_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
+  // Test engine context must outlive the ImGui context it hooks
+  ImGuiTestEngine_DestroyContext(testEngine);
 
   CleanupVulkanWindow();
   CleanupVulkan();
@@ -1604,5 +1732,5 @@ int main(int argc, char **argv) {
   glfwDestroyWindow(window);
   glfwTerminate();
 
-  return 0;
+  return exitCode;
 }

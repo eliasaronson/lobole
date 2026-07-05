@@ -22,6 +22,20 @@ find_package(spdlog REQUIRED)
 set(IMGUI_DIR deps/imgui)
 include_directories(${IMGUI_DIR} ${IMGUI_DIR}/backends ..)
 
+# Dear ImGui Test Engine (GUI testing)
+set(IMGUI_TEST_ENGINE_DIR deps/imgui_test_engine/imgui_test_engine)
+include_directories(${IMGUI_TEST_ENGINE_DIR})
+set(IMGUI_TEST_ENGINE_SOURCES
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_capture_tool.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_context.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_coroutine.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_engine.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_exporters.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_perftool.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_ui.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_utils.cpp
+)
+
 
 # OpenCASCADE - manual setup
 set(OPENCASCADE_INCLUDE_DIR "/usr/include/opencascade")
@@ -115,9 +129,13 @@ set(core_sources
     src/Sketch.cpp
     src/SketchManager.cpp
     src/FaceSelector.cpp
+    src/core/Feature.cpp
+    src/core/Document.cpp
+    src/core/Command.cpp
 )
 
 add_library(designer_core STATIC ${core_sources})
+target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog)
 if(OPENCASCADE_FOUND)
     target_link_libraries(designer_core PUBLIC ${OPENCASCADE_LIBS})
@@ -130,9 +148,16 @@ set(app_sources
     src/MeshRenderer.cpp
     src/OutlineRenderer.cpp
     src/RayTracingRenderer.cpp
+    src/GuiTests.cpp
 )
 
-add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+
+# imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks
+target_compile_definitions(designer PRIVATE
+    IMGUI_ENABLE_TEST_ENGINE
+    IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+)
 
 target_link_libraries(designer designer_core ${LIBRARIES})
 

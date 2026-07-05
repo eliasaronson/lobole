@@ -15,6 +15,7 @@ endif()
 add_executable(designer_tests
     test_cadkernel.cpp
     test_sketch.cpp
+    test_document.cpp
 )
 target_link_libraries(designer_tests PRIVATE designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -22,3 +23,8 @@ target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 include(CTest)
 include(Catch)
 catch_discover_tests(designer_tests)
+
+# GUI smoke tests drive the real app through ImGui Test Engine.
+# Needs a display (use `ctest -LE gui` on headless machines, or xvfb-run).
+add_test(NAME gui_smoke COMMAND designer --gui-tests)
+set_tests_properties(gui_smoke PROPERTIES LABELS gui TIMEOUT 600)
