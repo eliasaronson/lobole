@@ -55,12 +55,9 @@ Not working / partial:
    GUI tests via ImGui Test Engine, all under ctest)*
 3. **Purge dead code** — delete the uncompiled leftovers, the duplicated View menu, the
    committed test binary; park or delete `RayTracingRenderer`.
-4. **Fix face selection** — the gateway feature; everything downstream (sketch-on-face,
-   extrude, constraints, an LLM clicking on geometry) depends on it:
-   - Apply the Vulkan Y-flip / 0–1 depth convention once, consistently, in renderers and picker.
-   - Tag triangles with their `TopoDS_Face` ID during tessellation; compute real normals
-     from the triangulation while there.
-   - Implement real per-face highlighting.
+4. ~~**Fix face selection**~~ *(done — consistent Vulkan projection in camera+picker, real
+   B-Rep face mapping with surface normals, per-face highlight via push constants, viewport
+   input through ImGui so tests/automation can drive orbit/pan/zoom/select)*
 5. **Render sketches + implement extrude** (`BRepPrimAPI_MakePrism` on a closed profile) —
    closes the first sketch → solid loop.
 
