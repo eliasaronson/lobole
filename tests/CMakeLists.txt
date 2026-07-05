@@ -31,3 +31,9 @@ catch_discover_tests(designer_tests)
 # Needs a display (use `ctest -LE gui` on headless machines, or xvfb-run).
 add_test(NAME gui_smoke COMMAND designer --gui-tests)
 set_tests_properties(gui_smoke PROPERTIES LABELS gui TIMEOUT 600)
+
+# Drives a live app over the JSON-RPC remote interface (needs a display)
+add_test(NAME remote_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/remote_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(remote_smoke PROPERTIES LABELS gui TIMEOUT 600)

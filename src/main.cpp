@@ -5,6 +5,8 @@
 #include "FaceSelector.h"
 #include "GuiTests.h"
 #include "Logger.h"
+#include "Screenshot.h"
+#include "remote/RemoteServer.h"
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "RayTracingRenderer.h"
@@ -461,12 +463,16 @@ void printUsage(const char *programName) {
   std::cout << "  -h, --help           Show this help message" << std::endl;
   std::cout << "  --gui-tests          Run GUI test suite and exit"
             << std::endl;
+  std::cout << "  --remote <port>      Enable JSON-RPC remote control on "
+               "127.0.0.1:<port>"
+            << std::endl;
 }
 
 struct CommandLineArgs {
   std::string fileToLoad;
   spdlog::level::level_enum logLevel = spdlog::level::info;
   bool runGuiTests = false;
+  int remotePort = 0;
 };
 
 CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
@@ -489,6 +495,15 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
       }
     } else if (arg == "--gui-tests") {
       args.runGuiTests = true;
+    } else if (arg == "--remote") {
+      if (i + 1 < argc) {
+        args.remotePort = std::atoi(argv[i + 1]);
+        i++;
+      }
+      if (args.remotePort <= 0 || args.remotePort > 65535) {
+        std::cerr << "Error: --remote requires a port (1-65535)" << std::endl;
+        exit(1);
+      }
     } else if (arg == "-v" || arg == "--verbose") {
       args.logLevel = spdlog::level::debug;
     } else if (arg == "-vv") {
@@ -692,6 +707,12 @@ int main(int argc, char **argv) {
     ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests, "all");
   }
 
+  // Remote control (opt-in)
+  RemoteServer remoteServer;
+  if (args.remotePort > 0) {
+    remoteServer.Start(static_cast<uint16_t>(args.remotePort), testEngine);
+  }
+
   const ui::ClearColor vp = ui::ViewportClearColor();
   ImVec4 clear_color = ImVec4(vp.r, vp.g, vp.b, 1.00f);
 
@@ -740,6 +761,9 @@ int main(int argc, char **argv) {
     if (g_Scene)
       g_Scene->Update(deltaTime);
 
+    // Remote-control requests act on the document/UI before this frame
+    remoteServer.ProcessPending(g_App);
+
     // Mirror document changes (edits, undo, redo) into the renderers
     ui::SyncDocumentRenderers(g_App);
 
@@ -774,12 +798,34 @@ int main(int argc, char **argv) {
       FrameRender(wd, draw_data);
       FramePresent(wd);
       ImGuiTestEngine_PostSwap(testEngine);
+
+      // Remote screenshot: re-render this frame into a readable image
+      std::string shotPath;
+      if (remoteServer.WantsScreenshot(shotPath)) {
+        vkQueueWaitIdle(g_Queue); // frame resources must be reusable
+        std::string shotError;
+        const bool ok = CaptureScreenshot(
+            g_Device, g_PhysicalDevice, g_Queue, g_CommandPool,
+            wd->RenderPass, wd->SurfaceFormat.format,
+            static_cast<uint32_t>(wd->Width), static_cast<uint32_t>(wd->Height),
+            wd->ClearValue,
+            [&](VkCommandBuffer cb) {
+              if (g_MeshRenderer) g_MeshRenderer->Render(cb, wd->FrameIndex);
+              if (g_OutlineRenderer)
+                g_OutlineRenderer->Render(cb, wd->FrameIndex);
+              ImGui_ImplVulkan_RenderDrawData(draw_data, cb);
+            },
+            shotPath, &shotError);
+        remoteServer.ScreenshotDone(ok, shotError);
+      }
     }
 
     if (args.runGuiTests && ImGuiTestEngine_IsTestQueueEmpty(testEngine)) {
       glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
   }
+
+  remoteServer.Stop();
 
   // Collect GUI test results before teardown
   int exitCode = 0;

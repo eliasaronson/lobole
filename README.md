@@ -57,3 +57,26 @@ Unit tests are Catch2 against the GUI-free `designer_core` library. GUI tests
 drive the real application through
 [ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) (simulated
 mouse/keyboard on the actual UI) and need a display.
+
+## Remote control
+
+Scripts and AI assistants can drive a live session over JSON-RPC
+(localhost-only, opt-in):
+
+```
+./designer --remote 8437
+python3 tools/designer_remote.py 8437 get_state
+python3 tools/designer_remote.py 8437 add_feature \
+    '{"feature": {"type": "Box", "name": "Box 1", "position": [0,0,0],
+                  "width": 2, "height": 2, "depth": 2}}'
+python3 tools/designer_remote.py 8437 menu_click '{"path": "Edit/Undo"}'
+python3 tools/designer_remote.py 8437 screenshot '{"path": "/tmp/view.png"}'
+```
+
+Two tiers share the same underlying command layer as the GUI: semantic
+methods (`get_state`, `add/modify/delete_feature` using the project-file JSON
+format, `undo`/`redo`, project I/O, `import_step`, `select_face`, `fit_view`)
+and human-parity UI actions executed through the embedded test engine
+(`menu_click`, `item_click`, `item_input`, `viewport_click`, `viewport_drag`,
+`key_press`, `scroll`), plus `screenshot`. See `tools/designer_remote.py` and
+`tests/remote_smoke.py` for reference usage.

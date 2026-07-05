@@ -165,6 +165,8 @@ set(app_sources
     src/ui/AppActions.cpp
     src/ui/Theme.cpp
     src/ui/ViewportInput.cpp
+    src/Screenshot.cpp
+    src/remote/RemoteServer.cpp
 )
 
 # UI font, loaded at runtime relative to the executable
