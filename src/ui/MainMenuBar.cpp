@@ -22,19 +22,19 @@ void DrawFileMenu(AppState& state) {
   if (!ImGui::BeginMenu("File"))
     return;
 
-  if (ImGui::MenuItem("New")) {
+  if (ImGui::MenuItem("New", "Ctrl+N")) {
     ReplaceDocument(state, std::make_unique<Document>());
   }
 #ifdef HAVE_NATIVEFILEDIALOG
-  if (ImGui::MenuItem("Open Project...")) {
+  if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
     OpenProjectDialog(state);
   }
-  if (ImGui::MenuItem("Save Project As...")) {
+  if (ImGui::MenuItem("Save Project As...", "Ctrl+S")) {
     SaveProjectDialog(state);
   }
 #endif
   ImGui::Separator();
-  if (ImGui::MenuItem("Import STEP...")) {
+  if (ImGui::MenuItem("Import STEP...", "Ctrl+I")) {
     OpenStepFileDialog(state);
   }
   ImGui::Separator();
@@ -216,9 +216,41 @@ void DrawViewMenu(AppState& state) {
   ImGui::EndMenu();
 }
 
+// Global keyboard shortcuts. Registered every frame; ImGui's routing lets a
+// focused text field claim chords like Ctrl+Z for itself first.
+void HandleShortcuts(AppState& state) {
+  const ImGuiInputFlags route = ImGuiInputFlags_RouteGlobal;
+
+  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, route)) {
+    if (state.commands && state.commands->CanUndo())
+      state.commands->Undo(*state.document);
+  }
+  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, route) ||
+      ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, route)) {
+    if (state.commands && state.commands->CanRedo())
+      state.commands->Redo(*state.document);
+  }
+  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, route)) {
+    ReplaceDocument(state, std::make_unique<Document>());
+  }
+#ifdef HAVE_NATIVEFILEDIALOG
+  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_O, route)) {
+    OpenProjectDialog(state);
+  }
+  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, route)) {
+    SaveProjectDialog(state);
+  }
+#endif
+  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_I, route)) {
+    OpenStepFileDialog(state);
+  }
+}
+
 } // namespace
 
 void DrawMainMenuBar(AppState& state) {
+  HandleShortcuts(state);
+
   if (!ImGui::BeginMainMenuBar())
     return;
 

@@ -1,6 +1,7 @@
 #include "GuiTests.h"
 
 #include "core/Document.h"
+#include "core/Feature.h"
 
 #include "imgui_te_context.h"
 #include "imgui_te_engine.h"
@@ -83,6 +84,60 @@ void RegisterGuiTests(ImGuiTestEngine* engine,
     ctx->Yield();
     IM_CHECK_EQ(s_GetDocument()->FeatureCount(), (size_t)0);
     IM_CHECK_EQ(s_GetDocument()->GetBodies().size(), (size_t)0);
+  };
+
+  t = IM_REGISTER_TEST(engine, "properties", "edit_box_width_undo");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Box");
+    ctx->Yield();
+
+    Document* doc = s_GetDocument();
+    IM_CHECK(doc != nullptr);
+    auto* box = dynamic_cast<BoxFeature*>(doc->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 2.0);
+
+    // Select the feature in the Model panel, edit its width in Properties
+    ctx->ItemClick("//Model/Box 1##0");
+    ctx->ItemInputValue("//Properties/Width", 5.0f);
+    ctx->Yield();
+
+    box = dynamic_cast<BoxFeature*>(s_GetDocument()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 5.0);
+    IM_CHECK_EQ(s_GetDocument()->GetBodies().size(), (size_t)1);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield();
+    box = dynamic_cast<BoxFeature*>(s_GetDocument()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 2.0);
+
+    ctx->MenuClick("Edit/Redo");
+    ctx->Yield();
+    box = dynamic_cast<BoxFeature*>(s_GetDocument()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 5.0);
+  };
+
+  t = IM_REGISTER_TEST(engine, "shortcuts", "undo_redo_keyboard");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Box");
+    ctx->Yield();
+    IM_CHECK_EQ(s_GetDocument()->FeatureCount(), (size_t)1);
+
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z);
+    ctx->Yield();
+    IM_CHECK_EQ(s_GetDocument()->FeatureCount(), (size_t)0);
+
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y);
+    ctx->Yield();
+    IM_CHECK_EQ(s_GetDocument()->FeatureCount(), (size_t)1);
   };
 
   t = IM_REGISTER_TEST(engine, "menu", "sketch_mode_shows_toolbar");
