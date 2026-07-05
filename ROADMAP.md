@@ -72,11 +72,12 @@ deterministically, serialized as human-readable text (JSON or a small DSL). All 
 route through commands. Gives undo, checkpoints, and a diffable format immediately.
 
 *In progress:* `src/core/` has `Document` (feature list + deterministic regeneration),
-features (Box, Sphere, Cylinder, STEP Import), `Command`/`CommandStack` (undo/redo), and
-JSON project serialization (`DocumentIO`). All modeling UI routes through commands; the
-Scene panel shows the feature history. Next: parameter editing in the UI (click a feature,
-change its dimensions, regenerate), sketch/extrude as features, then persistent references
-(topological naming).
+features (Box, Sphere, Cylinder, STEP Import), `Command`/`CommandStack` (undo/redo incl.
+`ModifyFeatureCommand`), and JSON project serialization (`DocumentIO`). The UI is a
+docking workbench (`src/ui/`, imgui docking branch): Model panel (feature history,
+selection, delete), Properties panel with **live parameter editing** (drag a dimension,
+model regenerates, undoable), keyboard shortcuts, merged menus. Next: sketch/extrude as
+features, then persistent references (topological naming).
 
 ⚠ Hard problem to design for up front: **topological naming** — how "the face I filleted"
 stays identified after an upstream edit reorders faces. Study FreeCAD's RealThunder branch
