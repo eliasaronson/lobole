@@ -54,13 +54,22 @@ void SyncDocumentRenderers(AppState& state) {
   }
   state.documentMeshes.clear();
 
+  // Muted, theme-matched palette cycled per body so parts read apart
+  static const glm::vec3 kBodyPalette[] = {
+      {0.58f, 0.66f, 0.78f}, // steel blue
+      {0.80f, 0.62f, 0.42f}, // amber
+      {0.55f, 0.74f, 0.62f}, // sage
+      {0.76f, 0.58f, 0.70f}, // mauve
+      {0.72f, 0.72f, 0.55f}, // olive
+  };
+  size_t bodyIndex = 0;
   for (const auto& body : state.document->GetBodies()) {
     CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
     if (cadMesh.vertices.empty())
       continue;
 
     std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(
-        cadMesh, glm::vec3(0.8f, 0.7f, 0.4f));
+        cadMesh, kBodyPalette[bodyIndex++ % std::size(kBodyPalette)]);
     uint32_t meshId = state.meshRenderer->AddMesh(vertices, cadMesh.indices);
     uint32_t outlineId = 0;
     if (state.outlineRenderer)

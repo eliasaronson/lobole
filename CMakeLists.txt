@@ -160,7 +160,12 @@ set(app_sources
     src/ui/SketchToolbar.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
+    src/ui/Theme.cpp
 )
+
+# UI font, loaded at runtime relative to the executable
+file(COPY ${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf
+     DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 

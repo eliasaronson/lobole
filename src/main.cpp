@@ -12,7 +12,9 @@
 #include "SketchManager.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/Theme.h"
 #include "ui/UI.h"
+#include <algorithm>
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
@@ -676,7 +678,10 @@ int main(int argc, char **argv) {
   }
   g_App.runGuiTests = args.runGuiTests;
 
-  ImGui::StyleColorsDark();
+  // Theme, scaled for the display's content scale (HiDPI)
+  float scaleX = 1.0f, scaleY = 1.0f;
+  glfwGetWindowContentScale(window, &scaleX, &scaleY);
+  ui::ApplyTheme(std::max(1.0f, std::max(scaleX, scaleY)));
 
   ImGui_ImplGlfw_InitForVulkan(window, true);
   ImGui_ImplVulkan_InitInfo init_info = {};
@@ -802,7 +807,8 @@ int main(int argc, char **argv) {
     ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests, "all");
   }
 
-  ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+  const ui::ClearColor vp = ui::ViewportClearColor();
+  ImVec4 clear_color = ImVec4(vp.r, vp.g, vp.b, 1.00f);
 
   // Main loop
   while (!glfwWindowShouldClose(window)) {
