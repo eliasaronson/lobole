@@ -132,11 +132,14 @@ set(core_sources
     src/core/Feature.cpp
     src/core/Document.cpp
     src/core/Command.cpp
+    src/core/Serialization.cpp
 )
+
+find_package(nlohmann_json 3 REQUIRED)
 
 add_library(designer_core STATIC ${core_sources})
 target_include_directories(designer_core PUBLIC src)
-target_link_libraries(designer_core PUBLIC spdlog::spdlog)
+target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json)
 if(OPENCASCADE_FOUND)
     target_link_libraries(designer_core PUBLIC ${OPENCASCADE_LIBS})
 endif()

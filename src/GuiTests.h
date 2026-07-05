@@ -1,9 +1,11 @@
 #pragma once
 
+#include <functional>
+
 struct ImGuiTestEngine;
-class Scene;
 class Document;
 
-// Registers all GUI tests. Call once after the application objects exist.
-void RegisterGuiTests(ImGuiTestEngine* engine, Scene* scene,
-                      Document* document);
+// Registers all GUI tests. The document is resolved through a getter because
+// File > New / Open replace the document object mid-session.
+void RegisterGuiTests(ImGuiTestEngine* engine,
+                      std::function<Document*()> getDocument);

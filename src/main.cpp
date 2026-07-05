@@ -14,11 +14,13 @@
 #include "Scene.h"
 #include "SketchManager.h"
 #include "core/Command.h"
+#include "core/Serialization.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 #include "imgui_te_engine.h"
 #include <algorithm>
+#include <cfloat>
 #include <filesystem>
 #include <memory>
 #include <stdio.h>
@@ -63,6 +65,7 @@ static std::unique_ptr<FaceSelector> g_FaceSelector;
 // Parametric document (the model source of truth) and its undo stack
 static std::unique_ptr<Document> g_Document;
 static std::unique_ptr<CommandStack> g_CommandStack;
+static uint64_t g_SyncedDocumentVersion = 0;
 
 #ifndef HAVE_NATIVEFILEDIALOG
 // File browser state (fallback when nativefiledialog is not available)
@@ -717,122 +720,84 @@ void OpenStepFileDialog() {
 }
 #endif
 
+
+// Frames the camera on the document's combined bounding box.
+void FitCameraToDocument() {
+  if (!g_Document || !g_Camera || g_Document->GetBodies().empty())
+    return;
+
+  glm::vec3 min(FLT_MAX), max(-FLT_MAX);
+  for (const auto &body : g_Document->GetBodies()) {
+    glm::vec3 bmin, bmax;
+    body.shape.GetBoundingBox(bmin, bmax);
+    min = glm::min(min, bmin);
+    max = glm::max(max, bmax);
+  }
+  const glm::vec3 center = (min + max) * 0.5f;
+  const float radius = glm::length(max - min) * 0.5f;
+  g_Camera->SetTarget(center);
+  g_Camera->SetDistance(std::max(radius * 2.5f, 1.0f));
+}
+
+// Swaps in a new document (New/Open) with a fresh undo stack and forces the
+// renderers to resync even if the version counters happen to collide.
+void ReplaceDocument(std::unique_ptr<Document> doc) {
+  g_Document = std::move(doc);
+  g_CommandStack = std::make_unique<CommandStack>();
+  g_SyncedDocumentVersion = UINT64_MAX;
+}
+
+// Imports a STEP file as a parametric ImportFeature (undoable, serialized
+// with the project). Also used for the -f/--file startup argument.
 void LoadSTEPFile(const std::string &filename) {
-  if (!g_Scene || !g_MeshRenderer)
+  if (!g_Document || !g_CommandStack)
     return;
 
-  LOG_INFO("Loading STEP file: {}", filename);
+  const std::string name = std::filesystem::path(filename).stem().string();
+  auto feature = std::make_unique<ImportFeature>(name, filename);
+  g_CommandStack->Execute(
+      std::make_unique<AddFeatureCommand>(std::move(feature)), *g_Document);
 
-  // Use OpenCASCADE to load STEP file
-  std::vector<CADShape> shapes;
-  bool success = CADKernel::Instance().LoadSTEP(filename, shapes);
-
-  if (!success) {
-    LOG_ERROR("Failed to load STEP file: {}", filename);
-    return;
-  }
-
-  LOG_INFO("Loaded {} shapes from STEP file", shapes.size());
-
-  // Convert each shape to a mesh and add to renderer (limit to first 20 shapes
-  // for performance)
-  int shapeIndex = 0;
-  int maxShapes = std::min((int)shapes.size(), 20);
-  std::cout << "Processing first " << maxShapes << " shapes..." << std::endl;
-
-  for (int i = 0; i < maxShapes; i++) {
-    const auto &shape = shapes[i];
-    std::cout << "Processing shape " << (i + 1) << "/" << maxShapes << "..."
-              << std::endl;
-    if (shape.IsValid() && shape.Volume() > 1e-6) {
-      // Generate mesh from the shape
-      CADShape::Mesh cadMesh =
-          shape.GenerateMesh(0.5); // Good balance of quality and performance
-
-      if (!cadMesh.vertices.empty()) {
-        // Determine material type based on filename or shape index
-        CADMaterials::MaterialType materialType;
-        if (shapeIndex == 0) {
-          // First shape uses filename-based material detection
-          materialType =
-              CADMaterials::MaterialLibrary::GetMaterialFromFilename(filename);
-        } else {
-          // Additional shapes cycle through different materials
-          materialType =
-              CADMaterials::MaterialLibrary::GetMaterialFromShapeIndex(
-                  shapeIndex);
-        }
-
-        // Get professional CAD material properties
-        const auto &material =
-            CADMaterials::MaterialLibrary::GetMaterial(materialType);
-        glm::vec3 color = material.baseColor;
-
-        std::cout << "Shape " << (shapeIndex + 1)
-                  << " assigned material: " << material.name
-                  << " (Color: " << color.r << ", " << color.g << ", "
-                  << color.b << ")" << std::endl;
-
-        // Create a CAD object for the shape first (to get bounding box)
-        auto cadObject = std::make_unique<CADObject>(
-            "STEP Shape " + std::to_string(shapeIndex + 1), shape);
-
-        // Calculate bounding box for automatic centering
-        glm::vec3 minBounds, maxBounds;
-        cadObject->GetBoundingBox(minBounds, maxBounds);
-        glm::vec3 center = (minBounds + maxBounds) * 0.5f;
-        glm::vec3 size = maxBounds - minBounds;
-
-        std::cout << "Mesh bounds: min(" << minBounds.x << "," << minBounds.y
-                  << "," << minBounds.z << ") max(" << maxBounds.x << ","
-                  << maxBounds.y << "," << maxBounds.z << ")" << std::endl;
-        std::cout << "Mesh center: (" << center.x << "," << center.y << ","
-                  << center.z << "), size: (" << size.x << "," << size.y << ","
-                  << size.z << ")" << std::endl;
-
-        std::vector<Vertex3D> vertices =
-            CADMeshConverter::ConvertCADMeshToVertices(cadMesh, color);
-        uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
-
-        // Apply centering transform to move the object to origin
-        glm::mat4 centeringTransform = glm::translate(glm::mat4(1.0f), -center);
-        g_MeshRenderer->SetMeshTransform(meshId, centeringTransform);
-
-        std::cout << "Applied centering transform to mesh " << meshId
-                  << std::endl;
-
-        // Add outline mesh with same transform
-        if (g_OutlineRenderer) {
-          uint32_t outlineMeshId =
-              g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
-          g_OutlineRenderer->SetMeshTransform(outlineMeshId,
-                                              centeringTransform);
-        }
-
-        // Add face selection mesh with same transform
-        if (g_FaceSelector) {
-          g_FaceSelector->AddMesh(meshId, vertices, cadMesh.indices,
-                                  centeringTransform);
-        }
-
-        g_Scene->AddObject(std::move(cadObject));
-
-        std::cout << "Added shape " << shapeIndex + 1 << " with "
-                  << cadMesh.vertices.size() << " vertices and "
-                  << cadMesh.indices.size() / 3
-                  << " triangles (Mesh ID: " << meshId << ")" << std::endl;
-        shapeIndex++;
-      }
-    }
-  }
-
-  if (shapeIndex > 0) {
-    std::cout << "Successfully loaded " << shapeIndex
-              << " shapes from STEP file" << std::endl;
+  if (g_Document->GetBodies().empty()) {
+    LOG_ERROR("Import of '{}' produced no bodies", filename);
   } else {
-    std::cout << "No valid shapes found in STEP file" << std::endl;
+    FitCameraToDocument();
   }
 }
+
+#ifdef HAVE_NATIVEFILEDIALOG
+void OpenProjectDialog() {
+  nfdchar_t *outPath = nullptr;
+  if (NFD_OpenDialog("json", nullptr, &outPath) == NFD_OKAY) {
+    std::string path(outPath);
+    free(outPath);
+    std::string error;
+    if (auto doc = DocumentIO::Load(path, &error)) {
+      ReplaceDocument(std::move(doc));
+      FitCameraToDocument();
+    } else {
+      LOG_ERROR("Failed to open project: {}", error);
+    }
+  }
+}
+
+void SaveProjectDialog() {
+  if (!g_Document)
+    return;
+  nfdchar_t *outPath = nullptr;
+  if (NFD_SaveDialog("json", nullptr, &outPath) == NFD_OKAY) {
+    std::string path(outPath);
+    free(outPath);
+    if (std::filesystem::path(path).extension().empty()) {
+      path += ".json";
+    }
+    std::string error;
+    if (!DocumentIO::Save(*g_Document, path, &error)) {
+      LOG_ERROR("Failed to save project: {}", error);
+    }
+  }
+}
+#endif
 
 // Rebuilds render/picking meshes from the document's bodies whenever the
 // document version changes (feature added/removed, undo, redo). The document
@@ -842,7 +807,6 @@ struct DocumentRenderMesh {
   uint32_t outlineId;
 };
 static std::vector<DocumentRenderMesh> g_DocumentMeshes;
-static uint64_t g_SyncedDocumentVersion = 0;
 
 void SyncDocumentRenderers() {
   if (!g_Document || !g_MeshRenderer)
@@ -884,14 +848,21 @@ void RenderCADUI(GLFWwindow *window) {
   if (ImGui::BeginMainMenuBar()) {
     if (ImGui::BeginMenu("File")) {
       if (ImGui::MenuItem("New")) {
+        ReplaceDocument(std::make_unique<Document>());
       }
-
-      if (ImGui::MenuItem("Open STEP File...")) {
+#ifdef HAVE_NATIVEFILEDIALOG
+      if (ImGui::MenuItem("Open Project...")) {
+        OpenProjectDialog();
+      }
+      if (ImGui::MenuItem("Save Project As...")) {
+        SaveProjectDialog();
+      }
+#endif
+      ImGui::Separator();
+      if (ImGui::MenuItem("Import STEP...")) {
         OpenStepFileDialog();
       }
-
-      if (ImGui::MenuItem("Save")) {
-      }
+      ImGui::Separator();
       if (ImGui::MenuItem("Exit")) {
         glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
       }
@@ -917,6 +888,29 @@ void RenderCADUI(GLFWwindow *window) {
           auto feature = std::make_unique<BoxFeature>(
               "Box " + std::to_string(n),
               glm::vec3(-4.0f + (n - 1) * 2.5f, 0.0f, 0.0f), 2.0, 2.0, 2.0);
+          g_CommandStack->Execute(
+              std::make_unique<AddFeatureCommand>(std::move(feature)),
+              *g_Document);
+        }
+      }
+      if (ImGui::MenuItem("Sphere")) {
+        if (g_Document && g_CommandStack) {
+          const int n = static_cast<int>(g_Document->FeatureCount()) + 1;
+          auto feature = std::make_unique<SphereFeature>(
+              "Sphere " + std::to_string(n),
+              glm::vec3(-4.0f + (n - 1) * 2.5f, 0.0f, 0.0f), 1.0);
+          g_CommandStack->Execute(
+              std::make_unique<AddFeatureCommand>(std::move(feature)),
+              *g_Document);
+        }
+      }
+      if (ImGui::MenuItem("Cylinder")) {
+        if (g_Document && g_CommandStack) {
+          const int n = static_cast<int>(g_Document->FeatureCount()) + 1;
+          auto feature = std::make_unique<CylinderFeature>(
+              "Cylinder " + std::to_string(n),
+              glm::vec3(-4.0f + (n - 1) * 2.5f, -1.0f, 0.0f),
+              glm::vec3(0.0f, 1.0f, 0.0f), 0.8, 2.0);
           g_CommandStack->Execute(
               std::make_unique<AddFeatureCommand>(std::move(feature)),
               *g_Document);
@@ -986,149 +980,6 @@ void RenderCADUI(GLFWwindow *window) {
         ImGui::EndMenu();
       }
 
-      ImGui::Separator();
-
-      // Legacy primitive creation (for comparison)
-      if (ImGui::BeginMenu("Primitives (Legacy)")) {
-        if (ImGui::MenuItem("Box")) {
-          if (g_Scene && g_MeshRenderer) {
-            int objectCount = g_Scene->GetObjects().size();
-            auto box = CADObject::CreateBox(
-                "Box " + std::to_string(objectCount + 1), 2.0, 2.0, 2.0);
-
-            // Convert CAD shape to mesh and add to renderer
-            if (box->GetVolume() > 0.0) {
-              CADShape::Mesh cadMesh = box->GetShape().GenerateMesh(0.1);
-              if (!cadMesh.vertices.empty()) {
-                std::vector<Vertex3D> vertices =
-                    CADMeshConverter::ConvertCADMeshToVertices(
-                        cadMesh, glm::vec3(0.6f, 0.8f, 1.0f));
-                uint32_t meshId =
-                    g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
-
-                // Add outline mesh
-                if (g_OutlineRenderer) {
-                  uint32_t outlineMeshId =
-                      g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
-                  glm::mat4 transform = glm::translate(
-                      glm::mat4(1.0f),
-                      glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 0.0f));
-                  g_OutlineRenderer->SetMeshTransform(outlineMeshId, transform);
-                  std::cout
-                      << "Added box outline mesh with ID: " << outlineMeshId
-                      << std::endl;
-                }
-
-                // Add face selection mesh
-                if (g_FaceSelector) {
-                  g_FaceSelector->AddMesh(meshId, vertices, cadMesh.indices);
-                }
-
-                // Position objects at different locations
-                glm::mat4 transform = glm::translate(
-                    glm::mat4(1.0f),
-                    glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 0.0f));
-                g_MeshRenderer->SetMeshTransform(meshId, transform);
-                if (g_FaceSelector) {
-                  g_FaceSelector->UpdateMeshTransform(meshId, transform);
-                }
-
-                std::cout << "Added box mesh with ID: " << meshId << std::endl;
-              }
-            }
-
-            g_Scene->AddObject(std::move(box));
-          }
-        }
-        if (ImGui::MenuItem("Sphere")) {
-          if (g_Scene && g_MeshRenderer) {
-            int objectCount = g_Scene->GetObjects().size();
-            auto sphere = CADObject::CreateSphere(
-                "Sphere " + std::to_string(objectCount + 1), glm::vec3(0, 0, 0),
-                1.0);
-
-            // Convert CAD shape to mesh and add to renderer
-            if (sphere->GetVolume() > 0.0) {
-              CADShape::Mesh cadMesh = sphere->GetShape().GenerateMesh(0.1);
-              if (!cadMesh.vertices.empty()) {
-                std::vector<Vertex3D> vertices =
-                    CADMeshConverter::ConvertCADMeshToVertices(
-                        cadMesh, glm::vec3(1.0f, 0.6f, 0.6f));
-                uint32_t meshId =
-                    g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
-
-                // Add outline mesh
-                if (g_OutlineRenderer) {
-                  uint32_t outlineMeshId =
-                      g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
-                  glm::mat4 transform = glm::translate(
-                      glm::mat4(1.0f),
-                      glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 2.0f));
-                  g_OutlineRenderer->SetMeshTransform(outlineMeshId, transform);
-                  std::cout
-                      << "Added sphere outline mesh with ID: " << outlineMeshId
-                      << std::endl;
-                }
-
-                // Position objects at different locations
-                glm::mat4 transform = glm::translate(
-                    glm::mat4(1.0f),
-                    glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, 2.0f));
-                g_MeshRenderer->SetMeshTransform(meshId, transform);
-
-                std::cout << "Added sphere mesh with ID: " << meshId
-                          << std::endl;
-              }
-            }
-
-            g_Scene->AddObject(std::move(sphere));
-          }
-        }
-        if (ImGui::MenuItem("Cylinder")) {
-          if (g_Scene && g_MeshRenderer) {
-            int objectCount = g_Scene->GetObjects().size();
-            auto cylinder = CADObject::CreateCylinder(
-                "Cylinder " + std::to_string(objectCount + 1),
-                glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 1.0, 2.0);
-
-            // Convert CAD shape to mesh and add to renderer
-            if (cylinder->GetVolume() > 0.0) {
-              CADShape::Mesh cadMesh = cylinder->GetShape().GenerateMesh(0.1);
-              if (!cadMesh.vertices.empty()) {
-                std::vector<Vertex3D> vertices =
-                    CADMeshConverter::ConvertCADMeshToVertices(
-                        cadMesh, glm::vec3(0.6f, 1.0f, 0.6f));
-                uint32_t meshId =
-                    g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
-
-                // Add outline mesh
-                if (g_OutlineRenderer) {
-                  uint32_t outlineMeshId =
-                      g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
-                  glm::mat4 transform = glm::translate(
-                      glm::mat4(1.0f),
-                      glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, -2.0f));
-                  g_OutlineRenderer->SetMeshTransform(outlineMeshId, transform);
-                  std::cout << "Added cylinder outline mesh with ID: "
-                            << outlineMeshId << std::endl;
-                }
-
-                // Position objects at different locations
-                glm::mat4 transform = glm::translate(
-                    glm::mat4(1.0f),
-                    glm::vec3(-4.0f + objectCount * 2.0f, 0.0f, -2.0f));
-                g_MeshRenderer->SetMeshTransform(meshId, transform);
-
-                std::cout << "Added cylinder mesh with ID: " << meshId
-                          << std::endl;
-              }
-            }
-
-            g_Scene->AddObject(std::move(cylinder));
-          }
-        }
-        ImGui::EndMenu(); // End Primitives (Legacy)
-      }
       ImGui::EndMenu(); // End Create
     }
 
@@ -1339,6 +1190,35 @@ void RenderCADUI(GLFWwindow *window) {
 
   // Scene hierarchy
   ImGui::Begin("Scene");
+
+  // Parametric feature history
+  if (g_Document) {
+    ImGui::SeparatorText("Features");
+    for (size_t i = 0; i < g_Document->FeatureCount(); i++) {
+      Feature *feature = g_Document->GetFeature(i);
+      ImGui::PushID(static_cast<int>(i));
+      if (ImGui::TreeNode(feature->GetName().c_str())) {
+        ImGui::Text("Type: %s", feature->TypeName().c_str());
+        if (ImGui::SmallButton("Delete")) {
+          g_CommandStack->Execute(std::make_unique<RemoveFeatureCommand>(i),
+                                  *g_Document);
+          ImGui::TreePop();
+          ImGui::PopID();
+          break; // feature list changed; redraw next frame
+        }
+        ImGui::TreePop();
+      }
+      ImGui::PopID();
+    }
+
+    ImGui::SeparatorText("Bodies");
+    for (const auto &body : g_Document->GetBodies()) {
+      ImGui::BulletText("%s (volume %.2f)", body.name.c_str(),
+                        body.shape.Volume());
+    }
+    ImGui::SeparatorText("Legacy objects");
+  }
+
   if (g_Scene) {
     for (const auto &object : g_Scene->GetObjects()) {
       // Check if it's a CAD object
@@ -1602,7 +1482,7 @@ int main(int argc, char **argv) {
   testEngineIO.ConfigWatchdogWarning = 60.0f;
   testEngineIO.ConfigWatchdogKillTest = 300.0f;
   ImGuiTestEngine_Start(testEngine, ImGui::GetCurrentContext());
-  RegisterGuiTests(testEngine, g_Scene.get(), g_Document.get());
+  RegisterGuiTests(testEngine, [] { return g_Document.get(); });
   if (args.runGuiTests) {
     ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests, "all");
   }
