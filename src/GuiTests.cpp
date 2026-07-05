@@ -24,7 +24,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine,
 
   t = IM_REGISTER_TEST(engine, "app", "core_windows_exist");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    IM_CHECK(ctx->GetWindowByRef("//Scene") != nullptr);
+    IM_CHECK(ctx->GetWindowByRef("//Model") != nullptr);
     IM_CHECK(ctx->GetWindowByRef("//Properties") != nullptr);
   };
 

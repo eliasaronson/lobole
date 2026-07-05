@@ -1,0 +1,16 @@
+#pragma once
+
+#include "ui/AppState.h"
+
+namespace ui {
+
+// Native (NFD) dialogs when available; STEP import falls back to an ImGui
+// browser window otherwise (project open/save require NFD for now).
+void OpenStepFileDialog(AppState& state);
+void OpenProjectDialog(AppState& state);
+void SaveProjectDialog(AppState& state);
+
+// Draws the fallback browser window if it is open (no-op with NFD).
+void DrawFileBrowser(AppState& state);
+
+} // namespace ui

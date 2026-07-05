@@ -152,6 +152,14 @@ set(app_sources
     src/OutlineRenderer.cpp
     src/RayTracingRenderer.cpp
     src/GuiTests.cpp
+    src/ui/UI.cpp
+    src/ui/DockLayout.cpp
+    src/ui/MainMenuBar.cpp
+    src/ui/FeatureTreePanel.cpp
+    src/ui/PropertiesPanel.cpp
+    src/ui/SketchToolbar.cpp
+    src/ui/FileDialogs.cpp
+    src/ui/AppActions.cpp
 )
 
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)

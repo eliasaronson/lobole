@@ -1,27 +1,22 @@
 // CAD Application with working Vulkan + ImGui setup
 // Based on Dear ImGui GLFW+Vulkan example
 
-#include "CADMaterials.h"
-#include "CADMeshConverter.h"
-#include "CADObject.h"
 #include "Camera.h"
 #include "FaceSelector.h"
+#include "GuiTests.h"
 #include "Logger.h"
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "RayTracingRenderer.h"
-#include "GuiTests.h"
 #include "Scene.h"
 #include "SketchManager.h"
-#include "core/Command.h"
-#include "core/Serialization.h"
+#include "ui/AppActions.h"
+#include "ui/AppState.h"
+#include "ui/UI.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
-#include "imgui_internal.h" // DockBuilder API
 #include "imgui_te_engine.h"
-#include <algorithm>
-#include <cfloat>
 #include <filesystem>
 #include <memory>
 #include <stdio.h>
@@ -29,9 +24,6 @@
 #define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#ifdef HAVE_NATIVEFILEDIALOG
-#include <nfd.h>
-#endif
 
 #ifdef _DEBUG
 #define APP_USE_VULKAN_DEBUG_REPORT
@@ -63,25 +55,9 @@ static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<SketchManager> g_SketchManager;
 static std::unique_ptr<FaceSelector> g_FaceSelector;
 
-// Parametric document (the model source of truth) and its undo stack
-static std::unique_ptr<Document> g_Document;
-static std::unique_ptr<CommandStack> g_CommandStack;
-static uint64_t g_SyncedDocumentVersion = 0;
-static bool g_BuildDefaultDockLayout = false;
-
-#ifndef HAVE_NATIVEFILEDIALOG
-// File browser state (fallback when nativefiledialog is not available)
-static bool g_ShowFileBrowser = false;
-static std::string g_CurrentPath = "../CAD_files";
-static std::vector<std::string> g_DirectoryContents;
-#endif
-
-// 3D rendering happens full-screen - no separate viewport needed
-
-// Forward declarations
-void LoadSTEPFile(const std::string &filename);
-void RenderCADUI(GLFWwindow *window);
-void SyncDocumentRenderers();
+// All state the UI layer works with (owns the document + undo stack; holds
+// non-owning pointers to the objects above once they exist)
+static ui::AppState g_App;
 
 static void glfw_error_callback(int error, const char *description) {
   fprintf(stderr, "GLFW Error %d: %s\n", error, description);
@@ -581,704 +557,6 @@ static void FramePresent(ImGui_ImplVulkanH_Window *wd) {
   wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount;
 }
 
-#ifdef HAVE_NATIVEFILEDIALOG
-void OpenStepFileDialog() {
-  nfdchar_t *outPath = nullptr;
-  const nfdchar_t *filterList = "step,STEP,stp,iges,igs";
-
-  nfdresult_t result = NFD_OpenDialog(filterList, nullptr, &outPath);
-  if (result == NFD_OKAY) {
-    std::string filePath(outPath);
-    LOG_INFO("Selected file: {}", filePath);
-    LoadSTEPFile(filePath);
-
-    // Free the path returned by NFD
-    free(outPath);
-  } else if (result == NFD_CANCEL) {
-    LOG_DEBUG("User cancelled file dialog");
-  } else {
-    LOG_ERROR("Error opening file dialog: {}", NFD_GetError());
-  }
-}
-#else
-// Fallback ImGui file browser when nativefiledialog is not available
-void UpdateDirectoryContents() {
-  g_DirectoryContents.clear();
-
-  try {
-    if (std::filesystem::exists(g_CurrentPath) &&
-        std::filesystem::is_directory(g_CurrentPath)) {
-      // Add parent directory entry if not at root
-      if (g_CurrentPath != "." && g_CurrentPath != "/" &&
-          g_CurrentPath.find("..") == std::string::npos) {
-        g_DirectoryContents.push_back("..");
-      }
-
-      for (const auto &entry :
-           std::filesystem::directory_iterator(g_CurrentPath)) {
-        std::string filename = entry.path().filename().string();
-
-        if (entry.is_directory()) {
-          g_DirectoryContents.push_back("[DIR] " + filename);
-        } else {
-          // Show all files, highlight CAD files
-          std::string ext = entry.path().extension().string();
-          std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-
-          if (ext == ".step" || ext == ".stp" || ext == ".iges" ||
-              ext == ".igs") {
-            g_DirectoryContents.push_back("[CAD] " + filename);
-          } else {
-            g_DirectoryContents.push_back(filename);
-          }
-        }
-      }
-    }
-  } catch (const std::exception &e) {
-    std::cerr << "Error reading directory '" << g_CurrentPath
-              << "': " << e.what() << std::endl;
-    g_DirectoryContents.push_back("Error reading directory");
-  }
-
-  // Sort contents
-  std::sort(g_DirectoryContents.begin(), g_DirectoryContents.end());
-}
-
-void RenderFileBrowser() {
-  if (!g_ShowFileBrowser)
-    return;
-
-  ImGui::Begin("Open STEP File", &g_ShowFileBrowser,
-               ImGuiWindowFlags_AlwaysAutoResize);
-
-  ImGui::Text("Current Path: %s", g_CurrentPath.c_str());
-  ImGui::Separator();
-
-  if (ImGui::Button("Refresh")) {
-    UpdateDirectoryContents();
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Cancel")) {
-    g_ShowFileBrowser = false;
-  }
-
-  ImGui::Separator();
-
-  // File list
-  if (ImGui::BeginListBox("##files", ImVec2(400, 300))) {
-    for (const auto &item : g_DirectoryContents) {
-      bool isSelected = false;
-
-      if (ImGui::Selectable(item.c_str(), isSelected,
-                            ImGuiSelectableFlags_AllowDoubleClick)) {
-        if (ImGui::IsMouseDoubleClicked(0)) {
-          if (item == "..") {
-            // Go to parent directory
-            try {
-              std::filesystem::path currentPath(g_CurrentPath);
-              std::filesystem::path parentPath = currentPath.parent_path();
-              if (!parentPath.empty()) {
-                g_CurrentPath = parentPath.string();
-                // Normalize the path to avoid issues
-                g_CurrentPath =
-                    std::filesystem::weakly_canonical(g_CurrentPath).string();
-              } else {
-                g_CurrentPath = ".";
-              }
-              UpdateDirectoryContents();
-            } catch (const std::exception &e) {
-              std::cout << "Error navigating to parent directory: " << e.what()
-                        << std::endl;
-            }
-          } else if (item.starts_with("[DIR]")) {
-            // Enter directory
-            try {
-              std::string dirName = item.substr(6); // Remove "[DIR] " prefix
-              std::filesystem::path newPath =
-                  std::filesystem::path(g_CurrentPath) / dirName;
-              g_CurrentPath =
-                  std::filesystem::weakly_canonical(newPath).string();
-              UpdateDirectoryContents();
-            } catch (const std::exception &e) {
-              std::cout << "Error entering directory: " << e.what()
-                        << std::endl;
-            }
-          } else if (item.starts_with("[CAD]")) {
-            // Load CAD file
-            std::string fileName = item.substr(6); // Remove "[CAD] " prefix
-            std::string fullPath =
-                (std::filesystem::path(g_CurrentPath) / fileName).string();
-            std::cout << "Loading selected file: " << fullPath << std::endl;
-            LoadSTEPFile(fullPath);
-            g_ShowFileBrowser = false;
-          }
-        }
-      }
-    }
-    ImGui::EndListBox();
-  }
-
-  ImGui::Text("Double-click directories to enter, CAD files to load");
-
-  ImGui::End();
-}
-
-void OpenStepFileDialog() {
-  g_ShowFileBrowser = true;
-  UpdateDirectoryContents();
-}
-#endif
-
-
-// Frames the camera on the document's combined bounding box.
-void FitCameraToDocument() {
-  if (!g_Document || !g_Camera || g_Document->GetBodies().empty())
-    return;
-
-  glm::vec3 min(FLT_MAX), max(-FLT_MAX);
-  for (const auto &body : g_Document->GetBodies()) {
-    glm::vec3 bmin, bmax;
-    body.shape.GetBoundingBox(bmin, bmax);
-    min = glm::min(min, bmin);
-    max = glm::max(max, bmax);
-  }
-  const glm::vec3 center = (min + max) * 0.5f;
-  const float radius = glm::length(max - min) * 0.5f;
-  g_Camera->SetTarget(center);
-  g_Camera->SetDistance(std::max(radius * 2.5f, 1.0f));
-}
-
-// Swaps in a new document (New/Open) with a fresh undo stack and forces the
-// renderers to resync even if the version counters happen to collide.
-void ReplaceDocument(std::unique_ptr<Document> doc) {
-  g_Document = std::move(doc);
-  g_CommandStack = std::make_unique<CommandStack>();
-  g_SyncedDocumentVersion = UINT64_MAX;
-}
-
-// Imports a STEP file as a parametric ImportFeature (undoable, serialized
-// with the project). Also used for the -f/--file startup argument.
-void LoadSTEPFile(const std::string &filename) {
-  if (!g_Document || !g_CommandStack)
-    return;
-
-  const std::string name = std::filesystem::path(filename).stem().string();
-  auto feature = std::make_unique<ImportFeature>(name, filename);
-  g_CommandStack->Execute(
-      std::make_unique<AddFeatureCommand>(std::move(feature)), *g_Document);
-
-  if (g_Document->GetBodies().empty()) {
-    LOG_ERROR("Import of '{}' produced no bodies", filename);
-  } else {
-    FitCameraToDocument();
-  }
-}
-
-#ifdef HAVE_NATIVEFILEDIALOG
-void OpenProjectDialog() {
-  nfdchar_t *outPath = nullptr;
-  if (NFD_OpenDialog("json", nullptr, &outPath) == NFD_OKAY) {
-    std::string path(outPath);
-    free(outPath);
-    std::string error;
-    if (auto doc = DocumentIO::Load(path, &error)) {
-      ReplaceDocument(std::move(doc));
-      FitCameraToDocument();
-    } else {
-      LOG_ERROR("Failed to open project: {}", error);
-    }
-  }
-}
-
-void SaveProjectDialog() {
-  if (!g_Document)
-    return;
-  nfdchar_t *outPath = nullptr;
-  if (NFD_SaveDialog("json", nullptr, &outPath) == NFD_OKAY) {
-    std::string path(outPath);
-    free(outPath);
-    if (std::filesystem::path(path).extension().empty()) {
-      path += ".json";
-    }
-    std::string error;
-    if (!DocumentIO::Save(*g_Document, path, &error)) {
-      LOG_ERROR("Failed to save project: {}", error);
-    }
-  }
-}
-#endif
-
-// Rebuilds render/picking meshes from the document's bodies whenever the
-// document version changes (feature added/removed, undo, redo). The document
-// is the source of truth; renderers only mirror it.
-struct DocumentRenderMesh {
-  uint32_t meshId;
-  uint32_t outlineId;
-};
-static std::vector<DocumentRenderMesh> g_DocumentMeshes;
-
-void SyncDocumentRenderers() {
-  if (!g_Document || !g_MeshRenderer)
-    return;
-  if (g_Document->Version() == g_SyncedDocumentVersion)
-    return;
-  g_SyncedDocumentVersion = g_Document->Version();
-
-  for (const auto &m : g_DocumentMeshes) {
-    g_MeshRenderer->RemoveMesh(m.meshId);
-    if (g_OutlineRenderer)
-      g_OutlineRenderer->RemoveMesh(m.outlineId);
-    if (g_FaceSelector)
-      g_FaceSelector->RemoveMesh(m.meshId);
-  }
-  g_DocumentMeshes.clear();
-
-  for (const auto &body : g_Document->GetBodies()) {
-    CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
-    if (cadMesh.vertices.empty())
-      continue;
-
-    std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(
-        cadMesh, glm::vec3(0.8f, 0.7f, 0.4f));
-    uint32_t meshId = g_MeshRenderer->AddMesh(vertices, cadMesh.indices);
-    uint32_t outlineId = 0;
-    if (g_OutlineRenderer)
-      outlineId = g_OutlineRenderer->AddMesh(vertices, cadMesh.indices);
-    if (g_FaceSelector)
-      g_FaceSelector->AddMesh(meshId, vertices, cadMesh.indices);
-    g_DocumentMeshes.push_back({meshId, outlineId});
-  }
-  LOG_INFO("Document synced: {} features, {} bodies",
-           g_Document->FeatureCount(), g_Document->GetBodies().size());
-}
-
-void RenderCADUI(GLFWwindow *window) {
-  // Main menu bar
-  if (ImGui::BeginMainMenuBar()) {
-    if (ImGui::BeginMenu("File")) {
-      if (ImGui::MenuItem("New")) {
-        ReplaceDocument(std::make_unique<Document>());
-      }
-#ifdef HAVE_NATIVEFILEDIALOG
-      if (ImGui::MenuItem("Open Project...")) {
-        OpenProjectDialog();
-      }
-      if (ImGui::MenuItem("Save Project As...")) {
-        SaveProjectDialog();
-      }
-#endif
-      ImGui::Separator();
-      if (ImGui::MenuItem("Import STEP...")) {
-        OpenStepFileDialog();
-      }
-      ImGui::Separator();
-      if (ImGui::MenuItem("Exit")) {
-        glfwSetWindowShouldClose(glfwGetCurrentContext(), GLFW_TRUE);
-      }
-      ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Edit")) {
-      const bool canUndo = g_CommandStack && g_CommandStack->CanUndo();
-      const bool canRedo = g_CommandStack && g_CommandStack->CanRedo();
-      if (ImGui::MenuItem("Undo", "Ctrl+Z", false, canUndo)) {
-        g_CommandStack->Undo(*g_Document);
-      }
-      if (ImGui::MenuItem("Redo", "Ctrl+Y", false, canRedo)) {
-        g_CommandStack->Redo(*g_Document);
-      }
-      ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("Create")) {
-      if (ImGui::MenuItem("Box")) {
-        if (g_Document && g_CommandStack) {
-          const int n = static_cast<int>(g_Document->FeatureCount()) + 1;
-          auto feature = std::make_unique<BoxFeature>(
-              "Box " + std::to_string(n),
-              glm::vec3(-4.0f + (n - 1) * 2.5f, 0.0f, 0.0f), 2.0, 2.0, 2.0);
-          g_CommandStack->Execute(
-              std::make_unique<AddFeatureCommand>(std::move(feature)),
-              *g_Document);
-        }
-      }
-      if (ImGui::MenuItem("Sphere")) {
-        if (g_Document && g_CommandStack) {
-          const int n = static_cast<int>(g_Document->FeatureCount()) + 1;
-          auto feature = std::make_unique<SphereFeature>(
-              "Sphere " + std::to_string(n),
-              glm::vec3(-4.0f + (n - 1) * 2.5f, 0.0f, 0.0f), 1.0);
-          g_CommandStack->Execute(
-              std::make_unique<AddFeatureCommand>(std::move(feature)),
-              *g_Document);
-        }
-      }
-      if (ImGui::MenuItem("Cylinder")) {
-        if (g_Document && g_CommandStack) {
-          const int n = static_cast<int>(g_Document->FeatureCount()) + 1;
-          auto feature = std::make_unique<CylinderFeature>(
-              "Cylinder " + std::to_string(n),
-              glm::vec3(-4.0f + (n - 1) * 2.5f, -1.0f, 0.0f),
-              glm::vec3(0.0f, 1.0f, 0.0f), 0.8, 2.0);
-          g_CommandStack->Execute(
-              std::make_unique<AddFeatureCommand>(std::move(feature)),
-              *g_Document);
-        }
-      }
-      ImGui::Separator();
-
-      // Sketch options
-      if (ImGui::BeginMenu("Sketch")) {
-        if (ImGui::MenuItem("Sketch on Front Plane")) {
-          if (g_SketchManager) {
-            g_SketchManager->StartSketch(PlaneType::XY);
-            std::cout << "Started sketch on Front Plane" << std::endl;
-          }
-        }
-        if (ImGui::MenuItem("Sketch on Top Plane")) {
-          if (g_SketchManager) {
-            g_SketchManager->StartSketch(PlaneType::XZ);
-            std::cout << "Started sketch on Top Plane" << std::endl;
-          }
-        }
-        if (ImGui::MenuItem("Sketch on Right Plane")) {
-          if (g_SketchManager) {
-            g_SketchManager->StartSketch(PlaneType::YZ);
-            std::cout << "Started sketch on Right Plane" << std::endl;
-          }
-        }
-
-        ImGui::Separator();
-
-        if (ImGui::MenuItem("Exit Sketch", nullptr, false,
-                            g_SketchManager &&
-                                g_SketchManager->IsSketchMode())) {
-          if (g_SketchManager) {
-            g_SketchManager->ExitSketch();
-            std::cout << "Exited sketch mode" << std::endl;
-          }
-        }
-
-        ImGui::Separator();
-
-        // Face-based sketching
-        bool hasSelectedFace =
-            g_FaceSelector && g_FaceSelector->GetSelectedFace() != nullptr;
-        if (ImGui::MenuItem(
-                "Sketch on Selected Face", nullptr, false,
-                hasSelectedFace &&
-                    (!g_SketchManager || !g_SketchManager->IsSketchMode()))) {
-          if (g_SketchManager && g_FaceSelector && g_Camera) {
-            const Face *selectedFace = g_FaceSelector->GetSelectedFace();
-            if (selectedFace) {
-              // Align camera to face
-              glm::vec3 faceCenter = g_FaceSelector->GetFaceCenter(
-                  selectedFace->meshId, selectedFace->faceIndex);
-              glm::vec3 faceNormal = g_FaceSelector->GetFaceNormal(
-                  selectedFace->meshId, selectedFace->faceIndex);
-              g_Camera->AlignToFace(faceCenter, faceNormal, 5.0f);
-
-              // Start sketch
-              g_SketchManager->StartSketch(
-                  PlaneType::XY); // Will be customized for face
-              std::cout << "Started sketch on selected face" << std::endl;
-            }
-          }
-        }
-
-        ImGui::EndMenu();
-      }
-
-      ImGui::EndMenu(); // End Create
-    }
-
-    if (ImGui::BeginMenu("View")) {
-      if (ImGui::MenuItem("Reset Camera")) {
-        if (g_Camera) {
-          g_Camera->SetPosition(glm::vec3(5.0f, 5.0f, 5.0f));
-          g_Camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
-        }
-      }
-      ImGui::EndMenu();
-    }
-
-    if (ImGui::BeginMenu("View")) {
-      static bool useRayTracing = false;
-      if (ImGui::Checkbox("Ray Tracing", &useRayTracing)) {
-        if (g_RayTracingRenderer && g_RayTracingRenderer->IsInitialized()) {
-          g_RayTracingRenderer->SetRenderMode(useRayTracing);
-          std::cout << "Ray Tracing: "
-                    << (useRayTracing ? "Enabled" : "Disabled") << std::endl;
-        } else {
-          useRayTracing = false;
-          std::cout << "Ray Tracing: Not available on this hardware"
-                    << std::endl;
-        }
-      }
-
-      if (g_RayTracingRenderer && g_RayTracingRenderer->IsInitialized()) {
-        if (ImGui::BeginMenu("Ray Tracing Settings")) {
-          static int maxDepth = 4;
-          if (ImGui::SliderInt("Max Ray Depth", &maxDepth, 1, 10)) {
-            g_RayTracingRenderer->SetMaxRayDepth(maxDepth);
-          }
-
-          static int samples = 1;
-          if (ImGui::SliderInt("Samples Per Pixel", &samples, 1, 4)) {
-            g_RayTracingRenderer->SetSamplesPerPixel(samples);
-          }
-
-          ImGui::EndMenu();
-        }
-      }
-
-      ImGui::Separator();
-
-      // Outline rendering controls
-      if (g_OutlineRenderer && g_OutlineRenderer->IsInitialized()) {
-        if (ImGui::BeginMenu("Outline Rendering")) {
-          OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
-          bool changed = false;
-
-          // Outline mode
-          const char *outlineModes[] = {"None", "Edges", "Wireframe",
-                                        "Silhouette"};
-          int currentMode = static_cast<int>(settings.mode);
-          if (ImGui::Combo("Mode", &currentMode, outlineModes, 4)) {
-            settings.mode = static_cast<OutlineMode>(currentMode);
-            changed = true;
-          }
-
-          // Outline settings
-          if (settings.mode != OutlineMode::NONE) {
-            if (ImGui::ColorEdit3("Outline Color", &settings.outlineColor.x)) {
-              changed = true;
-            }
-
-            if (ImGui::SliderFloat("Outline Width", &settings.outlineWidth,
-                                   0.1f, 5.0f)) {
-              changed = true;
-            }
-
-            if (settings.mode == OutlineMode::WIREFRAME) {
-              if (ImGui::ColorEdit3("Wireframe Color",
-                                    &settings.wireframeColor.x)) {
-                changed = true;
-              }
-
-              if (ImGui::SliderFloat("Line Width", &settings.lineWidth, 0.5f,
-                                     3.0f)) {
-                changed = true;
-              }
-            }
-
-            if (ImGui::Checkbox("Depth Test", &settings.enableDepthTest)) {
-              changed = true;
-            }
-
-            if (ImGui::Checkbox("Blending", &settings.enableBlending)) {
-              changed = true;
-            }
-          }
-
-          if (changed) {
-            g_OutlineRenderer->SetOutlineSettings(settings);
-          }
-
-          ImGui::EndMenu();
-        }
-      }
-
-      ImGui::EndMenu();
-    }
-
-    ImGui::EndMainMenuBar();
-  }
-
-  // Workbench dockspace: panels dock left/right, the 3D scene shows through
-  // the empty central node (rendered fullscreen behind the UI).
-  ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(
-      0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
-  if (g_BuildDefaultDockLayout) {
-    g_BuildDefaultDockLayout = false;
-    ImGui::DockBuilderRemoveNode(dockspaceId);
-    ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
-    ImGui::DockBuilderSetNodeSize(dockspaceId,
-                                  ImGui::GetMainViewport()->WorkSize);
-    ImGuiID center = dockspaceId;
-    ImGuiID left =
-        ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr,
-                                    &center);
-    ImGuiID right =
-        ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.25f, nullptr,
-                                    &center);
-    ImGui::DockBuilderDockWindow("Scene", left);
-    ImGui::DockBuilderDockWindow("Properties", right);
-    ImGui::DockBuilderFinish(dockspaceId);
-  }
-
-  // Sketch toolbar (only shown in sketch mode)
-  if (g_SketchManager && g_SketchManager->IsSketchMode()) {
-    ImGui::Begin("Sketch Tools");
-
-    ImGui::Text("Sketch Mode Active");
-    ImGui::Separator();
-
-    // Drawing tools
-    if (ImGui::Button("Select")) {
-      g_SketchManager->SetSketchMode(SketchMode::Select);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Point")) {
-      g_SketchManager->SetSketchMode(SketchMode::Point);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Line")) {
-      g_SketchManager->SetSketchMode(SketchMode::Line);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Circle")) {
-      g_SketchManager->SetSketchMode(SketchMode::Circle);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Rectangle")) {
-      g_SketchManager->SetSketchMode(SketchMode::Rectangle);
-    }
-
-    ImGui::Separator();
-
-    // Current mode display
-    SketchMode currentMode = g_SketchManager->GetSketchMode();
-    const char *modeNames[] = {"Select", "Point", "Line", "Circle",
-                               "Rectangle"};
-    ImGui::Text("Current Tool: %s", modeNames[(int)currentMode]);
-
-    // Sketch info
-    if (auto sketch = g_SketchManager->GetActiveSketch()) {
-      ImGui::Text("Elements: %zu", sketch->GetElementCount());
-      ImGui::Text("Can Extrude: %s",
-                  g_SketchManager->CanExtrude() ? "Yes" : "No");
-    }
-
-    ImGui::Separator();
-
-    // Exit sketch button
-    if (ImGui::Button("Exit Sketch")) {
-      g_SketchManager->ExitSketch();
-      std::cout << "Exited sketch mode" << std::endl;
-    }
-
-    ImGui::End();
-  }
-
-#ifndef HAVE_NATIVEFILEDIALOG
-  // File browser (fallback when nativefiledialog is not available)
-  RenderFileBrowser();
-#endif
-
-  // 3D rendering happens full-screen behind the UI panels
-  // Update camera aspect ratio based on window size
-  int fb_width, fb_height;
-  glfwGetFramebufferSize(window, &fb_width, &fb_height);
-  if (g_Camera && fb_width > 0 && fb_height > 0) {
-    g_Camera->SetAspectRatio(static_cast<float>(fb_width) /
-                             static_cast<float>(fb_height));
-  }
-
-  // Properties panel
-  ImGui::Begin("Properties");
-  ImGui::Text("Scene Objects: %zu", g_Scene ? g_Scene->GetObjects().size() : 0);
-  if (g_Camera) {
-    glm::vec3 pos = g_Camera->GetPosition();
-    ImGui::Text("Camera Position: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z);
-    ImGui::Text("Camera Distance: %.2f", g_Camera->GetDistance());
-  }
-
-  ImGui::Separator();
-  ImGui::Text("Controls:");
-  ImGui::Text("• Left click: Select faces");
-  ImGui::Text("• Ctrl+Left click: Select + align camera");
-  ImGui::Text("• Right click: Orbit camera");
-  ImGui::Text("• Scroll: Zoom in/out");
-
-  ImGui::Separator();
-  if (g_FaceSelector) {
-    const Face *selectedFace = g_FaceSelector->GetSelectedFace();
-    if (selectedFace) {
-      ImGui::Text("Selected Face:");
-      ImGui::Text("  Mesh ID: %u", selectedFace->meshId);
-      ImGui::Text("  Face Index: %u", selectedFace->faceIndex);
-      glm::vec3 normal = g_FaceSelector->GetFaceNormal(selectedFace->meshId,
-                                                       selectedFace->faceIndex);
-      ImGui::Text("  Normal: (%.3f, %.3f, %.3f)", normal.x, normal.y, normal.z);
-    } else {
-      ImGui::Text("No face selected");
-      ImGui::Text("Left-click on the model to select");
-    }
-  }
-
-  ImGui::End();
-
-  // Scene hierarchy
-  ImGui::Begin("Scene");
-
-  // Parametric feature history
-  if (g_Document) {
-    ImGui::SeparatorText("Features");
-    for (size_t i = 0; i < g_Document->FeatureCount(); i++) {
-      Feature *feature = g_Document->GetFeature(i);
-      ImGui::PushID(static_cast<int>(i));
-      if (ImGui::TreeNode(feature->GetName().c_str())) {
-        ImGui::Text("Type: %s", feature->TypeName().c_str());
-        if (ImGui::SmallButton("Delete")) {
-          g_CommandStack->Execute(std::make_unique<RemoveFeatureCommand>(i),
-                                  *g_Document);
-          ImGui::TreePop();
-          ImGui::PopID();
-          break; // feature list changed; redraw next frame
-        }
-        ImGui::TreePop();
-      }
-      ImGui::PopID();
-    }
-
-    ImGui::SeparatorText("Bodies");
-    for (const auto &body : g_Document->GetBodies()) {
-      ImGui::BulletText("%s (volume %.2f)", body.name.c_str(),
-                        body.shape.Volume());
-    }
-    ImGui::SeparatorText("Legacy objects");
-  }
-
-  if (g_Scene) {
-    for (const auto &object : g_Scene->GetObjects()) {
-      // Check if it's a CAD object
-      if (auto cadObject = dynamic_cast<CADObject *>(object.get())) {
-        if (ImGui::TreeNode(object->GetName().c_str())) {
-          ImGui::Text("ID: %u", object->GetId());
-          ImGui::Text("Type: CAD Object");
-          ImGui::Text("Volume: %.3f", cadObject->GetVolume());
-
-          glm::vec3 min, max;
-          cadObject->GetBoundingBox(min, max);
-          ImGui::Text("Bounds: (%.2f,%.2f,%.2f) - (%.2f,%.2f,%.2f)", min.x,
-                      min.y, min.z, max.x, max.y, max.z);
-
-          ImGui::TreePop();
-        }
-      } else {
-        ImGui::Text("%s (ID: %u)", object->GetName().c_str(), object->GetId());
-      }
-    }
-
-    ImGui::Separator();
-    if (ImGui::Button("Add Test Object")) {
-      g_Scene->AddObject(std::make_unique<SceneObject>(
-          "Test Object " + std::to_string(g_Scene->GetObjects().size() + 1)));
-    }
-  }
-  ImGui::End();
-}
 
 void printUsage(const char *programName) {
   std::cout << "Usage: " << programName << " [OPTIONS]" << std::endl;
@@ -1392,10 +670,11 @@ int main(int argc, char **argv) {
   // always use the default layout and never persist, for determinism.
   if (args.runGuiTests) {
     io.IniFilename = nullptr;
-    g_BuildDefaultDockLayout = true;
+    g_App.buildDefaultDockLayout = true;
   } else {
-    g_BuildDefaultDockLayout = !std::filesystem::exists("imgui.ini");
+    g_App.buildDefaultDockLayout = !std::filesystem::exists("imgui.ini");
   }
+  g_App.runGuiTests = args.runGuiTests;
 
   ImGui::StyleColorsDark();
 
@@ -1421,8 +700,12 @@ int main(int argc, char **argv) {
   g_Scene = std::make_unique<Scene>();
   g_Camera = std::make_unique<Camera>();
   g_SketchManager = std::make_unique<SketchManager>();
-  g_Document = std::make_unique<Document>();
-  g_CommandStack = std::make_unique<CommandStack>();
+  g_App.document = std::make_unique<Document>();
+  g_App.commands = std::make_unique<CommandStack>();
+  g_App.scene = g_Scene.get();
+  g_App.camera = g_Camera.get();
+  g_App.sketchManager = g_SketchManager.get();
+  g_App.window = window;
 
   // Set up camera for good 3D view
   g_Camera->SetPosition(glm::vec3(8.0f, 6.0f, 8.0f));
@@ -1488,25 +771,16 @@ int main(int argc, char **argv) {
     std::cout << "Ray Tracing: Initialization successful!" << std::endl;
   }
 
-  // Test OpenCASCADE directly
-  std::cout << "=== Testing OpenCASCADE directly ===" << std::endl;
-  CADShape testShape = CADKernel::Instance().CreateBox(1.0, 1.0, 1.0);
-  std::cout << "Test shape valid: " << (testShape.IsValid() ? "YES" : "NO")
-            << std::endl;
-  std::cout << "Test shape volume: " << testShape.Volume() << std::endl;
-
-  // Test mesh generation
-  if (testShape.IsValid()) {
-    std::cout << "=== Testing mesh generation ===" << std::endl;
-    CADShape::Mesh mesh = testShape.GenerateMesh(0.1);
-    std::cout << "Generated mesh - Vertices: " << mesh.vertices.size()
-              << ", Triangles: " << mesh.indices.size() / 3 << std::endl;
-  }
+  // Hand the UI layer its pointers now that everything exists
+  g_App.meshRenderer = g_MeshRenderer.get();
+  g_App.outlineRenderer = g_OutlineRenderer.get();
+  g_App.rayTracer = g_RayTracingRenderer.get();
+  g_App.faceSelector = g_FaceSelector.get();
 
   // Load startup file if specified
   if (!args.fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", args.fileToLoad);
-    LoadSTEPFile(args.fileToLoad);
+    ui::LoadSTEPFile(g_App, args.fileToLoad);
   }
 
   LOG_INFO("=== APPLICATION READY - Left-click to select faces, "
@@ -1523,7 +797,7 @@ int main(int argc, char **argv) {
   testEngineIO.ConfigWatchdogWarning = 60.0f;
   testEngineIO.ConfigWatchdogKillTest = 300.0f;
   ImGuiTestEngine_Start(testEngine, ImGui::GetCurrentContext());
-  RegisterGuiTests(testEngine, [] { return g_Document.get(); });
+  RegisterGuiTests(testEngine, [] { return g_App.document.get(); });
   if (args.runGuiTests) {
     ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests, "all");
   }
@@ -1576,15 +850,14 @@ int main(int argc, char **argv) {
       g_Scene->Update(deltaTime);
 
     // Mirror document changes (edits, undo, redo) into the renderers
-    SyncDocumentRenderers();
+    ui::SyncDocumentRenderers(g_App);
 
     // Start ImGui frame
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    // Render CAD UI
-    RenderCADUI(window);
+    ui::DrawUI(g_App);
 
     // Update camera matrices for 3D rendering
     if (g_MeshRenderer && g_Camera) {
@@ -1631,8 +904,8 @@ int main(int argc, char **argv) {
   err = vkDeviceWaitIdle(g_Device);
   check_vk_result(err);
 
-  g_Document.reset();
-  g_CommandStack.reset();
+  g_App.document.reset();
+  g_App.commands.reset();
   g_Scene.reset();
   g_Camera.reset();
   g_MeshRenderer.reset();
