@@ -41,5 +41,19 @@ handled in CMakeLists.txt).
 
 ```
 cd build
-./designer [path/to/file.step]
+./designer [-f path/to/file.step]
 ```
+
+## Testing
+
+```
+cd build
+ctest              # everything (unit + GUI)
+ctest -LE gui      # unit tests only (safe on headless machines)
+./designer --gui-tests   # GUI suite directly, with verbose log
+```
+
+Unit tests are Catch2 against the GUI-free `designer_core` library. GUI tests
+drive the real application through
+[ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) (simulated
+mouse/keyboard on the actual UI) and need a display.

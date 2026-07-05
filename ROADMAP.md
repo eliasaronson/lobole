@@ -49,18 +49,20 @@ Not working / partial:
 
 ## Short term
 
-1. **Restore & stabilize the build** — submodules for all vendored deps, documented apt
-   packages, ideally CI that builds on a clean machine. *(in progress)*
-2. **Purge dead code** — delete the uncompiled leftovers, the duplicated View menu, the
+1. ~~**Restore & stabilize the build**~~ *(done — submodules, documented apt packages;
+   CI still open)*
+2. ~~**Testing infrastructure**~~ *(done — Catch2 unit tests against `designer_core`,
+   GUI tests via ImGui Test Engine, all under ctest)*
+3. **Purge dead code** — delete the uncompiled leftovers, the duplicated View menu, the
    committed test binary; park or delete `RayTracingRenderer`.
-3. **Fix face selection** — the gateway feature; everything downstream (sketch-on-face,
+4. **Fix face selection** — the gateway feature; everything downstream (sketch-on-face,
    extrude, constraints, an LLM clicking on geometry) depends on it:
    - Apply the Vulkan Y-flip / 0–1 depth convention once, consistently, in renderers and picker.
    - Tag triangles with their `TopoDS_Face` ID during tessellation; compute real normals
      from the triangulation while there.
    - Implement real per-face highlighting.
-4. **Render sketches + implement extrude** (`BRepPrimAPI_MakePrism` on a closed profile) —
-   closes the first sketch → solid loop and forces the document-model design at the right time.
+5. **Render sketches + implement extrude** (`BRepPrimAPI_MakePrism` on a closed profile) —
+   closes the first sketch → solid loop.
 
 ## Long term
 
@@ -68,6 +70,11 @@ Not working / partial:
 A feature list (sketch, extrude, boolean, transform, …) that regenerates the B-Rep
 deterministically, serialized as human-readable text (JSON or a small DSL). All UI actions
 route through commands. Gives undo, checkpoints, and a diffable format immediately.
+
+*Started:* `src/core/` now has `Document` (feature list + deterministic regeneration),
+`Feature` (first type: `BoxFeature`), and `Command`/`CommandStack` (undo/redo). Create→Box
+and Edit→Undo/Redo already route through it. Next: migrate the legacy primitive menu and
+STEP import into features, then text serialization.
 
 ⚠ Hard problem to design for up front: **topological naming** — how "the face I filleted"
 stays identified after an upstream edit reorders faces. Study FreeCAD's RealThunder branch
