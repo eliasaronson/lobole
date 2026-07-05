@@ -1009,7 +1009,25 @@ void OutlineRenderer::UpdateMesh(uint32_t meshId, const std::vector<Vertex3D>& v
 }
 
 void OutlineRenderer::RemoveMesh(uint32_t meshId) {
-    // Placeholder
+    if (meshId == 0 || meshId > m_meshes.size()) return;
+    OutlineMesh* mesh = m_meshes[meshId - 1].get();
+    if (!mesh) return;
+
+    vkDeviceWaitIdle(m_device);
+
+    if (mesh->vertexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_device, mesh->vertexBuffer, nullptr);
+        vkFreeMemory(m_device, mesh->vertexBufferMemory, nullptr);
+    }
+    if (mesh->indexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_device, mesh->indexBuffer, nullptr);
+        vkFreeMemory(m_device, mesh->indexBufferMemory, nullptr);
+    }
+    if (mesh->edgeIndexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_device, mesh->edgeIndexBuffer, nullptr);
+        vkFreeMemory(m_device, mesh->edgeIndexBufferMemory, nullptr);
+    }
+    m_meshes[meshId - 1].reset();
 }
 
 void OutlineRenderer::SetMeshTransform(uint32_t meshId, const glm::mat4& transform) {
