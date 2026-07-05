@@ -124,7 +124,7 @@ void DrawCreateMenu(AppState& state) {
               state.faceSelector->GetFaceCenter(face->meshId, face->faceIndex);
           glm::vec3 faceNormal =
               state.faceSelector->GetFaceNormal(face->meshId, face->faceIndex);
-          state.camera->AlignToFace(faceCenter, faceNormal, 5.0f);
+          state.camera->AlignToFace(faceCenter, faceNormal);
           sketch->StartSketch(PlaneType::XY); // Will be customized for face
           LOG_INFO("Started sketch on selected face");
         }

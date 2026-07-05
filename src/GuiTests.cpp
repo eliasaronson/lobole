@@ -187,6 +187,25 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(glm::length(s_App->camera->GetTarget() - targetBefore) > 0.05f);
   };
 
+  t = IM_REGISTER_TEST(engine, "viewport", "ctrl_mid_drag_switches_to_pan");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // Pressing Ctrl after the middle button is already down must switch the
+    // drag from rotate to pan
+    const glm::vec3 targetBefore = s_App->camera->GetTarget();
+
+    ImVec2 size = ImGui::GetMainViewport()->Size;
+    ImVec2 center(size.x * 0.5f, size.y * 0.5f);
+    ctx->MouseMoveToPos(center);
+    ctx->MouseDown(ImGuiMouseButton_Middle); // starts as rotate
+    ctx->KeyDown(ImGuiMod_Ctrl);             // ...now becomes pan
+    ctx->MouseMoveToPos(ImVec2(center.x + 90.0f, center.y + 50.0f));
+    ctx->MouseUp(ImGuiMouseButton_Middle);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+
+    IM_CHECK(glm::length(s_App->camera->GetTarget() - targetBefore) > 0.05f);
+  };
+
   t = IM_REGISTER_TEST(engine, "viewport", "scroll_zooms");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const float distBefore = s_App->camera->GetDistance();

@@ -31,8 +31,7 @@ void Pick(AppState& state, const ImVec2& pos, bool select, bool alignCamera) {
       if (alignCamera) {
         state.camera->AlignToFace(
             state.faceSelector->GetFaceCenter(hit.meshId, hit.faceIndex),
-            state.faceSelector->GetFaceNormal(hit.meshId, hit.faceIndex),
-            5.0f);
+            state.faceSelector->GetFaceNormal(hit.meshId, hit.faceIndex));
       }
     } else {
       state.faceSelector->ClearSelection();
@@ -69,9 +68,17 @@ void HandleViewportInput(AppState& state) {
   }
 
   // SolidWorks-style middle-button drags: plain = rotate, Ctrl = pan,
-  // Shift = zoom, Alt = roll. The mode is fixed at press time; the drag
-  // keeps tracking until release even if the cursor crosses a panel.
+  // Shift = zoom, Alt = roll. The drag starts over the viewport and keeps
+  // tracking until release even if the cursor crosses a panel; modifiers
+  // are re-read every frame so pressing Ctrl mid-drag switches to pan.
   if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+    state.viewportDrag = ViewportDrag::Orbit; // actual mode resolved below
+    state.camera->StopAnimation();
+  }
+  if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
+    state.viewportDrag = ViewportDrag::None;
+  }
+  if (state.viewportDrag != ViewportDrag::None) {
     if (io.KeyCtrl) {
       state.viewportDrag = ViewportDrag::Pan;
     } else if (io.KeyShift) {
@@ -81,10 +88,6 @@ void HandleViewportInput(AppState& state) {
     } else {
       state.viewportDrag = ViewportDrag::Orbit;
     }
-    state.camera->StopAnimation();
-  }
-  if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
-    state.viewportDrag = ViewportDrag::None;
   }
 
   if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) {

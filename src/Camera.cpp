@@ -114,20 +114,23 @@ void Camera::Roll(double delta) {
 }
 
 void Camera::AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNormal, float distance) {
-    // Calculate the camera position to look at the face perpendicularly
-    glm::vec3 newTarget = faceCenter;
-    glm::vec3 newPosition = faceCenter + glm::normalize(faceNormal) * distance;
-    
-    // Use world up as our up vector, but adjust if face normal is too close to up
-    glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f);
-    glm::vec3 newUp = worldUp;
-    
-    // If face normal is nearly parallel to world up, use a different up vector
-    if (glm::abs(glm::dot(faceNormal, worldUp)) > 0.95f) {
-        newUp = glm::vec3(1.0f, 0.0f, 0.0f);
+    // Keep the current zoom unless the caller asks for a specific distance
+    if (distance <= 0.0f) {
+        distance = GetDistance();
     }
-    
-    AnimateToPosition(newPosition, newTarget, 1.0f);
+
+    glm::vec3 n = glm::normalize(faceNormal);
+    glm::vec3 newPosition = faceCenter + n * distance;
+
+    // lookAt degenerates when the view direction is parallel to up (e.g.
+    // aligning to a horizontal face), so pick a valid up vector and apply it
+    glm::vec3 newUp = glm::vec3(0.0f, 1.0f, 0.0f);
+    if (glm::abs(glm::dot(n, newUp)) > 0.95f) {
+        newUp = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+    m_up = newUp;
+
+    AnimateToPosition(newPosition, faceCenter, 1.0f);
 }
 
 void Camera::AnimateToPosition(const glm::vec3& position, const glm::vec3& target, float duration) {

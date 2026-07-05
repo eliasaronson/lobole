@@ -106,6 +106,31 @@ TEST_CASE("Screen ray passes through the world point it was made from",
   }
 }
 
+TEST_CASE("AlignToFace to a horizontal face keeps a valid view",
+          "[camera]") {
+  Camera cam;
+  cam.SetPosition(glm::vec3(8, 6, 8));
+  cam.SetTarget(glm::vec3(0, 0, 0));
+  const float distBefore = cam.GetDistance();
+
+  // Top face: normal parallel to world up used to degenerate lookAt (NaN)
+  cam.AlignToFace(glm::vec3(1, 2, 1), glm::vec3(0, 1, 0));
+  cam.Update(5.0f); // finish the animation
+
+  const glm::vec3 pos = cam.GetPosition();
+  REQUIRE(std::isfinite(pos.x));
+  REQUIRE(std::isfinite(pos.y));
+  REQUIRE(std::isfinite(pos.z));
+  const glm::mat4& view = cam.GetViewMatrix();
+  for (int c = 0; c < 4; c++)
+    for (int r = 0; r < 4; r++) REQUIRE(std::isfinite(view[c][r]));
+
+  // Looks straight down at the face, zoom preserved
+  CHECK_THAT(glm::dot(cam.GetForward(), glm::vec3(0, -1, 0)),
+             WithinAbs(1.0f, 1e-3f));
+  CHECK_THAT(cam.GetDistance(), WithinAbs(distBefore, 0.01f));
+}
+
 TEST_CASE("Picking a box through the screen selects the facing face",
           "[picking]") {
   Camera camera;
