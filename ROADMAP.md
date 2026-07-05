@@ -71,10 +71,12 @@ A feature list (sketch, extrude, boolean, transform, …) that regenerates the B
 deterministically, serialized as human-readable text (JSON or a small DSL). All UI actions
 route through commands. Gives undo, checkpoints, and a diffable format immediately.
 
-*Started:* `src/core/` now has `Document` (feature list + deterministic regeneration),
-`Feature` (first type: `BoxFeature`), and `Command`/`CommandStack` (undo/redo). Create→Box
-and Edit→Undo/Redo already route through it. Next: migrate the legacy primitive menu and
-STEP import into features, then text serialization.
+*In progress:* `src/core/` has `Document` (feature list + deterministic regeneration),
+features (Box, Sphere, Cylinder, STEP Import), `Command`/`CommandStack` (undo/redo), and
+JSON project serialization (`DocumentIO`). All modeling UI routes through commands; the
+Scene panel shows the feature history. Next: parameter editing in the UI (click a feature,
+change its dimensions, regenerate), sketch/extrude as features, then persistent references
+(topological naming).
 
 ⚠ Hard problem to design for up front: **topological naming** — how "the face I filleted"
 stays identified after an upstream edit reorders faces. Study FreeCAD's RealThunder branch
