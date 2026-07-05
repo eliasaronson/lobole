@@ -13,33 +13,32 @@ FaceSelector::~FaceSelector() {
     Clear();
 }
 
-void FaceSelector::AddMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices, 
-                          const std::vector<uint32_t>& indices, const glm::mat4& transform) {
+void FaceSelector::AddMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices,
+                          const std::vector<uint32_t>& indices,
+                          const std::vector<uint32_t>& triangleFaces,
+                          const glm::mat4& transform) {
     auto meshData = std::make_unique<MeshData>();
     meshData->meshId = meshId;
     meshData->vertices = vertices;
     meshData->indices = indices;
     meshData->transform = transform;
-    
-    ExtractFaces(*meshData);
-    
-    LOG_INFO("FaceSelector: Adding mesh {} with {} triangles ({} faces)", 
-             meshId, indices.size() / 3, meshData->faces.size());
-    
-    // Debug: Show first few faces
-    if (meshData->faces.size() > 0) {
-        const auto& firstFace = meshData->faces[0];
-        LOG_DEBUG("  First face - vertices: {}, {}, {}", 
-                  firstFace.vertexIndices[0], firstFace.vertexIndices[1], firstFace.vertexIndices[2]);
-        LOG_TRACE("  First face - center: ({}, {}, {})", 
-                  firstFace.center.x, firstFace.center.y, firstFace.center.z);
-        LOG_TRACE("  First face - normal: ({}, {}, {})", 
-                  firstFace.normal.x, firstFace.normal.y, firstFace.normal.z);
+
+    // Without face info, treat each triangle as its own face
+    if (triangleFaces.size() == indices.size() / 3) {
+        meshData->triangleFaces = triangleFaces;
+    } else {
+        meshData->triangleFaces.resize(indices.size() / 3);
+        for (size_t t = 0; t < meshData->triangleFaces.size(); t++) {
+            meshData->triangleFaces[t] = static_cast<uint32_t>(t);
+        }
     }
-    
+
+    ExtractFaces(*meshData);
+
+    LOG_INFO("FaceSelector: Adding mesh {} with {} triangles ({} faces)",
+             meshId, indices.size() / 3, meshData->faces.size());
+
     m_meshes.push_back(std::move(meshData));
-    
-    LOG_DEBUG("FaceSelector: Total meshes now: {}", m_meshes.size());
 }
 
 void FaceSelector::UpdateMeshTransform(uint32_t meshId, const glm::mat4& transform) {
@@ -79,57 +78,77 @@ void FaceSelector::Clear() {
 
 void FaceSelector::ExtractFaces(MeshData& meshData) {
     meshData.faces.clear();
-    
-    for (size_t i = 0; i < meshData.indices.size(); i += 3) {
-        Face face;
+    if (meshData.triangleFaces.empty()) return;
+
+    const uint32_t faceCount =
+        *std::max_element(meshData.triangleFaces.begin(),
+                          meshData.triangleFaces.end()) + 1;
+    meshData.faces.resize(faceCount);
+
+    std::vector<glm::vec3> weightedNormal(faceCount, glm::vec3(0.0f));
+    std::vector<glm::vec3> weightedCenter(faceCount, glm::vec3(0.0f));
+    std::vector<float> totalArea(faceCount, 0.0f);
+    std::vector<uint32_t> minVertex(faceCount, UINT32_MAX);
+    std::vector<uint32_t> maxVertex(faceCount, 0);
+
+    auto transformed = [&](uint32_t idx) {
+        const auto& p = meshData.vertices[idx].position;
+        return glm::vec3(meshData.transform * glm::vec4(p[0], p[1], p[2], 1.0f));
+    };
+
+    for (size_t t = 0; t < meshData.triangleFaces.size(); t++) {
+        const uint32_t faceId = meshData.triangleFaces[t];
+        const uint32_t i0 = meshData.indices[t * 3];
+        const uint32_t i1 = meshData.indices[t * 3 + 1];
+        const uint32_t i2 = meshData.indices[t * 3 + 2];
+
+        const glm::vec3 v0 = transformed(i0);
+        const glm::vec3 v1 = transformed(i1);
+        const glm::vec3 v2 = transformed(i2);
+
+        const glm::vec3 cross = glm::cross(v1 - v0, v2 - v0);
+        const float area = 0.5f * glm::length(cross);
+        weightedNormal[faceId] += cross * 0.5f; // area-weighted normal
+        weightedCenter[faceId] += area * (v0 + v1 + v2) / 3.0f;
+        totalArea[faceId] += area;
+
+        minVertex[faceId] = std::min({minVertex[faceId], i0, i1, i2});
+        maxVertex[faceId] = std::max({maxVertex[faceId], i0, i1, i2});
+    }
+
+    for (uint32_t f = 0; f < faceCount; f++) {
+        Face& face = meshData.faces[f];
         face.meshId = meshData.meshId;
-        face.faceIndex = static_cast<uint32_t>(i / 3);
-        face.transform = meshData.transform;
-        
-        // Get triangle vertex indices
-        face.vertexIndices = {
-            meshData.indices[i],
-            meshData.indices[i + 1], 
-            meshData.indices[i + 2]
-        };
-        
-        // Get vertex positions and transform them
-        glm::vec3 v0 = glm::vec3(meshData.transform * glm::vec4(
-            meshData.vertices[face.vertexIndices[0]].position[0],
-            meshData.vertices[face.vertexIndices[0]].position[1],
-            meshData.vertices[face.vertexIndices[0]].position[2], 1.0f));
-        glm::vec3 v1 = glm::vec3(meshData.transform * glm::vec4(
-            meshData.vertices[face.vertexIndices[1]].position[0],
-            meshData.vertices[face.vertexIndices[1]].position[1],
-            meshData.vertices[face.vertexIndices[1]].position[2], 1.0f));
-        glm::vec3 v2 = glm::vec3(meshData.transform * glm::vec4(
-            meshData.vertices[face.vertexIndices[2]].position[0],
-            meshData.vertices[face.vertexIndices[2]].position[1],
-            meshData.vertices[face.vertexIndices[2]].position[2], 1.0f));
-        
-        // Calculate face normal and center
-        face.normal = glm::normalize(glm::cross(v1 - v0, v2 - v0));
-        face.center = (v0 + v1 + v2) / 3.0f;
-        
-        meshData.faces.push_back(face);
+        face.faceIndex = f;
+        if (minVertex[f] != UINT32_MAX) {
+            face.firstVertex = minVertex[f];
+            face.vertexCount = maxVertex[f] - minVertex[f] + 1;
+        }
+        const float len = glm::length(weightedNormal[f]);
+        face.normal = (len > 1e-8f) ? weightedNormal[f] / len
+                                    : glm::vec3(0, 0, 1);
+        face.center = (totalArea[f] > 1e-12f)
+                          ? weightedCenter[f] / totalArea[f]
+                          : glm::vec3(0.0f);
     }
 }
 
-Ray FaceSelector::ScreenToWorldRay(float screenX, float screenY, int screenWidth, int screenHeight, 
+Ray FaceSelector::ScreenToWorldRay(float screenX, float screenY, int screenWidth, int screenHeight,
                                   const Camera& camera) const {
-    // Convert screen coordinates to normalized device coordinates
+    // Vulkan conventions, matching Camera's projection exactly: NDC y points
+    // down (the projection carries the Y-flip) and depth runs 0 (near) to 1.
     float ndcX = (2.0f * screenX) / screenWidth - 1.0f;
-    float ndcY = 1.0f - (2.0f * screenY) / screenHeight; // Flip Y axis
-    
+    float ndcY = (2.0f * screenY) / screenHeight - 1.0f;
+
     LOG_TRACE("Ray: Screen({}, {}) -> NDC({}, {})", screenX, screenY, ndcX, ndcY);
-    
+
     // Get view and projection matrices
     glm::mat4 view = camera.GetViewMatrix();
     glm::mat4 proj = camera.GetProjectionMatrix();
-    
+
     // Create points in clip space
-    glm::vec4 rayStartClip = glm::vec4(ndcX, ndcY, -1.0f, 1.0f); // Near plane
-    glm::vec4 rayEndClip = glm::vec4(ndcX, ndcY, 1.0f, 1.0f);    // Far plane
+    glm::vec4 rayStartClip = glm::vec4(ndcX, ndcY, 0.0f, 1.0f); // Near plane
+    glm::vec4 rayEndClip = glm::vec4(ndcX, ndcY, 1.0f, 1.0f);   // Far plane
     
     // Transform to world space
     glm::mat4 invViewProj = glm::inverse(proj * view);
@@ -163,37 +182,36 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
     for (size_t meshIdx = 0; meshIdx < m_meshes.size(); meshIdx++) {
         const auto& mesh = m_meshes[meshIdx];
         totalFacesChecked += mesh->faces.size();
-        
-        // Test all faces for this mesh
-        for (const auto& face : mesh->faces) {
-            // Get transformed triangle vertices
-            glm::vec3 v0 = glm::vec3(face.transform * glm::vec4(
-                mesh->vertices[face.vertexIndices[0]].position[0],
-                mesh->vertices[face.vertexIndices[0]].position[1],
-                mesh->vertices[face.vertexIndices[0]].position[2], 1.0f));
-            glm::vec3 v1 = glm::vec3(face.transform * glm::vec4(
-                mesh->vertices[face.vertexIndices[1]].position[0],
-                mesh->vertices[face.vertexIndices[1]].position[1],
-                mesh->vertices[face.vertexIndices[1]].position[2], 1.0f));
-            glm::vec3 v2 = glm::vec3(face.transform * glm::vec4(
-                mesh->vertices[face.vertexIndices[2]].position[0],
-                mesh->vertices[face.vertexIndices[2]].position[1],
-                mesh->vertices[face.vertexIndices[2]].position[2], 1.0f));
-            
+
+        auto transformed = [&](uint32_t idx) {
+            const auto& p = mesh->vertices[idx].position;
+            return glm::vec3(mesh->transform *
+                             glm::vec4(p[0], p[1], p[2], 1.0f));
+        };
+
+        // Test every triangle; the hit maps back to its B-Rep face
+        for (size_t t = 0; t < mesh->triangleFaces.size(); t++) {
+            const glm::vec3 v0 = transformed(mesh->indices[t * 3]);
+            const glm::vec3 v1 = transformed(mesh->indices[t * 3 + 1]);
+            const glm::vec3 v2 = transformed(mesh->indices[t * 3 + 2]);
+
             float distance;
             glm::vec3 hitPoint;
             if (RayTriangleIntersect(ray, v0, v1, v2, distance, hitPoint)) {
                 if (distance < closestHit.distance && distance > 0.0f) {
+                    const uint32_t faceId = mesh->triangleFaces[t];
                     closestHit.hit = true;
                     closestHit.distance = distance;
                     closestHit.point = hitPoint;
-                    closestHit.normal = face.normal;
-                    closestHit.meshId = face.meshId;
-                    closestHit.faceIndex = face.faceIndex;
+                    // Geometric normal of the hit triangle (points outward)
+                    closestHit.normal =
+                        glm::normalize(glm::cross(v1 - v0, v2 - v0));
+                    closestHit.meshId = mesh->meshId;
+                    closestHit.faceIndex = faceId;
                 }
             }
         }
-        
+
         LOG_TRACE("  Mesh {}: {} faces checked", mesh->meshId, mesh->faces.size());
     }
     
@@ -295,6 +313,19 @@ void FaceSelector::ClearHover() {
     m_hasHover = false;
     m_hoveredMeshId = 0;
     m_hoveredFaceIndex = 0;
+}
+
+bool FaceSelector::GetFaceVertexRange(uint32_t meshId, uint32_t faceIndex,
+                                      uint32_t& firstVertex,
+                                      uint32_t& vertexCount) const {
+    for (const auto& mesh : m_meshes) {
+        if (mesh->meshId == meshId && faceIndex < mesh->faces.size()) {
+            firstVertex = mesh->faces[faceIndex].firstVertex;
+            vertexCount = mesh->faces[faceIndex].vertexCount;
+            return vertexCount > 0;
+        }
+    }
+    return false;
 }
 
 glm::vec3 FaceSelector::GetFaceNormal(uint32_t meshId, uint32_t faceIndex) const {

@@ -232,28 +232,64 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     scissor.extent = {m_viewportWidth, m_viewportHeight};
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     
+    // Shared UBO (camera + lights); the model matrix rides per-mesh in push
+    // constants so one UBO write serves every draw this frame
+    ubo.model = glm::mat4(1.0f);
+    memcpy(m_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
+
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                           m_pipelineLayout, 0, 1, &m_descriptorSets[currentFrame], 0, nullptr);
+
     // Render each mesh
+    struct PushConstants {
+        glm::mat4 model;
+        glm::uvec4 highlight;
+    } push;
+
     for (const auto& mesh : m_meshes) {
         if (!mesh || mesh->vertices.empty()) continue;
-        
-        // Update UBO with mesh transform
-        ubo.model = mesh->modelMatrix;
-        memcpy(m_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
-        
-        // Bind descriptor sets
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, 
-                               m_pipelineLayout, 0, 1, &m_descriptorSets[currentFrame], 0, nullptr);
-        
+
+        push.model = mesh->modelMatrix;
+        push.highlight = mesh->highlight;
+        vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
+
         // Bind vertex buffer
         VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-        
+
         // Bind index buffer
         vkCmdBindIndexBuffer(commandBuffer, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        
+
         // Draw
         vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+    }
+}
+
+void MeshRenderer::SetFaceHighlight(uint32_t meshId, uint32_t firstVertex, uint32_t count) {
+    if (meshId == 0 || meshId > m_meshes.size() || !m_meshes[meshId - 1]) return;
+    ClearFaceHighlight();
+    m_meshes[meshId - 1]->highlight.x = firstVertex;
+    m_meshes[meshId - 1]->highlight.y = firstVertex + count;
+}
+
+void MeshRenderer::SetFaceHover(uint32_t meshId, uint32_t firstVertex, uint32_t count) {
+    if (meshId == 0 || meshId > m_meshes.size() || !m_meshes[meshId - 1]) return;
+    ClearFaceHover();
+    m_meshes[meshId - 1]->highlight.z = firstVertex;
+    m_meshes[meshId - 1]->highlight.w = firstVertex + count;
+}
+
+void MeshRenderer::ClearFaceHighlight() {
+    for (auto& mesh : m_meshes) {
+        if (mesh) { mesh->highlight.x = mesh->highlight.y = 0; }
+    }
+}
+
+void MeshRenderer::ClearFaceHover() {
+    for (auto& mesh : m_meshes) {
+        if (mesh) { mesh->highlight.z = mesh->highlight.w = 0; }
     }
 }
 
@@ -348,7 +384,8 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    // Y-flipped projection inverts on-screen winding: CCW meshes appear CW
+    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     
     // Multisampling
@@ -389,10 +426,18 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     dynamicState.pDynamicStates = dynamicStates.data();
     
     // Pipeline layout
+    // Per-mesh model matrix + highlight ranges via push constants
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset = 0;
+    pushConstantRange.size = sizeof(glm::mat4) + sizeof(glm::uvec4);
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
     
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
         std::cerr << "Failed to create pipeline layout!" << std::endl;

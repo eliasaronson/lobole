@@ -1,11 +1,10 @@
 #pragma once
 
-#include <functional>
-
 struct ImGuiTestEngine;
-class Document;
+namespace ui {
+struct AppState;
+}
 
-// Registers all GUI tests. The document is resolved through a getter because
-// File > New / Open replace the document object mid-session.
-void RegisterGuiTests(ImGuiTestEngine* engine,
-                      std::function<Document*()> getDocument);
+// Registers all GUI tests. Takes the app state so tests can both drive the
+// UI (through the test engine) and assert on model/camera/selection state.
+void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state);

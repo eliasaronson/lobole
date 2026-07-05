@@ -3,24 +3,17 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-enum class CameraMode {
-    Orbit,
-    Pan,
-    Zoom
-};
-
 class Camera {
 public:
     Camera();
     ~Camera() = default;
 
     void Update(float deltaTime);
-    
-    // Camera controls
-    void OnMouseMove(double xpos, double ypos);
-    void OnMouseButton(int button, int action, int mods);
-    void OnScroll(double xoffset, double yoffset);
-    void OnKey(int key, int scancode, int action, int mods);
+
+    // Camera controls: pixel-space deltas, called by the input layer
+    void Orbit(double deltaX, double deltaY);
+    void Pan(double deltaX, double deltaY);
+    void Zoom(double delta); // positive zooms out
 
     // Camera properties
     void SetPosition(const glm::vec3& position) { m_position = position; UpdateViewMatrix(); }
@@ -56,16 +49,12 @@ public:
 private:
     void UpdateViewMatrix();
     void UpdateProjectionMatrix();
-    
-    void HandleOrbitMode(double deltaX, double deltaY);
-    void HandlePanMode(double deltaX, double deltaY);
-    void HandleZoomMode(double deltaY);
 
     // Camera parameters
     glm::vec3 m_position;
     glm::vec3 m_target;
     glm::vec3 m_up;
-    
+
     float m_fov;
     float m_aspectRatio;
     float m_nearPlane;
@@ -75,11 +64,6 @@ private:
     glm::mat4 m_viewMatrix;
     glm::mat4 m_projectionMatrix;
 
-    // Input state
-    bool m_mousePressed[3];
-    double m_lastMouseX, m_lastMouseY;
-    CameraMode m_currentMode;
-    
     // Camera settings
     float m_orbitSensitivity;
     float m_panSensitivity;

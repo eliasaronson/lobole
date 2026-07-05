@@ -75,7 +75,8 @@ void SyncDocumentRenderers(AppState& state) {
     if (state.outlineRenderer)
       outlineId = state.outlineRenderer->AddMesh(vertices, cadMesh.indices);
     if (state.faceSelector)
-      state.faceSelector->AddMesh(meshId, vertices, cadMesh.indices);
+      state.faceSelector->AddMesh(meshId, vertices, cadMesh.indices,
+                                  cadMesh.triangleFaces);
     state.documentMeshes.push_back({meshId, outlineId});
   }
   LOG_INFO("Document synced: {} features, {} bodies",

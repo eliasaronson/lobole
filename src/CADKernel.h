@@ -45,8 +45,12 @@ public:
     struct Mesh {
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
+        // B-Rep face id per triangle (indices.size()/3 entries). Faces are
+        // emitted contiguously, so each face also owns a contiguous vertex
+        // range - which picking and highlighting rely on.
+        std::vector<uint32_t> triangleFaces;
     };
-    
+
     Mesh GenerateMesh(double deflection = 0.1) const;
 
 private:
@@ -105,8 +109,9 @@ public:
     struct Mesh {
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
+        std::vector<uint32_t> triangleFaces;
     };
-    
+
     Mesh GenerateMesh(double deflection = 0.1) const { return Mesh(); }
 };
 

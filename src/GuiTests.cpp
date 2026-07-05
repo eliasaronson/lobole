@@ -1,18 +1,33 @@
 #include "GuiTests.h"
 
+#include "Camera.h"
+#include "FaceSelector.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "ui/AppState.h"
 
 #include "imgui_te_context.h"
 #include "imgui_te_engine.h"
 
-// Tests run inside the live application; the getter resolves the current
-// document each time since File > New / Open swap the object out.
-static std::function<Document*()> s_GetDocument;
+#include <glm/glm.hpp>
 
-void RegisterGuiTests(ImGuiTestEngine* engine,
-                      std::function<Document*()> getDocument) {
-  s_GetDocument = std::move(getDocument);
+// Tests run inside the live application and reach it through the AppState.
+static ui::AppState* s_App = nullptr;
+
+static Document* Doc() { return s_App->document.get(); }
+
+// Window position of a world point, projected exactly like the GPU does
+static ImVec2 WorldToWindow(const glm::vec3& p) {
+  const Camera& cam = *s_App->camera;
+  glm::vec4 clip =
+      cam.GetProjectionMatrix() * cam.GetViewMatrix() * glm::vec4(p, 1.0f);
+  glm::vec3 ndc = glm::vec3(clip) / clip.w;
+  ImVec2 size = ImGui::GetMainViewport()->Size;
+  return ImVec2((ndc.x + 1.0f) * 0.5f * size.x, (ndc.y + 1.0f) * 0.5f * size.y);
+}
+
+void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
+  s_App = state;
 
   ImGuiTest* t = nullptr;
 
@@ -31,59 +46,52 @@ void RegisterGuiTests(ImGuiTestEngine* engine,
 
   t = IM_REGISTER_TEST(engine, "document", "parametric_box_undo_redo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    Document* doc = s_GetDocument();
-    IM_CHECK(doc != nullptr);
-    const size_t before = doc->FeatureCount();
+    IM_CHECK(Doc() != nullptr);
+    const size_t before = Doc()->FeatureCount();
 
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("Create/Box");
     ctx->Yield();
-    IM_CHECK_EQ(doc->FeatureCount(), before + 1);
-    IM_CHECK_EQ(doc->GetBodies().size(), before + 1);
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), before + 1);
 
     ctx->MenuClick("Edit/Undo");
     ctx->Yield();
-    IM_CHECK_EQ(doc->FeatureCount(), before);
-    IM_CHECK_EQ(doc->GetBodies().size(), before);
+    IM_CHECK_EQ(Doc()->FeatureCount(), before);
 
     ctx->MenuClick("Edit/Redo");
     ctx->Yield();
-    IM_CHECK_EQ(doc->FeatureCount(), before + 1);
-    IM_CHECK_EQ(doc->GetBodies().size(), before + 1);
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
   };
 
   t = IM_REGISTER_TEST(engine, "document", "create_sphere_and_cylinder");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    Document* doc = s_GetDocument();
-    IM_CHECK(doc != nullptr);
-    const size_t before = doc->FeatureCount();
+    const size_t before = Doc()->FeatureCount();
 
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("Create/Sphere");
     ctx->MenuClick("Create/Cylinder");
     ctx->Yield();
-    IM_CHECK_EQ(doc->FeatureCount(), before + 2);
-    IM_CHECK_EQ(doc->GetBodies().size(), before + 2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), before + 2);
 
     ctx->MenuClick("Edit/Undo");
     ctx->MenuClick("Edit/Undo");
     ctx->Yield();
-    IM_CHECK_EQ(doc->FeatureCount(), before);
+    IM_CHECK_EQ(Doc()->FeatureCount(), before);
   };
 
   t = IM_REGISTER_TEST(engine, "document", "new_project_clears_features");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    IM_CHECK(s_GetDocument() != nullptr);
-
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("Create/Box");
     ctx->Yield();
-    IM_CHECK(s_GetDocument()->FeatureCount() > 0);
+    IM_CHECK(Doc()->FeatureCount() > 0);
 
     ctx->MenuClick("File/New");
     ctx->Yield();
-    IM_CHECK_EQ(s_GetDocument()->FeatureCount(), (size_t)0);
-    IM_CHECK_EQ(s_GetDocument()->GetBodies().size(), (size_t)0);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)0);
   };
 
   t = IM_REGISTER_TEST(engine, "properties", "edit_box_width_undo");
@@ -93,32 +101,28 @@ void RegisterGuiTests(ImGuiTestEngine* engine,
     ctx->MenuClick("Create/Box");
     ctx->Yield();
 
-    Document* doc = s_GetDocument();
-    IM_CHECK(doc != nullptr);
-    auto* box = dynamic_cast<BoxFeature*>(doc->GetFeature(0));
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
     IM_CHECK_EQ(box->width, 2.0);
 
-    // Select the feature in the Model panel, edit its width in Properties
     ctx->ItemClick("//Model/Box 1##0");
     ctx->ItemInputValue("//Properties/Width", 5.0f);
     ctx->Yield();
 
-    box = dynamic_cast<BoxFeature*>(s_GetDocument()->GetFeature(0));
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
     IM_CHECK_EQ(box->width, 5.0);
-    IM_CHECK_EQ(s_GetDocument()->GetBodies().size(), (size_t)1);
 
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("Edit/Undo");
     ctx->Yield();
-    box = dynamic_cast<BoxFeature*>(s_GetDocument()->GetFeature(0));
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
     IM_CHECK_EQ(box->width, 2.0);
 
     ctx->MenuClick("Edit/Redo");
     ctx->Yield();
-    box = dynamic_cast<BoxFeature*>(s_GetDocument()->GetFeature(0));
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
     IM_CHECK_EQ(box->width, 5.0);
   };
@@ -129,15 +133,87 @@ void RegisterGuiTests(ImGuiTestEngine* engine,
     ctx->MenuClick("File/New");
     ctx->MenuClick("Create/Box");
     ctx->Yield();
-    IM_CHECK_EQ(s_GetDocument()->FeatureCount(), (size_t)1);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
 
     ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z);
     ctx->Yield();
-    IM_CHECK_EQ(s_GetDocument()->FeatureCount(), (size_t)0);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
 
     ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Y);
     ctx->Yield();
-    IM_CHECK_EQ(s_GetDocument()->FeatureCount(), (size_t)1);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+  };
+
+  t = IM_REGISTER_TEST(engine, "viewport", "right_drag_orbits_camera");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Box");
+    ctx->Yield();
+
+    const glm::vec3 posBefore = s_App->camera->GetPosition();
+    const float distBefore = s_App->camera->GetDistance();
+
+    ImVec2 size = ImGui::GetMainViewport()->Size;
+    ImVec2 center(size.x * 0.5f, size.y * 0.5f);
+    ctx->MouseMoveToPos(center);
+    ctx->MouseDown(ImGuiMouseButton_Right);
+    ctx->MouseMoveToPos(ImVec2(center.x + 80.0f, center.y + 50.0f));
+    ctx->MouseUp(ImGuiMouseButton_Right);
+    ctx->Yield();
+
+    const glm::vec3 posAfter = s_App->camera->GetPosition();
+    IM_CHECK(glm::length(posAfter - posBefore) > 0.1f);
+    // Orbit keeps the distance to the target
+    IM_CHECK(std::abs(s_App->camera->GetDistance() - distBefore) <
+             0.05f * distBefore);
+  };
+
+  t = IM_REGISTER_TEST(engine, "viewport", "scroll_zooms");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const float distBefore = s_App->camera->GetDistance();
+
+    ImVec2 size = ImGui::GetMainViewport()->Size;
+    ctx->MouseMoveToPos(ImVec2(size.x * 0.5f, size.y * 0.5f));
+    ctx->MouseWheelY(2.0f); // scroll up = zoom in
+    ctx->Yield();
+
+    IM_CHECK(s_App->camera->GetDistance() < distBefore);
+  };
+
+  t = IM_REGISTER_TEST(engine, "viewport", "click_selects_facing_face");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Box");
+    ctx->Yield(2);
+
+    // Click on the projected body center: the ray must hit the camera-facing
+    // face of the box
+    glm::vec3 min, max;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const glm::vec3 bodyCenter = (min + max) * 0.5f;
+
+    ctx->MouseMoveToPos(WorldToWindow(bodyCenter));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    const Face* face = s_App->faceSelector->GetSelectedFace();
+    IM_CHECK(face != nullptr);
+
+    // Selected face must face the camera and sit on the near side of center
+    glm::vec3 normal =
+        s_App->faceSelector->GetFaceNormal(face->meshId, face->faceIndex);
+    glm::vec3 toCamera =
+        glm::normalize(s_App->camera->GetPosition() - face->center);
+    IM_CHECK(glm::dot(normal, toCamera) > 0.3f);
+
+    // Clicking empty space clears the selection
+    ctx->MouseMoveToPos(ImVec2(WorldToWindow(bodyCenter).x,
+                               ImGui::GetMainViewport()->Size.y * 0.92f));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->faceSelector->GetSelectedFace() == nullptr);
   };
 
   t = IM_REGISTER_TEST(engine, "menu", "sketch_mode_shows_toolbar");

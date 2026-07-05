@@ -27,6 +27,8 @@ struct DocumentRenderMesh {
   uint32_t outlineId;
 };
 
+enum class ViewportDrag { None, Orbit, Pan };
+
 // All state the UI reads and writes, replacing main.cpp's globals. The
 // document and undo stack are owned here (they are swapped by File > New /
 // Open); everything else is a non-owning pointer to objects whose lifetime
@@ -48,6 +50,7 @@ struct AppState {
 
   // UI state
   int selectedFeature = -1;
+  ViewportDrag viewportDrag = ViewportDrag::None;
   bool buildDefaultDockLayout = false;
   bool runGuiTests = false;
   nlohmann::json editBaseline; // parameter-edit snapshot while a widget is active

@@ -119,6 +119,7 @@ endif()
 # Core library: geometry, document and scene logic. Must stay free of
 # Vulkan/GLFW/ImGui so it can be unit-tested and scripted headlessly.
 set(core_sources
+    src/Camera.cpp
     src/Logger.cpp
     src/Scene.cpp
     src/CADObject.cpp
@@ -140,6 +141,9 @@ find_package(nlohmann_json 3 REQUIRED)
 add_library(designer_core STATIC ${core_sources})
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json)
+# Vulkan clip-space conventions everywhere glm is used (propagates to all
+# dependents): depth 0..1; the Y-flip lives in Camera::UpdateProjectionMatrix
+target_compile_definitions(designer_core PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 if(OPENCASCADE_FOUND)
     target_link_libraries(designer_core PUBLIC ${OPENCASCADE_LIBS})
 endif()
@@ -147,7 +151,6 @@ endif()
 # Application: windowing, rendering, UI.
 set(app_sources
     src/main.cpp
-    src/Camera.cpp
     src/MeshRenderer.cpp
     src/OutlineRenderer.cpp
     src/RayTracingRenderer.cpp
@@ -161,6 +164,7 @@ set(app_sources
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
     src/ui/Theme.cpp
+    src/ui/ViewportInput.cpp
 )
 
 # UI font, loaded at runtime relative to the executable

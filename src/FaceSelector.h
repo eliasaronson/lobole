@@ -7,13 +7,15 @@
 struct Vertex3D;
 class Camera;
 
+// A B-Rep face: the selectable unit. Tessellation emits each face as a
+// contiguous vertex range, which highlighting relies on.
 struct Face {
     uint32_t meshId;
-    uint32_t faceIndex;
-    std::vector<uint32_t> vertexIndices; // Triangle indices (3 vertices)
-    glm::vec3 normal;
+    uint32_t faceIndex;      // B-Rep face id within the mesh
+    uint32_t firstVertex = 0;
+    uint32_t vertexCount = 0;
+    glm::vec3 normal;        // area-weighted average over the triangulation
     glm::vec3 center;
-    glm::mat4 transform = glm::mat4(1.0f);
 };
 
 struct Ray {
@@ -35,9 +37,12 @@ public:
     FaceSelector();
     ~FaceSelector();
 
-    // Mesh management
-    void AddMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices, 
-                 const std::vector<uint32_t>& indices, const glm::mat4& transform = glm::mat4(1.0f));
+    // Mesh management. triangleFaces maps each triangle to its B-Rep face id
+    // (from CADShape::Mesh); if empty, every triangle is its own face.
+    void AddMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices,
+                 const std::vector<uint32_t>& indices,
+                 const std::vector<uint32_t>& triangleFaces = {},
+                 const glm::mat4& transform = glm::mat4(1.0f));
     void UpdateMeshTransform(uint32_t meshId, const glm::mat4& transform);
     void RemoveMesh(uint32_t meshId);
     void Clear();
@@ -58,12 +63,17 @@ public:
     // Utility
     glm::vec3 GetFaceNormal(uint32_t meshId, uint32_t faceIndex) const;
     glm::vec3 GetFaceCenter(uint32_t meshId, uint32_t faceIndex) const;
+    // Vertex range of a face within its mesh's vertex buffer (for highlight
+    // rendering). Returns false if the face doesn't exist.
+    bool GetFaceVertexRange(uint32_t meshId, uint32_t faceIndex,
+                            uint32_t& firstVertex, uint32_t& vertexCount) const;
 
 private:
     struct MeshData {
         uint32_t meshId;
         std::vector<Vertex3D> vertices;
         std::vector<uint32_t> indices;
+        std::vector<uint32_t> triangleFaces; // B-Rep face id per triangle
         std::vector<Face> faces;
         glm::mat4 transform = glm::mat4(1.0f);
     };

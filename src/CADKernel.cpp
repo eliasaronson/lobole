@@ -20,6 +20,9 @@
 #include <TopoDS_Edge.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Poly_Triangle.hxx>
+#include <Geom_Surface.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <gp_Pnt2d.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <gp_Trsf.hxx>
 #include <Bnd_Box.hxx>
@@ -147,48 +150,82 @@ void CADShape::Scale(double factor) {
 CADShape::Mesh CADShape::GenerateMesh(double deflection) const {
     Mesh mesh;
     if (!IsValid()) return mesh;
-    
+
     // Generate mesh
     BRepMesh_IncrementalMesh meshGen(m_shape, deflection);
     if (!meshGen.IsDone()) return mesh;
-    
-    // Extract triangular mesh from faces
-    for (TopExp_Explorer faceExp(m_shape, TopAbs_FACE); faceExp.More(); faceExp.Next()) {
+
+    // Extract triangular mesh, one contiguous vertex/triangle block per
+    // B-Rep face, with exact surface normals where the surface provides them
+    uint32_t faceId = 0;
+    for (TopExp_Explorer faceExp(m_shape, TopAbs_FACE); faceExp.More();
+         faceExp.Next(), faceId++) {
         const TopoDS_Face& face = TopoDS::Face(faceExp.Current());
         TopLoc_Location loc;
         Handle(Poly_Triangulation) triangulation = BRep_Tool::Triangulation(face, loc);
-        
-        if (!triangulation.IsNull()) {
-            int baseIndex = mesh.vertices.size();
-            
-            // Add vertices (newer OpenCASCADE API)
-            for (int i = 1; i <= triangulation->NbNodes(); i++) {
-                gp_Pnt p = triangulation->Node(i).Transformed(loc);
-                Vertex vertex;
-                vertex.position = glm::vec3(p.X(), p.Y(), p.Z());
-                vertex.normal = glm::vec3(0, 0, 1); // TODO: Calculate proper normals
-                mesh.vertices.push_back(vertex);
-            }
-            
-            // Add triangles (newer OpenCASCADE API)
-            for (int i = 1; i <= triangulation->NbTriangles(); i++) {
-                const Poly_Triangle& tri = triangulation->Triangle(i);
-                int n1, n2, n3;
-                tri.Get(n1, n2, n3);
-                
-                if (face.Orientation() == TopAbs_REVERSED) {
-                    mesh.indices.push_back(baseIndex + n1 - 1);
-                    mesh.indices.push_back(baseIndex + n3 - 1);
-                    mesh.indices.push_back(baseIndex + n2 - 1);
-                } else {
-                    mesh.indices.push_back(baseIndex + n1 - 1);
-                    mesh.indices.push_back(baseIndex + n2 - 1);
-                    mesh.indices.push_back(baseIndex + n3 - 1);
+        if (triangulation.IsNull()) continue;
+
+        const bool reversed = (face.Orientation() == TopAbs_REVERSED);
+        int baseIndex = mesh.vertices.size();
+
+        Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+        const bool hasUV = triangulation->HasUVNodes() && !surface.IsNull();
+
+        for (int i = 1; i <= triangulation->NbNodes(); i++) {
+            gp_Pnt p = triangulation->Node(i).Transformed(loc);
+            Vertex vertex;
+            vertex.position = glm::vec3(p.X(), p.Y(), p.Z());
+            vertex.normal = glm::vec3(0.0f); // triangle fallback fills these
+            if (hasUV) {
+                const gp_Pnt2d uv = triangulation->UVNode(i);
+                GeomLProp_SLProps props(surface, uv.X(), uv.Y(), 1,
+                                        Precision::Confusion());
+                if (props.IsNormalDefined()) {
+                    gp_Dir n = props.Normal().Transformed(loc.Transformation());
+                    vertex.normal = glm::vec3(n.X(), n.Y(), n.Z());
+                    if (reversed) vertex.normal = -vertex.normal;
                 }
             }
+            mesh.vertices.push_back(vertex);
+        }
+
+        for (int i = 1; i <= triangulation->NbTriangles(); i++) {
+            const Poly_Triangle& tri = triangulation->Triangle(i);
+            int n1, n2, n3;
+            tri.Get(n1, n2, n3);
+
+            if (reversed) {
+                mesh.indices.push_back(baseIndex + n1 - 1);
+                mesh.indices.push_back(baseIndex + n3 - 1);
+                mesh.indices.push_back(baseIndex + n2 - 1);
+            } else {
+                mesh.indices.push_back(baseIndex + n1 - 1);
+                mesh.indices.push_back(baseIndex + n2 - 1);
+                mesh.indices.push_back(baseIndex + n3 - 1);
+            }
+            mesh.triangleFaces.push_back(faceId);
         }
     }
-    
+
+    // Fallback for vertices whose surface normal was undefined: average the
+    // adjacent triangle normals (winding above makes them outward-facing)
+    std::vector<glm::vec3> accumulated(mesh.vertices.size(), glm::vec3(0.0f));
+    for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+        const glm::vec3& v0 = mesh.vertices[mesh.indices[t]].position;
+        const glm::vec3& v1 = mesh.vertices[mesh.indices[t + 1]].position;
+        const glm::vec3& v2 = mesh.vertices[mesh.indices[t + 2]].position;
+        glm::vec3 n = glm::cross(v1 - v0, v2 - v0);
+        accumulated[mesh.indices[t]] += n;
+        accumulated[mesh.indices[t + 1]] += n;
+        accumulated[mesh.indices[t + 2]] += n;
+    }
+    for (size_t i = 0; i < mesh.vertices.size(); i++) {
+        glm::vec3& n = mesh.vertices[i].normal;
+        if (glm::dot(n, n) < 0.25f) n = accumulated[i];
+        float len = glm::length(n);
+        n = (len > 1e-8f) ? n / len : glm::vec3(0, 0, 1);
+    }
+
     return mesh;
 }
 

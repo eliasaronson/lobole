@@ -6,7 +6,7 @@ struct Light {
 };
 
 layout(binding = 0) uniform UniformBufferObject {
-    mat4 model;
+    mat4 model; // unused; per-mesh model comes via push constant
     mat4 view;
     mat4 proj;
     vec4 viewPos;      // Camera position
@@ -15,6 +15,12 @@ layout(binding = 0) uniform UniformBufferObject {
     Light rimLight;     // Rim light
     vec4 ambientColor;  // rgb = ambient color, a = intensity
 } ubo;
+
+layout(push_constant) uniform PushConstants {
+    mat4 model;
+    // Vertex ranges [x,y) selected, [z,w) hovered for face highlighting
+    uvec4 highlight;
+} pc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
@@ -28,18 +34,25 @@ layout(location = 4) out Light fragPrimaryLight;
 layout(location = 6) out Light fragFillLight;
 layout(location = 8) out Light fragRimLight;
 layout(location = 10) out vec3 fragAmbientColor;
+layout(location = 11) out float fragHighlight;
 
 void main() {
     // Transform position to world space
-    vec4 worldPos = ubo.model * vec4(inPosition, 1.0);
+    vec4 worldPos = pc.model * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
-    
+
     // Final position
     gl_Position = ubo.proj * ubo.view * worldPos;
-    
+
     // Transform normal to world space (use normal matrix for proper scaling)
-    mat3 normalMatrix = transpose(inverse(mat3(ubo.model)));
+    mat3 normalMatrix = transpose(inverse(mat3(pc.model)));
     fragNormal = normalize(normalMatrix * inNormal);
+
+    // Face highlight: 1 = selected, 0.5 = hovered
+    uint v = uint(gl_VertexIndex);
+    fragHighlight = 0.0;
+    if (v >= pc.highlight.z && v < pc.highlight.w) fragHighlight = 0.5;
+    if (v >= pc.highlight.x && v < pc.highlight.y) fragHighlight = 1.0;
     
     // Pass through color and camera position
     fragColor = inColor;

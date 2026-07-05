@@ -13,6 +13,7 @@ layout(location = 4) in Light fragPrimaryLight;
 layout(location = 6) in Light fragFillLight;
 layout(location = 8) in Light fragRimLight;
 layout(location = 10) in vec3 fragAmbientColor;
+layout(location = 11) in float fragHighlight;
 
 layout(location = 0) out vec4 outColor;
 
@@ -79,6 +80,10 @@ void main() {
     
     // Slight brightness boost for better visibility
     finalColor *= 1.1;
-    
+
+    // Face highlight tint: selected (1.0) strong, hovered (0.5) subtle
+    const vec3 highlightColor = vec3(1.0, 0.65, 0.15);
+    finalColor = mix(finalColor, highlightColor, fragHighlight * 0.55);
+
     outColor = vec4(finalColor, 1.0);
 }

@@ -65,117 +65,6 @@ static void glfw_error_callback(int error, const char *description) {
   fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
-static void mouse_callback(GLFWwindow *window, double xpos, double ypos) {
-  if (g_SketchManager && g_SketchManager->IsSketchMode()) {
-    // In sketch mode, handle sketching (unless the cursor is over the UI)
-    if (g_Camera && !ImGui::GetIO().WantCaptureMouse) {
-      g_SketchManager->OnMouseMove(xpos, ypos, *g_Camera);
-    }
-  } else {
-    // In 3D mode, handle camera (only when mouse is pressed)
-    if (g_Camera) {
-      g_Camera->OnMouseMove(xpos, ypos);
-    }
-  }
-}
-
-static void mouse_button_callback(GLFWwindow *window, int button, int action,
-                                  int mods) {
-  // Presses over the UI belong to ImGui. Releases always reach the camera so
-  // a drag that ends over a panel doesn't get stuck.
-  if (action == GLFW_PRESS && ImGui::GetIO().WantCaptureMouse) {
-    return;
-  }
-
-  if (g_SketchManager && g_SketchManager->IsSketchMode()) {
-    // In sketch mode, handle sketching
-    if (action == GLFW_PRESS && g_Camera) {
-      double xpos, ypos;
-      glfwGetCursorPos(window, &xpos, &ypos);
-      g_SketchManager->OnMouseClick(xpos, ypos, *g_Camera);
-    }
-  } else {
-    // In 3D mode, handle camera and face selection
-
-    // Handle face selection on left-click FIRST (before camera)
-    if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS &&
-        g_FaceSelector && g_Camera) {
-      double xpos, ypos;
-      glfwGetCursorPos(window, &xpos, &ypos);
-
-      int width, height;
-      glfwGetFramebufferSize(window, &width, &height);
-
-      LOG_DEBUG("Left-click at ({}, {})", xpos, ypos);
-
-      Ray ray = g_FaceSelector->ScreenToWorldRay(xpos, ypos, width, height,
-                                                 *g_Camera);
-      RayHit hit = g_FaceSelector->PickFace(ray);
-
-      if (hit.hit) {
-        g_FaceSelector->SetSelectedFace(hit.meshId, hit.faceIndex);
-        LOG_INFO("✓ Selected face {} on mesh {}", hit.faceIndex, hit.meshId);
-
-        // Highlight the selected face by making the outline more prominent
-        if (g_OutlineRenderer) {
-          OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
-          settings.outlineColor =
-              glm::vec4(1.0f, 0.5f, 0.0f, 1.0f); // Orange highlight
-          settings.outlineWidth = 8.0f;          // Thicker outline
-          settings.mode =
-              OutlineMode::EDGES; // Switch to edge mode for better visibility
-          g_OutlineRenderer->SetOutlineSettings(settings);
-          LOG_DEBUG("🟠 Face highlighted with orange outline");
-        }
-
-        // Only align camera if Ctrl is held down
-        if ((mods & GLFW_MOD_CONTROL) && g_Camera) {
-          g_Camera->AlignToFace(hit.point, hit.normal, 5.0f);
-          LOG_INFO("📷 Camera aligned to face (Ctrl+Click)");
-        } else {
-          LOG_DEBUG("💡 Tip: Use Ctrl+Left-click to align camera to face");
-        }
-      } else {
-        g_FaceSelector->ClearSelection();
-
-        // Reset outline to default when no face is selected
-        if (g_OutlineRenderer) {
-          OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
-          settings.outlineColor =
-              glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);  // Default red
-          settings.outlineWidth = 5.0f;           // Default width
-          settings.mode = OutlineMode::WIREFRAME; // Default mode
-          g_OutlineRenderer->SetOutlineSettings(settings);
-        }
-
-        LOG_DEBUG("❌ No face selected");
-      }
-    }
-
-    // Handle camera controls (right-click and middle-click only, to avoid
-    // conflicts)
-    if (g_Camera && (button == GLFW_MOUSE_BUTTON_RIGHT ||
-                     button == GLFW_MOUSE_BUTTON_MIDDLE)) {
-      // Stop any camera animation when user wants to control manually
-      if (action == GLFW_PRESS) {
-        LOG_DEBUG("🖱️ Manual camera control");
-        g_Camera->StopAnimation();
-      }
-      g_Camera->OnMouseButton(button, action, mods);
-    }
-  }
-}
-
-static void scroll_callback(GLFWwindow *window, double xoffset,
-                            double yoffset) {
-  if (ImGui::GetIO().WantCaptureMouse) {
-    return;
-  }
-  if (g_Camera) {
-    g_Camera->OnScroll(xoffset, yoffset);
-  }
-}
-
 static void check_vk_result(VkResult err) {
   if (err == VK_SUCCESS)
     return;
@@ -635,10 +524,6 @@ int main(int argc, char **argv) {
   GLFWwindow *window = glfwCreateWindow(1280, 720, "Designer - 3D CAD Software",
                                         nullptr, nullptr);
 
-  // Set up input callbacks
-  glfwSetCursorPosCallback(window, mouse_callback);
-  glfwSetMouseButtonCallback(window, mouse_button_callback);
-  glfwSetScrollCallback(window, scroll_callback);
   if (!glfwVulkanSupported()) {
     printf("GLFW: Vulkan Not Supported\n");
     return 1;
@@ -802,7 +687,7 @@ int main(int argc, char **argv) {
   testEngineIO.ConfigWatchdogWarning = 60.0f;
   testEngineIO.ConfigWatchdogKillTest = 300.0f;
   ImGuiTestEngine_Start(testEngine, ImGui::GetCurrentContext());
-  RegisterGuiTests(testEngine, [] { return g_App.document.get(); });
+  RegisterGuiTests(testEngine, &g_App);
   if (args.runGuiTests) {
     ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests, "all");
   }

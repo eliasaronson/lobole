@@ -7,6 +7,7 @@
 #include "ui/MainMenuBar.h"
 #include "ui/PropertiesPanel.h"
 #include "ui/SketchToolbar.h"
+#include "ui/ViewportInput.h"
 
 #include "imgui.h"
 #define GLFW_INCLUDE_NONE
@@ -29,6 +30,8 @@ void DrawUI(AppState& state) {
   DrawPropertiesPanel(state);
   DrawSketchToolbar(state);
   DrawFileBrowser(state);
+
+  HandleViewportInput(state);
 
   // Keep the camera's aspect ratio in sync with the framebuffer
   if (state.camera && state.window) {
