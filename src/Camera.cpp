@@ -91,8 +91,9 @@ void Camera::Pan(double deltaX, double deltaY) {
     float distance = GetDistance();
     panScale *= (distance * 0.2f); // Slightly increased distance influence
     
-    // Fix Y inversion: when mouse moves up (positive deltaY), camera should move down (negative up)
-    glm::vec3 offset = right * (float)(-deltaX * panScale) + up * (float)(-deltaY * panScale);
+    // Content follows the cursor: drag right moves the model right (camera
+    // left), drag down moves the model down (camera up)
+    glm::vec3 offset = right * (float)(-deltaX * panScale) + up * (float)(deltaY * panScale);
     
     m_position += offset;
     m_target += offset;
