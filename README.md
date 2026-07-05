@@ -1,23 +1,45 @@
 # Designer
-Project to build a 3D CAD software using Vulkan and ImGui. The goal is to build
-an open source 3D CAD software, which works similarly to professionally used
-CAD softwares (like SolidWorks. I also aim to have a python based REPL and global paramaters
-which can be used to set dimension and similar.
+
+Project to build an open-source parametric 3D CAD application using Vulkan, ImGui and
+OpenCASCADE — working similarly to professionally used CAD software (Onshape, SolidWorks),
+with transformation checkpoints, global variables, a Python REPL/scripting API, git-based
+versioning, and an interface designed so that LLM assistants can use the same commands as
+human users.
+
+See [ROADMAP.md](ROADMAP.md) for the current state and the long-term plan.
 
 ## Requirements
-- Vulkan SDK
-- GLFW
-- GLM
-- ImGui
+
+System packages (Ubuntu 24.04):
+
+```
+sudo apt install cmake build-essential libvulkan-dev glslc libglfw3-dev libglm-dev \
+    libspdlog-dev libgtk-3-dev \
+    libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-modeling-data-dev \
+    libocct-foundation-dev libocct-ocaf-dev libocct-visualization-dev
+```
+
+Vendored dependencies (ImGui, nativefiledialog) are git submodules:
+
+```
+git submodule update --init --recursive
+```
 
 ## Building
+
 ```
+mkdir -p build
 cd build
 cmake ..
-cmake --build .
+cmake --build . -j$(nproc)
 ```
 
+Works with OpenCASCADE 7.6 (Ubuntu packages) and 7.8+ (the STEP/STL library renaming is
+handled in CMakeLists.txt).
+
 ## Running
+
 ```
-./designer
+cd build
+./designer [path/to/file.step]
 ```
