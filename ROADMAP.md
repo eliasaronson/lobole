@@ -91,6 +91,10 @@ like `create_sketch`, `add_line`, `extrude`, `query_faces`, plus screenshot/rend
 Humans and LLMs become genuinely equivalent clients; every scripted session is a replayable
 test case. Headless mode makes geometry operations unit-testable.
 
+*Started early:* `--remote <port>` serves JSON-RPC (see README): semantic feature/document
+commands + human-parity UI actions through the test engine + live screenshots.
+`tools/designer_remote.py` is the client. Remaining: MCP wrapper, Python REPL, headless mode.
+
 ### Phase 4 — Git integration
 With a text format this is mostly product design: repo-per-project, feature-level merging
 (consider one file per feature/part — feature lists merge far better than monolithic files),
