@@ -23,6 +23,10 @@ public:
   void InsertFeature(std::unique_ptr<Feature> feature, size_t index);
   std::unique_ptr<Feature> RemoveFeature(size_t index);
 
+  // Swaps the feature at index and regenerates. Returns false (and leaves
+  // the document unchanged) if index is out of range or feature is null.
+  bool ReplaceFeature(size_t index, std::unique_ptr<Feature> feature);
+
   // Rebuilds all bodies by executing the feature list in order. Returns
   // false if any feature failed; bodies then reflect the successful prefix.
   bool Regenerate();

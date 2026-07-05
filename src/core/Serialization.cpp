@@ -21,6 +21,10 @@ glm::vec3 Vec3FromJson(const json& j) {
                    j.at(2).get<float>());
 }
 
+}  // namespace
+
+namespace DocumentIO {
+
 json FeatureToJson(const Feature& feature) {
   json j;
   j["type"] = feature.TypeName();
@@ -72,10 +76,6 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   }
   throw std::runtime_error("Unknown feature type: " + type);
 }
-
-}  // namespace
-
-namespace DocumentIO {
 
 bool Save(const Document& doc, const std::string& path, std::string* error) {
   try {

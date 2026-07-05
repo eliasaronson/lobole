@@ -28,6 +28,15 @@ std::unique_ptr<Feature> Document::RemoveFeature(size_t index) {
   return removed;
 }
 
+bool Document::ReplaceFeature(size_t index, std::unique_ptr<Feature> feature) {
+  if (index >= m_features.size() || !feature) {
+    return false;
+  }
+  m_features[index] = std::move(feature);
+  Regenerate();
+  return true;
+}
+
 bool Document::Regenerate() {
   m_bodies.clear();
   m_version++;

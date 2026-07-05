@@ -2,6 +2,8 @@
 
 #include "core/Document.h"
 
+#include <nlohmann/json.hpp>
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,6 +48,24 @@ private:
   size_t m_index;
   std::unique_ptr<Feature> m_removed;
   std::string m_description;
+};
+
+// Parameter edit of one feature, snapshotted as JSON before/after. Execute
+// rebuilds the feature from the "after" snapshot, so it is idempotent: the
+// UI can mutate the feature live during a drag and still push this command
+// normally on release (the redundant execute is a no-op state-wise).
+class ModifyFeatureCommand : public Command {
+public:
+  ModifyFeatureCommand(size_t index, nlohmann::json before,
+                       nlohmann::json after);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  size_t m_index;
+  nlohmann::json m_before, m_after;
 };
 
 class CommandStack {
