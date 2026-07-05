@@ -384,8 +384,10 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    // Y-flipped projection inverts on-screen winding: CCW meshes appear CW
-    rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    // With the Y-flipped projection, OCCT's outward-oriented triangles are
+    // counter-clockwise in framebuffer space (verified empirically; pinned
+    // by the "camera-facing triangles are CCW" unit test)
+    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
     
     // Multisampling

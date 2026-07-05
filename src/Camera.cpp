@@ -106,6 +106,13 @@ void Camera::Zoom(double deltaY) {
     SetDistance(newDistance);
 }
 
+void Camera::Roll(double delta) {
+    const float angle = static_cast<float>(delta) * 0.01f;
+    glm::mat4 rot = glm::rotate(glm::mat4(1.0f), angle, GetForward());
+    m_up = glm::normalize(glm::vec3(rot * glm::vec4(m_up, 0.0f)));
+    UpdateViewMatrix();
+}
+
 void Camera::AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNormal, float distance) {
     // Calculate the camera position to look at the face perpendicularly
     glm::vec3 newTarget = faceCenter;

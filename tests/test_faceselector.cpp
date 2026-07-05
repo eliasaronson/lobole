@@ -45,6 +45,39 @@ TEST_CASE("GenerateMesh maps triangles to B-Rep faces with real normals",
   }
 }
 
+TEST_CASE("Camera-facing triangles are CCW in framebuffer space",
+          "[mesh][culling]") {
+  // Pins the winding convention MeshRenderer's cull mode depends on
+  // (VK_FRONT_FACE_COUNTER_CLOCKWISE with back-face culling). If this fails,
+  // the renderer shows the inside of solids.
+  CADShape::Mesh mesh = BoxMesh();
+
+  Camera cam;
+  cam.SetPosition(glm::vec3(10, 1, 1)); // looking straight at the +X face
+  cam.SetTarget(glm::vec3(1, 1, 1));
+  glm::mat4 vp = cam.GetProjectionMatrix() * cam.GetViewMatrix();
+
+  auto toFb = [&](const glm::vec3& p) {
+    glm::vec4 c = vp * glm::vec4(p, 1.0f);
+    return glm::vec2((c.x / c.w + 1.0f) * 640.0f,
+                     (c.y / c.w + 1.0f) * 360.0f); // framebuffer y is down
+  };
+
+  int checked = 0;
+  for (size_t t = 0; t < mesh.indices.size(); t += 3) {
+    const auto& v0 = mesh.vertices[mesh.indices[t]];
+    if (v0.normal.x < 0.9f) continue; // only the camera-facing face
+    glm::vec2 a = toFb(v0.position);
+    glm::vec2 b = toFb(mesh.vertices[mesh.indices[t + 1]].position);
+    glm::vec2 c = toFb(mesh.vertices[mesh.indices[t + 2]].position);
+    // In y-down framebuffer coords, negative cross = counter-clockwise
+    float cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    CHECK(cross < 0.0f);
+    checked++;
+  }
+  REQUIRE(checked == 2);
+}
+
 TEST_CASE("Screen ray passes through the world point it was made from",
           "[picking]") {
   Camera camera;

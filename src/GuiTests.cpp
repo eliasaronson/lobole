@@ -144,7 +144,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
   };
 
-  t = IM_REGISTER_TEST(engine, "viewport", "right_drag_orbits_camera");
+  t = IM_REGISTER_TEST(engine, "viewport", "middle_drag_rotates_camera");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
@@ -157,16 +157,34 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ImVec2 size = ImGui::GetMainViewport()->Size;
     ImVec2 center(size.x * 0.5f, size.y * 0.5f);
     ctx->MouseMoveToPos(center);
-    ctx->MouseDown(ImGuiMouseButton_Right);
+    ctx->MouseDown(ImGuiMouseButton_Middle);
     ctx->MouseMoveToPos(ImVec2(center.x + 80.0f, center.y + 50.0f));
-    ctx->MouseUp(ImGuiMouseButton_Right);
+    ctx->MouseUp(ImGuiMouseButton_Middle);
     ctx->Yield();
 
     const glm::vec3 posAfter = s_App->camera->GetPosition();
     IM_CHECK(glm::length(posAfter - posBefore) > 0.1f);
-    // Orbit keeps the distance to the target
+    // Rotation keeps the distance to the target
     IM_CHECK(std::abs(s_App->camera->GetDistance() - distBefore) <
              0.05f * distBefore);
+  };
+
+  t = IM_REGISTER_TEST(engine, "viewport", "ctrl_middle_drag_pans_camera");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const glm::vec3 targetBefore = s_App->camera->GetTarget();
+
+    ImVec2 size = ImGui::GetMainViewport()->Size;
+    ImVec2 center(size.x * 0.5f, size.y * 0.5f);
+    ctx->MouseMoveToPos(center);
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->MouseDown(ImGuiMouseButton_Middle);
+    ctx->MouseMoveToPos(ImVec2(center.x + 100.0f, center.y + 60.0f));
+    ctx->MouseUp(ImGuiMouseButton_Middle);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+
+    // Pan moves the orbit target
+    IM_CHECK(glm::length(s_App->camera->GetTarget() - targetBefore) > 0.05f);
   };
 
   t = IM_REGISTER_TEST(engine, "viewport", "scroll_zooms");

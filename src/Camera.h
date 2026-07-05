@@ -13,7 +13,8 @@ public:
     // Camera controls: pixel-space deltas, called by the input layer
     void Orbit(double deltaX, double deltaY);
     void Pan(double deltaX, double deltaY);
-    void Zoom(double delta); // positive zooms out
+    void Zoom(double delta);        // positive zooms out
+    void Roll(double delta);        // rotate around the view axis
 
     // Camera properties
     void SetPosition(const glm::vec3& position) { m_position = position; UpdateViewMatrix(); }

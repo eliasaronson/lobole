@@ -136,10 +136,11 @@ void DrawPropertiesPanel(AppState& state) {
   }
 
   ImGui::SeparatorText("Controls");
-  ImGui::BulletText("Left click: select face");
-  ImGui::BulletText("Ctrl+Left click: align camera to face");
-  ImGui::BulletText("Right click: orbit camera");
-  ImGui::BulletText("Scroll: zoom");
+  ImGui::BulletText("Left click: select face (Ctrl: align camera)");
+  ImGui::BulletText("Middle drag: rotate");
+  ImGui::BulletText("Ctrl+Middle: pan   Shift+Middle: zoom");
+  ImGui::BulletText("Alt+Middle: roll   Scroll: zoom");
+  ImGui::BulletText("Arrows: rotate (Shift: 90\xc2\xb0)   Z: zoom");
 
   ImGui::End();
 }

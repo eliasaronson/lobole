@@ -68,33 +68,70 @@ void HandleViewportInput(AppState& state) {
     state.camera->Zoom(-io.MouseWheel * 5.0);
   }
 
-  // Camera drags: start only over the viewport, but keep tracking until
-  // release so a drag that crosses a panel doesn't stick or stutter
-  if (overViewport) {
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-      state.viewportDrag = ViewportDrag::Orbit;
-      state.camera->StopAnimation();
-    } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+  // SolidWorks-style middle-button drags: plain = rotate, Ctrl = pan,
+  // Shift = zoom, Alt = roll. The mode is fixed at press time; the drag
+  // keeps tracking until release even if the cursor crosses a panel.
+  if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+    if (io.KeyCtrl) {
       state.viewportDrag = ViewportDrag::Pan;
-      state.camera->StopAnimation();
+    } else if (io.KeyShift) {
+      state.viewportDrag = ViewportDrag::Zoom;
+    } else if (io.KeyAlt) {
+      state.viewportDrag = ViewportDrag::Roll;
+    } else {
+      state.viewportDrag = ViewportDrag::Orbit;
     }
+    state.camera->StopAnimation();
   }
-  if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
-      state.viewportDrag == ViewportDrag::Orbit) {
-    state.viewportDrag = ViewportDrag::None;
-  }
-  if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle) &&
-      state.viewportDrag == ViewportDrag::Pan) {
+  if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
     state.viewportDrag = ViewportDrag::None;
   }
 
-  if (state.viewportDrag == ViewportDrag::Orbit) {
-    if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) {
+  if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) {
+    switch (state.viewportDrag) {
+    case ViewportDrag::Orbit:
       state.camera->Orbit(io.MouseDelta.x, io.MouseDelta.y);
-    }
-  } else if (state.viewportDrag == ViewportDrag::Pan) {
-    if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) {
+      break;
+    case ViewportDrag::Pan:
       state.camera->Pan(io.MouseDelta.x, io.MouseDelta.y);
+      break;
+    case ViewportDrag::Zoom:
+      state.camera->Zoom(io.MouseDelta.y * 0.05); // drag down = zoom out
+      break;
+    case ViewportDrag::Roll:
+      state.camera->Roll(io.MouseDelta.x);
+      break;
+    case ViewportDrag::None:
+      break;
+    }
+  }
+
+  // SolidWorks keyboard navigation (when the UI isn't capturing keys):
+  // arrows rotate (Shift = 90 degree steps), Ctrl+arrows pan, Alt+left/right
+  // roll, Z / Shift+Z zoom out/in
+  if (!io.WantCaptureKeyboard) {
+    // 15 degrees per press (90 with Shift); orbit is 0.005 rad per "pixel"
+    const double step = (io.KeyShift ? 1.5707963 : 0.2617994) / 0.005;
+    const double panStep = 40.0;
+
+    auto arrow = [&](ImGuiKey key, double dx, double dy) {
+      if (!ImGui::IsKeyPressed(key))
+        return;
+      if (io.KeyCtrl) {
+        state.camera->Pan(dx * panStep, dy * panStep);
+      } else if (io.KeyAlt) {
+        if (dx != 0.0) state.camera->Roll(dx * 26.0);
+      } else {
+        state.camera->Orbit(dx * step, dy * step);
+      }
+    };
+    arrow(ImGuiKey_LeftArrow, -1.0, 0.0);
+    arrow(ImGuiKey_RightArrow, 1.0, 0.0);
+    arrow(ImGuiKey_UpArrow, 0.0, -1.0);
+    arrow(ImGuiKey_DownArrow, 0.0, 1.0);
+
+    if (ImGui::IsKeyPressed(ImGuiKey_Z)) {
+      state.camera->Zoom(io.KeyShift ? -5.0 : 5.0);
     }
   }
 

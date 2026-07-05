@@ -27,7 +27,7 @@ struct DocumentRenderMesh {
   uint32_t outlineId;
 };
 
-enum class ViewportDrag { None, Orbit, Pan };
+enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
 
 // All state the UI reads and writes, replacing main.cpp's globals. The
 // document and undo stack are owned here (they are swapped by File > New /
