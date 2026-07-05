@@ -1,3 +1,4 @@
+#include <filesystem>
 #include "CADKernel.h"
 
 #ifdef HAVE_OPENCASCADE
@@ -329,6 +330,8 @@ CADShape CADKernel::CreateCone(const glm::vec3& center, const glm::vec3& directi
 }
 
 bool CADKernel::LoadSTEP(const std::string& filename, std::vector<CADShape>& shapes) {
+    if (!std::filesystem::exists(filename)) return false;
+
     STEPControl_Reader reader;
     IFSelect_ReturnStatus status = reader.ReadFile(filename.c_str());
     

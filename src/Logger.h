@@ -7,7 +7,12 @@
 class Logger {
 public:
     static void Initialize(spdlog::level::level_enum level = spdlog::level::info);
-    static std::shared_ptr<spdlog::logger>& GetLogger() { return s_logger; }
+    // Lazily initializes so library code (core, tests, scripts) can log
+    // without depending on application startup.
+    static std::shared_ptr<spdlog::logger>& GetLogger() {
+        if (!s_logger) Initialize();
+        return s_logger;
+    }
 
 private:
     static std::shared_ptr<spdlog::logger> s_logger;
