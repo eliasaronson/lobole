@@ -32,8 +32,17 @@ if(EXISTS ${OPENCASCADE_INCLUDE_DIR})
     # Core OpenCASCADE libraries we need
     set(OPENCASCADE_LIBS
         TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo
-        TKTopAlgo TKPrim TKMesh TKBO TKDESTEP TKDESTL TKXSBase
+        TKTopAlgo TKPrim TKMesh TKBO TKXSBase
     )
+
+    # STEP/STL data-exchange libraries were renamed in OCCT 7.8
+    # (TKSTEP*/TKSTL -> TKDESTEP/TKDESTL)
+    find_library(OCCT_TKDESTEP TKDESTEP)
+    if(OCCT_TKDESTEP)
+        list(APPEND OPENCASCADE_LIBS TKDESTEP TKDESTL)
+    else()
+        list(APPEND OPENCASCADE_LIBS TKSTEP TKSTEPBase TKSTEPAttr TKSTEP209 TKSTL)
+    endif()
     
     set(OPENCASCADE_FOUND TRUE)
     add_definitions(-DHAVE_OPENCASCADE)
