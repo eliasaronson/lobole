@@ -102,28 +102,43 @@ if(OPENCASCADE_FOUND)
     list(APPEND LIBRARIES ${OPENCASCADE_LIBS})
 endif()
 
-# file(GLOB sources src/*.cpp)
-set(sources 
-    src/main.cpp
+# Core library: geometry, document and scene logic. Must stay free of
+# Vulkan/GLFW/ImGui so it can be unit-tested and scripted headlessly.
+set(core_sources
     src/Logger.cpp
     src/Scene.cpp
-    src/Camera.cpp
     src/CADObject.cpp
     src/CADKernel.cpp
-    src/MeshRenderer.cpp
-    src/OutlineRenderer.cpp
     src/CADMeshConverter.cpp
     src/CADMaterials.cpp
     src/SketchPlane.cpp
     src/Sketch.cpp
     src/SketchManager.cpp
-    src/RayTracingRenderer.cpp
     src/FaceSelector.cpp
 )
 
-add_executable(designer ${sources} ${NFD_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+add_library(designer_core STATIC ${core_sources})
+target_link_libraries(designer_core PUBLIC spdlog::spdlog)
+if(OPENCASCADE_FOUND)
+    target_link_libraries(designer_core PUBLIC ${OPENCASCADE_LIBS})
+endif()
 
-target_link_libraries(designer ${LIBRARIES})
+# Application: windowing, rendering, UI.
+set(app_sources
+    src/main.cpp
+    src/Camera.cpp
+    src/MeshRenderer.cpp
+    src/OutlineRenderer.cpp
+    src/RayTracingRenderer.cpp
+)
+
+add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+
+target_link_libraries(designer designer_core ${LIBRARIES})
+
+# Tests
+enable_testing()
+add_subdirectory(tests)
 
 # Find glslc (Vulkan shader compiler)
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
