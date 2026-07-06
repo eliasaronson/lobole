@@ -292,6 +292,131 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
   }
 }
 
+// Depth buffer. ImGui's swapchain render pass is color-only, so 3D solids
+// rendered with only back-face culling look right when convex but wrong when
+// non-convex (a cut/hole), and overlays draw through them. We add a depth
+// attachment by overriding ImGui's render pass + framebuffers.
+static VkImage g_DepthImage = VK_NULL_HANDLE;
+static VkDeviceMemory g_DepthMemory = VK_NULL_HANDLE;
+static VkImageView g_DepthView = VK_NULL_HANDLE;
+static VkRenderPass g_DepthRenderPass = VK_NULL_HANDLE;
+static const VkFormat g_DepthFormat = VK_FORMAT_D32_SFLOAT;
+
+static uint32_t FindMemoryTypeIndex(uint32_t typeFilter,
+                                    VkMemoryPropertyFlags props) {
+  VkPhysicalDeviceMemoryProperties mp;
+  vkGetPhysicalDeviceMemoryProperties(g_PhysicalDevice, &mp);
+  for (uint32_t i = 0; i < mp.memoryTypeCount; i++)
+    if ((typeFilter & (1u << i)) &&
+        (mp.memoryTypes[i].propertyFlags & props) == props)
+      return i;
+  return 0;
+}
+
+// Recreates the depth image at the window size and overrides ImGui's
+// color-only render pass + framebuffers with color+depth ones. Must run after
+// every ImGui_ImplVulkanH_CreateOrResizeWindow (which recreates them
+// color-only) and before ImGui_ImplVulkan_Init.
+static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
+  if (g_DepthView) vkDestroyImageView(g_Device, g_DepthView, g_Allocator);
+  if (g_DepthImage) vkDestroyImage(g_Device, g_DepthImage, g_Allocator);
+  if (g_DepthMemory) vkFreeMemory(g_Device, g_DepthMemory, g_Allocator);
+  g_DepthView = VK_NULL_HANDLE;
+  g_DepthImage = VK_NULL_HANDLE;
+  g_DepthMemory = VK_NULL_HANDLE;
+
+  VkImageCreateInfo img{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  img.imageType = VK_IMAGE_TYPE_2D;
+  img.format = g_DepthFormat;
+  img.extent = {(uint32_t)wd->Width, (uint32_t)wd->Height, 1};
+  img.mipLevels = 1;
+  img.arrayLayers = 1;
+  img.samples = VK_SAMPLE_COUNT_1_BIT;
+  img.tiling = VK_IMAGE_TILING_OPTIMAL;
+  img.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  vkCreateImage(g_Device, &img, g_Allocator, &g_DepthImage);
+  VkMemoryRequirements req;
+  vkGetImageMemoryRequirements(g_Device, g_DepthImage, &req);
+  VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  alloc.allocationSize = req.size;
+  alloc.memoryTypeIndex =
+      FindMemoryTypeIndex(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  vkAllocateMemory(g_Device, &alloc, g_Allocator, &g_DepthMemory);
+  vkBindImageMemory(g_Device, g_DepthImage, g_DepthMemory, 0);
+  VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  view.image = g_DepthImage;
+  view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  view.format = g_DepthFormat;
+  view.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+  vkCreateImageView(g_Device, &view, g_Allocator, &g_DepthView);
+
+  // Color+depth render pass (created once, reused across resizes so ImGui's
+  // pipeline stays render-pass-compatible).
+  if (g_DepthRenderPass == VK_NULL_HANDLE) {
+    VkAttachmentDescription atts[2] = {};
+    atts[0].format = wd->SurfaceFormat.format;
+    atts[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    atts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    atts[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    atts[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    atts[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    atts[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    atts[1].format = g_DepthFormat;
+    atts[1].samples = VK_SAMPLE_COUNT_1_BIT;
+    atts[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    atts[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    atts[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    atts[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    atts[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    atts[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference depthRef{
+        1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sub{};
+    sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.colorAttachmentCount = 1;
+    sub.pColorAttachments = &colorRef;
+    sub.pDepthStencilAttachment = &depthRef;
+    VkSubpassDependency dep{};
+    dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dep.dstSubpass = 0;
+    dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    rp.attachmentCount = 2;
+    rp.pAttachments = atts;
+    rp.subpassCount = 1;
+    rp.pSubpasses = &sub;
+    rp.dependencyCount = 1;
+    rp.pDependencies = &dep;
+    vkCreateRenderPass(g_Device, &rp, g_Allocator, &g_DepthRenderPass);
+  }
+
+  // Swap ImGui's color-only render pass + framebuffers for color+depth ones.
+  if (wd->RenderPass != g_DepthRenderPass && wd->RenderPass != VK_NULL_HANDLE)
+    vkDestroyRenderPass(g_Device, wd->RenderPass, g_Allocator);
+  wd->RenderPass = g_DepthRenderPass;
+  for (uint32_t i = 0; i < wd->ImageCount; i++) {
+    ImGui_ImplVulkanH_Frame *fd = &wd->Frames[i];
+    if (fd->Framebuffer)
+      vkDestroyFramebuffer(g_Device, fd->Framebuffer, g_Allocator);
+    VkImageView attach[2] = {fd->BackbufferView, g_DepthView};
+    VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    fb.renderPass = g_DepthRenderPass;
+    fb.attachmentCount = 2;
+    fb.pAttachments = attach;
+    fb.width = wd->Width;
+    fb.height = wd->Height;
+    fb.layers = 1;
+    vkCreateFramebuffer(g_Device, &fb, g_Allocator, &fd->Framebuffer);
+  }
+}
+
 static void SetupVulkanWindow(ImGui_ImplVulkanH_Window *wd,
                               VkSurfaceKHR surface, int width, int height) {
   wd->Surface = surface;
@@ -335,6 +460,7 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window *wd,
   ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device,
                                          wd, g_QueueFamily, g_Allocator, width,
                                          height, g_MinImageCount);
+  SetupDepthBuffer(wd);
 }
 
 static void CleanupVulkan() {
@@ -353,8 +479,16 @@ static void CleanupVulkan() {
 }
 
 static void CleanupVulkanWindow() {
+  if (g_DepthView) vkDestroyImageView(g_Device, g_DepthView, g_Allocator);
+  if (g_DepthImage) vkDestroyImage(g_Device, g_DepthImage, g_Allocator);
+  if (g_DepthMemory) vkFreeMemory(g_Device, g_DepthMemory, g_Allocator);
+  g_DepthView = VK_NULL_HANDLE;
+  g_DepthImage = VK_NULL_HANDLE;
+  g_DepthMemory = VK_NULL_HANDLE;
+  // wd->RenderPass is g_DepthRenderPass; DestroyWindow frees it.
   ImGui_ImplVulkanH_DestroyWindow(g_Instance, g_Device, &g_MainWindowData,
                                   g_Allocator);
+  g_DepthRenderPass = VK_NULL_HANDLE;
 }
 
 static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
@@ -395,8 +529,11 @@ static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
     info.framebuffer = fd->Framebuffer;
     info.renderArea.extent.width = wd->Width;
     info.renderArea.extent.height = wd->Height;
-    info.clearValueCount = 1;
-    info.pClearValues = &wd->ClearValue;
+    VkClearValue clears[2];
+    clears[0] = wd->ClearValue;
+    clears[1].depthStencil = {1.0f, 0};
+    info.clearValueCount = 2;
+    info.pClearValues = clears;
     vkCmdBeginRenderPass(fd->CommandBuffer, &info, VK_SUBPASS_CONTENTS_INLINE);
   }
 
@@ -740,6 +877,7 @@ int main(int argc, char **argv) {
       ImGui_ImplVulkanH_CreateOrResizeWindow(
           g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData,
           g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount);
+      SetupDepthBuffer(&g_MainWindowData);
       g_MainWindowData.FrameIndex = 0;
       g_SwapChainRebuild = false;
 

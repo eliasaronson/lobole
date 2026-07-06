@@ -78,10 +78,40 @@ bool CaptureScreenshot(
   VkImageView view = VK_NULL_HANDLE;
   vkCreateImageView(device, &viewInfo, nullptr, &view);
 
+  // Transient depth attachment to match the color+depth render pass.
+  VkImageCreateInfo depthInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  depthInfo.imageType = VK_IMAGE_TYPE_2D;
+  depthInfo.format = VK_FORMAT_D32_SFLOAT;
+  depthInfo.extent = {width, height, 1};
+  depthInfo.mipLevels = 1;
+  depthInfo.arrayLayers = 1;
+  depthInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+  depthInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+  depthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+  VkImage depthImage = VK_NULL_HANDLE;
+  vkCreateImage(device, &depthInfo, nullptr, &depthImage);
+  VkMemoryRequirements depthReq;
+  vkGetImageMemoryRequirements(device, depthImage, &depthReq);
+  VkMemoryAllocateInfo depthAlloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+  depthAlloc.allocationSize = depthReq.size;
+  depthAlloc.memoryTypeIndex = FindMemoryType(
+      physicalDevice, depthReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  VkDeviceMemory depthMemory = VK_NULL_HANDLE;
+  vkAllocateMemory(device, &depthAlloc, nullptr, &depthMemory);
+  vkBindImageMemory(device, depthImage, depthMemory, 0);
+  VkImageViewCreateInfo depthView{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  depthView.image = depthImage;
+  depthView.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  depthView.format = VK_FORMAT_D32_SFLOAT;
+  depthView.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+  VkImageView depthImageView = VK_NULL_HANDLE;
+  vkCreateImageView(device, &depthView, nullptr, &depthImageView);
+
+  VkImageView attachments[2] = {view, depthImageView};
   VkFramebufferCreateInfo fbInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
   fbInfo.renderPass = renderPass;
-  fbInfo.attachmentCount = 1;
-  fbInfo.pAttachments = &view;
+  fbInfo.attachmentCount = 2;
+  fbInfo.pAttachments = attachments;
   fbInfo.width = width;
   fbInfo.height = height;
   fbInfo.layers = 1;
@@ -122,8 +152,11 @@ bool CaptureScreenshot(
   rp.renderPass = renderPass;
   rp.framebuffer = framebuffer;
   rp.renderArea.extent = {width, height};
-  rp.clearValueCount = 1;
-  rp.pClearValues = &clearValue;
+  VkClearValue clears[2];
+  clears[0] = clearValue;
+  clears[1].depthStencil = {1.0f, 0};
+  rp.clearValueCount = 2;
+  rp.pClearValues = clears;
   vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
   recordScene(cb);
   vkCmdEndRenderPass(cb);
@@ -176,6 +209,9 @@ bool CaptureScreenshot(
   vkDestroyImageView(device, view, nullptr);
   vkDestroyImage(device, image, nullptr);
   vkFreeMemory(device, imageMemory, nullptr);
+  vkDestroyImageView(device, depthImageView, nullptr);
+  vkDestroyImage(device, depthImage, nullptr);
+  vkFreeMemory(device, depthMemory, nullptr);
   vkDestroyBuffer(device, buffer, nullptr);
   vkFreeMemory(device, bufferMemory, nullptr);
 
