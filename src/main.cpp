@@ -874,6 +874,11 @@ int main(int argc, char **argv) {
         (g_SwapChainRebuild || g_MainWindowData.Width != fb_width ||
          g_MainWindowData.Height != fb_height)) {
       ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
+      // ImGui's swapchain recreate destroys wd->RenderPass at its top. Since we
+      // point that at our shared g_DepthRenderPass, null it first so ImGui frees
+      // only its own (throwaway) pass and ours survives; SetupDepthBuffer
+      // reattaches it.
+      g_MainWindowData.RenderPass = VK_NULL_HANDLE;
       ImGui_ImplVulkanH_CreateOrResizeWindow(
           g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData,
           g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount);
