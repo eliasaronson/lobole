@@ -4,8 +4,6 @@
 
 #include <glm/glm.hpp>
 
-#include <cmath>
-
 #include "imgui.h"
 #include "imgui_internal.h" // DockBuilder API
 
@@ -42,19 +40,20 @@ void BeginDockspace(AppState& state) {
 
   // Dockspace filling the rest; passthru central node shows the 3D behind it.
   ImGuiID dockspaceId = ImGui::GetID("MainDockSpace");
-  const ImVec2 dockAvail = ImGui::GetContentRegionAvail();
   ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f),
                    ImGuiDockNodeFlags_PassthruCentralNode);
 
-  // Re-fit the root node to the current region whenever the window resizes, so
-  // the side panels track the window edges (e.g. going fullscreen) instead of
-  // keeping their old size and leaving a gap at the right/bottom. Children
-  // rescale proportionally.
-  if (!state.buildDefaultDockLayout && dockAvail.x > 1.0f && dockAvail.y > 1.0f &&
-      (std::abs(dockAvail.x - state.lastDockSize.x) > 0.5f ||
-       std::abs(dockAvail.y - state.lastDockSize.y) > 0.5f)) {
-    ImGui::DockBuilderSetNodeSize(dockspaceId, dockAvail);
-    state.lastDockSize = glm::vec2(dockAvail.x, dockAvail.y);
+  // Self-heal a missing or stale layout. If the dockspace root has no split
+  // children, the Model/Properties panels aren't docked into it (a fresh run,
+  // or a leftover imgui.ini from an older layout that left them floating). In
+  // that state the panels can't track the window edges, so rebuild the default
+  // layout. Once docked, the root has splits and this won't fire again. With
+  // the panels docked, ImGui keeps the side panels a fixed width against their
+  // edges and grows the central node on resize — no manual re-fit needed.
+  if (!state.buildDefaultDockLayout) {
+    ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspaceId);
+    if (root == nullptr || root->IsLeafNode())
+      state.buildDefaultDockLayout = true;
   }
 
   if (state.buildDefaultDockLayout) {
@@ -73,7 +72,6 @@ void BeginDockspace(AppState& state) {
     ImGui::DockBuilderDockWindow("Model", left);
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderFinish(dockspaceId);
-    state.lastDockSize = glm::vec2(avail.x, avail.y);
   }
 
   ImGui::End(); // host window
