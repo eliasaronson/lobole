@@ -1,0 +1,105 @@
+#pragma once
+
+#include "MeshRenderer.h" // Vertex3D
+
+#include <glm/glm.hpp>
+#include <vulkan/vulkan.h>
+
+#include <string>
+#include <vector>
+
+// Draws sketch geometry over the 3D scene: static sketch entity lines,
+// a per-frame rubber-band overlay, and translucent plane quads. Uses two
+// pipelines (LINE_LIST for lines, TRIANGLE_LIST for quads) sharing one
+// view/proj UBO; per-draw opacity rides in a push constant. Vertex data is
+// uploaded into per-frame host-visible buffers each frame, so updates never
+// race a frame already in flight.
+class SketchRenderer {
+public:
+  SketchRenderer() = default;
+  ~SketchRenderer() { Shutdown(); }
+
+  bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
+                  VkRenderPass renderPass, VkQueue graphicsQueue,
+                  uint32_t queueFamily, VkCommandPool commandPool);
+  void Shutdown();
+
+  // Sketch entity lines (line list: pairs of endpoints). Replaced on
+  // document change.
+  void SetStaticLines(std::vector<Vertex3D> lines) {
+    m_staticLines = std::move(lines);
+  }
+  // Rubber-band preview, replaced every frame while drawing.
+  void SetOverlayLines(std::vector<Vertex3D> lines) {
+    m_overlayLines = std::move(lines);
+  }
+  // Translucent default-plane quads (triangle list).
+  void SetQuads(std::vector<Vertex3D> quads) { m_quads = std::move(quads); }
+
+  void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) {
+    m_view = view;
+    m_proj = proj;
+  }
+  void SetViewportSize(uint32_t w, uint32_t h) {
+    m_viewportWidth = w;
+    m_viewportHeight = h;
+  }
+
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+  bool IsInitialized() const { return m_initialized; }
+
+private:
+  static constexpr int kFramesInFlight = 2;
+
+  struct DynamicBuffer {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    void* mapped = nullptr;
+    VkDeviceSize capacity = 0;
+  };
+
+  struct Ubo {
+    glm::mat4 view;
+    glm::mat4 proj;
+  };
+
+  bool CreatePipelines();
+  bool CreateDescriptors();
+  uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props);
+  VkShaderModule LoadShader(const std::string& spvName);
+  // Grows the buffer if needed and uploads verts; returns the vertex count.
+  uint32_t Upload(DynamicBuffer& buf, const std::vector<Vertex3D>& verts);
+  void DestroyDynamic(DynamicBuffer& buf);
+  void DrawBuffer(VkCommandBuffer cb, VkPipeline pipeline, DynamicBuffer& buf,
+                  uint32_t count, float alpha);
+
+  VkDevice m_device = VK_NULL_HANDLE;
+  VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+  VkRenderPass m_renderPass = VK_NULL_HANDLE;
+  VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+  uint32_t m_queueFamily = 0;
+  VkCommandPool m_commandPool = VK_NULL_HANDLE;
+
+  VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
+  VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
+  VkPipeline m_linePipeline = VK_NULL_HANDLE;
+  VkPipeline m_quadPipeline = VK_NULL_HANDLE;
+  VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+
+  DynamicBuffer m_uniformBuffers[kFramesInFlight];
+  VkDescriptorSet m_descriptorSets[kFramesInFlight] = {VK_NULL_HANDLE,
+                                                       VK_NULL_HANDLE};
+  DynamicBuffer m_lineBuffers[kFramesInFlight];
+  DynamicBuffer m_overlayBuffers[kFramesInFlight];
+  DynamicBuffer m_quadBuffers[kFramesInFlight];
+
+  std::vector<Vertex3D> m_staticLines;
+  std::vector<Vertex3D> m_overlayLines;
+  std::vector<Vertex3D> m_quads;
+
+  glm::mat4 m_view = glm::mat4(1.0f);
+  glm::mat4 m_proj = glm::mat4(1.0f);
+  uint32_t m_viewportWidth = 1280;
+  uint32_t m_viewportHeight = 720;
+  bool m_initialized = false;
+};

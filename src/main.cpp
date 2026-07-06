@@ -11,6 +11,7 @@
 #include "OutlineRenderer.h"
 #include "RayTracingRenderer.h"
 #include "Scene.h"
+#include "SketchRenderer.h"
 #include "SketchManager.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
@@ -55,6 +56,7 @@ static std::unique_ptr<Scene> g_Scene;
 static std::unique_ptr<Camera> g_Camera;
 static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
+static std::unique_ptr<SketchRenderer> g_SketchRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<SketchManager> g_SketchManager;
 static std::unique_ptr<FaceSelector> g_FaceSelector;
@@ -405,6 +407,9 @@ static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
   if (g_OutlineRenderer) {
     g_OutlineRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
+  if (g_SketchRenderer) {
+    g_SketchRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
+  }
 
   ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
@@ -664,6 +669,15 @@ int main(int argc, char **argv) {
               << std::endl;
   }
 
+  // Initialize SketchRenderer
+  g_SketchRenderer = std::make_unique<SketchRenderer>();
+  if (g_SketchRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
+                                   g_Queue, g_QueueFamily, g_CommandPool)) {
+    g_SketchRenderer->SetViewportSize(1280, 720);
+  } else {
+    std::cout << "Warning: SketchRenderer initialization failed" << std::endl;
+  }
+
   // Initialize RayTracingRenderer
   g_RayTracingRenderer = std::make_unique<RayTracingRenderer>();
   bool rtInitialized = g_RayTracingRenderer->Initialize(
@@ -679,6 +693,7 @@ int main(int argc, char **argv) {
   // Hand the UI layer its pointers now that everything exists
   g_App.meshRenderer = g_MeshRenderer.get();
   g_App.outlineRenderer = g_OutlineRenderer.get();
+  g_App.sketchRenderer = g_SketchRenderer.get();
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
 
@@ -740,6 +755,9 @@ int main(int argc, char **argv) {
       if (g_OutlineRenderer) {
         g_OutlineRenderer->SetViewportSize(fb_width, fb_height);
       }
+      if (g_SketchRenderer) {
+        g_SketchRenderer->SetViewportSize(fb_width, fb_height);
+      }
       if (g_Camera) {
         g_Camera->SetAspectRatio(static_cast<float>(fb_width) /
                                  static_cast<float>(fb_height));
@@ -785,6 +803,11 @@ int main(int argc, char **argv) {
                                       g_Camera->GetProjectionMatrix());
     }
 
+    if (g_SketchRenderer && g_Camera) {
+      g_SketchRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
+                                     g_Camera->GetProjectionMatrix());
+    }
+
     // Rendering
     ImGui::Render();
     ImDrawData *draw_data = ImGui::GetDrawData();
@@ -813,6 +836,8 @@ int main(int argc, char **argv) {
               if (g_MeshRenderer) g_MeshRenderer->Render(cb, wd->FrameIndex);
               if (g_OutlineRenderer)
                 g_OutlineRenderer->Render(cb, wd->FrameIndex);
+              if (g_SketchRenderer)
+                g_SketchRenderer->Render(cb, wd->FrameIndex);
               ImGui_ImplVulkan_RenderDrawData(draw_data, cb);
             },
             shotPath, &shotError);
@@ -846,6 +871,7 @@ int main(int argc, char **argv) {
   g_Scene.reset();
   g_Camera.reset();
   g_MeshRenderer.reset();
+  g_SketchRenderer.reset();
   g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
   g_SketchManager.reset();

@@ -1,6 +1,8 @@
 #include "ui/UI.h"
 
 #include "Camera.h"
+#include "SketchRenderer.h"
+#include "ui/AppActions.h"
 #include "ui/DockLayout.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h"
@@ -32,6 +34,12 @@ void DrawUI(AppState& state) {
   DrawFileBrowser(state);
 
   HandleViewportInput(state);
+
+  // Refresh sketch-plane quads for this frame (hover highlighting is added
+  // with the plane-picking interaction).
+  if (state.sketchRenderer) {
+    state.sketchRenderer->SetQuads(BuildPlaneQuads(state.showPlanes, -1));
+  }
 
   // Keep the camera's aspect ratio in sync with the framebuffer
   if (state.camera && state.window) {

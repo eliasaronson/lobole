@@ -16,6 +16,7 @@ class MeshRenderer;
 class OutlineRenderer;
 class RayTracingRenderer;
 class SketchManager;
+class SketchRenderer;
 class FaceSelector;
 struct GLFWwindow;
 
@@ -45,12 +46,14 @@ struct AppState {
   OutlineRenderer* outlineRenderer = nullptr;
   RayTracingRenderer* rayTracer = nullptr;
   SketchManager* sketchManager = nullptr;
+  SketchRenderer* sketchRenderer = nullptr;
   FaceSelector* faceSelector = nullptr;
   GLFWwindow* window = nullptr;
 
   // UI state
   int selectedFeature = -1;
   ViewportDrag viewportDrag = ViewportDrag::None;
+  bool showPlanes = true;
   bool buildDefaultDockLayout = false;
   bool runGuiTests = false;
   nlohmann::json editBaseline; // parameter-edit snapshot while a widget is active

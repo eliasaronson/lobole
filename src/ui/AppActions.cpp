@@ -6,12 +6,85 @@
 #include "Logger.h"
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
+#include "SketchRenderer.h"
 #include "core/Feature.h"
+#include "core/SketchFeature.h"
+#include "core/SketchProfile.h"
 
 #include <cfloat>
 #include <filesystem>
 
 namespace ui {
+
+namespace {
+
+// Sketch line color; the active sketch is drawn brighter.
+constexpr glm::vec3 kSketchColor{0.40f, 0.72f, 1.00f};
+constexpr glm::vec3 kActiveSketchColor{0.55f, 0.85f, 1.00f};
+
+Vertex3D LineVertex(const glm::vec3& pos, const glm::vec3& color) {
+  Vertex3D v;
+  v.position = pos;
+  v.normal = glm::vec3(0.0f);
+  v.color = color;
+  return v;
+}
+
+// Appends a sketch feature's entities as world-space line segments.
+void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
+                       std::vector<Vertex3D>& out) {
+  for (const auto& entity : sk.entities) {
+    // Points render as a small world-space cross
+    if (std::holds_alternative<sketch::Point>(entity)) {
+      glm::vec2 uv = std::get<sketch::Point>(entity).p;
+      glm::vec3 c = sk.plane.PlaneToWorld(uv);
+      glm::vec3 u = sk.plane.GetUAxis() * 0.05f;
+      glm::vec3 v = sk.plane.GetVAxis() * 0.05f;
+      out.push_back(LineVertex(c - u, color));
+      out.push_back(LineVertex(c + u, color));
+      out.push_back(LineVertex(c - v, color));
+      out.push_back(LineVertex(c + v, color));
+      continue;
+    }
+    std::vector<glm::vec2> poly = sketch::TessellateEntity(entity);
+    for (size_t i = 0; i + 1 < poly.size(); i++) {
+      out.push_back(LineVertex(sk.plane.PlaneToWorld(poly[i]), color));
+      out.push_back(LineVertex(sk.plane.PlaneToWorld(poly[i + 1]), color));
+    }
+  }
+}
+
+} // namespace
+
+// Builds translucent quads for the three default planes (Front/Top/Right),
+// tinted by axis; the hovered plane (0/1/2, -1 = none) is brighter.
+std::vector<Vertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
+  std::vector<Vertex3D> quads;
+  if (!show)
+    return quads;
+
+  const float s = 3.0f; // half-extent
+  struct PlaneDef {
+    glm::vec3 u, v;
+    glm::vec3 color;
+  };
+  const PlaneDef defs[3] = {
+      {{1, 0, 0}, {0, 1, 0}, {0.35f, 0.45f, 0.75f}}, // Front (XY)
+      {{1, 0, 0}, {0, 0, 1}, {0.40f, 0.65f, 0.45f}}, // Top (XZ)
+      {{0, 1, 0}, {0, 0, 1}, {0.70f, 0.40f, 0.42f}}, // Right (YZ)
+  };
+  for (int i = 0; i < 3; i++) {
+    glm::vec3 color = defs[i].color * (i == hoveredPlane ? 2.0f : 1.0f);
+    glm::vec3 a = -defs[i].u * s - defs[i].v * s;
+    glm::vec3 b = defs[i].u * s - defs[i].v * s;
+    glm::vec3 c = defs[i].u * s + defs[i].v * s;
+    glm::vec3 d = -defs[i].u * s + defs[i].v * s;
+    for (const glm::vec3& p : {a, b, c, a, c, d}) {
+      quads.push_back(LineVertex(p, color));
+    }
+  }
+  return quads;
+}
 
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.document = std::move(doc);
@@ -79,8 +152,33 @@ void SyncDocumentRenderers(AppState& state) {
                                   cadMesh.triangleFaces);
     state.documentMeshes.push_back({meshId, outlineId});
   }
+
+  // Rebuild static sketch line geometry (the active sketch is highlighted in
+  // the per-frame overlay pass; here everything uses the base color).
+  if (state.sketchRenderer) {
+    std::vector<Vertex3D> lines;
+    for (const auto& feature : state.document->GetFeatures()) {
+      if (auto* sk = dynamic_cast<const SketchFeature*>(feature.get())) {
+        AppendSketchLines(*sk, kSketchColor, lines);
+      }
+    }
+    state.sketchRenderer->SetStaticLines(std::move(lines));
+  }
+
   LOG_INFO("Document synced: {} features, {} bodies",
            state.document->FeatureCount(), state.document->GetBodies().size());
+}
+
+std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,
+                                               uint64_t activeSketchId) {
+  std::vector<Vertex3D> lines;
+  if (activeSketchId == 0 || !state.document)
+    return lines;
+  if (auto* sk = dynamic_cast<const SketchFeature*>(
+          state.document->FindFeatureById(activeSketchId))) {
+    AppendSketchLines(*sk, kActiveSketchColor, lines);
+  }
+  return lines;
 }
 
 void LoadSTEPFile(AppState& state, const std::string& filename) {
