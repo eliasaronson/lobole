@@ -243,7 +243,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       default:
         break;
       }
-      edit.hasPendingPoint = false;
+      // The line tool chains: the endpoint becomes the next segment's start so
+      // continuous polylines can be drawn without reselecting the tool. Escape
+      // or switching tools breaks the chain. Other tools finish after one span.
+      if (edit.tool == SketchTool::Line) {
+        edit.pendingPoint = uv;
+        edit.hasPendingPoint = true;
+      } else {
+        edit.hasPendingPoint = false;
+      }
     }
   }
   return true;

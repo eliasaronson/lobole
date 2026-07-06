@@ -39,8 +39,10 @@ void DrawSketchToolbar(AppState& state) {
     if (active)
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(label))
+    if (ImGui::Button(label)) {
       edit.tool = tool;
+      edit.hasPendingPoint = false; // break any in-progress line chain
+    }
     if (active)
       ImGui::PopStyleColor();
   };
