@@ -100,7 +100,7 @@ static uint64_t AddRectSketch(Document& doc, const glm::vec2& c1,
                               const glm::vec2& c2,
                               const SketchPlane& plane = kXY) {
   auto sk = std::make_unique<SketchFeature>("Sketch", plane);
-  sk->entities.push_back(sketch::Rectangle{c1, c2});
+  sk->AddEntity(sketch::Rectangle{c1, c2});
   doc.AddFeature(std::move(sk));
   return doc.GetFeature(doc.FeatureCount() - 1)->GetId();
 }

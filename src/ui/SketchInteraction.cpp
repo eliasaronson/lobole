@@ -45,7 +45,7 @@ std::optional<glm::vec2> RayToPlaneUV(const Ray& ray, const SketchPlane& plane) 
 void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
                   const sketch::Entity& entity) {
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
-  sketch.entities.push_back(entity);
+  sketch.AddEntity(entity); // stamps a stable id
   nlohmann::json after = DocumentIO::FeatureToJson(sketch);
   state.commands->Execute(
       std::make_unique<ModifyFeatureCommand>(index, before, after),
@@ -182,6 +182,31 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   edit.hoverPoint = uv;
 
   if (edit.tool == SketchTool::Select) {
+    // Delete removes the selected entities (and cleans up their constraints).
+    if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !edit.selected.empty()) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+      size_t dropped = 0;
+      std::vector<uint32_t> ids;
+      for (const auto& r : edit.selected)
+        ids.push_back(r.entity);
+      for (uint32_t id : ids)
+        dropped += sketch->DeleteEntity(id);
+      edit.selected.clear();
+      edit.dragging = false;
+      sketch::Solver solver;
+      solver.Load(*sketch);
+      if (solver.Solve().ok)
+        solver.WriteBack(sketch->entities);
+      state.document->Regenerate();
+      nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+      if (after != before)
+        state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                                    index, before, after),
+                                *state.document);
+      if (dropped > 0)
+        LOG_INFO("Deleted {} dependent constraint(s)", dropped);
+      return true;
+    }
     // Click selects an endpoint (for constraints) and begins a drag; empty
     // click clears the selection.
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -322,13 +347,14 @@ SketchPick PickSketchPoint(AppState& state, const SketchFeature& sketch,
   SketchPick best;
   float bestDist = tolPx;
   for (uint32_t i = 0; i < sketch.entities.size(); i++) {
+    const uint32_t id = sketch::EntityId(sketch.entities[i]);
     for (auto& [which, uv] : EntityPoints(sketch.entities[i])) {
       glm::vec2 screen = SketchUVToScreen(state, sketch.plane, uv);
       float d = glm::length(screen - mousePos);
       if (d < bestDist) {
         bestDist = d;
         best.hit = true;
-        best.ref = {i, which};
+        best.ref = {id, which};
       }
     }
   }
@@ -348,15 +374,23 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   c.kind = kind;
   c.value = value;
 
-  // Validate the selection for the constraint kind.
+  // Validate the selection for the constraint kind. Refs carry entity ids, so
+  // resolve to the current index first (skip if the entity is gone).
+  auto entityOf = [&](const sketch::PointRef& r) -> const sketch::Entity* {
+    size_t idx = sketch->IndexOfEntity(r.entity);
+    return idx == SIZE_MAX ? nullptr : &sketch->entities[idx];
+  };
   auto isLine = [&](const sketch::PointRef& r) {
-    return std::holds_alternative<sketch::Line>(sketch->entities[r.entity]);
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::Line>(*e);
   };
   auto isCircle = [&](const sketch::PointRef& r) {
-    return std::holds_alternative<sketch::Circle>(sketch->entities[r.entity]);
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::Circle>(*e);
   };
   auto isPoint = [&](const sketch::PointRef& r) {
-    return std::holds_alternative<sketch::Point>(sketch->entities[r.entity]);
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::Point>(*e);
   };
 
   switch (kind) {

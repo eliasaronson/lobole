@@ -6,8 +6,11 @@
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 
+#include <nlohmann/json.hpp>
+
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 using Catch::Matchers::WithinAbs;
 namespace fs = std::filesystem;
@@ -84,10 +87,10 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   SketchPlane plane(glm::vec3(1, 2, 3), glm::vec3(0, 1, 1),
                     glm::vec3(1, 0, 0));
   auto sk = std::make_unique<SketchFeature>("Sketch 1", plane);
-  sk->entities.push_back(sketch::Point{{1.0f, 2.0f}});
-  sk->entities.push_back(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
-  sk->entities.push_back(sketch::Circle{{2.0f, 1.0f}, 0.5});
-  sk->entities.push_back(sketch::Rectangle{{0.0f, 0.0f}, {4.0f, 2.0f}});
+  sk->AddEntity(sketch::Point{{1.0f, 2.0f}});
+  sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
+  sk->AddEntity(sketch::Circle{{2.0f, 1.0f}, 0.5});
+  sk->AddEntity(sketch::Rectangle{{0.0f, 0.0f}, {4.0f, 2.0f}});
   sk->SetId(7);
 
   auto j = DocumentIO::FeatureToJson(*sk);
@@ -117,22 +120,22 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
 
 TEST_CASE("Sketch constraints round-trip through JSON", "[sketch][serialization]") {
   auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
-  sk->entities.push_back(sketch::Line{{0, 0}, {4, 0}});
-  sk->entities.push_back(sketch::Circle{{2, 1}, 0.5});
+  uint32_t line0 = sk->AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  uint32_t circ0 = sk->AddEntity(sketch::Circle{{2, 1}, 0.5});
   sk->constraints.push_back(
-      {sketch::ConstraintKind::Horizontal, {0, 0}, {0, 0}, 0.0});
+      {sketch::ConstraintKind::Horizontal, {line0, 0}, {0, 0}, 0.0});
   sk->constraints.push_back(
-      {sketch::ConstraintKind::Distance, {0, 0}, {0, 1}, 4.0});
+      {sketch::ConstraintKind::Distance, {line0, 0}, {line0, 1}, 4.0});
   sk->constraints.push_back(
-      {sketch::ConstraintKind::Radius, {1, 0}, {0, 0}, 0.5});
-  sk->entities.push_back(sketch::Line{{0, 0}, {0, 3}});
-  sk->entities.push_back(sketch::Point{{1, 1}});
+      {sketch::ConstraintKind::Radius, {circ0, 0}, {0, 0}, 0.5});
+  uint32_t line1 = sk->AddEntity(sketch::Line{{0, 0}, {0, 3}});
+  uint32_t pt0 = sk->AddEntity(sketch::Point{{1, 1}});
   sk->constraints.push_back(
-      {sketch::ConstraintKind::Angle, {0, 0}, {2, 0}, glm::radians(90.0)});
+      {sketch::ConstraintKind::Angle, {line0, 0}, {line1, 0}, glm::radians(90.0)});
   sk->constraints.push_back(
-      {sketch::ConstraintKind::Tangent, {0, 0}, {1, 0}, 0.0});
+      {sketch::ConstraintKind::Tangent, {line0, 0}, {circ0, 0}, 0.0});
   sk->constraints.push_back(
-      {sketch::ConstraintKind::PointOnLine, {3, 0}, {0, 0}, 0.0});
+      {sketch::ConstraintKind::PointOnLine, {pt0, 0}, {line0, 0}, 0.0});
 
   auto j = DocumentIO::FeatureToJson(*sk);
   auto restored = DocumentIO::FeatureFromJson(j);
@@ -142,7 +145,7 @@ TEST_CASE("Sketch constraints round-trip through JSON", "[sketch][serialization]
   CHECK(rsk->constraints[0].kind == sketch::ConstraintKind::Horizontal);
   CHECK(rsk->constraints[1].kind == sketch::ConstraintKind::Distance);
   CHECK(rsk->constraints[1].value == 4.0);
-  CHECK(rsk->constraints[2].a.entity == 1u);
+  CHECK(rsk->constraints[2].a.entity == circ0);
   CHECK(rsk->constraints[3].kind == sketch::ConstraintKind::Angle);
   CHECK(rsk->constraints[4].kind == sketch::ConstraintKind::Tangent);
   CHECK(rsk->constraints[5].kind == sketch::ConstraintKind::PointOnLine);
@@ -151,4 +154,63 @@ TEST_CASE("Sketch constraints round-trip through JSON", "[sketch][serialization]
   CHECK(j["constraints"][4]["kind"] == "tangent");
   CHECK(j["constraints"][5]["kind"] == "point_on_line");
   CHECK(DocumentIO::FeatureToJson(*rsk) == j);
+}
+
+TEST_CASE("Pre-v4 sketch migrates entity indices to stable ids",
+          "[sketch][serialization]") {
+  // A v3 sketch: entities carry no "id", constraints reference entity indices.
+  nlohmann::json j = {
+      {"type", "Sketch"},
+      {"name", "Legacy"},
+      {"id", 5},
+      {"plane",
+       {{"origin", {0.0, 0.0, 0.0}},
+        {"normal", {0.0, 0.0, 1.0}},
+        {"uAxis", {1.0, 0.0, 0.0}}}},
+      {"entities",
+       {{{"type", "line"}, {"a", {0.0, 0.0}}, {"b", {4.0, 0.0}}},
+        {{"type", "circle"}, {"center", {2.0, 1.0}}, {"radius", 0.5}}}},
+      {"constraints",
+       {{{"kind", "horizontal"}, {"a", {0, 0}}, {"b", {0, 0}}, {"value", 0.0}},
+        {{"kind", "radius"}, {"a", {1, 0}}, {"b", {0, 0}}, {"value", 0.5}}}}};
+
+  auto restored = DocumentIO::FeatureFromJson(j);
+  auto* sk = dynamic_cast<SketchFeature*>(restored.get());
+  REQUIRE(sk != nullptr);
+  REQUIRE(sk->entities.size() == 2);
+  // Entities get ids 1..N in list order.
+  CHECK(sketch::EntityId(sk->entities[0]) == 1u);
+  CHECK(sketch::EntityId(sk->entities[1]) == 2u);
+  // Index refs shifted to the matching ids (index 0 -> id 1, index 1 -> id 2).
+  CHECK(sk->constraints[0].a.entity == 1u); // Horizontal on the line
+  CHECK(sk->constraints[1].a.entity == 2u); // Radius on the circle
+  CHECK(sk->nextEntityId == 3u);
+  // Re-saving now carries per-entity ids (v4 shape).
+  auto j2 = DocumentIO::FeatureToJson(*sk);
+  CHECK(j2["entities"][0]["id"] == 1u);
+  CHECK(j2["next_entity_id"] == 3u);
+}
+
+TEST_CASE("Entity ids stay stable across insert and delete",
+          "[sketch]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t a = sk.AddEntity(sketch::Line{{0, 0}, {1, 0}});
+  uint32_t b = sk.AddEntity(sketch::Line{{1, 0}, {1, 1}});
+  sk.constraints.push_back({sketch::ConstraintKind::Coincident, {a, 1}, {b, 0}});
+
+  // Inserting a new entity shifts indices but not ids.
+  uint32_t c = sk.AddEntity(sketch::Circle{{5, 5}, 1.0});
+  CHECK(a == 1u);
+  CHECK(b == 2u);
+  CHECK(c == 3u);
+  CHECK(sk.IndexOfEntity(a) == 0u);
+  CHECK(sk.IndexOfEntity(b) == 1u);
+  // The A–B constraint still resolves after the insert.
+  CHECK(sk.constraints[0].a.entity == a);
+
+  // Deleting A shifts B down an index, but B's id is unchanged and resolvable.
+  sk.DeleteEntity(a);
+  CHECK(sk.IndexOfEntity(a) == std::numeric_limits<size_t>::max());
+  CHECK(sk.IndexOfEntity(b) == 0u);
+  CHECK(sketch::EntityId(sk.entities[0]) == b);
 }

@@ -327,7 +327,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sketch != nullptr);
     nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-    sketch->entities.push_back(sketch::Rectangle{{0, 0}, {4, 2}});
+    sketch->AddEntity(sketch::Rectangle{{0, 0}, {4, 2}});
     nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
@@ -427,15 +427,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Inject two lines with near-but-not-equal shared endpoints
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-    sk->entities.push_back(sketch::Line{{0, 0}, {4, 0}});
-    sk->entities.push_back(sketch::Line{{4.2f, 0.3f}, {4, 3}});
+    uint32_t l0 = sk->AddEntity(sketch::Line{{0, 0}, {4, 0}});
+    uint32_t l1 = sk->AddEntity(sketch::Line{{4.2f, 0.3f}, {4, 3}});
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield();
 
     // Select line1.a and line0.b, apply Coincident
-    s_App->sketchEdit.selected = {{1, 0}, {0, 1}};
+    s_App->sketchEdit.selected = {{l1, 0}, {l0, 1}};
     bool ok = ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Coincident, 0.0);
     IM_CHECK(ok);
     ctx->Yield();
@@ -463,13 +463,13 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
 
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-    sk->entities.push_back(sketch::Line{{0, 0}, {4, 1.5f}});
+    uint32_t l0 = sk->AddEntity(sketch::Line{{0, 0}, {4, 1.5f}});
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield();
 
-    s_App->sketchEdit.selected = {{0, 0}};
+    s_App->sketchEdit.selected = {{l0, 0}};
     IM_CHECK(ui::ApplySketchConstraint(*s_App,
                                        sketch::ConstraintKind::Horizontal, 0.0));
     ctx->Yield();

@@ -121,12 +121,22 @@ def main():
                       "uAxis": [1, 0, 0]},
             "entities": [{"type": "line", "a": [-2, -1], "b": [2, -1]},
                          {"type": "line", "a": [2.3, -0.7], "b": [2, 2]}]})
+        eid = sk["entity_ids"]  # stable ids the server assigned
+        expect(len(eid) == 2 and all(i > 0 for i in eid),
+               "add_feature returns entity ids")
         d.call("add_constraint", sketch_id=sk["id"], kind="coincident",
-               refs=[[1, 0], [0, 1]])
+               refs=[[eid[1], 0], [eid[0], 1]])
         ents = d.call("get_state")["features"][0]["entities"]
         dx = ents[0]["b"][0] - ents[1]["a"][0]
         dy = ents[0]["b"][1] - ents[1]["a"][1]
         expect(abs(dx) < 1e-3 and abs(dy) < 1e-3, "coincident solved")
+
+        # Deleting an entity removes it and its dependent constraint
+        dr = d.call("delete_entity", sketch_id=sk["id"], entity_id=eid[1])
+        ents2 = d.call("get_state")["features"][0]["entities"]
+        expect(len(ents2) == 1 and ents2[0]["id"] == eid[0],
+               "delete_entity removed the second line, kept the first")
+        expect(dr["dropped_constraints"] == 0, "coincident is a trivial drop")
 
         # Angle constraint over the wire: two lines forced to 45 degrees
         d.call("new_project")
@@ -136,10 +146,11 @@ def main():
                       "uAxis": [1, 0, 0]},
             "entities": [{"type": "line", "a": [0, 0], "b": [4, 0]},
                          {"type": "line", "a": [0, 0], "b": [3.5, 2.0]}]})
+        aid = ska["entity_ids"]
         d.call("add_constraint", sketch_id=ska["id"], kind="coincident",
-               refs=[[1, 0], [0, 0]])
+               refs=[[aid[1], 0], [aid[0], 0]])
         d.call("add_constraint", sketch_id=ska["id"], kind="angle",
-               refs=[[0, 0], [1, 0]], value=0.7853981634)
+               refs=[[aid[0], 0], [aid[1], 0]], value=0.7853981634)
         ea = d.call("get_state")["features"][0]["entities"]
         d0 = [ea[0]["b"][0] - ea[0]["a"][0], ea[0]["b"][1] - ea[0]["a"][1]]
         d1 = [ea[1]["b"][0] - ea[1]["a"][0], ea[1]["b"][1] - ea[1]["a"][1]]

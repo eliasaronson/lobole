@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <fstream>
 
 using nlohmann::json;
@@ -14,7 +15,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 3; // v3: sketch constraints
+constexpr int kVersion = 4; // v4: stable sketch entity ids
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -30,7 +31,7 @@ glm::vec2 Vec2FromJson(const json& j) {
 }
 
 json EntityToJson(const sketch::Entity& entity) {
-  return std::visit(
+  json j = std::visit(
       [](const auto& e) -> json {
         using T = std::decay_t<decltype(e)>;
         if constexpr (std::is_same_v<T, sketch::Point>) {
@@ -47,19 +48,28 @@ json EntityToJson(const sketch::Entity& entity) {
         }
       },
       entity);
+  j["id"] = sketch::EntityId(entity);
+  return j;
 }
 
 sketch::Entity EntityFromJson(const json& j) {
   const std::string type = j.at("type").get<std::string>();
-  if (type == "point") return sketch::Point{Vec2FromJson(j.at("p"))};
-  if (type == "line")
-    return sketch::Line{Vec2FromJson(j.at("a")), Vec2FromJson(j.at("b"))};
-  if (type == "circle")
-    return sketch::Circle{Vec2FromJson(j.at("center")),
-                          j.at("radius").get<double>()};
-  if (type == "rect")
-    return sketch::Rectangle{Vec2FromJson(j.at("c1")), Vec2FromJson(j.at("c2"))};
-  throw std::runtime_error("Unknown sketch entity type: " + type);
+  // Pre-v4 files have no "id"; leave it 0 so Load can detect and migrate.
+  const uint32_t id = j.value("id", uint32_t{0});
+  sketch::Entity e;
+  if (type == "point") {
+    e = sketch::Point{Vec2FromJson(j.at("p"))};
+  } else if (type == "line") {
+    e = sketch::Line{Vec2FromJson(j.at("a")), Vec2FromJson(j.at("b"))};
+  } else if (type == "circle") {
+    e = sketch::Circle{Vec2FromJson(j.at("center")), j.at("radius").get<double>()};
+  } else if (type == "rect") {
+    e = sketch::Rectangle{Vec2FromJson(j.at("c1")), Vec2FromJson(j.at("c2"))};
+  } else {
+    throw std::runtime_error("Unknown sketch entity type: " + type);
+  }
+  sketch::SetEntityId(e, id);
+  return e;
 }
 
 const char* ConstraintKindToString(sketch::ConstraintKind k) {
@@ -144,6 +154,7 @@ json FeatureToJson(const Feature& feature) {
     j["plane"] = {{"origin", Vec3ToJson(sk->plane.GetOrigin())},
                   {"normal", Vec3ToJson(sk->plane.GetNormal())},
                   {"uAxis", Vec3ToJson(sk->plane.GetUAxis())}};
+    j["next_entity_id"] = sk->nextEntityId;
     j["entities"] = json::array();
     for (const auto& entity : sk->entities) {
       j["entities"].push_back(EntityToJson(entity));
@@ -195,6 +206,27 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     for (const auto& cj : j.value("constraints", json::array())) {
       sk->constraints.push_back(ConstraintFromJson(cj));
+    }
+    // Migration: pre-v4 sketches carry no per-entity id (all 0) and their
+    // constraints reference entity *indices*. Stamp stable ids in list order
+    // and shift every index ref to the matching id (index i -> id i+1). Unused
+    // refs (default {0,0}) become {1,0} but are never read for their kind.
+    const bool legacy =
+        !sk->entities.empty() && sketch::EntityId(sk->entities[0]) == 0;
+    if (legacy) {
+      for (size_t i = 0; i < sk->entities.size(); i++)
+        sketch::SetEntityId(sk->entities[i], static_cast<uint32_t>(i + 1));
+      for (auto& c : sk->constraints) {
+        c.a.entity += 1;
+        c.b.entity += 1;
+      }
+      sk->nextEntityId = static_cast<uint32_t>(sk->entities.size() + 1);
+    } else {
+      uint32_t maxId = 0;
+      for (const auto& e : sk->entities)
+        maxId = std::max(maxId, sketch::EntityId(e));
+      sk->nextEntityId = std::max<uint32_t>(
+          {sk->nextEntityId, maxId + 1, j.value("next_entity_id", uint32_t{0})});
     }
     out = std::move(sk);
   } else if (type == "Extrude") {

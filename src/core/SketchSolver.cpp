@@ -29,10 +29,11 @@ struct Solver::Impl {
   std::vector<GCS::Line> lines;      // index-aligned with line entities
   std::map<uint32_t, int> lineOf;    // entity index -> lines index
   std::vector<GCS::Circle> circles;
-  std::map<uint32_t, int> circleOf;  // entity index -> circles index
+  std::map<uint32_t, int> circleOf;  // entity id -> circles index
 
   // Loaded sketch shape for write-back
   std::vector<Entity> entityShapes;
+  std::map<uint32_t, int> shapeIndexOf; // entity id -> index in entityShapes
 
   int dragTag = 0;
   std::deque<double> dragTarget; // 2 slots when dragging
@@ -79,23 +80,27 @@ void Solver::Load(const SketchFeature& sketch) {
     return gp;
   };
 
+  // All solver maps are keyed by the entity's stable id, not its list index,
+  // so constraint refs (which carry ids) resolve directly.
   for (uint32_t i = 0; i < sketch.entities.size(); i++) {
     const Entity& e = sketch.entities[i];
+    const uint32_t id = EntityId(e);
+    im.shapeIndexOf[id] = static_cast<int>(i);
     if (auto* pt = std::get_if<Point>(&e)) {
-      addPoint(i, 0, pt->p);
+      addPoint(id, 0, pt->p);
     } else if (auto* ln = std::get_if<Line>(&e)) {
       GCS::Line gl;
-      gl.p1 = addPoint(i, 0, ln->a);
-      gl.p2 = addPoint(i, 1, ln->b);
+      gl.p1 = addPoint(id, 0, ln->a);
+      gl.p2 = addPoint(id, 1, ln->b);
       im.lines.push_back(gl);
-      im.lineOf[i] = static_cast<int>(im.lines.size() - 1);
+      im.lineOf[id] = static_cast<int>(im.lines.size() - 1);
     } else if (auto* c = std::get_if<Circle>(&e)) {
       GCS::Circle gc;
-      gc.center = addPoint(i, 0, c->center);
+      gc.center = addPoint(id, 0, c->center);
       im.radii.push_back(c->radius);
       gc.rad = &im.radii.back();
       im.circles.push_back(gc);
-      im.circleOf[i] = static_cast<int>(im.circles.size() - 1);
+      im.circleOf[id] = static_cast<int>(im.circles.size() - 1);
     }
     // Rectangle: rigid in v1, not added to the solver.
   }
@@ -163,8 +168,10 @@ void Solver::Load(const SketchFeature& sketch) {
         // The vendored PlaneGCS tangent is a *signed* point-to-line distance,
         // so pick the side the circle is already on and keep it there rather
         // than let the solve flip it across the line.
-        const auto& ln = std::get<Line>(im.entityShapes[con.a.entity]);
-        const auto& circ = std::get<Circle>(im.entityShapes[con.b.entity]);
+        const auto& ln =
+            std::get<Line>(im.entityShapes[im.shapeIndexOf[con.a.entity]]);
+        const auto& circ =
+            std::get<Circle>(im.entityShapes[im.shapeIndexOf[con.b.entity]]);
         glm::vec2 d = ln.b - ln.a;
         glm::vec2 r = circ.center - ln.a;
         bool ccw = (d.x * r.y - d.y * r.x) > 0.0f;
@@ -232,8 +239,9 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
   entities = im.entityShapes;
   for (uint32_t i = 0; i < entities.size(); i++) {
     Entity& e = entities[i];
+    const uint32_t id = EntityId(e);
     auto pointAt = [&](uint8_t which) -> glm::vec2 {
-      auto it = im.pointIndex.find(Impl::Key(i, which));
+      auto it = im.pointIndex.find(Impl::Key(id, which));
       const GCS::Point& gp = im.gcsPoints[it->second];
       return glm::vec2(*gp.x, *gp.y);
     };
@@ -245,7 +253,7 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
     } else if (std::holds_alternative<Circle>(e)) {
       auto& c = std::get<Circle>(e);
       c.center = pointAt(0);
-      c.radius = *im.circles[im.circleOf.at(i)].rad;
+      c.radius = *im.circles[im.circleOf.at(id)].rad;
     }
   }
 }

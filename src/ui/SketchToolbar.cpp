@@ -60,14 +60,21 @@ void DrawSketchToolbar(AppState& state) {
   ImGui::SeparatorText("Constraints");
   const auto& sel = edit.selected;
   using K = sketch::ConstraintKind;
+  auto entityOf = [&](const sketch::PointRef& r) -> const sketch::Entity* {
+    size_t idx = sketch->IndexOfEntity(r.entity);
+    return idx == SIZE_MAX ? nullptr : &sketch->entities[idx];
+  };
   auto isLine = [&](const sketch::PointRef& r) {
-    return std::holds_alternative<sketch::Line>(sketch->entities[r.entity]);
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::Line>(*e);
   };
   auto isCircle = [&](const sketch::PointRef& r) {
-    return std::holds_alternative<sketch::Circle>(sketch->entities[r.entity]);
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::Circle>(*e);
   };
   auto isPoint = [&](const sketch::PointRef& r) {
-    return std::holds_alternative<sketch::Point>(sketch->entities[r.entity]);
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::Point>(*e);
   };
   auto conButton = [&](const char* label, const char* tip, bool enabled,
                        K kind, double value = 0.0) {

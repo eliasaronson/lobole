@@ -292,10 +292,11 @@ std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,
   // will apply to.
   const glm::vec3 selColor(1.0f, 0.85f, 0.3f);
   for (const auto& ref : state.sketchEdit.selected) {
-    if (ref.entity >= sk->entities.size())
+    size_t idx = sk->IndexOfEntity(ref.entity);
+    if (idx == SIZE_MAX)
       continue;
     glm::vec2 uv;
-    const auto& e = sk->entities[ref.entity];
+    const auto& e = sk->entities[idx];
     if (auto* p = std::get_if<sketch::Point>(&e)) uv = p->p;
     else if (auto* l = std::get_if<sketch::Line>(&e)) uv = ref.which ? l->b : l->a;
     else if (auto* c = std::get_if<sketch::Circle>(&e)) uv = c->center;

@@ -9,27 +9,42 @@
 
 namespace sketch {
 
-// Sketch entities live in the plane's UV space.
+// Sketch entities live in the plane's UV space. Each carries a stable `id`
+// (1-based; 0 means unassigned) so constraints survive insert/delete — see
+// PointRef below.
 struct Point {
   glm::vec2 p;
+  uint32_t id = 0;
 };
 struct Line {
   glm::vec2 a, b;
+  uint32_t id = 0;
 };
 struct Circle {
   glm::vec2 center;
   double radius;
+  uint32_t id = 0;
 };
 struct Rectangle {
   glm::vec2 c1, c2;
+  uint32_t id = 0;
 };
 
 using Entity = std::variant<Point, Line, Circle, Rectangle>;
 
-// A reference to a point on an entity (by index into the sketch's entity
-// list). `which` selects which point: 0 = a/center/c1, 1 = b/c2. For
-// whole-entity constraints (Horizontal on a line, Radius on a circle),
-// `which` is ignored and `a.entity` names the entity.
+// The stable id of an entity, regardless of which variant alternative it holds.
+inline uint32_t EntityId(const Entity& e) {
+  return std::visit([](const auto& g) { return g.id; }, e);
+}
+inline void SetEntityId(Entity& e, uint32_t id) {
+  std::visit([id](auto& g) { g.id = id; }, e);
+}
+
+// A reference to a point on an entity. `entity` is the entity's stable **id**
+// (not its index in the list — that shifts on insert/delete). `which` selects
+// which point: 0 = a/center/c1, 1 = b/c2. For whole-entity constraints
+// (Horizontal on a line, Radius on a circle), `which` is ignored and
+// `a.entity` names the entity.
 struct PointRef {
   uint32_t entity = 0;
   uint8_t which = 0;
@@ -72,7 +87,20 @@ public:
   std::string TypeName() const override { return "Sketch"; }
   bool Execute(RegenContext&) override { return true; }
 
+  // Appends `e` with a freshly stamped stable id and returns that id.
+  uint32_t AddEntity(sketch::Entity e);
+  // Index of the entity with the given id, or SIZE_MAX if none. Linear scan —
+  // sketches hold few entities, and this avoids a desync-prone cached map.
+  size_t IndexOfEntity(uint32_t id) const;
+  // Removes the entity with `id` and cleans up dependent constraints
+  // (transfer to a coincident survivor, transitive coincidence repair, orphan
+  // sweep). Returns the number of *non-trivial* constraints dropped (i.e. not
+  // Coincident/Horizontal/Vertical), for a user-facing warning; the entity is
+  // still removed. Returns 0 and does nothing if `id` is unknown.
+  size_t DeleteEntity(uint32_t id);
+
   SketchPlane plane;
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;
+  uint32_t nextEntityId = 1; // next stable id to hand out (1-based; 0 = none)
 };

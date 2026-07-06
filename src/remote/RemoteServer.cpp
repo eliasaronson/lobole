@@ -267,7 +267,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const size_t index = doc->FeatureCount() - 1;
     // Return the id the document actually assigned, so callers reference it
     // (a downstream extrude names its sketch by id) without guessing.
-    return {{"index", index}, {"id", doc->GetFeature(index)->GetId()}};
+    json resp = {{"index", index}, {"id", doc->GetFeature(index)->GetId()}};
+    // For sketches, also return the stable entity ids assigned on load (clients
+    // send entities without ids and reference these in add_constraint).
+    if (auto* sk = dynamic_cast<const SketchFeature*>(doc->GetFeature(index))) {
+      json ids = json::array();
+      for (const auto& e : sk->entities)
+        ids.push_back(sketch::EntityId(e));
+      resp["entity_ids"] = ids;
+    }
+    return resp;
   }
   if (m == "modify_feature") {
     const size_t index = p.at("index").get<size_t>();
@@ -331,6 +340,25 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json::object();
+  }
+  if (m == "delete_entity") {
+    // Remove a sketch entity by id, cleaning up dependent constraints; commit
+    // one undoable edit. params: {sketch_id, entity_id}
+    size_t index = 0;
+    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    auto* sk = dynamic_cast<SketchFeature*>(f);
+    if (!sk) throw std::runtime_error("no such sketch");
+    json before = DocumentIO::FeatureToJson(*sk);
+    const size_t dropped = sk->DeleteEntity(p.at("entity_id").get<uint32_t>());
+    sketch::Solver solver;
+    solver.Load(*sk);
+    if (solver.Solve().ok)
+      solver.WriteBack(sk->entities);
+    doc->Regenerate();
+    json after = DocumentIO::FeatureToJson(*sk);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    return {{"dropped_constraints", dropped}};
   }
   if (m == "undo") {
     state.commands->Undo(*doc);

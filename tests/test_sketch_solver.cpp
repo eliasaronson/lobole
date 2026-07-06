@@ -26,10 +26,10 @@ static glm::vec2 LineB(const sketch::Entity& e) {
 
 TEST_CASE("Coincident merges two endpoints", "[solver]") {
   SketchFeature s = MakeSketch();
-  s.entities.push_back(sketch::Line{{0, 0}, {4, 0}});
-  s.entities.push_back(sketch::Line{{4.1f, 0.2f}, {4, 3}}); // starts near L0.b
-  // Coincident: L1.a (entity 1, which 0) == L0.b (entity 0, which 1)
-  s.constraints.push_back({sketch::ConstraintKind::Coincident, {1, 0}, {0, 1}});
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  uint32_t l1 = s.AddEntity(sketch::Line{{4.1f, 0.2f}, {4, 3}}); // near L0.b
+  // Coincident: L1.a (which 0) == L0.b (which 1)
+  s.constraints.push_back({sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 1}});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -45,8 +45,8 @@ TEST_CASE("Coincident merges two endpoints", "[solver]") {
 
 TEST_CASE("Horizontal levels a line's endpoints", "[solver]") {
   SketchFeature s = MakeSketch();
-  s.entities.push_back(sketch::Line{{0, 0}, {4, 1.5f}});
-  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {0, 0}, {0, 0}});
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 1.5f}});
+  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -59,9 +59,10 @@ TEST_CASE("Horizontal levels a line's endpoints", "[solver]") {
 
 TEST_CASE("Distance constraint sets endpoint separation", "[solver]") {
   SketchFeature s = MakeSketch();
-  s.entities.push_back(sketch::Line{{0, 0}, {3, 0}});
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {3, 0}});
   // Pin start, and constrain length to 5
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {0, 0}, {0, 1}, 5.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -75,8 +76,8 @@ TEST_CASE("Distance constraint sets endpoint separation", "[solver]") {
 
 TEST_CASE("Radius constraint sets a circle radius", "[solver]") {
   SketchFeature s = MakeSketch();
-  s.entities.push_back(sketch::Circle{{0, 0}, 1.0});
-  s.constraints.push_back({sketch::ConstraintKind::Radius, {0, 0}, {0, 0}, 2.5});
+  uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 1.0});
+  s.constraints.push_back({sketch::ConstraintKind::Radius, {c0, 0}, {0, 0}, 2.5});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -90,12 +91,12 @@ TEST_CASE("Radius constraint sets a circle radius", "[solver]") {
 TEST_CASE("Angle constraint sets the angle between two lines", "[solver]") {
   SketchFeature s = MakeSketch();
   // L0 along +x (pinned-ish); L1 shares the origin at a shallow angle.
-  s.entities.push_back(sketch::Line{{0, 0}, {4, 0}});
-  s.entities.push_back(sketch::Line{{0, 0}, {3.5f, 2.0f}}); // ~30 deg
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  uint32_t l1 = s.AddEntity(sketch::Line{{0, 0}, {3.5f, 2.0f}}); // ~30 deg
   // L1.a coincident to L0.a so the vertex stays put.
-  s.constraints.push_back({sketch::ConstraintKind::Coincident, {1, 0}, {0, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 0}});
   s.constraints.push_back(
-      {sketch::ConstraintKind::Angle, {0, 0}, {1, 0}, glm::radians(45.0)});
+      {sketch::ConstraintKind::Angle, {l0, 0}, {l1, 0}, glm::radians(45.0)});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -112,9 +113,9 @@ TEST_CASE("Angle constraint sets the angle between two lines", "[solver]") {
 
 TEST_CASE("Tangent keeps the circle on its side of the line", "[solver]") {
   SketchFeature s = MakeSketch();
-  s.entities.push_back(sketch::Line{{0, 0}, {4, 0}}); // along +x, y=0
-  s.entities.push_back(sketch::Circle{{2, 3}, 1.0});  // above the line
-  s.constraints.push_back({sketch::ConstraintKind::Tangent, {0, 0}, {1, 0}});
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}}); // along +x, y=0
+  uint32_t c0 = s.AddEntity(sketch::Circle{{2, 3}, 1.0});  // above the line
+  s.constraints.push_back({sketch::ConstraintKind::Tangent, {l0, 0}, {c0, 0}});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -135,10 +136,10 @@ TEST_CASE("Tangent keeps the circle on its side of the line", "[solver]") {
 
 TEST_CASE("PointOnLine pulls a point onto a line", "[solver]") {
   SketchFeature s = MakeSketch();
-  s.entities.push_back(sketch::Line{{0, 0}, {4, 0}}); // along +x
-  s.entities.push_back(sketch::Point{{2, 2}});        // off the line
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}}); // along +x
+  uint32_t p0 = s.AddEntity(sketch::Point{{2, 2}});        // off the line
   s.constraints.push_back(
-      {sketch::ConstraintKind::PointOnLine, {1, 0}, {0, 0}});
+      {sketch::ConstraintKind::PointOnLine, {p0, 0}, {l0, 0}});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -155,12 +156,70 @@ TEST_CASE("PointOnLine pulls a point onto a line", "[solver]") {
   CHECK_THAT(ab.x * ap.y - ab.y * ap.x, WithinAbs(0.0f, 1e-4f));
 }
 
+TEST_CASE("Deleting a line keeps a coincident neighbour's constraints",
+          "[solver][delete]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  uint32_t l1 = s.AddEntity(sketch::Line{{4, 0}, {4, 3}});
+  s.constraints.push_back({sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 1}});
+  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+
+  // Deleting l1 only drops the (trivial) coincident — no warning-worthy loss.
+  size_t dropped = s.DeleteEntity(l1);
+  CHECK(dropped == 0);
+  REQUIRE(s.entities.size() == 1);
+  REQUIRE(s.constraints.size() == 1); // Horizontal on l0 survives
+  CHECK(s.constraints[0].kind == sketch::ConstraintKind::Horizontal);
+  CHECK(sketch::EntityId(s.entities[0]) == l0);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  CHECK(solver.Solve().ok);
+}
+
+TEST_CASE("Deleting a dimensioned entity counts the dropped constraint",
+          "[solver][delete]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
+  size_t dropped = s.DeleteEntity(l0);
+  CHECK(dropped == 1); // Distance is non-trivial
+  CHECK(s.entities.empty());
+  CHECK(s.constraints.empty());
+}
+
+TEST_CASE("Transitive coincidence survives deleting the middle point",
+          "[solver][delete]") {
+  SketchFeature s = MakeSketch();
+  uint32_t p0 = s.AddEntity(sketch::Point{{0, 0}});
+  uint32_t pMid = s.AddEntity(sketch::Point{{5, 5}});
+  uint32_t p2 = s.AddEntity(sketch::Point{{10, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Coincident, {p0, 0}, {pMid, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Coincident, {pMid, 0}, {p2, 0}});
+
+  // Deleting the middle point should re-link p0~p2 so they stay merged.
+  s.DeleteEntity(pMid);
+  REQUIRE(s.entities.size() == 2);
+  REQUIRE(s.constraints.size() == 1);
+  CHECK(s.constraints[0].kind == sketch::ConstraintKind::Coincident);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 a = std::get<sketch::Point>(out[0]).p;
+  glm::vec2 b = std::get<sketch::Point>(out[1]).p;
+  CHECK_THAT(glm::length(a - b), WithinAbs(0.0f, 1e-5f));
+}
+
 TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   SketchFeature s = MakeSketch();
-  s.entities.push_back(sketch::Line{{0, 0}, {4, 0}});
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
   // Two conflicting distances on the same points
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {0, 0}, {0, 1}, 5.0});
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {0, 0}, {0, 1}, 3.0});
+  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
+  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -172,7 +231,7 @@ TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
 TEST_CASE("A constrained rectangle profile still extrudes", "[solver][extrude]") {
   // Rectangles are rigid (unsolved) but must still form a profile.
   SketchFeature s = MakeSketch();
-  s.entities.push_back(sketch::Rectangle{{0, 0}, {4, 2}});
+  s.AddEntity(sketch::Rectangle{{0, 0}, {4, 2}});
 
   sketch::Solver solver;
   solver.Load(s);
