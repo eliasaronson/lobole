@@ -87,6 +87,74 @@ TEST_CASE("Radius constraint sets a circle radius", "[solver]") {
   CHECK_THAT(std::get<sketch::Circle>(out[0]).radius, WithinRel(2.5, 1e-4));
 }
 
+TEST_CASE("Angle constraint sets the angle between two lines", "[solver]") {
+  SketchFeature s = MakeSketch();
+  // L0 along +x (pinned-ish); L1 shares the origin at a shallow angle.
+  s.entities.push_back(sketch::Line{{0, 0}, {4, 0}});
+  s.entities.push_back(sketch::Line{{0, 0}, {3.5f, 2.0f}}); // ~30 deg
+  // L1.a coincident to L0.a so the vertex stays put.
+  s.constraints.push_back({sketch::ConstraintKind::Coincident, {1, 0}, {0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Angle, {0, 0}, {1, 0}, glm::radians(45.0)});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 d0 = glm::normalize(LineB(out[0]) - LineA(out[0]));
+  glm::vec2 d1 = glm::normalize(LineB(out[1]) - LineA(out[1]));
+  // L2LAngle is measured from l0's direction to l1's; signed via cross.
+  double ang = std::atan2(d0.x * d1.y - d0.y * d1.x, glm::dot(d0, d1));
+  CHECK_THAT(std::abs(ang), WithinAbs(glm::radians(45.0), 1e-4));
+}
+
+TEST_CASE("Tangent keeps the circle on its side of the line", "[solver]") {
+  SketchFeature s = MakeSketch();
+  s.entities.push_back(sketch::Line{{0, 0}, {4, 0}}); // along +x, y=0
+  s.entities.push_back(sketch::Circle{{2, 3}, 1.0});  // above the line
+  s.constraints.push_back({sketch::ConstraintKind::Tangent, {0, 0}, {1, 0}});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  auto& circ = std::get<sketch::Circle>(out[1]);
+  glm::vec2 a = LineA(out[0]);
+  glm::vec2 b = LineB(out[0]);
+  // Distance from center to the (infinite) line ~= radius.
+  glm::vec2 d = glm::normalize(b - a);
+  glm::vec2 n{-d.y, d.x};
+  double dist = std::abs(glm::dot(circ.center - a, n));
+  CHECK_THAT(dist, WithinRel(circ.radius, 1e-4));
+  CHECK(circ.center.y > 0.0f); // still above the line, not flipped through it
+}
+
+TEST_CASE("PointOnLine pulls a point onto a line", "[solver]") {
+  SketchFeature s = MakeSketch();
+  s.entities.push_back(sketch::Line{{0, 0}, {4, 0}}); // along +x
+  s.entities.push_back(sketch::Point{{2, 2}});        // off the line
+  s.constraints.push_back(
+      {sketch::ConstraintKind::PointOnLine, {1, 0}, {0, 0}});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 a = LineA(out[0]);
+  glm::vec2 b = LineB(out[0]);
+  glm::vec2 p = std::get<sketch::Point>(out[1]).p;
+  // Colinear: cross of (b-a, p-a) ~= 0.
+  glm::vec2 ab = b - a;
+  glm::vec2 ap = p - a;
+  CHECK_THAT(ab.x * ap.y - ab.y * ap.x, WithinAbs(0.0f, 1e-4f));
+}
+
 TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   SketchFeature s = MakeSketch();
   s.entities.push_back(sketch::Line{{0, 0}, {4, 0}});

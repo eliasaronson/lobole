@@ -125,15 +125,30 @@ TEST_CASE("Sketch constraints round-trip through JSON", "[sketch][serialization]
       {sketch::ConstraintKind::Distance, {0, 0}, {0, 1}, 4.0});
   sk->constraints.push_back(
       {sketch::ConstraintKind::Radius, {1, 0}, {0, 0}, 0.5});
+  sk->entities.push_back(sketch::Line{{0, 0}, {0, 3}});
+  sk->entities.push_back(sketch::Point{{1, 1}});
+  sk->constraints.push_back(
+      {sketch::ConstraintKind::Angle, {0, 0}, {2, 0}, glm::radians(90.0)});
+  sk->constraints.push_back(
+      {sketch::ConstraintKind::Tangent, {0, 0}, {1, 0}, 0.0});
+  sk->constraints.push_back(
+      {sketch::ConstraintKind::PointOnLine, {3, 0}, {0, 0}, 0.0});
 
   auto j = DocumentIO::FeatureToJson(*sk);
   auto restored = DocumentIO::FeatureFromJson(j);
   auto* rsk = dynamic_cast<SketchFeature*>(restored.get());
   REQUIRE(rsk != nullptr);
-  REQUIRE(rsk->constraints.size() == 3);
+  REQUIRE(rsk->constraints.size() == 6);
   CHECK(rsk->constraints[0].kind == sketch::ConstraintKind::Horizontal);
   CHECK(rsk->constraints[1].kind == sketch::ConstraintKind::Distance);
   CHECK(rsk->constraints[1].value == 4.0);
   CHECK(rsk->constraints[2].a.entity == 1u);
+  CHECK(rsk->constraints[3].kind == sketch::ConstraintKind::Angle);
+  CHECK(rsk->constraints[4].kind == sketch::ConstraintKind::Tangent);
+  CHECK(rsk->constraints[5].kind == sketch::ConstraintKind::PointOnLine);
+  // Kind strings survive as expected.
+  CHECK(j["constraints"][3]["kind"] == "angle");
+  CHECK(j["constraints"][4]["kind"] == "tangent");
+  CHECK(j["constraints"][5]["kind"] == "point_on_line");
   CHECK(DocumentIO::FeatureToJson(*rsk) == j);
 }

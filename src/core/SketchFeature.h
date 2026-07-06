@@ -44,6 +44,9 @@ enum class ConstraintKind {
   Equal,         // a.entity, b.entity: equal length (lines) or radius (circles)
   Distance,      // a, b are points: |a-b| = value (driving dimension)
   Radius,        // a.entity is a circle: radius = value
+  Angle,         // a.entity, b.entity are two lines: angle = value (radians)
+  Tangent,       // a.entity is a line, b.entity is a circle
+  PointOnLine,   // a is a point, b.entity is a line
 };
 
 struct Constraint {

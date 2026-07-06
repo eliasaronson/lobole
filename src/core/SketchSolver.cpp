@@ -150,6 +150,34 @@ void Solver::Load(const SketchFeature& sketch) {
                                          &im.params.back(), tag++);
       }
       break;
+    case ConstraintKind::Angle:
+      if (im.lineOf.count(con.a.entity) && im.lineOf.count(con.b.entity)) {
+        im.params.push_back(con.value); // angle (radians), driving
+        im.sys.addConstraintL2LAngle(im.lines[im.lineOf[con.a.entity]],
+                                     im.lines[im.lineOf[con.b.entity]],
+                                     &im.params.back(), tag++);
+      }
+      break;
+    case ConstraintKind::Tangent:
+      if (im.lineOf.count(con.a.entity) && im.circleOf.count(con.b.entity)) {
+        // The vendored PlaneGCS tangent is a *signed* point-to-line distance,
+        // so pick the side the circle is already on and keep it there rather
+        // than let the solve flip it across the line.
+        const auto& ln = std::get<Line>(im.entityShapes[con.a.entity]);
+        const auto& circ = std::get<Circle>(im.entityShapes[con.b.entity]);
+        glm::vec2 d = ln.b - ln.a;
+        glm::vec2 r = circ.center - ln.a;
+        bool ccw = (d.x * r.y - d.y * r.x) > 0.0f;
+        im.sys.addConstraintTangent(im.lines[im.lineOf[con.a.entity]],
+                                    im.circles[im.circleOf[con.b.entity]], ccw,
+                                    tag++);
+      }
+      break;
+    case ConstraintKind::PointOnLine:
+      if (a && im.lineOf.count(con.b.entity))
+        im.sys.addConstraintPointOnLine(*a, im.lines[im.lineOf[con.b.entity]],
+                                        tag++);
+      break;
     }
   }
   im.dragTag = tag;

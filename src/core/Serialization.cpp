@@ -73,6 +73,9 @@ const char* ConstraintKindToString(sketch::ConstraintKind k) {
   case K::Equal: return "equal";
   case K::Distance: return "distance";
   case K::Radius: return "radius";
+  case K::Angle: return "angle";
+  case K::Tangent: return "tangent";
+  case K::PointOnLine: return "point_on_line";
   }
   return "coincident";
 }
@@ -87,6 +90,9 @@ sketch::ConstraintKind ConstraintKindFromString(const std::string& s) {
   if (s == "equal") return K::Equal;
   if (s == "distance") return K::Distance;
   if (s == "radius") return K::Radius;
+  if (s == "angle") return K::Angle;
+  if (s == "tangent") return K::Tangent;
+  if (s == "point_on_line") return K::PointOnLine;
   throw std::runtime_error("Unknown constraint kind: " + s);
 }
 

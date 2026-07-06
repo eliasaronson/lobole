@@ -355,6 +355,9 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   auto isCircle = [&](const sketch::PointRef& r) {
     return std::holds_alternative<sketch::Circle>(sketch->entities[r.entity]);
   };
+  auto isPoint = [&](const sketch::PointRef& r) {
+    return std::holds_alternative<sketch::Point>(sketch->entities[r.entity]);
+  };
 
   switch (kind) {
   case K::Coincident:
@@ -379,6 +382,49 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     if (sel.empty() || !isCircle(sel[0])) return false;
     c.a = {sel[0].entity, 0};
     break;
+  case K::Angle:
+    if (sel.size() < 2 || !isLine(sel[0]) || !isLine(sel[1])) return false;
+    c.a = {sel[0].entity, 0};
+    c.b = {sel[1].entity, 0};
+    break;
+  case K::Tangent: {
+    // One line + one circle, in either order; normalize to a=line, b=circle.
+    if (sel.size() < 2) return false;
+    if (isLine(sel[0]) && isCircle(sel[1])) {
+      c.a = {sel[0].entity, 0};
+      c.b = {sel[1].entity, 0};
+    } else if (isCircle(sel[0]) && isLine(sel[1])) {
+      c.a = {sel[1].entity, 0};
+      c.b = {sel[0].entity, 0};
+    } else {
+      return false;
+    }
+    break;
+  }
+  case K::PointOnLine: {
+    // One point + one line, in either order. The point is stored verbatim
+    // (its `which` selects the endpoint); the line entity goes in b.
+    if (sel.size() < 2) return false;
+    const sketch::PointRef* pt = nullptr;
+    const sketch::PointRef* line = nullptr;
+    if (isPoint(sel[0]) && isLine(sel[1])) {
+      pt = &sel[0];
+      line = &sel[1];
+    } else if (isLine(sel[0]) && isPoint(sel[1])) {
+      pt = &sel[1];
+      line = &sel[0];
+    } else if (isLine(sel[0]) && isLine(sel[1])) {
+      // A line endpoint onto another line; first selection is the point.
+      pt = &sel[0];
+      line = &sel[1];
+    } else {
+      return false;
+    }
+    if (pt->entity == line->entity) return false; // point is on its own line
+    c.a = *pt;
+    c.b = {line->entity, 0};
+    break;
+  }
   }
 
   nlohmann::json before = DocumentIO::FeatureToJson(*sketch);

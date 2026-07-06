@@ -306,7 +306,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"perpendicular", sketch::ConstraintKind::Perpendicular},
         {"equal", sketch::ConstraintKind::Equal},
         {"distance", sketch::ConstraintKind::Distance},
-        {"radius", sketch::ConstraintKind::Radius}};
+        {"radius", sketch::ConstraintKind::Radius},
+        {"angle", sketch::ConstraintKind::Angle},
+        {"tangent", sketch::ConstraintKind::Tangent},
+        {"point_on_line", sketch::ConstraintKind::PointOnLine}};
     auto it = kinds.find(p.at("kind").get<std::string>());
     if (it == kinds.end()) throw std::runtime_error("unknown constraint kind");
     c.kind = it->second;

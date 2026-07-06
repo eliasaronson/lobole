@@ -3,6 +3,7 @@
 
 Usage: remote_smoke.py <path-to-designer-binary>
 """
+import math
 import os
 import socket
 import subprocess
@@ -127,7 +128,32 @@ def main():
         dy = ents[0]["b"][1] - ents[1]["a"][1]
         expect(abs(dx) < 1e-3 and abs(dy) < 1e-3, "coincident solved")
 
+        # Angle constraint over the wire: two lines forced to 45 degrees
+        d.call("new_project")
+        ska = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch A",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [0, 0], "b": [4, 0]},
+                         {"type": "line", "a": [0, 0], "b": [3.5, 2.0]}]})
+        d.call("add_constraint", sketch_id=ska["id"], kind="coincident",
+               refs=[[1, 0], [0, 0]])
+        d.call("add_constraint", sketch_id=ska["id"], kind="angle",
+               refs=[[0, 0], [1, 0]], value=0.7853981634)
+        ea = d.call("get_state")["features"][0]["entities"]
+        d0 = [ea[0]["b"][0] - ea[0]["a"][0], ea[0]["b"][1] - ea[0]["a"][1]]
+        d1 = [ea[1]["b"][0] - ea[1]["a"][0], ea[1]["b"][1] - ea[1]["a"][1]]
+        ang = abs(math.atan2(d0[0] * d1[1] - d0[1] * d1[0],
+                             d0[0] * d1[0] + d0[1] * d1[1]))
+        expect(abs(ang - 0.7853981634) < 1e-3, "angle solved to 45 degrees")
+
         # Screenshot: the controller can see what the user sees
+        d.call("new_project")
+        sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch 1",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [-2, -1], "b": [2, -1]}]})
         d.call("fit_view")
         shot = os.path.join(tmp, "view.png")
         d.call("screenshot", path=shot)

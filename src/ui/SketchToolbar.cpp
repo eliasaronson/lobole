@@ -66,6 +66,9 @@ void DrawSketchToolbar(AppState& state) {
   auto isCircle = [&](const sketch::PointRef& r) {
     return std::holds_alternative<sketch::Circle>(sketch->entities[r.entity]);
   };
+  auto isPoint = [&](const sketch::PointRef& r) {
+    return std::holds_alternative<sketch::Point>(sketch->entities[r.entity]);
+  };
   auto conButton = [&](const char* label, const char* tip, bool enabled,
                        K kind, double value = 0.0) {
     ImGui::BeginDisabled(!enabled);
@@ -89,6 +92,16 @@ void DrawSketchToolbar(AppState& state) {
   conButton(ICON_FA_ANGLE_RIGHT, "Perpendicular (2 lines)", twoLines,
             K::Perpendicular);
   conButton("=", "Equal (2 lines/circles)", sel.size() >= 2, K::Equal);
+  const bool lineCircle =
+      sel.size() >= 2 && ((isLine(sel[0]) && isCircle(sel[1])) ||
+                          (isCircle(sel[0]) && isLine(sel[1])));
+  conButton("T", "Tangent (line + circle)", lineCircle, K::Tangent);
+  const bool ptOnLine =
+      sel.size() >= 2 &&
+      ((isPoint(sel[0]) && isLine(sel[1])) ||
+       (isLine(sel[0]) && isPoint(sel[1])) ||
+       (isLine(sel[0]) && isLine(sel[1]) && sel[0].entity != sel[1].entity));
+  conButton("L", "Point on line (point + line)", ptOnLine, K::PointOnLine);
   ImGui::NewLine();
 
   // Dimensional constraints with a value input
@@ -101,6 +114,14 @@ void DrawSketchToolbar(AppState& state) {
   ImGui::SameLine();
   if (ImGui::Button("Radius") && !sel.empty() && isCircle(sel[0]))
     ApplySketchConstraint(state, K::Radius, dimValue);
+
+  // Angle dimension (degrees in the UI, radians in the model).
+  static float angleDeg = 90.0f;
+  ImGui::SetNextItemWidth(70);
+  ImGui::DragFloat("##angle", &angleDeg, 0.5f, 0.0f, 360.0f, "%.1f deg");
+  ImGui::SameLine();
+  if (ImGui::Button(ICON_FA_ANGLE_RIGHT " Angle") && twoLines)
+    ApplySketchConstraint(state, K::Angle, glm::radians(angleDeg));
 
   ImGui::SeparatorText("Profile");
   ImGui::Text("Entities: %zu  Constraints: %zu", sketch->entities.size(),
