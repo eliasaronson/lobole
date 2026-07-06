@@ -114,3 +114,26 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   REQUIRE(doc.Regenerate());
   CHECK(doc.GetBodies().size() == 1);
 }
+
+TEST_CASE("Sketch constraints round-trip through JSON", "[sketch][serialization]") {
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  sk->entities.push_back(sketch::Line{{0, 0}, {4, 0}});
+  sk->entities.push_back(sketch::Circle{{2, 1}, 0.5});
+  sk->constraints.push_back(
+      {sketch::ConstraintKind::Horizontal, {0, 0}, {0, 0}, 0.0});
+  sk->constraints.push_back(
+      {sketch::ConstraintKind::Distance, {0, 0}, {0, 1}, 4.0});
+  sk->constraints.push_back(
+      {sketch::ConstraintKind::Radius, {1, 0}, {0, 0}, 0.5});
+
+  auto j = DocumentIO::FeatureToJson(*sk);
+  auto restored = DocumentIO::FeatureFromJson(j);
+  auto* rsk = dynamic_cast<SketchFeature*>(restored.get());
+  REQUIRE(rsk != nullptr);
+  REQUIRE(rsk->constraints.size() == 3);
+  CHECK(rsk->constraints[0].kind == sketch::ConstraintKind::Horizontal);
+  CHECK(rsk->constraints[1].kind == sketch::ConstraintKind::Distance);
+  CHECK(rsk->constraints[1].value == 4.0);
+  CHECK(rsk->constraints[2].a.entity == 1u);
+  CHECK(DocumentIO::FeatureToJson(*rsk) == j);
+}

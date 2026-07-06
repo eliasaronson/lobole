@@ -26,6 +26,32 @@ struct Rectangle {
 
 using Entity = std::variant<Point, Line, Circle, Rectangle>;
 
+// A reference to a point on an entity (by index into the sketch's entity
+// list). `which` selects which point: 0 = a/center/c1, 1 = b/c2. For
+// whole-entity constraints (Horizontal on a line, Radius on a circle),
+// `which` is ignored and `a.entity` names the entity.
+struct PointRef {
+  uint32_t entity = 0;
+  uint8_t which = 0;
+};
+
+enum class ConstraintKind {
+  Coincident,    // a, b are two points made equal
+  Horizontal,    // a.entity is a line: its endpoints share y
+  Vertical,      // a.entity is a line: its endpoints share x
+  Parallel,      // a.entity, b.entity are two lines
+  Perpendicular, // a.entity, b.entity are two lines
+  Equal,         // a.entity, b.entity: equal length (lines) or radius (circles)
+  Distance,      // a, b are points: |a-b| = value (driving dimension)
+  Radius,        // a.entity is a circle: radius = value
+};
+
+struct Constraint {
+  ConstraintKind kind;
+  PointRef a, b;
+  double value = 0.0; // Distance / Radius dimension
+};
+
 } // namespace sketch
 
 // A 2D sketch in the parametric history. Owns its plane as a baked value —
@@ -45,4 +71,5 @@ public:
 
   SketchPlane plane;
   std::vector<sketch::Entity> entities;
+  std::vector<sketch::Constraint> constraints;
 };

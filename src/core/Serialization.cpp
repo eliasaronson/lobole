@@ -14,7 +14,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 2; // v2: stable feature ids, Sketch/Extrude features
+constexpr int kVersion = 3; // v3: sketch constraints
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -62,6 +62,50 @@ sketch::Entity EntityFromJson(const json& j) {
   throw std::runtime_error("Unknown sketch entity type: " + type);
 }
 
+const char* ConstraintKindToString(sketch::ConstraintKind k) {
+  using K = sketch::ConstraintKind;
+  switch (k) {
+  case K::Coincident: return "coincident";
+  case K::Horizontal: return "horizontal";
+  case K::Vertical: return "vertical";
+  case K::Parallel: return "parallel";
+  case K::Perpendicular: return "perpendicular";
+  case K::Equal: return "equal";
+  case K::Distance: return "distance";
+  case K::Radius: return "radius";
+  }
+  return "coincident";
+}
+
+sketch::ConstraintKind ConstraintKindFromString(const std::string& s) {
+  using K = sketch::ConstraintKind;
+  if (s == "coincident") return K::Coincident;
+  if (s == "horizontal") return K::Horizontal;
+  if (s == "vertical") return K::Vertical;
+  if (s == "parallel") return K::Parallel;
+  if (s == "perpendicular") return K::Perpendicular;
+  if (s == "equal") return K::Equal;
+  if (s == "distance") return K::Distance;
+  if (s == "radius") return K::Radius;
+  throw std::runtime_error("Unknown constraint kind: " + s);
+}
+
+json ConstraintToJson(const sketch::Constraint& c) {
+  return {{"kind", ConstraintKindToString(c.kind)},
+          {"a", {c.a.entity, c.a.which}},
+          {"b", {c.b.entity, c.b.which}},
+          {"value", c.value}};
+}
+
+sketch::Constraint ConstraintFromJson(const json& j) {
+  sketch::Constraint c;
+  c.kind = ConstraintKindFromString(j.at("kind").get<std::string>());
+  c.a = {j.at("a").at(0).get<uint32_t>(), j.at("a").at(1).get<uint8_t>()};
+  c.b = {j.at("b").at(0).get<uint32_t>(), j.at("b").at(1).get<uint8_t>()};
+  c.value = j.value("value", 0.0);
+  return c;
+}
+
 const char* ExtrudeModeToString(ExtrudeMode mode) {
   switch (mode) {
   case ExtrudeMode::NewBody: return "new_body";
@@ -97,6 +141,10 @@ json FeatureToJson(const Feature& feature) {
     j["entities"] = json::array();
     for (const auto& entity : sk->entities) {
       j["entities"].push_back(EntityToJson(entity));
+    }
+    j["constraints"] = json::array();
+    for (const auto& c : sk->constraints) {
+      j["constraints"].push_back(ConstraintToJson(c));
     }
   } else if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     j["sketch_id"] = ext->sketchId;
@@ -138,6 +186,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto sk = std::make_unique<SketchFeature>(name, plane);
     for (const auto& ej : j.value("entities", json::array())) {
       sk->entities.push_back(EntityFromJson(ej));
+    }
+    for (const auto& cj : j.value("constraints", json::array())) {
+      sk->constraints.push_back(ConstraintFromJson(cj));
     }
     out = std::move(sk);
   } else if (type == "Extrude") {
