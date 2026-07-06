@@ -2,137 +2,12 @@
 
 #include "Camera.h"
 #include "FaceSelector.h"
-#include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
-#include "core/Serialization.h"
-#include "core/SketchFeature.h"
+#include "ui/FeatureEditor.h"
 
 #include "imgui.h"
 
-#include <cstdio>
-#include <cstring>
-
 namespace ui {
-
-namespace {
-
-// Per-widget edit lifecycle for live parameter editing:
-// - on activation, snapshot the feature (undo baseline)
-// - while the widget changes the value, regenerate for live preview
-// - on deactivation after an edit, push one undoable ModifyFeatureCommand
-//   spanning the whole drag (its execute is idempotent over live edits)
-// - on deactivation without an edit (e.g. Esc revert), regenerate once so
-//   the geometry matches the restored value
-void HandleEdit(AppState& state, Feature& feature, bool changedThisFrame) {
-  Document& doc = *state.document;
-
-  if (ImGui::IsItemActivated()) {
-    state.editBaseline = DocumentIO::FeatureToJson(feature);
-  }
-  if (changedThisFrame) {
-    doc.Regenerate();
-  }
-  if (ImGui::IsItemDeactivatedAfterEdit()) {
-    nlohmann::json after = DocumentIO::FeatureToJson(feature);
-    if (after != state.editBaseline) {
-      state.commands->Execute(
-          std::make_unique<ModifyFeatureCommand>(
-              static_cast<size_t>(state.selectedFeature), state.editBaseline,
-              after),
-          doc);
-    }
-  } else if (ImGui::IsItemDeactivated()) {
-    doc.Regenerate();
-  }
-}
-
-bool DragDim(const char* label, double* value) {
-  static const double kMin = 0.01, kMax = 1e6;
-  return ImGui::DragScalar(label, ImGuiDataType_Double, value, 0.05f, &kMin,
-                           &kMax, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-}
-
-void DrawFeatureEditor(AppState& state, Feature& feature) {
-  // Name (committed on Enter or focus loss, undoable like any other edit)
-  static char nameBuf[128];
-  static int nameBufFeature = -1;
-  if (nameBufFeature != state.selectedFeature ||
-      !ImGui::IsAnyItemActive()) {
-    snprintf(nameBuf, sizeof(nameBuf), "%s", feature.GetName().c_str());
-    nameBufFeature = state.selectedFeature;
-  }
-  ImGui::InputText("Name", nameBuf, sizeof(nameBuf));
-  if (ImGui::IsItemActivated()) {
-    state.editBaseline = DocumentIO::FeatureToJson(feature);
-  }
-  if (ImGui::IsItemDeactivatedAfterEdit() && nameBuf[0] != '\0' &&
-      feature.GetName() != nameBuf) {
-    feature.SetName(nameBuf);
-    state.document->Regenerate(); // body names come from the feature
-    nlohmann::json after = DocumentIO::FeatureToJson(feature);
-    state.commands->Execute(
-        std::make_unique<ModifyFeatureCommand>(
-            static_cast<size_t>(state.selectedFeature), state.editBaseline,
-            after),
-        *state.document);
-  }
-
-  if (auto* box = dynamic_cast<BoxFeature*>(&feature)) {
-    HandleEdit(state, feature,
-               ImGui::DragFloat3("Position", &box->position.x, 0.05f));
-    HandleEdit(state, feature, DragDim("Width", &box->width));
-    HandleEdit(state, feature, DragDim("Height", &box->height));
-    HandleEdit(state, feature, DragDim("Depth", &box->depth));
-  } else if (auto* sphere = dynamic_cast<SphereFeature*>(&feature)) {
-    HandleEdit(state, feature,
-               ImGui::DragFloat3("Center", &sphere->center.x, 0.05f));
-    HandleEdit(state, feature, DragDim("Radius", &sphere->radius));
-  } else if (auto* cyl = dynamic_cast<CylinderFeature*>(&feature)) {
-    HandleEdit(state, feature,
-               ImGui::DragFloat3("Center", &cyl->center.x, 0.05f));
-    HandleEdit(state, feature,
-               ImGui::DragFloat3("Direction", &cyl->direction.x, 0.05f));
-    HandleEdit(state, feature, DragDim("Radius", &cyl->radius));
-    HandleEdit(state, feature, DragDim("Height", &cyl->height));
-  } else if (auto* import = dynamic_cast<ImportFeature*>(&feature)) {
-    ImGui::TextDisabled("File: %s", import->path.c_str());
-  } else if (auto* sk = dynamic_cast<SketchFeature*>(&feature)) {
-    glm::vec3 n = sk->plane.GetNormal();
-    ImGui::Text("Plane normal: (%.2f, %.2f, %.2f)", n.x, n.y, n.z);
-    ImGui::Text("Entities: %zu", sk->entities.size());
-    if (ImGui::Button("Edit Sketch")) {
-      state.sketchEdit = SketchEditState{};
-      state.sketchEdit.activeSketchId = sk->GetId();
-      if (state.camera)
-        state.camera->AlignToFace(sk->plane.GetOrigin(), sk->plane.GetNormal());
-    }
-  } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
-    HandleEdit(state, feature, DragDim("Distance", &ext->distance));
-    HandleEdit(state, feature, ImGui::Checkbox("Reversed", &ext->reversed));
-
-    const char* modes[] = {"New Body", "Add", "Cut"};
-    int mode = static_cast<int>(ext->mode);
-    if (ImGui::Combo("Mode", &mode, modes, 3)) {
-      // Combo doesn't fit the drag activate/deactivate pattern, so snapshot
-      // and push the command directly.
-      nlohmann::json before = DocumentIO::FeatureToJson(*ext);
-      ext->mode = static_cast<ExtrudeMode>(mode);
-      nlohmann::json after = DocumentIO::FeatureToJson(*ext);
-      state.commands->Execute(
-          std::make_unique<ModifyFeatureCommand>(
-              static_cast<size_t>(state.selectedFeature), before, after),
-          *state.document);
-    }
-
-    if (Feature* src = state.document->FindFeatureById(ext->sketchId)) {
-      ImGui::Text("Sketch: %s", src->GetName().c_str());
-    } else {
-      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch: missing");
-    }
-  }
-}
-
-} // namespace
 
 void DrawPropertiesPanel(AppState& state) {
   ImGui::Begin("Properties");
@@ -145,7 +20,11 @@ void DrawPropertiesPanel(AppState& state) {
           : nullptr;
   if (feature) {
     ImGui::Text("%s", feature->TypeName().c_str());
-    DrawFeatureEditor(state, *feature);
+    // A pending (preview) feature isn't on the undo stack; edit it live
+    // without committing (the preview dialog owns accept/cancel).
+    const bool commit = feature->GetId() != state.pendingFeatureId;
+    DrawFeatureParamWidgets(state, *feature,
+                            static_cast<size_t>(state.selectedFeature), commit);
   } else {
     ImGui::TextDisabled("No feature selected");
     ImGui::TextDisabled("Select one in the Model panel");

@@ -10,6 +10,7 @@
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h"
 #include "ui/MainMenuBar.h"
+#include "ui/PreviewFeature.h"
 #include "ui/PropertiesPanel.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
@@ -35,6 +36,7 @@ void DrawUI(AppState& state) {
   DrawFeatureTreePanel(state);
   DrawPropertiesPanel(state);
   DrawSketchToolbar(state);
+  DrawPreviewDialog(state);
   DrawFileBrowser(state);
 
   HandleViewportInput(state);
@@ -43,9 +45,8 @@ void DrawUI(AppState& state) {
   // or while picking a plane; the active sketch and rubber-band preview draw
   // as an overlay on top of the static sketch lines.
   if (state.sketchRenderer) {
-    const bool showPlanes = state.showPlanes || state.sketchEdit.pickingPlane;
-    std::vector<Vertex3D> quads =
-        BuildPlaneQuads(showPlanes, state.sketchEdit.hoveredPlane);
+    std::vector<Vertex3D> quads = BuildPlaneQuads(
+        EffectivePlaneVisibility(state), state.sketchEdit.hoveredPlane);
 
     std::vector<Vertex3D> overlay =
         BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);

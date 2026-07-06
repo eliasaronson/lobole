@@ -2,6 +2,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/SketchFeature.h"
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
@@ -45,6 +46,11 @@ struct SketchEditState {
   glm::vec2 hoverPoint{0.0f};
   int hoveredPlane = -1; // 0 Front / 1 Top / 2 Right while picking
 
+  // Sketch-entity selection (for adding constraints), ordered.
+  std::vector<sketch::PointRef> selected;
+  bool dragging = false;    // dragging a selected point (Select tool)
+  sketch::PointRef dragRef; // the point being dragged
+
   bool IsEditing() const { return activeSketchId != 0; }
 };
 
@@ -69,8 +75,11 @@ struct AppState {
 
   // UI state
   int selectedFeature = -1;
+  // Feature being previewed (in the document + rendered, but NOT on the undo
+  // stack until accepted). 0 = none. See PreviewFeature.
+  uint64_t pendingFeatureId = 0;
   ViewportDrag viewportDrag = ViewportDrag::None;
-  bool showPlanes = false;
+  bool showPlanes = true; // visible by default; auto-hidden once bodies exist
   SketchEditState sketchEdit;
 
   // The 3D viewport = the central dock node (between the side panels), in

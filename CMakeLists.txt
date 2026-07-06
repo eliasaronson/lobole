@@ -137,13 +137,38 @@ set(core_sources
     src/core/SketchFeature.cpp
     src/core/SketchProfile.cpp
     src/core/ExtrudeFeature.cpp
+    src/core/SketchSolver.cpp
 )
 
 find_package(nlohmann_json 3 REQUIRED)
 
+# PlaneGCS constraint solver (vendored from FreeCAD, LGPL-2.1). Optional:
+# needs Eigen3 + Boost headers. Gated by HAVE_PLANEGCS; SketchSolver falls
+# back to a no-op stub if unavailable.
+find_package(Eigen3 3.3 QUIET)
+find_package(Boost QUIET)
+if(Eigen3_FOUND AND Boost_FOUND)
+    set(PLANEGCS_SOURCES
+        deps/planegcs/GCS.cpp deps/planegcs/Constraints.cpp
+        deps/planegcs/Geo.cpp deps/planegcs/SubSystem.cpp
+        deps/planegcs/qp_eq.cpp)
+    add_library(planegcs STATIC ${PLANEGCS_SOURCES})
+    target_compile_features(planegcs PUBLIC cxx_std_20)
+    target_include_directories(planegcs PUBLIC deps/planegcs)
+    target_link_libraries(planegcs PUBLIC Eigen3::Eigen Boost::boost)
+    set(HAVE_PLANEGCS TRUE)
+    message(STATUS "PlaneGCS enabled (Eigen + Boost found)")
+else()
+    message(WARNING "PlaneGCS disabled: Eigen3/Boost not found")
+endif()
+
 add_library(designer_core STATIC ${core_sources})
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json)
+if(HAVE_PLANEGCS)
+    target_link_libraries(designer_core PUBLIC planegcs)
+    target_compile_definitions(designer_core PUBLIC HAVE_PLANEGCS)
+endif()
 # Vulkan clip-space conventions everywhere glm is used (propagates to all
 # dependents): depth 0..1; the Y-flip lives in Camera::UpdateProjectionMatrix
 target_compile_definitions(designer_core PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
@@ -167,16 +192,22 @@ set(app_sources
     src/ui/SketchToolbar.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
+    src/ui/FeatureEditor.cpp
+    src/ui/PreviewFeature.cpp
     src/ui/Theme.cpp
     src/ui/ViewportInput.cpp
     src/ui/SketchInteraction.cpp
+    src/ui/Toolbar.cpp
     src/Screenshot.cpp
     src/remote/RemoteServer.cpp
 )
 
-# UI font, loaded at runtime relative to the executable
+# UI fonts, loaded at runtime relative to the executable
 file(COPY ${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
+file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf
+     DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
+include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 

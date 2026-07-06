@@ -8,6 +8,7 @@
 #include "core/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
+#include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
 
 #include "imgui.h"
@@ -48,8 +49,9 @@ void DrawEditMenu(AppState& state) {
   if (!ImGui::BeginMenu("Edit"))
     return;
 
-  const bool canUndo = state.commands && state.commands->CanUndo();
-  const bool canRedo = state.commands && state.commands->CanRedo();
+  const bool pending = HasPendingFeature(state);
+  const bool canUndo = !pending && state.commands && state.commands->CanUndo();
+  const bool canRedo = !pending && state.commands && state.commands->CanRedo();
   if (ImGui::MenuItem("Undo", "Ctrl+Z", false, canUndo)) {
     state.commands->Undo(*state.document);
   }
@@ -59,44 +61,24 @@ void DrawEditMenu(AppState& state) {
   ImGui::EndMenu();
 }
 
-void AddPrimitive(AppState& state, std::unique_ptr<Feature> feature) {
-  if (state.document && state.commands) {
-    state.commands->Execute(
-        std::make_unique<AddFeatureCommand>(std::move(feature)),
-        *state.document);
-  }
-}
-
 void DrawCreateMenu(AppState& state) {
   if (!ImGui::BeginMenu("Create"))
     return;
 
-  const int n =
-      state.document ? static_cast<int>(state.document->FeatureCount()) + 1 : 1;
-  const glm::vec3 spot(-4.0f + (n - 1) * 2.5f, 0.0f, 0.0f);
-
-  if (ImGui::MenuItem("Box")) {
-    AddPrimitive(state, std::make_unique<BoxFeature>(
-                            "Box " + std::to_string(n), spot, 2.0, 2.0, 2.0));
-  }
-  if (ImGui::MenuItem("Sphere")) {
-    AddPrimitive(state, std::make_unique<SphereFeature>(
-                            "Sphere " + std::to_string(n), spot, 1.0));
-  }
-  if (ImGui::MenuItem("Cylinder")) {
-    AddPrimitive(state,
-                 std::make_unique<CylinderFeature>(
-                     "Cylinder " + std::to_string(n),
-                     spot + glm::vec3(0.0f, -1.0f, 0.0f),
-                     glm::vec3(0.0f, 1.0f, 0.0f), 0.8, 2.0));
-  }
+  // Creation is disabled while a feature preview is pending.
+  const bool idle = !HasPendingFeature(state);
+  if (ImGui::MenuItem("Box", nullptr, false, idle))
+    CreateBox(state);
+  if (ImGui::MenuItem("Sphere", nullptr, false, idle))
+    CreateSphere(state);
+  if (ImGui::MenuItem("Cylinder", nullptr, false, idle))
+    CreateCylinder(state);
   ImGui::Separator();
 
   SketchEditState& edit = state.sketchEdit;
   if (ImGui::BeginMenu("Sketch")) {
     if (ImGui::MenuItem("New Sketch...")) {
-      edit = SketchEditState{};
-      edit.pickingPlane = true; // pick a plane/face in the viewport
+      StartNewSketch(state);
     }
     ImGui::Separator();
     if (ImGui::MenuItem("Sketch on Front Plane")) {
@@ -200,6 +182,14 @@ void DrawViewMenu(AppState& state) {
 // focused text field claim chords like Ctrl+Z for itself first.
 void HandleShortcuts(AppState& state) {
   const ImGuiInputFlags route = ImGuiInputFlags_RouteGlobal;
+
+  // While a feature preview is pending, freeze the undo stack: Ctrl+Z / Escape
+  // cancel the preview instead of touching history.
+  if (HasPendingFeature(state)) {
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, route))
+      CancelPendingFeature(state);
+    return;
+  }
 
   if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, route)) {
     if (state.commands && state.commands->CanUndo())

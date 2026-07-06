@@ -2,6 +2,7 @@
 
 #include "Logger.h"
 
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 
 #include <filesystem>
@@ -149,11 +150,26 @@ void ApplyTheme(float scale) {
   style.ScaleAllSizes(scale);
 
   ImGuiIO& io = ImGui::GetIO();
-  const std::string fontPath =
-      ExecutableDirectory() + "/assets/fonts/Roboto-Medium.ttf";
+  const std::string dir = ExecutableDirectory() + "/assets/fonts/";
+  const std::string fontPath = dir + "Roboto-Medium.ttf";
   if (std::filesystem::exists(fontPath)) {
     io.Fonts->Clear();
     io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f * scale);
+
+    // Merge Font Awesome icons into the same atlas so ICON_FA_* works inline
+    const std::string iconPath = dir + "fa-solid-900.ttf";
+    if (std::filesystem::exists(iconPath)) {
+      static const ImWchar kIconRange[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
+      ImFontConfig cfg;
+      cfg.MergeMode = true;
+      cfg.PixelSnapH = true;
+      cfg.GlyphMinAdvanceX = 15.0f * scale; // fixed-width icon column
+      cfg.GlyphOffset = ImVec2(0.0f, 2.0f * scale);
+      io.Fonts->AddFontFromFileTTF(iconPath.c_str(), 14.0f * scale, &cfg,
+                                   kIconRange);
+    } else {
+      LOG_WARN("Icon font not found at {}", iconPath);
+    }
   } else {
     LOG_WARN("Font not found at {}, using ImGui default", fontPath);
   }

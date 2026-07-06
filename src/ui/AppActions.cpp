@@ -10,6 +10,7 @@
 #include "core/Feature.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
+#include "ui/PreviewFeature.h"
 
 #include <cfloat>
 #include <filesystem>
@@ -144,10 +145,59 @@ void AppendOriginGizmo(std::vector<Vertex3D>& lines) {
   }
 }
 
+namespace {
+// Placement offset so successive primitives don't overlap.
+glm::vec3 NextSpot(const AppState& state) {
+  const int n =
+      state.document ? static_cast<int>(state.document->FeatureCount()) : 0;
+  return glm::vec3(-4.0f + n * 2.5f, 0.0f, 0.0f);
+}
+std::string NextName(const AppState& state, const char* base) {
+  const int n =
+      state.document ? static_cast<int>(state.document->FeatureCount()) + 1 : 1;
+  return std::string(base) + " " + std::to_string(n);
+}
+} // namespace
+
+void CreateBox(AppState& state) {
+  BeginPreviewFeature(state, std::make_unique<BoxFeature>(
+                                 NextName(state, "Box"), NextSpot(state), 2.0,
+                                 2.0, 2.0));
+}
+
+void CreateSphere(AppState& state) {
+  BeginPreviewFeature(state, std::make_unique<SphereFeature>(
+                                 NextName(state, "Sphere"), NextSpot(state),
+                                 1.0));
+}
+
+void CreateCylinder(AppState& state) {
+  BeginPreviewFeature(
+      state, std::make_unique<CylinderFeature>(
+                 NextName(state, "Cylinder"),
+                 NextSpot(state) + glm::vec3(0.0f, -1.0f, 0.0f),
+                 glm::vec3(0.0f, 1.0f, 0.0f), 0.8, 2.0));
+}
+
+void StartNewSketch(AppState& state) {
+  state.sketchEdit = SketchEditState{};
+  state.sketchEdit.pickingPlane = true;
+}
+
+bool EffectivePlaneVisibility(const AppState& state) {
+  if (state.sketchEdit.pickingPlane || state.sketchEdit.IsEditing())
+    return true;
+  const bool hasBodies =
+      state.document && !state.document->GetBodies().empty();
+  return state.showPlanes && !hasBodies; // auto-hide once the part has geometry
+}
+
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();
   state.selectedFeature = -1;
+  state.pendingFeatureId = 0;
+  state.sketchEdit = SketchEditState{};
   // Force a resync even if the version counters happen to collide
   state.syncedDocumentVersion = UINT64_MAX;
 }
@@ -232,9 +282,31 @@ std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,
   std::vector<Vertex3D> lines;
   if (activeSketchId == 0 || !state.document)
     return lines;
-  if (auto* sk = dynamic_cast<const SketchFeature*>(
-          state.document->FindFeatureById(activeSketchId))) {
-    AppendSketchLines(*sk, kActiveSketchColor, lines);
+  auto* sk = dynamic_cast<const SketchFeature*>(
+      state.document->FindFeatureById(activeSketchId));
+  if (!sk)
+    return lines;
+  AppendSketchLines(*sk, kActiveSketchColor, lines);
+
+  // Mark selected points with a bright cross so it's clear what a constraint
+  // will apply to.
+  const glm::vec3 selColor(1.0f, 0.85f, 0.3f);
+  for (const auto& ref : state.sketchEdit.selected) {
+    if (ref.entity >= sk->entities.size())
+      continue;
+    glm::vec2 uv;
+    const auto& e = sk->entities[ref.entity];
+    if (auto* p = std::get_if<sketch::Point>(&e)) uv = p->p;
+    else if (auto* l = std::get_if<sketch::Line>(&e)) uv = ref.which ? l->b : l->a;
+    else if (auto* c = std::get_if<sketch::Circle>(&e)) uv = c->center;
+    else if (auto* r = std::get_if<sketch::Rectangle>(&e)) uv = ref.which ? r->c2 : r->c1;
+    glm::vec3 w = sk->plane.PlaneToWorld(uv);
+    glm::vec3 u = sk->plane.GetUAxis() * 0.08f;
+    glm::vec3 v = sk->plane.GetVAxis() * 0.08f;
+    lines.push_back(LineVertex(w - u, selColor));
+    lines.push_back(LineVertex(w + u, selColor));
+    lines.push_back(LineVertex(w - v, selColor));
+    lines.push_back(LineVertex(w + v, selColor));
   }
   return lines;
 }

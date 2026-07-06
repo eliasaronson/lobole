@@ -26,6 +26,18 @@ void SyncDocumentRenderers(AppState& state);
 // Imports a STEP file as an undoable ImportFeature and fits the camera.
 void LoadSTEPFile(AppState& state, const std::string& filename);
 
+// Shared feature-creation actions (menu + toolbar call these). Each starts a
+// preview the user accepts/cancels (see PreviewFeature).
+void CreateBox(AppState& state);
+void CreateSphere(AppState& state);
+void CreateCylinder(AppState& state);
+// Arms plane-picking for a new sketch.
+void StartNewSketch(AppState& state);
+
+// Whether the default planes should render this frame (visible by default,
+// auto-hidden once the part has bodies, always shown while picking/editing).
+bool EffectivePlaneVisibility(const AppState& state);
+
 // Translucent default-plane quads (Front/Top/Right); hoveredPlane 0/1/2 is
 // brightened, -1 for none. Empty when show is false.
 std::vector<Vertex3D> BuildPlaneQuads(bool show, int hoveredPlane);
