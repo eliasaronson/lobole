@@ -13,7 +13,7 @@ This revision folds in two things:
    sketchers and taught nothing here. KiCad has no constraint solver either;
    its one useful bit is the snap-anchor ranking + snap-indicator UX in
    `kicad-source-mirror/common/tool/grid_helper.cpp` — worth a 15-minute look
-   when building Phase D's cursor behavior, nothing more).
+   when building Phase E's snapping cursor behavior, nothing more).
 
 PlaneGCS still covers every solver primitive we need; the work remains in our
 data model, UI, and profile building. Sequenced so each phase ends green
@@ -65,7 +65,7 @@ Pointers are into the checkouts under `~/Documents/CAD/`.
   Whole line = pin both endpoints; circle body = pin center + a PointOnCircle
   holding the radius. Our current per-frame `Solver::Load()` rebuild + hard
   coincident pin (`SketchInteraction.cpp` Select-drag) is the naive version of
-  this — replace it in Phase E.
+  this — replace it in Phase F.
 - **Auto-constraint inference**: create the constraint on *click*, never on
   hover, and snap the geometry to the target position first so the solver
   starts already satisfied. Tolerances that work in practice: ~10 px hover
@@ -109,7 +109,10 @@ allowlist that must gain the new kinds.
 
 Risk: low.
 
-## Phase B — Stable entity IDs + deletion (new, ~1–1.5 days)
+**Status: shipped** (commit "feat: angle, tangent and point-on-line sketch
+constraints").
+
+## Phase B — Stable entity IDs + deletion (~1–1.5 days) — SHIPPED
 
 The foundation split/trim/delete all stand on. Mechanical but wide.
 
@@ -128,7 +131,45 @@ The foundation split/trim/delete all stand on. Mechanical but wide.
 Risk: low-medium — touches solver load, picking, serialization, remote, but
 each change is mechanical.
 
-## Phase C — Rectangle decomposition + split + line trim (~1.5–2 days)
+Shipped as commit "feat: stable sketch entity ids and entity deletion". One
+scope cut: dimensional-constraint transfer onto a coincident survivor was
+deferred (we do coincidence repair + orphan sweep); Phase D's `SplitEntity`
+needs its own transfer logic anyway. Detailed in
+[CONSTRAINTS_PHASE_B.md](CONSTRAINTS_PHASE_B.md).
+
+## Phase C — Selectable entities: body picking + visible lines (NEW, next, ~1 day)
+
+Pulled ahead of everything below: **constraints are currently unusable** because
+only entity *endpoints* are pickable (`PickSketchPoint`, 12 px radius) and lines
+render 1 px with no AA (`SketchRenderer.cpp` — `lineWidth = 1.0`,
+`VK_SAMPLE_COUNT_1_BIT`), so the endpoint targets are near-invisible. You cannot
+select a line to apply Horizontal/Parallel/etc. This is the picking half of the
+drag phase (Phase F), brought forward; the drag-*solver* rework stays there.
+
+- **Body picking**: extend selection so a click that misses every endpoint
+  tolerance falls back to the nearest **line segment** (point-to-segment
+  distance) or **circle circumference** within a pixel tolerance, selecting the
+  whole entity (ref `{id, 0}`). Endpoint-within-tolerance still wins first, so
+  coincident/distance/drag keep working. Add a **hover highlight** of the pick
+  candidate so it's clear what a click will grab.
+- **Visible lines**: thicken + anti-alias sketch lines. **Decision: quad
+  expansion (two triangles), not `wideLines`.** Expand each segment to a
+  screen-space quad in the **vertex shader** (project both endpoints, offset
+  along the screen normal by a pixel half-width) and feather the alpha at the
+  quad edge in the fragment shader for AA. Rationale: `wideLines` is ~universal
+  on desktop (this laptop has it) but renders *aliased* fat lines with butt-cap
+  notches at polyline corners, needs `VK_EXT_line_rasterization` for real AA,
+  and is absent on MoltenVK/mobile; quad expansion gives constant pixel width,
+  free AA, round-cap-capable corners, and stays portable (no `wideLines`/GS
+  dependency). Selected/hovered entities render brighter/thicker.
+- Tests: GUI `pick/select_line_body` (click mid-segment → that line selected,
+  Horizontal enabled and applies); `pick/prefers_endpoint` (click near a shared
+  vertex → endpoint, not body).
+
+Risk: low-medium — the vertex-shader expansion touches the sketch pipeline and
+a new vertex attribute (segment direction / side), but it's self-contained.
+
+## Phase D — Rectangle decomposition + split + line trim (~1.5–2 days)
 
 - **Rectangle tool** commits 4 lines + 4 corner Coincidents + 2 H + 2 V as one
   undo record (SolveSpace-style), then rubber-bands the far corner. The rigid
@@ -141,7 +182,7 @@ each change is mechanical.
 - **Trim tool**: click a segment → find bracketing intersections/constraint
   points → split there → delete the clicked piece (Phase B machinery cleans up
   its constraints). No bracketing cuts → delete whole entity. Circle trim
-  produces arcs, so it waits for Phase F; line-only trim covers the rectangle
+  produces arcs, so it waits for Phase G; line-only trim covers the rectangle
   workflows.
 - Draw-onto-a-line behavior: for now emits `PointOnLine` (Phase A kind) rather
   than eagerly splitting — matches Onshape/SolveSpace/FreeCAD; the trim/split
@@ -154,7 +195,7 @@ each change is mechanical.
 Risk: medium — the transfer policy has many small cases; the FreeCAD reference
 enumerates them all.
 
-## Phase D — Snapping / auto-constraint inference (~1.5–2 days)
+## Phase E — Snapping / auto-constraint inference (~1.5–2 days)
 
 The Onshape-feel milestone: snap + auto-constrain while drawing.
 
@@ -177,7 +218,7 @@ The Onshape-feel milestone: snap + auto-constrain while drawing.
 
 Risk: medium — tolerance tuning; the numbers above are proven starting points.
 
-## Phase E — Whole-entity dragging + drag-solver rework (~1–2 days)
+## Phase F — Whole-entity dragging + drag-solver rework (~1–2 days)
 
 Adopt the FreeCAD drag recipe wholesale (it's PlaneGCS-native):
 
@@ -187,9 +228,10 @@ Adopt the FreeCAD drag recipe wholesale (it's PlaneGCS-native):
   helpers + `solve(DogLeg)`; re-init when the cursor strays far. Refuse drag
   while conflicts exist. This also replaces today's per-frame `Load()` rebuild
   for plain endpoint drags.
-- Picking: `PickSketchPoint` grows body hits → `DragEndpoint` |
-  `DragEntityBody` (line: both endpoints, rigid delta; circle: center +
-  radius-holding PointOnCircle) | `DragCircleRim` (drive the radius param).
+- Drag modes: body picking already exists from Phase C; this phase maps a body
+  hit to `DragEntityBody` (line: both endpoints, rigid delta; circle: center +
+  radius-holding PointOnCircle) and a rim hit to `DragCircleRim` (drive the
+  radius param), alongside the existing `DragEndpoint`.
 - Mouse-up commits one `ModifyFeatureCommand` from the mouse-down baseline,
   as today.
 - Tests: GUI `drag/move_whole_line` (constrained neighbour follows),
@@ -198,7 +240,7 @@ Adopt the FreeCAD drag recipe wholesale (it's PlaneGCS-native):
 
 Risk: low-medium now that the reference implementation is mapped.
 
-## Phase F — Arcs (~3–4 days)
+## Phase G — Arcs (~3–4 days)
 
 As previously planned, with the repo findings applied:
 
@@ -219,24 +261,25 @@ As previously planned, with the repo findings applied:
 Risk: medium — wire orientation is the fiddly part; the ShapeFix pass is the
 known mitigation.
 
-## Phase G — B-splines (large, defer)
+## Phase H — B-splines (large, defer)
 
-Unchanged: own milestone after A–F.
+Unchanged: own milestone after A–G.
 
 ## Cross-cutting
 
 - **DOF badge**: surface remaining DOF / fully-constrained / conflicting set as
-  each phase adds constraints; Phase D's add-then-diagnose depends on the
+  each phase adds constraints; Phase E's add-then-diagnose depends on the
   redundant list being reliable.
 - **Remote parity**: constraint kinds ride the existing `{kind, refs, value}`
-  schema; Phase B switches refs to stable IDs; Phase F adds arcs to
+  schema; Phase B switches refs to stable IDs; Phase G adds arcs to
   `add_feature`. Extend `remote_smoke.py` per phase.
 - **Undo**: compound tools (rectangle, split, trim) must land as a single
   `ModifyFeatureCommand`.
 
 ## Recommended order
 
-A → B → C → D → E → F (→ G later). A is a quick win; B is the foundation
-everything with topology change needs; C delivers cuttable rectangles; D is
-the requested snapping; E and F complete the Onshape feel. Roughly 9–12 days
-end to end at the original plan's calibration.
+A ✓ → B ✓ → **C (selectable entities)** → D (rectangle/split/trim) → E
+(snapping) → F (drag) → G (arcs) → H (splines, later). A and B shipped. C is
+next and unblocks using constraints at all — you can't pick a line today. D
+delivers cuttable rectangles; E is the requested snapping; F and G complete the
+Onshape feel. Roughly 8–11 days remaining at the original plan's calibration.
