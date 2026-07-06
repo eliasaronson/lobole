@@ -79,7 +79,8 @@ public:
     void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
     
     // Viewport
-    void SetViewportSize(uint32_t width, uint32_t height);
+    void SetViewportSize(uint32_t width, uint32_t height) { SetViewport(0, 0, width, height); }
+    void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
 
 private:
     VkDevice m_device = VK_NULL_HANDLE;
@@ -112,6 +113,8 @@ private:
     glm::mat4 m_projectionMatrix = glm::mat4(1.0f);
     
     // Viewport
+    int32_t m_viewportX = 0;
+    int32_t m_viewportY = 0;
     uint32_t m_viewportWidth = 800;
     uint32_t m_viewportHeight = 600;
     

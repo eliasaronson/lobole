@@ -18,14 +18,17 @@ static ui::AppState* s_App = nullptr;
 
 static Document* Doc() { return s_App->document.get(); }
 
-// Window position of a world point, projected exactly like the GPU does
+// Window position of a world point, mapped through the central-node viewport
+// rect (where the 3D scene actually renders), matching the picking math.
 static ImVec2 WorldToWindow(const glm::vec3& p) {
   const Camera& cam = *s_App->camera;
   glm::vec4 clip =
       cam.GetProjectionMatrix() * cam.GetViewMatrix() * glm::vec4(p, 1.0f);
   glm::vec3 ndc = glm::vec3(clip) / clip.w;
-  ImVec2 size = ImGui::GetMainViewport()->Size;
-  return ImVec2((ndc.x + 1.0f) * 0.5f * size.x, (ndc.y + 1.0f) * 0.5f * size.y);
+  const glm::vec2 pos = s_App->viewportPos;
+  const glm::vec2 size = s_App->viewportSize;
+  return ImVec2(pos.x + (ndc.x + 1.0f) * 0.5f * size.x,
+                pos.y + (ndc.y + 1.0f) * 0.5f * size.y);
 }
 
 void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {

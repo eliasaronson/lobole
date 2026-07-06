@@ -51,7 +51,8 @@ public:
     // Settings
     void SetOutlineSettings(const OutlineSettings& settings) { m_settings = settings; }
     const OutlineSettings& GetOutlineSettings() const { return m_settings; }
-    void SetViewportSize(uint32_t width, uint32_t height);
+    void SetViewportSize(uint32_t width, uint32_t height) { SetViewport(0, 0, width, height); }
+    void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
     
     bool IsInitialized() const { return m_isInitialized; }
 
@@ -158,6 +159,8 @@ private:
     glm::vec3 m_cameraPosition = glm::vec3(0.0f);
 
     // Viewport
+    int32_t m_viewportX = 0;
+    int32_t m_viewportY = 0;
     uint32_t m_viewportWidth = 1280;
     uint32_t m_viewportHeight = 720;
 

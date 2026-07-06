@@ -1036,7 +1036,9 @@ void OutlineRenderer::SetMeshTransform(uint32_t meshId, const glm::mat4& transfo
     }
 }
 
-void OutlineRenderer::SetViewportSize(uint32_t width, uint32_t height) {
+void OutlineRenderer::SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height) {
+    m_viewportX = x;
+    m_viewportY = y;
     m_viewportWidth = width;
     m_viewportHeight = height;
 }
@@ -1086,8 +1088,8 @@ void OutlineRenderer::RenderOutlines(VkCommandBuffer commandBuffer, uint32_t cur
     
     // Set dynamic viewport and scissor
     VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
+    viewport.x = static_cast<float>(m_viewportX);
+    viewport.y = static_cast<float>(m_viewportY);
     viewport.width = static_cast<float>(m_viewportWidth);
     viewport.height = static_cast<float>(m_viewportHeight);
     viewport.minDepth = 0.0f;
@@ -1095,7 +1097,7 @@ void OutlineRenderer::RenderOutlines(VkCommandBuffer commandBuffer, uint32_t cur
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     
     VkRect2D scissor{};
-    scissor.offset = {0, 0};
+    scissor.offset = {m_viewportX, m_viewportY};
     scissor.extent = {m_viewportWidth, m_viewportHeight};
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     
@@ -1118,8 +1120,8 @@ void OutlineRenderer::RenderWireframes(VkCommandBuffer commandBuffer, uint32_t c
     
     // Set dynamic viewport and scissor
     VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
+    viewport.x = static_cast<float>(m_viewportX);
+    viewport.y = static_cast<float>(m_viewportY);
     viewport.width = static_cast<float>(m_viewportWidth);
     viewport.height = static_cast<float>(m_viewportHeight);
     viewport.minDepth = 0.0f;
@@ -1127,7 +1129,7 @@ void OutlineRenderer::RenderWireframes(VkCommandBuffer commandBuffer, uint32_t c
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
     
     VkRect2D scissor{};
-    scissor.offset = {0, 0};
+    scissor.offset = {m_viewportX, m_viewportY};
     scissor.extent = {m_viewportWidth, m_viewportHeight};
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     

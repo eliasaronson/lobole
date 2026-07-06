@@ -4,7 +4,6 @@
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "OutlineRenderer.h"
-#include "RayTracingRenderer.h"
 #include "core/Feature.h"
 #include "core/SketchFeature.h"
 #include "ui/AppActions.h"
@@ -156,31 +155,6 @@ void DrawViewMenu(AppState& state) {
     FitCameraToDocument(state);
   }
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
-
-  ImGui::Separator();
-
-  static bool useRayTracing = false;
-  if (ImGui::Checkbox("Ray Tracing", &useRayTracing)) {
-    if (state.rayTracer && state.rayTracer->IsInitialized()) {
-      state.rayTracer->SetRenderMode(useRayTracing);
-    } else {
-      useRayTracing = false;
-      LOG_WARN("Ray Tracing: not available on this hardware");
-    }
-  }
-  if (state.rayTracer && state.rayTracer->IsInitialized()) {
-    if (ImGui::BeginMenu("Ray Tracing Settings")) {
-      static int maxDepth = 4;
-      if (ImGui::SliderInt("Max Ray Depth", &maxDepth, 1, 10)) {
-        state.rayTracer->SetMaxRayDepth(maxDepth);
-      }
-      static int samples = 1;
-      if (ImGui::SliderInt("Samples Per Pixel", &samples, 1, 4)) {
-        state.rayTracer->SetSamplesPerPixel(samples);
-      }
-      ImGui::EndMenu();
-    }
-  }
 
   ImGui::Separator();
 

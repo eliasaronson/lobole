@@ -40,7 +40,10 @@ public:
     m_view = view;
     m_proj = proj;
   }
-  void SetViewportSize(uint32_t w, uint32_t h) {
+  void SetViewportSize(uint32_t w, uint32_t h) { SetViewport(0, 0, w, h); }
+  void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) {
+    m_viewportX = x;
+    m_viewportY = y;
     m_viewportWidth = w;
     m_viewportHeight = h;
   }
@@ -99,6 +102,8 @@ private:
 
   glm::mat4 m_view = glm::mat4(1.0f);
   glm::mat4 m_proj = glm::mat4(1.0f);
+  int32_t m_viewportX = 0;
+  int32_t m_viewportY = 0;
   uint32_t m_viewportWidth = 1280;
   uint32_t m_viewportHeight = 720;
   bool m_initialized = false;

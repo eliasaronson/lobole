@@ -13,10 +13,12 @@ namespace ui {
 namespace {
 
 void Pick(AppState& state, const ImVec2& pos, bool select, bool alignCamera) {
-  ImGuiIO& io = ImGui::GetIO();
+  // Map the cursor through the central-node viewport rect (not the full
+  // window), matching where the 3D scene is actually drawn.
   Ray ray = state.faceSelector->ScreenToWorldRay(
-      pos.x, pos.y, static_cast<int>(io.DisplaySize.x),
-      static_cast<int>(io.DisplaySize.y), *state.camera);
+      pos.x - state.viewportPos.x, pos.y - state.viewportPos.y,
+      static_cast<int>(state.viewportSize.x),
+      static_cast<int>(state.viewportSize.y), *state.camera);
   RayHit hit = state.faceSelector->PickFace(ray);
 
   uint32_t first = 0, count = 0;

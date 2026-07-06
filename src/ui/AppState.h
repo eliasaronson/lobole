@@ -72,6 +72,12 @@ struct AppState {
   ViewportDrag viewportDrag = ViewportDrag::None;
   bool showPlanes = false;
   SketchEditState sketchEdit;
+
+  // The 3D viewport = the central dock node (between the side panels), in
+  // ImGui display coords. The renderers draw only here and picking maps
+  // clicks through it, so the model centers on the visible area.
+  glm::vec2 viewportPos{0.0f, 0.0f};
+  glm::vec2 viewportSize{1280.0f, 720.0f};
   bool buildDefaultDockLayout = false;
   bool runGuiTests = false;
   nlohmann::json editBaseline; // parameter-edit snapshot while a widget is active

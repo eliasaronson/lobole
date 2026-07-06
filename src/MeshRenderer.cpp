@@ -217,18 +217,18 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     // Bind pipeline
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
     
-    // Set viewport
+    // Set viewport to the central region (excludes the side panels)
     VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
+    viewport.x = static_cast<float>(m_viewportX);
+    viewport.y = static_cast<float>(m_viewportY);
     viewport.width = static_cast<float>(m_viewportWidth);
     viewport.height = static_cast<float>(m_viewportHeight);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    
+
     VkRect2D scissor{};
-    scissor.offset = {0, 0};
+    scissor.offset = {m_viewportX, m_viewportY};
     scissor.extent = {m_viewportWidth, m_viewportHeight};
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
     
@@ -293,7 +293,9 @@ void MeshRenderer::ClearFaceHover() {
     }
 }
 
-void MeshRenderer::SetViewportSize(uint32_t width, uint32_t height) {
+void MeshRenderer::SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height) {
+    m_viewportX = x;
+    m_viewportY = y;
     m_viewportWidth = width;
     m_viewportHeight = height;
 }

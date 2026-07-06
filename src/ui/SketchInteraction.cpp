@@ -50,10 +50,11 @@ void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
 }
 
 Ray ScreenRay(AppState& state, const glm::vec2& mousePos) {
-  ImGuiIO& io = ImGui::GetIO();
+  // Map through the central-node viewport rect (see Pick in ViewportInput)
   return state.faceSelector->ScreenToWorldRay(
-      mousePos.x, mousePos.y, static_cast<int>(io.DisplaySize.x),
-      static_cast<int>(io.DisplaySize.y), *state.camera);
+      mousePos.x - state.viewportPos.x, mousePos.y - state.viewportPos.y,
+      static_cast<int>(state.viewportSize.x),
+      static_cast<int>(state.viewportSize.y), *state.camera);
 }
 
 } // namespace

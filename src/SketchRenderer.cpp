@@ -329,11 +329,14 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
     return;
 
   VkViewport vp{};
+  vp.x = static_cast<float>(m_viewportX);
+  vp.y = static_cast<float>(m_viewportY);
   vp.width = static_cast<float>(m_viewportWidth);
   vp.height = static_cast<float>(m_viewportHeight);
   vp.maxDepth = 1.0f;
   vkCmdSetViewport(commandBuffer, 0, 1, &vp);
-  VkRect2D scissor{{0, 0}, {m_viewportWidth, m_viewportHeight}};
+  VkRect2D scissor{{m_viewportX, m_viewportY},
+                   {m_viewportWidth, m_viewportHeight}};
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,

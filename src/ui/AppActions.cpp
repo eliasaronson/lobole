@@ -121,6 +121,29 @@ void AppendSketchGrid(const SketchPlane& plane, std::vector<Vertex3D>& lines) {
   }
 }
 
+void AppendOriginGizmo(std::vector<Vertex3D>& lines) {
+  const float L = 1.5f;  // axis length
+  const float h = 0.22f; // arrowhead size
+  struct Axis {
+    glm::vec3 dir, side, color;
+  };
+  const Axis axes[3] = {
+      {{1, 0, 0}, {0, 1, 0}, {0.90f, 0.32f, 0.32f}}, // X red
+      {{0, 1, 0}, {1, 0, 0}, {0.35f, 0.82f, 0.38f}}, // Y green
+      {{0, 0, 1}, {1, 0, 0}, {0.38f, 0.55f, 0.95f}}, // Z blue
+  };
+  for (const Axis& a : axes) {
+    const glm::vec3 tip = a.dir * L;
+    lines.push_back(LineVertex(glm::vec3(0.0f), a.color));
+    lines.push_back(LineVertex(tip, a.color));
+    // Two-line arrowhead in the axis/side plane
+    lines.push_back(LineVertex(tip, a.color));
+    lines.push_back(LineVertex(tip - a.dir * h + a.side * h, a.color));
+    lines.push_back(LineVertex(tip, a.color));
+    lines.push_back(LineVertex(tip - a.dir * h - a.side * h, a.color));
+  }
+}
+
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();

@@ -1,6 +1,8 @@
 #include "ui/UI.h"
 
 #include "Camera.h"
+#include "MeshRenderer.h"
+#include "OutlineRenderer.h"
 #include "SketchRenderer.h"
 #include "core/SketchFeature.h"
 #include "ui/AppActions.h"
@@ -48,6 +50,7 @@ void DrawUI(AppState& state) {
     std::vector<Vertex3D> overlay =
         BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
     BuildSketchOverlay(state, overlay);
+    AppendOriginGizmo(overlay); // always show the world origin + axes
 
     // While editing, draw a grid + subtle fill on the work plane so it's
     // clear what surface the sketch is on.
@@ -61,14 +64,26 @@ void DrawUI(AppState& state) {
     state.sketchRenderer->SetOverlayLines(std::move(overlay));
   }
 
-  // Keep the camera's aspect ratio in sync with the framebuffer
-  if (state.camera && state.window) {
-    int fbWidth, fbHeight;
-    glfwGetFramebufferSize(state.window, &fbWidth, &fbHeight);
-    if (fbWidth > 0 && fbHeight > 0) {
-      state.camera->SetAspectRatio(static_cast<float>(fbWidth) /
-                                   static_cast<float>(fbHeight));
-    }
+  // Point the renderers, camera, and picking at the central-node region so
+  // the 3D scene is centered in the visible area between the panels.
+  ImGuiIO& io = ImGui::GetIO();
+  const glm::vec2 scale(io.DisplayFramebufferScale.x,
+                        io.DisplayFramebufferScale.y);
+  const glm::vec2 fbPos = state.viewportPos * scale;
+  const glm::vec2 fbSize = state.viewportSize * scale;
+  if (fbSize.x > 0 && fbSize.y > 0) {
+    auto setVp = [&](auto* r) {
+      if (r)
+        r->SetViewport(static_cast<int32_t>(fbPos.x),
+                       static_cast<int32_t>(fbPos.y),
+                       static_cast<uint32_t>(fbSize.x),
+                       static_cast<uint32_t>(fbSize.y));
+    };
+    setVp(state.meshRenderer);
+    setVp(state.outlineRenderer);
+    setVp(state.sketchRenderer);
+    if (state.camera)
+      state.camera->SetAspectRatio(fbSize.x / fbSize.y);
   }
 }
 

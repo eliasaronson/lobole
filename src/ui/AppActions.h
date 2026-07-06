@@ -38,6 +38,9 @@ void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color,
 // U/V axes), so it is clear what surface you are drawing on.
 void AppendSketchGrid(const SketchPlane& plane, std::vector<Vertex3D>& lines);
 
+// Appends the world-origin gizmo: three arrows (X red / Y green / Z blue).
+void AppendOriginGizmo(std::vector<Vertex3D>& lines);
+
 // Highlighted line geometry for the sketch currently being edited (empty if
 // none). Rendered as a per-frame overlay on top of the static sketch lines.
 std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,

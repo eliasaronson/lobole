@@ -1,5 +1,7 @@
 #include "ui/DockLayout.h"
 
+#include <glm/glm.hpp>
+
 #include "imgui.h"
 #include "imgui_internal.h" // DockBuilder API
 
@@ -23,6 +25,19 @@ void BeginDockspace(AppState& state) {
     ImGui::DockBuilderDockWindow("Model", left);
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderFinish(dockspaceId);
+  }
+
+  // Track the central node's rect (relative to the main viewport) so the 3D
+  // scene renders in the visible region between the panels, not the whole
+  // window. Falls back to the full work area before the layout exists.
+  ImGuiViewport* vp = ImGui::GetMainViewport();
+  if (ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspaceId)) {
+    state.viewportPos = glm::vec2(central->Pos.x - vp->Pos.x,
+                                  central->Pos.y - vp->Pos.y);
+    state.viewportSize = glm::vec2(central->Size.x, central->Size.y);
+  } else {
+    state.viewportPos = glm::vec2(0.0f, 0.0f);
+    state.viewportSize = glm::vec2(vp->WorkSize.x, vp->WorkSize.y);
   }
 }
 
