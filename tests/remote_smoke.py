@@ -98,6 +98,35 @@ def main():
         expect(abs(state["bodies"][0]["volume"] - 24.0) < 1e-6,
                "extruded volume 24")
 
+        # Preview -> accept/cancel feature flow
+        d.call("new_project")
+        d.call("menu_click", path="Create/Box")
+        st = d.call("get_state")
+        expect(st["pending_feature_id"] != 0, "box is a pending preview")
+        expect(not st["can_undo"], "preview not yet on undo stack")
+        d.call("accept_pending")
+        st = d.call("get_state")
+        expect(st["pending_feature_id"] == 0 and st["can_undo"],
+               "accept commits one undoable action")
+        d.call("menu_click", path="Create/Sphere")
+        d.call("cancel_pending")
+        expect(len(d.call("get_state")["features"]) == 1, "cancel discards")
+
+        # Constraint solving: two lines snap coincident
+        d.call("new_project")
+        sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch 1",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [-2, -1], "b": [2, -1]},
+                         {"type": "line", "a": [2.3, -0.7], "b": [2, 2]}]})
+        d.call("add_constraint", sketch_id=sk["id"], kind="coincident",
+               refs=[[1, 0], [0, 1]])
+        ents = d.call("get_state")["features"][0]["entities"]
+        dx = ents[0]["b"][0] - ents[1]["a"][0]
+        dy = ents[0]["b"][1] - ents[1]["a"][1]
+        expect(abs(dx) < 1e-3 and abs(dy) < 1e-3, "coincident solved")
+
         # Screenshot: the controller can see what the user sees
         d.call("fit_view")
         shot = os.path.join(tmp, "view.png")
