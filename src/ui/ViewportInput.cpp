@@ -4,7 +4,7 @@
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "MeshRenderer.h"
-#include "SketchManager.h"
+#include "ui/SketchInteraction.h"
 
 #include "imgui.h"
 
@@ -138,17 +138,9 @@ void HandleViewportInput(AppState& state) {
     }
   }
 
-  // Sketch mode consumes left click/move in the viewport
-  if (state.sketchManager && state.sketchManager->IsSketchMode()) {
-    if (overViewport) {
-      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        state.sketchManager->OnMouseClick(io.MousePos.x, io.MousePos.y,
-                                          *state.camera);
-      } else if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) {
-        state.sketchManager->OnMouseMove(io.MousePos.x, io.MousePos.y,
-                                         *state.camera);
-      }
-    }
+  // Sketch plane-picking / drawing consumes the viewport when active
+  if (HandleSketchViewport(state, glm::vec2(io.MousePos.x, io.MousePos.y),
+                           overViewport)) {
     return;
   }
 

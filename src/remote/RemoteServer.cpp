@@ -250,7 +250,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     auto feature = DocumentIO::FeatureFromJson(p.at("feature"));
     state.commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(feature)), *doc);
-    return {{"index", doc->FeatureCount() - 1}};
+    const size_t index = doc->FeatureCount() - 1;
+    // Return the id the document actually assigned, so callers reference it
+    // (a downstream extrude names its sketch by id) without guessing.
+    return {{"index", index}, {"id", doc->GetFeature(index)->GetId()}};
   }
   if (m == "modify_feature") {
     const size_t index = p.at("index").get<size_t>();

@@ -4,6 +4,8 @@
 #include "FaceSelector.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Serialization.h"
+#include "core/SketchFeature.h"
 #include "ui/AppState.h"
 
 #include "imgui_te_context.h"
@@ -253,17 +255,80 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->faceSelector->GetSelectedFace() == nullptr);
   };
 
-  t = IM_REGISTER_TEST(engine, "menu", "sketch_mode_shows_toolbar");
+  t = IM_REGISTER_TEST(engine, "sketch", "front_plane_shows_toolbar");
   t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
     IM_CHECK(ctx->GetWindowByRef("//Sketch Tools") == nullptr);
 
-    ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
     ctx->Yield();
+    // A SketchFeature was added and the toolbar appeared
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    IM_CHECK(Doc()->GetFeature(0)->TypeName() == "Sketch");
     IM_CHECK(ctx->GetWindowByRef("//Sketch Tools") != nullptr);
 
+    ctx->SetRef("//Sketch Tools");
+    ctx->ItemClick("Exit Sketch");
+    ctx->Yield(2);
+    // The window object lingers in ImGui's list; check it is no longer shown
+    ImGuiWindow* toolbar = ctx->GetWindowByRef("//Sketch Tools");
+    IM_CHECK(toolbar == nullptr || !toolbar->WasActive);
+  };
+
+  t = IM_REGISTER_TEST(engine, "sketch", "draw_line_undo");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("Create/Sketch/Exit Sketch");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Top Plane");
     ctx->Yield();
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+
+    // Line tool is the default; two viewport clicks place a line
+    ImVec2 size = ImGui::GetMainViewport()->Size;
+    ctx->MouseMoveToPos(ImVec2(size.x * 0.45f, size.y * 0.45f));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(size.x * 0.55f, size.y * 0.55f));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(sketch->entities.size(), (size_t)1);
+
+    // Undo removes the line but keeps the sketch
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield();
+    sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    IM_CHECK_EQ(sketch->entities.size(), (size_t)0);
+  };
+
+  t = IM_REGISTER_TEST(engine, "sketch", "rect_extrude_produces_body");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+
+    // Inject a rectangle deterministically via a command (viewport click
+    // coordinates are resolution-dependent; drawing is covered separately)
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+    sketch->entities.push_back(sketch::Rectangle{{0, 0}, {4, 2}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    // Extrude from the toolbar
+    ctx->SetRef("//Sketch Tools");
+    ctx->ItemClick("Extrude...");
+    ctx->Yield();
+
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    IM_CHECK(Doc()->GetFeature(1)->TypeName() == "Extrude");
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() > 1.0); // rect x default dist
   };
 }

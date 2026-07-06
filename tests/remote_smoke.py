@@ -82,7 +82,24 @@ def main():
         d.call("open_project", path=project)
         expect(len(d.call("get_state")["features"]) == 1, "reloaded")
 
+        # Sketch + extrude entirely over the RPC: add the sketch, reference it
+        # from the extrude by the id the server assigns (add_feature returns it)
+        d.call("new_project")
+        sketch = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch 1",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "rect", "c1": [0, 0], "c2": [4, 2]}]})
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Pad", "sketch_id": sketch["id"],
+            "distance": 3.0, "mode": "new_body"})
+        state = d.call("get_state")
+        expect(len(state["features"]) == 2, "sketch + extrude")
+        expect(abs(state["bodies"][0]["volume"] - 24.0) < 1e-6,
+               "extruded volume 24")
+
         # Screenshot: the controller can see what the user sees
+        d.call("fit_view")
         shot = os.path.join(tmp, "view.png")
         d.call("screenshot", path=shot)
         expect(os.path.exists(shot) and os.path.getsize(shot) > 1000,

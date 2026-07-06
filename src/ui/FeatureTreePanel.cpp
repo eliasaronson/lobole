@@ -1,6 +1,7 @@
 #include "ui/FeatureTreePanel.h"
 
 #include "core/Feature.h"
+#include "ui/SketchInteraction.h"
 
 #include "imgui.h"
 
@@ -11,6 +12,21 @@ void DrawFeatureTreePanel(AppState& state) {
 
   Document* doc = state.document.get();
   if (doc) {
+    // Default geometry: the three base planes a sketch can be started on.
+    ImGui::SeparatorText("Default geometry");
+    static const char* kPlaneNames[3] = {"Front Plane", "Top Plane",
+                                          "Right Plane"};
+    for (int i = 0; i < 3; i++) {
+      if (ImGui::Selectable(kPlaneNames[i], false,
+                            ImGuiSelectableFlags_AllowDoubleClick)) {
+        if (ImGui::IsMouseDoubleClicked(0)) {
+          const int n = static_cast<int>(doc->FeatureCount()) + 1;
+          BeginSketchOnPlane(state, DefaultPlane(i),
+                             "Sketch " + std::to_string(n));
+        }
+      }
+    }
+
     ImGui::SeparatorText("Features");
     for (size_t i = 0; i < doc->FeatureCount(); i++) {
       Feature* feature = doc->GetFeature(i);

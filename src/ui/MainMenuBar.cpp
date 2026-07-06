@@ -5,10 +5,11 @@
 #include "Logger.h"
 #include "OutlineRenderer.h"
 #include "RayTracingRenderer.h"
-#include "SketchManager.h"
 #include "core/Feature.h"
+#include "core/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
+#include "ui/SketchInteraction.h"
 
 #include "imgui.h"
 #define GLFW_INCLUDE_NONE
@@ -92,23 +93,24 @@ void DrawCreateMenu(AppState& state) {
   }
   ImGui::Separator();
 
-  SketchManager* sketch = state.sketchManager;
+  SketchEditState& edit = state.sketchEdit;
   if (ImGui::BeginMenu("Sketch")) {
-    if (ImGui::MenuItem("Sketch on Front Plane") && sketch) {
-      sketch->StartSketch(PlaneType::XY);
+    if (ImGui::MenuItem("New Sketch...")) {
+      edit = SketchEditState{};
+      edit.pickingPlane = true; // pick a plane/face in the viewport
     }
-    if (ImGui::MenuItem("Sketch on Top Plane") && sketch) {
-      sketch->StartSketch(PlaneType::XZ);
-    }
-    if (ImGui::MenuItem("Sketch on Right Plane") && sketch) {
-      sketch->StartSketch(PlaneType::YZ);
-    }
-
     ImGui::Separator();
-
-    if (ImGui::MenuItem("Exit Sketch", nullptr, false,
-                        sketch && sketch->IsSketchMode())) {
-      sketch->ExitSketch();
+    if (ImGui::MenuItem("Sketch on Front Plane")) {
+      const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+      BeginSketchOnPlane(state, DefaultPlane(0), "Sketch " + std::to_string(n));
+    }
+    if (ImGui::MenuItem("Sketch on Top Plane")) {
+      const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+      BeginSketchOnPlane(state, DefaultPlane(1), "Sketch " + std::to_string(n));
+    }
+    if (ImGui::MenuItem("Sketch on Right Plane")) {
+      const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+      BeginSketchOnPlane(state, DefaultPlane(2), "Sketch " + std::to_string(n));
     }
 
     ImGui::Separator();
@@ -116,19 +118,22 @@ void DrawCreateMenu(AppState& state) {
     const bool hasSelectedFace =
         state.faceSelector && state.faceSelector->GetSelectedFace() != nullptr;
     if (ImGui::MenuItem("Sketch on Selected Face", nullptr, false,
-                        hasSelectedFace &&
-                            (!sketch || !sketch->IsSketchMode()))) {
-      if (sketch && state.faceSelector && state.camera) {
-        if (const Face* face = state.faceSelector->GetSelectedFace()) {
-          glm::vec3 faceCenter =
-              state.faceSelector->GetFaceCenter(face->meshId, face->faceIndex);
-          glm::vec3 faceNormal =
-              state.faceSelector->GetFaceNormal(face->meshId, face->faceIndex);
-          state.camera->AlignToFace(faceCenter, faceNormal);
-          sketch->StartSketch(PlaneType::XY); // Will be customized for face
-          LOG_INFO("Started sketch on selected face");
-        }
-      }
+                        hasSelectedFace && !edit.IsEditing())) {
+      const Face* face = state.faceSelector->GetSelectedFace();
+      glm::vec3 c =
+          state.faceSelector->GetFaceCenter(face->meshId, face->faceIndex);
+      glm::vec3 nrm =
+          state.faceSelector->GetFaceNormal(face->meshId, face->faceIndex);
+      glm::vec3 u =
+          std::abs(nrm.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+      u = glm::normalize(u - glm::dot(u, nrm) * nrm);
+      const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+      BeginSketchOnPlane(state, SketchPlane(c, nrm, u),
+                         "Sketch " + std::to_string(n));
+    }
+
+    if (ImGui::MenuItem("Exit Sketch", nullptr, false, edit.IsEditing())) {
+      edit = SketchEditState{};
     }
 
     ImGui::EndMenu();
@@ -150,6 +155,7 @@ void DrawViewMenu(AppState& state) {
   if (ImGui::MenuItem("Fit View")) {
     FitCameraToDocument(state);
   }
+  ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
 
   ImGui::Separator();
 

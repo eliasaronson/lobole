@@ -3,6 +3,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 
+#include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
@@ -15,7 +16,6 @@ class Camera;
 class MeshRenderer;
 class OutlineRenderer;
 class RayTracingRenderer;
-class SketchManager;
 class SketchRenderer;
 class FaceSelector;
 struct GLFWwindow;
@@ -29,6 +29,24 @@ struct DocumentRenderMesh {
 };
 
 enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
+
+enum class SketchTool { Select, Point, Line, Circle, Rectangle };
+
+// Transient state for the active sketch-editing session. The sketch itself
+// lives in the Document (as a SketchFeature); this only holds which sketch is
+// being edited (by stable id, so it survives undo reindexing), the current
+// tool, and the in-progress two-click drawing state.
+struct SketchEditState {
+  bool pickingPlane = false;   // "New Sketch" armed, waiting for a plane/face
+  uint64_t activeSketchId = 0; // 0 = not editing a sketch
+  SketchTool tool = SketchTool::Line;
+  bool hasPendingPoint = false; // first click of a two-click entity placed
+  glm::vec2 pendingPoint{0.0f};
+  glm::vec2 hoverPoint{0.0f};
+  int hoveredPlane = -1; // 0 Front / 1 Top / 2 Right while picking
+
+  bool IsEditing() const { return activeSketchId != 0; }
+};
 
 // All state the UI reads and writes, replacing main.cpp's globals. The
 // document and undo stack are owned here (they are swapped by File > New /
@@ -45,7 +63,6 @@ struct AppState {
   MeshRenderer* meshRenderer = nullptr;
   OutlineRenderer* outlineRenderer = nullptr;
   RayTracingRenderer* rayTracer = nullptr;
-  SketchManager* sketchManager = nullptr;
   SketchRenderer* sketchRenderer = nullptr;
   FaceSelector* faceSelector = nullptr;
   GLFWwindow* window = nullptr;
@@ -53,7 +70,8 @@ struct AppState {
   // UI state
   int selectedFeature = -1;
   ViewportDrag viewportDrag = ViewportDrag::None;
-  bool showPlanes = true;
+  bool showPlanes = false;
+  SketchEditState sketchEdit;
   bool buildDefaultDockLayout = false;
   bool runGuiTests = false;
   nlohmann::json editBaseline; // parameter-edit snapshot while a widget is active

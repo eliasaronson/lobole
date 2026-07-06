@@ -2,8 +2,10 @@
 
 #include "Camera.h"
 #include "FaceSelector.h"
+#include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/Serialization.h"
+#include "core/SketchFeature.h"
 
 #include "imgui.h"
 
@@ -94,6 +96,39 @@ void DrawFeatureEditor(AppState& state, Feature& feature) {
     HandleEdit(state, feature, DragDim("Height", &cyl->height));
   } else if (auto* import = dynamic_cast<ImportFeature*>(&feature)) {
     ImGui::TextDisabled("File: %s", import->path.c_str());
+  } else if (auto* sk = dynamic_cast<SketchFeature*>(&feature)) {
+    glm::vec3 n = sk->plane.GetNormal();
+    ImGui::Text("Plane normal: (%.2f, %.2f, %.2f)", n.x, n.y, n.z);
+    ImGui::Text("Entities: %zu", sk->entities.size());
+    if (ImGui::Button("Edit Sketch")) {
+      state.sketchEdit = SketchEditState{};
+      state.sketchEdit.activeSketchId = sk->GetId();
+      if (state.camera)
+        state.camera->AlignToFace(sk->plane.GetOrigin(), sk->plane.GetNormal());
+    }
+  } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
+    HandleEdit(state, feature, DragDim("Distance", &ext->distance));
+    HandleEdit(state, feature, ImGui::Checkbox("Reversed", &ext->reversed));
+
+    const char* modes[] = {"New Body", "Add", "Cut"};
+    int mode = static_cast<int>(ext->mode);
+    if (ImGui::Combo("Mode", &mode, modes, 3)) {
+      // Combo doesn't fit the drag activate/deactivate pattern, so snapshot
+      // and push the command directly.
+      nlohmann::json before = DocumentIO::FeatureToJson(*ext);
+      ext->mode = static_cast<ExtrudeMode>(mode);
+      nlohmann::json after = DocumentIO::FeatureToJson(*ext);
+      state.commands->Execute(
+          std::make_unique<ModifyFeatureCommand>(
+              static_cast<size_t>(state.selectedFeature), before, after),
+          *state.document);
+    }
+
+    if (Feature* src = state.document->FindFeatureById(ext->sketchId)) {
+      ImGui::Text("Sketch: %s", src->GetName().c_str());
+    } else {
+      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch: missing");
+    }
   }
 }
 

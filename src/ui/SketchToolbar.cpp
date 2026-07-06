@@ -1,57 +1,81 @@
 #include "ui/SketchToolbar.h"
 
-#include "SketchManager.h"
+#include "core/ExtrudeFeature.h"
+#include "core/SketchFeature.h"
+#include "core/SketchProfile.h"
+#include "ui/SketchInteraction.h"
 
 #include "imgui.h"
 
 namespace ui {
 
 void DrawSketchToolbar(AppState& state) {
-  SketchManager* sketch = state.sketchManager;
-  if (!sketch || !sketch->IsSketchMode())
+  SketchEditState& edit = state.sketchEdit;
+
+  if (edit.pickingPlane) {
+    ImGui::Begin("Sketch Tools");
+    ImGui::TextWrapped(
+        "Pick a plane or a model face to sketch on. (Esc to cancel)");
+    if (ImGui::Button("Cancel"))
+      edit.pickingPlane = false;
+    ImGui::End();
+    return;
+  }
+
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch)
     return;
 
   ImGui::Begin("Sketch Tools");
-
-  ImGui::Text("Sketch Mode Active");
+  ImGui::TextUnformatted(sketch->GetName().c_str());
   ImGui::Separator();
 
-  if (ImGui::Button("Select")) {
-    sketch->SetSketchMode(SketchMode::Select);
-  }
+  auto toolButton = [&](const char* label, SketchTool tool) {
+    const bool active = edit.tool == tool;
+    if (active)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button(label))
+      edit.tool = tool;
+    if (active)
+      ImGui::PopStyleColor();
+  };
+  toolButton("Select", SketchTool::Select);
   ImGui::SameLine();
-  if (ImGui::Button("Point")) {
-    sketch->SetSketchMode(SketchMode::Point);
-  }
+  toolButton("Point", SketchTool::Point);
   ImGui::SameLine();
-  if (ImGui::Button("Line")) {
-    sketch->SetSketchMode(SketchMode::Line);
-  }
+  toolButton("Line", SketchTool::Line);
   ImGui::SameLine();
-  if (ImGui::Button("Circle")) {
-    sketch->SetSketchMode(SketchMode::Circle);
-  }
+  toolButton("Circle", SketchTool::Circle);
   ImGui::SameLine();
-  if (ImGui::Button("Rectangle")) {
-    sketch->SetSketchMode(SketchMode::Rectangle);
-  }
+  toolButton("Rect", SketchTool::Rectangle);
 
   ImGui::Separator();
+  ImGui::Text("Entities: %zu", sketch->entities.size());
 
-  SketchMode currentMode = sketch->GetSketchMode();
-  const char* modeNames[] = {"Select", "Point", "Line", "Circle", "Rectangle"};
-  ImGui::Text("Current Tool: %s", modeNames[(int)currentMode]);
-
-  if (auto activeSketch = sketch->GetActiveSketch()) {
-    ImGui::Text("Elements: %zu", activeSketch->GetElementCount());
-    ImGui::Text("Can Extrude: %s", sketch->CanExtrude() ? "Yes" : "No");
-  }
+  const bool canExtrude = !sketch::BuildLoops(sketch->entities).empty();
+  ImGui::Text("Closed profile: %s", canExtrude ? "yes" : "no");
 
   ImGui::Separator();
-
-  if (ImGui::Button("Exit Sketch")) {
-    sketch->ExitSketch();
+  ImGui::BeginDisabled(!canExtrude);
+  if (ImGui::Button("Extrude...")) {
+    const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+    state.commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::make_unique<ExtrudeFeature>(
+            "Extrude " + std::to_string(n), edit.activeSketchId, 1.0,
+            ExtrudeMode::NewBody)),
+        *state.document);
+    // Select the new extrude for immediate distance/mode editing
+    state.selectedFeature =
+        static_cast<int>(state.document->FeatureCount() - 1);
+    edit = SketchEditState{}; // exit sketch mode
   }
+  ImGui::EndDisabled();
+
+  ImGui::SameLine();
+  if (ImGui::Button("Exit Sketch"))
+    edit = SketchEditState{};
 
   ImGui::End();
 }

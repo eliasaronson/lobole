@@ -8,6 +8,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/MainMenuBar.h"
 #include "ui/PropertiesPanel.h"
+#include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
 #include "ui/ViewportInput.h"
 
@@ -35,10 +36,18 @@ void DrawUI(AppState& state) {
 
   HandleViewportInput(state);
 
-  // Refresh sketch-plane quads for this frame (hover highlighting is added
-  // with the plane-picking interaction).
+  // Refresh sketch overlays for this frame. Planes show when the toggle is on
+  // or while picking a plane; the active sketch and rubber-band preview draw
+  // as an overlay on top of the static sketch lines.
   if (state.sketchRenderer) {
-    state.sketchRenderer->SetQuads(BuildPlaneQuads(state.showPlanes, -1));
+    const bool showPlanes = state.showPlanes || state.sketchEdit.pickingPlane;
+    state.sketchRenderer->SetQuads(
+        BuildPlaneQuads(showPlanes, state.sketchEdit.hoveredPlane));
+
+    std::vector<Vertex3D> overlay =
+        BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
+    BuildSketchOverlay(state, overlay);
+    state.sketchRenderer->SetOverlayLines(std::move(overlay));
   }
 
   // Keep the camera's aspect ratio in sync with the framebuffer

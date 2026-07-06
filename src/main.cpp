@@ -12,7 +12,6 @@
 #include "RayTracingRenderer.h"
 #include "Scene.h"
 #include "SketchRenderer.h"
-#include "SketchManager.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/Theme.h"
@@ -58,7 +57,6 @@ static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<SketchRenderer> g_SketchRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
-static std::unique_ptr<SketchManager> g_SketchManager;
 static std::unique_ptr<FaceSelector> g_FaceSelector;
 
 // All state the UI layer works with (owns the document + undo stack; holds
@@ -609,21 +607,16 @@ int main(int argc, char **argv) {
   // Initialize application objects
   g_Scene = std::make_unique<Scene>();
   g_Camera = std::make_unique<Camera>();
-  g_SketchManager = std::make_unique<SketchManager>();
   g_App.document = std::make_unique<Document>();
   g_App.commands = std::make_unique<CommandStack>();
   g_App.scene = g_Scene.get();
   g_App.camera = g_Camera.get();
-  g_App.sketchManager = g_SketchManager.get();
   g_App.window = window;
 
   // Set up camera for good 3D view
   g_Camera->SetPosition(glm::vec3(8.0f, 6.0f, 8.0f));
   g_Camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
   g_Camera->SetAspectRatio(1280.0f / 720.0f);
-
-  // Set viewport size for sketch manager
-  g_SketchManager->SetViewportSize(1280, 720);
 
   // Initialize MeshRenderer with Vulkan context
   g_MeshRenderer = std::make_unique<MeshRenderer>();
@@ -874,7 +867,6 @@ int main(int argc, char **argv) {
   g_SketchRenderer.reset();
   g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
-  g_SketchManager.reset();
   g_FaceSelector.reset();
 
   ImGui_ImplVulkan_Shutdown();
