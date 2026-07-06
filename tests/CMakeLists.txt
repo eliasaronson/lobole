@@ -19,6 +19,7 @@ add_executable(designer_tests
     test_serialization.cpp
     test_command_modify.cpp
     test_faceselector.cpp
+    test_sketch_feature.cpp
 )
 target_link_libraries(designer_tests PRIVATE designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)

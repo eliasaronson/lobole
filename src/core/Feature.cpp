@@ -2,13 +2,24 @@
 
 #include "Logger.h"
 
+const Feature* RegenContext::FindById(uint64_t id) const {
+  if (id == 0)
+    return nullptr;
+  for (size_t i = 0; i < currentIndex && i < features.size(); i++) {
+    if (features[i]->GetId() == id)
+      return features[i].get();
+  }
+  return nullptr;
+}
+
 BoxFeature::BoxFeature(const std::string& name, const glm::vec3& position,
                        double width, double height, double depth)
     : position(position), width(width), height(height), depth(depth) {
   m_name = name;
 }
 
-bool BoxFeature::Execute(std::vector<Body>& bodies) {
+bool BoxFeature::Execute(RegenContext& ctx) {
+  auto& bodies = ctx.bodies;
   CADShape shape = CADKernel::Instance().CreateBox(width, height, depth);
   if (!shape.IsValid()) {
     LOG_ERROR("BoxFeature '{}': invalid dimensions {}x{}x{}", m_name, width,
@@ -26,7 +37,8 @@ SphereFeature::SphereFeature(const std::string& name, const glm::vec3& center,
   m_name = name;
 }
 
-bool SphereFeature::Execute(std::vector<Body>& bodies) {
+bool SphereFeature::Execute(RegenContext& ctx) {
+  auto& bodies = ctx.bodies;
   CADShape shape = CADKernel::Instance().CreateSphere(center, radius);
   if (!shape.IsValid()) {
     LOG_ERROR("SphereFeature '{}': invalid radius {}", m_name, radius);
@@ -44,7 +56,8 @@ CylinderFeature::CylinderFeature(const std::string& name,
   m_name = name;
 }
 
-bool CylinderFeature::Execute(std::vector<Body>& bodies) {
+bool CylinderFeature::Execute(RegenContext& ctx) {
+  auto& bodies = ctx.bodies;
   CADShape shape =
       CADKernel::Instance().CreateCylinder(center, direction, radius, height);
   if (!shape.IsValid()) {
@@ -61,7 +74,8 @@ ImportFeature::ImportFeature(const std::string& name, const std::string& path)
   m_name = name;
 }
 
-bool ImportFeature::Execute(std::vector<Body>& bodies) {
+bool ImportFeature::Execute(RegenContext& ctx) {
+  auto& bodies = ctx.bodies;
   std::vector<CADShape> shapes;
   if (!CADKernel::Instance().LoadSTEP(path, shapes)) {
     LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);

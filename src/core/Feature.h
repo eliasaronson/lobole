@@ -12,6 +12,21 @@ struct Body {
   CADShape shape;
 };
 
+class Feature;
+
+// What a feature sees while executing during regeneration: the bodies built
+// so far, and read access to the features strictly BEFORE it in the history
+// (a feature can only reference what already exists — e.g. an extrude can
+// only consume an earlier sketch).
+struct RegenContext {
+  std::vector<Body>& bodies;
+  const std::vector<std::unique_ptr<Feature>>& features;
+  size_t currentIndex;
+
+  // Searches features[0, currentIndex) by stable id; nullptr if absent.
+  const Feature* FindById(uint64_t id) const;
+};
+
 // One step in the parametric history. Features are executed in order by
 // Document::Regenerate() to rebuild the model from scratch, so they must be
 // deterministic and self-contained (all inputs are parameters, never live
@@ -23,14 +38,21 @@ public:
   const std::string& GetName() const { return m_name; }
   void SetName(const std::string& name) { m_name = name; }
 
+  // Stable identity for feature->feature references (an extrude names its
+  // sketch by id, which survives reordering and undo). 0 = unassigned; the
+  // Document assigns ids on insert and serialization round-trips them.
+  uint64_t GetId() const { return m_id; }
+  void SetId(uint64_t id) { m_id = id; }
+
   virtual std::string TypeName() const = 0;
 
   // Applies this feature to the model. Returns false on failure, which
   // aborts regeneration of subsequent features.
-  virtual bool Execute(std::vector<Body>& bodies) = 0;
+  virtual bool Execute(RegenContext& ctx) = 0;
 
 protected:
   std::string m_name;
+  uint64_t m_id = 0;
 };
 
 class BoxFeature : public Feature {
@@ -39,7 +61,7 @@ public:
              double height, double depth);
 
   std::string TypeName() const override { return "Box"; }
-  bool Execute(std::vector<Body>& bodies) override;
+  bool Execute(RegenContext& ctx) override;
 
   glm::vec3 position;
   double width, height, depth;
@@ -51,7 +73,7 @@ public:
                 double radius);
 
   std::string TypeName() const override { return "Sphere"; }
-  bool Execute(std::vector<Body>& bodies) override;
+  bool Execute(RegenContext& ctx) override;
 
   glm::vec3 center;
   double radius;
@@ -63,7 +85,7 @@ public:
                   const glm::vec3& direction, double radius, double height);
 
   std::string TypeName() const override { return "Cylinder"; }
-  bool Execute(std::vector<Body>& bodies) override;
+  bool Execute(RegenContext& ctx) override;
 
   glm::vec3 center;
   glm::vec3 direction;
@@ -78,7 +100,7 @@ public:
   ImportFeature(const std::string& name, const std::string& path);
 
   std::string TypeName() const override { return "Import"; }
-  bool Execute(std::vector<Body>& bodies) override;
+  bool Execute(RegenContext& ctx) override;
 
   std::string path;
 };

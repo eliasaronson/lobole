@@ -17,6 +17,9 @@ public:
   const std::vector<std::unique_ptr<Feature>>& GetFeatures() const {
     return m_features;
   }
+  // Lookup by stable id (see Feature::GetId); nullptr if absent. Returns the
+  // feature's current index through outIndex if given.
+  Feature* FindFeatureById(uint64_t id, size_t* outIndex = nullptr);
 
   // Mutators regenerate automatically so bodies always match the features.
   void AddFeature(std::unique_ptr<Feature> feature);
@@ -41,4 +44,5 @@ private:
   std::vector<std::unique_ptr<Feature>> m_features;
   std::vector<Body> m_bodies;
   uint64_t m_version = 0;
+  uint64_t m_nextId = 1;
 };
