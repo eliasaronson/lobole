@@ -58,8 +58,10 @@ Not working / partial:
 4. ~~**Fix face selection**~~ *(done — consistent Vulkan projection in camera+picker, real
    B-Rep face mapping with surface normals, per-face highlight via push constants, viewport
    input through ImGui so tests/automation can drive orbit/pan/zoom/select)*
-5. **Render sketches + implement extrude** (`BRepPrimAPI_MakePrism` on a closed profile) —
-   closes the first sketch → solid loop.
+5. ~~**Render sketches + implement extrude**~~ *(done — SketchFeature + ExtrudeFeature
+   (new body / add / cut), sketch rendering, plane/face picking, the full
+   sketch → extrude → sketch-on-face loop)*
+6. **Sketch constraints** (next) — PlaneGCS for coincident/parallel/dimension.
 
 ## Long term
 
@@ -68,13 +70,16 @@ A feature list (sketch, extrude, boolean, transform, …) that regenerates the B
 deterministically, serialized as human-readable text (JSON or a small DSL). All UI actions
 route through commands. Gives undo, checkpoints, and a diffable format immediately.
 
-*In progress:* `src/core/` has `Document` (feature list + deterministic regeneration),
-features (Box, Sphere, Cylinder, STEP Import), `Command`/`CommandStack` (undo/redo incl.
-`ModifyFeatureCommand`), and JSON project serialization (`DocumentIO`). The UI is a
-docking workbench (`src/ui/`, imgui docking branch): Model panel (feature history,
-selection, delete), Properties panel with **live parameter editing** (drag a dimension,
-model regenerates, undoable), keyboard shortcuts, merged menus. Next: sketch/extrude as
-features, then persistent references (topological naming).
+*Largely built:* `src/core/` has `Document` (feature list + deterministic regeneration,
+stable feature ids, `RegenContext` for feature→feature references), features (Box, Sphere,
+Cylinder, STEP Import, **Sketch**, **Extrude** with new-body/add/cut), `Command`/`CommandStack`
+(undo/redo incl. `ModifyFeatureCommand`), and JSON project serialization v2 (`DocumentIO`).
+The UI is a docking workbench (`src/ui/`): Model panel with a Default-geometry section and
+feature history, Properties with **live parameter editing**, a `SketchRenderer` (lines +
+translucent plane quads), and full sketch interaction (pick plane/face → draw → extrude).
+The complete Onshape loop works: sketch → extrude → sketch on a face → cut. Remaining before
+this phase is "done": persistent references (**topological naming**) so a sketch on a face
+follows that face when upstream edits move it — currently planes are baked at creation.
 
 ⚠ Hard problem to design for up front: **topological naming** — how "the face I filleted"
 stays identified after an upstream edit reorders faces. Study FreeCAD's RealThunder branch
