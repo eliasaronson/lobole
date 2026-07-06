@@ -1,6 +1,7 @@
 #include "core/Serialization.h"
 
 #include "Logger.h"
+#include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/SketchFeature.h"
 
@@ -61,6 +62,22 @@ sketch::Entity EntityFromJson(const json& j) {
   throw std::runtime_error("Unknown sketch entity type: " + type);
 }
 
+const char* ExtrudeModeToString(ExtrudeMode mode) {
+  switch (mode) {
+  case ExtrudeMode::NewBody: return "new_body";
+  case ExtrudeMode::Add: return "add";
+  case ExtrudeMode::Cut: return "cut";
+  }
+  return "new_body";
+}
+
+ExtrudeMode ExtrudeModeFromString(const std::string& s) {
+  if (s == "new_body") return ExtrudeMode::NewBody;
+  if (s == "add") return ExtrudeMode::Add;
+  if (s == "cut") return ExtrudeMode::Cut;
+  throw std::runtime_error("Unknown extrude mode: " + s);
+}
+
 }  // namespace
 
 namespace DocumentIO {
@@ -81,6 +98,11 @@ json FeatureToJson(const Feature& feature) {
     for (const auto& entity : sk->entities) {
       j["entities"].push_back(EntityToJson(entity));
     }
+  } else if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
+    j["sketch_id"] = ext->sketchId;
+    j["distance"] = ext->distance;
+    j["reversed"] = ext->reversed;
+    j["mode"] = ExtrudeModeToString(ext->mode);
   } else if (auto* box = dynamic_cast<const BoxFeature*>(&feature)) {
     j["position"] = Vec3ToJson(box->position);
     j["width"] = box->width;
@@ -118,8 +140,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sk->entities.push_back(EntityFromJson(ej));
     }
     out = std::move(sk);
-  }
-  if (type == "Box") {
+  } else if (type == "Extrude") {
+    out = std::make_unique<ExtrudeFeature>(
+        name, j.at("sketch_id").get<uint64_t>(), j.at("distance").get<double>(),
+        ExtrudeModeFromString(j.value("mode", "new_body")),
+        j.value("reversed", false));
+  } else if (type == "Box") {
     out = std::make_unique<BoxFeature>(
         name, Vec3FromJson(j.at("position")), j.at("width").get<double>(),
         j.at("height").get<double>(), j.at("depth").get<double>());

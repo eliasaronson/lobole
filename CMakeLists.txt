@@ -135,6 +135,8 @@ set(core_sources
     src/core/Command.cpp
     src/core/Serialization.cpp
     src/core/SketchFeature.cpp
+    src/core/SketchProfile.cpp
+    src/core/ExtrudeFeature.cpp
 )
 
 find_package(nlohmann_json 3 REQUIRED)
