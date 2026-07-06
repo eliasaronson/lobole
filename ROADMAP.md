@@ -110,6 +110,18 @@ A real constraint solver (coincident, parallel, dimensions) is what makes it fee
 Onshape. Don't write one — embed **PlaneGCS** (FreeCAD's solver, LGPL) or SolveSpace's
 solver as a library.
 
+*Done (v1):* PlaneGCS vendored (`deps/planegcs`, LGPL) + a `SketchSolver` adapter. Constraints
+(coincident, horizontal/vertical, parallel, perpendicular, equal, distance, radius) in the
+sketch model, serialized (format v3). Sketch-entity picking + drag-to-resolve; a constraints
+toolbar. Solve runs in the interaction layer (never in Regenerate). Remaining: angle
+constraints, arcs, auto-constraint inference, whole-line/circle dragging.
+
+### CAD UI (done)
+Traditional-CAD redesign on the dark theme: icon toolbar (Font Awesome), **preview →
+accept/cancel** feature creation (green ✓ / red ✗, Onshape-style), default planes visible by
+default and auto-hidden with geometry, world-origin gizmo. The 3D viewport renders into the
+central dock node (centered between panels).
+
 ### Continuous
 Incrementally dismantle `main.cpp` and the tripled Vulkan boilerplate (extract a
 `VulkanContext` + shared renderer utilities) — opportunistically while touching code, not as
