@@ -8,6 +8,7 @@
 #include <vector>
 
 struct Vertex3D;
+class SketchPlane;
 
 namespace ui {
 
@@ -28,6 +29,14 @@ void LoadSTEPFile(AppState& state, const std::string& filename);
 // Translucent default-plane quads (Front/Top/Right); hoveredPlane 0/1/2 is
 // brightened, -1 for none. Empty when show is false.
 std::vector<Vertex3D> BuildPlaneQuads(bool show, int hoveredPlane);
+
+// Appends a translucent fill quad for one plane (e.g. the active sketch plane).
+void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color,
+                     float half, std::vector<Vertex3D>& quads);
+
+// Appends grid lines for a sketch's work plane (minor/major cells + colored
+// U/V axes), so it is clear what surface you are drawing on.
+void AppendSketchGrid(const SketchPlane& plane, std::vector<Vertex3D>& lines);
 
 // Highlighted line geometry for the sketch currently being edited (empty if
 // none). Rendered as a per-frame overlay on top of the static sketch lines.

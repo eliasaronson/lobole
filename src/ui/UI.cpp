@@ -2,6 +2,7 @@
 
 #include "Camera.h"
 #include "SketchRenderer.h"
+#include "core/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/DockLayout.h"
 #include "ui/FeatureTreePanel.h"
@@ -41,12 +42,22 @@ void DrawUI(AppState& state) {
   // as an overlay on top of the static sketch lines.
   if (state.sketchRenderer) {
     const bool showPlanes = state.showPlanes || state.sketchEdit.pickingPlane;
-    state.sketchRenderer->SetQuads(
-        BuildPlaneQuads(showPlanes, state.sketchEdit.hoveredPlane));
+    std::vector<Vertex3D> quads =
+        BuildPlaneQuads(showPlanes, state.sketchEdit.hoveredPlane);
 
     std::vector<Vertex3D> overlay =
         BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
     BuildSketchOverlay(state, overlay);
+
+    // While editing, draw a grid + subtle fill on the work plane so it's
+    // clear what surface the sketch is on.
+    if (SketchFeature* active = ResolveActiveSketch(state)) {
+      AppendSketchGrid(active->plane, overlay);
+      AppendPlaneQuad(active->plane, glm::vec3(0.30f, 0.36f, 0.48f), 5.0f,
+                      quads);
+    }
+
+    state.sketchRenderer->SetQuads(std::move(quads));
     state.sketchRenderer->SetOverlayLines(std::move(overlay));
   }
 

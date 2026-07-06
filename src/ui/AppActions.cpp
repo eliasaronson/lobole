@@ -86,6 +86,41 @@ std::vector<Vertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
   return quads;
 }
 
+void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color, float half,
+                     std::vector<Vertex3D>& quads) {
+  glm::vec3 o = plane.GetOrigin();
+  glm::vec3 u = plane.GetUAxis() * half;
+  glm::vec3 v = plane.GetVAxis() * half;
+  glm::vec3 a = o - u - v, b = o + u - v, c = o + u + v, d = o - u + v;
+  for (const glm::vec3& p : {a, b, c, a, c, d}) {
+    quads.push_back(LineVertex(p, color));
+  }
+}
+
+void AppendSketchGrid(const SketchPlane& plane, std::vector<Vertex3D>& lines) {
+  const int half = 5;      // grid extends -5..5 in plane units
+  const float step = 1.0f; // one grid cell per unit
+  const glm::vec3 minor(0.30f, 0.34f, 0.42f);
+  const glm::vec3 major(0.45f, 0.52f, 0.65f);
+  const glm::vec3 uAxisColor(0.85f, 0.40f, 0.42f); // red = U (like X)
+  const glm::vec3 vAxisColor(0.45f, 0.80f, 0.50f); // green = V (like Y)
+
+  auto world = [&](float u, float v) {
+    return plane.PlaneToWorld(glm::vec2(u, v));
+  };
+  const float extent = half * step;
+  for (int i = -half; i <= half; i++) {
+    const float t = i * step;
+    // Lines parallel to V (constant U) and parallel to U (constant V)
+    const glm::vec3 cU = (i == 0) ? vAxisColor : (i % 5 == 0 ? major : minor);
+    lines.push_back(LineVertex(world(t, -extent), cU));
+    lines.push_back(LineVertex(world(t, extent), cU));
+    const glm::vec3 cV = (i == 0) ? uAxisColor : (i % 5 == 0 ? major : minor);
+    lines.push_back(LineVertex(world(-extent, t), cV));
+    lines.push_back(LineVertex(world(extent, t), cV));
+  }
+}
+
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();
