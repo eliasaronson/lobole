@@ -7,8 +7,11 @@
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
+#include "core/SketchSolver.h"
 
 #include "imgui.h"
+
+#include <optional>
 
 namespace ui {
 
@@ -178,8 +181,45 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   const glm::vec2 uv = *uvOpt;
   edit.hoverPoint = uv;
 
-  if (edit.tool == SketchTool::Select)
+  if (edit.tool == SketchTool::Select) {
+    // Click selects an endpoint (for constraints) and begins a drag; empty
+    // click clears the selection.
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      SketchPick pick =
+          PickSketchPoint(state, *sketch, glm::vec2(mousePos.x, mousePos.y),
+                          12.0f);
+      if (pick.hit) {
+        if (!ImGui::GetIO().KeyCtrl)
+          edit.selected.clear();
+        edit.selected.push_back(pick.ref);
+        edit.dragging = true;
+        edit.dragRef = pick.ref;
+        state.editBaseline = DocumentIO::FeatureToJson(*sketch);
+      } else {
+        edit.selected.clear();
+      }
+    }
+    // Drag: re-solve with the grabbed point pinned to the cursor.
+    if (edit.dragging && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+      sketch::Solver solver;
+      solver.Load(*sketch);
+      solver.SetDragPoint(edit.dragRef, uv);
+      if (solver.Solve().ok) {
+        solver.WriteBack(sketch->entities);
+        state.document->Regenerate();
+      }
+    }
+    if (edit.dragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+      edit.dragging = false;
+      nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+      if (after != state.editBaseline) {
+        state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                                    index, state.editBaseline, after),
+                                *state.document);
+      }
+    }
     return true;
+  }
 
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     if (edit.tool == SketchTool::Point) {
@@ -239,6 +279,117 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
     out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
     out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
   }
+}
+
+glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
+                           glm::vec2 uv) {
+  glm::vec3 world = plane.PlaneToWorld(uv);
+  glm::vec4 clip = state.camera->GetProjectionMatrix() *
+                   state.camera->GetViewMatrix() * glm::vec4(world, 1.0f);
+  glm::vec3 ndc = glm::vec3(clip) / clip.w;
+  return state.viewportPos +
+         glm::vec2((ndc.x + 1.0f) * 0.5f * state.viewportSize.x,
+                   (ndc.y + 1.0f) * 0.5f * state.viewportSize.y);
+}
+
+namespace {
+// Endpoints exposed by an entity for picking/constraints.
+std::vector<std::pair<uint8_t, glm::vec2>> EntityPoints(const sketch::Entity& e) {
+  std::vector<std::pair<uint8_t, glm::vec2>> pts;
+  if (auto* p = std::get_if<sketch::Point>(&e)) {
+    pts = {{0, p->p}};
+  } else if (auto* l = std::get_if<sketch::Line>(&e)) {
+    pts = {{0, l->a}, {1, l->b}};
+  } else if (auto* c = std::get_if<sketch::Circle>(&e)) {
+    pts = {{0, c->center}};
+  } else if (auto* r = std::get_if<sketch::Rectangle>(&e)) {
+    pts = {{0, r->c1}, {1, r->c2}};
+  }
+  return pts;
+}
+} // namespace
+
+SketchPick PickSketchPoint(AppState& state, const SketchFeature& sketch,
+                           glm::vec2 mousePos, float tolPx) {
+  SketchPick best;
+  float bestDist = tolPx;
+  for (uint32_t i = 0; i < sketch.entities.size(); i++) {
+    for (auto& [which, uv] : EntityPoints(sketch.entities[i])) {
+      glm::vec2 screen = SketchUVToScreen(state, sketch.plane, uv);
+      float d = glm::length(screen - mousePos);
+      if (d < bestDist) {
+        bestDist = d;
+        best.hit = true;
+        best.ref = {i, which};
+      }
+    }
+  }
+  return best;
+}
+
+bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
+                           double value) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch)
+    return false;
+
+  const auto& sel = state.sketchEdit.selected;
+  using K = sketch::ConstraintKind;
+  sketch::Constraint c;
+  c.kind = kind;
+  c.value = value;
+
+  // Validate the selection for the constraint kind.
+  auto isLine = [&](const sketch::PointRef& r) {
+    return std::holds_alternative<sketch::Line>(sketch->entities[r.entity]);
+  };
+  auto isCircle = [&](const sketch::PointRef& r) {
+    return std::holds_alternative<sketch::Circle>(sketch->entities[r.entity]);
+  };
+
+  switch (kind) {
+  case K::Coincident:
+  case K::Distance:
+    if (sel.size() < 2) return false;
+    c.a = sel[0];
+    c.b = sel[1];
+    break;
+  case K::Horizontal:
+  case K::Vertical:
+    if (sel.empty() || !isLine(sel[0])) return false;
+    c.a = {sel[0].entity, 0};
+    break;
+  case K::Parallel:
+  case K::Perpendicular:
+  case K::Equal:
+    if (sel.size() < 2) return false;
+    c.a = {sel[0].entity, 0};
+    c.b = {sel[1].entity, 0};
+    break;
+  case K::Radius:
+    if (sel.empty() || !isCircle(sel[0])) return false;
+    c.a = {sel[0].entity, 0};
+    break;
+  }
+
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  sketch->constraints.push_back(c);
+
+  // Solve and write the result back into the sketch.
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  sketch::SolveResult r = solver.Solve();
+  if (r.ok)
+    solver.WriteBack(sketch->entities);
+
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  state.sketchEdit.selected.clear();
+  return true;
 }
 
 } // namespace ui

@@ -5,7 +5,12 @@
 #include "Logger.h"
 #include "MeshRenderer.h"
 #include "core/Serialization.h"
+#include "core/SketchFeature.h"
+#include "core/SketchSolver.h"
 #include "ui/AppActions.h"
+#include "ui/PreviewFeature.h"
+
+#include <map>
 
 #include "imgui.h"
 #include "imgui_te_context.h"
@@ -244,7 +249,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               {"target", Vec3ToJson(state.camera->GetTarget())},
               {"distance", state.camera->GetDistance()}}},
             {"can_undo", state.commands->CanUndo()},
-            {"can_redo", state.commands->CanRedo()}};
+            {"can_redo", state.commands->CanRedo()},
+            {"pending_feature_id", state.pendingFeatureId}};
+  }
+  if (m == "accept_pending") {
+    ui::AcceptPendingFeature(state);
+    return json::object();
+  }
+  if (m == "cancel_pending") {
+    ui::CancelPendingFeature(state);
+    return json::object();
   }
   if (m == "add_feature") {
     auto feature = DocumentIO::FeatureFromJson(p.at("feature"));
@@ -273,6 +287,46 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                  *doc)) {
       throw std::runtime_error("no feature at index");
     }
+    return json::object();
+  }
+  if (m == "add_constraint") {
+    // Append a constraint to a sketch (by id), solve, and commit one edit.
+    // params: {sketch_id, kind, refs: [[entity,which],...], value?}
+    size_t index = 0;
+    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    auto* sk = dynamic_cast<SketchFeature*>(f);
+    if (!sk) throw std::runtime_error("no such sketch");
+
+    sketch::Constraint c;
+    static const std::map<std::string, sketch::ConstraintKind> kinds = {
+        {"coincident", sketch::ConstraintKind::Coincident},
+        {"horizontal", sketch::ConstraintKind::Horizontal},
+        {"vertical", sketch::ConstraintKind::Vertical},
+        {"parallel", sketch::ConstraintKind::Parallel},
+        {"perpendicular", sketch::ConstraintKind::Perpendicular},
+        {"equal", sketch::ConstraintKind::Equal},
+        {"distance", sketch::ConstraintKind::Distance},
+        {"radius", sketch::ConstraintKind::Radius}};
+    auto it = kinds.find(p.at("kind").get<std::string>());
+    if (it == kinds.end()) throw std::runtime_error("unknown constraint kind");
+    c.kind = it->second;
+    c.value = p.value("value", 0.0);
+    const json& refs = p.at("refs");
+    if (refs.size() > 0)
+      c.a = {refs[0][0].get<uint32_t>(), refs[0][1].get<uint8_t>()};
+    if (refs.size() > 1)
+      c.b = {refs[1][0].get<uint32_t>(), refs[1][1].get<uint8_t>()};
+
+    json before = DocumentIO::FeatureToJson(*sk);
+    sk->constraints.push_back(c);
+    sketch::Solver solver;
+    solver.Load(*sk);
+    if (solver.Solve().ok)
+      solver.WriteBack(sk->entities);
+    doc->Regenerate();
+    json after = DocumentIO::FeatureToJson(*sk);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json::object();
   }
   if (m == "undo") {

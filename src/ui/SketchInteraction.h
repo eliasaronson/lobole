@@ -36,4 +36,22 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 // sketch renderer's overlay. No-op when not drawing.
 void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out);
 
+// Projects a plane-UV point to viewport screen coords (pixels), matching the
+// picking/render path.
+glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
+                           glm::vec2 uv);
+
+// Screen-space pick of the nearest sketch endpoint within tolerance.
+struct SketchPick {
+  bool hit = false;
+  sketch::PointRef ref;
+};
+SketchPick PickSketchPoint(AppState& state, const SketchFeature& sketch,
+                           glm::vec2 mousePos, float tolPx);
+
+// Adds a constraint from the current selection, solves, and commits one
+// ModifyFeatureCommand. Returns false if the selection isn't valid.
+bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
+                           double value);
+
 } // namespace ui
