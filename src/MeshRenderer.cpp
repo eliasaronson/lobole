@@ -148,8 +148,12 @@ void MeshRenderer::UpdateMesh(uint32_t meshId, const std::vector<Vertex3D>& vert
 
 void MeshRenderer::RemoveMesh(uint32_t meshId) {
     if (meshId == 0 || meshId > m_meshes.size()) return;
-    
+
     if (m_meshes[meshId - 1]) {
+        // Ensure the buffers aren't referenced by an in-flight frame before
+        // destroying them (rapid resync, e.g. accepting a feature preview,
+        // otherwise causes a GPU device-lost).
+        vkDeviceWaitIdle(m_device);
         DestroyMeshBuffers(m_meshes[meshId - 1].get());
         m_meshes[meshId - 1].reset();
     }

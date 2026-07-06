@@ -25,6 +25,7 @@
 #include <memory>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -314,10 +315,11 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window *wd,
       requestSurfaceColorSpace);
 
   if (g_DisableVSync) {
-    // Uncapped presents: vsynced (FIFO) presents of an occluded window get
-    // throttled to ~1 fps by the compositor, which stalls GUI tests.
-    VkPresentModeKHR present_modes[] = {VK_PRESENT_MODE_IMMEDIATE_KHR,
-                                        VK_PRESENT_MODE_MAILBOX_KHR,
+    // Test mode: uncapped present (FIFO throttles occluded windows to ~1 fps,
+    // stalling the suite). Prefer MAILBOX. A frame-rate cap in the main loop
+    // keeps the GPU from a timeout device-lost under the fast test engine.
+    VkPresentModeKHR present_modes[] = {VK_PRESENT_MODE_MAILBOX_KHR,
+                                        VK_PRESENT_MODE_IMMEDIATE_KHR,
                                         VK_PRESENT_MODE_FIFO_KHR};
     wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(
         g_PhysicalDevice, wd->Surface, &present_modes[0],
@@ -814,6 +816,21 @@ int main(int argc, char **argv) {
       FrameRender(wd, draw_data);
       FramePresent(wd);
       ImGuiTestEngine_PostSwap(testEngine);
+
+      // In uncapped test mode, cap the frame rate so the GPU isn't driven to
+      // a timeout device-lost by the fast test-engine loop. 60 fps keeps the
+      // suite well under the ctest timeout while giving the GPU headroom.
+      if (g_DisableVSync) {
+        static double lastFrame = 0.0;
+        const double now = glfwGetTime();
+        const double minFrame = 1.0 / 60.0;
+        const double elapsed = now - lastFrame;
+        if (elapsed < minFrame && elapsed > 0.0) {
+          struct timespec ts{0, (long)((minFrame - elapsed) * 1e9)};
+          nanosleep(&ts, nullptr);
+        }
+        lastFrame = glfwGetTime();
+      }
 
       // Remote screenshot: re-render this frame into a readable image
       std::string shotPath;
