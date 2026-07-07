@@ -261,6 +261,95 @@ TEST_CASE("Split keeps both pieces horizontal and the length spanning",
   CHECK_THAT(glm::length(p2.b - p1.a), WithinRel(6.0, 1e-4));
 }
 
+TEST_CASE("Midpoint pins a point to a line's centre", "[solver]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  uint32_t p0 = s.AddEntity(sketch::Point{{1, 2}}); // off the middle
+  s.constraints.push_back({sketch::ConstraintKind::Midpoint, {p0, 0}, {l0, 0}});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 mid = 0.5f * (LineA(out[0]) + LineB(out[0]));
+  glm::vec2 p = std::get<sketch::Point>(out[1]).p;
+  CHECK_THAT(glm::length(p - mid), WithinAbs(0.0f, 1e-5f));
+}
+
+TEST_CASE("Symmetric mirrors two points across a line", "[solver]") {
+  SketchFeature s = MakeSketch();
+  uint32_t axis = s.AddEntity(sketch::Line{{0, 0}, {0, 4}}); // vertical axis x=0
+  uint32_t pa = s.AddEntity(sketch::Point{{-2, 1}});
+  uint32_t pb = s.AddEntity(sketch::Point{{2.5f, 1.3f}}); // not yet mirrored
+  // Pin the axis so symmetry is about x=0 (not a drifted axis).
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {axis, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {axis, 1}});
+  sketch::Constraint sym{sketch::ConstraintKind::Symmetric, {pa, 0}, {pb, 0}};
+  sym.c = {axis, 0};
+  s.constraints.push_back(sym);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 a = std::get<sketch::Point>(out[1]).p;
+  glm::vec2 b = std::get<sketch::Point>(out[2]).p;
+  CHECK_THAT(a.x, WithinAbs(-b.x, 1e-4f)); // mirrored across x=0
+  CHECK_THAT(a.y, WithinAbs(b.y, 1e-4f));  // same height
+}
+
+TEST_CASE("Fixed pins a point under a drag", "[solver][drag]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 0}}); // pin a
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.BeginDrag({{l0, 0}}));       // try to drag the fixed endpoint
+  solver.SetDragTargets({{3.0f, 3.0f}});
+  REQUIRE(solver.SolveDrag().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  CHECK_THAT(glm::length(LineA(out[0])), WithinAbs(0.0f, 1e-4f)); // stayed at 0,0
+}
+
+TEST_CASE("Concentric shares two circle centres", "[solver]") {
+  SketchFeature s = MakeSketch();
+  uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 1.0});
+  uint32_t c1 = s.AddEntity(sketch::Circle{{2, 1}, 2.0});
+  s.constraints.push_back({sketch::ConstraintKind::Concentric, {c0, 0}, {c1, 0}});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 ca = std::get<sketch::Circle>(out[0]).center;
+  glm::vec2 cb = std::get<sketch::Circle>(out[1]).center;
+  CHECK_THAT(glm::length(ca - cb), WithinAbs(0.0f, 1e-5f));
+}
+
+TEST_CASE("Collinear puts two lines on one line", "[solver]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {2, 0}});
+  uint32_t l1 = s.AddEntity(sketch::Line{{3, 0.5f}, {5, 0.7f}}); // offset + tilted
+  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 0}}); // pin l0 to y=0
+  s.constraints.push_back({sketch::ConstraintKind::Collinear, {l0, 0}, {l1, 0}});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  // Both lines end up on y = 0 (collinear with the horizontal l0).
+  auto& b = std::get<sketch::Line>(out[1]);
+  CHECK_THAT(b.a.y, WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(b.b.y, WithinAbs(0.0f, 1e-4f));
+}
+
 TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});

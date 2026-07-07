@@ -62,6 +62,14 @@ void DrawSketchToolbar(AppState& state) {
   if (ImGui::IsItemHovered())
     ImGui::SetTooltip("Snap and add constraints while drawing (hold Ctrl to "
                       "place freely)");
+  ImGui::SameLine();
+  ImGui::BeginDisabled(edit.selected.empty());
+  if (ImGui::Button("Construction"))
+    ToggleConstruction(state);
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    ImGui::SetTooltip("Toggle selected geometry as construction/reference "
+                      "(dashed, excluded from the profile)");
 
   // Constraints (enabled by the current Select-mode selection)
   ImGui::SeparatorText("Constraints");
@@ -116,6 +124,18 @@ void DrawSketchToolbar(AppState& state) {
        (isLine(sel[0]) && isPoint(sel[1])) ||
        (isLine(sel[0]) && isLine(sel[1]) && sel[0].entity != sel[1].entity));
   conButton("L", "Point on line (point + line)", ptOnLine, K::PointOnLine);
+  const bool twoCircles = sel.size() >= 2 && isCircle(sel[0]) && isCircle(sel[1]);
+  int symLines = 0;
+  for (size_t i = 0; i < sel.size() && i < 3; i++)
+    if (isLine(sel[i])) symLines++;
+  const bool symmetric = sel.size() >= 3 && symLines >= 1;
+  const bool midpoint =
+      sel.size() >= 2 && (isLine(sel[0]) != isLine(sel[1])); // exactly one line
+  conButton("Sym", "Symmetric (2 points + a line)", symmetric, K::Symmetric);
+  conButton("Mid", "Midpoint (point + line)", midpoint, K::Midpoint);
+  conButton(ICON_FA_LOCK, "Fix (pin a point)", !sel.empty(), K::Fixed);
+  conButton("Con", "Concentric (2 circles)", twoCircles, K::Concentric);
+  conButton("Col", "Collinear (2 lines)", twoLines, K::Collinear);
   ImGui::NewLine();
 
   // Dimensional constraints with a value input

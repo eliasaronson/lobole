@@ -15,18 +15,24 @@ namespace sketch {
 // Sketch entities live in the plane's UV space. Each carries a stable `id`
 // (1-based; 0 means unassigned) so constraints survive insert/delete — see
 // PointRef below.
+// `construction`: reference geometry (centerlines, ref circles). It drives
+// constraints and snapping but is excluded from the extrude profile and drawn
+// dashed/dimmed.
 struct Point {
   glm::vec2 p;
   uint32_t id = 0;
+  bool construction = false;
 };
 struct Line {
   glm::vec2 a, b;
   uint32_t id = 0;
+  bool construction = false;
 };
 struct Circle {
   glm::vec2 center;
   double radius;
   uint32_t id = 0;
+  bool construction = false;
 };
 
 // Rectangles are not a primitive: they decompose into four Lines with shared
@@ -40,6 +46,12 @@ inline uint32_t EntityId(const Entity& e) {
 }
 inline void SetEntityId(Entity& e, uint32_t id) {
   std::visit([id](auto& g) { g.id = id; }, e);
+}
+inline bool IsConstruction(const Entity& e) {
+  return std::visit([](const auto& g) { return g.construction; }, e);
+}
+inline void SetConstruction(Entity& e, bool c) {
+  std::visit([c](auto& g) { g.construction = c; }, e);
 }
 
 // A reference to a point on an entity. `entity` is the entity's stable **id**
@@ -64,12 +76,18 @@ enum class ConstraintKind {
   Angle,         // a.entity, b.entity are two lines: angle = value (radians)
   Tangent,       // a.entity is a line, b.entity is a circle
   PointOnLine,   // a is a point, b.entity is a line
+  Symmetric,     // a, b are points symmetric about the line c.entity
+  Midpoint,      // a is a point at the midpoint of the line b.entity
+  Fixed,         // a is a point (or entity) pinned in place
+  Concentric,    // a.entity, b.entity are circles sharing a center
+  Collinear,     // a.entity, b.entity are two lines on the same infinite line
 };
 
 struct Constraint {
   ConstraintKind kind;
   PointRef a, b;
   double value = 0.0; // Distance / Radius dimension
+  PointRef c;         // third ref (Symmetric: the symmetry line); else unused
 };
 
 } // namespace sketch

@@ -15,7 +15,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 5; // v5: rectangles decompose into lines
+constexpr int kVersion = 6; // v6: construction-geometry flag
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -46,6 +46,8 @@ json EntityToJson(const sketch::Entity& entity) {
       },
       entity);
   j["id"] = sketch::EntityId(entity);
+  if (sketch::IsConstruction(entity))
+    j["construction"] = true; // omit when false to keep JSON compact
   return j;
 }
 
@@ -66,6 +68,7 @@ sketch::Entity EntityFromJson(const json& j) {
     throw std::runtime_error("Unknown sketch entity type: " + type);
   }
   sketch::SetEntityId(e, id);
+  sketch::SetConstruction(e, j.value("construction", false));
   return e;
 }
 
@@ -83,6 +86,11 @@ const char* ConstraintKindToString(sketch::ConstraintKind k) {
   case K::Angle: return "angle";
   case K::Tangent: return "tangent";
   case K::PointOnLine: return "point_on_line";
+  case K::Symmetric: return "symmetric";
+  case K::Midpoint: return "midpoint";
+  case K::Fixed: return "fixed";
+  case K::Concentric: return "concentric";
+  case K::Collinear: return "collinear";
   }
   return "coincident";
 }
@@ -100,14 +108,22 @@ sketch::ConstraintKind ConstraintKindFromString(const std::string& s) {
   if (s == "angle") return K::Angle;
   if (s == "tangent") return K::Tangent;
   if (s == "point_on_line") return K::PointOnLine;
+  if (s == "symmetric") return K::Symmetric;
+  if (s == "midpoint") return K::Midpoint;
+  if (s == "fixed") return K::Fixed;
+  if (s == "concentric") return K::Concentric;
+  if (s == "collinear") return K::Collinear;
   throw std::runtime_error("Unknown constraint kind: " + s);
 }
 
 json ConstraintToJson(const sketch::Constraint& c) {
-  return {{"kind", ConstraintKindToString(c.kind)},
-          {"a", {c.a.entity, c.a.which}},
-          {"b", {c.b.entity, c.b.which}},
-          {"value", c.value}};
+  json j = {{"kind", ConstraintKindToString(c.kind)},
+            {"a", {c.a.entity, c.a.which}},
+            {"b", {c.b.entity, c.b.which}},
+            {"value", c.value}};
+  if (c.kind == sketch::ConstraintKind::Symmetric) // only Symmetric uses c
+    j["c"] = {c.c.entity, c.c.which};
+  return j;
 }
 
 sketch::Constraint ConstraintFromJson(const json& j) {
@@ -116,6 +132,8 @@ sketch::Constraint ConstraintFromJson(const json& j) {
   c.a = {j.at("a").at(0).get<uint32_t>(), j.at("a").at(1).get<uint8_t>()};
   c.b = {j.at("b").at(0).get<uint32_t>(), j.at("b").at(1).get<uint8_t>()};
   c.value = j.value("value", 0.0);
+  if (j.contains("c"))
+    c.c = {j.at("c").at(0).get<uint32_t>(), j.at("c").at(1).get<uint8_t>()};
   return c;
 }
 

@@ -46,6 +46,25 @@ TEST_CASE("Rectangle (as four lines) yields one loop", "[profile]") {
   CHECK_THAT(std::abs(loops[0].SignedArea()), WithinRel(8.0, 1e-9));
 }
 
+TEST_CASE("Construction geometry is excluded from the profile", "[profile]") {
+  std::vector<sketch::Entity> e = RectLines({0, 0}, {4, 2});
+  // A construction diagonal + a construction reference circle: ignored by loops.
+  sketch::Line diag{{0, 0}, {4, 2}};
+  diag.construction = true;
+  e.push_back(diag);
+  sketch::Circle ref{{2, 1}, 0.5};
+  ref.construction = true;
+  e.push_back(ref);
+
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 1); // just the rectangle; construction contributes 0
+  CHECK_THAT(std::abs(loops[0].SignedArea()), WithinRel(8.0, 1e-9));
+
+  // Marking a rectangle side construction opens the profile.
+  std::get<sketch::Line>(e[0]).construction = true;
+  CHECK(sketch::BuildLoops(e).empty());
+}
+
 TEST_CASE("Out-of-order lines with a flipped segment chain into one loop",
           "[profile]") {
   // A triangle given in scrambled order, one segment reversed

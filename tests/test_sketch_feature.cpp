@@ -191,6 +191,24 @@ TEST_CASE("Pre-v4 sketch migrates entity indices to stable ids",
   CHECK(j2["next_entity_id"] == 3u);
 }
 
+TEST_CASE("Construction flag round-trips through JSON", "[sketch][serialization]") {
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  sketch::Line ref{{0, 0}, {4, 0}};
+  ref.construction = true;
+  sk->AddEntity(ref);
+  sk->AddEntity(sketch::Line{{0, 0}, {0, 3}}); // solid
+
+  auto j = DocumentIO::FeatureToJson(*sk);
+  auto restored = DocumentIO::FeatureFromJson(j);
+  auto* rsk = dynamic_cast<SketchFeature*>(restored.get());
+  REQUIRE(rsk != nullptr);
+  CHECK(sketch::IsConstruction(rsk->entities[0]));
+  CHECK_FALSE(sketch::IsConstruction(rsk->entities[1]));
+  // Solid entities omit the key; construction ones carry it.
+  CHECK(j["entities"][0].contains("construction"));
+  CHECK_FALSE(j["entities"][1].contains("construction"));
+}
+
 TEST_CASE("Legacy rigid rect migrates to four lines with H/V",
           "[sketch][serialization]") {
   // A v4 sketch with a rigid "rect" entity (and a stray constraint on it).

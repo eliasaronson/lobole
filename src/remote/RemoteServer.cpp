@@ -318,7 +318,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"radius", sketch::ConstraintKind::Radius},
         {"angle", sketch::ConstraintKind::Angle},
         {"tangent", sketch::ConstraintKind::Tangent},
-        {"point_on_line", sketch::ConstraintKind::PointOnLine}};
+        {"point_on_line", sketch::ConstraintKind::PointOnLine},
+        {"symmetric", sketch::ConstraintKind::Symmetric},
+        {"midpoint", sketch::ConstraintKind::Midpoint},
+        {"fixed", sketch::ConstraintKind::Fixed},
+        {"concentric", sketch::ConstraintKind::Concentric},
+        {"collinear", sketch::ConstraintKind::Collinear}};
     auto it = kinds.find(p.at("kind").get<std::string>());
     if (it == kinds.end()) throw std::runtime_error("unknown constraint kind");
     c.kind = it->second;
@@ -328,6 +333,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       c.a = {refs[0][0].get<uint32_t>(), refs[0][1].get<uint8_t>()};
     if (refs.size() > 1)
       c.b = {refs[1][0].get<uint32_t>(), refs[1][1].get<uint8_t>()};
+    if (refs.size() > 2) // Symmetric's third ref (the symmetry line)
+      c.c = {refs[2][0].get<uint32_t>(), refs[2][1].get<uint8_t>()};
 
     json before = DocumentIO::FeatureToJson(*sk);
     sk->constraints.push_back(c);

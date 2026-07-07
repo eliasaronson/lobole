@@ -304,6 +304,20 @@ void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
     out.push_back(v);
 }
 
+// A dashed line (world-space dashes) for construction/reference geometry.
+void AppendPrimDashedLine(glm::vec3 a, glm::vec3 b, float halfPx,
+                          const glm::vec4& color, std::vector<PrimVertex>& out) {
+  glm::vec3 d = b - a;
+  float len = glm::length(d);
+  if (len < 1e-6f)
+    return;
+  glm::vec3 dir = d / len;
+  const float dash = 0.15f, gap = 0.10f;
+  for (float t = 0.0f; t < len; t += dash + gap)
+    AppendPrimLine(a + dir * t, a + dir * std::min(t + dash, len), halfPx, color,
+                   out);
+}
+
 // A constant-size dot (two triangles, SDF-round in the fragment shader).
 void AppendPrimDot(glm::vec3 p, float radiusPx, const glm::vec4& color,
                    std::vector<PrimVertex>& out) {
@@ -363,18 +377,26 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
   const glm::vec4 base(0.55f, 0.85f, 1.00f, 1.0f);
   const glm::vec4 sel(1.00f, 0.62f, 0.20f, 1.0f);
   const glm::vec4 hov(1.00f, 1.00f, 0.65f, 1.0f);
-  const glm::vec4 trim(1.00f, 0.35f, 0.28f, 1.0f); // segment a trim will remove
+  const glm::vec4 trim(1.00f, 0.35f, 0.28f, 1.0f);        // trim-will-remove
+  const glm::vec4 construct(0.55f, 0.60f, 0.70f, 0.85f);  // reference geometry
 
-  // Entity lines.
+  // Entity lines. Construction geometry draws dashed + dimmed (unless
+  // selected/hovered, where the emphasis colour reads better solid).
   for (const auto& e : sk->entities) {
     const uint32_t id = sketch::EntityId(e);
     const bool s = selectedEntity(id), h = hoveredEntityBody(id);
-    const glm::vec4 col = s ? sel : (h ? hov : base);
-    const float halfPx = (s || h) ? 3.0f : 1.8f;
+    const bool constr = sketch::IsConstruction(e);
+    const glm::vec4 col = s ? sel : (h ? hov : (constr ? construct : base));
+    const float halfPx = (s || h) ? 3.0f : (constr ? 1.3f : 1.8f);
     std::vector<glm::vec2> poly = sketch::TessellateEntity(e);
-    for (size_t i = 0; i + 1 < poly.size(); i++)
-      AppendPrimLine(sk->plane.PlaneToWorld(poly[i]),
-                     sk->plane.PlaneToWorld(poly[i + 1]), halfPx, col, prims);
+    for (size_t i = 0; i + 1 < poly.size(); i++) {
+      glm::vec3 wa = sk->plane.PlaneToWorld(poly[i]);
+      glm::vec3 wb = sk->plane.PlaneToWorld(poly[i + 1]);
+      if (constr && !s && !h)
+        AppendPrimDashedLine(wa, wb, halfPx, col, prims);
+      else
+        AppendPrimLine(wa, wb, halfPx, col, prims);
+    }
   }
 
   // Vertex dots (endpoints, circle centers, points).

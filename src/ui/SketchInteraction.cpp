@@ -777,6 +777,44 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     c.b = {line->entity, 0};
     break;
   }
+  case K::Symmetric: {
+    // Two points + a symmetry line (any order). Line → c, the two points → a/b.
+    if (sel.size() < 3) return false;
+    int lineIdx = -1;
+    for (int i = 0; i < 3; i++)
+      if (isLine(sel[i])) { lineIdx = i; break; }
+    if (lineIdx < 0) return false;
+    int p0 = -1, p1 = -1;
+    for (int i = 0; i < 3; i++)
+      if (i != lineIdx) (p0 < 0 ? p0 : p1) = i;
+    c.a = sel[p0];
+    c.b = sel[p1];
+    c.c = {sel[lineIdx].entity, 0};
+    break;
+  }
+  case K::Midpoint: {
+    // A point + a line: the point sits at the line's midpoint.
+    if (sel.size() < 2) return false;
+    int lineIdx = isLine(sel[1]) ? 1 : (isLine(sel[0]) ? 0 : -1);
+    if (lineIdx < 0) return false;
+    c.a = sel[1 - lineIdx]; // the point (verbatim, keeps which)
+    c.b = {sel[lineIdx].entity, 0};
+    break;
+  }
+  case K::Fixed:
+    if (sel.empty()) return false;
+    c.a = sel[0]; // pin this point in place
+    break;
+  case K::Concentric:
+    if (sel.size() < 2 || !isCircle(sel[0]) || !isCircle(sel[1])) return false;
+    c.a = {sel[0].entity, 0};
+    c.b = {sel[1].entity, 0};
+    break;
+  case K::Collinear:
+    if (sel.size() < 2 || !isLine(sel[0]) || !isLine(sel[1])) return false;
+    c.a = {sel[0].entity, 0};
+    c.b = {sel[1].entity, 0};
+    break;
   }
 
   nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
@@ -795,6 +833,36 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
   state.sketchEdit.selected.clear();
+  return true;
+}
+
+bool ToggleConstruction(AppState& state) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || state.sketchEdit.selected.empty())
+    return false;
+
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  // Flip each selected entity; toggle relative to the first one's current state
+  // so a mixed selection ends up consistent.
+  bool anyConstruction = false;
+  for (const auto& r : state.sketchEdit.selected) {
+    size_t idx = sketch->IndexOfEntity(r.entity);
+    if (idx != SIZE_MAX && sketch::IsConstruction(sketch->entities[idx]))
+      anyConstruction = true;
+  }
+  const bool target = !anyConstruction;
+  for (const auto& r : state.sketchEdit.selected) {
+    size_t idx = sketch->IndexOfEntity(r.entity);
+    if (idx != SIZE_MAX)
+      sketch::SetConstruction(sketch->entities[idx], target);
+  }
+
+  state.document->Regenerate(); // profile changes when a line leaves/enters it
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
   return true;
 }
 

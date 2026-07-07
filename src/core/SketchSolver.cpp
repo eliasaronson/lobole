@@ -4,6 +4,7 @@
 
 #include <deque>
 #include <map>
+#include <set>
 
 #ifdef HAVE_PLANEGCS
 
@@ -39,6 +40,7 @@ struct Solver::Impl {
   std::deque<double> dragTarget;       // 2 slots per dragged point (x, y)
   std::vector<int> dragTargetBase;     // dragTarget index base per input point
   std::deque<double> dragRadiusTarget; // 1 slot for a radius drag
+  std::set<double*> fixedParams;       // params held out of the unknowns (Fixed)
 
   static uint64_t Key(uint32_t entity, uint8_t which) {
     return (uint64_t(entity) << 8) | which;
@@ -56,8 +58,10 @@ struct Solver::Impl {
   void DeclareUnknowns() {
     GCS::VEC_pD unknowns;
     for (auto& gp : gcsPoints) {
-      unknowns.push_back(gp.x);
-      unknowns.push_back(gp.y);
+      if (!fixedParams.count(gp.x)) // Fixed points stay put
+        unknowns.push_back(gp.x);
+      if (!fixedParams.count(gp.y))
+        unknowns.push_back(gp.y);
     }
     for (auto& r : radii)
       unknowns.push_back(&r);
@@ -221,6 +225,45 @@ void Solver::Load(const SketchFeature& sketch) {
       if (a && im.lineOf.count(con.b.entity))
         im.sys.addConstraintPointOnLine(*a, im.lines[im.lineOf[con.b.entity]],
                                         tag++);
+      break;
+    case ConstraintKind::Symmetric:
+      // a, b are points symmetric about the line c.entity.
+      if (a && b && im.lineOf.count(con.c.entity))
+        im.sys.addConstraintP2PSymmetric(
+            *a, *b, im.lines[im.lineOf[con.c.entity]], tag++);
+      break;
+    case ConstraintKind::Midpoint:
+      // a is the midpoint of line b: b's endpoints are symmetric about a.
+      if (a && im.lineOf.count(con.b.entity)) {
+        GCS::Line& l = im.lines[im.lineOf[con.b.entity]];
+        im.sys.addConstraintP2PSymmetric(l.p1, l.p2, *a, tag++);
+      }
+      break;
+    case ConstraintKind::Fixed:
+      // Pin the point a by holding its params out of the unknowns (no GCS
+      // constraint; handled in DeclareUnknowns).
+      if (a) {
+        im.fixedParams.insert(a->x);
+        im.fixedParams.insert(a->y);
+      }
+      break;
+    case ConstraintKind::Concentric: {
+      // Two circles share a center: coincident of their center points.
+      GCS::Point* ca = im.Resolve({con.a.entity, 0});
+      GCS::Point* cb = im.Resolve({con.b.entity, 0});
+      if (ca && cb && im.circleOf.count(con.a.entity) &&
+          im.circleOf.count(con.b.entity))
+        im.sys.addConstraintP2PCoincident(*ca, *cb, tag++);
+      break;
+    }
+    case ConstraintKind::Collinear:
+      // Parallel + one endpoint on the other line = on the same infinite line.
+      if (im.lineOf.count(con.a.entity) && im.lineOf.count(con.b.entity)) {
+        GCS::Line& la = im.lines[im.lineOf[con.a.entity]];
+        GCS::Line& lb = im.lines[im.lineOf[con.b.entity]];
+        im.sys.addConstraintParallel(la, lb, tag++);
+        im.sys.addConstraintPointOnLine(la.p1, lb, tag++);
+      }
       break;
     }
   }

@@ -55,6 +55,8 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
   std::vector<std::pair<glm::vec2, glm::vec2>> segments;
 
   for (const auto& entity : entities) {
+    if (IsConstruction(entity))
+      continue; // reference geometry: never contributes to a profile
     std::visit(
         [&](const auto& e) {
           using T = std::decay_t<decltype(e)>;

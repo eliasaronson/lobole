@@ -68,4 +68,8 @@ SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
                            double value);
 
+// Toggles the construction flag on the selected entities (one undoable edit).
+// Returns false if nothing is selected.
+bool ToggleConstruction(AppState& state);
+
 } // namespace ui
