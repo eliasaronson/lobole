@@ -380,6 +380,44 @@ first within the phase.
 
 Unchanged: own milestone after A–I.
 
+## Phase K — Interaction & keyboard: select-default, Escape, shortcuts, box-select (~1.5 days)
+
+Sketcher UX polish, placed last so shortcuts can cover *every* tool and
+constraint. The core parts (select-default, Escape, box-select) don't depend on
+later phases and can be pulled forward; only the exhaustive shortcut list wants
+all tools present.
+
+- **Select is the default mode.** Change the default `SketchTool` from `Line` to
+  `Select`; a new sketch lands in Select. Drawing tools stay active for repeated
+  placement; Escape returns to Select — so Select is the resting state and its
+  toolbar button becomes almost vestigial (kept, but rarely needed).
+- **Escape cascade** (replaces today's two-step): back out one level per press —
+  (1) cancel an in-progress draw (pending point); (2) a non-Select tool active →
+  switch to Select; (3) selection non-empty → clear it; (4) else leave sketch
+  edit. Predictable "undo my mode."
+- **Keyboard shortcuts** (guarded by `!ImGui::GetIO().WantTextInput` so they
+  never fire while editing a dimension/name field):
+  - Tools: `L` Line, `C` Circle, `R` Rectangle, `P` Point, `T` Trim, `Esc`/`S`
+    Select; `A` Arc and `D` Dimension once H/G land.
+  - Constraints on the current selection: `H` Horizontal, `V` Vertical, `O`
+    cOincident, `E` Equal, `//` (or `L2`) parallel, etc. — a compact mnemonic
+    map (tunable; the toolbar stays for the rest). Routes to the existing
+    `ApplySketchConstraint`.
+- **Box (rubber-band) selection.** In Select mode, a mouse-down that misses all
+  geometry starts a selection box instead of just clearing; drag → a 2D overlay
+  rectangle; release → select the entities inside. Left→right = window (fully
+  enclosed), right→left = crossing (touching) — the CAD convention; Ctrl adds to
+  the selection. A tiny box (a plain click) still just clears. `SketchEditState`
+  gains the box screen-rect; the hit-test is a **pure `BoxSelect(entities, rect,
+  mode, projector)`** so it unit-tests deterministically (like `SketchInference`).
+- Tests: `BoxSelect` unit cases (window vs crossing, partial overlap); GUI
+  `keys/tool_switch` (`L` → Line tool), `keys/constraint_on_selection` (select
+  two lines, `H` → both level), `select/box_selects_enclosed` (drag a box over
+  two entities → both selected), and the Escape cascade steps.
+
+Risk: low — mostly wiring; the box hit-test (pure) and the WantTextInput key
+guard are the only fiddly bits.
+
 ## Deferred / explicitly out of scope
 
 Things intentionally NOT done in a given phase, with where they get picked up.
@@ -434,10 +472,11 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 
 ## Recommended order
 
-A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → **F (drag)** / **G (dimensions)** → H (arcs) →
-I (generative: mirror/pattern/fillet/offset) → J (splines, later). A–E shipped.
-F (drag) and G (dimension display + editing) are both independent and either can
-go next — dimensions is the bigger "feels-like-a-sketcher" win, drag is the last
-core interaction; pick by feel. H completes the geometry set; I (generative) is
-the "history where it matters" layer and needs arcs first; J is its own deferred
-milestone. Roughly 10–14 days remaining.
+A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → F ✓ → **G (dimensions)** → H (arcs) →
+I (generative: mirror/pattern/fillet/offset) → J (splines, later) → K
+(interaction & keyboard). A–F shipped. G (dimension display + editing) is the
+next big "feels-like-a-sketcher" win; H completes the geometry set; I
+(generative) is the "history where it matters" layer and needs arcs first; J is
+its own deferred milestone; K is UX polish placed last so its shortcuts cover
+every tool/constraint (though select-default/Escape/box-select are independent
+and can be pulled forward). Roughly 9–13 days remaining.
