@@ -1,0 +1,20 @@
+# Curated for bug-finding, not style churn. Run on demand (clang-tidy is not
+# wired into the build to keep compiles fast):
+#   apt install clang-tidy
+#   run-clang-tidy -p build src/     # uses build/compile_commands.json
+# CMake exports compile_commands.json (CMAKE_EXPORT_COMPILE_COMMANDS) for this.
+Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*,
+  portability-*,
+  misc-*,
+  cppcoreguidelines-slicing,
+  cppcoreguidelines-pro-type-member-init,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  -misc-include-cleaner
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*/src/.*'

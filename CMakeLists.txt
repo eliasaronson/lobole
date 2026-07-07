@@ -11,20 +11,39 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
+# Export compile_commands.json for clang-tidy / clangd / editor tooling.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DVK_PROTOTYPES")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES")
+
+# Use ccache when available (no-op otherwise) for fast unchanged-TU rebuilds.
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+  set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+  set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+  message(STATUS "ccache enabled: ${CCACHE_PROGRAM}")
+endif()
+
+# Opt-in AddressSanitizer + UndefinedBehaviorSanitizer build
+# (cmake -DENABLE_SANITIZERS=ON). Off by default so normal builds pay nothing.
+option(ENABLE_SANITIZERS "Build with ASan + UBSan" OFF)
+if(ENABLE_SANITIZERS)
+  add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined)
+  message(STATUS "Sanitizers enabled (ASan + UBSan)")
+endif()
 
 find_package(glfw3 REQUIRED)
 find_package(glm REQUIRED)
 find_package(spdlog REQUIRED)
 
-# Dear ImGui
+# Dear ImGui (SYSTEM: third-party, don't warn on its headers)
 set(IMGUI_DIR deps/imgui)
-include_directories(${IMGUI_DIR} ${IMGUI_DIR}/backends ..)
+include_directories(SYSTEM ${IMGUI_DIR} ${IMGUI_DIR}/backends ..)
 
 # Dear ImGui Test Engine (GUI testing)
 set(IMGUI_TEST_ENGINE_DIR deps/imgui_test_engine/imgui_test_engine)
-include_directories(${IMGUI_TEST_ENGINE_DIR})
+include_directories(SYSTEM ${IMGUI_TEST_ENGINE_DIR})
 set(IMGUI_TEST_ENGINE_SOURCES
     ${IMGUI_TEST_ENGINE_DIR}/imgui_capture_tool.cpp
     ${IMGUI_TEST_ENGINE_DIR}/imgui_te_context.cpp
@@ -40,7 +59,8 @@ set(IMGUI_TEST_ENGINE_SOURCES
 # OpenCASCADE - manual setup
 set(OPENCASCADE_INCLUDE_DIR "/usr/include/opencascade")
 if(EXISTS ${OPENCASCADE_INCLUDE_DIR})
-    include_directories(${OPENCASCADE_INCLUDE_DIR})
+    # SYSTEM: OCC headers use deprecated std::iterator etc.; don't warn on them.
+    include_directories(SYSTEM ${OPENCASCADE_INCLUDE_DIR})
     message(STATUS "OpenCASCADE includes found at: ${OPENCASCADE_INCLUDE_DIR}")
     
     # Core OpenCASCADE libraries we need
@@ -100,6 +120,11 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/${NFD_DIR}/src/include/nfd.h)
             set(NFD_LIBS "")
             message(STATUS "Using Zenity fallback for nativefiledialog")
         endif()
+    endif()
+    # Vendored third-party C: don't warn on its (harmless) format-truncation.
+    if(NFD_SOURCES)
+        set_source_files_properties(${NFD_SOURCES} PROPERTIES
+            COMPILE_OPTIONS "-w")
     endif()
 else()
     message(WARNING "nativefiledialog submodule not found - will use ImGui file browser fallback")
@@ -175,6 +200,18 @@ target_compile_definitions(designer_core PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 if(OPENCASCADE_FOUND)
     target_link_libraries(designer_core PUBLIC ${OPENCASCADE_LIBS})
 endif()
+
+# Precompiled header for the heavy, stable includes. CADKernel.h drags in the
+# whole OpenCASCADE header tree, which otherwise re-parses in every core TU and
+# dominates compile time. PRIVATE so it applies to designer_core's own sources
+# only (not dependents). Kept off the app target, whose ImGui sources shouldn't
+# be forced to include OCC.
+target_precompile_headers(designer_core PRIVATE
+    "${CMAKE_SOURCE_DIR}/src/CADKernel.h"
+    <glm/glm.hpp>
+    <nlohmann/json.hpp>
+    <vector> <string> <memory> <optional> <variant> <map> <array>
+)
 
 # Application: windowing, rendering, UI.
 set(app_sources
