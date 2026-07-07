@@ -107,6 +107,15 @@ public:
   // editable and trimmable.
   std::array<uint32_t, 4> AddRectangle(glm::vec2 c1, glm::vec2 c2);
 
+  // Splits the line `id` at point P (assumed on the segment). Piece 1 keeps
+  // `id` (its far endpoint becomes P); piece 2 is a new line P -> original-end.
+  // Constraints transfer per the FreeCAD lines-only policy: the far-endpoint
+  // refs move to piece 2, whole-edge distances re-anchor to span both pieces,
+  // H/V/parallel/perpendicular are copied onto piece 2 (so it stays aligned),
+  // and a coincident joins the two pieces at the cut. Returns piece 2's id, or
+  // 0 if `id` isn't a line or P is at an endpoint (degenerate).
+  uint32_t SplitEntity(uint32_t id, glm::vec2 P);
+
   SketchPlane plane;
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;

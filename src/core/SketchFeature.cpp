@@ -109,3 +109,55 @@ size_t SketchFeature::DeleteEntity(uint32_t id) {
   entities.erase(entities.begin() + idx);
   return droppedNonTrivial;
 }
+
+uint32_t SketchFeature::SplitEntity(uint32_t id, glm::vec2 P) {
+  const size_t idx = IndexOfEntity(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return 0;
+  auto* line = std::get_if<sketch::Line>(&entities[idx]);
+  if (!line)
+    return 0;
+  const glm::vec2 a = line->a, b = line->b;
+  const float eps = 1e-4f;
+  if (glm::length(P - a) < eps || glm::length(P - b) < eps)
+    return 0; // degenerate: split at an endpoint
+
+  using K = sketch::ConstraintKind;
+  line->b = P;                                       // piece 1: a -> P (keeps id)
+  const uint32_t newId = AddEntity(sketch::Line{P, b}); // piece 2: P -> b
+
+  // Move every reference to the original far endpoint (id, 1) onto piece 2.
+  // This carries endpoint coincidents/point-on-line and, for a whole-edge
+  // distance {id,0}-{id,1}, re-anchors it to span {id,0}-{newId,1}.
+  for (auto& c : constraints) {
+    if (c.a.entity == id && c.a.which == 1)
+      c.a = {newId, 1};
+    if (c.b.entity == id && c.b.which == 1)
+      c.b = {newId, 1};
+  }
+  // Copy axis/parallel constraints onto piece 2 so it stays aligned like the
+  // piece that kept the id (H/V keep a trimmed rectangle side straight).
+  std::vector<sketch::Constraint> copies;
+  for (const auto& c : constraints) {
+    if (c.kind != K::Horizontal && c.kind != K::Vertical &&
+        c.kind != K::Parallel && c.kind != K::Perpendicular)
+      continue;
+    sketch::Constraint copy = c;
+    bool refs = false;
+    if (copy.a.entity == id) {
+      copy.a.entity = newId;
+      refs = true;
+    }
+    if (UsesSecondRef(copy.kind) && copy.b.entity == id) {
+      copy.b.entity = newId;
+      refs = true;
+    }
+    if (refs)
+      copies.push_back(copy);
+  }
+  for (const auto& c : copies)
+    constraints.push_back(c);
+  // Join the two pieces at the cut.
+  constraints.push_back({K::Coincident, {id, 1}, {newId, 0}, 0.0});
+  return newId;
+}

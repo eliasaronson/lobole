@@ -231,6 +231,70 @@ TEST_CASE("Legacy rigid rect migrates to four lines with H/V",
   CHECK(sketch::BuildLoops(sk->entities).size() == 1);
 }
 
+TEST_CASE("SplitEntity splits a line and transfers its constraints",
+          "[sketch]") {
+  using K = sketch::ConstraintKind;
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  uint32_t l1 = sk.AddEntity(sketch::Line{{4, 0}, {4, 3}}); // meets l0's far end
+  sk.constraints.push_back({K::Coincident, {l0, 1}, {l1, 0}, 0.0});
+  sk.constraints.push_back({K::Horizontal, {l0, 0}, {0, 0}, 0.0});
+  sk.constraints.push_back({K::Distance, {l0, 0}, {l0, 1}, 4.0}); // whole length
+
+  uint32_t l2 = sk.SplitEntity(l0, {2, 0});
+  REQUIRE(l2 != 0);
+  REQUIRE(sk.entities.size() == 3);
+
+  auto& p1 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l0)]);
+  auto& p2 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l2)]);
+  CHECK(p1.a == glm::vec2(0, 0));
+  CHECK(p1.b == glm::vec2(2, 0)); // piece 1: a -> P
+  CHECK(p2.a == glm::vec2(2, 0));
+  CHECK(p2.b == glm::vec2(4, 0)); // piece 2: P -> original end
+
+  int coincident = 0, horizontal = 0, distance = 0;
+  bool spanDistance = false, farJoinMoved = false, cutAdded = false;
+  for (const auto& c : sk.constraints) {
+    if (c.kind == K::Coincident) {
+      coincident++;
+      // far-end join moved to piece 2: {l2,1} ~ {l1,0}
+      if ((c.a.entity == l2 && c.a.which == 1 && c.b.entity == l1) ||
+          (c.b.entity == l2 && c.b.which == 1 && c.a.entity == l1))
+        farJoinMoved = true;
+      // cut join: {l0,1} ~ {l2,0}
+      if ((c.a.entity == l0 && c.a.which == 1 && c.b.entity == l2 &&
+           c.b.which == 0) ||
+          (c.b.entity == l0 && c.b.which == 1 && c.a.entity == l2 &&
+           c.a.which == 0))
+        cutAdded = true;
+    } else if (c.kind == K::Horizontal) {
+      horizontal++;
+    } else if (c.kind == K::Distance) {
+      distance++;
+      // re-anchored to span both pieces: {l0,0}-{l2,1}
+      if (c.a.entity == l0 && c.b.entity == l2 && c.b.which == 1)
+        spanDistance = true;
+    }
+  }
+  CHECK(coincident == 2); // transferred far join + new cut join
+  CHECK(horizontal == 2); // original on l0 + copy on l2
+  CHECK(distance == 1);
+  CHECK(spanDistance);
+  CHECK(farJoinMoved);
+  CHECK(cutAdded);
+}
+
+TEST_CASE("SplitEntity rejects a non-line or a degenerate cut", "[sketch]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t c0 = sk.AddEntity(sketch::Circle{{0, 0}, 1.0});
+  uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  CHECK(sk.SplitEntity(c0, {1, 0}) == 0);       // not a line
+  CHECK(sk.SplitEntity(l0, {0, 0}) == 0);       // at endpoint a
+  CHECK(sk.SplitEntity(l0, {4, 0}) == 0);       // at endpoint b
+  CHECK(sk.SplitEntity(999, {2, 0}) == 0);      // unknown id
+  CHECK(sk.entities.size() == 2);               // nothing added
+}
+
 TEST_CASE("Entity ids stay stable across insert and delete",
           "[sketch]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));

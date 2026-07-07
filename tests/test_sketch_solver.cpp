@@ -214,6 +214,33 @@ TEST_CASE("Transitive coincidence survives deleting the middle point",
   CHECK_THAT(glm::length(a - b), WithinAbs(0.0f, 1e-5f));
 }
 
+TEST_CASE("Split keeps both pieces horizontal and the length spanning",
+          "[solver][split]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {6, 0.4f}}); // slightly sloped
+  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 6.0});
+
+  // Split near the middle; the transferred H (both pieces) + spanning distance
+  // must still solve to a straight 6-long horizontal segment pair.
+  uint32_t l1 = s.SplitEntity(l0, {3, 0.2f});
+  REQUIRE(l1 != 0);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+
+  auto& p1 = std::get<sketch::Line>(out[s.IndexOfEntity(l0)]);
+  auto& p2 = std::get<sketch::Line>(out[s.IndexOfEntity(l1)]);
+  CHECK_THAT(p1.a.y, WithinAbs(p1.b.y, 1e-5f)); // piece 1 horizontal
+  CHECK_THAT(p2.a.y, WithinAbs(p2.b.y, 1e-5f)); // piece 2 horizontal
+  CHECK_THAT(glm::length(p1.b - p2.a), WithinAbs(0.0f, 1e-5f)); // joined at cut
+  // Total span from piece1.a to piece2.b is the dimensioned 6.
+  CHECK_THAT(glm::length(p2.b - p1.a), WithinRel(6.0, 1e-4));
+}
+
 TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
