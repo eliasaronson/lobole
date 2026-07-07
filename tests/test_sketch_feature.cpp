@@ -312,6 +312,24 @@ TEST_CASE("TrimLineAt removes the segment between two crossings", "[sketch]") {
   CHECK(right);
 }
 
+TEST_CASE("TrimSpanAt reports the span a trim would remove", "[sketch]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {6, 0}});
+  sk.AddEntity(sketch::Line{{2, -1}, {2, 1}}); // crosses at x=2
+  sk.AddEntity(sketch::Line{{4, -1}, {4, 1}}); // crosses at x=4
+
+  auto span = sk.TrimSpanAt(l0, {3, 0}); // cursor in the middle span
+  REQUIRE(span.has_value());
+  auto near = [](glm::vec2 p, glm::vec2 q) { return glm::length(p - q) < 1e-4f; };
+  CHECK(((near(span->first, {2, 0}) && near(span->second, {4, 0})) ||
+         (near(span->first, {4, 0}) && near(span->second, {2, 0}))));
+  // Preview is read-only: nothing changed.
+  CHECK(sk.entities.size() == 3);
+  // Not a line → nullopt.
+  uint32_t c0 = sk.AddEntity(sketch::Circle{{0, 0}, 1.0});
+  CHECK_FALSE(sk.TrimSpanAt(c0, {1, 0}).has_value());
+}
+
 TEST_CASE("TrimLineAt with no crossings deletes the whole line", "[sketch]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});

@@ -576,4 +576,39 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(sk->entities.size(), (size_t)4);
     IM_CHECK(sk->IndexOfEntity(h) != SIZE_MAX); // piece 1 kept the id
   };
+
+  // Hovering (no click) with the Trim tool computes the preview span for the
+  // segment under the cursor.
+  t = IM_REGISTER_TEST(engine, "trim", "preview_highlights_span");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::Line{{-2, 0}, {2, 0}});
+    sk->AddEntity(sketch::Line{{-1, -1}, {-1, 1}});
+    sk->AddEntity(sketch::Line{{1, -1}, {1, 1}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+
+    s_App->sketchEdit.tool = ui::SketchTool::Trim;
+    glm::vec2 mid = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0, 0));
+    ctx->MouseMoveToPos(ImVec2(mid.x, mid.y)); // hover, no click
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.hasTrimPreview);
+    // The previewed span is the middle piece [-1,0]..[1,0].
+    float lo = std::min(s_App->sketchEdit.trimPreviewA.x,
+                        s_App->sketchEdit.trimPreviewB.x);
+    float hi = std::max(s_App->sketchEdit.trimPreviewA.x,
+                        s_App->sketchEdit.trimPreviewB.x);
+    IM_CHECK(std::abs(lo + 1.0f) < 1e-3f);
+    IM_CHECK(std::abs(hi - 1.0f) < 1e-3f);
+    IM_CHECK_EQ(sk->entities.size(), (size_t)3); // preview didn't mutate
+  };
 }

@@ -165,14 +165,16 @@ uint32_t SketchFeature::SplitEntity(uint32_t id, glm::vec2 P) {
   return newId;
 }
 
-bool SketchFeature::TrimLineAt(uint32_t id, glm::vec2 clickUV) {
+bool SketchFeature::TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a,
+                                glm::vec2& ab, float& tLo, float& tHi) const {
   const size_t idx = IndexOfEntity(id);
   if (idx == std::numeric_limits<size_t>::max())
     return false;
   auto* line = std::get_if<sketch::Line>(&entities[idx]);
   if (!line)
     return false;
-  const glm::vec2 a = line->a, b = line->b, ab = b - a;
+  a = line->a;
+  ab = line->b - line->a;
   const float len2 = glm::dot(ab, ab);
   if (len2 < 1e-12f)
     return false;
@@ -183,7 +185,7 @@ bool SketchFeature::TrimLineAt(uint32_t id, glm::vec2 clickUV) {
     if (sketch::EntityId(e) == id)
       continue;
     if (auto* o = std::get_if<sketch::Line>(&e)) {
-      if (auto t = sketch::SegmentIntersect(a, b, o->a, o->b))
+      if (auto t = sketch::SegmentIntersect(a, line->b, o->a, o->b))
         if (*t > 1e-4f && *t < 1.0f - 1e-4f)
           cuts.push_back(*t);
     }
@@ -194,7 +196,8 @@ bool SketchFeature::TrimLineAt(uint32_t id, glm::vec2 clickUV) {
              cuts.end());
 
   const float tClick = glm::clamp(glm::dot(clickUV - a, ab) / len2, 0.0f, 1.0f);
-  float tLo = 0.0f, tHi = 1.0f;
+  tLo = 0.0f;
+  tHi = 1.0f;
   for (size_t i = 0; i + 1 < cuts.size(); i++) {
     if (tClick >= cuts[i] - 1e-6f && tClick <= cuts[i + 1] + 1e-6f) {
       tLo = cuts[i];
@@ -202,7 +205,23 @@ bool SketchFeature::TrimLineAt(uint32_t id, glm::vec2 clickUV) {
       break;
     }
   }
+  return true;
+}
 
+std::optional<std::pair<glm::vec2, glm::vec2>>
+SketchFeature::TrimSpanAt(uint32_t id, glm::vec2 clickUV) const {
+  glm::vec2 a, ab;
+  float tLo, tHi;
+  if (!TrimBracket(id, clickUV, a, ab, tLo, tHi))
+    return std::nullopt;
+  return std::make_pair(a + tLo * ab, a + tHi * ab);
+}
+
+bool SketchFeature::TrimLineAt(uint32_t id, glm::vec2 clickUV) {
+  glm::vec2 a, ab;
+  float tLo, tHi;
+  if (!TrimBracket(id, clickUV, a, ab, tLo, tHi))
+    return false;
   auto at = [&](float t) { return a + t * ab; };
   if (tLo <= 1e-4f && tHi >= 1.0f - 1e-4f) {
     DeleteEntity(id); // no bracketing cut — remove the whole line

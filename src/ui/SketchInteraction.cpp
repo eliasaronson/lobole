@@ -219,8 +219,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   if (!sketch)
     return false;
 
-  // Cleared each frame; re-set below only while hovering in the Select tool.
+  // Cleared each frame; re-set below only while hovering in the Select/Trim
+  // tools.
   edit.hasHover = false;
+  edit.hasTrimPreview = false;
 
   if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     if (edit.hasPendingPoint)
@@ -318,12 +320,19 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 
   if (edit.tool == SketchTool::Trim) {
     // Click a line segment to remove the piece under the cursor (bounded by
-    // its crossings). Hover-highlights the target like the Select tool.
+    // its crossings). Preview highlights just that sub-segment (not the whole
+    // line) so it's clear what the click deletes.
     SketchPick hover = PickSketchEntity(
         state, *sketch, glm::vec2(mousePos.x, mousePos.y), 12.0f);
-    edit.hasHover = hover.hit;
-    edit.hoveredBody = hover.body;
-    edit.hoveredRef = hover.ref;
+    edit.hasHover = false; // whole-entity highlight suppressed in Trim
+    edit.hasTrimPreview = false;
+    if (hover.hit) {
+      if (auto span = sketch->TrimSpanAt(hover.ref.entity, uv)) {
+        edit.hasTrimPreview = true;
+        edit.trimPreviewA = span->first;
+        edit.trimPreviewB = span->second;
+      }
+    }
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
       size_t eidx = sketch->IndexOfEntity(hover.ref.entity);
       if (eidx != SIZE_MAX &&

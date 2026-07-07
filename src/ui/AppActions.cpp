@@ -354,20 +354,23 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
         return true;
     return false;
   };
-  auto hoveredEntity = [&](uint32_t id) {
-    return edit.hasHover && edit.hoveredRef.entity == id;
+  // A line is emphasized on hover only when its *body* is hovered — hovering a
+  // vertex highlights just that dot, not the whole line.
+  auto hoveredEntityBody = [&](uint32_t id) {
+    return edit.hasHover && edit.hoveredBody && edit.hoveredRef.entity == id;
   };
 
   const glm::vec4 base(0.55f, 0.85f, 1.00f, 1.0f);
   const glm::vec4 sel(1.00f, 0.62f, 0.20f, 1.0f);
   const glm::vec4 hov(1.00f, 1.00f, 0.65f, 1.0f);
+  const glm::vec4 trim(1.00f, 0.35f, 0.28f, 1.0f); // segment a trim will remove
 
   // Entity lines.
   for (const auto& e : sk->entities) {
     const uint32_t id = sketch::EntityId(e);
-    const bool s = selectedEntity(id), h = hoveredEntity(id);
+    const bool s = selectedEntity(id), h = hoveredEntityBody(id);
     const glm::vec4 col = s ? sel : (h ? hov : base);
-    const float halfPx = (s || h) ? 2.5f : 1.4f;
+    const float halfPx = (s || h) ? 3.0f : 1.8f;
     std::vector<glm::vec2> poly = sketch::TessellateEntity(e);
     for (size_t i = 0; i + 1 < poly.size(); i++)
       AppendPrimLine(sk->plane.PlaneToWorld(poly[i]),
@@ -382,9 +385,16 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
       const bool h = edit.hasHover && !edit.hoveredBody &&
                      edit.hoveredRef.entity == id && edit.hoveredRef.which == which;
       const glm::vec4 col = s ? sel : (h ? hov : base);
-      const float rPx = (s || h) ? 5.0f : 3.0f;
+      const float rPx = (s || h) ? 5.8f : 3.8f;
       AppendPrimDot(sk->plane.PlaneToWorld(uv), rPx, col, prims);
     }
+  }
+
+  // Trim preview: the sub-segment the cursor would remove, drawn thick and in
+  // a "delete" colour on top of the line so it's clear what a click deletes.
+  if (edit.hasTrimPreview) {
+    AppendPrimLine(sk->plane.PlaneToWorld(edit.trimPreviewA),
+                   sk->plane.PlaneToWorld(edit.trimPreviewB), 3.4f, trim, prims);
   }
   return prims;
 }

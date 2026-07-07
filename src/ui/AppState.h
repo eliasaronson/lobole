@@ -58,6 +58,12 @@ struct SketchEditState {
   bool hoveredBody = false;
   sketch::PointRef hoveredRef;
 
+  // Trim tool: the sub-segment the cursor would remove, highlighted so it's
+  // clear what a click deletes. In plane UV.
+  bool hasTrimPreview = false;
+  glm::vec2 trimPreviewA{0.0f};
+  glm::vec2 trimPreviewB{0.0f};
+
   bool IsEditing() const { return activeSketchId != 0; }
 };
 

@@ -5,6 +5,8 @@
 
 #include <glm/glm.hpp>
 #include <array>
+#include <optional>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -123,8 +125,22 @@ public:
   // (trimming a circle produces an arc; deferred to the arcs milestone).
   bool TrimLineAt(uint32_t id, glm::vec2 clickUV);
 
+  // The span (two UV endpoints) that TrimLineAt would remove for a click on
+  // line `id` at `clickUV` — the sub-segment bounded by neighbouring crossings.
+  // For a hover preview so the user sees exactly what trim will delete. Nullopt
+  // if `id` isn't a line.
+  std::optional<std::pair<glm::vec2, glm::vec2>>
+  TrimSpanAt(uint32_t id, glm::vec2 clickUV) const;
+
   SketchPlane plane;
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;
   uint32_t nextEntityId = 1; // next stable id to hand out (1-based; 0 = none)
+
+private:
+  // Shared by TrimLineAt/TrimSpanAt: for line `id` at `clickUV`, outputs the
+  // line origin `a`, direction `ab`, and the [tLo,tHi] span to remove. Returns
+  // false if `id` isn't a line.
+  bool TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a, glm::vec2& ab,
+                   float& tLo, float& tHi) const;
 };
