@@ -1,3 +1,4 @@
+#include <cmath>
 #include <filesystem>
 #include "CADKernel.h"
 
@@ -151,8 +152,25 @@ CADShape::Mesh CADShape::GenerateMesh(double deflection) const {
     Mesh mesh;
     if (!IsValid()) return mesh;
 
-    // Generate mesh
-    BRepMesh_IncrementalMesh meshGen(m_shape, deflection);
+    // Generate mesh. A fixed absolute deflection facets curved surfaces badly
+    // (a small cylinder becomes a visible ~16-gon whose flat facets flicker as
+    // the camera orbits). Scale the linear deflection to the model's size and
+    // add an angular deflection so circles stay smooth at any scale.
+    Bnd_Box bbox;
+    BRepBndLib::Add(m_shape, bbox);
+    double linDeflection = deflection;
+    if (!bbox.IsVoid()) {
+        double xmin, ymin, zmin, xmax, ymax, zmax;
+        bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+        const double diag = std::sqrt((xmax - xmin) * (xmax - xmin) +
+                                      (ymax - ymin) * (ymax - ymin) +
+                                      (zmax - zmin) * (zmax - zmin));
+        if (diag > Precision::Confusion())
+            linDeflection = diag * 0.002; // 0.2% of the bounding diagonal
+    }
+    const double angDeflection = 0.2; // radians (~11.5°) → ~32 segments / circle
+    BRepMesh_IncrementalMesh meshGen(m_shape, linDeflection, Standard_False,
+                                     angDeflection, Standard_True);
     if (!meshGen.IsDone()) return mesh;
 
     // Extract triangular mesh, one contiguous vertex/triangle block per
