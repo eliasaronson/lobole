@@ -277,6 +277,9 @@ Risk: low-medium now that the reference implementation is mapped.
 
 ## Phase G — Dimension display + editing (NEW, ~2 days)
 
+**Detailed plan for the whole constraint-layer block (G+H+I):
+[CONSTRAINTS_PHASE_GHI.md](CONSTRAINTS_PHASE_GHI.md).**
+
 The dimensional *constraints* (Distance, Radius, Angle with a `value`) already
 solve — but they're **invisible in the canvas** and only settable via the
 toolbar value box. This phase adds the annotation graphics and in-canvas editing
@@ -309,7 +312,8 @@ but the constraint/solver side is done.
 ## Phase H — Construction geometry + extra constraints (~1.5 days)
 
 Completes the constraint layer. Independent of arcs/splines; pairs with the
-dimension work in G.
+dimension work in G. **Detailed plan:
+[CONSTRAINTS_PHASE_GHI.md](CONSTRAINTS_PHASE_GHI.md).**
 
 - **Construction geometry**: a `bool construction` flag on entities (serialized).
   Construction lines/circles drive constraints and snapping but are **excluded
@@ -329,6 +333,8 @@ dimension work in G.
 Risk: low — same shape as Phase A, plus a one-field flag.
 
 ## Phase I — Constraint status & management (~2 days)
+
+**Detailed plan: [CONSTRAINTS_PHASE_GHI.md](CONSTRAINTS_PHASE_GHI.md).**
 
 The feedback + management layer — as important as dimensions for the sketcher
 feel, and currently only half-present (the solver reports dof/conflicting but
