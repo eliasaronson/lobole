@@ -705,4 +705,44 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(sk->constraints.size(), (size_t)0); // nothing inferred
     s_App->sketchEdit.autoConstrain = true; // restore default for other tests
   };
+
+  // Dragging a line's body translates the whole line and its coincident
+  // neighbour, end to end through the viewport drag.
+  t = IM_REGISTER_TEST(engine, "drag", "move_whole_line");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-2, 0}, {2, 0}});
+    uint32_t l1 = sk->AddEntity(sketch::Line{{2, 0}, {2, 3}}); // l1.a ~ l0.b
+    sk->constraints.push_back(
+        {sketch::ConstraintKind::Coincident, {l0, 1}, {l1, 0}, 0.0});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+
+    // Press on the line's midpoint (its body), drag up 1 unit, release.
+    glm::vec2 mid = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0, 0));
+    glm::vec2 to = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0, 1));
+    ctx->MouseMoveToPos(ImVec2(mid.x, mid.y));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(to.x, to.y));
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const auto& moved = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(l0)]);
+    // Both endpoints translated up ~1; the neighbour's coincident end followed.
+    IM_CHECK(moved.a.y > 0.5f && moved.b.y > 0.5f);
+    const auto& nbr = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(l1)]);
+    IM_CHECK(glm::length(nbr.a - moved.b) < 1e-2f);
+    IM_CHECK(s_App->commands->CanUndo()); // one undoable edit
+  };
 }

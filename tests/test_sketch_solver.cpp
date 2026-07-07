@@ -275,6 +275,83 @@ TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   CHECK((r.conflicting.size() > 0 || !r.ok || r.dof >= 0));
 }
 
+TEST_CASE("Dragging a whole line translates it and pulls a coincident neighbour",
+          "[solver][drag]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  uint32_t l1 = s.AddEntity(sketch::Line{{4, 0}, {4, 3}}); // l1.a joined to l0.b
+  s.constraints.push_back({sketch::ConstraintKind::Coincident, {l0, 1}, {l1, 0}});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.BeginDrag({{l0, 0}, {l0, 1}})); // whole line = both endpoints
+  const glm::vec2 d{2.0f, 1.0f};
+  solver.SetDragTargets({{0 + d.x, 0 + d.y}, {4 + d.x, 0 + d.y}}); // rigid delta
+  REQUIRE(solver.SolveDrag().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 a = LineA(out[s.IndexOfEntity(l0)]);
+  glm::vec2 b = LineB(out[s.IndexOfEntity(l0)]);
+  CHECK_THAT(glm::length(a - glm::vec2(2, 1)), WithinAbs(0.0f, 1e-2f));
+  CHECK_THAT(glm::length(b - glm::vec2(6, 1)), WithinAbs(0.0f, 1e-2f));
+  // The neighbour's coincident endpoint followed to l0's new far end.
+  glm::vec2 l1a = LineA(out[s.IndexOfEntity(l1)]);
+  CHECK_THAT(glm::length(l1a - b), WithinAbs(0.0f, 1e-4f));
+}
+
+TEST_CASE("Dragging a circle rim resizes it with the centre fixed",
+          "[solver][drag]") {
+  SketchFeature s = MakeSketch();
+  uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 1.0});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.BeginRadiusDrag(c0));
+  solver.SetRadiusTarget(2.5);
+  REQUIRE(solver.SolveDrag().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  auto& circ = std::get<sketch::Circle>(out[0]);
+  CHECK_THAT(circ.radius, WithinAbs(2.5, 1e-2));
+  CHECK_THAT(glm::length(circ.center), WithinAbs(0.0f, 1e-5f)); // centre held
+}
+
+TEST_CASE("Dragging a heavily constrained sketch stays stable", "[solver][drag]") {
+  // A rectangle (4 lines + coincidents + H/V). Drag one corner over many small
+  // steps and confirm it converges without blowing up (the rescale-0.01 pull).
+  SketchFeature s = MakeSketch();
+  auto ids = s.AddRectangle({0, 0}, {4, 2});
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.BeginDrag({{ids[0], 0}})); // bottom line's start = a corner
+
+  glm::vec2 target{0, 0};
+  for (int k = 1; k <= 20; k++) {
+    target = glm::vec2(-1.0f, -1.0f) * (k / 20.0f); // walk the corner out
+    solver.SetDragTargets({target});
+    REQUIRE(solver.SolveDrag().ok);
+  }
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 corner = LineA(out[s.IndexOfEntity(ids[0])]);
+  CHECK(std::isfinite(corner.x));
+  CHECK(std::isfinite(corner.y));
+  CHECK_THAT(glm::length(corner - target), WithinAbs(0.0f, 1e-1f)); // tracked it
+}
+
+TEST_CASE("BeginDrag refuses a conflicting sketch", "[solver][drag]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
+  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  CHECK_FALSE(solver.BeginDrag({{l0, 0}})); // refuse — conflicting
+}
+
 TEST_CASE("A rectangle (4 lines + H/V) solves and extrudes", "[solver][extrude]") {
   // Rectangle = 4 lines + corner coincidents + H/V; the solver settles the
   // corners and the four lines chain into one closed profile loop.

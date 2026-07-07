@@ -26,12 +26,27 @@ public:
   // Build solver geometry + constraints from the sketch.
   void Load(const SketchFeature& sketch);
 
-  // Pin a point (entity index + which) toward a UV target for interactive
-  // dragging; the rest of the sketch follows the constraints. Call after Load,
-  // before Solve.
-  void SetDragPoint(const PointRef& point, glm::vec2 targetUV);
-
   SolveResult Solve();
+
+  // --- Interactive drag session (FreeCAD moveGeometry recipe) --------------
+  // Built once per drag: after Load(), Begin* pins the dragged element with a
+  // *weak* temporary constraint (rescaled 0.01) so the rest of the sketch
+  // follows without oscillating, then per frame overwrite the target(s) and
+  // SolveDrag() — no rebuild. Begin* returns false (refuse the drag) if the
+  // sketch is already conflicting.
+
+  // Drag one or more points toward per-point UV targets (a line body pins both
+  // endpoints; an endpoint pins one).
+  bool BeginDrag(const std::vector<PointRef>& points);
+  void SetDragTargets(const std::vector<glm::vec2>& targets);
+
+  // Drag a circle's radius toward a target length (centre held by its own
+  // constraints). Pair with SetRadiusTarget.
+  bool BeginRadiusDrag(uint32_t circleId);
+  void SetRadiusTarget(double radius);
+
+  // Re-solve with the current drag target(s); no reload/redeclare.
+  SolveResult SolveDrag();
 
   // Copies solved coordinates into a copy of the sketch's entities.
   void WriteBack(std::vector<Entity>& entities) const;

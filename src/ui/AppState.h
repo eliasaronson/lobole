@@ -4,6 +4,7 @@
 #include "core/Document.h"
 #include "core/SketchFeature.h"
 #include "core/SketchInference.h"
+#include "core/SketchSolver.h"
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
@@ -49,8 +50,6 @@ struct SketchEditState {
 
   // Sketch-entity selection (for adding constraints), ordered.
   std::vector<sketch::PointRef> selected;
-  bool dragging = false;    // dragging a selected point (Select tool)
-  sketch::PointRef dragRef; // the point being dragged
 
   // What the cursor is over in the Select tool (for hover highlighting),
   // refreshed each frame. `hoveredBody` distinguishes an entity body from a
@@ -74,6 +73,22 @@ struct SketchEditState {
   sketch::Snap currentSnap;
 
   bool IsEditing() const { return activeSketchId != 0; }
+};
+
+// A live whole-entity drag (FreeCAD moveGeometry recipe): the solver is built
+// once on mouse-down and reused each frame. Lives here (not SketchEditState) so
+// that stays cheaply copyable.
+struct SketchDragSession {
+  enum class Mode { Point, LineBody, CircleRim };
+  bool active = false;
+  Mode mode = Mode::Point;
+  std::unique_ptr<sketch::Solver> solver;
+  std::vector<sketch::PointRef> points; // dragged points (Point / LineBody)
+  std::vector<glm::vec2> initialPos;    // their UV positions at mouse-down
+  glm::vec2 initialCursor{0.0f};
+  uint32_t circleId = 0;                // CircleRim
+  glm::vec2 circleCenter{0.0f};         // CircleRim: radius = |cursor - centre|
+  size_t featureIndex = 0;              // sketch index for the commit
 };
 
 // All state the UI reads and writes, replacing main.cpp's globals. The
@@ -103,6 +118,7 @@ struct AppState {
   ViewportDrag viewportDrag = ViewportDrag::None;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
   SketchEditState sketchEdit;
+  SketchDragSession sketchDrag;
 
   // The 3D viewport = the central dock node (between the side panels), in
   // ImGui display coords. The renderers draw only here and picking maps

@@ -164,6 +164,92 @@ Ray ScreenRay(AppState& state, const glm::vec2& mousePos) {
       static_cast<int>(state.viewportSize.y), *state.camera);
 }
 
+// Starts a drag on mouse-down: builds the solver once, pins the dragged element
+// (endpoint / line body / circle rim) with a weak temporary constraint, and
+// captures the mouse-down baseline. Leaves the session inactive if the sketch
+// is conflicting (BeginDrag refused).
+void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
+                      const SketchPick& pick, glm::vec2 cursorUV) {
+  SketchDragSession& drag = state.sketchDrag;
+  drag = SketchDragSession{}; // reset (drops any prior solver)
+  const size_t eidx = sketch.IndexOfEntity(pick.ref.entity);
+  if (eidx == SIZE_MAX)
+    return;
+  const sketch::Entity& e = sketch.entities[eidx];
+
+  drag.featureIndex = index;
+  drag.initialCursor = cursorUV;
+  drag.solver = std::make_unique<sketch::Solver>();
+  drag.solver->Load(sketch);
+  state.editBaseline = DocumentIO::FeatureToJson(sketch);
+
+  bool ok = false;
+  if (pick.body && std::holds_alternative<sketch::Circle>(e)) {
+    drag.mode = SketchDragSession::Mode::CircleRim;
+    drag.circleId = pick.ref.entity;
+    drag.circleCenter = std::get<sketch::Circle>(e).center;
+    ok = drag.solver->BeginRadiusDrag(drag.circleId);
+  } else if (pick.body && std::holds_alternative<sketch::Line>(e)) {
+    drag.mode = SketchDragSession::Mode::LineBody;
+    const auto& l = std::get<sketch::Line>(e);
+    drag.points = {{pick.ref.entity, 0}, {pick.ref.entity, 1}};
+    drag.initialPos = {l.a, l.b};
+    ok = drag.solver->BeginDrag(drag.points);
+  } else {
+    drag.mode = SketchDragSession::Mode::Point;
+    glm::vec2 pos = cursorUV;
+    if (auto* p = std::get_if<sketch::Point>(&e))
+      pos = p->p;
+    else if (auto* l = std::get_if<sketch::Line>(&e))
+      pos = pick.ref.which ? l->b : l->a;
+    else if (auto* c = std::get_if<sketch::Circle>(&e))
+      pos = c->center;
+    drag.points = {pick.ref};
+    drag.initialPos = {pos};
+    ok = drag.solver->BeginDrag(drag.points);
+  }
+  drag.active = ok;
+  if (!ok)
+    drag.solver.reset();
+}
+
+// Per-frame while dragging: retarget from the cursor delta, re-solve, write back.
+void UpdateDragSession(AppState& state, SketchFeature& sketch,
+                       glm::vec2 cursorUV) {
+  SketchDragSession& drag = state.sketchDrag;
+  if (!drag.active || !drag.solver)
+    return;
+  if (drag.mode == SketchDragSession::Mode::CircleRim) {
+    drag.solver->SetRadiusTarget(glm::length(cursorUV - drag.circleCenter));
+  } else {
+    const glm::vec2 delta = cursorUV - drag.initialCursor;
+    std::vector<glm::vec2> targets;
+    targets.reserve(drag.initialPos.size());
+    for (const glm::vec2& ip : drag.initialPos)
+      targets.push_back(ip + delta);
+    drag.solver->SetDragTargets(targets);
+  }
+  if (drag.solver->SolveDrag().ok) {
+    drag.solver->WriteBack(sketch.entities);
+    state.document->Regenerate();
+  }
+}
+
+// Mouse-up: end the drag and commit one undoable edit from the baseline.
+void EndDragSession(AppState& state, SketchFeature& sketch) {
+  SketchDragSession& drag = state.sketchDrag;
+  if (!drag.active)
+    return;
+  drag.active = false;
+  drag.solver.reset();
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  if (after != state.editBaseline)
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(drag.featureIndex,
+                                               state.editBaseline, after),
+        *state.document);
+}
+
 } // namespace
 
 SketchPlane DefaultPlane(int index) {
@@ -326,7 +412,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       for (uint32_t id : ids)
         dropped += sketch->DeleteEntity(id);
       edit.selected.clear();
-      edit.dragging = false;
+      state.sketchDrag = SketchDragSession{}; // cancel any drag
       sketch::Solver solver;
       solver.Load(*sketch);
       if (solver.Solve().ok)
@@ -341,8 +427,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         LOG_INFO("Deleted {} dependent constraint(s)", dropped);
       return true;
     }
-    // Click selects an endpoint (for constraints) and begins a drag; empty
-    // click clears the selection.
+    // Click selects an element (for constraints) and begins a drag: an endpoint
+    // moves that point, a line body translates the whole line, a circle rim
+    // resizes it. Empty click clears the selection.
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       SketchPick pick =
           PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y),
@@ -351,35 +438,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         if (!ImGui::GetIO().KeyCtrl)
           edit.selected.clear();
         edit.selected.push_back(pick.ref);
-        // Only an endpoint hit begins a drag; dragging a whole body is Phase F.
-        if (!pick.body) {
-          edit.dragging = true;
-          edit.dragRef = pick.ref;
-          state.editBaseline = DocumentIO::FeatureToJson(*sketch);
-        }
+        BeginDragSession(state, *sketch, index, pick, uv);
       } else {
         edit.selected.clear();
       }
     }
-    // Drag: re-solve with the grabbed point pinned to the cursor.
-    if (edit.dragging && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-      sketch::Solver solver;
-      solver.Load(*sketch);
-      solver.SetDragPoint(edit.dragRef, uv);
-      if (solver.Solve().ok) {
-        solver.WriteBack(sketch->entities);
-        state.document->Regenerate();
-      }
-    }
-    if (edit.dragging && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-      edit.dragging = false;
-      nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
-      if (after != state.editBaseline) {
-        state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
-                                    index, state.editBaseline, after),
-                                *state.document);
-      }
-    }
+    if (state.sketchDrag.active && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+      UpdateDragSession(state, *sketch, uv);
+    if (state.sketchDrag.active && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+      EndDragSession(state, *sketch);
     return true;
   }
 

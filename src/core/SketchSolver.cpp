@@ -36,7 +36,9 @@ struct Solver::Impl {
   std::map<uint32_t, int> shapeIndexOf; // entity id -> index in entityShapes
 
   int dragTag = 0;
-  std::deque<double> dragTarget; // 2 slots when dragging
+  std::deque<double> dragTarget;       // 2 slots per dragged point (x, y)
+  std::vector<int> dragTargetBase;     // dragTarget index base per input point
+  std::deque<double> dragRadiusTarget; // 1 slot for a radius drag
 
   static uint64_t Key(uint32_t entity, uint8_t which) {
     return (uint64_t(entity) << 8) | which;
@@ -47,6 +49,41 @@ struct Solver::Impl {
     if (it == pointIndex.end())
       return nullptr;
     return &gcsPoints[it->second];
+  }
+
+  // Declares every point coord + radius as an unknown and initialises the
+  // solution structure. Call after all constraints (incl. drag) are added.
+  void DeclareUnknowns() {
+    GCS::VEC_pD unknowns;
+    for (auto& gp : gcsPoints) {
+      unknowns.push_back(gp.x);
+      unknowns.push_back(gp.y);
+    }
+    for (auto& r : radii)
+      unknowns.push_back(&r);
+    if (unknowns.empty())
+      return;
+    sys.declareUnknowns(unknowns);
+    sys.initSolution();
+  }
+
+  // Solves the already-declared system and reports the verdict.
+  SolveResult RunSolve() {
+    SolveResult result;
+    if (gcsPoints.empty() && radii.empty()) {
+      result.ok = true;
+      result.dof = 0;
+      return result;
+    }
+    int status = sys.solve(true, GCS::DogLeg);
+    if (status == GCS::Success || status == GCS::Converged) {
+      sys.applySolution();
+      result.ok = true;
+    }
+    result.dof = sys.dofsNumber();
+    sys.getConflicting(result.conflicting);
+    sys.getRedundant(result.redundant);
+    return result;
   }
 };
 
@@ -190,49 +227,66 @@ void Solver::Load(const SketchFeature& sketch) {
   im.dragTag = tag;
 }
 
-void Solver::SetDragPoint(const PointRef& point, glm::vec2 targetUV) {
-  Impl& im = *m_impl;
-  GCS::Point* p = im.Resolve(point);
-  if (!p)
-    return;
-  // Pin the dragged point to a fixed target with a temporary coincidence so it
-  // leads and the rest follows the constraints.
-  im.dragTarget = {targetUV.x, targetUV.y};
-  GCS::Point target(&im.dragTarget[0], &im.dragTarget[1]);
-  im.sys.addConstraintP2PCoincident(*p, target, im.dragTag++);
-}
-
 SolveResult Solver::Solve() {
   Impl& im = *m_impl;
-  SolveResult result;
-
-  // Every point coordinate + radius is an unknown.
-  GCS::VEC_pD unknowns;
-  for (auto& gp : im.gcsPoints) {
-    unknowns.push_back(gp.x);
-    unknowns.push_back(gp.y);
-  }
-  for (auto& r : im.radii)
-    unknowns.push_back(&r);
-
-  if (unknowns.empty()) {
-    result.ok = true;
-    result.dof = 0;
-    return result;
-  }
-
-  im.sys.declareUnknowns(unknowns);
-  im.sys.initSolution();
-  int status = im.sys.solve(true, GCS::DogLeg);
-  if (status == GCS::Success || status == GCS::Converged) {
-    im.sys.applySolution();
-    result.ok = true;
-  }
-  result.dof = im.sys.dofsNumber();
-  im.sys.getConflicting(result.conflicting);
-  im.sys.getRedundant(result.redundant);
-  return result;
+  im.DeclareUnknowns();
+  return im.RunSolve();
 }
+
+bool Solver::BeginDrag(const std::vector<PointRef>& points) {
+  Impl& im = *m_impl;
+  im.dragTarget.clear();
+  im.dragTargetBase.assign(points.size(), -1);
+  // Pin each dragged point to a free target with a *weak* coincident, so the
+  // real constraints dominate and the drag doesn't oscillate.
+  for (size_t i = 0; i < points.size(); i++) {
+    GCS::Point* gp = im.Resolve(points[i]);
+    if (!gp)
+      continue;
+    const int base = static_cast<int>(im.dragTarget.size());
+    im.dragTarget.push_back(*gp->x); // start at the point's current position
+    im.dragTarget.push_back(*gp->y);
+    GCS::Point target(&im.dragTarget[base], &im.dragTarget[base + 1]);
+    int cid = im.sys.addConstraintP2PCoincident(*gp, target, im.dragTag++);
+    im.sys.rescaleConstraint(cid, 0.01);
+    im.dragTargetBase[i] = base;
+  }
+  im.DeclareUnknowns();
+  return im.RunSolve().conflicting.empty();
+}
+
+void Solver::SetDragTargets(const std::vector<glm::vec2>& targets) {
+  Impl& im = *m_impl;
+  for (size_t i = 0; i < targets.size() && i < im.dragTargetBase.size(); i++) {
+    const int base = im.dragTargetBase[i];
+    if (base < 0)
+      continue;
+    im.dragTarget[base] = targets[i].x;
+    im.dragTarget[base + 1] = targets[i].y;
+  }
+}
+
+bool Solver::BeginRadiusDrag(uint32_t circleId) {
+  Impl& im = *m_impl;
+  auto it = im.circleOf.find(circleId);
+  if (it == im.circleOf.end())
+    return false;
+  im.dragRadiusTarget.clear();
+  im.dragRadiusTarget.push_back(*im.circles[it->second].rad); // current radius
+  int cid = im.sys.addConstraintCircleRadius(
+      im.circles[it->second], &im.dragRadiusTarget[0], im.dragTag++);
+  im.sys.rescaleConstraint(cid, 0.01);
+  im.DeclareUnknowns();
+  return im.RunSolve().conflicting.empty();
+}
+
+void Solver::SetRadiusTarget(double radius) {
+  Impl& im = *m_impl;
+  if (!im.dragRadiusTarget.empty())
+    im.dragRadiusTarget[0] = radius;
+}
+
+SolveResult Solver::SolveDrag() { return m_impl->RunSolve(); }
 
 void Solver::WriteBack(std::vector<Entity>& entities) const {
   const Impl& im = *m_impl;
@@ -269,11 +323,15 @@ struct Solver::Impl {
 Solver::Solver() : m_impl(new Impl) {}
 Solver::~Solver() { delete m_impl; }
 void Solver::Load(const SketchFeature& s) { m_impl->shapes = s.entities; }
-void Solver::SetDragPoint(const PointRef&, glm::vec2) {}
 SolveResult Solver::Solve() {
   LOG_WARN("SketchSolver: built without PlaneGCS; constraints ignored");
   return {true, -1, {}, {}};
 }
+bool Solver::BeginDrag(const std::vector<PointRef>&) { return false; }
+void Solver::SetDragTargets(const std::vector<glm::vec2>&) {}
+bool Solver::BeginRadiusDrag(uint32_t) { return false; }
+void Solver::SetRadiusTarget(double) {}
+SolveResult Solver::SolveDrag() { return {true, -1, {}, {}}; }
 void Solver::WriteBack(std::vector<Entity>& e) const { e = m_impl->shapes; }
 } // namespace sketch
 
