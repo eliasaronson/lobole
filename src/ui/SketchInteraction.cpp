@@ -6,12 +6,14 @@
 #include "MeshRenderer.h" // Vertex3D
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
+#include "core/SketchInference.h"
 #include "core/SketchProfile.h"
 #include "core/SketchSolver.h"
 
 #include "imgui.h"
 
 #include <optional>
+#include <vector>
 
 namespace ui {
 
@@ -52,39 +54,85 @@ void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
       *state.document);
 }
 
-float DistToSegment(glm::vec2 p, glm::vec2 a, glm::vec2 b); // fwd (defined below)
+// Approximate pixels per UV unit at `uv` (from the current zoom), for turning
+// the inference's pixel tolerances into UV distances.
+float PixelsPerUV(AppState& state, const SketchPlane& plane, glm::vec2 uv) {
+  glm::vec2 s0 = SketchUVToScreen(state, plane, uv);
+  glm::vec2 s1 = SketchUVToScreen(state, plane, uv + glm::vec2(1.0f, 0.0f));
+  return glm::length(s1 - s0);
+}
 
-// Commits a line a->b. If the just-drawn endpoint b lands on an existing line's
-// body, also binds it there with a PointOnLine constraint (a light taste of
-// inference; full snapping is a later phase). Only b is bound — a is often the
-// previous chained segment's endpoint, which shouldn't be point-on-line'd.
-void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
-                glm::vec2 a, glm::vec2 b) {
-  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
-  const uint32_t id = sketch.AddEntity(sketch::Line{a, b});
-  const glm::vec2 bScreen = SketchUVToScreen(state, sketch.plane, b);
-  float bestD = 8.0f;
-  uint32_t onLine = 0;
-  for (const auto& e : sketch.entities) {
-    const uint32_t eid = sketch::EntityId(e);
-    if (eid == id)
-      continue;
-    if (auto* l = std::get_if<sketch::Line>(&e)) {
-      float d = DistToSegment(bScreen, SketchUVToScreen(state, sketch.plane, l->a),
-                              SketchUVToScreen(state, sketch.plane, l->b));
-      if (d < bestD) {
-        bestD = d;
-        onLine = eid;
-      }
+// Point-level constraints implied by a Snap for endpoint `which` of `id`.
+void SnapPointConstraints(const sketch::Snap& snap, uint32_t id, uint8_t which,
+                          std::vector<sketch::Constraint>& out) {
+  using K = sketch::ConstraintKind;
+  if (snap.coincident)
+    out.push_back({K::Coincident, {id, which}, *snap.coincident, 0.0});
+  else if (snap.pointOnLine)
+    out.push_back({K::PointOnLine, {id, which}, {*snap.pointOnLine, 0}, 0.0});
+}
+
+// Segment-level constraints implied by a line's end Snap (whole line = id).
+void SnapSegmentConstraints(const sketch::Snap& snap, uint32_t id,
+                            std::vector<sketch::Constraint>& out) {
+  using K = sketch::ConstraintKind;
+  if (snap.horizontal)
+    out.push_back({K::Horizontal, {id, 0}, {0, 0}, 0.0});
+  else if (snap.vertical)
+    out.push_back({K::Vertical, {id, 0}, {0, 0}, 0.0});
+  if (snap.parallelTo)
+    out.push_back({K::Parallel, {id, 0}, {*snap.parallelTo, 0}, 0.0});
+  else if (snap.perpendicularTo)
+    out.push_back({K::Perpendicular, {id, 0}, {*snap.perpendicularTo, 0}, 0.0});
+}
+
+// Adds each candidate constraint only if it further constrains the sketch
+// (DOF drops) without conflicting — the add-then-diagnose safety net that keeps
+// inference from over-constraining. Settles geometry with the kept constraints.
+void ApplyInferred(SketchFeature& sketch,
+                   const std::vector<sketch::Constraint>& candidates) {
+  sketch::Solver solver;
+  solver.Load(sketch);
+  sketch::SolveResult r = solver.Solve();
+  int dof = r.ok ? r.dof : -1;
+  for (const auto& c : candidates) {
+    sketch.constraints.push_back(c);
+    sketch::Solver s2;
+    s2.Load(sketch);
+    sketch::SolveResult r2 = s2.Solve();
+    const bool keep = r2.ok && r2.conflicting.empty() &&
+                      (dof < 0 || r2.dof < dof);
+    if (keep) {
+      dof = r2.dof;
+      s2.WriteBack(sketch.entities); // settle with this constraint
+    } else {
+      sketch.constraints.pop_back(); // redundant or conflicting — drop it
     }
   }
-  if (onLine) {
-    sketch.constraints.push_back(
-        {sketch::ConstraintKind::PointOnLine, {id, 1}, {onLine, 0}, 0.0});
-    sketch::Solver solver;
-    solver.Load(sketch);
-    if (solver.Solve().ok)
-      solver.WriteBack(sketch.entities);
+}
+
+// Commits a line a->b with auto-constraint inference: snaps each endpoint to
+// nearby geometry and applies the implied coincident / point-on-line / H-V /
+// parallel-perpendicular constraints (each kept only if it bites). `infer`
+// off (auto-constrain disabled or Ctrl held) places the raw line.
+void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
+                glm::vec2 a, glm::vec2 b, bool infer) {
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  glm::vec2 pa = a, pb = b;
+  std::vector<sketch::Constraint> candidates;
+  if (infer) {
+    const float ppu = PixelsPerUV(state, sketch.plane, b);
+    sketch::Snap sa = sketch::InferPoint(sketch.entities, a, std::nullopt, 0, ppu);
+    sketch::Snap sb = sketch::InferPoint(sketch.entities, b, sa.uv, 0, ppu);
+    pa = sa.uv;
+    pb = sb.uv;
+    const uint32_t id = sketch.AddEntity(sketch::Line{pa, pb});
+    SnapPointConstraints(sa, id, 0, candidates);
+    SnapPointConstraints(sb, id, 1, candidates);
+    SnapSegmentConstraints(sb, id, candidates);
+    ApplyInferred(sketch, candidates);
+  } else {
+    sketch.AddEntity(sketch::Line{pa, pb});
   }
   nlohmann::json after = DocumentIO::FeatureToJson(sketch);
   state.commands->Execute(
@@ -220,9 +268,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     return false;
 
   // Cleared each frame; re-set below only while hovering in the Select/Trim
-  // tools.
+  // tools or snapping in a draw tool.
   edit.hasHover = false;
   edit.hasTrimPreview = false;
+  edit.hasCurrentSnap = false;
 
   if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     if (edit.hasPendingPoint)
@@ -239,7 +288,23 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   auto uvOpt = RayToPlaneUV(ray, sketch->plane);
   if (!uvOpt)
     return true;
-  const glm::vec2 uv = *uvOpt;
+  glm::vec2 uv = *uvOpt;
+
+  // Auto-constraint inference for the Line tool: snap the cursor to nearby
+  // geometry so the preview and the click both use the snapped point, and stash
+  // the result for the ghost-glyph overlay. Ctrl or the toggle suppresses it.
+  if (edit.tool == SketchTool::Line && edit.autoConstrain &&
+      !ImGui::GetIO().KeyCtrl) {
+    const float ppu = PixelsPerUV(state, sketch->plane, uv);
+    std::optional<glm::vec2> other =
+        edit.hasPendingPoint ? std::optional<glm::vec2>(edit.pendingPoint)
+                             : std::nullopt;
+    sketch::Snap snap =
+        sketch::InferPoint(sketch->entities, uv, other, 0, ppu);
+    uv = snap.uv;
+    edit.currentSnap = snap;
+    edit.hasCurrentSnap = !snap.glyphs.empty();
+  }
   edit.hoverPoint = uv;
 
   if (edit.tool == SketchTool::Select) {
@@ -366,7 +431,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       const glm::vec2 a = edit.pendingPoint;
       switch (edit.tool) {
       case SketchTool::Line:
-        CommitLine(state, *sketch, index, a, uv);
+        CommitLine(state, *sketch, index, a, uv,
+                   edit.autoConstrain && !ImGui::GetIO().KeyCtrl);
         break;
       case SketchTool::Circle:
         CommitEntity(state, *sketch, index,
@@ -421,6 +487,38 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
   for (size_t i = 0; i + 1 < poly.size(); i++) {
     out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
     out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
+  }
+}
+
+void DrawSnapGlyphs(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  if (!edit.IsEditing() || !edit.hasCurrentSnap)
+    return;
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (!sketch)
+    return;
+
+  const glm::vec2 p = SketchUVToScreen(state, sketch->plane, edit.currentSnap.uv);
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImU32 accent = IM_COL32(255, 220, 120, 255);
+  dl->AddCircle(ImVec2(p.x, p.y), 7.0f, accent, 0, 2.0f); // "grabbed" ring
+
+  float gx = p.x + 12.0f, gy = p.y - 24.0f;
+  for (sketch::GlyphKind k : edit.currentSnap.glyphs) {
+    const char* label = "";
+    switch (k) {
+    case sketch::GlyphKind::Coincident: label = "coincident"; break;
+    case sketch::GlyphKind::PointOnLine: label = "on line"; break;
+    case sketch::GlyphKind::Horizontal: label = "H"; break;
+    case sketch::GlyphKind::Vertical: label = "V"; break;
+    case sketch::GlyphKind::Parallel: label = "parallel"; break;
+    case sketch::GlyphKind::Perpendicular: label = "perpendicular"; break;
+    }
+    const ImVec2 sz = ImGui::CalcTextSize(label);
+    dl->AddRectFilled(ImVec2(gx - 3, gy - 1), ImVec2(gx + sz.x + 3, gy + sz.y + 1),
+                      IM_COL32(25, 28, 34, 210), 3.0f);
+    dl->AddText(ImVec2(gx, gy), accent, label);
+    gy += sz.y + 4.0f;
   }
 }
 

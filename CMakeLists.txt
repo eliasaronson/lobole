@@ -161,6 +161,7 @@ set(core_sources
     src/core/Serialization.cpp
     src/core/SketchFeature.cpp
     src/core/SketchProfile.cpp
+    src/core/SketchInference.cpp
     src/core/ExtrudeFeature.cpp
     src/core/SketchSolver.cpp
 )

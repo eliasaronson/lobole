@@ -57,6 +57,26 @@ TEST_CASE("Horizontal levels a line's endpoints", "[solver]") {
   CHECK_THAT(LineA(out[0]).y, WithinAbs(LineB(out[0]).y, 1e-5f));
 }
 
+TEST_CASE("A redundant constraint leaves DOF unchanged (add-then-diagnose)",
+          "[solver]") {
+  // The signal auto-constraint inference uses to drop redundant snaps: adding a
+  // second Horizontal to an already-horizontal line must not reduce the DOF.
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 1.5f}});
+  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  sketch::Solver one;
+  one.Load(s);
+  sketch::SolveResult r1 = one.Solve();
+  REQUIRE(r1.ok);
+
+  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  sketch::Solver two;
+  two.Load(s);
+  sketch::SolveResult r2 = two.Solve();
+  REQUIRE(r2.ok);
+  CHECK(r2.dof == r1.dof); // no new information → would be dropped
+}
+
 TEST_CASE("Distance constraint sets endpoint separation", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {3, 0}});

@@ -36,6 +36,11 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 // sketch renderer's overlay. No-op when not drawing.
 void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out);
 
+// Draws the auto-constraint snap indicator + ghost glyphs (H, V, coincident, …)
+// at the snapped cursor, via ImGui's foreground draw list. No-op when not
+// snapping. Call once per frame from the UI pass.
+void DrawSnapGlyphs(AppState& state);
+
 // Projects a plane-UV point to viewport screen coords (pixels), matching the
 // picking/render path.
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,

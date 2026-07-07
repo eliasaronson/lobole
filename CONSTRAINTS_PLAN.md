@@ -222,6 +222,11 @@ enumerates them all.
 
 ## Phase E — Snapping / auto-constraint inference (~1.5–2 days)
 
+**Detailed implementation plan: [CONSTRAINTS_PHASE_E.md](CONSTRAINTS_PHASE_E.md)**
+(pure testable `core/SketchInference` taking a `pixelsPerUV` scale; add-then-
+diagnose via the DOF delta; generalizes Phase D's `CommitLine`; ghost glyphs via
+an ImGui 2D overlay).
+
 The Onshape-feel milestone: snap + auto-constrain while drawing.
 
 - New `SketchInference.{h,cpp}` pass, run each frame during the draw FSM:

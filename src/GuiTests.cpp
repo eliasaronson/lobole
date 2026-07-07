@@ -611,4 +611,98 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(std::abs(hi - 1.0f) < 1e-3f);
     IM_CHECK_EQ(sk->entities.size(), (size_t)3); // preview didn't mutate
   };
+
+  // Drawing a near-horizontal line auto-adds a Horizontal constraint and snaps
+  // it flat.
+  t = IM_REGISTER_TEST(engine, "infer", "horizontal_snaps");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.tool = ui::SketchTool::Line;
+    s_App->sketchEdit.autoConstrain = true;
+
+    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-2, 0));
+    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2, 0.06f));
+    ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);
+    bool hasH = false;
+    for (const auto& c : sk->constraints)
+      if (c.kind == sketch::ConstraintKind::Horizontal)
+        hasH = true;
+    IM_CHECK(hasH);
+    const auto& ln = std::get<sketch::Line>(sk->entities[0]);
+    IM_CHECK(std::abs(ln.a.y - ln.b.y) < 1e-3f); // snapped flat
+  };
+
+  // Ending a line near an existing point snaps coincident to it.
+  t = IM_REGISTER_TEST(engine, "infer", "endpoint_coincident");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t target = sk->AddEntity(sketch::Point{{3, 1}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Line;
+    s_App->sketchEdit.autoConstrain = true;
+
+    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1, -1));
+    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(3, 1)); // onto the point
+    ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    bool coincidentToTarget = false;
+    for (const auto& c : sk->constraints)
+      if (c.kind == sketch::ConstraintKind::Coincident &&
+          (c.a.entity == target || c.b.entity == target))
+        coincidentToTarget = true;
+    IM_CHECK(coincidentToTarget);
+  };
+
+  // With auto-constrain off, no constraints are inferred.
+  t = IM_REGISTER_TEST(engine, "infer", "toggle_suppresses");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.tool = ui::SketchTool::Line;
+    s_App->sketchEdit.autoConstrain = false; // suppressed
+
+    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-2, 0));
+    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2, 0.06f));
+    ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)0); // nothing inferred
+    s_App->sketchEdit.autoConstrain = true; // restore default for other tests
+  };
 }

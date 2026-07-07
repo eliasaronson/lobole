@@ -58,6 +58,11 @@ void DrawSketchToolbar(AppState& state) {
   ImGui::SameLine();
   toolButton(ICON_FA_SCISSORS " Trim", SketchTool::Trim);
 
+  ImGui::Checkbox("Auto-constrain", &edit.autoConstrain);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Snap and add constraints while drawing (hold Ctrl to "
+                      "place freely)");
+
   // Constraints (enabled by the current Select-mode selection)
   ImGui::SeparatorText("Constraints");
   const auto& sel = edit.selected;

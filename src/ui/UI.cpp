@@ -70,6 +70,9 @@ void DrawUI(AppState& state) {
         BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
     state.sketchRenderer->SetPrimitives(
         BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId));
+
+    // Auto-constraint snap indicator + ghost glyphs (2D overlay).
+    DrawSnapGlyphs(state);
   }
 
   // Point the renderers, camera, and picking at the central-node region so

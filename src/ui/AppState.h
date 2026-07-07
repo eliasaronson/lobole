@@ -3,6 +3,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/SketchFeature.h"
+#include "core/SketchInference.h"
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
@@ -63,6 +64,14 @@ struct SketchEditState {
   bool hasTrimPreview = false;
   glm::vec2 trimPreviewA{0.0f};
   glm::vec2 trimPreviewB{0.0f};
+
+  // Auto-constraint inference (snap + constrain while drawing). Toggle in the
+  // toolbar; hold Ctrl to suppress for one click.
+  bool autoConstrain = true;
+  // The inference for the point currently being placed (glyphs + snap preview),
+  // refreshed each frame while drawing.
+  bool hasCurrentSnap = false;
+  sketch::Snap currentSnap;
 
   bool IsEditing() const { return activeSketchId != 0; }
 };
