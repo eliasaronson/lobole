@@ -284,6 +284,42 @@ TEST_CASE("SplitEntity splits a line and transfers its constraints",
   CHECK(cutAdded);
 }
 
+TEST_CASE("TrimLineAt removes the segment between two crossings", "[sketch]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {6, 0}}); // horizontal
+  sk.AddEntity(sketch::Line{{2, -1}, {2, 1}});              // crosses at x=2
+  sk.AddEntity(sketch::Line{{4, -1}, {4, 1}});              // crosses at x=4
+
+  // Click on the middle span [2,4]; it should be removed, leaving [0,2] + [4,6].
+  REQUIRE(sk.TrimLineAt(l0, {3, 0}));
+  REQUIRE(sk.entities.size() == 4); // 2 crossers + 2 remaining pieces
+
+  bool left = false, right = false;
+  for (const auto& e : sk.entities) {
+    if (auto* l = std::get_if<sketch::Line>(&e)) {
+      auto near = [](glm::vec2 p, glm::vec2 q) {
+        return glm::length(p - q) < 1e-4f;
+      };
+      if ((near(l->a, {0, 0}) && near(l->b, {2, 0})) ||
+          (near(l->a, {2, 0}) && near(l->b, {0, 0})))
+        left = true;
+      if ((near(l->a, {4, 0}) && near(l->b, {6, 0})) ||
+          (near(l->a, {6, 0}) && near(l->b, {4, 0})))
+        right = true;
+    }
+  }
+  CHECK(left);
+  CHECK(right);
+}
+
+TEST_CASE("TrimLineAt with no crossings deletes the whole line", "[sketch]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  sk.AddEntity(sketch::Line{{0, 2}, {4, 2}}); // parallel, never crosses
+  REQUIRE(sk.TrimLineAt(l0, {2, 0}));
+  CHECK(sk.entities.size() == 1); // only the parallel line remains
+}
+
 TEST_CASE("SplitEntity rejects a non-line or a degenerate cut", "[sketch]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t c0 = sk.AddEntity(sketch::Circle{{0, 0}, 1.0});

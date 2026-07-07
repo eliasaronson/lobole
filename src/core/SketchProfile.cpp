@@ -223,4 +223,20 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity) {
   return points;
 }
 
+std::optional<float> SegmentIntersect(glm::vec2 a1, glm::vec2 b1, glm::vec2 a2,
+                                      glm::vec2 b2) {
+  const glm::vec2 r = b1 - a1, s = b2 - a2;
+  auto cross = [](glm::vec2 u, glm::vec2 v) { return u.x * v.y - u.y * v.x; };
+  const float rxs = cross(r, s);
+  if (std::abs(rxs) < 1e-9f)
+    return std::nullopt; // parallel / collinear
+  const glm::vec2 qp = a2 - a1;
+  const float t = cross(qp, s) / rxs; // param along [a1,b1]
+  const float u = cross(qp, r) / rxs; // param along [a2,b2]
+  const float eps = 1e-6f;
+  if (t < -eps || t > 1.0f + eps || u < -eps || u > 1.0f + eps)
+    return std::nullopt;
+  return glm::clamp(t, 0.0f, 1.0f);
+}
+
 } // namespace sketch

@@ -116,6 +116,13 @@ public:
   // 0 if `id` isn't a line or P is at an endpoint (degenerate).
   uint32_t SplitEntity(uint32_t id, glm::vec2 P);
 
+  // Trims the line `id` at `clickUV`: removes the sub-segment the click falls
+  // in, bounded by the line's intersections with other lines (via SplitEntity +
+  // DeleteEntity). With no bracketing intersection the whole line is deleted.
+  // Returns true if anything changed. Lines only — circles are ignored here
+  // (trimming a circle produces an arc; deferred to the arcs milestone).
+  bool TrimLineAt(uint32_t id, glm::vec2 clickUV);
+
   SketchPlane plane;
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;

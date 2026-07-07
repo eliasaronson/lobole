@@ -52,6 +52,46 @@ void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
       *state.document);
 }
 
+float DistToSegment(glm::vec2 p, glm::vec2 a, glm::vec2 b); // fwd (defined below)
+
+// Commits a line a->b. If the just-drawn endpoint b lands on an existing line's
+// body, also binds it there with a PointOnLine constraint (a light taste of
+// inference; full snapping is a later phase). Only b is bound — a is often the
+// previous chained segment's endpoint, which shouldn't be point-on-line'd.
+void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
+                glm::vec2 a, glm::vec2 b) {
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  const uint32_t id = sketch.AddEntity(sketch::Line{a, b});
+  const glm::vec2 bScreen = SketchUVToScreen(state, sketch.plane, b);
+  float bestD = 8.0f;
+  uint32_t onLine = 0;
+  for (const auto& e : sketch.entities) {
+    const uint32_t eid = sketch::EntityId(e);
+    if (eid == id)
+      continue;
+    if (auto* l = std::get_if<sketch::Line>(&e)) {
+      float d = DistToSegment(bScreen, SketchUVToScreen(state, sketch.plane, l->a),
+                              SketchUVToScreen(state, sketch.plane, l->b));
+      if (d < bestD) {
+        bestD = d;
+        onLine = eid;
+      }
+    }
+  }
+  if (onLine) {
+    sketch.constraints.push_back(
+        {sketch::ConstraintKind::PointOnLine, {id, 1}, {onLine, 0}, 0.0});
+    sketch::Solver solver;
+    solver.Load(sketch);
+    if (solver.Solve().ok)
+      solver.WriteBack(sketch.entities);
+  }
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+}
+
 // Commits a rectangle (4 lines + corner/H/V constraints) as one undo record,
 // then solves so the shape settles.
 void CommitRectangle(AppState& state, SketchFeature& sketch, size_t index,
@@ -276,6 +316,37 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     return true;
   }
 
+  if (edit.tool == SketchTool::Trim) {
+    // Click a line segment to remove the piece under the cursor (bounded by
+    // its crossings). Hover-highlights the target like the Select tool.
+    SketchPick hover = PickSketchEntity(
+        state, *sketch, glm::vec2(mousePos.x, mousePos.y), 12.0f);
+    edit.hasHover = hover.hit;
+    edit.hoveredBody = hover.body;
+    edit.hoveredRef = hover.ref;
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
+      size_t eidx = sketch->IndexOfEntity(hover.ref.entity);
+      if (eidx != SIZE_MAX &&
+          std::holds_alternative<sketch::Circle>(sketch->entities[eidx])) {
+        LOG_INFO("Trim: circle trimming needs arcs (not yet supported)");
+      } else {
+        nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+        if (sketch->TrimLineAt(hover.ref.entity, uv)) {
+          sketch::Solver solver;
+          solver.Load(*sketch);
+          if (solver.Solve().ok)
+            solver.WriteBack(sketch->entities);
+          state.document->Regenerate();
+          nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+          state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                                      index, before, after),
+                                  *state.document);
+        }
+      }
+    }
+    return true;
+  }
+
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     if (edit.tool == SketchTool::Point) {
       CommitEntity(state, *sketch, index, sketch::Point{uv});
@@ -286,7 +357,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       const glm::vec2 a = edit.pendingPoint;
       switch (edit.tool) {
       case SketchTool::Line:
-        CommitEntity(state, *sketch, index, sketch::Line{a, uv});
+        CommitLine(state, *sketch, index, a, uv);
         break;
       case SketchTool::Circle:
         CommitEntity(state, *sketch, index,

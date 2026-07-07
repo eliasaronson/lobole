@@ -34,4 +34,10 @@ CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
 // marker elsewhere).
 std::vector<glm::vec2> TessellateEntity(const Entity& entity);
 
+// If segments [a1,b1] and [a2,b2] properly cross, returns the crossing's
+// parameter t in [0,1] along the *first* segment; nullopt if parallel or the
+// crossing lies outside either segment. Used to find trim cut points.
+std::optional<float> SegmentIntersect(glm::vec2 a1, glm::vec2 b1, glm::vec2 a2,
+                                      glm::vec2 b2);
+
 } // namespace sketch

@@ -24,6 +24,20 @@ static std::vector<sketch::Entity> RectLines(glm::vec2 c1, glm::vec2 c2) {
           sketch::Line{d, a}};
 }
 
+// --- Geometry ---------------------------------------------------------------
+
+TEST_CASE("SegmentIntersect finds crossings and rejects misses", "[profile]") {
+  using Catch::Matchers::WithinAbs;
+  // Crosses at the midpoint of segment 1.
+  auto hit = sketch::SegmentIntersect({0, 0}, {2, 0}, {1, -1}, {1, 1});
+  REQUIRE(hit.has_value());
+  CHECK_THAT(*hit, WithinAbs(0.5f, 1e-5f));
+  // Parallel: no intersection.
+  CHECK_FALSE(sketch::SegmentIntersect({0, 0}, {2, 0}, {0, 1}, {2, 1}));
+  // Lines would cross beyond segment 1's extent (x=3 > 2).
+  CHECK_FALSE(sketch::SegmentIntersect({0, 0}, {2, 0}, {3, -1}, {3, 1}));
+}
+
 // --- BuildLoops -------------------------------------------------------------
 
 TEST_CASE("Rectangle (as four lines) yields one loop", "[profile]") {

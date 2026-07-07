@@ -31,7 +31,7 @@ struct DocumentRenderMesh {
 
 enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
 
-enum class SketchTool { Select, Point, Line, Circle, Rectangle };
+enum class SketchTool { Select, Point, Line, Circle, Rectangle, Trim };
 
 // Transient state for the active sketch-editing session. The sketch itself
 // lives in the Document (as a SketchFeature); this only holds which sketch is

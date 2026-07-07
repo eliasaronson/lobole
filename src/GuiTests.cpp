@@ -542,4 +542,38 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(pick.ref.entity, l0);
     IM_CHECK_EQ((int)pick.ref.which, 1); // endpoint b
   };
+
+  // Trim tool: clicking the middle span of a crossed line removes just that
+  // piece, end to end through the viewport handler.
+  t = IM_REGISTER_TEST(engine, "trim", "removes_middle_span");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t h = sk->AddEntity(sketch::Line{{-2, 0}, {2, 0}}); // horizontal
+    sk->AddEntity(sketch::Line{{-1, -1}, {-1, 1}});            // crosses at x=-1
+    sk->AddEntity(sketch::Line{{1, -1}, {1, 1}});              // crosses at x=1
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+
+    // Switch to the Trim tool and click the middle of the horizontal line.
+    s_App->sketchEdit.tool = ui::SketchTool::Trim;
+    glm::vec2 mid = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0, 0));
+    ctx->MouseMoveToPos(ImVec2(mid.x, mid.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    // The middle span [-1,1] is gone; the two outer pieces + 2 crossers remain.
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->entities.size(), (size_t)4);
+    IM_CHECK(sk->IndexOfEntity(h) != SIZE_MAX); // piece 1 kept the id
+  };
 }

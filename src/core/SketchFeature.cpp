@@ -1,5 +1,8 @@
 #include "core/SketchFeature.h"
 
+#include "core/SketchProfile.h" // SegmentIntersect
+
+#include <algorithm>
 #include <limits>
 #include <map>
 #include <vector>
@@ -160,4 +163,57 @@ uint32_t SketchFeature::SplitEntity(uint32_t id, glm::vec2 P) {
   // Join the two pieces at the cut.
   constraints.push_back({K::Coincident, {id, 1}, {newId, 0}, 0.0});
   return newId;
+}
+
+bool SketchFeature::TrimLineAt(uint32_t id, glm::vec2 clickUV) {
+  const size_t idx = IndexOfEntity(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return false;
+  auto* line = std::get_if<sketch::Line>(&entities[idx]);
+  if (!line)
+    return false;
+  const glm::vec2 a = line->a, b = line->b, ab = b - a;
+  const float len2 = glm::dot(ab, ab);
+  if (len2 < 1e-12f)
+    return false;
+
+  // Cut parameters along [a,b]: interior intersections with other lines.
+  std::vector<float> cuts = {0.0f, 1.0f};
+  for (const auto& e : entities) {
+    if (sketch::EntityId(e) == id)
+      continue;
+    if (auto* o = std::get_if<sketch::Line>(&e)) {
+      if (auto t = sketch::SegmentIntersect(a, b, o->a, o->b))
+        if (*t > 1e-4f && *t < 1.0f - 1e-4f)
+          cuts.push_back(*t);
+    }
+  }
+  std::sort(cuts.begin(), cuts.end());
+  cuts.erase(std::unique(cuts.begin(), cuts.end(),
+                         [](float x, float y) { return std::abs(x - y) < 1e-4f; }),
+             cuts.end());
+
+  const float tClick = glm::clamp(glm::dot(clickUV - a, ab) / len2, 0.0f, 1.0f);
+  float tLo = 0.0f, tHi = 1.0f;
+  for (size_t i = 0; i + 1 < cuts.size(); i++) {
+    if (tClick >= cuts[i] - 1e-6f && tClick <= cuts[i + 1] + 1e-6f) {
+      tLo = cuts[i];
+      tHi = cuts[i + 1];
+      break;
+    }
+  }
+
+  auto at = [&](float t) { return a + t * ab; };
+  if (tLo <= 1e-4f && tHi >= 1.0f - 1e-4f) {
+    DeleteEntity(id); // no bracketing cut — remove the whole line
+    return true;
+  }
+  // Split off the clicked interval [tLo, tHi] and delete just that piece.
+  uint32_t clicked = id;
+  if (tHi < 1.0f - 1e-4f)
+    SplitEntity(id, at(tHi)); // id becomes [0, tHi]
+  if (tLo > 1e-4f)
+    clicked = SplitEntity(id, at(tLo)); // new piece is [tLo, tHi]
+  DeleteEntity(clicked);
+  return true;
 }

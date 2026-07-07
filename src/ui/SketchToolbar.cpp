@@ -55,6 +55,8 @@ void DrawSketchToolbar(AppState& state) {
   toolButton("Circle", SketchTool::Circle);
   ImGui::SameLine();
   toolButton("Rect", SketchTool::Rectangle);
+  ImGui::SameLine();
+  toolButton(ICON_FA_SCISSORS " Trim", SketchTool::Trim);
 
   // Constraints (enabled by the current Select-mode selection)
   ImGui::SeparatorText("Constraints");
