@@ -191,6 +191,11 @@ vertex attribute, but it's self-contained and reuses the existing upload path.
 
 ## Phase D — Rectangle decomposition + split + line trim (~1.5–2 days)
 
+**Detailed implementation plan: [CONSTRAINTS_PHASE_D.md](CONSTRAINTS_PHASE_D.md)**
+(reuses Phase B `DeleteEntity` for trim cleanup and Phase C body picking; drops
+the rigid `Rectangle` variant with a v4→v5 load migration; lines-only trim,
+circle trim deferred to Phase G).
+
 - **Rectangle tool** commits 4 lines + 4 corner Coincidents + 2 H + 2 V as one
   undo record (SolveSpace-style), then rubber-bands the far corner. The rigid
   `sketch::Rectangle` entity is removed; v4 migration decomposes any stored
@@ -285,6 +290,39 @@ known mitigation.
 
 Unchanged: own milestone after A–G.
 
+## Deferred / explicitly out of scope
+
+Things intentionally NOT done in a given phase, with where they get picked up.
+Keep this list honest — a deferred item is a known gap, not a silent one.
+
+- **B-splines** → Phase H (own milestone; poles/knots/weights UX + OCC B-spline
+  edge are each substantial).
+- **Circle & arc trim** → needs Phase G arcs (trimming a circle yields an arc).
+  Phase D trim is **lines-only**; the Trim tool skips circles with a log line.
+- **Whole-entity body dragging** (drag a line/circle by its interior; rim-drag
+  a circle's radius) → Phase F. Phase C added body *picking* only; the Select
+  drag still moves single endpoints.
+- **Dimensional-constraint transfer onto a coincident survivor on delete** →
+  deferred in Phase B (we do coincidence repair + orphan sweep only). Phase D's
+  `SplitEntity` implements its own per-piece transfer; a general delete-time
+  transfer is still unbuilt.
+- **Eager split-at-draw** (drawing onto a line splits it immediately) →
+  Phase D uses trim-time split + a `PointOnLine` constraint instead (Onshape
+  model). Eager splitting remains a possible policy toggle, unplanned.
+- **Full auto-constraint inference** (ghost H/V/⟂/● glyphs, parallel/perp/
+  tangent snapping, tolerance tuning, the Ctrl-suppress modifier) → Phase E.
+  Phase D ships only a minimal `PointOnLine`-on-commit taste of it.
+- **Constraint-list editor / deleting individual constraints from the UI** →
+  unplanned. Phase B can delete *entities* (which cleans up their constraints)
+  but there is no per-constraint editor yet.
+- **Persistent face references (toponaming)** → out of scope for this plan. A
+  sketch bakes its plane at creation; editing an upstream feature does NOT move
+  dependent sketches. Tracked separately (see the FreeCAD/Blender reference
+  notes).
+- **Rendering polish**: round joins/caps on thick lines (Phase C uses butt
+  caps) and the faint sawtooth on near-edge-on lines under an oblique camera —
+  cosmetic, unplanned; invisible in the normal face-on editing view.
+
 ## Cross-cutting
 
 - **DOF badge**: surface remaining DOF / fully-constrained / conflicting set as
@@ -295,6 +333,14 @@ Unchanged: own milestone after A–G.
   `add_feature`. Extend `remote_smoke.py` per phase.
 - **Undo**: compound tools (rectangle, split, trim) must land as a single
   `ModifyFeatureCommand`.
+- **Build hygiene** (independent of the constraints work): third-party headers
+  (OpenCASCADE, ImGui) come in via plain `-I`, so OCC's `std::iterator`
+  deprecation warnings flood every build — switch to SYSTEM includes
+  (`-isystem`) to silence them. Builds are slow because `Feature.h` →
+  `CADKernel.h` pulls the whole OCC header tree into every core TU; a
+  precompiled header for the heavy common set (OCC/Vulkan/glm/json), the Ninja
+  generator, and ccache would each cut rebuild time. Already on C++20 (GCC
+  13.3) — the standard version is not the bottleneck.
 
 ## Recommended order
 
