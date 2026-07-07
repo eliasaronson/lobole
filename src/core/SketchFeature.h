@@ -81,13 +81,25 @@ enum class ConstraintKind {
   Fixed,         // a is a point (or entity) pinned in place
   Concentric,    // a.entity, b.entity are circles sharing a center
   Collinear,     // a.entity, b.entity are two lines on the same infinite line
+  DistanceX,     // a, b are points: b.x - a.x = value (driving dimension)
+  DistanceY,     // a, b are points: b.y - a.y = value (driving dimension)
+  Diameter,      // a.entity is a circle: diameter = value (radius = value/2)
 };
+
+// Which kinds are driving dimensions (carry an editable numeric value + a
+// canvas annotation with a `labelOffset`).
+inline bool IsDimension(ConstraintKind k) {
+  return k == ConstraintKind::Distance || k == ConstraintKind::DistanceX ||
+         k == ConstraintKind::DistanceY || k == ConstraintKind::Radius ||
+         k == ConstraintKind::Diameter || k == ConstraintKind::Angle;
+}
 
 struct Constraint {
   ConstraintKind kind;
   PointRef a, b;
-  double value = 0.0; // Distance / Radius dimension
-  PointRef c;         // third ref (Symmetric: the symmetry line); else unused
+  double value = 0.0;         // Distance / Radius / Angle dimension
+  PointRef c;                 // third ref (Symmetric: the symmetry line)
+  glm::vec2 labelOffset{0.0f}; // dimension annotation placement (UV)
 };
 
 } // namespace sketch

@@ -148,6 +148,15 @@ void DrawSketchToolbar(AppState& state) {
   ImGui::SameLine();
   if (ImGui::Button("Radius") && !sel.empty() && isCircle(sel[0]))
     ApplySketchConstraint(state, K::Radius, dimValue);
+  ImGui::SameLine();
+  if (ImGui::Button("Ø") && !sel.empty() && isCircle(sel[0]))
+    ApplySketchConstraint(state, K::Diameter, dimValue);
+  ImGui::SameLine();
+  if (ImGui::Button("dX") && sel.size() >= 2)
+    ApplySketchConstraint(state, K::DistanceX, dimValue);
+  ImGui::SameLine();
+  if (ImGui::Button("dY") && sel.size() >= 2)
+    ApplySketchConstraint(state, K::DistanceY, dimValue);
 
   // Angle dimension (degrees in the UI, radians in the model).
   static float angleDeg = 90.0f;

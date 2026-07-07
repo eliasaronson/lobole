@@ -191,6 +191,20 @@ TEST_CASE("Pre-v4 sketch migrates entity indices to stable ids",
   CHECK(j2["next_entity_id"] == 3u);
 }
 
+TEST_CASE("Dimension label offset round-trips", "[sketch][serialization]") {
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  uint32_t l0 = sk->AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  sketch::Constraint dim{sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 4.0};
+  dim.labelOffset = {0.5f, 1.2f};
+  sk->constraints.push_back(dim);
+
+  auto restored = DocumentIO::FeatureFromJson(DocumentIO::FeatureToJson(*sk));
+  auto* rsk = dynamic_cast<SketchFeature*>(restored.get());
+  REQUIRE(rsk != nullptr);
+  CHECK(rsk->constraints[0].labelOffset.x == 0.5f);
+  CHECK(rsk->constraints[0].labelOffset.y == 1.2f);
+}
+
 TEST_CASE("Construction flag round-trips through JSON", "[sketch][serialization]") {
   auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
   sketch::Line ref{{0, 0}, {4, 0}};

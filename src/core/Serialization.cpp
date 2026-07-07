@@ -91,6 +91,9 @@ const char* ConstraintKindToString(sketch::ConstraintKind k) {
   case K::Fixed: return "fixed";
   case K::Concentric: return "concentric";
   case K::Collinear: return "collinear";
+  case K::DistanceX: return "distance_x";
+  case K::DistanceY: return "distance_y";
+  case K::Diameter: return "diameter";
   }
   return "coincident";
 }
@@ -113,6 +116,9 @@ sketch::ConstraintKind ConstraintKindFromString(const std::string& s) {
   if (s == "fixed") return K::Fixed;
   if (s == "concentric") return K::Concentric;
   if (s == "collinear") return K::Collinear;
+  if (s == "distance_x") return K::DistanceX;
+  if (s == "distance_y") return K::DistanceY;
+  if (s == "diameter") return K::Diameter;
   throw std::runtime_error("Unknown constraint kind: " + s);
 }
 
@@ -123,6 +129,8 @@ json ConstraintToJson(const sketch::Constraint& c) {
             {"value", c.value}};
   if (c.kind == sketch::ConstraintKind::Symmetric) // only Symmetric uses c
     j["c"] = {c.c.entity, c.c.which};
+  if (sketch::IsDimension(c.kind) && (c.labelOffset.x != 0 || c.labelOffset.y != 0))
+    j["label"] = Vec2ToJson(c.labelOffset);
   return j;
 }
 
@@ -134,6 +142,8 @@ sketch::Constraint ConstraintFromJson(const json& j) {
   c.value = j.value("value", 0.0);
   if (j.contains("c"))
     c.c = {j.at("c").at(0).get<uint32_t>(), j.at("c").at(1).get<uint8_t>()};
+  if (j.contains("label"))
+    c.labelOffset = Vec2FromJson(j.at("label"));
   return c;
 }
 

@@ -72,6 +72,9 @@ struct SketchEditState {
   bool hasCurrentSnap = false;
   sketch::Snap currentSnap;
 
+  // Index of the dimension constraint being edited inline (-1 = none).
+  int editingDim = -1;
+
   bool IsEditing() const { return activeSketchId != 0; }
 };
 

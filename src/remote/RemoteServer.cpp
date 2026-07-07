@@ -323,7 +323,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"midpoint", sketch::ConstraintKind::Midpoint},
         {"fixed", sketch::ConstraintKind::Fixed},
         {"concentric", sketch::ConstraintKind::Concentric},
-        {"collinear", sketch::ConstraintKind::Collinear}};
+        {"collinear", sketch::ConstraintKind::Collinear},
+        {"distance_x", sketch::ConstraintKind::DistanceX},
+        {"distance_y", sketch::ConstraintKind::DistanceY},
+        {"diameter", sketch::ConstraintKind::Diameter}};
     auto it = kinds.find(p.at("kind").get<std::string>());
     if (it == kinds.end()) throw std::runtime_error("unknown constraint kind");
     c.kind = it->second;

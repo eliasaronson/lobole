@@ -350,6 +350,36 @@ TEST_CASE("Collinear puts two lines on one line", "[solver]") {
   CHECK_THAT(b.b.y, WithinAbs(0.0f, 1e-4f));
 }
 
+TEST_CASE("DistanceX / DistanceY drive a coordinate gap", "[solver]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {1, 1}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 0}}); // pin a
+  s.constraints.push_back({sketch::ConstraintKind::DistanceX, {l0, 0}, {l0, 1}, 3.0});
+  s.constraints.push_back({sketch::ConstraintKind::DistanceY, {l0, 0}, {l0, 1}, 2.0});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 a = LineA(out[0]), b = LineB(out[0]);
+  CHECK_THAT(b.x - a.x, WithinAbs(3.0f, 1e-4f));
+  CHECK_THAT(b.y - a.y, WithinAbs(2.0f, 1e-4f));
+}
+
+TEST_CASE("Diameter drives radius to half its value", "[solver]") {
+  SketchFeature s = MakeSketch();
+  uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 1.0});
+  s.constraints.push_back({sketch::ConstraintKind::Diameter, {c0, 0}, {0, 0}, 5.0});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  CHECK_THAT(std::get<sketch::Circle>(out[0]).radius, WithinRel(2.5, 1e-4));
+}
+
 TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});

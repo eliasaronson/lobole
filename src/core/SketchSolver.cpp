@@ -265,6 +265,25 @@ void Solver::Load(const SketchFeature& sketch) {
         im.sys.addConstraintPointOnLine(la.p1, lb, tag++);
       }
       break;
+    case ConstraintKind::DistanceX:
+      if (a && b) {
+        im.params.push_back(con.value);
+        im.sys.addConstraintDifference(a->x, b->x, &im.params.back(), tag++);
+      }
+      break;
+    case ConstraintKind::DistanceY:
+      if (a && b) {
+        im.params.push_back(con.value);
+        im.sys.addConstraintDifference(a->y, b->y, &im.params.back(), tag++);
+      }
+      break;
+    case ConstraintKind::Diameter:
+      if (im.circleOf.count(con.a.entity)) {
+        im.params.push_back(con.value * 0.5); // radius = diameter / 2
+        im.sys.addConstraintCircleRadius(im.circles[im.circleOf[con.a.entity]],
+                                         &im.params.back(), tag++);
+      }
+      break;
     }
   }
   im.dragTag = tag;

@@ -41,6 +41,11 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out);
 // snapping. Call once per frame from the UI pass.
 void DrawSnapGlyphs(AppState& state);
 
+// Draws dimension annotations (extension/dimension lines, arrows, value text)
+// for the active sketch's driving dimensions, and handles double-click-to-edit
+// their value. Call once per frame from the UI pass.
+void DrawDimensions(AppState& state);
+
 // Projects a plane-UV point to viewport screen coords (pixels), matching the
 // picking/render path.
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,

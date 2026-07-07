@@ -589,6 +589,168 @@ void DrawSnapGlyphs(AppState& state) {
   }
 }
 
+namespace {
+// UV position of a point ref (line endpoint / point / circle centre).
+std::optional<glm::vec2> RefUV(const SketchFeature& sk,
+                               const sketch::PointRef& r) {
+  size_t idx = sk.IndexOfEntity(r.entity);
+  if (idx == SIZE_MAX)
+    return std::nullopt;
+  const auto& e = sk.entities[idx];
+  if (auto* p = std::get_if<sketch::Point>(&e))
+    return p->p;
+  if (auto* l = std::get_if<sketch::Line>(&e))
+    return r.which ? l->b : l->a;
+  if (auto* c = std::get_if<sketch::Circle>(&e))
+    return c->center;
+  return std::nullopt;
+}
+
+// A filled arrowhead at `tip` pointing along `dir` (screen space).
+void Arrow(ImDrawList* dl, ImVec2 tip, glm::vec2 dir, ImU32 col) {
+  glm::vec2 n{-dir.y, dir.x};
+  const float len = 9.0f, w = 3.5f;
+  ImVec2 base(tip.x - dir.x * len, tip.y - dir.y * len);
+  dl->AddTriangleFilled(tip, ImVec2(base.x + n.x * w, base.y + n.y * w),
+                        ImVec2(base.x - n.x * w, base.y - n.y * w), col);
+}
+
+// Commits an edited dimension value: sets it, re-solves, one undo record.
+void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
+                        int dimIdx, double value) {
+  if (dimIdx < 0 || dimIdx >= (int)sketch.constraints.size())
+    return;
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  sketch.constraints[dimIdx].value = value;
+  sketch::Solver solver;
+  solver.Load(sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch.entities);
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+}
+} // namespace
+
+void DrawDimensions(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  if (!edit.IsEditing())
+    return;
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch)
+    return;
+
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImU32 col = IM_COL32(120, 200, 255, 235);
+  auto scr = [&](glm::vec2 uv) {
+    glm::vec2 s = SketchUVToScreen(state, sketch->plane, uv);
+    return ImVec2(s.x, s.y);
+  };
+
+  for (int i = 0; i < (int)sketch->constraints.size(); i++) {
+    const sketch::Constraint& con = sketch->constraints[i];
+    if (!sketch::IsDimension(con.kind))
+      continue;
+
+    char label[48] = "";
+    ImVec2 labelPos;
+    using K = sketch::ConstraintKind;
+
+    if (con.kind == K::Radius || con.kind == K::Diameter) {
+      size_t ci = sketch->IndexOfEntity(con.a.entity);
+      if (ci == SIZE_MAX)
+        continue;
+      auto* circ = std::get_if<sketch::Circle>(&sketch->entities[ci]);
+      if (!circ)
+        continue;
+      glm::vec2 dir(0.7071f, 0.7071f);
+      glm::vec2 rimUV = circ->center + dir * (float)circ->radius;
+      ImVec2 c0 = scr(circ->center), c1 = scr(rimUV + con.labelOffset);
+      dl->AddLine(c0, c1, col, 1.4f); // leader from centre out
+      snprintf(label, sizeof(label),
+               con.kind == K::Diameter ? "\xC3\x98%.3g" : "R%.3g", con.value);
+      labelPos = c1;
+    } else if (con.kind == K::Angle) {
+      auto a = RefUV(*sketch, {con.a.entity, 0});
+      if (!a)
+        continue;
+      labelPos = scr(*a + con.labelOffset + glm::vec2(0.3f, 0.3f));
+      snprintf(label, sizeof(label), "%.1f\xC2\xB0", con.value * 57.2957795f);
+    } else { // Distance / DistanceX / DistanceY (points a, b)
+      auto a = RefUV(*sketch, con.a), b = RefUV(*sketch, con.b);
+      if (!a || !b)
+        continue;
+      glm::vec2 da = *a + con.labelOffset, db = *b + con.labelOffset;
+      if (con.kind == K::DistanceX)
+        da.y = db.y = std::min(a->y, b->y) + con.labelOffset.y;
+      else if (con.kind == K::DistanceY)
+        da.x = db.x = std::min(a->x, b->x) + con.labelOffset.x;
+      ImVec2 sa = scr(*a), sb = scr(*b), sda = scr(da), sdb = scr(db);
+      dl->AddLine(sa, sda, col, 1.0f); // extension lines
+      dl->AddLine(sb, sdb, col, 1.0f);
+      dl->AddLine(sda, sdb, col, 1.4f); // dimension line
+      glm::vec2 d{sdb.x - sda.x, sdb.y - sda.y};
+      float L = std::sqrt(d.x * d.x + d.y * d.y);
+      if (L > 1e-3f) {
+        d /= L;
+        Arrow(dl, sda, d, col);
+        Arrow(dl, sdb, {-d.x, -d.y}, col);
+      }
+      double v = con.kind == K::DistanceX  ? std::abs(b->x - a->x)
+                 : con.kind == K::DistanceY ? std::abs(b->y - a->y)
+                                            : glm::length(*b - *a);
+      snprintf(label, sizeof(label), "%.3g", v);
+      labelPos = ImVec2((sda.x + sdb.x) * 0.5f, (sda.y + sdb.y) * 0.5f);
+    }
+
+    // Value text with a small backing box; double-click opens an inline editor.
+    const ImVec2 tsz = ImGui::CalcTextSize(label);
+    ImVec2 tp(labelPos.x - tsz.x * 0.5f, labelPos.y - tsz.y * 0.5f);
+    dl->AddRectFilled(ImVec2(tp.x - 3, tp.y - 1), ImVec2(tp.x + tsz.x + 3, tp.y + tsz.y + 1),
+                      IM_COL32(20, 24, 30, 220), 3.0f);
+    dl->AddText(tp, col, label);
+
+    ImGuiIO& io = ImGui::GetIO();
+    const bool overLabel = io.MousePos.x >= tp.x - 3 && io.MousePos.x <= tp.x + tsz.x + 3 &&
+                           io.MousePos.y >= tp.y - 1 && io.MousePos.y <= tp.y + tsz.y + 1;
+    if (overLabel && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+      edit.editingDim = i;
+
+    if (edit.editingDim == i) {
+      static char buf[48];
+      static int lastEditing = -1;
+      if (lastEditing != i) {
+        snprintf(buf, sizeof(buf), "%.4g", con.value);
+        lastEditing = i;
+      }
+      ImGui::SetNextWindowPos(ImVec2(tp.x - 4, tp.y - 4));
+      ImGui::SetNextWindowBgAlpha(0.95f);
+      ImGui::Begin("##dimedit", nullptr,
+                   ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize |
+                       ImGuiWindowFlags_NoSavedSettings);
+      ImGui::SetNextItemWidth(70);
+      ImGui::SetKeyboardFocusHere();
+      bool commit = ImGui::InputText("##v", buf, sizeof(buf),
+                                     ImGuiInputTextFlags_EnterReturnsTrue);
+      ImGui::End();
+      if (commit) {
+        double v = con.kind == K::Angle ? glm::radians(std::atof(buf))
+                                        : std::atof(buf);
+        ApplyDimensionEdit(state, *sketch, index, i, v);
+        edit.editingDim = -1;
+        lastEditing = -1;
+      } else if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+        edit.editingDim = -1;
+        lastEditing = -1;
+      }
+    }
+  }
+}
+
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
                            glm::vec2 uv) {
   glm::vec3 world = plane.PlaneToWorld(uv);
@@ -714,6 +876,8 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   switch (kind) {
   case K::Coincident:
   case K::Distance:
+  case K::DistanceX:
+  case K::DistanceY:
     if (sel.size() < 2) return false;
     c.a = sel[0];
     c.b = sel[1];
@@ -731,6 +895,7 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     c.b = {sel[1].entity, 0};
     break;
   case K::Radius:
+  case K::Diameter:
     if (sel.empty() || !isCircle(sel[0])) return false;
     c.a = {sel[0].entity, 0};
     break;
