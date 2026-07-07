@@ -125,7 +125,7 @@ Risk: low-medium — the reference implementation (FreeCAD `Sketch::initMove` /
 `moveGeometries`) is mapped in CONSTRAINTS_PLAN.md; the rescale-0.01 weak pull is
 the known anti-oscillation fix, and refuse-on-conflict avoids garbage solves.
 
-Note for later: built off the generic dragged-point set, so Phase H arcs slot in
+Note for later: built off the generic dragged-point set, so Phase J arcs slot in
 by exposing start/end/centre points (endpoint/body drag free) plus an arc-rim
 mode reusing `BeginRadiusDrag`'s scalar-DOF pattern.
 

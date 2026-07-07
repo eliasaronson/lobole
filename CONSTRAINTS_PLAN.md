@@ -194,7 +194,7 @@ vertex attribute, but it's self-contained and reuses the existing upload path.
 **Detailed implementation plan: [CONSTRAINTS_PHASE_D.md](CONSTRAINTS_PHASE_D.md)**
 (reuses Phase B `DeleteEntity` for trim cleanup and Phase C body picking; drops
 the rigid `Rectangle` variant with a v4→v5 load migration; lines-only trim,
-circle trim deferred to Phase H).
+circle trim deferred to Phase J).
 
 - **Rectangle tool** commits 4 lines + 4 corner Coincidents + 2 H + 2 V as one
   undo record (SolveSpace-style), then rubber-bands the far corner. The rigid
@@ -207,7 +207,7 @@ circle trim deferred to Phase H).
 - **Trim tool**: click a segment → find bracketing intersections/constraint
   points → split there → delete the clicked piece (Phase B machinery cleans up
   its constraints). No bracketing cuts → delete whole entity. Circle trim
-  produces arcs, so it waits for Phase H; line-only trim covers the rectangle
+  produces arcs, so it waits for Phase J; line-only trim covers the rectangle
   workflows.
 - Draw-onto-a-line behavior: for now emits `PointOnLine` (Phase A kind) rather
   than eagerly splitting — matches Onshape/SolveSpace/FreeCAD; the trim/split
@@ -306,7 +306,55 @@ sketcher). Independent of drag/arcs/splines; can run before or after Phase F.
 Risk: medium — annotation layout (arrow placement, text avoidance) is fiddly UX,
 but the constraint/solver side is done.
 
-## Phase H — Arcs (~3–4 days)
+## Phase H — Construction geometry + extra constraints (~1.5 days)
+
+Completes the constraint layer. Independent of arcs/splines; pairs with the
+dimension work in G.
+
+- **Construction geometry**: a `bool construction` flag on entities (serialized).
+  Construction lines/circles drive constraints and snapping but are **excluded
+  from `BuildLoops`** (no profile contribution) and render **dashed / dimmed**.
+  A toolbar/context toggle flips the selected entity's flag. Tiny change,
+  everyday feature (centerlines, reference circles). Tests: a construction line
+  doesn't close a profile but still solves; round-trips.
+- **Extra constraint kinds** (Phase-A-shaped — solver map + toolbar + the Phase M
+  shortcuts): **Symmetric** (two points/entities about a line —
+  `addConstraintSymmetric` / `PointOnPerpBisector`), **Midpoint** (point at a
+  line's middle — `addConstraintMidpointOnLine`), **Fixed/Lock** (ground a point
+  by dropping its params from the unknowns), **Concentric** (coincident centres),
+  **Collinear** (two lines on one line). PlaneGCS already exposes the primitives.
+- Tests: symmetric reflects a point across a line; midpoint pins to 0.5; a fixed
+  point doesn't move under drag; concentric/collinear solve.
+
+Risk: low — same shape as Phase A, plus a one-field flag.
+
+## Phase I — Constraint status & management (~2 days)
+
+The feedback + management layer — as important as dimensions for the sketcher
+feel, and currently only half-present (the solver reports dof/conflicting but
+nothing renders or lets you act on it).
+
+- **Fully-constrained coloring**: colour entities by constrained-ness —
+  under-constrained (blue) vs fully constrained (black/white), from
+  `SolveResult.dof` and a per-entity DOF attribution. The classic "is my sketch
+  solved" signal (Onshape's Show-overdefined).
+- **Persistent constraint glyphs**: draw the little H / V / coincident / ⟂ / =
+  badges *on the geometry* (reusing the Phase E glyph renderer, but for the
+  committed constraints, not just live inference), with a show/hide toggle.
+- **Delete an individual constraint**: today only *entities* delete (cleaning up
+  their constraints); add selecting a constraint (via its glyph or a list) and
+  removing just it, then re-solve. Closes the Deferred "constraint-list editor"
+  gap.
+- **Conflict / over-defined highlighting**: surface `conflicting`/`redundant`
+  constraints in red so an over-defined sketch is diagnosable, not just stuck.
+- Tests: dof attribution marks a free line under-constrained and a fully-pinned
+  one solved; deleting a constraint frees the relevant DOF; a conflicting set is
+  flagged.
+
+Risk: medium — per-entity DOF attribution and constraint hit-testing are the
+fiddly bits; the solver already provides the raw dof/conflicting data.
+
+## Phase J — Arcs (~3–4 days)
 
 As previously planned, with the repo findings applied:
 
@@ -327,7 +375,7 @@ As previously planned, with the repo findings applied:
 Risk: medium — wire orientation is the fiddly part; the ShapeFix pass is the
 known mitigation.
 
-## Phase I — Generative operations: mirror, pattern, fillet, offset (~3–4 days)
+## Phase K — Generative operations: mirror, pattern, fillet, offset (~3–4 days)
 
 Operations that *produce geometry from other geometry* — the one place a sketch
 genuinely wants "history." Placed after arcs because fillet and offset produce
@@ -361,7 +409,7 @@ The ops:
 - **Pattern** linear (count + direction + spacing) and circular (count + centre
   + angle): instances derive from the seed.
 - **Fillet**: replace a corner where two lines meet with a tangent arc of radius
-  r, trimming the lines — generative + reuses split/trim; **needs Phase H arcs**.
+  r, trimming the lines — generative + reuses split/trim; **needs Phase J arcs**.
 - **Offset**: offset a chain by a distance — parallel lines + arcs at convex
   corners; **needs arcs**.
 - UI: mirror/pattern/fillet/offset tools with a bake-vs-linked toggle; editing a
@@ -376,11 +424,11 @@ Risk: medium-large — the id-stable parametric regeneration is the fiddly part 
 sketch-local analogue of the toponaming problem); bake mode is easy and can ship
 first within the phase.
 
-## Phase J — B-splines (large, defer)
+## Phase L — B-splines (large, defer)
 
-Unchanged: own milestone after A–I.
+Unchanged: own milestone after A–K.
 
-## Phase K — Interaction & keyboard: select-default, Escape, shortcuts, box-select (~1.5 days)
+## Phase M — Interaction & keyboard: select-default, Escape, shortcuts, box-select (~1.5 days)
 
 Sketcher UX polish, placed last so shortcuts can cover *every* tool and
 constraint. The core parts (select-default, Escape, box-select) don't depend on
@@ -423,9 +471,9 @@ guard are the only fiddly bits.
 Things intentionally NOT done in a given phase, with where they get picked up.
 Keep this list honest — a deferred item is a known gap, not a silent one.
 
-- **B-splines** → Phase J (own milestone; poles/knots/weights UX + OCC B-spline
+- **B-splines** → Phase L (own milestone; poles/knots/weights UX + OCC B-spline
   edge are each substantial).
-- **Circle & arc trim** → needs Phase H arcs (trimming a circle yields an arc).
+- **Circle & arc trim** → needs Phase J arcs (trimming a circle yields an arc).
   Phase D trim is **lines-only**; the Trim tool skips circles with a log line.
 - **Whole-entity body dragging** (drag a line/circle by its interior; rim-drag
   a circle's radius) → Phase F. Phase C added body *picking* only; the Select
@@ -440,24 +488,33 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 - **Full auto-constraint inference** (ghost H/V/⟂/● glyphs, parallel/perp/
   tangent snapping, tolerance tuning, the Ctrl-suppress modifier) → Phase E.
   Phase D ships only a minimal `PointOnLine`-on-commit taste of it.
-- **Constraint-list editor / deleting individual constraints from the UI** →
-  unplanned. Phase B can delete *entities* (which cleans up their constraints)
-  but there is no per-constraint editor yet.
+- **Deleting individual constraints / constraint status** → **Phase I** (was
+  unplanned). Today only *entities* delete (cleaning up their constraints).
+- **Extend tool** (the complement of Trim — stretch a line to meet another) →
+  nice-to-have; pairs with Trim/arcs, unscheduled.
+- **Transform tools** (move/rotate/scale/copy a *selection* numerically) →
+  nice-to-have. Interactive move is covered by drag (F); rotate/scale/array of a
+  selection overlaps Phase K generative patterns, unscheduled.
+- **Convenience primitives**: slot (2 arcs + 2 lines, needs arcs), polygon
+  (N-gon), ellipse (PlaneGCS supports ellipses) → nice-to-have, unscheduled.
 - **Persistent face references (toponaming)** → out of scope for this plan. A
   sketch bakes its plane at creation; editing an upstream feature does NOT move
-  dependent sketches. Tracked separately (see the FreeCAD/Blender reference
-  notes).
+  dependent sketches. This also blocks **projected/external geometry** ("use
+  edges" — projecting model edges into the sketch). Tracked separately (see the
+  FreeCAD/Blender reference notes).
+- **Sketch text** → niche, out of scope.
 - **Rendering polish**: round joins/caps on thick lines (Phase C uses butt
   caps) and the faint sawtooth on near-edge-on lines under an oblique camera —
   cosmetic, unplanned; invisible in the normal face-on editing view.
 
 ## Cross-cutting
 
-- **DOF badge**: surface remaining DOF / fully-constrained / conflicting set as
-  each phase adds constraints; Phase E's add-then-diagnose depends on the
-  redundant list being reliable.
+- **DOF / constraint status**: the raw remaining-DOF / conflicting / redundant
+  data is already produced by the solver each solve (Phase E's add-then-diagnose
+  relies on it); **Phase I** turns it into the fully-constrained coloring +
+  conflict highlighting UX.
 - **Remote parity**: constraint kinds ride the existing `{kind, refs, value}`
-  schema; Phase B switches refs to stable IDs; Phase H adds arcs to
+  schema; Phase B switches refs to stable IDs; Phase J adds arcs to
   `add_feature`. Extend `remote_smoke.py` per phase.
 - **Undo**: compound tools (rectangle, split, trim) must land as a single
   `ModifyFeatureCommand`.
@@ -472,11 +529,17 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 
 ## Recommended order
 
-A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → F ✓ → **G (dimensions)** → H (arcs) →
-I (generative: mirror/pattern/fillet/offset) → J (splines, later) → K
-(interaction & keyboard). A–F shipped. G (dimension display + editing) is the
-next big "feels-like-a-sketcher" win; H completes the geometry set; I
-(generative) is the "history where it matters" layer and needs arcs first; J is
-its own deferred milestone; K is UX polish placed last so its shortcuts cover
+A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → F ✓ → **G (dimensions)** → H (construction +
+extra constraints) → I (constraint status & management) → J (arcs) → K
+(generative: mirror/pattern/fillet/offset) → L (splines, later) → M
+(interaction & keyboard).
+
+A–F shipped. G/H/I are the **constraint-layer** block — dimensions display,
+construction geometry + the remaining standard constraints, and the
+fully-constrained/conflict feedback + per-constraint delete — together the
+biggest "feels-like-a-sketcher" gap after geometry. They're independent of
+arcs/splines and can be reordered freely. J completes the geometry set; K
+(generative) is the "history where it matters" layer and needs arcs first; L is
+its own deferred milestone; M is UX polish placed last so its shortcuts cover
 every tool/constraint (though select-default/Escape/box-select are independent
-and can be pulled forward). Roughly 9–13 days remaining.
+and can be pulled forward). Roughly 12–17 days remaining.
