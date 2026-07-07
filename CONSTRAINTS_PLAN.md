@@ -194,7 +194,7 @@ vertex attribute, but it's self-contained and reuses the existing upload path.
 **Detailed implementation plan: [CONSTRAINTS_PHASE_D.md](CONSTRAINTS_PHASE_D.md)**
 (reuses Phase B `DeleteEntity` for trim cleanup and Phase C body picking; drops
 the rigid `Rectangle` variant with a v4→v5 load migration; lines-only trim,
-circle trim deferred to Phase G).
+circle trim deferred to Phase H).
 
 - **Rectangle tool** commits 4 lines + 4 corner Coincidents + 2 H + 2 V as one
   undo record (SolveSpace-style), then rubber-bands the far corner. The rigid
@@ -207,7 +207,7 @@ circle trim deferred to Phase G).
 - **Trim tool**: click a segment → find bracketing intersections/constraint
   points → split there → delete the clicked piece (Phase B machinery cleans up
   its constraints). No bracketing cuts → delete whole entity. Circle trim
-  produces arcs, so it waits for Phase G; line-only trim covers the rectangle
+  produces arcs, so it waits for Phase H; line-only trim covers the rectangle
   workflows.
 - Draw-onto-a-line behavior: for now emits `PointOnLine` (Phase A kind) rather
   than eagerly splitting — matches Onshape/SolveSpace/FreeCAD; the trim/split
@@ -250,6 +250,11 @@ Risk: medium — tolerance tuning; the numbers above are proven starting points.
 
 ## Phase F — Whole-entity dragging + drag-solver rework (~1–2 days)
 
+**Detailed implementation plan: [CONSTRAINTS_PHASE_F.md](CONSTRAINTS_PHASE_F.md)**
+(persistent `Solver` drag session `BeginDrag`/`SetDragTargets`/`SolveDrag`; weak
+`rescaleConstraint(0.01)` pins; pick→mode classification; solver-level tests so
+the GUI path stays thin; arcs slot into the generic point set later).
+
 Adopt the FreeCAD drag recipe wholesale (it's PlaneGCS-native):
 
 - `Solver` gains `BeginDrag(refs) / SetDragTarget(uv) / EndDrag`: system built
@@ -270,7 +275,38 @@ Adopt the FreeCAD drag recipe wholesale (it's PlaneGCS-native):
 
 Risk: low-medium now that the reference implementation is mapped.
 
-## Phase G — Arcs (~3–4 days)
+## Phase G — Dimension display + editing (NEW, ~2 days)
+
+The dimensional *constraints* (Distance, Radius, Angle with a `value`) already
+solve — but they're **invisible in the canvas** and only settable via the
+toolbar value box. This phase adds the annotation graphics and in-canvas editing
+that make a sketch feel dimensioned (the "Ø2 with a leader" in every CAD
+sketcher). Independent of drag/arcs/splines; can run before or after Phase F.
+
+- **Model**: dimensional constraints gain a **label position/offset** (extend
+  `sketch::Constraint`, or a parallel map keyed by constraint) so annotations
+  have a placement; serialized. Add `DistanceX` / `DistanceY` and `Diameter`
+  kinds (small solver additions, same shape as Phase A).
+- **Rendering** (`DrawDimensions`, a 2D ImGui overlay like `DrawSnapGlyphs`):
+  project the constrained geometry to screen and draw extension lines, a
+  dimension line with arrowheads, and the value text — `2.00` for a distance,
+  `Ø2`/`R2` for a circle, `45°` for an angle. Auto-place initially at the stored
+  offset.
+- **Editing**: double-click a dimension label → inline `InputText` → parse →
+  re-apply the constraint `value` → re-solve (one `ModifyFeatureCommand`).
+  Drag the label to reposition (updates the offset).
+- **Dimension tool**: one tool that infers the kind from the selection (2 points
+  → distance, circle → radius/diameter, 2 lines → angle), places the annotation,
+  and prompts for the value — the Onshape flow, alongside the existing toolbar
+  buttons.
+- Tests: a dimension's screen annotation hit-tests and its edited value re-drives
+  the geometry; DistanceX/Diameter solve; serialization round-trips the label
+  offset. Rendering itself is eyeballed via `/run` (2D overlay, like the glyphs).
+
+Risk: medium — annotation layout (arrow placement, text avoidance) is fiddly UX,
+but the constraint/solver side is done.
+
+## Phase H — Arcs (~3–4 days)
 
 As previously planned, with the repo findings applied:
 
@@ -291,18 +327,67 @@ As previously planned, with the repo findings applied:
 Risk: medium — wire orientation is the fiddly part; the ShapeFix pass is the
 known mitigation.
 
-## Phase H — B-splines (large, defer)
+## Phase I — Generative operations: mirror, pattern, fillet, offset (~3–4 days)
 
-Unchanged: own milestone after A–G.
+Operations that *produce geometry from other geometry* — the one place a sketch
+genuinely wants "history." Placed after arcs because fillet and offset produce
+arcs. Each op supports **both modes, chosen by the user per invocation**:
+
+- **Bake** — generate the geometry once as plain entities, no link. Simplest;
+  matches how split/trim/rectangle already mutate the entity list. Edit the
+  source → copies don't follow; re-run to update. Good for "just duplicate it."
+- **Parametric ("linked")** — the generated entities carry a *derived-from* tag
+  and regenerate when the source changes. The real-CAD feel: move the original,
+  the mirror/pattern follows.
+
+Shared machinery (only the parametric mode needs it):
+
+- **Derived record** on `SketchFeature`: an ordered list of generative ops
+  `{kind, sourceIds, params, generatedIds}` — a small in-sketch dependency
+  graph, *not* a linear feature tree. Bake mode stores nothing.
+- **Regeneration pass** (`SketchFeature::RegenerateDerived`): after the
+  constraint solve, replay the parametric ops to rebuild their generated
+  entities, then re-solve. Regeneration must be **id-stable** — a regenerated
+  entity keeps its id so constraints and downstream refs survive (same
+  discipline as split keeping piece-1's id; leans entirely on Phase B ids).
+- Serialization round-trips the derived records; on load, geometry is stored and
+  re-verified by a regenerate.
+
+The ops:
+
+- **Mirror** across a line (or a sketch axis): reflect the source entities;
+  parametric mode links each copy to its source (optionally adds symmetry
+  constraints).
+- **Pattern** linear (count + direction + spacing) and circular (count + centre
+  + angle): instances derive from the seed.
+- **Fillet**: replace a corner where two lines meet with a tangent arc of radius
+  r, trimming the lines — generative + reuses split/trim; **needs Phase H arcs**.
+- **Offset**: offset a chain by a distance — parallel lines + arcs at convex
+  corners; **needs arcs**.
+- UI: mirror/pattern/fillet/offset tools with a bake-vs-linked toggle; editing a
+  parametric op's params (mirror line, pattern count, fillet radius) regenerates.
+
+- Tests: mirror reflects geometry (bake: no link; parametric: moving the source
+  updates the copy after regenerate); linear/circular pattern counts; fillet on
+  a corner closes and extrudes; regeneration preserves generated-entity ids so a
+  constraint on a mirrored entity survives a source edit.
+
+Risk: medium-large — the id-stable parametric regeneration is the fiddly part (a
+sketch-local analogue of the toponaming problem); bake mode is easy and can ship
+first within the phase.
+
+## Phase J — B-splines (large, defer)
+
+Unchanged: own milestone after A–I.
 
 ## Deferred / explicitly out of scope
 
 Things intentionally NOT done in a given phase, with where they get picked up.
 Keep this list honest — a deferred item is a known gap, not a silent one.
 
-- **B-splines** → Phase H (own milestone; poles/knots/weights UX + OCC B-spline
+- **B-splines** → Phase J (own milestone; poles/knots/weights UX + OCC B-spline
   edge are each substantial).
-- **Circle & arc trim** → needs Phase G arcs (trimming a circle yields an arc).
+- **Circle & arc trim** → needs Phase H arcs (trimming a circle yields an arc).
   Phase D trim is **lines-only**; the Trim tool skips circles with a log line.
 - **Whole-entity body dragging** (drag a line/circle by its interior; rim-drag
   a circle's radius) → Phase F. Phase C added body *picking* only; the Select
@@ -334,7 +419,7 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
   each phase adds constraints; Phase E's add-then-diagnose depends on the
   redundant list being reliable.
 - **Remote parity**: constraint kinds ride the existing `{kind, refs, value}`
-  schema; Phase B switches refs to stable IDs; Phase G adds arcs to
+  schema; Phase B switches refs to stable IDs; Phase H adds arcs to
   `add_feature`. Extend `remote_smoke.py` per phase.
 - **Undo**: compound tools (rectangle, split, trim) must land as a single
   `ModifyFeatureCommand`.
@@ -349,8 +434,10 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 
 ## Recommended order
 
-A ✓ → B ✓ → **C (selectable entities)** → D (rectangle/split/trim) → E
-(snapping) → F (drag) → G (arcs) → H (splines, later). A and B shipped. C is
-next and unblocks using constraints at all — you can't pick a line today. D
-delivers cuttable rectangles; E is the requested snapping; F and G complete the
-Onshape feel. Roughly 8–11 days remaining at the original plan's calibration.
+A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → **F (drag)** / **G (dimensions)** → H (arcs) →
+I (generative: mirror/pattern/fillet/offset) → J (splines, later). A–E shipped.
+F (drag) and G (dimension display + editing) are both independent and either can
+go next — dimensions is the bigger "feels-like-a-sketcher" win, drag is the last
+core interaction; pick by feel. H completes the geometry set; I (generative) is
+the "history where it matters" layer and needs arcs first; J is its own deferred
+milestone. Roughly 10–14 days remaining.
