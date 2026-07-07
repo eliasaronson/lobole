@@ -327,7 +327,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sketch != nullptr);
     nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-    sketch->AddEntity(sketch::Rectangle{{0, 0}, {4, 2}});
+    sketch->AddRectangle({0, 0}, {4, 2}); // 4 lines + corner/H/V constraints
     nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());

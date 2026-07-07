@@ -52,6 +52,22 @@ void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
       *state.document);
 }
 
+// Commits a rectangle (4 lines + corner/H/V constraints) as one undo record,
+// then solves so the shape settles.
+void CommitRectangle(AppState& state, SketchFeature& sketch, size_t index,
+                     glm::vec2 c1, glm::vec2 c2) {
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  sketch.AddRectangle(c1, c2);
+  sketch::Solver solver;
+  solver.Load(sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch.entities);
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+}
+
 Ray ScreenRay(AppState& state, const glm::vec2& mousePos) {
   // Map through the central-node viewport rect (see Pick in ViewportInput)
   return state.faceSelector->ScreenToWorldRay(
@@ -277,7 +293,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
                      sketch::Circle{a, glm::length(uv - a)});
         break;
       case SketchTool::Rectangle:
-        CommitEntity(state, *sketch, index, sketch::Rectangle{a, uv});
+        CommitRectangle(state, *sketch, index, a, uv);
         break;
       default:
         break;
@@ -307,21 +323,21 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
 
   const glm::vec2 a = edit.pendingPoint;
   const glm::vec2 b = edit.hoverPoint;
-  sketch::Entity preview;
+  std::vector<glm::vec2> poly;
   switch (edit.tool) {
   case SketchTool::Line:
-    preview = sketch::Line{a, b};
+    poly = sketch::TessellateEntity(sketch::Line{a, b});
     break;
   case SketchTool::Circle:
-    preview = sketch::Circle{a, glm::length(b - a)};
+    poly = sketch::TessellateEntity(sketch::Circle{a, glm::length(b - a)});
     break;
   case SketchTool::Rectangle:
-    preview = sketch::Rectangle{a, b};
+    // Rectangles aren't an entity anymore; draw the outline directly.
+    poly = {a, {b.x, a.y}, b, {a.x, b.y}, a};
     break;
   default:
     return;
   }
-  std::vector<glm::vec2> poly = sketch::TessellateEntity(preview);
   for (size_t i = 0; i + 1 < poly.size(); i++) {
     out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
     out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
@@ -349,8 +365,6 @@ std::vector<std::pair<uint8_t, glm::vec2>> EntityPoints(const sketch::Entity& e)
     pts = {{0, l->a}, {1, l->b}};
   } else if (auto* c = std::get_if<sketch::Circle>(&e)) {
     pts = {{0, c->center}};
-  } else if (auto* r = std::get_if<sketch::Rectangle>(&e)) {
-    pts = {{0, r->c1}, {1, r->c2}};
   }
   return pts;
 }
@@ -409,14 +423,6 @@ SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
           c->center + glm::vec2(static_cast<float>(c->radius), 0.0f));
       float rPx = glm::length(rim - center);
       d = std::abs(glm::length(mousePos - center) - rPx);
-    } else if (auto* r = std::get_if<sketch::Rectangle>(&e)) {
-      // Rigid rect: hit-test its four edges.
-      glm::vec2 c1 = SketchUVToScreen(state, sketch.plane, r->c1);
-      glm::vec2 c2 = SketchUVToScreen(state, sketch.plane, r->c2);
-      glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, cc{c2.x, c2.y}, dd{c1.x, c2.y};
-      d = std::min({DistToSegment(mousePos, a, b), DistToSegment(mousePos, b, cc),
-                    DistToSegment(mousePos, cc, dd),
-                    DistToSegment(mousePos, dd, a)});
     }
     if (d < bestDist) {
       bestDist = d;

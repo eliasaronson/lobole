@@ -86,11 +86,15 @@ def main():
         # Sketch + extrude entirely over the RPC: add the sketch, reference it
         # from the extrude by the id the server assigns (add_feature returns it)
         d.call("new_project")
+        # A legacy "rect" entity is migrated to four lines on load.
         sketch = d.call("add_feature", feature={
             "type": "Sketch", "name": "Sketch 1",
             "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
                       "uAxis": [1, 0, 0]},
             "entities": [{"type": "rect", "c1": [0, 0], "c2": [4, 2]}]})
+        ents = d.call("get_state")["features"][0]["entities"]
+        expect(len(ents) == 4 and all(e["type"] == "line" for e in ents),
+               "rect migrated to four lines")
         d.call("add_feature", feature={
             "type": "Extrude", "name": "Pad", "sketch_id": sketch["id"],
             "distance": 3.0, "mode": "new_body"})

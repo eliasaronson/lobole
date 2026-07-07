@@ -25,6 +25,26 @@ size_t SketchFeature::IndexOfEntity(uint32_t id) const {
   return std::numeric_limits<size_t>::max();
 }
 
+std::array<uint32_t, 4> SketchFeature::AddRectangle(glm::vec2 c1, glm::vec2 c2) {
+  using K = sketch::ConstraintKind;
+  const glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
+  const uint32_t l0 = AddEntity(sketch::Line{a, b}); // bottom (horizontal)
+  const uint32_t l1 = AddEntity(sketch::Line{b, c}); // right (vertical)
+  const uint32_t l2 = AddEntity(sketch::Line{c, d}); // top (horizontal)
+  const uint32_t l3 = AddEntity(sketch::Line{d, a}); // left (vertical)
+  // Corner coincidents: end of each line meets the start of the next.
+  constraints.push_back({K::Coincident, {l0, 1}, {l1, 0}, 0.0});
+  constraints.push_back({K::Coincident, {l1, 1}, {l2, 0}, 0.0});
+  constraints.push_back({K::Coincident, {l2, 1}, {l3, 0}, 0.0});
+  constraints.push_back({K::Coincident, {l3, 1}, {l0, 0}, 0.0});
+  // Axis alignment on the whole sides.
+  constraints.push_back({K::Horizontal, {l0, 0}, {0, 0}, 0.0});
+  constraints.push_back({K::Horizontal, {l2, 0}, {0, 0}, 0.0});
+  constraints.push_back({K::Vertical, {l1, 0}, {0, 0}, 0.0});
+  constraints.push_back({K::Vertical, {l3, 0}, {0, 0}, 0.0});
+  return {l0, l1, l2, l3};
+}
+
 namespace {
 // Does constraint kind `k` read its second ref (`b`)? Horizontal/Vertical/
 // Radius are whole-entity on `a` only; the rest use both.

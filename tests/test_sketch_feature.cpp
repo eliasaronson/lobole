@@ -5,6 +5,7 @@
 #include "core/Document.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
+#include "core/SketchProfile.h"
 
 #include <nlohmann/json.hpp>
 
@@ -90,7 +91,6 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   sk->AddEntity(sketch::Point{{1.0f, 2.0f}});
   sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
   sk->AddEntity(sketch::Circle{{2.0f, 1.0f}, 0.5});
-  sk->AddEntity(sketch::Rectangle{{0.0f, 0.0f}, {4.0f, 2.0f}});
   sk->SetId(7);
 
   auto j = DocumentIO::FeatureToJson(*sk);
@@ -99,7 +99,7 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   REQUIRE(rsk != nullptr);
 
   CHECK(rsk->GetId() == 7);
-  CHECK(rsk->entities.size() == 4);
+  CHECK(rsk->entities.size() == 3);
   CHECK(DocumentIO::FeatureToJson(*rsk) == j);
 
   // Plane axes reconstructed orthonormally
@@ -189,6 +189,46 @@ TEST_CASE("Pre-v4 sketch migrates entity indices to stable ids",
   auto j2 = DocumentIO::FeatureToJson(*sk);
   CHECK(j2["entities"][0]["id"] == 1u);
   CHECK(j2["next_entity_id"] == 3u);
+}
+
+TEST_CASE("Legacy rigid rect migrates to four lines with H/V",
+          "[sketch][serialization]") {
+  // A v4 sketch with a rigid "rect" entity (and a stray constraint on it).
+  nlohmann::json j = {
+      {"type", "Sketch"},
+      {"name", "Legacy"},
+      {"id", 9},
+      {"next_entity_id", 3},
+      {"plane",
+       {{"origin", {0.0, 0.0, 0.0}},
+        {"normal", {0.0, 0.0, 1.0}},
+        {"uAxis", {1.0, 0.0, 0.0}}}},
+      {"entities",
+       {{{"type", "line"}, {"a", {0.0, 5.0}}, {"b", {4.0, 5.0}}, {"id", 1}},
+        {{"type", "rect"}, {"c1", {0.0, 0.0}}, {"c2", {4.0, 2.0}}, {"id", 2}}}},
+      {"constraints",
+       // A constraint referencing the rigid rect (id 2) — should be dropped.
+       {{{"kind", "coincident"}, {"a", {1, 1}}, {"b", {2, 0}}, {"value", 0.0}}}}};
+
+  auto restored = DocumentIO::FeatureFromJson(j);
+  auto* sk = dynamic_cast<SketchFeature*>(restored.get());
+  REQUIRE(sk != nullptr);
+  // 1 original line + 4 rectangle lines.
+  REQUIRE(sk->entities.size() == 5);
+  for (const auto& e : sk->entities)
+    CHECK(std::holds_alternative<sketch::Line>(e));
+  // The rect's own constraints (referencing id 2) are gone; the rectangle
+  // brings its 8 (4 coincident + 2 H + 2 V).
+  size_t hv = 0;
+  for (const auto& c : sk->constraints)
+    if (c.kind == sketch::ConstraintKind::Horizontal ||
+        c.kind == sketch::ConstraintKind::Vertical)
+      hv++;
+  CHECK(hv == 4);
+  for (const auto& c : sk->constraints)
+    CHECK((c.a.entity != 2u && c.b.entity != 2u)); // no dangling rect ref
+  // The four rect lines still close into an extrudable loop.
+  CHECK(sketch::BuildLoops(sk->entities).size() == 1);
 }
 
 TEST_CASE("Entity ids stay stable across insert and delete",

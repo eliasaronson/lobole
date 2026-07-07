@@ -15,7 +15,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 4; // v4: stable sketch entity ids
+constexpr int kVersion = 5; // v5: rectangles decompose into lines
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -39,12 +39,9 @@ json EntityToJson(const sketch::Entity& entity) {
         } else if constexpr (std::is_same_v<T, sketch::Line>) {
           return {{"type", "line"}, {"a", Vec2ToJson(e.a)},
                   {"b", Vec2ToJson(e.b)}};
-        } else if constexpr (std::is_same_v<T, sketch::Circle>) {
+        } else {
           return {{"type", "circle"}, {"center", Vec2ToJson(e.center)},
                   {"radius", e.radius}};
-        } else {
-          return {{"type", "rect"}, {"c1", Vec2ToJson(e.c1)},
-                  {"c2", Vec2ToJson(e.c2)}};
         }
       },
       entity);
@@ -63,9 +60,9 @@ sketch::Entity EntityFromJson(const json& j) {
     e = sketch::Line{Vec2FromJson(j.at("a")), Vec2FromJson(j.at("b"))};
   } else if (type == "circle") {
     e = sketch::Circle{Vec2FromJson(j.at("center")), j.at("radius").get<double>()};
-  } else if (type == "rect") {
-    e = sketch::Rectangle{Vec2FromJson(j.at("c1")), Vec2FromJson(j.at("c2"))};
   } else {
+    // "rect" is intercepted and expanded in FeatureFromJson (pre-v5 rigid
+    // rectangles become four lines); anything else is unknown.
     throw std::runtime_error("Unknown sketch entity type: " + type);
   }
   sketch::SetEntityId(e, id);
@@ -201,8 +198,23 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                       Vec3FromJson(pl.at("normal")),
                       Vec3FromJson(pl.at("uAxis")));
     auto sk = std::make_unique<SketchFeature>(name, plane);
+    // Pre-v5 rigid "rect" entities are expanded into four lines below. During
+    // loading they occupy a placeholder slot (preserving order/indexing so the
+    // pre-v4 index migration stays correct); their corners are remembered.
+    std::vector<std::pair<glm::vec2, glm::vec2>> legacyRects;
+    std::vector<size_t> rectSlots; // placeholder positions in sk->entities
     for (const auto& ej : j.value("entities", json::array())) {
-      sk->entities.push_back(EntityFromJson(ej));
+      if (ej.value("type", "") == "rect") {
+        glm::vec2 c1 = Vec2FromJson(ej.at("c1"));
+        glm::vec2 c2 = Vec2FromJson(ej.at("c2"));
+        sketch::Entity ph = sketch::Line{c1, c2}; // placeholder, preserves order
+        sketch::SetEntityId(ph, ej.value("id", uint32_t{0}));
+        rectSlots.push_back(sk->entities.size());
+        sk->entities.push_back(ph);
+        legacyRects.emplace_back(c1, c2);
+      } else {
+        sk->entities.push_back(EntityFromJson(ej));
+      }
     }
     for (const auto& cj : j.value("constraints", json::array())) {
       sk->constraints.push_back(ConstraintFromJson(cj));
@@ -227,6 +239,31 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         maxId = std::max(maxId, sketch::EntityId(e));
       sk->nextEntityId = std::max<uint32_t>(
           {sk->nextEntityId, maxId + 1, j.value("next_entity_id", uint32_t{0})});
+    }
+    // Now expand the placeholder rects into real lines (nextEntityId is final,
+    // so the new lines get fresh non-colliding ids). Drop any constraint that
+    // referenced a rigid rect — those were solver no-ops.
+    if (!legacyRects.empty()) {
+      std::vector<uint32_t> rectIds;
+      for (size_t slot : rectSlots) // ids are final; migration didn't reorder
+        rectIds.push_back(sketch::EntityId(sk->entities[slot]));
+      auto isRect = [&](uint32_t id) {
+        return std::find(rectIds.begin(), rectIds.end(), id) != rectIds.end();
+      };
+      sk->entities.erase(
+          std::remove_if(sk->entities.begin(), sk->entities.end(),
+                         [&](const sketch::Entity& e) {
+                           return isRect(sketch::EntityId(e));
+                         }),
+          sk->entities.end());
+      sk->constraints.erase(
+          std::remove_if(sk->constraints.begin(), sk->constraints.end(),
+                         [&](const sketch::Constraint& c) {
+                           return isRect(c.a.entity) || isRect(c.b.entity);
+                         }),
+          sk->constraints.end());
+      for (const auto& [c1, c2] : legacyRects)
+        sk->AddRectangle(c1, c2);
     }
     out = std::move(sk);
   } else if (type == "Extrude") {

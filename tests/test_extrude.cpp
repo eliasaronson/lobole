@@ -16,11 +16,18 @@ namespace fs = std::filesystem;
 
 static const SketchPlane kXY(PlaneType::XY);
 
+// Rectangles are four lines now; build them at exact corners so BuildLoops
+// chains them without needing a solve.
+static std::vector<sketch::Entity> RectLines(glm::vec2 c1, glm::vec2 c2) {
+  glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
+  return {sketch::Line{a, b}, sketch::Line{b, c}, sketch::Line{c, d},
+          sketch::Line{d, a}};
+}
+
 // --- BuildLoops -------------------------------------------------------------
 
-TEST_CASE("Rectangle entity yields one loop", "[profile]") {
-  std::vector<sketch::Entity> e = {sketch::Rectangle{{0, 0}, {4, 2}}};
-  auto loops = sketch::BuildLoops(e);
+TEST_CASE("Rectangle (as four lines) yields one loop", "[profile]") {
+  auto loops = sketch::BuildLoops(RectLines({0, 0}, {4, 2}));
   REQUIRE(loops.size() == 1);
   CHECK_THAT(std::abs(loops[0].SignedArea()), WithinRel(8.0, 1e-9));
 }
@@ -47,7 +54,7 @@ TEST_CASE("Open polyline yields no loops", "[profile]") {
 // --- BuildPrism volumes -----------------------------------------------------
 
 TEST_CASE("Rectangle extrudes to a box of the expected volume", "[extrude]") {
-  auto loops = sketch::BuildLoops({sketch::Rectangle{{0, 0}, {4, 2}}});
+  auto loops = sketch::BuildLoops(RectLines({0, 0}, {4, 2}));
   CADShape prism = sketch::BuildPrism(kXY, loops, 3.0, false);
   REQUIRE(prism.IsValid());
   CHECK_THAT(prism.Volume(), WithinRel(24.0, 1e-6));
@@ -61,8 +68,8 @@ TEST_CASE("Circle extrudes to a cylinder volume", "[extrude]") {
 }
 
 TEST_CASE("Rectangle with an inner circle extrudes with a hole", "[extrude]") {
-  std::vector<sketch::Entity> e = {sketch::Rectangle{{0, 0}, {4, 2}},
-                                   sketch::Circle{{2, 1}, 0.5}};
+  std::vector<sketch::Entity> e = RectLines({0, 0}, {4, 2});
+  e.push_back(sketch::Circle{{2, 1}, 0.5});
   auto loops = sketch::BuildLoops(e);
   REQUIRE(loops.size() == 2);
   CADShape prism = sketch::BuildPrism(kXY, loops, 3.0, false);
@@ -73,7 +80,7 @@ TEST_CASE("Rectangle with an inner circle extrudes with a hole", "[extrude]") {
 
 TEST_CASE("Reversed extrude sits on the opposite side of the plane",
           "[extrude]") {
-  auto loops = sketch::BuildLoops({sketch::Rectangle{{0, 0}, {2, 2}}});
+  auto loops = sketch::BuildLoops(RectLines({0, 0}, {2, 2}));
   CADShape prism = sketch::BuildPrism(kXY, loops, 2.0, true);
   REQUIRE(prism.IsValid());
   glm::vec3 min, max;
@@ -84,7 +91,7 @@ TEST_CASE("Reversed extrude sits on the opposite side of the plane",
 
 TEST_CASE("Offset plane places the prism where expected", "[extrude]") {
   SketchPlane plane(PlaneType::XY, glm::vec3(10, 0, 5));
-  auto loops = sketch::BuildLoops({sketch::Rectangle{{-1, -1}, {1, 1}}});
+  auto loops = sketch::BuildLoops(RectLines({-1, -1}, {1, 1}));
   CADShape prism = sketch::BuildPrism(plane, loops, 2.0, false);
   REQUIRE(prism.IsValid());
   glm::vec3 min, max;
@@ -100,7 +107,7 @@ static uint64_t AddRectSketch(Document& doc, const glm::vec2& c1,
                               const glm::vec2& c2,
                               const SketchPlane& plane = kXY) {
   auto sk = std::make_unique<SketchFeature>("Sketch", plane);
-  sk->AddEntity(sketch::Rectangle{c1, c2});
+  sk->AddRectangle(c1, c2);
   doc.AddFeature(std::move(sk));
   return doc.GetFeature(doc.FeatureCount() - 1)->GetId();
 }

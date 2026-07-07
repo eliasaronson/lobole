@@ -51,7 +51,7 @@ double Loop::SignedArea() const {
 std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
   std::vector<Loop> loops;
 
-  // Collect free line segments to chain; circles/rectangles are loops already.
+  // Collect free line segments to chain; circles are loops already.
   std::vector<std::pair<glm::vec2, glm::vec2>> segments;
 
   for (const auto& entity : entities) {
@@ -61,10 +61,6 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
           if constexpr (std::is_same_v<T, Circle>) {
             Loop loop;
             loop.circle = e;
-            loops.push_back(loop);
-          } else if constexpr (std::is_same_v<T, Rectangle>) {
-            Loop loop;
-            loop.polygon = {e.c1, {e.c2.x, e.c1.y}, e.c2, {e.c1.x, e.c2.y}};
             loops.push_back(loop);
           } else if constexpr (std::is_same_v<T, Line>) {
             segments.emplace_back(e.a, e.b);
@@ -212,12 +208,6 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity) {
         using T = std::decay_t<decltype(e)>;
         if constexpr (std::is_same_v<T, Line>) {
           points = {e.a, e.b};
-        } else if constexpr (std::is_same_v<T, Rectangle>) {
-          points = {e.c1,
-                    {e.c2.x, e.c1.y},
-                    e.c2,
-                    {e.c1.x, e.c2.y},
-                    e.c1};
         } else if constexpr (std::is_same_v<T, Circle>) {
           points.reserve(kCircleSegments + 1);
           for (int i = 0; i <= kCircleSegments; i++) {

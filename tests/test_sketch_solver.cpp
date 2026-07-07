@@ -228,14 +228,15 @@ TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   CHECK((r.conflicting.size() > 0 || !r.ok || r.dof >= 0));
 }
 
-TEST_CASE("A constrained rectangle profile still extrudes", "[solver][extrude]") {
-  // Rectangles are rigid (unsolved) but must still form a profile.
+TEST_CASE("A rectangle (4 lines + H/V) solves and extrudes", "[solver][extrude]") {
+  // Rectangle = 4 lines + corner coincidents + H/V; the solver settles the
+  // corners and the four lines chain into one closed profile loop.
   SketchFeature s = MakeSketch();
-  s.AddEntity(sketch::Rectangle{{0, 0}, {4, 2}});
+  s.AddRectangle({0, 0}, {4, 2});
 
   sketch::Solver solver;
   solver.Load(s);
-  solver.Solve();
+  REQUIRE(solver.Solve().ok);
   std::vector<sketch::Entity> out;
   solver.WriteBack(out);
 

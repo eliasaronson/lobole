@@ -30,8 +30,8 @@ CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
                     double distance, bool reversed);
 
 // Tessellates one entity into a UV polyline for rendering/preview: Line = 2
-// points, Rectangle = 5 (closed), Circle = 33 (closed, 32 segments),
-// Point = empty (rendered as a marker elsewhere).
+// points, Circle = 33 (closed, 32 segments), Point = empty (rendered as a
+// marker elsewhere).
 std::vector<glm::vec2> TessellateEntity(const Entity& entity);
 
 } // namespace sketch

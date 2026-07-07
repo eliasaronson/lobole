@@ -4,6 +4,7 @@
 #include "core/Feature.h"
 
 #include <glm/glm.hpp>
+#include <array>
 #include <variant>
 #include <vector>
 
@@ -25,12 +26,11 @@ struct Circle {
   double radius;
   uint32_t id = 0;
 };
-struct Rectangle {
-  glm::vec2 c1, c2;
-  uint32_t id = 0;
-};
 
-using Entity = std::variant<Point, Line, Circle, Rectangle>;
+// Rectangles are not a primitive: they decompose into four Lines with shared
+// corners (see SketchFeature::AddRectangle) so every side is editable and
+// trimmable. Legacy files with a rigid "rect" entity are migrated on load.
+using Entity = std::variant<Point, Line, Circle>;
 
 // The stable id of an entity, regardless of which variant alternative it holds.
 inline uint32_t EntityId(const Entity& e) {
@@ -42,7 +42,7 @@ inline void SetEntityId(Entity& e, uint32_t id) {
 
 // A reference to a point on an entity. `entity` is the entity's stable **id**
 // (not its index in the list — that shifts on insert/delete). `which` selects
-// which point: 0 = a/center/c1, 1 = b/c2. For whole-entity constraints
+// which point: 0 = a/center, 1 = b. For whole-entity constraints
 // (Horizontal on a line, Radius on a circle), `which` is ignored and
 // `a.entity` names the entity.
 struct PointRef {
@@ -98,6 +98,14 @@ public:
   // Coincident/Horizontal/Vertical), for a user-facing warning; the entity is
   // still removed. Returns 0 and does nothing if `id` is unknown.
   size_t DeleteEntity(uint32_t id);
+
+  // Adds an axis-aligned rectangle as four real lines with shared corner
+  // points: 4 lines + 4 corner coincidents + 2 horizontal + 2 vertical
+  // constraints. Corners derive from the opposite corners c1, c2. Returns the
+  // four line ids (bottom, right, top, left). This is the modern replacement
+  // for the rigid `sketch::Rectangle` entity — each side is individually
+  // editable and trimmable.
+  std::array<uint32_t, 4> AddRectangle(glm::vec2 c1, glm::vec2 c2);
 
   SketchPlane plane;
   std::vector<sketch::Entity> entities;

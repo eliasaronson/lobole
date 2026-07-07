@@ -289,8 +289,6 @@ EntityDots(const sketch::Entity& e) {
     return {{0, l->a}, {1, l->b}};
   if (auto* c = std::get_if<sketch::Circle>(&e))
     return {{0, c->center}};
-  if (auto* r = std::get_if<sketch::Rectangle>(&e))
-    return {{0, r->c1}, {1, r->c2}};
   return {};
 }
 
