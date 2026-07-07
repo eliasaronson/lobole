@@ -51,6 +51,13 @@ struct SketchEditState {
   bool dragging = false;    // dragging a selected point (Select tool)
   sketch::PointRef dragRef; // the point being dragged
 
+  // What the cursor is over in the Select tool (for hover highlighting),
+  // refreshed each frame. `hoveredBody` distinguishes an entity body from a
+  // vertex.
+  bool hasHover = false;
+  bool hoveredBody = false;
+  sketch::PointRef hoveredRef;
+
   bool IsEditing() const { return activeSketchId != 0; }
 };
 

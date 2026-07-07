@@ -261,17 +261,9 @@ void SyncDocumentRenderers(AppState& state) {
     state.documentMeshes.push_back({meshId, outlineId});
   }
 
-  // Rebuild static sketch line geometry (the active sketch is highlighted in
-  // the per-frame overlay pass; here everything uses the base color).
-  if (state.sketchRenderer) {
-    std::vector<Vertex3D> lines;
-    for (const auto& feature : state.document->GetFeatures()) {
-      if (auto* sk = dynamic_cast<const SketchFeature*>(feature.get())) {
-        AppendSketchLines(*sk, kSketchColor, lines);
-      }
-    }
-    state.sketchRenderer->SetStaticLines(std::move(lines));
-  }
+  // Sketch line geometry (static inactive sketches + the active sketch's
+  // expanded primitives) is rebuilt per-frame in UI.cpp, since it must react to
+  // edit-mode and selection/hover changes that don't bump the document version.
 
   LOG_INFO("Document synced: {} features, {} bodies",
            state.document->FeatureCount(), state.document->GetBodies().size());
@@ -279,37 +271,124 @@ void SyncDocumentRenderers(AppState& state) {
 
 std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,
                                                uint64_t activeSketchId) {
+  // Entity lines and selection markers now render through the expanded
+  // primitive path (BuildActiveSketchPrimitives); the caller adds the
+  // rubber-band preview, grid, and gizmo to this buffer.
+  (void)state;
+  (void)activeSketchId;
+  return {};
+}
+
+namespace {
+// Vertices exposed by an entity for dots (which, plane-UV).
+std::vector<std::pair<uint8_t, glm::vec2>>
+EntityDots(const sketch::Entity& e) {
+  if (auto* p = std::get_if<sketch::Point>(&e))
+    return {{0, p->p}};
+  if (auto* l = std::get_if<sketch::Line>(&e))
+    return {{0, l->a}, {1, l->b}};
+  if (auto* c = std::get_if<sketch::Circle>(&e))
+    return {{0, c->center}};
+  if (auto* r = std::get_if<sketch::Rectangle>(&e))
+    return {{0, r->c1}, {1, r->c2}};
+  return {};
+}
+
+// A thick screen-space line segment (two triangles). The B-end negates
+// corner.x so both ends offset to the same world side (no bowtie).
+void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
+                    const glm::vec4& color, std::vector<PrimVertex>& out) {
+  PrimVertex am{a, b, {-1, 0}, {halfPx, 0}, color};
+  PrimVertex ap{a, b, {1, 0}, {halfPx, 0}, color};
+  PrimVertex bp{b, a, {-1, 0}, {halfPx, 0}, color}; // logical +side at B
+  PrimVertex bm{b, a, {1, 0}, {halfPx, 0}, color};  // logical -side at B
+  for (const PrimVertex& v : {am, ap, bp, am, bp, bm})
+    out.push_back(v);
+}
+
+// A constant-size dot (two triangles, SDF-round in the fragment shader).
+void AppendPrimDot(glm::vec3 p, float radiusPx, const glm::vec4& color,
+                   std::vector<PrimVertex>& out) {
+  PrimVertex c00{p, p, {-1, -1}, {radiusPx, 1}, color};
+  PrimVertex c10{p, p, {1, -1}, {radiusPx, 1}, color};
+  PrimVertex c11{p, p, {1, 1}, {radiusPx, 1}, color};
+  PrimVertex c01{p, p, {-1, 1}, {radiusPx, 1}, color};
+  for (const PrimVertex& v : {c00, c10, c11, c00, c11, c01})
+    out.push_back(v);
+}
+} // namespace
+
+std::vector<Vertex3D> BuildStaticSketchLines(AppState& state,
+                                             uint64_t activeSketchId) {
   std::vector<Vertex3D> lines;
-  if (activeSketchId == 0 || !state.document)
+  if (!state.document)
     return lines;
+  for (const auto& feature : state.document->GetFeatures()) {
+    if (auto* sk = dynamic_cast<const SketchFeature*>(feature.get())) {
+      if (sk->GetId() == activeSketchId)
+        continue; // active sketch renders through the primitive path
+      AppendSketchLines(*sk, kSketchColor, lines);
+    }
+  }
+  return lines;
+}
+
+std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
+                                                    uint64_t activeSketchId) {
+  std::vector<PrimVertex> prims;
+  if (activeSketchId == 0 || !state.document)
+    return prims;
   auto* sk = dynamic_cast<const SketchFeature*>(
       state.document->FindFeatureById(activeSketchId));
   if (!sk)
-    return lines;
-  AppendSketchLines(*sk, kActiveSketchColor, lines);
+    return prims;
+  const SketchEditState& edit = state.sketchEdit;
 
-  // Mark selected points with a bright cross so it's clear what a constraint
-  // will apply to.
-  const glm::vec3 selColor(1.0f, 0.85f, 0.3f);
-  for (const auto& ref : state.sketchEdit.selected) {
-    size_t idx = sk->IndexOfEntity(ref.entity);
-    if (idx == SIZE_MAX)
-      continue;
-    glm::vec2 uv;
-    const auto& e = sk->entities[idx];
-    if (auto* p = std::get_if<sketch::Point>(&e)) uv = p->p;
-    else if (auto* l = std::get_if<sketch::Line>(&e)) uv = ref.which ? l->b : l->a;
-    else if (auto* c = std::get_if<sketch::Circle>(&e)) uv = c->center;
-    else if (auto* r = std::get_if<sketch::Rectangle>(&e)) uv = ref.which ? r->c2 : r->c1;
-    glm::vec3 w = sk->plane.PlaneToWorld(uv);
-    glm::vec3 u = sk->plane.GetUAxis() * 0.08f;
-    glm::vec3 v = sk->plane.GetVAxis() * 0.08f;
-    lines.push_back(LineVertex(w - u, selColor));
-    lines.push_back(LineVertex(w + u, selColor));
-    lines.push_back(LineVertex(w - v, selColor));
-    lines.push_back(LineVertex(w + v, selColor));
+  auto selectedEntity = [&](uint32_t id) {
+    for (const auto& r : edit.selected)
+      if (r.entity == id)
+        return true;
+    return false;
+  };
+  auto selectedVertex = [&](uint32_t id, uint8_t which) {
+    for (const auto& r : edit.selected)
+      if (r.entity == id && r.which == which)
+        return true;
+    return false;
+  };
+  auto hoveredEntity = [&](uint32_t id) {
+    return edit.hasHover && edit.hoveredRef.entity == id;
+  };
+
+  const glm::vec4 base(0.55f, 0.85f, 1.00f, 1.0f);
+  const glm::vec4 sel(1.00f, 0.62f, 0.20f, 1.0f);
+  const glm::vec4 hov(1.00f, 1.00f, 0.65f, 1.0f);
+
+  // Entity lines.
+  for (const auto& e : sk->entities) {
+    const uint32_t id = sketch::EntityId(e);
+    const bool s = selectedEntity(id), h = hoveredEntity(id);
+    const glm::vec4 col = s ? sel : (h ? hov : base);
+    const float halfPx = (s || h) ? 2.5f : 1.4f;
+    std::vector<glm::vec2> poly = sketch::TessellateEntity(e);
+    for (size_t i = 0; i + 1 < poly.size(); i++)
+      AppendPrimLine(sk->plane.PlaneToWorld(poly[i]),
+                     sk->plane.PlaneToWorld(poly[i + 1]), halfPx, col, prims);
   }
-  return lines;
+
+  // Vertex dots (endpoints, circle centers, points).
+  for (const auto& e : sk->entities) {
+    const uint32_t id = sketch::EntityId(e);
+    for (auto& [which, uv] : EntityDots(e)) {
+      const bool s = selectedVertex(id, which);
+      const bool h = edit.hasHover && !edit.hoveredBody &&
+                     edit.hoveredRef.entity == id && edit.hoveredRef.which == which;
+      const glm::vec4 col = s ? sel : (h ? hov : base);
+      const float rPx = (s || h) ? 5.0f : 3.0f;
+      AppendPrimDot(sk->plane.PlaneToWorld(uv), rPx, col, prims);
+    }
+  }
+  return prims;
 }
 
 void LoadSTEPFile(AppState& state, const std::string& filename) {

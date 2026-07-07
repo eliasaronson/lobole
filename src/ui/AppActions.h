@@ -1,5 +1,6 @@
 #pragma once
 
+#include "SketchRenderer.h" // Vertex3D, PrimVertex
 #include "ui/AppState.h"
 
 #include <cstdint>
@@ -7,7 +8,6 @@
 #include <string>
 #include <vector>
 
-struct Vertex3D;
 class SketchPlane;
 
 namespace ui {
@@ -55,7 +55,19 @@ void AppendOriginGizmo(std::vector<Vertex3D>& lines);
 
 // Highlighted line geometry for the sketch currently being edited (empty if
 // none). Rendered as a per-frame overlay on top of the static sketch lines.
+// Holds the rubber-band preview + gizmo/grid; entity lines and vertex dots go
+// through BuildActiveSketchPrimitives instead.
 std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,
                                                uint64_t activeSketchId);
+
+// Thick anti-aliased entity lines + constant-size vertex dots for the active
+// sketch, with hover/selection emphasis. Empty if not editing a sketch.
+std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
+                                                    uint64_t activeSketchId);
+
+// Base-color thin lines for every sketch except the active one (which renders
+// through BuildActiveSketchPrimitives). Rebuilt per-frame.
+std::vector<Vertex3D> BuildStaticSketchLines(AppState& state,
+                                             uint64_t activeSketchId);
 
 } // namespace ui

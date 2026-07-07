@@ -41,13 +41,22 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out);
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
                            glm::vec2 uv);
 
-// Screen-space pick of the nearest sketch endpoint within tolerance.
+// Screen-space pick of a sketch element within tolerance. `body` is true when
+// the hit is on an entity's interior (line segment / circle rim) rather than an
+// endpoint — in that case `ref` names the whole entity (`{id, 0}`).
 struct SketchPick {
   bool hit = false;
+  bool body = false;
   sketch::PointRef ref;
 };
 SketchPick PickSketchPoint(AppState& state, const SketchFeature& sketch,
                            glm::vec2 mousePos, float tolPx);
+
+// Endpoint-first pick: returns an endpoint hit if the cursor is within `tolPx`
+// of one, else the nearest line segment / circle circumference within `tolPx`
+// as a whole-entity hit (`body = true`).
+SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
+                            glm::vec2 mousePos, float tolPx);
 
 // Adds a constraint from the current selection, solves, and commits one
 // ModifyFeatureCommand. Returns false if the selection isn't valid.

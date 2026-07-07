@@ -146,12 +146,16 @@ render 1 px with no AA (`SketchRenderer.cpp` — `lineWidth = 1.0`,
 select a line to apply Horizontal/Parallel/etc. This is the picking half of the
 drag phase (Phase F), brought forward; the drag-*solver* rework stays there.
 
+Four parts: body picking, visible lines, point visualization, hover highlight.
+Onshape/SolidWorks (the reference images) draw a dot at every endpoint and
+circle center and highlight what's under the cursor — that legibility is what
+makes a sketch clickable.
+
 - **Body picking**: extend selection so a click that misses every endpoint
   tolerance falls back to the nearest **line segment** (point-to-segment
   distance) or **circle circumference** within a pixel tolerance, selecting the
   whole entity (ref `{id, 0}`). Endpoint-within-tolerance still wins first, so
-  coincident/distance/drag keep working. Add a **hover highlight** of the pick
-  candidate so it's clear what a click will grab.
+  coincident/distance/drag keep working.
 - **Visible lines**: thicken + anti-alias sketch lines. **Decision: quad
   expansion (two triangles), not `wideLines`.** Expand each segment to a
   screen-space quad in the **vertex shader** (project both endpoints, offset
@@ -161,13 +165,29 @@ drag phase (Phase F), brought forward; the drag-*solver* rework stays there.
   notches at polyline corners, needs `VK_EXT_line_rasterization` for real AA,
   and is absent on MoltenVK/mobile; quad expansion gives constant pixel width,
   free AA, round-cap-capable corners, and stays portable (no `wideLines`/GS
-  dependency). Selected/hovered entities render brighter/thicker.
+  dependency).
+- **Point visualization**: draw a constant-screen-size dot at every line
+  endpoint, circle center, and standalone point (Onshape-style), using the same
+  screen-space-expanded primitive path as the lines (a point = a small quad,
+  SDF-circle fragment for AA). These dots are the endpoint pick/selection
+  targets; the existing selection cross in `AppActions.cpp` becomes a filled
+  bright dot.
+- **Hover highlight**: run the pick each frame (not just on click) against the
+  current cursor; the entity or vertex under the cursor renders brighter /
+  slightly enlarged so it's clear what a click will grab. Selected entities stay
+  emphasized. State lives on `SketchEditState` (`hoveredRef`).
+- **Renderer**: unify the above under one screen-space-expanded pipeline — add
+  viewport size to the UBO, a per-vertex pixel-offset attribute, and an SDF
+  fragment for AA; it serves thick lines, point dots, and hover/selection
+  emphasis (color + size). Reuses the existing dynamic-buffer upload and
+  descriptor infra in `SketchRenderer`.
 - Tests: GUI `pick/select_line_body` (click mid-segment → that line selected,
   Horizontal enabled and applies); `pick/prefers_endpoint` (click near a shared
-  vertex → endpoint, not body).
+  vertex → endpoint, not body); `pick/hover_tracks_cursor` (hoveredRef updates
+  as the mouse moves over an entity).
 
-Risk: low-medium — the vertex-shader expansion touches the sketch pipeline and
-a new vertex attribute (segment direction / side), but it's self-contained.
+Risk: low-medium — the renderer gains a screen-space-expanded pipeline and a new
+vertex attribute, but it's self-contained and reuses the existing upload path.
 
 ## Phase D — Rectangle decomposition + split + line trim (~1.5–2 days)
 

@@ -224,7 +224,9 @@ bool SketchRenderer::CreatePipelines() {
                              &m_pipelineLayout) != VK_SUCCESS)
     return false;
 
-  auto makePipeline = [&](VkPrimitiveTopology topology, bool depthBias,
+  auto makePipeline = [&](VkPipelineShaderStageCreateInfo* st,
+                          const VkPipelineVertexInputStateCreateInfo* vin,
+                          VkPrimitiveTopology topology, bool depthBias,
                           VkPipeline& out) -> bool {
     VkPipelineInputAssemblyStateCreateInfo ia{
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -245,8 +247,8 @@ bool SketchRenderer::CreatePipelines() {
     VkGraphicsPipelineCreateInfo info{
         VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
     info.stageCount = 2;
-    info.pStages = stages;
-    info.pVertexInputState = &vertexInput;
+    info.pStages = st;
+    info.pVertexInputState = vin;
     info.pInputAssemblyState = &ia;
     info.pViewportState = &viewport;
     info.pRasterizationState = &raster;
@@ -261,23 +263,56 @@ bool SketchRenderer::CreatePipelines() {
                                      &out) == VK_SUCCESS;
   };
 
-  bool ok = makePipeline(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, true, m_linePipeline) &&
-            makePipeline(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, false,
-                         m_quadPipeline);
+  bool ok =
+      makePipeline(stages, &vertexInput, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, true,
+                   m_linePipeline) &&
+      makePipeline(stages, &vertexInput, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                   false, m_quadPipeline);
+
+  // Screen-space-expanded primitive pipeline (thick AA lines + point dots).
+  VkShaderModule primVert = LoadShader("sketch_prim_vert.spv");
+  VkShaderModule primFrag = LoadShader("sketch_prim_frag.spv");
+  VkPipelineShaderStageCreateInfo primStages[2] = {stages[0], stages[1]};
+  primStages[0].module = primVert;
+  primStages[1].module = primFrag;
+
+  VkVertexInputBindingDescription primBinding{};
+  primBinding.binding = 0;
+  primBinding.stride = sizeof(PrimVertex);
+  primBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+  std::array<VkVertexInputAttributeDescription, 5> primAttrs{};
+  primAttrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(PrimVertex, posThis)};
+  primAttrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                  offsetof(PrimVertex, posOther)};
+  primAttrs[2] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(PrimVertex, corner)};
+  primAttrs[3] = {3, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(PrimVertex, params)};
+  primAttrs[4] = {4, 0, VK_FORMAT_R32G32B32A32_SFLOAT,
+                  offsetof(PrimVertex, color)};
+  VkPipelineVertexInputStateCreateInfo primInput{
+      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+  primInput.vertexBindingDescriptionCount = 1;
+  primInput.pVertexBindingDescriptions = &primBinding;
+  primInput.vertexAttributeDescriptionCount = primAttrs.size();
+  primInput.pVertexAttributeDescriptions = primAttrs.data();
+
+  ok = ok && makePipeline(primStages, &primInput,
+                          VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true,
+                          m_primPipeline);
 
   vkDestroyShaderModule(m_device, vert, nullptr);
   vkDestroyShaderModule(m_device, frag, nullptr);
+  vkDestroyShaderModule(m_device, primVert, nullptr);
+  vkDestroyShaderModule(m_device, primFrag, nullptr);
   return ok;
 }
 
-uint32_t SketchRenderer::Upload(DynamicBuffer& buf,
-                                const std::vector<Vertex3D>& verts) {
-  if (verts.empty())
+uint32_t SketchRenderer::UploadRaw(DynamicBuffer& buf, const void* data,
+                                   VkDeviceSize bytes, uint32_t count) {
+  if (count == 0)
     return 0;
-  const VkDeviceSize needed = verts.size() * sizeof(Vertex3D);
-  if (needed > buf.capacity) {
+  if (bytes > buf.capacity) {
     DestroyDynamic(buf);
-    VkDeviceSize cap = needed * 2; // grow with headroom
+    VkDeviceSize cap = bytes * 2; // grow with headroom
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bi.size = cap;
     bi.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
@@ -295,8 +330,14 @@ uint32_t SketchRenderer::Upload(DynamicBuffer& buf,
     vkMapMemory(m_device, buf.memory, 0, cap, 0, &buf.mapped);
     buf.capacity = cap;
   }
-  std::memcpy(buf.mapped, verts.data(), needed);
-  return static_cast<uint32_t>(verts.size());
+  std::memcpy(buf.mapped, data, bytes);
+  return count;
+}
+
+uint32_t SketchRenderer::Upload(DynamicBuffer& buf,
+                                const std::vector<Vertex3D>& verts) {
+  return UploadRaw(buf, verts.data(), verts.size() * sizeof(Vertex3D),
+                   static_cast<uint32_t>(verts.size()));
 }
 
 void SketchRenderer::DrawBuffer(VkCommandBuffer cb, VkPipeline pipeline,
@@ -319,13 +360,19 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
     return;
   const uint32_t frame = currentFrame % kFramesInFlight;
 
-  Ubo ubo{m_view, m_proj};
+  Ubo ubo{m_view, m_proj,
+          glm::vec4(static_cast<float>(m_viewportWidth),
+                    static_cast<float>(m_viewportHeight), 0.0f, 0.0f)};
   std::memcpy(m_uniformBuffers[frame].mapped, &ubo, sizeof(ubo));
 
   const uint32_t quadCount = Upload(m_quadBuffers[frame], m_quads);
   const uint32_t lineCount = Upload(m_lineBuffers[frame], m_staticLines);
   const uint32_t overlayCount = Upload(m_overlayBuffers[frame], m_overlayLines);
-  if (quadCount == 0 && lineCount == 0 && overlayCount == 0)
+  const uint32_t primCount =
+      UploadRaw(m_primBuffers[frame], m_primitives.data(),
+                m_primitives.size() * sizeof(PrimVertex),
+                static_cast<uint32_t>(m_primitives.size()));
+  if (quadCount == 0 && lineCount == 0 && overlayCount == 0 && primCount == 0)
     return;
 
   VkViewport vp{};
@@ -349,6 +396,9 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
              1.0f);
   DrawBuffer(commandBuffer, m_linePipeline, m_overlayBuffers[frame],
              overlayCount, 1.0f);
+  // Expanded primitives (thick entity lines + dots) draw last, on top.
+  DrawBuffer(commandBuffer, m_primPipeline, m_primBuffers[frame], primCount,
+             1.0f);
 }
 
 void SketchRenderer::DestroyDynamic(DynamicBuffer& buf) {
@@ -376,11 +426,14 @@ void SketchRenderer::Shutdown() {
     DestroyDynamic(m_lineBuffers[i]);
     DestroyDynamic(m_overlayBuffers[i]);
     DestroyDynamic(m_quadBuffers[i]);
+    DestroyDynamic(m_primBuffers[i]);
   }
   if (m_linePipeline)
     vkDestroyPipeline(m_device, m_linePipeline, nullptr);
   if (m_quadPipeline)
     vkDestroyPipeline(m_device, m_quadPipeline, nullptr);
+  if (m_primPipeline)
+    vkDestroyPipeline(m_device, m_primPipeline, nullptr);
   if (m_pipelineLayout)
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
   if (m_descriptorPool)

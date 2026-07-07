@@ -309,8 +309,16 @@ set(SKETCH_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/sketch.frag")
 set(SKETCH_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/sketch_frag.spv")
 compile_shader(sketch_frag_shader ${SKETCH_FRAG_SHADER_SOURCE} ${SKETCH_FRAG_SHADER_OUTPUT})
 
+set(SKETCH_PRIM_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/sketch_prim.vert")
+set(SKETCH_PRIM_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/sketch_prim_vert.spv")
+compile_shader(sketch_prim_vert_shader ${SKETCH_PRIM_VERT_SHADER_SOURCE} ${SKETCH_PRIM_VERT_SHADER_OUTPUT})
+
+set(SKETCH_PRIM_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/sketch_prim.frag")
+set(SKETCH_PRIM_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/sketch_prim_frag.spv")
+compile_shader(sketch_prim_frag_shader ${SKETCH_PRIM_FRAG_SHADER_SOURCE} ${SKETCH_PRIM_FRAG_SHADER_OUTPUT})
+
 # Create a target for all shaders
-add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader)
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader)
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)

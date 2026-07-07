@@ -8,6 +8,20 @@
 #include <string>
 #include <vector>
 
+// A vertex for the screen-space-expanded primitive pipeline: thick
+// anti-aliased lines and constant-size point dots. Each triangle vertex sits on
+// `posThis`; the vertex shader offsets it in screen space by `corner` scaled to
+// `params.x` pixels (a line offsets along the screen normal of posThis→posOther
+// by corner.x; a dot offsets to a square corner). `params.y` is the shape
+// (0 = line, 1 = dot); the fragment shader SDF-feathers the edge for AA.
+struct PrimVertex {
+  glm::vec3 posThis;
+  glm::vec3 posOther;
+  glm::vec2 corner;
+  glm::vec2 params; // x = half-width/radius in px, y = shape (0 line, 1 dot)
+  glm::vec4 color;
+};
+
 // Draws sketch geometry over the 3D scene: static sketch entity lines,
 // a per-frame rubber-band overlay, and translucent plane quads. Uses two
 // pipelines (LINE_LIST for lines, TRIANGLE_LIST for quads) sharing one
@@ -35,6 +49,11 @@ public:
   }
   // Translucent default-plane quads (triangle list).
   void SetQuads(std::vector<Vertex3D> quads) { m_quads = std::move(quads); }
+  // Screen-space-expanded primitives (thick lines + point dots), replaced on
+  // document/selection change.
+  void SetPrimitives(std::vector<PrimVertex> prims) {
+    m_primitives = std::move(prims);
+  }
 
   void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) {
     m_view = view;
@@ -64,6 +83,7 @@ private:
   struct Ubo {
     glm::mat4 view;
     glm::mat4 proj;
+    glm::vec4 viewport; // xy = viewport size in pixels (for screen expansion)
   };
 
   bool CreatePipelines();
@@ -72,6 +92,9 @@ private:
   VkShaderModule LoadShader(const std::string& spvName);
   // Grows the buffer if needed and uploads verts; returns the vertex count.
   uint32_t Upload(DynamicBuffer& buf, const std::vector<Vertex3D>& verts);
+  // Raw-bytes variant shared by the Vertex3D and PrimVertex upload paths.
+  uint32_t UploadRaw(DynamicBuffer& buf, const void* data, VkDeviceSize bytes,
+                     uint32_t count);
   void DestroyDynamic(DynamicBuffer& buf);
   void DrawBuffer(VkCommandBuffer cb, VkPipeline pipeline, DynamicBuffer& buf,
                   uint32_t count, float alpha);
@@ -87,6 +110,7 @@ private:
   VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
   VkPipeline m_linePipeline = VK_NULL_HANDLE;
   VkPipeline m_quadPipeline = VK_NULL_HANDLE;
+  VkPipeline m_primPipeline = VK_NULL_HANDLE;
   VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
 
   DynamicBuffer m_uniformBuffers[kFramesInFlight];
@@ -95,10 +119,12 @@ private:
   DynamicBuffer m_lineBuffers[kFramesInFlight];
   DynamicBuffer m_overlayBuffers[kFramesInFlight];
   DynamicBuffer m_quadBuffers[kFramesInFlight];
+  DynamicBuffer m_primBuffers[kFramesInFlight];
 
   std::vector<Vertex3D> m_staticLines;
   std::vector<Vertex3D> m_overlayLines;
   std::vector<Vertex3D> m_quads;
+  std::vector<PrimVertex> m_primitives;
 
   glm::mat4 m_view = glm::mat4(1.0f);
   glm::mat4 m_proj = glm::mat4(1.0f);

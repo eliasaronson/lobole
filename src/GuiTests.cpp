@@ -478,4 +478,68 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const auto& ln = std::get<sketch::Line>(sk->entities[0]);
     IM_CHECK(std::abs(ln.a.y - ln.b.y) < 1e-3f);
   };
+
+  // Clicking a line's body (not an endpoint) selects the whole entity, so a
+  // whole-line constraint like Horizontal can then be applied.
+  t = IM_REGISTER_TEST(engine, "pick", "select_line_body");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-2, 1}, {2, 1.6f}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0)); // Execute replaced it
+
+    // Pick the segment midpoint (far from both endpoints) → whole-line body.
+    glm::vec2 midScreen =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, 1.3f));
+    ui::SketchPick pick = ui::PickSketchEntity(*s_App, *sk, midScreen, 12.0f);
+    IM_CHECK(pick.hit);
+    IM_CHECK(pick.body);
+    IM_CHECK_EQ(pick.ref.entity, l0);
+
+    // Body selection enables + applies Horizontal.
+    s_App->sketchEdit.selected = {pick.ref};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Horizontal,
+                                       0.0));
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const auto& hln = std::get<sketch::Line>(sk->entities[0]);
+    IM_CHECK(std::abs(hln.a.y - hln.b.y) < 1e-3f);
+  };
+
+  // A click near a vertex prefers the endpoint over the body.
+  t = IM_REGISTER_TEST(engine, "pick", "prefers_endpoint");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-2, 0}, {2, 0}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0)); // Execute replaced it
+
+    glm::vec2 endScreen =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2.0f, 0.0f));
+    ui::SketchPick pick = ui::PickSketchEntity(*s_App, *sk, endScreen, 12.0f);
+    IM_CHECK(pick.hit);
+    IM_CHECK(!pick.body); // endpoint, not body
+    IM_CHECK_EQ(pick.ref.entity, l0);
+    IM_CHECK_EQ((int)pick.ref.which, 1); // endpoint b
+  };
 }

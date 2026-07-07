@@ -63,6 +63,13 @@ void DrawUI(AppState& state) {
 
     state.sketchRenderer->SetQuads(std::move(quads));
     state.sketchRenderer->SetOverlayLines(std::move(overlay));
+    // Inactive sketches as thin lines; the active sketch as thick AA primitives
+    // with vertex dots and hover/selection emphasis. Rebuilt each frame so
+    // edit-mode, selection, and hover changes show immediately.
+    state.sketchRenderer->SetStaticLines(
+        BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
+    state.sketchRenderer->SetPrimitives(
+        BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId));
   }
 
   // Point the renderers, camera, and picking at the central-node region so

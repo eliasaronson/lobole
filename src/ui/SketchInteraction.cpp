@@ -163,6 +163,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   if (!sketch)
     return false;
 
+  // Cleared each frame; re-set below only while hovering in the Select tool.
+  edit.hasHover = false;
+
   if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     if (edit.hasPendingPoint)
       edit.hasPendingPoint = false;
@@ -182,6 +185,14 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   edit.hoverPoint = uv;
 
   if (edit.tool == SketchTool::Select) {
+    // Track what the cursor is over for hover highlighting (endpoint-first,
+    // then entity body).
+    SketchPick hover = PickSketchEntity(
+        state, *sketch, glm::vec2(mousePos.x, mousePos.y), 12.0f);
+    edit.hasHover = hover.hit;
+    edit.hoveredBody = hover.body;
+    edit.hoveredRef = hover.ref;
+
     // Delete removes the selected entities (and cleans up their constraints).
     if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !edit.selected.empty()) {
       nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
@@ -211,15 +222,18 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     // click clears the selection.
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       SketchPick pick =
-          PickSketchPoint(state, *sketch, glm::vec2(mousePos.x, mousePos.y),
-                          12.0f);
+          PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y),
+                           12.0f);
       if (pick.hit) {
         if (!ImGui::GetIO().KeyCtrl)
           edit.selected.clear();
         edit.selected.push_back(pick.ref);
-        edit.dragging = true;
-        edit.dragRef = pick.ref;
-        state.editBaseline = DocumentIO::FeatureToJson(*sketch);
+        // Only an endpoint hit begins a drag; dragging a whole body is Phase F.
+        if (!pick.body) {
+          edit.dragging = true;
+          edit.dragRef = pick.ref;
+          state.editBaseline = DocumentIO::FeatureToJson(*sketch);
+        }
       } else {
         edit.selected.clear();
       }
@@ -356,6 +370,59 @@ SketchPick PickSketchPoint(AppState& state, const SketchFeature& sketch,
         best.hit = true;
         best.ref = {id, which};
       }
+    }
+  }
+  return best;
+}
+
+namespace {
+// Distance in pixels from p to segment [a,b].
+float DistToSegment(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
+  glm::vec2 ab = b - a;
+  float len2 = glm::dot(ab, ab);
+  float t = len2 > 1e-6f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f)
+                         : 0.0f;
+  return glm::length(p - (a + t * ab));
+}
+} // namespace
+
+SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
+                            glm::vec2 mousePos, float tolPx) {
+  // Endpoints win first, so coincident/distance/drag are unaffected.
+  SketchPick pick = PickSketchPoint(state, sketch, mousePos, tolPx);
+  if (pick.hit)
+    return pick;
+
+  // Otherwise fall back to the nearest entity body (line segment / circle rim).
+  SketchPick best;
+  float bestDist = tolPx;
+  for (const auto& e : sketch.entities) {
+    const uint32_t id = sketch::EntityId(e);
+    float d = 1e30f;
+    if (auto* l = std::get_if<sketch::Line>(&e)) {
+      d = DistToSegment(mousePos, SketchUVToScreen(state, sketch.plane, l->a),
+                        SketchUVToScreen(state, sketch.plane, l->b));
+    } else if (auto* c = std::get_if<sketch::Circle>(&e)) {
+      glm::vec2 center = SketchUVToScreen(state, sketch.plane, c->center);
+      glm::vec2 rim = SketchUVToScreen(
+          state, sketch.plane,
+          c->center + glm::vec2(static_cast<float>(c->radius), 0.0f));
+      float rPx = glm::length(rim - center);
+      d = std::abs(glm::length(mousePos - center) - rPx);
+    } else if (auto* r = std::get_if<sketch::Rectangle>(&e)) {
+      // Rigid rect: hit-test its four edges.
+      glm::vec2 c1 = SketchUVToScreen(state, sketch.plane, r->c1);
+      glm::vec2 c2 = SketchUVToScreen(state, sketch.plane, r->c2);
+      glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, cc{c2.x, c2.y}, dd{c1.x, c2.y};
+      d = std::min({DistToSegment(mousePos, a, b), DistToSegment(mousePos, b, cc),
+                    DistToSegment(mousePos, cc, dd),
+                    DistToSegment(mousePos, dd, a)});
+    }
+    if (d < bestDist) {
+      bestDist = d;
+      best.hit = true;
+      best.body = true;
+      best.ref = {id, 0};
     }
   }
   return best;
