@@ -162,6 +162,23 @@ def main():
                              d0[0] * d1[0] + d0[1] * d1[1]))
         expect(abs(ang - 0.7853981634) < 1e-3, "angle solved to 45 degrees")
 
+        # Arc entity round-trips over the wire and takes a radius constraint.
+        d.call("new_project")
+        skc = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch C",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "arc", "center": [0, 0], "radius": 1.0,
+                          "start_angle": 0.0, "end_angle": 1.5707963}]})
+        cid = skc["entity_ids"]
+        arc0 = d.call("get_state")["features"][0]["entities"][0]
+        expect(arc0["type"] == "arc" and abs(arc0["radius"] - 1.0) < 1e-6,
+               "arc entity round-trips")
+        d.call("add_constraint", sketch_id=skc["id"], kind="radius",
+               refs=[[cid[0], 0]], value=2.5)
+        arc1 = d.call("get_state")["features"][0]["entities"][0]
+        expect(abs(arc1["radius"] - 2.5) < 1e-3, "arc radius constraint solved")
+
         # Screenshot: the controller can see what the user sees
         d.call("new_project")
         sk = d.call("add_feature", feature={

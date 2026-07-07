@@ -360,7 +360,15 @@ nothing renders or lets you act on it).
 Risk: medium — per-entity DOF attribution and constraint hit-testing are the
 fiddly bits; the solver already provides the raw dof/conflicting data.
 
-## Phase J — Arcs (~3–4 days)
+## Phase J — Arcs (~3–4 days) — SHIPPED
+
+Shipped as `feat: sketch arcs + curve trim`: `sketch::Arc` (CCW-always) through
+model / serialization (v7) / solver (`addConstraintArcRules` + arc
+radius/diameter/equal/tangent/concentric) / profile (the `Loop` edge-list
+refactor + `ShapeFix_Wire`) / rendering / picking; both arc tools
+(center→start→end and start→end→bulge); and curve trim (circle→arc, arc→arcs).
+Detailed change-list in CONSTRAINTS_PHASE_J.md. Original outline below.
+
 
 As previously planned, with the repo findings applied:
 
@@ -479,8 +487,8 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 
 - **B-splines** → Phase L (own milestone; poles/knots/weights UX + OCC B-spline
   edge are each substantial).
-- **Circle & arc trim** → needs Phase J arcs (trimming a circle yields an arc).
-  Phase D trim is **lines-only**; the Trim tool skips circles with a log line.
+- **Circle & arc trim** → SHIPPED in Phase J (`TrimCurveAt`): a trimmed circle
+  becomes the complementary arc, a trimmed arc splits into sub-arcs.
 - **Whole-entity body dragging** (drag a line/circle by its interior; rim-drag
   a circle's radius) → Phase F. Phase C added body *picking* only; the Select
   drag still moves single endpoints.

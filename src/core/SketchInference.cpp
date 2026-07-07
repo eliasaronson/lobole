@@ -53,6 +53,11 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
       consider(1, l->b);
     } else if (auto* c = std::get_if<Circle>(&e))
       consider(0, c->center);
+    else if (auto* a = std::get_if<Arc>(&e)) {
+      consider(0, a->center);
+      consider(1, ArcPointUV(*a, 1)); // start
+      consider(2, ArcPointUV(*a, 2)); // end
+    }
   }
   if (s.coincident) {
     s.glyphs.push_back(GlyphKind::Coincident);

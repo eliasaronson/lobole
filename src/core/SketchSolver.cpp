@@ -2,6 +2,7 @@
 
 #include "Logger.h"
 
+#include <cmath>
 #include <deque>
 #include <map>
 #include <set>
@@ -24,13 +25,16 @@ struct Solver::Impl {
   // deque: element addresses stay stable across push_back (GCS holds raw
   // pointers into these), so no reservation bookkeeping is needed.
   std::deque<double> params;         // point coords + dimension values
-  std::deque<double> radii;          // circle radii
+  std::deque<double> radii;          // circle + arc radii
+  std::deque<double> angles;         // arc start/end angles
   std::vector<GCS::Point> gcsPoints; // one per (entity, which) we expose
   std::map<uint64_t, int> pointIndex; // (entity<<8 | which) -> gcsPoints index
   std::vector<GCS::Line> lines;      // index-aligned with line entities
   std::map<uint32_t, int> lineOf;    // entity index -> lines index
   std::vector<GCS::Circle> circles;
   std::map<uint32_t, int> circleOf;  // entity id -> circles index
+  std::vector<GCS::Arc> arcs;
+  std::map<uint32_t, int> arcOf;     // entity id -> arcs index
 
   // Loaded sketch shape for write-back
   std::vector<Entity> entityShapes;
@@ -79,6 +83,8 @@ struct Solver::Impl {
     }
     for (auto& r : radii)
       unknowns.push_back(&r);
+    for (auto& ang : angles) // arc start/end angles (tied to points by ArcRules)
+      unknowns.push_back(&ang);
     if (unknowns.empty())
       return;
     sys.declareUnknowns(unknowns);
@@ -123,6 +129,7 @@ void Solver::Load(const SketchFeature& sketch) {
     if (std::holds_alternative<Point>(e)) nParams += 2;
     else if (std::holds_alternative<Line>(e)) nParams += 4;
     else if (std::holds_alternative<Circle>(e)) nParams += 3;
+    else if (std::holds_alternative<Arc>(e)) nParams += 6; // 3 pts + rad + 2 ang
   }
   (void)nParams; // deque addresses are stable; no reservation needed
 
@@ -158,6 +165,24 @@ void Solver::Load(const SketchFeature& sketch) {
       gc.rad = &im.radii.back();
       im.circles.push_back(gc);
       im.circleOf[id] = static_cast<int>(im.circles.size() - 1);
+    } else if (auto* ar = std::get_if<Arc>(&e)) {
+      // center = which 0; start/end are real solver points (which 1/2) so
+      // coincident/distance/fixed on an arc endpoint need no arc-specific code.
+      GCS::Arc ga;
+      ga.center = addPoint(id, 0, ar->center);
+      ga.start = addPoint(id, 1, ArcPointUV(*ar, 1));
+      ga.end = addPoint(id, 2, ArcPointUV(*ar, 2));
+      im.radii.push_back(ar->radius);
+      ga.rad = &im.radii.back();
+      im.angles.push_back(ar->startAngle);
+      ga.startAngle = &im.angles.back();
+      im.angles.push_back(ar->endAngle);
+      ga.endAngle = &im.angles.back();
+      im.arcs.push_back(ga);
+      im.arcOf[id] = static_cast<int>(im.arcs.size() - 1);
+      // Definitional: ties start/end points to center+radius+angles. Tag 0 so
+      // it is never attributed to a user constraint (Phase I conflict mapping).
+      im.sys.addConstraintArcRules(im.arcs.back(), 0);
     }
     // Rectangle: rigid in v1, not added to the solver.
   }
@@ -195,15 +220,27 @@ void Solver::Load(const SketchFeature& sketch) {
                                           im.lines[im.lineOf[con.b.entity]],
                                           tag++);
       break;
-    case ConstraintKind::Equal:
-      if (im.lineOf.count(con.a.entity) && im.lineOf.count(con.b.entity))
-        im.sys.addConstraintEqualLength(im.lines[im.lineOf[con.a.entity]],
-                                        im.lines[im.lineOf[con.b.entity]], tag++);
-      else if (im.circleOf.count(con.a.entity) && im.circleOf.count(con.b.entity))
-        im.sys.addConstraintEqualRadius(im.circles[im.circleOf[con.a.entity]],
-                                        im.circles[im.circleOf[con.b.entity]],
-                                        tag++);
+    case ConstraintKind::Equal: {
+      const uint32_t ea = con.a.entity, eb = con.b.entity;
+      const bool aC = im.circleOf.count(ea), aA = im.arcOf.count(ea);
+      const bool bC = im.circleOf.count(eb), bA = im.arcOf.count(eb);
+      if (im.lineOf.count(ea) && im.lineOf.count(eb))
+        im.sys.addConstraintEqualLength(im.lines[im.lineOf[ea]],
+                                        im.lines[im.lineOf[eb]], tag++);
+      else if (aC && bC)
+        im.sys.addConstraintEqualRadius(im.circles[im.circleOf[ea]],
+                                        im.circles[im.circleOf[eb]], tag++);
+      else if (aC && bA)
+        im.sys.addConstraintEqualRadius(im.circles[im.circleOf[ea]],
+                                        im.arcs[im.arcOf[eb]], tag++);
+      else if (aA && bC) // overload is (Circle&, Arc&)
+        im.sys.addConstraintEqualRadius(im.circles[im.circleOf[eb]],
+                                        im.arcs[im.arcOf[ea]], tag++);
+      else if (aA && bA)
+        im.sys.addConstraintEqualRadius(im.arcs[im.arcOf[ea]],
+                                        im.arcs[im.arcOf[eb]], tag++);
       break;
+    }
     case ConstraintKind::Distance:
       if (a && b) {
         im.params.push_back(con.value); // dimension value (driving, fixed)
@@ -215,6 +252,10 @@ void Solver::Load(const SketchFeature& sketch) {
         im.params.push_back(con.value);
         im.sys.addConstraintCircleRadius(im.circles[im.circleOf[con.a.entity]],
                                          &im.params.back(), tag++);
+      } else if (im.arcOf.count(con.a.entity)) {
+        im.params.push_back(con.value);
+        im.sys.addConstraintArcRadius(im.arcs[im.arcOf[con.a.entity]],
+                                      &im.params.back(), tag++);
       }
       break;
     case ConstraintKind::Angle:
@@ -240,6 +281,16 @@ void Solver::Load(const SketchFeature& sketch) {
         im.sys.addConstraintTangent(im.lines[im.lineOf[con.a.entity]],
                                     im.circles[im.circleOf[con.b.entity]], ccw,
                                     tag++);
+      } else if (im.lineOf.count(con.a.entity) && im.arcOf.count(con.b.entity)) {
+        const auto& ln =
+            std::get<Line>(im.entityShapes[im.shapeIndexOf[con.a.entity]]);
+        const auto& arc =
+            std::get<Arc>(im.entityShapes[im.shapeIndexOf[con.b.entity]]);
+        glm::vec2 d = ln.b - ln.a;
+        glm::vec2 r = arc.center - ln.a;
+        bool ccw = (d.x * r.y - d.y * r.x) > 0.0f;
+        im.sys.addConstraintTangent(im.lines[im.lineOf[con.a.entity]],
+                                    im.arcs[im.arcOf[con.b.entity]], ccw, tag++);
       }
       break;
     case ConstraintKind::PointOnLine:
@@ -269,11 +320,15 @@ void Solver::Load(const SketchFeature& sketch) {
       }
       break;
     case ConstraintKind::Concentric: {
-      // Two circles share a center: coincident of their center points.
+      // Two circles/arcs share a center: coincident of their center points
+      // (center is which 0 for both circles and arcs).
       GCS::Point* ca = im.Resolve({con.a.entity, 0});
       GCS::Point* cb = im.Resolve({con.b.entity, 0});
-      if (ca && cb && im.circleOf.count(con.a.entity) &&
-          im.circleOf.count(con.b.entity))
+      const bool aCurve =
+          im.circleOf.count(con.a.entity) || im.arcOf.count(con.a.entity);
+      const bool bCurve =
+          im.circleOf.count(con.b.entity) || im.arcOf.count(con.b.entity);
+      if (ca && cb && aCurve && bCurve)
         im.sys.addConstraintP2PCoincident(*ca, *cb, tag++);
       break;
     }
@@ -303,6 +358,10 @@ void Solver::Load(const SketchFeature& sketch) {
         im.params.push_back(con.value * 0.5); // radius = diameter / 2
         im.sys.addConstraintCircleRadius(im.circles[im.circleOf[con.a.entity]],
                                          &im.params.back(), tag++);
+      } else if (im.arcOf.count(con.a.entity)) {
+        im.params.push_back(con.value * 0.5);
+        im.sys.addConstraintArcRadius(im.arcs[im.arcOf[con.a.entity]],
+                                      &im.params.back(), tag++);
       }
       break;
     }
@@ -392,6 +451,16 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
       auto& c = std::get<Circle>(e);
       c.center = pointAt(0);
       c.radius = *im.circles[im.circleOf.at(id)].rad;
+    } else if (std::holds_alternative<Arc>(e)) {
+      auto& ar = std::get<Arc>(e);
+      const GCS::Arc& ga = im.arcs[im.arcOf.at(id)];
+      ar.center = pointAt(0);
+      ar.radius = *ga.rad;
+      ar.startAngle = *ga.startAngle;
+      ar.endAngle = *ga.endAngle;
+      // Keep the CCW-always invariant: sweep in (0, 2π].
+      while (ar.endAngle <= ar.startAngle)
+        ar.endAngle += 2.0 * M_PI;
     }
   }
 }

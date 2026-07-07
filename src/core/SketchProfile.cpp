@@ -7,6 +7,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <GC_MakeSegment.hxx>
+#include <ShapeFix_Wire.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
@@ -32,17 +33,53 @@ constexpr int kCircleSegments = 32;
 bool Near(const glm::vec2& a, const glm::vec2& b) {
   return glm::length(a - b) < kChainTol;
 }
+
+// A point on a circle at UV angle `ang`.
+glm::vec2 OnCircle(const glm::vec2& c, double r, double ang) {
+  return {c.x + static_cast<float>(r * std::cos(ang)),
+          c.y + static_cast<float>(r * std::sin(ang))};
+}
+
+// Tessellates one loop edge into UV points in traversal order (a → b). A line
+// is its two endpoints; an arc is sampled along its CCW span, then oriented so
+// the first point matches `a`.
+std::vector<glm::vec2> TessellateLoopEdge(const LoopEdge& e) {
+  if (!e.arc)
+    return {e.a, e.b};
+  const double sweep = e.angEnd - e.angStart; // normalized positive
+  int segs = std::max(1, static_cast<int>(std::lround(kCircleSegments * sweep /
+                                                      (2.0 * M_PI))));
+  std::vector<glm::vec2> pts;
+  pts.reserve(segs + 1);
+  for (int i = 0; i <= segs; i++)
+    pts.push_back(OnCircle(e.center, e.radius,
+                           e.angStart + sweep * i / segs)); // canonical CCW
+  if (!pts.empty() && glm::length(pts.front() - e.a) >
+                          glm::length(pts.back() - e.a))
+    std::reverse(pts.begin(), pts.end()); // orient to traversal a → b
+  return pts;
+}
 } // namespace
 
 double Loop::SignedArea() const {
   if (circle) {
     return M_PI * circle->radius * circle->radius;
   }
+  // Concatenate the boundary as a polyline (drop each edge's duplicated start),
+  // then shoelace. Arcs are tessellated so curved area is counted.
+  std::vector<glm::vec2> poly;
+  for (const auto& e : edges) {
+    std::vector<glm::vec2> seg = TessellateLoopEdge(e);
+    for (size_t i = (poly.empty() ? 0 : 1); i < seg.size(); i++)
+      poly.push_back(seg[i]);
+  }
+  if (poly.size() >= 2 && Near(poly.front(), poly.back()))
+    poly.pop_back();
   double area = 0.0;
-  const size_t n = polygon.size();
+  const size_t n = poly.size();
   for (size_t i = 0; i < n; i++) {
-    const glm::vec2& p0 = polygon[i];
-    const glm::vec2& p1 = polygon[(i + 1) % n];
+    const glm::vec2& p0 = poly[i];
+    const glm::vec2& p1 = poly[(i + 1) % n];
     area += static_cast<double>(p0.x) * p1.y - static_cast<double>(p1.x) * p0.y;
   }
   return area * 0.5;
@@ -51,9 +88,8 @@ double Loop::SignedArea() const {
 std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
   std::vector<Loop> loops;
 
-  // Collect free line segments to chain; circles are loops already.
-  std::vector<std::pair<glm::vec2, glm::vec2>> segments;
-
+  // Collect chainable edges (lines + arcs); circles are loops already.
+  std::vector<LoopEdge> freeEdges;
   for (const auto& entity : entities) {
     if (IsConstruction(entity))
       continue; // reference geometry: never contributes to a profile
@@ -65,52 +101,60 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
             loop.circle = e;
             loops.push_back(loop);
           } else if constexpr (std::is_same_v<T, Line>) {
-            segments.emplace_back(e.a, e.b);
+            freeEdges.push_back({false, e.a, e.b});
+          } else if constexpr (std::is_same_v<T, Arc>) {
+            double s = e.startAngle, en = e.endAngle;
+            while (en <= s)
+              en += 2.0 * M_PI; // CCW-always
+            freeEdges.push_back({true, ArcPointUV(e, 1), ArcPointUV(e, 2),
+                                 e.center, e.radius, s, en});
           }
           // Point contributes nothing to a profile
         },
         entity);
   }
 
-  // Chain remaining line segments into closed loops by endpoint proximity.
-  std::vector<bool> used(segments.size(), false);
-  for (size_t start = 0; start < segments.size(); start++) {
+  // Chain edges into closed loops by endpoint proximity. Reversing an edge to
+  // fit the walk only swaps its traversal endpoints; the arc's canonical span
+  // is untouched, so its geometry survives.
+  std::vector<bool> used(freeEdges.size(), false);
+  for (size_t start = 0; start < freeEdges.size(); start++) {
     if (used[start])
       continue;
 
-    std::vector<glm::vec2> chain = {segments[start].first,
-                                    segments[start].second};
+    std::vector<LoopEdge> chain = {freeEdges[start]};
     used[start] = true;
-    glm::vec2 tail = segments[start].second;
+    glm::vec2 tail = chain.front().b;
 
     bool extended = true;
     while (extended) {
       extended = false;
-      for (size_t i = 0; i < segments.size(); i++) {
+      for (size_t i = 0; i < freeEdges.size(); i++) {
         if (used[i])
           continue;
-        if (Near(segments[i].first, tail)) {
-          tail = segments[i].second;
-        } else if (Near(segments[i].second, tail)) {
-          tail = segments[i].first;
+        LoopEdge cand = freeEdges[i];
+        if (Near(cand.a, tail)) {
+          // already oriented a → b
+        } else if (Near(cand.b, tail)) {
+          std::swap(cand.a, cand.b); // traverse it backwards
         } else {
           continue;
         }
-        chain.push_back(tail);
+        tail = cand.b;
+        chain.push_back(cand);
         used[i] = true;
         extended = true;
         break;
       }
     }
 
-    // Closed if the chain returns to its start
-    if (chain.size() >= 4 && Near(chain.front(), chain.back())) {
-      chain.pop_back(); // drop the duplicated closing point
+    // Closed if the walk returns to the first edge's start.
+    if (chain.size() >= 2 && Near(chain.front().a, tail)) {
       Loop loop;
-      loop.polygon = std::move(chain);
+      loop.edges = std::move(chain);
       loops.push_back(loop);
     } else {
-      LOG_WARN("Sketch profile: discarding open chain of {} points",
+      LOG_WARN("Sketch profile: discarding open chain of {} edges",
                chain.size());
     }
   }
@@ -120,34 +164,52 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
 
 namespace {
 
-// Builds an OCCT wire for one loop in world space on the given plane.
+// Builds an OCCT wire for one loop in world space on the given plane. Every
+// wire is passed through ShapeFix_Wire (reorder / reconnect / close) so greedy
+// edge order and small endpoint gaps — especially where arcs meet lines — are
+// repaired before face building (FreeCAD Sketch::toShape does the same).
 TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
+  const glm::vec3 n3 = plane.GetNormal();
+  const gp_Dir normal(n3.x, n3.y, n3.z);
   auto toPnt = [&](const glm::vec2& uv) {
     glm::vec3 w = plane.PlaneToWorld(uv);
     return gp_Pnt(w.x, w.y, w.z);
   };
 
-  if (loop.circle) {
-    glm::vec3 c = plane.PlaneToWorld(loop.circle->center);
-    glm::vec3 n = plane.GetNormal();
-    glm::vec3 u = plane.GetUAxis();
-    gp_Ax2 axis(gp_Pnt(c.x, c.y, c.z), gp_Dir(n.x, n.y, n.z),
-                gp_Dir(u.x, u.y, u.z));
-    gp_Circ circ(axis, loop.circle->radius);
-    BRepBuilderAPI_MakeEdge edge(circ);
-    BRepBuilderAPI_MakeWire wire(edge.Edge());
-    return wire.Wire();
-  }
-
   BRepBuilderAPI_MakeWire wire;
-  const size_t n = loop.polygon.size();
-  for (size_t i = 0; i < n; i++) {
-    gp_Pnt a = toPnt(loop.polygon[i]);
-    gp_Pnt b = toPnt(loop.polygon[(i + 1) % n]);
-    Handle(Geom_TrimmedCurve) seg = GC_MakeSegment(a, b).Value();
-    wire.Add(BRepBuilderAPI_MakeEdge(seg).Edge());
+  if (loop.circle) {
+    glm::vec3 u = plane.GetUAxis();
+    gp_Ax2 axis(toPnt(loop.circle->center), normal, gp_Dir(u.x, u.y, u.z));
+    gp_Circ circ(axis, loop.circle->radius);
+    wire.Add(BRepBuilderAPI_MakeEdge(circ).Edge());
+  } else {
+    for (const auto& e : loop.edges) {
+      if (e.arc) {
+        // Build the canonical CCW arc (angStart → angEnd) as a trimmed gp_Circ;
+        // its in-loop orientation is fixed up by ShapeFix_Wire below.
+        glm::vec3 u = plane.GetUAxis();
+        gp_Ax2 axis(toPnt(e.center), normal, gp_Dir(u.x, u.y, u.z));
+        gp_Circ circ(axis, e.radius);
+        gp_Pnt s = toPnt(OnCircle(e.center, e.radius, e.angStart));
+        gp_Pnt en = toPnt(OnCircle(e.center, e.radius, e.angEnd));
+        wire.Add(BRepBuilderAPI_MakeEdge(circ, s, en).Edge());
+      } else {
+        Handle(Geom_TrimmedCurve) seg =
+            GC_MakeSegment(toPnt(e.a), toPnt(e.b)).Value();
+        wire.Add(BRepBuilderAPI_MakeEdge(seg).Edge());
+      }
+    }
   }
-  return wire.Wire();
+  if (!wire.IsDone())
+    return TopoDS_Wire();
+
+  ShapeFix_Wire fix;
+  fix.Load(wire.Wire());
+  fix.SetPrecision(1e-4);
+  fix.FixReorder();
+  fix.FixConnected();
+  fix.FixClosed();
+  return fix.Wire();
 }
 
 } // namespace
@@ -214,6 +276,20 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity) {
           points.reserve(kCircleSegments + 1);
           for (int i = 0; i <= kCircleSegments; i++) {
             double a = 2.0 * M_PI * i / kCircleSegments;
+            points.push_back(
+                {e.center.x + static_cast<float>(e.radius * std::cos(a)),
+                 e.center.y + static_cast<float>(e.radius * std::sin(a))});
+          }
+        } else if constexpr (std::is_same_v<T, Arc>) {
+          double s = e.startAngle, en = e.endAngle;
+          while (en <= s)
+            en += 2.0 * M_PI; // CCW-always
+          const double sweep = en - s;
+          int segs = std::max(2, static_cast<int>(std::lround(
+                                     kCircleSegments * sweep / (2.0 * M_PI))));
+          points.reserve(segs + 1);
+          for (int i = 0; i <= segs; i++) {
+            double a = s + sweep * i / segs;
             points.push_back(
                 {e.center.x + static_cast<float>(e.radius * std::cos(a)),
                  e.center.y + static_cast<float>(e.radius * std::sin(a))});

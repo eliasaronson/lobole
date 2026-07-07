@@ -361,9 +361,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   edit.hasCurrentSnap = false;
 
   if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    if (edit.hasPendingPoint)
+    if (edit.hasPendingPoint || edit.hasPendingPoint2) {
       edit.hasPendingPoint = false;
-    else
+      edit.hasPendingPoint2 = false;
+    } else
       edit = SketchEditState{}; // leave sketch edit
     return true;
   }
@@ -468,22 +469,23 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     }
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
       size_t eidx = sketch->IndexOfEntity(hover.ref.entity);
-      if (eidx != SIZE_MAX &&
-          std::holds_alternative<sketch::Circle>(sketch->entities[eidx])) {
-        LOG_INFO("Trim: circle trimming needs arcs (not yet supported)");
-      } else {
-        nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-        if (sketch->TrimLineAt(hover.ref.entity, uv)) {
-          sketch::Solver solver;
-          solver.Load(*sketch);
-          if (solver.Solve().ok)
-            solver.WriteBack(sketch->entities);
-          state.document->Regenerate();
-          nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
-          state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
-                                      index, before, after),
-                                  *state.document);
-        }
+      const bool curve =
+          eidx != SIZE_MAX &&
+          (std::holds_alternative<sketch::Circle>(sketch->entities[eidx]) ||
+           std::holds_alternative<sketch::Arc>(sketch->entities[eidx]));
+      nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+      const bool changed = curve ? sketch->TrimCurveAt(hover.ref.entity, uv)
+                                 : sketch->TrimLineAt(hover.ref.entity, uv);
+      if (changed) {
+        sketch::Solver solver;
+        solver.Load(*sketch);
+        if (solver.Solve().ok)
+          solver.WriteBack(sketch->entities);
+        state.document->Regenerate();
+        nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+        state.commands->Execute(
+            std::make_unique<ModifyFeatureCommand>(index, before, after),
+            *state.document);
       }
     }
     return true;
@@ -492,6 +494,28 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     if (edit.tool == SketchTool::Point) {
       CommitEntity(state, *sketch, index, sketch::Point{uv});
+    } else if (edit.tool == SketchTool::Arc ||
+               edit.tool == SketchTool::ArcThreePoint) {
+      // Both arc tools are 3-click: two pending points, then commit on the
+      // third. Point 1/2 semantics differ per tool (see ArcCenterStartEnd /
+      // ArcFromThreePoints); the CCW-always Arc is normalized on build.
+      if (!edit.hasPendingPoint) {
+        edit.pendingPoint = uv;
+        edit.hasPendingPoint = true;
+      } else if (!edit.hasPendingPoint2) {
+        edit.pendingPoint2 = uv;
+        edit.hasPendingPoint2 = true;
+      } else {
+        std::optional<sketch::Arc> arc;
+        if (edit.tool == SketchTool::Arc)
+          arc = sketch::ArcCenterStartEnd(edit.pendingPoint, edit.pendingPoint2, uv);
+        else
+          arc = sketch::ArcFromThreePoints(edit.pendingPoint, uv, edit.pendingPoint2);
+        if (arc)
+          CommitEntity(state, *sketch, index, *arc);
+        edit.hasPendingPoint = false;
+        edit.hasPendingPoint2 = false;
+      }
     } else if (!edit.hasPendingPoint) {
       edit.pendingPoint = uv;
       edit.hasPendingPoint = true;
@@ -549,6 +573,20 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
     // Rectangles aren't an entity anymore; draw the outline directly.
     poly = {a, {b.x, a.y}, b, {a.x, b.y}, a};
     break;
+  case SketchTool::Arc:
+    if (!edit.hasPendingPoint2) // center placed: preview the radius ring
+      poly = sketch::TessellateEntity(sketch::Circle{a, glm::length(b - a)});
+    else // center + start placed: live arc to the cursor
+      poly = sketch::TessellateEntity(sketch::ArcCenterStartEnd(a, edit.pendingPoint2, b));
+    break;
+  case SketchTool::ArcThreePoint:
+    if (!edit.hasPendingPoint2) // start placed: preview the chord
+      poly = {a, b};
+    else if (auto arc = sketch::ArcFromThreePoints(a, b, edit.pendingPoint2))
+      poly = sketch::TessellateEntity(*arc);
+    else
+      poly = {a, edit.pendingPoint2}; // collinear: fall back to the chord
+    break;
   default:
     return;
   }
@@ -597,14 +635,7 @@ std::optional<glm::vec2> RefUV(const SketchFeature& sk,
   size_t idx = sk.IndexOfEntity(r.entity);
   if (idx == SIZE_MAX)
     return std::nullopt;
-  const auto& e = sk.entities[idx];
-  if (auto* p = std::get_if<sketch::Point>(&e))
-    return p->p;
-  if (auto* l = std::get_if<sketch::Line>(&e))
-    return r.which ? l->b : l->a;
-  if (auto* c = std::get_if<sketch::Circle>(&e))
-    return c->center;
-  return std::nullopt;
+  return sketch::EntityPointUV(sk.entities[idx], r.which);
 }
 
 // A filled arrowhead at `tip` pointing along `dir` (screen space).
@@ -664,12 +695,24 @@ void DrawDimensions(AppState& state) {
       size_t ci = sketch->IndexOfEntity(con.a.entity);
       if (ci == SIZE_MAX)
         continue;
-      auto* circ = std::get_if<sketch::Circle>(&sketch->entities[ci]);
-      if (!circ)
+      const auto& ent = sketch->entities[ci];
+      glm::vec2 center;
+      float radius;
+      glm::vec2 dir(0.7071f, 0.7071f); // circle: 45° leader
+      if (auto* circ = std::get_if<sketch::Circle>(&ent)) {
+        center = circ->center;
+        radius = static_cast<float>(circ->radius);
+      } else if (auto* arc = std::get_if<sketch::Arc>(&ent)) {
+        center = arc->center;
+        radius = static_cast<float>(arc->radius);
+        double mid = 0.5 * (arc->startAngle + arc->endAngle); // within the sweep
+        dir = {static_cast<float>(std::cos(mid)),
+               static_cast<float>(std::sin(mid))};
+      } else {
         continue;
-      glm::vec2 dir(0.7071f, 0.7071f);
-      glm::vec2 rimUV = circ->center + dir * (float)circ->radius;
-      ImVec2 c0 = scr(circ->center), c1 = scr(rimUV + con.labelOffset);
+      }
+      glm::vec2 rimUV = center + dir * radius;
+      ImVec2 c0 = scr(center), c1 = scr(rimUV + con.labelOffset);
       dl->AddLine(c0, c1, col, 1.4f); // leader from centre out
       snprintf(label, sizeof(label),
                con.kind == K::Diameter ? "\xC3\x98%.3g" : "R%.3g", con.value);
@@ -820,6 +863,10 @@ std::vector<std::pair<uint8_t, glm::vec2>> EntityPoints(const sketch::Entity& e)
     pts = {{0, l->a}, {1, l->b}};
   } else if (auto* c = std::get_if<sketch::Circle>(&e)) {
     pts = {{0, c->center}};
+  } else if (auto* a = std::get_if<sketch::Arc>(&e)) {
+    pts = {{0, a->center},
+           {1, sketch::ArcPointUV(*a, 1)},
+           {2, sketch::ArcPointUV(*a, 2)}};
   }
   return pts;
 }
@@ -878,6 +925,15 @@ SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
           c->center + glm::vec2(static_cast<float>(c->radius), 0.0f));
       float rPx = glm::length(rim - center);
       d = std::abs(glm::length(mousePos - center) - rPx);
+    } else if (std::holds_alternative<sketch::Arc>(e)) {
+      // Distance to the tessellated arc polyline — respects the sweep (only
+      // the drawn span is hit) and works under any projection.
+      std::vector<glm::vec2> uv = sketch::TessellateEntity(e);
+      for (size_t k = 0; k + 1 < uv.size(); k++)
+        d = std::min(d, DistToSegment(
+                            mousePos,
+                            SketchUVToScreen(state, sketch.plane, uv[k]),
+                            SketchUVToScreen(state, sketch.plane, uv[k + 1])));
     }
     if (d < bestDist) {
       bestDist = d;
@@ -916,6 +972,13 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     const auto* e = entityOf(r);
     return e && std::holds_alternative<sketch::Circle>(*e);
   };
+  auto isArc = [&](const sketch::PointRef& r) {
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::Arc>(*e);
+  };
+  auto isCurve = [&](const sketch::PointRef& r) { // circle or arc: has a radius
+    return isCircle(r) || isArc(r);
+  };
   auto isPoint = [&](const sketch::PointRef& r) {
     const auto* e = entityOf(r);
     return e && std::holds_alternative<sketch::Point>(*e);
@@ -944,7 +1007,7 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     break;
   case K::Radius:
   case K::Diameter:
-    if (sel.empty() || !isCircle(sel[0])) return false;
+    if (sel.empty() || !isCurve(sel[0])) return false;
     c.a = {sel[0].entity, 0};
     break;
   case K::Angle:
@@ -953,12 +1016,12 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     c.b = {sel[1].entity, 0};
     break;
   case K::Tangent: {
-    // One line + one circle, in either order; normalize to a=line, b=circle.
+    // One line + one circle/arc, either order; normalize to a=line, b=curve.
     if (sel.size() < 2) return false;
-    if (isLine(sel[0]) && isCircle(sel[1])) {
+    if (isLine(sel[0]) && isCurve(sel[1])) {
       c.a = {sel[0].entity, 0};
       c.b = {sel[1].entity, 0};
-    } else if (isCircle(sel[0]) && isLine(sel[1])) {
+    } else if (isCurve(sel[0]) && isLine(sel[1])) {
       c.a = {sel[1].entity, 0};
       c.b = {sel[0].entity, 0};
     } else {
@@ -1019,7 +1082,7 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     c.a = sel[0]; // pin this point in place
     break;
   case K::Concentric:
-    if (sel.size() < 2 || !isCircle(sel[0]) || !isCircle(sel[1])) return false;
+    if (sel.size() < 2 || !isCurve(sel[0]) || !isCurve(sel[1])) return false;
     c.a = {sel[0].entity, 0};
     c.b = {sel[1].entity, 0};
     break;

@@ -5,7 +5,9 @@
 
 #include <glm/glm.hpp>
 #include <array>
+#include <cmath>
 #include <optional>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -34,11 +36,36 @@ struct Circle {
   uint32_t id = 0;
   bool construction = false;
 };
+// An arc runs **counter-clockwise** from `startAngle` to `endAngle` (radians,
+// measured from the +U axis) — the model is CCW-always; OCC's CW form is
+// produced only at shape-build time. `endAngle` is normalized so the CCW sweep
+// `endAngle - startAngle` lies in (0, 2π).
+struct Arc {
+  glm::vec2 center;
+  double radius;
+  double startAngle;
+  double endAngle;
+  uint32_t id = 0;
+  bool construction = false;
+};
 
 // Rectangles are not a primitive: they decompose into four Lines with shared
 // corners (see SketchFeature::AddRectangle) so every side is editable and
 // trimmable. Legacy files with a rigid "rect" entity are migrated on load.
-using Entity = std::variant<Point, Line, Circle>;
+using Entity = std::variant<Point, Line, Circle, Arc>;
+
+// UV of one of an arc's referenced points: which 0 = center, 1 = start, 2 = end
+// (start/end matching CCW startAngle/endAngle). Mirrors Circle's center = 0.
+inline glm::vec2 ArcPointUV(const Arc& arc, uint8_t which) {
+  const float r = static_cast<float>(arc.radius);
+  if (which == 1)
+    return arc.center + r * glm::vec2(std::cos(arc.startAngle),
+                                      std::sin(arc.startAngle));
+  if (which == 2)
+    return arc.center +
+           r * glm::vec2(std::cos(arc.endAngle), std::sin(arc.endAngle));
+  return arc.center;
+}
 
 // The stable id of an entity, regardless of which variant alternative it holds.
 inline uint32_t EntityId(const Entity& e) {
@@ -54,11 +81,75 @@ inline void SetConstruction(Entity& e, bool c) {
   std::visit([c](auto& g) { g.construction = c; }, e);
 }
 
+// Builds a CCW arc centred at `center`, starting at `start`, sweeping CCW to
+// the ray toward `endDir`. Radius = |start - center|; the sweep is normalized
+// into (0, 2π].
+inline Arc ArcCenterStartEnd(glm::vec2 center, glm::vec2 start,
+                             glm::vec2 endDir) {
+  const double r = glm::length(start - center);
+  double a0 = std::atan2(start.y - center.y, start.x - center.x);
+  double a1 = std::atan2(endDir.y - center.y, endDir.x - center.x);
+  while (a1 <= a0)
+    a1 += 2.0 * M_PI;
+  return Arc{center, r, a0, a1};
+}
+
+// Builds the CCW arc through three points: from `p0` to `p1`, bulging through
+// `through`. Returns nullopt if the points are collinear (no circumcircle).
+inline std::optional<Arc> ArcFromThreePoints(glm::vec2 p0, glm::vec2 through,
+                                             glm::vec2 p1) {
+  const double ax = p0.x, ay = p0.y, bx = through.x, by = through.y, cx = p1.x,
+               cy = p1.y;
+  const double d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+  if (std::abs(d) < 1e-9)
+    return std::nullopt;
+  const double a2 = ax * ax + ay * ay, b2 = bx * bx + by * by,
+               c2 = cx * cx + cy * cy;
+  glm::vec2 center(
+      static_cast<float>((a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d),
+      static_cast<float>((a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d));
+  const double r = glm::length(p0 - center);
+  auto ang = [&](glm::vec2 p) {
+    return std::atan2(p.y - center.y, p.x - center.x);
+  };
+  auto wrap = [](double x) {
+    while (x < 0)
+      x += 2.0 * M_PI;
+    while (x >= 2.0 * M_PI)
+      x -= 2.0 * M_PI;
+    return x;
+  };
+  const double a0 = ang(p0), a1 = ang(p1), am = ang(through);
+  const double sweepP0 = wrap(a1 - a0); // CCW p0 → p1
+  if (wrap(am - a0) <= sweepP0)         // `through` lies on that CCW span
+    return Arc{center, r, a0, a0 + sweepP0};
+  return Arc{center, r, a1, a1 + (2.0 * M_PI - sweepP0)}; // the other way
+}
+
+// UV of the point a ref addresses, for any alternative: Point → p; Line →
+// a (which 0) / b (which 1); Circle → center; Arc → center/start/end per
+// ArcPointUV. Single source of truth for RefUV / EntityPoints / EntityDots.
+inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
+  return std::visit(
+      [which](const auto& g) -> glm::vec2 {
+        using T = std::decay_t<decltype(g)>;
+        if constexpr (std::is_same_v<T, Point>)
+          return g.p;
+        else if constexpr (std::is_same_v<T, Line>)
+          return which == 1 ? g.b : g.a;
+        else if constexpr (std::is_same_v<T, Circle>)
+          return g.center;
+        else // Arc
+          return ArcPointUV(g, which);
+      },
+      e);
+}
+
 // A reference to a point on an entity. `entity` is the entity's stable **id**
 // (not its index in the list — that shifts on insert/delete). `which` selects
-// which point: 0 = a/center, 1 = b. For whole-entity constraints
-// (Horizontal on a line, Radius on a circle), `which` is ignored and
-// `a.entity` names the entity.
+// which point: Line 0 = a, 1 = b; Circle 0 = center; Arc 0 = center, 1 = start,
+// 2 = end. For whole-entity constraints (Horizontal on a line, Radius on a
+// circle/arc), `which` is ignored and `a.entity` names the entity.
 struct PointRef {
   uint32_t entity = 0;
   uint8_t which = 0;
@@ -154,6 +245,14 @@ public:
   // Returns true if anything changed. Lines only — circles are ignored here
   // (trimming a circle produces an arc; deferred to the arcs milestone).
   bool TrimLineAt(uint32_t id, glm::vec2 clickUV);
+
+  // Trims the circle or arc `id` at `clickUV`: removes the angular span the
+  // click falls in, bounded by the curve's intersections with other lines (and
+  // the arc's own endpoints). A trimmed circle becomes one arc (the complement
+  // of the removed span, keeping the id); a trimmed arc becomes up to two arcs
+  // (the first keeps the id, the rest are new entities). With no bracketing
+  // crossing the whole curve is deleted. Returns true if anything changed.
+  bool TrimCurveAt(uint32_t id, glm::vec2 clickUV);
 
   // The span (two UV endpoints) that TrimLineAt would remove for a click on
   // line `id` at `clickUV` — the sub-segment bounded by neighbouring crossings.

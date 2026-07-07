@@ -100,6 +100,39 @@ TEST_CASE("Circle extrudes to a cylinder volume", "[extrude]") {
   CHECK_THAT(prism.Volume(), WithinRel(M_PI * 1.5 * 1.5 * 2.0, 1e-3));
 }
 
+TEST_CASE("A filleted-corner profile (lines + arc) extrudes", "[extrude][arc]") {
+  // 4x2 rectangle with the top-right corner rounded by a quarter arc of r=0.5:
+  // the arc runs CCW from (4,1.5) to (3.5,2), centred at (3.5,1.5).
+  const double r = 0.5;
+  std::vector<sketch::Entity> e;
+  e.push_back(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
+  e.push_back(sketch::Line{{4.0f, 0.0f}, {4.0f, 1.5f}});
+  e.push_back(sketch::Arc{{3.5f, 1.5f}, r, 0.0, M_PI / 2});
+  e.push_back(sketch::Line{{3.5f, 2.0f}, {0.0f, 2.0f}});
+  e.push_back(sketch::Line{{0.0f, 2.0f}, {0.0f, 0.0f}});
+
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 1);
+  CADShape prism = sketch::BuildPrism(kXY, loops, 2.0, false);
+  REQUIRE(prism.IsValid());
+  // Area = rect - (corner square - quarter disk); volume = area * height.
+  const double area = 8.0 - (r * r - M_PI * r * r / 4.0);
+  CHECK_THAT(prism.Volume(), WithinRel(area * 2.0, 1e-3));
+}
+
+TEST_CASE("A half-disk (diameter line + semicircle arc) extrudes",
+          "[extrude][arc]") {
+  // Semicircle radius 1 centred at origin, closed by its diameter.
+  std::vector<sketch::Entity> e;
+  e.push_back(sketch::Line{{-1.0f, 0.0f}, {1.0f, 0.0f}}); // diameter
+  e.push_back(sketch::Arc{{0.0f, 0.0f}, 1.0, 0.0, M_PI}); // upper semicircle
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 1);
+  CADShape prism = sketch::BuildPrism(kXY, loops, 3.0, false);
+  REQUIRE(prism.IsValid());
+  CHECK_THAT(prism.Volume(), WithinRel(0.5 * M_PI * 1.0 * 1.0 * 3.0, 1e-3));
+}
+
 TEST_CASE("Rectangle with an inner circle extrudes with a hole", "[extrude]") {
   std::vector<sketch::Entity> e = RectLines({0, 0}, {4, 2});
   e.push_back(sketch::Circle{{2, 1}, 0.5});

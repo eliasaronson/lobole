@@ -511,4 +511,50 @@ TEST_CASE("A rectangle (4 lines + H/V) solves and extrudes", "[solver][extrude]"
   CHECK_THAT(prism.Volume(), WithinRel(16.0, 1e-6));
 }
 
+TEST_CASE("Radius constraint sets an arc radius", "[solver][arc]") {
+  SketchFeature s = MakeSketch();
+  // Quarter arc, CCW from 0 to pi/2, radius 1.
+  uint32_t a0 = s.AddEntity(sketch::Arc{{0, 0}, 1.0, 0.0, M_PI / 2});
+  s.constraints.push_back({sketch::ConstraintKind::Radius, {a0, 0}, {0, 0}, 2.5});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  const auto& arc = std::get<sketch::Arc>(out[0]);
+  CHECK_THAT(arc.radius, WithinRel(2.5, 1e-4));
+  // Endpoints stay on the (grown) arc: start at angle 0, end at pi/2.
+  glm::vec2 start = sketch::ArcPointUV(arc, 1);
+  glm::vec2 end = sketch::ArcPointUV(arc, 2);
+  CHECK_THAT(glm::length(start - arc.center), WithinRel(2.5f, 1e-3f));
+  CHECK_THAT(glm::length(end - arc.center), WithinRel(2.5f, 1e-3f));
+}
+
+TEST_CASE("An arc endpoint constrained coincident to a line endpoint solves",
+          "[solver][arc]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {2, 0}});
+  // Arc whose start (angle 0 → point (3,1)) is near, but not on, L0.b (2,0).
+  uint32_t a0 = s.AddEntity(sketch::Arc{{2, 1}, 1.0, -M_PI / 2, M_PI / 2});
+  // Coincident: arc.start (which 1) == L0.b (which 1).
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {a0, 1}, {l0, 1}});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  glm::vec2 arcStart = sketch::ArcPointUV(std::get<sketch::Arc>(out[1]), 1);
+  glm::vec2 l0b = std::get<sketch::Line>(out[0]).b;
+  CHECK_THAT(glm::length(arcStart - l0b), WithinAbs(0.0f, 1e-4f));
+  // The endpoint still lies on the arc's own rim.
+  const auto& arc = std::get<sketch::Arc>(out[1]);
+  CHECK_THAT(glm::length(arcStart - arc.center),
+             WithinRel(static_cast<float>(arc.radius), 1e-3f));
+}
+
 #endif // HAVE_PLANEGCS

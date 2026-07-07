@@ -33,7 +33,16 @@ struct DocumentRenderMesh {
 
 enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
 
-enum class SketchTool { Select, Point, Line, Circle, Rectangle, Trim };
+enum class SketchTool {
+  Select,
+  Point,
+  Line,
+  Circle,
+  Rectangle,
+  Trim,
+  Arc,          // 3-click center → start → end
+  ArcThreePoint // 3-click start → end → through-point
+};
 
 // Transient state for the active sketch-editing session. The sketch itself
 // lives in the Document (as a SketchFeature); this only holds which sketch is
@@ -45,6 +54,8 @@ struct SketchEditState {
   SketchTool tool = SketchTool::Line;
   bool hasPendingPoint = false; // first click of a two-click entity placed
   glm::vec2 pendingPoint{0.0f};
+  bool hasPendingPoint2 = false; // second click of a 3-click tool (arcs)
+  glm::vec2 pendingPoint2{0.0f};
   glm::vec2 hoverPoint{0.0f};
   int hoveredPlane = -1; // 0 Front / 1 Top / 2 Right while picking
 

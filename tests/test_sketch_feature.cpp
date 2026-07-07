@@ -91,6 +91,7 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   sk->AddEntity(sketch::Point{{1.0f, 2.0f}});
   sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
   sk->AddEntity(sketch::Circle{{2.0f, 1.0f}, 0.5});
+  sk->AddEntity(sketch::Arc{{1.0f, 1.0f}, 2.0, 0.25, 1.75});
   sk->SetId(7);
 
   auto j = DocumentIO::FeatureToJson(*sk);
@@ -99,8 +100,15 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   REQUIRE(rsk != nullptr);
 
   CHECK(rsk->GetId() == 7);
-  CHECK(rsk->entities.size() == 3);
+  CHECK(rsk->entities.size() == 4);
   CHECK(DocumentIO::FeatureToJson(*rsk) == j);
+
+  // The arc survives with its angles intact.
+  REQUIRE(std::holds_alternative<sketch::Arc>(rsk->entities[3]));
+  const auto& arc = std::get<sketch::Arc>(rsk->entities[3]);
+  CHECK_THAT(arc.radius, WithinAbs(2.0, 1e-6));
+  CHECK_THAT(arc.startAngle, WithinAbs(0.25, 1e-6));
+  CHECK_THAT(arc.endAngle, WithinAbs(1.75, 1e-6));
 
   // Plane axes reconstructed orthonormally
   CHECK_THAT(glm::length(rsk->plane.GetNormal()), WithinAbs(1.0f, 1e-4f));
@@ -116,6 +124,29 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   doc.AddFeature(std::make_unique<BoxFeature>("Box", glm::vec3(0), 1, 1, 1));
   REQUIRE(doc.Regenerate());
   CHECK(doc.GetBodies().size() == 1);
+}
+
+TEST_CASE("ArcFromThreePoints builds a CCW arc through the middle point",
+          "[sketch][arc]") {
+  // Unit circle: start (1,0), through top (0,1), end (-1,0) → upper semicircle.
+  auto arc = sketch::ArcFromThreePoints({1, 0}, {0, 1}, {-1, 0});
+  REQUIRE(arc.has_value());
+  CHECK_THAT(arc->center.x, WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(arc->center.y, WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(arc->radius, WithinAbs(1.0, 1e-4));
+  // The span must include the through-point's angle (π/2).
+  CHECK(arc->startAngle <= M_PI / 2 + 1e-6);
+  CHECK(arc->endAngle >= M_PI / 2 - 1e-6);
+  CHECK(arc->endAngle > arc->startAngle); // CCW-always
+
+  // Same endpoints but bulging through the bottom → the other (lower) arc.
+  auto lower = sketch::ArcFromThreePoints({1, 0}, {0, -1}, {-1, 0});
+  REQUIRE(lower.has_value());
+  double m = 0.5 * (lower->startAngle + lower->endAngle);
+  CHECK(std::sin(m) < 0.0); // midpoint of the swept arc is below the x-axis
+
+  // Collinear points have no circumcircle.
+  CHECK_FALSE(sketch::ArcFromThreePoints({0, 0}, {1, 0}, {2, 0}).has_value());
 }
 
 TEST_CASE("Sketch constraints round-trip through JSON", "[sketch][serialization]") {
@@ -360,6 +391,47 @@ TEST_CASE("TrimSpanAt reports the span a trim would remove", "[sketch]") {
   // Not a line → nullopt.
   uint32_t c0 = sk.AddEntity(sketch::Circle{{0, 0}, 1.0});
   CHECK_FALSE(sk.TrimSpanAt(c0, {1, 0}).has_value());
+}
+
+TEST_CASE("TrimCurveAt turns a crossed circle into the complementary arc",
+          "[sketch][arc]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t c0 = sk.AddEntity(sketch::Circle{{0, 0}, 1.0}); // unit circle
+  sk.AddEntity(sketch::Line{{-2, 0}, {2, 0}}); // x-axis: crosses at (±1,0)
+
+  // Click the top span → it's removed, leaving the lower semicircle arc.
+  REQUIRE(sk.TrimCurveAt(c0, {0, 1}));
+  REQUIRE(sk.entities.size() == 2); // circle→arc (same id) + the crossing line
+
+  size_t idx = sk.IndexOfEntity(c0);
+  REQUIRE(idx != SIZE_MAX);
+  REQUIRE(std::holds_alternative<sketch::Arc>(sk.entities[idx]));
+  const auto& arc = std::get<sketch::Arc>(sk.entities[idx]);
+  CHECK_THAT(arc.radius, WithinAbs(1.0, 1e-4));
+  CHECK(arc.endAngle > arc.startAngle);              // CCW-always
+  double mid = 0.5 * (arc.startAngle + arc.endAngle);
+  CHECK(std::sin(mid) < 0.0);                        // surviving span is the bottom
+}
+
+TEST_CASE("TrimCurveAt splits a crossed arc, dropping the clicked sub-span",
+          "[sketch][arc]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  // Upper semicircle arc (0 → π), crossed by the y-axis at the top (0,1).
+  uint32_t a0 = sk.AddEntity(sketch::Arc{{0, 0}, 1.0, 0.0, M_PI});
+  sk.AddEntity(sketch::Line{{0, -2}, {0, 2}}); // crosses the arc at angle π/2
+
+  // Click the right sub-span (angle ~π/4) → removed; left sub-span survives.
+  glm::vec2 clickRight(std::cos(M_PI / 4), std::sin(M_PI / 4));
+  REQUIRE(sk.TrimCurveAt(a0, clickRight));
+
+  size_t idx = sk.IndexOfEntity(a0);
+  REQUIRE(idx != SIZE_MAX);
+  REQUIRE(std::holds_alternative<sketch::Arc>(sk.entities[idx]));
+  const auto& arc = std::get<sketch::Arc>(sk.entities[idx]);
+  // Survivor is [π/2, π]: its midpoint is up-left (x<0, y>0).
+  double mid = 0.5 * (arc.startAngle + arc.endAngle);
+  CHECK(std::cos(mid) < 0.0);
+  CHECK(std::sin(mid) > 0.0);
 }
 
 TEST_CASE("TrimLineAt with no crossings deletes the whole line", "[sketch]") {

@@ -72,6 +72,7 @@ void DrawSketchToolbar(AppState& state) {
     if (ImGui::Button(label)) {
       edit.tool = tool;
       edit.hasPendingPoint = false; // break any in-progress line chain
+      edit.hasPendingPoint2 = false;
     }
     if (active)
       ImGui::PopStyleColor();
@@ -85,6 +86,10 @@ void DrawSketchToolbar(AppState& state) {
   toolButton("Circle", SketchTool::Circle);
   ImGui::SameLine();
   toolButton("Rect", SketchTool::Rectangle);
+  ImGui::SameLine();
+  toolButton("Arc", SketchTool::Arc);
+  ImGui::SameLine();
+  toolButton("3-Pt Arc", SketchTool::ArcThreePoint);
   ImGui::SameLine();
   toolButton(ICON_FA_SCISSORS " Trim", SketchTool::Trim);
 
@@ -117,6 +122,14 @@ void DrawSketchToolbar(AppState& state) {
     const auto* e = entityOf(r);
     return e && std::holds_alternative<sketch::Circle>(*e);
   };
+  auto isArc = [&](const sketch::PointRef& r) {
+    const auto* e = entityOf(r);
+    return e && std::holds_alternative<sketch::Arc>(*e);
+  };
+  // Circle or arc: both carry a radius and a center for radial constraints.
+  auto isCurve = [&](const sketch::PointRef& r) {
+    return isCircle(r) || isArc(r);
+  };
   auto isPoint = [&](const sketch::PointRef& r) {
     const auto* e = entityOf(r);
     return e && std::holds_alternative<sketch::Point>(*e);
@@ -144,17 +157,17 @@ void DrawSketchToolbar(AppState& state) {
   conButton(ICON_FA_ANGLE_RIGHT, "Perpendicular (2 lines)", twoLines,
             K::Perpendicular);
   conButton("=", "Equal (2 lines/circles)", sel.size() >= 2, K::Equal);
-  const bool lineCircle =
-      sel.size() >= 2 && ((isLine(sel[0]) && isCircle(sel[1])) ||
-                          (isCircle(sel[0]) && isLine(sel[1])));
-  conButton("T", "Tangent (line + circle)", lineCircle, K::Tangent);
+  const bool lineCurve =
+      sel.size() >= 2 && ((isLine(sel[0]) && isCurve(sel[1])) ||
+                          (isCurve(sel[0]) && isLine(sel[1])));
+  conButton("T", "Tangent (line + circle/arc)", lineCurve, K::Tangent);
   const bool ptOnLine =
       sel.size() >= 2 &&
       ((isPoint(sel[0]) && isLine(sel[1])) ||
        (isLine(sel[0]) && isPoint(sel[1])) ||
        (isLine(sel[0]) && isLine(sel[1]) && sel[0].entity != sel[1].entity));
   conButton("L", "Point on line (point + line)", ptOnLine, K::PointOnLine);
-  const bool twoCircles = sel.size() >= 2 && isCircle(sel[0]) && isCircle(sel[1]);
+  const bool twoCurves = sel.size() >= 2 && isCurve(sel[0]) && isCurve(sel[1]);
   int symLines = 0;
   for (size_t i = 0; i < sel.size() && i < 3; i++)
     if (isLine(sel[i])) symLines++;
@@ -164,7 +177,7 @@ void DrawSketchToolbar(AppState& state) {
   conButton("Sym", "Symmetric (2 points + a line)", symmetric, K::Symmetric);
   conButton("Mid", "Midpoint (point + line)", midpoint, K::Midpoint);
   conButton(ICON_FA_LOCK, "Fix (pin a point)", !sel.empty(), K::Fixed);
-  conButton("Con", "Concentric (2 circles)", twoCircles, K::Concentric);
+  conButton("Con", "Concentric (2 circles/arcs)", twoCurves, K::Concentric);
   conButton("Col", "Collinear (2 lines)", twoLines, K::Collinear);
   ImGui::NewLine();
 
@@ -176,10 +189,10 @@ void DrawSketchToolbar(AppState& state) {
   if (ImGui::Button(ICON_FA_RULER " Distance") && sel.size() >= 2)
     ApplySketchConstraint(state, K::Distance, dimValue);
   ImGui::SameLine();
-  if (ImGui::Button("Radius") && !sel.empty() && isCircle(sel[0]))
+  if (ImGui::Button("Radius") && !sel.empty() && isCurve(sel[0]))
     ApplySketchConstraint(state, K::Radius, dimValue);
   ImGui::SameLine();
-  if (ImGui::Button("Ø") && !sel.empty() && isCircle(sel[0]))
+  if (ImGui::Button("Ø") && !sel.empty() && isCurve(sel[0]))
     ApplySketchConstraint(state, K::Diameter, dimValue);
   ImGui::SameLine();
   if (ImGui::Button("dX") && sel.size() >= 2)

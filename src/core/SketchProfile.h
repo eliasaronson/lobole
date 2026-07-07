@@ -9,10 +9,23 @@
 
 namespace sketch {
 
+// One boundary edge of a profile loop, in plane UV space. Traversal runs from
+// `a` to `b`. Arcs also carry their canonical geometry (center/radius and the
+// CCW angle span from `angStart` to `angEnd`), independent of traversal
+// direction — the entity defines a specific arc; ordering/orientation is fixed
+// up by ShapeFix_Wire at build time.
+struct LoopEdge {
+  bool arc = false;
+  glm::vec2 a{0.0f}, b{0.0f};
+  glm::vec2 center{0.0f};
+  double radius = 0.0;
+  double angStart = 0.0, angEnd = 0.0; // CCW span (arc only)
+};
+
 // One closed loop of a sketch profile, in plane UV space.
 struct Loop {
-  std::optional<Circle> circle; // set: a pure circle loop
-  std::vector<glm::vec2> polygon; // else: closed polyline (implicit close)
+  std::optional<Circle> circle;  // set: a pure circle loop
+  std::vector<LoopEdge> edges;   // else: ordered boundary edges (lines + arcs)
 
   // Shoelace area (sign = winding); circles are positive.
   double SignedArea() const;

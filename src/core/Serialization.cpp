@@ -15,7 +15,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 6; // v6: construction-geometry flag
+constexpr int kVersion = 7; // v7: arc entities (v6: construction-geometry flag)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -39,9 +39,15 @@ json EntityToJson(const sketch::Entity& entity) {
         } else if constexpr (std::is_same_v<T, sketch::Line>) {
           return {{"type", "line"}, {"a", Vec2ToJson(e.a)},
                   {"b", Vec2ToJson(e.b)}};
-        } else {
+        } else if constexpr (std::is_same_v<T, sketch::Circle>) {
           return {{"type", "circle"}, {"center", Vec2ToJson(e.center)},
                   {"radius", e.radius}};
+        } else {
+          return {{"type", "arc"},
+                  {"center", Vec2ToJson(e.center)},
+                  {"radius", e.radius},
+                  {"start_angle", e.startAngle},
+                  {"end_angle", e.endAngle}};
         }
       },
       entity);
@@ -62,6 +68,10 @@ sketch::Entity EntityFromJson(const json& j) {
     e = sketch::Line{Vec2FromJson(j.at("a")), Vec2FromJson(j.at("b"))};
   } else if (type == "circle") {
     e = sketch::Circle{Vec2FromJson(j.at("center")), j.at("radius").get<double>()};
+  } else if (type == "arc") {
+    e = sketch::Arc{Vec2FromJson(j.at("center")), j.at("radius").get<double>(),
+                    j.at("start_angle").get<double>(),
+                    j.at("end_angle").get<double>()};
   } else {
     // "rect" is intercepted and expanded in FeatureFromJson (pre-v5 rigid
     // rectangles become four lines); anything else is unknown.
