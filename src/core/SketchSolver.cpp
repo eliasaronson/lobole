@@ -41,6 +41,20 @@ struct Solver::Impl {
   std::vector<int> dragTargetBase;     // dragTarget index base per input point
   std::deque<double> dragRadiusTarget; // 1 slot for a radius drag
   std::set<double*> fixedParams;       // params held out of the unknowns (Fixed)
+  std::vector<int> constraintFirstTag; // per-constraint first GCS tag (+ end)
+
+  // Maps solver tags to the SketchFeature::constraints indices that own them.
+  std::vector<size_t> ConstraintsForTags(const std::vector<int>& tags) const {
+    std::vector<size_t> out;
+    for (int t : tags) {
+      for (size_t k = 0; k + 1 < constraintFirstTag.size(); k++)
+        if (constraintFirstTag[k] <= t && t < constraintFirstTag[k + 1]) {
+          out.push_back(k);
+          break;
+        }
+    }
+    return out;
+  }
 
   static uint64_t Key(uint32_t entity, uint8_t which) {
     return (uint64_t(entity) << 8) | which;
@@ -87,6 +101,8 @@ struct Solver::Impl {
     result.dof = sys.dofsNumber();
     sys.getConflicting(result.conflicting);
     sys.getRedundant(result.redundant);
+    result.conflictingConstraints = ConstraintsForTags(result.conflicting);
+    result.redundantConstraints = ConstraintsForTags(result.redundant);
     return result;
   }
 };
@@ -146,9 +162,14 @@ void Solver::Load(const SketchFeature& sketch) {
     // Rectangle: rigid in v1, not added to the solver.
   }
 
-  // Constraints
+  // Constraints. Record the first tag each one uses so conflicting/redundant
+  // tags map back to constraint indices; a constraint owns tags
+  // [firstTag[k], firstTag[k+1]) (empty range = it added nothing).
   int tag = 1;
-  for (const auto& con : sketch.constraints) {
+  im.constraintFirstTag.assign(sketch.constraints.size() + 1, 0);
+  for (size_t k = 0; k < sketch.constraints.size(); k++) {
+    im.constraintFirstTag[k] = tag;
+    const Constraint& con = sketch.constraints[k];
     GCS::Point* a = im.Resolve(con.a);
     GCS::Point* b = im.Resolve(con.b);
     switch (con.kind) {
@@ -286,6 +307,7 @@ void Solver::Load(const SketchFeature& sketch) {
       break;
     }
   }
+  im.constraintFirstTag.back() = tag; // upper bound for the last constraint
   im.dragTag = tag;
 }
 

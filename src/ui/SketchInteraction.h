@@ -46,6 +46,11 @@ void DrawSnapGlyphs(AppState& state);
 // their value. Call once per frame from the UI pass.
 void DrawDimensions(AppState& state);
 
+// Draws small badges (H, V, =, ⟂, ∥, ●, ⌗) on the geometry for the active
+// sketch's non-dimensional constraints. Gated on showConstraintGlyphs. Call
+// once per frame from the UI pass.
+void DrawConstraintGlyphs(AppState& state);
+
 // Projects a plane-UV point to viewport screen coords (pixels), matching the
 // picking/render path.
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
@@ -76,5 +81,14 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
 // Toggles the construction flag on the selected entities (one undoable edit).
 // Returns false if nothing is selected.
 bool ToggleConstruction(AppState& state);
+
+// Re-solves the active sketch (without mutating it) and stores the DOF +
+// conflicting-constraint indices in SketchEditState, for status feedback and
+// coloring. Call once per frame while editing.
+void UpdateSketchStatus(AppState& state);
+
+// Removes the constraint at `index` from the active sketch, re-solves, and
+// commits one undoable edit.
+bool DeleteConstraint(AppState& state, size_t index);
 
 } // namespace ui

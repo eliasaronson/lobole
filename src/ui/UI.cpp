@@ -66,6 +66,7 @@ void DrawUI(AppState& state) {
     // Inactive sketches as thin lines; the active sketch as thick AA primitives
     // with vertex dots and hover/selection emphasis. Rebuilt each frame so
     // edit-mode, selection, and hover changes show immediately.
+    UpdateSketchStatus(state); // DOF + conflicts for coloring/feedback
     state.sketchRenderer->SetStaticLines(
         BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
     state.sketchRenderer->SetPrimitives(
@@ -75,6 +76,7 @@ void DrawUI(AppState& state) {
     // (2D overlays).
     DrawSnapGlyphs(state);
     DrawDimensions(state);
+    DrawConstraintGlyphs(state);
   }
 
   // Point the renderers, camera, and picking at the central-node region so

@@ -75,6 +75,13 @@ struct SketchEditState {
   // Index of the dimension constraint being edited inline (-1 = none).
   int editingDim = -1;
 
+  // Solver status of the active sketch, refreshed each frame: remaining DOF
+  // (0 = fully constrained, -1 = failed) and the constraint indices flagged as
+  // conflicting/redundant.
+  int dof = -1;
+  std::vector<size_t> conflictingConstraints;
+  bool showConstraintGlyphs = true;
+
   bool IsEditing() const { return activeSketchId != 0; }
 };
 

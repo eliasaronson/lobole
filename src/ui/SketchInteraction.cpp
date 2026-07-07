@@ -12,6 +12,7 @@
 
 #include "imgui.h"
 
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -751,6 +752,53 @@ void DrawDimensions(AppState& state) {
   }
 }
 
+void DrawConstraintGlyphs(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  if (!edit.IsEditing() || !edit.showConstraintGlyphs)
+    return;
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch)
+    return;
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImU32 col = IM_COL32(150, 210, 170, 220);
+  using K = sketch::ConstraintKind;
+
+  // Fan out multiple badges on the same entity so they don't overlap.
+  std::map<uint32_t, int> stack;
+  auto badge = [&](uint32_t entity, const char* text) {
+    auto uv = RefUV(*sketch, {entity, 0});
+    if (!uv)
+      return;
+    glm::vec2 s = SketchUVToScreen(state, sketch->plane, *uv);
+    float dx = 10.0f + 13.0f * stack[entity]++;
+    ImVec2 p(s.x + dx, s.y - 16.0f);
+    ImVec2 sz = ImGui::CalcTextSize(text);
+    dl->AddRectFilled(ImVec2(p.x - 2, p.y - 1), ImVec2(p.x + sz.x + 2, p.y + sz.y + 1),
+                      IM_COL32(25, 32, 28, 200), 2.0f);
+    dl->AddText(p, col, text);
+  };
+
+  for (const auto& c : sketch->constraints) {
+    switch (c.kind) {
+    case K::Horizontal: badge(c.a.entity, "H"); break;
+    case K::Vertical: badge(c.a.entity, "V"); break;
+    case K::Parallel: badge(c.a.entity, "//"); badge(c.b.entity, "//"); break;
+    case K::Perpendicular: badge(c.a.entity, "|_"); break;
+    case K::Equal: badge(c.a.entity, "="); badge(c.b.entity, "="); break;
+    case K::Coincident: badge(c.a.entity, "co"); break;
+    case K::PointOnLine: badge(c.b.entity, "on"); break;
+    case K::Tangent: badge(c.a.entity, "T"); break;
+    case K::Symmetric: badge(c.c.entity, "sym"); break;
+    case K::Midpoint: badge(c.b.entity, "mid"); break;
+    case K::Fixed: badge(c.a.entity, "fix"); break;
+    case K::Concentric: badge(c.a.entity, "con"); break;
+    case K::Collinear: badge(c.a.entity, "L"); badge(c.b.entity, "L"); break;
+    default: break; // dimensions render via DrawDimensions
+    }
+  }
+}
+
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
                            glm::vec2 uv) {
   glm::vec3 world = plane.PlaneToWorld(uv);
@@ -998,6 +1046,41 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
   state.sketchEdit.selected.clear();
+  return true;
+}
+
+void UpdateSketchStatus(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  edit.dof = -1;
+  edit.conflictingConstraints.clear();
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (!sketch)
+    return;
+  sketch::Solver solver;
+  solver.Load(*sketch); // solve for status only — no WriteBack, sketch unchanged
+  sketch::SolveResult r = solver.Solve();
+  edit.dof = r.ok ? r.dof : -1;
+  edit.conflictingConstraints = r.conflictingConstraints;
+  for (size_t ri : r.redundantConstraints)
+    edit.conflictingConstraints.push_back(ri); // flag redundant too
+}
+
+bool DeleteConstraint(AppState& state, size_t cIndex) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || cIndex >= sketch->constraints.size())
+    return false;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  sketch->constraints.erase(sketch->constraints.begin() + cIndex);
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch->entities);
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
   return true;
 }
 

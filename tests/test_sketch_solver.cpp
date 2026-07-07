@@ -394,6 +394,27 @@ TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   CHECK((r.conflicting.size() > 0 || !r.ok || r.dof >= 0));
 }
 
+TEST_CASE("Conflicting tags map back to constraint indices", "[solver]") {
+  SketchFeature s = MakeSketch();
+  uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 0}}); // idx 0
+  // Two conflicting lengths on the same line (idx 1, 2).
+  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
+  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  sketch::SolveResult r = solver.Solve();
+  // The flagged constraints are the Distances (indices 1/2), never the Fixed(0)
+  // which adds no GCS constraint.
+  for (size_t ci : r.conflictingConstraints)
+    CHECK((ci == 1 || ci == 2));
+  for (size_t ci : r.redundantConstraints)
+    CHECK((ci == 1 || ci == 2));
+  CHECK((!r.conflictingConstraints.empty() || !r.redundantConstraints.empty() ||
+         !r.ok));
+}
+
 TEST_CASE("Dragging a whole line translates it and pulls a coincident neighbour",
           "[solver][drag]") {
   SketchFeature s = MakeSketch();

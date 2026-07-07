@@ -14,6 +14,7 @@
 
 #include <cfloat>
 #include <filesystem>
+#include <set>
 
 namespace ui {
 
@@ -374,11 +375,26 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     return edit.hasHover && edit.hoveredBody && edit.hoveredRef.entity == id;
   };
 
-  const glm::vec4 base(0.55f, 0.85f, 1.00f, 1.0f);
+  // Fully-constrained sketches read in a neutral "solved" colour; under-
+  // constrained ones stay blue (Onshape's black-vs-blue signal).
+  const glm::vec4 base = edit.dof == 0 ? glm::vec4(0.90f, 0.92f, 0.96f, 1.0f)
+                                       : glm::vec4(0.55f, 0.85f, 1.00f, 1.0f);
   const glm::vec4 sel(1.00f, 0.62f, 0.20f, 1.0f);
   const glm::vec4 hov(1.00f, 1.00f, 0.65f, 1.0f);
   const glm::vec4 trim(1.00f, 0.35f, 0.28f, 1.0f);        // trim-will-remove
   const glm::vec4 construct(0.55f, 0.60f, 0.70f, 0.85f);  // reference geometry
+  const glm::vec4 conflict(1.00f, 0.30f, 0.30f, 1.0f);    // over-defined
+
+  // Entities touched by a conflicting/redundant constraint, flagged red.
+  std::set<uint32_t> conflictIds;
+  for (size_t ci : edit.conflictingConstraints) {
+    if (ci >= sk->constraints.size())
+      continue;
+    const auto& con = sk->constraints[ci];
+    conflictIds.insert(con.a.entity);
+    conflictIds.insert(con.b.entity);
+    conflictIds.insert(con.c.entity);
+  }
 
   // Entity lines. Construction geometry draws dashed + dimmed (unless
   // selected/hovered, where the emphasis colour reads better solid).
@@ -386,7 +402,11 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     const uint32_t id = sketch::EntityId(e);
     const bool s = selectedEntity(id), h = hoveredEntityBody(id);
     const bool constr = sketch::IsConstruction(e);
-    const glm::vec4 col = s ? sel : (h ? hov : (constr ? construct : base));
+    const bool bad = conflictIds.count(id) > 0;
+    const glm::vec4 col = bad ? conflict
+                        : s   ? sel
+                        : h   ? hov
+                        : (constr ? construct : base);
     const float halfPx = (s || h) ? 3.0f : (constr ? 1.3f : 1.8f);
     std::vector<glm::vec2> poly = sketch::TessellateEntity(e);
     for (size_t i = 0; i + 1 < poly.size(); i++) {

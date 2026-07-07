@@ -10,7 +10,37 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
+#include <set>
+
 namespace ui {
+
+namespace {
+const char* ConstraintKindName(sketch::ConstraintKind k) {
+  using K = sketch::ConstraintKind;
+  switch (k) {
+  case K::Coincident: return "coincident";
+  case K::Horizontal: return "horizontal";
+  case K::Vertical: return "vertical";
+  case K::Parallel: return "parallel";
+  case K::Perpendicular: return "perpendicular";
+  case K::Equal: return "equal";
+  case K::Distance: return "distance";
+  case K::Radius: return "radius";
+  case K::Angle: return "angle";
+  case K::Tangent: return "tangent";
+  case K::PointOnLine: return "point-on-line";
+  case K::Symmetric: return "symmetric";
+  case K::Midpoint: return "midpoint";
+  case K::Fixed: return "fixed";
+  case K::Concentric: return "concentric";
+  case K::Collinear: return "collinear";
+  case K::DistanceX: return "distance-x";
+  case K::DistanceY: return "distance-y";
+  case K::Diameter: return "diameter";
+  }
+  return "?";
+}
+} // namespace
 
 void DrawSketchToolbar(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
@@ -165,6 +195,41 @@ void DrawSketchToolbar(AppState& state) {
   ImGui::SameLine();
   if (ImGui::Button(ICON_FA_ANGLE_RIGHT " Angle") && twoLines)
     ApplySketchConstraint(state, K::Angle, glm::radians(angleDeg));
+
+  // Constraint status + management.
+  ImGui::SeparatorText("Status");
+  if (edit.dof == 0)
+    ImGui::TextColored(ImVec4(0.55f, 0.95f, 0.60f, 1.0f), "Fully constrained");
+  else if (edit.dof > 0)
+    ImGui::TextColored(ImVec4(0.55f, 0.80f, 1.0f, 1.0f), "%d DOF free", edit.dof);
+  else
+    ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Not solved");
+  if (!edit.conflictingConstraints.empty())
+    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%zu conflicting",
+                       edit.conflictingConstraints.size());
+  ImGui::Checkbox("Show constraints", &edit.showConstraintGlyphs);
+
+  if (!sketch->constraints.empty() &&
+      ImGui::TreeNode("Constraints##list")) {
+    std::set<size_t> bad(edit.conflictingConstraints.begin(),
+                         edit.conflictingConstraints.end());
+    int toDelete = -1;
+    for (size_t i = 0; i < sketch->constraints.size(); i++) {
+      ImGui::PushID(static_cast<int>(i));
+      if (ImGui::SmallButton("x"))
+        toDelete = static_cast<int>(i);
+      ImGui::SameLine();
+      const char* name = ConstraintKindName(sketch->constraints[i].kind);
+      if (bad.count(i))
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", name);
+      else
+        ImGui::TextUnformatted(name);
+      ImGui::PopID();
+    }
+    ImGui::TreePop();
+    if (toDelete >= 0)
+      DeleteConstraint(state, static_cast<size_t>(toDelete));
+  }
 
   ImGui::SeparatorText("Profile");
   ImGui::Text("Entities: %zu  Constraints: %zu", sketch->entities.size(),

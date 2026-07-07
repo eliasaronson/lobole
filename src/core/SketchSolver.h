@@ -10,8 +10,12 @@ namespace sketch {
 struct SolveResult {
   bool ok = false;
   int dof = -1; // remaining degrees of freedom (0 = fully constrained)
-  std::vector<int> conflicting;
+  std::vector<int> conflicting; // raw PlaneGCS tags
   std::vector<int> redundant;
+  // Mapped back to indices into SketchFeature::constraints, for the UI to flag
+  // the offending constraints.
+  std::vector<size_t> conflictingConstraints;
+  std::vector<size_t> redundantConstraints;
 };
 
 // Adapter around PlaneGCS: maps a SketchFeature's Point/Line/Circle entities
