@@ -239,6 +239,12 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     MenuCreateAccept(ctx, "Create/Box");
     ctx->Yield();
 
+    // File/New does not reset the camera, so the orbit/pan/zoom left by earlier
+    // viewport tests would leak in and can leave the box grazing-angle to the
+    // camera. Reset to the default iso view so this pick is self-contained.
+    ctx->MenuClick("View/Reset Camera");
+    ctx->Yield();
+
     // Click on the projected body center: the ray must hit the camera-facing
     // face of the box
     glm::vec3 min, max;
