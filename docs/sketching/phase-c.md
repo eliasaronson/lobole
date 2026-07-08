@@ -1,6 +1,6 @@
 # Phase C — Selectable entities: picking, points, hover, visible lines
 
-Detailed plan for Phase C of [CONSTRAINTS_PLAN.md](CONSTRAINTS_PLAN.md). Pulled
+Detailed plan for Phase C of [plan.md](plan.md). Pulled
 ahead of the topology work because **constraints are unusable today**: only
 entity endpoints are pickable and lines render 1 px un-anti-aliased, so there's
 nothing to reliably click. Reference UX: Onshape/SolidWorks draw a dot at every
@@ -57,7 +57,7 @@ anti-aliased thick lines — three of which share one new renderer path.
 
 ## Part 4 — Anti-aliased thick lines + the shared primitive pipeline
 
-**Decision (from CONSTRAINTS_PLAN.md): quad expansion in the vertex shader, not
+**Decision (from plan.md): quad expansion in the vertex shader, not
 `wideLines`.** One new pipeline serves thick lines, point dots, and
 hover/selection emphasis.
 

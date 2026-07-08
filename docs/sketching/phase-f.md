@@ -1,6 +1,6 @@
 # Phase F — Whole-entity dragging + drag-solver rework
 
-Detailed plan for Phase F of [CONSTRAINTS_PLAN.md](CONSTRAINTS_PLAN.md). Adopt
+Detailed plan for Phase F of [plan.md](plan.md). Adopt
 the FreeCAD PlaneGCS-native drag recipe: build the solver once on mouse-down,
 pin the dragged points with *weak* temporary constraints, and per frame just
 overwrite the targets and re-solve — replacing today's naive per-frame rebuild,
@@ -122,7 +122,7 @@ GPU-heavy GUI path stays thin):
   it with the centre fixed.
 
 Risk: low-medium — the reference implementation (FreeCAD `Sketch::initMove` /
-`moveGeometries`) is mapped in CONSTRAINTS_PLAN.md; the rescale-0.01 weak pull is
+`moveGeometries`) is mapped in plan.md; the rescale-0.01 weak pull is
 the known anti-oscillation fix, and refuse-on-conflict avoids garbage solves.
 
 Note for later: built off the generic dragged-point set, so Phase J arcs slot in

@@ -11,7 +11,7 @@ The steps below are still ordered so the build stays incremental and testable
 the final commit is unified. The arc drawing tool ships **both** constructions
 (center→start→end and endpoints→bulge) — see step 8.
 
-Reference findings applied (from CONSTRAINTS_PLAN.md "What the reference repos
+Reference findings applied (from plan.md "What the reference repos
 taught us"): keep a **CCW-always** model convention and convert to OCC only at
 shape-build time (avoids FreeCAD's `emulateCCWXY` retrofit); run `ShapeFix_Wire`
 (FixReorder / FixConnected / FixClosed) on every wire before face building.
@@ -257,6 +257,6 @@ dimension edits live, and a circle crossed by two lines trims to an arc. Commit
 - Est: ~3.5–4 days total.
 
 ## Plan-file bookkeeping
-- After the commit: CONSTRAINTS_PLAN.md — mark Phase J shipped (arc entity +
+- After the commit: plan.md — mark Phase J shipped (arc entity +
   curve trim). The `Deferred` "Circle & arc trim" line resolves. Phase K's Fillet
   ("needs Phase J arcs") is unblocked.

@@ -1,6 +1,6 @@
 # Phase D — Rectangle decomposition + split + line trim
 
-Detailed plan for Phase D of [CONSTRAINTS_PLAN.md](CONSTRAINTS_PLAN.md). This is
+Detailed plan for Phase D of [plan.md](plan.md). This is
 the "cuttable segments" milestone the user asked for: rectangles become four
 real, individually-editable lines, and any line can be trimmed at its crossings.
 

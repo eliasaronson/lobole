@@ -172,7 +172,7 @@ Draw the box while dragging via `ImGui::GetForegroundDrawList()` (like
   then `feat: onshape-style keyboard shortcuts` (or one commit if small).
 
 ## Bookkeeping
-- Update CONSTRAINTS_PLAN.md Phase M status on ship. Phase M was the roadmap's
+- Update plan.md Phase M status on ship. Phase M was the roadmap's
   planned finale before N (UI redesign) was added; N naturally follows since it
   builds on these interaction primitives (Select-default, the tool-state model,
   the shared prompt area that supersedes `actionMsg`).

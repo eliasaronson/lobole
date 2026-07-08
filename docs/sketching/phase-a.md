@@ -1,6 +1,6 @@
 # Phase A — Angle, Tangent, PointOnLine constraints (implementation plan)
 
-Detailed plan for Phase A of [CONSTRAINTS_PLAN.md](CONSTRAINTS_PLAN.md). Pure
+Detailed plan for Phase A of [plan.md](plan.md). Pure
 extension of the v1 constraint plumbing; no new geometry, no format bump.
 
 Two corrections to earlier assumptions, found by reading the code:

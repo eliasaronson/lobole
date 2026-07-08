@@ -221,7 +221,7 @@ void Solver::Load(const SketchFeature& sketch) {
     } else if (auto* el = std::get_if<Ellipse>(&e)) {
       // v1: only the centre is a solver point (so coincident/distance/fixed on
       // the centre work and the ellipse translates with it); the radii and
-      // rotation are rigid — see CONSTRAINTS_PHASE_L.md for the full-rules TODO.
+      // rotation are rigid — see docs/sketching/phase-l.md for the full-rules TODO.
       (void)el;
       addPoint(id, 0, el->center);
     }

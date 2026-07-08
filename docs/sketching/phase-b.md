@@ -1,6 +1,6 @@
 # Phase B — Stable entity IDs + entity deletion (implementation plan)
 
-Detailed plan for Phase B of [CONSTRAINTS_PLAN.md](CONSTRAINTS_PLAN.md). This
+Detailed plan for Phase B of [plan.md](plan.md). This
 is the foundation the topology-changing work (Phase C split/trim, and safe
 delete) stands on: constraints must survive entities being inserted and removed.
 
@@ -10,7 +10,7 @@ delete) stands on: constraints must survive entities being inserted and removed.
   an index into `SketchFeature::entities`). Any insert/erase before an index
   shifts every later reference — a latent corruption bug the moment topology
   changes. This is FreeCAD's GeoId problem; SolveSpace avoids it with stable
-  handles (see the reference notes in CONSTRAINTS_PLAN.md).
+  handles (see the reference notes in plan.md).
 - **There is no sketch-entity deletion today at all** — only whole-feature
   deletion (`Document::RemoveFeature`). So Phase B *adds* a delete path with
   correct constraint cleanup; it isn't lifting a code guard.
@@ -92,7 +92,7 @@ the entity's **id**:
   exposing step 5.
 
 ### 5. Entity deletion + constraint cleanup (`SketchFeature::DeleteEntity`)
-Follows the FreeCAD/SolveSpace recipe (CONSTRAINTS_PLAN.md "deletion
+Follows the FreeCAD/SolveSpace recipe (plan.md "deletion
 machinery"):
 1. **Transfer** — if the deleted entity shares a coincident point with a
    surviving entity, move point-referencing constraints onto the survivor

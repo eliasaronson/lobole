@@ -1,6 +1,6 @@
 # Phase E — Snapping / auto-constraint inference
 
-Detailed plan for Phase E of [CONSTRAINTS_PLAN.md](CONSTRAINTS_PLAN.md). The
+Detailed plan for Phase E of [plan.md](plan.md). The
 Onshape-feel milestone: while drawing, snap the cursor to nearby geometry and
 add the implied constraint automatically, with a ghost glyph showing what will
 be applied. Generalizes the `PointOnLine`-on-commit taste added in Phase D.

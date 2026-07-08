@@ -92,7 +92,7 @@ Pointers are into the checkouts under `~/Documents/CAD/`.
 ## Phase A — Angle + tangent + point-on-line constraints (small, ~1 day) — SHIPPED (`52f71af`)
 
 Pure extension of existing plumbing. **Detailed implementation plan:
-[CONSTRAINTS_PHASE_A.md](CONSTRAINTS_PHASE_A.md)** — including two corrected
+[phase-a.md](phase-a.md)** — including two corrected
 assumptions: serialization *throws* on unknown kind strings (no generic
 round-trip), and the remote server's `add_constraint` has its own kind
 allowlist that must gain the new kinds.
@@ -135,7 +135,7 @@ Shipped as commit "feat: stable sketch entity ids and entity deletion". One
 scope cut: dimensional-constraint transfer onto a coincident survivor was
 deferred (we do coincidence repair + orphan sweep); Phase D's `SplitEntity`
 needs its own transfer logic anyway. Detailed in
-[CONSTRAINTS_PHASE_B.md](CONSTRAINTS_PHASE_B.md).
+[phase-b.md](phase-b.md).
 
 ## Phase C — Selectable entities: body picking + visible lines (~1 day) — SHIPPED (`5121623`)
 
@@ -191,7 +191,7 @@ vertex attribute, but it's self-contained and reuses the existing upload path.
 
 ## Phase D — Rectangle decomposition + split + line trim (~1.5–2 days) — SHIPPED (`b932e1a`,`3e4a787`,`7cde476`,`da4cf5e`)
 
-**Detailed implementation plan: [CONSTRAINTS_PHASE_D.md](CONSTRAINTS_PHASE_D.md)**
+**Detailed implementation plan: [phase-d.md](phase-d.md)**
 (reuses Phase B `DeleteEntity` for trim cleanup and Phase C body picking; drops
 the rigid `Rectangle` variant with a v4→v5 load migration; lines-only trim,
 circle trim deferred to Phase J).
@@ -222,7 +222,7 @@ enumerates them all.
 
 ## Phase E — Snapping / auto-constraint inference (~1.5–2 days) — SHIPPED (`c16ca40`)
 
-**Detailed implementation plan: [CONSTRAINTS_PHASE_E.md](CONSTRAINTS_PHASE_E.md)**
+**Detailed implementation plan: [phase-e.md](phase-e.md)**
 (pure testable `core/SketchInference` taking a `pixelsPerUV` scale; add-then-
 diagnose via the DOF delta; generalizes Phase D's `CommitLine`; ghost glyphs via
 an ImGui 2D overlay).
@@ -250,7 +250,7 @@ Risk: medium — tolerance tuning; the numbers above are proven starting points.
 
 ## Phase F — Whole-entity dragging + drag-solver rework (~1–2 days) — SHIPPED (`648f68c`)
 
-**Detailed implementation plan: [CONSTRAINTS_PHASE_F.md](CONSTRAINTS_PHASE_F.md)**
+**Detailed implementation plan: [phase-f.md](phase-f.md)**
 (persistent `Solver` drag session `BeginDrag`/`SetDragTargets`/`SolveDrag`; weak
 `rescaleConstraint(0.01)` pins; pick→mode classification; solver-level tests so
 the GUI path stays thin; arcs slot into the generic point set later).
@@ -278,7 +278,7 @@ Risk: low-medium now that the reference implementation is mapped.
 ## Phase G — Dimension display + editing (~2 days) — SHIPPED (`95d0d56`)
 
 **Detailed plan for the whole constraint-layer block (G+H+I):
-[CONSTRAINTS_PHASE_GHI.md](CONSTRAINTS_PHASE_GHI.md).**
+[phase-ghi.md](phase-ghi.md).**
 
 The dimensional *constraints* (Distance, Radius, Angle with a `value`) already
 solve — but they're **invisible in the canvas** and only settable via the
@@ -313,7 +313,7 @@ but the constraint/solver side is done.
 
 Completes the constraint layer. Independent of arcs/splines; pairs with the
 dimension work in G. **Detailed plan:
-[CONSTRAINTS_PHASE_GHI.md](CONSTRAINTS_PHASE_GHI.md).**
+[phase-ghi.md](phase-ghi.md).**
 
 - **Construction geometry**: a `bool construction` flag on entities (serialized).
   Construction lines/circles drive constraints and snapping but are **excluded
@@ -334,7 +334,7 @@ Risk: low — same shape as Phase A, plus a one-field flag.
 
 ## Phase I — Constraint status & management (~2 days)
 
-**Detailed plan: [CONSTRAINTS_PHASE_GHI.md](CONSTRAINTS_PHASE_GHI.md).**
+**Detailed plan: [phase-ghi.md](phase-ghi.md).**
 
 The feedback + management layer — as important as dimensions for the sketcher
 feel, and currently only half-present (the solver reports dof/conflicting but
@@ -367,7 +367,7 @@ model / serialization (v7) / solver (`addConstraintArcRules` + arc
 radius/diameter/equal/tangent/concentric) / profile (the `Loop` edge-list
 refactor + `ShapeFix_Wire`) / rendering / picking; both arc tools
 (center→start→end and start→end→bulge); and curve trim (circle→arc, arc→arcs).
-Detailed change-list in CONSTRAINTS_PHASE_J.md. Original outline below.
+Detailed change-list in phase-j.md. Original outline below.
 
 
 As previously planned, with the repo findings applied:
@@ -391,7 +391,7 @@ known mitigation.
 
 ## Phase K — Generative operations: mirror, pattern, fillet, offset (~3–4 days)
 
-Detailed plan (with reference-repo findings) in **CONSTRAINTS_PHASE_K.md**. Key
+Detailed plan (with reference-repo findings) in **phase-k.md**. Key
 revision from that research: FreeCAD does these as constraint-linked bakes (no
 dependency graph), so mirror + fillet need **no** derived-record machinery — the
 derived record is only needed for editable pattern count. Split into K1 (mirror
@@ -476,13 +476,13 @@ first within the phase.
 `sketch::Ellipse{center, rMajor, rMinor, rotation}` threaded through the full
 pipeline — serialization (v9), solver (centre is a movable point; radii/rotation
 rigid — full `GCS::Ellipse` constrainability is the deferred follow-up in
-CONSTRAINTS_PHASE_L.md), profile (`gp_Elips` wire edge + tessellation → extrudes
+phase-l.md), profile (`gp_Elips` wire edge + tessellation → extrudes
 to π·a·b·h), render/pick (centre dot + tessellated body-hit), and a 3-click
 `SketchTool::Ellipse` (centre → major-axis end → minor radius) with an
 `ICON_FA_EGG` toolbar button. Trim/circle-line-break bug and the trackball
 gimbal-lock fix shipped alongside on fix/sketch-usability.
 
-**B-splines** remain a separate milestone — planned in CONSTRAINTS_PHASE_L.md
+**B-splines** remain a separate milestone — planned in phase-l.md
 (variable poles/knots, control-point UX, OCC `Geom_BSplineCurve`); build after
 review.
 
@@ -495,7 +495,7 @@ default tool; Escape cascade (cancel → Select → clear selection → leave);
 segment-vs-rect) + rubber-band drag + overlay; **context-sensitive Onshape
 keymap** — sketch keys (`l c g a m o`, `Shift+f`; `h v n b t e d`; `q`,
 `Shift+s`) via `HandleSketchKeys`, model keys (`f` fit, `Shift+1..7` views,
-`Shift+p` planes) in ViewportInput. Detailed plan: CONSTRAINTS_PHASE_M.md.
+`Shift+p` planes) in ViewportInput. Detailed plan: phase-m.md.
 Deferred within M: model-context `n` normal-to and `Shift+s/e` new-sketch/extrude
 (need selected-face / feature plumbing) → fold into Phase N.
 
@@ -537,7 +537,7 @@ guard are the only fiddly bits.
 
 ## Phase N — Sketch UI polish, generative-op editing, alignment inference (~3–4 days) — SHIPPED (`08428cd`,`f0bb57a`,`0377737`,`606cb24`,`9f02de1`); follow-ups planned
 
-**Detailed implementation plan: [CONSTRAINTS_PHASE_N.md](CONSTRAINTS_PHASE_N.md).**
+**Detailed implementation plan: [phase-n.md](phase-n.md).**
 The five workstreams shipped: N5 point-alignment inference, N1 staged
 tool-prompt bar, N2 guided Mirror + preview, N3 Pattern/Offset ghost preview, N4
 full pattern-transform editing. (The "dock it, don't float it" half was already
@@ -563,7 +563,7 @@ constraint. Solver already supports the point-pair form
 Risk: medium — mostly UI/UX wiring. The only core/solver changes are the
 two-point H/V branch (N5, small) and an optional `DerivedKind::Offset`; the rest
 exposes params the model already stores or restructures ImGui panels. See
-[CONSTRAINTS_PHASE_N.md](CONSTRAINTS_PHASE_N.md) for the step-by-step.
+[phase-n.md](phase-n.md) for the step-by-step.
 
 ## Deferred / explicitly out of scope
 
@@ -638,9 +638,9 @@ construction + status/conflict management; generative: mirror/fillet/pattern/
 offset; interaction: select-default/Escape/box-select + Onshape keymap + icon
 toolbar). **Remaining:**
 - **Phase N** — UI staging, generative-op editing, and point-alignment inference
-  ([CONSTRAINTS_PHASE_N.md](CONSTRAINTS_PHASE_N.md)). The last sketch milestone.
+  ([phase-n.md](phase-n.md)). The last sketch milestone.
 - **B-splines** — Phase L's second half, planned in
-  [CONSTRAINTS_PHASE_L.md](CONSTRAINTS_PHASE_L.md), awaiting review.
+  [phase-l.md](phase-l.md), awaiting review.
 - **Follow-ups** (see Deferred): ellipse full constrainability, offset as a
   regenerating DerivedOp, extend/transform tools, convenience primitives.
 

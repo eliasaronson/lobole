@@ -234,7 +234,7 @@ first/last params). New; the mirror image of `MakeLoopWire`.
 - Independent commits; build K1 → K2 → K3. Est ~4 days total.
 
 ## Plan-file bookkeeping
-- The original Phase K section (CONSTRAINTS_PLAN.md:392) assumed a derived-record
+- The original Phase K section (plan.md:392) assumed a derived-record
   for *all* ops. Update it to reflect the constraint-linked-primary approach
   (derived-record only for pattern), citing this file.
 - Phase K unblocks nothing downstream; L (splines) and M (interaction) remain.
