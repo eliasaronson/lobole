@@ -404,6 +404,25 @@ tangent arc + 2 Tangent/2 Coincident); Mirror/Fillet tools + Linked toggle +
 radius; `mirror`/`fillet` RPCs. Verified: filleted rectangle extrudes (vol
 matches analytic), linked mirror tracks a source edit through the solver.
 
+**K2 SHIPPED** (branch feat/mirror-fillet, commit `feat: sketch linear and
+circular pattern`): `sketch::DerivedOp` + `SketchFeature::RegenerateDerived()`
+(id-stable replay, SolveSpace remap discipline); `AddLinearPattern`/
+`AddCircularPattern` (bake or linked); serialization v7→v8 `derived_ops` +
+post-load regen; `RegenerateDerived` hooked into every edit-commit path so
+patterns follow their source; Pattern tool + live-editable count list;
+`pattern` RPC. Verified: plate with a linked row of 5 patterned holes extrudes
+(vol exact), count edit 4→6 regenerates id-stably through save/load. Note: a
+pre-existing `BuildPrism` limit (disjoint loops → outer+holes, not multi-body)
+means a bare row of circles won't extrude as separate solids.
+
+**K3 SHIPPED** (branch feat/mirror-fillet, commit `feat: sketch offset`):
+`SketchFeature::OffsetChain` + `sketch::OffsetLoop` (OCC
+`BRepOffsetAPI_MakeOffset`, Arc/Intersection join) + `EdgeToSketchEntity`
+reverse conversion (line/circle edge → sketch Line/Arc, CCW-correct); Offset
+tool + distance/round-corners; `offset` RPC; needs `TKOffset`. Verified: a
+rectangle offset outward with rounded corners extrudes to the analytic area.
+Offset is bake-only (not yet a regenerating DerivedOp). **Phase K COMPLETE.**
+
 Operations that *produce geometry from other geometry* — the one place a sketch
 genuinely wants "history." Placed after arcs because fillet and offset produce
 arcs. Each op supports **both modes, chosen by the user per invocation**:

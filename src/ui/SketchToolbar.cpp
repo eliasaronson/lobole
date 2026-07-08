@@ -99,6 +99,8 @@ void DrawSketchToolbar(AppState& state) {
   toolButton("Fillet", SketchTool::Fillet);
   ImGui::SameLine();
   toolButton("Pattern", SketchTool::Pattern);
+  ImGui::SameLine();
+  toolButton("Offset", SketchTool::Offset);
 
   // Generative-op controls.
   if (edit.tool == SketchTool::Mirror) {
@@ -138,6 +140,17 @@ void DrawSketchToolbar(AppState& state) {
     ImGui::BeginDisabled(edit.selected.empty());
     if (ImGui::Button("Apply##pat"))
       ApplyPattern(state);
+    ImGui::EndDisabled();
+  } else if (edit.tool == SketchTool::Offset) {
+    ImGui::TextUnformatted("Offset: select a closed loop, set distance, Apply.");
+    ImGui::SetNextItemWidth(90);
+    ImGui::DragFloat("Distance##off", &edit.offsetDistance, 0.02f, -1e6f, 1e6f,
+                     "%.3f");
+    ImGui::SameLine();
+    ImGui::Checkbox("Round corners##off", &edit.offsetJoinArc);
+    ImGui::BeginDisabled(edit.selected.empty());
+    if (ImGui::Button("Apply##off"))
+      ApplyOffset(state);
     ImGui::EndDisabled();
   }
   if (!edit.actionMsg.empty())

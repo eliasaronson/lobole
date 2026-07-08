@@ -53,4 +53,13 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity);
 std::optional<float> SegmentIntersect(glm::vec2 a1, glm::vec2 b1, glm::vec2 a2,
                                       glm::vec2 b2);
 
+// Offsets a single closed loop formed by `chain` (lines + arcs) by `distance`
+// (signed) on the given plane, delegating corner treatment to OCCT
+// (BRepOffsetAPI_MakeOffset: `joinArc` = arcs at convex corners, else
+// extend/trim to the intersection). Returns the offset boundary as new sketch
+// entities in plane-UV, or empty on failure or if `chain` isn't one loop.
+std::vector<Entity> OffsetLoop(const SketchPlane& plane,
+                               const std::vector<Entity>& chain, double distance,
+                               bool joinArc);
+
 } // namespace sketch

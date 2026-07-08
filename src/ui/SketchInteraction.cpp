@@ -1289,6 +1289,45 @@ bool ApplyPattern(AppState& state) {
   return true;
 }
 
+bool ApplyOffset(AppState& state) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch)
+    return false;
+  auto& edit = state.sketchEdit;
+  std::vector<uint32_t> chain; // unique selected ids
+  for (const auto& r : edit.selected) {
+    bool seen = false;
+    for (uint32_t s : chain)
+      seen |= (s == r.entity);
+    if (!seen)
+      chain.push_back(r.entity);
+  }
+  if (chain.empty()) {
+    edit.actionMsg = "Offset: select a closed loop (its edges) first.";
+    return false;
+  }
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  auto gen = sketch->OffsetChain(chain, edit.offsetDistance, edit.offsetJoinArc);
+  if (gen.empty()) {
+    edit.actionMsg =
+        "Offset: the selection must form a single closed loop.";
+    return false;
+  }
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch->entities);
+  sketch->RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  edit.actionMsg.clear();
+  return true;
+}
+
 bool SetPatternCount(AppState& state, size_t opIndex, int count) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);

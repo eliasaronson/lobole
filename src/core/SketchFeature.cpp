@@ -651,3 +651,18 @@ SketchFeature::AddCircularPattern(const std::vector<uint32_t>& sourceIds,
     gen.push_back(in.genId);
   return gen;
 }
+
+std::vector<uint32_t>
+SketchFeature::OffsetChain(const std::vector<uint32_t>& chainIds,
+                           double distance, bool joinArc) {
+  std::vector<uint32_t> gen;
+  std::vector<sketch::Entity> chain;
+  for (uint32_t id : chainIds) {
+    const size_t i = IndexOfEntity(id);
+    if (i != std::numeric_limits<size_t>::max())
+      chain.push_back(entities[i]);
+  }
+  for (auto& e : sketch::OffsetLoop(plane, chain, distance, joinArc))
+    gen.push_back(AddEntity(e));
+  return gen;
+}

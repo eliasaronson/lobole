@@ -100,4 +100,9 @@ bool ApplyPattern(AppState& state);
 // sketch, regenerates, and commits one undoable edit.
 bool SetPatternCount(AppState& state, size_t opIndex, int count);
 
+// Offsets the selected closed loop by the offset params in SketchEditState and
+// commits one undoable edit. Returns false if nothing is selected or the
+// selection isn't a single closed loop.
+bool ApplyOffset(AppState& state);
+
 } // namespace ui

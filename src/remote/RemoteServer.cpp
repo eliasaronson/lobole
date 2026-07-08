@@ -352,12 +352,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json::object();
   }
-  if (m == "mirror" || m == "fillet" || m == "pattern") {
+  if (m == "mirror" || m == "fillet" || m == "pattern" || m == "offset") {
     // Generative op on a sketch (by id), solve, and commit one edit.
     // mirror params:  {sketch_id, sources:[id,...], axis:lineId, link?}
     // fillet params:  {sketch_id, line1, line2, radius}
     // pattern params: {sketch_id, sources:[id,...], count, link?,
     //                  circular?, step:[dx,dy] | center:[x,y], angle}
+    // offset params:  {sketch_id, chain:[id,...], distance, join_arc?}
     size_t index = 0;
     Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
@@ -387,6 +388,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         result["generated"] = sk->AddLinearPattern(
             sources, {s[0].get<float>(), s[1].get<float>()}, count, link);
       }
+    } else if (m == "offset") {
+      std::vector<uint32_t> chain;
+      for (const auto& s : p.at("chain"))
+        chain.push_back(s.get<uint32_t>());
+      result["generated"] = sk->OffsetChain(
+          chain, p.at("distance").get<double>(), p.value("join_arc", true));
     } else {
       result["arc_id"] =
           sk->FilletCorner(p.at("line1").get<uint32_t>(),

@@ -133,6 +133,28 @@ TEST_CASE("A half-disk (diameter line + semicircle arc) extrudes",
   CHECK_THAT(prism.Volume(), WithinRel(0.5 * M_PI * 1.0 * 1.0 * 3.0, 1e-3));
 }
 
+TEST_CASE("Offset expands a rectangle loop with rounded corners",
+          "[extrude][offset]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  auto rect = sk.AddRectangle({0, 0}, {4, 2});
+  std::vector<uint32_t> chain(rect.begin(), rect.end());
+  const double d = 0.5;
+  auto gen = sk.OffsetChain(chain, d, /*joinArc=*/true);
+  REQUIRE(!gen.empty());
+  // Extrude just the offset boundary (not the original rect).
+  std::vector<sketch::Entity> offsetEnts;
+  for (uint32_t id : gen)
+    offsetEnts.push_back(sk.entities[sk.IndexOfEntity(id)]);
+  auto loops = sketch::BuildLoops(offsetEnts);
+  REQUIRE(loops.size() == 1);
+  CADShape prism = sketch::BuildPrism(kXY, loops, 1.0, false);
+  REQUIRE(prism.IsValid());
+  // Outward offset by d: area = rect + perimeter*d + a full disc of radius d
+  // (the four quarter-arc corners), height 1.
+  const double area = 8.0 + 2.0 * d * (4.0 + 2.0) + M_PI * d * d;
+  CHECK_THAT(prism.Volume(), WithinRel(area, 1e-2));
+}
+
 TEST_CASE("Rectangle with an inner circle extrudes with a hole", "[extrude]") {
   std::vector<sketch::Entity> e = RectLines({0, 0}, {4, 2});
   e.push_back(sketch::Circle{{2, 1}, 0.5});

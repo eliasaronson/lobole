@@ -44,7 +44,8 @@ enum class SketchTool {
   ArcThreePoint, // 3-click start → end → through-point
   Mirror,        // reflect the current selection across a clicked axis line
   Fillet,        // round the clicked corner where two lines meet
-  Pattern        // linear/circular array of the current selection
+  Pattern,       // linear/circular array of the current selection
+  Offset         // offset the selected closed loop by a distance
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -72,6 +73,10 @@ struct SketchEditState {
   glm::vec2 patternStep{2.0f, 0.0f}; // linear per-step translation
   glm::vec2 patternCenter{0.0f};     // circular centre
   float patternAngleDeg = 60.0f;     // circular step angle
+
+  // Offset tool params (applied to the selected closed loop).
+  float offsetDistance = 0.5f;
+  bool offsetJoinArc = true; // arcs at convex corners (else extend/trim)
 
   // Transient feedback shown in the toolbar (e.g. why a fillet no-op'd), so
   // operations that can silently fail tell the user what happened.

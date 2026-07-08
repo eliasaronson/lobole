@@ -400,6 +400,14 @@ public:
   AddCircularPattern(const std::vector<uint32_t>& sourceIds, glm::vec2 center,
                      double stepAngle, int count, bool link);
 
+  // Offsets the closed loop formed by `chainIds` by `distance` (signed; corner
+  // treatment via `joinArc` — arcs at convex corners, else extend/trim),
+  // appending the offset boundary as new entities and returning their ids.
+  // Empty if the chain isn't a single closed loop or OCC fails. Always bakes
+  // (unlinked); offset is not yet a regenerating DerivedOp.
+  std::vector<uint32_t> OffsetChain(const std::vector<uint32_t>& chainIds,
+                                    double distance, bool joinArc);
+
   // Replays every linked DerivedOp: recomputes each generated entity from its
   // (current) source, keeping generated ids stable — reusing the entity for a
   // surviving (source, k), creating new ones when count grows, deleting the

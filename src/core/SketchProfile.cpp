@@ -6,8 +6,12 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
 #include <GC_MakeSegment.hxx>
+#include <GeomAbs_CurveType.hxx>
 #include <ShapeFix_Wire.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
@@ -299,6 +303,74 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity) {
       },
       entity);
   return points;
+}
+
+namespace {
+// Converts one OCCT edge (line or circle) back to a plane-UV sketch entity.
+std::optional<Entity> EdgeToSketchEntity(const TopoDS_Edge& edge,
+                                         const SketchPlane& plane) {
+  BRepAdaptor_Curve curve(edge);
+  auto toUV = [&](const gp_Pnt& p) {
+    return plane.WorldToPlane(glm::vec3(p.X(), p.Y(), p.Z()));
+  };
+  const double f = curve.FirstParameter(), l = curve.LastParameter();
+  const glm::vec2 uv1 = toUV(curve.Value(f)), uv2 = toUV(curve.Value(l));
+  if (curve.GetType() == GeomAbs_Line) {
+    if (glm::length(uv2 - uv1) < 1e-7f)
+      return std::nullopt; // degenerate
+    return Line{uv1, uv2};
+  }
+  if (curve.GetType() == GeomAbs_Circle) {
+    const gp_Circ circ = curve.Circle();
+    const glm::vec2 c = toUV(circ.Location());
+    const double r = circ.Radius();
+    const glm::vec2 mid = toUV(curve.Value(0.5 * (f + l)));
+    auto ang = [&](glm::vec2 p) {
+      return std::atan2(p.y - c.y, p.x - c.x);
+    };
+    auto wrap = [](double x) {
+      while (x < 0)
+        x += 2.0 * M_PI;
+      while (x >= 2.0 * M_PI)
+        x -= 2.0 * M_PI;
+      return x;
+    };
+    const double a1 = ang(uv1), a2 = ang(uv2), am = ang(mid);
+    const double sweep = wrap(a2 - a1);       // CCW a1 → a2
+    if (wrap(am - a1) <= sweep)               // midpoint lies on that span
+      return Arc{c, r, a1, a1 + sweep};
+    return Arc{c, r, a2, a2 + (2.0 * M_PI - sweep)}; // the other way (CCW)
+  }
+  return std::nullopt; // other curve types not represented in sketches
+}
+} // namespace
+
+std::vector<Entity> OffsetLoop(const SketchPlane& plane,
+                               const std::vector<Entity>& chain, double distance,
+                               bool joinArc) {
+  std::vector<Entity> out;
+  if (std::abs(distance) < 1e-9)
+    return out;
+  auto loops = BuildLoops(chain);
+  if (loops.size() != 1)
+    return out; // need exactly one closed loop
+  TopoDS_Wire wire = MakeLoopWire(plane, loops[0]);
+  if (wire.IsNull())
+    return out;
+  try {
+    BRepOffsetAPI_MakeOffset mk(
+        wire, joinArc ? GeomAbs_Arc : GeomAbs_Intersection);
+    mk.Perform(distance);
+    if (!mk.IsDone())
+      return out;
+    for (TopExp_Explorer ex(mk.Shape(), TopAbs_EDGE); ex.More(); ex.Next())
+      if (auto e = EdgeToSketchEntity(TopoDS::Edge(ex.Current()), plane))
+        out.push_back(*e);
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Sketch offset: OCCT error: {}", e.GetMessageString());
+    out.clear();
+  }
+  return out;
 }
 
 std::optional<float> SegmentIntersect(glm::vec2 a1, glm::vec2 b1, glm::vec2 a2,

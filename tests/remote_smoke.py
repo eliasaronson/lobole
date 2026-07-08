@@ -233,6 +233,24 @@ def main():
         st2 = d.call("get_state")["features"][0]
         expect(len(st2["entities"]) == 6, "editing count regenerated the pattern")
 
+        # Offset a rectangle loop outward with rounded corners → 4 lines + 4 arcs.
+        d.call("new_project")
+        sko = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch O",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [0, 0], "b": [4, 0]},
+                         {"type": "line", "a": [4, 0], "b": [4, 2]},
+                         {"type": "line", "a": [4, 2], "b": [0, 2]},
+                         {"type": "line", "a": [0, 2], "b": [0, 0]}]})
+        oc = d.call("offset", sketch_id=sko["id"], chain=sko["entity_ids"],
+                    distance=0.5, join_arc=True)
+        oents = d.call("get_state")["features"][0]["entities"]
+        newkinds = [e["type"] for e in oents if e["id"] in oc["generated"]]
+        expect(len(oc["generated"]) == 8, "offset made 4 lines + 4 corner arcs")
+        expect(newkinds.count("arc") == 4 and newkinds.count("line") == 4,
+               "offset boundary is lines + rounded-corner arcs")
+
         # Screenshot: the controller can see what the user sees
         d.call("new_project")
         sk = d.call("add_feature", feature={
