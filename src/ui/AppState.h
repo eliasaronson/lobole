@@ -74,6 +74,10 @@ struct SketchEditState {
   bool linkGenerative = true;
   float filletRadius = 0.5f;
 
+  // Mirror tool is two-step: collect geometry (false), then pick the axis
+  // (true). Enter advances; Escape backs out. Selection carries the sources.
+  bool mirrorAxisPhase = false;
+
   // Pattern tool params (applied to the current selection).
   bool patternCircular = false;
   int patternCount = 3;

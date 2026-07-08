@@ -906,10 +906,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     ui::SketchEditState m;
     m.tool = ui::SketchTool::Mirror;
-    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 1);      // no selection yet
+    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 1);      // collecting geometry
     IM_CHECK_EQ(ui::SketchToolPrompt(m).stepCount, 2);
-    m.selected.push_back({1, 0});
-    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 2);      // selection made
+    m.mirrorAxisPhase = true;
+    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 2);      // axis-pick step
 
     ui::SketchEditState el;
     el.tool = ui::SketchTool::Ellipse;
@@ -917,6 +917,52 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     el.hasPendingPoint2 = true;
     IM_CHECK_EQ(ui::SketchToolPrompt(el).step, 3);     // third click
     IM_CHECK_EQ(ui::SketchToolPrompt(el).stepCount, 3);
+  };
+
+  // Guided mirror (N2): select geometry in-tool, Enter, then click the axis.
+  t = IM_REGISTER_TEST(engine, "mirror", "guided_flow");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::Line{{0.5f, 0.6f}, {1.5f, 0.6f}}); // geometry to mirror
+    sk->AddEntity(sketch::Line{{0.0f, -1.0f}, {0.0f, 1.0f}}); // vertical axis
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const size_t n0 = sk->entities.size(); // 2
+    s_App->sketchEdit.tool = ui::SketchTool::Mirror;
+    s_App->sketchEdit.mirrorAxisPhase = false;
+    s_App->sketchEdit.selected.clear();
+
+    // Step 1: click the geometry line's midpoint to select it.
+    glm::vec2 g = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.0f, 0.6f));
+    ctx->MouseMoveToPos(ImVec2(g.x, g.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.selected.empty());
+
+    // Enter advances to the axis-pick step.
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.mirrorAxisPhase);
+
+    // Step 2: click the axis line → the mirror runs and adds a copy.
+    glm::vec2 ax = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, 0.0f));
+    ctx->MouseMoveToPos(ImVec2(ax.x, ax.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk->entities.size() > n0); // a mirrored copy was added
   };
 
   // With auto-constrain off, no constraints are inferred.

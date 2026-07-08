@@ -318,6 +318,7 @@ static void HandleSketchKeys(AppState& state) {
   auto setTool = [&](SketchTool t) {
     edit.tool = t;
     edit.hasPendingPoint = edit.hasPendingPoint2 = false;
+    edit.mirrorAxisPhase = false;
     edit.actionMsg.clear();
   };
 
@@ -453,8 +454,11 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.hasPendingPoint = false;
       edit.hasPendingPoint2 = false;
       edit.boxActive = false;
+    } else if (edit.tool == SketchTool::Mirror && edit.mirrorAxisPhase) {
+      edit.mirrorAxisPhase = false; // axis-pick → back to collecting geometry
     } else if (edit.tool != SketchTool::Select) {
       edit.tool = SketchTool::Select;
+      edit.mirrorAxisPhase = false;
       edit.actionMsg.clear();
     } else if (!edit.selected.empty()) {
       edit.selected.clear();
@@ -630,22 +634,38 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   };
 
   if (edit.tool == SketchTool::Mirror) {
-    // Sources = the current selection; the clicked line is the mirror axis.
     SketchPick hover =
         PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y), 12.0f);
     edit.hasHover = hover.hit;
     if (hover.hit)
       edit.hoveredRef = hover.ref;
+
+    if (!edit.mirrorAxisPhase) {
+      // Step 1 — collect the geometry to mirror. A click toggles the whole
+      // entity in the selection; Enter advances to the axis pick.
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
+        bool removed = false;
+        for (size_t i = edit.selected.size(); i-- > 0;)
+          if (edit.selected[i].entity == hover.ref.entity) {
+            edit.selected.erase(edit.selected.begin() + i);
+            removed = true;
+          }
+        if (!removed)
+          edit.selected.push_back({hover.ref.entity, 0});
+      }
+      if (ImGui::IsKeyPressed(ImGuiKey_Enter) && !edit.selected.empty())
+        edit.mirrorAxisPhase = true;
+      return true;
+    }
+
+    // Step 2 — click a line (drawn or construction) to mirror across.
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
       const size_t ei = sketch->IndexOfEntity(hover.ref.entity);
       const bool isLine =
           ei != SIZE_MAX &&
           std::holds_alternative<sketch::Line>(sketch->entities[ei]);
-      if (edit.selected.empty()) {
-        edit.actionMsg = "Mirror: select the geometry to mirror first "
-                         "(Select tool, Ctrl+click for multiple).";
-      } else if (!isLine) {
-        edit.actionMsg = "Mirror: click a line to use as the mirror axis.";
+      if (!isLine) {
+        edit.actionMsg = "Mirror: the axis must be a line.";
       } else {
         std::vector<uint32_t> sources; // unique selected ids, minus the axis
         for (const auto& r : edit.selected) {
@@ -657,11 +677,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           if (!seen)
             sources.push_back(r.entity);
         }
-        if (!sources.empty()) {
+        if (sources.empty()) {
+          edit.actionMsg = "Mirror: pick an axis other than the selected "
+                           "geometry.";
+        } else {
           nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
           sketch->MirrorEntities(sources, hover.ref.entity, edit.linkGenerative);
           commitMutation(before);
           edit.selected.clear();
+          edit.mirrorAxisPhase = false;
           edit.actionMsg.clear();
           edit.tool = SketchTool::Select;
         }
@@ -783,11 +807,39 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 
 void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
   SketchEditState& edit = state.sketchEdit;
-  if (!edit.IsEditing() || !edit.hasPendingPoint)
+  if (!edit.IsEditing())
     return;
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (!sketch)
+    return;
+
+  // Mirror preview: in the axis-pick step, ghost each selected source reflected
+  // across the hovered line so the result is visible before committing.
+  if (edit.tool == SketchTool::Mirror && edit.mirrorAxisPhase && edit.hasHover) {
+    const size_t ax = sketch->IndexOfEntity(edit.hoveredRef.entity);
+    if (ax != SIZE_MAX) {
+      if (auto* axl = std::get_if<sketch::Line>(&sketch->entities[ax])) {
+        for (const auto& r : edit.selected) {
+          if (r.entity == edit.hoveredRef.entity)
+            continue;
+          const size_t si = sketch->IndexOfEntity(r.entity);
+          if (si == SIZE_MAX)
+            continue;
+          const sketch::Entity refl =
+              sketch::ReflectEntity(sketch->entities[si], axl->a, axl->b);
+          std::vector<glm::vec2> poly = sketch::TessellateEntity(refl);
+          for (size_t i = 0; i + 1 < poly.size(); i++) {
+            out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
+            out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
+          }
+        }
+      }
+    }
+    return; // no pending-point preview while picking a mirror axis
+  }
+
+  if (!edit.hasPendingPoint)
     return;
 
   const glm::vec2 a = edit.pendingPoint;
@@ -980,10 +1032,10 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     set("Trim", 0, 0, "click a segment to remove it");
     break;
   case T::Mirror:
-    set("Mirror", edit.selected.empty() ? 1 : 2, 2,
-        edit.selected.empty()
-            ? "select the geometry to mirror, then pick the axis"
-            : "click a line (or axis) to mirror across");
+    set("Mirror", edit.mirrorAxisPhase ? 2 : 1, 2,
+        edit.mirrorAxisPhase
+            ? "click a line to mirror across"
+            : "click geometry to mirror (Enter to continue)");
     break;
   case T::Fillet:
     set("Fillet", 0, 0, "click a corner where two lines meet");

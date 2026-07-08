@@ -75,6 +75,7 @@ void DrawSketchModeToolbar(AppState& state) {
     if (ImGui::Button(icon)) {
       edit.tool = t;
       edit.hasPendingPoint = edit.hasPendingPoint2 = false;
+      edit.mirrorAxisPhase = false;
       edit.actionMsg.clear();
     }
     if (active)
