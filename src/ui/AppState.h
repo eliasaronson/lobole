@@ -55,12 +55,18 @@ enum class SketchTool {
 struct SketchEditState {
   bool pickingPlane = false;   // "New Sketch" armed, waiting for a plane/face
   uint64_t activeSketchId = 0; // 0 = not editing a sketch
-  SketchTool tool = SketchTool::Line;
+  SketchTool tool = SketchTool::Select;
   bool hasPendingPoint = false; // first click of a two-click entity placed
   glm::vec2 pendingPoint{0.0f};
   bool hasPendingPoint2 = false; // second click of a 3-click tool (arcs)
   glm::vec2 pendingPoint2{0.0f};
   glm::vec2 hoverPoint{0.0f};
+
+  // Box (rubber-band) selection in progress (Select tool). Screen px; the
+  // window/crossing sense is boxEnd.x < boxStart.x (right→left = crossing).
+  bool boxActive = false;
+  glm::vec2 boxStart{0.0f};
+  glm::vec2 boxEnd{0.0f};
 
   // Generative ops (Mirror/Fillet): "linked" adds constraints tying the result
   // to its source so it tracks edits; unchecked bakes an unlinked copy.

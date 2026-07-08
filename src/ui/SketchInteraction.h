@@ -41,6 +41,11 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out);
 // snapping. Call once per frame from the UI pass.
 void DrawSnapGlyphs(AppState& state);
 
+// Draws the rubber-band selection rectangle while a box-select drag is active
+// (blue solid = window / left→right; green dashed = crossing / right→left).
+// No-op otherwise. Call once per frame from the UI pass.
+void DrawSelectionBox(AppState& state);
+
 // Draws dimension annotations (extension/dimension lines, arrows, value text)
 // for the active sketch's driving dimensions, and handles double-click-to-edit
 // their value. Call once per frame from the UI pass.

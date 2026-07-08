@@ -474,7 +474,18 @@ first within the phase.
 
 Unchanged: own milestone after A–K.
 
-## Phase M — Interaction & keyboard: select-default, Escape, shortcuts, box-select (~1.5 days)
+## Phase M — Interaction & keyboard: select-default, Escape, shortcuts, box-select (~1.5 days) — SHIPPED
+
+**SHIPPED** (branch feat/interaction-keyboard, commit `feat: sketch
+select-default, escape cascade, box-select + Onshape shortcuts`): Select is the
+default tool; Escape cascade (cancel → Select → clear selection → leave);
+`core/SketchSelection::BoxSelect` (pure window/crossing hit-test with
+segment-vs-rect) + rubber-band drag + overlay; **context-sensitive Onshape
+keymap** — sketch keys (`l c g a m o`, `Shift+f`; `h v n b t e d`; `q`,
+`Shift+s`) via `HandleSketchKeys`, model keys (`f` fit, `Shift+1..7` views,
+`Shift+p` planes) in ViewportInput. Detailed plan: CONSTRAINTS_PHASE_M.md.
+Deferred within M: model-context `n` normal-to and `Shift+s/e` new-sketch/extrude
+(need selected-face / feature plumbing) → fold into Phase N.
 
 Sketcher UX polish, placed last so shortcuts can cover *every* tool and
 constraint. The core parts (select-default, Escape, box-select) don't depend on
@@ -511,6 +522,51 @@ all tools present.
 
 Risk: low — mostly wiring; the box hit-test (pure) and the WantTextInput key
 guard are the only fiddly bits.
+
+## Phase N — Sketch UI redesign + generative-op editing (~3–4 days)
+
+The sketch toolbar grew organically into a tall **floating** ImGui window with
+every tool, constraint, status readout, and generative control stacked in it.
+It needs a real redesign, and the multi-step tools (mirror/pattern/offset) need
+staged guidance instead of terse hint text. Deferred here (from Phase K) because
+it's a UI concern, not a modelling one, and wants doing once across all tools.
+
+- **Dock the sketch UI, don't float it.** Fold the sketch tools into the app's
+  docking layout (a proper docked panel / contextual toolbar that appears on
+  sketch-edit and shares the frame), matching the Model/Properties panels rather
+  than a stray `Begin("Sketch Tools")` window. Group: draw tools · constraints ·
+  generative · status. Consider a compact tool strip + a context panel for the
+  active tool's options.
+- **Staged, guided multi-step tools.** Tools that take more than one kind of
+  input should show explicit steps and progress, not one line of hint text:
+  - *Mirror*: "Step 1 — select geometry to mirror" → "Step 2 — click the mirror
+    axis line", with the current selection highlighted distinctly from the axis,
+    a live preview of the reflected result, and a cancel/confirm. (Today it
+    silently relies on a prior selection + a hint string.)
+    - Also let a mirror axis be a **construction line or the plane X/Y axes**,
+      not only a drawn line (the K1 rough edge).
+  - *Pattern* / *Offset*: a small inline form for the params with a live ghost
+    preview before commit, and clearer "select the loop / geometry first"
+    staging.
+  - A shared "tool prompt / step" area (supersedes the ad-hoc
+    `SketchEditState::actionMsg`), so every tool reports what it wants next and
+    why a click did nothing.
+- **Generative-op parameter editing (the deferred K editing).** The Patterns
+  panel currently edits only `count`. Expose the full transform: linear
+  spacing/direction, circular centre/angle, and link/unlink — with an
+  `EditPatternParams`-style commit alongside `SetPatternCount`. Add a
+  first-class **edit-fillet-radius** affordance (today you must add a Radius
+  dimension to the fillet arc). Optionally, make **offset a linked DerivedOp** so
+  its distance is editable too (K3 shipped it bake-only).
+- **Selected-op inspector.** Clicking a generated/derived entity (or the op in a
+  list) surfaces its op's params for editing — the natural home for the above.
+- Tests: GUI coverage for the staged mirror flow (select → axis → preview →
+  commit) and pattern param edits regenerating; the pure param-edit commit
+  (`EditPatternParams`) unit-tested like `SetPatternCount`.
+
+Risk: medium — mostly UI/UX work and wiring; the docking integration and a
+clean tool-state machine (per-tool staged input) are the substance. No new
+modelling core beyond exposing params the DerivedOp already stores.
 
 ## Deferred / explicitly out of scope
 

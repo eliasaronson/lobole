@@ -4,6 +4,7 @@
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "MeshRenderer.h"
+#include "ui/AppActions.h"
 #include "ui/SketchInteraction.h"
 
 #include "imgui.h"
@@ -137,6 +138,31 @@ void HandleViewportInput(AppState& state) {
 
     if (ImGui::IsKeyPressed(ImGuiKey_Z)) {
       state.camera->Zoom(io.KeyShift ? -5.0 : 5.0);
+    }
+    // Onshape view keys. `f` (zoom to fit) works in any context; standard views,
+    // plane toggle, etc. are model-context so they don't fight the sketch keymap
+    // (e.g. `n` = Coincident while sketching, handled in HandleSketchViewport).
+    if (!io.KeyShift && !io.KeyCtrl && !io.KeyAlt &&
+        ImGui::IsKeyPressed(ImGuiKey_F))
+      FitCameraToDocument(state);
+
+    const bool modelCtx = !state.sketchEdit.IsEditing();
+    if (modelCtx && io.KeyShift) {
+      if (ImGui::IsKeyPressed(ImGuiKey_P))
+        state.showPlanes = !state.showPlanes; // Shift+P: hide/show planes
+      // Shift+1..7: standard views (camera aligned along the axis normal;
+      // distance 0 keeps the current zoom).
+      auto view = [&](glm::vec3 n) {
+        state.camera->AlignToFace(glm::vec3(0.0f), n);
+      };
+      if (ImGui::IsKeyPressed(ImGuiKey_1)) view({0, 0, 1});   // Front
+      else if (ImGui::IsKeyPressed(ImGuiKey_2)) view({0, 0, -1}); // Back
+      else if (ImGui::IsKeyPressed(ImGuiKey_3)) view({-1, 0, 0}); // Left
+      else if (ImGui::IsKeyPressed(ImGuiKey_4)) view({1, 0, 0});  // Right
+      else if (ImGui::IsKeyPressed(ImGuiKey_5)) view({0, 1, 0});  // Top
+      else if (ImGui::IsKeyPressed(ImGuiKey_6)) view({0, -1, 0}); // Bottom
+      else if (ImGui::IsKeyPressed(ImGuiKey_7))
+        view(glm::normalize(glm::vec3(1, 1, 1))); // Isometric
     }
   }
 

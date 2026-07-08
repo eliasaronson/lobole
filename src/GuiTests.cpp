@@ -647,6 +647,104 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(arcs, 1);
   };
 
+  // A new sketch defaults to the Select tool; letter keys switch tools (Onshape
+  // keymap: g = rectangle, m = trim).
+  t = IM_REGISTER_TEST(engine, "keys", "tool_switch");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select); // default
+    ctx->KeyPress(ImGuiKey_L);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Line);
+    ctx->KeyPress(ImGuiKey_G);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Rectangle);
+    ctx->KeyPress(ImGuiKey_M);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Trim);
+  };
+
+  // `h` applies Horizontal to the current selection (constraint keymap).
+  t = IM_REGISTER_TEST(engine, "keys", "constraint_on_selection");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t l = sk->AddEntity(sketch::Line{{0, 0}, {4, 0.5f}}); // slightly tilted
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    s_App->sketchEdit.selected = {{l, 0}};
+    ctx->KeyPress(ImGuiKey_H);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    int nh = 0;
+    for (const auto& c : sk->constraints)
+      if (c.kind == sketch::ConstraintKind::Horizontal)
+        nh++;
+    IM_CHECK_EQ(nh, 1);
+    const auto& ln = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(l)]);
+    IM_CHECK(std::abs(ln.a.y - ln.b.y) < 1e-3f); // solved flat
+  };
+
+  // Dragging a box over empty space selects the entities it encloses (window).
+  t = IM_REGISTER_TEST(engine, "select", "box_selects_enclosed");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::Line{{0, 0}, {1, 0}});
+    sk->AddEntity(sketch::Line{{0, 1}, {1, 1}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    // Box corners in empty space (well off the geometry) enclosing both lines.
+    glm::vec2 a = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1, -1));
+    glm::vec2 b = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2, 2));
+    ctx->MouseMoveToPos(ImVec2(a.x, a.y));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(b.x, b.y));
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)2);
+  };
+
+  // Escape backs out one level per press: tool → clear selection → leave edit.
+  t = IM_REGISTER_TEST(engine, "select", "escape_cascade");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    uint32_t l = sk->AddEntity(sketch::Line{{0, 0}, {1, 0}});
+    s_App->sketchEdit.tool = ui::SketchTool::Circle;
+    s_App->sketchEdit.selected = {{l, 0}};
+    ctx->KeyPress(ImGuiKey_Escape); // 1: tool → Select
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+    IM_CHECK(!s_App->sketchEdit.selected.empty());
+    ctx->KeyPress(ImGuiKey_Escape); // 2: clear selection
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.selected.empty());
+    IM_CHECK(s_App->sketchEdit.IsEditing());
+    ctx->KeyPress(ImGuiKey_Escape); // 3: leave sketch edit
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+  };
+
   // Drawing a near-horizontal line auto-adds a Horizontal constraint and snaps
   // it flat.
   t = IM_REGISTER_TEST(engine, "infer", "horizontal_snaps");

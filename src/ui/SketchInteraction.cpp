@@ -8,6 +8,7 @@
 #include "core/SketchFeature.h"
 #include "core/SketchInference.h"
 #include "core/SketchProfile.h"
+#include "core/SketchSelection.h"
 #include "core/SketchSolver.h"
 
 #include "imgui.h"
@@ -297,6 +298,74 @@ uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
   return id;
 }
 
+// Sketch-context keyboard shortcuts (Onshape keymap). Called each frame while a
+// sketch is being edited. Guarded so keys never fire while typing in a field or
+// during a Ctrl/Alt chord (undo/redo).
+static void HandleSketchKeys(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  ImGuiIO& io = ImGui::GetIO();
+  if (io.WantTextInput || io.KeyCtrl || io.KeyAlt || io.KeySuper)
+    return;
+  const bool shift = io.KeyShift;
+
+  auto setTool = [&](SketchTool t) {
+    edit.tool = t;
+    edit.hasPendingPoint = edit.hasPendingPoint2 = false;
+    edit.actionMsg.clear();
+  };
+
+  if (shift) {
+    if (ImGui::IsKeyPressed(ImGuiKey_F))
+      setTool(SketchTool::Fillet); // Shift+F: Fillet
+    else if (ImGui::IsKeyPressed(ImGuiKey_S))
+      edit.autoConstrain = !edit.autoConstrain; // Shift+S: suppress inferencing
+    return;
+  }
+
+  // Bare-key tools.
+  if (ImGui::IsKeyPressed(ImGuiKey_L)) return setTool(SketchTool::Line);
+  if (ImGui::IsKeyPressed(ImGuiKey_C)) return setTool(SketchTool::Circle);
+  if (ImGui::IsKeyPressed(ImGuiKey_G)) return setTool(SketchTool::Rectangle);
+  if (ImGui::IsKeyPressed(ImGuiKey_A)) return setTool(SketchTool::ArcThreePoint);
+  if (ImGui::IsKeyPressed(ImGuiKey_M)) return setTool(SketchTool::Trim);
+  if (ImGui::IsKeyPressed(ImGuiKey_O)) return setTool(SketchTool::Offset);
+
+  if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
+    edit.selected.clear();
+    return;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Q)) { // toggle construction on the selection
+    ToggleConstruction(state);
+    return;
+  }
+
+  // Constraints on the current selection.
+  if (edit.selected.empty())
+    return;
+  using K = sketch::ConstraintKind;
+  if (ImGui::IsKeyPressed(ImGuiKey_H)) return (void)ApplySketchConstraint(state, K::Horizontal, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_V)) return (void)ApplySketchConstraint(state, K::Vertical, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_N)) return (void)ApplySketchConstraint(state, K::Coincident, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_B)) return (void)ApplySketchConstraint(state, K::Parallel, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_T)) return (void)ApplySketchConstraint(state, K::Tangent, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_E)) return (void)ApplySketchConstraint(state, K::Equal, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_D) && edit.selected.size() >= 2) {
+    // Dimension: pin the current distance between the two selected points
+    // (double-click the label to edit the value — Phase G).
+    SketchFeature* sk = ResolveActiveSketch(state);
+    double v = 1.0;
+    if (sk) {
+      const size_t ia = sk->IndexOfEntity(edit.selected[0].entity);
+      const size_t ib = sk->IndexOfEntity(edit.selected[1].entity);
+      if (ia != SIZE_MAX && ib != SIZE_MAX)
+        v = glm::length(
+            sketch::EntityPointUV(sk->entities[ib], edit.selected[1].which) -
+            sketch::EntityPointUV(sk->entities[ia], edit.selected[0].which));
+    }
+    ApplySketchConstraint(state, K::Distance, v);
+  }
+}
+
 bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
                           bool overViewport) {
   SketchEditState& edit = state.sketchEdit;
@@ -363,13 +432,24 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   edit.hasCurrentSnap = false;
 
   if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    if (edit.hasPendingPoint || edit.hasPendingPoint2) {
+    // Back out one level per press: cancel an in-progress action → return to the
+    // Select tool → clear the selection → leave sketch edit.
+    if (edit.hasPendingPoint || edit.hasPendingPoint2 || edit.boxActive) {
       edit.hasPendingPoint = false;
       edit.hasPendingPoint2 = false;
-    } else
+      edit.boxActive = false;
+    } else if (edit.tool != SketchTool::Select) {
+      edit.tool = SketchTool::Select;
+      edit.actionMsg.clear();
+    } else if (!edit.selected.empty()) {
+      edit.selected.clear();
+    } else {
       edit = SketchEditState{}; // leave sketch edit
+    }
     return true;
   }
+
+  HandleSketchKeys(state); // Onshape sketch-context shortcuts
 
   if (!overViewport)
     return true;
@@ -445,8 +525,32 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         edit.selected.push_back(pick.ref);
         BeginDragSession(state, *sketch, index, pick, uv);
       } else {
-        edit.selected.clear();
+        // Missed geometry: start a rubber-band box (don't clear yet — a plain
+        // click clears on release).
+        edit.boxActive = true;
+        edit.boxStart = edit.boxEnd = mousePos;
       }
+    }
+    if (edit.boxActive && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+      edit.boxEnd = mousePos;
+    if (edit.boxActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+      const bool add = ImGui::GetIO().KeyCtrl;
+      if (glm::length(edit.boxEnd - edit.boxStart) < 4.0f) {
+        if (!add)
+          edit.selected.clear(); // tiny box == a plain empty click
+      } else {
+        const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
+        auto project = [&](glm::vec2 p) {
+          return SketchUVToScreen(state, sketch->plane, p);
+        };
+        auto ids = sketch::BoxSelect(sketch->entities, edit.boxStart,
+                                     edit.boxEnd, crossing, project);
+        if (!add)
+          edit.selected.clear();
+        for (uint32_t id : ids)
+          edit.selected.push_back({id, 0});
+      }
+      edit.boxActive = false;
     }
     if (state.sketchDrag.active && ImGui::IsMouseDown(ImGuiMouseButton_Left))
       UpdateDragSession(state, *sketch, uv);
@@ -689,6 +793,38 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
   for (size_t i = 0; i + 1 < poly.size(); i++) {
     out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
     out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
+  }
+}
+
+void DrawSelectionBox(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  if (!edit.IsEditing() || !edit.boxActive)
+    return;
+  if (glm::length(edit.boxEnd - edit.boxStart) < 2.0f)
+    return;
+  const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImVec2 a(std::min(edit.boxStart.x, edit.boxEnd.x),
+                 std::min(edit.boxStart.y, edit.boxEnd.y));
+  const ImVec2 b(std::max(edit.boxStart.x, edit.boxEnd.x),
+                 std::max(edit.boxStart.y, edit.boxEnd.y));
+  const ImU32 edge = crossing ? IM_COL32(110, 210, 130, 230)  // crossing: green
+                              : IM_COL32(90, 160, 255, 230);   // window: blue
+  const ImU32 fill = crossing ? IM_COL32(110, 210, 130, 40)
+                              : IM_COL32(90, 160, 255, 40);
+  dl->AddRectFilled(a, b, fill);
+  if (crossing) { // dashed outline for crossing (CAD convention)
+    const float dash = 6.0f;
+    for (float x = a.x; x < b.x; x += 2 * dash) {
+      dl->AddLine(ImVec2(x, a.y), ImVec2(std::min(x + dash, b.x), a.y), edge);
+      dl->AddLine(ImVec2(x, b.y), ImVec2(std::min(x + dash, b.x), b.y), edge);
+    }
+    for (float y = a.y; y < b.y; y += 2 * dash) {
+      dl->AddLine(ImVec2(a.x, y), ImVec2(a.x, std::min(y + dash, b.y)), edge);
+      dl->AddLine(ImVec2(b.x, y), ImVec2(b.x, std::min(y + dash, b.y)), edge);
+    }
+  } else {
+    dl->AddRect(a, b, edge);
   }
 }
 

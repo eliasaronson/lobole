@@ -75,6 +75,7 @@ void DrawUI(AppState& state) {
     // Auto-constraint snap indicator + ghost glyphs, and dimension annotations
     // (2D overlays).
     DrawSnapGlyphs(state);
+    DrawSelectionBox(state);
     DrawDimensions(state);
     DrawConstraintGlyphs(state);
   }
