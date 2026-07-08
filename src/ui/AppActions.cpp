@@ -14,6 +14,7 @@
 
 #include <cfloat>
 #include <filesystem>
+#include <cmath>
 #include <set>
 
 namespace ui {
@@ -313,13 +314,19 @@ void AppendPrimDashedLine(glm::vec3 a, glm::vec3 b, float halfPx,
                           const glm::vec4& color, std::vector<PrimVertex>& out) {
   glm::vec3 d = b - a;
   float len = glm::length(d);
-  if (len < 1e-6f)
-    return;
+  if (!std::isfinite(len) || len < 1e-6f)
+    return; // skip degenerate / non-finite (e.g. a solve that blew up)
   glm::vec3 dir = d / len;
-  const float dash = 0.15f, gap = 0.10f;
-  for (float t = 0.0f; t < len; t += dash + gap)
+  const float dash = 0.15f, gap = 0.10f, period = dash + gap;
+  // Cap the dash count: an under-constrained drag can fling a point to a huge
+  // coordinate, and an unbounded `t < len` loop would push billions of vertices
+  // and exhaust memory. Past the cap the (off-screen) line simply stops dashing.
+  const int n = std::min(4096, static_cast<int>(len / period) + 1);
+  for (int i = 0; i < n; i++) {
+    const float t = i * period;
     AppendPrimLine(a + dir * t, a + dir * std::min(t + dash, len), halfPx, color,
                    out);
+  }
 }
 
 // A constant-size dot (two triangles, SDF-round in the fragment shader).
