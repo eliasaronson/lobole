@@ -58,25 +58,23 @@ void Camera::UpdateProjectionMatrix() {
 }
 
 void Camera::Orbit(double deltaX, double deltaY) {
+    // Trackball orbit: yaw about the camera's current up, pitch about its right.
+    // Rotating around the camera's own basis (rather than converting to
+    // spherical coordinates about a fixed world-up) has no pole singularity, so
+    // the view never gimbal-locks or gets stuck near vertical.
     glm::vec3 toCamera = m_position - m_target;
-    float distance = glm::length(toCamera);
-    
-    // Convert to spherical coordinates
-    float theta = atan2(toCamera.z, toCamera.x);
-    float phi = acos(toCamera.y / distance);
-    
-    // Apply rotation
-    theta -= deltaX * m_orbitSensitivity;
-    phi -= deltaY * m_orbitSensitivity;
-    
-    // Clamp phi to avoid flipping
-    phi = std::clamp(phi, 0.01f, 3.14f - 0.01f);
-    
-    // Convert back to cartesian
-    m_position.x = m_target.x + distance * sin(phi) * cos(theta);
-    m_position.y = m_target.y + distance * cos(phi);
-    m_position.z = m_target.z + distance * sin(phi) * sin(theta);
-    
+    const glm::vec3 forward = glm::normalize(-toCamera);
+    const glm::vec3 right = glm::normalize(glm::cross(forward, m_up));
+    const glm::vec3 up = glm::normalize(glm::cross(right, forward));
+
+    const float yaw = -static_cast<float>(deltaX) * m_orbitSensitivity;
+    const float pitch = -static_cast<float>(deltaY) * m_orbitSensitivity;
+    const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), yaw, up) *
+                          glm::rotate(glm::mat4(1.0f), pitch, right);
+
+    toCamera = glm::vec3(rot * glm::vec4(toCamera, 0.0f));
+    m_up = glm::normalize(glm::vec3(rot * glm::vec4(up, 0.0f)));
+    m_position = m_target + toCamera;
     UpdateViewMatrix();
 }
 
