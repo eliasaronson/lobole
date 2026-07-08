@@ -612,6 +612,41 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(sk->entities.size(), (size_t)3); // preview didn't mutate
   };
 
+  // Fillet a right-angle corner via the UI path (pick corner → tangent arc).
+  t = IM_REGISTER_TEST(engine, "fillet", "fillet_corner_via_click");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t l1 = sk->AddEntity(sketch::Line{{4, 0}, {0, 0}});
+    uint32_t l2 = sk->AddEntity(sketch::Line{{0, 0}, {0, 4}});
+    sk->constraints.push_back(
+        {sketch::ConstraintKind::Coincident, {l1, 1}, {l2, 0}, 0.0});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+
+    s_App->sketchEdit.tool = ui::SketchTool::Fillet;
+    s_App->sketchEdit.filletRadius = 1.0f;
+    glm::vec2 corner = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0, 0));
+    ctx->MouseMoveToPos(ImVec2(corner.x, corner.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    int arcs = 0;
+    for (const auto& e : sk->entities)
+      if (std::holds_alternative<sketch::Arc>(e))
+        arcs++;
+    IM_CHECK_EQ(sk->entities.size(), (size_t)3); // 2 lines + fillet arc
+    IM_CHECK_EQ(arcs, 1);
+  };
+
   // Drawing a near-horizontal line auto-adds a Horizontal constraint and snaps
   // it flat.
   t = IM_REGISTER_TEST(engine, "infer", "horizontal_snaps");

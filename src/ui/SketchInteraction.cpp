@@ -514,9 +514,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.hoveredRef = hover.ref;
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
       const size_t ei = sketch->IndexOfEntity(hover.ref.entity);
-      if (ei != SIZE_MAX &&
-          std::holds_alternative<sketch::Line>(sketch->entities[ei]) &&
-          !edit.selected.empty()) {
+      const bool isLine =
+          ei != SIZE_MAX &&
+          std::holds_alternative<sketch::Line>(sketch->entities[ei]);
+      if (edit.selected.empty()) {
+        edit.actionMsg = "Mirror: select the geometry to mirror first "
+                         "(Select tool, Ctrl+click for multiple).";
+      } else if (!isLine) {
+        edit.actionMsg = "Mirror: click a line to use as the mirror axis.";
+      } else {
         std::vector<uint32_t> sources; // unique selected ids, minus the axis
         for (const auto& r : edit.selected) {
           if (r.entity == hover.ref.entity)
@@ -532,6 +538,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           sketch->MirrorEntities(sources, hover.ref.entity, edit.linkGenerative);
           commitMutation(before);
           edit.selected.clear();
+          edit.actionMsg.clear();
           edit.tool = SketchTool::Select;
         }
       }
@@ -559,8 +566,16 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
               lines.push_back(sketch::EntityId(e));
         if (lines.size() >= 2) {
           nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-          if (sketch->FilletCorner(lines[0], lines[1], edit.filletRadius))
+          if (sketch->FilletCorner(lines[0], lines[1], edit.filletRadius)) {
             commitMutation(before);
+            edit.actionMsg.clear();
+          } else {
+            edit.actionMsg =
+                "Fillet: radius " + std::to_string(edit.filletRadius) +
+                " doesn't fit this corner — try a smaller radius.";
+          }
+        } else {
+          edit.actionMsg = "Fillet: click a corner where two lines meet.";
         }
       }
     }

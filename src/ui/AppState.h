@@ -64,6 +64,10 @@ struct SketchEditState {
   // to its source so it tracks edits; unchecked bakes an unlinked copy.
   bool linkGenerative = true;
   float filletRadius = 0.5f;
+
+  // Transient feedback shown in the toolbar (e.g. why a fillet no-op'd), so
+  // operations that can silently fail tell the user what happened.
+  std::string actionMsg;
   int hoveredPlane = -1; // 0 Front / 1 Top / 2 Right while picking
 
   // Sketch-entity selection (for adding constraints), ordered.

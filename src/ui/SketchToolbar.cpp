@@ -73,6 +73,7 @@ void DrawSketchToolbar(AppState& state) {
       edit.tool = tool;
       edit.hasPendingPoint = false; // break any in-progress line chain
       edit.hasPendingPoint2 = false;
+      edit.actionMsg.clear();
     }
     if (active)
       ImGui::PopStyleColor();
@@ -110,6 +111,9 @@ void DrawSketchToolbar(AppState& state) {
     ImGui::DragFloat("Radius##fillet", &edit.filletRadius, 0.02f, 0.01f, 1e6f,
                      "%.3f");
   }
+  if (!edit.actionMsg.empty())
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "%s",
+                       edit.actionMsg.c_str());
 
   ImGui::Checkbox("Auto-constrain", &edit.autoConstrain);
   if (ImGui::IsItemHovered())
