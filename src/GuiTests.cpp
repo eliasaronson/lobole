@@ -848,6 +848,47 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(coincidentToTarget);
   };
 
+  // Ending a line under an existing point (shared X, far in Y) infers a
+  // two-point Vertical alignment constraint (Phase N5).
+  t = IM_REGISTER_TEST(engine, "infer", "endpoint_aligns_vertical");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t target = sk->AddEntity(sketch::Point{{1.5f, 1.8f}}); // shares X below
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Line;
+    s_App->sketchEdit.autoConstrain = true;
+
+    // Line from (-1.5,-1) to (1.5,-1): the end shares X (1.5) with the point but
+    // is well away in Y → vertical alignment, not coincident.
+    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -1.0f));
+    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.5f, -1.0f));
+    ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    bool verticalToTarget = false;
+    for (const auto& c : sk->constraints)
+      if (c.kind == sketch::ConstraintKind::Vertical &&
+          (c.a.entity == target || c.b.entity == target))
+        verticalToTarget = true;
+    IM_CHECK(verticalToTarget);
+  };
+
   // With auto-constrain off, no constraints are inferred.
   t = IM_REGISTER_TEST(engine, "infer", "toggle_suppresses");
   t->TestFunc = [](ImGuiTestContext* ctx) {

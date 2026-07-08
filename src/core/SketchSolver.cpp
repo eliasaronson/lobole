@@ -209,11 +209,15 @@ void Solver::Load(const SketchFeature& sketch) {
       if (a && b) im.sys.addConstraintP2PCoincident(*a, *b, tag++);
       break;
     case ConstraintKind::Horizontal:
-      if (im.lineOf.count(con.a.entity))
+      // Two-point form (both refs resolve to points): the pair shares a Y — used
+      // for point-to-point alignment. Otherwise the whole-line form.
+      if (a && b) im.sys.addConstraintHorizontal(*a, *b, tag++);
+      else if (im.lineOf.count(con.a.entity))
         im.sys.addConstraintHorizontal(im.lines[im.lineOf[con.a.entity]], tag++);
       break;
     case ConstraintKind::Vertical:
-      if (im.lineOf.count(con.a.entity))
+      if (a && b) im.sys.addConstraintVertical(*a, *b, tag++); // pair shares an X
+      else if (im.lineOf.count(con.a.entity))
         im.sys.addConstraintVertical(im.lines[im.lineOf[con.a.entity]], tag++);
       break;
     case ConstraintKind::Parallel:

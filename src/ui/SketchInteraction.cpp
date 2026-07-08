@@ -72,6 +72,13 @@ void SnapPointConstraints(const sketch::Snap& snap, uint32_t id, uint8_t which,
     out.push_back({K::Coincident, {id, which}, *snap.coincident, 0.0});
   else if (snap.pointOnLine)
     out.push_back({K::PointOnLine, {id, which}, {*snap.pointOnLine, 0}, 0.0});
+  // Axis alignment with another vertex (two-point form): shared X = Vertical,
+  // shared Y = Horizontal. Independent of coincident/point-on-line and of each
+  // other; ApplyInferred keeps each only if it further constrains the sketch.
+  if (snap.alignShareX)
+    out.push_back({K::Vertical, {id, which}, *snap.alignShareX, 0.0});
+  if (snap.alignShareY)
+    out.push_back({K::Horizontal, {id, which}, *snap.alignShareY, 0.0});
 }
 
 // Segment-level constraints implied by a line's end Snap (whole line = id).
@@ -870,6 +877,33 @@ void DrawSnapGlyphs(AppState& state) {
   const glm::vec2 p = SketchUVToScreen(state, sketch->plane, edit.currentSnap.uv);
   ImDrawList* dl = ImGui::GetForegroundDrawList();
   const ImU32 accent = IM_COL32(255, 220, 120, 255);
+
+  // Alignment guides: a dashed inference line from the shared vertex through the
+  // snapped point, extended a little past it (Onshape-style).
+  auto guide = [&](const std::optional<sketch::PointRef>& ref) {
+    if (!ref)
+      return;
+    const size_t idx = sketch->IndexOfEntity(ref->entity);
+    if (idx == SIZE_MAX)
+      return;
+    const glm::vec2 v = SketchUVToScreen(
+        state, sketch->plane, sketch::EntityPointUV(sketch->entities[idx], ref->which));
+    const glm::vec2 d = p - v;
+    const float len = glm::length(d);
+    if (len < 1e-3f)
+      return;
+    const glm::vec2 dir = d / len;
+    const float full = len + 24.0f;
+    const ImU32 col = IM_COL32(150, 190, 255, 200);
+    for (float t = 0.0f; t < full; t += 12.0f) {
+      const float t1 = std::min(t + 6.0f, full);
+      dl->AddLine(ImVec2(v.x + dir.x * t, v.y + dir.y * t),
+                  ImVec2(v.x + dir.x * t1, v.y + dir.y * t1), col, 1.5f);
+    }
+  };
+  guide(edit.currentSnap.alignShareX);
+  guide(edit.currentSnap.alignShareY);
+
   dl->AddCircle(ImVec2(p.x, p.y), 7.0f, accent, 0, 2.0f); // "grabbed" ring
 
   float gx = p.x + 12.0f, gy = p.y - 24.0f;

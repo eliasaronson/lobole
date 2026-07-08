@@ -25,6 +25,12 @@ struct Snap {
   glm::vec2 uv{0.0f};                   // the point, snapped (or unchanged)
   std::optional<PointRef> coincident;   // snap the point coincident to this
   std::optional<uint32_t> pointOnLine;  // else bind the point onto this line id
+  // Axis alignment with another vertex: the new point shares that vertex's X
+  // (vertical alignment → a two-point Vertical constraint) or Y (horizontal
+  // alignment → a two-point Horizontal constraint). Independent per axis and of
+  // the segment-level snaps below.
+  std::optional<PointRef> alignShareX;  // new point shares X with this vertex
+  std::optional<PointRef> alignShareY;  // new point shares Y with this vertex
   // Segment-level (only when a segment's other end is known):
   bool horizontal = false;
   bool vertical = false;

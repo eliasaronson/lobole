@@ -43,6 +43,40 @@ TEST_CASE("Coincident merges two endpoints", "[solver]") {
   CHECK_THAT(glm::length(l0b - l1a), WithinAbs(0.0f, 1e-5f));
 }
 
+TEST_CASE("Two-point Vertical/Horizontal aligns points on an axis",
+          "[solver][align]") {
+  // Point-to-point alignment (Phase N5): Vertical → shared X, Horizontal →
+  // shared Y. Both refs are points, so the solver takes the point-pair form.
+  SECTION("Vertical shares X") {
+    SketchFeature s = MakeSketch();
+    uint32_t p0 = s.AddEntity(sketch::Point{{0, 0}});
+    uint32_t p1 = s.AddEntity(sketch::Point{{2, 5}});
+    s.constraints.push_back(
+        {sketch::ConstraintKind::Vertical, {p0, 0}, {p1, 0}});
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.Solve().ok);
+    std::vector<sketch::Entity> out;
+    solver.WriteBack(out);
+    CHECK_THAT(std::get<sketch::Point>(out[0]).p.x,
+               WithinAbs(std::get<sketch::Point>(out[1]).p.x, 1e-5f));
+  }
+  SECTION("Horizontal shares Y") {
+    SketchFeature s = MakeSketch();
+    uint32_t p0 = s.AddEntity(sketch::Point{{0, 0}});
+    uint32_t p1 = s.AddEntity(sketch::Point{{2, 5}});
+    s.constraints.push_back(
+        {sketch::ConstraintKind::Horizontal, {p0, 0}, {p1, 0}});
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.Solve().ok);
+    std::vector<sketch::Entity> out;
+    solver.WriteBack(out);
+    CHECK_THAT(std::get<sketch::Point>(out[0]).p.y,
+               WithinAbs(std::get<sketch::Point>(out[1]).p.y, 1e-5f));
+  }
+}
+
 TEST_CASE("An ellipse centre is a solver point that Coincident moves",
           "[solver][ellipse]") {
   // The ellipse centre snaps onto a fixed anchor point; radii/rotation are

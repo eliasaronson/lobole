@@ -67,3 +67,64 @@ TEST_CASE("Infer excludes the entity being drawn", "[inference]") {
   CHECK_FALSE(s.coincident.has_value());
   CHECK_FALSE(s.pointOnLine.has_value());
 }
+
+TEST_CASE("Infer aligns a point to another vertex's X (vertical align)",
+          "[inference]") {
+  // A lone point at (3,5); cursor shares its X (0.05 UV off) but is far in Y.
+  std::vector<sketch::Entity> e = {sketch::Point{{3.0f, 5.0f}, 1}};
+  sketch::Snap s = sketch::InferPoint(e, {3.05f, -2.0f}, std::nullopt, 0, kScale);
+  CHECK_FALSE(s.coincident.has_value());
+  REQUIRE(s.alignShareX.has_value());
+  CHECK(s.alignShareX->entity == 1u);
+  CHECK_FALSE(s.alignShareY.has_value());
+  CHECK_THAT(s.uv.x, WithinAbs(3.0f, 1e-5f));  // X snapped to the vertex
+  CHECK_THAT(s.uv.y, WithinAbs(-2.0f, 1e-5f)); // Y left alone
+}
+
+TEST_CASE("Infer aligns a point to another vertex's Y (horizontal align)",
+          "[inference]") {
+  std::vector<sketch::Entity> e = {sketch::Point{{3.0f, 5.0f}, 1}};
+  sketch::Snap s = sketch::InferPoint(e, {-2.0f, 5.05f}, std::nullopt, 0, kScale);
+  REQUIRE(s.alignShareY.has_value());
+  CHECK(s.alignShareY->entity == 1u);
+  CHECK_FALSE(s.alignShareX.has_value());
+  CHECK_THAT(s.uv.y, WithinAbs(5.0f, 1e-5f));
+  CHECK_THAT(s.uv.x, WithinAbs(-2.0f, 1e-5f));
+}
+
+TEST_CASE("Infer aligns both axes to different vertices (rectangle corner)",
+          "[inference]") {
+  // Corner should line up under vertex A in X and beside vertex B in Y.
+  std::vector<sketch::Entity> e = {sketch::Point{{0.0f, 7.0f}, 1},
+                                   sketch::Point{{6.0f, 3.0f}, 2}};
+  sketch::Snap s = sketch::InferPoint(e, {0.1f, 3.1f}, std::nullopt, 0, kScale);
+  REQUIRE(s.alignShareX.has_value());
+  REQUIRE(s.alignShareY.has_value());
+  CHECK(s.alignShareX->entity == 1u); // X from A
+  CHECK(s.alignShareY->entity == 2u); // Y from B
+  CHECK_THAT(s.uv.x, WithinAbs(0.0f, 1e-5f));
+  CHECK_THAT(s.uv.y, WithinAbs(3.0f, 1e-5f));
+}
+
+TEST_CASE("Coincident wins over axis alignment", "[inference]") {
+  // Cursor near a vertex on both axes → the whole-point coincident snap, not a
+  // pair of alignments.
+  std::vector<sketch::Entity> e = {sketch::Point{{3.0f, 5.0f}, 1}};
+  sketch::Snap s = sketch::InferPoint(e, {3.05f, 5.05f}, std::nullopt, 0, kScale);
+  REQUIRE(s.coincident.has_value());
+  CHECK_FALSE(s.alignShareX.has_value());
+  CHECK_FALSE(s.alignShareY.has_value());
+}
+
+TEST_CASE("X alignment combines with a horizontal segment (close the rectangle)",
+          "[inference]") {
+  // Drawing from (6,3) toward a point that lines up under vertex V in X; the
+  // segment is also near-horizontal, so Y snaps flat to the start.
+  std::vector<sketch::Entity> e = {sketch::Point{{0.0f, 5.0f}, 1}};
+  sketch::Snap s =
+      sketch::InferPoint(e, {0.05f, 3.05f}, glm::vec2{6.0f, 3.0f}, 0, kScale);
+  REQUIRE(s.alignShareX.has_value()); // X aligned to V
+  CHECK(s.horizontal);                // segment flattened
+  CHECK_THAT(s.uv.x, WithinAbs(0.0f, 1e-5f));
+  CHECK_THAT(s.uv.y, WithinAbs(3.0f, 1e-5f)); // = start Y
+}
