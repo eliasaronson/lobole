@@ -839,6 +839,58 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
     return; // no pending-point preview while picking a mirror axis
   }
 
+  // Unique selected entity ids (used by the pattern/offset previews below).
+  auto uniqueSources = [&]() {
+    std::vector<uint32_t> ids;
+    for (const auto& r : edit.selected) {
+      bool seen = false;
+      for (uint32_t s : ids)
+        seen |= (s == r.entity);
+      if (!seen)
+        ids.push_back(r.entity);
+    }
+    return ids;
+  };
+  auto emitPoly = [&](const std::vector<glm::vec2>& poly) {
+    for (size_t i = 0; i + 1 < poly.size(); i++) {
+      out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i])));
+      out.push_back(LineVertex(sketch->plane.PlaneToWorld(poly[i + 1])));
+    }
+  };
+
+  // Pattern preview: ghost each generated instance for the current params.
+  if (edit.tool == SketchTool::Pattern && !edit.selected.empty()) {
+    for (uint32_t sid : uniqueSources()) {
+      const size_t si = sketch->IndexOfEntity(sid);
+      if (si == SIZE_MAX)
+        continue;
+      for (int k = 1; k < edit.patternCount; k++) {
+        const sketch::Entity inst =
+            edit.patternCircular
+                ? sketch::RotateEntity(sketch->entities[si], edit.patternCenter,
+                                       glm::radians(edit.patternAngleDeg) * k)
+                : sketch::TranslateEntity(sketch->entities[si],
+                                          static_cast<float>(k) * edit.patternStep);
+        emitPoly(sketch::TessellateEntity(inst));
+      }
+    }
+    return;
+  }
+
+  // Offset preview: ghost the offset of the selected closed loop.
+  if (edit.tool == SketchTool::Offset && !edit.selected.empty()) {
+    std::vector<sketch::Entity> chain;
+    for (uint32_t sid : uniqueSources()) {
+      const size_t si = sketch->IndexOfEntity(sid);
+      if (si != SIZE_MAX)
+        chain.push_back(sketch->entities[si]);
+    }
+    for (const auto& e : sketch::OffsetLoop(sketch->plane, chain,
+                                            edit.offsetDistance, edit.offsetJoinArc))
+      emitPoly(sketch::TessellateEntity(e));
+    return;
+  }
+
   if (!edit.hasPendingPoint)
     return;
 
