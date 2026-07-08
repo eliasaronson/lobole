@@ -8,7 +8,8 @@ feel unfinished: multi-step tools give no guidance, generative ops expose only
 **Status:** N5 (`08428cd`), N1 (`f0bb57a`), N2 (`0377737`), N3 (`606cb24`),
 N4-pattern-editing (`9f02de1`) shipped. **NF1 datum geometry** shipped
 (`0a28468` core + `3da51f3` picking): mirror across X/Y axes, snap to origin,
-vertical/horizontal to origin. Remaining: NF2 op inspector, NF3 edit-fillet-radius.
+vertical/horizontal to origin. **NF2** (pattern delete + selected-op highlight)
+and **NF3** (edit fillet/curve radius) shipped (`a8f184c`). Phase N complete.
 
 ## Current state (grounded in code)
 

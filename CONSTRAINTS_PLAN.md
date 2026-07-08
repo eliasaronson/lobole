@@ -546,9 +546,8 @@ done by the icon ribbon `8f7f457` + docked "Sketch" panel.)
 **Follow-ups:** **NF1 datum geometry — the origin point + X/Y axes — SHIPPED**
 (`0a28468`,`3da51f3`): mirror across an axis, snap to the origin, and
 vertical/horizontal-to-origin, all from one reference type (fixed solver points
-+ two axis lines; Symmetric/Coincident/two-point-H-V resolve datum refs). Then
-NF2 selected-op inspector and NF3 edit-fillet-radius (both small, planned in the
-phase doc).
++ two axis lines; Symmetric/Coincident/two-point-H-V resolve datum refs). **NF2** (pattern delete + selected-op highlight) and **NF3** (edit fillet/curve
+radius) shipped (`a8f184c`). **Phase N and all its follow-ups are complete.**
 
 Workstreams (full detail in the phase doc): **N1** tool state machine + a shared
 staged prompt bar (replaces `actionMsg`); **N2** guided Mirror (2-step, live
