@@ -5,6 +5,10 @@ UX polish plus the two editing/inference gaps that make the shipped features
 feel unfinished: multi-step tools give no guidance, generative ops expose only
 `count`, and drawing has no point-to-point alignment snapping.
 
+**Status:** N5 (`08428cd`), N1 (`f0bb57a`), N2 (`0377737`), N3 (`606cb24`),
+N4-pattern-editing (`9f02de1`) shipped. Remaining: the **follow-ups** below
+(datum geometry, op inspector, edit-fillet-radius).
+
 ## Current state (grounded in code)
 
 - **Sketch UI is already docked.** The old floating `Begin("Sketch Tools")`
@@ -128,3 +132,130 @@ commit; N5 can ship before or in parallel with the UI work.
 Medium, and mostly UI/UX wiring. The only core/solver changes are the two-point
 H/V branch (N5, tiny) and the optional `DerivedKind::Offset` (N3). Everything
 else exposes params the model already stores or restructures ImGui panels.
+
+---
+
+# N follow-ups (planned)
+
+Deferred from the N workstreams above. **NF1 is the big one** and the highest
+value: it is what every CAD sketcher leans on — mirror across an axis, and
+snap / align to the origin — and all of it falls out of one feature.
+
+## NF1 — Datum geometry: origin point + X/Y axes
+
+Today a sketch has no origin or axes you can pick, snap to, or mirror across —
+so "mirror across the Y axis" and "line this vertex up with the origin" (both
+extremely common) are impossible. Add the **datum set**: the origin point at
+(0,0) and the two axis lines (X = the +U direction through the origin, Y = +V),
+always present, never user-created or deletable. This single feature unlocks
+mirror-across-axis, snap-to-origin, align-H/V-to-origin, point-on-axis, and
+symmetric-about-axis — the whole family.
+
+### Model — datum references (not entities)
+The datums are **not** stored in `SketchFeature::entities`; they are constant
+references the solver, picking, inference, and mirror special-case. Reserve a
+high id block so `nextEntityId` (which grows from 1) can never collide:
+
+```
+constexpr uint32_t kDatumBase = 0xFFFFFF00;
+kOrigin = kDatumBase;      // point (0,0)
+kAxisX  = kDatumBase + 1;  // line (0,0)->(1,0):  which 0 = origin, which 1 = +U
+kAxisY  = kDatumBase + 2;  // line (0,0)->(0,1):  which 0 = origin, which 1 = +V
+```
+A small helper (`sketch::IsDatum(id)`, `sketch::DatumPointUV(ref)`,
+`sketch::DatumAxisEndpoints(id) -> (a,b)`) is the single source of truth for
+their geometry. **Integration caveat to thread everywhere:**
+`SketchFeature::IndexOfEntity(datumId)` returns `SIZE_MAX` (they aren't in the
+vector), so every site that resolves a ref by index — `MirrorEntities`,
+`RefUV`/`EntityPointUV` callers, drag, delete — must check `IsDatum` first and
+route to the datum helpers. Grep the `IndexOfEntity(... .entity)` call sites; a
+missed one is a crash on a datum ref.
+
+### Solver (`SketchSolver.cpp` `Load`)
+Register the datum points once, up front, and pin them:
+- `addPoint(kOrigin, 0, {0,0})`, `addPoint(kAxisX, 0, {0,0})`,
+  `addPoint(kAxisX, 1, {1,0})`, and the same for `kAxisY`; insert every one of
+  their params into `fixedParams` so `DeclareUnknowns` holds them out (they
+  never move — same mechanism as the `Fixed` constraint at
+  `SketchSolver.cpp:~300`).
+- Build `GCS::Line`s for `kAxisX`/`kAxisY` (p1 = origin point, p2 = dir point)
+  and populate `lineOf[kAxisX]`/`lineOf[kAxisY]`.
+Then `Resolve` already returns the datum points (it's just a `pointIndex`
+lookup, `SketchSolver.cpp:67`), and the existing constraint cases work as-is on
+datum refs: Coincident-to-origin, PointOnLine-onto-an-axis, two-point
+Horizontal/Vertical-to-origin (from N5), and — crucially — **Symmetric about a
+datum axis**, since its case already does `im.lines[im.lineOf[con.c.entity]]`
+(`SketchSolver.cpp:314`) and `lineOf` now contains the axis.
+
+### Mirror across an axis (`MirrorEntities` + N2 tool)
+`MirrorEntities(sources, axisId, link)` currently does
+`IndexOfEntity(axisLineId)` and reads the line's `a`/`b`. Generalise: if
+`IsDatum(axisId)`, take `(a,b)` from `DatumAxisEndpoints(axisId)` instead of the
+entities vector; the reflection (`ReflectEntity`) and the linked `Symmetric`
+constraint (which references `axisId`) then work unchanged — the solver resolves
+the datum axis line. In the N2 guided-mirror axis step, add the X/Y axes (and the
+origin, for point mirroring later) as pick targets so step 2 accepts them.
+
+### Inference / snapping (`SketchInference::InferPoint`)
+Feed the datums into the candidate scans (the N5 `ForEachVertex` set already
+generalises this):
+- **Coincident**: the origin is a vertex candidate → snap-to-origin.
+- **Point-on-line**: the two axes are line candidates → drop a point onto an
+  axis (add a `PointOnLine` to `kAxisX`/`kAxisY` on commit).
+- **Axis alignment (N5)**: include the origin so a new point aligns H/V with it,
+  yielding a two-point Vertical/Horizontal to `kOrigin`.
+Guides/glyphs render the same way; the constraints reference the datum ids.
+
+### Picking + rendering
+- **Render** the two axes as thin full-width lines through the origin (distinct,
+  muted colour; X warmer, Y cooler is the usual convention) plus an origin dot.
+  A plane grid already draws — the axes layer over it and, unlike the grid, are
+  *pickable*.
+- **Pick**: `PickSketchEntity` / `PickSketchPoint` add the origin (point) and the
+  two axes (bodies) to the candidate set, returning datum refs. Hover highlight
+  reuses the existing path. Keep datum hits lower priority than real geometry so
+  they don't shadow user entities.
+
+### Serialization
+Nothing to store — datums are implicit. Constraints that *reference* datum ids
+serialise normally (the ids round-trip); on load they resolve because the solver
+re-registers the datums every `Load`. Add a guard so a stray constraint to a
+datum id from a hand-edited file doesn't crash (it just resolves or is skipped).
+
+### Tests
+- Solver: Coincident(point, kOrigin) pins the point to (0,0); PointOnLine(point,
+  kAxisX) drops it to y=0; Symmetric about kAxisY mirrors a point's X.
+- Mirror: `MirrorEntities({line}, kAxisY, link)` reflects across x=0 and adds a
+  Symmetric to `kAxisY` that solves.
+- Inference: `InferPoint` near (0,0) returns coincident-to-origin; near the X
+  axis returns point-on-line to `kAxisX`; sharing the origin's X returns
+  `alignShareX == kOrigin`.
+- GUI: guided mirror across the Y axis reflects the selection; drawing a point
+  near the origin snaps to it.
+
+### Risk
+Medium-high — it's a cross-cutting reference type. The mechanics are small
+(fixed points + two lines in the solver; helpers for geometry), but the
+**`IndexOfEntity` audit** is the real work: every ref-by-index site must tolerate
+a datum id. Do the solver + inference + mirror first (pure, testable), then
+picking/rendering.
+
+## NF2 — Selected-op inspector
+Clicking a generated/derived entity surfaces its op's params for editing. Build
+the reverse map `genId -> (opIndex)` from `DerivedOp::instances` (already stores
+`genId`); on selecting such an entity, show the same inline form N4 added to the
+Patterns list, scoped to that op, with a "delete pattern" affordance. Small once
+N4's `EditPatternParams` exists — it's routing a selection to the editor.
+
+## NF3 — Edit-fillet-radius
+A fillet is an arc + a Tangent (constraint-linked, not a `DerivedOp`), so its
+radius is the arc's `radius`, driven by a Radius dimension when one exists.
+Affordance: when the selection is a fillet arc (or on hover), show a radius field
+that (a) edits an existing Radius dimension on the arc, or (b) adds one if
+absent, then re-solves. Reuses the dimension-edit path (`ApplyDimensionEdit`).
+Smaller than NF1; independent.
+
+## Sequencing
+NF1 first (highest value, and NF2 wants a selected derived entity to inspect
+anyway). NF1's solver/inference/mirror slices land before its picking/render
+slice. NF2 and NF3 are small and independent.

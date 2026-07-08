@@ -535,15 +535,21 @@ all tools present.
 Risk: low — mostly wiring; the box hit-test (pure) and the WantTextInput key
 guard are the only fiddly bits.
 
-## Phase N — Sketch UI polish, generative-op editing, alignment inference (~3–4 days) — NEXT
+## Phase N — Sketch UI polish, generative-op editing, alignment inference (~3–4 days) — SHIPPED (`08428cd`,`f0bb57a`,`0377737`,`606cb24`,`9f02de1`); follow-ups planned
 
 **Detailed implementation plan: [CONSTRAINTS_PHASE_N.md](CONSTRAINTS_PHASE_N.md).**
-The only remaining sketch milestone. The "dock it, don't float it" half is
-**already done** (the context-switching icon ribbon `8f7f457` + a docked
-"Sketch" panel tabbed with Properties); what's left is per-tool staging, exposing
-generative-op params the model already stores, and the point-to-point alignment
-snapping (below). The multi-step tools (mirror/pattern/offset) still need staged
-guidance instead of terse hint text.
+The five workstreams shipped: N5 point-alignment inference, N1 staged
+tool-prompt bar, N2 guided Mirror + preview, N3 Pattern/Offset ghost preview, N4
+full pattern-transform editing. (The "dock it, don't float it" half was already
+done by the icon ribbon `8f7f457` + docked "Sketch" panel.)
+
+**Follow-ups (planned, in the phase doc):** **NF1 datum geometry — the origin
+point + X/Y axes**, the big one: it unlocks *mirror across an axis* and *snap /
+align to the origin* (both extremely common), plus point-on-axis and
+symmetric-about-axis, all from one reference type (fixed solver points + two
+axis lines; the main work is auditing `IndexOfEntity` call sites to tolerate a
+datum id). Then NF2 selected-op inspector and NF3 edit-fillet-radius (both
+small). Also from N2, mirroring across the plane axes is subsumed by NF1.
 
 Workstreams (full detail in the phase doc): **N1** tool state machine + a shared
 staged prompt bar (replaces `actionMsg`); **N2** guided Mirror (2-step, live
