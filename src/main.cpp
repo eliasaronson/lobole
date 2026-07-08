@@ -677,9 +677,20 @@ int main(int argc, char **argv) {
   if (!glfwInit())
     return 1;
 
+  // Create the window hidden. A *visible* window makes glfwCreateWindow block
+  // inside the X server waiting for a VisibilityNotify (XCheckTypedWindowEvent);
+  // under a tiling WM like i3 the window can be mapped onto a non-focused
+  // workspace, so that event never arrives and startup hangs forever — before
+  // the remote server ever binds. Headless modes (--remote / --gui-tests)
+  // render + screenshot from an offscreen target and never need it shown;
+  // interactive mode shows it explicitly once created.
+  const bool headless = args.remotePort != 0 || args.runGuiTests;
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+  glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
   GLFWwindow *window = glfwCreateWindow(1280, 720, "Designer - 3D CAD Software",
                                         nullptr, nullptr);
+  if (window && !headless)
+    glfwShowWindow(window);
 
   if (!glfwVulkanSupported()) {
     printf("GLFW: Vulkan Not Supported\n");
