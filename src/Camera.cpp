@@ -1,10 +1,14 @@
 #include "Camera.h"
-#include <algorithm>
 
-Camera::Camera() 
-    : m_position(5.0f, 5.0f, 5.0f)
-    , m_target(0.0f, 0.0f, 0.0f)
-    , m_up(0.0f, 1.0f, 0.0f)
+#include <glm/gtc/quaternion.hpp>
+
+#include <algorithm>
+#include <cmath>
+
+Camera::Camera()
+    : m_pivot(0.0f, 0.0f, 0.0f)
+    , m_distance(1.0f)
+    , m_orientation(1.0f, 0.0f, 0.0f, 0.0f) // identity
     , m_fov(45.0f)
     , m_aspectRatio(16.0f / 9.0f)
     , m_nearPlane(0.1f)
@@ -15,39 +19,90 @@ Camera::Camera()
     , m_minDistance(0.5f)
     , m_maxDistance(100.0f) {
 
-    UpdateViewMatrix();
+    // Establish the default iso view (camera at (5,5,5) looking at the origin):
+    // sets m_distance and m_orientation from the look-at.
+    SetPosition(glm::vec3(5.0f, 5.0f, 5.0f));
     UpdateProjectionMatrix();
 }
 
+glm::quat Camera::OrientationLookingAlong(const glm::vec3& dir,
+                                          const glm::vec3& up) {
+    glm::vec3 f = glm::normalize(dir); // forward: view -Z maps to f
+    glm::vec3 u = up;
+    // If the requested up is (near) collinear with the view direction the basis
+    // would collapse; fall back to a non-parallel reference so the result is
+    // always a valid orthonormal frame (world-up normally, world-Z when looking
+    // straight up/down).
+    if (glm::abs(glm::dot(f, glm::normalize(u))) > 0.999f)
+        u = (glm::abs(f.y) < 0.9f) ? glm::vec3(0.0f, 1.0f, 0.0f)
+                                   : glm::vec3(0.0f, 0.0f, 1.0f);
+    const glm::vec3 right = glm::normalize(glm::cross(f, u));
+    const glm::vec3 trueUp = glm::cross(right, f);
+    // Columns are the camera's world axes: +X right, +Y up, +Z backwards
+    // (the view looks down -Z), so quat * -Z == forward.
+    const glm::mat3 basis(right, trueUp, -f);
+    return glm::normalize(glm::quat_cast(basis));
+}
+
 void Camera::Update(float deltaTime) {
-    // Handle animation
-    if (m_isAnimating) {
-        m_animationTime += deltaTime;
-        float t = std::min(m_animationTime / m_animationDuration, 1.0f);
-        
-        // Smooth interpolation (ease-in-out)
-        t = t * t * (3.0f - 2.0f * t);
-        
-        m_position = glm::mix(m_animationStartPos, m_animationEndPos, t);
-        m_target = glm::mix(m_animationStartTarget, m_animationEndTarget, t);
-        
-        UpdateViewMatrix();
-        
-        if (t >= 1.0f) {
-            m_isAnimating = false;
-        }
-    }
+    if (!m_isAnimating)
+        return;
+
+    m_animationTime += deltaTime;
+    float t = std::min(m_animationTime / m_animationDuration, 1.0f);
+    t = t * t * (3.0f - 2.0f * t); // ease-in-out
+
+    // Constant-angular-velocity orientation blend + linear pivot/zoom blend.
+    m_orientation = glm::normalize(glm::slerp(m_animStartOrient, m_animEndOrient, t));
+    m_pivot = glm::mix(m_animStartPivot, m_animEndPivot, t);
+    m_distance = glm::mix(m_animStartDistance, m_animEndDistance, t);
+    UpdateViewMatrix();
+
+    if (t >= 1.0f)
+        m_isAnimating = false;
 }
 
 void Camera::SetDistance(float distance) {
-    distance = std::clamp(distance, m_minDistance, m_maxDistance);
-    glm::vec3 direction = glm::normalize(m_position - m_target);
-    m_position = m_target + direction * distance;
+    m_distance = std::clamp(distance, m_minDistance, m_maxDistance);
+    UpdateViewMatrix();
+}
+
+void Camera::SetPosition(const glm::vec3& position) {
+    // Keep the current target and up; move the camera to `position`.
+    const glm::vec3 up = GetUp();
+    const glm::vec3 dir = m_pivot - position; // look from position toward pivot
+    const float d = glm::length(dir);
+    if (d < 1e-6f)
+        return;
+    m_distance = d;
+    m_orientation = OrientationLookingAlong(dir, up);
+    UpdateViewMatrix();
+}
+
+void Camera::SetTarget(const glm::vec3& target) {
+    // Keep the camera where it is; re-aim at `target`.
+    const glm::vec3 pos = GetPosition();
+    const glm::vec3 up = GetUp();
+    const glm::vec3 dir = target - pos;
+    const float d = glm::length(dir);
+    if (d < 1e-6f)
+        return;
+    m_pivot = target;
+    m_distance = d;
+    m_orientation = OrientationLookingAlong(dir, up);
+    UpdateViewMatrix();
+}
+
+void Camera::SetUp(const glm::vec3& up) {
+    // Keep the view direction; re-roll so up is as close to `up` as possible.
+    m_orientation = OrientationLookingAlong(GetForward(), up);
     UpdateViewMatrix();
 }
 
 void Camera::UpdateViewMatrix() {
-    m_viewMatrix = glm::lookAt(m_position, m_target, m_up);
+    // Derived position/up are always orthonormal to the forward axis, so lookAt
+    // is never degenerate here.
+    m_viewMatrix = glm::lookAt(GetPosition(), m_pivot, GetUp());
 }
 
 void Camera::UpdateProjectionMatrix() {
@@ -59,84 +114,66 @@ void Camera::UpdateProjectionMatrix() {
 
 void Camera::Orbit(double deltaX, double deltaY) {
     // Trackball orbit: yaw about the camera's current up, pitch about its right.
-    // Rotating around the camera's own basis (rather than converting to
-    // spherical coordinates about a fixed world-up) has no pole singularity, so
-    // the view never gimbal-locks or gets stuck near vertical.
-    glm::vec3 toCamera = m_position - m_target;
-    const glm::vec3 forward = glm::normalize(-toCamera);
-    const glm::vec3 right = glm::normalize(glm::cross(forward, m_up));
-    const glm::vec3 up = glm::normalize(glm::cross(right, forward));
-
+    // Composing quaternions about the live basis has no pole singularity, so the
+    // view never gimbal-locks, and the orientation stays a clean unit rotation
+    // (no drifting up vector to re-orthonormalize).
     const float yaw = -static_cast<float>(deltaX) * m_orbitSensitivity;
     const float pitch = -static_cast<float>(deltaY) * m_orbitSensitivity;
-    const glm::mat4 rot = glm::rotate(glm::mat4(1.0f), yaw, up) *
-                          glm::rotate(glm::mat4(1.0f), pitch, right);
-
-    toCamera = glm::vec3(rot * glm::vec4(toCamera, 0.0f));
-    m_up = glm::normalize(glm::vec3(rot * glm::vec4(up, 0.0f)));
-    m_position = m_target + toCamera;
+    const glm::quat qYaw = glm::angleAxis(yaw, GetUp());
+    const glm::quat qPitch = glm::angleAxis(pitch, GetRight());
+    m_orientation = glm::normalize(qYaw * qPitch * m_orientation);
     UpdateViewMatrix();
 }
 
 void Camera::Pan(double deltaX, double deltaY) {
-    glm::vec3 right = GetRight();
-    glm::vec3 up = GetUp();
-    
-    // Use a more responsive pan scale
-    float panScale = 0.005f; // Increased from 0.001f for better responsiveness
-    
-    // Apply distance scaling more moderately
-    float distance = GetDistance();
-    panScale *= (distance * 0.2f); // Slightly increased distance influence
-    
+    const glm::vec3 right = GetRight();
+    const glm::vec3 up = GetUp();
+
+    float panScale = 0.005f;
+    panScale *= (m_distance * 0.2f); // pan speed tracks zoom
+
     // Content follows the cursor: drag right moves the model right (camera
-    // left), drag down moves the model down (camera up)
-    glm::vec3 offset = right * (float)(-deltaX * panScale) + up * (float)(deltaY * panScale);
-    
-    m_position += offset;
-    m_target += offset;
-    
+    // left), drag down moves the model down (camera up). Moving the pivot moves
+    // the derived position with it.
+    m_pivot += right * static_cast<float>(-deltaX * panScale) +
+               up * static_cast<float>(deltaY * panScale);
     UpdateViewMatrix();
 }
 
 void Camera::Zoom(double deltaY) {
-    float currentDistance = GetDistance();
-    float newDistance = currentDistance * (1.0f + deltaY * m_zoomSensitivity);
-    SetDistance(newDistance);
+    SetDistance(m_distance * (1.0f + static_cast<float>(deltaY) * m_zoomSensitivity));
 }
 
 void Camera::Roll(double delta) {
     const float angle = static_cast<float>(delta) * 0.01f;
-    glm::mat4 rot = glm::rotate(glm::mat4(1.0f), angle, GetForward());
-    m_up = glm::normalize(glm::vec3(rot * glm::vec4(m_up, 0.0f)));
+    m_orientation = glm::normalize(glm::angleAxis(angle, GetForward()) * m_orientation);
     UpdateViewMatrix();
 }
 
 void Camera::AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNormal, float distance) {
-    // Keep the current zoom unless the caller asks for a specific distance
-    if (distance <= 0.0f) {
-        distance = GetDistance();
-    }
+    // Keep the current zoom unless the caller asks for a specific distance.
+    if (distance <= 0.0f)
+        distance = m_distance;
 
-    glm::vec3 n = glm::normalize(faceNormal);
-    glm::vec3 newPosition = faceCenter + n * distance;
-
-    // lookAt degenerates when the view direction is parallel to up (e.g.
-    // aligning to a horizontal face), so pick a valid up vector and apply it
-    glm::vec3 newUp = glm::vec3(0.0f, 1.0f, 0.0f);
-    if (glm::abs(glm::dot(n, newUp)) > 0.95f) {
-        newUp = glm::vec3(0.0f, 0.0f, 1.0f);
-    }
-    m_up = newUp;
-
+    const glm::vec3 n = glm::normalize(faceNormal);
+    const glm::vec3 newPosition = faceCenter + n * distance;
+    // Upright handling (world-up, or world-Z for a horizontal face) is applied
+    // when the target orientation is built in AnimateToPosition.
     AnimateToPosition(newPosition, faceCenter, 1.0f);
 }
 
 void Camera::AnimateToPosition(const glm::vec3& position, const glm::vec3& target, float duration) {
-    m_animationStartPos = m_position;
-    m_animationStartTarget = m_target;
-    m_animationEndPos = position;
-    m_animationEndTarget = target;
+    m_animStartOrient = m_orientation;
+    m_animStartPivot = m_pivot;
+    m_animStartDistance = m_distance;
+
+    const glm::vec3 dir = target - position;
+    m_animEndPivot = target;
+    m_animEndDistance = glm::length(dir);
+    m_animEndOrient = (m_animEndDistance > 1e-6f)
+                          ? OrientationLookingAlong(dir, glm::vec3(0.0f, 1.0f, 0.0f))
+                          : m_orientation;
+
     m_animationTime = 0.0f;
     m_animationDuration = duration;
     m_isAnimating = true;
