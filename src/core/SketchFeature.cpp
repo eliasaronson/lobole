@@ -32,6 +32,38 @@ std::vector<double> LineCircleAngles(glm::vec2 center, double r, glm::vec2 la,
   }
   return out;
 }
+
+// Params t in (0,1) along segment [a, a+d] where it crosses circle (center, r).
+std::vector<float> LineCircleParams(glm::vec2 a, glm::vec2 d, glm::vec2 center,
+                                    double r) {
+  std::vector<float> out;
+  const double A = glm::dot(d, d);
+  if (A < 1e-12)
+    return out;
+  const glm::vec2 f = a - center;
+  const double B = 2.0 * glm::dot(f, d);
+  const double C = glm::dot(f, f) - r * r;
+  double disc = B * B - 4.0 * A * C;
+  if (disc < 0.0)
+    return out;
+  disc = std::sqrt(disc);
+  for (double t : {(-B - disc) / (2.0 * A), (-B + disc) / (2.0 * A)})
+    if (t > 1e-4 && t < 1.0 - 1e-4)
+      out.push_back(static_cast<float>(t));
+  return out;
+}
+
+// True if angle `ang` lies within an arc's CCW sweep [startAngle, endAngle].
+bool AngleInArc(double ang, const sketch::Arc& arc) {
+  double s = arc.startAngle, en = arc.endAngle;
+  while (en <= s)
+    en += 2.0 * M_PI;
+  while (ang < s)
+    ang += 2.0 * M_PI;
+  while (ang >= s + 2.0 * M_PI)
+    ang -= 2.0 * M_PI;
+  return ang <= en + 1e-6;
+}
 } // namespace
 
 SketchFeature::SketchFeature(const std::string& name, const SketchPlane& p)
@@ -206,7 +238,8 @@ bool SketchFeature::TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a,
   if (len2 < 1e-12f)
     return false;
 
-  // Cut parameters along [a,b]: interior intersections with other lines.
+  // Cut parameters along [a,b]: interior intersections with other lines, and
+  // where circles/arcs cross the line (so a curve laid over a line splits it).
   std::vector<float> cuts = {0.0f, 1.0f};
   for (const auto& e : entities) {
     if (sketch::EntityId(e) == id)
@@ -215,6 +248,15 @@ bool SketchFeature::TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a,
       if (auto t = sketch::SegmentIntersect(a, line->b, o->a, o->b))
         if (*t > 1e-4f && *t < 1.0f - 1e-4f)
           cuts.push_back(*t);
+    } else if (auto* c = std::get_if<sketch::Circle>(&e)) {
+      for (float t : LineCircleParams(a, ab, c->center, c->radius))
+        cuts.push_back(t);
+    } else if (auto* ar = std::get_if<sketch::Arc>(&e)) {
+      for (float t : LineCircleParams(a, ab, ar->center, ar->radius)) {
+        const glm::vec2 p = a + t * ab;
+        if (AngleInArc(std::atan2(p.y - ar->center.y, p.x - ar->center.x), *ar))
+          cuts.push_back(t);
+      }
     }
   }
   std::sort(cuts.begin(), cuts.end());

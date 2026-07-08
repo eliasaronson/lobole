@@ -609,6 +609,31 @@ TEST_CASE("TrimCurveAt splits a crossed arc, dropping the clicked sub-span",
   CHECK(std::sin(mid) > 0.0);
 }
 
+TEST_CASE("A circle crossing a line splits it for trimming", "[sketch]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {6, 0}});
+  sk.AddEntity(sketch::Circle{{3, 0}, 1.0}); // crosses the line at x=2 and x=4
+  auto near = [](glm::vec2 p, glm::vec2 q) { return glm::length(p - q) < 1e-3f; };
+
+  // Clicking the middle brackets the [2,4] span between the circle crossings.
+  auto span = sk.TrimSpanAt(l, {3, 0});
+  REQUIRE(span.has_value());
+  CHECK(((near(span->first, {2, 0}) && near(span->second, {4, 0})) ||
+         (near(span->first, {4, 0}) && near(span->second, {2, 0}))));
+
+  // Trim removes that span → two line pieces remain (plus the circle).
+  REQUIRE(sk.TrimLineAt(l, {3, 0}));
+  int lines = 0, circles = 0;
+  for (const auto& e : sk.entities) {
+    if (std::holds_alternative<sketch::Line>(e))
+      lines++;
+    if (std::holds_alternative<sketch::Circle>(e))
+      circles++;
+  }
+  CHECK(lines == 2);
+  CHECK(circles == 1);
+}
+
 TEST_CASE("TrimLineAt with no crossings deletes the whole line", "[sketch]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t l0 = sk.AddEntity(sketch::Line{{0, 0}, {4, 0}});
