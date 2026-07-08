@@ -965,6 +965,50 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(sk->entities.size() > n0); // a mirrored copy was added
   };
 
+  // Guided mirror across the Y datum axis (NF1): the axis is pickable even
+  // though it isn't an entity.
+  t = IM_REGISTER_TEST(engine, "mirror", "across_datum_axis");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::Line{{0.5f, 0.6f}, {1.5f, 0.6f}}); // off the Y axis
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Mirror;
+    s_App->sketchEdit.mirrorAxisPhase = false;
+    s_App->sketchEdit.selected.clear();
+
+    // Select the line, Enter, then click on the Y axis (x=0, well away from the
+    // line) — no entity there, so the datum axis is picked.
+    glm::vec2 g = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.0f, 0.6f));
+    ctx->MouseMoveToPos(ImVec2(g.x, g.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield();
+    glm::vec2 ax = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, -1.2f));
+    ctx->MouseMoveToPos(ImVec2(ax.x, ax.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    bool symToYAxis = false;
+    for (const auto& c : sk->constraints)
+      if (c.kind == sketch::ConstraintKind::Symmetric && c.c.entity == sketch::kAxisY)
+        symToYAxis = true;
+    IM_CHECK(symToYAxis); // mirrored across the Y axis
+  };
+
   // With auto-constrain off, no constraints are inferred.
   t = IM_REGISTER_TEST(engine, "infer", "toggle_suppresses");
   t->TestFunc = [](ImGuiTestContext* ctx) {

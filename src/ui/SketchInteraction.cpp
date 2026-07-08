@@ -658,14 +658,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       return true;
     }
 
-    // Step 2 — click a line (drawn or construction) to mirror across.
+    // Step 2 — click a line (drawn, construction, or an X/Y datum axis).
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
       const size_t ei = sketch->IndexOfEntity(hover.ref.entity);
       const bool isLine =
-          ei != SIZE_MAX &&
-          std::holds_alternative<sketch::Line>(sketch->entities[ei]);
+          sketch::IsDatum(hover.ref.entity) ||
+          (ei != SIZE_MAX &&
+           std::holds_alternative<sketch::Line>(sketch->entities[ei]));
       if (!isLine) {
-        edit.actionMsg = "Mirror: the axis must be a line.";
+        edit.actionMsg = "Mirror: the axis must be a line or an X/Y axis.";
       } else {
         std::vector<uint32_t> sources; // unique selected ids, minus the axis
         for (const auto& r : edit.selected) {
@@ -1455,6 +1456,24 @@ SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
       best.hit = true;
       best.body = true;
       best.ref = {id, 0};
+    }
+  }
+  // Datum axes are pickable (e.g. as a mirror axis) but lower priority than real
+  // geometry, so only when nothing user-drawn was closer.
+  if (!best.hit) {
+    for (uint32_t axisId : {sketch::kAxisX, sketch::kAxisY}) {
+      const auto ep = sketch::DatumAxisEndpoints(axisId);
+      const glm::vec2 dir = ep.second - ep.first;
+      const glm::vec2 a = ep.first - dir * 100.0f, b = ep.first + dir * 100.0f;
+      const float d =
+          DistToSegment(mousePos, SketchUVToScreen(state, sketch.plane, a),
+                        SketchUVToScreen(state, sketch.plane, b));
+      if (d < bestDist) {
+        bestDist = d;
+        best.hit = true;
+        best.body = true;
+        best.ref = {axisId, 0};
+      }
     }
   }
   return best;
