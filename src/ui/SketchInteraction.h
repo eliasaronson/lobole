@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 #include <optional>
+#include <string>
 #include <vector>
 
 class SketchFeature;
@@ -55,6 +56,22 @@ void DrawDimensions(AppState& state);
 // sketch's non-dimensional constraints. Gated on showConstraintGlyphs. Call
 // once per frame from the UI pass.
 void DrawConstraintGlyphs(AppState& state);
+
+// The staged prompt for the active tool: what the current click will do and,
+// for multi-step tools, which step of how many. `step`/`stepCount` are 0 for
+// single-action tools; `text` is empty for the Select tool. Pure function of
+// the edit state (no ImGui) so the step logic is testable.
+struct ToolPrompt {
+  std::string text;
+  int step = 0;
+  int stepCount = 0;
+};
+ToolPrompt SketchToolPrompt(const SketchEditState& edit);
+
+// Draws the active tool's staged prompt (+ any transient actionMsg warning) as a
+// pill centred at the top of the viewport. No-op outside sketch edit / for the
+// Select tool with nothing to say. Call once per frame from the UI pass.
+void DrawToolPrompt(AppState& state);
 
 // Projects a plane-UV point to viewport screen coords (pixels), matching the
 // picking/render path.

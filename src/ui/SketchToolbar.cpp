@@ -118,9 +118,8 @@ void DrawSketchToolbar(AppState& state) {
       ApplyOffset(state);
     ImGui::EndDisabled();
   }
-  if (!edit.actionMsg.empty())
-    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "%s",
-                       edit.actionMsg.c_str());
+  // actionMsg / staged guidance is shown in the viewport tool-prompt bar
+  // (DrawToolPrompt), not duplicated here.
 
   ImGui::Checkbox("Auto-constrain", &edit.autoConstrain);
   if (ImGui::IsItemHovered())

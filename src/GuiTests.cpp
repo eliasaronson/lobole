@@ -889,6 +889,36 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(verticalToTarget);
   };
 
+  // The staged tool prompt reports the right step for each tool/state (N1).
+  t = IM_REGISTER_TEST(engine, "prompt", "staged_tool_steps");
+  t->TestFunc = [](ImGuiTestContext*) {
+    ui::SketchEditState e;
+    e.activeSketchId = 1; // in sketch edit
+
+    e.tool = ui::SketchTool::Select;
+    IM_CHECK(ui::SketchToolPrompt(e).text.empty()); // Select is quiet
+
+    e.tool = ui::SketchTool::Line;
+    e.hasPendingPoint = false;
+    IM_CHECK_EQ(ui::SketchToolPrompt(e).step, 1);
+    e.hasPendingPoint = true;
+    IM_CHECK_EQ(ui::SketchToolPrompt(e).step, 2);
+
+    ui::SketchEditState m;
+    m.tool = ui::SketchTool::Mirror;
+    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 1);      // no selection yet
+    IM_CHECK_EQ(ui::SketchToolPrompt(m).stepCount, 2);
+    m.selected.push_back({1, 0});
+    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 2);      // selection made
+
+    ui::SketchEditState el;
+    el.tool = ui::SketchTool::Ellipse;
+    el.hasPendingPoint = true;
+    el.hasPendingPoint2 = true;
+    IM_CHECK_EQ(ui::SketchToolPrompt(el).step, 3);     // third click
+    IM_CHECK_EQ(ui::SketchToolPrompt(el).stepCount, 3);
+  };
+
   // With auto-constrain off, no constraints are inferred.
   t = IM_REGISTER_TEST(engine, "infer", "toggle_suppresses");
   t->TestFunc = [](ImGuiTestContext* ctx) {

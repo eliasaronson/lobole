@@ -925,6 +925,112 @@ void DrawSnapGlyphs(AppState& state) {
   }
 }
 
+ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
+  using T = SketchTool;
+  ToolPrompt p;
+  auto set = [&](const char* name, int step, int count, const char* what) {
+    p.step = step;
+    p.stepCount = count;
+    p.text = name;
+    if (count > 0)
+      p.text += " (Step " + std::to_string(step) + "/" + std::to_string(count) + ")";
+    p.text += std::string(": ") + what;
+  };
+  // For 3-click tools (arcs / ellipse), the current step from the pending state.
+  const int click3 =
+      edit.hasPendingPoint2 ? 3 : (edit.hasPendingPoint ? 2 : 1);
+  switch (edit.tool) {
+  case T::Select:
+    break; // default tool: no prompt
+  case T::Point:
+    set("Point", 0, 0, "click to place a point");
+    break;
+  case T::Line:
+    set("Line", edit.hasPendingPoint ? 2 : 1, 2,
+        edit.hasPendingPoint ? "click the next point (Esc to finish)"
+                             : "click the start point");
+    break;
+  case T::Circle:
+    set("Circle", edit.hasPendingPoint ? 2 : 1, 2,
+        edit.hasPendingPoint ? "click to set the radius" : "click the centre");
+    break;
+  case T::Rectangle:
+    set("Rectangle", edit.hasPendingPoint ? 2 : 1, 2,
+        edit.hasPendingPoint ? "click the opposite corner"
+                             : "click the first corner");
+    break;
+  case T::Arc:
+    set("Arc", click3, 3,
+        click3 == 1 ? "click the centre"
+                    : click3 == 2 ? "click the start point" : "click the end point");
+    break;
+  case T::ArcThreePoint:
+    set("3-Point Arc", click3, 3,
+        click3 == 1 ? "click the start point"
+                    : click3 == 2 ? "click the end point"
+                                  : "click a point on the arc");
+    break;
+  case T::Ellipse:
+    set("Ellipse", click3, 3,
+        click3 == 1 ? "click the centre"
+                    : click3 == 2 ? "click the major-axis end"
+                                  : "click to set the minor radius");
+    break;
+  case T::Trim:
+    set("Trim", 0, 0, "click a segment to remove it");
+    break;
+  case T::Mirror:
+    set("Mirror", edit.selected.empty() ? 1 : 2, 2,
+        edit.selected.empty()
+            ? "select the geometry to mirror, then pick the axis"
+            : "click a line (or axis) to mirror across");
+    break;
+  case T::Fillet:
+    set("Fillet", 0, 0, "click a corner where two lines meet");
+    break;
+  case T::Pattern:
+    set("Pattern", edit.selected.empty() ? 1 : 2, 2,
+        edit.selected.empty() ? "select the geometry to pattern"
+                              : "set count/spacing in the panel, then Apply");
+    break;
+  case T::Offset:
+    set("Offset", edit.selected.empty() ? 1 : 2, 2,
+        edit.selected.empty() ? "select a closed loop (its edges)"
+                              : "set the distance in the panel, then Apply");
+    break;
+  }
+  return p;
+}
+
+void DrawToolPrompt(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  if (!edit.IsEditing())
+    return;
+  const ToolPrompt tp = SketchToolPrompt(edit);
+  const bool hasErr = !edit.actionMsg.empty();
+  if (tp.text.empty() && !hasErr)
+    return;
+
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const float cx = state.viewportPos.x + state.viewportSize.x * 0.5f;
+  float y = state.viewportPos.y + 34.0f; // clear of the docked panel tab bar
+  const float padX = 10.0f, padY = 5.0f;
+  auto pill = [&](const std::string& text, ImU32 bg, ImU32 fg) {
+    if (text.empty())
+      return;
+    const ImVec2 sz = ImGui::CalcTextSize(text.c_str());
+    const ImVec2 a(cx - sz.x * 0.5f - padX, y);
+    const ImVec2 b(cx + sz.x * 0.5f + padX, y + sz.y + 2.0f * padY);
+    dl->AddRectFilled(a, b, bg, 5.0f);
+    dl->AddText(ImVec2(cx - sz.x * 0.5f, y + padY), fg, text.c_str());
+    y = b.y + 4.0f;
+  };
+  if (!tp.text.empty())
+    pill(tp.text, IM_COL32(28, 32, 40, 225), IM_COL32(226, 232, 240, 255));
+  if (hasErr)
+    pill(edit.actionMsg, IM_COL32(60, 44, 24, 235), IM_COL32(255, 205, 120, 255));
+}
+
 namespace {
 // UV position of a point ref (line endpoint / point / circle centre).
 std::optional<glm::vec2> RefUV(const SketchFeature& sk,

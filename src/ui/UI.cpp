@@ -78,6 +78,7 @@ void DrawUI(AppState& state) {
     DrawSelectionBox(state);
     DrawDimensions(state);
     DrawConstraintGlyphs(state);
+    DrawToolPrompt(state);
   }
 
   // Point the renderers, camera, and picking at the central-node region so
