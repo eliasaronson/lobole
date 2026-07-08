@@ -375,17 +375,25 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     edit.hoveredPlane = -1;
     if (overViewport) {
       Ray ray = ScreenRay(state, mousePos);
-      // Prefer a model face if the ray hits one; else a default plane.
+      // A model face wins whenever the ray hits one (faces are solid; you're
+      // pointing at the body). The default planes are only candidates where no
+      // face is under the cursor — and only within their finite quad, since the
+      // planes themselves are infinite and would otherwise be "hit" everywhere.
       RayHit hit = state.faceSelector->PickFace(ray);
-      float bestDist = hit.hit ? hit.distance : 1e30f;
       int plane = -1;
-      for (int i = 0; i < 3; i++) {
-        SketchPlane p = DefaultPlane(i);
-        if (auto uv = RayToPlaneUV(ray, p)) {
-          float dist = glm::length(p.PlaneToWorld(*uv) - ray.origin);
-          if (dist < bestDist) {
-            bestDist = dist;
-            plane = i;
+      if (!hit.hit) {
+        const float halfExtent = 3.0f; // matches BuildPlaneQuads
+        float bestDist = 1e30f;
+        for (int i = 0; i < 3; i++) {
+          SketchPlane p = DefaultPlane(i);
+          if (auto uv = RayToPlaneUV(ray, p)) {
+            if (std::abs(uv->x) > halfExtent || std::abs(uv->y) > halfExtent)
+              continue; // ray misses the visible quad
+            float dist = glm::length(p.PlaneToWorld(*uv) - ray.origin);
+            if (dist < bestDist) {
+              bestDist = dist;
+              plane = i;
+            }
           }
         }
       }
@@ -393,10 +401,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 
       if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-        if (plane >= 0) {
-          BeginSketchOnPlane(state, DefaultPlane(plane),
-                             "Sketch " + std::to_string(n));
-        } else if (hit.hit) {
+        if (hit.hit) {
           // Bake the selected face's plane (no persistent face ref yet).
           glm::vec3 c =
               state.faceSelector->GetFaceCenter(hit.meshId, hit.faceIndex);
@@ -406,6 +411,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
                                                : glm::vec3(1, 0, 0);
           u = glm::normalize(u - glm::dot(u, nrm) * nrm);
           BeginSketchOnPlane(state, SketchPlane(c, nrm, u),
+                             "Sketch " + std::to_string(n));
+        } else if (plane >= 0) {
+          BeginSketchOnPlane(state, DefaultPlane(plane),
                              "Sketch " + std::to_string(n));
         }
       }
