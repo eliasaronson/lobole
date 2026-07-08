@@ -543,13 +543,12 @@ tool-prompt bar, N2 guided Mirror + preview, N3 Pattern/Offset ghost preview, N4
 full pattern-transform editing. (The "dock it, don't float it" half was already
 done by the icon ribbon `8f7f457` + docked "Sketch" panel.)
 
-**Follow-ups (planned, in the phase doc):** **NF1 datum geometry — the origin
-point + X/Y axes**, the big one: it unlocks *mirror across an axis* and *snap /
-align to the origin* (both extremely common), plus point-on-axis and
-symmetric-about-axis, all from one reference type (fixed solver points + two
-axis lines; the main work is auditing `IndexOfEntity` call sites to tolerate a
-datum id). Then NF2 selected-op inspector and NF3 edit-fillet-radius (both
-small). Also from N2, mirroring across the plane axes is subsumed by NF1.
+**Follow-ups:** **NF1 datum geometry — the origin point + X/Y axes — SHIPPED**
+(`0a28468`,`3da51f3`): mirror across an axis, snap to the origin, and
+vertical/horizontal-to-origin, all from one reference type (fixed solver points
++ two axis lines; Symmetric/Coincident/two-point-H-V resolve datum refs). Then
+NF2 selected-op inspector and NF3 edit-fillet-radius (both small, planned in the
+phase doc).
 
 Workstreams (full detail in the phase doc): **N1** tool state machine + a shared
 staged prompt bar (replaces `actionMsg`); **N2** guided Mirror (2-step, live

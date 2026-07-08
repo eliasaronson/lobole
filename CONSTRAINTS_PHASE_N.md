@@ -6,8 +6,9 @@ feel unfinished: multi-step tools give no guidance, generative ops expose only
 `count`, and drawing has no point-to-point alignment snapping.
 
 **Status:** N5 (`08428cd`), N1 (`f0bb57a`), N2 (`0377737`), N3 (`606cb24`),
-N4-pattern-editing (`9f02de1`) shipped. Remaining: the **follow-ups** below
-(datum geometry, op inspector, edit-fillet-radius).
+N4-pattern-editing (`9f02de1`) shipped. **NF1 datum geometry** shipped
+(`0a28468` core + `3da51f3` picking): mirror across X/Y axes, snap to origin,
+vertical/horizontal to origin. Remaining: NF2 op inspector, NF3 edit-fillet-radius.
 
 ## Current state (grounded in code)
 
