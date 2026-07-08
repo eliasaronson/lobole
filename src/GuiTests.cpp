@@ -267,25 +267,24 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->faceSelector->GetSelectedFace() == nullptr);
   };
 
-  t = IM_REGISTER_TEST(engine, "sketch", "front_plane_shows_toolbar");
+  t = IM_REGISTER_TEST(engine, "sketch", "front_plane_enters_edit");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    IM_CHECK(ctx->GetWindowByRef("//Sketch Tools") == nullptr);
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
 
     ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
     ctx->Yield();
-    // A SketchFeature was added and the toolbar appeared
+    // A SketchFeature was added and we entered sketch edit (Select is default).
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     IM_CHECK(Doc()->GetFeature(0)->TypeName() == "Sketch");
-    IM_CHECK(ctx->GetWindowByRef("//Sketch Tools") != nullptr);
+    IM_CHECK(s_App->sketchEdit.IsEditing());
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
 
-    ctx->SetRef("//Sketch Tools");
-    ctx->ItemClick("Exit Sketch");
+    // Escape leaves sketch edit (nothing pending, Select tool, no selection).
+    ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield(2);
-    // The window object lingers in ImGui's list; check it is no longer shown
-    ImGuiWindow* toolbar = ctx->GetWindowByRef("//Sketch Tools");
-    IM_CHECK(toolbar == nullptr || !toolbar->WasActive);
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
   };
 
   t = IM_REGISTER_TEST(engine, "sketch", "draw_line_undo");
@@ -297,11 +296,20 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sketch != nullptr);
 
-    // Line tool is the default; two viewport clicks place a line
-    ImVec2 size = ImGui::GetMainViewport()->Size;
-    ctx->MouseMoveToPos(ImVec2(size.x * 0.45f, size.y * 0.45f));
+    // Select is the default tool now; pick Line, then two viewport clicks place
+    // a line. Use exact plane-UV → screen coords (arbitrary screen fractions can
+    // miss the viewport now that the side panels are wider).
+    // Anchor at the projected sketch origin and offset in *screen pixels*: an
+    // empty sketch is fit very tightly, so offsetting in UV would project
+    // off-screen and the click would be lost.
+    // Select is the default tool now; pick Line, then two viewport clicks place
+    // a line. Anchor at the projected origin and offset in screen pixels (an
+    // empty sketch is fit tightly, so a UV offset would project off-screen).
+    s_App->sketchEdit.tool = ui::SketchTool::Line;
+    glm::vec2 c = ui::SketchUVToScreen(*s_App, sketch->plane, glm::vec2(0, 0));
+    ctx->MouseMoveToPos(ImVec2(c.x - 60.0f, c.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
-    ctx->MouseMoveToPos(ImVec2(size.x * 0.55f, size.y * 0.55f));
+    ctx->MouseMoveToPos(ImVec2(c.x + 60.0f, c.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     IM_CHECK_EQ(sketch->entities.size(), (size_t)1);
@@ -334,7 +342,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
 
     // Extrude from the toolbar → preview, then accept
-    ctx->SetRef("//Sketch Tools");
+    ctx->SetRef("//Sketch");
     ctx->ItemClick("Extrude...");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App)); // extrude is a pending preview
