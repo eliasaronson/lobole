@@ -30,6 +30,36 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#if defined(__linux__)
+// Map the window ourselves via XMapWindow instead of glfwShowWindow. GLFW's
+// show path calls waitForVisibilityNotify, which blocks until the window is
+// unobscured — a deadlock under a tiling WM (i3) when the window opens behind a
+// fullscreen window or on a non-focused workspace. XMapWindow just posts the
+// map request and returns; the render loop's glfwPollEvents pumps events and
+// present targets the mapped X window. Declared extern to avoid <X11/Xlib.h>,
+// whose None/Bool/Status/Success macros clash with OCCT/PlaneGCS headers.
+extern "C" {
+void *glfwGetX11Display(void);
+unsigned long glfwGetX11Window(GLFWwindow *handle);
+int XMapWindow(void *display, unsigned long window);
+int XFlush(void *display);
+}
+static void ShowWindowNonBlocking(GLFWwindow *window) {
+  void *dpy = glfwGetX11Display();
+  unsigned long xw = glfwGetX11Window(window);
+  if (dpy && xw) {
+    XMapWindow(dpy, xw);
+    XFlush(dpy);
+  } else {
+    glfwShowWindow(window); // not X11 (e.g. Wayland): fall back
+  }
+}
+#else
+static void ShowWindowNonBlocking(GLFWwindow *window) {
+  glfwShowWindow(window);
+}
+#endif
+
 #ifdef _DEBUG
 #define APP_USE_VULKAN_DEBUG_REPORT
 static VkDebugReportCallbackEXT g_DebugReport = VK_NULL_HANDLE;
@@ -677,20 +707,21 @@ int main(int argc, char **argv) {
   if (!glfwInit())
     return 1;
 
-  // Create the window hidden. A *visible* window makes glfwCreateWindow block
-  // inside the X server waiting for a VisibilityNotify (XCheckTypedWindowEvent);
-  // under a tiling WM like i3 the window can be mapped onto a non-focused
-  // workspace, so that event never arrives and startup hangs forever — before
-  // the remote server ever binds. Headless modes (--remote / --gui-tests)
-  // render + screenshot from an offscreen target and never need it shown;
-  // interactive mode shows it explicitly once created.
-  const bool headless = args.remotePort != 0 || args.runGuiTests;
+  // Create the window hidden, then map it ourselves (ShowWindowNonBlocking).
+  // A *visible* window makes glfwCreateWindow — and glfwShowWindow — block in
+  // waitForVisibilityNotify until the window is unobscured; under i3 a window
+  // opening behind a fullscreen window or on a non-focused workspace never gets
+  // that event, so startup hangs forever (before the remote server binds).
+  // --remote is pure-headless (offscreen screenshots) and never needs a window
+  // shown; interactive and --gui-tests map it non-blocking so it's visible
+  // without the deadlock.
+  const bool pureHeadless = args.remotePort != 0;
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
   GLFWwindow *window = glfwCreateWindow(1280, 720, "Designer - 3D CAD Software",
                                         nullptr, nullptr);
-  if (window && !headless)
-    glfwShowWindow(window);
+  if (window && !pureHeadless)
+    ShowWindowNonBlocking(window);
 
   if (!glfwVulkanSupported()) {
     printf("GLFW: Vulkan Not Supported\n");

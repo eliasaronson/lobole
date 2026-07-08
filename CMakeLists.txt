@@ -257,6 +257,15 @@ target_compile_definitions(designer PRIVATE
 
 target_link_libraries(designer designer_core ${LIBRARIES})
 
+# X11 for the non-blocking XMapWindow window-show path (see main.cpp); avoids
+# GLFW's waitForVisibilityNotify deadlock under i3. Linux/X11 only.
+if(UNIX AND NOT APPLE)
+    find_package(X11)
+    if(X11_FOUND)
+        target_link_libraries(designer ${X11_LIBRARIES})
+    endif()
+endif()
+
 # Tests
 enable_testing()
 add_subdirectory(tests)
