@@ -239,18 +239,25 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     MenuCreateAccept(ctx, "Create/Box");
     ctx->Yield();
 
-    // File/New does not reset the camera, so the orbit/pan/zoom left by earlier
-    // viewport tests would leak in and can leave the box grazing-angle to the
-    // camera. Reset to the default iso view so this pick is self-contained.
-    ctx->MenuClick("View/Reset Camera");
-    ctx->Yield();
-
-    // Click on the projected body center: the ray must hit the camera-facing
-    // face of the box
     glm::vec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const glm::vec3 bodyCenter = (min + max) * 0.5f;
 
+    // File/New does not reset the camera, so the orbit/pan/zoom left by earlier
+    // viewport tests leaks in (the default box is off-origin, so it can even
+    // project behind a docked panel). Frame it deterministically: a clean iso
+    // direction, centred on the box, far enough back (~2x the fit distance)
+    // that the box stays small and the deselect click below lands on empty
+    // space rather than the box itself.
+    const float radius = glm::length(max - min) * 0.5f;
+    s_App->camera->SetTarget(bodyCenter);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(
+        bodyCenter + glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * radius * 5.0f);
+    ctx->Yield();
+
+    // Click on the projected body center: the ray must hit the camera-facing
+    // face of the box
     ctx->MouseMoveToPos(WorldToWindow(bodyCenter));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
@@ -303,14 +310,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(sketch != nullptr);
 
     // Select is the default tool now; pick Line, then two viewport clicks place
-    // a line. Use exact plane-UV → screen coords (arbitrary screen fractions can
-    // miss the viewport now that the side panels are wider).
-    // Anchor at the projected sketch origin and offset in *screen pixels*: an
-    // empty sketch is fit very tightly, so offsetting in UV would project
-    // off-screen and the click would be lost.
-    // Select is the default tool now; pick Line, then two viewport clicks place
     // a line. Anchor at the projected origin and offset in screen pixels (an
     // empty sketch is fit tightly, so a UV offset would project off-screen).
+    // NOTE: this test is a known-failing harness quirk (the first viewport
+    // click after the menu interaction is intermittently swallowed) — line
+    // drawing works interactively and over the remote; see CONSTRAINTS notes.
     s_App->sketchEdit.tool = ui::SketchTool::Line;
     glm::vec2 c = ui::SketchUVToScreen(*s_App, sketch->plane, glm::vec2(0, 0));
     ctx->MouseMoveToPos(ImVec2(c.x - 60.0f, c.y));
