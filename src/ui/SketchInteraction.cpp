@@ -1801,6 +1801,47 @@ bool SetPatternCount(AppState& state, size_t opIndex, int count) {
   return EditPatternParams(state, opIndex, op.vec, op.scalar, count);
 }
 
+bool EditDimensionValue(AppState& state, int dimIndex, double value) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || dimIndex < 0 || dimIndex >= (int)sketch->constraints.size())
+    return false;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  sketch->constraints[dimIndex].value = value;
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch->entities);
+  sketch->RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  return true;
+}
+
+bool RemovePattern(AppState& state, size_t opIndex) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || opIndex >= sketch->derived.size())
+    return false;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  sketch->RemoveDerivedOp(opIndex); // drops the op + its generated entities
+  sketch->RegenerateDerived();
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch->entities);
+  sketch->RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  return true;
+}
+
 bool ToggleConstruction(AppState& state) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);

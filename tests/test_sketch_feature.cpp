@@ -191,6 +191,21 @@ TEST_CASE("Changing a linked pattern's count is id-stable", "[sketch][pattern]")
   CHECK(sk.derived[0].instances.size() == 3);
 }
 
+TEST_CASE("RemoveDerivedOp drops the op and its generated entities",
+          "[sketch][pattern]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t p = sk.AddEntity(sketch::Point{{0, 0}});
+  auto gen = sk.AddLinearPattern({p}, {2, 0}, 3, /*link=*/true);
+  REQUIRE(gen.size() == 2);
+  REQUIRE(sk.entities.size() == 3); // source + two instances
+
+  sk.RemoveDerivedOp(0);
+  CHECK(sk.derived.empty());
+  CHECK(sk.entities.size() == 1); // only the source remains
+  for (uint32_t g : gen)
+    CHECK(sk.IndexOfEntity(g) == SIZE_MAX); // instances deleted
+}
+
 TEST_CASE("Editing a linked pattern's step regenerates it id-stably",
           "[sketch][pattern]") {
   // The core of EditPatternParams (N4): changing the transform moves the

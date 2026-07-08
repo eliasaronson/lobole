@@ -204,6 +204,34 @@ void DrawSketchToolbar(AppState& state) {
   if (ImGui::Button("dY") && sel.size() >= 2)
     ApplySketchConstraint(state, K::DistanceY, dimValue);
 
+  // Radius editor for a single selected arc/circle (edit a fillet's radius
+  // after the fact). Editing drives a Radius dimension: edit the existing one,
+  // or add one (with the current radius) so the value sticks under the solver.
+  if (sel.size() == 1 && isCurve(sel[0])) {
+    const size_t ei = sketch->IndexOfEntity(sel[0].entity);
+    if (ei != SIZE_MAX) {
+      int radiusDim = -1;
+      for (size_t i = 0; i < sketch->constraints.size(); i++) {
+        const auto& c = sketch->constraints[i];
+        if (c.kind == K::Radius && c.a.entity == sel[0].entity)
+          radiusDim = static_cast<int>(i);
+      }
+      double curR = 0.0;
+      if (auto* a = std::get_if<sketch::Arc>(&sketch->entities[ei]))
+        curR = a->radius;
+      else if (auto* c = std::get_if<sketch::Circle>(&sketch->entities[ei]))
+        curR = c->radius;
+      if (radiusDim >= 0) {
+        float r = static_cast<float>(sketch->constraints[radiusDim].value);
+        ImGui::SetNextItemWidth(90);
+        if (ImGui::DragFloat("Radius##sel", &r, 0.02f, 0.001f, 1e6f, "%.3f"))
+          EditDimensionValue(state, radiusDim, r);
+      } else if (ImGui::Button("Dimension radius")) {
+        ApplySketchConstraint(state, K::Radius, curR); // now editable above
+      }
+    }
+  }
+
   // Angle dimension (degrees in the UI, radians in the model).
   static float angleDeg = 90.0f;
   ImGui::SetNextItemWidth(70);
@@ -247,14 +275,33 @@ void DrawSketchToolbar(AppState& state) {
       DeleteConstraint(state, static_cast<size_t>(toDelete));
   }
 
-  // Linked patterns: edit the full transform live (regenerates id-stably).
+  // Linked patterns: edit the full transform live (regenerates id-stably),
+  // delete the op, and highlight the one whose instance/source is selected.
   if (!sketch->derived.empty()) {
     ImGui::SeparatorText("Patterns");
+    int deleteOp = -1;
     for (size_t i = 0; i < sketch->derived.size(); i++) {
       ImGui::PushID(static_cast<int>(i));
       const sketch::DerivedOp& op = sketch->derived[i];
       const bool circular = op.kind == sketch::DerivedKind::CircularPattern;
-      ImGui::TextUnformatted(circular ? "Circular" : "Linear");
+
+      // Is a generated instance (or a source) of this op currently selected?
+      bool opSelected = false;
+      for (const auto& r : edit.selected) {
+        for (const auto& in : op.instances)
+          opSelected |= (in.genId == r.entity);
+        for (uint32_t sid : op.sourceIds)
+          opSelected |= (sid == r.entity);
+      }
+      const char* label = circular ? "Circular" : "Linear";
+      if (opSelected)
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.4f, 1.0f), "%s (selected)",
+                           label);
+      else
+        ImGui::TextUnformatted(label);
+      ImGui::SameLine();
+      if (ImGui::SmallButton(ICON_FA_TRASH_CAN "##delpat"))
+        deleteOp = static_cast<int>(i);
 
       int count = op.count;
       glm::vec2 vec = op.vec;
@@ -277,6 +324,8 @@ void DrawSketchToolbar(AppState& state) {
                           circular ? glm::radians(angleDeg) : 0.0, count);
       ImGui::PopID();
     }
+    if (deleteOp >= 0) // deferred so we don't mutate `derived` mid-iteration
+      RemovePattern(state, static_cast<size_t>(deleteOp));
   }
 
   ImGui::SeparatorText("Profile");

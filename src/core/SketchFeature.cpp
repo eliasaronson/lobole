@@ -595,6 +595,16 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   return arcId;
 }
 
+void SketchFeature::RemoveDerivedOp(size_t opIndex) {
+  if (opIndex >= derived.size())
+    return;
+  // Delete the generated entities (DeleteEntity also drops their constraints),
+  // then drop the op record.
+  for (const auto& in : derived[opIndex].instances)
+    DeleteEntity(in.genId);
+  derived.erase(derived.begin() + opIndex);
+}
+
 void SketchFeature::RegenerateDerived() {
   for (auto& op : derived) {
     auto transform = [&](const sketch::Entity& src, int k) -> sketch::Entity {

@@ -487,6 +487,10 @@ public:
   // surplus when it shrinks. Call after the constraint solve on any edit.
   void RegenerateDerived();
 
+  // Removes a linked DerivedOp and the entities it generated (its instances).
+  // No-op if opIndex is out of range. Call RegenerateDerived after for the rest.
+  void RemoveDerivedOp(size_t opIndex);
+
   SketchPlane plane;
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;

@@ -128,6 +128,15 @@ bool SetPatternCount(AppState& state, size_t opIndex, int count);
 bool EditPatternParams(AppState& state, size_t opIndex, glm::vec2 vec,
                        double scalar, int count);
 
+// Removes a linked pattern (its op + generated entities) and regenerates. One
+// undo record. No-op if opIndex is out of range.
+bool RemovePattern(AppState& state, size_t opIndex);
+
+// Sets a dimension constraint's value (by index in the active sketch),
+// re-solves, and commits one undo record. No-op if the index isn't a valid
+// constraint. Used by the panel's radius editor and dimension edits.
+bool EditDimensionValue(AppState& state, int dimIndex, double value);
+
 // Offsets the selected closed loop by the offset params in SketchEditState and
 // commits one undoable edit. Returns false if nothing is selected or the
 // selection isn't a single closed loop.
