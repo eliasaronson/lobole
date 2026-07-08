@@ -43,3 +43,6 @@ example_projects/*
 
 # ImGui layout (generated at runtime)
 imgui.ini
+
+# All out-of-source build dirs (build/, build-asan/, ...)
+build-*/

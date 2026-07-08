@@ -64,7 +64,10 @@ void DrawSketchToolbar(AppState& state) {
   ImGui::TextUnformatted(sketch->GetName().c_str());
   ImGui::Separator();
 
-  auto toolButton = [&](const char* label, SketchTool tool) {
+  // `key` (when set) is shown as a hover tooltip. Select isn't a button — it's
+  // the default/resting mode (Escape returns to it).
+  auto toolButton = [&](const char* label, SketchTool tool,
+                        const char* key = nullptr) {
     const bool active = edit.tool == tool;
     if (active)
       ImGui::PushStyleColor(ImGuiCol_Button,
@@ -77,30 +80,30 @@ void DrawSketchToolbar(AppState& state) {
     }
     if (active)
       ImGui::PopStyleColor();
+    if (key && ImGui::IsItemHovered())
+      ImGui::SetTooltip("Shortcut: %s", key);
   };
-  toolButton("Select", SketchTool::Select);
-  ImGui::SameLine();
   toolButton("Point", SketchTool::Point);
   ImGui::SameLine();
-  toolButton("Line", SketchTool::Line);
+  toolButton("Line", SketchTool::Line, "L");
   ImGui::SameLine();
-  toolButton("Circle", SketchTool::Circle);
+  toolButton("Circle", SketchTool::Circle, "C");
   ImGui::SameLine();
-  toolButton("Rect", SketchTool::Rectangle);
+  toolButton("Rect", SketchTool::Rectangle, "G");
   ImGui::SameLine();
   toolButton("Arc", SketchTool::Arc);
   ImGui::SameLine();
-  toolButton("3-Pt Arc", SketchTool::ArcThreePoint);
+  toolButton("3-Pt Arc", SketchTool::ArcThreePoint, "A");
   ImGui::SameLine();
-  toolButton(ICON_FA_SCISSORS " Trim", SketchTool::Trim);
+  toolButton(ICON_FA_SCISSORS " Trim", SketchTool::Trim, "M");
   ImGui::SameLine();
   toolButton("Mirror", SketchTool::Mirror);
   ImGui::SameLine();
-  toolButton("Fillet", SketchTool::Fillet);
+  toolButton("Fillet", SketchTool::Fillet, "Shift+F");
   ImGui::SameLine();
   toolButton("Pattern", SketchTool::Pattern);
   ImGui::SameLine();
-  toolButton("Offset", SketchTool::Offset);
+  toolButton("Offset", SketchTool::Offset, "O");
 
   // Generative-op controls.
   if (edit.tool == SketchTool::Mirror) {
@@ -168,7 +171,7 @@ void DrawSketchToolbar(AppState& state) {
   ImGui::EndDisabled();
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     ImGui::SetTooltip("Toggle selected geometry as construction/reference "
-                      "(dashed, excluded from the profile)");
+                      "(dashed, excluded from the profile) — Q");
 
   // Constraints (enabled by the current Select-mode selection)
   ImGui::SeparatorText("Constraints");
@@ -210,21 +213,21 @@ void DrawSketchToolbar(AppState& state) {
   };
   const bool twoPts = sel.size() >= 2;
   const bool twoLines = sel.size() >= 2 && isLine(sel[0]) && isLine(sel[1]);
-  conButton(ICON_FA_ARROWS_TO_DOT, "Coincident (2 points)", twoPts,
+  conButton(ICON_FA_ARROWS_TO_DOT, "Coincident (2 points) — N", twoPts,
             K::Coincident);
-  conButton("H", "Horizontal (line)", !sel.empty() && isLine(sel[0]),
+  conButton("H", "Horizontal (line) — H", !sel.empty() && isLine(sel[0]),
             K::Horizontal);
-  conButton("V", "Vertical (line)", !sel.empty() && isLine(sel[0]),
+  conButton("V", "Vertical (line) — V", !sel.empty() && isLine(sel[0]),
             K::Vertical);
-  conButton(ICON_FA_ARROWS_LEFT_RIGHT, "Parallel (2 lines)", twoLines,
+  conButton(ICON_FA_ARROWS_LEFT_RIGHT, "Parallel (2 lines) — B", twoLines,
             K::Parallel);
   conButton(ICON_FA_ANGLE_RIGHT, "Perpendicular (2 lines)", twoLines,
             K::Perpendicular);
-  conButton("=", "Equal (2 lines/circles)", sel.size() >= 2, K::Equal);
+  conButton("=", "Equal (2 lines/circles) — E", sel.size() >= 2, K::Equal);
   const bool lineCurve =
       sel.size() >= 2 && ((isLine(sel[0]) && isCurve(sel[1])) ||
                           (isCurve(sel[0]) && isLine(sel[1])));
-  conButton("T", "Tangent (line + circle/arc)", lineCurve, K::Tangent);
+  conButton("T", "Tangent (line + circle/arc) — T", lineCurve, K::Tangent);
   const bool ptOnLine =
       sel.size() >= 2 &&
       ((isPoint(sel[0]) && isLine(sel[1])) ||

@@ -139,14 +139,20 @@ void HandleViewportInput(AppState& state) {
     if (ImGui::IsKeyPressed(ImGuiKey_Z)) {
       state.camera->Zoom(io.KeyShift ? -5.0 : 5.0);
     }
-    // Onshape view keys. `f` (zoom to fit) works in any context; standard views,
-    // plane toggle, etc. are model-context so they don't fight the sketch keymap
-    // (e.g. `n` = Coincident while sketching, handled in HandleSketchViewport).
-    if (!io.KeyShift && !io.KeyCtrl && !io.KeyAlt &&
-        ImGui::IsKeyPressed(ImGuiKey_F))
+  }
+
+  // Onshape view/model shortcuts. Guarded only by WantTextInput (like the sketch
+  // keys) so they fire whether or not a panel has focus. `f` (zoom to fit) works
+  // in any context; the rest are model-context so they don't fight the sketch
+  // keymap (e.g. `n` = Coincident while sketching).
+  if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt) {
+    if (!io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F))
       FitCameraToDocument(state);
 
     const bool modelCtx = !state.sketchEdit.IsEditing();
+    if (modelCtx && !io.KeyShift && !state.sketchEdit.pickingPlane &&
+        ImGui::IsKeyPressed(ImGuiKey_S))
+      StartNewSketch(state); // `s`: start a sketch (then pick a plane/face)
     if (modelCtx && io.KeyShift) {
       if (ImGui::IsKeyPressed(ImGuiKey_P))
         state.showPlanes = !state.showPlanes; // Shift+P: hide/show planes
@@ -155,12 +161,12 @@ void HandleViewportInput(AppState& state) {
       auto view = [&](glm::vec3 n) {
         state.camera->AlignToFace(glm::vec3(0.0f), n);
       };
-      if (ImGui::IsKeyPressed(ImGuiKey_1)) view({0, 0, 1});   // Front
-      else if (ImGui::IsKeyPressed(ImGuiKey_2)) view({0, 0, -1}); // Back
-      else if (ImGui::IsKeyPressed(ImGuiKey_3)) view({-1, 0, 0}); // Left
-      else if (ImGui::IsKeyPressed(ImGuiKey_4)) view({1, 0, 0});  // Right
-      else if (ImGui::IsKeyPressed(ImGuiKey_5)) view({0, 1, 0});  // Top
-      else if (ImGui::IsKeyPressed(ImGuiKey_6)) view({0, -1, 0}); // Bottom
+      if (ImGui::IsKeyPressed(ImGuiKey_1)) view({0, 0, 1});        // Front
+      else if (ImGui::IsKeyPressed(ImGuiKey_2)) view({0, 0, -1});  // Back
+      else if (ImGui::IsKeyPressed(ImGuiKey_3)) view({-1, 0, 0});  // Left
+      else if (ImGui::IsKeyPressed(ImGuiKey_4)) view({1, 0, 0});   // Right
+      else if (ImGui::IsKeyPressed(ImGuiKey_5)) view({0, 1, 0});   // Top
+      else if (ImGui::IsKeyPressed(ImGuiKey_6)) view({0, -1, 0});  // Bottom
       else if (ImGui::IsKeyPressed(ImGuiKey_7))
         view(glm::normalize(glm::vec3(1, 1, 1))); // Isometric
     }
