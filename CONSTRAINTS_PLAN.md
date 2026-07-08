@@ -89,7 +89,7 @@ Pointers are into the checkouts under `~/Documents/CAD/`.
   FixConnected / FixClosed) before face building; greedy edge order alone is
   not enough (FreeCAD `Sketch::toShape`).
 
-## Phase A — Angle + tangent + point-on-line constraints (small, ~1 day)
+## Phase A — Angle + tangent + point-on-line constraints (small, ~1 day) — SHIPPED (`52f71af`)
 
 Pure extension of existing plumbing. **Detailed implementation plan:
 [CONSTRAINTS_PHASE_A.md](CONSTRAINTS_PHASE_A.md)** — including two corrected
@@ -137,7 +137,7 @@ deferred (we do coincidence repair + orphan sweep); Phase D's `SplitEntity`
 needs its own transfer logic anyway. Detailed in
 [CONSTRAINTS_PHASE_B.md](CONSTRAINTS_PHASE_B.md).
 
-## Phase C — Selectable entities: body picking + visible lines (NEW, next, ~1 day)
+## Phase C — Selectable entities: body picking + visible lines (~1 day) — SHIPPED (`5121623`)
 
 Pulled ahead of everything below: **constraints are currently unusable** because
 only entity *endpoints* are pickable (`PickSketchPoint`, 12 px radius) and lines
@@ -189,7 +189,7 @@ makes a sketch clickable.
 Risk: low-medium — the renderer gains a screen-space-expanded pipeline and a new
 vertex attribute, but it's self-contained and reuses the existing upload path.
 
-## Phase D — Rectangle decomposition + split + line trim (~1.5–2 days)
+## Phase D — Rectangle decomposition + split + line trim (~1.5–2 days) — SHIPPED (`b932e1a`,`3e4a787`,`7cde476`,`da4cf5e`)
 
 **Detailed implementation plan: [CONSTRAINTS_PHASE_D.md](CONSTRAINTS_PHASE_D.md)**
 (reuses Phase B `DeleteEntity` for trim cleanup and Phase C body picking; drops
@@ -220,7 +220,7 @@ circle trim deferred to Phase J).
 Risk: medium — the transfer policy has many small cases; the FreeCAD reference
 enumerates them all.
 
-## Phase E — Snapping / auto-constraint inference (~1.5–2 days)
+## Phase E — Snapping / auto-constraint inference (~1.5–2 days) — SHIPPED (`c16ca40`)
 
 **Detailed implementation plan: [CONSTRAINTS_PHASE_E.md](CONSTRAINTS_PHASE_E.md)**
 (pure testable `core/SketchInference` taking a `pixelsPerUV` scale; add-then-
@@ -248,7 +248,7 @@ The Onshape-feel milestone: snap + auto-constrain while drawing.
 
 Risk: medium — tolerance tuning; the numbers above are proven starting points.
 
-## Phase F — Whole-entity dragging + drag-solver rework (~1–2 days)
+## Phase F — Whole-entity dragging + drag-solver rework (~1–2 days) — SHIPPED (`648f68c`)
 
 **Detailed implementation plan: [CONSTRAINTS_PHASE_F.md](CONSTRAINTS_PHASE_F.md)**
 (persistent `Solver` drag session `BeginDrag`/`SetDragTargets`/`SolveDrag`; weak
@@ -275,7 +275,7 @@ Adopt the FreeCAD drag recipe wholesale (it's PlaneGCS-native):
 
 Risk: low-medium now that the reference implementation is mapped.
 
-## Phase G — Dimension display + editing (NEW, ~2 days)
+## Phase G — Dimension display + editing (~2 days) — SHIPPED (`95d0d56`)
 
 **Detailed plan for the whole constraint-layer block (G+H+I):
 [CONSTRAINTS_PHASE_GHI.md](CONSTRAINTS_PHASE_GHI.md).**
@@ -309,7 +309,7 @@ sketcher). Independent of drag/arcs/splines; can run before or after Phase F.
 Risk: medium — annotation layout (arrow placement, text avoidance) is fiddly UX,
 but the constraint/solver side is done.
 
-## Phase H — Construction geometry + extra constraints (~1.5 days)
+## Phase H — Construction geometry + extra constraints (~1.5 days) — SHIPPED (`bf96eb2`)
 
 Completes the constraint layer. Independent of arcs/splines; pairs with the
 dimension work in G. **Detailed plan:
@@ -535,50 +535,31 @@ all tools present.
 Risk: low — mostly wiring; the box hit-test (pure) and the WantTextInput key
 guard are the only fiddly bits.
 
-## Phase N — Sketch UI redesign + generative-op editing (~3–4 days)
+## Phase N — Sketch UI polish, generative-op editing, alignment inference (~3–4 days) — NEXT
 
-The sketch toolbar grew organically into a tall **floating** ImGui window with
-every tool, constraint, status readout, and generative control stacked in it.
-It needs a real redesign, and the multi-step tools (mirror/pattern/offset) need
-staged guidance instead of terse hint text. Deferred here (from Phase K) because
-it's a UI concern, not a modelling one, and wants doing once across all tools.
+**Detailed implementation plan: [CONSTRAINTS_PHASE_N.md](CONSTRAINTS_PHASE_N.md).**
+The only remaining sketch milestone. The "dock it, don't float it" half is
+**already done** (the context-switching icon ribbon `8f7f457` + a docked
+"Sketch" panel tabbed with Properties); what's left is per-tool staging, exposing
+generative-op params the model already stores, and the point-to-point alignment
+snapping (below). The multi-step tools (mirror/pattern/offset) still need staged
+guidance instead of terse hint text.
 
-- **Dock the sketch UI, don't float it.** Fold the sketch tools into the app's
-  docking layout (a proper docked panel / contextual toolbar that appears on
-  sketch-edit and shares the frame), matching the Model/Properties panels rather
-  than a stray `Begin("Sketch Tools")` window. Group: draw tools · constraints ·
-  generative · status. Consider a compact tool strip + a context panel for the
-  active tool's options.
-- **Staged, guided multi-step tools.** Tools that take more than one kind of
-  input should show explicit steps and progress, not one line of hint text:
-  - *Mirror*: "Step 1 — select geometry to mirror" → "Step 2 — click the mirror
-    axis line", with the current selection highlighted distinctly from the axis,
-    a live preview of the reflected result, and a cancel/confirm. (Today it
-    silently relies on a prior selection + a hint string.)
-    - Also let a mirror axis be a **construction line or the plane X/Y axes**,
-      not only a drawn line (the K1 rough edge).
-  - *Pattern* / *Offset*: a small inline form for the params with a live ghost
-    preview before commit, and clearer "select the loop / geometry first"
-    staging.
-  - A shared "tool prompt / step" area (supersedes the ad-hoc
-    `SketchEditState::actionMsg`), so every tool reports what it wants next and
-    why a click did nothing.
-- **Generative-op parameter editing (the deferred K editing).** The Patterns
-  panel currently edits only `count`. Expose the full transform: linear
-  spacing/direction, circular centre/angle, and link/unlink — with an
-  `EditPatternParams`-style commit alongside `SetPatternCount`. Add a
-  first-class **edit-fillet-radius** affordance (today you must add a Radius
-  dimension to the fillet arc). Optionally, make **offset a linked DerivedOp** so
-  its distance is editable too (K3 shipped it bake-only).
-- **Selected-op inspector.** Clicking a generated/derived entity (or the op in a
-  list) surfaces its op's params for editing — the natural home for the above.
-- Tests: GUI coverage for the staged mirror flow (select → axis → preview →
-  commit) and pattern param edits regenerating; the pure param-edit commit
-  (`EditPatternParams`) unit-tested like `SetPatternCount`.
+Workstreams (full detail in the phase doc): **N1** tool state machine + a shared
+staged prompt bar (replaces `actionMsg`); **N2** guided Mirror (2-step, live
+preview, axis = drawn/construction line **or plane X/Y**); **N3** guided
+Pattern/Offset with a ghost preview + full param forms; **N4** generative-op
+editing (`EditPatternParams`, edit-fillet-radius, selected-op inspector);
+**N5 — point-alignment inference** (user-requested): the Onshape dashed guide
+when a new point lines up with an existing point's X/Y — snap the coordinate,
+draw the guide, and (autoConstrain on) add a two-point Horizontal/Vertical
+constraint. Solver already supports the point-pair form
+(`GCS.h:407,409`); `SketchSolver` currently wires only the line form.
 
-Risk: medium — mostly UI/UX work and wiring; the docking integration and a
-clean tool-state machine (per-tool staged input) are the substance. No new
-modelling core beyond exposing params the DerivedOp already stores.
+Risk: medium — mostly UI/UX wiring. The only core/solver changes are the
+two-point H/V branch (N5, small) and an optional `DerivedKind::Offset`; the rest
+exposes params the model already stores or restructures ImGui panels. See
+[CONSTRAINTS_PHASE_N.md](CONSTRAINTS_PHASE_N.md) for the step-by-step.
 
 ## Deferred / explicitly out of scope
 
@@ -590,8 +571,8 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 - **Circle & arc trim** → SHIPPED in Phase J (`TrimCurveAt`): a trimmed circle
   becomes the complementary arc, a trimmed arc splits into sub-arcs.
 - **Whole-entity body dragging** (drag a line/circle by its interior; rim-drag
-  a circle's radius) → Phase F. Phase C added body *picking* only; the Select
-  drag still moves single endpoints.
+  a circle's radius) → **SHIPPED in Phase F** (`648f68c`, FreeCAD drag-solver
+  recipe).
 - **Dimensional-constraint transfer onto a coincident survivor on delete** →
   deferred in Phase B (we do coincidence repair + orphan sweep only). Phase D's
   `SplitEntity` implements its own per-piece transfer; a general delete-time
@@ -599,11 +580,12 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 - **Eager split-at-draw** (drawing onto a line splits it immediately) →
   Phase D uses trim-time split + a `PointOnLine` constraint instead (Onshape
   model). Eager splitting remains a possible policy toggle, unplanned.
-- **Full auto-constraint inference** (ghost H/V/⟂/● glyphs, parallel/perp/
-  tangent snapping, tolerance tuning, the Ctrl-suppress modifier) → Phase E.
-  Phase D ships only a minimal `PointOnLine`-on-commit taste of it.
-- **Deleting individual constraints / constraint status** → **Phase I** (was
-  unplanned). Today only *entities* delete (cleaning up their constraints).
+- **Auto-constraint inference** (ghost H/V/⟂/● glyphs, parallel/perp snapping,
+  the Ctrl-suppress modifier) → **SHIPPED in Phase E** (`c16ca40`). The one
+  remaining inference gap — **point-to-point X/Y alignment guides** (snapping a
+  new point under/beside an existing one) — is **N5** in Phase N.
+- **Deleting individual constraints / constraint status** → **SHIPPED in
+  Phase I** (`7001a35`).
 - **Extend tool** (the complement of Trim — stretch a line to meet another) →
   nice-to-have; pairs with Trim/arcs, unscheduled.
 - **Transform tools** (move/rotate/scale/copy a *selection* numerically) →
@@ -643,17 +625,22 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 
 ## Recommended order
 
-A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → F ✓ → **G (dimensions)** → H (construction +
-extra constraints) → I (constraint status & management) → J (arcs) → K
-(generative: mirror/pattern/fillet/offset) → L (splines, later) → M
-(interaction & keyboard).
+A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → F ✓ → G ✓ → H ✓ → I ✓ → J ✓ → K ✓ →
+L ✓ (ellipses; B-splines deferred) → M ✓ → **N (next)**.
 
-A–F shipped. G/H/I are the **constraint-layer** block — dimensions display,
-construction geometry + the remaining standard constraints, and the
-fully-constrained/conflict feedback + per-constraint delete — together the
-biggest "feels-like-a-sketcher" gap after geometry. They're independent of
-arcs/splines and can be reordered freely. J completes the geometry set; K
-(generative) is the "history where it matters" layer and needs arcs first; L is
-its own deferred milestone; M is UX polish placed last so its shortcuts cover
-every tool/constraint (though select-default/Escape/box-select are independent
-and can be pulled forward). Roughly 12–17 days remaining.
+**A–M all shipped** — the sketcher is feature-complete for v1 (geometry:
+lines/rects/arcs/ellipses; constraints: the full standard set + dimensions +
+construction + status/conflict management; generative: mirror/fillet/pattern/
+offset; interaction: select-default/Escape/box-select + Onshape keymap + icon
+toolbar). **Remaining:**
+- **Phase N** — UI staging, generative-op editing, and point-alignment inference
+  ([CONSTRAINTS_PHASE_N.md](CONSTRAINTS_PHASE_N.md)). The last sketch milestone.
+- **B-splines** — Phase L's second half, planned in
+  [CONSTRAINTS_PHASE_L.md](CONSTRAINTS_PHASE_L.md), awaiting review.
+- **Follow-ups** (see Deferred): ellipse full constrainability, offset as a
+  regenerating DerivedOp, extend/transform tools, convenience primitives.
+
+Orthogonal, non-sketch work surfaced later: the **quaternion camera**
+(`refactor/quaternion-camera`) and an **incremental-regeneration** rework for
+large models (current `Document::Regenerate()` recomputes every feature each
+edit — fine now, the scaling limiter later).
