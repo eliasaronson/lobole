@@ -130,6 +130,7 @@ void Solver::Load(const SketchFeature& sketch) {
     else if (std::holds_alternative<Line>(e)) nParams += 4;
     else if (std::holds_alternative<Circle>(e)) nParams += 3;
     else if (std::holds_alternative<Arc>(e)) nParams += 6; // 3 pts + rad + 2 ang
+    else if (std::holds_alternative<Ellipse>(e)) nParams += 2; // centre only
   }
   (void)nParams; // deque addresses are stable; no reservation needed
 
@@ -183,6 +184,12 @@ void Solver::Load(const SketchFeature& sketch) {
       // Definitional: ties start/end points to center+radius+angles. Tag 0 so
       // it is never attributed to a user constraint (Phase I conflict mapping).
       im.sys.addConstraintArcRules(im.arcs.back(), 0);
+    } else if (auto* el = std::get_if<Ellipse>(&e)) {
+      // v1: only the centre is a solver point (so coincident/distance/fixed on
+      // the centre work and the ellipse translates with it); the radii and
+      // rotation are rigid — see CONSTRAINTS_PHASE_L.md for the full-rules TODO.
+      (void)el;
+      addPoint(id, 0, el->center);
     }
     // Rectangle: rigid in v1, not added to the solver.
   }
@@ -461,6 +468,8 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
       // Keep the CCW-always invariant: sweep in (0, 2π].
       while (ar.endAngle <= ar.startAngle)
         ar.endAngle += 2.0 * M_PI;
+    } else if (std::holds_alternative<Ellipse>(e)) {
+      std::get<Ellipse>(e).center = pointAt(0); // radii/rotation rigid
     }
   }
 }

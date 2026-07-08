@@ -267,6 +267,7 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
   sk->AddEntity(sketch::Circle{{2.0f, 1.0f}, 0.5});
   sk->AddEntity(sketch::Arc{{1.0f, 1.0f}, 2.0, 0.25, 1.75});
+  sk->AddEntity(sketch::Ellipse{{3.0f, 2.0f}, 1.5, 0.75, 0.6});
   sk->SetId(7);
 
   auto j = DocumentIO::FeatureToJson(*sk);
@@ -275,7 +276,7 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   REQUIRE(rsk != nullptr);
 
   CHECK(rsk->GetId() == 7);
-  CHECK(rsk->entities.size() == 4);
+  CHECK(rsk->entities.size() == 5);
   CHECK(DocumentIO::FeatureToJson(*rsk) == j);
 
   // The arc survives with its angles intact.
@@ -284,6 +285,14 @@ TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   CHECK_THAT(arc.radius, WithinAbs(2.0, 1e-6));
   CHECK_THAT(arc.startAngle, WithinAbs(0.25, 1e-6));
   CHECK_THAT(arc.endAngle, WithinAbs(1.75, 1e-6));
+
+  // The ellipse survives with its radii and rotation intact.
+  REQUIRE(std::holds_alternative<sketch::Ellipse>(rsk->entities[4]));
+  const auto& ell = std::get<sketch::Ellipse>(rsk->entities[4]);
+  CHECK_THAT(ell.center.x, WithinAbs(3.0f, 1e-6f));
+  CHECK_THAT(ell.rMajor, WithinAbs(1.5, 1e-6));
+  CHECK_THAT(ell.rMinor, WithinAbs(0.75, 1e-6));
+  CHECK_THAT(ell.rotation, WithinAbs(0.6, 1e-6));
 
   // Plane axes reconstructed orthonormally
   CHECK_THAT(glm::length(rsk->plane.GetNormal()), WithinAbs(1.0f, 1e-4f));
@@ -322,6 +331,22 @@ TEST_CASE("ArcFromThreePoints builds a CCW arc through the middle point",
 
   // Collinear points have no circumcircle.
   CHECK_FALSE(sketch::ArcFromThreePoints({0, 0}, {1, 0}, {2, 0}).has_value());
+}
+
+TEST_CASE("EllipseFromClicks derives radii and rotation", "[sketch][ellipse]") {
+  // Centre at origin, major-axis end at (2,0) → rMajor 2, rotation 0. A third
+  // point at (0.5, 0.75) is 0.75 off the major (x) axis → rMinor 0.75.
+  sketch::Ellipse e = sketch::EllipseFromClicks({0, 0}, {2, 0}, {0.5f, 0.75f});
+  CHECK_THAT(e.rMajor, WithinAbs(2.0, 1e-5));
+  CHECK_THAT(e.rMinor, WithinAbs(0.75, 1e-5));
+  CHECK_THAT(e.rotation, WithinAbs(0.0, 1e-5));
+
+  // Rotated major axis: end at (0,3) → rMajor 3, rotation π/2. The minor point
+  // (−1.2, 0) is 1.2 off the (now vertical) major axis.
+  sketch::Ellipse r = sketch::EllipseFromClicks({0, 0}, {0, 3}, {-1.2f, 0});
+  CHECK_THAT(r.rMajor, WithinAbs(3.0, 1e-5));
+  CHECK_THAT(r.rMinor, WithinAbs(1.2, 1e-5));
+  CHECK_THAT(r.rotation, WithinAbs(M_PI / 2, 1e-5));
 }
 
 TEST_CASE("Sketch constraints round-trip through JSON", "[sketch][serialization]") {

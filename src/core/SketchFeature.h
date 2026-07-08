@@ -48,11 +48,43 @@ struct Arc {
   uint32_t id = 0;
   bool construction = false;
 };
+// A full ellipse: major axis is `rotation` radians from the +U axis. `which`
+// 0 addresses the centre.
+struct Ellipse {
+  glm::vec2 center;
+  double rMajor;
+  double rMinor;
+  double rotation;
+  uint32_t id = 0;
+  bool construction = false;
+};
 
 // Rectangles are not a primitive: they decompose into four Lines with shared
 // corners (see SketchFeature::AddRectangle) so every side is editable and
 // trimmable. Legacy files with a rigid "rect" entity are migrated on load.
-using Entity = std::variant<Point, Line, Circle, Arc>;
+using Entity = std::variant<Point, Line, Circle, Arc, Ellipse>;
+
+// Builds an ellipse from three clicks: centre, a point on the major axis (sets
+// rMajor + rotation), and a third point whose perpendicular distance to the
+// major axis sets rMinor.
+inline Ellipse EllipseFromClicks(glm::vec2 center, glm::vec2 majorEnd,
+                                 glm::vec2 minorPt) {
+  const glm::vec2 maj = majorEnd - center;
+  const double rMajor = glm::length(maj);
+  const double rotation = std::atan2(maj.y, maj.x);
+  // Perpendicular (minor-axis) direction, and the third point's distance to it.
+  const glm::vec2 minorDir(-std::sin(rotation), std::cos(rotation));
+  const double rMinor = std::abs(glm::dot(minorPt - center, minorDir));
+  return Ellipse{center, rMajor, rMinor, rotation};
+}
+
+// UV of a point on the ellipse at parametric angle `t` (before/after rotation).
+inline glm::vec2 EllipsePointUV(const Ellipse& e, double t) {
+  const double x = e.rMajor * std::cos(t), y = e.rMinor * std::sin(t);
+  const double c = std::cos(e.rotation), s = std::sin(e.rotation);
+  return e.center + glm::vec2(static_cast<float>(c * x - s * y),
+                              static_cast<float>(s * x + c * y));
+}
 
 // UV of one of an arc's referenced points: which 0 = center, 1 = start, 2 = end
 // (start/end matching CCW startAngle/endAngle). Mirrors Circle's center = 0.
@@ -151,7 +183,8 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
           return Line{ReflectPoint(g.a, a, b), ReflectPoint(g.b, a, b)};
         else if constexpr (std::is_same_v<T, Circle>)
           return Circle{ReflectPoint(g.center, a, b), g.radius};
-        else { // Arc: reflected start becomes the new end (winding flips)
+        else if constexpr (std::is_same_v<T, Arc>) {
+          // Reflected start becomes the new end (winding flips).
           glm::vec2 c = ReflectPoint(g.center, a, b);
           glm::vec2 s = ReflectPoint(ArcPointUV(g, 1), a, b);
           glm::vec2 en = ReflectPoint(ArcPointUV(g, 2), a, b);
@@ -160,6 +193,11 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
           while (a1 <= a0)
             a1 += 2.0 * M_PI; // CCW-always
           return Arc{c, g.radius, a0, a1};
+        } else { // Ellipse: reflect the centre and the major-axis direction
+          glm::vec2 c = ReflectPoint(g.center, a, b);
+          glm::vec2 maj = ReflectPoint(EllipsePointUV(g, 0.0), a, b);
+          return Ellipse{c, g.rMajor, g.rMinor,
+                         std::atan2(maj.y - c.y, maj.x - c.x)};
         }
       },
       e);
@@ -179,8 +217,10 @@ inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
           return Line{g.a + t, g.b + t};
         else if constexpr (std::is_same_v<T, Circle>)
           return Circle{g.center + t, g.radius};
-        else // Arc
+        else if constexpr (std::is_same_v<T, Arc>)
           return Arc{g.center + t, g.radius, g.startAngle, g.endAngle};
+        else // Ellipse
+          return Ellipse{g.center + t, g.rMajor, g.rMinor, g.rotation};
       },
       e);
   SetEntityId(out, 0);
@@ -207,9 +247,11 @@ inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
           return Line{rot(g.a), rot(g.b)};
         else if constexpr (std::is_same_v<T, Circle>)
           return Circle{rot(g.center), g.radius};
-        else // Arc
+        else if constexpr (std::is_same_v<T, Arc>)
           return Arc{rot(g.center), g.radius, g.startAngle + ang,
                      g.endAngle + ang};
+        else // Ellipse
+          return Ellipse{rot(g.center), g.rMajor, g.rMinor, g.rotation + ang};
       },
       e);
   SetEntityId(out, 0);
@@ -230,8 +272,10 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
           return which == 1 ? g.b : g.a;
         else if constexpr (std::is_same_v<T, Circle>)
           return g.center;
-        else // Arc
+        else if constexpr (std::is_same_v<T, Arc>)
           return ArcPointUV(g, which);
+        else // Ellipse: only the centre (which 0)
+          return g.center;
       },
       e);
 }

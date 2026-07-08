@@ -100,6 +100,25 @@ TEST_CASE("Circle extrudes to a cylinder volume", "[extrude]") {
   CHECK_THAT(prism.Volume(), WithinRel(M_PI * 1.5 * 1.5 * 2.0, 1e-3));
 }
 
+TEST_CASE("Ellipse extrudes to an elliptic-prism volume", "[extrude][ellipse]") {
+  const double a = 2.0, b = 1.0;
+  auto loops = sketch::BuildLoops({sketch::Ellipse{{0, 0}, a, b, 0.0}});
+  REQUIRE(loops.size() == 1);
+  CADShape prism = sketch::BuildPrism(kXY, loops, 3.0, false);
+  REQUIRE(prism.IsValid());
+  CHECK_THAT(prism.Volume(), WithinRel(M_PI * a * b * 3.0, 1e-3));
+}
+
+TEST_CASE("A rotated ellipse extrudes to the same volume", "[extrude][ellipse]") {
+  // Rotation leaves the enclosed area (π·a·b) unchanged.
+  const double a = 2.0, b = 1.0;
+  auto loops = sketch::BuildLoops({sketch::Ellipse{{0, 0}, a, b, 0.7}});
+  REQUIRE(loops.size() == 1);
+  CADShape prism = sketch::BuildPrism(kXY, loops, 3.0, false);
+  REQUIRE(prism.IsValid());
+  CHECK_THAT(prism.Volume(), WithinRel(M_PI * a * b * 3.0, 1e-3));
+}
+
 TEST_CASE("A filleted-corner profile (lines + arc) extrudes", "[extrude][arc]") {
   // 4x2 rectangle with the top-right corner rounded by a quarter arc of r=0.5:
   // the arc runs CCW from (4,1.5) to (3.5,2), centred at (3.5,1.5).

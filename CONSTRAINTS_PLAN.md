@@ -470,9 +470,21 @@ Risk: medium-large — the id-stable parametric regeneration is the fiddly part 
 sketch-local analogue of the toponaming problem); bake mode is easy and can ship
 first within the phase.
 
-## Phase L — B-splines (large, defer)
+## Phase L — Ellipses (SHIPPED) + B-splines (large, defer)
 
-Unchanged: own milestone after A–K.
+**Ellipses SHIPPED** (branch feat/curves, commit `feat: sketch ellipses`):
+`sketch::Ellipse{center, rMajor, rMinor, rotation}` threaded through the full
+pipeline — serialization (v9), solver (centre is a movable point; radii/rotation
+rigid — full `GCS::Ellipse` constrainability is the deferred follow-up in
+CONSTRAINTS_PHASE_L.md), profile (`gp_Elips` wire edge + tessellation → extrudes
+to π·a·b·h), render/pick (centre dot + tessellated body-hit), and a 3-click
+`SketchTool::Ellipse` (centre → major-axis end → minor radius) with an
+`ICON_FA_EGG` toolbar button. Trim/circle-line-break bug and the trackball
+gimbal-lock fix shipped alongside on fix/sketch-usability.
+
+**B-splines** remain a separate milestone — planned in CONSTRAINTS_PHASE_L.md
+(variable poles/knots, control-point UX, OCC `Geom_BSplineCurve`); build after
+review.
 
 ## Phase M — Interaction & keyboard: select-default, Escape, shortcuts, box-select (~1.5 days) — SHIPPED
 

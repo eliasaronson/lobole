@@ -15,7 +15,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 8; // v8: derived ops (v7: arcs, v6: construction flag)
+constexpr int kVersion = 9; // v9: ellipses (v8: derived ops, v7: arcs)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -42,12 +42,18 @@ json EntityToJson(const sketch::Entity& entity) {
         } else if constexpr (std::is_same_v<T, sketch::Circle>) {
           return {{"type", "circle"}, {"center", Vec2ToJson(e.center)},
                   {"radius", e.radius}};
-        } else {
+        } else if constexpr (std::is_same_v<T, sketch::Arc>) {
           return {{"type", "arc"},
                   {"center", Vec2ToJson(e.center)},
                   {"radius", e.radius},
                   {"start_angle", e.startAngle},
                   {"end_angle", e.endAngle}};
+        } else {
+          return {{"type", "ellipse"},
+                  {"center", Vec2ToJson(e.center)},
+                  {"r_major", e.rMajor},
+                  {"r_minor", e.rMinor},
+                  {"rotation", e.rotation}};
         }
       },
       entity);
@@ -72,6 +78,11 @@ sketch::Entity EntityFromJson(const json& j) {
     e = sketch::Arc{Vec2FromJson(j.at("center")), j.at("radius").get<double>(),
                     j.at("start_angle").get<double>(),
                     j.at("end_angle").get<double>()};
+  } else if (type == "ellipse") {
+    e = sketch::Ellipse{Vec2FromJson(j.at("center")),
+                        j.at("r_major").get<double>(),
+                        j.at("r_minor").get<double>(),
+                        j.at("rotation").get<double>()};
   } else {
     // "rect" is intercepted and expanded in FeatureFromJson (pre-v5 rigid
     // rectangles become four lines); anything else is unknown.

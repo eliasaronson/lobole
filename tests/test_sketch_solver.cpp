@@ -43,6 +43,31 @@ TEST_CASE("Coincident merges two endpoints", "[solver]") {
   CHECK_THAT(glm::length(l0b - l1a), WithinAbs(0.0f, 1e-5f));
 }
 
+TEST_CASE("An ellipse centre is a solver point that Coincident moves",
+          "[solver][ellipse]") {
+  // The ellipse centre snaps onto a fixed anchor point; radii/rotation are
+  // rigid, so the whole ellipse translates with its centre.
+  SketchFeature s = MakeSketch();
+  uint32_t anchor = s.AddEntity(sketch::Point{{2.0f, 1.0f}});
+  uint32_t el = s.AddEntity(sketch::Ellipse{{0.0f, 0.0f}, 1.5, 0.5, 0.3});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {anchor, 0}, {0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {el, 0}, {anchor, 0}});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  const auto& e = std::get<sketch::Ellipse>(out[1]);
+  CHECK_THAT(e.center.x, WithinAbs(2.0f, 1e-5f));
+  CHECK_THAT(e.center.y, WithinAbs(1.0f, 1e-5f));
+  CHECK_THAT(e.rMajor, WithinAbs(1.5, 1e-9)); // shape unchanged
+  CHECK_THAT(e.rMinor, WithinAbs(0.5, 1e-9));
+  CHECK_THAT(e.rotation, WithinAbs(0.3, 1e-9));
+}
+
 TEST_CASE("Horizontal levels a line's endpoints", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 1.5f}});

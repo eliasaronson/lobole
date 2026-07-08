@@ -724,6 +724,22 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         edit.hasPendingPoint = false;
         edit.hasPendingPoint2 = false;
       }
+    } else if (edit.tool == SketchTool::Ellipse) {
+      // 3-click: centre → major-axis end → minor radius.
+      if (!edit.hasPendingPoint) {
+        edit.pendingPoint = uv;
+        edit.hasPendingPoint = true;
+      } else if (!edit.hasPendingPoint2) {
+        edit.pendingPoint2 = uv;
+        edit.hasPendingPoint2 = true;
+      } else {
+        sketch::Ellipse el =
+            sketch::EllipseFromClicks(edit.pendingPoint, edit.pendingPoint2, uv);
+        if (el.rMajor > 1e-6 && el.rMinor > 1e-6)
+          CommitEntity(state, *sketch, index, el);
+        edit.hasPendingPoint = false;
+        edit.hasPendingPoint2 = false;
+      }
     } else if (!edit.hasPendingPoint) {
       edit.pendingPoint = uv;
       edit.hasPendingPoint = true;
@@ -794,6 +810,13 @@ void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
       poly = sketch::TessellateEntity(*arc);
     else
       poly = {a, edit.pendingPoint2}; // collinear: fall back to the chord
+    break;
+  case SketchTool::Ellipse:
+    if (!edit.hasPendingPoint2) // centre placed: preview the major axis
+      poly = {a, b};
+    else // major axis placed: live ellipse to the cursor's minor radius
+      poly = sketch::TessellateEntity(
+          sketch::EllipseFromClicks(a, edit.pendingPoint2, b));
     break;
   default:
     return;
@@ -1108,6 +1131,8 @@ std::vector<std::pair<uint8_t, glm::vec2>> EntityPoints(const sketch::Entity& e)
     pts = {{0, a->center},
            {1, sketch::ArcPointUV(*a, 1)},
            {2, sketch::ArcPointUV(*a, 2)}};
+  } else if (auto* el = std::get_if<sketch::Ellipse>(&e)) {
+    pts = {{0, el->center}};
   }
   return pts;
 }

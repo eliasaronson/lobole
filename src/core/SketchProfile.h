@@ -24,8 +24,9 @@ struct LoopEdge {
 
 // One closed loop of a sketch profile, in plane UV space.
 struct Loop {
-  std::optional<Circle> circle;  // set: a pure circle loop
-  std::vector<LoopEdge> edges;   // else: ordered boundary edges (lines + arcs)
+  std::optional<Circle> circle;   // set: a pure circle loop
+  std::optional<Ellipse> ellipse; // set: a pure ellipse loop
+  std::vector<LoopEdge> edges;    // else: ordered boundary edges (lines + arcs)
 
   // Shoelace area (sign = winding); circles are positive.
   double SignedArea() const;

@@ -20,6 +20,7 @@
 #include <gp_Ax3.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
+#include <gp_Elips.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
@@ -69,6 +70,9 @@ double Loop::SignedArea() const {
   if (circle) {
     return M_PI * circle->radius * circle->radius;
   }
+  if (ellipse) {
+    return M_PI * ellipse->rMajor * ellipse->rMinor;
+  }
   // Concatenate the boundary as a polyline (drop each edge's duplicated start),
   // then shoelace. Arcs are tessellated so curved area is counted.
   std::vector<glm::vec2> poly;
@@ -103,6 +107,10 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
           if constexpr (std::is_same_v<T, Circle>) {
             Loop loop;
             loop.circle = e;
+            loops.push_back(loop);
+          } else if constexpr (std::is_same_v<T, Ellipse>) {
+            Loop loop;
+            loop.ellipse = e;
             loops.push_back(loop);
           } else if constexpr (std::is_same_v<T, Line>) {
             freeEdges.push_back({false, e.a, e.b});
@@ -186,6 +194,15 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
     gp_Ax2 axis(toPnt(loop.circle->center), normal, gp_Dir(u.x, u.y, u.z));
     gp_Circ circ(axis, loop.circle->radius);
     wire.Add(BRepBuilderAPI_MakeEdge(circ).Edge());
+  } else if (loop.ellipse) {
+    const Ellipse& el = *loop.ellipse;
+    // Major-axis direction: +U rotated by `rotation` within the plane.
+    glm::vec3 u = plane.GetUAxis(), v = plane.GetVAxis();
+    const double c = std::cos(el.rotation), s = std::sin(el.rotation);
+    glm::vec3 major = u * static_cast<float>(c) + v * static_cast<float>(s);
+    gp_Ax2 axis(toPnt(el.center), normal, gp_Dir(major.x, major.y, major.z));
+    gp_Elips ell(axis, el.rMajor, el.rMinor);
+    wire.Add(BRepBuilderAPI_MakeEdge(ell).Edge());
   } else {
     for (const auto& e : loop.edges) {
       if (e.arc) {
@@ -298,6 +315,11 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity) {
                 {e.center.x + static_cast<float>(e.radius * std::cos(a)),
                  e.center.y + static_cast<float>(e.radius * std::sin(a))});
           }
+        } else if constexpr (std::is_same_v<T, Ellipse>) {
+          points.reserve(kCircleSegments + 1);
+          for (int i = 0; i <= kCircleSegments; i++)
+            points.push_back(
+                EllipsePointUV(e, 2.0 * M_PI * i / kCircleSegments));
         }
         // Point: no polyline
       },

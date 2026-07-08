@@ -87,6 +87,7 @@ void DrawSketchModeToolbar(AppState& state) {
   toolBtn(ICON_FA_CIRCLE_NOTCH, "Circle (C)", SketchTool::Circle);
   toolBtn(ICON_FA_VECTOR_SQUARE, "Rectangle (G)", SketchTool::Rectangle);
   toolBtn(ICON_FA_BEZIER_CURVE, "3-Point Arc (A)", SketchTool::ArcThreePoint);
+  toolBtn(ICON_FA_EGG, "Ellipse", SketchTool::Ellipse);
   toolBtn(ICON_FA_CIRCLE_DOT, "Point", SketchTool::Point);
   toolBtn(ICON_FA_SCISSORS, "Trim (M)", SketchTool::Trim);
   Divider();

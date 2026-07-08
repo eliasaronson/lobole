@@ -294,6 +294,8 @@ EntityDots(const sketch::Entity& e) {
   if (auto* a = std::get_if<sketch::Arc>(&e))
     return {{0, a->center}, {1, sketch::ArcPointUV(*a, 1)},
             {2, sketch::ArcPointUV(*a, 2)}};
+  if (auto* el = std::get_if<sketch::Ellipse>(&e))
+    return {{0, el->center}};
   return {};
 }
 

@@ -103,6 +103,24 @@ def main():
         expect(abs(state["bodies"][0]["volume"] - 24.0) < 1e-6,
                "extruded volume 24")
 
+        # Ellipse round-trips through JSON and extrudes to an elliptic prism.
+        d.call("new_project")
+        ske = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch E",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "ellipse", "center": [0, 0],
+                          "r_major": 2.0, "r_minor": 1.0, "rotation": 0.0}]})
+        e0 = d.call("get_state")["features"][0]["entities"][0]
+        expect(e0["type"] == "ellipse" and abs(e0["r_major"] - 2.0) < 1e-6,
+               "ellipse survives the RPC round-trip")
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Pad", "sketch_id": ske["id"],
+            "distance": 3.0, "mode": "new_body"})
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - math.pi * 2.0 * 1.0 * 3.0) < 0.05,
+               "ellipse extrudes to pi*a*b*h")
+
         # Preview -> accept/cancel feature flow
         d.call("new_project")
         d.call("menu_click", path="Create/Box")

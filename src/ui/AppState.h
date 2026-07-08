@@ -42,6 +42,7 @@ enum class SketchTool {
   Trim,
   Arc,           // 3-click center → start → end
   ArcThreePoint, // 3-click start → end → through-point
+  Ellipse,       // 3-click center → major-axis end → minor radius
   Mirror,        // reflect the current selection across a clicked axis line
   Fillet,        // round the clicked corner where two lines meet
   Pattern,       // linear/circular array of the current selection
