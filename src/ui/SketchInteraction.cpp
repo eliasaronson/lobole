@@ -151,6 +151,7 @@ void CommitRectangle(AppState& state, SketchFeature& sketch, size_t index,
   solver.Load(sketch);
   if (solver.Solve().ok)
     solver.WriteBack(sketch.entities);
+  sketch.RegenerateDerived();
   nlohmann::json after = DocumentIO::FeatureToJson(sketch);
   state.commands->Execute(
       std::make_unique<ModifyFeatureCommand>(index, before, after),
@@ -232,6 +233,7 @@ void UpdateDragSession(AppState& state, SketchFeature& sketch,
   }
   if (drag.solver->SolveDrag().ok) {
     drag.solver->WriteBack(sketch.entities);
+    sketch.RegenerateDerived();
     state.document->Regenerate();
   }
 }
@@ -419,6 +421,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       solver.Load(*sketch);
       if (solver.Solve().ok)
         solver.WriteBack(sketch->entities);
+      sketch->RegenerateDerived();
       state.document->Regenerate();
       nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
       if (after != before)
@@ -481,6 +484,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         solver.Load(*sketch);
         if (solver.Solve().ok)
           solver.WriteBack(sketch->entities);
+        sketch->RegenerateDerived();
         state.document->Regenerate();
         nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
         state.commands->Execute(
@@ -498,6 +502,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     solver.Load(*sketch);
     if (solver.Solve().ok)
       solver.WriteBack(sketch->entities);
+    sketch->RegenerateDerived();
     state.document->Regenerate();
     nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
     state.commands->Execute(
@@ -749,6 +754,7 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
   solver.Load(sketch);
   if (solver.Solve().ok)
     solver.WriteBack(sketch.entities);
+  sketch.RegenerateDerived();
   state.document->Regenerate();
   nlohmann::json after = DocumentIO::FeatureToJson(sketch);
   state.commands->Execute(
@@ -1230,6 +1236,74 @@ bool DeleteConstraint(AppState& state, size_t cIndex) {
   solver.Load(*sketch);
   if (solver.Solve().ok)
     solver.WriteBack(sketch->entities);
+  sketch->RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  return true;
+}
+
+bool ApplyPattern(AppState& state) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch)
+    return false;
+  auto& edit = state.sketchEdit;
+  std::vector<uint32_t> sources; // unique selected ids
+  for (const auto& r : edit.selected) {
+    bool seen = false;
+    for (uint32_t s : sources)
+      seen |= (s == r.entity);
+    if (!seen)
+      sources.push_back(r.entity);
+  }
+  if (sources.empty()) {
+    edit.actionMsg = "Pattern: select the geometry to pattern first.";
+    return false;
+  }
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  std::vector<uint32_t> gen =
+      edit.patternCircular
+          ? sketch->AddCircularPattern(sources, edit.patternCenter,
+                                       glm::radians(edit.patternAngleDeg),
+                                       edit.patternCount, edit.linkGenerative)
+          : sketch->AddLinearPattern(sources, edit.patternStep,
+                                     edit.patternCount, edit.linkGenerative);
+  if (gen.empty()) {
+    edit.actionMsg = "Pattern: nothing generated (count must be >= 2).";
+    return false;
+  }
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch->entities);
+  sketch->RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  edit.actionMsg.clear();
+  return true;
+}
+
+bool SetPatternCount(AppState& state, size_t opIndex, int count) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || opIndex >= sketch->derived.size() || count < 2)
+    return false;
+  if (sketch->derived[opIndex].count == count)
+    return false;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  sketch->derived[opIndex].count = count;
+  sketch->RegenerateDerived();
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch->entities);
+  sketch->RegenerateDerived();
   state.document->Regenerate();
   nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
   state.commands->Execute(

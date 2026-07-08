@@ -345,16 +345,19 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     solver.Load(*sk);
     if (solver.Solve().ok)
       solver.WriteBack(sk->entities);
+    sk->RegenerateDerived();
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*sk);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json::object();
   }
-  if (m == "mirror" || m == "fillet") {
+  if (m == "mirror" || m == "fillet" || m == "pattern") {
     // Generative op on a sketch (by id), solve, and commit one edit.
-    // mirror params: {sketch_id, sources:[id,...], axis:lineId, link?}
-    // fillet params: {sketch_id, line1, line2, radius}
+    // mirror params:  {sketch_id, sources:[id,...], axis:lineId, link?}
+    // fillet params:  {sketch_id, line1, line2, radius}
+    // pattern params: {sketch_id, sources:[id,...], count, link?,
+    //                  circular?, step:[dx,dy] | center:[x,y], angle}
     size_t index = 0;
     Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
@@ -368,6 +371,22 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         sources.push_back(s.get<uint32_t>());
       result["generated"] = sk->MirrorEntities(
           sources, p.at("axis").get<uint32_t>(), p.value("link", true));
+    } else if (m == "pattern") {
+      std::vector<uint32_t> sources;
+      for (const auto& s : p.at("sources"))
+        sources.push_back(s.get<uint32_t>());
+      const int count = p.at("count").get<int>();
+      const bool link = p.value("link", true);
+      if (p.value("circular", false)) {
+        const auto& c = p.at("center");
+        result["generated"] = sk->AddCircularPattern(
+            sources, {c[0].get<float>(), c[1].get<float>()},
+            p.at("angle").get<double>(), count, link);
+      } else {
+        const auto& s = p.at("step");
+        result["generated"] = sk->AddLinearPattern(
+            sources, {s[0].get<float>(), s[1].get<float>()}, count, link);
+      }
     } else {
       result["arc_id"] =
           sk->FilletCorner(p.at("line1").get<uint32_t>(),
@@ -378,6 +397,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     solver.Load(*sk);
     if (solver.Solve().ok)
       solver.WriteBack(sk->entities);
+    sk->RegenerateDerived();
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*sk);
     state.commands->Execute(
@@ -397,6 +417,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     solver.Load(*sk);
     if (solver.Solve().ok)
       solver.WriteBack(sk->entities);
+    sk->RegenerateDerived();
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*sk);
     state.commands->Execute(

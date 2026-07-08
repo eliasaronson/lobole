@@ -168,6 +168,55 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
   return out;
 }
 
+// Translates an entity by `t`, preserving id/construction (angles unchanged).
+inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
+  Entity out = std::visit(
+      [&](const auto& g) -> Entity {
+        using T = std::decay_t<decltype(g)>;
+        if constexpr (std::is_same_v<T, Point>)
+          return Point{g.p + t};
+        else if constexpr (std::is_same_v<T, Line>)
+          return Line{g.a + t, g.b + t};
+        else if constexpr (std::is_same_v<T, Circle>)
+          return Circle{g.center + t, g.radius};
+        else // Arc
+          return Arc{g.center + t, g.radius, g.startAngle, g.endAngle};
+      },
+      e);
+  SetEntityId(out, 0);
+  SetConstruction(out, IsConstruction(e));
+  return out;
+}
+
+// Rotates an entity by `ang` (radians, CCW) about `center`, preserving
+// id/construction and the arc CCW-always invariant (adding `ang` to both arc
+// angles keeps the sweep).
+inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
+  const float c = static_cast<float>(std::cos(ang)),
+              s = static_cast<float>(std::sin(ang));
+  auto rot = [&](glm::vec2 p) {
+    glm::vec2 d = p - center;
+    return center + glm::vec2(c * d.x - s * d.y, s * d.x + c * d.y);
+  };
+  Entity out = std::visit(
+      [&](const auto& g) -> Entity {
+        using T = std::decay_t<decltype(g)>;
+        if constexpr (std::is_same_v<T, Point>)
+          return Point{rot(g.p)};
+        else if constexpr (std::is_same_v<T, Line>)
+          return Line{rot(g.a), rot(g.b)};
+        else if constexpr (std::is_same_v<T, Circle>)
+          return Circle{rot(g.center), g.radius};
+        else // Arc
+          return Arc{rot(g.center), g.radius, g.startAngle + ang,
+                     g.endAngle + ang};
+      },
+      e);
+  SetEntityId(out, 0);
+  SetConstruction(out, IsConstruction(e));
+  return out;
+}
+
 // UV of the point a ref addresses, for any alternative: Point → p; Line →
 // a (which 0) / b (which 1); Circle → center; Arc → center/start/end per
 // ArcPointUV. Single source of truth for RefUV / EntityPoints / EntityDots.
@@ -233,6 +282,27 @@ struct Constraint {
   double value = 0.0;         // Distance / Radius / Angle dimension
   PointRef c;                 // third ref (Symmetric: the symmetry line)
   glm::vec2 labelOffset{0.0f}; // dimension annotation placement (UV)
+};
+
+enum class DerivedKind { LinearPattern, CircularPattern };
+
+// A *linked* generative op: it derives geometry from `sourceIds` and is replayed
+// by SketchFeature::RegenerateDerived when the sources change. `instances` maps
+// each (sourceId, k) to the stable id of the generated entity so refs survive a
+// count change (the sketch-local analogue of SolveSpace's remap table). Baked
+// ops leave no record.
+struct DerivedOp {
+  DerivedKind kind;
+  std::vector<uint32_t> sourceIds;
+  glm::vec2 vec{0.0f}; // Linear: per-step translation. Circular: centre (UV).
+  double scalar = 0.0; // Circular: step angle (radians). Linear: unused.
+  int count = 2;       // total instances including the seed (count-1 generated)
+  struct Inst {
+    uint32_t sourceId = 0;
+    int k = 0; // instance index 1..count-1
+    uint32_t genId = 0;
+  };
+  std::vector<Inst> instances;
 };
 
 } // namespace sketch
@@ -319,9 +389,27 @@ public:
   // a corner, are parallel, or the radius is too large for either segment.
   uint32_t FilletCorner(uint32_t lineId1, uint32_t lineId2, double radius);
 
+  // Patterns of `sourceIds`. Linear: `count` instances (incl. the seed) each
+  // stepped by `step` in UV. Circular: `count` instances stepped by `stepAngle`
+  // (radians) about `center`. `link=false` bakes unlinked copies and returns
+  // their ids; `link=true` records a DerivedOp (regenerates on source edits, id
+  // stable across count changes) and returns the generated ids.
+  std::vector<uint32_t> AddLinearPattern(const std::vector<uint32_t>& sourceIds,
+                                         glm::vec2 step, int count, bool link);
+  std::vector<uint32_t>
+  AddCircularPattern(const std::vector<uint32_t>& sourceIds, glm::vec2 center,
+                     double stepAngle, int count, bool link);
+
+  // Replays every linked DerivedOp: recomputes each generated entity from its
+  // (current) source, keeping generated ids stable — reusing the entity for a
+  // surviving (source, k), creating new ones when count grows, deleting the
+  // surplus when it shrinks. Call after the constraint solve on any edit.
+  void RegenerateDerived();
+
   SketchPlane plane;
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;
+  std::vector<sketch::DerivedOp> derived; // linked generative ops (replayed)
   uint32_t nextEntityId = 1; // next stable id to hand out (1-based; 0 = none)
 
 private:

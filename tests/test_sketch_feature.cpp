@@ -99,6 +99,92 @@ TEST_CASE("FilletCorner rounds a right-angle corner with a tangent arc",
   CHECK(coincAtOrigin == 0);
 }
 
+TEST_CASE("Linear pattern bakes stepped copies", "[sketch][pattern]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {1, 0}});
+  auto gen = sk.AddLinearPattern({l}, {5, 0}, /*count=*/3, /*link=*/false);
+  REQUIRE(gen.size() == 2); // count-1 copies
+  CHECK(sk.entities.size() == 3);
+  CHECK(sk.derived.empty()); // bake stores no record
+  const auto& c1 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
+  const auto& c2 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[1])]);
+  CHECK_THAT(c1.a.x, WithinAbs(5.0f, 1e-5f));
+  CHECK_THAT(c2.a.x, WithinAbs(10.0f, 1e-5f));
+}
+
+TEST_CASE("Circular pattern bakes rotated copies", "[sketch][pattern]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t p = sk.AddEntity(sketch::Point{{1, 0}});
+  auto gen = sk.AddCircularPattern({p}, {0, 0}, M_PI / 2, /*count=*/4, false);
+  REQUIRE(gen.size() == 3); // 90, 180, 270 degrees
+  const auto& q1 = std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(gen[0])]);
+  CHECK_THAT(q1.p.x, WithinAbs(0.0f, 1e-5f));
+  CHECK_THAT(q1.p.y, WithinAbs(1.0f, 1e-5f)); // (1,0) rotated 90 → (0,1)
+  const auto& q2 = std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(gen[1])]);
+  CHECK_THAT(q2.p.x, WithinAbs(-1.0f, 1e-5f)); // 180 → (-1,0)
+}
+
+TEST_CASE("A linked pattern regenerates when its source moves",
+          "[sketch][pattern]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t p = sk.AddEntity(sketch::Point{{0, 0}});
+  auto gen = sk.AddLinearPattern({p}, {2, 0}, 3, /*link=*/true);
+  REQUIRE(gen.size() == 2);
+  REQUIRE(sk.derived.size() == 1);
+
+  // Move the source, regenerate: instances keep ids and follow.
+  std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(p)]).p = {0, 5};
+  sk.RegenerateDerived();
+  CHECK(sk.entities.size() == 3); // still one source + two instances
+  const auto& g0 = std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(gen[0])]);
+  const auto& g1 = std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(gen[1])]);
+  CHECK_THAT(g0.p.y, WithinAbs(5.0f, 1e-5f)); // followed the source in y
+  CHECK_THAT(g0.p.x, WithinAbs(2.0f, 1e-5f));
+  CHECK_THAT(g1.p.x, WithinAbs(4.0f, 1e-5f));
+}
+
+TEST_CASE("Changing a linked pattern's count is id-stable", "[sketch][pattern]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t p = sk.AddEntity(sketch::Point{{0, 0}});
+  auto gen = sk.AddLinearPattern({p}, {2, 0}, 3, /*link=*/true);
+  REQUIRE(gen.size() == 2);
+  const uint32_t inst1 = gen[0]; // the k=1 instance
+
+  // Shrink to count 2: the k=2 instance is removed, k=1 keeps its id.
+  sk.derived[0].count = 2;
+  sk.RegenerateDerived();
+  CHECK(sk.entities.size() == 2); // source + one instance
+  CHECK(sk.IndexOfEntity(inst1) != SIZE_MAX);       // k=1 survived with its id
+  CHECK(sk.IndexOfEntity(gen[1]) == SIZE_MAX);       // k=2 deleted
+
+  // Grow to count 4: k=1 keeps its id; k=2,3 are (re)created.
+  sk.derived[0].count = 4;
+  sk.RegenerateDerived();
+  CHECK(sk.entities.size() == 4); // source + three instances
+  CHECK(sk.IndexOfEntity(inst1) != SIZE_MAX);       // k=1 id preserved throughout
+  CHECK(sk.derived[0].instances.size() == 3);
+}
+
+TEST_CASE("A linked pattern round-trips through JSON", "[sketch][pattern]") {
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  uint32_t p = sk->AddEntity(sketch::Point{{0, 0}});
+  sk->AddCircularPattern({p}, {0, 0}, M_PI / 2, 4, /*link=*/true);
+  sk->SetId(3);
+  REQUIRE(sk->derived.size() == 1);
+  const size_t entCount = sk->entities.size(); // source + 3 instances
+
+  auto j = DocumentIO::FeatureToJson(*sk);
+  auto restored = DocumentIO::FeatureFromJson(j);
+  auto* rsk = dynamic_cast<SketchFeature*>(restored.get());
+  REQUIRE(rsk != nullptr);
+  REQUIRE(rsk->derived.size() == 1);
+  CHECK(rsk->derived[0].kind == sketch::DerivedKind::CircularPattern);
+  CHECK(rsk->derived[0].count == 4);
+  CHECK(rsk->derived[0].instances.size() == 3);
+  CHECK(rsk->entities.size() == entCount);
+  CHECK(DocumentIO::FeatureToJson(*rsk) == j); // stable round-trip
+}
+
 TEST_CASE("FilletCorner rejects bad inputs", "[sketch]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t l1 = sk.AddEntity(sketch::Line{{4, 0}, {0, 0}});

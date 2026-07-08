@@ -43,7 +43,8 @@ enum class SketchTool {
   Arc,           // 3-click center → start → end
   ArcThreePoint, // 3-click start → end → through-point
   Mirror,        // reflect the current selection across a clicked axis line
-  Fillet         // round the clicked corner where two lines meet
+  Fillet,        // round the clicked corner where two lines meet
+  Pattern        // linear/circular array of the current selection
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -64,6 +65,13 @@ struct SketchEditState {
   // to its source so it tracks edits; unchecked bakes an unlinked copy.
   bool linkGenerative = true;
   float filletRadius = 0.5f;
+
+  // Pattern tool params (applied to the current selection).
+  bool patternCircular = false;
+  int patternCount = 3;
+  glm::vec2 patternStep{2.0f, 0.0f}; // linear per-step translation
+  glm::vec2 patternCenter{0.0f};     // circular centre
+  float patternAngleDeg = 60.0f;     // circular step angle
 
   // Transient feedback shown in the toolbar (e.g. why a fillet no-op'd), so
   // operations that can silently fail tell the user what happened.

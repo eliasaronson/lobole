@@ -97,6 +97,8 @@ void DrawSketchToolbar(AppState& state) {
   toolButton("Mirror", SketchTool::Mirror);
   ImGui::SameLine();
   toolButton("Fillet", SketchTool::Fillet);
+  ImGui::SameLine();
+  toolButton("Pattern", SketchTool::Pattern);
 
   // Generative-op controls.
   if (edit.tool == SketchTool::Mirror) {
@@ -110,6 +112,33 @@ void DrawSketchToolbar(AppState& state) {
     ImGui::SetNextItemWidth(90);
     ImGui::DragFloat("Radius##fillet", &edit.filletRadius, 0.02f, 0.01f, 1e6f,
                      "%.3f");
+  } else if (edit.tool == SketchTool::Pattern) {
+    ImGui::TextUnformatted("Pattern: select geometry, set params, then Apply.");
+    ImGui::RadioButton("Linear", !edit.patternCircular);
+    if (ImGui::IsItemClicked())
+      edit.patternCircular = false;
+    ImGui::SameLine();
+    ImGui::RadioButton("Circular", edit.patternCircular);
+    if (ImGui::IsItemClicked())
+      edit.patternCircular = true;
+    ImGui::SetNextItemWidth(80);
+    ImGui::DragInt("Count##pat", &edit.patternCount, 0.1f, 2, 1000);
+    if (!edit.patternCircular) {
+      ImGui::SetNextItemWidth(140);
+      ImGui::DragFloat2("Step (dx,dy)##pat", &edit.patternStep.x, 0.05f);
+    } else {
+      ImGui::SetNextItemWidth(140);
+      ImGui::DragFloat2("Centre##pat", &edit.patternCenter.x, 0.05f);
+      ImGui::SetNextItemWidth(80);
+      ImGui::DragFloat("Angle##pat", &edit.patternAngleDeg, 0.5f, -360.0f,
+                       360.0f, "%.1f deg");
+    }
+    ImGui::Checkbox("Linked##pat", &edit.linkGenerative);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(edit.selected.empty());
+    if (ImGui::Button("Apply##pat"))
+      ApplyPattern(state);
+    ImGui::EndDisabled();
   }
   if (!edit.actionMsg.empty())
     ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "%s",
@@ -264,6 +293,23 @@ void DrawSketchToolbar(AppState& state) {
     ImGui::TreePop();
     if (toDelete >= 0)
       DeleteConstraint(state, static_cast<size_t>(toDelete));
+  }
+
+  // Linked patterns: edit the instance count live (regenerates id-stably).
+  if (!sketch->derived.empty()) {
+    ImGui::SeparatorText("Patterns");
+    for (size_t i = 0; i < sketch->derived.size(); i++) {
+      ImGui::PushID(static_cast<int>(i));
+      const auto& op = sketch->derived[i];
+      int count = op.count;
+      ImGui::SetNextItemWidth(90);
+      const char* kind = op.kind == sketch::DerivedKind::CircularPattern
+                             ? "circular"
+                             : "linear";
+      if (ImGui::DragInt(kind, &count, 0.1f, 2, 1000))
+        SetPatternCount(state, i, count);
+      ImGui::PopID();
+    }
   }
 
   ImGui::SeparatorText("Profile");

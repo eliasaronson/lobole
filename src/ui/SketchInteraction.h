@@ -91,4 +91,13 @@ void UpdateSketchStatus(AppState& state);
 // commits one undoable edit.
 bool DeleteConstraint(AppState& state, size_t index);
 
+// Patterns the current selection using the pattern params in SketchEditState
+// (linear or circular, linked = SketchEditState::linkGenerative). Commits one
+// undoable edit. Returns false if nothing is selected.
+bool ApplyPattern(AppState& state);
+
+// Sets the count of the linked pattern (derived op) at `opIndex` on the active
+// sketch, regenerates, and commits one undoable edit.
+bool SetPatternCount(AppState& state, size_t opIndex, int count);
+
 } // namespace ui

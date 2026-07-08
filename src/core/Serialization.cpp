@@ -15,7 +15,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 7; // v7: arc entities (v6: construction-geometry flag)
+constexpr int kVersion = 8; // v8: derived ops (v7: arcs, v6: construction flag)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -157,6 +157,37 @@ sketch::Constraint ConstraintFromJson(const json& j) {
   return c;
 }
 
+json DerivedOpToJson(const sketch::DerivedOp& op) {
+  json insts = json::array();
+  for (const auto& in : op.instances)
+    insts.push_back({{"source", in.sourceId}, {"k", in.k}, {"gen", in.genId}});
+  return {{"kind", op.kind == sketch::DerivedKind::CircularPattern
+                       ? "circular_pattern"
+                       : "linear_pattern"},
+          {"source_ids", op.sourceIds},
+          {"vec", Vec2ToJson(op.vec)},
+          {"scalar", op.scalar},
+          {"count", op.count},
+          {"instances", insts}};
+}
+
+sketch::DerivedOp DerivedOpFromJson(const json& j) {
+  sketch::DerivedOp op;
+  op.kind = j.at("kind").get<std::string>() == "circular_pattern"
+                ? sketch::DerivedKind::CircularPattern
+                : sketch::DerivedKind::LinearPattern;
+  for (const auto& s : j.at("source_ids"))
+    op.sourceIds.push_back(s.get<uint32_t>());
+  op.vec = Vec2FromJson(j.at("vec"));
+  op.scalar = j.at("scalar").get<double>();
+  op.count = j.at("count").get<int>();
+  for (const auto& in : j.at("instances"))
+    op.instances.push_back({in.at("source").get<uint32_t>(),
+                            in.at("k").get<int>(),
+                            in.at("gen").get<uint32_t>()});
+  return op;
+}
+
 const char* ExtrudeModeToString(ExtrudeMode mode) {
   switch (mode) {
   case ExtrudeMode::NewBody: return "new_body";
@@ -197,6 +228,11 @@ json FeatureToJson(const Feature& feature) {
     j["constraints"] = json::array();
     for (const auto& c : sk->constraints) {
       j["constraints"].push_back(ConstraintToJson(c));
+    }
+    if (!sk->derived.empty()) { // omit when empty to keep JSON compact
+      j["derived_ops"] = json::array();
+      for (const auto& op : sk->derived)
+        j["derived_ops"].push_back(DerivedOpToJson(op));
     }
   } else if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     j["sketch_id"] = ext->sketchId;
@@ -303,6 +339,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       for (const auto& [c1, c2] : legacyRects)
         sk->AddRectangle(c1, c2);
     }
+    for (const auto& oj : j.value("derived_ops", json::array()))
+      sk->derived.push_back(DerivedOpFromJson(oj));
+    if (!sk->derived.empty())
+      sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
     out = std::move(sk);
   } else if (type == "Extrude") {
     out = std::make_unique<ExtrudeFeature>(

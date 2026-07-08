@@ -541,3 +541,113 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   constraints.push_back({K::Tangent, {lineId2, 0}, {arcId, 0}, 0.0});
   return arcId;
 }
+
+void SketchFeature::RegenerateDerived() {
+  for (auto& op : derived) {
+    auto transform = [&](const sketch::Entity& src, int k) -> sketch::Entity {
+      if (op.kind == sketch::DerivedKind::LinearPattern)
+        return sketch::TranslateEntity(src, static_cast<float>(k) * op.vec);
+      return sketch::RotateEntity(src, op.vec,
+                                  static_cast<double>(k) * op.scalar);
+    };
+    std::vector<sketch::DerivedOp::Inst> keep;
+    for (uint32_t sid : op.sourceIds) {
+      const size_t si = IndexOfEntity(sid);
+      if (si == std::numeric_limits<size_t>::max())
+        continue; // source removed → its instances get pruned below
+      const sketch::Entity srcCopy = entities[si]; // copy before any AddEntity
+      for (int k = 1; k < op.count; k++) {
+        uint32_t genId = 0;
+        for (const auto& in : op.instances)
+          if (in.sourceId == sid && in.k == k) {
+            genId = in.genId;
+            break;
+          }
+        sketch::Entity g = transform(srcCopy, k);
+        const size_t gi = (genId != 0) ? IndexOfEntity(genId)
+                                       : std::numeric_limits<size_t>::max();
+        if (gi != std::numeric_limits<size_t>::max()) {
+          sketch::SetEntityId(g, genId); // reuse the entity, keep its id
+          entities[gi] = g;
+        } else {
+          genId = AddEntity(g); // new instance (first regen, or count grew)
+        }
+        keep.push_back({sid, k, genId});
+      }
+    }
+    // Prune instances no longer produced (count shrank or a source vanished).
+    for (const auto& in : op.instances) {
+      bool kept = false;
+      for (const auto& kp : keep)
+        if (kp.genId == in.genId) {
+          kept = true;
+          break;
+        }
+      if (!kept)
+        DeleteEntity(in.genId);
+    }
+    op.instances = std::move(keep);
+  }
+}
+
+std::vector<uint32_t>
+SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
+                               glm::vec2 step, int count, bool link) {
+  std::vector<uint32_t> gen;
+  if (count < 2 || sourceIds.empty())
+    return gen;
+  if (!link) {
+    for (uint32_t sid : sourceIds) {
+      const size_t si = IndexOfEntity(sid);
+      if (si == std::numeric_limits<size_t>::max())
+        continue;
+      const sketch::Entity srcCopy = entities[si];
+      for (int k = 1; k < count; k++)
+        gen.push_back(AddEntity(
+            sketch::TranslateEntity(srcCopy, static_cast<float>(k) * step)));
+    }
+    return gen;
+  }
+  sketch::DerivedOp op;
+  op.kind = sketch::DerivedKind::LinearPattern;
+  op.sourceIds = sourceIds;
+  op.vec = step;
+  op.count = count;
+  derived.push_back(op);
+  RegenerateDerived();
+  for (const auto& in : derived.back().instances)
+    gen.push_back(in.genId);
+  return gen;
+}
+
+std::vector<uint32_t>
+SketchFeature::AddCircularPattern(const std::vector<uint32_t>& sourceIds,
+                                 glm::vec2 center, double stepAngle, int count,
+                                 bool link) {
+  std::vector<uint32_t> gen;
+  if (count < 2 || sourceIds.empty())
+    return gen;
+  if (!link) {
+    for (uint32_t sid : sourceIds) {
+      const size_t si = IndexOfEntity(sid);
+      if (si == std::numeric_limits<size_t>::max())
+        continue;
+      const sketch::Entity srcCopy = entities[si];
+      for (int k = 1; k < count; k++)
+        gen.push_back(AddEntity(sketch::RotateEntity(
+            srcCopy, center, static_cast<double>(k) * stepAngle)));
+    }
+    return gen;
+  }
+  sketch::DerivedOp op;
+  op.kind = sketch::DerivedKind::CircularPattern;
+  op.sourceIds = sourceIds;
+  op.vec = center;
+  op.scalar = stepAngle;
+  op.count = count;
+  derived.push_back(op);
+  RegenerateDerived();
+  for (const auto& in : derived.back().instances)
+    gen.push_back(in.genId);
+  return gen;
+}

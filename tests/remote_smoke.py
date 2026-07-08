@@ -214,6 +214,25 @@ def main():
         expect(arc["type"] == "arc" and abs(arc["radius"] - 1.0) < 1e-3,
                "fillet arc has the requested radius")
 
+        # Linked linear pattern, then edit its count via modify_feature.
+        d.call("new_project")
+        skp = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch P",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [0, 0], "radius": 0.3}]})
+        pid = skp["entity_ids"][0]
+        pp = d.call("pattern", sketch_id=skp["id"], sources=[pid], count=4,
+                    step=[1.0, 0], link=True, circular=False)
+        expect(len(pp["generated"]) == 3, "pattern made count-1 copies")
+        st = d.call("get_state")["features"][0]
+        expect(len(st["entities"]) == 4 and len(st["derived_ops"]) == 1,
+               "pattern seed + copies + a derived record")
+        st["derived_ops"][0]["count"] = 6  # edit count → regenerate
+        d.call("modify_feature", index=0, feature=st)
+        st2 = d.call("get_state")["features"][0]
+        expect(len(st2["entities"]) == 6, "editing count regenerated the pattern")
+
         # Screenshot: the controller can see what the user sees
         d.call("new_project")
         sk = d.call("add_feature", feature={
