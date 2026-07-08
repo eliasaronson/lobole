@@ -391,6 +391,19 @@ known mitigation.
 
 ## Phase K — Generative operations: mirror, pattern, fillet, offset (~3–4 days)
 
+Detailed plan (with reference-repo findings) in **CONSTRAINTS_PHASE_K.md**. Key
+revision from that research: FreeCAD does these as constraint-linked bakes (no
+dependency graph), so mirror + fillet need **no** derived-record machinery — the
+derived record is only needed for editable pattern count. Split into K1 (mirror
++ fillet, constraint-linked), K2 (pattern, derived-record), K3 (offset, OCC).
+
+**K1 SHIPPED** (branch feat/mirror-fillet, commit `feat: sketch mirror and
+fillet`): `SketchFeature::MirrorEntities` (reflect + optional Symmetric/Equal
+links, arc CCW-preserving) and `FilletCorner` (bisector/normal-offset → trim +
+tangent arc + 2 Tangent/2 Coincident); Mirror/Fillet tools + Linked toggle +
+radius; `mirror`/`fillet` RPCs. Verified: filleted rectangle extrudes (vol
+matches analytic), linked mirror tracks a source edit through the solver.
+
 Operations that *produce geometry from other geometry* — the one place a sketch
 genuinely wants "history." Placed after arcs because fillet and offset produce
 arcs. Each op supports **both modes, chosen by the user per invocation**:

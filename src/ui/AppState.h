@@ -40,8 +40,10 @@ enum class SketchTool {
   Circle,
   Rectangle,
   Trim,
-  Arc,          // 3-click center → start → end
-  ArcThreePoint // 3-click start → end → through-point
+  Arc,           // 3-click center → start → end
+  ArcThreePoint, // 3-click start → end → through-point
+  Mirror,        // reflect the current selection across a clicked axis line
+  Fillet         // round the clicked corner where two lines meet
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -57,6 +59,11 @@ struct SketchEditState {
   bool hasPendingPoint2 = false; // second click of a 3-click tool (arcs)
   glm::vec2 pendingPoint2{0.0f};
   glm::vec2 hoverPoint{0.0f};
+
+  // Generative ops (Mirror/Fillet): "linked" adds constraints tying the result
+  // to its source so it tracks edits; unchecked bakes an unlinked copy.
+  bool linkGenerative = true;
+  float filletRadius = 0.5f;
   int hoveredPlane = -1; // 0 Front / 1 Top / 2 Right while picking
 
   // Sketch-entity selection (for adding constraints), ordered.

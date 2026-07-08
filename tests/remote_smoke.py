@@ -179,6 +179,41 @@ def main():
         arc1 = d.call("get_state")["features"][0]["entities"][0]
         expect(abs(arc1["radius"] - 2.5) < 1e-3, "arc radius constraint solved")
 
+        # Generative: mirror a line across an axis, and fillet a rectangle corner.
+        d.call("new_project")
+        skg = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch G",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [0, -3], "b": [0, 3]},  # axis
+                         {"type": "line", "a": [1, 0], "b": [2, 2]}]})
+        gid = skg["entity_ids"]
+        mg = d.call("mirror", sketch_id=skg["id"], sources=[gid[1]],
+                    axis=gid[0], link=True)
+        expect(len(mg["generated"]) == 1, "mirror generated one copy")
+        gents = d.call("get_state")["features"][0]["entities"]
+        copy = next(e for e in gents if e["id"] == mg["generated"][0])
+        expect(abs(copy["a"][0] + 1.0) < 1e-3 and abs(copy["b"][0] + 2.0) < 1e-3,
+               "mirror reflected the line across x=0")
+
+        d.call("new_project")
+        skf = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch F",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [4, 0], "b": [0, 0]},
+                         {"type": "line", "a": [0, 0], "b": [0, 4]}]})
+        fid = skf["entity_ids"]
+        d.call("add_constraint", sketch_id=skf["id"], kind="coincident",
+               refs=[[fid[0], 1], [fid[1], 0]])
+        ff = d.call("fillet", sketch_id=skf["id"], line1=fid[0], line2=fid[1],
+                    radius=1.0)
+        expect(ff["arc_id"] != 0, "fillet created an arc")
+        fents = d.call("get_state")["features"][0]["entities"]
+        arc = next(e for e in fents if e["id"] == ff["arc_id"])
+        expect(arc["type"] == "arc" and abs(arc["radius"] - 1.0) < 1e-3,
+               "fillet arc has the requested radius")
+
         # Screenshot: the controller can see what the user sees
         d.call("new_project")
         sk = d.call("add_feature", feature={

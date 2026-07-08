@@ -92,6 +92,24 @@ void DrawSketchToolbar(AppState& state) {
   toolButton("3-Pt Arc", SketchTool::ArcThreePoint);
   ImGui::SameLine();
   toolButton(ICON_FA_SCISSORS " Trim", SketchTool::Trim);
+  ImGui::SameLine();
+  toolButton("Mirror", SketchTool::Mirror);
+  ImGui::SameLine();
+  toolButton("Fillet", SketchTool::Fillet);
+
+  // Generative-op controls.
+  if (edit.tool == SketchTool::Mirror) {
+    ImGui::TextUnformatted("Mirror: select geometry, then click an axis line.");
+    ImGui::Checkbox("Linked##gen", &edit.linkGenerative);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Add symmetry constraints so the mirror tracks edits "
+                        "(off = one-shot copy)");
+  } else if (edit.tool == SketchTool::Fillet) {
+    ImGui::TextUnformatted("Fillet: click a corner where two lines meet.");
+    ImGui::SetNextItemWidth(90);
+    ImGui::DragFloat("Radius##fillet", &edit.filletRadius, 0.02f, 0.01f, 1e6f,
+                     "%.3f");
+  }
 
   ImGui::Checkbox("Auto-constrain", &edit.autoConstrain);
   if (ImGui::IsItemHovered())

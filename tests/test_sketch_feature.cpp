@@ -20,6 +20,95 @@ static std::unique_ptr<BoxFeature> MakeBox(const std::string& name) {
   return std::make_unique<BoxFeature>(name, glm::vec3(0), 2.0, 2.0, 2.0);
 }
 
+TEST_CASE("MirrorEntities reflects geometry across an axis line", "[sketch]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t axis = sk.AddEntity(sketch::Line{{0, -5}, {0, 5}}); // the y-axis
+  uint32_t seg = sk.AddEntity(sketch::Line{{2, 1}, {3, 4}});    // to the right
+
+  SECTION("bake: unlinked copy, no constraints") {
+    auto gen = sk.MirrorEntities({seg}, axis, /*link=*/false);
+    REQUIRE(gen.size() == 1);
+    const auto& copy = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
+    CHECK_THAT(copy.a.x, WithinAbs(-2.0f, 1e-5f));
+    CHECK_THAT(copy.a.y, WithinAbs(1.0f, 1e-5f));
+    CHECK_THAT(copy.b.x, WithinAbs(-3.0f, 1e-5f));
+    CHECK_THAT(copy.b.y, WithinAbs(4.0f, 1e-5f));
+    CHECK(sk.constraints.empty()); // bake adds none
+  }
+  SECTION("linked: adds Symmetric constraints tying copy to source") {
+    auto gen = sk.MirrorEntities({seg}, axis, /*link=*/true);
+    REQUIRE(gen.size() == 1);
+    int sym = 0;
+    for (const auto& c : sk.constraints)
+      if (c.kind == sketch::ConstraintKind::Symmetric) {
+        sym++;
+        CHECK(c.c.entity == axis); // symmetry about the axis line
+      }
+    CHECK(sym == 2); // both endpoints
+  }
+}
+
+TEST_CASE("MirrorEntities reflects an arc keeping it CCW", "[sketch][arc]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t axis = sk.AddEntity(sketch::Line{{0, -5}, {0, 5}});
+  // Arc on the right, CCW from 0 to pi/2.
+  uint32_t a0 = sk.AddEntity(sketch::Arc{{2, 0}, 1.0, 0.0, M_PI / 2});
+  auto gen = sk.MirrorEntities({a0}, axis, false);
+  REQUIRE(gen.size() == 1);
+  const auto& arc = std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(gen[0])]);
+  CHECK_THAT(arc.center.x, WithinAbs(-2.0f, 1e-5f));
+  CHECK(arc.endAngle > arc.startAngle); // still CCW-always
+  // Endpoints are the reflections of the source's (winding swapped).
+  glm::vec2 s = sketch::ArcPointUV(arc, 1), e = sketch::ArcPointUV(arc, 2);
+  CHECK_THAT(glm::length(s - glm::vec2(-2, 1)), WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(glm::length(e - glm::vec2(-3, 0)), WithinAbs(0.0f, 1e-4f));
+}
+
+TEST_CASE("FilletCorner rounds a right-angle corner with a tangent arc",
+          "[sketch][arc]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  // Two lines meeting at the origin at 90 degrees.
+  uint32_t l1 = sk.AddEntity(sketch::Line{{4, 0}, {0, 0}}); // corner at b=(0,0)
+  uint32_t l2 = sk.AddEntity(sketch::Line{{0, 0}, {0, 4}}); // corner at a=(0,0)
+  sk.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {l1, 1}, {l2, 0}, 0.0});
+
+  const double r = 1.0;
+  uint32_t arcId = sk.FilletCorner(l1, l2, r);
+  REQUIRE(arcId != 0);
+  const auto& arc = std::get<sketch::Arc>(sk.entities[sk.IndexOfEntity(arcId)]);
+  CHECK_THAT(arc.radius, WithinAbs(r, 1e-5));
+  // For a right angle at the origin, the fillet centre is at (r, r).
+  CHECK_THAT(arc.center.x, WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(arc.center.y, WithinAbs(1.0f, 1e-4f));
+  // Lines trimmed to the tangent points (r along each from the corner).
+  const auto& s1 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l1)]);
+  const auto& s2 = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(l2)]);
+  CHECK_THAT(glm::length(s1.b - glm::vec2(1, 0)), WithinAbs(0.0f, 1e-4f));
+  CHECK_THAT(glm::length(s2.a - glm::vec2(0, 1)), WithinAbs(0.0f, 1e-4f));
+  // Old corner coincident removed; two tangents added.
+  int tang = 0, coincAtOrigin = 0;
+  for (const auto& c : sk.constraints) {
+    if (c.kind == sketch::ConstraintKind::Tangent)
+      tang++;
+    if (c.kind == sketch::ConstraintKind::Coincident && c.a.entity == l1 &&
+        c.a.which == 1 && c.b.entity == l2)
+      coincAtOrigin++;
+  }
+  CHECK(tang == 2);
+  CHECK(coincAtOrigin == 0);
+}
+
+TEST_CASE("FilletCorner rejects bad inputs", "[sketch]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t l1 = sk.AddEntity(sketch::Line{{4, 0}, {0, 0}});
+  uint32_t l2 = sk.AddEntity(sketch::Line{{0, 0}, {0, 4}});
+  uint32_t l3 = sk.AddEntity(sketch::Line{{10, 0}, {14, 0}}); // no shared corner
+  CHECK(sk.FilletCorner(l1, l3, 1.0) == 0);  // no shared corner
+  CHECK(sk.FilletCorner(l1, l2, 100.0) == 0); // radius too large
+  CHECK(sk.FilletCorner(l1, l2, 0.0) == 0);   // non-positive radius
+}
+
 TEST_CASE("Features get unique, monotonic ids", "[ids]") {
   Document doc;
   doc.AddFeature(MakeBox("A"));

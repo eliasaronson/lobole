@@ -491,6 +491,82 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     return true;
   }
 
+  // Load → Solve → WriteBack → Regenerate → one command, given the pre-edit
+  // snapshot. Shared by the generative tools (mirror/fillet).
+  auto commitMutation = [&](const nlohmann::json& before) {
+    sketch::Solver solver;
+    solver.Load(*sketch);
+    if (solver.Solve().ok)
+      solver.WriteBack(sketch->entities);
+    state.document->Regenerate();
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after),
+        *state.document);
+  };
+
+  if (edit.tool == SketchTool::Mirror) {
+    // Sources = the current selection; the clicked line is the mirror axis.
+    SketchPick hover =
+        PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y), 12.0f);
+    edit.hasHover = hover.hit;
+    if (hover.hit)
+      edit.hoveredRef = hover.ref;
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
+      const size_t ei = sketch->IndexOfEntity(hover.ref.entity);
+      if (ei != SIZE_MAX &&
+          std::holds_alternative<sketch::Line>(sketch->entities[ei]) &&
+          !edit.selected.empty()) {
+        std::vector<uint32_t> sources; // unique selected ids, minus the axis
+        for (const auto& r : edit.selected) {
+          if (r.entity == hover.ref.entity)
+            continue;
+          bool seen = false;
+          for (uint32_t s : sources)
+            seen |= (s == r.entity);
+          if (!seen)
+            sources.push_back(r.entity);
+        }
+        if (!sources.empty()) {
+          nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+          sketch->MirrorEntities(sources, hover.ref.entity, edit.linkGenerative);
+          commitMutation(before);
+          edit.selected.clear();
+          edit.tool = SketchTool::Select;
+        }
+      }
+    }
+    return true;
+  }
+
+  if (edit.tool == SketchTool::Fillet) {
+    // Click a corner: fillet the two lines sharing the nearest endpoint.
+    SketchPick vtx =
+        PickSketchPoint(state, *sketch, glm::vec2(mousePos.x, mousePos.y), 16.0f);
+    edit.hasHover = vtx.hit;
+    if (vtx.hit)
+      edit.hoveredRef = vtx.ref;
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && vtx.hit) {
+      const size_t vi = sketch->IndexOfEntity(vtx.ref.entity);
+      if (vi != SIZE_MAX) {
+        const glm::vec2 cornerUV =
+            sketch::EntityPointUV(sketch->entities[vi], vtx.ref.which);
+        std::vector<uint32_t> lines; // lines with an endpoint at the corner
+        for (const auto& e : sketch->entities)
+          if (auto* l = std::get_if<sketch::Line>(&e))
+            if (glm::length(l->a - cornerUV) < 1e-3f ||
+                glm::length(l->b - cornerUV) < 1e-3f)
+              lines.push_back(sketch::EntityId(e));
+        if (lines.size() >= 2) {
+          nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+          if (sketch->FilletCorner(lines[0], lines[1], edit.filletRadius))
+            commitMutation(before);
+        }
+      }
+    }
+    return true;
+  }
+
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     if (edit.tool == SketchTool::Point) {
       CommitEntity(state, *sketch, index, sketch::Point{uv});

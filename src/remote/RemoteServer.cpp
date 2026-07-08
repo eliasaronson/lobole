@@ -351,6 +351,39 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json::object();
   }
+  if (m == "mirror" || m == "fillet") {
+    // Generative op on a sketch (by id), solve, and commit one edit.
+    // mirror params: {sketch_id, sources:[id,...], axis:lineId, link?}
+    // fillet params: {sketch_id, line1, line2, radius}
+    size_t index = 0;
+    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    auto* sk = dynamic_cast<SketchFeature*>(f);
+    if (!sk) throw std::runtime_error("no such sketch");
+
+    json before = DocumentIO::FeatureToJson(*sk);
+    json result = json::object();
+    if (m == "mirror") {
+      std::vector<uint32_t> sources;
+      for (const auto& s : p.at("sources"))
+        sources.push_back(s.get<uint32_t>());
+      result["generated"] = sk->MirrorEntities(
+          sources, p.at("axis").get<uint32_t>(), p.value("link", true));
+    } else {
+      result["arc_id"] =
+          sk->FilletCorner(p.at("line1").get<uint32_t>(),
+                           p.at("line2").get<uint32_t>(),
+                           p.at("radius").get<double>());
+    }
+    sketch::Solver solver;
+    solver.Load(*sk);
+    if (solver.Solve().ok)
+      solver.WriteBack(sk->entities);
+    doc->Regenerate();
+    json after = DocumentIO::FeatureToJson(*sk);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    return result;
+  }
   if (m == "delete_entity") {
     // Remove a sketch entity by id, cleaning up dependent constraints; commit
     // one undoable edit. params: {sketch_id, entity_id}

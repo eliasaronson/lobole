@@ -376,3 +376,168 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
     AddEntity(makeArc(survivors[i].first, survivors[i].second));
   return true;
 }
+
+std::vector<uint32_t>
+SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
+                             uint32_t axisLineId, bool link) {
+  using K = sketch::ConstraintKind;
+  std::vector<uint32_t> generated;
+  const size_t axisIdx = IndexOfEntity(axisLineId);
+  if (axisIdx == std::numeric_limits<size_t>::max())
+    return generated;
+  auto* axis = std::get_if<sketch::Line>(&entities[axisIdx]);
+  if (!axis)
+    return generated;
+  const glm::vec2 a = axis->a, b = axis->b;
+
+  std::vector<std::pair<uint32_t, uint32_t>> pairs; // (source id, copy id)
+  for (uint32_t sid : sourceIds) {
+    const size_t si = IndexOfEntity(sid);
+    if (si == std::numeric_limits<size_t>::max() || sid == axisLineId)
+      continue;
+    sketch::Entity copy = sketch::ReflectEntity(entities[si], a, b);
+    // Perturb a reflected arc so the solver can distinguish Symmetry from Equal
+    // (FreeCAD issue #13551).
+    if (link)
+      if (auto* arc = std::get_if<sketch::Arc>(&copy)) {
+        arc->startAngle += 1e-6;
+        arc->endAngle += 1e-6;
+      }
+    const uint32_t cid = AddEntity(copy);
+    pairs.emplace_back(sid, cid);
+    generated.push_back(cid);
+  }
+  if (!link)
+    return generated;
+
+  auto onAxis = [&](glm::vec2 p) {
+    return glm::length(p - sketch::ReflectPoint(p, a, b)) < 1e-6f;
+  };
+  for (auto [sid, cid] : pairs) {
+    const sketch::Entity& src = entities[IndexOfEntity(sid)];
+    // Symmetric pins source point `sw` to copy point `cw` about the axis; a
+    // point already on the axis is its own mirror → use Coincident instead.
+    auto symPair = [&](uint8_t sw, uint8_t cw) {
+      if (onAxis(sketch::EntityPointUV(src, sw)))
+        constraints.push_back({K::Coincident, {sid, sw}, {cid, cw}, 0.0});
+      else
+        constraints.push_back(
+            {K::Symmetric, {sid, sw}, {cid, cw}, 0.0, {axisLineId, 0}});
+    };
+    std::visit(
+        [&](const auto& g) {
+          using T = std::decay_t<decltype(g)>;
+          if constexpr (std::is_same_v<T, sketch::Point>) {
+            symPair(0, 0);
+          } else if constexpr (std::is_same_v<T, sketch::Line>) {
+            symPair(0, 0);
+            symPair(1, 1);
+          } else if constexpr (std::is_same_v<T, sketch::Circle>) {
+            constraints.push_back({K::Equal, {sid, 0}, {cid, 0}, 0.0});
+            symPair(0, 0); // centres
+          } else { // Arc: reflection swaps start/end (winding flips)
+            constraints.push_back({K::Equal, {sid, 0}, {cid, 0}, 0.0});
+            symPair(0, 0); // centres
+            symPair(1, 2);
+            symPair(2, 1);
+          }
+        },
+        src);
+  }
+  return generated;
+}
+
+uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
+                                     double radius) {
+  using K = sketch::ConstraintKind;
+  if (radius <= 0.0)
+    return 0;
+  const size_t i1 = IndexOfEntity(lineId1), i2 = IndexOfEntity(lineId2);
+  if (i1 == std::numeric_limits<size_t>::max() ||
+      i2 == std::numeric_limits<size_t>::max())
+    return 0;
+  auto* l1 = std::get_if<sketch::Line>(&entities[i1]);
+  auto* l2 = std::get_if<sketch::Line>(&entities[i2]);
+  if (!l1 || !l2)
+    return 0;
+
+  // The shared corner: the endpoint pair (one per line) that coincides. c1/c2
+  // are the which-index (0=a, 1=b) of the corner endpoint on each line.
+  const float tol = 1e-4f;
+  const glm::vec2 e1[2] = {l1->a, l1->b}, e2[2] = {l2->a, l2->b};
+  int c1 = -1, c2 = -1;
+  for (int i = 0; i < 2 && c1 < 0; i++)
+    for (int j = 0; j < 2; j++)
+      if (glm::length(e1[i] - e2[j]) < tol) {
+        c1 = i;
+        c2 = j;
+        break;
+      }
+  if (c1 < 0)
+    return 0; // no shared corner
+
+  const glm::vec2 C = e1[c1];
+  glm::vec2 d1 = e1[1 - c1] - C, d2 = e2[1 - c2] - C;
+  const float len1 = glm::length(d1), len2 = glm::length(d2);
+  if (len1 < tol || len2 < tol)
+    return 0;
+  d1 /= len1;
+  d2 /= len2;
+  const double theta = std::acos(glm::clamp(glm::dot(d1, d2), -1.0f, 1.0f));
+  if (theta < 1e-3 || theta > M_PI - 1e-3)
+    return 0; // parallel / collinear
+  const double dTan = radius / std::tan(theta / 2.0);
+  if (dTan > len1 - tol || dTan > len2 - tol)
+    return 0; // radius too large for a segment
+  const glm::vec2 bis = glm::normalize(d1 + d2);
+  const glm::vec2 center = C + bis * static_cast<float>(radius / std::sin(theta / 2.0));
+  const glm::vec2 T1 = C + d1 * static_cast<float>(dTan);
+  const glm::vec2 T2 = C + d2 * static_cast<float>(dTan);
+
+  // Trim each line's corner endpoint to its tangent point.
+  (c1 == 0 ? l1->a : l1->b) = T1;
+  (c2 == 0 ? l2->a : l2->b) = T2;
+
+  // Minor arc T1→T2 (CCW-always), and which endpoint the arc starts at.
+  auto wrap = [](double x) {
+    while (x < 0)
+      x += 2.0 * M_PI;
+    while (x >= 2.0 * M_PI)
+      x -= 2.0 * M_PI;
+    return x;
+  };
+  const double aT1 = std::atan2(T1.y - center.y, T1.x - center.x);
+  const double aT2 = std::atan2(T2.y - center.y, T2.x - center.x);
+  const bool startIsT1 = wrap(aT2 - aT1) <= M_PI;
+  sketch::Arc arc = startIsT1
+                        ? sketch::Arc{center, radius, aT1, aT1 + wrap(aT2 - aT1)}
+                        : sketch::Arc{center, radius, aT2, aT2 + wrap(aT1 - aT2)};
+  const uint32_t arcId = AddEntity(arc);
+
+  // Remove the old corner coincident joining the two lines.
+  const uint8_t w1 = static_cast<uint8_t>(c1), w2 = static_cast<uint8_t>(c2);
+  auto refIs = [](const sketch::PointRef& r, uint32_t id, uint8_t w) {
+    return r.entity == id && r.which == w;
+  };
+  constraints.erase(
+      std::remove_if(constraints.begin(), constraints.end(),
+                     [&](const sketch::Constraint& con) {
+                       return con.kind == K::Coincident &&
+                              ((refIs(con.a, lineId1, w1) &&
+                                refIs(con.b, lineId2, w2)) ||
+                               (refIs(con.a, lineId2, w2) &&
+                                refIs(con.b, lineId1, w1)));
+                     }),
+      constraints.end());
+
+  // Join the trimmed line ends to the arc endpoints; tangency does the rest.
+  const uint32_t startLine = startIsT1 ? lineId1 : lineId2;
+  const uint8_t startWhich = startIsT1 ? w1 : w2;
+  const uint32_t endLine = startIsT1 ? lineId2 : lineId1;
+  const uint8_t endWhich = startIsT1 ? w2 : w1;
+  constraints.push_back({K::Coincident, {startLine, startWhich}, {arcId, 1}, 0.0});
+  constraints.push_back({K::Coincident, {endLine, endWhich}, {arcId, 2}, 0.0});
+  constraints.push_back({K::Tangent, {lineId1, 0}, {arcId, 0}, 0.0});
+  constraints.push_back({K::Tangent, {lineId2, 0}, {arcId, 0}, 0.0});
+  return arcId;
+}

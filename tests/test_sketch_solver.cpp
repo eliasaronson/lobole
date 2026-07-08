@@ -557,4 +557,53 @@ TEST_CASE("An arc endpoint constrained coincident to a line endpoint solves",
              WithinRel(static_cast<float>(arc.radius), 1e-3f));
 }
 
+TEST_CASE("A linked mirror follows the source through the solver",
+          "[solver][generative]") {
+  SketchFeature s = MakeSketch();
+  uint32_t axis = s.AddEntity(sketch::Line{{0, -5}, {0, 5}}); // y-axis
+  uint32_t seg = s.AddEntity(sketch::Line{{2, 1}, {3, 4}});
+  // Pin the axis so it doesn't drift.
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {axis, 0}, {0, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {axis, 1}, {0, 0}});
+  auto gen = s.MirrorEntities({seg}, axis, /*link=*/true);
+  REQUIRE(gen.size() == 1);
+
+  // Move the source line's endpoint, then re-solve: the linked copy must mirror.
+  std::get<sketch::Line>(s.entities[s.IndexOfEntity(seg)]).a = {2.5f, 2.0f};
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+
+  glm::vec2 srcA = std::get<sketch::Line>(out[s.IndexOfEntity(seg)]).a;
+  glm::vec2 copyA = std::get<sketch::Line>(out[s.IndexOfEntity(gen[0])]).a;
+  // Copy endpoint is the mirror of the (moved) source endpoint about x=0.
+  CHECK_THAT(copyA.x, WithinAbs(-srcA.x, 1e-3f));
+  CHECK_THAT(copyA.y, WithinAbs(srcA.y, 1e-3f));
+}
+
+TEST_CASE("A filleted corner solves and extrudes", "[solver][arc][generative]") {
+  // A rectangle with one corner filleted still closes and extrudes.
+  SketchFeature s = MakeSketch();
+  auto r = s.AddRectangle({0, 0}, {4, 2});
+  // Fillet the top-right corner where side r[1] (right) meets r[2] (top).
+  uint32_t arcId = s.FilletCorner(r[1], r[2], 0.5);
+  REQUIRE(arcId != 0);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+
+  auto loops = sketch::BuildLoops(out);
+  REQUIRE(loops.size() == 1);
+  CADShape prism = sketch::BuildPrism(s.plane, loops, 1.0, false);
+  REQUIRE(prism.IsValid());
+  // Area = 8 - (corner square - quarter disk); height 1.
+  const double area = 8.0 - (0.5 * 0.5 - M_PI * 0.5 * 0.5 / 4.0);
+  CHECK_THAT(prism.Volume(), WithinRel(area, 1e-2));
+}
+
 #endif // HAVE_PLANEGCS

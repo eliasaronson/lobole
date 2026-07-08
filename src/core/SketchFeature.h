@@ -126,6 +126,48 @@ inline std::optional<Arc> ArcFromThreePoints(glm::vec2 p0, glm::vec2 through,
   return Arc{center, r, a1, a1 + (2.0 * M_PI - sweepP0)}; // the other way
 }
 
+// Reflects a point across the infinite line through a and b.
+inline glm::vec2 ReflectPoint(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
+  glm::vec2 d = b - a;
+  float len2 = glm::dot(d, d);
+  if (len2 < 1e-12f)
+    return p; // degenerate axis: identity
+  float t = glm::dot(p - a, d) / len2; // projection param along the axis
+  glm::vec2 foot = a + t * d;
+  return foot + (foot - p); // p mirrored through its foot on the axis
+}
+
+// Reflects an entity across the line a→b, preserving id/construction and the
+// arc CCW-always invariant. A reflection reverses orientation, so an arc's
+// swept endpoints are reflected and its start/end angles recomputed (the old
+// start maps to the new *end*).
+inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
+  Entity out = std::visit(
+      [&](const auto& g) -> Entity {
+        using T = std::decay_t<decltype(g)>;
+        if constexpr (std::is_same_v<T, Point>)
+          return Point{ReflectPoint(g.p, a, b)};
+        else if constexpr (std::is_same_v<T, Line>)
+          return Line{ReflectPoint(g.a, a, b), ReflectPoint(g.b, a, b)};
+        else if constexpr (std::is_same_v<T, Circle>)
+          return Circle{ReflectPoint(g.center, a, b), g.radius};
+        else { // Arc: reflected start becomes the new end (winding flips)
+          glm::vec2 c = ReflectPoint(g.center, a, b);
+          glm::vec2 s = ReflectPoint(ArcPointUV(g, 1), a, b);
+          glm::vec2 en = ReflectPoint(ArcPointUV(g, 2), a, b);
+          double a0 = std::atan2(en.y - c.y, en.x - c.x);
+          double a1 = std::atan2(s.y - c.y, s.x - c.x);
+          while (a1 <= a0)
+            a1 += 2.0 * M_PI; // CCW-always
+          return Arc{c, g.radius, a0, a1};
+        }
+      },
+      e);
+  SetEntityId(out, 0); // caller stamps a fresh id via AddEntity
+  SetConstruction(out, IsConstruction(e));
+  return out;
+}
+
 // UV of the point a ref addresses, for any alternative: Point → p; Line →
 // a (which 0) / b (which 1); Circle → center; Arc → center/start/end per
 // ArcPointUV. Single source of truth for RefUV / EntityPoints / EntityDots.
@@ -260,6 +302,22 @@ public:
   // if `id` isn't a line.
   std::optional<std::pair<glm::vec2, glm::vec2>>
   TrimSpanAt(uint32_t id, glm::vec2 clickUV) const;
+
+  // Mirrors `sourceIds` across the line entity `axisLineId`, appending the
+  // reflected copies (fresh ids) and returning their ids. When `link` is true
+  // it also adds constraints tying each copy to its source so the mirror tracks
+  // edits (Symmetric on line/arc endpoints, Equal+Symmetric on circle/arc
+  // centres; a source point already on the axis gets a Coincident instead).
+  // `link=false` bakes an unlinked copy. No-op (empty) if the axis isn't a line.
+  std::vector<uint32_t> MirrorEntities(const std::vector<uint32_t>& sourceIds,
+                                       uint32_t axisLineId, bool link);
+
+  // Rounds the corner where line `lineId1` and `lineId2` meet with a tangent arc
+  // of the given radius: trims both lines to the tangent points, inserts the
+  // arc, and adds two Tangent + two Coincident constraints (removing the old
+  // corner coincident). Returns the new arc's id, or 0 if the lines don't share
+  // a corner, are parallel, or the radius is too large for either segment.
+  uint32_t FilletCorner(uint32_t lineId1, uint32_t lineId2, double radius);
 
   SketchPlane plane;
   std::vector<sketch::Entity> entities;
