@@ -165,6 +165,27 @@ TEST_CASE("Changing a linked pattern's count is id-stable", "[sketch][pattern]")
   CHECK(sk.derived[0].instances.size() == 3);
 }
 
+TEST_CASE("Editing a linked pattern's step regenerates it id-stably",
+          "[sketch][pattern]") {
+  // The core of EditPatternParams (N4): changing the transform moves the
+  // generated instances but keeps their ids.
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t p = sk.AddEntity(sketch::Point{{0, 0}});
+  auto gen = sk.AddLinearPattern({p}, {2, 0}, 3, /*link=*/true);
+  REQUIRE(gen.size() == 2);
+  const uint32_t inst1 = gen[0]; // k=1 at (2,0)
+
+  sk.derived[0].vec = glm::vec2{0, 5}; // re-aim the step to +Y, spacing 5
+  sk.RegenerateDerived();
+
+  CHECK(sk.entities.size() == 3);             // count unchanged
+  const size_t idx = sk.IndexOfEntity(inst1); // same id...
+  REQUIRE(idx != SIZE_MAX);
+  const auto& moved = std::get<sketch::Point>(sk.entities[idx]);
+  CHECK_THAT(moved.p.x, WithinAbs(0.0f, 1e-5f)); // ...moved to (0,5)
+  CHECK_THAT(moved.p.y, WithinAbs(5.0f, 1e-5f));
+}
+
 TEST_CASE("A linked pattern round-trips through JSON", "[sketch][pattern]") {
   auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
   uint32_t p = sk->AddEntity(sketch::Point{{0, 0}});

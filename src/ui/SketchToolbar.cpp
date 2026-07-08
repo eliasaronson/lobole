@@ -247,19 +247,34 @@ void DrawSketchToolbar(AppState& state) {
       DeleteConstraint(state, static_cast<size_t>(toDelete));
   }
 
-  // Linked patterns: edit the instance count live (regenerates id-stably).
+  // Linked patterns: edit the full transform live (regenerates id-stably).
   if (!sketch->derived.empty()) {
     ImGui::SeparatorText("Patterns");
     for (size_t i = 0; i < sketch->derived.size(); i++) {
       ImGui::PushID(static_cast<int>(i));
-      const auto& op = sketch->derived[i];
+      const sketch::DerivedOp& op = sketch->derived[i];
+      const bool circular = op.kind == sketch::DerivedKind::CircularPattern;
+      ImGui::TextUnformatted(circular ? "Circular" : "Linear");
+
       int count = op.count;
+      glm::vec2 vec = op.vec;
+      float angleDeg = static_cast<float>(glm::degrees(op.scalar));
+      bool changed = false;
       ImGui::SetNextItemWidth(90);
-      const char* kind = op.kind == sketch::DerivedKind::CircularPattern
-                             ? "circular"
-                             : "linear";
-      if (ImGui::DragInt(kind, &count, 0.1f, 2, 1000))
-        SetPatternCount(state, i, count);
+      changed |= ImGui::DragInt("Count", &count, 0.1f, 2, 1000);
+      if (circular) {
+        ImGui::SetNextItemWidth(140);
+        changed |= ImGui::DragFloat2("Centre", &vec.x, 0.05f);
+        ImGui::SetNextItemWidth(90);
+        changed |= ImGui::DragFloat("Angle", &angleDeg, 0.5f, -360.0f, 360.0f,
+                                    "%.1f deg");
+      } else {
+        ImGui::SetNextItemWidth(140);
+        changed |= ImGui::DragFloat2("Step", &vec.x, 0.05f);
+      }
+      if (changed)
+        EditPatternParams(state, i, vec,
+                          circular ? glm::radians(angleDeg) : 0.0, count);
       ImGui::PopID();
     }
   }

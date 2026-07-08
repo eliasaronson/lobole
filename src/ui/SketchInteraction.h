@@ -122,6 +122,12 @@ bool ApplyPattern(AppState& state);
 // sketch, regenerates, and commits one undoable edit.
 bool SetPatternCount(AppState& state, size_t opIndex, int count);
 
+// Edits a linked pattern's full transform (linear step / circular centre in
+// `vec`, circular step angle in `scalar` radians, `count`) and regenerates it
+// id-stably. No-op if unchanged or count < 2. One undo record.
+bool EditPatternParams(AppState& state, size_t opIndex, glm::vec2 vec,
+                       double scalar, int count);
+
 // Offsets the selected closed loop by the offset params in SketchEditState and
 // commits one undoable edit. Returns false if nothing is selected or the
 // selection isn't a single closed loop.

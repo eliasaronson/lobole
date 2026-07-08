@@ -1741,15 +1741,19 @@ bool ApplyOffset(AppState& state) {
   return true;
 }
 
-bool SetPatternCount(AppState& state, size_t opIndex, int count) {
+bool EditPatternParams(AppState& state, size_t opIndex, glm::vec2 vec,
+                       double scalar, int count) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (!sketch || opIndex >= sketch->derived.size() || count < 2)
     return false;
-  if (sketch->derived[opIndex].count == count)
-    return false;
+  sketch::DerivedOp& op = sketch->derived[opIndex];
+  if (op.vec == vec && op.scalar == scalar && op.count == count)
+    return false; // no change
   nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-  sketch->derived[opIndex].count = count;
+  op.vec = vec;       // linear step / circular centre
+  op.scalar = scalar; // circular step angle (radians); unused for linear
+  op.count = count;
   sketch->RegenerateDerived();
   sketch::Solver solver;
   solver.Load(*sketch);
@@ -1762,6 +1766,15 @@ bool SetPatternCount(AppState& state, size_t opIndex, int count) {
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
   return true;
+}
+
+bool SetPatternCount(AppState& state, size_t opIndex, int count) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || opIndex >= sketch->derived.size())
+    return false;
+  const sketch::DerivedOp& op = sketch->derived[opIndex];
+  return EditPatternParams(state, opIndex, op.vec, op.scalar, count);
 }
 
 bool ToggleConstruction(AppState& state) {
