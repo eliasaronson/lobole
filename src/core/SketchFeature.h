@@ -290,6 +290,35 @@ struct PointRef {
   uint8_t which = 0;
 };
 
+// Datum geometry: the sketch origin + X/Y axes. These are always available as
+// constraint / mirror / snap references but are NOT stored in the entity list —
+// they live in a reserved id block above any real entity id (which grow from 1).
+// `IndexOfEntity` returns SIZE_MAX for them, so every ref-by-index site must
+// check IsDatum first and use the helpers below for their (fixed) geometry.
+constexpr uint32_t kDatumBase = 0xFFFFFF00u;
+constexpr uint32_t kOrigin = kDatumBase;     // point (0,0)
+constexpr uint32_t kAxisX = kDatumBase + 1;  // line (0,0) -> (1,0)  (+U)
+constexpr uint32_t kAxisY = kDatumBase + 2;  // line (0,0) -> (0,1)  (+V)
+
+inline bool IsDatum(uint32_t id) { return id >= kDatumBase; }
+
+// UV of a datum ref's point. Origin = (0,0); an axis's which 0 = origin, which
+// 1 = its unit-direction end.
+inline glm::vec2 DatumPointUV(uint32_t entity, uint8_t which) {
+  if (entity == kAxisX)
+    return which == 1 ? glm::vec2(1.0f, 0.0f) : glm::vec2(0.0f, 0.0f);
+  if (entity == kAxisY)
+    return which == 1 ? glm::vec2(0.0f, 1.0f) : glm::vec2(0.0f, 0.0f);
+  return glm::vec2(0.0f, 0.0f); // origin
+}
+
+// The two points (a, b) defining a datum axis line (kAxisX / kAxisY).
+inline std::pair<glm::vec2, glm::vec2> DatumAxisEndpoints(uint32_t entity) {
+  if (entity == kAxisY)
+    return {{0.0f, 0.0f}, {0.0f, 1.0f}};
+  return {{0.0f, 0.0f}, {1.0f, 0.0f}}; // kAxisX
+}
+
 enum class ConstraintKind {
   Coincident,    // a, b are two points made equal
   Horizontal,    // a.entity is a line: its endpoints share y

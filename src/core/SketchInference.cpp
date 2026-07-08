@@ -78,6 +78,12 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
       consider(2, ArcPointUV(*a, 2)); // end
     }
   }
+  // Datum: the origin is always a coincident candidate.
+  if (glm::length(uv) < bestPt) {
+    bestPt = glm::length(uv);
+    s.coincident = PointRef{kOrigin, 0};
+    s.uv = glm::vec2(0.0f);
+  }
   if (s.coincident) {
     s.glyphs.push_back(GlyphKind::Coincident);
     return s; // point is pinned; no further snapping
@@ -131,6 +137,19 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
           s.alignShareY = PointRef{id, which};
         }
       });
+    }
+    // Datum: align to the origin's X / Y too ("vertical / horizontal to the
+    // origin"). Lower priority than a real vertex (strict <, so a vertex tie
+    // wins), yielding a two-point Vertical/Horizontal to the origin on commit.
+    if (std::abs(uv.x) < bestX) {
+      bestX = std::abs(uv.x);
+      snapX = 0.0f;
+      s.alignShareX = PointRef{kOrigin, 0};
+    }
+    if (std::abs(uv.y) < bestY) {
+      bestY = std::abs(uv.y);
+      snapY = 0.0f;
+      s.alignShareY = PointRef{kOrigin, 0};
     }
     if (s.alignShareX) {
       s.uv.x = snapX;

@@ -987,11 +987,16 @@ void DrawSnapGlyphs(AppState& state) {
   auto guide = [&](const std::optional<sketch::PointRef>& ref) {
     if (!ref)
       return;
-    const size_t idx = sketch->IndexOfEntity(ref->entity);
-    if (idx == SIZE_MAX)
-      return;
-    const glm::vec2 v = SketchUVToScreen(
-        state, sketch->plane, sketch::EntityPointUV(sketch->entities[idx], ref->which));
+    glm::vec2 targetUV;
+    if (sketch::IsDatum(ref->entity)) {
+      targetUV = sketch::DatumPointUV(ref->entity, ref->which);
+    } else {
+      const size_t idx = sketch->IndexOfEntity(ref->entity);
+      if (idx == SIZE_MAX)
+        return;
+      targetUV = sketch::EntityPointUV(sketch->entities[idx], ref->which);
+    }
+    const glm::vec2 v = SketchUVToScreen(state, sketch->plane, targetUV);
     const glm::vec2 d = p - v;
     const float len = glm::length(d);
     if (len < 1e-3f)

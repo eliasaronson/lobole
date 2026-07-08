@@ -424,13 +424,24 @@ SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
                              uint32_t axisLineId, bool link) {
   using K = sketch::ConstraintKind;
   std::vector<uint32_t> generated;
-  const size_t axisIdx = IndexOfEntity(axisLineId);
-  if (axisIdx == std::numeric_limits<size_t>::max())
-    return generated;
-  auto* axis = std::get_if<sketch::Line>(&entities[axisIdx]);
-  if (!axis)
-    return generated;
-  const glm::vec2 a = axis->a, b = axis->b;
+  // Axis geometry comes from the datum helpers for the X/Y axes, else from the
+  // axis line entity. The linked Symmetric constraints reference axisLineId
+  // either way — the solver resolves a datum axis id via its registered line.
+  glm::vec2 a, b;
+  if (sketch::IsDatum(axisLineId)) {
+    const auto ep = sketch::DatumAxisEndpoints(axisLineId);
+    a = ep.first;
+    b = ep.second;
+  } else {
+    const size_t axisIdx = IndexOfEntity(axisLineId);
+    if (axisIdx == std::numeric_limits<size_t>::max())
+      return generated;
+    auto* axis = std::get_if<sketch::Line>(&entities[axisIdx]);
+    if (!axis)
+      return generated;
+    a = axis->a;
+    b = axis->b;
+  }
 
   std::vector<std::pair<uint32_t, uint32_t>> pairs; // (source id, copy id)
   for (uint32_t sid : sourceIds) {

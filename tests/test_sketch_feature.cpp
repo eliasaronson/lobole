@@ -6,6 +6,7 @@
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
+#include "core/SketchSolver.h"
 
 #include <nlohmann/json.hpp>
 
@@ -46,6 +47,31 @@ TEST_CASE("MirrorEntities reflects geometry across an axis line", "[sketch]") {
       }
     CHECK(sym == 2); // both endpoints
   }
+}
+
+TEST_CASE("Mirror across a datum axis reflects and links to it",
+          "[sketch][mirror][datum]") {
+  // No axis entity needed — the Y axis datum reflects across x = 0 and the
+  // linked Symmetric constraints reference kAxisY (resolved by the solver).
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t seg = sk.AddEntity(sketch::Line{{1, 0}, {2, 1}});
+  auto gen = sk.MirrorEntities({seg}, sketch::kAxisY, /*link=*/true);
+  REQUIRE(gen.size() == 1);
+
+  const auto& copy = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
+  CHECK_THAT(copy.a.x, WithinAbs(-1.0f, 1e-4f)); // reflected across x = 0
+  CHECK_THAT(copy.b.x, WithinAbs(-2.0f, 1e-4f));
+  CHECK_THAT(copy.b.y, WithinAbs(1.0f, 1e-4f));
+
+  bool symToAxis = false;
+  for (const auto& c : sk.constraints)
+    if (c.kind == sketch::ConstraintKind::Symmetric && c.c.entity == sketch::kAxisY)
+      symToAxis = true;
+  CHECK(symToAxis);
+
+  sketch::Solver solver; // the datum-referencing constraints solve
+  solver.Load(sk);
+  CHECK(solver.Solve().ok);
 }
 
 TEST_CASE("MirrorEntities reflects an arc keeping it CCW", "[sketch][arc]") {

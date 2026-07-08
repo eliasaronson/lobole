@@ -77,6 +77,56 @@ TEST_CASE("Two-point Vertical/Horizontal aligns points on an axis",
   }
 }
 
+TEST_CASE("Constraints resolve against datum geometry (origin + axes)",
+          "[solver][datum]") {
+  SECTION("Coincident to the origin pins a point to (0,0)") {
+    SketchFeature s = MakeSketch();
+    uint32_t p = s.AddEntity(sketch::Point{{3, 4}});
+    s.constraints.push_back(
+        {sketch::ConstraintKind::Coincident, {p, 0}, {sketch::kOrigin, 0}});
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.Solve().ok);
+    std::vector<sketch::Entity> out;
+    solver.WriteBack(out);
+    const glm::vec2 q = std::get<sketch::Point>(out[0]).p;
+    CHECK_THAT(q.x, WithinAbs(0.0f, 1e-5f));
+    CHECK_THAT(q.y, WithinAbs(0.0f, 1e-5f));
+  }
+  SECTION("Point-on-line onto the X axis drops Y to 0") {
+    SketchFeature s = MakeSketch();
+    uint32_t p = s.AddEntity(sketch::Point{{3, 4}});
+    s.constraints.push_back(
+        {sketch::ConstraintKind::PointOnLine, {p, 0}, {sketch::kAxisX, 0}});
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.Solve().ok);
+    std::vector<sketch::Entity> out;
+    solver.WriteBack(out);
+    CHECK_THAT(std::get<sketch::Point>(out[0]).p.y, WithinAbs(0.0f, 1e-5f));
+  }
+  SECTION("Symmetric about the Y axis mirrors X") {
+    SketchFeature s = MakeSketch();
+    uint32_t a = s.AddEntity(sketch::Point{{2.0f, 1.0f}});
+    uint32_t b = s.AddEntity(sketch::Point{{2.5f, 1.5f}});
+    sketch::Constraint c;
+    c.kind = sketch::ConstraintKind::Symmetric;
+    c.a = {a, 0};
+    c.b = {b, 0};
+    c.c = {sketch::kAxisY, 0}; // symmetry line = the Y axis (x = 0)
+    s.constraints.push_back(c);
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.Solve().ok);
+    std::vector<sketch::Entity> out;
+    solver.WriteBack(out);
+    const glm::vec2 qa = std::get<sketch::Point>(out[0]).p;
+    const glm::vec2 qb = std::get<sketch::Point>(out[1]).p;
+    CHECK_THAT(qa.x, WithinAbs(-qb.x, 1e-4f)); // mirrored across x = 0
+    CHECK_THAT(qa.y, WithinAbs(qb.y, 1e-4f));
+  }
+}
+
 TEST_CASE("An ellipse centre is a solver point that Coincident moves",
           "[solver][ellipse]") {
   // The ellipse centre snaps onto a fixed anchor point; radii/rotation are

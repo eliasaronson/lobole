@@ -94,7 +94,17 @@ struct Solver::Impl {
   // Solves the already-declared system and reports the verdict.
   SolveResult RunSolve() {
     SolveResult result;
-    if (gcsPoints.empty() && radii.empty()) {
+    // Trivial when nothing is free to solve. gcsPoints is never empty now (the
+    // datum origin/axes are always registered) but they're all fixed, so check
+    // for any free param instead.
+    bool anyFree = !radii.empty() || !angles.empty();
+    for (auto& gp : gcsPoints) {
+      if (anyFree)
+        break;
+      if (!fixedParams.count(gp.x) || !fixedParams.count(gp.y))
+        anyFree = true;
+    }
+    if (!anyFree) {
       result.ok = true;
       result.dof = 0;
       return result;
@@ -144,6 +154,30 @@ void Solver::Load(const SketchFeature& sketch) {
         static_cast<int>(im.gcsPoints.size() - 1);
     return gp;
   };
+
+  // Datum geometry: a fixed origin point and the two axis lines, always present
+  // so constraints / mirrors / snaps can reference them. Held out of the
+  // unknowns (fixedParams), so they add no DOF and never move.
+  auto fixPoint = [&](GCS::Point gp) {
+    im.fixedParams.insert(gp.x);
+    im.fixedParams.insert(gp.y);
+  };
+  auto addDatumAxis = [&](uint32_t id, glm::vec2 a, glm::vec2 b) {
+    GCS::Line gl;
+    gl.p1 = addPoint(id, 0, a);
+    gl.p2 = addPoint(id, 1, b);
+    fixPoint(gl.p1);
+    fixPoint(gl.p2);
+    im.lines.push_back(gl);
+    im.lineOf[id] = static_cast<int>(im.lines.size() - 1);
+  };
+  fixPoint(addPoint(kOrigin, 0, {0.0f, 0.0f}));
+  {
+    auto [xa, xb] = DatumAxisEndpoints(kAxisX);
+    addDatumAxis(kAxisX, xa, xb);
+    auto [ya, yb] = DatumAxisEndpoints(kAxisY);
+    addDatumAxis(kAxisY, ya, yb);
+  }
 
   // All solver maps are keyed by the entity's stable id, not its list index,
   // so constraint refs (which carry ids) resolve directly.

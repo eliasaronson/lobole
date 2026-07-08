@@ -33,18 +33,19 @@ TEST_CASE("Infer snaps onto a line body (point-on-line)", "[inference]") {
 
 TEST_CASE("Infer detects horizontal and vertical segments", "[inference]") {
   std::vector<sketch::Entity> e; // empty — no vertices to snap to
-  // Near-horizontal: from (0,0) to (5, 0.1) → within 2 deg.
-  sketch::Snap h = sketch::InferPoint(e, {5.0f, 0.1f}, glm::vec2{0, 0}, 0, kScale);
+  // Drawn away from the origin/axes so datum snapping doesn't claim an axis.
+  // Near-horizontal: from (2,2) to (7, 2.1) → within 2 deg.
+  sketch::Snap h = sketch::InferPoint(e, {7.0f, 2.1f}, glm::vec2{2, 2}, 0, kScale);
   CHECK(h.horizontal);
   CHECK_FALSE(h.vertical);
-  CHECK_THAT(h.uv.y, WithinAbs(0.0f, 1e-5f)); // snapped flat
+  CHECK_THAT(h.uv.y, WithinAbs(2.0f, 1e-5f)); // snapped flat to the start
 
-  sketch::Snap v = sketch::InferPoint(e, {0.1f, 5.0f}, glm::vec2{0, 0}, 0, kScale);
+  sketch::Snap v = sketch::InferPoint(e, {2.1f, 7.0f}, glm::vec2{2, 2}, 0, kScale);
   CHECK(v.vertical);
-  CHECK_THAT(v.uv.x, WithinAbs(0.0f, 1e-5f));
+  CHECK_THAT(v.uv.x, WithinAbs(2.0f, 1e-5f));
 
   // A clear 30 deg segment is neither.
-  sketch::Snap d = sketch::InferPoint(e, {5.0f, 2.9f}, glm::vec2{0, 0}, 0, kScale);
+  sketch::Snap d = sketch::InferPoint(e, {7.0f, 4.9f}, glm::vec2{2, 2}, 0, kScale);
   CHECK_FALSE(d.horizontal);
   CHECK_FALSE(d.vertical);
 }
@@ -127,4 +128,28 @@ TEST_CASE("X alignment combines with a horizontal segment (close the rectangle)"
   CHECK(s.horizontal);                // segment flattened
   CHECK_THAT(s.uv.x, WithinAbs(0.0f, 1e-5f));
   CHECK_THAT(s.uv.y, WithinAbs(3.0f, 1e-5f)); // = start Y
+}
+
+TEST_CASE("Infer snaps to the origin datum", "[inference][datum]") {
+  std::vector<sketch::Entity> e; // empty sketch — the origin is always present
+  sketch::Snap s = sketch::InferPoint(e, {0.3f, -0.2f}, std::nullopt, 0, kScale);
+  REQUIRE(s.coincident.has_value());
+  CHECK(s.coincident->entity == sketch::kOrigin);
+  CHECK_THAT(s.uv.x, WithinAbs(0.0f, 1e-5f));
+  CHECK_THAT(s.uv.y, WithinAbs(0.0f, 1e-5f));
+}
+
+TEST_CASE("Infer aligns vertical/horizontal to the origin", "[inference][datum]") {
+  std::vector<sketch::Entity> e; // empty — the origin is always present
+  // Shares the origin's X (x ~ 0), far in Y → vertical alignment to the origin.
+  sketch::Snap vx = sketch::InferPoint(e, {0.05f, 5.0f}, std::nullopt, 0, kScale);
+  REQUIRE(vx.alignShareX.has_value());
+  CHECK(vx.alignShareX->entity == sketch::kOrigin);
+  CHECK_THAT(vx.uv.x, WithinAbs(0.0f, 1e-5f));
+
+  // Shares the origin's Y → horizontal alignment to the origin.
+  sketch::Snap hy = sketch::InferPoint(e, {5.0f, -0.05f}, std::nullopt, 0, kScale);
+  REQUIRE(hy.alignShareY.has_value());
+  CHECK(hy.alignShareY->entity == sketch::kOrigin);
+  CHECK_THAT(hy.uv.y, WithinAbs(0.0f, 1e-5f));
 }
