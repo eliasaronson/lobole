@@ -309,12 +309,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sketch != nullptr);
 
+    // Entering a sketch aligns the camera to the plane over a 1s animation. Wait
+    // for it to settle before projecting click coordinates — otherwise
+    // SketchUVToScreen reads a mid-flight camera and the clicks land off target.
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+
     // Select is the default tool now; pick Line, then two viewport clicks place
     // a line. Anchor at the projected origin and offset in screen pixels (an
     // empty sketch is fit tightly, so a UV offset would project off-screen).
-    // NOTE: this test is a known-failing harness quirk (the first viewport
-    // click after the menu interaction is intermittently swallowed) — line
-    // drawing works interactively and over the remote; see CONSTRAINTS notes.
     s_App->sketchEdit.tool = ui::SketchTool::Line;
     glm::vec2 c = ui::SketchUVToScreen(*s_App, sketch->plane, glm::vec2(0, 0));
     ctx->MouseMoveToPos(ImVec2(c.x - 60.0f, c.y));
@@ -322,6 +325,13 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MouseMoveToPos(ImVec2(c.x + 60.0f, c.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
+
+    // Committing the line rebuilds the sketch feature through the command
+    // system, so the pointer captured above now dangles — re-fetch it before
+    // reading the entity list (this stale-pointer read, not the clicks, was why
+    // this test used to fail).
+    sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
     IM_CHECK_EQ(sketch->entities.size(), (size_t)1);
 
     // Undo removes the line but keeps the sketch
@@ -805,17 +815,24 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-    uint32_t target = sk->AddEntity(sketch::Point{{3, 1}});
+    // Keep the point well within the sketch's visible UV range (~±2 at the
+    // default framing); further out it projects onto a side panel and the click
+    // that should land on it misses the viewport.
+    uint32_t target = sk->AddEntity(sketch::Point{{1.5f, 0.5f}});
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield();
+    // Let the sketch-entry camera animation settle so the projected click
+    // coordinates land on target (see draw_line_undo).
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     s_App->sketchEdit.tool = ui::SketchTool::Line;
     s_App->sketchEdit.autoConstrain = true;
 
-    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1, -1));
-    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(3, 1)); // onto the point
+    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -0.5f));
+    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.5f, 0.5f)); // onto the point
     ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
