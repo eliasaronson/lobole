@@ -45,6 +45,12 @@ public:
     glm::mat4 modelMatrix = glm::mat4(1.0f);
     glm::vec3 color = glm::vec3(0.8f, 0.8f, 0.8f);
 
+    // PBR params passed to the fragment shader via push constants:
+    // x = metallic, y = roughness, z = specular, w = dielectric reflectance.
+    // Default = neutral dielectric (matte, non-metal) so unassigned bodies read
+    // predictably instead of being guessed from albedo.
+    glm::vec4 materialParams = glm::vec4(0.0f, 0.5f, 0.5f, 0.04f);
+
     // Face-highlight vertex ranges [start, end), passed via push constants
     glm::uvec4 highlight = glm::uvec4(0); // x,y = selected; z,w = hovered
 
@@ -67,6 +73,10 @@ public:
     void RemoveMesh(uint32_t meshId);
     void SetMeshTransform(uint32_t meshId, const glm::mat4& transform);
     void SetMeshColor(uint32_t meshId, const glm::vec3& color);
+    // Sets albedo (as vertex color) + PBR params in one shot. params is
+    // (metallic, roughness, specular, reflectance).
+    void SetMeshMaterial(uint32_t meshId, const glm::vec3& albedo,
+                         const glm::vec4& params);
 
     // Face highlighting (vertex ranges within the mesh's vertex buffer)
     void SetFaceHighlight(uint32_t meshId, uint32_t firstVertex, uint32_t count);

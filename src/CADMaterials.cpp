@@ -210,6 +210,56 @@ MaterialType MaterialLibrary::GetMaterialFromFilename(const std::string& filenam
     return MaterialType::ALUMINUM;
 }
 
+namespace {
+// Single source of truth for slug <-> type and UI ordering. Grouped metals
+// first, then non-metals; DEFAULT is intentionally excluded from AllTypes() (it
+// is the empty-slug fallback, not a user-picked material).
+const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
+    static const std::vector<std::pair<MaterialType, const char*>> table = {
+        {MaterialType::ALUMINUM, "aluminum"},
+        {MaterialType::STEEL, "steel"},
+        {MaterialType::STAINLESS_STEEL, "stainless_steel"},
+        {MaterialType::BRASS, "brass"},
+        {MaterialType::BRONZE, "bronze"},
+        {MaterialType::COPPER, "copper"},
+        {MaterialType::CHROME, "chrome"},
+        {MaterialType::GOLD, "gold"},
+        {MaterialType::SILVER, "silver"},
+        {MaterialType::TITANIUM, "titanium"},
+        {MaterialType::PLASTIC_WHITE, "plastic_white"},
+        {MaterialType::PLASTIC_BLACK, "plastic_black"},
+        {MaterialType::RUBBER, "rubber"},
+        {MaterialType::GLASS, "glass"},
+        {MaterialType::CONCRETE, "concrete"},
+    };
+    return table;
+}
+} // namespace
+
+std::string MaterialLibrary::Slug(MaterialType type) {
+    for (const auto& [t, slug] : SlugTable()) {
+        if (t == type) return slug;
+    }
+    return ""; // DEFAULT (and anything unmapped) serializes as empty
+}
+
+MaterialType MaterialLibrary::FromSlug(const std::string& slug) {
+    if (slug.empty()) return MaterialType::DEFAULT;
+    for (const auto& [t, s] : SlugTable()) {
+        if (slug == s) return t;
+    }
+    return MaterialType::DEFAULT;
+}
+
+const std::vector<MaterialType>& MaterialLibrary::AllTypes() {
+    static const std::vector<MaterialType> types = [] {
+        std::vector<MaterialType> v;
+        for (const auto& [t, slug] : SlugTable()) v.push_back(t);
+        return v;
+    }();
+    return types;
+}
+
 MaterialType MaterialLibrary::GetMaterialFromShapeIndex(int index) {
     // Cycle through different metals for variety
     const MaterialType metalMaterials[] = {

@@ -1,5 +1,6 @@
 #include "ui/FeatureEditor.h"
 
+#include "CADMaterials.h"
 #include "Camera.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
@@ -9,6 +10,7 @@
 #include "imgui.h"
 
 #include <cstdio>
+#include <vector>
 
 namespace ui {
 
@@ -82,6 +84,32 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     nlohmann::json before = state.editBaseline;
     feature.SetName(nameBuf);
     CommitDiscrete(state, feature, before, index, commit);
+  }
+
+  // Material — applies to any body this feature creates (index 0 = Default,
+  // i.e. the empty slug; the rest mirror MaterialLibrary::AllTypes()).
+  {
+    using CADMaterials::MaterialLibrary;
+    const auto& types = MaterialLibrary::AllTypes();
+    int sel = 0;
+    for (size_t i = 0; i < types.size(); ++i) {
+      if (MaterialLibrary::Slug(types[i]) == feature.GetMaterial()) {
+        sel = static_cast<int>(i) + 1;
+        break;
+      }
+    }
+    std::vector<const char*> labels;
+    labels.reserve(types.size() + 1);
+    labels.push_back("Default");
+    for (auto t : types)
+      labels.push_back(MaterialLibrary::GetMaterial(t).name.c_str());
+    if (ImGui::Combo("Material", &sel, labels.data(),
+                     static_cast<int>(labels.size()))) {
+      nlohmann::json before = DocumentIO::FeatureToJson(feature);
+      feature.SetMaterial(sel == 0 ? std::string{}
+                                   : MaterialLibrary::Slug(types[sel - 1]));
+      CommitDiscrete(state, feature, before, index, commit);
+    }
   }
 
   if (auto* box = dynamic_cast<BoxFeature*>(&feature)) {

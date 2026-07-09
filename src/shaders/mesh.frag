@@ -17,8 +17,14 @@ layout(location = 11) in float fragHighlight;
 
 layout(location = 0) out vec4 outColor;
 
+layout(push_constant) uniform PushConstants {
+    mat4 model;        // used in the vertex stage
+    uvec4 highlight;   // used in the vertex stage
+    vec4 material;      // x=metallic, y=roughness, z=specular, w=reflectance
+} pc;
+
 // Enhanced PBR lighting calculation
-vec3 calculateLight(Light light, vec3 normal, vec3 viewDir, vec3 albedo, float metallic, float roughness) {
+vec3 calculateLight(Light light, vec3 normal, vec3 viewDir, vec3 albedo, float metallic, float roughness, float specularScale, float reflectance) {
     vec3 lightDir = normalize(light.direction.xyz);
     float lightIntensity = light.direction.w;
     vec3 lightColor = light.color.rgb;
@@ -33,12 +39,12 @@ vec3 calculateLight(Light light, vec3 normal, vec3 viewDir, vec3 albedo, float m
     float shininess = mix(16.0, 256.0, 1.0 - roughness);
     float spec = pow(NdotH, shininess);
     
-    // Fresnel effect
+    // Fresnel effect (dielectric F0 from the material's reflectance)
     float VdotH = max(dot(viewDir, halfwayDir), 0.0);
-    vec3 F0 = mix(vec3(0.04), albedo, metallic);
+    vec3 F0 = mix(vec3(reflectance), albedo, metallic);
     vec3 fresnel = F0 + (1.0 - F0) * pow(1.0 - VdotH, 5.0);
-    
-    vec3 specular = lightColor * lightIntensity * spec * fresnel;
+
+    vec3 specular = lightColor * lightIntensity * spec * fresnel * specularScale;
     
     // Combine diffuse and specular based on metallicness
     return mix(diffuse, vec3(0.0), metallic) + specular;
@@ -49,27 +55,22 @@ void main() {
     vec3 normal = normalize(fragNormal);
     vec3 viewDir = normalize(fragViewPos - fragWorldPos);
     
-    // Enhanced material properties based on surface color
+    // Albedo from the vertex color (set from the body's material base color).
     vec3 albedo = fragColor;
-    
-    // Determine material properties from color
-    // Bright colors = more metallic, darker colors = less metallic
-    float brightness = dot(albedo, vec3(0.299, 0.587, 0.114));
-    float metallic = mix(0.1, 0.95, smoothstep(0.3, 0.8, brightness));
-    float roughness = mix(0.05, 0.3, 1.0 - brightness);
-    
-    // Override for very saturated colors (likely metals)
-    if (albedo.r > 0.8 && albedo.g < 0.7) metallic = 0.9; // Reddish metals (copper, gold)
-    if (albedo.g > 0.8 && albedo.r < 0.7) metallic = 0.8; // Greenish metals
-    if (albedo.b > 0.8 && albedo.r < 0.7) metallic = 0.9; // Bluish metals (steel)
-    
+
+    // Real PBR params from the assigned material (no more color guessing).
+    float metallic = pc.material.x;
+    float roughness = clamp(pc.material.y, 0.03, 1.0);
+    float specularScale = pc.material.z;
+    float reflectance = pc.material.w;
+
     // Ambient lighting
     vec3 ambient = fragAmbientColor * albedo;
-    
+
     // Calculate lighting from all three light sources
-    vec3 primaryLighting = calculateLight(fragPrimaryLight, normal, viewDir, albedo, metallic, roughness);
-    vec3 fillLighting = calculateLight(fragFillLight, normal, viewDir, albedo, metallic, roughness);
-    vec3 rimLighting = calculateLight(fragRimLight, normal, viewDir, albedo, metallic, roughness);
+    vec3 primaryLighting = calculateLight(fragPrimaryLight, normal, viewDir, albedo, metallic, roughness, specularScale, reflectance);
+    vec3 fillLighting = calculateLight(fragFillLight, normal, viewDir, albedo, metallic, roughness, specularScale, reflectance);
+    vec3 rimLighting = calculateLight(fragRimLight, normal, viewDir, albedo, metallic, roughness, specularScale, reflectance);
     
     // Combine all lighting
     vec3 finalColor = ambient + primaryLighting + fillLighting + rimLighting;

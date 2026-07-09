@@ -48,13 +48,13 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
 
   switch (mode) {
   case ExtrudeMode::NewBody:
-    bodies.push_back({m_name, std::move(prism)});
+    bodies.push_back({m_name, std::move(prism), m_material});
     return true;
 
   case ExtrudeMode::Add: {
     if (bodies.empty()) {
       LOG_WARN("ExtrudeFeature '{}': Add with no bodies, creating one", m_name);
-      bodies.push_back({m_name, std::move(prism)});
+      bodies.push_back({m_name, std::move(prism), m_material});
       return true;
     }
     // Fuse into the last body whose bbox overlaps the prism, else the last.

@@ -185,6 +185,24 @@ void MeshRenderer::SetMeshColor(uint32_t meshId, const glm::vec3& color) {
     }
 }
 
+void MeshRenderer::SetMeshMaterial(uint32_t meshId, const glm::vec3& albedo,
+                                   const glm::vec4& params) {
+    if (meshId == 0 || meshId > m_meshes.size()) return;
+
+    Mesh* mesh = m_meshes[meshId - 1].get();
+    if (mesh) {
+        mesh->materialParams = params;
+        // Albedo rides in the vertex color (same path as SetMeshColor), so no
+        // extra push-constant space is needed for it.
+        mesh->color = albedo;
+        for (auto& vertex : mesh->vertices) {
+            vertex.color = albedo;
+        }
+        mesh->isDirty = true;
+        UpdateMeshBuffers(mesh);
+    }
+}
+
 void MeshRenderer::UpdateCamera(const glm::mat4& view, const glm::mat4& projection) {
     m_viewMatrix = view;
     m_projectionMatrix = projection;
@@ -248,6 +266,7 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     struct PushConstants {
         glm::mat4 model;
         glm::uvec4 highlight;
+        glm::vec4 material; // metallic, roughness, specular, reflectance
     } push;
 
     for (const auto& mesh : m_meshes) {
@@ -255,8 +274,10 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
 
         push.model = mesh->modelMatrix;
         push.highlight = mesh->highlight;
+        push.material = mesh->materialParams;
         vkCmdPushConstants(commandBuffer, m_pipelineLayout,
-                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(push), &push);
 
         // Bind vertex buffer
         VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
@@ -434,11 +455,14 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     dynamicState.pDynamicStates = dynamicStates.data();
     
     // Pipeline layout
-    // Per-mesh model matrix + highlight ranges via push constants
+    // Per-mesh model matrix + highlight ranges (vertex) + PBR material
+    // (fragment) via push constants
     VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.stageFlags =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(glm::mat4) + sizeof(glm::uvec4);
+    pushConstantRange.size =
+        sizeof(glm::mat4) + sizeof(glm::uvec4) + sizeof(glm::vec4);
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

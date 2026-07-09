@@ -1,5 +1,6 @@
 #include "ui/AppActions.h"
 
+#include "CADMaterials.h"
 #include "CADMeshConverter.h"
 #include "Camera.h"
 #include "FaceSelector.h"
@@ -254,6 +255,16 @@ void SyncDocumentRenderers(AppState& state) {
     std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(
         cadMesh, kBodyPalette[bodyIndex++ % std::size(kBodyPalette)]);
     uint32_t meshId = state.meshRenderer->AddMesh(vertices, cadMesh.indices);
+    // A body with an assigned material overrides the palette color with the
+    // material's base color and real PBR params; unassigned bodies keep the
+    // palette color and the mesh's neutral-dielectric defaults.
+    if (!body.material.empty()) {
+      const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
+          CADMaterials::MaterialLibrary::FromSlug(body.material));
+      state.meshRenderer->SetMeshMaterial(
+          meshId, mat.baseColor,
+          glm::vec4(mat.metallic, mat.roughness, mat.specular, mat.reflectance));
+    }
     uint32_t outlineId = 0;
     if (state.outlineRenderer)
       outlineId = state.outlineRenderer->AddMesh(vertices, cadMesh.indices);

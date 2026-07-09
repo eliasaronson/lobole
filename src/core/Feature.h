@@ -6,10 +6,14 @@
 #include <string>
 #include <vector>
 
-// A named solid produced by regenerating the feature list.
+// A named solid produced by regenerating the feature list. `material` is a slug
+// into the render-layer material library (empty = default); it is transient like
+// the shape — the feature that creates the body stamps its own material here on
+// every regeneration.
 struct Body {
   std::string name;
   CADShape shape;
+  std::string material;
 };
 
 class Feature;
@@ -38,6 +42,13 @@ public:
   const std::string& GetName() const { return m_name; }
   void SetName(const std::string& name) { m_name = name; }
 
+  // Material slug (into the render-layer material library) applied to any body
+  // this feature creates. Empty = default. Persistent + serialized; a feature
+  // that only modifies existing bodies (extrude add/cut) leaves their material
+  // untouched.
+  const std::string& GetMaterial() const { return m_material; }
+  void SetMaterial(const std::string& material) { m_material = material; }
+
   // Stable identity for feature->feature references (an extrude names its
   // sketch by id, which survives reordering and undo). 0 = unassigned; the
   // Document assigns ids on insert and serialization round-trips them.
@@ -52,6 +63,7 @@ public:
 
 protected:
   std::string m_name;
+  std::string m_material;
   uint64_t m_id = 0;
 };
 

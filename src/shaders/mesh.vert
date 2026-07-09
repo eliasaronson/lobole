@@ -20,6 +20,8 @@ layout(push_constant) uniform PushConstants {
     mat4 model;
     // Vertex ranges [x,y) selected, [z,w) hovered for face highlighting
     uvec4 highlight;
+    // PBR: x=metallic, y=roughness, z=specular, w=reflectance (used in frag)
+    vec4 material;
 } pc;
 
 layout(location = 0) in vec3 inPosition;

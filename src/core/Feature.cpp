@@ -27,7 +27,7 @@ bool BoxFeature::Execute(RegenContext& ctx) {
     return false;
   }
   shape.Translate(position);
-  bodies.push_back({m_name, std::move(shape)});
+  bodies.push_back({m_name, std::move(shape), m_material});
   return true;
 }
 
@@ -44,7 +44,7 @@ bool SphereFeature::Execute(RegenContext& ctx) {
     LOG_ERROR("SphereFeature '{}': invalid radius {}", m_name, radius);
     return false;
   }
-  bodies.push_back({m_name, std::move(shape)});
+  bodies.push_back({m_name, std::move(shape), m_material});
   return true;
 }
 
@@ -65,7 +65,7 @@ bool CylinderFeature::Execute(RegenContext& ctx) {
               radius, height);
     return false;
   }
-  bodies.push_back({m_name, std::move(shape)});
+  bodies.push_back({m_name, std::move(shape), m_material});
   return true;
 }
 
@@ -116,7 +116,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     shape.Translate(-center);
     added++;
     bodies.push_back(
-        {m_name + " " + std::to_string(added), std::move(shape)});
+        {m_name + " " + std::to_string(added), std::move(shape), m_material});
   }
   return true;
 }

@@ -46,3 +46,4 @@ imgui.ini
 
 # All out-of-source build dirs (build/, build-asan/, ...)
 build-*/
+.cache/

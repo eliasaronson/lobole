@@ -1,5 +1,6 @@
 #include "remote/RemoteServer.h"
 
+#include "CADMaterials.h"
 #include "Camera.h"
 #include "FaceSelector.h"
 #include "Logger.h"
@@ -224,6 +225,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       body.shape.GetBoundingBox(min, max);
       json entry = {{"name", body.name},
                     {"volume", body.shape.Volume()},
+                    {"material", body.material},
                     {"bbox_min", Vec3ToJson(min)},
                     {"bbox_max", Vec3ToJson(max)}};
       // Render/picking mesh id (used by select_face); ids change on
@@ -288,6 +290,28 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                  *doc)) {
       throw std::runtime_error("modify failed");
     }
+    return json::object();
+  }
+  if (m == "set_material") {
+    // Assign a material to a feature (by id). params: {feature_id, material}
+    // where material is a library slug (e.g. "steel") or "" for default.
+    // Commits one undoable edit and regenerates.
+    size_t index = 0;
+    Feature* f = doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
+    if (!f) throw std::runtime_error("no such feature");
+    const std::string slug = p.value("material", std::string{});
+    // A non-empty slug that resolves to DEFAULT is unknown (DEFAULT is never in
+    // the slug table, so valid slugs always map to a specific material).
+    if (!slug.empty() && CADMaterials::MaterialLibrary::FromSlug(slug) ==
+                             CADMaterials::MaterialType::DEFAULT) {
+      throw std::runtime_error("unknown material slug: " + slug);
+    }
+    json before = DocumentIO::FeatureToJson(*f);
+    f->SetMaterial(slug);
+    doc->Regenerate();
+    json after = DocumentIO::FeatureToJson(*f);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json::object();
   }
   if (m == "delete_feature") {

@@ -94,6 +94,36 @@ TEST_CASE("Document JSON roundtrip preserves features and geometry",
   fs::remove(path);
 }
 
+TEST_CASE("Feature material round-trips and stamps its body", "[serialization]") {
+  Document doc;
+  auto box = std::make_unique<BoxFeature>("Base", glm::vec3(0), 2.0, 2.0, 2.0);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  // A second body left at the default (empty) material.
+  doc.AddFeature(
+      std::make_unique<SphereFeature>("Ball", glm::vec3(5, 0, 0), 1.0));
+
+  // The creating feature stamps its material onto the body it produces.
+  REQUIRE(doc.GetBodies().size() == 2);
+  CHECK(doc.GetBodies()[0].material == "steel");
+  CHECK(doc.GetBodies()[1].material.empty());
+
+  fs::path path = TempFile("designer_test_material.json");
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(loaded != nullptr);
+  REQUIRE(loaded->FeatureCount() == 2);
+  CHECK(loaded->GetFeature(0)->GetMaterial() == "steel");
+  CHECK(loaded->GetFeature(1)->GetMaterial().empty());
+  // And the material survives regeneration onto the rebuilt body.
+  CHECK(loaded->GetBodies()[0].material == "steel");
+  CHECK(loaded->GetBodies()[1].material.empty());
+
+  fs::remove(path);
+}
+
 TEST_CASE("Loading rejects non-document JSON", "[serialization]") {
   fs::path path = TempFile("designer_test_bad.json");
   {

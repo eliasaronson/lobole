@@ -15,7 +15,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 9; // v9: ellipses (v8: derived ops, v7: arcs)
+constexpr int kVersion = 10; // v10: per-feature material (v9: ellipses, v8: derived ops, v7: arcs)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -226,6 +226,9 @@ json FeatureToJson(const Feature& feature) {
   if (feature.GetId() != 0) {
     j["id"] = feature.GetId();
   }
+  if (!feature.GetMaterial().empty()) { // omit default to keep JSON compact
+    j["material"] = feature.GetMaterial();
+  }
 
   if (auto* sk = dynamic_cast<const SketchFeature*>(&feature)) {
     j["plane"] = {{"origin", Vec3ToJson(sk->plane.GetOrigin())},
@@ -380,6 +383,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     throw std::runtime_error("Unknown feature type: " + type);
   }
   out->SetId(j.value("id", uint64_t{0})); // v1 files have no id; Document assigns
+  out->SetMaterial(j.value("material", std::string{})); // absent (pre-v10) = default
   return out;
 }
 

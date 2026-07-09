@@ -269,6 +269,27 @@ def main():
         expect(newkinds.count("arc") == 4 and newkinds.count("line") == 4,
                "offset boundary is lines + rounded-corner arcs")
 
+        # Material: assign via RPC, stamped onto the body, survives save/load.
+        d.call("new_project")
+        mb = d.call("add_feature", feature=BOX)
+        d.call("set_material", feature_id=mb["id"], material="steel")
+        mstate = d.call("get_state")
+        expect(mstate["features"][0].get("material") == "steel",
+               "material set on feature")
+        expect(mstate["bodies"][0]["material"] == "steel",
+               "material stamped on body")
+        try:
+            d.call("set_material", feature_id=mb["id"], material="unobtainium")
+            expect(False, "unknown material should error")
+        except RuntimeError:
+            pass
+        mpath = os.path.join(tmp, "material.json")
+        d.call("save_project", path=mpath)
+        d.call("new_project")
+        d.call("open_project", path=mpath)
+        expect(d.call("get_state")["bodies"][0]["material"] == "steel",
+               "material survives save/load")
+
         # Screenshot: the controller can see what the user sees
         d.call("new_project")
         sk = d.call("add_feature", feature={
