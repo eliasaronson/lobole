@@ -496,6 +496,15 @@ VkBuffer RayTracingRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags 
     allocInfo.allocationSize = memRequirements.size;
     allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
 
+    // A buffer used for a device address (e.g. the SBT) must have its memory
+    // allocated with the matching flag, or vkBindBufferMemory is invalid.
+    VkMemoryAllocateFlagsInfo flagsInfo{};
+    flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
+        allocInfo.pNext = &flagsInfo;
+    }
+
     if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
         throw std::runtime_error("failed to allocate buffer memory!");
     }

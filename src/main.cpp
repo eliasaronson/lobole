@@ -137,8 +137,19 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
 
   // Create Vulkan Instance
   {
+    // Request Vulkan 1.2: it promotes VK_EXT_descriptor_indexing,
+    // VK_KHR_buffer_device_address, VK_KHR_spirv_1_4 and VK_KHR_device_group to
+    // core, which satisfies the ray-tracing extensions' dependencies and makes
+    // the SPIR-V 1.4 RT shaders legal (both hard validation errors under the
+    // implicit 1.0 default). Both discrete and iGPU here report 1.3.
+    VkApplicationInfo app_info = {};
+    app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    app_info.pApplicationName = "Designer";
+    app_info.apiVersion = VK_API_VERSION_1_2;
+
     VkInstanceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    create_info.pApplicationInfo = &app_info;
 
     // Enumerate available extensions
     uint32_t properties_count;
@@ -277,9 +288,17 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
     asFeatures.accelerationStructure = VK_TRUE;
     asFeatures.pNext = &rtPipelineFeatures;
 
+    // The OutlineRenderer wireframe pipeline draws with VK_POLYGON_MODE_LINE,
+    // which requires the fillModeNonSolid feature. Enable it when supported.
+    VkPhysicalDeviceFeatures supportedFeatures{};
+    vkGetPhysicalDeviceFeatures(g_PhysicalDevice, &supportedFeatures);
+    VkPhysicalDeviceFeatures enabledFeatures{};
+    enabledFeatures.fillModeNonSolid = supportedFeatures.fillModeNonSolid;
+
     VkDeviceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     create_info.pNext = &asFeatures;
+    create_info.pEnabledFeatures = &enabledFeatures;
     create_info.queueCreateInfoCount =
         sizeof(queue_info) / sizeof(queue_info[0]);
     create_info.pQueueCreateInfos = queue_info;
