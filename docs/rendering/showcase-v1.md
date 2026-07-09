@@ -72,11 +72,20 @@ MSAA + ACES tone mapping": whole-pass 4x MSAA with a resolve to the backbuffer
 scene pipeline + ImGui + the offscreen screenshot pass, ACES filmic curve in
 `mesh.frag`. Before/after edge crops confirm the staircase is gone. Two notes:
 (1) the render pass keeps color=0/depth=1 so FrameRender's clears don't branch,
-resolve appended at index 2; (2) the Vulkan validation layer isn't installed in
-this environment — VUID checks couldn't run, so correctness rests on the
-exercised resize/dock/screenshot paths (gui_smoke) rather than validation. Run
-with `-DAPP_USE_VULKAN_DEBUG_REPORT` on a machine with the layer before R4 (the
-RT work is far more validation-sensitive).
+resolve appended at index 2; (2) validated clean — after installing
+`vulkan-validationlayers` and clearing the pre-existing errors (see below), a
+validated run reaches the render loop and screenshots with **zero** VUIDs,
+confirming the MSAA BeginRenderPass → resolve → present → screenshot path.
+
+**Validation errors fixed alongside R2** (`1b9c7f4`, all pre-existing, none from
+materials/MSAA): the app was requesting Vulkan 1.0 implicitly → bumped
+`VkApplicationInfo::apiVersion` to 1.2 (promotes the RT extensions' dependency
+extensions to core + legalizes the SPIR-V 1.4 RT shaders); enabled
+`fillModeNonSolid` for the wireframe pipeline; allocated the RT SBT buffer with
+`VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT`. Note: the app's own debug-report path is
+still gated behind `#ifdef _DEBUG` (an MSVC-ism GCC never defines) — force the
+layer with `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` until CMake defines
+`APP_USE_VULKAN_DEBUG_REPORT` for Debug builds.
 
 - **MSAA 4×, whole-pass**: the swapchain render pass gains multisampled
   color + depth attachments with a resolve to the backbuffer
@@ -122,10 +131,11 @@ The "premium render" jump; also builds the codebase's first texture path.
 Finish the scaffold into a KeyShot-style "Render" button. Raster viewport is
 untouched — RT runs on demand into the offscreen path.
 
-- **R4.0 Ground truth (half-day)**: run with validation layers; confirm
-  `Initialize()` actually succeeds (RT pipeline + SBT get created), confirm
-  the app picks the RTX 4060 and not the Arc iGPU (fix device selection to
-  prefer a discrete RT-capable device), and audit the SBT region
+- **R4.0 Ground truth (half-day)**: partly done during R2's validation pass —
+  `Initialize()` succeeds (RT pipeline + SBT create) and the SBT/device-address
+  + extension-dependency validation errors are already fixed (`1b9c7f4`).
+  Remaining: confirm the app picks the RTX 4060 and not the Arc iGPU (fix device
+  selection to prefer a discrete RT-capable device), and audit the SBT region
   math against the spec (stride/size alignment) — it was written blind and has
   never executed a trace.
 - **R4.1 Geometry upload (1 day)**: make `AddGeometry` real — vertex/index
