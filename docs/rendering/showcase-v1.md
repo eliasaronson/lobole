@@ -36,9 +36,16 @@ plans).
   advertises the RT extensions — device selection must prefer the discrete
   NVIDIA GPU explicitly (verify in R4.0; an iGPU pick would work but crawl).
 
-## Phase R1 — Real materials (~1.5–2 days)
+## Phase R1 — Real materials (~1.5–2 days) — SHIPPED (`d206a26`)
 
-Replace the color-guess with the library that already exists.
+Replace the color-guess with the library that already exists. Shipped as
+"feat: per-feature PBR materials": material slug on `Feature` (serialized v10),
+stamped onto bodies during regen; `mesh.frag` uses real metallic/roughness +
+reflectance-driven dielectric F0 (fragment-stage push constant); Properties
+combo + `set_material` RPC + `get_state` body material; unit + remote_smoke
+tests; chrome-vs-plastic verified visually. One scope note: albedo comes from
+`MaterialProperties::baseColor` on assignment (custom per-body color override
+is a later nicety, not needed for R1).
 
 - **Model**: a feature/body gains a `materialType` (library enum, serialized as
   its name string; format v10 with default `DEFAULT` on load). Assignment is a
