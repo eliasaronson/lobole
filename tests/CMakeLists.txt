@@ -25,9 +25,12 @@ add_executable(designer_tests
     test_sketch_inference.cpp
     test_sketch_selection.cpp
     test_camera.cpp
+    test_ibl.cpp
 )
 target_link_libraries(designer_tests PRIVATE designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(designer_tests PRIVATE
+    DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 include(CTest)
 include(Catch)

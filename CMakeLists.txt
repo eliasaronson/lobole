@@ -151,6 +151,7 @@ set(core_sources
     src/CADKernel.cpp
     src/CADMeshConverter.cpp
     src/CADMaterials.cpp
+    src/IBL.cpp
     src/SketchPlane.cpp
     src/Sketch.cpp
     src/SketchManager.cpp
