@@ -64,9 +64,19 @@ is a later nicety, not needed for R1).
 - Tests: serialization round-trip; GUI test assigns steel and asserts the
   feature's material; visual eyeball via `/run`.
 
-## Phase R2 — MSAA + ACES (~1–1.5 days)
+## Phase R2 — MSAA + ACES (~1–1.5 days) — SHIPPED (`310b833`)
 
-The #1 "looks cheap" fix and the "looks finished" curve.
+The #1 "looks cheap" fix and the "looks finished" curve. Shipped as "feat: 4x
+MSAA + ACES tone mapping": whole-pass 4x MSAA with a resolve to the backbuffer
+(sample count from device limits, 1x fallback), sample count threaded into every
+scene pipeline + ImGui + the offscreen screenshot pass, ACES filmic curve in
+`mesh.frag`. Before/after edge crops confirm the staircase is gone. Two notes:
+(1) the render pass keeps color=0/depth=1 so FrameRender's clears don't branch,
+resolve appended at index 2; (2) the Vulkan validation layer isn't installed in
+this environment — VUID checks couldn't run, so correctness rests on the
+exercised resize/dock/screenshot paths (gui_smoke) rather than validation. Run
+with `-DAPP_USE_VULKAN_DEBUG_REPORT` on a machine with the layer before R4 (the
+RT work is far more validation-sensitive).
 
 - **MSAA 4×, whole-pass**: the swapchain render pass gains multisampled
   color + depth attachments with a resolve to the backbuffer
