@@ -332,6 +332,25 @@ static VkImageView g_DepthView = VK_NULL_HANDLE;
 static VkRenderPass g_DepthRenderPass = VK_NULL_HANDLE;
 static const VkFormat g_DepthFormat = VK_FORMAT_D32_SFLOAT;
 
+// MSAA: the scene + UI render into a multisampled color+depth target that
+// resolves to the swapchain backbuffer. Chosen once from device limits (capped
+// at 4x); falls back to 1x (no resolve) on hardware that can't multisample.
+static VkSampleCountFlagBits g_MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+static VkImage g_MsaaColorImage = VK_NULL_HANDLE;
+static VkDeviceMemory g_MsaaColorMemory = VK_NULL_HANDLE;
+static VkImageView g_MsaaColorView = VK_NULL_HANDLE;
+
+static VkSampleCountFlagBits GetMaxUsableSampleCount() {
+  VkPhysicalDeviceProperties props;
+  vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
+  // Need the count supported for BOTH color and depth so one pass can use it.
+  VkSampleCountFlags counts = props.limits.framebufferColorSampleCounts &
+                              props.limits.framebufferDepthSampleCounts;
+  if (counts & VK_SAMPLE_COUNT_4_BIT) return VK_SAMPLE_COUNT_4_BIT;
+  if (counts & VK_SAMPLE_COUNT_2_BIT) return VK_SAMPLE_COUNT_2_BIT;
+  return VK_SAMPLE_COUNT_1_BIT;
+}
+
 static uint32_t FindMemoryTypeIndex(uint32_t typeFilter,
                                     VkMemoryPropertyFlags props) {
   VkPhysicalDeviceMemoryProperties mp;
@@ -354,14 +373,23 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
   g_DepthView = VK_NULL_HANDLE;
   g_DepthImage = VK_NULL_HANDLE;
   g_DepthMemory = VK_NULL_HANDLE;
+  if (g_MsaaColorView) vkDestroyImageView(g_Device, g_MsaaColorView, g_Allocator);
+  if (g_MsaaColorImage) vkDestroyImage(g_Device, g_MsaaColorImage, g_Allocator);
+  if (g_MsaaColorMemory) vkFreeMemory(g_Device, g_MsaaColorMemory, g_Allocator);
+  g_MsaaColorView = VK_NULL_HANDLE;
+  g_MsaaColorImage = VK_NULL_HANDLE;
+  g_MsaaColorMemory = VK_NULL_HANDLE;
 
+  const bool msaa = g_MSAASamples != VK_SAMPLE_COUNT_1_BIT;
+
+  // Depth image (multisampled to match the color target).
   VkImageCreateInfo img{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   img.imageType = VK_IMAGE_TYPE_2D;
   img.format = g_DepthFormat;
   img.extent = {(uint32_t)wd->Width, (uint32_t)wd->Height, 1};
   img.mipLevels = 1;
   img.arrayLayers = 1;
-  img.samples = VK_SAMPLE_COUNT_1_BIT;
+  img.samples = g_MSAASamples;
   img.tiling = VK_IMAGE_TILING_OPTIMAL;
   img.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   vkCreateImage(g_Device, &img, g_Allocator, &g_DepthImage);
@@ -380,34 +408,81 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
   view.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
   vkCreateImageView(g_Device, &view, g_Allocator, &g_DepthView);
 
-  // Color+depth render pass (created once, reused across resizes so ImGui's
-  // pipeline stays render-pass-compatible).
+  // Multisampled color image that resolves to the backbuffer (MSAA only).
+  if (msaa) {
+    VkImageCreateInfo cimg{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    cimg.imageType = VK_IMAGE_TYPE_2D;
+    cimg.format = wd->SurfaceFormat.format;
+    cimg.extent = {(uint32_t)wd->Width, (uint32_t)wd->Height, 1};
+    cimg.mipLevels = 1;
+    cimg.arrayLayers = 1;
+    cimg.samples = g_MSAASamples;
+    cimg.tiling = VK_IMAGE_TILING_OPTIMAL;
+    cimg.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                 VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+    vkCreateImage(g_Device, &cimg, g_Allocator, &g_MsaaColorImage);
+    VkMemoryRequirements creq;
+    vkGetImageMemoryRequirements(g_Device, g_MsaaColorImage, &creq);
+    VkMemoryAllocateInfo calloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    calloc.allocationSize = creq.size;
+    calloc.memoryTypeIndex = FindMemoryTypeIndex(
+        creq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vkAllocateMemory(g_Device, &calloc, g_Allocator, &g_MsaaColorMemory);
+    vkBindImageMemory(g_Device, g_MsaaColorImage, g_MsaaColorMemory, 0);
+    VkImageViewCreateInfo cview{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    cview.image = g_MsaaColorImage;
+    cview.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    cview.format = wd->SurfaceFormat.format;
+    cview.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCreateImageView(g_Device, &cview, g_Allocator, &g_MsaaColorView);
+  }
+
+  // Render pass (created once, reused across resizes so ImGui's pipeline stays
+  // render-pass-compatible). Attachment order is kept stable across the MSAA and
+  // non-MSAA paths — color=0, depth=1 — so the clear values in FrameRender don't
+  // need to branch; the resolve target (backbuffer) is appended at index 2.
   if (g_DepthRenderPass == VK_NULL_HANDLE) {
-    VkAttachmentDescription atts[2] = {};
+    VkAttachmentDescription atts[3] = {};
+    // 0: color (multisampled when MSAA; the presented backbuffer otherwise)
     atts[0].format = wd->SurfaceFormat.format;
-    atts[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    atts[0].samples = g_MSAASamples;
     atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    atts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    atts[0].storeOp = msaa ? VK_ATTACHMENT_STORE_OP_DONT_CARE
+                           : VK_ATTACHMENT_STORE_OP_STORE;
     atts[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     atts[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     atts[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    atts[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    atts[0].finalLayout = msaa ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                               : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    // 1: depth
     atts[1].format = g_DepthFormat;
-    atts[1].samples = VK_SAMPLE_COUNT_1_BIT;
+    atts[1].samples = g_MSAASamples;
     atts[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     atts[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     atts[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     atts[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     atts[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     atts[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    // 2: resolve target = the presented backbuffer (MSAA only)
+    atts[2].format = wd->SurfaceFormat.format;
+    atts[2].samples = VK_SAMPLE_COUNT_1_BIT;
+    atts[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    atts[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    atts[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    atts[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    atts[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    atts[2].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkAttachmentReference depthRef{
         1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference resolveRef{2,
+                                     VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
     VkSubpassDescription sub{};
     sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sub.colorAttachmentCount = 1;
     sub.pColorAttachments = &colorRef;
     sub.pDepthStencilAttachment = &depthRef;
+    if (msaa) sub.pResolveAttachments = &resolveRef;
     VkSubpassDependency dep{};
     dep.srcSubpass = VK_SUBPASS_EXTERNAL;
     dep.dstSubpass = 0;
@@ -418,7 +493,7 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
     dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-    rp.attachmentCount = 2;
+    rp.attachmentCount = msaa ? 3 : 2;
     rp.pAttachments = atts;
     rp.subpassCount = 1;
     rp.pSubpasses = &sub;
@@ -427,7 +502,9 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
     vkCreateRenderPass(g_Device, &rp, g_Allocator, &g_DepthRenderPass);
   }
 
-  // Swap ImGui's color-only render pass + framebuffers for color+depth ones.
+  // Swap ImGui's color-only render pass + framebuffers for our color+depth
+  // (+resolve) ones. Framebuffer attachments match the render pass order:
+  // MSAA → [msaaColor, depth, backbuffer]; single-sample → [backbuffer, depth].
   if (wd->RenderPass != g_DepthRenderPass && wd->RenderPass != VK_NULL_HANDLE)
     vkDestroyRenderPass(g_Device, wd->RenderPass, g_Allocator);
   wd->RenderPass = g_DepthRenderPass;
@@ -435,10 +512,21 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
     ImGui_ImplVulkanH_Frame *fd = &wd->Frames[i];
     if (fd->Framebuffer)
       vkDestroyFramebuffer(g_Device, fd->Framebuffer, g_Allocator);
-    VkImageView attach[2] = {fd->BackbufferView, g_DepthView};
+    VkImageView attach[3];
+    uint32_t attachCount;
+    if (msaa) {
+      attach[0] = g_MsaaColorView;
+      attach[1] = g_DepthView;
+      attach[2] = fd->BackbufferView;
+      attachCount = 3;
+    } else {
+      attach[0] = fd->BackbufferView;
+      attach[1] = g_DepthView;
+      attachCount = 2;
+    }
     VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
     fb.renderPass = g_DepthRenderPass;
-    fb.attachmentCount = 2;
+    fb.attachmentCount = attachCount;
     fb.pAttachments = attach;
     fb.width = wd->Width;
     fb.height = wd->Height;
@@ -450,6 +538,9 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
 static void SetupVulkanWindow(ImGui_ImplVulkanH_Window *wd,
                               VkSurfaceKHR surface, int width, int height) {
   wd->Surface = surface;
+
+  // Decide the MSAA level once, before the render pass / pipelines are built.
+  g_MSAASamples = GetMaxUsableSampleCount();
 
   VkBool32 res;
   vkGetPhysicalDeviceSurfaceSupportKHR(g_PhysicalDevice, g_QueueFamily,
@@ -515,6 +606,12 @@ static void CleanupVulkanWindow() {
   g_DepthView = VK_NULL_HANDLE;
   g_DepthImage = VK_NULL_HANDLE;
   g_DepthMemory = VK_NULL_HANDLE;
+  if (g_MsaaColorView) vkDestroyImageView(g_Device, g_MsaaColorView, g_Allocator);
+  if (g_MsaaColorImage) vkDestroyImage(g_Device, g_MsaaColorImage, g_Allocator);
+  if (g_MsaaColorMemory) vkFreeMemory(g_Device, g_MsaaColorMemory, g_Allocator);
+  g_MsaaColorView = VK_NULL_HANDLE;
+  g_MsaaColorImage = VK_NULL_HANDLE;
+  g_MsaaColorMemory = VK_NULL_HANDLE;
   // wd->RenderPass is g_DepthRenderPass; DestroyWindow frees it.
   ImGui_ImplVulkanH_DestroyWindow(g_Instance, g_Device, &g_MainWindowData,
                                   g_Allocator);
@@ -780,7 +877,7 @@ int main(int argc, char **argv) {
   init_info.Subpass = 0;
   init_info.MinImageCount = g_MinImageCount;
   init_info.ImageCount = wd->ImageCount;
-  init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+  init_info.MSAASamples = g_MSAASamples;
   init_info.Allocator = g_Allocator;
   init_info.CheckVkResultFn = check_vk_result;
   ImGui_ImplVulkan_Init(&init_info);
@@ -803,7 +900,8 @@ int main(int argc, char **argv) {
   g_MeshRenderer = std::make_unique<MeshRenderer>();
   bool meshRendererInitialized =
       g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                 g_Queue, g_QueueFamily, g_CommandPool);
+                                 g_Queue, g_QueueFamily, g_CommandPool,
+                                 g_MSAASamples);
   if (!meshRendererInitialized) {
     LOG_ERROR("MeshRenderer initialization failed");
   } else {
@@ -819,7 +917,8 @@ int main(int argc, char **argv) {
   g_OutlineRenderer = std::make_unique<OutlineRenderer>();
   bool outlineInitialized =
       g_OutlineRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                    g_Queue, g_QueueFamily, g_CommandPool);
+                                    g_Queue, g_QueueFamily, g_CommandPool,
+                                    g_MSAASamples);
   if (!outlineInitialized) {
     std::cout << "Warning: OutlineRenderer initialization failed" << std::endl;
   } else {
@@ -846,7 +945,8 @@ int main(int argc, char **argv) {
   // Initialize SketchRenderer
   g_SketchRenderer = std::make_unique<SketchRenderer>();
   if (g_SketchRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                   g_Queue, g_QueueFamily, g_CommandPool)) {
+                                   g_Queue, g_QueueFamily, g_CommandPool,
+                                   g_MSAASamples)) {
     g_SketchRenderer->SetViewportSize(1280, 720);
   } else {
     std::cout << "Warning: SketchRenderer initialization failed" << std::endl;
@@ -1035,7 +1135,7 @@ int main(int argc, char **argv) {
                 g_SketchRenderer->Render(cb, wd->FrameIndex);
               ImGui_ImplVulkan_RenderDrawData(draw_data, cb);
             },
-            shotPath, &shotError);
+            shotPath, &shotError, g_MSAASamples);
         remoteServer.ScreenshotDone(ok, shotError);
       }
     }

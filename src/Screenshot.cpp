@@ -31,12 +31,14 @@ bool CaptureScreenshot(
     VkCommandPool commandPool, VkRenderPass renderPass, VkFormat format,
     uint32_t width, uint32_t height, const VkClearValue& clearValue,
     const std::function<void(VkCommandBuffer)>& recordScene,
-    const std::string& outputPath, std::string* error) {
+    const std::string& outputPath, std::string* error,
+    VkSampleCountFlagBits samples) {
   auto fail = [&](const char* what) {
     if (error) *error = what;
     LOG_ERROR("Screenshot failed: {}", what);
     return false;
   };
+  const bool msaa = samples != VK_SAMPLE_COUNT_1_BIT;
 
   // Offscreen color target we are allowed to copy from
   VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
@@ -85,7 +87,7 @@ bool CaptureScreenshot(
   depthInfo.extent = {width, height, 1};
   depthInfo.mipLevels = 1;
   depthInfo.arrayLayers = 1;
-  depthInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+  depthInfo.samples = samples;
   depthInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
   depthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   VkImage depthImage = VK_NULL_HANDLE;
@@ -107,10 +109,57 @@ bool CaptureScreenshot(
   VkImageView depthImageView = VK_NULL_HANDLE;
   vkCreateImageView(device, &depthView, nullptr, &depthImageView);
 
-  VkImageView attachments[2] = {view, depthImageView};
+  // Transient multisampled color target that resolves into `image` (MSAA only),
+  // mirroring the on-screen render pass's attachment order [msaaColor, depth,
+  // resolve].
+  VkImage msaaColorImage = VK_NULL_HANDLE;
+  VkDeviceMemory msaaColorMemory = VK_NULL_HANDLE;
+  VkImageView msaaColorView = VK_NULL_HANDLE;
+  if (msaa) {
+    VkImageCreateInfo cinfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    cinfo.imageType = VK_IMAGE_TYPE_2D;
+    cinfo.format = format;
+    cinfo.extent = {width, height, 1};
+    cinfo.mipLevels = 1;
+    cinfo.arrayLayers = 1;
+    cinfo.samples = samples;
+    cinfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    cinfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                  VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+    vkCreateImage(device, &cinfo, nullptr, &msaaColorImage);
+    VkMemoryRequirements creq;
+    vkGetImageMemoryRequirements(device, msaaColorImage, &creq);
+    VkMemoryAllocateInfo calloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    calloc.allocationSize = creq.size;
+    calloc.memoryTypeIndex = FindMemoryType(physicalDevice, creq.memoryTypeBits,
+                                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vkAllocateMemory(device, &calloc, nullptr, &msaaColorMemory);
+    vkBindImageMemory(device, msaaColorImage, msaaColorMemory, 0);
+    VkImageViewCreateInfo cview{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    cview.image = msaaColorImage;
+    cview.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    cview.format = format;
+    cview.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCreateImageView(device, &cview, nullptr, &msaaColorView);
+  }
+
+  // Framebuffer attachments match the render pass: MSAA → [msaaColor, depth,
+  // resolve=image]; single-sample → [image, depth].
+  VkImageView attachments[3];
+  uint32_t attachmentCount;
+  if (msaa) {
+    attachments[0] = msaaColorView;
+    attachments[1] = depthImageView;
+    attachments[2] = view;
+    attachmentCount = 3;
+  } else {
+    attachments[0] = view;
+    attachments[1] = depthImageView;
+    attachmentCount = 2;
+  }
   VkFramebufferCreateInfo fbInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
   fbInfo.renderPass = renderPass;
-  fbInfo.attachmentCount = 2;
+  fbInfo.attachmentCount = attachmentCount;
   fbInfo.pAttachments = attachments;
   fbInfo.width = width;
   fbInfo.height = height;
@@ -212,6 +261,9 @@ bool CaptureScreenshot(
   vkDestroyImageView(device, depthImageView, nullptr);
   vkDestroyImage(device, depthImage, nullptr);
   vkFreeMemory(device, depthMemory, nullptr);
+  if (msaaColorView) vkDestroyImageView(device, msaaColorView, nullptr);
+  if (msaaColorImage) vkDestroyImage(device, msaaColorImage, nullptr);
+  if (msaaColorMemory) vkFreeMemory(device, msaaColorMemory, nullptr);
   vkDestroyBuffer(device, buffer, nullptr);
   vkFreeMemory(device, bufferMemory, nullptr);
 

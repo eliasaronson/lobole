@@ -35,7 +35,8 @@ public:
 
   bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
                   VkRenderPass renderPass, VkQueue graphicsQueue,
-                  uint32_t queueFamily, VkCommandPool commandPool);
+                  uint32_t queueFamily, VkCommandPool commandPool,
+                  VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
   void Shutdown();
 
   // Sketch entity lines (line list: pairs of endpoints). Replaced on
@@ -102,6 +103,7 @@ private:
   VkDevice m_device = VK_NULL_HANDLE;
   VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
   VkRenderPass m_renderPass = VK_NULL_HANDLE;
+  VkSampleCountFlagBits m_msaaSamples = VK_SAMPLE_COUNT_1_BIT;
   VkQueue m_graphicsQueue = VK_NULL_HANDLE;
   uint32_t m_queueFamily = 0;
   VkCommandPool m_commandPool = VK_NULL_HANDLE;

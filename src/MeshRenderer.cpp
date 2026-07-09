@@ -61,9 +61,11 @@ MeshRenderer::~MeshRenderer() {
     Shutdown();
 }
 
-bool MeshRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice, 
-                             VkRenderPass renderPass, VkQueue graphicsQueue, 
-                             uint32_t queueFamily, VkCommandPool commandPool) {
+bool MeshRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
+                             VkRenderPass renderPass, VkQueue graphicsQueue,
+                             uint32_t queueFamily, VkCommandPool commandPool,
+                             VkSampleCountFlagBits samples) {
+    m_msaaSamples = samples;
     m_device = device;
     m_physicalDevice = physicalDevice;
     m_renderPass = renderPass;
@@ -421,7 +423,7 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples = m_msaaSamples;
     
     // Depth testing
     VkPipelineDepthStencilStateCreateInfo depthStencil{};

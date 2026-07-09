@@ -22,10 +22,12 @@ std::string ExecutableDir() {
 bool SketchRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
                                 VkRenderPass renderPass, VkQueue graphicsQueue,
                                 uint32_t queueFamily,
-                                VkCommandPool commandPool) {
+                                VkCommandPool commandPool,
+                                VkSampleCountFlagBits samples) {
   m_device = device;
   m_physicalDevice = physicalDevice;
   m_renderPass = renderPass;
+  m_msaaSamples = samples;
   m_graphicsQueue = graphicsQueue;
   m_queueFamily = queueFamily;
   m_commandPool = commandPool;
@@ -181,7 +183,7 @@ bool SketchRenderer::CreatePipelines() {
 
   VkPipelineMultisampleStateCreateInfo msaa{
       VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-  msaa.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  msaa.rasterizationSamples = m_msaaSamples;
 
   VkPipelineColorBlendAttachmentState blend{};
   blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |

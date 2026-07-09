@@ -23,6 +23,17 @@ layout(push_constant) uniform PushConstants {
     vec4 material;      // x=metallic, y=roughness, z=specular, w=reflectance
 } pc;
 
+// ACES filmic tone mapping (Narkowicz fit): maps HDR [0,inf) into [0,1] with a
+// filmic shoulder so highlights roll off instead of clipping to flat white.
+vec3 ACESFilm(vec3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
 // Enhanced PBR lighting calculation
 vec3 calculateLight(Light light, vec3 normal, vec3 viewDir, vec3 albedo, float metallic, float roughness, float specularScale, float reflectance) {
     vec3 lightDir = normalize(light.direction.xyz);
@@ -75,8 +86,8 @@ void main() {
     // Combine all lighting
     vec3 finalColor = ambient + primaryLighting + fillLighting + rimLighting;
     
-    // Enhanced tone mapping for CAD visualization
-    finalColor = finalColor / (finalColor + vec3(1.2));
+    // ACES filmic tone mapping, then gamma to sRGB.
+    finalColor = ACESFilm(finalColor);
     finalColor = pow(finalColor, vec3(1.0/2.2));
     
     // Slight brightness boost for better visibility

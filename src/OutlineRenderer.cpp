@@ -19,9 +19,11 @@ OutlineRenderer::~OutlineRenderer() {
     Shutdown();
 }
 
-bool OutlineRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice, 
-                                VkRenderPass renderPass, VkQueue graphicsQueue, 
-                                uint32_t queueFamily, VkCommandPool commandPool) {
+bool OutlineRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
+                                VkRenderPass renderPass, VkQueue graphicsQueue,
+                                uint32_t queueFamily, VkCommandPool commandPool,
+                                VkSampleCountFlagBits samples) {
+    m_msaaSamples = samples;
     m_device = device;
     m_physicalDevice = physicalDevice;
     m_renderPass = renderPass;
@@ -225,7 +227,7 @@ bool OutlineRenderer::CreateOutlinePipeline() {
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples = m_msaaSamples;
     
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -379,7 +381,7 @@ bool OutlineRenderer::CreateWireframePipeline() {
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampling.rasterizationSamples = m_msaaSamples;
     
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;

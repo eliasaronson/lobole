@@ -62,9 +62,10 @@ public:
     MeshRenderer();
     ~MeshRenderer();
     
-    bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice, 
-                   VkRenderPass renderPass, VkQueue graphicsQueue, 
-                   uint32_t queueFamily, VkCommandPool commandPool);
+    bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
+                   VkRenderPass renderPass, VkQueue graphicsQueue,
+                   uint32_t queueFamily, VkCommandPool commandPool,
+                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
     void Shutdown();
     
     // Mesh management
@@ -101,6 +102,7 @@ private:
     
     // Pipeline
     VkRenderPass m_renderPass = VK_NULL_HANDLE;
+    VkSampleCountFlagBits m_msaaSamples = VK_SAMPLE_COUNT_1_BIT;
     VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;

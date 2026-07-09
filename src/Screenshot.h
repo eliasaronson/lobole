@@ -10,9 +10,13 @@
 // directly). recordScene records the same render-pass content as the
 // on-screen frame. Synchronous (waits for the GPU); intended for remote
 // control / debugging, not per-frame use.
+// `samples` must match the render pass; when >1 the offscreen target is
+// multisampled and resolved into the readback image, matching the on-screen
+// MSAA pass so screenshots look like the viewport.
 bool CaptureScreenshot(
     VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue,
     VkCommandPool commandPool, VkRenderPass renderPass, VkFormat format,
     uint32_t width, uint32_t height, const VkClearValue& clearValue,
     const std::function<void(VkCommandBuffer)>& recordScene,
-    const std::string& outputPath, std::string* error = nullptr);
+    const std::string& outputPath, std::string* error = nullptr,
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
