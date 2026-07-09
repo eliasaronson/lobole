@@ -1,14 +1,22 @@
 # Rendering & visual fidelity — plan
 
+> **Implementation plan for the first arc** (materials → MSAA/ACES → IBL →
+> offline render button, items 2/1/4/5/6a): **[showcase-v1.md](showcase-v1.md)**
+> — with verified code facts and phase-by-phase tasks. 6b (real-time hybrid RT)
+> stays here, gated as described below.
+
 Most open-source CAD looks cheap, and that alone makes it unpleasant to use. The fix is
 mostly *not* raytracing — it's a modern raster pipeline done properly. Ordered by
 perceptual-win-per-unit-effort, so the cheap high-impact work lands before the expensive
 work. Everything through 6.5 works on any GPU; 6.6 needs RT hardware.
 
-Prerequisite for all of it: **real vertex normals**. Shading is fake today (normals
-hardcoded to `(0,0,1)` in the mesh path). OpenCASCADE tessellation already provides per-face
-normals — plumb them through `CADMeshConverter` → `MeshRenderer` before anything below will
-look right.
+~~Prerequisite: real vertex normals~~ — **done** (shipped with the face-selection fix):
+`CADKernel` tessellation emits exact B-Rep surface normals with a triangle-average fallback,
+and `CADMeshConverter` passes them through. Note the current `mesh.frag` is further along
+than "flat Lambert": three lights, Blinn-Phong + Fresnel, Reinhard-ish tone-map — but
+metallic/roughness are *guessed from the albedo color* (brightness/hue heuristics). Step 2
+replaces that guess with real per-body material properties (`MaterialProperties` in
+`CADMaterials.h` already has metallic/roughness fields).
 
 1. **Anti-aliasing** — the #1 "this looks cheap" tell. Start with MSAA (a render-pass +
    pipeline change; note the current pass is color+D32 single-sample, so this touches the

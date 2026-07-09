@@ -1,12 +1,11 @@
 # Designer Roadmap
 
-> **Area plans:** [sketching](sketching/plan.md) (complete) ·
-> [3D modeling](modeling/plan.md) (next) · [rendering](rendering/plan.md). This
-> roadmap is the top-level vision + phase index; the area docs hold the detail.
+> Top-level vision + workstream index. Detail lives in the area plans (linked
+> below); this doc holds the why, the current state, and the sequencing.
 
 ## Vision
 
-An open-source parametric CAD application in the spirit of Onshape/SolidWorks, with four
+An open-source parametric CAD application in the spirit of Onshape/SolidWorks, with five
 differentiating goals:
 
 1. **Transformation checkpoints** — named points in the model's regeneration history that
@@ -36,109 +35,91 @@ testability (geometry ops unit-testable without a GUI).
 
 ## Current state (July 2026)
 
-Working: STEP import → OpenCASCADE tessellation → Vulkan rasterizer (mesh + outlines),
-camera controls, materials. CADKernel has primitives, booleans (not exposed in UI), STEP/STL I/O.
+**Working:** the full Onshape loop — sketch → extrude → sketch-on-a-face → cut. The 2D
+sketcher is feature-complete (lines/rects/arcs/ellipses; the full constraint set +
+dimensions + construction geometry + conflict management; mirror/fillet/pattern/offset;
+select-default/Escape/box-select + Onshape keymap). Parametric core: `Document` feature
+list with deterministic regeneration, stable feature + sketch-entity ids, undo/redo,
+JSON project serialization (v9). PlaneGCS constraint solving with the FreeCAD drag
+recipe. `--remote <port>` JSON-RPC: semantic commands + human-parity UI actions +
+screenshots (`tools/designer_remote.py`). STEP import, face picking with real B-Rep
+face mapping, docking dark-theme workbench with icon toolbar and preview→accept.
 
-Not working / partial:
-- Face selection: picking ray is vertically mirrored vs. the display (missing Vulkan Y-flip
-  in the render path), and tessellation stores no B-Rep-face → triangle mapping, so a "face"
-  is a single triangle. Highlighting is a stub.
-- Sketching: plane/UV scaffolding and element input exist, but sketches are never rendered
-  and nothing consumes them (no extrude).
-- Vertex normals hardcoded to (0,0,1) — shading is fake.
-- No feature history, variables, undo, scripting, or tests.
-- Dead code: `Application`, `SimpleApp`, `Viewport`, `ColorPicker`, `FaceHighlighter`;
-  1600-line `main.cpp` with global state; Vulkan boilerplate copy-pasted across renderers.
-- Rendering is flat: hardcoded normals, no AO/shadows/anti-aliasing/tone-mapping, a single
-  directional light. `RayTracingRenderer` (BLAS/TLAS, RT pipeline, SBT, `vkCmdTraceRaysKHR`)
-  and its shaders are fully scaffolded and the device enables the RT extensions, but
-  `Render()` is never called and its output is never composited — the viewport is 100%
-  rasterized (`MeshRenderer` + `OutlineRenderer` + `SketchRenderer`). This is the Phase 6
-  starting point, not dead weight.
+**Thin or missing:** solid modeling beyond extrude (no revolve, datum planes, fillets,
+booleans-as-features, 3D patterns); persistent face/edge references (**toponaming**) —
+sketches bake their plane at creation, upstream edits don't move dependents; variables/
+expressions; checkpoints + git; MCP wrapper, Python API, headless mode; measurement +
+mass properties; rendering is prototype-quality (no AA, materials guessed from color); no
+assemblies; `Document::Regenerate()` recomputes every feature per edit; no CI.
 
-## Short term
+## Workstreams
 
-1. ~~**Restore & stabilize the build**~~ *(done — submodules, documented apt packages;
-   CI still open)*
-2. ~~**Testing infrastructure**~~ *(done — Catch2 unit tests against `designer_core`,
-   GUI tests via ImGui Test Engine, all under ctest)*
-3. **Purge dead code** — delete the uncompiled leftovers, the duplicated View menu, the
-   committed test binary. *Keep* `RayTracingRenderer` — it's non-functional today but is the
-   seed of Phase 6; see there.
-4. ~~**Fix face selection**~~ *(done — consistent Vulkan projection in camera+picker, real
-   B-Rep face mapping with surface normals, per-face highlight via push constants, viewport
-   input through ImGui so tests/automation can drive orbit/pan/zoom/select)*
-5. ~~**Render sketches + implement extrude**~~ *(done — SketchFeature + ExtrudeFeature
-   (new body / add / cut), sketch rendering, plane/face picking, the full
-   sketch → extrude → sketch-on-face loop)*
-6. **Sketch constraints** (next) — PlaneGCS for coincident/parallel/dimension.
+Each workstream has its own plan doc and ships in independent milestones.
 
-## Long term
+| Workstream | Plan | Status |
+|---|---|---|
+| 1. Sketching | [sketching/plan.md](sketching/plan.md) | **Complete** (B-splines deferred) |
+| 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **Next frontier** (M1–M8) |
+| 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | Design study — start now, in parallel |
+| 4. Variables & expressions | [variables/plan.md](variables/plan.md) | Unstarted — do early (see sequencing) |
+| 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | Remote shipped; MCP/Python/headless remain |
+| 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | Format v9 exists; the rest unstarted |
+| 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
+| 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | Unstarted |
+| 9. Rendering | [rendering/plan.md](rendering/plan.md) | Planned (normals → AA → PBR → … → RT) |
+| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | Planned; gated (see plan) |
 
-### Phase 1 — Parametric document model (the heart)
-A feature list (sketch, extrude, boolean, transform, …) that regenerates the B-Rep
-deterministically, serialized as human-readable text (JSON or a small DSL). All UI actions
-route through commands. Gives undo, checkpoints, and a diffable format immediately.
+Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
+differentiators — the reason this project exists rather than being a worse
+SolidWorks. 7–9 make it pleasant; 10 makes it complete.
 
-*Largely built:* `src/core/` has `Document` (feature list + deterministic regeneration,
-stable feature ids, `RegenContext` for feature→feature references), features (Box, Sphere,
-Cylinder, STEP Import, **Sketch**, **Extrude** with new-body/add/cut), `Command`/`CommandStack`
-(undo/redo incl. `ModifyFeatureCommand`), and JSON project serialization v2 (`DocumentIO`).
-The UI is a docking workbench (`src/ui/`): Model panel with a Default-geometry section and
-feature history, Properties with **live parameter editing**, a `SketchRenderer` (lines +
-translucent plane quads), and full sketch interaction (pick plane/face → draw → extrude).
-The complete Onshape loop works: sketch → extrude → sketch on a face → cut. Remaining before
-this phase is "done": persistent references (**topological naming**) so a sketch on a face
-follows that face when upstream edits move it — currently planes are baked at creation.
+## Sequencing
 
-⚠ Hard problem to design for up front: **topological naming** — how "the face I filleted"
-stays identified after an upstream edit reorders faces. Study FreeCAD's RealThunder branch
-and SolveSpace before designing persistent references. Getting this wrong is the #1 way
-parametric kernels die.
+The recommended interleaving, with the rationale:
 
-### Phase 2 — Variables & expressions
-Dimensions as expressions over named parameters, evaluated during regeneration. Cheap once
-Phase 1 exists, nearly impossible before it.
+1. **Variables & expressions first (V1–V2)** — small now that the document model exists,
+   and every new modeling feature (revolve angle, datum offset, pattern count) should be
+   expression-driven from day one rather than retrofitted.
+2. **Modeling M1 datum planes → M2 revolve** — highest-value solid features, both
+   toponaming-free.
+3. **Toponaming design study (T1) in parallel** — it shapes the reference model every
+   later feature uses; the study costs reading + a memo, not code.
+4. **Modeling M4 booleans → M5 3D mirror/pattern → M3 richer extrude**, with the
+   **regeneration-failure UX** (modeling cross-cutting) landing before the first
+   failure-prone feature (fillets, up-to-face).
+5. **UI passes interleaved throughout** — U-milestones are small and independently
+   shippable; U2 (sketch-region selection for extrude) and U3 (feature-dialog pattern)
+   directly serve the modeling work.
+6. **Scripting completion (MCP, Python client, headless)** after variables — the API
+   should speak expressions. Headless mode also unlocks geometry tests in CI.
+7. **Versioning F1–F2 (format spec + autosave)** early — cheap insurance once real
+   models exist. Checkpoints + git (F3–F5) after the schema settles.
+8. **Inspection I2 (mass properties)** almost any time — OCC gives it nearly for free
+   and it's very LLM-useful. I1 measure wants edge picking (modeling cross-cutting).
+9. **Rendering** demo-driven: normals + AA are overdue quality-of-life; the rest when
+   it hurts or when a release needs to look good.
+10. **Assemblies last** — gated on incremental regeneration, renderer instancing, and
+    (for face mates) toponaming. See the plan's prerequisites section.
 
-### Phase 3 — Scripting + the LLM interface
-Expose the command layer as an API: embedded Python REPL and/or an MCP server with commands
-like `create_sketch`, `add_line`, `extrude`, `query_faces`, plus screenshot/render feedback.
-Humans and LLMs become genuinely equivalent clients; every scripted session is a replayable
-test case. Headless mode makes geometry operations unit-testable.
+## Continuous
 
-*Started early:* `--remote <port>` serves JSON-RPC (see README): semantic feature/document
-commands + human-parity UI actions through the test engine + live screenshots.
-`tools/designer_remote.py` is the client. Remaining: MCP wrapper, Python REPL, headless mode.
+- **Dead code purge** — `Application`, `SimpleApp`, `Viewport`, `ColorPicker`,
+  `FaceHighlighter`, the duplicated View menu. *Keep* `RayTracingRenderer` (rendering 6a/6b
+  seed).
+- **Dismantle `main.cpp`** and the tripled Vulkan boilerplate (extract a `VulkanContext` +
+  shared renderer utilities) — opportunistically while touching code, not big-bang.
+- **CI** — build + ctest on every push; the test suites exist, they should run
+  automatically. GUI tests need a virtual display; headless mode (scripting S2) makes the
+  geometry tests trivially CI-able first.
+- **Build hygiene** — `-isystem` for OCC/ImGui headers, a PCH for the heavy common set,
+  Ninja, ccache (see sketching plan cross-cutting).
+- **Incremental regeneration** — per-feature output-shape cache keyed by an input hash.
+  The scaling limiter, and the entry ticket to assemblies.
 
-### Phase 4 — Git integration
-With a text format this is mostly product design: repo-per-project, feature-level merging
-(consider one file per feature/part — feature lists merge far better than monolithic files),
-UI for history and branches.
+## Explicitly not planned (conscious decisions, not omissions)
 
-### Phase 5 — Sketch constraints
-A real constraint solver (coincident, parallel, dimensions) is what makes it feel like
-Onshape. Don't write one — embed **PlaneGCS** (FreeCAD's solver, LGPL) or SolveSpace's
-solver as a library.
-
-*Done (v1):* PlaneGCS vendored (`deps/planegcs`, LGPL) + a `SketchSolver` adapter. Constraints
-(coincident, horizontal/vertical, parallel, perpendicular, equal, distance, radius) in the
-sketch model, serialized (format v3). Sketch-entity picking + drag-to-resolve; a constraints
-toolbar. Solve runs in the interaction layer (never in Regenerate). Remaining: angle
-constraints, arcs, auto-constraint inference, whole-line/circle dragging.
-
-### Phase 6 — Rendering & visual fidelity
-
-Moved to its own doc: **[rendering/plan.md](rendering/plan.md)** — real vertex
-normals first, then AA → PBR materials → SSAO → tone-mapping → IBL, with
-raytracing (offline render button, then hybrid RT lighting) as the cherry on top.
-
-### CAD UI (done)
-Traditional-CAD redesign on the dark theme: icon toolbar (Font Awesome), **preview →
-accept/cancel** feature creation (green ✓ / red ✗, Onshape-style), default planes visible by
-default and auto-hidden with geometry, world-origin gizmo. The 3D viewport renders into the
-central dock node (centered between panels).
-
-### Continuous
-Incrementally dismantle `main.cpp` and the tripled Vulkan boilerplate (extract a
-`VulkanContext` + shared renderer utilities) — opportunistically while touching code, not as
-a big-bang rewrite. The prototype rasterizer is good enough to carry the parametric core work.
+- **2D drawings / drafting output** — the classic fifth pillar of CAD (part / assembly /
+  drawing / render / measure). Deliberately out of scope until after assemblies; revisit
+  then.
+- **CAM, simulation/FEA** — out of scope.
+- **Sketch text** — niche, out of scope (see sketching plan).

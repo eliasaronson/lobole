@@ -25,7 +25,9 @@ faces/edges**. The first kind is safe. The second needs *persistent naming* so
 "the edge I filleted" stays identified after an upstream edit reorders faces —
 the classic hard problem (getting it wrong is the #1 way parametric kernels die;
 study FreeCAD's RealThunder element-maps and OCC's `BRepBuilderAPI`
-`Modified`/`Generated`/`IsDeleted` history before designing it).
+`Modified`/`Generated`/`IsDeleted` history before designing it). The design
+study, candidate element-map design, and its own milestones now live in
+**[toponaming.md](toponaming.md)**.
 
 So: **do the toponaming-free milestones first**, and treat toponaming as the
 foundation that gates the edge/face-referencing features.
@@ -65,10 +67,12 @@ analog of the sketch `DerivedOp` mirror/pattern — reuse that id-stable-replay
 discipline.
 
 ### M6 — Topological naming (the foundation)
-Persistent identification of faces/edges across regeneration. Design study first
-(FreeCAD RealThunder element maps; OCC modification history). Unblocks every
-edge/face-referencing feature below. Start the *design* early even while M1–M5
-ship, because it shapes the reference model.
+Persistent identification of faces/edges across regeneration. Unblocks every
+edge/face-referencing feature below. Promoted to its own workstream with a
+design study, candidate design (element maps seeded by our stable sketch-entity
+ids), and milestones T1–T5: **[toponaming.md](toponaming.md)**. Start the
+*design* (T1) early even while M1–M5 ship, because it shapes the reference
+model.
 
 ### M7 — 3D fillet / chamfer (needs M6)
 `BRepFilletAPI_MakeFillet` / `MakeChamfer` on selected edges. A v1 that
@@ -81,6 +85,21 @@ wizards, rib, draft on selected faces. All either need M6 or build on M1–M5.
 
 ## Cross-cutting
 
+- **Regeneration-failure UX** (land before the first failure-prone feature —
+  fillets, up-to-face): today a feature that fails to regenerate has no story.
+  With M7-era features, upstream edits *will* make downstream features fail
+  (fillet radius exceeds the new face, referenced element gone). Needed:
+  per-feature error state shown in the history panel (icon + message),
+  regeneration that **continues past** a failed feature (downstream features
+  see the pre-failure body or also error, deterministically), a **suppress**
+  flag per feature, and a repair path (edit params / reattach references —
+  ties into [toponaming.md](toponaming.md) resolution failure). Every
+  parametric CAD has this; nobody plans it up front. Cheap now, painful later.
+- **Expression-ready parameters**: every numeric param a new feature adds
+  (revolve angle, datum offset, pattern count/spacing, extrude depth) should be
+  an expression from birth, not a raw double — coordinate with
+  [variables/plan.md](../variables/plan.md); its V1–V2 should land before or
+  with M1–M2.
 - **Edge picking**: M7 and face-select modes need it; `FaceSelector` currently
   maps triangles→B-Rep faces — add an edge analog.
 - **Incremental regeneration**: `Document::Regenerate()` recomputes every feature
