@@ -219,6 +219,7 @@ target_precompile_headers(designer_core PRIVATE
 # Application: windowing, rendering, UI.
 set(app_sources
     src/main.cpp
+    src/IBLTextures.cpp
     src/MeshRenderer.cpp
     src/OutlineRenderer.cpp
     src/RayTracingRenderer.cpp
@@ -255,6 +256,7 @@ add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCE
 target_compile_definitions(designer PRIVATE
     IMGUI_ENABLE_TEST_ENGINE
     IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+    DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 target_link_libraries(designer designer_core ${LIBRARIES})

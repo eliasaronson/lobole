@@ -23,6 +23,20 @@ layout(push_constant) uniform PushConstants {
     vec4 material;      // x=metallic, y=roughness, z=specular, w=reflectance
 } pc;
 
+// Image-based lighting maps (equirectangular; see IBL.cpp for the convention).
+layout(set = 0, binding = 1) uniform sampler2D uIrradiance;  // diffuse env
+layout(set = 0, binding = 2) uniform sampler2D uPrefilter;   // specular mips
+layout(set = 0, binding = 3) uniform sampler2D uBrdfLut;     // env BRDF (RG)
+
+const float PI = 3.14159265359;
+// Must match IBL.cpp DirToEquirectUV exactly.
+vec2 dirToUV(vec3 d) {
+    d = normalize(d);
+    float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
+    float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
+    return vec2(u, v);
+}
+
 // ACES filmic tone mapping (Narkowicz fit): maps HDR [0,inf) into [0,1] with a
 // filmic shoulder so highlights roll off instead of clipping to flat white.
 vec3 ACESFilm(vec3 x) {
@@ -75,16 +89,36 @@ void main() {
     float specularScale = pc.material.z;
     float reflectance = pc.material.w;
 
-    // Ambient lighting
-    vec3 ambient = fragAmbientColor * albedo;
+    // Image-based ambient/environment lighting (split-sum). Replaces the flat
+    // ambient term: diffuse from the irradiance map, specular from the
+    // prefiltered map + BRDF LUT.
+    vec3 R = reflect(-viewDir, normal);
+    float NdotV = max(dot(normal, viewDir), 0.0);
+    vec3 F0 = mix(vec3(reflectance), albedo, metallic);
+    // Roughness-aware Fresnel (Fdez-Aguera) so grazing angles don't over-brighten.
+    vec3 F = F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(1.0 - NdotV, 5.0);
+    vec3 kD = (1.0 - F) * (1.0 - metallic);
 
-    // Calculate lighting from all three light sources
+    vec3 irradiance = texture(uIrradiance, dirToUV(normal)).rgb;
+    vec3 diffuseIBL = irradiance * albedo;
+
+    const float kMaxReflectionLod = 4.0; // kPrefilterMips - 1
+    vec3 prefiltered =
+        textureLod(uPrefilter, dirToUV(R), roughness * kMaxReflectionLod).rgb;
+    vec2 envBRDF = texture(uBrdfLut, vec2(NdotV, roughness)).rg;
+    vec3 specularIBL = prefiltered * (F * envBRDF.x + envBRDF.y);
+
+    vec3 ambient = kD * diffuseIBL + specularIBL;
+
+    // Direct analytic lights add crisp key/fill/rim highlights on top of IBL.
+    // Dialed back since IBL now supplies the environment fill.
     vec3 primaryLighting = calculateLight(fragPrimaryLight, normal, viewDir, albedo, metallic, roughness, specularScale, reflectance);
     vec3 fillLighting = calculateLight(fragFillLight, normal, viewDir, albedo, metallic, roughness, specularScale, reflectance);
     vec3 rimLighting = calculateLight(fragRimLight, normal, viewDir, albedo, metallic, roughness, specularScale, reflectance);
-    
-    // Combine all lighting
-    vec3 finalColor = ambient + primaryLighting + fillLighting + rimLighting;
+
+    // Combine IBL ambient + direct lights (direct scaled down to avoid
+    // double-lighting now that IBL carries the environment).
+    vec3 finalColor = ambient + 0.5 * (primaryLighting + fillLighting + rimLighting);
     
     // ACES filmic tone mapping, then gamma to sRGB.
     finalColor = ACESFilm(finalColor);

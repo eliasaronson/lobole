@@ -93,6 +93,17 @@ public:
     void SetViewportSize(uint32_t width, uint32_t height) { SetViewport(0, 0, width, height); }
     void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
 
+    // IBL textures for the fragment shader. Must be set BEFORE Initialize()
+    // (descriptor sets bind them at creation).
+    void SetIBL(VkImageView irradiance, VkImageView prefilter, VkImageView brdf,
+                VkSampler envSampler, VkSampler lutSampler) {
+        m_iblIrradiance = irradiance;
+        m_iblPrefilter = prefilter;
+        m_iblBrdf = brdf;
+        m_iblEnvSampler = envSampler;
+        m_iblLutSampler = lutSampler;
+    }
+
 private:
     VkDevice m_device = VK_NULL_HANDLE;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
@@ -120,6 +131,13 @@ private:
     std::vector<std::unique_ptr<Mesh>> m_meshes;
     uint32_t m_nextMeshId = 1;
     
+    // IBL texture handles (owned by IBLTextures; bound into descriptor sets).
+    VkImageView m_iblIrradiance = VK_NULL_HANDLE;
+    VkImageView m_iblPrefilter = VK_NULL_HANDLE;
+    VkImageView m_iblBrdf = VK_NULL_HANDLE;
+    VkSampler m_iblEnvSampler = VK_NULL_HANDLE;
+    VkSampler m_iblLutSampler = VK_NULL_HANDLE;
+
     // Camera
     glm::mat4 m_viewMatrix = glm::mat4(1.0f);
     glm::mat4 m_projectionMatrix = glm::mat4(1.0f);

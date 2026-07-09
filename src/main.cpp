@@ -4,6 +4,8 @@
 #include "Camera.h"
 #include "FaceSelector.h"
 #include "GuiTests.h"
+#include "IBL.h"
+#include "IBLTextures.h"
 #include "Logger.h"
 #include "Screenshot.h"
 #include "remote/RemoteServer.h"
@@ -89,6 +91,7 @@ static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<SketchRenderer> g_SketchRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<FaceSelector> g_FaceSelector;
+static std::unique_ptr<IBLTextures> g_IBLTextures;
 
 // All state the UI layer works with (owns the document + undo stack; holds
 // non-owning pointers to the objects above once they exist)
@@ -915,8 +918,32 @@ int main(int argc, char **argv) {
   g_Camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
   g_Camera->SetAspectRatio(1280.0f / 720.0f);
 
+  // Image-based lighting: precompute (CPU, cached) the irradiance/prefilter/
+  // BRDF maps from the bundled studio HDR and upload them. Built before the
+  // mesh renderer since its descriptor sets bind these textures at creation.
+  g_IBLTextures = std::make_unique<IBLTextures>();
+  {
+    const std::string hdr =
+        std::string(DESIGNER_SOURCE_DIR) + "/assets/hdri/brown_photostudio_02_1k.hdr";
+    IBLPrecompute ibl;
+    if (ibl.Build(hdr, DESIGNER_SOURCE_DIR "/build")) {
+      if (!g_IBLTextures->Upload(g_Device, g_PhysicalDevice, g_Queue,
+                                 g_CommandPool, ibl))
+        g_IBLTextures->MakeFallback(g_Device, g_PhysicalDevice, g_Queue,
+                                    g_CommandPool);
+    } else {
+      g_IBLTextures->MakeFallback(g_Device, g_PhysicalDevice, g_Queue,
+                                  g_CommandPool);
+    }
+  }
+
   // Initialize MeshRenderer with Vulkan context
   g_MeshRenderer = std::make_unique<MeshRenderer>();
+  g_MeshRenderer->SetIBL(g_IBLTextures->IrradianceView(),
+                         g_IBLTextures->PrefilterView(),
+                         g_IBLTextures->BrdfLutView(),
+                         g_IBLTextures->EnvSampler(),
+                         g_IBLTextures->LutSampler());
   bool meshRendererInitialized =
       g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
                                  g_Queue, g_QueueFamily, g_CommandPool,
@@ -1189,6 +1216,10 @@ int main(int argc, char **argv) {
   g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
   g_FaceSelector.reset();
+  if (g_IBLTextures) {
+    g_IBLTextures->Shutdown(g_Device);
+    g_IBLTextures.reset();
+  }
 
   ImGui_ImplVulkan_Shutdown();
   ImGui_ImplGlfw_Shutdown();

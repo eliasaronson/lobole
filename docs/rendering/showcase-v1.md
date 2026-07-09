@@ -106,9 +106,23 @@ layer with `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` until CMake defines
   validation-layer-clean run; before/after screenshots via the remote for the
   eyeball diff.
 
-## Phase R3 — Image-based lighting (~2–3 days)
+## Phase R3 — Image-based lighting (~2–3 days) — SHIPPED (`517cf51`, IBL precompute; + integration)
 
 The "premium render" jump; also builds the codebase's first texture path.
+
+**Shipped**, with one deliberate deviation from the outline below: the precompute
+runs on the **CPU** (`IBLPrecompute`, in `designer_core`), not GPU compute. No
+compute-pipeline infra existed and CPU keeps the Vulkan surface minimal + the
+split-sum math unit-testable and PPM-dumpable. Multithreaded, with a binary disk
+cache so the multi-second convolution runs once per HDR. `IBLTextures` uploads
+the maps as `R16G16B16A16_SFLOAT` / `R16G16_SFLOAT` sampled textures (env sampler
+wraps u / clamps v for the equirect back-seam; LUT clamps both), and `mesh.frag`
+does the split-sum ambient (irradiance·albedo diffuse + prefilter·(F·A+B)
+specular), with the analytic key/fill/rim lights dialed to 0.5 on top. Bundles
+`brown_photostudio_02_1k.hdr` (Poly Haven, CC0). Verified: `test_ibl` (BRDF
+corner ≈ (1,0), bright irradiance, decreasing mips) + dumped maps eyeballed +
+a validated render (0 VUIDs) showing gold/chrome picking up the environment.
+GPU-compute prefiltering remains a later optimization.
 
 - **Texture infrastructure** (new, reusable): HDR load (`stb_image` — already
   vendored? if not, single header), `VkImage` + view + sampler creation with

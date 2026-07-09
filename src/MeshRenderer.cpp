@@ -329,22 +329,31 @@ void MeshRenderer::SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t he
 
 // Private helper functions
 bool MeshRenderer::CreateDescriptorSetLayout() {
-    VkDescriptorSetLayoutBinding uboLayoutBinding{};
-    uboLayoutBinding.binding = 0;
-    uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uboLayoutBinding.descriptorCount = 1;
-    uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    
+    // 0: camera+lights UBO (vertex). 1-3: IBL maps (fragment) — irradiance,
+    // prefiltered specular, BRDF LUT.
+    VkDescriptorSetLayoutBinding bindings[4]{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    for (int i = 1; i <= 3; i++) {
+        bindings[i].binding = static_cast<uint32_t>(i);
+        bindings[i].descriptorType =
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &uboLayoutBinding;
-    
+    layoutInfo.bindingCount = 4;
+    layoutInfo.pBindings = bindings;
+
     if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
         std::cerr << "Failed to create descriptor set layout!" << std::endl;
         return false;
     }
-    
+
     return true;
 }
 
@@ -531,14 +540,17 @@ bool MeshRenderer::CreateUniformBuffers() {
 }
 
 bool MeshRenderer::CreateDescriptorPool() {
-    VkDescriptorPoolSize poolSize{};
-    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-    
+    VkDescriptorPoolSize poolSizes[2]{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+    // 3 IBL samplers per frame.
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 3;
+
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.poolSizeCount = 2;
+    poolInfo.pPoolSizes = poolSizes;
     poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
     
     if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
@@ -568,19 +580,37 @@ bool MeshRenderer::CreateDescriptorSets() {
         bufferInfo.buffer = m_uniformBuffers[i];
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(UniformBufferObject);
-        
-        VkWriteDescriptorSet descriptorWrite{};
-        descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrite.dstSet = m_descriptorSets[i];
-        descriptorWrite.dstBinding = 0;
-        descriptorWrite.dstArrayElement = 0;
-        descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrite.descriptorCount = 1;
-        descriptorWrite.pBufferInfo = &bufferInfo;
-        
-        vkUpdateDescriptorSets(m_device, 1, &descriptorWrite, 0, nullptr);
+
+        // IBL image infos (bindings 1-3). Handles come from SetIBL().
+        VkDescriptorImageInfo irr{m_iblEnvSampler, m_iblIrradiance,
+                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo pref{m_iblEnvSampler, m_iblPrefilter,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo brdf{m_iblLutSampler, m_iblBrdf,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+        VkWriteDescriptorSet writes[4]{};
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = m_descriptorSets[i];
+        writes[0].dstBinding = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[0].descriptorCount = 1;
+        writes[0].pBufferInfo = &bufferInfo;
+
+        const VkDescriptorImageInfo* imgs[3] = {&irr, &pref, &brdf};
+        for (int b = 1; b <= 3; b++) {
+            writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[b].dstSet = m_descriptorSets[i];
+            writes[b].dstBinding = static_cast<uint32_t>(b);
+            writes[b].descriptorType =
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[b].descriptorCount = 1;
+            writes[b].pImageInfo = imgs[b - 1];
+        }
+
+        vkUpdateDescriptorSets(m_device, 4, writes, 0, nullptr);
     }
-    
+
     return true;
 }
 
