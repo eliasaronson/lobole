@@ -66,6 +66,9 @@ void CreateDatumPlane(AppState& state);
 void CreateDatumAxis(AppState& state);
 // Starts a preview of a boolean combining the two most-recent body producers.
 void CreateBoolean(AppState& state);
+// Starts a preview of a mirror / linear pattern of the most-recent body.
+void CreateMirror(AppState& state);
+void CreatePattern(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);
 

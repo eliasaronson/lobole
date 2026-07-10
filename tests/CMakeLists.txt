@@ -23,6 +23,7 @@ add_executable(designer_tests
     test_datum.cpp
     test_revolve.cpp
     test_boolean.cpp
+    test_pattern.cpp
     test_faceselector.cpp
     test_sketch_feature.cpp
     test_extrude.cpp

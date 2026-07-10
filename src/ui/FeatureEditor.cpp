@@ -8,6 +8,7 @@
 #include "core/ExtrudeFeature.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
@@ -144,6 +145,71 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
       exprText.clear(); // back to a literal holding the last good value
       CommitDiscrete(state, feature, before, index, commit);
     }
+  }
+  ImGui::PopID();
+}
+
+// The integer sibling of ExprDim: a literal InputInt with an "fx" button to
+// switch to an expression (evaluated against the parameter table, rounded).
+void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
+               const char* label, std::string& exprText, int& value) {
+  Document& doc = *state.document;
+  ImGui::PushID(label);
+
+  if (exprText.empty()) {
+    HandleEdit(state, feature, ImGui::InputInt(label, &value), index, commit);
+    if (value < 1)
+      value = 1;
+    ImGui::SameLine();
+    if (ImGui::SmallButton("fx")) {
+      nlohmann::json before = DocumentIO::FeatureToJson(feature);
+      exprText = std::to_string(value);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    ImGui::PopID();
+    return;
+  }
+
+  static std::string activeField;
+  static char buf[128];
+  const std::string key = std::to_string(feature.GetId()) + "/" + label;
+  const bool editing = activeField == key;
+  char tmp[sizeof(buf)];
+  snprintf(tmp, sizeof(tmp), "%s", exprText.c_str());
+  ImGui::InputText(label, editing ? buf : tmp, sizeof(buf));
+  if (ImGui::IsItemActivated()) {
+    activeField = key;
+    snprintf(buf, sizeof(buf), "%s", exprText.c_str());
+  }
+  if (editing && ImGui::IsItemDeactivatedAfterEdit()) {
+    activeField.clear();
+    nlohmann::json before = DocumentIO::FeatureToJson(feature);
+    char* end = nullptr;
+    const long n = std::strtol(buf, &end, 10);
+    while (end != nullptr && *end == ' ')
+      end++;
+    if (end != buf && end != nullptr && *end == '\0') {
+      exprText.clear(); // a plain integer reverts to a literal
+      value = std::max(1, static_cast<int>(n));
+    } else {
+      exprText = buf;
+    }
+    CommitDiscrete(state, feature, before, index, commit);
+  }
+
+  ExprError err;
+  const auto v =
+      ExpressionEngine::Default().EvaluateText(exprText, doc.Symbols(), &err);
+  if (v.has_value())
+    ImGui::TextDisabled("= %d", std::max(1, static_cast<int>(std::lround(*v))));
+  else
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
+                       err.message.c_str());
+  ImGui::SameLine();
+  if (ImGui::SmallButton("123")) {
+    nlohmann::json before = DocumentIO::FeatureToJson(feature);
+    exprText.clear();
+    CommitDiscrete(state, feature, before, index, commit);
   }
   ImGui::PopID();
 }
@@ -354,6 +420,95 @@ void DrawBooleanParams(AppState& state, BooleanFeature& boo, size_t index,
   operandCombo("Tool", boo.toolId);
 }
 
+// A combo listing earlier body-producing features; sets `sourceId`.
+void SourceBodyCombo(AppState& state, Feature& owner, uint64_t& sourceId,
+                     size_t index, bool commit) {
+  const auto producers = BodyProducers(*state.document, index);
+  std::vector<const char*> labels;
+  std::vector<uint64_t> ids;
+  int sel = -1;
+  for (size_t i = 0; i < producers.size(); i++) {
+    labels.push_back(producers[i].second.c_str());
+    ids.push_back(producers[i].first);
+    if (producers[i].first == sourceId)
+      sel = static_cast<int>(i);
+  }
+  if (ImGui::Combo("Source", &sel, labels.data(),
+                   static_cast<int>(labels.size())) &&
+      sel >= 0) {
+    nlohmann::json before = DocumentIO::FeatureToJson(owner);
+    sourceId = ids[static_cast<size_t>(sel)];
+    CommitDiscrete(state, owner, before, index, commit);
+  }
+  if (sourceId != 0 && sel < 0) {
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "(missing)");
+  }
+}
+
+// A plane picker (base planes + earlier datum planes); sets planeId/basePlane
+// the same way DrawDatumPlaneParams' parent combo does.
+void PlaneRefCombo(AppState& state, Feature& owner, uint64_t& planeId,
+                   PlaneType& basePlane, size_t index, bool commit) {
+  std::vector<const char*> labels = {"Front (XY)", "Top (XZ)", "Right (YZ)"};
+  std::vector<uint64_t> ids = {0, 0, 0};
+  std::vector<PlaneType> bases = {PlaneType::XY, PlaneType::XZ, PlaneType::YZ};
+  for (size_t i = 0; i < index; i++) {
+    if (auto* dp =
+            dynamic_cast<DatumPlaneFeature*>(state.document->GetFeature(i))) {
+      labels.push_back(dp->GetName().c_str());
+      ids.push_back(dp->GetId());
+      bases.push_back(PlaneType::XY);
+    }
+  }
+  int sel = 0;
+  if (planeId != 0) {
+    for (size_t i = 3; i < ids.size(); i++)
+      if (ids[i] == planeId) sel = static_cast<int>(i);
+  } else {
+    sel = static_cast<int>(basePlane);
+  }
+  if (ImGui::Combo("Plane", &sel, labels.data(),
+                   static_cast<int>(labels.size()))) {
+    nlohmann::json before = DocumentIO::FeatureToJson(owner);
+    planeId = ids[static_cast<size_t>(sel)];
+    basePlane = bases[static_cast<size_t>(sel)];
+    CommitDiscrete(state, owner, before, index, commit);
+  }
+}
+
+// Properties widgets for a mirror/pattern: kind, source body, and the kind's
+// plane (mirror) or axis + count + spacing/angle (linear/circular).
+void DrawPatternParams(AppState& state, PatternFeature& pat, size_t index,
+                       bool commit) {
+  const char* kinds[] = {"Mirror", "Linear", "Circular"};
+  int kind = static_cast<int>(pat.kind);
+  if (ImGui::Combo("Type", &kind, kinds, 3)) {
+    nlohmann::json before = DocumentIO::FeatureToJson(pat);
+    pat.kind = static_cast<PatternKind>(kind);
+    CommitDiscrete(state, pat, before, index, commit);
+  }
+
+  SourceBodyCombo(state, pat, pat.sourceId, index, commit);
+
+  switch (pat.kind) {
+  case PatternKind::Mirror:
+    PlaneRefCombo(state, pat, pat.planeId, pat.basePlane, index, commit);
+    break;
+  case PatternKind::Linear:
+    DrawAxisRefCombo(state, pat, pat.axis, index, commit, /*sketch=*/0);
+    ExprCount(state, pat, index, commit, "Count", pat.countExpr, pat.count);
+    ExprDim(state, pat, index, commit, "Spacing", pat.spacingExpr, pat.spacing);
+    break;
+  case PatternKind::Circular:
+    DrawAxisRefCombo(state, pat, pat.axis, index, commit, /*sketch=*/0);
+    ExprCount(state, pat, index, commit, "Count", pat.countExpr, pat.count);
+    ExprDim(state, pat, index, commit, "Angle (deg)", pat.angleExpr,
+            pat.angleDeg);
+    break;
+  }
+}
+
 } // namespace
 
 void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
@@ -492,6 +647,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
   } else if (auto* boo = dynamic_cast<BooleanFeature*>(&feature)) {
     DrawBooleanParams(state, *boo, index, commit);
+  } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {
+    DrawPatternParams(state, *pat, index, commit);
   }
 }
 

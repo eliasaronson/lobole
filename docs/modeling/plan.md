@@ -94,11 +94,25 @@ yet). Result inherits the target's material. Tests: `test_boolean.cpp`
 boolean-of-boolean chain, round-trip) + a `remote_smoke.py` block. Verified
 in-app: a corner-notch subtract of two boxes.
 
-### M5 — 3D mirror / pattern (of features/bodies) — toponaming-free
-Mirror a body/feature across a **datum plane**; linear/circular **pattern** of a
-body/feature. References bodies + datum planes only. This is the model-level
-analog of the sketch `DerivedOp` mirror/pattern — reuse that id-stable-replay
-discipline.
+### M5 — 3D mirror / pattern (of bodies) — toponaming-free
+**Shipped (July 2026).** One `PatternFeature` with kind **Mirror** (reflect
+across a base/datum plane), **Linear** (array along an `AxisRef`), and
+**Circular** (array about an `AxisRef`). The seed body is referenced by its
+producing feature's id (M4 `Body::createdBy`); every instance (seed + copies)
+is fused and split back into connected solids, so touching instances merge and
+disjoint ones become separate bodies (Onshape behavior). Count is
+**expression-driven** (evaluated against the parameter table, the variables
+plan's flagged use), as are linear spacing and circular per-step angle. Reused
+`ResolveParentPlane` (mirror plane), `AxisRef`/`ResolveAxis` (direction/axis),
+the `BodyProducers` combo, and `ExprDim`; new kernel helpers `CADShape::Mirror`
+/`RotateAbout`/`SplitSolids` and a shared `FuseInstancesReplacingSource`.
+Format v15. Tests: `test_pattern.cpp` + a `remote_smoke.py` block; verified
+in-app (a 6-up circular ring and a 4-up linear row). *Feature (vs body)
+patterns and per-instance references deferred.*
+
+**Modeling is now toponaming-free-complete** — the remaining milestones (M3
+richer extrude's up-to-face, M7 fillets) need M6 topological naming
+([toponaming.md](toponaming.md); T1 memo done).
 
 ### M6 — Topological naming (the foundation)
 Persistent identification of faces/edges across regeneration. Unblocks every

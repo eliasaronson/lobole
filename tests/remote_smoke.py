@@ -307,6 +307,35 @@ def main():
         vol = d.call("get_state")["bodies"][0]["volume"]
         expect(abs(vol - 12.0) < 1e-4, "union = 8 + 8 - 4")
 
+        # Pattern: an expression-driven linear array of a box; editing the count
+        # variable changes the number of bodies. A mirror across a base plane.
+        d.call("new_project")
+        d.call("set_variable", name="n", expression="3")
+        pbox = d.call("add_feature", feature={
+            "type": "Box", "name": "A", "position": [0, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        d.call("add_feature", feature={
+            "type": "Pattern", "name": "Arr", "kind": "linear",
+            "source_id": pbox["id"], "axis": {"kind": "x"},
+            "count": 1, "count_expr": "n", "spacing": 5.0})
+        expect(len(d.call("get_state")["bodies"]) == 3,
+               "linear pattern count 3 = 3 disjoint bodies")
+        d.call("set_variable", name="n", expression="5")
+        expect(len(d.call("get_state")["bodies"]) == 5,
+               "editing the count variable rebuilds the pattern")
+
+        d.call("new_project")
+        mbox = d.call("add_feature", feature={
+            "type": "Box", "name": "A", "position": [1, 0, 0],
+            "width": 2, "height": 2, "depth": 2})  # clear of x=0
+        d.call("add_feature", feature={
+            "type": "Pattern", "name": "Mir", "kind": "mirror",
+            "source_id": mbox["id"], "base_plane": "yz"})
+        st = d.call("get_state")
+        expect(len(st["bodies"]) == 2, "mirror across YZ = two bodies")
+        total = sum(b["volume"] for b in st["bodies"])
+        expect(abs(total - 16.0) < 1e-3, "mirror total volume 2x8")
+
         # Ellipse round-trips through JSON and extrudes to an elliptic prism.
         d.call("new_project")
         ske = d.call("add_feature", feature={

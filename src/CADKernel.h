@@ -31,7 +31,17 @@ public:
     // Transformation
     void Translate(const glm::vec3& offset);
     void Rotate(const glm::vec3& axis, double angle);
+    // Rotates `angle` radians about the axis through `point` along `dir`
+    // (unlike Rotate, whose axis passes through the origin).
+    void RotateAbout(const glm::vec3& point, const glm::vec3& dir, double angle);
+    // Reflects across the plane through `point` with the given `normal`.
+    void Mirror(const glm::vec3& point, const glm::vec3& normal);
     void Scale(double factor);
+
+    // Splits into its connected solids (one entry when the shape is a single
+    // solid, several when it is a compound of disjoint solids). Empty if
+    // invalid. Used to turn a fused pattern back into per-instance bodies.
+    std::vector<CADShape> SplitSolids() const;
     
     // Access to underlying shape
     const TopoDS_Shape& GetShape() const { return m_shape; }

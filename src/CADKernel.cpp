@@ -19,6 +19,9 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Edge.hxx>
+#include <TopoDS_Solid.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_Ax2.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Poly_Triangle.hxx>
 #include <Geom_Surface.hxx>
@@ -138,14 +141,58 @@ void CADShape::Rotate(const glm::vec3& axis, double angle) {
 
 void CADShape::Scale(double factor) {
     if (!IsValid()) return;
-    
+
     gp_Trsf transform;
     transform.SetScale(gp_Pnt(0, 0, 0), factor);
-    
+
     BRepBuilderAPI_Transform transformer(m_shape, transform);
     if (transformer.IsDone()) {
         m_shape = transformer.Shape();
     }
+}
+
+void CADShape::RotateAbout(const glm::vec3& point, const glm::vec3& dir,
+                           double angle) {
+    if (!IsValid()) return;
+
+    gp_Ax1 axis(gp_Pnt(point.x, point.y, point.z),
+                gp_Dir(dir.x, dir.y, dir.z));
+    gp_Trsf transform;
+    transform.SetRotation(axis, angle);
+
+    BRepBuilderAPI_Transform transformer(m_shape, transform);
+    if (transformer.IsDone()) {
+        m_shape = transformer.Shape();
+    }
+}
+
+void CADShape::Mirror(const glm::vec3& point, const glm::vec3& normal) {
+    if (!IsValid()) return;
+
+    // The gp_Ax2's XY plane is the mirror plane; its main direction = normal.
+    gp_Ax2 plane(gp_Pnt(point.x, point.y, point.z),
+                 gp_Dir(normal.x, normal.y, normal.z));
+    gp_Trsf transform;
+    transform.SetMirror(plane);
+
+    BRepBuilderAPI_Transform transformer(m_shape, transform);
+    if (transformer.IsDone()) {
+        m_shape = transformer.Shape();
+    }
+}
+
+std::vector<CADShape> CADShape::SplitSolids() const {
+    std::vector<CADShape> solids;
+    if (!IsValid()) return solids;
+    for (TopExp_Explorer exp(m_shape, TopAbs_SOLID); exp.More(); exp.Next()) {
+        solids.emplace_back(exp.Current());
+    }
+    // A lone solid isn't wrapped in a compound, but TopExp still yields it;
+    // if somehow nothing was found, fall back to the shape itself.
+    if (solids.empty()) {
+        solids.push_back(*this);
+    }
+    return solids;
 }
 
 CADShape::Mesh CADShape::GenerateMesh(double deflection) const {

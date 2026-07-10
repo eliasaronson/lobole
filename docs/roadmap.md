@@ -47,13 +47,15 @@ and `set/rename/delete/list_variables` RPCs. **Datum planes** (M1): offset/angle
 through-points reference geometry, with sketches that track a datum by id so upstream
 edits move dependents. **Revolve** (M2): profile revolved about an axis (global / sketch
 line / datum axis) through an expression-driven angle, with a symmetric option; plus
-standalone datum axes. `--remote <port>` JSON-RPC: semantic commands + human-parity UI
+standalone datum axes. **Booleans** (M4) over bodies by producing-feature id, and
+**mirror/linear/circular patterns** (M5) that fuse-and-split instances into connected
+solids with expression-driven counts. `--remote <port>` JSON-RPC: semantic commands + human-parity UI
 actions + screenshots (`tools/designer_remote.py`). STEP import, face picking with real
 B-Rep face mapping, docking dark-theme workbench with icon toolbar and preview→accept.
 Rendering: MSAA + ACES tonemap + IBL/PBR from a studio HDR.
 
-**Thin or missing:** solid modeling beyond extrude/revolve/booleans + datum geometry (no
-fillets, 3D patterns, richer extrude); persistent face/edge references (**toponaming**) —
+**Thin or missing:** the face/edge-referencing solid features (fillets/chamfers,
+up-to-face extrude, shell) — all gated on persistent face/edge references (**toponaming**) —
 face/edge sketches still bake at creation, upstream edits don't move those dependents;
 checkpoints + git; MCP wrapper, Python API, headless mode; measurement + mass properties;
 no assemblies; `Document::Regenerate()` recomputes every feature per edit; no CI.
@@ -65,7 +67,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | Workstream | Plan | Status |
 |---|---|---|
 | 1. Sketching | [sketching/plan.md](sketching/plan.md) | **Complete** (B-splines deferred) |
-| 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **In progress** (M1 datum planes, M2 revolve/datum axes, M4 booleans shipped; M3/M5–M8 next) |
+| 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **In progress** (M1/M2/M4/M5 shipped — all toponaming-free features; M3 up-to-face + M6–M8 need toponaming) |
 | 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | **T1 design memo done**; T2 prototype (extrude) next, in parallel |
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Shipped** (V1–V3; units algebra deferred) |
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | Remote shipped; MCP/Python/headless remain |

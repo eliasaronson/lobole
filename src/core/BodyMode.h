@@ -19,3 +19,14 @@
 bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
                    const std::string& name, const std::string& material,
                    uint64_t ownerId);
+
+// Fuses `instanceShapes` (a pattern/mirror's seed + transformed copies), splits
+// the result back into its connected solids, erases every body created by
+// `sourceId`, and appends each solid as a body owned by `ownerId`. Instances
+// that touch merge into one body; disjoint instances become separate bodies.
+// Returns false if no source body was found or the fuse failed.
+bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
+                                  std::vector<CADShape> instanceShapes,
+                                  const std::string& name,
+                                  const std::string& material,
+                                  uint64_t ownerId);

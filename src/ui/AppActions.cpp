@@ -15,6 +15,7 @@
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
@@ -262,6 +263,38 @@ void CreateBoolean(AppState& state) {
   BeginPreviewFeature(state, std::make_unique<BooleanFeature>(
                                  NextName(state, "Boolean"), target, tool,
                                  BooleanOp::Union));
+}
+
+void CreateMirror(AppState& state) {
+  if (!state.document) {
+    return;
+  }
+  auto producers = BodyProducers(*state.document, state.document->FeatureCount());
+  if (producers.empty()) {
+    return;
+  }
+  auto mir = std::make_unique<PatternFeature>(NextName(state, "Mirror"),
+                                              PatternKind::Mirror,
+                                              producers.back().first);
+  mir->basePlane = PlaneType::YZ; // reflect across x by default
+  BeginPreviewFeature(state, std::move(mir));
+}
+
+void CreatePattern(AppState& state) {
+  if (!state.document) {
+    return;
+  }
+  auto producers = BodyProducers(*state.document, state.document->FeatureCount());
+  if (producers.empty()) {
+    return;
+  }
+  auto pat = std::make_unique<PatternFeature>(NextName(state, "Pattern"),
+                                              PatternKind::Linear,
+                                              producers.back().first);
+  pat->axis.kind = AxisRef::Kind::X;
+  pat->count = 3;
+  pat->spacing = 3.0; // scene scale
+  BeginPreviewFeature(state, std::move(pat));
 }
 
 void StartNewSketch(AppState& state) {

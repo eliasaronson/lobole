@@ -71,3 +71,47 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
   }
   return false;
 }
+
+bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
+                                  std::vector<CADShape> instanceShapes,
+                                  const std::string& name,
+                                  const std::string& material,
+                                  uint64_t ownerId) {
+  if (instanceShapes.empty()) {
+    return false;
+  }
+  const bool hasSource =
+      std::any_of(bodies.begin(), bodies.end(),
+                  [&](const Body& b) { return b.createdBy == sourceId; });
+  if (!hasSource) {
+    LOG_ERROR("Pattern '{}': source body (feature {}) not found", name,
+              sourceId);
+    return false;
+  }
+
+  // Fuse all instances, then split back into connected solids.
+  CADShape fused = std::move(instanceShapes[0]);
+  for (size_t i = 1; i < instanceShapes.size(); i++) {
+    CADShape next = fused.Union(instanceShapes[i]);
+    if (!next.IsValid()) {
+      LOG_ERROR("Pattern '{}': fusing instances failed", name);
+      return false;
+    }
+    fused = std::move(next);
+  }
+  std::vector<CADShape> solids = fused.SplitSolids();
+
+  // Replace the seed body(ies) with the pattern's solids.
+  bodies.erase(std::remove_if(bodies.begin(), bodies.end(),
+                              [&](const Body& b) {
+                                return b.createdBy == sourceId;
+                              }),
+               bodies.end());
+  for (size_t i = 0; i < solids.size(); i++) {
+    std::string bodyName =
+        solids.size() > 1 ? name + " " + std::to_string(i + 1) : name;
+    bodies.push_back({std::move(bodyName), std::move(solids[i]), material,
+                      ownerId});
+  }
+  return true;
+}

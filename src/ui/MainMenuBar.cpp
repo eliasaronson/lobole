@@ -77,11 +77,16 @@ void DrawCreateMenu(AppState& state) {
     CreateDatumPlane(state);
   if (ImGui::MenuItem("Datum Axis", nullptr, false, idle))
     CreateDatumAxis(state);
-  const bool canBoolean =
-      idle && state.document &&
-      BodyProducers(*state.document, state.document->FeatureCount()).size() >= 2;
-  if (ImGui::MenuItem("Boolean", nullptr, false, canBoolean))
+  const size_t producers =
+      state.document
+          ? BodyProducers(*state.document, state.document->FeatureCount()).size()
+          : 0;
+  if (ImGui::MenuItem("Boolean", nullptr, false, idle && producers >= 2))
     CreateBoolean(state);
+  if (ImGui::MenuItem("Mirror", nullptr, false, idle && producers >= 1))
+    CreateMirror(state);
+  if (ImGui::MenuItem("Pattern", nullptr, false, idle && producers >= 1))
+    CreatePattern(state);
   ImGui::Separator();
 
   SketchEditState& edit = state.sketchEdit;

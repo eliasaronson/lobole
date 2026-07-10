@@ -6,6 +6,7 @@
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
 
@@ -19,7 +20,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 14; // v14: booleans (v13: revolve + datum axis, v12: datum planes + plane_ref)
+constexpr int kVersion = 15; // v15: mirror/pattern (v14: booleans, v13: revolve + datum axis)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -238,6 +239,22 @@ BooleanOp BooleanOpFromString(const std::string& s) {
   throw std::runtime_error("Unknown boolean op: " + s);
 }
 
+const char* PatternKindToString(PatternKind kind) {
+  switch (kind) {
+  case PatternKind::Mirror: return "mirror";
+  case PatternKind::Linear: return "linear";
+  case PatternKind::Circular: return "circular";
+  }
+  return "linear";
+}
+
+PatternKind PatternKindFromString(const std::string& s) {
+  if (s == "mirror") return PatternKind::Mirror;
+  if (s == "linear") return PatternKind::Linear;
+  if (s == "circular") return PatternKind::Circular;
+  throw std::runtime_error("Unknown pattern kind: " + s);
+}
+
 const char* DatumPlaneKindToString(DatumPlaneKind kind) {
   switch (kind) {
   case DatumPlaneKind::Offset: return "offset";
@@ -440,6 +457,29 @@ json FeatureToJson(const Feature& feature) {
     j["target_id"] = boo->targetId;
     j["tool_id"] = boo->toolId;
     j["op"] = BooleanOpToString(boo->op);
+  } else if (auto* pat = dynamic_cast<const PatternFeature*>(&feature)) {
+    j["kind"] = PatternKindToString(pat->kind);
+    j["source_id"] = pat->sourceId;
+    if (pat->kind == PatternKind::Mirror) {
+      if (pat->planeId != 0)
+        j["parent_id"] = pat->planeId;
+      else
+        j["base_plane"] = PlaneTypeToString(pat->basePlane);
+    } else {
+      j["axis"] = AxisRefToJson(pat->axis);
+      j["count"] = pat->count;
+      if (!pat->countExpr.empty())
+        j["count_expr"] = pat->countExpr;
+      if (pat->kind == PatternKind::Linear) {
+        j["spacing"] = pat->spacing;
+        if (!pat->spacingExpr.empty())
+          j["spacing_expr"] = pat->spacingExpr;
+      } else { // Circular
+        j["angle_deg"] = pat->angleDeg;
+        if (!pat->angleExpr.empty())
+          j["angle_expr"] = pat->angleExpr;
+      }
+    }
   } else {
     throw std::runtime_error("Unserializable feature type: " +
                              feature.TypeName());
@@ -613,6 +653,28 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, j.at("target_id").get<uint64_t>(),
         j.at("tool_id").get<uint64_t>(),
         BooleanOpFromString(j.value("op", "union")));
+  } else if (type == "Pattern") {
+    auto pat = std::make_unique<PatternFeature>(
+        name, PatternKindFromString(j.at("kind").get<std::string>()),
+        j.at("source_id").get<uint64_t>());
+    if (pat->kind == PatternKind::Mirror) {
+      pat->planeId = j.value("parent_id", uint64_t{0});
+      if (j.contains("base_plane"))
+        pat->basePlane =
+            PlaneTypeFromString(j.at("base_plane").get<std::string>());
+    } else {
+      pat->axis = AxisRefFromJson(j.at("axis"));
+      pat->count = j.value("count", 3);
+      pat->countExpr = j.value("count_expr", std::string{});
+      if (pat->kind == PatternKind::Linear) {
+        pat->spacing = j.value("spacing", 5.0);
+        pat->spacingExpr = j.value("spacing_expr", std::string{});
+      } else {
+        pat->angleDeg = j.value("angle_deg", 90.0);
+        pat->angleExpr = j.value("angle_expr", std::string{});
+      }
+    }
+    out = std::move(pat);
   }
 
   if (!out) {
