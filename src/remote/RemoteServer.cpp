@@ -595,6 +595,30 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     ui::FitCameraToDocument(state);
     return json::object();
   }
+  if (m == "view") {
+    // Standard view, snapped instantly (no animation) so the very next
+    // screenshot captures the final framing. Fit runs first: it re-aims at the
+    // document center (SetTarget), so the snap must set the orientation last.
+    // params: {name: front|back|left|right|top|bottom|iso, fit?: true}
+    // Directions follow the default planes (Front = XY, normal +Z, Y up);
+    // top/bottom pick the up the camera would reach by tilting over from front.
+    static const std::map<std::string, std::pair<glm::vec3, glm::vec3>> kViews =
+        {{"front", {{0, 0, 1}, {0, 1, 0}}},
+         {"back", {{0, 0, -1}, {0, 1, 0}}},
+         {"right", {{1, 0, 0}, {0, 1, 0}}},
+         {"left", {{-1, 0, 0}, {0, 1, 0}}},
+         {"top", {{0, 1, 0}, {0, 0, -1}}},
+         {"bottom", {{0, -1, 0}, {0, 0, 1}}},
+         {"iso", {glm::normalize(glm::vec3(1, 1, 1)), {0, 1, 0}}}};
+    const std::string name = p.at("name").get<std::string>();
+    auto it = kViews.find(name);
+    if (it == kViews.end()) throw std::runtime_error("unknown view: " + name);
+    if (p.value("fit", true)) ui::FitCameraToDocument(state);
+    state.camera->SnapToView(it->second.first, it->second.second);
+    return {{"position", Vec3ToJson(state.camera->GetPosition())},
+            {"target", Vec3ToJson(state.camera->GetTarget())},
+            {"distance", state.camera->GetDistance()}};
+  }
   if (m == "select_face") {
     const uint32_t mesh = p.at("mesh").get<uint32_t>();
     const uint32_t face = p.at("face").get<uint32_t>();

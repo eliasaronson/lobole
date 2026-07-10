@@ -50,7 +50,7 @@ evaluate CSG into a body — could be a community feature someday; not planned.)
 
 ## Milestones
 
-### S1 — MCP server (~1 day)
+### S1 — MCP server (~1 day) — [design: s1-mcp.md](s1-mcp.md)
 `tools/designer_mcp.py`: an MCP server (official Python SDK, stdio transport)
 wrapping the JSON-RPC client — tools mirroring the RPC surface
 (`create_sketch`, `add_line`, `add_constraint`, `extrude`, `query_document`,

@@ -64,6 +64,10 @@ public:
 
     // Face alignment for sketching. distance <= 0 keeps the current zoom.
     void AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNormal, float distance = 0.0f);
+    // Instantly look at the current pivot from `direction` (unit offset from
+    // pivot toward the camera) with `up` as screen-up. Cancels any animation —
+    // remote callers need the very next frame to render the final view.
+    void SnapToView(const glm::vec3& direction, const glm::vec3& up);
     void AnimateToPosition(const glm::vec3& position, const glm::vec3& target, float duration = 1.0f);
     void StopAnimation() { m_isAnimating = false; }
     bool IsAnimating() const { return m_isAnimating; }

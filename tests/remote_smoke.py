@@ -536,6 +536,30 @@ def main():
         expect(os.path.exists(shot) and os.path.getsize(shot) > 1000,
                "screenshot written")
 
+        # Standard views: instant (no animation), fit + exact axis alignment
+        d.call("new_project")
+        d.call("add_feature", feature=BOX)
+        v = d.call("view", name="front")  # camera on +Z of the box center
+        offset = [p - t for p, t in zip(v["position"], v["target"])]
+        expect(abs(offset[0]) < 1e-4 and abs(offset[1]) < 1e-4
+               and offset[2] > 1.0, "front view puts the camera on +Z")
+        v = d.call("view", name="top")
+        offset = [p - t for p, t in zip(v["position"], v["target"])]
+        expect(abs(offset[0]) < 1e-4 and abs(offset[2]) < 1e-4
+               and offset[1] > 1.0, "top view puts the camera on +Y")
+        st = d.call("get_state")  # the snap is already committed, not animating
+        expect(all(abs(a - b) < 1e-4 for a, b in
+                   zip(st["camera"]["position"], v["position"])),
+               "view result matches get_state camera")
+        v2 = d.call("view", name="iso", fit=False)  # fit=False keeps distance
+        expect(abs(v2["distance"] - v["distance"]) < 1e-4,
+               "view fit=False preserves the camera distance")
+        try:
+            d.call("view", name="sideways")
+            expect(False, "unknown view name must error")
+        except RuntimeError:
+            pass
+
         # Offline raytraced still: build a body, render small + deterministic.
         # Skipped gracefully if the GPU has no ray tracing.
         d.call("new_project")

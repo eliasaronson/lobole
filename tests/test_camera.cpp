@@ -109,3 +109,38 @@ TEST_CASE("AlignToFace on a horizontal face resolves to a valid top-down view",
   CHECK_THAT(cam.GetPosition().y, WithinRel(5.0f, 1e-2f)); // faceCenter + n*dist
   CHECK(std::isfinite(cam.GetPosition().x));
 }
+
+TEST_CASE("SnapToView orients instantly with no animation", "[camera]") {
+  Camera cam;
+  for (int i = 0; i < 10; i++)
+    cam.Orbit(40.0, 40.0); // arbitrary starting orientation
+  const glm::vec3 pivot = cam.GetTarget();
+  const float d0 = cam.GetDistance();
+
+  cam.SnapToView(glm::vec3(0, 0, 1), glm::vec3(0, 1, 0)); // front
+  CHECK(!cam.IsAnimating()); // effective immediately, no Update needed
+  CHECK_THAT(glm::dot(cam.GetForward(), glm::vec3(0, 0, -1)),
+             WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(glm::dot(cam.GetUp(), glm::vec3(0, 1, 0)), WithinAbs(1.0f, 1e-4f));
+  // Pivot and zoom are untouched: only the orientation snaps.
+  CHECK_THAT(glm::length(cam.GetTarget() - pivot), WithinAbs(0.0f, 1e-5f));
+  CHECK_THAT(cam.GetDistance(), WithinRel(d0, 1e-4f));
+
+  // Straight-down view: the explicit up resolves the collinear-up case.
+  cam.SnapToView(glm::vec3(0, 1, 0), glm::vec3(0, 0, -1)); // top
+  CHECK_THAT(glm::dot(cam.GetForward(), glm::vec3(0, -1, 0)),
+             WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(glm::dot(cam.GetUp(), glm::vec3(0, 0, -1)), WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(glm::length(cam.GetRight()), WithinAbs(1.0f, 1e-3f));
+}
+
+TEST_CASE("SnapToView cancels an in-flight animation", "[camera]") {
+  Camera cam;
+  cam.AlignToFace(glm::vec3(0, 0, 0), glm::vec3(0, 1, 0), 5.0f); // 1s animation
+  CHECK(cam.IsAnimating());
+  cam.SnapToView(glm::vec3(0, 0, 1), glm::vec3(0, 1, 0));
+  CHECK(!cam.IsAnimating());
+  cam.Update(0.5f); // a later frame must not resume the animation
+  CHECK_THAT(glm::dot(cam.GetForward(), glm::vec3(0, 0, -1)),
+             WithinAbs(1.0f, 1e-4f));
+}

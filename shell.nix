@@ -33,7 +33,7 @@ pkgs.mkShell {
     eigen # PlaneGCS constraint solver
     boost # PlaneGCS (headers only)
     gtk3 # nativefiledialog
-    xorg.libX11 # non-blocking XMapWindow path (see main.cpp)
+    libx11 # non-blocking XMapWindow path (see main.cpp)
     catch2_3 # unit tests (FetchContent fallback needs network otherwise)
   ];
 

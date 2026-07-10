@@ -162,6 +162,12 @@ void Camera::AlignToFace(const glm::vec3& faceCenter, const glm::vec3& faceNorma
     AnimateToPosition(newPosition, faceCenter, 1.0f);
 }
 
+void Camera::SnapToView(const glm::vec3& direction, const glm::vec3& up) {
+    m_isAnimating = false;
+    m_orientation = OrientationLookingAlong(-glm::normalize(direction), up);
+    UpdateViewMatrix();
+}
+
 void Camera::AnimateToPosition(const glm::vec3& position, const glm::vec3& target, float duration) {
     m_animStartOrient = m_orientation;
     m_animStartPivot = m_pivot;
