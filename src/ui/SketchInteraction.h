@@ -9,6 +9,7 @@
 #include <vector>
 
 class SketchFeature;
+class DatumPlaneFeature;
 struct Vertex3D;
 
 namespace ui {
@@ -25,6 +26,12 @@ SketchFeature* ResolveActiveSketch(AppState& state, size_t* outIndex = nullptr);
 // Starts a new sketch on the given plane: pushes an AddFeatureCommand, enters
 // edit mode on it, and aligns the camera. Returns the new sketch's id.
 uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
+                            const std::string& name);
+
+// Starts a new sketch that tracks a datum plane: bakes the datum's current
+// plane and records planeRef, so the sketch re-derives its plane whenever the
+// datum regenerates. Returns the new sketch's id.
+uint64_t BeginSketchOnDatum(AppState& state, const DatumPlaneFeature& datum,
                             const std::string& name);
 
 // Handles viewport interaction while picking a plane or drawing. Called from

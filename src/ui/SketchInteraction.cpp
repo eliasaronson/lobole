@@ -4,6 +4,7 @@
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "MeshRenderer.h" // Vertex3D
+#include "core/DatumPlaneFeature.h"
 #include "core/Expression.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
@@ -289,10 +290,11 @@ SketchFeature* ResolveActiveSketch(AppState& state, size_t* outIndex) {
   return sketch;
 }
 
-uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
-                            const std::string& name) {
-  auto sketch = std::make_unique<SketchFeature>(name, plane);
-  state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(sketch)),
+// Commits a freshly-built sketch, enters edit mode on it, and aligns the
+// camera to its plane. Shared by the plane and datum entry points.
+static uint64_t BeginSketch(AppState& state, std::unique_ptr<SketchFeature> sk,
+                            const SketchPlane& plane, const std::string& name) {
+  state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(sk)),
                           *state.document);
   const size_t index = state.document->FeatureCount() - 1;
   const uint64_t id = state.document->GetFeature(index)->GetId();
@@ -305,6 +307,21 @@ uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
   }
   LOG_INFO("Started {} (id {})", name, id);
   return id;
+}
+
+uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
+                            const std::string& name) {
+  return BeginSketch(state, std::make_unique<SketchFeature>(name, plane), plane,
+                     name);
+}
+
+uint64_t BeginSketchOnDatum(AppState& state, const DatumPlaneFeature& datum,
+                            const std::string& name) {
+  // Bake the datum's current plane as the initial value and record the
+  // reference so the sketch re-derives its plane on every regeneration.
+  auto sketch = std::make_unique<SketchFeature>(name, datum.OutputPlane());
+  sketch->planeRef = datum.GetId();
+  return BeginSketch(state, std::move(sketch), datum.OutputPlane(), name);
 }
 
 // Sketch-context keyboard shortcuts (Onshape keymap). Called each frame while a
@@ -383,14 +400,16 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   // --- Plane picking -------------------------------------------------------
   if (edit.pickingPlane) {
     edit.hoveredPlane = -1;
+    edit.hoveredDatumId = 0;
     if (overViewport) {
       Ray ray = ScreenRay(state, mousePos);
       // A model face wins whenever the ray hits one (faces are solid; you're
-      // pointing at the body). The default planes are only candidates where no
-      // face is under the cursor — and only within their finite quad, since the
-      // planes themselves are infinite and would otherwise be "hit" everywhere.
+      // pointing at the body). The default/datum planes are only candidates
+      // where no face is under the cursor — and only within their finite quad,
+      // since the planes are infinite and would otherwise be "hit" everywhere.
       RayHit hit = state.faceSelector->PickFace(ray);
       int plane = -1;
+      uint64_t datumId = 0;
       if (!hit.hit) {
         const float halfExtent = 3.0f; // matches BuildPlaneQuads
         float bestDist = 1e30f;
@@ -406,11 +425,31 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
             }
           }
         }
+        // Datum planes compete on the same nearest-hit basis as base planes.
+        for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+          auto* dp =
+              dynamic_cast<DatumPlaneFeature*>(state.document->GetFeature(i));
+          if (!dp)
+            continue;
+          if (auto uv = RayToPlaneUV(ray, dp->OutputPlane())) {
+            if (std::abs(uv->x) > halfExtent || std::abs(uv->y) > halfExtent)
+              continue;
+            float dist =
+                glm::length(dp->OutputPlane().PlaneToWorld(*uv) - ray.origin);
+            if (dist < bestDist) {
+              bestDist = dist;
+              plane = -1; // a datum beat the base planes
+              datumId = dp->GetId();
+            }
+          }
+        }
       }
       edit.hoveredPlane = plane;
+      edit.hoveredDatumId = datumId;
 
       if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+        const std::string name = "Sketch " + std::to_string(n);
         if (hit.hit) {
           // Bake the selected face's plane (no persistent face ref yet).
           glm::vec3 c =
@@ -420,11 +459,13 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           glm::vec3 u = std::abs(nrm.y) < 0.9f ? glm::vec3(0, 1, 0)
                                                : glm::vec3(1, 0, 0);
           u = glm::normalize(u - glm::dot(u, nrm) * nrm);
-          BeginSketchOnPlane(state, SketchPlane(c, nrm, u),
-                             "Sketch " + std::to_string(n));
+          BeginSketchOnPlane(state, SketchPlane(c, nrm, u), name);
+        } else if (datumId != 0) {
+          if (auto* dp = dynamic_cast<DatumPlaneFeature*>(
+                  state.document->FindFeatureById(datumId)))
+            BeginSketchOnDatum(state, *dp, name);
         } else if (plane >= 0) {
-          BeginSketchOnPlane(state, DefaultPlane(plane),
-                             "Sketch " + std::to_string(n));
+          BeginSketchOnPlane(state, DefaultPlane(plane), name);
         }
       }
     }

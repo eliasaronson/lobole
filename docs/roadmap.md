@@ -40,17 +40,21 @@ sketcher is feature-complete (lines/rects/arcs/ellipses; the full constraint set
 dimensions + construction geometry + conflict management; mirror/fillet/pattern/offset;
 select-default/Escape/box-select + Onshape keymap). Parametric core: `Document` feature
 list with deterministic regeneration, stable feature + sketch-entity ids, undo/redo,
-JSON project serialization (v9). PlaneGCS constraint solving with the FreeCAD drag
-recipe. `--remote <port>` JSON-RPC: semantic commands + human-parity UI actions +
-screenshots (`tools/designer_remote.py`). STEP import, face picking with real B-Rep
-face mapping, docking dark-theme workbench with icon toolbar and preview→accept.
+JSON project serialization (v12). PlaneGCS constraint solving with the FreeCAD drag
+recipe. **Variables & expressions** (V1–V3): a document parameter table with a swappable
+expression engine, expression-driven dimensions/extrude/datum params, a Variables panel,
+and `set/rename/delete/list_variables` RPCs. **Datum planes** (M1): offset/angled/
+through-points reference geometry, with sketches that track a datum by id so upstream
+edits move dependents. `--remote <port>` JSON-RPC: semantic commands + human-parity UI
+actions + screenshots (`tools/designer_remote.py`). STEP import, face picking with real
+B-Rep face mapping, docking dark-theme workbench with icon toolbar and preview→accept.
+Rendering: MSAA + ACES tonemap + IBL/PBR from a studio HDR.
 
-**Thin or missing:** solid modeling beyond extrude (no revolve, datum planes, fillets,
+**Thin or missing:** solid modeling beyond extrude + datum planes (no revolve, fillets,
 booleans-as-features, 3D patterns); persistent face/edge references (**toponaming**) —
-sketches bake their plane at creation, upstream edits don't move dependents; variables/
-expressions; checkpoints + git; MCP wrapper, Python API, headless mode; measurement +
-mass properties; rendering is prototype-quality (no AA, materials guessed from color); no
-assemblies; `Document::Regenerate()` recomputes every feature per edit; no CI.
+face/edge sketches still bake at creation, upstream edits don't move those dependents;
+checkpoints + git; MCP wrapper, Python API, headless mode; measurement + mass properties;
+no assemblies; `Document::Regenerate()` recomputes every feature per edit; no CI.
 
 ## Workstreams
 
@@ -59,7 +63,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | Workstream | Plan | Status |
 |---|---|---|
 | 1. Sketching | [sketching/plan.md](sketching/plan.md) | **Complete** (B-splines deferred) |
-| 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **Next frontier** (M1–M8) |
+| 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **In progress** (M1 datum planes shipped; M2–M8 next) |
 | 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | Design study — start now, in parallel |
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Shipped** (V1–V3; units algebra deferred) |
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | Remote shipped; MCP/Python/headless remain |

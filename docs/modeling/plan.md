@@ -35,13 +35,25 @@ foundation that gates the edge/face-referencing features.
 ## Milestones (sequenced)
 
 ### M1 — Datum planes (+ axes / points) — toponaming-free, do first
-A `DatumPlane` feature so sketches aren't stuck on the three default planes.
-Variants: **offset** from a plane, **angled** about an edge/axis, **through**
-points/lines. Each produces a `SketchPlane` a sketch references by feature id
-(survives edits because the datum regenerates). The sketch origin/axes work is
-the mini-precedent; this is the model-level analog. *Offset/angled/through-points
-are toponaming-free; "plane on a face" needs a face ref — defer that variant to
-after M6.* Also expose datum **axes** and **points** (needed by revolve/pattern).
+**Shipped (July 2026, planes only).** `DatumPlaneFeature` (`src/core/`) with
+all three toponaming-free variants — **offset** from a plane, **angled** about
+an axis (global axis or a sketch line via the shared `AxisRef` in
+`src/core/AxisRef.h`), **through** three points. Each recomputes a cached
+`SketchPlane` every regeneration; missing/degenerate inputs fail the feature
+like a missing extrude sketch. Sketches gain an optional `planeRef` (0 = baked,
+today's behavior) resolved in `SketchFeature::Execute`, so editing an upstream
+datum moves the sketch and its extrusion — the first lift of the baked-plane
+limitation. Offset/angle are expression-driven (`VisitExprs`, degrees for
+angle). Format v12. UI: Create → Datum Plane preview/accept, Properties editor
+(kind/parent/axis combos + expression fields), amber viewport quads with name
+labels, plane-picking + feature-tree double-click to sketch on a datum. RPCs
+work through the generic `add_feature`/`modify_feature`. Tests: `test_datum.cpp`
++ a `remote_smoke.py` block (edit a variable → the body translates).
+
+*Deferred:* "plane on a face" needs a face ref → after M6. **Datum axes &
+points** move to **M2** (revolve is their real consumer, so `AxisRef` gets
+designed against it); the angled-datum sketch-line axis already exercises the
+`AxisRef` core.
 
 ### M2 — Revolve — toponaming-free
 `RevolveFeature`: a sketch profile revolved about an axis (a sketch line, a datum

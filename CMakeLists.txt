@@ -166,6 +166,7 @@ set(core_sources
     src/core/SketchInference.cpp
     src/core/SketchSelection.cpp
     src/core/ExtrudeFeature.cpp
+    src/core/DatumPlaneFeature.cpp
     src/core/SketchSolver.cpp
 )
 

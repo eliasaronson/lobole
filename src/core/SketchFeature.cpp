@@ -1,6 +1,7 @@
 #include "core/SketchFeature.h"
 
 #include "Logger.h"
+#include "core/DatumPlaneFeature.h"
 #include "core/SketchProfile.h" // SegmentIntersect
 #include "core/SketchSolver.h"
 
@@ -607,7 +608,17 @@ void SketchFeature::RemoveDerivedOp(size_t opIndex) {
   derived.erase(derived.begin() + opIndex);
 }
 
-bool SketchFeature::Execute(RegenContext&) {
+bool SketchFeature::Execute(RegenContext& ctx) {
+  if (planeRef != 0) {
+    const auto* datum =
+        dynamic_cast<const DatumPlaneFeature*>(ctx.FindById(planeRef));
+    if (datum == nullptr) {
+      LOG_ERROR("Sketch '{}': referenced datum plane not found", GetName());
+      return false;
+    }
+    plane = datum->OutputPlane();
+  }
+
   const bool exprDriven =
       std::any_of(constraints.begin(), constraints.end(),
                   [](const sketch::Constraint& c) {

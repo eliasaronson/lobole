@@ -214,6 +214,38 @@ def main():
         expect(abs(vol - math.pi * 3.0 * 3.0 * 2.0) < 0.2,
                "variable edit re-solves the sketch and rebuilds the rod")
 
+        # Datum plane: an expression-driven offset datum, a sketch that tracks
+        # it, and an extrude — editing the variable moves the whole stack.
+        d.call("new_project")
+        d.call("set_variable", name="off", expression="1.5")
+        datum = d.call("add_feature", feature={
+            "type": "DatumPlane", "name": "Plane 1",
+            "kind": "offset", "base_plane": "xy",
+            "offset": 1.0, "offset_expr": "off * 2"})
+        skd = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch D",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "plane_ref": datum["id"],
+            "entities": [{"type": "rect", "c1": [0, 0], "c2": [4, 2]}]})
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Pad", "sketch_id": skd["id"],
+            "distance": 3.0, "mode": "new_body"})
+        body = d.call("get_state")["bodies"][0]
+        # Datum at z = off*2 = 3; extrude +3 -> z spans [3, 6].
+        expect(abs(body["bbox_min"][2] - 3.0) < 1e-3
+               and abs(body["bbox_max"][2] - 6.0) < 1e-3,
+               "sketch tracks the expression-driven datum (z in [3,6])")
+        d.call("set_variable", name="off", expression="2.5")
+        body = d.call("get_state")["bodies"][0]
+        # Datum now at z = 5; extrude +3 -> z spans [5, 8].
+        expect(abs(body["bbox_min"][2] - 5.0) < 1e-3
+               and abs(body["bbox_max"][2] - 8.0) < 1e-3,
+               "editing the variable moves the datum, sketch, and body")
+        d.call("undo")  # revert the variable edit
+        body = d.call("get_state")["bodies"][0]
+        expect(abs(body["bbox_min"][2] - 3.0) < 1e-3, "datum edit is undoable")
+
         # Ellipse round-trips through JSON and extrudes to an elliptic prism.
         d.call("new_project")
         ske = d.call("add_feature", feature={

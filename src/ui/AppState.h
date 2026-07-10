@@ -94,6 +94,7 @@ struct SketchEditState {
   // operations that can silently fail tell the user what happened.
   std::string actionMsg;
   int hoveredPlane = -1; // 0 Front / 1 Top / 2 Right while picking
+  uint64_t hoveredDatumId = 0; // datum plane under the cursor while picking
 
   // Sketch-entity selection (for adding constraints), ordered.
   std::vector<sketch::PointRef> selected;

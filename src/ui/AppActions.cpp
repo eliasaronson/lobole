@@ -10,10 +10,14 @@
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
+#include "core/DatumPlaneFeature.h"
 #include "core/Feature.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
 #include "ui/PreviewFeature.h"
+#include "ui/SketchInteraction.h" // SketchUVToScreen
+
+#include "imgui.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -185,9 +189,64 @@ void CreateCylinder(AppState& state) {
                  glm::vec3(0.0f, 1.0f, 0.0f), 0.8, 2.0));
 }
 
+void CreateDatumPlane(AppState& state) {
+  auto dp = std::make_unique<DatumPlaneFeature>(NextName(state, "Plane"),
+                                                DatumPlaneKind::Offset);
+  dp->offset = 2.0; // scene scale (~2-unit boxes, half-extent-3 plane quads)
+  // Build on the selected datum if one is selected, else the XY base plane.
+  if (state.document && state.selectedFeature >= 0) {
+    Feature* sel = state.document->GetFeature(
+        static_cast<size_t>(state.selectedFeature));
+    if (auto* parent = dynamic_cast<DatumPlaneFeature*>(sel))
+      dp->parentId = parent->GetId();
+  }
+  BeginPreviewFeature(state, std::move(dp));
+}
+
 void StartNewSketch(AppState& state) {
   state.sketchEdit = SketchEditState{};
   state.sketchEdit.pickingPlane = true;
+}
+
+// Whether datum quads should render this frame. Unlike base planes, datums are
+// user-created reference geometry, so they follow showPlanes but do NOT
+// auto-hide once bodies exist; always shown while picking a plane.
+static bool DatumPlanesVisible(const AppState& state) {
+  return state.sketchEdit.pickingPlane || state.sketchEdit.IsEditing() ||
+         state.showPlanes;
+}
+
+void AppendDatumPlaneQuads(AppState& state, std::vector<Vertex3D>& quads) {
+  if (!state.document || !DatumPlanesVisible(state))
+    return;
+  const glm::vec3 kDatumTint(0.85f, 0.62f, 0.28f); // amber, distinct from bases
+  for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+    auto* dp = dynamic_cast<DatumPlaneFeature*>(state.document->GetFeature(i));
+    if (!dp)
+      continue;
+    const bool emphasized =
+        dp->GetId() == state.sketchEdit.hoveredDatumId ||
+        dp->GetId() == state.pendingFeatureId ||
+        static_cast<int>(i) == state.selectedFeature;
+    AppendPlaneQuad(dp->OutputPlane(), kDatumTint * (emphasized ? 1.8f : 1.0f),
+                    3.0f, quads);
+  }
+}
+
+void DrawDatumLabels(AppState& state) {
+  if (!state.document || !DatumPlanesVisible(state))
+    return;
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImU32 col = IM_COL32(230, 180, 90, 230);
+  for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+    auto* dp = dynamic_cast<DatumPlaneFeature*>(state.document->GetFeature(i));
+    if (!dp)
+      continue;
+    // Label near a corner of the 3-unit quad.
+    glm::vec2 s = SketchUVToScreen(state, dp->OutputPlane(),
+                                   glm::vec2(2.6f, 2.6f));
+    dl->AddText(ImVec2(s.x, s.y), col, dp->GetName().c_str());
+  }
 }
 
 bool EffectivePlaneVisibility(const AppState& state) {

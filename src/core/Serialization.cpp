@@ -1,6 +1,7 @@
 #include "core/Serialization.h"
 
 #include "Logger.h"
+#include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/SketchFeature.h"
@@ -15,7 +16,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 11; // v11: parameters + expressions (v10: material, v9: ellipses, v8: derived ops)
+constexpr int kVersion = 12; // v12: datum planes + sketch plane_ref (v11: parameters + expressions, v10: material)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -218,6 +219,67 @@ ExtrudeMode ExtrudeModeFromString(const std::string& s) {
   throw std::runtime_error("Unknown extrude mode: " + s);
 }
 
+const char* DatumPlaneKindToString(DatumPlaneKind kind) {
+  switch (kind) {
+  case DatumPlaneKind::Offset: return "offset";
+  case DatumPlaneKind::Angled: return "angled";
+  case DatumPlaneKind::ThroughPoints: return "through_points";
+  }
+  return "offset";
+}
+
+DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
+  if (s == "offset") return DatumPlaneKind::Offset;
+  if (s == "angled") return DatumPlaneKind::Angled;
+  if (s == "through_points") return DatumPlaneKind::ThroughPoints;
+  throw std::runtime_error("Unknown datum plane kind: " + s);
+}
+
+const char* PlaneTypeToString(PlaneType type) {
+  switch (type) {
+  case PlaneType::XY: return "xy";
+  case PlaneType::XZ: return "xz";
+  case PlaneType::YZ: return "yz";
+  }
+  return "xy";
+}
+
+PlaneType PlaneTypeFromString(const std::string& s) {
+  if (s == "xy") return PlaneType::XY;
+  if (s == "xz") return PlaneType::XZ;
+  if (s == "yz") return PlaneType::YZ;
+  throw std::runtime_error("Unknown base plane: " + s);
+}
+
+json AxisRefToJson(const AxisRef& axis) {
+  switch (axis.kind) {
+  case AxisRef::Kind::X: return {{"kind", "x"}};
+  case AxisRef::Kind::Y: return {{"kind", "y"}};
+  case AxisRef::Kind::Z: return {{"kind", "z"}};
+  case AxisRef::Kind::SketchLine:
+    return {{"kind", "sketch_line"},
+            {"sketch_id", axis.sketchId},
+            {"entity_id", axis.entityId}};
+  }
+  return {{"kind", "x"}};
+}
+
+AxisRef AxisRefFromJson(const json& j) {
+  AxisRef axis;
+  const std::string kind = j.at("kind").get<std::string>();
+  if (kind == "x") axis.kind = AxisRef::Kind::X;
+  else if (kind == "y") axis.kind = AxisRef::Kind::Y;
+  else if (kind == "z") axis.kind = AxisRef::Kind::Z;
+  else if (kind == "sketch_line") {
+    axis.kind = AxisRef::Kind::SketchLine;
+    axis.sketchId = j.at("sketch_id").get<uint64_t>();
+    axis.entityId = j.at("entity_id").get<uint32_t>();
+  } else {
+    throw std::runtime_error("Unknown axis kind: " + kind);
+  }
+  return axis;
+}
+
 }  // namespace
 
 namespace DocumentIO {
@@ -237,6 +299,9 @@ json FeatureToJson(const Feature& feature) {
     j["plane"] = {{"origin", Vec3ToJson(sk->plane.GetOrigin())},
                   {"normal", Vec3ToJson(sk->plane.GetNormal())},
                   {"uAxis", Vec3ToJson(sk->plane.GetUAxis())}};
+    if (sk->planeRef != 0) { // v12: tracked datum plane (omit when baked)
+      j["plane_ref"] = sk->planeRef;
+    }
     j["next_entity_id"] = sk->nextEntityId;
     j["entities"] = json::array();
     for (const auto& entity : sk->entities) {
@@ -273,6 +338,35 @@ json FeatureToJson(const Feature& feature) {
     j["height"] = cyl->height;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
+  } else if (auto* dp = dynamic_cast<const DatumPlaneFeature*>(&feature)) {
+    j["kind"] = DatumPlaneKindToString(dp->kind);
+    // Parent (Offset/Angled): earlier datum by id, or a base plane.
+    if (dp->kind != DatumPlaneKind::ThroughPoints) {
+      if (dp->parentId != 0)
+        j["parent_id"] = dp->parentId;
+      else
+        j["base_plane"] = PlaneTypeToString(dp->basePlane);
+    }
+    // Emit only the active variant's fields.
+    switch (dp->kind) {
+    case DatumPlaneKind::Offset:
+      j["offset"] = dp->offset;
+      if (!dp->offsetExpr.empty())
+        j["offset_expr"] = dp->offsetExpr;
+      if (dp->flip)
+        j["flip"] = true;
+      break;
+    case DatumPlaneKind::Angled:
+      j["axis"] = AxisRefToJson(dp->axis);
+      j["angle_deg"] = dp->angleDeg;
+      if (!dp->angleExpr.empty())
+        j["angle_expr"] = dp->angleExpr;
+      break;
+    case DatumPlaneKind::ThroughPoints:
+      j["points"] = {Vec3ToJson(dp->p0), Vec3ToJson(dp->p1),
+                     Vec3ToJson(dp->p2)};
+      break;
+    }
   } else {
     throw std::runtime_error("Unserializable feature type: " +
                              feature.TypeName());
@@ -362,6 +456,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sk->derived.push_back(DerivedOpFromJson(oj));
     if (!sk->derived.empty())
       sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
+    sk->planeRef = j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
     out = std::move(sk);
   } else if (type == "Extrude") {
     auto ext = std::make_unique<ExtrudeFeature>(
@@ -385,6 +480,32 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "Import") {
     out = std::make_unique<ImportFeature>(name,
                                           j.at("path").get<std::string>());
+  } else if (type == "DatumPlane") {
+    auto dp = std::make_unique<DatumPlaneFeature>(
+        name, DatumPlaneKindFromString(j.at("kind").get<std::string>()));
+    dp->parentId = j.value("parent_id", uint64_t{0});
+    if (j.contains("base_plane"))
+      dp->basePlane = PlaneTypeFromString(j.at("base_plane").get<std::string>());
+    switch (dp->kind) {
+    case DatumPlaneKind::Offset:
+      dp->offset = j.value("offset", 0.0);
+      dp->offsetExpr = j.value("offset_expr", std::string{});
+      dp->flip = j.value("flip", false);
+      break;
+    case DatumPlaneKind::Angled:
+      dp->axis = AxisRefFromJson(j.at("axis"));
+      dp->angleDeg = j.value("angle_deg", 0.0);
+      dp->angleExpr = j.value("angle_expr", std::string{});
+      break;
+    case DatumPlaneKind::ThroughPoints: {
+      const json& pts = j.at("points");
+      dp->p0 = Vec3FromJson(pts.at(0));
+      dp->p1 = Vec3FromJson(pts.at(1));
+      dp->p2 = Vec3FromJson(pts.at(2));
+      break;
+    }
+    }
+    out = std::move(dp);
   }
 
   if (!out) {

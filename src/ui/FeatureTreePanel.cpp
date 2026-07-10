@@ -1,5 +1,6 @@
 #include "ui/FeatureTreePanel.h"
 
+#include "core/DatumPlaneFeature.h"
 #include "core/Feature.h"
 #include "ui/SketchInteraction.h"
 
@@ -33,9 +34,19 @@ void DrawFeatureTreePanel(AppState& state) {
       // Suffix keeps IDs unique and test paths stable even if names repeat
       const std::string label =
           feature->GetName() + "##" + std::to_string(i);
+      // Datum planes are double-clickable to start a sketch on them, like the
+      // base planes above.
+      auto* datum = dynamic_cast<DatumPlaneFeature*>(feature);
+      const ImGuiSelectableFlags flags =
+          datum ? ImGuiSelectableFlags_AllowDoubleClick : 0;
       if (ImGui::Selectable(label.c_str(),
-                            state.selectedFeature == static_cast<int>(i))) {
+                            state.selectedFeature == static_cast<int>(i),
+                            flags)) {
         state.selectedFeature = static_cast<int>(i);
+        if (datum && ImGui::IsMouseDoubleClicked(0)) {
+          const int n = static_cast<int>(doc->FeatureCount()) + 1;
+          BeginSketchOnDatum(state, *datum, "Sketch " + std::to_string(n));
+        }
       }
       if (ImGui::BeginPopupContextItem()) {
         if (ImGui::MenuItem("Delete")) {

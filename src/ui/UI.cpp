@@ -49,6 +49,7 @@ void DrawUI(AppState& state) {
   if (state.sketchRenderer) {
     std::vector<Vertex3D> quads = BuildPlaneQuads(
         EffectivePlaneVisibility(state), state.sketchEdit.hoveredPlane);
+    AppendDatumPlaneQuads(state, quads); // user datum planes (own visibility)
 
     std::vector<Vertex3D> overlay =
         BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
@@ -78,6 +79,7 @@ void DrawUI(AppState& state) {
     // (2D overlays).
     DrawSnapGlyphs(state);
     DrawSelectionBox(state);
+    DrawDatumLabels(state);
     DrawDimensions(state);
     DrawConstraintGlyphs(state);
     DrawToolPrompt(state);
