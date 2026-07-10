@@ -44,9 +44,25 @@ The `RayTracingRenderer` scaffold is ~40% real:
   visible buffer, `vkCmdCopyImageToBuffer`, `stbi_write_png`) is a template for
   writing the RT output image to disk.
 
+## Progress
+
+- **R4.0–R4.2 SHIPPED** (`c6b6fef`): device confirmed (RTX 4060); SBT math
+  audited sound; `AddGeometry` uploads real vertex/index buffers; **real
+  BLAS-per-body + TLAS build works** (`SyncRayTracingScene` + `rt_build` RPC →
+  `has_tlas=true`, **0 VUIDs**). The highest-risk piece (AS build) is done.
+- **Remaining**: R4.3 descriptors + `rgba32f` output image, R4.4 trace/
+  accumulate + shader rewrite, R4.5 the button + `render_still` RPC. Note the
+  descriptor architecture needs revisiting for N bodies — the scaffold's
+  layout has a single vertex/index binding; use buffer arrays (or a combined
+  buffer + per-instance offsets) so the closest-hit shader can fetch attributes
+  for the hit body via `gl_InstanceCustomIndexEXT`.
+
 ## Milestones
 
-### R4.0 — Ground truth (~0.5 day)
+### R4.0 — Ground truth (~0.5 day) — done
+Was: verify device, audit SBT. Result: RTX 4060 selected; SBT sound.
+
+### R4.0 (original detail)
 Before writing new code, de-risk the untested scaffold.
 - Log the selected device name; confirm it's the RTX 4060 (not Arc/llvmpipe).
   If a machine ever picks the wrong one, add a discrete-RT-capable preference
