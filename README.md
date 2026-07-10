@@ -19,6 +19,10 @@ sudo apt install cmake build-essential libvulkan-dev glslc libglfw3-dev libglm-d
     libocct-foundation-dev libocct-ocaf-dev libocct-visualization-dev
 ```
 
+On NixOS, `shell.nix` provides everything instead: run `nix-shell` in the repo root.
+(The Vulkan ICD comes from the system config — `hardware.graphics.enable = true` plus
+your GPU driver module — not from the shell.)
+
 Vendored dependencies (ImGui, nativefiledialog) are git submodules:
 
 ```

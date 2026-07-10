@@ -56,14 +56,29 @@ set(IMGUI_TEST_ENGINE_SOURCES
 )
 
 
-# OpenCASCADE - manual setup
-set(OPENCASCADE_INCLUDE_DIR "/usr/include/opencascade")
-if(EXISTS ${OPENCASCADE_INCLUDE_DIR})
+# OpenCASCADE: prefer the CMake config package (any prefix — NixOS, custom
+# installs), fall back to the conventional /usr/include/opencascade layout.
+find_package(OpenCASCADE QUIET)
+if(OpenCASCADE_FOUND)
     # SYSTEM: OCC headers use deprecated std::iterator etc.; don't warn on them.
-    include_directories(SYSTEM ${OPENCASCADE_INCLUDE_DIR})
-    message(STATUS "OpenCASCADE includes found at: ${OPENCASCADE_INCLUDE_DIR}")
-    
-    # Core OpenCASCADE libraries we need
+    include_directories(SYSTEM ${OpenCASCADE_INCLUDE_DIR})
+    message(STATUS "OpenCASCADE ${OpenCASCADE_VERSION} found via CMake config: ${OpenCASCADE_INCLUDE_DIR}")
+    set(OPENCASCADE_FOUND TRUE)
+else()
+    set(OPENCASCADE_INCLUDE_DIR "/usr/include/opencascade")
+    if(EXISTS ${OPENCASCADE_INCLUDE_DIR})
+        include_directories(SYSTEM ${OPENCASCADE_INCLUDE_DIR})
+        message(STATUS "OpenCASCADE includes found at: ${OPENCASCADE_INCLUDE_DIR}")
+        set(OPENCASCADE_FOUND TRUE)
+    else()
+        message(WARNING "OpenCASCADE not found - CAD functionality will be limited")
+        set(OPENCASCADE_FOUND FALSE)
+    endif()
+endif()
+
+if(OPENCASCADE_FOUND)
+    # Core OpenCASCADE libraries we need. With the config package these are
+    # imported targets; with the /usr fallback, plain library names.
     set(OPENCASCADE_LIBS
         TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo
         TKTopAlgo TKPrim TKMesh TKBO TKXSBase TKShHealing TKOffset
@@ -72,17 +87,13 @@ if(EXISTS ${OPENCASCADE_INCLUDE_DIR})
     # STEP/STL data-exchange libraries were renamed in OCCT 7.8
     # (TKSTEP*/TKSTL -> TKDESTEP/TKDESTL)
     find_library(OCCT_TKDESTEP TKDESTEP)
-    if(OCCT_TKDESTEP)
+    if(TARGET TKDESTEP OR OCCT_TKDESTEP)
         list(APPEND OPENCASCADE_LIBS TKDESTEP TKDESTL)
     else()
         list(APPEND OPENCASCADE_LIBS TKSTEP TKSTEPBase TKSTEPAttr TKSTEP209 TKSTL)
     endif()
-    
-    set(OPENCASCADE_FOUND TRUE)
+
     add_definitions(-DHAVE_OPENCASCADE)
-else()
-    message(WARNING "OpenCASCADE not found - CAD functionality will be limited")
-    set(OPENCASCADE_FOUND FALSE)
 endif()
 
 # nativefiledialog - build from submodule
