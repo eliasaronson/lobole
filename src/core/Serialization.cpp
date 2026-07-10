@@ -1,9 +1,11 @@
 #include "core/Serialization.h"
 
 #include "Logger.h"
+#include "core/DatumAxisFeature.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
 
 #include <nlohmann/json.hpp>
@@ -16,7 +18,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 12; // v12: datum planes + sketch plane_ref (v11: parameters + expressions, v10: material)
+constexpr int kVersion = 13; // v13: revolve + datum axis (v12: datum planes + plane_ref, v11: parameters/expressions)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -235,6 +237,26 @@ DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
   throw std::runtime_error("Unknown datum plane kind: " + s);
 }
 
+const char* DatumAxisKindToString(DatumAxisKind kind) {
+  switch (kind) {
+  case DatumAxisKind::TwoPoints: return "two_points";
+  case DatumAxisKind::SketchLine: return "sketch_line";
+  case DatumAxisKind::GlobalX: return "global_x";
+  case DatumAxisKind::GlobalY: return "global_y";
+  case DatumAxisKind::GlobalZ: return "global_z";
+  }
+  return "two_points";
+}
+
+DatumAxisKind DatumAxisKindFromString(const std::string& s) {
+  if (s == "two_points") return DatumAxisKind::TwoPoints;
+  if (s == "sketch_line") return DatumAxisKind::SketchLine;
+  if (s == "global_x") return DatumAxisKind::GlobalX;
+  if (s == "global_y") return DatumAxisKind::GlobalY;
+  if (s == "global_z") return DatumAxisKind::GlobalZ;
+  throw std::runtime_error("Unknown datum axis kind: " + s);
+}
+
 const char* PlaneTypeToString(PlaneType type) {
   switch (type) {
   case PlaneType::XY: return "xy";
@@ -260,6 +282,8 @@ json AxisRefToJson(const AxisRef& axis) {
     return {{"kind", "sketch_line"},
             {"sketch_id", axis.sketchId},
             {"entity_id", axis.entityId}};
+  case AxisRef::Kind::DatumAxis:
+    return {{"kind", "datum_axis"}, {"datum_axis_id", axis.datumAxisId}};
   }
   return {{"kind", "x"}};
 }
@@ -274,6 +298,9 @@ AxisRef AxisRefFromJson(const json& j) {
     axis.kind = AxisRef::Kind::SketchLine;
     axis.sketchId = j.at("sketch_id").get<uint64_t>();
     axis.entityId = j.at("entity_id").get<uint32_t>();
+  } else if (kind == "datum_axis") {
+    axis.kind = AxisRef::Kind::DatumAxis;
+    axis.datumAxisId = j.at("datum_axis_id").get<uint64_t>();
   } else {
     throw std::runtime_error("Unknown axis kind: " + kind);
   }
@@ -366,6 +393,31 @@ json FeatureToJson(const Feature& feature) {
       j["points"] = {Vec3ToJson(dp->p0), Vec3ToJson(dp->p1),
                      Vec3ToJson(dp->p2)};
       break;
+    }
+  } else if (auto* rev = dynamic_cast<const RevolveFeature*>(&feature)) {
+    j["sketch_id"] = rev->sketchId;
+    j["axis"] = AxisRefToJson(rev->axis);
+    j["angle_deg"] = rev->angleDeg;
+    if (!rev->angleExpr.empty()) // literals stay plain numbers (v11)
+      j["angle_expr"] = rev->angleExpr;
+    if (rev->symmetric)
+      j["symmetric"] = true;
+    j["reversed"] = rev->reversed;
+    j["mode"] = ExtrudeModeToString(rev->mode);
+  } else if (auto* da = dynamic_cast<const DatumAxisFeature*>(&feature)) {
+    j["kind"] = DatumAxisKindToString(da->kind);
+    switch (da->kind) {
+    case DatumAxisKind::TwoPoints:
+      j["points"] = {Vec3ToJson(da->p0), Vec3ToJson(da->p1)};
+      break;
+    case DatumAxisKind::SketchLine:
+      j["sketch_id"] = da->sketchId;
+      j["entity_id"] = da->entityId;
+      break;
+    case DatumAxisKind::GlobalX:
+    case DatumAxisKind::GlobalY:
+    case DatumAxisKind::GlobalZ:
+      break; // kind string is sufficient
     }
   } else {
     throw std::runtime_error("Unserializable feature type: " +
@@ -506,6 +558,35 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     }
     out = std::move(dp);
+  } else if (type == "Revolve") {
+    auto rev = std::make_unique<RevolveFeature>(
+        name, j.at("sketch_id").get<uint64_t>(), j.value("angle_deg", 360.0),
+        ExtrudeModeFromString(j.value("mode", "new_body")),
+        j.value("reversed", false));
+    rev->axis = AxisRefFromJson(j.at("axis"));
+    rev->angleExpr = j.value("angle_expr", std::string{});
+    rev->symmetric = j.value("symmetric", false);
+    out = std::move(rev);
+  } else if (type == "DatumAxis") {
+    auto da = std::make_unique<DatumAxisFeature>(
+        name, DatumAxisKindFromString(j.at("kind").get<std::string>()));
+    switch (da->kind) {
+    case DatumAxisKind::TwoPoints: {
+      const json& pts = j.at("points");
+      da->p0 = Vec3FromJson(pts.at(0));
+      da->p1 = Vec3FromJson(pts.at(1));
+      break;
+    }
+    case DatumAxisKind::SketchLine:
+      da->sketchId = j.at("sketch_id").get<uint64_t>();
+      da->entityId = j.at("entity_id").get<uint32_t>();
+      break;
+    case DatumAxisKind::GlobalX:
+    case DatumAxisKind::GlobalY:
+    case DatumAxisKind::GlobalZ:
+      break;
+    }
+    out = std::move(da);
   }
 
   if (!out) {

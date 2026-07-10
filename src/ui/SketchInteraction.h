@@ -82,6 +82,10 @@ void DrawToolPrompt(AppState& state);
 
 // Projects a plane-UV point to viewport screen coords (pixels), matching the
 // picking/render path.
+// Projects a world-space point to viewport pixel coordinates (proj*view then
+// NDC → screen, offset by the viewport origin).
+glm::vec2 WorldToScreen(AppState& state, const glm::vec3& world);
+
 glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
                            glm::vec2 uv);
 

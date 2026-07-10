@@ -246,6 +246,44 @@ def main():
         body = d.call("get_state")["bodies"][0]
         expect(abs(body["bbox_min"][2] - 3.0) < 1e-3, "datum edit is undoable")
 
+        # Revolve: an expression-driven angle sweeps a profile about the global
+        # Y axis; editing the variable rebuilds the solid.
+        d.call("new_project")
+        d.call("set_variable", name="sweep", expression="360")
+        skr = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Profile",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "rect", "c1": [1, 0], "c2": [3, 3]}]})
+        d.call("add_feature", feature={
+            "type": "Revolve", "name": "Rev", "sketch_id": skr["id"],
+            "axis": {"kind": "y"}, "angle_deg": 1.0, "angle_expr": "sweep",
+            "mode": "new_body"})
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        # Washer: 2*pi*R*(w*h) with R=2, w=2, h=3 -> 24pi.
+        expect(abs(vol - 2 * math.pi * 2.0 * 6.0) < 0.1, "full revolve is 24pi")
+        d.call("set_variable", name="sweep", expression="180")
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - 12 * math.pi) < 0.1,
+               "editing the angle variable rebuilds the revolve")
+
+        # Revolve about a DatumAxisFeature (two points along Y).
+        d.call("new_project")
+        ax = d.call("add_feature", feature={
+            "type": "DatumAxis", "name": "Axis 1", "kind": "two_points",
+            "points": [[0, 0, 0], [0, 1, 0]]})
+        skr2 = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Profile",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "rect", "c1": [1, 0], "c2": [3, 3]}]})
+        d.call("add_feature", feature={
+            "type": "Revolve", "name": "Rev", "sketch_id": skr2["id"],
+            "axis": {"kind": "datum_axis", "datum_axis_id": ax["id"]},
+            "angle_deg": 360.0, "mode": "new_body"})
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - 24 * math.pi) < 0.1, "revolve about a datum axis")
+
         # Ellipse round-trips through JSON and extrudes to an elliptic prism.
         d.call("new_project")
         ske = d.call("add_feature", feature={

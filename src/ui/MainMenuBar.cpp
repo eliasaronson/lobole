@@ -75,6 +75,8 @@ void DrawCreateMenu(AppState& state) {
     CreateCylinder(state);
   if (ImGui::MenuItem("Datum Plane", nullptr, false, idle))
     CreateDatumPlane(state);
+  if (ImGui::MenuItem("Datum Axis", nullptr, false, idle))
+    CreateDatumAxis(state);
   ImGui::Separator();
 
   SketchEditState& edit = state.sketchEdit;

@@ -2,10 +2,12 @@
 
 #include "CADMaterials.h"
 #include "Camera.h"
+#include "core/DatumAxisFeature.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/RevolveFeature.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 
@@ -144,6 +146,68 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   ImGui::PopID();
 }
 
+// A reusable axis picker: global X/Y/Z, every earlier DatumAxisFeature by
+// name, and (when sketchIdForLines names a sketch) that sketch's construction
+// lines by entity id. Commits a change to owner.axis like a discrete combo.
+void DrawAxisRefCombo(AppState& state, Feature& owner, AxisRef& axis,
+                      size_t index, bool commit, uint64_t sketchIdForLines) {
+  std::vector<std::string> labels = {"X", "Y", "Z"};
+  std::vector<AxisRef> refs = {{AxisRef::Kind::X}, {AxisRef::Kind::Y},
+                               {AxisRef::Kind::Z}};
+
+  for (size_t i = 0; i < index; i++) {
+    if (auto* da =
+            dynamic_cast<DatumAxisFeature*>(state.document->GetFeature(i))) {
+      AxisRef r;
+      r.kind = AxisRef::Kind::DatumAxis;
+      r.datumAxisId = da->GetId();
+      labels.push_back(da->GetName());
+      refs.push_back(r);
+    }
+  }
+
+  if (sketchIdForLines != 0) {
+    if (auto* sk = dynamic_cast<SketchFeature*>(
+            state.document->FindFeatureById(sketchIdForLines))) {
+      for (const auto& e : sk->entities) {
+        const auto* line = std::get_if<sketch::Line>(&e);
+        if (line == nullptr || !line->construction)
+          continue; // only construction lines make sensible axes
+        AxisRef r;
+        r.kind = AxisRef::Kind::SketchLine;
+        r.sketchId = sketchIdForLines;
+        r.entityId = line->id;
+        labels.push_back("Line " + std::to_string(line->id));
+        refs.push_back(r);
+      }
+    }
+  }
+
+  int sel = 0;
+  for (size_t i = 0; i < refs.size(); i++) {
+    const AxisRef& r = refs[i];
+    if (r.kind != axis.kind)
+      continue;
+    if ((r.kind == AxisRef::Kind::DatumAxis &&
+         r.datumAxisId != axis.datumAxisId) ||
+        (r.kind == AxisRef::Kind::SketchLine && r.entityId != axis.entityId))
+      continue;
+    sel = static_cast<int>(i);
+    break;
+  }
+
+  std::vector<const char*> cstrs;
+  cstrs.reserve(labels.size());
+  for (const auto& s : labels)
+    cstrs.push_back(s.c_str());
+  if (ImGui::Combo("Axis", &sel, cstrs.data(),
+                   static_cast<int>(cstrs.size()))) {
+    nlohmann::json before = DocumentIO::FeatureToJson(owner);
+    axis = refs[static_cast<size_t>(sel)];
+    CommitDiscrete(state, owner, before, index, commit);
+  }
+}
+
 // Properties widgets for a datum plane: variant selector, parent (Offset/
 // Angled), and the variant's expression-driven fields. Parent/kind/axis are
 // discrete combos committed like the extrude Mode combo.
@@ -199,19 +263,7 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
     HandleEdit(state, dp, ImGui::Checkbox("Flip", &dp.flip), index, commit);
     break;
   case DatumPlaneKind::Angled: {
-    const char* axes[] = {"X", "Y", "Z"};
-    // The M1 UI offers the global axes; sketch-line axes are settable via RPC
-    // and get their pick UI with M2 revolve.
-    int a = dp.axis.kind == AxisRef::Kind::SketchLine
-                ? -1
-                : static_cast<int>(dp.axis.kind);
-    if (dp.axis.kind == AxisRef::Kind::SketchLine) {
-      ImGui::Text("Axis: sketch line");
-    } else if (ImGui::Combo("Axis", &a, axes, 3)) {
-      nlohmann::json before = DocumentIO::FeatureToJson(dp);
-      dp.axis.kind = static_cast<AxisRef::Kind>(a);
-      discrete(before);
-    }
+    DrawAxisRefCombo(state, dp, dp.axis, index, commit, /*sketch=*/0);
     ExprDim(state, dp, index, commit, "Angle (deg)", dp.angleExpr, dp.angleDeg);
     break;
   }
@@ -223,6 +275,40 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
     HandleEdit(state, dp, ImGui::DragFloat3("Point 3", &dp.p2.x, 0.05f), index,
                commit);
     break;
+  }
+}
+
+// Properties widgets for a datum axis: kind selector plus the active variant's
+// fields (world points, or the referenced sketch line shown read-only).
+void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
+                         bool commit) {
+  const char* kinds[] = {"Two Points", "Sketch Line", "Global X", "Global Y",
+                         "Global Z"};
+  int kind = static_cast<int>(da.kind);
+  if (ImGui::Combo("Type", &kind, kinds, 5)) {
+    nlohmann::json before = DocumentIO::FeatureToJson(da);
+    da.kind = static_cast<DatumAxisKind>(kind);
+    CommitDiscrete(state, da, before, index, commit);
+  }
+
+  switch (da.kind) {
+  case DatumAxisKind::TwoPoints:
+    HandleEdit(state, da, ImGui::DragFloat3("Point 1", &da.p0.x, 0.05f), index,
+               commit);
+    HandleEdit(state, da, ImGui::DragFloat3("Point 2", &da.p1.x, 0.05f), index,
+               commit);
+    break;
+  case DatumAxisKind::SketchLine:
+    if (Feature* sk = state.document->FindFeatureById(da.sketchId)) {
+      ImGui::Text("Line %u of %s", da.entityId, sk->GetName().c_str());
+    } else {
+      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch line: missing");
+    }
+    break;
+  case DatumAxisKind::GlobalX:
+  case DatumAxisKind::GlobalY:
+  case DatumAxisKind::GlobalZ:
+    break; // fully defined by the kind
   }
 }
 
@@ -318,6 +404,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
   } else if (auto* dp = dynamic_cast<DatumPlaneFeature*>(&feature)) {
     DrawDatumPlaneParams(state, *dp, index, commit);
+  } else if (auto* da = dynamic_cast<DatumAxisFeature*>(&feature)) {
+    DrawDatumAxisParams(state, *da, index, commit);
   } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
             ext->distance);
@@ -333,6 +421,29 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
 
     if (Feature* src = state.document->FindFeatureById(ext->sketchId)) {
+      ImGui::Text("Sketch: %s", src->GetName().c_str());
+    } else {
+      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch: missing");
+    }
+  } else if (auto* rev = dynamic_cast<RevolveFeature*>(&feature)) {
+    ExprDim(state, feature, index, commit, "Angle (deg)", rev->angleExpr,
+            rev->angleDeg);
+    DrawAxisRefCombo(state, feature, rev->axis, index, commit, rev->sketchId);
+    HandleEdit(state, feature, ImGui::Checkbox("Symmetric", &rev->symmetric),
+               index, commit);
+    if (!rev->symmetric) // reversed has no effect on a symmetric sweep
+      HandleEdit(state, feature, ImGui::Checkbox("Reversed", &rev->reversed),
+                 index, commit);
+
+    const char* modes[] = {"New Body", "Add", "Cut"};
+    int mode = static_cast<int>(rev->mode);
+    if (ImGui::Combo("Mode", &mode, modes, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*rev);
+      rev->mode = static_cast<ExtrudeMode>(mode);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+
+    if (Feature* src = state.document->FindFeatureById(rev->sketchId)) {
       ImGui::Text("Sketch: %s", src->GetName().c_str());
     } else {
       ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch: missing");

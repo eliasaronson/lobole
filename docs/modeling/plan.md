@@ -55,11 +55,25 @@ points** move to **M2** (revolve is their real consumer, so `AxisRef` gets
 designed against it); the angled-datum sketch-line axis already exercises the
 `AxisRef` core.
 
-### M2 — Revolve — toponaming-free
-`RevolveFeature`: a sketch profile revolved about an axis (a sketch line, a datum
-axis, or later an edge) through an angle. OCC `BRepPrimAPI_MakeRevol`; modes
-new-body / add / cut like Extrude. Axis from a sketch line or datum axis is
-toponaming-free. Highest value after datum planes.
+### M2 — Revolve (+ datum axes) — toponaming-free
+**Shipped (July 2026).** `RevolveFeature` revolves a sketch profile about an
+`AxisRef` axis (global axis, sketch construction line, or a `DatumAxisFeature`)
+through an angle — OCC `BRepPrimAPI_MakeRevol`, via a new
+`sketch::BuildRevolve` sharing `BuildProfileFace` with extrude. Angle is
+expression-driven (degrees); **symmetric** centers the sweep on the profile
+plane (pre-rotate by −angle/2), `reversed` sweeps the other hand. Modes
+new-body / add / cut reuse the extracted `ApplyBodyMode` (shared with extrude).
+The axis must lie in the sketch plane and the profile must not cross it — both
+enforced (out-of-plane → error; a crossing profile's invalid solid is
+rejected). Also shipped the deferred **`DatumAxisFeature`** (two-points /
+sketch-line / global), integrated through a new `AxisRef::Kind::DatumAxis`, so
+axes are first-class tree features usable by revolve (and later 3D patterns).
+Format v13. UI: "Revolve…" beside "Extrude…", a reusable axis-picker combo
+(also upgraded the M1 angled-datum editor), Create → Datum Axis with a line +
+label render. Tests: `test_revolve.cpp` (Pappus volumes, symmetric, failure
+modes), `test_datum.cpp` datum-axis cases, a `remote_smoke.py` block.
+
+*Deferred:* axis-by-B-Rep-edge → after toponaming (M6).
 
 ### M3 — Richer extrude
 Symmetric / two-sided, blind distance both ways, **thin/shell** (wall

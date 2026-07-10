@@ -167,6 +167,9 @@ set(core_sources
     src/core/SketchSelection.cpp
     src/core/ExtrudeFeature.cpp
     src/core/DatumPlaneFeature.cpp
+    src/core/BodyMode.cpp
+    src/core/RevolveFeature.cpp
+    src/core/DatumAxisFeature.cpp
     src/core/SketchSolver.cpp
 )
 

@@ -1,6 +1,7 @@
 #include "core/DatumPlaneFeature.h"
 
 #include "Logger.h"
+#include "core/DatumAxisFeature.h"
 #include "core/SketchFeature.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -54,6 +55,16 @@ bool ResolveAxis(const RegenContext& ctx, const AxisRef& ref,
       }
       outOrigin = a;
       outDir = glm::normalize(d);
+      return true;
+    }
+    case AxisRef::Kind::DatumAxis: {
+      const auto* datum =
+          dynamic_cast<const DatumAxisFeature*>(ctx.FindById(ref.datumAxisId));
+      if (datum == nullptr) {
+        return false; // earlier feature, so it already Executed successfully
+      }
+      outOrigin = datum->Origin();
+      outDir = datum->Direction();
       return true;
     }
   }

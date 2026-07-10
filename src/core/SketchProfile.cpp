@@ -5,7 +5,9 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepOffsetAPI_MakeOffset.hxx>
 #include <GC_MakeSegment.hxx>
@@ -16,6 +18,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
 #include <Standard_Failure.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Circ.hxx>
@@ -23,6 +26,7 @@
 #include <gp_Elips.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
 #include <algorithm>
@@ -233,6 +237,42 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
   return fix.Wire();
 }
 
+// Builds the planar profile face from the loops: the largest-|area| loop is
+// the outer boundary, the rest become holes. Null face on failure. Shared by
+// BuildPrism (extrude) and BuildRevolve.
+TopoDS_Face BuildProfileFace(const SketchPlane& plane,
+                             const std::vector<Loop>& loops) {
+  size_t outer = 0;
+  double outerArea = std::abs(loops[0].SignedArea());
+  for (size_t i = 1; i < loops.size(); i++) {
+    double area = std::abs(loops[i].SignedArea());
+    if (area > outerArea) {
+      outerArea = area;
+      outer = i;
+    }
+  }
+
+  glm::vec3 o = plane.GetOrigin();
+  glm::vec3 nrm = plane.GetNormal();
+  glm::vec3 u = plane.GetUAxis();
+  gp_Ax3 ax3(gp_Pnt(o.x, o.y, o.z), gp_Dir(nrm.x, nrm.y, nrm.z),
+             gp_Dir(u.x, u.y, u.z));
+  gp_Pln pln(ax3);
+
+  BRepBuilderAPI_MakeFace faceMaker(pln, MakeLoopWire(plane, loops[outer]));
+  for (size_t i = 0; i < loops.size(); i++) {
+    if (i == outer)
+      continue;
+    TopoDS_Wire hole = MakeLoopWire(plane, loops[i]);
+    faceMaker.Add(TopoDS::Wire(hole.Reversed()));
+  }
+  if (!faceMaker.IsDone()) {
+    LOG_ERROR("Sketch profile: face construction failed");
+    return TopoDS_Face();
+  }
+  return faceMaker.Face();
+}
+
 } // namespace
 
 CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
@@ -242,44 +282,73 @@ CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
   }
 
   try {
-    // Largest-area loop is the outer boundary; the rest are holes.
-    size_t outer = 0;
-    double outerArea = std::abs(loops[0].SignedArea());
-    for (size_t i = 1; i < loops.size(); i++) {
-      double area = std::abs(loops[i].SignedArea());
-      if (area > outerArea) {
-        outerArea = area;
-        outer = i;
-      }
-    }
-
-    glm::vec3 o = plane.GetOrigin();
-    glm::vec3 nrm = plane.GetNormal();
-    glm::vec3 u = plane.GetUAxis();
-    gp_Ax3 ax3(gp_Pnt(o.x, o.y, o.z), gp_Dir(nrm.x, nrm.y, nrm.z),
-               gp_Dir(u.x, u.y, u.z));
-    gp_Pln pln(ax3);
-
-    BRepBuilderAPI_MakeFace faceMaker(pln, MakeLoopWire(plane, loops[outer]));
-    for (size_t i = 0; i < loops.size(); i++) {
-      if (i == outer)
-        continue;
-      TopoDS_Wire hole = MakeLoopWire(plane, loops[i]);
-      faceMaker.Add(TopoDS::Wire(hole.Reversed()));
-    }
-    if (!faceMaker.IsDone()) {
-      LOG_ERROR("Sketch profile: face construction failed");
+    TopoDS_Face face = BuildProfileFace(plane, loops);
+    if (face.IsNull()) {
       return CADShape();
     }
 
+    glm::vec3 nrm = plane.GetNormal();
     const double d = reversed ? -distance : distance;
     gp_Vec extrusion(nrm.x * d, nrm.y * d, nrm.z * d);
-    BRepPrimAPI_MakePrism prism(faceMaker.Face(), extrusion);
+    BRepPrimAPI_MakePrism prism(face, extrusion);
     if (!prism.IsDone()) {
       LOG_ERROR("Sketch profile: prism construction failed");
       return CADShape();
     }
     return CADShape(prism.Shape());
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
+    return CADShape();
+  }
+}
+
+CADShape BuildRevolve(const SketchPlane& plane, const std::vector<Loop>& loops,
+                      const glm::vec3& axisOrigin, const glm::vec3& axisDir,
+                      double angleRadians, bool reversed, bool symmetric) {
+  double angle = std::abs(angleRadians);
+  if (loops.empty() || angle < 1e-9) {
+    return CADShape();
+  }
+  if (angle > 2.0 * M_PI) {
+    angle = 2.0 * M_PI;
+  }
+  const bool full = angle >= 2.0 * M_PI - 1e-9;
+
+  try {
+    TopoDS_Face face = BuildProfileFace(plane, loops);
+    if (face.IsNull()) {
+      return CADShape();
+    }
+
+    gp_Ax1 ax(gp_Pnt(axisOrigin.x, axisOrigin.y, axisOrigin.z),
+              gp_Dir(axisDir.x, axisDir.y, axisDir.z));
+
+    TopoDS_Shape profile = face;
+    double sweep = reversed ? -angle : angle;
+    // Symmetric: pre-rotate the profile by -angle/2 about the axis so the
+    // sweep straddles the profile plane. Irrelevant at a full revolution, and
+    // `reversed` has no effect on a plane-symmetric sweep.
+    if (symmetric && !full) {
+      gp_Trsf pre;
+      pre.SetRotation(ax, -angle / 2.0);
+      profile = BRepBuilderAPI_Transform(profile, pre, /*Copy=*/true).Shape();
+      sweep = angle;
+    }
+
+    BRepPrimAPI_MakeRevol revol(profile, ax, sweep);
+    if (!revol.IsDone()) {
+      LOG_ERROR("Sketch profile: revolve construction failed");
+      return CADShape();
+    }
+    CADShape out(revol.Shape());
+    // A profile that crosses the axis yields a self-intersecting/degenerate
+    // solid; reject it here rather than pre-checking in UV.
+    if (!out.IsValid() || out.Volume() < 1e-9) {
+      LOG_ERROR("Sketch profile: revolve produced an invalid solid "
+                "(does the profile cross the axis?)");
+      return CADShape();
+    }
+    return out;
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
     return CADShape();

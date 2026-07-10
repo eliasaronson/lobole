@@ -1,6 +1,7 @@
 #include "ui/SketchToolbar.h"
 
 #include "core/ExtrudeFeature.h"
+#include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
 #include "core/SketchSolver.h"
@@ -345,6 +346,35 @@ void DrawSketchToolbar(AppState& state) {
     BeginPreviewFeature(state, std::make_unique<ExtrudeFeature>(
                                    "Extrude " + std::to_string(n), sketchId,
                                    1.0, ExtrudeMode::NewBody));
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Revolve...")) {
+    const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+    const uint64_t sketchId = edit.activeSketchId;
+    // Default the axis to the sketch's sole construction line if it has
+    // exactly one; else the global Y axis. The user can change it in the
+    // preview dialog.
+    AxisRef axis;
+    axis.kind = AxisRef::Kind::Y;
+    uint32_t soleConstructionLine = 0;
+    int constructionLines = 0;
+    for (const auto& e : sketch->entities) {
+      const auto* line = std::get_if<sketch::Line>(&e);
+      if (line != nullptr && line->construction) {
+        soleConstructionLine = line->id;
+        constructionLines++;
+      }
+    }
+    if (constructionLines == 1) {
+      axis.kind = AxisRef::Kind::SketchLine;
+      axis.sketchId = sketchId;
+      axis.entityId = soleConstructionLine;
+    }
+    edit = SketchEditState{};
+    auto rev = std::make_unique<RevolveFeature>(
+        "Revolve " + std::to_string(n), sketchId, 360.0, ExtrudeMode::NewBody);
+    rev->axis = axis;
+    BeginPreviewFeature(state, std::move(rev));
   }
   ImGui::EndDisabled();
 

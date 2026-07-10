@@ -61,6 +61,8 @@ void CreateCylinder(AppState& state);
 // Starts a preview of an offset datum plane (from XY, or from the selected
 // datum if one is selected) — the first of the DatumPlane variants.
 void CreateDatumPlane(AppState& state);
+// Starts a preview of a two-point datum axis (along X by default).
+void CreateDatumAxis(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);
 
@@ -70,7 +72,11 @@ void StartNewSketch(AppState& state);
 // (datums are user reference geometry, so they don't auto-hide behind bodies).
 void AppendDatumPlaneQuads(AppState& state, std::vector<Vertex3D>& quads);
 
-// Draws each visible datum plane's name as a 2D label at a quad corner
+// Appends a line segment for every DatumAxisFeature (same visibility rule as
+// the datum planes), tinted distinctly; selected/pending is brightened.
+void AppendDatumAxisLines(AppState& state, std::vector<Vertex3D>& lines);
+
+// Draws each visible datum plane's and datum axis's name as a 2D label
 // (foreground draw list). Call inside the ImGui frame, near DrawDimensions.
 void DrawDatumLabels(AppState& state);
 

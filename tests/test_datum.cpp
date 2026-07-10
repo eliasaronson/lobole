@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "core/DatumAxisFeature.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/Document.h"
 #include "core/ExtrudeFeature.h"
@@ -273,4 +274,74 @@ TEST_CASE("Datum regeneration is deterministic", "[datum]") {
 
   CHECK_THAT(min1.z, WithinAbs(min2.z, 1e-6f));
   CHECK_THAT(max1.z, WithinAbs(max2.z, 1e-6f));
+}
+
+// --- Datum axes --------------------------------------------------------------
+
+TEST_CASE("DatumAxis global and two-point variants", "[datum]") {
+  Document doc;
+  auto gx = std::make_unique<DatumAxisFeature>("X", DatumAxisKind::GlobalX);
+  doc.AddFeature(std::move(gx));
+  auto* x = dynamic_cast<DatumAxisFeature*>(doc.GetFeature(0));
+  REQUIRE(x != nullptr);
+  CHECK_THAT(x->Direction().x, WithinRel(1.0f, 1e-6f));
+  CHECK(doc.GetBodies().empty()); // contributes no body
+
+  auto tp = std::make_unique<DatumAxisFeature>("Diag",
+                                               DatumAxisKind::TwoPoints);
+  tp->p0 = {1, 2, 3};
+  tp->p1 = {1, 2, 5}; // along +z
+  doc.AddFeature(std::move(tp));
+  auto* diag = dynamic_cast<DatumAxisFeature*>(doc.GetFeature(1));
+  REQUIRE(diag != nullptr);
+  CHECK_THAT(diag->Origin().z, WithinRel(3.0f, 1e-6f));
+  CHECK_THAT(diag->Direction().z, WithinRel(1.0f, 1e-6f));
+}
+
+TEST_CASE("DatumAxis with coincident points fails", "[datum]") {
+  Document doc;
+  auto tp = std::make_unique<DatumAxisFeature>("Bad",
+                                               DatumAxisKind::TwoPoints);
+  tp->p0 = {1, 1, 1};
+  tp->p1 = {1, 1, 1};
+  doc.AddFeature(std::move(tp));
+  CHECK_FALSE(doc.Regenerate());
+}
+
+TEST_CASE("DatumAxis along a sketch line resolves to the line", "[datum]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("Sketch", kXY);
+  const uint32_t lineId = sk->AddEntity(sketch::Line{{0, 0}, {2, 0}});
+  doc.AddFeature(std::move(sk));
+  const uint64_t sketchId = doc.GetFeature(0)->GetId();
+
+  auto ax = std::make_unique<DatumAxisFeature>("Axis",
+                                               DatumAxisKind::SketchLine);
+  ax->sketchId = sketchId;
+  ax->entityId = lineId;
+  doc.AddFeature(std::move(ax));
+  auto* a = dynamic_cast<DatumAxisFeature*>(doc.GetFeature(1));
+  REQUIRE(a != nullptr);
+  // Line runs along +U (world X) on the XY plane.
+  CHECK_THAT(a->Direction().x, WithinRel(1.0f, 1e-5f));
+}
+
+TEST_CASE("DatumAxis round-trips through JSON", "[datum]") {
+  const fs::path path = fs::temp_directory_path() / "designer_axis_test.json";
+  {
+    Document doc;
+    auto ax = std::make_unique<DatumAxisFeature>("Axis",
+                                                 DatumAxisKind::TwoPoints);
+    ax->p0 = {0, 0, 0};
+    ax->p1 = {0, 0, 4};
+    doc.AddFeature(std::move(ax));
+    REQUIRE(DocumentIO::Save(doc, path.string()));
+  }
+  const auto loaded = DocumentIO::Load(path.string());
+  REQUIRE(loaded != nullptr);
+  auto* ax = dynamic_cast<DatumAxisFeature*>(loaded->GetFeature(0));
+  REQUIRE(ax != nullptr);
+  CHECK(ax->kind == DatumAxisKind::TwoPoints);
+  CHECK_THAT(ax->Direction().z, WithinRel(1.0f, 1e-6f));
+  fs::remove(path);
 }

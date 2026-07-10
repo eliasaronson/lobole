@@ -55,6 +55,7 @@ void DrawUI(AppState& state) {
         BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
     BuildSketchOverlay(state, overlay);
     AppendOriginGizmo(overlay); // always show the world origin + axes
+    AppendDatumAxisLines(state, overlay); // user datum axes as line segments
 
     // While editing, draw a grid + subtle fill on the work plane so it's
     // clear what surface the sketch is on.

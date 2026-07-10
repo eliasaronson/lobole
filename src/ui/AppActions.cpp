@@ -10,6 +10,7 @@
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
+#include "core/DatumAxisFeature.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/Feature.h"
 #include "core/SketchFeature.h"
@@ -203,6 +204,14 @@ void CreateDatumPlane(AppState& state) {
   BeginPreviewFeature(state, std::move(dp));
 }
 
+void CreateDatumAxis(AppState& state) {
+  auto ax = std::make_unique<DatumAxisFeature>(NextName(state, "Axis"),
+                                               DatumAxisKind::TwoPoints);
+  ax->p0 = glm::vec3(0.0f);
+  ax->p1 = glm::vec3(3.0f, 0.0f, 0.0f); // along X at scene scale
+  BeginPreviewFeature(state, std::move(ax));
+}
+
 void StartNewSketch(AppState& state) {
   state.sketchEdit = SketchEditState{};
   state.sketchEdit.pickingPlane = true;
@@ -233,19 +242,42 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<Vertex3D>& quads) {
   }
 }
 
+void AppendDatumAxisLines(AppState& state, std::vector<Vertex3D>& lines) {
+  if (!state.document || !DatumPlanesVisible(state))
+    return;
+  const glm::vec3 kAxisTint(0.90f, 0.75f, 0.35f); // brighter amber than planes
+  const float half = 3.0f;                        // half the drawn length
+  for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+    auto* da = dynamic_cast<DatumAxisFeature*>(state.document->GetFeature(i));
+    if (!da)
+      continue;
+    const bool emphasized = da->GetId() == state.pendingFeatureId ||
+                            static_cast<int>(i) == state.selectedFeature;
+    const glm::vec3 c = kAxisTint * (emphasized ? 1.4f : 1.0f);
+    const glm::vec3 o = da->Origin();
+    const glm::vec3 d = da->Direction();
+    lines.push_back(LineVertex(o - d * half, c));
+    lines.push_back(LineVertex(o + d * half, c));
+  }
+}
+
 void DrawDatumLabels(AppState& state) {
   if (!state.document || !DatumPlanesVisible(state))
     return;
   ImDrawList* dl = ImGui::GetForegroundDrawList();
   const ImU32 col = IM_COL32(230, 180, 90, 230);
   for (size_t i = 0; i < state.document->FeatureCount(); i++) {
-    auto* dp = dynamic_cast<DatumPlaneFeature*>(state.document->GetFeature(i));
-    if (!dp)
-      continue;
-    // Label near a corner of the 3-unit quad.
-    glm::vec2 s = SketchUVToScreen(state, dp->OutputPlane(),
-                                   glm::vec2(2.6f, 2.6f));
-    dl->AddText(ImVec2(s.x, s.y), col, dp->GetName().c_str());
+    Feature* f = state.document->GetFeature(i);
+    if (auto* dp = dynamic_cast<DatumPlaneFeature*>(f)) {
+      // Label near a corner of the 3-unit quad.
+      glm::vec2 s = SketchUVToScreen(state, dp->OutputPlane(),
+                                     glm::vec2(2.6f, 2.6f));
+      dl->AddText(ImVec2(s.x, s.y), col, dp->GetName().c_str());
+    } else if (auto* da = dynamic_cast<DatumAxisFeature*>(f)) {
+      const glm::vec3 end = da->Origin() + da->Direction() * 3.0f;
+      glm::vec2 s = WorldToScreen(state, end);
+      dl->AddText(ImVec2(s.x, s.y), col, da->GetName().c_str());
+    }
   }
 }
 

@@ -12,11 +12,12 @@ struct RegenContext;
 // variant) and, later, Revolve (M2). Never references B-Rep edges — that
 // waits for topological naming (M6).
 struct AxisRef {
-  enum class Kind { X, Y, Z, SketchLine };
+  enum class Kind { X, Y, Z, SketchLine, DatumAxis };
 
   Kind kind = Kind::X;
-  uint64_t sketchId = 0;  // SketchLine: owning sketch's feature id
-  uint32_t entityId = 0;  // SketchLine: stable sketch-entity id
+  uint64_t sketchId = 0;     // SketchLine: owning sketch's feature id
+  uint32_t entityId = 0;     // SketchLine: stable sketch-entity id
+  uint64_t datumAxisId = 0;  // DatumAxis: referenced DatumAxisFeature id
 };
 
 // Resolves the axis to a world-space origin + unit direction against the

@@ -1437,15 +1437,18 @@ void DrawConstraintGlyphs(AppState& state) {
   }
 }
 
-glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
-                           glm::vec2 uv) {
-  glm::vec3 world = plane.PlaneToWorld(uv);
+glm::vec2 WorldToScreen(AppState& state, const glm::vec3& world) {
   glm::vec4 clip = state.camera->GetProjectionMatrix() *
                    state.camera->GetViewMatrix() * glm::vec4(world, 1.0f);
   glm::vec3 ndc = glm::vec3(clip) / clip.w;
   return state.viewportPos +
          glm::vec2((ndc.x + 1.0f) * 0.5f * state.viewportSize.x,
                    (ndc.y + 1.0f) * 0.5f * state.viewportSize.y);
+}
+
+glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
+                           glm::vec2 uv) {
+  return WorldToScreen(state, plane.PlaneToWorld(uv));
 }
 
 namespace {

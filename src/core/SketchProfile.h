@@ -43,6 +43,16 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities);
 CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
                     double distance, bool reversed);
 
+// Builds the profile face and revolves it about the given world-space axis
+// (origin + unit direction) through `angleRadians`. `reversed` sweeps the
+// opposite hand; `symmetric` centers the sweep on the profile plane (half the
+// angle each way — ignored at a full revolution and moot when reversed). The
+// axis must lie in the sketch plane and the profile must not cross it; a
+// self-intersecting or degenerate result is rejected (invalid CADShape).
+CADShape BuildRevolve(const SketchPlane& plane, const std::vector<Loop>& loops,
+                      const glm::vec3& axisOrigin, const glm::vec3& axisDir,
+                      double angleRadians, bool reversed, bool symmetric);
+
 // Tessellates one entity into a UV polyline for rendering/preview: Line = 2
 // points, Circle = 33 (closed, 32 segments), Point = empty (rendered as a
 // marker elsewhere).
