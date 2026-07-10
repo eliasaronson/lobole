@@ -2,6 +2,7 @@
 
 #include "CADMaterials.h"
 #include "Camera.h"
+#include "core/BooleanFeature.h"
 #include "core/DatumAxisFeature.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
@@ -10,6 +11,7 @@
 #include "core/RevolveFeature.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
+#include "ui/AppActions.h" // BodyProducers
 
 #include "imgui.h"
 
@@ -312,6 +314,46 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
   }
 }
 
+// Properties widgets for a boolean: the operation plus two operand combos
+// listing the body-producing features earlier in the history.
+void DrawBooleanParams(AppState& state, BooleanFeature& boo, size_t index,
+                       bool commit) {
+  const char* ops[] = {"Union", "Subtract", "Intersect"};
+  int op = static_cast<int>(boo.op);
+  if (ImGui::Combo("Operation", &op, ops, 3)) {
+    nlohmann::json before = DocumentIO::FeatureToJson(boo);
+    boo.op = static_cast<BooleanOp>(op);
+    CommitDiscrete(state, boo, before, index, commit);
+  }
+
+  const auto producers = BodyProducers(*state.document, index);
+  const auto operandCombo = [&](const char* label, uint64_t& operandId) {
+    std::vector<const char*> labels;
+    std::vector<uint64_t> ids;
+    int sel = -1;
+    for (size_t i = 0; i < producers.size(); i++) {
+      labels.push_back(producers[i].second.c_str());
+      ids.push_back(producers[i].first);
+      if (producers[i].first == operandId) {
+        sel = static_cast<int>(i);
+      }
+    }
+    if (ImGui::Combo(label, &sel, labels.data(),
+                     static_cast<int>(labels.size())) &&
+        sel >= 0) {
+      nlohmann::json before = DocumentIO::FeatureToJson(boo);
+      operandId = ids[static_cast<size_t>(sel)];
+      CommitDiscrete(state, boo, before, index, commit);
+    }
+    if (operandId != 0 && sel < 0) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "(missing)");
+    }
+  };
+  operandCombo("Target", boo.targetId);
+  operandCombo("Tool", boo.toolId);
+}
+
 } // namespace
 
 void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
@@ -448,6 +490,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     } else {
       ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch: missing");
     }
+  } else if (auto* boo = dynamic_cast<BooleanFeature*>(&feature)) {
+    DrawBooleanParams(state, *boo, index, commit);
   }
 }
 

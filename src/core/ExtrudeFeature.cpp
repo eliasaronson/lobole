@@ -33,5 +33,6 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  return ApplyBodyMode(ctx.bodies, std::move(prism), mode, m_name, m_material);
+  return ApplyBodyMode(ctx.bodies, std::move(prism), mode, m_name, m_material,
+                       GetId());
 }

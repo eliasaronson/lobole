@@ -81,10 +81,18 @@ thickness), **draft angle**. Blind is easy; **up-to-face / up-to-body** needs a
 face/body ref → the up-to-face variant waits for M6.
 
 ### M4 — Body booleans as features — toponaming-free
-A `BooleanFeature` (union / subtract / intersect) between two bodies by id. The
-kernel ops already exist (`CADShape::Union/Difference/Intersection`); this is
-wiring them as a history feature + a two-body pick UI. Whole-body refs, so
-toponaming-free.
+**Shipped (July 2026).** `BooleanFeature` (union / subtract / intersect) over
+two bodies referenced by their **producing feature's id** — the new
+`Body::createdBy` stamp gives transient bodies a stable identity
+(toponaming-free, whole-body refs). Both operands are consumed into one result
+owned by the boolean, so booleans chain. The kernel ops
+(`CADShape::Union/Difference/Intersection`) already existed; M4 wired body
+identity + the feature + serialization (v14) + an editor with an op combo and
+two operand combos (listing earlier body producers — no viewport body-picking
+yet). Result inherits the target's material. Tests: `test_boolean.cpp`
+(union/subtract/intersect volumes, consume-to-one, missing/degenerate operands,
+boolean-of-boolean chain, round-trip) + a `remote_smoke.py` block. Verified
+in-app: a corner-notch subtract of two boxes.
 
 ### M5 — 3D mirror / pattern (of features/bodies) — toponaming-free
 Mirror a body/feature across a **datum plane**; linear/circular **pattern** of a

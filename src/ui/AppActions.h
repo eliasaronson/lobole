@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 class SketchPlane;
@@ -63,8 +64,16 @@ void CreateCylinder(AppState& state);
 void CreateDatumPlane(AppState& state);
 // Starts a preview of a two-point datum axis (along X by default).
 void CreateDatumAxis(AppState& state);
+// Starts a preview of a boolean combining the two most-recent body producers.
+void CreateBoolean(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);
+
+// The features in [0, beforeIndex) that produce a body (primitives, imports,
+// extrude/revolve in NewBody mode, and earlier booleans), as {featureId,
+// name}. Backs the boolean operand combos and the "Boolean" menu gate.
+std::vector<std::pair<uint64_t, std::string>> BodyProducers(
+    const Document& doc, size_t beforeIndex);
 
 // Appends translucent quads for every DatumPlaneFeature in the document,
 // tinted distinctly from the base planes; the hovered/selected/pending datum

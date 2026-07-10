@@ -14,16 +14,17 @@ bool BoxesOverlap(const glm::vec3& minA, const glm::vec3& maxA,
 } // namespace
 
 bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
-                   const std::string& name, const std::string& material) {
+                   const std::string& name, const std::string& material,
+                   uint64_t ownerId) {
   switch (mode) {
   case ExtrudeMode::NewBody:
-    bodies.push_back({name, std::move(shape), material});
+    bodies.push_back({name, std::move(shape), material, ownerId});
     return true;
 
   case ExtrudeMode::Add: {
     if (bodies.empty()) {
       LOG_WARN("ApplyBodyMode '{}': Add with no bodies, creating one", name);
-      bodies.push_back({name, std::move(shape), material});
+      bodies.push_back({name, std::move(shape), material, ownerId});
       return true;
     }
     // Fuse into the last body whose bbox overlaps the shape, else the last.

@@ -1,6 +1,7 @@
 #include "core/Serialization.h"
 
 #include "Logger.h"
+#include "core/BooleanFeature.h"
 #include "core/DatumAxisFeature.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
@@ -18,7 +19,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 13; // v13: revolve + datum axis (v12: datum planes + plane_ref, v11: parameters/expressions)
+constexpr int kVersion = 14; // v14: booleans (v13: revolve + datum axis, v12: datum planes + plane_ref)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -221,6 +222,22 @@ ExtrudeMode ExtrudeModeFromString(const std::string& s) {
   throw std::runtime_error("Unknown extrude mode: " + s);
 }
 
+const char* BooleanOpToString(BooleanOp op) {
+  switch (op) {
+  case BooleanOp::Union: return "union";
+  case BooleanOp::Subtract: return "subtract";
+  case BooleanOp::Intersect: return "intersect";
+  }
+  return "union";
+}
+
+BooleanOp BooleanOpFromString(const std::string& s) {
+  if (s == "union") return BooleanOp::Union;
+  if (s == "subtract") return BooleanOp::Subtract;
+  if (s == "intersect") return BooleanOp::Intersect;
+  throw std::runtime_error("Unknown boolean op: " + s);
+}
+
 const char* DatumPlaneKindToString(DatumPlaneKind kind) {
   switch (kind) {
   case DatumPlaneKind::Offset: return "offset";
@@ -419,6 +436,10 @@ json FeatureToJson(const Feature& feature) {
     case DatumAxisKind::GlobalZ:
       break; // kind string is sufficient
     }
+  } else if (auto* boo = dynamic_cast<const BooleanFeature*>(&feature)) {
+    j["target_id"] = boo->targetId;
+    j["tool_id"] = boo->toolId;
+    j["op"] = BooleanOpToString(boo->op);
   } else {
     throw std::runtime_error("Unserializable feature type: " +
                              feature.TypeName());
@@ -587,6 +608,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       break;
     }
     out = std::move(da);
+  } else if (type == "Boolean") {
+    out = std::make_unique<BooleanFeature>(
+        name, j.at("target_id").get<uint64_t>(),
+        j.at("tool_id").get<uint64_t>(),
+        BooleanOpFromString(j.value("op", "union")));
   }
 
   if (!out) {

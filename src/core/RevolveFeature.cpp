@@ -58,5 +58,6 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  return ApplyBodyMode(ctx.bodies, std::move(solid), mode, m_name, m_material);
+  return ApplyBodyMode(ctx.bodies, std::move(solid), mode, m_name, m_material,
+                       GetId());
 }

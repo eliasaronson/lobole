@@ -16,6 +16,12 @@ struct Body {
   std::string name;
   CADShape shape;
   std::string material;
+  // Stable id of the feature that *created* this body (a primitive, or an
+  // extrude/revolve in NewBody mode). Add/Cut modify a body without changing
+  // it, so it survives fusing. Transient like the shape — stamped every
+  // regeneration; lets features reference a whole body by its producer
+  // (BooleanFeature). 0 = unstamped.
+  uint64_t createdBy = 0;
 };
 
 class Feature;

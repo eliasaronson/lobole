@@ -284,6 +284,29 @@ def main():
         vol = d.call("get_state")["bodies"][0]["volume"]
         expect(abs(vol - 24 * math.pi) < 0.1, "revolve about a datum axis")
 
+        # Boolean: two overlapping boxes combined into one body. Box A [0,2]^3,
+        # box B [1,3]x[0,2]^2; overlap = 4, each volume 8.
+        d.call("new_project")
+        ba = d.call("add_feature", feature={
+            "type": "Box", "name": "A", "position": [0, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        bb = d.call("add_feature", feature={
+            "type": "Box", "name": "B", "position": [1, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        expect(len(d.call("get_state")["bodies"]) == 2, "two boxes")
+        boo = d.call("add_feature", feature={
+            "type": "Boolean", "name": "Cut", "op": "subtract",
+            "target_id": ba["id"], "tool_id": bb["id"]})
+        st = d.call("get_state")
+        expect(len(st["bodies"]) == 1, "boolean consumes both into one body")
+        expect(abs(st["bodies"][0]["volume"] - 4.0) < 1e-4, "subtract = 8 - 4")
+        # Switch the op to union via modify_feature -> volume 12.
+        d.call("modify_feature", index=2, feature={
+            "type": "Boolean", "name": "Cut", "op": "union",
+            "target_id": ba["id"], "tool_id": bb["id"], "id": boo["id"]})
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - 12.0) < 1e-4, "union = 8 + 8 - 4")
+
         # Ellipse round-trips through JSON and extrudes to an elliptic prism.
         d.call("new_project")
         ske = d.call("add_feature", feature={

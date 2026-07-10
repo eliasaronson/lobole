@@ -10,9 +10,12 @@
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
+#include "core/BooleanFeature.h"
 #include "core/DatumAxisFeature.h"
 #include "core/DatumPlaneFeature.h"
+#include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
 #include "ui/PreviewFeature.h"
@@ -210,6 +213,55 @@ void CreateDatumAxis(AppState& state) {
   ax->p0 = glm::vec3(0.0f);
   ax->p1 = glm::vec3(3.0f, 0.0f, 0.0f); // along X at scene scale
   BeginPreviewFeature(state, std::move(ax));
+}
+
+namespace {
+// Does this feature create a body (vs. modify or produce none)?
+bool ProducesBody(const Feature& f) {
+  if (dynamic_cast<const BoxFeature*>(&f) ||
+      dynamic_cast<const SphereFeature*>(&f) ||
+      dynamic_cast<const CylinderFeature*>(&f) ||
+      dynamic_cast<const ImportFeature*>(&f) ||
+      dynamic_cast<const BooleanFeature*>(&f)) {
+    return true;
+  }
+  if (auto* e = dynamic_cast<const ExtrudeFeature*>(&f)) {
+    return e->mode == ExtrudeMode::NewBody;
+  }
+  if (auto* r = dynamic_cast<const RevolveFeature*>(&f)) {
+    return r->mode == ExtrudeMode::NewBody;
+  }
+  return false;
+}
+} // namespace
+
+std::vector<std::pair<uint64_t, std::string>> BodyProducers(const Document& doc,
+                                                            size_t beforeIndex) {
+  std::vector<std::pair<uint64_t, std::string>> out;
+  const auto& features = doc.GetFeatures();
+  for (size_t i = 0; i < beforeIndex && i < features.size(); i++) {
+    if (ProducesBody(*features[i])) {
+      out.emplace_back(features[i]->GetId(), features[i]->GetName());
+    }
+  }
+  return out;
+}
+
+void CreateBoolean(AppState& state) {
+  if (!state.document) {
+    return;
+  }
+  auto producers = BodyProducers(*state.document, state.document->FeatureCount());
+  if (producers.size() < 2) {
+    return; // the menu gates this, but guard anyway
+  }
+  // Default: the two most-recent producers, older as Target so subtract reads
+  // as "the earlier body minus the newer one".
+  const uint64_t tool = producers.back().first;
+  const uint64_t target = producers[producers.size() - 2].first;
+  BeginPreviewFeature(state, std::make_unique<BooleanFeature>(
+                                 NextName(state, "Boolean"), target, tool,
+                                 BooleanOp::Union));
 }
 
 void StartNewSketch(AppState& state) {

@@ -170,6 +170,7 @@ set(core_sources
     src/core/BodyMode.cpp
     src/core/RevolveFeature.cpp
     src/core/DatumAxisFeature.cpp
+    src/core/BooleanFeature.cpp
     src/core/SketchSolver.cpp
 )
 
