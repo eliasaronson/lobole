@@ -21,6 +21,7 @@ class OutlineRenderer;
 class RayTracingRenderer;
 class SketchRenderer;
 class FaceSelector;
+class IBLTextures;
 struct GLFWwindow;
 
 namespace ui {
@@ -147,6 +148,26 @@ struct SketchDragSession {
   size_t featureIndex = 0;              // sketch index for the commit
 };
 
+// Drives an offline path-traced still across UI frames (one sample batch per
+// frame) so the Render modal can show progress and stay cancellable. main.cpp
+// owns the pump; the toolbar modal reads/writes the request + result fields.
+struct RenderJob {
+  bool active = false;        // a render is in flight
+  bool started = false;       // BeginStill has run (internal)
+  bool cancel = false;        // set by the UI to abort
+  uint32_t width = 1280;
+  uint32_t height = 720;
+  uint32_t totalSamples = 128;
+  uint32_t done = 0;          // samples traced so far
+  uint32_t seed = 1;
+  std::string outPath;
+  // Result (valid once !active after having been started)
+  bool finished = false;      // a render completed (success or failure)
+  bool success = false;
+  std::string error;
+  std::string resultPath;
+};
+
 // All state the UI reads and writes, replacing main.cpp's globals. The
 // document and undo stack are owned here (they are swapped by File > New /
 // Open); everything else is a non-owning pointer to objects whose lifetime
@@ -164,6 +185,7 @@ struct AppState {
   RayTracingRenderer* rayTracer = nullptr;
   SketchRenderer* sketchRenderer = nullptr;
   FaceSelector* faceSelector = nullptr;
+  IBLTextures* ibl = nullptr;
   GLFWwindow* window = nullptr;
 
   // UI state
@@ -188,6 +210,9 @@ struct AppState {
   // Document -> renderer sync bookkeeping
   uint64_t syncedDocumentVersion = 0;
   std::vector<DocumentRenderMesh> documentMeshes;
+
+  // Offline render (Render toolbar button); pumped by main.cpp.
+  RenderJob renderJob;
 
 #ifndef HAVE_NATIVEFILEDIALOG
   // Fallback file-browser state

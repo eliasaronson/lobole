@@ -28,6 +28,54 @@ def expect(condition, message):
         raise AssertionError(message)
 
 
+def is_black(png_path):
+    """True if the decoded 8-bit RGB PNG has no meaningfully lit pixel."""
+    import struct
+    import zlib
+    with open(png_path, "rb") as f:
+        data = f.read()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return True
+    pos, width, height, idat = 8, 0, 0, b""
+    while pos < len(data):
+        length = struct.unpack(">I", data[pos:pos + 4])[0]
+        ctype = data[pos + 4:pos + 8]
+        chunk = data[pos + 8:pos + 8 + length]
+        if ctype == b"IHDR":
+            width, height = struct.unpack(">II", chunk[:8])
+        elif ctype == b"IDAT":
+            idat += chunk
+        elif ctype == b"IEND":
+            break
+        pos += 12 + length
+    raw = zlib.decompress(idat)
+    stride = width * 3
+    prev = bytearray(stride)
+    p = 0
+    for _ in range(height):
+        filt = raw[p]; p += 1
+        line = bytearray(raw[p:p + stride]); p += stride
+        for i in range(stride):
+            a = line[i - 3] if i >= 3 else 0
+            b = prev[i]
+            c = prev[i - 3] if i >= 3 else 0
+            if filt == 1:
+                line[i] = (line[i] + a) & 255
+            elif filt == 2:
+                line[i] = (line[i] + b) & 255
+            elif filt == 3:
+                line[i] = (line[i] + ((a + b) >> 1)) & 255
+            elif filt == 4:
+                pp = a + b - c
+                pa, pb, pc = abs(pp - a), abs(pp - b), abs(pp - c)
+                pr = a if (pa <= pb and pa <= pc) else (b if pb <= pc else c)
+                line[i] = (line[i] + pr) & 255
+        if any(v > 8 for v in line):
+            return False
+        prev = line
+    return True
+
+
 def main():
     binary = sys.argv[1]
     port = free_port()
@@ -365,6 +413,29 @@ def main():
         d.call("screenshot", path=shot)
         expect(os.path.exists(shot) and os.path.getsize(shot) > 1000,
                "screenshot written")
+
+        # Offline raytraced still: build a body, render small + deterministic.
+        # Skipped gracefully if the GPU has no ray tracing.
+        d.call("new_project")
+        d.call("add_feature", feature=BOX)
+        rb = d.call("rt_build")
+        if rb.get("ok") and rb.get("has_tlas"):
+            still = os.path.join(tmp, "still.png")
+            r = d.call("render_still", width=96, height=72, samples=8, seed=1,
+                       path=still)
+            expect(r["ok"], "render_still ok: " + str(r.get("error")))
+            expect(os.path.exists(still) and os.path.getsize(still) > 200,
+                   "render_still wrote a png")
+            expect(not is_black(still), "render_still png is not all black")
+            # Same seed + samples => byte-identical (deterministic accumulation).
+            still2 = os.path.join(tmp, "still2.png")
+            d.call("render_still", width=96, height=72, samples=8, seed=1,
+                   path=still2)
+            with open(still, "rb") as a, open(still2, "rb") as b:
+                expect(a.read() == b.read(),
+                       "render_still is deterministic for a fixed seed")
+        else:
+            print("remote_smoke: ray tracing unavailable, skipping render_still")
 
         # Error handling
         try:

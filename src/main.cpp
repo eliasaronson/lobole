@@ -1024,6 +1024,7 @@ int main(int argc, char **argv) {
   g_App.sketchRenderer = g_SketchRenderer.get();
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
+  g_App.ibl = g_IBLTextures.get();
 
   // Load startup file if specified
   if (!args.fileToLoad.empty()) {
@@ -1118,6 +1119,10 @@ int main(int argc, char **argv) {
 
     // Mirror document changes (edits, undo, redo) into the renderers
     ui::SyncDocumentRenderers(g_App);
+
+    // Advance an in-flight offline render by one sample batch (the Render modal
+    // shows progress; runs on the main thread with its own one-shot submits).
+    ui::PumpRenderJob(g_App);
 
     // Start ImGui frame
     ImGui_ImplVulkan_NewFrame();

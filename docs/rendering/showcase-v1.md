@@ -140,13 +140,16 @@ GPU-compute prefiltering remains a later optimization.
 - Tests: validation-clean; gui_smoke green; the money shot: chrome + brushed
   steel + black plastic side by side via the remote screenshot.
 
-## Phase R4 — Offline render button (RT still) (~4–6 days) — PLANNED
+## Phase R4 — Offline render button (RT still) (~4–6 days) — SHIPPED
 
-Finish the scaffold into a KeyShot-style "Render" button; the raster viewport is
-untouched. **Detailed, code-grounded plan: [r4-offline-render.md](r4-offline-render.md)**
-(R4.0 ground truth → R4.1 geometry upload → R4.2 BLAS/TLAS → R4.3 descriptors +
-`rgba32f` accumulation image → R4.4 trace/accumulate → R4.5 button + `render_still`
-RPC).
+A KeyShot-style "Render" button that path-traces an on-demand still (real R1
+materials, soft shadows, AO, R3 IBL environment reflections) into an offscreen
+`rgba32f` image and writes a PNG; the raster viewport is untouched. Driven by a
+toolbar modal (resolution / samples / progress / cancel) and mirrored as a
+`render_still` RPC. **0 VUIDs, all 168 tests green. Detailed writeup:
+[r4-offline-render.md](r4-offline-render.md)** (R4.0 ground truth → R4.1 geometry
+upload → R4.2 BLAS/TLAS → R4.3 descriptors + `rgba32f` accumulation → R4.4
+trace/accumulate + shader rewrite → R4.5 button + `render_still` RPC).
 
 Prerequisites already met by R1–R3 + the validation pass: Vulkan 1.2 / SBT
 device-address / extension-dep VUIDs fixed (0 VUIDs at startup, `1b9c7f4`);

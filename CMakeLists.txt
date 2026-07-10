@@ -302,7 +302,7 @@ endfunction()
 function(compile_rt_shader TARGET SHADER_SOURCE SHADER_OUTPUT)
     add_custom_command(
         OUTPUT ${SHADER_OUTPUT}
-        COMMAND ${GLSLC} --target-spv=spv1.4 ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
+        COMMAND ${GLSLC} --target-env=vulkan1.2 ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
         DEPENDS ${SHADER_SOURCE}
         COMMENT "Compiling RT shader ${SHADER_SOURCE}"
     )

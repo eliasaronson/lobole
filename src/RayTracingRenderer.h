@@ -39,6 +39,24 @@ struct RTMaterial {
     float transmission;
 };
 
+// Everything an offline still render needs from the app: output size, camera,
+// and the shared IBL maps (same environment as the raster viewport, so both
+// agree on lighting).
+struct RTStillDesc {
+    uint32_t width = 0;
+    uint32_t height = 0;
+    glm::mat4 view{1.0f};
+    glm::mat4 proj{1.0f};
+    glm::vec3 cameraPos{0.0f};
+    VkImageView irradiance = VK_NULL_HANDLE;
+    VkImageView prefilter = VK_NULL_HANDLE;
+    VkImageView brdfLut = VK_NULL_HANDLE;
+    VkSampler envSampler = VK_NULL_HANDLE;
+    VkSampler lutSampler = VK_NULL_HANDLE;
+    uint32_t prefilterMips = 1;
+    uint32_t seed = 0; // RNG seed; fixed seed -> deterministic image
+};
+
 class RayTracingRenderer {
 public:
     RayTracingRenderer();
@@ -80,6 +98,24 @@ public:
                const glm::mat4& view, const glm::mat4& projection,
                const glm::vec3& cameraPos);
 
+    // ---- Offline still render (R4.3-R4.5) ----
+    // On-demand path-traced still into an offscreen rgba32f image, accumulated
+    // over N samples and read back to a PNG. Independent of the raster viewport.
+    // Requires acceleration structures already built (BuildAccelerationStructures).
+    //   BeginStill  -> create the output image, UBO, per-body SSBOs, descriptor
+    //                  set, and clear the accumulation buffer.
+    //   RenderBatch -> dispatch `samplesInBatch` traces (one command buffer,
+    //                  submit + wait); call repeatedly until firstSample reaches
+    //                  the total. Cheap to batch for progress/cancel.
+    //   ReadbackStill -> divide by totalSamples, ACES tonemap + gamma, write PNG.
+    //   EndStill    -> free the per-render resources.
+    bool BeginStill(const RTStillDesc& desc);
+    bool RenderBatch(uint32_t firstSample, uint32_t samplesInBatch);
+    bool ReadbackStill(uint32_t totalSamples, const std::string& pngPath,
+                       std::string* error = nullptr);
+    void EndStill();
+    bool IsStillActive() const { return m_stillActive; }
+
     // Settings
     void SetRenderMode(bool useRayTracing) { m_useRayTracing = useRayTracing; }
     bool GetRenderMode() const { return m_useRayTracing; }
@@ -107,6 +143,14 @@ private:
     bool CreateRTPipeline();
     bool CreateRTDescriptorSets();
     bool CreateShaderBindingTable();
+
+    // Still-render helpers
+    void DestroyStillResources();
+    void TransitionImage(VkCommandBuffer cb, VkImage image,
+                         VkImageLayout oldLayout, VkImageLayout newLayout,
+                         VkPipelineStageFlags srcStage,
+                         VkPipelineStageFlags dstStage,
+                         VkAccessFlags srcAccess, VkAccessFlags dstAccess);
 
     // Acceleration structure helpers
     bool CreateBottomLevelAS();
@@ -159,7 +203,22 @@ private:
 
     // RT properties
     VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{};
-    
+
+    // ---- Offline still-render resources (live between BeginStill/EndStill) ----
+    bool m_stillActive = false;
+    uint32_t m_stillWidth = 0;
+    uint32_t m_stillHeight = 0;
+    uint32_t m_stillSeed = 0;
+    VkImage m_stillImage = VK_NULL_HANDLE;          // rgba32f accumulation
+    VkDeviceMemory m_stillImageMemory = VK_NULL_HANDLE;
+    VkImageView m_stillImageView = VK_NULL_HANDLE;
+    VkBuffer m_stillUBO = VK_NULL_HANDLE;           // camera + light UBO
+    VkDeviceMemory m_stillUBOMemory = VK_NULL_HANDLE;
+    VkBuffer m_stillGeomInfo = VK_NULL_HANDLE;      // GeometryInfo[] SSBO
+    VkDeviceMemory m_stillGeomInfoMemory = VK_NULL_HANDLE;
+    VkBuffer m_stillMaterials = VK_NULL_HANDLE;     // RTMaterial[] SSBO
+    VkDeviceMemory m_stillMaterialsMemory = VK_NULL_HANDLE;
+
     // Settings
     bool m_isInitialized = false;
     bool m_useRayTracing = true;

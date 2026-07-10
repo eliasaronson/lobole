@@ -264,6 +264,22 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
              state.rayTracer ? state.rayTracer->GeometryCount() : 0},
             {"has_tlas", state.rayTracer && state.rayTracer->HasTLAS()}};
   }
+  if (m == "render_still") {
+    // Offline path-traced still to a PNG. Runs synchronously on the main thread
+    // (ProcessPending) using the same idle-queue one-shot submits as the AS
+    // build, so it needs no swapchain interaction. Parameters default to a
+    // small deterministic render for smoke tests.
+    uint32_t width = p.value("width", 640u);
+    uint32_t height = p.value("height", 480u);
+    uint32_t samples = p.value("samples", 64u);
+    uint32_t seed = p.value("seed", 1u);
+    std::string path = p.value("path", std::string("render.png"));
+    std::string error;
+    bool ok = ui::RenderStillBlocking(state, width, height, samples, path, seed,
+                                      &error);
+    return {{"ok", ok},        {"path", path},   {"width", width},
+            {"height", height}, {"samples", samples}, {"error", error}};
+  }
   if (m == "select_feature") {
     // Select a feature by index (-1 clears). Drives the same selection the
     // feature tree sets, so the Properties panel shows/edits it.

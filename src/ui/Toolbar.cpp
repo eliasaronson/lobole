@@ -1,5 +1,6 @@
 #include "ui/Toolbar.h"
 
+#include "RayTracingRenderer.h"
 #include "core/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
@@ -8,9 +9,97 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
+#include <cfloat>
+
 namespace ui {
 
 namespace {
+
+// The offline-render dialog: resolution + sample count, a live progress bar
+// while a render is in flight, and the last result. Opened by the toolbar's
+// Render button; the actual tracing is pumped by main.cpp (PumpRenderJob).
+void DrawRenderModal(AppState& state) {
+  struct Res {
+    const char* label;
+    uint32_t w, h;
+  };
+  static const Res kRes[] = {{"1280 x 720", 1280, 720},
+                             {"1920 x 1080", 1920, 1080},
+                             {"960 x 540", 960, 540},
+                             {"640 x 480", 640, 480}};
+  static int resIdx = 0;
+  static int samples = 128;
+
+  ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Render Still", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+
+  RenderJob& job = state.renderJob;
+
+  if (job.active) {
+    float frac = job.totalSamples
+                     ? static_cast<float>(job.done) /
+                           static_cast<float>(job.totalSamples)
+                     : 0.0f;
+    ImGui::Text("Rendering %u x %u ...", job.width, job.height);
+    ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0));
+    ImGui::Text("%u / %u samples", job.done, job.totalSamples);
+    ImGui::Spacing();
+    if (ImGui::Button("Cancel", ImVec2(120, 0)))
+      job.cancel = true;
+  } else {
+    if (job.finished) {
+      if (job.success)
+        ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.45f, 1.0f), "%s Saved: %s",
+                           ICON_FA_CIRCLE_CHECK, job.resultPath.c_str());
+      else
+        ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "Failed: %s",
+                           job.error.c_str());
+      ImGui::Separator();
+    }
+
+    ImGui::TextUnformatted("Resolution");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::BeginCombo("##res", kRes[resIdx].label)) {
+      for (int i = 0; i < IM_ARRAYSIZE(kRes); ++i)
+        if (ImGui::Selectable(kRes[i].label, i == resIdx))
+          resIdx = i;
+      ImGui::EndCombo();
+    }
+    ImGui::TextUnformatted("Samples");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::SliderInt("##spp", &samples, 16, 1024);
+
+    const bool hasBodies =
+        state.document && !state.document->GetBodies().empty();
+    const bool rtReady =
+        state.rayTracer && state.rayTracer->IsInitialized();
+    const bool canRender = hasBodies && rtReady;
+
+    ImGui::Spacing();
+    ImGui::BeginDisabled(!canRender);
+    if (ImGui::Button(ICON_FA_CAMERA " Render", ImVec2(150, 0))) {
+      job = RenderJob{};
+      job.active = true;
+      job.width = kRes[resIdx].w;
+      job.height = kRes[resIdx].h;
+      job.totalSamples = static_cast<uint32_t>(samples);
+      job.seed = 1;
+      job.outPath = "render.png";
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Close", ImVec2(120, 0)))
+      ImGui::CloseCurrentPopup();
+
+    if (!rtReady)
+      ImGui::TextDisabled("Ray tracing not available on this GPU.");
+    else if (!hasBodies)
+      ImGui::TextDisabled("Add a body to render.");
+  }
+  ImGui::EndPopup();
+}
 
 // An icon button with a tooltip. Returns true when clicked.
 bool ToolButton(const char* icon, const char* tooltip, bool enabled = true) {
@@ -53,6 +142,15 @@ void DrawModelToolbar(AppState& state) {
     FitCameraToDocument(state);
   if (ToolButton(ICON_FA_TABLE_CELLS, "Toggle planes (Shift+P)", hasDoc))
     state.showPlanes = !state.showPlanes;
+
+  Divider();
+
+  // Offline path-traced still (KeyShot-style). Opens the render dialog.
+  const bool rtReady = state.rayTracer && state.rayTracer->IsInitialized();
+  if (ToolButton(ICON_FA_CAMERA, "Render (offline raytrace)",
+                 hasDoc && rtReady))
+    ImGui::OpenPopup("Render Still");
+  DrawRenderModal(state);
 
   ImGui::NewLine();
 }

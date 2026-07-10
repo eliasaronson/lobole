@@ -1,10 +1,14 @@
 #include "RayTracingRenderer.h"
 #include "MeshRenderer.h"
+#include "thirdparty/stb_image_write.h" // declarations only; impl lives in Screenshot.cpp
+#include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
 #include <algorithm>
+#include <cmath>
+#include <vector>
 #include <filesystem>
 #include <unistd.h>
 #include <climits>
@@ -128,7 +132,11 @@ void RayTracingRenderer::Shutdown() {
     
     // Wait for device to finish
     vkDeviceWaitIdle(m_device);
-    
+
+    // Cleanup any in-flight offline-render resources
+    DestroyStillResources();
+    m_stillActive = false;
+
     // Cleanup acceleration structures
     if (m_rtFunctions.vkDestroyAccelerationStructureKHR) {
         if (m_bottomLevelAS.handle != VK_NULL_HANDLE) {
@@ -230,36 +238,53 @@ bool RayTracingRenderer::CheckRTProperties() {
 bool RayTracingRenderer::CreateRTPipeline() {
     std::cout << "Ray Tracing: Creating RT pipeline..." << std::endl;
     
-    // Create descriptor set layout
+    // Create descriptor set layout. Bindings are shared by the whole offline
+    // pipeline; per-body vertex/index data is reached through buffer-reference
+    // addresses in the GeometryInfo SSBO (binding 3), not per-body descriptors.
+    const VkShaderStageFlags allRT = VK_SHADER_STAGE_RAYGEN_BIT_KHR |
+                                     VK_SHADER_STAGE_MISS_BIT_KHR |
+                                     VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     std::vector<VkDescriptorSetLayoutBinding> bindings = {
-        // Acceleration structure
+        // 0: TLAS
         {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
-        // Output image
+        // 1: rgba32f accumulation image
         {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR, nullptr},
-        // Uniform buffer
-        {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
-        // Vertex buffer
+        // 2: camera + light UBO
+        {2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, allRT, nullptr},
+        // 3: GeometryInfo[] (per-body vertex/index addresses + material index)
         {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
-        // Index buffer
-        {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr}
+        // 4: RTMaterial[]
+        {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
+        // 5/6/7: IBL irradiance / prefilter / BRDF LUT
+        {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR, nullptr},
+        {6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR, nullptr},
+        {7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr}
     };
-    
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
     layoutInfo.pBindings = bindings.data();
-    
+
     if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_rtDescriptorSetLayout) != VK_SUCCESS) {
         std::cerr << "Ray Tracing: Failed to create descriptor set layout" << std::endl;
         return false;
     }
-    
-    // Create pipeline layout
+
+    // Create pipeline layout. Push constant carries the per-sample RNG seed data
+    // to the raygen stage (sampleIndex + frameSeed).
+    VkPushConstantRange pushRange{};
+    pushRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    pushRange.offset = 0;
+    pushRange.size = 2 * sizeof(uint32_t); // {uint sampleIndex; uint frameSeed;}
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &m_rtDescriptorSetLayout;
-    
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_rtPipelineLayout) != VK_SUCCESS) {
         std::cerr << "Ray Tracing: Failed to create pipeline layout" << std::endl;
         return false;
@@ -330,7 +355,9 @@ bool RayTracingRenderer::CreateRTPipeline() {
 }
 
 bool RayTracingRenderer::CreateRTDescriptorSets() {
-    std::cout << "Ray Tracing: RT Descriptor sets creation - placeholder" << std::endl;
+    // The offline pipeline allocates its descriptor pool + set per render in
+    // BeginStill (the set binds render-sized, per-scene resources), so there is
+    // nothing to create at init time. Kept for the Initialize() call sequence.
     return true;
 }
 
@@ -528,6 +555,421 @@ void RayTracingRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentF
     
     // Placeholder for RT rendering
     // std::cout << "Ray Tracing: Rendering frame " << currentFrame << std::endl;
+}
+
+// ---- Offline still render -----------------------------------------------
+
+namespace {
+// std430/glm mirror of the closest-hit GeometryInfo. The two device addresses
+// become buffer_reference values (8 bytes each) on the GPU. Explicit padding to
+// 32 bytes so the SSBO stride is unambiguous on both sides.
+struct GeometryInfoGPU {
+    VkDeviceAddress vertexAddress;
+    VkDeviceAddress indexAddress;
+    uint32_t materialIndex;
+    uint32_t pad0;
+    uint32_t pad1;
+    uint32_t pad2;
+};
+
+// Camera + light UBO, matching the layout declared in the RT shaders.
+struct RTUniforms {
+    glm::mat4 viewInverse;
+    glm::mat4 projInverse;
+    glm::vec4 viewPos;
+    glm::vec4 lightDir;     // xyz = travel direction, w = intensity
+    glm::vec4 lightColor;   // rgb = color, w unused
+    glm::vec4 ambientColor;
+    glm::vec4 params;       // x = prefilter mip count
+};
+
+glm::vec3 ACESFilm(const glm::vec3& x) {
+    const float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
+    glm::vec3 num = x * (a * x + b);
+    glm::vec3 den = x * (c * x + d) + e;
+    return glm::clamp(num / den, glm::vec3(0.0f), glm::vec3(1.0f));
+}
+} // namespace
+
+void RayTracingRenderer::TransitionImage(
+    VkCommandBuffer cb, VkImage image, VkImageLayout oldLayout,
+    VkImageLayout newLayout, VkPipelineStageFlags srcStage,
+    VkPipelineStageFlags dstStage, VkAccessFlags srcAccess,
+    VkAccessFlags dstAccess) {
+    VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = srcAccess;
+    barrier.dstAccessMask = dstAccess;
+    vkCmdPipelineBarrier(cb, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1,
+                         &barrier);
+}
+
+bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
+    if (!m_isInitialized || !m_useRayTracing) {
+        std::cerr << "Ray Tracing: BeginStill with no RT support" << std::endl;
+        return false;
+    }
+    if (m_topLevelAS.handle == VK_NULL_HANDLE || m_geometries.empty()) {
+        std::cerr << "Ray Tracing: BeginStill with no acceleration structures"
+                  << std::endl;
+        return false;
+    }
+    if (m_stillActive) EndStill();
+
+    m_stillWidth = desc.width;
+    m_stillHeight = desc.height;
+    m_stillSeed = desc.seed;
+
+    // --- Accumulation image (rgba32f, storage + transfer src for readback) ---
+    VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    imgInfo.imageType = VK_IMAGE_TYPE_2D;
+    imgInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    imgInfo.extent = {desc.width, desc.height, 1};
+    imgInfo.mipLevels = 1;
+    imgInfo.arrayLayers = 1;
+    imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imgInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT |
+                    VK_IMAGE_USAGE_TRANSFER_SRC_BIT | // readback
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT;  // clear-to-zero
+    imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (vkCreateImage(m_device, &imgInfo, nullptr, &m_stillImage) != VK_SUCCESS) {
+        std::cerr << "Ray Tracing: failed to create still image" << std::endl;
+        return false;
+    }
+    VkMemoryRequirements memReq{};
+    vkGetImageMemoryRequirements(m_device, m_stillImage, &memReq);
+    VkMemoryAllocateInfo memAlloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    memAlloc.allocationSize = memReq.size;
+    memAlloc.memoryTypeIndex =
+        FindMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vkAllocateMemory(m_device, &memAlloc, nullptr, &m_stillImageMemory);
+    vkBindImageMemory(m_device, m_stillImage, m_stillImageMemory, 0);
+
+    VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    viewInfo.image = m_stillImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.layerCount = 1;
+    vkCreateImageView(m_device, &viewInfo, nullptr, &m_stillImageView);
+
+    // --- Camera + light UBO ---
+    RTUniforms u{};
+    u.viewInverse = glm::inverse(desc.view);
+    u.projInverse = glm::inverse(desc.proj);
+    u.viewPos = glm::vec4(desc.cameraPos, 1.0f);
+    // Match the raster primary key light: direction *toward* the light is
+    // normalize(1, 1.5, 1); store the travel direction (negated) so the shader
+    // recovers the toward-light vector as -lightDir.
+    glm::vec3 toLight = glm::normalize(glm::vec3(1.0f, 1.5f, 1.0f));
+    u.lightDir = glm::vec4(-toLight, 1.8f);
+    u.lightColor = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f);
+    u.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 1.0f);
+    u.params = glm::vec4(static_cast<float>(desc.prefilterMips), 0, 0, 0);
+
+    const VkMemoryPropertyFlags hostVisible =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    m_stillUBO = CreateBuffer(sizeof(RTUniforms),
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, hostVisible,
+                              m_stillUBOMemory);
+    void* ubomap = nullptr;
+    vkMapMemory(m_device, m_stillUBOMemory, 0, sizeof(RTUniforms), 0, &ubomap);
+    memcpy(ubomap, &u, sizeof(RTUniforms));
+    vkUnmapMemory(m_device, m_stillUBOMemory);
+
+    // --- GeometryInfo[] SSBO (per-body buffer addresses + material index) ---
+    std::vector<GeometryInfoGPU> geomInfos;
+    geomInfos.reserve(m_geometries.size());
+    for (const auto& g : m_geometries) {
+        GeometryInfoGPU gi{};
+        gi.vertexAddress = g->vertexAddress;
+        gi.indexAddress = g->indexAddress;
+        gi.materialIndex = g->materialIndex;
+        geomInfos.push_back(gi);
+    }
+    VkDeviceSize geomSize = geomInfos.size() * sizeof(GeometryInfoGPU);
+    m_stillGeomInfo = CreateBuffer(geomSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                   hostVisible, m_stillGeomInfoMemory);
+    void* gmap = nullptr;
+    vkMapMemory(m_device, m_stillGeomInfoMemory, 0, geomSize, 0, &gmap);
+    memcpy(gmap, geomInfos.data(), static_cast<size_t>(geomSize));
+    vkUnmapMemory(m_device, m_stillGeomInfoMemory);
+
+    // --- RTMaterial[] SSBO (std430 stride == sizeof(RTMaterial) == 48) ---
+    std::vector<RTMaterial> mats = m_materials;
+    if (mats.empty()) {
+        RTMaterial def{};
+        def.baseColor = glm::vec3(0.8f);
+        def.metallic = 0.1f;
+        def.roughness = 0.5f;
+        def.specular = glm::vec3(0.5f);
+        mats.push_back(def);
+    }
+    VkDeviceSize matSize = mats.size() * sizeof(RTMaterial);
+    m_stillMaterials = CreateBuffer(matSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                    hostVisible, m_stillMaterialsMemory);
+    void* mmap = nullptr;
+    vkMapMemory(m_device, m_stillMaterialsMemory, 0, matSize, 0, &mmap);
+    memcpy(mmap, mats.data(), static_cast<size_t>(matSize));
+    vkUnmapMemory(m_device, m_stillMaterialsMemory);
+
+    // --- Descriptor pool + set ---
+    std::vector<VkDescriptorPoolSize> poolSizes = {
+        {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1},
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3},
+    };
+    VkDescriptorPoolCreateInfo poolInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
+    poolInfo.pPoolSizes = poolSizes.data();
+    if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr,
+                               &m_rtDescriptorPool) != VK_SUCCESS) {
+        std::cerr << "Ray Tracing: failed to create descriptor pool" << std::endl;
+        EndStill();
+        return false;
+    }
+    VkDescriptorSetAllocateInfo setAlloc{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    setAlloc.descriptorPool = m_rtDescriptorPool;
+    setAlloc.descriptorSetCount = 1;
+    setAlloc.pSetLayouts = &m_rtDescriptorSetLayout;
+    if (vkAllocateDescriptorSets(m_device, &setAlloc, &m_rtDescriptorSet) !=
+        VK_SUCCESS) {
+        std::cerr << "Ray Tracing: failed to allocate descriptor set" << std::endl;
+        EndStill();
+        return false;
+    }
+
+    // --- Descriptor writes ---
+    VkWriteDescriptorSetAccelerationStructureKHR asWrite{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    asWrite.accelerationStructureCount = 1;
+    asWrite.pAccelerationStructures = &m_topLevelAS.handle;
+
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = m_stillImageView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    VkDescriptorBufferInfo uboInfo{m_stillUBO, 0, sizeof(RTUniforms)};
+    VkDescriptorBufferInfo geomBufInfo{m_stillGeomInfo, 0, geomSize};
+    VkDescriptorBufferInfo matBufInfo{m_stillMaterials, 0, matSize};
+
+    VkDescriptorImageInfo irr{desc.envSampler, desc.irradiance,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo pre{desc.envSampler, desc.prefilter,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo brdf{desc.lutSampler, desc.brdfLut,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+
+    std::vector<VkWriteDescriptorSet> writes(8,
+        {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET});
+    for (auto& w : writes) w.dstSet = m_rtDescriptorSet, w.descriptorCount = 1;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    writes[0].pNext = &asWrite;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writes[1].pImageInfo = &imageInfo;
+    writes[2].dstBinding = 2;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[2].pBufferInfo = &uboInfo;
+    writes[3].dstBinding = 3;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[3].pBufferInfo = &geomBufInfo;
+    writes[4].dstBinding = 4;
+    writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[4].pBufferInfo = &matBufInfo;
+    writes[5].dstBinding = 5;
+    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[5].pImageInfo = &irr;
+    writes[6].dstBinding = 6;
+    writes[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[6].pImageInfo = &pre;
+    writes[7].dstBinding = 7;
+    writes[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[7].pImageInfo = &brdf;
+    vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()),
+                           writes.data(), 0, nullptr);
+
+    // --- Clear the accumulation image to zero, leave it in GENERAL ---
+    VkCommandBuffer cb = BeginSingleTimeCommands();
+    TransitionImage(cb, m_stillImage, VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                    VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkClearColorValue clear{};
+    clear.float32[0] = clear.float32[1] = clear.float32[2] = clear.float32[3] = 0.0f;
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cb, m_stillImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                         &clear, 1, &range);
+    TransitionImage(cb, m_stillImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    EndSingleTimeCommands(cb);
+
+    m_stillActive = true;
+    std::cout << "Ray Tracing: BeginStill " << desc.width << "x" << desc.height
+              << " over " << m_geometries.size() << " bodies" << std::endl;
+    return true;
+}
+
+bool RayTracingRenderer::RenderBatch(uint32_t firstSample,
+                                     uint32_t samplesInBatch) {
+    if (!m_stillActive) return false;
+
+    VkCommandBuffer cb = BeginSingleTimeCommands();
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipeline);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                            m_rtPipelineLayout, 0, 1, &m_rtDescriptorSet, 0,
+                            nullptr);
+
+    for (uint32_t s = 0; s < samplesInBatch; ++s) {
+        uint32_t push[2] = {firstSample + s, m_stillSeed};
+        vkCmdPushConstants(cb, m_rtPipelineLayout,
+                           VK_SHADER_STAGE_RAYGEN_BIT_KHR, 0, sizeof(push),
+                           push);
+        m_rtFunctions.vkCmdTraceRaysKHR(cb, &m_raygenSBT, &m_missSBT, &m_hitSBT,
+                                        &m_callableSBT, m_stillWidth,
+                                        m_stillHeight, 1);
+        // The accumulation image is read-modify-written each sample: serialize
+        // consecutive dispatches so sample s+1 sees sample s's writes.
+        if (s + 1 < samplesInBatch) {
+            VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+            barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = m_stillImage;
+            barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            barrier.dstAccessMask =
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdPipelineBarrier(cb,
+                                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0,
+                                 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+    }
+    EndSingleTimeCommands(cb);
+    return true;
+}
+
+bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
+                                       const std::string& pngPath,
+                                       std::string* error) {
+    if (!m_stillActive) {
+        if (error) *error = "no active still render";
+        return false;
+    }
+    if (totalSamples == 0) totalSamples = 1;
+
+    const VkDeviceSize pixelBytes = 16; // rgba32f
+    VkDeviceSize bufSize =
+        static_cast<VkDeviceSize>(m_stillWidth) * m_stillHeight * pixelBytes;
+    VkDeviceMemory readMem = VK_NULL_HANDLE;
+    VkBuffer readBuf = CreateBuffer(
+        bufSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        readMem);
+
+    VkCommandBuffer cb = BeginSingleTimeCommands();
+    TransitionImage(cb, m_stillImage, VK_IMAGE_LAYOUT_GENERAL,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+                    VK_ACCESS_TRANSFER_READ_BIT);
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {m_stillWidth, m_stillHeight, 1};
+    vkCmdCopyImageToBuffer(cb, m_stillImage,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readBuf, 1,
+                           &copy);
+    EndSingleTimeCommands(cb);
+
+    void* mapped = nullptr;
+    vkMapMemory(m_device, readMem, 0, bufSize, 0, &mapped);
+    const float* src = static_cast<const float*>(mapped);
+    std::vector<uint8_t> rgb(static_cast<size_t>(m_stillWidth) * m_stillHeight *
+                             3);
+    const float invN = 1.0f / static_cast<float>(totalSamples);
+    for (size_t i = 0; i < static_cast<size_t>(m_stillWidth) * m_stillHeight;
+         ++i) {
+        glm::vec3 c(src[i * 4 + 0], src[i * 4 + 1], src[i * 4 + 2]);
+        c *= invN;                       // average the accumulated samples
+        c = ACESFilm(c);                 // filmic tonemap
+        c = glm::pow(c, glm::vec3(1.0f / 2.2f)); // gamma to sRGB
+        rgb[i * 3 + 0] = static_cast<uint8_t>(glm::clamp(c.r, 0.0f, 1.0f) * 255.0f + 0.5f);
+        rgb[i * 3 + 1] = static_cast<uint8_t>(glm::clamp(c.g, 0.0f, 1.0f) * 255.0f + 0.5f);
+        rgb[i * 3 + 2] = static_cast<uint8_t>(glm::clamp(c.b, 0.0f, 1.0f) * 255.0f + 0.5f);
+    }
+    vkUnmapMemory(m_device, readMem);
+    vkDestroyBuffer(m_device, readBuf, nullptr);
+    vkFreeMemory(m_device, readMem, nullptr);
+
+    int ok = stbi_write_png(pngPath.c_str(), static_cast<int>(m_stillWidth),
+                            static_cast<int>(m_stillHeight), 3, rgb.data(),
+                            static_cast<int>(m_stillWidth) * 3);
+    if (!ok) {
+        if (error) *error = "stbi_write_png failed for " + pngPath;
+        return false;
+    }
+    std::cout << "Ray Tracing: wrote still " << pngPath << " (" << totalSamples
+              << " spp)" << std::endl;
+    return true;
+}
+
+void RayTracingRenderer::DestroyStillResources() {
+    if (m_device == VK_NULL_HANDLE) return;
+    if (m_rtDescriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(m_device, m_rtDescriptorPool, nullptr);
+        m_rtDescriptorPool = VK_NULL_HANDLE;
+        m_rtDescriptorSet = VK_NULL_HANDLE; // freed with the pool
+    }
+    if (m_stillImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(m_device, m_stillImageView, nullptr);
+        m_stillImageView = VK_NULL_HANDLE;
+    }
+    if (m_stillImage != VK_NULL_HANDLE) {
+        vkDestroyImage(m_device, m_stillImage, nullptr);
+        vkFreeMemory(m_device, m_stillImageMemory, nullptr);
+        m_stillImage = VK_NULL_HANDLE;
+        m_stillImageMemory = VK_NULL_HANDLE;
+    }
+    auto freeBuf = [&](VkBuffer& b, VkDeviceMemory& m) {
+        if (b != VK_NULL_HANDLE) {
+            vkDestroyBuffer(m_device, b, nullptr);
+            vkFreeMemory(m_device, m, nullptr);
+            b = VK_NULL_HANDLE;
+            m = VK_NULL_HANDLE;
+        }
+    };
+    freeBuf(m_stillUBO, m_stillUBOMemory);
+    freeBuf(m_stillGeomInfo, m_stillGeomInfoMemory);
+    freeBuf(m_stillMaterials, m_stillMaterialsMemory);
+}
+
+void RayTracingRenderer::EndStill() {
+    if (m_device != VK_NULL_HANDLE) vkDeviceWaitIdle(m_device);
+    DestroyStillResources();
+    m_stillActive = false;
 }
 
 // Utility functions

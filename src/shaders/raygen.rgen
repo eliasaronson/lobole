@@ -2,7 +2,7 @@
 #extension GL_EXT_ray_tracing : require
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 1, set = 0, rgba8) uniform image2D image;
+layout(binding = 1, set = 0, rgba32f) uniform image2D image;
 
 layout(binding = 2, set = 0) uniform UniformBufferObject {
     mat4 viewInverse;
@@ -11,24 +11,57 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 lightDir;
     vec4 lightColor;
     vec4 ambientColor;
+    vec4 params;      // x = prefilter mip count
 } ubo;
 
-layout(location = 0) rayPayloadEXT vec3 hitValue;
+// Per-sample RNG seed data (raygen only).
+layout(push_constant) uniform PushConstants {
+    uint sampleIndex;
+    uint frameSeed;
+} pc;
+
+// Radiance + RNG state threaded through the hit shaders (soft shadows / AO
+// consume the same stream so batches don't correlate).
+struct RayPayload {
+    vec3 radiance;
+    uint rngState;
+};
+layout(location = 0) rayPayloadEXT RayPayload payload;
+
+uint pcgHash(uint v) {
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
 
 void main() {
-    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
-    const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
+    // Seed from BOTH pixel and sample: pixel-only seeding never decorrelates and
+    // the accumulation would not converge with sample count.
+    uint pixelIndex = gl_LaunchIDEXT.y * gl_LaunchSizeEXT.x + gl_LaunchIDEXT.x;
+    payload.rngState =
+        pcgHash(pixelIndex) ^ pcgHash(pc.sampleIndex ^ (pc.frameSeed * 9781u));
+
+    // Sub-pixel jitter (uniform over the pixel) gives free anti-aliasing as
+    // samples accumulate.
+    payload.rngState = payload.rngState * 747796405u + 2891336453u;
+    float jx = float((payload.rngState >> 8) & 0xFFFFu) / 65536.0;
+    payload.rngState = payload.rngState * 747796405u + 2891336453u;
+    float jy = float((payload.rngState >> 8) & 0xFFFFu) / 65536.0;
+
+    const vec2 pixel = vec2(gl_LaunchIDEXT.xy) + vec2(jx, jy);
+    const vec2 inUV = pixel / vec2(gl_LaunchSizeEXT.xy);
     vec2 d = inUV * 2.0 - 1.0;
 
-    vec4 origin = ubo.viewInverse * vec4(0,0,0,1);
+    vec4 origin = ubo.viewInverse * vec4(0, 0, 0, 1);
     vec4 target = ubo.projInverse * vec4(d.x, d.y, 1, 1);
-    vec4 direction = ubo.viewInverse*vec4(normalize(target.xyz), 0);
+    vec4 direction = ubo.viewInverse * vec4(normalize(target.xyz), 0);
 
-    uint rayFlags = gl_RayFlagsOpaqueEXT;
-    float tMin = 0.001;
-    float tMax = 10000.0;
+    payload.radiance = vec3(0.0);
+    traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xff, 0, 0, 0, origin.xyz,
+                0.001, direction.xyz, 10000.0, 0);
 
-    traceRayEXT(topLevelAS, rayFlags, 0xff, 0, 0, 0, origin.xyz, tMin, direction.xyz, tMax, 0);
-
-    imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
+    // Accumulate (sum); the CPU divides by the sample count on readback.
+    vec3 prev = imageLoad(image, ivec2(gl_LaunchIDEXT.xy)).rgb;
+    imageStore(image, ivec2(gl_LaunchIDEXT.xy),
+               vec4(prev + payload.radiance, 1.0));
 }

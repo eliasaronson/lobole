@@ -43,6 +43,14 @@ public:
     const glm::mat4& GetProjectionMatrix() const { return m_projectionMatrix; }
     glm::mat4 GetViewProjectionMatrix() const { return m_projectionMatrix * m_viewMatrix; }
 
+    // Projection for an arbitrary output aspect (offline render targets aren't
+    // tied to the viewport), with the same Vulkan Y flip as UpdateProjectionMatrix.
+    glm::mat4 GetProjectionMatrixForAspect(float aspect) const {
+        glm::mat4 proj = glm::perspective(glm::radians(m_fov), aspect, m_nearPlane, m_farPlane);
+        proj[1][1] *= -1.0f;
+        return proj;
+    }
+
     // Camera vectors (derived from the orientation quaternion, always orthonormal)
     glm::vec3 GetPosition() const { return m_pivot - GetForward() * m_distance; }
     glm::vec3 GetTarget() const { return m_pivot; }

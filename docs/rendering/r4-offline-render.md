@@ -50,12 +50,32 @@ The `RayTracingRenderer` scaffold is ~40% real:
   audited sound; `AddGeometry` uploads real vertex/index buffers; **real
   BLAS-per-body + TLAS build works** (`SyncRayTracingScene` + `rt_build` RPC →
   `has_tlas=true`, **0 VUIDs**). The highest-risk piece (AS build) is done.
-- **Remaining**: R4.3 descriptors + `rgba32f` output image, R4.4 trace/
-  accumulate + shader rewrite, R4.5 the button + `render_still` RPC. Note the
-  descriptor architecture needs revisiting for N bodies — the scaffold's
-  layout has a single vertex/index binding; use buffer arrays (or a combined
-  buffer + per-instance offsets) so the closest-hit shader can fetch attributes
-  for the hit body via `gl_InstanceCustomIndexEXT`.
+- **R4.3–R4.5 SHIPPED**: full offline path-traced still, **0 VUIDs**, all 168
+  tests green.
+  - **N-body attributes without descriptor arrays**: an 8-binding set (TLAS,
+    `rgba32f` accumulation image, camera/light UBO, `GeometryInfo[]` SSBO,
+    `RTMaterial[]` SSBO, 3 IBL samplers) + a raygen push constant
+    (`sampleIndex`, `frameSeed`). The closest-hit reaches each body's
+    vertex/index data by **`GL_EXT_buffer_reference2` addresses** stored in
+    `GeometryInfo[gl_InstanceCustomIndexEXT]` — `std430` `float[]`/`uint[]`
+    references (stride 4) match the 9-float `Vertex3D` exactly, so no
+    `scalarBlockLayout`/`shaderInt64` (neither is enabled). Needed
+    `--target-env=vulkan1.2` for `glslc` (was `--target-spv=spv1.4`).
+  - **Still API** on `RayTracingRenderer`: `BeginStill` (output image + UBO +
+    SSBOs + descriptor set + clear) / `RenderBatch` (N traces per one-shot
+    submit, accumulate into `rgba32f`) / `ReadbackStill` (÷N, ACES, gamma → PNG
+    via `Screenshot.cpp`'s stb tail) / `EndStill`. Raygen jitters + PCG-seeds
+    per (pixel, sample); closest-hit does direct key light + **soft shadow**
+    (cone-jittered), **1-ray AO**, and split-sum **IBL** ambient sharing the
+    raster maps; miss samples the environment (prefilter mip 0).
+  - **UI + RPC**: a Render toolbar button opens a modal (resolution, samples,
+    progress bar, Cancel); `AppState::renderJob` is pumped one batch/frame by
+    `PumpRenderJob` in the main loop. The `render_still(width,height,samples,
+    seed,path)` RPC runs the blocking variant (`RenderStillBlocking`) on the
+    main thread. Fixed seed + sample count ⇒ byte-identical PNG.
+  - **Fixed en route**: the scaffold shadow ray (`isShadowed` was never
+    initialized to `true`; `sbtRecordOffset` was `1`, past the 1-entry hit
+    region) → now `true` + offset `0`, miss index `1`.
 
 ## Milestones
 

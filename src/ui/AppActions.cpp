@@ -3,6 +3,7 @@
 #include "CADMaterials.h"
 #include "CADMeshConverter.h"
 #include "Camera.h"
+#include "IBLTextures.h"
 #include "RayTracingRenderer.h"
 #include "FaceSelector.h"
 #include "Logger.h"
@@ -14,6 +15,7 @@
 #include "core/SketchProfile.h"
 #include "ui/PreviewFeature.h"
 
+#include <algorithm>
 #include <cfloat>
 #include <filesystem>
 #include <cmath>
@@ -318,6 +320,133 @@ bool SyncRayTracingScene(AppState& state) {
   if (state.rayTracer->GeometryCount() == 0)
     return false;
   return state.rayTracer->BuildAccelerationStructures();
+}
+
+RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
+                          uint32_t seed) {
+  RTStillDesc desc;
+  desc.width = width;
+  desc.height = height;
+  desc.seed = seed;
+  if (state.camera) {
+    const float aspect =
+        height > 0 ? static_cast<float>(width) / static_cast<float>(height)
+                   : 1.0f;
+    desc.view = state.camera->GetViewMatrix();
+    desc.proj = state.camera->GetProjectionMatrixForAspect(aspect);
+    desc.cameraPos = state.camera->GetPosition();
+  }
+  if (state.ibl) {
+    desc.irradiance = state.ibl->IrradianceView();
+    desc.prefilter = state.ibl->PrefilterView();
+    desc.brdfLut = state.ibl->BrdfLutView();
+    desc.envSampler = state.ibl->EnvSampler();
+    desc.lutSampler = state.ibl->LutSampler();
+    desc.prefilterMips = state.ibl->PrefilterMips();
+  }
+  return desc;
+}
+
+bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
+                         uint32_t samples, const std::string& path,
+                         uint32_t seed, std::string* error) {
+  auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (!state.rayTracer || !state.rayTracer->IsInitialized())
+    return fail("ray tracing not available");
+  if (!SyncRayTracingScene(state))
+    return fail("no geometry to render");
+  if (samples == 0)
+    samples = 1;
+
+  RTStillDesc desc = MakeStillDesc(state, width, height, seed);
+  if (!desc.irradiance)
+    return fail("IBL maps unavailable");
+  if (!state.rayTracer->BeginStill(desc))
+    return fail("BeginStill failed");
+
+  // Trace in batches so a single command buffer never runs unbounded (TDR
+  // safety); the RPC path just loops them back to back.
+  const uint32_t kBatch = 32;
+  for (uint32_t s = 0; s < samples; s += kBatch) {
+    uint32_t n = std::min(kBatch, samples - s);
+    if (!state.rayTracer->RenderBatch(s, n)) {
+      state.rayTracer->EndStill();
+      return fail("RenderBatch failed");
+    }
+  }
+
+  std::string rbError;
+  bool ok = state.rayTracer->ReadbackStill(samples, path, &rbError);
+  state.rayTracer->EndStill();
+  if (!ok)
+    return fail(rbError.empty() ? "readback failed" : rbError);
+  return true;
+}
+
+void PumpRenderJob(AppState& state) {
+  RenderJob& job = state.renderJob;
+  if (!job.active)
+    return;
+
+  auto finish = [&](bool ok, const std::string& err) {
+    if (state.rayTracer && job.started)
+      state.rayTracer->EndStill();
+    job.active = false;
+    job.started = false;
+    job.finished = true;
+    job.success = ok;
+    job.error = ok ? std::string() : err;
+    job.resultPath = ok ? job.outPath : std::string();
+  };
+
+  if (!state.rayTracer || !state.rayTracer->IsInitialized()) {
+    finish(false, "ray tracing unavailable");
+    return;
+  }
+  if (job.cancel) {
+    finish(false, "cancelled");
+    return;
+  }
+
+  if (!job.started) {
+    // First frame of the job: build the scene + acceleration structures and set
+    // up the still. Spread over its own frame so the modal shows immediately.
+    if (!SyncRayTracingScene(state)) {
+      finish(false, "no geometry to render");
+      return;
+    }
+    RTStillDesc desc = MakeStillDesc(state, job.width, job.height, job.seed);
+    if (!desc.irradiance) {
+      finish(false, "IBL maps unavailable");
+      return;
+    }
+    if (!state.rayTracer->BeginStill(desc)) {
+      finish(false, "BeginStill failed");
+      return;
+    }
+    job.started = true;
+    job.done = 0;
+    return;
+  }
+
+  if (job.done < job.totalSamples) {
+    uint32_t n = std::min<uint32_t>(32, job.totalSamples - job.done);
+    if (!state.rayTracer->RenderBatch(job.done, n)) {
+      finish(false, "RenderBatch failed");
+      return;
+    }
+    job.done += n;
+    return;
+  }
+
+  // All samples traced: tonemap + write the PNG, then finish.
+  std::string err;
+  bool ok = state.rayTracer->ReadbackStill(job.totalSamples, job.outPath, &err);
+  finish(ok, err.empty() ? "readback failed" : err);
 }
 
 std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,
