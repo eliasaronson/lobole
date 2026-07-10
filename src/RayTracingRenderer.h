@@ -16,6 +16,13 @@ struct RTAccelerationStructure {
     VkDeviceAddress deviceAddress = 0;
 };
 
+// Per-geometry behavior flags (must match closesthit.rchit).
+enum RTGeometryFlags : uint32_t {
+    // Shadow catcher: shows the environment darkened by shadow/AO instead of a
+    // shaded surface — the ground plane under offline renders.
+    RT_GEOM_SHADOW_CATCHER = 1u << 0,
+};
+
 struct RTGeometry {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
@@ -26,6 +33,7 @@ struct RTGeometry {
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
     uint32_t materialIndex = 0;
+    uint32_t flags = 0; // RTGeometryFlags, forwarded to the closest-hit shader
     // Per-geometry bottom-level AS (built in R4.2).
     RTAccelerationStructure blas;
 };
@@ -48,6 +56,7 @@ struct RTStillDesc {
     glm::mat4 view{1.0f};
     glm::mat4 proj{1.0f};
     glm::vec3 cameraPos{0.0f};
+    VkImageView environment = VK_NULL_HANDLE; // full-res HDR (background)
     VkImageView irradiance = VK_NULL_HANDLE;
     VkImageView prefilter = VK_NULL_HANDLE;
     VkImageView brdfLut = VK_NULL_HANDLE;
@@ -73,9 +82,9 @@ public:
     bool IsInitialized() const { return m_isInitialized; }
 
     // Geometry management
-    uint32_t AddGeometry(const std::vector<Vertex3D>& vertices, 
+    uint32_t AddGeometry(const std::vector<Vertex3D>& vertices,
                         const std::vector<uint32_t>& indices,
-                        uint32_t materialIndex = 0);
+                        uint32_t materialIndex = 0, uint32_t flags = 0);
     void UpdateGeometry(uint32_t geometryId, const std::vector<Vertex3D>& vertices,
                        const std::vector<uint32_t>& indices);
     void RemoveGeometry(uint32_t geometryId);

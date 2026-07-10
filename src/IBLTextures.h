@@ -21,6 +21,7 @@ public:
   void Shutdown(VkDevice device);
 
   bool IsReady() const { return m_ready; }
+  VkImageView EnvironmentView() const { return m_environment.view; }
   VkImageView IrradianceView() const { return m_irradiance.view; }
   VkImageView PrefilterView() const { return m_prefilter.view; }
   VkImageView BrdfLutView() const { return m_brdf.view; }
@@ -36,6 +37,7 @@ private:
   };
 
   bool m_ready = false;
+  Tex m_environment; // full-res source HDR (background / sharp reflections)
   Tex m_irradiance;
   Tex m_prefilter;
   Tex m_brdf;

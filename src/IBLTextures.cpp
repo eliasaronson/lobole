@@ -206,6 +206,14 @@ bool IBLTextures::Upload(VkDevice device, VkPhysicalDevice physicalDevice,
   m_commandPool = commandPool;
   if (!CreateSamplers()) return false;
 
+  std::vector<MipSrc> env = {
+      {ibl.Environment().width, ibl.Environment().height,
+       &ibl.Environment().pixels}};
+  if (!UploadImage(device, physicalDevice, queue, commandPool,
+                   VK_FORMAT_R16G16B16A16_SFLOAT, 4, env, m_environment.image,
+                   m_environment.memory, m_environment.view))
+    return false;
+
   std::vector<MipSrc> one = {
       {ibl.Irradiance().width, ibl.Irradiance().height, &ibl.Irradiance().pixels}};
   if (!UploadImage(device, physicalDevice, queue, commandPool,
@@ -250,6 +258,9 @@ bool IBLTextures::MakeFallback(VkDevice device, VkPhysicalDevice physicalDevice,
   m_prefilterMips = 1;
   bool ok =
       UploadImage(device, physicalDevice, queue, commandPool,
+                  VK_FORMAT_R16G16B16A16_SFLOAT, 4, g, m_environment.image,
+                  m_environment.memory, m_environment.view) &&
+      UploadImage(device, physicalDevice, queue, commandPool,
                   VK_FORMAT_R16G16B16A16_SFLOAT, 4, g, m_irradiance.image,
                   m_irradiance.memory, m_irradiance.view) &&
       UploadImage(device, physicalDevice, queue, commandPool,
@@ -270,6 +281,7 @@ void IBLTextures::Shutdown(VkDevice device) {
     if (t.memory) vkFreeMemory(device, t.memory, nullptr);
     t = {};
   };
+  drop(m_environment);
   drop(m_irradiance);
   drop(m_prefilter);
   drop(m_brdf);

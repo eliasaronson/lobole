@@ -29,6 +29,7 @@ void DrawRenderModal(AppState& state) {
                              {"640 x 480", 640, 480}};
   static int resIdx = 0;
   static int samples = 128;
+  static bool ground = true;
 
   ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal("Render Still", nullptr,
@@ -70,6 +71,9 @@ void DrawRenderModal(AppState& state) {
     ImGui::TextUnformatted("Samples");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::SliderInt("##spp", &samples, 16, 1024);
+    ImGui::Checkbox("Ground shadows", &ground);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Catch soft shadows on an invisible floor plane");
 
     const bool hasBodies =
         state.document && !state.document->GetBodies().empty();
@@ -86,6 +90,7 @@ void DrawRenderModal(AppState& state) {
       job.height = kRes[resIdx].h;
       job.totalSamples = static_cast<uint32_t>(samples);
       job.seed = 1;
+      job.groundPlane = ground;
       job.outPath = "render.png";
     }
     ImGui::EndDisabled();

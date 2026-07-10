@@ -295,15 +295,18 @@ bool IBLPrecompute::Build(const std::string& hdrPath,
     std::string base =
         slash == std::string::npos ? hdrPath : hdrPath.substr(slash + 1);
     cachePath = cacheDir + "/" + base + ".iblcache";
-    if (LoadCache(cachePath)) return true;
   }
 
+  // The full-res source is needed downstream too (offline-render background /
+  // sharp reflections), so load it even on a cache hit — the cache only skips
+  // the convolution.
   if (!LoadHDR(hdrPath)) return false;
+  if (!cachePath.empty() && LoadCache(cachePath)) return true;
+
   LOG_INFO("IBL: precomputing irradiance / prefilter / BRDF (one-time)...");
   ComputeIrradiance();
   ComputePrefilter();
   ComputeBRDF();
-  m_env = {}; // free the source; only the derived maps are needed downstream
   if (!cachePath.empty()) SaveCache(cachePath);
   return true;
 }

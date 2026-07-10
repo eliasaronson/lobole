@@ -30,6 +30,7 @@ public:
   // cache.
   bool Build(const std::string& hdrPath, const std::string& cacheDir);
 
+  const Image& Environment() const { return m_env; } // full-res source HDR
   const Image& Irradiance() const { return m_irradiance; }
   const std::vector<Image>& Prefilter() const { return m_prefilter; } // mip 0..N-1
   const Image& BrdfLut() const { return m_brdf; }

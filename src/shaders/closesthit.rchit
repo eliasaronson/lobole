@@ -29,13 +29,16 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer FloatBuf { float f[]; };
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer UintBuf { uint u[]; };
 
+// Geometry behavior flags (must match RTGeometryFlags in RayTracingRenderer.h).
+const uint kFlagShadowCatcher = 1u;
+
 struct GeometryInfo {
     FloatBuf verts;
     UintBuf inds;
     uint materialIndex;
+    uint flags;
     uint pad0;
     uint pad1;
-    uint pad2;
 };
 layout(binding = 3, set = 0, std430) readonly buffer GeometryInfos {
     GeometryInfo geoms[];
@@ -57,6 +60,7 @@ layout(binding = 4, set = 0, std430) readonly buffer Materials {
 layout(binding = 5, set = 0) uniform sampler2D uIrradiance;
 layout(binding = 6, set = 0) uniform sampler2D uPrefilter;
 layout(binding = 7, set = 0) uniform sampler2D uBrdfLut;
+layout(binding = 8, set = 0) uniform sampler2D uEnvironment; // full-res HDRI
 
 struct Vertex {
     vec3 pos;
@@ -65,6 +69,8 @@ struct Vertex {
 };
 
 const float PI = 3.14159265359;
+const float kSunCos = 0.9994; // shadow-ray cone, ~2 degree half-angle
+const float kAORadius = 2.0;  // ambient-occlusion ray reach
 
 // Must match IBL.cpp DirToEquirectUV / mesh.frag dirToUV exactly.
 vec2 dirToUV(vec3 d) {
@@ -170,6 +176,24 @@ void main() {
     vec3 V = normalize(ubo.viewPos.xyz - worldPos);
     if (dot(N, V) < 0.0) N = -N;
 
+    // ---- Shadow catcher (the ground plane): show the environment as if the
+    // ray had missed, darkened by key-light shadow + contact occlusion. Keeps
+    // the backdrop photographic while giving bodies something to sit on. ----
+    if ((g.flags & kFlagShadowCatcher) != 0u) {
+        vec3 dir = normalize(gl_WorldRayDirectionEXT);
+        vec3 env = textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
+        vec3 Lc = normalize(-ubo.lightDir.xyz);
+        vec3 Lcs = coneSample(Lc, kSunCos, payload.rngState);
+        float sun = traceOcclusion(worldPos + N * 0.001, Lcs, 10000.0) ? 0.0 : 1.0;
+        vec3 aoDir = cosineSample(N, payload.rngState);
+        float ao = traceOcclusion(worldPos + N * 0.001, aoDir, kAORadius) ? 0.0 : 1.0;
+        const float kShadowStrength = 0.55; // how dark the umbra gets
+        const float kAOStrength = 0.35;     // extra contact darkening
+        float shade = mix(1.0, sun, kShadowStrength) * mix(1.0, ao, kAOStrength);
+        payload.radiance = env * shade;
+        return;
+    }
+
     Material mat = materials[g.materialIndex];
     float roughness = clamp(mat.roughness, 0.03, 1.0);
 
@@ -177,7 +201,6 @@ void main() {
     vec3 L = normalize(-ubo.lightDir.xyz);
     vec3 lightColor = ubo.lightColor.rgb * ubo.lightDir.w;
     // Jitter the shadow ray in a small cone -> penumbrae as samples accumulate.
-    const float kSunCos = 0.9994; // ~2 degree half-angle
     vec3 Ls = coneSample(L, kSunCos, payload.rngState);
     float shadow = traceOcclusion(worldPos + N * 0.001, Ls, 10000.0) ? 0.0 : 1.0;
     vec3 direct = directLight(N, V, L, lightColor, mat, roughness) * shadow;
@@ -194,11 +217,16 @@ void main() {
 
     float maxLod = max(ubo.params.x - 1.0, 0.0);
     vec3 prefiltered = textureLod(uPrefilter, dirToUV(R), roughness * maxLod).rgb;
+    // Near-mirror surfaces reflect the full-res environment instead of the
+    // low-res prefilter base, so chrome shows a crisp room.
+    float sharp = 1.0 - smoothstep(0.0, 0.15, roughness);
+    if (sharp > 0.0)
+        prefiltered = mix(prefiltered,
+                          textureLod(uEnvironment, dirToUV(R), 0.0).rgb, sharp);
     vec2 envBRDF = texture(uBrdfLut, vec2(NdotV, roughness)).rg;
     vec3 specularIBL = prefiltered * (F * envBRDF.x + envBRDF.y);
 
     // ---- Ambient occlusion: one cosine-hemisphere ray, local radius ----
-    const float kAORadius = 2.0;
     vec3 aoDir = cosineSample(N, payload.rngState);
     float ao = traceOcclusion(worldPos + N * 0.001, aoDir, kAORadius) ? 0.0 : 1.0;
 

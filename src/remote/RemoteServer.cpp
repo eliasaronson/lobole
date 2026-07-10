@@ -274,9 +274,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     uint32_t samples = p.value("samples", 64u);
     uint32_t seed = p.value("seed", 1u);
     std::string path = p.value("path", std::string("render.png"));
+    bool ground = p.value("ground", true); // shadow-catcher plane
     std::string error;
     bool ok = ui::RenderStillBlocking(state, width, height, samples, path, seed,
-                                      &error);
+                                      ground, &error);
     return {{"ok", ok},        {"path", path},   {"width", width},
             {"height", height}, {"samples", samples}, {"error", error}};
   }

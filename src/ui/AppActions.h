@@ -26,8 +26,9 @@ void SyncDocumentRenderers(AppState& state);
 
 // Mirrors the current document bodies into the ray tracer (geometry + materials)
 // and (re)builds its acceleration structures. On-demand for the offline render;
-// returns false if RT is unavailable or there's no geometry.
-bool SyncRayTracingScene(AppState& state);
+// returns false if RT is unavailable or there's no geometry. `groundPlane`
+// adds a shadow-catcher quad under the scene (offline renders only).
+bool SyncRayTracingScene(AppState& state, bool groundPlane = false);
 
 // Builds the offline-render descriptor from the current app state (camera +
 // shared IBL maps) for a `width`x`height` still with the given RNG seed.
@@ -41,7 +42,7 @@ bool SyncRayTracingScene(AppState& state);
 // given (scene, samples, seed) is reproducible.
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
-                         uint32_t seed, std::string* error);
+                         uint32_t seed, bool groundPlane, std::string* error);
 
 // Advances an active AppState::renderJob by one sample batch per call (the
 // non-blocking counterpart of RenderStillBlocking). Call once per UI frame on

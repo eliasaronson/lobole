@@ -17,9 +17,9 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     vec4 params;      // x = prefilter mip count
 } ubo;
 
-// Sharpest prefiltered environment mip == the studio environment itself, so the
-// background and mirror reflections show the real HDRI.
-layout(binding = 6, set = 0) uniform sampler2D uPrefilter;
+// Full-resolution source HDRI (the prefilter chain's base mip is only 128x64,
+// which upscales to a mushy background).
+layout(binding = 8, set = 0) uniform sampler2D uEnvironment;
 
 const float PI = 3.14159265359;
 vec2 dirToUV(vec3 d) {
@@ -31,5 +31,5 @@ vec2 dirToUV(vec3 d) {
 
 void main() {
     vec3 dir = normalize(gl_WorldRayDirectionEXT);
-    payload.radiance = textureLod(uPrefilter, dirToUV(dir), 0.0).rgb;
+    payload.radiance = textureLod(uEnvironment, dirToUV(dir), 0.0).rgb;
 }

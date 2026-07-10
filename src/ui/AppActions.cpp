@@ -344,13 +344,14 @@ void SyncDocumentRenderers(AppState& state) {
            state.document->FeatureCount(), state.document->GetBodies().size());
 }
 
-bool SyncRayTracingScene(AppState& state) {
+bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   if (!state.rayTracer || !state.rayTracer->IsInitialized() || !state.document)
     return false;
 
   state.rayTracer->ClearGeometry();
   state.rayTracer->ClearMaterials();
 
+  glm::vec3 bbMin(FLT_MAX), bbMax(-FLT_MAX);
   for (const auto& body : state.document->GetBodies()) {
     CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
     if (cadMesh.vertices.empty())
@@ -373,11 +374,36 @@ bool SyncRayTracingScene(AppState& state) {
 
     std::vector<Vertex3D> vertices =
         CADMeshConverter::ConvertCADMeshToVertices(cadMesh, mat.baseColor);
+    for (const Vertex3D& v : vertices) {
+      bbMin = glm::min(bbMin, v.position);
+      bbMax = glm::max(bbMax, v.position);
+    }
     state.rayTracer->AddGeometry(vertices, cadMesh.indices, matId);
   }
 
   if (state.rayTracer->GeometryCount() == 0)
     return false;
+
+  // Shadow-catcher ground plane: a large quad just under the scene so soft
+  // shadows and AO have a surface to land on. The closest-hit shader renders it
+  // as the environment darkened by occlusion, so the backdrop stays the HDRI.
+  if (groundPlane) {
+    const glm::vec3 center = 0.5f * (bbMin + bbMax);
+    const float diag = glm::length(bbMax - bbMin);
+    const float half = 10.0f * diag;             // covers every camera angle
+    const float y = bbMin.y - 0.001f * diag;     // just below: no coplanar fizz
+    const glm::vec3 n(0.0f, 1.0f, 0.0f);
+    const glm::vec3 white(1.0f);
+    std::vector<Vertex3D> quad = {
+        {{center.x - half, y, center.z - half}, n, white},
+        {{center.x + half, y, center.z - half}, n, white},
+        {{center.x + half, y, center.z + half}, n, white},
+        {{center.x - half, y, center.z + half}, n, white},
+    };
+    std::vector<uint32_t> quadIdx = {0, 1, 2, 0, 2, 3};
+    state.rayTracer->AddGeometry(quad, quadIdx, 0, RT_GEOM_SHADOW_CATCHER);
+  }
+
   return state.rayTracer->BuildAccelerationStructures();
 }
 
@@ -396,6 +422,7 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
     desc.cameraPos = state.camera->GetPosition();
   }
   if (state.ibl) {
+    desc.environment = state.ibl->EnvironmentView();
     desc.irradiance = state.ibl->IrradianceView();
     desc.prefilter = state.ibl->PrefilterView();
     desc.brdfLut = state.ibl->BrdfLutView();
@@ -408,7 +435,7 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
 
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
-                         uint32_t seed, std::string* error) {
+                         uint32_t seed, bool groundPlane, std::string* error) {
   auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
@@ -416,7 +443,7 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
   };
   if (!state.rayTracer || !state.rayTracer->IsInitialized())
     return fail("ray tracing not available");
-  if (!SyncRayTracingScene(state))
+  if (!SyncRayTracingScene(state, groundPlane))
     return fail("no geometry to render");
   if (samples == 0)
     samples = 1;
@@ -474,7 +501,7 @@ void PumpRenderJob(AppState& state) {
   if (!job.started) {
     // First frame of the job: build the scene + acceleration structures and set
     // up the still. Spread over its own frame so the modal shows immediately.
-    if (!SyncRayTracingScene(state)) {
+    if (!SyncRayTracingScene(state, job.groundPlane)) {
       finish(false, "no geometry to render");
       return;
     }

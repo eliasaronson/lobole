@@ -76,6 +76,21 @@ The `RayTracingRenderer` scaffold is ~40% real:
   - **Fixed en route**: the scaffold shadow ray (`isShadowed` was never
     initialized to `true`; `sbtRecordOffset` was `1`, past the 1-entry hit
     region) → now `true` + offset `0`, miss index `1`.
+- **Polish SHIPPED** (post-R4.5): shadow catcher + sharp environment.
+  - **Shadow-catcher ground plane**: `SyncRayTracingScene(state, groundPlane)`
+    adds a large quad just under the scene bbox, flagged
+    `RT_GEOM_SHADOW_CATCHER` via a new per-geometry `flags` word in
+    `GeometryInfo` (spare padding). The closest-hit renders it as the
+    environment darkened by key-light shadow + contact AO — the backdrop stays
+    the HDRI while parts get grounding shadows. Toggle: modal checkbox
+    ("Ground shadows") and `render_still`'s `ground` param (default on).
+  - **Full-res environment (binding 8)**: the source HDR is kept through the
+    IBL precompute (also on cache hits) and uploaded as its own texture
+    (`IBLTextures::EnvironmentView`). The miss shader and near-mirror
+    reflections (roughness < 0.15) sample it instead of the 128×64 prefilter
+    base — crisp chrome, sharper background. (The bundled HDRI is 1k, which
+    still limits background sharpness at narrow FOVs; swapping in a 4k HDRI
+    would sharpen it further with no code change.)
 
 ## Milestones
 

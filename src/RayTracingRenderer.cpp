@@ -258,7 +258,10 @@ bool RayTracingRenderer::CreateRTPipeline() {
         // 5/6/7: IBL irradiance / prefilter / BRDF LUT
         {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR, nullptr},
         {6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR, nullptr},
-        {7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr}
+        {7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR, nullptr},
+        // 8: full-res environment HDR (background + near-mirror reflections;
+        //    the prefilter chain's base mip is too low-res for either)
+        {8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR, nullptr}
     };
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -448,11 +451,13 @@ VkDeviceAddress RayTracingRenderer::GetBufferDeviceAddress(VkBuffer buffer) {
 
 uint32_t RayTracingRenderer::AddGeometry(const std::vector<Vertex3D>& vertices,
                                         const std::vector<uint32_t>& indices,
-                                        uint32_t materialIndex) {
+                                        uint32_t materialIndex,
+                                        uint32_t flags) {
     auto geometry = std::make_unique<RTGeometry>();
     geometry->vertexCount = static_cast<uint32_t>(vertices.size());
     geometry->indexCount = static_cast<uint32_t>(indices.size());
     geometry->materialIndex = materialIndex;
+    geometry->flags = flags;
 
     // Vertex + index buffers usable both as acceleration-structure build input
     // and as storage buffers the closest-hit shader reads by index. Host-visible
@@ -567,9 +572,9 @@ struct GeometryInfoGPU {
     VkDeviceAddress vertexAddress;
     VkDeviceAddress indexAddress;
     uint32_t materialIndex;
+    uint32_t flags; // RTGeometryFlags
     uint32_t pad0;
     uint32_t pad1;
-    uint32_t pad2;
 };
 
 // Camera + light UBO, matching the layout declared in the RT shaders.
@@ -695,6 +700,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
         gi.vertexAddress = g->vertexAddress;
         gi.indexAddress = g->indexAddress;
         gi.materialIndex = g->materialIndex;
+        gi.flags = g->flags;
         geomInfos.push_back(gi);
     }
     VkDeviceSize geomSize = geomInfos.size() * sizeof(GeometryInfoGPU);
@@ -729,7 +735,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1},
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 3},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
     };
     VkDescriptorPoolCreateInfo poolInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -774,8 +780,10 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkDescriptorImageInfo brdf{desc.lutSampler, desc.brdfLut,
                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo env{desc.envSampler, desc.environment,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-    std::vector<VkWriteDescriptorSet> writes(8,
+    std::vector<VkWriteDescriptorSet> writes(9,
         {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET});
     for (auto& w : writes) w.dstSet = m_rtDescriptorSet, w.descriptorCount = 1;
     writes[0].dstBinding = 0;
@@ -802,6 +810,9 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
     writes[7].dstBinding = 7;
     writes[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[7].pImageInfo = &brdf;
+    writes[8].dstBinding = 8;
+    writes[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[8].pImageInfo = &env;
     vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()),
                            writes.data(), 0, nullptr);
 
