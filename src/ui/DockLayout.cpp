@@ -78,6 +78,7 @@ void BeginDockspace(AppState& state) {
     ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f,
                                                 nullptr, &center);
     ImGui::DockBuilderDockWindow("Model", left);
+    ImGui::DockBuilderDockWindow("Variables", left); // tabbed behind Model
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderDockWindow("Sketch", right); // sketch options, tabbed
     ImGui::DockBuilderFinish(dockspaceId);

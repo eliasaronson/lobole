@@ -374,6 +374,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (it == kinds.end()) throw std::runtime_error("unknown constraint kind");
     c.kind = it->second;
     c.value = p.value("value", 0.0);
+    // Optional expression driving the value, evaluated against the document's
+    // variables on every regeneration (angles in degrees, like the UI).
+    c.valueExpr = p.value("expr", std::string{});
     const json& refs = p.at("refs");
     if (refs.size() > 0)
       c.a = {refs[0][0].get<uint32_t>(), refs[0][1].get<uint8_t>()};
@@ -473,6 +476,70 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return {{"dropped_constraints", dropped}};
+  }
+  if (m == "set_variable") {
+    // Add or redefine a document variable; one undoable edit, regenerates
+    // every expression-driven field. params: {name, expression, comment?}.
+    // Returns the evaluated value (plus "error" if it didn't evaluate).
+    const std::string name = p.at("name").get<std::string>();
+    const json& expr = p.at("expression");
+    const std::string expression =
+        expr.is_string() ? expr.get<std::string>() : expr.dump();
+    // Omitting "comment" preserves an existing one (redefinitions usually
+    // only change the expression).
+    std::string comment;
+    if (p.contains("comment")) {
+      comment = p.at("comment").get<std::string>();
+    } else if (const Parameter* prior = doc->FindParameter(name)) {
+      comment = prior->comment;
+    }
+    if (!state.commands->Execute(
+            std::make_unique<SetVariableCommand>(name, expression, comment),
+            *doc)) {
+      throw std::runtime_error("invalid variable name: " + name);
+    }
+    const Parameter* param = doc->FindParameter(name);
+    json result = {{"value", param->value}};
+    if (!param->error.empty()) result["error"] = param->error;
+    return result;
+  }
+  if (m == "delete_variable") {
+    // Refused while referenced, reporting what references it. params: {name}
+    const std::string name = p.at("name").get<std::string>();
+    if (doc->FindParameter(name) == nullptr)
+      throw std::runtime_error("no such variable: " + name);
+    std::vector<std::string> refs = doc->FindParameterReferences(name);
+    if (!refs.empty()) {
+      std::string msg = "variable is referenced by:";
+      for (const std::string& r : refs) msg += " " + r + ";";
+      throw std::runtime_error(msg);
+    }
+    state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
+                            *doc);
+    return json::object();
+  }
+  if (m == "rename_variable") {
+    // Renames + rewrites every referencing expression. params: {name, new_name}
+    if (!state.commands->Execute(
+            std::make_unique<RenameVariableCommand>(
+                p.at("name").get<std::string>(),
+                p.at("new_name").get<std::string>()),
+            *doc)) {
+      throw std::runtime_error("rename failed (unknown, invalid, or taken)");
+    }
+    return json::object();
+  }
+  if (m == "list_variables") {
+    json variables = json::array();
+    for (const Parameter& param : doc->GetParameters()) {
+      json entry = {{"name", param.name},
+                    {"expression", param.expression},
+                    {"value", param.value}};
+      if (!param.comment.empty()) entry["comment"] = param.comment;
+      if (!param.error.empty()) entry["error"] = param.error;
+      variables.push_back(entry);
+    }
+    return {{"variables", variables}};
   }
   if (m == "undo") {
     state.commands->Undo(*doc);

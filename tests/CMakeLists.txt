@@ -18,6 +18,8 @@ add_executable(designer_tests
     test_document.cpp
     test_serialization.cpp
     test_command_modify.cpp
+    test_expression.cpp
+    test_variables.cpp
     test_faceselector.cpp
     test_sketch_feature.cpp
     test_extrude.cpp

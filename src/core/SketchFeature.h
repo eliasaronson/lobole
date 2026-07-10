@@ -355,6 +355,10 @@ struct Constraint {
   double value = 0.0;         // Distance / Radius / Angle dimension
   PointRef c;                 // third ref (Symmetric: the symmetry line)
   glm::vec2 labelOffset{0.0f}; // dimension annotation placement (UV)
+  // Optional expression driving `value` (empty = plain literal). Evaluated
+  // against the document's parameter table on every regeneration; kept last
+  // in the struct so existing aggregate initializers stay valid.
+  std::string valueExpr;
 };
 
 enum class DerivedKind { LinearPattern, CircularPattern };
@@ -393,7 +397,15 @@ public:
   SketchFeature(const std::string& name, const SketchPlane& plane);
 
   std::string TypeName() const override { return "Sketch"; }
-  bool Execute(RegenContext&) override { return true; }
+
+  // Contributes no bodies, but when any dimension is expression-driven the
+  // sketch re-solves here so downstream consumers (extrudes) see geometry
+  // matching the current parameter values. A failed solve keeps the last
+  // good entity positions rather than failing the history.
+  bool Execute(RegenContext&) override;
+
+  // Dimensional-constraint (value, expression) pairs; see Feature::VisitExprs.
+  void VisitExprs(const ExprVisitor& visit) override;
 
   // Appends `e` with a freshly stamped stable id and returns that id.
   uint32_t AddEntity(sketch::Entity e);

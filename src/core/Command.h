@@ -68,6 +68,57 @@ private:
   nlohmann::json m_before, m_after;
 };
 
+// Adds a parameter or redefines an existing one. Undo restores the previous
+// definition, or removes the parameter if it was newly added.
+class SetVariableCommand : public Command {
+public:
+  SetVariableCommand(std::string name, std::string expression,
+                     std::string comment = "");
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  std::string m_name, m_expression, m_comment;
+  // Prior definition, captured on Execute for Undo.
+  bool m_existed = false;
+  std::string m_oldExpression, m_oldComment;
+};
+
+// Deletes a parameter. Fails (see References()) if any expression still
+// references it, so references never dangle silently. Undo re-adds the
+// parameter at the end of the table (original position is not preserved).
+class DeleteVariableCommand : public Command {
+public:
+  explicit DeleteVariableCommand(std::string name);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+  // After a failed Execute: the parameters/features that blocked deletion.
+  const std::vector<std::string>& References() const { return m_references; }
+
+private:
+  std::string m_name;
+  std::string m_expression, m_comment;  // captured for Undo
+  std::vector<std::string> m_references;
+};
+
+// Renames a parameter and rewrites every referencing expression.
+class RenameVariableCommand : public Command {
+public:
+  RenameVariableCommand(std::string oldName, std::string newName);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  std::string m_oldName, m_newName;
+};
+
 class CommandStack {
 public:
   // Executes the command and pushes it onto the undo stack (clearing any

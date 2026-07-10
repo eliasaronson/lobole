@@ -3,6 +3,7 @@
 #include "CADMaterials.h"
 #include "Camera.h"
 #include "core/ExtrudeFeature.h"
+#include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
@@ -10,6 +11,8 @@
 #include "imgui.h"
 
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 namespace ui {
@@ -62,6 +65,82 @@ void CommitDiscrete(AppState& state, Feature& feature,
         std::make_unique<ModifyFeatureCommand>(index, before, after),
         *state.document);
   }
+}
+
+// A dimension that can be driven by an expression over the document's
+// variables (variables plan V2). Literal fields keep the usual drag plus an
+// "fx" button that switches to expression mode; expression fields show an
+// editable text input with the evaluated value (or error) underneath and a
+// "123" button back to a literal. Committing a plain number also reverts to
+// a literal — expressions stay opt-in per field.
+void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
+             const char* label, std::string& exprText, double& value) {
+  Document& doc = *state.document;
+  ImGui::PushID(label);
+
+  if (exprText.empty()) {
+    HandleEdit(state, feature, DragDim(label, &value), index, commit);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("fx")) {
+      nlohmann::json before = DocumentIO::FeatureToJson(feature);
+      char buf[64];
+      snprintf(buf, sizeof(buf), "%g", value);
+      exprText = buf;
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    ImGui::PopID();
+    return;
+  }
+
+  // One shared buffer; claimed by this field on activation (only one ImGui
+  // item is ever active) — same recipe as the Variables panel cells.
+  static std::string activeField;
+  static char buf[256];
+  const std::string key =
+      std::to_string(feature.GetId()) + "/" + label;
+  const bool editing = activeField == key;
+  char tmp[sizeof(buf)];
+  snprintf(tmp, sizeof(tmp), "%s", exprText.c_str());
+  ImGui::InputText(label, editing ? buf : tmp, sizeof(buf));
+  if (ImGui::IsItemActivated()) {
+    activeField = key;
+    snprintf(buf, sizeof(buf), "%s", exprText.c_str());
+  }
+  if (editing && ImGui::IsItemDeactivatedAfterEdit()) {
+    activeField.clear();
+    nlohmann::json before = DocumentIO::FeatureToJson(feature);
+    char* end = nullptr;
+    const double number = std::strtod(buf, &end);
+    while (end != nullptr && *end == ' ') {
+      end++;
+    }
+    if (end != buf && end != nullptr && *end == '\0') {
+      exprText.clear(); // a plain number reverts the field to a literal
+      value = number;
+    } else {
+      exprText = buf; // empty or symbolic: regen (re)evaluates it
+    }
+    CommitDiscrete(state, feature, before, index, commit);
+  }
+
+  if (!exprText.empty()) {
+    ExprError err;
+    const auto v =
+        ExpressionEngine::Default().EvaluateText(exprText, doc.Symbols(), &err);
+    if (v.has_value()) {
+      ImGui::TextDisabled("= %.4g", *v);
+    } else {
+      ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
+                         err.message.c_str());
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("123")) {
+      nlohmann::json before = DocumentIO::FeatureToJson(feature);
+      exprText.clear(); // back to a literal holding the last good value
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+  }
+  ImGui::PopID();
 }
 
 } // namespace
@@ -147,8 +226,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         state.camera->AlignToFace(sk->plane.GetOrigin(), sk->plane.GetNormal());
     }
   } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
-    HandleEdit(state, feature, DragDim("Distance", &ext->distance), index,
-               commit);
+    ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
+            ext->distance);
     HandleEdit(state, feature, ImGui::Checkbox("Reversed", &ext->reversed),
                index, commit);
 

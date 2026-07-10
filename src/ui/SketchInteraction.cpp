@@ -4,6 +4,7 @@
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "MeshRenderer.h" // Vertex3D
+#include "core/Expression.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "core/SketchInference.h"
@@ -13,6 +14,7 @@
 
 #include "imgui.h"
 
+#include <cstdlib>
 #include <map>
 #include <optional>
 #include <vector>
@@ -1160,13 +1162,16 @@ void Arrow(ImDrawList* dl, ImVec2 tip, glm::vec2 dir, ImU32 col) {
                         ImVec2(base.x - n.x * w, base.y - n.y * w), col);
 }
 
-// Commits an edited dimension value: sets it, re-solves, one undo record.
+// Commits an edited dimension value: sets it (plus the optional driving
+// expression, empty = literal), re-solves, one undo record.
 void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
-                        int dimIdx, double value) {
+                        int dimIdx, double value,
+                        const std::string& expr = {}) {
   if (dimIdx < 0 || dimIdx >= (int)sketch.constraints.size())
     return;
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
   sketch.constraints[dimIdx].value = value;
+  sketch.constraints[dimIdx].valueExpr = expr;
   sketch::Solver solver;
   solver.Load(sketch);
   if (solver.Solve().ok)
@@ -1278,11 +1283,20 @@ void DrawDimensions(AppState& state) {
       edit.editingDim = i;
 
     if (edit.editingDim == i) {
-      static char buf[48];
+      static char buf[128];
       static int lastEditing = -1;
+      static std::string editError;
       if (lastEditing != i) {
-        snprintf(buf, sizeof(buf), "%.4g", con.value);
+        // Seed with the driving expression when there is one, else the value
+        // (degrees in the UI for angles, as always).
+        if (!con.valueExpr.empty())
+          snprintf(buf, sizeof(buf), "%s", con.valueExpr.c_str());
+        else if (con.kind == K::Angle)
+          snprintf(buf, sizeof(buf), "%.4g", glm::degrees(con.value));
+        else
+          snprintf(buf, sizeof(buf), "%.4g", con.value);
         lastEditing = i;
+        editError.clear();
       }
       ImGui::SetNextWindowPos(ImVec2(tp.x - 4, tp.y - 4));
       ImGui::SetNextWindowBgAlpha(0.95f);
@@ -1290,17 +1304,43 @@ void DrawDimensions(AppState& state) {
                    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize |
                        ImGuiWindowFlags_NoSavedSettings);
-      ImGui::SetNextItemWidth(70);
+      ImGui::SetNextItemWidth(120);
       ImGui::SetKeyboardFocusHere();
       bool commit = ImGui::InputText("##v", buf, sizeof(buf),
                                      ImGuiInputTextFlags_EnterReturnsTrue);
+      if (!editError.empty())
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
+                           editError.c_str());
       ImGui::End();
       if (commit) {
-        double v = con.kind == K::Angle ? glm::radians(std::atof(buf))
-                                        : std::atof(buf);
-        ApplyDimensionEdit(state, *sketch, index, i, v);
-        edit.editingDim = -1;
-        lastEditing = -1;
+        // A plain number stays a literal; anything else is an expression
+        // over the document's variables (angles speak degrees, stored as
+        // radians). Invalid expressions keep the editor open with the error.
+        char* end = nullptr;
+        double v = std::strtod(buf, &end);
+        while (end != nullptr && *end == ' ')
+          end++;
+        const bool isNumber = end != buf && end != nullptr && *end == '\0';
+        if (isNumber) {
+          if (con.kind == K::Angle)
+            v = glm::radians(v);
+          ApplyDimensionEdit(state, *sketch, index, i, v);
+        } else {
+          ExprError err;
+          const auto evaluated = ExpressionEngine::Default().EvaluateText(
+              buf, state.document->Symbols(), &err);
+          if (!evaluated.has_value()) {
+            editError = err.message;
+            commit = false; // stay open, show the error
+          } else {
+            v = con.kind == K::Angle ? glm::radians(*evaluated) : *evaluated;
+            ApplyDimensionEdit(state, *sketch, index, i, v, buf);
+          }
+        }
+        if (commit) {
+          edit.editingDim = -1;
+          lastEditing = -1;
+        }
       } else if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         edit.editingDim = -1;
         lastEditing = -1;

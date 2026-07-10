@@ -1,6 +1,8 @@
 #include "core/SketchFeature.h"
 
+#include "Logger.h"
 #include "core/SketchProfile.h" // SegmentIntersect
+#include "core/SketchSolver.h"
 
 #include <algorithm>
 #include <cmath>
@@ -603,6 +605,51 @@ void SketchFeature::RemoveDerivedOp(size_t opIndex) {
   for (const auto& in : derived[opIndex].instances)
     DeleteEntity(in.genId);
   derived.erase(derived.begin() + opIndex);
+}
+
+bool SketchFeature::Execute(RegenContext&) {
+  const bool exprDriven =
+      std::any_of(constraints.begin(), constraints.end(),
+                  [](const sketch::Constraint& c) {
+                    return sketch::IsDimension(c.kind) && !c.valueExpr.empty();
+                  });
+  if (!exprDriven) {
+    return true;
+  }
+  // Dimension values were already refreshed from the parameter table by
+  // Document::Regenerate (via VisitExprs); apply them to the geometry.
+  sketch::Solver solver;
+  solver.Load(*this);
+  const sketch::SolveResult result = solver.Solve();
+  if (!result.ok) {
+    // Keep the last good entity positions instead of failing the history —
+    // the conflict is the user's to resolve, downstream features can still
+    // consume the previous geometry.
+    LOG_WARN("Sketch '{}': expression-driven solve failed, keeping previous "
+             "geometry",
+             GetName());
+    return true;
+  }
+  solver.WriteBack(entities);
+  RegenerateDerived();
+  return true;
+}
+
+void SketchFeature::VisitExprs(const ExprVisitor& visit) {
+  for (sketch::Constraint& c : constraints) {
+    if (!sketch::IsDimension(c.kind)) {
+      continue;
+    }
+    if (c.kind == sketch::ConstraintKind::Angle) {
+      // Angle values are stored in radians, but expressions (like the
+      // dimension UI) speak degrees — convert around the visit.
+      double degrees = glm::degrees(c.value);
+      visit(c.valueExpr, degrees);
+      c.value = glm::radians(degrees);
+    } else {
+      visit(c.valueExpr, c.value);
+    }
+  }
 }
 
 void SketchFeature::RegenerateDerived() {

@@ -14,6 +14,7 @@
 #include "ui/PropertiesPanel.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
+#include "ui/VariablesPanel.h"
 #include "ui/ViewportInput.h"
 
 #include "imgui.h"
@@ -34,6 +35,7 @@ void DrawUI(AppState& state) {
   BeginDockspace(state);
 
   DrawFeatureTreePanel(state);
+  DrawVariablesPanel(state);
   DrawPropertiesPanel(state);
   DrawSketchToolbar(state);
   DrawPreviewDialog(state);

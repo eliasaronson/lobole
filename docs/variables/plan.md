@@ -7,6 +7,17 @@ nearly impossible before* — and the document model now exists. Do this **early
 (before or alongside modeling M1–M2) so every new feature's params are
 expression-driven from day one instead of retrofitted.
 
+> **Status: V1–V3 shipped (July 2026).** Evaluator behind a swappable
+> `ExpressionEngine` interface (`src/core/Expression.h`) so a heavier parser
+> or a scripting runtime can replace the built-in recursive-descent engine
+> without touching the document model. Parameter table + topo-sort/cycle
+> evaluation pass on `Document`, `Feature::VisitExprs` threading (extrude
+> distance + sketch dimensions, angles in degrees), format v11, undoable
+> set/delete/rename commands, docked Variables panel, expression editing in
+> Properties + the inline dimension editor, and
+> `set/delete/rename/list_variables` RPCs (`add_constraint` takes `expr`,
+> `add_feature` takes `distance_expr`). Deferred items below still stand.
+
 ## Design
 
 ### Parameter table

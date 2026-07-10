@@ -15,7 +15,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 10; // v10: per-feature material (v9: ellipses, v8: derived ops, v7: arcs)
+constexpr int kVersion = 11; // v11: parameters + expressions (v10: material, v9: ellipses, v8: derived ops)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -148,6 +148,8 @@ json ConstraintToJson(const sketch::Constraint& c) {
             {"a", {c.a.entity, c.a.which}},
             {"b", {c.b.entity, c.b.which}},
             {"value", c.value}};
+  if (!c.valueExpr.empty()) // literals stay plain numbers (v11)
+    j["expr"] = c.valueExpr;
   if (c.kind == sketch::ConstraintKind::Symmetric) // only Symmetric uses c
     j["c"] = {c.c.entity, c.c.which};
   if (sketch::IsDimension(c.kind) && (c.labelOffset.x != 0 || c.labelOffset.y != 0))
@@ -161,6 +163,7 @@ sketch::Constraint ConstraintFromJson(const json& j) {
   c.a = {j.at("a").at(0).get<uint32_t>(), j.at("a").at(1).get<uint8_t>()};
   c.b = {j.at("b").at(0).get<uint32_t>(), j.at("b").at(1).get<uint8_t>()};
   c.value = j.value("value", 0.0);
+  c.valueExpr = j.value("expr", std::string{}); // absent (pre-v11) = literal
   if (j.contains("c"))
     c.c = {j.at("c").at(0).get<uint32_t>(), j.at("c").at(1).get<uint8_t>()};
   if (j.contains("label"))
@@ -251,6 +254,8 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     j["sketch_id"] = ext->sketchId;
     j["distance"] = ext->distance;
+    if (!ext->distanceExpr.empty()) // literals stay plain numbers (v11)
+      j["distance_expr"] = ext->distanceExpr;
     j["reversed"] = ext->reversed;
     j["mode"] = ExtrudeModeToString(ext->mode);
   } else if (auto* box = dynamic_cast<const BoxFeature*>(&feature)) {
@@ -359,10 +364,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
     out = std::move(sk);
   } else if (type == "Extrude") {
-    out = std::make_unique<ExtrudeFeature>(
+    auto ext = std::make_unique<ExtrudeFeature>(
         name, j.at("sketch_id").get<uint64_t>(), j.at("distance").get<double>(),
         ExtrudeModeFromString(j.value("mode", "new_body")),
         j.value("reversed", false));
+    ext->distanceExpr =
+        j.value("distance_expr", std::string{}); // absent (pre-v11) = literal
+    out = std::move(ext);
   } else if (type == "Box") {
     out = std::make_unique<BoxFeature>(
         name, Vec3FromJson(j.at("position")), j.at("width").get<double>(),
@@ -392,6 +400,16 @@ bool Save(const Document& doc, const std::string& path, std::string* error) {
     json j;
     j["format"] = kFormat;
     j["version"] = kVersion;
+    if (!doc.GetParameters().empty()) { // omit when empty to keep JSON compact
+      j["parameters"] = json::array();
+      for (const Parameter& p : doc.GetParameters()) {
+        json pj = {{"name", p.name}, {"expression", p.expression}};
+        if (!p.comment.empty()) {
+          pj["comment"] = p.comment;
+        }
+        j["parameters"].push_back(std::move(pj));
+      }
+    }
     j["features"] = json::array();
     for (const auto& feature : doc.GetFeatures()) {
       j["features"].push_back(FeatureToJson(*feature));
@@ -432,6 +450,13 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
     }
 
     auto doc = std::make_unique<Document>();
+    // Parameters first: features' expressions evaluate against them on the
+    // regeneration each AddFeature triggers.
+    for (const auto& pj : j.value("parameters", json::array())) {
+      doc->SetParameter(pj.at("name").get<std::string>(),
+                        pj.at("expression").get<std::string>(),
+                        pj.value("comment", std::string{}));
+    }
     for (const auto& fj : j.at("features")) {
       doc->AddFeature(FeatureFromJson(fj));
     }

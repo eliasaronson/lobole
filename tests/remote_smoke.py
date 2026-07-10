@@ -103,6 +103,69 @@ def main():
         expect(abs(state["bodies"][0]["volume"] - 24.0) < 1e-6,
                "extruded volume 24")
 
+        # Variables: an expression-driven extrude follows a parameter edit,
+        # undoably; rename rewrites expressions; referenced delete is refused.
+        d.call("new_project")
+        r = d.call("set_variable", name="depth", expression="3",
+                   comment="pad height")
+        expect(abs(r["value"] - 3.0) < 1e-9, "set_variable evaluates")
+        skv = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch V",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "rect", "c1": [0, 0], "c2": [4, 2]}]})
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Pad", "sketch_id": skv["id"],
+            "distance": 1.0, "distance_expr": "depth * 2",
+            "mode": "new_body"})
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - 8.0 * 6.0) < 1e-6, "expression-driven extrude")
+        d.call("set_variable", name="depth", expression="5")
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - 8.0 * 10.0) < 1e-6,
+               "editing a variable rebuilds the extrude")
+        d.call("undo")
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - 8.0 * 6.0) < 1e-6, "variable edit is undoable")
+        d.call("redo")
+        d.call("rename_variable", name="depth", new_name="h")
+        pad = d.call("get_state")["features"][1]
+        expect(pad["distance_expr"] == "h * 2", "rename rewrites expressions")
+        lv = d.call("list_variables")["variables"]
+        expect(len(lv) == 1 and lv[0]["name"] == "h"
+               and lv[0]["comment"] == "pad height", "list_variables")
+        try:
+            d.call("delete_variable", name="h")
+            expect(False, "deleting a referenced variable must fail")
+        except RuntimeError as e:
+            expect("referenced" in str(e), "delete refusal names the reason")
+        try:
+            d.call("set_variable", name="2bad", expression="1")
+            expect(False, "invalid variable name must fail")
+        except RuntimeError:
+            pass
+        # An expression-driven sketch dimension re-solves on a variable edit.
+        d.call("new_project")
+        d.call("set_variable", name="r", expression="1.5")
+        skc2 = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch R",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [0, 0],
+                          "radius": 1.0}]})
+        d.call("add_constraint", sketch_id=skc2["id"], kind="radius",
+               refs=[[skc2["entity_ids"][0], 0]], value=1.0, expr="r")
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Rod", "sketch_id": skc2["id"],
+            "distance": 2.0, "mode": "new_body"})
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - math.pi * 1.5 * 1.5 * 2.0) < 0.05,
+               "radius expression applied through the solve")
+        d.call("set_variable", name="r", expression="3")
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - math.pi * 3.0 * 3.0 * 2.0) < 0.2,
+               "variable edit re-solves the sketch and rebuilds the rod")
+
         # Ellipse round-trips through JSON and extrudes to an elliptic prism.
         d.call("new_project")
         ske = d.call("add_feature", feature={

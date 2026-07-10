@@ -1,8 +1,10 @@
 #pragma once
 
 #include "CADKernel.h"
+#include "core/Expression.h"
 
 #include <glm/glm.hpp>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -26,6 +28,9 @@ struct RegenContext {
   std::vector<Body>& bodies;
   const std::vector<std::unique_ptr<Feature>>& features;
   size_t currentIndex;
+  // The document's evaluated parameter values (never null during a normal
+  // regeneration); what expression-driven fields were evaluated against.
+  const SymbolTable* symbols = nullptr;
 
   // Searches features[0, currentIndex) by stable id; nullptr if absent.
   const Feature* FindById(uint64_t id) const;
@@ -60,6 +65,15 @@ public:
   // Applies this feature to the model. Returns false on failure, which
   // aborts regeneration of subsequent features.
   virtual bool Execute(RegenContext& ctx) = 0;
+
+  // Expression-driven numeric fields follow the pattern of a plain double
+  // (what geometry code reads) paired with an expression-text string (empty
+  // = plain literal; see ExtrudeFeature::distanceExpr). Features expose each
+  // such pair here so the Document can evaluate them during regeneration and
+  // parameter rename/delete can rewrite/inspect the texts — one hook instead
+  // of three per-feature code paths.
+  using ExprVisitor = std::function<void(std::string& text, double& value)>;
+  virtual void VisitExprs(const ExprVisitor& visit) { (void)visit; }
 
 protected:
   std::string m_name;
