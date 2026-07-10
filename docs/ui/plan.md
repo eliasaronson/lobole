@@ -53,7 +53,19 @@ tree as an alternate pick surface.
 
 ## U4 — Layout & scaling correctness
 
-The "windows don't fit their buttons" class of bugs:
+**Partly shipped** (`a122590`): toolbar background bar (was transparent — icons
+floated over the viewport); viewport-favoring default split (~17/18/65);
+untracked the stale `imgui.ini` (a 4K-saved layout applied to a smaller window
+was the real cause of the cramped viewport); "Reset Layout" in the View menu;
+`select_feature` RPC. **Deferred to U5** (found the hard way): auto-hiding the
+right panel when idle — gating its window submission lets ImGui garbage-collect
+the *shared* right dock node, so the Sketch panel loses its docked home and
+floats over the viewport (breaks sketch draw-clicks); needs Properties and
+Sketch in **separate, persistent** dock nodes. Also U5: Properties uses
+labels-*after*-fields, which clip in a narrow panel — switch to labels-left / a
+two-column layout.
+
+The remaining "windows don't fit their buttons" class of bugs:
 - **DPI awareness**: scale fonts + `ImGuiStyle` by monitor content scale
   (GLFW `glfwGetWindowContentScale`), rescale on monitor change; a user font-
   size setting.

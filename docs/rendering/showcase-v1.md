@@ -140,50 +140,21 @@ GPU-compute prefiltering remains a later optimization.
 - Tests: validation-clean; gui_smoke green; the money shot: chrome + brushed
   steel + black plastic side by side via the remote screenshot.
 
-## Phase R4 — Offline render button (RT still) (~4–5 days)
+## Phase R4 — Offline render button (RT still) (~4–6 days) — PLANNED
 
-Finish the scaffold into a KeyShot-style "Render" button. Raster viewport is
-untouched — RT runs on demand into the offscreen path.
+Finish the scaffold into a KeyShot-style "Render" button; the raster viewport is
+untouched. **Detailed, code-grounded plan: [r4-offline-render.md](r4-offline-render.md)**
+(R4.0 ground truth → R4.1 geometry upload → R4.2 BLAS/TLAS → R4.3 descriptors +
+`rgba32f` accumulation image → R4.4 trace/accumulate → R4.5 button + `render_still`
+RPC).
 
-- **R4.0 Ground truth (half-day)**: partly done during R2's validation pass —
-  `Initialize()` succeeds (RT pipeline + SBT create) and the SBT/device-address
-  + extension-dependency validation errors are already fixed (`1b9c7f4`).
-  Remaining: confirm the app picks the RTX 4060 and not the Arc iGPU (fix device
-  selection to prefer a discrete RT-capable device), and audit the SBT region
-  math against the spec (stride/size alignment) — it was written blind and has
-  never executed a trace.
-- **R4.1 Geometry upload (1 day)**: make `AddGeometry` real — vertex/index
-  buffers with `ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY` +
-  `SHADER_DEVICE_ADDRESS` usage, fed from the same tessellated meshes the
-  raster path uses; a `SyncFromScene()` that mirrors current bodies +
-  transforms + materials (`RTMaterial` ← `MaterialProperties`, mapping from
-  R1).
-- **R4.2 Acceleration structures (1–1.5 days, the hard part)**: real BLAS
-  build (sizes query → AS buffer + scratch → build submit → compaction later),
-  one BLAS per body, TLAS over per-body instances. Rebuild-on-demand only
-  (the button), no per-edit lifecycle — that's 6b.
-- **R4.3 Descriptors + output (0.5–1 day)**: storage image at render
-  resolution, camera UBO, material/vertex/index storage buffers, descriptor
-  pool + set against the existing layout (extend the layout with the material
-  buffer binding the closest-hit shader needs).
-- **R4.4 Trace + accumulate (1 day)**: implement `Render()` —
-  `vkCmdTraceRaysKHR` with barriers, progressive accumulation (sample index
-  via push constant, jittered camera rays, cosine-hemisphere AO + soft shadow
-  rays toward the key light in `raygen`/`closesthit` — direct lighting + AO,
-  not full path tracing, matching the raster look but soft). N samples
-  (default 256) submitted in batches so the GPU isn't hogged in one submit.
-- **R4.5 The button (0.5 day)**: toolbar "Render" → modal with resolution /
-  samples / progress → runs the trace → tonemapped result shown in a window +
-  saved PNG (through `Screenshot.cpp` plumbing). Remote parity:
-  `render_still(width, height, samples)` RPC — the LLM gets the money shot
-  too ([scripting/plan.md](../scripting/plan.md)).
-- Tests: a headless/remote render smoke (render 64×64, assert non-black and
-  deterministic hash given fixed samples); validation-clean; the showcase
-  render of a real part.
-- **Risks**: first-light debugging dominates (black image with no validation
-  errors is the classic RT failure mode — mitigate by starting from R4.0's
-  audit and tracing one hardcoded triangle before the full scene); driver
-  variance between the two GPUs (pin to NVIDIA).
+Prerequisites already met by R1–R3 + the validation pass: Vulkan 1.2 / SBT
+device-address / extension-dep VUIDs fixed (0 VUIDs at startup, `1b9c7f4`);
+discrete-GPU selection (RTX 4060); `RTMaterial` ← `MaterialProperties` (R1); and
+— new — the RT closest-hit can sample the **same IBL maps** (R3) for ambient, so
+the offline render and the raster viewport agree on lighting. The hard part is
+still the acceleration-structure build; first-light debugging (black image, no
+VUID) dominates the risk, so the plan builds up from one triangle.
 
 ## Order & payoff
 
