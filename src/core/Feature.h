@@ -87,10 +87,21 @@ public:
   using ExprVisitor = std::function<void(std::string& text, double& value)>;
   virtual void VisitExprs(const ExprVisitor& visit) { (void)visit; }
 
+  // Why this feature's last regeneration failed (empty = healthy). Transient
+  // (never serialized), like Parameter::error: Document::Regenerate clears it
+  // before each Execute and sets a generic message if Execute fails silently;
+  // a feature can SetError a specific message (e.g. a dangling element ref) for
+  // the UI to surface. Set on the object even though regeneration aborts, so
+  // the tree can show which feature broke and why.
+  [[nodiscard]] const std::string& GetError() const { return m_error; }
+  void SetError(const std::string& error) { m_error = error; }
+  void ClearError() { m_error.clear(); }
+
 protected:
   std::string m_name;
   std::string m_material;
   uint64_t m_id = 0;
+  std::string m_error;
 };
 
 class BoxFeature : public Feature {

@@ -2,6 +2,7 @@
 
 #include "core/DatumPlaneFeature.h"
 #include "core/Feature.h"
+#include "core/SketchFeature.h"
 #include "ui/SketchInteraction.h"
 
 #include "imgui.h"
@@ -39,6 +40,10 @@ void DrawFeatureTreePanel(AppState& state) {
       auto* datum = dynamic_cast<DatumPlaneFeature*>(feature);
       const ImGuiSelectableFlags flags =
           datum ? ImGuiSelectableFlags_AllowDoubleClick : 0;
+      // Features that failed to regenerate show red, with the reason on hover.
+      const bool errored = !feature->GetError().empty();
+      if (errored)
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.35f, 0.35f, 1.0f));
       if (ImGui::Selectable(label.c_str(),
                             state.selectedFeature == static_cast<int>(i),
                             flags)) {
@@ -48,7 +53,22 @@ void DrawFeatureTreePanel(AppState& state) {
           BeginSketchOnDatum(state, *datum, "Sketch " + std::to_string(n));
         }
       }
+      if (errored) {
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("%s", feature->GetError().c_str());
+      }
       if (ImGui::BeginPopupContextItem()) {
+        // A face-attached sketch can be re-pointed at another face (e.g. after
+        // its face was consumed): arms face-picking for this sketch's faceRef.
+        auto* sk = dynamic_cast<SketchFeature*>(feature);
+        if (sk != nullptr && sk->faceRef.IsSet()) {
+          if (ImGui::MenuItem("Reattach face…")) {
+            state.sketchEdit = SketchEditState{};
+            state.sketchEdit.pickingPlane = true;
+            state.sketchEdit.reattachSketchId = sk->GetId();
+          }
+        }
         if (ImGui::MenuItem("Delete")) {
           state.commands->Execute(std::make_unique<RemoveFeatureCommand>(i),
                                   *doc);

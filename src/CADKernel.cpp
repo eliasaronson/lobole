@@ -20,6 +20,8 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Solid.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <GeomAbs_SurfaceType.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <Poly_Triangulation.hxx>
@@ -193,6 +195,42 @@ std::vector<CADShape> CADShape::SplitSolids() const {
         solids.push_back(*this);
     }
     return solids;
+}
+
+bool CADShape::FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
+                         glm::vec3& uAxis) const {
+    if (!IsValid() || faceIndex < 0) return false;
+
+    // Walk to the face in the same order GenerateMesh / the ElementMap use.
+    int i = 0;
+    TopoDS_Face face;
+    for (TopExp_Explorer exp(m_shape, TopAbs_FACE); exp.More(); exp.Next(), i++) {
+        if (i == faceIndex) { face = TopoDS::Face(exp.Current()); break; }
+    }
+    if (face.IsNull()) return false;
+
+    // Sketch-on-face requires a planar face.
+    BRepAdaptor_Surface surf(face);
+    if (surf.GetType() != GeomAbs_Plane) return false;
+
+    // Centroid.
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(face, props);
+    const gp_Pnt c = props.CentreOfMass();
+    center = glm::vec3(c.X(), c.Y(), c.Z());
+
+    // The plane's axis is the normal; the face orientation gives outward sense.
+    const gp_Dir nd = surf.Plane().Axis().Direction();
+    glm::vec3 n(nd.X(), nd.Y(), nd.Z());
+    if (face.Orientation() == TopAbs_REVERSED) n = -n;
+    normal = glm::normalize(n);
+
+    // Deterministic in-plane u-axis (matches the sketch-on-face baking
+    // heuristic), so the sketch frame is stable across upstream edits.
+    glm::vec3 u = std::abs(normal.y) < 0.9f ? glm::vec3(0, 1, 0)
+                                            : glm::vec3(1, 0, 0);
+    uAxis = glm::normalize(u - glm::dot(u, normal) * normal);
+    return true;
 }
 
 CADShape::Mesh CADShape::GenerateMesh(double deflection) const {

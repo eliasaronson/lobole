@@ -20,7 +20,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 15; // v15: mirror/pattern (v14: booleans, v13: revolve + datum axis)
+constexpr int kVersion = 16; // v16: sketch face_ref (v15: mirror/pattern, v14: booleans)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -363,6 +363,10 @@ json FeatureToJson(const Feature& feature) {
     if (sk->planeRef != 0) { // v12: tracked datum plane (omit when baked)
       j["plane_ref"] = sk->planeRef;
     }
+    if (sk->faceRef.IsSet()) { // v16: attached body face (toponaming)
+      j["face_ref"] = {{"feature_id", sk->faceRef.featureId},
+                       {"element", sk->faceRef.name}};
+    }
     j["next_entity_id"] = sk->nextEntityId;
     j["entities"] = json::array();
     for (const auto& entity : sk->entities) {
@@ -570,6 +574,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (!sk->derived.empty())
       sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
     sk->planeRef = j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
+    if (j.contains("face_ref")) { // v16: attached body face
+      const json& fr = j.at("face_ref");
+      sk->faceRef = ElementRef{fr.value("feature_id", uint64_t{0}),
+                               fr.value("element", std::string{})};
+    }
     out = std::move(sk);
   } else if (type == "Extrude") {
     auto ext = std::make_unique<ExtrudeFeature>(

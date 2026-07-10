@@ -34,6 +34,22 @@ uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
 uint64_t BeginSketchOnDatum(AppState& state, const DatumPlaneFeature& datum,
                             const std::string& name);
 
+// The stable element ref for a picked body face ({meshId, faceIndex}), or
+// nullopt if that face isn't named (only extrude-NewBody faces are, so far).
+std::optional<ElementRef> FaceElementRef(AppState& state, uint32_t meshId,
+                                         uint32_t faceIndex);
+
+// Starts a new sketch attached to a body face by an ElementRef: bakes the
+// face's current plane and records faceRef, so the sketch (and everything
+// built on it) follows edits to the base body. Returns the new sketch's id.
+uint64_t BeginSketchOnFace(AppState& state, const ElementRef& ref,
+                           const SketchPlane& plane, const std::string& name);
+
+// Re-points an existing face-attached sketch at another face (one undoable
+// edit). Backs the "Reattach face…" flow.
+void ReattachSketchFace(AppState& state, uint64_t sketchId,
+                        const ElementRef& ref);
+
 // Handles viewport interaction while picking a plane or drawing. Called from
 // the viewport-input sketch branch. Returns true if it consumed the frame's
 // interaction (so normal face-picking is skipped).

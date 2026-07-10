@@ -92,15 +92,26 @@ the hovered/selected face. Mutation tests (`tests/test_toponaming.cpp`) prove
 the contract: names survive a geometry edit and an added hole; a deleted
 entity's name stops resolving. Landed T1 prerequisites 1, 2, 4.
 
-### T3 — `ElementRef` plumbing
-The reference type, serialization (format bump + migration), resolution in
-`RegenContext`, error surfacing into the feature-error UX.
+### T3 — `ElementRef` plumbing — **done (July 2026)**
+`ElementRef {featureId, name}` (`src/core/ElementMap.h`); resolution finds the
+body the feature produced (`Body::createdBy`) and looks the name up in its
+`ElementMap`. `CADShape::FacePlane(faceIndex)` extracts a planar face's frame
+at the B-Rep level (centroid + normal + deterministic u-axis). Per-feature
+**error state**: `Feature::m_error` (transient, mirrors `Parameter::error`);
+`Document::Regenerate` clears it before each `Execute` and stamps a generic
+message on silent failure; features `SetError` specifics. Landed T1
+prerequisite 3.
 
-### T4 — Adopt: sketch-on-face
-Replace the baked `SketchPlane` for face-attached sketches with an
-`ElementRef` — the first user-visible payoff: edit the base extrude's height
-and the dependent sketch + its extrude follow. (Keep baked planes for datum/
-default-plane sketches — those are already stable by feature id.)
+### T4 — Adopt: sketch-on-face — **done (July 2026)**
+`SketchFeature` gained a `faceRef` (`ElementRef`) resolved in `Execute` before
+the datum block: the sketch re-derives its plane from the attached face every
+regeneration, so **editing the base body moves the dependent sketch and
+everything built on it** (verified: raising a base box from 3→6 carried the
+top feature from z=3 to z=6). "Sketch on Selected Face" stores a `faceRef` when
+the face is named (extrude-NewBody faces), else bakes (no regression). Format
+v16. UI: errored features show red + a tooltip in the tree, and a face-attached
+sketch has a **Reattach face…** context action. Base/datum-plane sketches keep
+their stable feature-id refs unchanged.
 
 ### T5 — Adopt: booleans propagation + fillet edges
 History propagation through `BRepAlgoAPI_*`; then M7 fillet consumes

@@ -1,8 +1,20 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
+
+// A persistent reference to a named face/edge of a feature's output body
+// (topological naming, T3). Stored in features that attach to geometry (e.g. a
+// sketch on a body face); resolved each regeneration by finding the body the
+// feature produced and looking `name` up in its ElementMap. Unlike a raw
+// faceIndex, this survives upstream edits that renumber faces.
+struct ElementRef {
+  uint64_t featureId = 0; // the feature whose body owns the name
+  std::string name;       // a MappedName in that body's ElementMap
+  [[nodiscard]] bool IsSet() const { return featureId != 0; }
+};
 
 // Stable element names ↔ volatile face indices for one body (topological
 // naming, T2). A MappedName encodes *why* a face exists (e.g. an extrude's

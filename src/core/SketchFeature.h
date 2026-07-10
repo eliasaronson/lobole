@@ -507,8 +507,13 @@ public:
   // When non-zero: the id of a DatumPlaneFeature earlier in the history;
   // Execute refreshes `plane` from its output each regeneration, so the
   // sketch tracks datum edits. 0 = `plane` is a baked value (legacy
-  // behavior, and still how base-plane/face sketches work).
+  // behavior, and still how base-plane sketches work).
   uint64_t planeRef = 0;
+  // When set: a body face this sketch is attached to (topological naming, T4).
+  // Execute re-derives `plane` from the resolved face each regeneration, so the
+  // sketch (and everything built on it) follows edits to the base body. Takes
+  // precedence over planeRef; mutually exclusive with it in practice.
+  ElementRef faceRef;
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;
   std::vector<sketch::DerivedOp> derived; // linked generative ops (replayed)

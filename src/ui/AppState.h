@@ -96,6 +96,9 @@ struct SketchEditState {
   std::string actionMsg;
   int hoveredPlane = -1; // 0 Front / 1 Top / 2 Right while picking
   uint64_t hoveredDatumId = 0; // datum plane under the cursor while picking
+  // When non-zero while pickingPlane: re-pick the attached face of this sketch
+  // (its faceRef) instead of starting a new sketch. Set by "Reattach face…".
+  uint64_t reattachSketchId = 0;
 
   // Sketch-entity selection (for adding constraints), ordered.
   std::vector<sketch::PointRef> selected;

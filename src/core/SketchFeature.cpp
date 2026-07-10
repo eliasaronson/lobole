@@ -608,12 +608,43 @@ void SketchFeature::RemoveDerivedOp(size_t opIndex) {
   derived.erase(derived.begin() + opIndex);
 }
 
+namespace {
+// Resolves a face ElementRef to a work plane: find the body the referenced
+// feature produced whose element map still holds the name, then extract the
+// planar face's frame. nullopt if the name no longer resolves (deleted /
+// renamed element) or the face isn't planar.
+std::optional<SketchPlane> ResolveFacePlane(const RegenContext& ctx,
+                                            const ElementRef& ref) {
+  for (const Body& body : ctx.bodies) {
+    if (body.createdBy != ref.featureId) {
+      continue;
+    }
+    const auto idx = body.elementMap.Resolve(ref.name);
+    if (!idx) {
+      continue;
+    }
+    glm::vec3 center, normal, uAxis;
+    if (body.shape.FacePlane(*idx, center, normal, uAxis)) {
+      return SketchPlane(center, normal, uAxis);
+    }
+  }
+  return std::nullopt;
+}
+} // namespace
+
 bool SketchFeature::Execute(RegenContext& ctx) {
-  if (planeRef != 0) {
+  if (faceRef.IsSet()) {
+    const auto p = ResolveFacePlane(ctx, faceRef);
+    if (!p) {
+      SetError("attached face '" + faceRef.name + "' no longer exists");
+      return false;
+    }
+    plane = *p;
+  } else if (planeRef != 0) {
     const auto* datum =
         dynamic_cast<const DatumPlaneFeature*>(ctx.FindById(planeRef));
     if (datum == nullptr) {
-      LOG_ERROR("Sketch '{}': referenced datum plane not found", GetName());
+      SetError("referenced datum plane not found");
       return false;
     }
     plane = datum->OutputPlane();

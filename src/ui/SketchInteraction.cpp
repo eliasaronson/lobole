@@ -324,6 +324,48 @@ uint64_t BeginSketchOnDatum(AppState& state, const DatumPlaneFeature& datum,
   return BeginSketch(state, std::move(sketch), datum.OutputPlane(), name);
 }
 
+std::optional<ElementRef> FaceElementRef(AppState& state, uint32_t meshId,
+                                         uint32_t faceIndex) {
+  const auto& meshes = state.documentMeshes;
+  const auto it = std::find_if(
+      meshes.begin(), meshes.end(),
+      [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });
+  if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
+    return std::nullopt;
+  const Body& body = state.document->GetBodies()[it->bodyIndex];
+  const std::string* name =
+      body.elementMap.NameOf(static_cast<int>(faceIndex));
+  if (name == nullptr)
+    return std::nullopt; // face isn't named (only extrude NewBody faces are)
+  return ElementRef{body.createdBy, *name};
+}
+
+uint64_t BeginSketchOnFace(AppState& state, const ElementRef& ref,
+                           const SketchPlane& plane, const std::string& name) {
+  // Bake the face's current plane and record the ElementRef so the sketch
+  // re-derives its plane from the (possibly moved) face on every regeneration.
+  auto sketch = std::make_unique<SketchFeature>(name, plane);
+  sketch->faceRef = ref;
+  return BeginSketch(state, std::move(sketch), plane, name);
+}
+
+// Re-points an existing sketch's faceRef at a new face, as one undoable edit.
+void ReattachSketchFace(AppState& state, uint64_t sketchId,
+                        const ElementRef& ref) {
+  size_t index = 0;
+  auto* sk =
+      dynamic_cast<SketchFeature*>(state.document->FindFeatureById(sketchId, &index));
+  if (sk == nullptr)
+    return;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+  sk->faceRef = ref;
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+}
+
 // Sketch-context keyboard shortcuts (Onshape keymap). Called each frame while a
 // sketch is being edited. Guarded so keys never fire while typing in a field or
 // during a Ctrl/Alt chord (undo/redo).
@@ -450,8 +492,15 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const int n = static_cast<int>(state.document->FeatureCount()) + 1;
         const std::string name = "Sketch " + std::to_string(n);
-        if (hit.hit) {
-          // Bake the selected face's plane (no persistent face ref yet).
+        // Reattach mode: a named face re-points an existing sketch's faceRef.
+        if (edit.reattachSketchId != 0) {
+          if (hit.hit) {
+            if (auto ref = FaceElementRef(state, hit.meshId, hit.faceIndex))
+              ReattachSketchFace(state, edit.reattachSketchId, *ref);
+          }
+          edit.pickingPlane = false;
+          edit.reattachSketchId = 0;
+        } else if (hit.hit) {
           glm::vec3 c =
               state.faceSelector->GetFaceCenter(hit.meshId, hit.faceIndex);
           glm::vec3 nrm =
@@ -459,7 +508,13 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           glm::vec3 u = std::abs(nrm.y) < 0.9f ? glm::vec3(0, 1, 0)
                                                : glm::vec3(1, 0, 0);
           u = glm::normalize(u - glm::dot(u, nrm) * nrm);
-          BeginSketchOnPlane(state, SketchPlane(c, nrm, u), name);
+          const SketchPlane facePlane(c, nrm, u);
+          // Attach to the face by its stable name when it has one; else bake.
+          if (auto ref = FaceElementRef(state, hit.meshId, hit.faceIndex)) {
+            BeginSketchOnFace(state, *ref, facePlane, name);
+          } else {
+            BeginSketchOnPlane(state, facePlane, name);
+          }
         } else if (datumId != 0) {
           if (auto* dp = dynamic_cast<DatumPlaneFeature*>(
                   state.document->FindFeatureById(datumId)))

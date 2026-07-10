@@ -82,10 +82,14 @@ bool Document::Regenerate() {
       }
     });
 
+    m_features[i]->ClearError();
     RegenContext ctx{m_bodies, m_features, i, &m_symbols};
     if (!m_features[i]->Execute(ctx)) {
-      LOG_ERROR("Regeneration stopped at feature '{}'",
-                m_features[i]->GetName());
+      if (m_features[i]->GetError().empty()) {
+        m_features[i]->SetError("regeneration failed");
+      }
+      LOG_ERROR("Regeneration stopped at feature '{}': {}",
+                m_features[i]->GetName(), m_features[i]->GetError());
       return false;
     }
   }

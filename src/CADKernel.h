@@ -42,6 +42,14 @@ public:
     // solid, several when it is a compound of disjoint solids). Empty if
     // invalid. Used to turn a fused pattern back into per-instance bodies.
     std::vector<CADShape> SplitSolids() const;
+
+    // For the planar face at `faceIndex` (TopExp_Explorer(TopAbs_FACE) order,
+    // the same order GenerateMesh / picking use), outputs a work-plane frame:
+    // `center` = the face centroid, `normal` = the outward face normal, `uAxis`
+    // = a deterministic in-plane axis. Returns false if the index is out of
+    // range or the face is not planar (topological naming, sketch-on-face).
+    bool FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
+                   glm::vec3& uAxis) const;
     
     // Access to underlying shape
     const TopoDS_Shape& GetShape() const { return m_shape; }
@@ -123,6 +131,8 @@ public:
     };
 
     Mesh GenerateMesh(double deflection = 0.1) const { return Mesh(); }
+    std::vector<CADShape> SplitSolids() const { return {}; }
+    bool FacePlane(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
 };
 
 class CADKernel {

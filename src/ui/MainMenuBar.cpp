@@ -123,8 +123,14 @@ void DrawCreateMenu(AppState& state) {
           std::abs(nrm.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
       u = glm::normalize(u - glm::dot(u, nrm) * nrm);
       const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-      BeginSketchOnPlane(state, SketchPlane(c, nrm, u),
-                         "Sketch " + std::to_string(n));
+      const std::string name = "Sketch " + std::to_string(n);
+      const SketchPlane facePlane(c, nrm, u);
+      // Attach by the face's stable name when it has one; else bake the plane.
+      if (auto ref = FaceElementRef(state, face->meshId, face->faceIndex)) {
+        BeginSketchOnFace(state, *ref, facePlane, name);
+      } else {
+        BeginSketchOnPlane(state, facePlane, name);
+      }
     }
 
     if (ImGui::MenuItem("Exit Sketch", nullptr, false, edit.IsEditing())) {
