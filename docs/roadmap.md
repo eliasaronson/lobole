@@ -66,7 +66,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 |---|---|---|
 | 1. Sketching | [sketching/plan.md](sketching/plan.md) | **Complete** (B-splines deferred) |
 | 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **In progress** (M1 datum planes + M2 revolve/datum axes shipped; M3–M8 next) |
-| 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | Design study — start now, in parallel |
+| 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | **T1 design memo done**; T2 prototype (extrude) next, in parallel |
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Shipped** (V1–V3; units algebra deferred) |
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | Remote shipped; MCP/Python/headless remain |
 | 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | Format v9 exists; the rest unstarted |

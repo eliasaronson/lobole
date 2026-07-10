@@ -68,11 +68,15 @@ must never silently guess.
 
 ## Milestones
 
-### T1 — Design memo (no code)
-Read the list above; write `toponaming-design.md`: the naming grammar, the
-propagation rule per OCC op we use, the `ElementRef` API, failure semantics,
-serialization. Review against three scenarios: reorder sketch entities, add a
-hole through a filleted face, delete the referenced entity.
+### T1 — Design memo (no code) — **done (July 2026)**
+See **[toponaming-design.md](toponaming-design.md)**: the naming grammar
+(human-readable, no hashing), per-OCC-op propagation rules with reliability
+verdicts (extrude/revolve safe; boolean/fillet need care), the `ElementRef`
+API + resolution + serialization, failure semantics, and the three scenario
+walkthroughs. It also pins five **prerequisites** T2 depends on: thread the
+sketch-entity id onto profile edges, keep OCC makers alive (booleans currently
+discard theirs), a per-feature error state, an `ElementMap` on `Body`, and
+normalizing op history onto `BRepTools_History`.
 
 ### T2 — Prototype on Extrude
 Name extrude output elements from sketch-entity ids (no history propagation
