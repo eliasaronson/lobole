@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CADKernel.h"
+#include "core/ElementMap.h"
 #include "core/Expression.h"
 
 #include <glm/glm.hpp>
@@ -22,6 +23,11 @@ struct Body {
   // regeneration; lets features reference a whole body by its producer
   // (BooleanFeature). 0 = unstamped.
   uint64_t createdBy = 0;
+
+  // Stable names for this body's faces (topological naming, T2). Transient,
+  // rebuilt each regeneration. Empty when the producing feature doesn't name
+  // its output yet (only extrude NewBody does so far).
+  ElementMap elementMap;
 };
 
 class Feature;

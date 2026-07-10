@@ -26,6 +26,22 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
+  // NewBody: the prism *is* the body, so its face indices survive into the
+  // rendered mesh — name its faces (topological naming, T2) and attach the map.
+  // Add/Cut run a boolean that renumbers faces, so leave those unnamed (T5).
+  if (mode == ExtrudeMode::NewBody) {
+    ElementMap map;
+    CADShape prism = sketch::BuildPrismNamed(sketch->plane, loops, distance,
+                                             reversed, GetId(), map);
+    if (!prism.IsValid()) {
+      LOG_ERROR("ExtrudeFeature '{}': prism construction failed", m_name);
+      return false;
+    }
+    ctx.bodies.push_back({m_name, std::move(prism), m_material, GetId()});
+    ctx.bodies.back().elementMap = std::move(map);
+    return true;
+  }
+
   CADShape prism =
       sketch::BuildPrism(sketch->plane, loops, distance, reversed);
   if (!prism.IsValid()) {

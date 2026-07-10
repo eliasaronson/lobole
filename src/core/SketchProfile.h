@@ -2,8 +2,10 @@
 
 #include "CADKernel.h"
 #include "SketchPlane.h"
+#include "core/ElementMap.h"
 #include "core/SketchFeature.h"
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
@@ -20,6 +22,7 @@ struct LoopEdge {
   glm::vec2 center{0.0f};
   double radius = 0.0;
   double angStart = 0.0, angEnd = 0.0; // CCW span (arc only)
+  uint32_t entityId = 0;               // stable id of the generating sketch entity
 };
 
 // One closed loop of a sketch profile, in plane UV space.
@@ -42,6 +45,16 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities);
 // invalid CADShape on failure.
 CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
                     double distance, bool reversed);
+
+// Like BuildPrism, but also fills `out` with stable names for the prism's
+// faces (topological naming, T2): each side face is named
+// "<featureTag>/g<entityId>" from the sketch entity that generated it, the two
+// caps "<featureTag>/cap0" (base) and "cap1" (top). The names key on the
+// faceIndex (TopExp_Explorer order) that GenerateMesh and picking use, so they
+// survive upstream sketch edits. `loops` must carry entity ids (see BuildLoops).
+CADShape BuildPrismNamed(const SketchPlane& plane,
+                         const std::vector<Loop>& loops, double distance,
+                         bool reversed, uint64_t featureTag, ElementMap& out);
 
 // Builds the profile face and revolves it about the given world-space axis
 // (origin + unit direction) through `angleRadians`. `reversed` sweeps the

@@ -366,6 +366,41 @@ void DrawDatumLabels(AppState& state) {
   }
 }
 
+void DrawElementNameOverlay(AppState& state) {
+  if (!state.showElementNames || !state.document || !state.faceSelector)
+    return;
+  // Label the hovered face (live feedback), falling back to the selected one.
+  const Face* face = state.faceSelector->GetHoveredFace();
+  if (face == nullptr)
+    face = state.faceSelector->GetSelectedFace();
+  if (face == nullptr)
+    return;
+
+  // Resolve the mesh back to its Body, then that face's element name.
+  const auto& meshes = state.documentMeshes;
+  const auto it = std::find_if(meshes.begin(), meshes.end(),
+                               [&](const DocumentRenderMesh& m) {
+                                 return m.meshId == face->meshId;
+                               });
+  if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
+    return;
+  const Body& body = state.document->GetBodies()[it->bodyIndex];
+  const std::string* name =
+      body.elementMap.NameOf(static_cast<int>(face->faceIndex));
+
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const glm::vec3 center =
+      state.faceSelector->GetFaceCenter(face->meshId, face->faceIndex);
+  const glm::vec2 s = WorldToScreen(state, center);
+  const char* text = name != nullptr ? name->c_str() : "(unnamed)";
+  const ImVec2 sz = ImGui::CalcTextSize(text);
+  dl->AddRectFilled(ImVec2(s.x - sz.x * 0.5f - 3, s.y - 2),
+                    ImVec2(s.x + sz.x * 0.5f + 3, s.y + sz.y + 2),
+                    IM_COL32(20, 24, 30, 220), 3.0f);
+  dl->AddText(ImVec2(s.x - sz.x * 0.5f, s.y), IM_COL32(120, 230, 170, 255),
+              text);
+}
+
 bool EffectivePlaneVisibility(const AppState& state) {
   if (state.sketchEdit.pickingPlane || state.sketchEdit.IsEditing())
     return true;
@@ -425,14 +460,16 @@ void SyncDocumentRenderers(AppState& state) {
       {0.76f, 0.58f, 0.70f}, // mauve
       {0.72f, 0.72f, 0.55f}, // olive
   };
-  size_t bodyIndex = 0;
-  for (const auto& body : state.document->GetBodies()) {
+  size_t palette = 0;
+  const auto& bodies = state.document->GetBodies();
+  for (size_t bi = 0; bi < bodies.size(); bi++) {
+    const auto& body = bodies[bi];
     CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
     if (cadMesh.vertices.empty())
       continue;
 
     std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(
-        cadMesh, kBodyPalette[bodyIndex++ % std::size(kBodyPalette)]);
+        cadMesh, kBodyPalette[palette++ % std::size(kBodyPalette)]);
     uint32_t meshId = state.meshRenderer->AddMesh(vertices, cadMesh.indices);
     // A body with an assigned material overrides the palette color with the
     // material's base color and real PBR params; unassigned bodies keep the
@@ -450,7 +487,7 @@ void SyncDocumentRenderers(AppState& state) {
     if (state.faceSelector)
       state.faceSelector->AddMesh(meshId, vertices, cadMesh.indices,
                                   cadMesh.triangleFaces);
-    state.documentMeshes.push_back({meshId, outlineId});
+    state.documentMeshes.push_back({meshId, outlineId, bi});
   }
 
   // Sketch line geometry (static inactive sketches + the active sketch's

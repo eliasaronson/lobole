@@ -155,6 +155,7 @@ void DrawViewMenu(AppState& state) {
     FitCameraToDocument(state);
   }
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
+  ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
 
   if (ImGui::MenuItem("Reset Layout")) {
     // Rebuild the default docking layout next frame — recovers from a panel

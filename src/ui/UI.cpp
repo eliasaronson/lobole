@@ -81,6 +81,7 @@ void DrawUI(AppState& state) {
     DrawSnapGlyphs(state);
     DrawSelectionBox(state);
     DrawDatumLabels(state);
+    DrawElementNameOverlay(state); // toponaming debug: hovered face's name
     DrawDimensions(state);
     DrawConstraintGlyphs(state);
     DrawToolPrompt(state);

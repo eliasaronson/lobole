@@ -92,6 +92,10 @@ void AppendDatumAxisLines(AppState& state, std::vector<Vertex3D>& lines);
 // (foreground draw list). Call inside the ImGui frame, near DrawDimensions.
 void DrawDatumLabels(AppState& state);
 
+// When state.showElementNames is on, labels the hovered face with its stable
+// element name (topological-naming debug overlay). No-op otherwise.
+void DrawElementNameOverlay(AppState& state);
+
 // Whether the default planes should render this frame (visible by default,
 // auto-hidden once the part has bodies, always shown while picking/editing).
 bool EffectivePlaneVisibility(const AppState& state);

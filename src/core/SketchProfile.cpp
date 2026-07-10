@@ -15,8 +15,10 @@
 #include <ShapeFix_Wire.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <Standard_Failure.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
@@ -117,13 +119,14 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
             loop.ellipse = e;
             loops.push_back(loop);
           } else if constexpr (std::is_same_v<T, Line>) {
-            freeEdges.push_back({false, e.a, e.b});
+            freeEdges.push_back(
+                {false, e.a, e.b, {}, 0.0, 0.0, 0.0, e.id});
           } else if constexpr (std::is_same_v<T, Arc>) {
             double s = e.startAngle, en = e.endAngle;
             while (en <= s)
               en += 2.0 * M_PI; // CCW-always
             freeEdges.push_back({true, ArcPointUV(e, 1), ArcPointUV(e, 2),
-                                 e.center, e.radius, s, en});
+                                 e.center, e.radius, s, en, e.id});
           }
           // Point contributes nothing to a profile
         },
@@ -478,6 +481,124 @@ std::optional<float> SegmentIntersect(glm::vec2 a1, glm::vec2 b1, glm::vec2 a2,
   if (t < -eps || t > 1.0f + eps || u < -eps || u > 1.0f + eps)
     return std::nullopt;
   return glm::clamp(t, 0.0f, 1.0f);
+}
+
+namespace {
+
+// The stable id of the sketch entity that produced `edge` (an edge of the
+// profile face), matched by geometry against the entity-id-carrying loops —
+// ShapeFix rebuilds the OCC edges, so there is no direct handle. 0 if unmatched.
+uint32_t MatchEntityId(const TopoDS_Edge& edge, const SketchPlane& plane,
+                       const std::vector<Loop>& loops) {
+  const std::optional<Entity> ent = EdgeToSketchEntity(edge, plane);
+  if (!ent) {
+    return 0;
+  }
+  const float tol = 1e-3f;
+  if (const auto* line = std::get_if<Line>(&*ent)) {
+    for (const Loop& loop : loops) {
+      for (const LoopEdge& le : loop.edges) {
+        if (le.arc) {
+          continue;
+        }
+        if ((glm::length(le.a - line->a) < tol &&
+             glm::length(le.b - line->b) < tol) ||
+            (glm::length(le.a - line->b) < tol &&
+             glm::length(le.b - line->a) < tol)) {
+          return le.entityId;
+        }
+      }
+    }
+  } else if (const auto* arc = std::get_if<Arc>(&*ent)) {
+    // Arc or full circle: match by centre + radius.
+    for (const Loop& loop : loops) {
+      if (loop.circle && glm::length(loop.circle->center - arc->center) < tol &&
+          std::abs(loop.circle->radius - arc->radius) < tol) {
+        return loop.circle->id;
+      }
+      for (const LoopEdge& le : loop.edges) {
+        if (le.arc && glm::length(le.center - arc->center) < tol &&
+            std::abs(le.radius - arc->radius) < tol) {
+          return le.entityId;
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+// 0-based index of `face` in TopExp_Explorer(shape, TopAbs_FACE) order — the
+// same walk GenerateMesh and picking use. -1 if not found.
+int FaceIndexOf(const TopoDS_Shape& shape, const TopoDS_Shape& face) {
+  int i = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next(), i++) {
+    if (ex.Current().IsSame(face)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+} // namespace
+
+CADShape BuildPrismNamed(const SketchPlane& plane,
+                         const std::vector<Loop>& loops, double distance,
+                         bool reversed, uint64_t featureTag, ElementMap& out) {
+  out.names.clear();
+  if (loops.empty() || std::abs(distance) < 1e-9) {
+    return CADShape();
+  }
+
+  try {
+    TopoDS_Face face = BuildProfileFace(plane, loops);
+    if (face.IsNull()) {
+      return CADShape();
+    }
+
+    glm::vec3 nrm = plane.GetNormal();
+    const double d = reversed ? -distance : distance;
+    gp_Vec extrusion(nrm.x * d, nrm.y * d, nrm.z * d);
+    BRepPrimAPI_MakePrism prism(face, extrusion);
+    if (!prism.IsDone()) {
+      LOG_ERROR("Sketch profile: prism construction failed");
+      return CADShape();
+    }
+    const TopoDS_Shape shape = prism.Shape();
+
+    const std::string tag = std::to_string(featureTag) + "/";
+    // Side faces: each profile edge sweeps into a lateral face, named from the
+    // sketch entity that produced the edge.
+    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+      const uint32_t entityId = MatchEntityId(edge, plane, loops);
+      if (entityId == 0) {
+        continue; // unmatched edge (e.g. a seam); leave it for a later pass
+      }
+      const std::string name = tag + "g" + std::to_string(entityId);
+      const TopTools_ListOfShape& gen = prism.Generated(edge);
+      for (const TopoDS_Shape& sideFace : gen) {
+        const int idx = FaceIndexOf(shape, sideFace);
+        if (idx >= 0) {
+          out.names[idx] = name;
+        }
+      }
+    }
+
+    // Caps: fixed sentinels, so adding/removing a hole never renames them.
+    const int baseIdx = FaceIndexOf(shape, prism.FirstShape());
+    if (baseIdx >= 0) {
+      out.names[baseIdx] = tag + "cap0";
+    }
+    const int topIdx = FaceIndexOf(shape, prism.LastShape());
+    if (topIdx >= 0) {
+      out.names[topIdx] = tag + "cap1";
+    }
+
+    return CADShape(shape);
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
+    return CADShape();
+  }
 }
 
 } // namespace sketch

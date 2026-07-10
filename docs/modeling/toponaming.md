@@ -78,11 +78,19 @@ sketch-entity id onto profile edges, keep OCC makers alive (booleans currently
 discard theirs), a per-feature error state, an `ElementMap` on `Body`, and
 normalizing op history onto `BRepTools_History`.
 
-### T2 — Prototype on Extrude
-Name extrude output elements from sketch-entity ids (no history propagation
-needed — extrude generates directly from the profile). A debug overlay shows
-element names on hover. Tests: edit the sketch (move, add entities) → the same
-side face keeps its name; delete the entity → the name reports gone.
+### T2 — Prototype on Extrude — **done (July 2026)**
+Extrude NewBody faces are named from sketch-entity ids: `BuildPrismNamed`
+(`src/core/SketchProfile.cpp`) keeps the `MakePrism` maker, names each side
+face `<extrudeId>/g<entityId>` via `Generated(edge)` + geometric edge→entity
+matching (reusing `EdgeToSketchEntity`), and the caps `cap0`/`cap1` via
+`FirstShape`/`LastShape`. The name↔faceIndex map (`ElementMap`, new header)
+rides on the `Body` (transient); face indices align with `GenerateMesh`/picking
+because the prism's TShape is shared unchanged into the body (NewBody only —
+Add/Cut run a boolean that renumbers, so `ApplyBodyMode` clears the map there).
+`LoopEdge` gained an `entityId`. A **View → Show Element Names** overlay labels
+the hovered/selected face. Mutation tests (`tests/test_toponaming.cpp`) prove
+the contract: names survive a geometry edit and an added hole; a deleted
+entity's name stops resolving. Landed T1 prerequisites 1, 2, 4.
 
 ### T3 — `ElementRef` plumbing
 The reference type, serialization (format bump + migration), resolution in

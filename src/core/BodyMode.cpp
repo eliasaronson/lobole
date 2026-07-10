@@ -45,6 +45,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
       return false;
     }
     bodies[target].shape = std::move(fused);
+    bodies[target].elementMap = {}; // the boolean renumbered faces (T2/T5)
     return true;
   }
 
@@ -57,6 +58,7 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
       CADShape cut = body.shape.Difference(shape);
       if (cut.IsValid()) {
         body.shape = std::move(cut);
+        body.elementMap = {}; // the cut renumbered faces
       }
     }
     // Drop bodies the cut fully consumed.

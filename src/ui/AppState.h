@@ -30,6 +30,7 @@ namespace ui {
 struct DocumentRenderMesh {
   uint32_t meshId;
   uint32_t outlineId;
+  size_t bodyIndex; // index into Document::GetBodies() (for element-name lookup)
 };
 
 enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
@@ -197,6 +198,7 @@ struct AppState {
   uint64_t pendingFeatureId = 0;
   ViewportDrag viewportDrag = ViewportDrag::None;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
+  bool showElementNames = false; // debug: element name of the hovered face
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
 
