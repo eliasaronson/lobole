@@ -183,8 +183,10 @@ bool RayTracingRenderer::LoadRTFunctions() {
         (PFN_vkCreateAccelerationStructureKHR)vkGetDeviceProcAddr(m_device, "vkCreateAccelerationStructureKHR");
     m_rtFunctions.vkDestroyAccelerationStructureKHR = 
         (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(m_device, "vkDestroyAccelerationStructureKHR");
-    m_rtFunctions.vkBuildAccelerationStructuresKHR = 
+    m_rtFunctions.vkBuildAccelerationStructuresKHR =
         (PFN_vkBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(m_device, "vkBuildAccelerationStructuresKHR");
+    m_rtFunctions.vkCmdBuildAccelerationStructuresKHR =
+        (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(m_device, "vkCmdBuildAccelerationStructuresKHR");
     m_rtFunctions.vkGetAccelerationStructureDeviceAddressKHR = 
         (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(m_device, "vkGetAccelerationStructureDeviceAddressKHR");
     m_rtFunctions.vkGetAccelerationStructureBuildSizesKHR = 
@@ -411,22 +413,76 @@ bool RayTracingRenderer::CreateShaderBindingTable() {
     return true;
 }
 
-uint32_t RayTracingRenderer::AddGeometry(const std::vector<Vertex3D>& vertices, 
+VkDeviceAddress RayTracingRenderer::GetBufferDeviceAddress(VkBuffer buffer) {
+    VkBufferDeviceAddressInfo info{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    info.buffer = buffer;
+    return vkGetBufferDeviceAddress(m_device, &info);
+}
+
+uint32_t RayTracingRenderer::AddGeometry(const std::vector<Vertex3D>& vertices,
                                         const std::vector<uint32_t>& indices,
                                         uint32_t materialIndex) {
-    std::cout << "Ray Tracing: Adding geometry with " << vertices.size() << " vertices, " 
-              << indices.size() << " indices" << std::endl;
-    
-    // For now, just track that we have geometry
     auto geometry = std::make_unique<RTGeometry>();
     geometry->vertexCount = static_cast<uint32_t>(vertices.size());
     geometry->indexCount = static_cast<uint32_t>(indices.size());
     geometry->materialIndex = materialIndex;
-    
+
+    // Vertex + index buffers usable both as acceleration-structure build input
+    // and as storage buffers the closest-hit shader reads by index. Host-visible
+    // is fine for an on-demand offline render (no per-frame churn).
+    const VkBufferUsageFlags usage =
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    const VkMemoryPropertyFlags props = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+    VkDeviceSize vSize = vertices.size() * sizeof(Vertex3D);
+    geometry->vertexBuffer =
+        CreateBuffer(vSize, usage, props, geometry->vertexMemory);
+    void* vmap = nullptr;
+    vkMapMemory(m_device, geometry->vertexMemory, 0, vSize, 0, &vmap);
+    memcpy(vmap, vertices.data(), static_cast<size_t>(vSize));
+    vkUnmapMemory(m_device, geometry->vertexMemory);
+    geometry->vertexAddress = GetBufferDeviceAddress(geometry->vertexBuffer);
+
+    VkDeviceSize iSize = indices.size() * sizeof(uint32_t);
+    geometry->indexBuffer =
+        CreateBuffer(iSize, usage, props, geometry->indexMemory);
+    void* imap = nullptr;
+    vkMapMemory(m_device, geometry->indexMemory, 0, iSize, 0, &imap);
+    memcpy(imap, indices.data(), static_cast<size_t>(iSize));
+    vkUnmapMemory(m_device, geometry->indexMemory);
+    geometry->indexAddress = GetBufferDeviceAddress(geometry->indexBuffer);
+
     uint32_t geometryId = m_nextGeometryId++;
     m_geometries.push_back(std::move(geometry));
-    
     return geometryId;
+}
+
+void RayTracingRenderer::DestroyAccelerationStructure(RTAccelerationStructure& as) {
+    if (as.handle != VK_NULL_HANDLE)
+        m_rtFunctions.vkDestroyAccelerationStructureKHR(m_device, as.handle, nullptr);
+    if (as.buffer != VK_NULL_HANDLE)
+        vkDestroyBuffer(m_device, as.buffer, nullptr);
+    if (as.memory != VK_NULL_HANDLE)
+        vkFreeMemory(m_device, as.memory, nullptr);
+    as = {};
+}
+
+void RayTracingRenderer::ClearGeometry() {
+    if (!m_isInitialized) return;
+    vkDeviceWaitIdle(m_device);
+    DestroyAccelerationStructure(m_topLevelAS);
+    for (auto& g : m_geometries) {
+        DestroyAccelerationStructure(g->blas);
+        if (g->vertexBuffer) vkDestroyBuffer(m_device, g->vertexBuffer, nullptr);
+        if (g->vertexMemory) vkFreeMemory(m_device, g->vertexMemory, nullptr);
+        if (g->indexBuffer) vkDestroyBuffer(m_device, g->indexBuffer, nullptr);
+        if (g->indexMemory) vkFreeMemory(m_device, g->indexMemory, nullptr);
+    }
+    m_geometries.clear();
+    m_nextGeometryId = 1;
 }
 
 uint32_t RayTracingRenderer::AddMaterial(const RTMaterial& material) {
@@ -566,73 +622,212 @@ std::string RayTracingRenderer::GetExecutableDirectory() {
     return std::filesystem::path(path).parent_path().string();
 }
 
+VkCommandBuffer RayTracingRenderer::BeginSingleTimeCommands() {
+    VkCommandBufferAllocateInfo alloc{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    alloc.commandPool = m_commandPool;
+    alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc.commandBufferCount = 1;
+    VkCommandBuffer cb = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(m_device, &alloc, &cb);
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cb, &begin);
+    return cb;
+}
+
+void RayTracingRenderer::EndSingleTimeCommands(VkCommandBuffer cb) {
+    vkEndCommandBuffer(cb);
+    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cb;
+    vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(m_graphicsQueue);
+    vkFreeCommandBuffers(m_device, m_commandPool, 1, &cb);
+}
+
 bool RayTracingRenderer::CreateBottomLevelAS() {
-    std::cout << "Ray Tracing: Creating bottom level acceleration structure..." << std::endl;
-    
-    // For now, create a simple BLAS for all geometries combined
-    // In a full implementation, we'd create separate BLAS for each geometry
-    
-    // Geometry description
-    std::vector<VkAccelerationStructureGeometryKHR> geometries;
-    std::vector<VkAccelerationStructureBuildRangeInfoKHR> buildRangeInfos;
-    
-    for (const auto& geom : m_geometries) {
-        VkAccelerationStructureGeometryKHR asGeometry{};
-        asGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-        asGeometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-        asGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
-        
-        // Vertex data
-        asGeometry.geometry.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-        asGeometry.geometry.triangles.vertexData.deviceAddress = 0; // Will be set when we have actual buffers
-        asGeometry.geometry.triangles.maxVertex = geom->vertexCount - 1;
-        asGeometry.geometry.triangles.vertexStride = sizeof(float) * 9; // pos(3) + normal(3) + color(3)
-        asGeometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-        
-        // Index data
-        asGeometry.geometry.triangles.indexData.deviceAddress = 0; // Will be set when we have actual buffers
-        asGeometry.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
-        
-        geometries.push_back(asGeometry);
-        
-        VkAccelerationStructureBuildRangeInfoKHR buildRangeInfo{};
-        buildRangeInfo.primitiveCount = geom->indexCount / 3;
-        buildRangeInfo.primitiveOffset = 0;
-        buildRangeInfo.firstVertex = 0;
-        buildRangeInfo.transformOffset = 0;
-        
-        buildRangeInfos.push_back(buildRangeInfo);
+    // One BLAS per geometry (body). Built device-side from the vertex/index
+    // buffers uploaded in AddGeometry.
+    for (auto& geom : m_geometries) {
+        VkAccelerationStructureGeometryKHR asGeom{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+        asGeom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        asGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+        auto& tri = asGeom.geometry.triangles;
+        tri.sType =
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+        tri.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT; // position is the first vec3
+        tri.vertexData.deviceAddress = geom->vertexAddress;
+        tri.vertexStride = sizeof(Vertex3D);
+        tri.maxVertex = geom->vertexCount - 1;
+        tri.indexType = VK_INDEX_TYPE_UINT32;
+        tri.indexData.deviceAddress = geom->indexAddress;
+
+        uint32_t primCount = geom->indexCount / 3;
+
+        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        buildInfo.flags =
+            VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        buildInfo.geometryCount = 1;
+        buildInfo.pGeometries = &asGeom;
+
+        VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+        m_rtFunctions.vkGetAccelerationStructureBuildSizesKHR(
+            m_device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo,
+            &primCount, &sizeInfo);
+
+        geom->blas.buffer = CreateBuffer(
+            sizeInfo.accelerationStructureSize,
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, geom->blas.memory);
+
+        VkAccelerationStructureCreateInfoKHR createInfo{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+        createInfo.buffer = geom->blas.buffer;
+        createInfo.size = sizeInfo.accelerationStructureSize;
+        createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        m_rtFunctions.vkCreateAccelerationStructureKHR(m_device, &createInfo,
+                                                       nullptr, &geom->blas.handle);
+
+        VkDeviceMemory scratchMem = VK_NULL_HANDLE;
+        VkBuffer scratch = CreateBuffer(
+            sizeInfo.buildScratchSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchMem);
+
+        buildInfo.dstAccelerationStructure = geom->blas.handle;
+        buildInfo.scratchData.deviceAddress = GetBufferDeviceAddress(scratch);
+
+        VkAccelerationStructureBuildRangeInfoKHR range{};
+        range.primitiveCount = primCount;
+        const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
+
+        VkCommandBuffer cb = BeginSingleTimeCommands();
+        m_rtFunctions.vkCmdBuildAccelerationStructuresKHR(cb, 1, &buildInfo,
+                                                          &pRange);
+        EndSingleTimeCommands(cb);
+
+        vkDestroyBuffer(m_device, scratch, nullptr);
+        vkFreeMemory(m_device, scratchMem, nullptr);
+
+        VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
+            VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+        addrInfo.accelerationStructure = geom->blas.handle;
+        geom->blas.deviceAddress =
+            m_rtFunctions.vkGetAccelerationStructureDeviceAddressKHR(m_device,
+                                                                     &addrInfo);
     }
-    
-    // For now, return true - we'll implement the actual AS building when we integrate with MeshRenderer
-    std::cout << "Ray Tracing: Bottom level AS creation - ready for integration" << std::endl;
+    std::cout << "Ray Tracing: built " << m_geometries.size() << " BLAS"
+              << std::endl;
     return true;
 }
 
 bool RayTracingRenderer::CreateTopLevelAS() {
-    std::cout << "Ray Tracing: Creating top level acceleration structure..." << std::endl;
-    
-    // Create instance data for each geometry
+    // One instance per body, referencing its BLAS. Geometry is already in world
+    // space, so the instance transform is identity.
     std::vector<VkAccelerationStructureInstanceKHR> instances;
-    
     for (size_t i = 0; i < m_geometries.size(); ++i) {
-        VkAccelerationStructureInstanceKHR instance{};
-        
-        // Identity transform for now
-        instance.transform.matrix[0][0] = 1.0f;
-        instance.transform.matrix[1][1] = 1.0f;
-        instance.transform.matrix[2][2] = 1.0f;
-        
-        instance.instanceCustomIndex = static_cast<uint32_t>(i);
-        instance.mask = 0xFF;
-        instance.instanceShaderBindingTableRecordOffset = 0;
-        instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-        instance.accelerationStructureReference = m_bottomLevelAS.deviceAddress;
-        
-        instances.push_back(instance);
+        VkAccelerationStructureInstanceKHR inst{};
+        inst.transform.matrix[0][0] = 1.0f;
+        inst.transform.matrix[1][1] = 1.0f;
+        inst.transform.matrix[2][2] = 1.0f;
+        inst.instanceCustomIndex = static_cast<uint32_t>(i);
+        inst.mask = 0xFF;
+        inst.instanceShaderBindingTableRecordOffset = 0;
+        inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+        inst.accelerationStructureReference = m_geometries[i]->blas.deviceAddress;
+        instances.push_back(inst);
     }
-    
-    // For now, return true - we'll implement the actual AS building when we integrate with MeshRenderer
-    std::cout << "Ray Tracing: Top level AS creation - ready for integration" << std::endl;
+
+    VkDeviceSize instSize =
+        instances.size() * sizeof(VkAccelerationStructureInstanceKHR);
+    VkDeviceMemory instMem = VK_NULL_HANDLE;
+    VkBuffer instBuf = CreateBuffer(
+        instSize,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+        instMem);
+    void* map = nullptr;
+    vkMapMemory(m_device, instMem, 0, instSize, 0, &map);
+    memcpy(map, instances.data(), static_cast<size_t>(instSize));
+    vkUnmapMemory(m_device, instMem);
+
+    VkAccelerationStructureGeometryKHR asGeom{
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+    asGeom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    asGeom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    asGeom.geometry.instances.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    asGeom.geometry.instances.arrayOfPointers = VK_FALSE;
+    asGeom.geometry.instances.data.deviceAddress = GetBufferDeviceAddress(instBuf);
+
+    uint32_t primCount = static_cast<uint32_t>(instances.size());
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.geometryCount = 1;
+    buildInfo.pGeometries = &asGeom;
+
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    m_rtFunctions.vkGetAccelerationStructureBuildSizesKHR(
+        m_device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo,
+        &primCount, &sizeInfo);
+
+    m_topLevelAS.buffer = CreateBuffer(
+        sizeInfo.accelerationStructureSize,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_topLevelAS.memory);
+
+    VkAccelerationStructureCreateInfoKHR createInfo{
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+    createInfo.buffer = m_topLevelAS.buffer;
+    createInfo.size = sizeInfo.accelerationStructureSize;
+    createInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    m_rtFunctions.vkCreateAccelerationStructureKHR(m_device, &createInfo, nullptr,
+                                                   &m_topLevelAS.handle);
+
+    VkDeviceMemory scratchMem = VK_NULL_HANDLE;
+    VkBuffer scratch = CreateBuffer(
+        sizeInfo.buildScratchSize,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, scratchMem);
+
+    buildInfo.dstAccelerationStructure = m_topLevelAS.handle;
+    buildInfo.scratchData.deviceAddress = GetBufferDeviceAddress(scratch);
+
+    VkAccelerationStructureBuildRangeInfoKHR range{};
+    range.primitiveCount = primCount;
+    const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
+
+    VkCommandBuffer cb = BeginSingleTimeCommands();
+    m_rtFunctions.vkCmdBuildAccelerationStructuresKHR(cb, 1, &buildInfo, &pRange);
+    EndSingleTimeCommands(cb);
+
+    vkDestroyBuffer(m_device, scratch, nullptr);
+    vkFreeMemory(m_device, scratchMem, nullptr);
+    vkDestroyBuffer(m_device, instBuf, nullptr);
+    vkFreeMemory(m_device, instMem, nullptr);
+
+    VkAccelerationStructureDeviceAddressInfoKHR addrInfo{
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+    addrInfo.accelerationStructure = m_topLevelAS.handle;
+    m_topLevelAS.deviceAddress =
+        m_rtFunctions.vkGetAccelerationStructureDeviceAddressKHR(m_device,
+                                                                 &addrInfo);
+    std::cout << "Ray Tracing: built TLAS over " << instances.size()
+              << " instances" << std::endl;
     return true;
 }

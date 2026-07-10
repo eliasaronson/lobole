@@ -208,9 +208,17 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
 #endif
   }
 
-  // Select Physical Device (GPU)
+  // Select Physical Device (GPU). ImGui prefers a discrete GPU, which on this
+  // dual-GPU machine is the RT-capable RTX 4060 (not the Arc iGPU). Log it so a
+  // wrong pick (e.g. a headless llvmpipe) is obvious — RT needs the discrete GPU.
   g_PhysicalDevice = ImGui_ImplVulkanH_SelectPhysicalDevice(g_Instance);
   IM_ASSERT(g_PhysicalDevice != VK_NULL_HANDLE);
+  {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
+    LOG_INFO("Selected GPU: {} (type {})", props.deviceName,
+             static_cast<int>(props.deviceType));
+  }
 
   // Select graphics queue family
   g_QueueFamily = ImGui_ImplVulkanH_SelectQueueFamilyIndex(g_PhysicalDevice);

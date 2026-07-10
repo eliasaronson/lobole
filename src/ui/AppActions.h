@@ -23,6 +23,11 @@ void FitCameraToDocument(AppState& state);
 // changed (edit, undo, redo). Call once per frame before drawing.
 void SyncDocumentRenderers(AppState& state);
 
+// Mirrors the current document bodies into the ray tracer (geometry + materials)
+// and (re)builds its acceleration structures. On-demand for the offline render;
+// returns false if RT is unavailable or there's no geometry.
+bool SyncRayTracingScene(AppState& state);
+
 // Imports a STEP file as an undoable ImportFeature and fits the camera.
 void LoadSTEPFile(AppState& state, const std::string& filename);
 

@@ -4,6 +4,7 @@
 #include "Camera.h"
 #include "FaceSelector.h"
 #include "Logger.h"
+#include "RayTracingRenderer.h"
 #include "MeshRenderer.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
@@ -253,6 +254,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"can_undo", state.commands->CanUndo()},
             {"can_redo", state.commands->CanRedo()},
             {"pending_feature_id", state.pendingFeatureId}};
+  }
+  if (m == "rt_build") {
+    // Build the ray-tracing acceleration structures from the current document.
+    // Verification hook for the offline-render work (R4).
+    bool ok = ui::SyncRayTracingScene(state);
+    return {{"ok", ok},
+            {"geometry_count",
+             state.rayTracer ? state.rayTracer->GeometryCount() : 0},
+            {"has_tlas", state.rayTracer && state.rayTracer->HasTLAS()}};
   }
   if (m == "select_feature") {
     // Select a feature by index (-1 clears). Drives the same selection the

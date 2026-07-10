@@ -3,6 +3,7 @@
 #include "CADMaterials.h"
 #include "CADMeshConverter.h"
 #include "Camera.h"
+#include "RayTracingRenderer.h"
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "MeshRenderer.h"
@@ -280,6 +281,43 @@ void SyncDocumentRenderers(AppState& state) {
 
   LOG_INFO("Document synced: {} features, {} bodies",
            state.document->FeatureCount(), state.document->GetBodies().size());
+}
+
+bool SyncRayTracingScene(AppState& state) {
+  if (!state.rayTracer || !state.rayTracer->IsInitialized() || !state.document)
+    return false;
+
+  state.rayTracer->ClearGeometry();
+  state.rayTracer->ClearMaterials();
+
+  for (const auto& body : state.document->GetBodies()) {
+    CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
+    if (cadMesh.vertices.empty())
+      continue;
+
+    CADMaterials::MaterialType mt =
+        body.material.empty()
+            ? CADMaterials::MaterialType::DEFAULT
+            : CADMaterials::MaterialLibrary::FromSlug(body.material);
+    const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(mt);
+
+    RTMaterial rtm{};
+    rtm.baseColor = mat.baseColor;
+    rtm.metallic = mat.metallic;
+    rtm.roughness = mat.roughness;
+    rtm.emissive = glm::vec3(0.0f);
+    rtm.specular = glm::vec3(mat.specular);
+    rtm.transmission = 0.0f;
+    uint32_t matId = state.rayTracer->AddMaterial(rtm);
+
+    std::vector<Vertex3D> vertices =
+        CADMeshConverter::ConvertCADMeshToVertices(cadMesh, mat.baseColor);
+    state.rayTracer->AddGeometry(vertices, cadMesh.indices, matId);
+  }
+
+  if (state.rayTracer->GeometryCount() == 0)
+    return false;
+  return state.rayTracer->BuildAccelerationStructures();
 }
 
 std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,

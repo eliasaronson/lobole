@@ -18,10 +18,16 @@ struct RTAccelerationStructure {
 
 struct RTGeometry {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
+    VkDeviceAddress vertexAddress = 0;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+    VkDeviceAddress indexAddress = 0;
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
     uint32_t materialIndex = 0;
+    // Per-geometry bottom-level AS (built in R4.2).
+    RTAccelerationStructure blas;
 };
 
 struct RTMaterial {
@@ -52,9 +58,15 @@ public:
     uint32_t AddGeometry(const std::vector<Vertex3D>& vertices, 
                         const std::vector<uint32_t>& indices,
                         uint32_t materialIndex = 0);
-    void UpdateGeometry(uint32_t geometryId, const std::vector<Vertex3D>& vertices, 
+    void UpdateGeometry(uint32_t geometryId, const std::vector<Vertex3D>& vertices,
                        const std::vector<uint32_t>& indices);
     void RemoveGeometry(uint32_t geometryId);
+    // Drops all geometry + acceleration structures (offline render rebuilds the
+    // scene from scratch each time).
+    void ClearGeometry();
+    void ClearMaterials() { m_materials.clear(); m_nextMaterialId = 0; }
+    size_t GeometryCount() const { return m_geometries.size(); }
+    bool HasTLAS() const { return m_topLevelAS.handle != VK_NULL_HANDLE; }
 
     // Material management
     uint32_t AddMaterial(const RTMaterial& material);
@@ -81,6 +93,7 @@ private:
         PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
         PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
         PFN_vkBuildAccelerationStructuresKHR vkBuildAccelerationStructuresKHR = nullptr;
+        PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
         PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
         PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
         PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
@@ -100,8 +113,12 @@ private:
     bool CreateTopLevelAS();
     
     // Utility functions
-    VkBuffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, 
+    VkBuffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                          VkMemoryPropertyFlags properties, VkDeviceMemory& bufferMemory);
+    VkDeviceAddress GetBufferDeviceAddress(VkBuffer buffer);
+    void DestroyAccelerationStructure(RTAccelerationStructure& as);
+    VkCommandBuffer BeginSingleTimeCommands();
+    void EndSingleTimeCommands(VkCommandBuffer cb);
     uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     std::vector<char> ReadShaderFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
