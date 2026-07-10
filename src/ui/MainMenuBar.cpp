@@ -142,6 +142,12 @@ void DrawViewMenu(AppState& state) {
   }
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
 
+  if (ImGui::MenuItem("Reset Layout")) {
+    // Rebuild the default docking layout next frame — recovers from a panel
+    // dragged huge or a stale imgui.ini.
+    state.buildDefaultDockLayout = true;
+  }
+
   ImGui::Separator();
 
   if (state.outlineRenderer && state.outlineRenderer->IsInitialized()) {

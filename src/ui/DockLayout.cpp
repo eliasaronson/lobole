@@ -29,7 +29,12 @@ void BeginDockspace(AppState& state) {
   ImGui::Begin("##DockHost", nullptr, hostFlags);
   ImGui::PopStyleVar(3);
 
-  // Toolbar row (padded child so the buttons aren't flush to the edge)
+  // Toolbar row (padded child so the buttons aren't flush to the edge). Give it
+  // an opaque background so it reads as a solid bar continuous with the menu
+  // bar, rather than icons floating over the transparent viewport.
+  ImVec4 barBg = ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg);
+  barBg.w = 1.0f;
+  ImGui::PushStyleColor(ImGuiCol_ChildBg, barBg);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f, 4.0f));
   const float toolbarH = ImGui::GetFrameHeight() + 12.0f;
   ImGui::BeginChild("##ToolbarRow", ImVec2(0.0f, toolbarH), ImGuiChildFlags_None,
@@ -37,6 +42,7 @@ void BeginDockspace(AppState& state) {
   DrawToolbar(state);
   ImGui::EndChild();
   ImGui::PopStyleVar();
+  ImGui::PopStyleColor();
 
   // Dockspace filling the rest; passthru central node shows the 3D behind it.
   ImGuiID dockspaceId = ImGui::GetID("MainDockSpace");
@@ -65,9 +71,11 @@ void BeginDockspace(AppState& state) {
       avail = vp->WorkSize; // first frame: content region not yet sized
     ImGui::DockBuilderSetNodeSize(dockspaceId, avail);
     ImGuiID center = dockspaceId;
-    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f,
+    // Favor the 3D viewport: narrow-ish side panels (~17% left, ~18% right),
+    // leaving ~65% for the central node.
+    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.17f,
                                                nullptr, &center);
-    ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.25f,
+    ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f,
                                                 nullptr, &center);
     ImGui::DockBuilderDockWindow("Model", left);
     ImGui::DockBuilderDockWindow("Properties", right);

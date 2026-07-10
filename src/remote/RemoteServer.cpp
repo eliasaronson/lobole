@@ -254,6 +254,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"can_redo", state.commands->CanRedo()},
             {"pending_feature_id", state.pendingFeatureId}};
   }
+  if (m == "select_feature") {
+    // Select a feature by index (-1 clears). Drives the same selection the
+    // feature tree sets, so the Properties panel shows/edits it.
+    int index = p.value("index", -1);
+    if (index >= 0 && index >= static_cast<int>(doc->FeatureCount()))
+      throw std::runtime_error("feature index out of range");
+    state.selectedFeature = index;
+    return json::object();
+  }
   if (m == "accept_pending") {
     ui::AcceptPendingFeature(state);
     return json::object();
