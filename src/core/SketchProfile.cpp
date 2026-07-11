@@ -20,6 +20,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Vertex.hxx>
@@ -341,39 +342,95 @@ bool PolygonContains(const std::vector<glm::vec2>& poly, const glm::vec2& p) {
   return inside;
 }
 
-// Builds the planar profile face from the loops: the largest-|area| loop is
-// the outer boundary, the rest become holes. Null face on failure. Shared by
-// BuildPrism (extrude) and BuildRevolve.
-TopoDS_Face BuildProfileFace(const SketchPlane& plane,
-                             const std::vector<Loop>& loops) {
-  size_t outer = 0;
-  double outerArea = std::abs(loops[0].SignedArea());
-  for (size_t i = 1; i < loops.size(); i++) {
-    double area = std::abs(loops[i].SignedArea());
-    if (area > outerArea) {
-      outerArea = area;
-      outer = i;
+// One outer loop with the holes that belong to it (multi-profile, M3.1).
+// `key` is the lowest entity id in the outer loop: a stable identity for
+// per-group element names (cap faces) that survives loop reordering.
+struct ProfileGroup {
+  size_t outer;
+  std::vector<size_t> holes;
+  uint32_t key;
+};
+
+uint32_t LoopKey(const Loop& loop) {
+  if (loop.circle)
+    return loop.circle->id;
+  if (loop.ellipse)
+    return loop.ellipse->id;
+  uint32_t key = UINT32_MAX;
+  for (const auto& e : loop.edges)
+    key = std::min(key, e.entityId);
+  return key == UINT32_MAX ? 0 : key;
+}
+
+// Groups loops into outers-with-holes by containment depth: even depth =
+// outer boundary, odd depth = hole of its immediate (deepest) container;
+// islands inside holes become outers again (Onshape behavior). Empty on
+// partially-overlapping loops — an ambiguous profile is a loud error, never
+// a guess.
+std::vector<ProfileGroup> ClassifyLoops(const std::vector<Loop>& loops) {
+  const size_t n = loops.size();
+  std::vector<std::vector<glm::vec2>> polys(n);
+  for (size_t i = 0; i < n; i++)
+    polys[i] = LoopPolygon(loops[i]);
+
+  // Partial overlap: some but not all of a loop's vertices inside another.
+  for (size_t a = 0; a < n; a++) {
+    for (size_t b = 0; b < n; b++) {
+      if (a == b)
+        continue;
+      size_t inside = 0;
+      for (const glm::vec2& v : polys[a])
+        if (PolygonContains(polys[b], v))
+          inside++;
+      if (inside != 0 && inside != polys[a].size()) {
+        LOG_ERROR("Sketch profile: loops {} and {} overlap — profiles must "
+                  "be disjoint or fully nested",
+                  a, b);
+        return {};
+      }
     }
   }
 
-  // Every other loop must be a hole INSIDE the outer. A profile of disjoint
-  // loops (e.g. four separate bolt-hole circles) is not supported yet; treat
-  // it as an error rather than let the bogus outer+holes face produce a
-  // silent no-op boolean downstream.
-  const std::vector<glm::vec2> outerPoly = LoopPolygon(loops[outer]);
-  for (size_t i = 0; i < loops.size(); i++) {
-    if (i == outer)
+  std::vector<int> depth(n, 0);
+  std::vector<std::vector<size_t>> containers(n);
+  for (size_t i = 0; i < n; i++) {
+    for (size_t j = 0; j < n; j++) {
+      if (i != j && !polys[i].empty() &&
+          PolygonContains(polys[j], polys[i].front()))
+        containers[i].push_back(j);
+    }
+    depth[i] = static_cast<int>(containers[i].size());
+  }
+
+  std::vector<ProfileGroup> groups;
+  std::vector<int> groupOf(n, -1);
+  for (size_t i = 0; i < n; i++) {
+    if (depth[i] % 2 == 0) {
+      groupOf[i] = static_cast<int>(groups.size());
+      groups.push_back({i, {}, LoopKey(loops[i])});
+    }
+  }
+  for (size_t i = 0; i < n; i++) {
+    if (depth[i] % 2 == 0)
       continue;
-    const std::vector<glm::vec2> poly = LoopPolygon(loops[i]);
-    if (poly.empty() || !PolygonContains(outerPoly, poly.front())) {
-      LOG_ERROR("Sketch profile: loop {} lies outside the outer boundary "
-                "(multiple disjoint profiles are not supported yet — use one "
-                "feature per profile)",
-                i);
-      return TopoDS_Face();
+    size_t owner = containers[i][0];
+    for (size_t j : containers[i])
+      if (depth[j] > depth[owner])
+        owner = j;
+    if (depth[owner] != depth[i] - 1 || groupOf[owner] < 0) {
+      LOG_ERROR("Sketch profile: inconsistent loop nesting at loop {}", i);
+      return {};
     }
+    groups[groupOf[owner]].holes.push_back(i);
   }
+  return groups;
+}
 
+// Builds the planar face for one profile group (outer boundary + its holes).
+// Null face on failure. Shared by BuildPrism (extrude) and BuildRevolve.
+TopoDS_Face BuildGroupFace(const SketchPlane& plane,
+                           const std::vector<Loop>& loops,
+                           const ProfileGroup& group) {
   glm::vec3 o = plane.GetOrigin();
   glm::vec3 nrm = plane.GetNormal();
   glm::vec3 u = plane.GetUAxis();
@@ -381,11 +438,14 @@ TopoDS_Face BuildProfileFace(const SketchPlane& plane,
              gp_Dir(u.x, u.y, u.z));
   gp_Pln pln(ax3);
 
-  BRepBuilderAPI_MakeFace faceMaker(pln, MakeLoopWire(plane, loops[outer]));
-  for (size_t i = 0; i < loops.size(); i++) {
-    if (i == outer)
-      continue;
+  TopoDS_Wire outerWire = MakeLoopWire(plane, loops[group.outer]);
+  if (outerWire.IsNull())
+    return TopoDS_Face();
+  BRepBuilderAPI_MakeFace faceMaker(pln, outerWire);
+  for (size_t i : group.holes) {
     TopoDS_Wire hole = MakeLoopWire(plane, loops[i]);
+    if (hole.IsNull())
+      return TopoDS_Face();
     faceMaker.Add(TopoDS::Wire(hole.Reversed()));
   }
   if (!faceMaker.IsDone()) {
@@ -393,6 +453,13 @@ TopoDS_Face BuildProfileFace(const SketchPlane& plane,
     return TopoDS_Face();
   }
   return faceMaker.Face();
+}
+
+int CountFaces(const TopoDS_Shape& shape) {
+  int count = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
+    count++;
+  return count;
 }
 
 } // namespace
@@ -404,20 +471,35 @@ CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
   }
 
   try {
-    TopoDS_Face face = BuildProfileFace(plane, loops);
-    if (face.IsNull()) {
+    const std::vector<ProfileGroup> groups = ClassifyLoops(loops);
+    if (groups.empty()) {
       return CADShape();
     }
 
     glm::vec3 nrm = plane.GetNormal();
     const double d = reversed ? -distance : distance;
     gp_Vec extrusion(nrm.x * d, nrm.y * d, nrm.z * d);
-    BRepPrimAPI_MakePrism prism(face, extrusion);
-    if (!prism.IsDone()) {
-      LOG_ERROR("Sketch profile: prism construction failed");
-      return CADShape();
+
+    // One prism per profile group; several disjoint groups form a compound
+    // (booleans and volume handle compounds; ClassifyLoops rejects overlap).
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    TopoDS_Shape single;
+    for (const ProfileGroup& group : groups) {
+      TopoDS_Face face = BuildGroupFace(plane, loops, group);
+      if (face.IsNull()) {
+        return CADShape();
+      }
+      BRepPrimAPI_MakePrism prism(face, extrusion);
+      if (!prism.IsDone()) {
+        LOG_ERROR("Sketch profile: prism construction failed");
+        return CADShape();
+      }
+      single = prism.Shape();
+      builder.Add(compound, single);
     }
-    return CADShape(prism.Shape());
+    return CADShape(groups.size() == 1 ? single : TopoDS_Shape(compound));
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
     return CADShape();
@@ -437,32 +519,45 @@ CADShape BuildRevolve(const SketchPlane& plane, const std::vector<Loop>& loops,
   const bool full = angle >= 2.0 * M_PI - 1e-9;
 
   try {
-    TopoDS_Face face = BuildProfileFace(plane, loops);
-    if (face.IsNull()) {
+    const std::vector<ProfileGroup> groups = ClassifyLoops(loops);
+    if (groups.empty()) {
       return CADShape();
     }
 
     gp_Ax1 ax(gp_Pnt(axisOrigin.x, axisOrigin.y, axisOrigin.z),
               gp_Dir(axisDir.x, axisDir.y, axisDir.z));
 
-    TopoDS_Shape profile = face;
-    double sweep = reversed ? -angle : angle;
-    // Symmetric: pre-rotate the profile by -angle/2 about the axis so the
-    // sweep straddles the profile plane. Irrelevant at a full revolution, and
-    // `reversed` has no effect on a plane-symmetric sweep.
-    if (symmetric && !full) {
-      gp_Trsf pre;
-      pre.SetRotation(ax, -angle / 2.0);
-      profile = BRepBuilderAPI_Transform(profile, pre, /*Copy=*/true).Shape();
-      sweep = angle;
-    }
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    TopoDS_Shape single;
+    for (const ProfileGroup& group : groups) {
+      TopoDS_Face face = BuildGroupFace(plane, loops, group);
+      if (face.IsNull()) {
+        return CADShape();
+      }
 
-    BRepPrimAPI_MakeRevol revol(profile, ax, sweep);
-    if (!revol.IsDone()) {
-      LOG_ERROR("Sketch profile: revolve construction failed");
-      return CADShape();
+      TopoDS_Shape profile = face;
+      double sweep = reversed ? -angle : angle;
+      // Symmetric: pre-rotate the profile by -angle/2 about the axis so the
+      // sweep straddles the profile plane. Irrelevant at a full revolution,
+      // and `reversed` has no effect on a plane-symmetric sweep.
+      if (symmetric && !full) {
+        gp_Trsf pre;
+        pre.SetRotation(ax, -angle / 2.0);
+        profile = BRepBuilderAPI_Transform(profile, pre, /*Copy=*/true).Shape();
+        sweep = angle;
+      }
+
+      BRepPrimAPI_MakeRevol revol(profile, ax, sweep);
+      if (!revol.IsDone()) {
+        LOG_ERROR("Sketch profile: revolve construction failed");
+        return CADShape();
+      }
+      single = revol.Shape();
+      builder.Add(compound, single);
     }
-    CADShape out(revol.Shape());
+    CADShape out(groups.size() == 1 ? single : TopoDS_Shape(compound));
     // A profile that crosses the axis yields a self-intersecting/degenerate
     // solid; reject it here rather than pre-checking in UV.
     if (!out.IsValid() || out.Volume() < 1e-9) {
@@ -669,53 +764,78 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
   }
 
   try {
-    TopoDS_Face face = BuildProfileFace(plane, loops);
-    if (face.IsNull()) {
+    const std::vector<ProfileGroup> groups = ClassifyLoops(loops);
+    if (groups.empty()) {
       return CADShape();
     }
 
     glm::vec3 nrm = plane.GetNormal();
     const double d = reversed ? -distance : distance;
     gp_Vec extrusion(nrm.x * d, nrm.y * d, nrm.z * d);
-    BRepPrimAPI_MakePrism prism(face, extrusion);
-    if (!prism.IsDone()) {
-      LOG_ERROR("Sketch profile: prism construction failed");
-      return CADShape();
-    }
-    const TopoDS_Shape shape = prism.Shape();
 
     const std::string tag = std::to_string(featureTag) + "/";
-    // Side faces: each profile edge sweeps into a lateral face, named from the
-    // sketch entity that produced the edge.
-    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
-      const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
-      const uint32_t entityId = MatchEntityId(edge, plane, loops);
-      if (entityId == 0) {
-        continue; // unmatched edge (e.g. a seam); leave it for a later pass
+    const bool multi = groups.size() > 1;
+    // One prism per profile group, assembled into a compound whose face
+    // order is the concatenation of the groups' faces — local face indices
+    // shift by a running offset. Names stay per-prism, so no boolean/history
+    // propagation is needed for disjoint groups.
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    TopoDS_Shape single;
+    int faceOffset = 0;
+    for (const ProfileGroup& group : groups) {
+      TopoDS_Face face = BuildGroupFace(plane, loops, group);
+      if (face.IsNull()) {
+        return CADShape();
       }
-      const std::string name = tag + "g" + std::to_string(entityId);
-      const TopTools_ListOfShape& gen = prism.Generated(edge);
-      for (const TopoDS_Shape& sideFace : gen) {
-        const int idx = FaceIndexOf(shape, sideFace);
-        if (idx >= 0) {
-          out.names[idx] = name;
+      BRepPrimAPI_MakePrism prism(face, extrusion);
+      if (!prism.IsDone()) {
+        LOG_ERROR("Sketch profile: prism construction failed");
+        return CADShape();
+      }
+      const TopoDS_Shape shape = prism.Shape();
+
+      // Side faces: each profile edge sweeps into a lateral face, named from
+      // the sketch entity that produced the edge (unique across groups).
+      for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+        const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+        const uint32_t entityId = MatchEntityId(edge, plane, loops);
+        if (entityId == 0) {
+          continue; // unmatched edge (e.g. a seam); leave it for a later pass
+        }
+        const std::string name = tag + "g" + std::to_string(entityId);
+        const TopTools_ListOfShape& gen = prism.Generated(edge);
+        for (const TopoDS_Shape& sideFace : gen) {
+          const int idx = FaceIndexOf(shape, sideFace);
+          if (idx >= 0) {
+            out.names[faceOffset + idx] = name;
+          }
         }
       }
-    }
 
-    // Caps: fixed sentinels, so adding/removing a hole never renames them.
-    const int baseIdx = FaceIndexOf(shape, prism.FirstShape());
-    if (baseIdx >= 0) {
-      out.names[baseIdx] = tag + "cap0";
-    }
-    const int topIdx = FaceIndexOf(shape, prism.LastShape());
-    if (topIdx >= 0) {
-      out.names[topIdx] = tag + "cap1";
+      // Caps: fixed sentinels, so adding/removing a hole never renames them.
+      // With several groups each pair is keyed by its outer loop's lowest
+      // entity id ("cap0@g7"), stable against group reordering.
+      const std::string capSuffix =
+          multi ? "@g" + std::to_string(group.key) : "";
+      const int baseIdx = FaceIndexOf(shape, prism.FirstShape());
+      if (baseIdx >= 0) {
+        out.names[faceOffset + baseIdx] = tag + "cap0" + capSuffix;
+      }
+      const int topIdx = FaceIndexOf(shape, prism.LastShape());
+      if (topIdx >= 0) {
+        out.names[faceOffset + topIdx] = tag + "cap1" + capSuffix;
+      }
+
+      faceOffset += CountFaces(shape);
+      single = shape;
+      builder.Add(compound, single);
     }
 
     // U/L fallback passes: the prism's edges take names from their faces
     // ("<faceName>;U<i>"), which is what makes them referenceable by a fillet.
-    CADShape result(shape);
+    CADShape result(multi ? TopoDS_Shape(compound) : single);
     topo::ApplyFallbackPasses(result, out);
     return result;
   } catch (const Standard_Failure& e) {
@@ -741,34 +861,94 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
   const bool full = angle >= 2.0 * M_PI - 1e-9;
 
   try {
-    TopoDS_Face face = BuildProfileFace(plane, loops);
-    if (face.IsNull()) {
+    const std::vector<ProfileGroup> groups = ClassifyLoops(loops);
+    if (groups.empty()) {
       return CADShape();
     }
 
     gp_Ax1 ax(gp_Pnt(axisOrigin.x, axisOrigin.y, axisOrigin.z),
               gp_Dir(axisDir.x, axisDir.y, axisDir.z));
 
-    TopoDS_Shape profile = face;
-    double sweep = reversed ? -angle : angle;
-    // Symmetric: pre-rotate the profile (see BuildRevolve). Kept alive so the
-    // original profile edges can be mapped to their swept copies below.
-    std::unique_ptr<BRepBuilderAPI_Transform> xform;
-    if (symmetric && !full) {
-      gp_Trsf pre;
-      pre.SetRotation(ax, -angle / 2.0);
-      xform =
-          std::make_unique<BRepBuilderAPI_Transform>(profile, pre, /*Copy=*/true);
-      profile = xform->Shape();
-      sweep = angle;
+    const std::string tag = std::to_string(featureTag) + "/";
+    const bool multi = groups.size() > 1;
+    // One revolve per profile group (see BuildPrismNamed for the compound
+    // face-index-offset scheme).
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    TopoDS_Shape single;
+    int faceOffset = 0;
+    for (const ProfileGroup& group : groups) {
+      TopoDS_Face face = BuildGroupFace(plane, loops, group);
+      if (face.IsNull()) {
+        return CADShape();
+      }
+
+      TopoDS_Shape profile = face;
+      double sweep = reversed ? -angle : angle;
+      // Symmetric: pre-rotate the profile (see BuildRevolve). Kept alive so
+      // the original profile edges can be mapped to their swept copies below.
+      std::unique_ptr<BRepBuilderAPI_Transform> xform;
+      if (symmetric && !full) {
+        gp_Trsf pre;
+        pre.SetRotation(ax, -angle / 2.0);
+        xform = std::make_unique<BRepBuilderAPI_Transform>(profile, pre,
+                                                           /*Copy=*/true);
+        profile = xform->Shape();
+        sweep = angle;
+      }
+
+      BRepPrimAPI_MakeRevol revol(profile, ax, sweep);
+      if (!revol.IsDone()) {
+        LOG_ERROR("Sketch profile: revolve construction failed");
+        return CADShape();
+      }
+      const TopoDS_Shape shape = revol.Shape();
+
+      // Side faces: each profile edge sweeps into a face of revolution, named
+      // from the sketch entity that produced the edge. When the profile was
+      // pre-rotated, query the swept *copy* of each original edge.
+      for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+        const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+        const uint32_t entityId = MatchEntityId(edge, plane, loops);
+        if (entityId == 0) {
+          continue;
+        }
+        const TopoDS_Shape query = xform ? xform->ModifiedShape(edge)
+                                         : TopoDS_Shape(edge);
+        const std::string name = tag + "g" + std::to_string(entityId);
+        for (const TopoDS_Shape& sideFace : revol.Generated(query)) {
+          const int idx = FaceIndexOf(shape, sideFace);
+          if (idx >= 0) {
+            out.names[faceOffset + idx] = name;
+          }
+        }
+      }
+
+      // Caps: the planar ends of a partial revolve. A full revolution has
+      // none (FirstShape/LastShape are not part of the result; FaceIndexOf
+      // misses). Multi-group caps are keyed like the prism's.
+      const std::string capSuffix =
+          multi ? "@g" + std::to_string(group.key) : "";
+      if (!revol.FirstShape().IsNull()) {
+        const int baseIdx = FaceIndexOf(shape, revol.FirstShape());
+        if (baseIdx >= 0) {
+          out.names[faceOffset + baseIdx] = tag + "cap0" + capSuffix;
+        }
+      }
+      if (!revol.LastShape().IsNull()) {
+        const int topIdx = FaceIndexOf(shape, revol.LastShape());
+        if (topIdx >= 0) {
+          out.names[faceOffset + topIdx] = tag + "cap1" + capSuffix;
+        }
+      }
+
+      faceOffset += CountFaces(shape);
+      single = shape;
+      builder.Add(compound, single);
     }
 
-    BRepPrimAPI_MakeRevol revol(profile, ax, sweep);
-    if (!revol.IsDone()) {
-      LOG_ERROR("Sketch profile: revolve construction failed");
-      return CADShape();
-    }
-    CADShape result(revol.Shape());
+    CADShape result(multi ? TopoDS_Shape(compound) : single);
     if (!result.IsValid() || result.Volume() < 1e-9) {
       LOG_ERROR("Sketch profile: revolve produced an invalid solid "
                 "(does the profile cross the axis?)");
@@ -776,45 +956,9 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
     }
     const TopoDS_Shape& shape = result.GetShape();
 
-    const std::string tag = std::to_string(featureTag) + "/";
-    // Side faces: each profile edge sweeps into a face of revolution, named
-    // from the sketch entity that produced the edge. When the profile was
-    // pre-rotated, query the swept *copy* of each original edge.
-    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
-      const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
-      const uint32_t entityId = MatchEntityId(edge, plane, loops);
-      if (entityId == 0) {
-        continue;
-      }
-      const TopoDS_Shape query = xform ? xform->ModifiedShape(edge)
-                                       : TopoDS_Shape(edge);
-      const std::string name = tag + "g" + std::to_string(entityId);
-      for (const TopoDS_Shape& sideFace : revol.Generated(query)) {
-        const int idx = FaceIndexOf(shape, sideFace);
-        if (idx >= 0) {
-          out.names[idx] = name;
-        }
-      }
-    }
-
-    // Caps: the planar ends of a partial revolve. A full revolution has none
-    // (FirstShape/LastShape are not part of the result; FaceIndexOf misses).
-    if (!revol.FirstShape().IsNull()) {
-      const int baseIdx = FaceIndexOf(shape, revol.FirstShape());
-      if (baseIdx >= 0) {
-        out.names[baseIdx] = tag + "cap0";
-      }
-    }
-    if (!revol.LastShape().IsNull()) {
-      const int topIdx = FaceIndexOf(shape, revol.LastShape());
-      if (topIdx >= 0) {
-        out.names[topIdx] = tag + "cap1";
-      }
-    }
-
     // Degenerate pole edges at the axis have no generating parent
     // (Generated() is empty for them) — name them by position so they never
-    // go unnamed.
+    // go unnamed. Edge indices follow the final (possibly compound) shape.
     TopTools_IndexedMapOfShape edges;
     TopExp::MapShapes(shape, TopAbs_EDGE, edges);
     int pole = 0;

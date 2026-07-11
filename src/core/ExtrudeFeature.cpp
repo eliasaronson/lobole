@@ -35,8 +35,7 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   CADShape prism = sketch::BuildPrismNamed(sketch->plane, loops, distance,
                                            reversed, GetId(), map);
   if (!prism.IsValid()) {
-    SetError("profile could not be extruded (disjoint profiles in one "
-             "sketch are not supported — use one feature per profile)");
+    SetError("profile could not be extruded (overlapping loops? see log)");
     LOG_ERROR("ExtrudeFeature '{}': prism construction failed", m_name);
     return false;
   }

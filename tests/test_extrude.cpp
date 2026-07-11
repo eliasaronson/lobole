@@ -6,8 +6,10 @@
 #include "core/ExtrudeFeature.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
+#include "core/ElementMap.h"
 #include "core/SketchProfile.h"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 
@@ -328,18 +330,18 @@ TEST_CASE("Solver float noise at a line/arc joint does not distort the prism",
   CHECK_THAT(prism.Volume(), WithinRel(area * 5.0, 1e-4));
 }
 
-TEST_CASE("Disjoint profiles in one sketch fail loudly instead of a silent "
-          "no-op",
+TEST_CASE("Disjoint profiles extrude as independent solids (multi-profile)",
           "[extrude][profile]") {
-  // Two separate circles (a bolt-hole sketch): unsupported as one profile.
-  // The old largest-loop-plus-holes assumption built a bogus face whose
-  // boolean was a silent no-op; now the build fails so the feature errors.
+  // Two separate circles (a bolt-hole sketch): one prism per profile group,
+  // assembled into a compound whose volume is the sum. (Before M3.1 this was
+  // first a silent no-op, then a loud error.)
   std::vector<sketch::Entity> e = {sketch::Circle{{10, 0}, 3},
                                    sketch::Circle{{-10, 0}, 3}};
   auto loops = sketch::BuildLoops(e);
   REQUIRE(loops.size() == 2);
   CADShape prism = sketch::BuildPrism(kXY, loops, 5.0, false);
-  CHECK(!prism.IsValid());
+  REQUIRE(prism.IsValid());
+  CHECK_THAT(prism.Volume(), WithinRel(2.0 * M_PI * 9.0 * 5.0, 1e-3));
 
   // A circle properly inside another still extrudes as a ring.
   std::vector<sketch::Entity> ring = {sketch::Circle{{0, 0}, 5},
@@ -348,4 +350,92 @@ TEST_CASE("Disjoint profiles in one sketch fail loudly instead of a silent "
                                      false);
   REQUIRE(tube.IsValid());
   CHECK_THAT(tube.Volume(), WithinRel(M_PI * (25.0 - 4.0) * 2.0, 1e-3));
+}
+
+TEST_CASE("Four-bolt-hole cut works from ONE sketch", "[extrude][profile]") {
+  // The flange from the S1 live run that motivated multi-profile: a plate,
+  // then a single sketch holding four disjoint circles cut through it.
+  auto plate = sketch::BuildLoops(RectLines({-30, -20}, {30, 20}));
+  CADShape body = sketch::BuildPrism(kXY, plate, 6.0, false);
+  REQUIRE(body.IsValid());
+
+  std::vector<sketch::Entity> holes = {
+      sketch::Circle{{22, 12}, 3}, sketch::Circle{{-22, 12}, 3},
+      sketch::Circle{{-22, -12}, 3}, sketch::Circle{{22, -12}, 3}};
+  CADShape tool = sketch::BuildPrism(kXY, sketch::BuildLoops(holes), 6.0,
+                                     false);
+  REQUIRE(tool.IsValid());
+  CADShape cut = body.Difference(tool);
+  REQUIRE(cut.IsValid());
+  CHECK_THAT(cut.Volume(),
+             WithinRel((2400.0 - 4.0 * M_PI * 9.0) * 6.0, 1e-3));
+}
+
+TEST_CASE("Islands inside holes become solids again (3-deep nesting)",
+          "[extrude][profile]") {
+  // Outer rect, circular hole, island circle inside the hole:
+  // area = rect - hole + island.
+  std::vector<sketch::Entity> e = RectLines({0, 0}, {10, 10});
+  e.push_back(sketch::Circle{{5, 5}, 3});
+  e.push_back(sketch::Circle{{5, 5}, 1});
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 3);
+  CADShape prism = sketch::BuildPrism(kXY, loops, 2.0, false);
+  REQUIRE(prism.IsValid());
+  CHECK_THAT(prism.Volume(),
+             WithinRel((100.0 - M_PI * 9.0 + M_PI) * 2.0, 1e-3));
+}
+
+TEST_CASE("Overlapping loops fail loudly", "[extrude][profile]") {
+  std::vector<sketch::Entity> e = {sketch::Circle{{0, 0}, 3},
+                                   sketch::Circle{{2, 0}, 3}};
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 2);
+  CHECK(!sketch::BuildPrism(kXY, loops, 5.0, false).IsValid());
+}
+
+TEST_CASE("Multi-profile revolve sums the groups", "[extrude][profile]") {
+  // Two disjoint rectangles revolved 360 deg about Y: two coaxial rings.
+  // Pappus: V = 2*pi*R*A per ring.
+  std::vector<sketch::Entity> e = RectLines({2, 0}, {3, 1});
+  for (auto& le : RectLines({5, 0}, {6, 1}))
+    e.push_back(le);
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 2);
+  CADShape rings = sketch::BuildRevolve(kXY, loops, glm::vec3(0),
+                                        glm::vec3(0, 1, 0), 2.0 * M_PI,
+                                        false, false);
+  REQUIRE(rings.IsValid());
+  const double v = 2.0 * M_PI * 2.5 * 1.0 + 2.0 * M_PI * 5.5 * 1.0;
+  CHECK_THAT(rings.Volume(), WithinRel(v, 1e-3));
+}
+
+TEST_CASE("Multi-profile prisms keep element names per group",
+          "[extrude][profile][toponaming]") {
+  sketch::Circle a{{10, 0}, 3};
+  a.id = 7;
+  sketch::Circle b{{-10, 0}, 3};
+  b.id = 9;
+  std::vector<sketch::Entity> e = {a, b};
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 2);
+  ElementMap map;
+  CADShape prism = sketch::BuildPrismNamed(kXY, loops, 5.0, false, 42, map);
+  REQUIRE(prism.IsValid());
+  // Each cylinder: side face named from its circle entity, caps keyed by the
+  // group (the outer loop's entity id) so the two pairs never collide.
+  std::vector<std::string> names;
+  for (const auto& [idx, name] : map.names)
+    names.push_back(name);
+  auto has = [&](const std::string& n) {
+    return std::find(names.begin(), names.end(), n) != names.end();
+  };
+  CHECK(has("42/g7"));
+  CHECK(has("42/g9"));
+  CHECK(has("42/cap0@g7"));
+  CHECK(has("42/cap1@g7"));
+  CHECK(has("42/cap0@g9"));
+  CHECK(has("42/cap1@g9"));
+  // Every face of both cylinders is named (3 faces each).
+  CHECK(map.names.size() == 6);
 }
