@@ -58,7 +58,9 @@ Rendering: MSAA + ACES tonemap + IBL/PBR from a studio HDR.
 up-to-face extrude, shell) — all gated on persistent face/edge references (**toponaming**) —
 face/edge sketches still bake at creation, upstream edits don't move those dependents;
 checkpoints + git; MCP wrapper, Python API, headless mode; measurement + mass properties;
-no assemblies; `Document::Regenerate()` recomputes every feature per edit; no CI.
+**no export** (kernel STEP/STL writers exist with no UI/RPC callers — see
+[interchange/plan.md](interchange/plan.md)); no assemblies;
+`Document::Regenerate()` recomputes every feature per edit; no CI.
 
 ## Workstreams
 
@@ -76,6 +78,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | Unstarted |
 | 9. Rendering | [rendering/plan.md](rendering/plan.md) | Planned (normals → AA → PBR → … → RT) |
 | 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | Planned; gated (see plan) |
+| 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | Unstarted (kernel STEP/STL writers exist, unexposed) |
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
 differentiators — the reason this project exists rather than being a worse
@@ -104,6 +107,9 @@ The recommended interleaving, with the rationale:
    models exist. Checkpoints + git (F3–F5) after the schema settles.
 8. **Inspection I2 (mass properties)** almost any time — OCC gives it nearly for free
    and it's very LLM-useful. I1 measure wants edge picking (modeling cross-cutting).
+   Same goes for **interchange X1 (STEP/STL export)**: the kernel writers already
+   exist, it's ~a day including RPCs, and it's the first real-world need (3D
+   printing, sending a part to another tool).
 9. **Rendering** demo-driven: normals + AA are overdue quality-of-life; the rest when
    it hurts or when a release needs to look good.
 10. **Assemblies last** — gated on incremental regeneration, renderer instancing, and

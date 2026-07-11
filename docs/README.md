@@ -29,6 +29,9 @@ top-level vision + workstream index and holds the recommended sequencing.
   command palette.
 - **[inspect/](inspect/plan.md)** — measure tool, mass properties (volume/
   CoG/mass from material density), section views.
+- **[interchange/](interchange/plan.md)** — export: STEP/STL (kernel writers
+  exist, unexposed), BREP, glTF via an XCAF bridge; import widening (IGES,
+  mesh bodies) later. 3MF and DXF consciously deferred.
 - **[rendering/](rendering/plan.md)** — visual fidelity: real normals, AA, PBR
   materials, SSAO, tone-mapping, IBL, then raytracing (offline render, then
   hybrid RT lighting).
