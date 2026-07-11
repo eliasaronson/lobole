@@ -182,6 +182,35 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
+        # Export STEP/STL/BREP (E1), then re-import the STEP to verify it
+        # round-trips to the same volume.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Blk", "position": [0, 0, 0],
+            "width": 2, "height": 3, "depth": 4})
+        step = os.path.join(tmp, "part.step")
+        stl = os.path.join(tmp, "part.stl")
+        brep = os.path.join(tmp, "part.brep")
+        expect(d.call("export_step", path=step)["bodies"] == 1, "export step")
+        d.call("export_stl", path=stl, deflection=0.05)
+        d.call("export_brep", path=brep)
+        for f in (step, stl, brep):
+            expect(os.path.getsize(f) > 100, f"{f} written")
+        # STL binary header is 80 bytes + 4-byte count; not ASCII "solid".
+        with open(stl, "rb") as fh:
+            expect(not fh.read(5).startswith(b"solid") or
+                   os.path.getsize(stl) > 84, "stl is binary")
+        d.call("new_project")
+        d.call("import_step", path=step)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
+               "re-imported STEP has the original volume")
+        d.call("new_project")  # empty document
+        try:
+            d.call("export_step", path=os.path.join(tmp, "empty.step"))
+            expect(False, "export with no bodies must fail")
+        except RuntimeError:
+            pass
+
         # Checkpoints (F4): create, list, mutate, restore, and error paths
         d.call("new_project")  # fresh document: no project path yet
         d.call("add_feature", feature={

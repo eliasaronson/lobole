@@ -73,6 +73,10 @@ void DrawFileMenu(AppState& state) {
   if (ImGui::MenuItem("Import STEP...", "Ctrl+I")) {
     OpenStepFileDialog(state);
   }
+  if (ImGui::MenuItem("Export...", nullptr, false,
+                      state.document && !state.document->GetBodies().empty())) {
+    ExportDialog(state);
+  }
   ImGui::Separator();
   if (ImGui::MenuItem("Exit")) {
     glfwSetWindowShouldClose(state.window, GLFW_TRUE);

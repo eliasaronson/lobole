@@ -1,6 +1,7 @@
 #include "ui/FileDialogs.h"
 
 #include "Logger.h"
+#include "CADKernel.h"
 #include "core/Autosaver.h"
 #include "core/Serialization.h"
 #include "ui/AppActions.h"
@@ -86,6 +87,43 @@ void SaveProjectDialog(AppState& state) {
   }
 }
 
+void ExportDialog(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  nfdchar_t* outPath = nullptr;
+  if (NFD_SaveDialog("step,stp,stl,brep", nullptr, &outPath) != NFD_OKAY)
+    return;
+  std::string path(outPath);
+  free(outPath);
+  std::string ext = std::filesystem::path(path).extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+  if (ext.empty()) {
+    ext = ".step";
+    path += ext;
+  }
+
+  auto& kernel = CADKernel::Instance();
+  const auto& bodies = state.document->GetBodies();
+  bool ok = false;
+  if (ext == ".stl" || ext == ".brep") {
+    // Single-shape formats: fuse the document into one solid.
+    CADShape shape = bodies[0].shape;
+    for (size_t i = 1; i < bodies.size(); i++)
+      shape = shape.Union(bodies[i].shape);
+    ok = ext == ".stl" ? kernel.SaveSTL(path, shape)
+                       : kernel.SaveBREP(path, shape);
+  } else {
+    std::vector<CADShape> shapes;
+    for (const auto& b : bodies)
+      shapes.push_back(b.shape);
+    ok = kernel.SaveSTEP(path, shapes);
+  }
+  if (ok)
+    LOG_INFO("Exported {} bodies to {}", bodies.size(), path);
+  else
+    LOG_ERROR("Export failed: {}", path);
+}
+
 void DrawFileBrowser(AppState& state) {
   // Crash-recovery prompt: OpenProjectDialog found an autosave newer than
   // the picked project file.
@@ -168,6 +206,10 @@ void OpenProjectDialog(AppState&) {
 
 void SaveProjectDialog(AppState&) {
   LOG_WARN("Save Project requires nativefiledialog");
+}
+
+void ExportDialog(AppState&) {
+  LOG_WARN("Export requires nativefiledialog");
 }
 
 void DrawFileBrowser(AppState& state) {

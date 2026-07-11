@@ -418,6 +418,28 @@ def save_project(path: str, message: str = "save") -> dict:
     return _call("save_project", path=path, message=message)
 
 
+@mcp.tool(description="Export to STEP (one shape per body). Whole document, "
+          "or one body by index. STEP moves the exact B-Rep to other CAD.")
+def export_step(path: str, body: int = -1) -> dict:
+    return _call("export_step", path=path,
+                 **({"body": body} if body >= 0 else {}))
+
+
+@mcp.tool(description="Export to binary STL (re-meshed at `deflection`, "
+          "smaller = finer). Whole document fuses to one solid, or one body "
+          "by index. STL is how a part gets 3D-printed.")
+def export_stl(path: str, body: int = -1, deflection: float = 0.1) -> dict:
+    return _call("export_stl", path=path, deflection=deflection,
+                 **({"body": body} if body >= 0 else {}))
+
+
+@mcp.tool(description="Export to native OCC BREP text (exact, no "
+          "tessellation) — useful for kernel bug reports.")
+def export_brep(path: str, body: int = -1) -> dict:
+    return _call("export_brep", path=path,
+                 **({"body": body} if body >= 0 else {}))
+
+
 @mcp.tool(description="Import a STEP file's bodies as an Import feature.")
 def import_step(path: str) -> dict:
     return _call("import_step", path=path)

@@ -9,6 +9,9 @@ namespace ui {
 void OpenStepFileDialog(AppState& state);
 void OpenProjectDialog(AppState& state);
 void SaveProjectDialog(AppState& state);
+// Export the whole document; format chosen by the chosen file's extension
+// (.step/.stp, .stl, .brep). No-op without NFD.
+void ExportDialog(AppState& state);
 
 // Draws the fallback browser window if it is open (no-op with NFD).
 void DrawFileBrowser(AppState& state);

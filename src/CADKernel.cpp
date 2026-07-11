@@ -44,6 +44,7 @@
 #include <STEPControl_Writer.hxx>
 #include <StlAPI_Reader.hxx>
 #include <StlAPI_Writer.hxx>
+#include <BRepTools.hxx>
 #include <Interface_Static.hxx>
 #include <Standard_Version.hxx>
 #include <Standard_Failure.hxx>
@@ -588,11 +589,24 @@ bool CADKernel::LoadSTL(const std::string& filename, CADShape& shape) {
     return false;
 }
 
-bool CADKernel::SaveSTL(const std::string& filename, const CADShape& shape) {
+bool CADKernel::SaveSTL(const std::string& filename, const CADShape& shape,
+                        double deflection) {
     if (!shape.IsValid()) return false;
-    
+
+    // Re-mesh explicitly at the requested deflection instead of reusing
+    // whatever triangulation the viewport happened to leave on the shape —
+    // export quality is then a user choice, not an accident.
+    BRepMesh_IncrementalMesh mesh(shape.GetShape(), deflection);
+    mesh.Perform();
+
     StlAPI_Writer writer;
+    writer.ASCIIMode() = false; // binary: smaller, faster, slicer-friendly
     return writer.Write(shape.GetShape(), filename.c_str());
+}
+
+bool CADKernel::SaveBREP(const std::string& filename, const CADShape& shape) {
+    if (!shape.IsValid()) return false;
+    return BRepTools::Write(shape.GetShape(), filename.c_str());
 }
 
 // Helper functions

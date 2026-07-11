@@ -1,5 +1,6 @@
 #include "remote/RemoteServer.h"
 
+#include "CADKernel.h"
 #include "CADMaterials.h"
 #include "Camera.h"
 #include "FaceSelector.h"
@@ -831,6 +832,44 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     ui::FitCameraToDocument(state);
     ui::MarkProjectRecovered(state, state.projectPath);
     return json::object();
+  }
+  if (m == "export_step" || m == "export_stl" || m == "export_brep") {
+    // Export the whole document (all bodies) or one body (by index) to
+    // STEP / binary STL / native BREP. params:
+    // {path, body?: index, deflection?: 0.1 (STL only)}
+    const std::string path = p.at("path").get<std::string>();
+    const auto& bodies = doc->GetBodies();
+    if (bodies.empty()) throw std::runtime_error("no bodies to export");
+    const int only = p.value("body", -1);
+    if (only >= static_cast<int>(bodies.size()))
+      throw std::runtime_error("body index out of range");
+
+    auto& kernel = CADKernel::Instance();
+    bool ok = false;
+    if (m == "export_step") {
+      std::vector<CADShape> shapes;
+      for (size_t i = 0; i < bodies.size(); i++)
+        if (only < 0 || i == static_cast<size_t>(only))
+          shapes.push_back(bodies[i].shape);
+      ok = kernel.SaveSTEP(path, shapes);
+    } else {
+      // STL/BREP are single-shape; a whole-document export of several bodies
+      // fuses them (Onshape behavior) so one file holds the whole part.
+      CADShape shape;
+      if (only >= 0) {
+        shape = bodies[only].shape;
+      } else {
+        shape = bodies[0].shape;
+        for (size_t i = 1; i < bodies.size(); i++)
+          shape = shape.Union(bodies[i].shape);
+      }
+      ok = m == "export_stl"
+               ? kernel.SaveSTL(path, shape, p.value("deflection", 0.1))
+               : kernel.SaveBREP(path, shape);
+    }
+    if (!ok) throw std::runtime_error("export failed (see log)");
+    return {{"path", path},
+            {"bodies", only < 0 ? bodies.size() : size_t{1}}};
   }
   if (m == "import_step") {
     const size_t before = doc->GetBodies().size();

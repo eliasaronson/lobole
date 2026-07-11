@@ -116,7 +116,12 @@ public:
     bool SaveSTEP(const std::string& filename, const std::vector<CADShape>& shapes);
     
     bool LoadSTL(const std::string& filename, CADShape& shape);
-    bool SaveSTL(const std::string& filename, const CADShape& shape);
+    // Binary STL, re-meshed at `deflection` (smaller = finer). Export quality
+    // is the caller's choice, not whatever the viewport tessellated.
+    bool SaveSTL(const std::string& filename, const CADShape& shape,
+                 double deflection = 0.1);
+    // Native OCC BREP text (BRepTools::Write) — exact, no tessellation.
+    bool SaveBREP(const std::string& filename, const CADShape& shape);
 
 private:
     CADKernel() = default;
