@@ -403,6 +403,15 @@ json FeatureToJson(const Feature& feature) {
                            {"element", ext->endTarget.name}};
       }
     }
+    if (ext->thin) { // v18; omit when off
+      json thin = {{"thickness", ext->thinThickness},
+                   {"side", ext->thinSide == sketch::ThinSide::Out  ? "out"
+                            : ext->thinSide == sketch::ThinSide::In ? "in"
+                                                                     : "both"}};
+      if (!ext->thinThicknessExpr.empty())
+        thin["thickness_expr"] = ext->thinThicknessExpr;
+      j["thin"] = thin;
+    }
   } else if (auto* box = dynamic_cast<const BoxFeature*>(&feature)) {
     j["position"] = Vec3ToJson(box->position);
     j["width"] = box->width;
@@ -624,6 +633,16 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       ext->endTarget =
           ElementRef{j["end_target"].value("feature_id", uint64_t{0}),
                      j["end_target"].value("element", std::string{})};
+    }
+    if (j.contains("thin")) { // v18
+      const json& t = j["thin"];
+      ext->thin = true;
+      ext->thinThickness = t.value("thickness", 1.0);
+      ext->thinThicknessExpr = t.value("thickness_expr", std::string{});
+      const std::string side = t.value("side", "out");
+      ext->thinSide = side == "in"     ? sketch::ThinSide::In
+                      : side == "both" ? sketch::ThinSide::Both
+                                       : sketch::ThinSide::Out;
     }
     out = std::move(ext);
   } else if (type == "Box") {

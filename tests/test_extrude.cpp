@@ -575,3 +575,86 @@ TEST_CASE("Up-to-face round-trips through serialization",
   CHECK(rt->endTarget.name == "7/cap1");
   std::filesystem::remove(path);
 }
+
+TEST_CASE("Thin extrude walls a circle exactly", "[extrude][thin]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", kXY);
+  sketch::Circle c{{0, 0}, 3.0};
+  sk->entities.push_back(c);
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto ext = std::make_unique<ExtrudeFeature>("Tube", skId, 4.0,
+                                              ExtrudeMode::NewBody);
+  ext->thin = true;
+  ext->thinThickness = 0.5;
+  ext->thinSide = sketch::ThinSide::Out;
+  doc.AddFeature(std::move(ext));
+  REQUIRE(doc.GetBodies().size() == 1);
+  // Ring r=3..3.5, height 4.
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(M_PI * (3.5 * 3.5 - 9.0) * 4.0, 1e-3));
+}
+
+TEST_CASE("Thin extrude wall sides (rect, inward vs outward)",
+          "[extrude][thin]") {
+  auto build = [](sketch::ThinSide side, double thickness) {
+    Document doc;
+    auto sk = std::make_unique<SketchFeature>("S", kXY);
+    sk->AddRectangle({0, 0}, {4, 2});
+    doc.AddFeature(std::move(sk));
+    const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+    auto ext = std::make_unique<ExtrudeFeature>("Wall", skId, 1.0,
+                                                ExtrudeMode::NewBody);
+    ext->thin = true;
+    ext->thinThickness = thickness;
+    ext->thinSide = side;
+    doc.AddFeature(std::move(ext));
+    REQUIRE(doc.GetBodies().size() == 1);
+    return doc.GetBodies()[0].shape.Volume();
+  };
+  // Inward: sharp corners, ring area = 8 - (4-1)(2-1) = 5.
+  CHECK_THAT(build(sketch::ThinSide::In, 0.5), WithinRel(5.0, 1e-3));
+  // Outward: arc-joined convex corners, area = P*t + pi*t^2 (P = 12).
+  CHECK_THAT(build(sketch::ThinSide::Out, 0.5),
+             WithinRel(12.0 * 0.5 + M_PI * 0.25, 1e-3));
+  // Too thick inward: the offset degenerates -> loud failure, not garbage.
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", kXY);
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto ext = std::make_unique<ExtrudeFeature>("Wall", skId, 1.0,
+                                              ExtrudeMode::NewBody);
+  ext->thin = true;
+  ext->thinThickness = 3.0; // > half the short side
+  ext->thinSide = sketch::ThinSide::In;
+  doc.AddFeature(std::move(ext));
+  CHECK(doc.GetBodies().empty());
+  CHECK(!doc.GetFeature(1)->GetError().empty());
+}
+
+TEST_CASE("Thin round-trips through serialization", "[extrude][thin]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", kXY);
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto ext = std::make_unique<ExtrudeFeature>("Wall", skId, 1.0,
+                                              ExtrudeMode::NewBody);
+  ext->thin = true;
+  ext->thinThickness = 0.25;
+  ext->thinSide = sketch::ThinSide::Both;
+  doc.AddFeature(std::move(ext));
+  const auto path = std::filesystem::temp_directory_path() / "thin_rt.json";
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(loaded != nullptr);
+  auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
+  REQUIRE(rt != nullptr);
+  CHECK(rt->thin);
+  CHECK(rt->thinSide == sketch::ThinSide::Both);
+  CHECK_THAT(loaded->GetBodies()[0].shape.Volume(),
+             WithinRel(doc.GetBodies()[0].shape.Volume(), 1e-9));
+  std::filesystem::remove(path);
+}

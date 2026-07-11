@@ -645,6 +645,20 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       HandleEdit(state, feature, ImGui::Checkbox("Reversed", &ext->reversed),
                  index, commit);
 
+    HandleEdit(state, feature, ImGui::Checkbox("Thin", &ext->thin), index,
+               commit);
+    if (ext->thin) {
+      ExprDim(state, feature, index, commit, "Thickness",
+              ext->thinThicknessExpr, ext->thinThickness);
+      const char* sides[] = {"Outward", "Inward", "Both"};
+      int side = static_cast<int>(ext->thinSide);
+      if (ImGui::Combo("Wall side", &side, sides, 3)) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*ext);
+        ext->thinSide = static_cast<sketch::ThinSide>(side);
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+    }
+
     const char* modes[] = {"New Body", "Add", "Cut"};
     int mode = static_cast<int>(ext->mode);
     if (ImGui::Combo("Mode", &mode, modes, 3)) {

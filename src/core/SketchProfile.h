@@ -56,6 +56,20 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
                          const std::vector<Loop>& loops, double distance,
                          bool reversed, uint64_t featureTag, ElementMap& out);
 
+// Which side of the profile curve a thin extrude's wall grows toward.
+enum class ThinSide { Out, In, Both };
+
+// Thin/wall extrude (M3.4): every closed loop becomes a hollow wall ring of
+// `thickness` (offset via OCC MakeOffset, arc-joined corners), swept
+// `distance`. Loops are walled individually — holes become walls too, and
+// grouping does not apply. Caps are named per loop ("cap0@g<entityId>" when
+// several); wall side faces get names via the fallback passes. Invalid
+// CADShape when an offset self-intersects or thickness <= 0.
+CADShape BuildThinPrismNamed(const SketchPlane& plane,
+                             const std::vector<Loop>& loops, double distance,
+                             bool reversed, double thickness, ThinSide side,
+                             uint64_t featureTag, ElementMap& out);
+
 // Builds the profile face and revolves it about the given world-space axis
 // (origin + unit direction) through `angleRadians`. `reversed` sweeps the
 // opposite hand; `symmetric` centers the sweep on the profile plane (half the

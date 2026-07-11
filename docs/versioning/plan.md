@@ -8,15 +8,17 @@ models at stake.
 
 ## Current state
 
-JSON project serialization, `kVersion = 9` (`src/core/Serialization.cpp`),
-with load-time migrations accumulated through the sketch phases (v3→v9) and a
-newer-version guard. Single monolithic file per project. No autosave, no
-format spec, no git integration. Stable feature + entity ids (the hard
-prerequisite for everything below) already exist.
+JSON project serialization, `kVersion = 18` (`src/core/Serialization.cpp`),
+with load-time migrations back to v1, a newer-version guard, a written
+contract + migration policy ([format.md](format.md)), a golden-file corpus
+(`tests/golden/`, enforced by `test_golden.cpp`), and autosave with crash
+recovery (`core/Autosaver`, GUI modal + `open_project.autosave_available`
+over RPC). Single monolithic file per project; no git integration yet.
+Stable feature + entity ids already exist.
 
 ## Milestones
 
-### F1 — Format spec + golden-file corpus (~0.5–1 day) — [design: f1-f2.md](f1-f2.md)
+### F1 — Format spec + golden-file corpus — **shipped (July 2026)** — [design: f1-f2.md](f1-f2.md)
 Write `docs/versioning/format.md`: the JSON schema, the id-stability
 guarantees, and the **migration policy** (every version bump ships a loader
 migration + a round-trip test — already the de-facto practice; codify it).
@@ -24,7 +26,7 @@ Add a golden-file corpus: real saved projects, one per format version, loaded
 + regenerated + geometry-asserted in ctest. This is what makes "your old files
 still open" a tested promise instead of a hope.
 
-### F2 — Autosave + crash recovery (~0.5–1 day) — [design: f1-f2.md](f1-f2.md)
+### F2 — Autosave + crash recovery — **shipped (July 2026)** — [design: f1-f2.md](f1-f2.md)
 Timed autosave of dirty documents to a sidecar (`project.dsgn.autosave`),
 atomic write (temp + rename), recover-on-start prompt when a sidecar is newer
 than its project, sidecar cleared on clean save/exit. Dirty-state already

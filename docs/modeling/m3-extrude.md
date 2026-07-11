@@ -1,5 +1,7 @@
 # M3 — Richer extrude — design
 
+> **SHIPPED 2026-07-10** as designed (draft angle stays deferred).
+
 The last thin spot in the bread-and-butter workflow. Four sub-milestones,
 sequenced so the one users hit hardest lands first. Estimated **~3.5 days**.
 

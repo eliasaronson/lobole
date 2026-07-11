@@ -2,6 +2,7 @@
 
 #include "core/ElementMap.h"
 #include "core/Feature.h"
+#include "core/SketchProfile.h" // sketch::ThinSide
 
 #include <cstdint>
 
@@ -33,6 +34,7 @@ public:
   void VisitExprs(const ExprVisitor& visit) override {
     visit(distanceExpr, distance);
     visit(distance2Expr, distance2);
+    visit(thinThicknessExpr, thinThickness);
   }
 
   uint64_t sketchId = 0;
@@ -48,6 +50,12 @@ public:
   // Planar only in v1 — a curved target needs a trimmed boolean, not a
   // distance.
   ElementRef endTarget;
+  // Thin/wall extrude (M3.4): every loop becomes a hollow wall instead of a
+  // filled profile. Composes with any end condition.
+  bool thin = false;
+  double thinThickness = 1.0;
+  std::string thinThicknessExpr;
+  sketch::ThinSide thinSide = sketch::ThinSide::Out;
   bool reversed = false;
   ExtrudeMode mode = ExtrudeMode::NewBody;
 };

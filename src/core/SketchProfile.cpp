@@ -976,4 +976,110 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
   }
 }
 
-} // namespace sketch
+CADShape BuildThinPrismNamed(const SketchPlane& plane,
+                             const std::vector<Loop>& loops, double distance,
+                             bool reversed, double thickness, ThinSide side,
+                             uint64_t featureTag, ElementMap& out) {
+  out = {};
+  if (loops.empty() || std::abs(distance) < 1e-9 || thickness <= 0.0) {
+    return CADShape();
+  }
+
+  try {
+    glm::vec3 o = plane.GetOrigin();
+    glm::vec3 nrm = plane.GetNormal();
+    glm::vec3 u = plane.GetUAxis();
+    gp_Ax3 ax3(gp_Pnt(o.x, o.y, o.z), gp_Dir(nrm.x, nrm.y, nrm.z),
+               gp_Dir(u.x, u.y, u.z));
+    gp_Pln pln(ax3);
+
+    // Offset a closed loop wire by `d` (positive = outward, arc-joined
+    // convex corners). Null wire when the offset degenerates.
+    auto offsetWire = [&](const TopoDS_Wire& wire, double d) -> TopoDS_Wire {
+      if (std::abs(d) < 1e-12)
+        return wire;
+      TopoDS_Face base = BRepBuilderAPI_MakeFace(pln, wire).Face();
+      BRepOffsetAPI_MakeOffset off(base, GeomAbs_Arc);
+      off.Perform(d);
+      if (!off.IsDone())
+        return TopoDS_Wire();
+      for (TopExp_Explorer ex(off.Shape(), TopAbs_WIRE); ex.More(); ex.Next())
+        return TopoDS::Wire(ex.Current());
+      return TopoDS_Wire();
+    };
+
+    const double d = reversed ? -distance : distance;
+    gp_Vec extrusion(nrm.x * d, nrm.y * d, nrm.z * d);
+
+    const std::string tag = std::to_string(featureTag) + "/";
+    const bool multi = loops.size() > 1;
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    TopoDS_Shape single;
+    int faceOffset = 0;
+    for (const Loop& loop : loops) {
+      const TopoDS_Wire wire = MakeLoopWire(plane, loop);
+      if (wire.IsNull()) {
+        return CADShape();
+      }
+      TopoDS_Wire outer, inner;
+      switch (side) {
+      case ThinSide::Out:
+        outer = offsetWire(wire, thickness);
+        inner = wire;
+        break;
+      case ThinSide::In:
+        outer = wire;
+        inner = offsetWire(wire, -thickness);
+        break;
+      case ThinSide::Both:
+        outer = offsetWire(wire, thickness / 2.0);
+        inner = offsetWire(wire, -thickness / 2.0);
+        break;
+      }
+      if (outer.IsNull() || inner.IsNull()) {
+        LOG_ERROR("Sketch profile: thin offset degenerated (wall thicker "
+                  "than the profile?)");
+        return CADShape();
+      }
+
+      BRepBuilderAPI_MakeFace ring(pln, outer);
+      ring.Add(TopoDS::Wire(inner.Reversed()));
+      if (!ring.IsDone()) {
+        LOG_ERROR("Sketch profile: thin ring face construction failed");
+        return CADShape();
+      }
+      BRepPrimAPI_MakePrism prism(ring.Face(), extrusion);
+      if (!prism.IsDone()) {
+        LOG_ERROR("Sketch profile: prism construction failed");
+        return CADShape();
+      }
+      const TopoDS_Shape shape = prism.Shape();
+
+      const std::string capSuffix =
+          multi ? "@g" + std::to_string(LoopKey(loop)) : "";
+      const int baseIdx = FaceIndexOf(shape, prism.FirstShape());
+      if (baseIdx >= 0) {
+        out.names[faceOffset + baseIdx] = tag + "cap0" + capSuffix;
+      }
+      const int topIdx = FaceIndexOf(shape, prism.LastShape());
+      if (topIdx >= 0) {
+        out.names[faceOffset + topIdx] = tag + "cap1" + capSuffix;
+      }
+
+      faceOffset += CountFaces(shape);
+      single = shape;
+      builder.Add(compound, single);
+    }
+
+    CADShape result(multi ? TopoDS_Shape(compound) : single);
+    topo::ApplyFallbackPasses(result, out);
+    return result;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
+    return CADShape();
+  }
+}
+
+} // namespace sketch\n

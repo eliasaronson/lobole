@@ -51,7 +51,15 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "entity_ids" in list order. Use those ids for constraints and ops.
 - Extrude: {{"type": "Extrude", "name": str, "sketch_id": <feature id>,
   "distance": num, "distance_expr"?: str, "reversed"?: bool,
-  "mode": "new_body"|"add"|"cut"}}
+  "mode": "new_body"|"add"|"cut",
+  "end_mode"?: "symmetric" (centered on the plane) | "two_sided"
+  (+ "distance2"/"distance2_expr" backward) | "up_to_face"
+  (+ "end_target": {{"feature_id", "element"}} — a planar face from
+  list_elements; follows upstream edits),
+  "thin"?: {{"thickness": num, "thickness_expr"?: str,
+  "side": "out"|"in"|"both"}} — walls every loop instead of filling}}.
+  Sketches may hold SEVERAL disjoint profiles (e.g. four bolt-hole circles):
+  nested loops become holes, islands become solids again.
 - Revolve: {{"type": "Revolve", "name": str, "sketch_id": <feature id>,
   "axis": <axis ref>, "angle_deg"?: num (default 360), "angle_expr"?: str,
   "symmetric"?: bool, "reversed"?: bool, "mode": "new_body"|"add"|"cut"}}

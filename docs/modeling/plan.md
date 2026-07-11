@@ -75,18 +75,22 @@ modes), `test_datum.cpp` datum-axis cases, a `remote_smoke.py` block.
 
 *Deferred:* axis-by-B-Rep-edge → after toponaming (M6).
 
-### M3 — Richer extrude — [design: m3-extrude.md](m3-extrude.md)
-Symmetric / two-sided, blind distance both ways, **thin/shell** (wall
-thickness), **up-to-face** (unblocked by M6/T5 — planar-face v1), and
-**multi-profile sketches** as the headline. Draft angle explicitly deferred
-(see the design doc).
-
-Also: **multi-profile sketches** (several disjoint loops → one face per outer
-with its own holes, e.g. a four-bolt-hole cut in one sketch). Found via the
-MCP live run (2026-07-10): `BuildProfileFace` assumes largest-loop-outer +
-rest-are-holes; disjoint loops now fail the feature loudly (containment check)
-instead of the previous silent no-op boolean, but supporting them properly
-needs loop classification by containment + one prism per outer, fused.
+### M3 — Richer extrude — **shipped (July 2026)** — [design: m3-extrude.md](m3-extrude.md)
+**Multi-profile sketches** (the headline — a four-bolt-hole cut in ONE
+sketch, found via the MCP live run): loops classified by containment depth
+into outers + holes (islands re-emerge), one prism/revolve per group,
+compound-assembled with per-group cap names ("cap0@g<entityId>"); overlap
+stays a loud error. **End conditions** (`ExtrudeEnd`, format v18): symmetric,
+two-sided (expression-driven `distance2`), and **up-to-face** on a planar
+`ElementRef` (resolved like fillet edges via the shared `ResolveFacePlane`;
+follows upstream edits — the first extrude-side toponaming consumer).
+**Thin/wall extrude** (`BuildThinPrismNamed`): every loop offset via OCC
+`MakeOffset` into a hollow wall (out/in/both), composing with any end
+condition. All variants build ONE prism of the computed total translated
+back along the normal, so element names stay exactly a blind extrude's.
+Editor: End combo + target-face combo + Thin block. Tests in
+`test_extrude.cpp` ([profile]/[end]/[thin]). *Draft angle deferred* (needs
+face-level surgery that fights the element maps).
 
 ### M4 — Body booleans as features — toponaming-free
 **Shipped (July 2026).** `BooleanFeature` (union / subtract / intersect) over
