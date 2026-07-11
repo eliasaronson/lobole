@@ -113,9 +113,32 @@ v16. UI: errored features show red + a tooltip in the tree, and a face-attached
 sketch has a **Reattach face…** context action. Base/datum-plane sketches keep
 their stable feature-id refs unchanged.
 
-### T5 — Adopt: booleans propagation + fillet edges
-History propagation through `BRepAlgoAPI_*`; then M7 fillet consumes
-`ElementRef` edges. From here every new feature uses `ElementRef` from birth.
+### T5 — Adopt: booleans propagation + fillet edges — **done (July 2026)**
+Booleans keep their `BRepAlgoAPI_*` maker alive, normalize its reports onto
+`BRepTools_History` (T1 prerequisite 5, the last one), and `PropagateNames`
+(`src/core/ElementHistory.{h,cpp}`) rewrites the operands' names onto the
+result: survivors verbatim, `Modified` → `;M<tag>` (`.i` on 1→N splits),
+`Generated` → `;G<tag>` (a pierced face *generates* its section edges —
+verified against OCC 7.9.3), leftovers `<tag>/seam<i>`. The **U/L fallback
+passes** then name everything history missed; U is what gives edges stable
+names. `ElementMap` gained an edge space (`edgeNames`, keyed by the deduped
+`TopExp::MapShapes(TopAbs_EDGE)` order that `GenerateEdgePolylines` and edge
+picking share). `BooleanFeature` and extrude/revolve Add/Cut all attach
+propagated maps — no path clears a map anymore — and `BuildRevolveNamed`
+brought revolve up to extrude's naming (sides, caps, poles).
+
+On top of that, **M7 fillet + chamfer** (`src/core/FilletFeature`,
+`topo::EdgeBlendNamed`): edges held as `ElementRef`s, resolved each regen,
+blend faces named `<spineEdgeName>;G<tag>`, dangling refs error with a
+re-pick repair action. Edge picking = `FaceSelector::PickEdge`
+(ray-to-polyline, occlusion-aware) + depth-tested highlight through the
+sketch-primitive pipeline. Format v17. Mutation tests:
+`tests/test_toponaming.cpp` (T5 section), `tests/test_fillet.cpp`.
+
+From here every new feature uses `ElementRef` from birth. *Still out of
+scope: pattern/mirror (`FuseInstancesReplacingSource`) does not propagate
+maps — pattern outputs stay unnamed until per-instance references are
+designed (FreeCAD's `;:C` child maps, deliberately skipped).*
 
 ## Test strategy
 

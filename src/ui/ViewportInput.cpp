@@ -178,6 +178,12 @@ void HandleViewportInput(AppState& state) {
     return;
   }
 
+  // B-Rep edge picking (fillet/chamfer edge collection) consumes the
+  // viewport while active.
+  if (HandleEdgePickInput(state, overViewport)) {
+    return;
+  }
+
   // Face picking: click to select, otherwise hover pre-highlight
   if (!state.faceSelector || !state.meshRenderer)
     return;

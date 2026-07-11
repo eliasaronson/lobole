@@ -3,8 +3,11 @@
 #include "CADKernel.h"
 #include "core/BooleanFeature.h" // BooleanOp
 #include "core/ElementMap.h"
+#include "core/FilletFeature.h" // EdgeBlendOp
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 // Propagation of stable element names through history-reporting OCC operations
 // (topological naming, T5). Each function keeps the OCC maker alive, folds its
@@ -25,6 +28,29 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
                       ElementMap& out);
+
+// Constant-radius fillet or chamfer of the given edges (edgeIndex space,
+// the ElementMap convention). Blend faces are named
+// "<spineEdgeName>;G<featureTag>" via the maker's Generated (the spine edge
+// is removed-but-generating, so its own name dies — references to it fail,
+// as intended); adjacent support faces keep their names via Modified; fillet
+// corner patches are covered by the U-then-L fallback. On failure returns an
+// invalid CADShape and, when OCC reports faulty contours, a diagnostic in
+// *error (may be null).
+CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
+                        const std::vector<int>& edgeIndices, EdgeBlendOp op,
+                        double radiusOrDistance, uint64_t featureTag,
+                        ElementMap& out, std::string* error);
+
+// Fixed names for a primitive's output (box/sphere/cylinder/import): every
+// face "<prefix>/face<i>" in index order — stable because a primitive's
+// topology never changes with its dimensions — then the U/L passes for its
+// edges. The memo's "Primitives: fixed names" rule, so blends can reference
+// primitive edges too. `prefix` is normally the feature tag; a multi-body
+// import appends its body ordinal ("<tag>/b1") so two bodies of one feature
+// never share names.
+void NamePrimitiveElements(const CADShape& shape, const std::string& prefix,
+                           ElementMap& out);
 
 // The U and L fallback passes alone, for builders whose history already
 // seeded `map` (extrude/revolve): U — a named face names its still-unnamed

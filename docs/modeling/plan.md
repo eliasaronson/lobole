@@ -117,22 +117,25 @@ Format v15. Tests: `test_pattern.cpp` + a `remote_smoke.py` block; verified
 in-app (a 6-up circular ring and a 4-up linear row). *Feature (vs body)
 patterns and per-instance references deferred.*
 
-**Modeling is now toponaming-free-complete** — the remaining milestones (M3
-richer extrude's up-to-face, M7 fillets) need M6 topological naming
-([toponaming.md](toponaming.md); T1 memo done).
+**Toponaming is complete (T1–T5)** — M7 shipped on top of it; M3's
+up-to-face extrude can now consume face `ElementRef`s directly.
 
-### M6 — Topological naming (the foundation)
-Persistent identification of faces/edges across regeneration. Unblocks every
-edge/face-referencing feature below. Promoted to its own workstream with a
-design study, candidate design (element maps seeded by our stable sketch-entity
-ids), and milestones T1–T5: **[toponaming.md](toponaming.md)**. Start the
-*design* (T1) early even while M1–M5 ship, because it shapes the reference
-model.
+### M6 — Topological naming (the foundation) — **shipped (July 2026)**
+Persistent identification of faces/edges across regeneration. All milestones
+T1–T5 done: **[toponaming.md](toponaming.md)** — element maps seeded by
+stable sketch-entity ids, propagation through booleans via
+`BRepTools_History`, U/L fallback passes, edge names, sketch-on-face and
+fillet as consumers.
 
-### M7 — 3D fillet / chamfer (needs M6)
-`BRepFilletAPI_MakeFillet` / `MakeChamfer` on selected edges. A v1 that
-references edges by current index works but breaks on upstream edits; the robust
-version wants M6. Requires **edge picking** (extend the `FaceSelector` to edges).
+### M7 — 3D fillet / chamfer — **shipped (July 2026)**
+`FilletFeature` (one class, fillet/chamfer op) referencing edges by
+`ElementRef` from birth — the robust version directly, since T5 landed first
+([toponaming.md](toponaming.md)). Edge picking shipped as
+`FaceSelector::PickEdge` over `CADShape::GenerateEdgePolylines` (ray-to-
+polyline with occlusion), highlighted through the sketch-primitive line
+pipeline; toolbar/menu creation with preview, radius as an expression,
+dangling-ref error + "Pick edges…" repair. Format v17. Tests:
+`test_fillet.cpp` + a `fillet_body_edge_via_click` GUI case.
 
 ### M8+ — advanced
 Sweep, loft (`BRepOffsetAPI_ThruSections`), shell (face-select → M6), hole/thread

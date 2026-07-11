@@ -6,6 +6,8 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepFilletAPI_MakeChamfer.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepTools_History.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -267,6 +269,100 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
     out = {};
     return CADShape();
   }
+}
+
+namespace {
+
+// Shared tail of both blend makers: build, verify, propagate, fall back.
+template <typename Maker>
+CADShape RunEdgeBlend(Maker& mk, const TopoDS_Shape& shape,
+                      const ElementMap& bodyMap, uint64_t featureTag,
+                      ElementMap& out, std::string* error) {
+  mk.Build();
+  if (!mk.IsDone()) {
+    if (error) {
+      *error = "the blend could not be built (radius too large for the "
+               "geometry?)";
+    }
+    return CADShape();
+  }
+  const TopoDS_Shape result = mk.Shape();
+  if (result.IsNull()) {
+    return CADShape();
+  }
+
+  TopTools_ListOfShape args;
+  AppendSubshapeArgs(shape, args);
+  const BRepTools_History hist(args, mk);
+  static const TopTools_ListOfShape kNoSeams;
+  out = PropagateNames({{shape, bodyMap}}, hist, kNoSeams, result, featureTag);
+  FallbackPasses(result, out);
+  return CADShape(result);
+}
+
+} // namespace
+
+CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
+                        const std::vector<int>& edgeIndices, EdgeBlendOp op,
+                        double radiusOrDistance, uint64_t featureTag,
+                        ElementMap& out, std::string* error) {
+  out = {};
+  if (!body.IsValid() || edgeIndices.empty()) {
+    return CADShape();
+  }
+  try {
+    const TopoDS_Shape& shape = body.GetShape();
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+    for (int idx : edgeIndices) {
+      if (idx < 0 || idx + 1 > edges.Extent()) {
+        if (error) {
+          *error = "edge index out of range";
+        }
+        return CADShape();
+      }
+    }
+
+    if (op == EdgeBlendOp::Chamfer) {
+      BRepFilletAPI_MakeChamfer mk(shape);
+      for (int idx : edgeIndices) {
+        mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
+      }
+      return RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
+    }
+    BRepFilletAPI_MakeFillet mk(shape);
+    for (int idx : edgeIndices) {
+      mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
+    }
+    CADShape result = RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
+    if (!result.IsValid() && error && mk.NbFaultyContours() > 0) {
+      *error = "the fillet failed on " +
+               std::to_string(mk.NbFaultyContours()) +
+               " contour(s) (radius too large for the geometry?)";
+    }
+    return result;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("EdgeBlendNamed: OCCT error: {}", e.GetMessageString());
+    if (error) {
+      *error = std::string("OCCT error: ") + e.GetMessageString();
+    }
+    out = {};
+    return CADShape();
+  }
+}
+
+void NamePrimitiveElements(const CADShape& shape, const std::string& prefix,
+                           ElementMap& out) {
+  out = {};
+  if (!shape.IsValid()) {
+    return;
+  }
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(shape.GetShape(), TopAbs_FACE, faces);
+  for (int i = 1; i <= faces.Extent(); i++) {
+    out.names[i - 1] = prefix + "/face" + std::to_string(i - 1);
+  }
+  FallbackPasses(shape.GetShape(), out);
 }
 
 void ApplyFallbackPasses(const CADShape& shape, ElementMap& map) {

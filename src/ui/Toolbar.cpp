@@ -142,6 +142,15 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
+  const bool hasBody =
+      hasDoc && !state.document->GetBodies().empty();
+  if (ToolButton(ICON_FA_BORDER_TOP_LEFT, "Fillet edges", hasBody && idle))
+    CreateFillet(state);
+  if (ToolButton(ICON_FA_CROP_SIMPLE, "Chamfer edges", hasBody && idle))
+    CreateChamfer(state);
+
+  Divider();
+
   if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)",
                  hasDoc))
     FitCameraToDocument(state);

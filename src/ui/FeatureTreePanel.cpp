@@ -2,6 +2,7 @@
 
 #include "core/DatumPlaneFeature.h"
 #include "core/Feature.h"
+#include "core/FilletFeature.h"
 #include "core/SketchFeature.h"
 #include "ui/SketchInteraction.h"
 
@@ -67,6 +68,15 @@ void DrawFeatureTreePanel(AppState& state) {
             state.sketchEdit = SketchEditState{};
             state.sketchEdit.pickingPlane = true;
             state.sketchEdit.reattachSketchId = sk->GetId();
+          }
+        }
+        // A fillet/chamfer's edges can be re-picked (e.g. after a ref went
+        // dangling): arms edge picking for this feature.
+        auto* fil = dynamic_cast<FilletFeature*>(feature);
+        if (fil != nullptr) {
+          if (ImGui::MenuItem("Pick edges…")) {
+            state.edgePick = {};
+            state.edgePick.filletId = fil->GetId();
           }
         }
         if (ImGui::MenuItem("Delete")) {

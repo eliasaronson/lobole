@@ -73,8 +73,10 @@ void DrawUI(AppState& state) {
     UpdateSketchStatus(state); // DOF + conflicts for coloring/feedback
     state.sketchRenderer->SetStaticLines(
         BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
-    state.sketchRenderer->SetPrimitives(
-        BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId));
+    std::vector<PrimVertex> prims =
+        BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId);
+    AppendEdgePickPrimitives(state, prims); // fillet/chamfer edge picking
+    state.sketchRenderer->SetPrimitives(std::move(prims));
 
     // Auto-constraint snap indicator + ghost glyphs, and dimension annotations
     // (2D overlays).

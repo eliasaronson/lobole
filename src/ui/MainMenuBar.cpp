@@ -87,6 +87,12 @@ void DrawCreateMenu(AppState& state) {
     CreateMirror(state);
   if (ImGui::MenuItem("Pattern", nullptr, false, idle && producers >= 1))
     CreatePattern(state);
+  const bool hasBody =
+      state.document && !state.document->GetBodies().empty();
+  if (ImGui::MenuItem("Fillet", nullptr, false, idle && hasBody))
+    CreateFillet(state);
+  if (ImGui::MenuItem("Chamfer", nullptr, false, idle && hasBody))
+    CreateChamfer(state);
   ImGui::Separator();
 
   SketchEditState& edit = state.sketchEdit;

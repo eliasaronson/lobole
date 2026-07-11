@@ -4,6 +4,7 @@
 #include "FaceSelector.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/FilletFeature.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "ui/AppActions.h"
@@ -1073,5 +1074,69 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const auto& nbr = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(l1)]);
     IM_CHECK(glm::length(nbr.a - moved.b) < 1e-2f);
     IM_CHECK(s_App->commands->CanUndo()); // one undoable edit
+  };
+
+  // 3D fillet via edge picking (M7/T5): create a box, start a fillet, click a
+  // visible B-Rep edge, accept — the body loses volume along that edge.
+  t = IM_REGISTER_TEST(engine, "fillet", "fillet_body_edge_via_click");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    ctx->Yield();
+    const double before = Doc()->GetBodies()[0].shape.Volume();
+
+    // Frame the box deterministically (same recipe as the face-pick test).
+    glm::vec3 min, max;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const glm::vec3 center = (min + max) * 0.5f;
+    const float radius = glm::length(max - min) * 0.5f;
+    // A camera animation left by an earlier flow would override these setters
+    // every frame until it finishes — stop it first.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(center);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(
+        center + glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * radius * 5.0f);
+    ctx->Yield();
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Create/Fillet");
+    ctx->Yield();
+    IM_CHECK(s_App->edgePick.Active());
+    auto* fil = dynamic_cast<FilletFeature*>(
+        Doc()->FindFeatureById(s_App->edgePick.filletId));
+    IM_CHECK(fil != nullptr);
+    fil->radius = 0.3;
+
+    // Click the midpoint of the B-Rep edge nearest the camera (a silhouette
+    // or front edge from this viewpoint, so the pick can't be occluded).
+    const auto polys = Doc()->GetBodies()[0].shape.GenerateEdgePolylines();
+    const glm::vec3 eye = s_App->camera->GetPosition();
+    glm::vec3 target(0.0f);
+    float bestDist = FLT_MAX;
+    for (const auto& poly : polys) {
+      if (poly.size() < 2)
+        continue;
+      const glm::vec3 mid = poly[poly.size() / 2];
+      const float d = glm::length(mid - eye);
+      if (d < bestDist) {
+        bestDist = d;
+        target = mid;
+      }
+    }
+    ctx->MouseMoveToPos(WorldToWindow(target));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(fil->edges.size(), (size_t)1);
+
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(!s_App->edgePick.Active()); // picking ends with the preview
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < before - 1e-6);
+    IM_CHECK(s_App->commands->CanUndo()); // accept = one undoable action
   };
 }

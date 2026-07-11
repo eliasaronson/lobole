@@ -25,6 +25,7 @@ add_executable(designer_tests
     test_boolean.cpp
     test_pattern.cpp
     test_toponaming.cpp
+    test_fillet.cpp
     test_faceselector.cpp
     test_sketch_feature.cpp
     test_extrude.cpp

@@ -11,10 +11,13 @@
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
 #include "core/BooleanFeature.h"
+#include "core/Command.h"
 #include "core/DatumAxisFeature.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/FilletFeature.h"
+#include "core/Serialization.h"
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
@@ -297,6 +300,31 @@ void CreatePattern(AppState& state) {
   BeginPreviewFeature(state, std::move(pat));
 }
 
+namespace {
+// Shared by CreateFillet/CreateChamfer: start the preview and arm edge
+// picking so viewport clicks collect edges on the pending feature.
+void CreateEdgeBlend(AppState& state, EdgeBlendOp op) {
+  if (!state.document || state.document->GetBodies().empty()) {
+    return; // the menu gates this, but guard anyway
+  }
+  const char* base = op == EdgeBlendOp::Chamfer ? "Chamfer" : "Fillet";
+  const uint64_t id = BeginPreviewFeature(
+      state, std::make_unique<FilletFeature>(NextName(state, base),
+                                             std::vector<ElementRef>{}, 0.5,
+                                             op));
+  state.edgePick = {};
+  state.edgePick.filletId = id;
+}
+} // namespace
+
+void CreateFillet(AppState& state) {
+  CreateEdgeBlend(state, EdgeBlendOp::Fillet);
+}
+
+void CreateChamfer(AppState& state) {
+  CreateEdgeBlend(state, EdgeBlendOp::Chamfer);
+}
+
 void StartNewSketch(AppState& state) {
   state.sketchEdit = SketchEditState{};
   state.sketchEdit.pickingPlane = true;
@@ -369,6 +397,21 @@ void DrawDatumLabels(AppState& state) {
 void DrawElementNameOverlay(AppState& state) {
   if (!state.showElementNames || !state.document || !state.faceSelector)
     return;
+  // While edge picking, label the hovered edge instead of a face.
+  if (state.edgePick.hasHover) {
+    const auto ref = EdgeElementRef(state, state.edgePick.hoverMeshId,
+                                    state.edgePick.hoverEdgeIndex);
+    const char* text = ref ? ref->name.c_str() : "(unnamed)";
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const ImVec2 sz = ImGui::CalcTextSize(text);
+    dl->AddRectFilled(ImVec2(mouse.x + 12 - 3, mouse.y + 12 - 2),
+                      ImVec2(mouse.x + 12 + sz.x + 3, mouse.y + 12 + sz.y + 2),
+                      IM_COL32(20, 24, 30, 220), 3.0f);
+    dl->AddText(ImVec2(mouse.x + 12, mouse.y + 12),
+                IM_COL32(120, 230, 170, 255), text);
+    return;
+  }
   // Label the hovered face (live feedback), falling back to the selected one.
   const Face* face = state.faceSelector->GetHoveredFace();
   if (face == nullptr)
@@ -873,6 +916,161 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
                    sk->plane.PlaneToWorld(edit.trimPreviewB), 3.4f, trim, prims);
   }
   return prims;
+}
+
+std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
+                                         uint32_t edgeIndex) {
+  const auto& meshes = state.documentMeshes;
+  const auto it = std::find_if(
+      meshes.begin(), meshes.end(),
+      [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });
+  if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
+    return std::nullopt;
+  const Body& body = state.document->GetBodies()[it->bodyIndex];
+  const std::string* name =
+      body.elementMap.EdgeNameOf(static_cast<int>(edgeIndex));
+  if (name == nullptr)
+    return std::nullopt; // the edge has no stable name
+  return ElementRef{body.createdBy, *name};
+}
+
+namespace {
+
+// Adds/removes one edge ref on the blend. A pending (previewing) feature is
+// edited directly — it isn't on the undo stack until accepted; an accepted
+// one goes through ModifyFeatureCommand so the change is one undo step.
+void ToggleBlendEdge(AppState& state, FilletFeature& fil,
+                     const ElementRef& ref) {
+  if (!fil.edges.empty() && fil.edges[0].featureId != ref.featureId) {
+    state.sketchEdit.actionMsg =
+        "Pick edges on the same body (or accept and start another blend).";
+    return;
+  }
+  const bool pending = state.pendingFeatureId == fil.GetId();
+  size_t index = 0;
+  if (state.document->FindFeatureById(fil.GetId(), &index) == nullptr) {
+    return;
+  }
+  nlohmann::json before = DocumentIO::FeatureToJson(fil);
+  const auto it = std::find_if(fil.edges.begin(), fil.edges.end(),
+                               [&](const ElementRef& e) {
+                                 return e.featureId == ref.featureId &&
+                                        e.name == ref.name;
+                               });
+  if (it != fil.edges.end()) {
+    fil.edges.erase(it);
+  } else {
+    fil.edges.push_back(ref);
+  }
+  if (pending) {
+    state.document->Regenerate();
+    return;
+  }
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before,
+                                             DocumentIO::FeatureToJson(fil)),
+      *state.document);
+}
+
+} // namespace
+
+bool HandleEdgePickInput(AppState& state, bool overViewport) {
+  if (!state.edgePick.Active() || !state.faceSelector || !state.camera ||
+      !state.document) {
+    return false;
+  }
+  // The mode ends with its feature (deleted, preview resolved elsewhere).
+  auto* fil = dynamic_cast<FilletFeature*>(
+      state.document->FindFeatureById(state.edgePick.filletId));
+  if (fil == nullptr) {
+    state.edgePick = {};
+    return false;
+  }
+  const bool pending = state.pendingFeatureId == fil->GetId();
+  // Escape ends a re-pick session; while previewing it stays with the
+  // preview's own cancel handling.
+  if (!pending && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    state.edgePick = {};
+    return true;
+  }
+
+  state.edgePick.hasHover = false;
+  if (!overViewport) {
+    return false;
+  }
+
+  ImGuiIO& io = ImGui::GetIO();
+  const Ray ray = state.faceSelector->ScreenToWorldRay(
+      io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
+      static_cast<int>(state.viewportSize.x),
+      static_cast<int>(state.viewportSize.y), *state.camera);
+  const EdgeHit hit = state.faceSelector->PickEdge(ray);
+  if (hit.hit) {
+    state.edgePick.hasHover = true;
+    state.edgePick.hoverMeshId = hit.meshId;
+    state.edgePick.hoverEdgeIndex = hit.edgeIndex;
+  }
+
+  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hit.hit) {
+    if (auto ref = EdgeElementRef(state, hit.meshId, hit.edgeIndex)) {
+      ToggleBlendEdge(state, *fil, *ref);
+    } else {
+      state.sketchEdit.actionMsg =
+          "This edge has no stable name and can't be blended.";
+    }
+  }
+  return true; // the mode owns viewport clicks and hover
+}
+
+void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
+  if (!state.edgePick.Active() || !state.document) {
+    return;
+  }
+  const auto* fil = dynamic_cast<const FilletFeature*>(
+      state.document->FindFeatureById(state.edgePick.filletId));
+  if (fil == nullptr) {
+    return;
+  }
+  const glm::vec4 kDim{0.55f, 0.62f, 0.72f, 0.85f};
+  const glm::vec4 kHover{1.00f, 0.85f, 0.30f, 1.0f};
+  const glm::vec4 kPicked{0.35f, 0.80f, 1.00f, 1.0f};
+
+  for (const DocumentRenderMesh& m : state.documentMeshes) {
+    if (m.bodyIndex >= state.document->GetBodies().size()) {
+      continue;
+    }
+    const Body& body = state.document->GetBodies()[m.bodyIndex];
+    for (size_t e = 0; e < m.edgePolylines.size(); e++) {
+      const auto& poly = m.edgePolylines[e];
+      if (poly.size() < 2) {
+        continue;
+      }
+      const std::string* name = body.elementMap.EdgeNameOf(static_cast<int>(e));
+      const bool picked =
+          name != nullptr &&
+          std::any_of(fil->edges.begin(), fil->edges.end(),
+                      [&](const ElementRef& r) {
+                        return r.featureId == body.createdBy &&
+                               r.name == *name;
+                      });
+      const bool hovered = state.edgePick.hasHover &&
+                           state.edgePick.hoverMeshId == m.meshId &&
+                           state.edgePick.hoverEdgeIndex == e;
+      glm::vec4 color = kDim;
+      float halfPx = 1.2f;
+      if (picked) {
+        color = kPicked;
+        halfPx = 2.6f;
+      }
+      if (hovered) {
+        color = kHover;
+        halfPx = 2.6f;
+      }
+      for (size_t i = 0; i + 1 < poly.size(); i++) {
+        AppendPrimLine(poly[i], poly[i + 1], halfPx, color, out);
+      }
+    }
+  }
 }
 
 void LoadSTEPFile(AppState& state, const std::string& filename) {

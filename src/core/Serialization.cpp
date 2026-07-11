@@ -6,6 +6,7 @@
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/FilletFeature.h"
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
@@ -20,7 +21,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 16; // v16: sketch face_ref (v15: mirror/pattern, v14: booleans)
+constexpr int kVersion = 17; // v17: fillet/chamfer (v16: sketch face_ref)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -461,6 +462,16 @@ json FeatureToJson(const Feature& feature) {
     j["target_id"] = boo->targetId;
     j["tool_id"] = boo->toolId;
     j["op"] = BooleanOpToString(boo->op);
+  } else if (auto* fil = dynamic_cast<const FilletFeature*>(&feature)) {
+    // type is "Fillet"/"Chamfer" (TypeName encodes the op); v17.
+    j["radius"] = fil->radius;
+    if (!fil->radiusExpr.empty()) // literals stay plain numbers
+      j["radius_expr"] = fil->radiusExpr;
+    json arr = json::array();
+    for (const auto& ref : fil->edges) {
+      arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
+    }
+    j["edges"] = std::move(arr);
   } else if (auto* pat = dynamic_cast<const PatternFeature*>(&feature)) {
     j["kind"] = PatternKindToString(pat->kind);
     j["source_id"] = pat->sourceId;
@@ -662,6 +673,17 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, j.at("target_id").get<uint64_t>(),
         j.at("tool_id").get<uint64_t>(),
         BooleanOpFromString(j.value("op", "union")));
+  } else if (type == "Fillet" || type == "Chamfer") { // v17
+    std::vector<ElementRef> refs;
+    for (const auto& ej : j.value("edges", json::array())) {
+      refs.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
+                                ej.value("element", std::string{})});
+    }
+    auto fil = std::make_unique<FilletFeature>(
+        name, std::move(refs), j.value("radius", 0.5),
+        type == "Chamfer" ? EdgeBlendOp::Chamfer : EdgeBlendOp::Fillet);
+    fil->radiusExpr = j.value("radius_expr", std::string{});
+    out = std::move(fil);
   } else if (type == "Pattern") {
     auto pat = std::make_unique<PatternFeature>(
         name, PatternKindFromString(j.at("kind").get<std::string>()),

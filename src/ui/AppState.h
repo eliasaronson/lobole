@@ -156,6 +156,18 @@ struct SketchDragSession {
   size_t featureIndex = 0;              // sketch index for the commit
 };
 
+// Edge picking for fillet/chamfer (M7): active while a blend feature is
+// collecting edge refs — during its creation preview, or re-armed later from
+// the inspector / tree ("Pick edges…"). Viewport clicks toggle edges on that
+// feature; hovering pre-highlights the edge under the cursor.
+struct EdgePickState {
+  uint64_t filletId = 0; // the FilletFeature collecting edges; 0 = inactive
+  bool hasHover = false;
+  uint32_t hoverMeshId = 0;
+  uint32_t hoverEdgeIndex = 0;
+  bool Active() const { return filletId != 0; }
+};
+
 // Drives an offline path-traced still across UI frames (one sample batch per
 // frame) so the Render modal can show progress and stay cancellable. main.cpp
 // owns the pump; the toolbar modal reads/writes the request + result fields.
@@ -207,6 +219,7 @@ struct AppState {
   bool showElementNames = false; // debug: element name of the hovered face
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
+  EdgePickState edgePick;
 
   // The 3D viewport = the central dock node (between the side panels), in
   // ImGui display coords. The renderers draw only here and picking maps

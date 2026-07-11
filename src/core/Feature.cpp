@@ -1,6 +1,7 @@
 #include "core/Feature.h"
 
 #include "Logger.h"
+#include "core/ElementHistory.h"
 
 const Feature* RegenContext::FindById(uint64_t id) const {
   if (id == 0)
@@ -27,7 +28,10 @@ bool BoxFeature::Execute(RegenContext& ctx) {
     return false;
   }
   shape.Translate(position);
+  ElementMap map;
+  topo::NamePrimitiveElements(shape, std::to_string(GetId()), map);
   bodies.push_back({m_name, std::move(shape), m_material, GetId()});
+  bodies.back().elementMap = std::move(map);
   return true;
 }
 
@@ -44,7 +48,10 @@ bool SphereFeature::Execute(RegenContext& ctx) {
     LOG_ERROR("SphereFeature '{}': invalid radius {}", m_name, radius);
     return false;
   }
+  ElementMap map;
+  topo::NamePrimitiveElements(shape, std::to_string(GetId()), map);
   bodies.push_back({m_name, std::move(shape), m_material, GetId()});
+  bodies.back().elementMap = std::move(map);
   return true;
 }
 
@@ -65,7 +72,10 @@ bool CylinderFeature::Execute(RegenContext& ctx) {
               radius, height);
     return false;
   }
+  ElementMap map;
+  topo::NamePrimitiveElements(shape, std::to_string(GetId()), map);
   bodies.push_back({m_name, std::move(shape), m_material, GetId()});
+  bodies.back().elementMap = std::move(map);
   return true;
 }
 
@@ -115,8 +125,15 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       continue;
     shape.Translate(-center);
     added++;
+    // All import bodies share createdBy, so the prefix carries the body
+    // ordinal — otherwise two bodies' identical face names would resolve
+    // against whichever body is found first.
+    ElementMap map;
+    topo::NamePrimitiveElements(
+        shape, std::to_string(GetId()) + "/b" + std::to_string(added), map);
     bodies.push_back({m_name + " " + std::to_string(added), std::move(shape),
                       m_material, GetId()});
+    bodies.back().elementMap = std::move(map);
   }
   return true;
 }

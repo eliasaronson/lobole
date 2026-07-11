@@ -1,10 +1,12 @@
 #pragma once
 
 #include "SketchRenderer.h" // Vertex3D, PrimVertex
+#include "core/ElementMap.h" // ElementRef
 #include "ui/AppState.h"
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -69,8 +71,26 @@ void CreateBoolean(AppState& state);
 // Starts a preview of a mirror / linear pattern of the most-recent body.
 void CreateMirror(AppState& state);
 void CreatePattern(AppState& state);
+// Starts a fillet/chamfer preview and arms edge picking: viewport clicks
+// toggle B-Rep edges on the pending feature (M7).
+void CreateFillet(AppState& state);
+void CreateChamfer(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);
+
+// The stable ElementRef for a picked B-Rep edge (the body's createdBy + the
+// edge's MappedName); nullopt when the edge has no stable name.
+std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
+                                         uint32_t edgeIndex);
+
+// Routes viewport hover/click to B-Rep edge picking while state.edgePick is
+// active (fillet/chamfer edge collection). Returns true when it consumed the
+// viewport input for this frame.
+bool HandleEdgePickInput(AppState& state, bool overViewport);
+
+// Appends edge highlight primitives while edge picking is active: every body
+// edge dimmed, the hovered edge and the blend's picked edges emphasized.
+void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out);
 
 // The features in [0, beforeIndex) that produce a body (primitives, imports,
 // extrude/revolve in NewBody mode, and earlier booleans), as {featureId,

@@ -8,6 +8,7 @@
 #include "core/ExtrudeFeature.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/FilletFeature.h"
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/Serialization.h"
@@ -649,6 +650,45 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     DrawBooleanParams(state, *boo, index, commit);
   } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {
     DrawPatternParams(state, *pat, index, commit);
+  } else if (auto* fil = dynamic_cast<FilletFeature*>(&feature)) {
+    const char* ops[] = {"Fillet", "Chamfer"};
+    int op = static_cast<int>(fil->op);
+    if (ImGui::Combo("Operation", &op, ops, 2)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*fil);
+      fil->op = static_cast<EdgeBlendOp>(op);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    ExprDim(state, feature, index, commit,
+            fil->op == EdgeBlendOp::Chamfer ? "Distance" : "Radius",
+            fil->radiusExpr, fil->radius);
+
+    // The edge list, each entry removable — the repair path for a dangling
+    // ref (its edge is gone, so it can't be un-clicked in the viewport).
+    ImGui::Text("Edges: %zu", fil->edges.size());
+    for (size_t e = 0; e < fil->edges.size(); e++) {
+      ImGui::PushID(static_cast<int>(e));
+      if (ImGui::SmallButton("x")) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*fil);
+        fil->edges.erase(fil->edges.begin() + static_cast<long>(e));
+        CommitDiscrete(state, feature, before, index, commit);
+        ImGui::PopID();
+        break; // list changed; redraw next frame
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", fil->edges[e].name.c_str());
+      ImGui::PopID();
+    }
+    if (state.edgePick.filletId == fil->GetId()) {
+      ImGui::TextColored(ImVec4(0.35f, 0.80f, 1.00f, 1.0f),
+                         "Click edges in the viewport to add/remove");
+      if (ImGui::Button("Done picking")) {
+        state.edgePick = {};
+      }
+    } else if (ImGui::Button("Pick edges…")) {
+      // Also the repair action for a dangling ref: re-pick, click the new edge.
+      state.edgePick = {};
+      state.edgePick.filletId = fil->GetId();
+    }
   }
 }
 

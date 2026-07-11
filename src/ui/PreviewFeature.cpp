@@ -44,6 +44,7 @@ void AcceptPendingFeature(AppState& state) {
   state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(owned)),
                           *state.document);
   state.selectedFeature = static_cast<int>(state.document->FeatureCount() - 1);
+  state.edgePick = {}; // a blend preview's edge picking ends with it
 }
 
 void CancelPendingFeature(AppState& state) {
@@ -53,6 +54,7 @@ void CancelPendingFeature(AppState& state) {
   }
   state.pendingFeatureId = 0;
   state.selectedFeature = -1;
+  state.edgePick = {};
 }
 
 void DrawPreviewDialog(AppState& state) {
