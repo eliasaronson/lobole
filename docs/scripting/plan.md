@@ -78,7 +78,7 @@ prove it); the work is a startup path that skips renderer/ImGui init and a
 degraded-capability answer for `screenshot` (error or offscreen render later).
 Payoff: geometry tests + scripted regeneration on CI with no virtual display.
 
-### S3 — Python package (~1–2 days)
+### S3 — Python package — SHIPPED (v1, 2026-07-11)
 Client-first, not embedded: a `designer` Python package wrapping the RPC in a
 pythonic API (`doc.sketch(plane="XY").line(...).rect(...); doc.extrude(sk,
 depth="width/2")`), usable from any REPL/notebook. Same interface as the LLM —
