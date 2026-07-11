@@ -32,7 +32,7 @@ atomic write (temp + rename), recover-on-start prompt when a sidecar is newer
 than its project, sidecar cleared on clean save/exit. Dirty-state already
 implied by the command stack.
 
-### F3 — Diffable on-disk layout (~1–2 days, decide before F5)
+### F3 — Diffable on-disk layout (~1–2 days, decide before F5) — [design: f3-directory-format.md](f3-directory-format.md), awaiting the default-format decision
 The monolithic JSON diffs poorly and merges worse. Evaluate a **directory
 format**: one file per feature (named by stable id) + an ordered index +
 document-level files (parameters, settings). Feature-level files make git
@@ -41,7 +41,7 @@ diffs readable ("modified `extrude-42.json`") and most merges trivial
 (both exist) are the prerequisites. Keep single-file as an export/interchange
 form.
 
-### F4 — Checkpoints + the rollback bar (~2 days)
+### F4 — Checkpoints + the rollback bar — **shipped (July 2026)** (rollback bar via the regeneration track; named checkpoints v1 under `<project>.checkpoints/`; insert-at-marker still v2)
 Two related things, built together:
 - **Rollback bar** (SolidWorks-style): a marker in the feature list;
   regeneration stops there, features after it show grayed. Implementation is

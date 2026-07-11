@@ -1,5 +1,9 @@
 # The regeneration track — failure UX, rollback bar, incremental regen
 
+> **SHIPPED 2026-07-11** (R1 continue-past-failure + suppress, R2 rollback
+> bar, R3 prefix cache; format v19). Bonus finds: a latent use-after-free in
+> the sketch viewport, and PatternFeature's in-Execute count evaluation.
+
 Three changes to the same organ (`Document::Regenerate`), designed together
 so the surgery happens once. R1 is overdue by this plan's own gate (fillets
 and up-to-face shipped first); R3 is the scaling limiter and assemblies

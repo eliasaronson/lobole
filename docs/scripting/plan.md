@@ -86,7 +86,7 @@ which is the point (goal 5). An *embedded* interpreter (pybind11) only if
 in-process latency or GUI-blocking interactivity ever demands it; it's a build
 and API-stability cost we don't need to pay to get 100% of the capability.
 
-### S4 — Recorded sessions as tests (~1 day)
+### S4 — Recorded sessions as tests — SHIPPED (v1, 2026-07-11)
 Record the command stream of a session to a file; replay headless and assert
 the resulting document/geometry. Every reported bug becomes a replayable
 regression test; ties into [versioning/plan.md](../versioning/plan.md)

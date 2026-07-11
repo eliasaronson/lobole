@@ -143,7 +143,12 @@ The loop that works — follow it every time:
 5. For 3D fillets/chamfers: list_elements to get stable edge names, then
    add_feature with type Fillet/Chamfer referencing them.
 6. Iterate. A wrong step is one undo away — prefer undo over compensating
-   edits. When done: save_project, and render_still for a presentation shot.
+   edits; checkpoint_create before risky multi-step changes and
+   checkpoint_restore instead of reconstructing. A feature that errors no
+   longer blanks the model (regeneration continues past it) — read the
+   feature's "error", fix or suppress_feature it. set_rollback lets you
+   inspect intermediate history states. When done: save_project, and
+   render_still for a presentation shot.
 """
 
 # ---------------------------------------------------------------------------
@@ -350,6 +355,24 @@ def delete_variable(name: str) -> dict:
 # ---------------------------------------------------------------------------
 # History & project
 # ---------------------------------------------------------------------------
+
+@mcp.tool(description="Suppress or unsuppress a feature (by feature id): "
+          "suppressed features are skipped by regeneration but keep their "
+          "parameters; anything referencing their outputs errors like a "
+          "deleted reference. One undoable edit.")
+def suppress_feature(feature_id: int, suppressed: bool) -> dict:
+    return _call("suppress_feature", feature_id=feature_id,
+                 suppressed=suppressed)
+
+
+@mcp.tool(description="Move the rollback bar: regeneration executes only "
+          "features [0, index); -1 = end. Features after the bar keep their "
+          "params but contribute nothing — use it to inspect intermediate "
+          "history states. Not undoable (a view, not an edit); "
+          "get_state.rollback shows the position.")
+def set_rollback(index: int) -> dict:
+    return _call("set_rollback", index=index)
+
 
 @mcp.tool(description="Undo the last document edit. Prefer this over "
           "compensating edits when a step went wrong.")
