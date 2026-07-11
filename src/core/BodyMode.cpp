@@ -1,6 +1,7 @@
 #include "core/BodyMode.h"
 
 #include "Logger.h"
+#include "core/ElementHistory.h"
 
 #include <algorithm>
 
@@ -13,18 +14,21 @@ bool BoxesOverlap(const glm::vec3& minA, const glm::vec3& maxA,
 }
 } // namespace
 
-bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
+bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
+                   ElementMap shapeMap, ExtrudeMode mode,
                    const std::string& name, const std::string& material,
                    uint64_t ownerId) {
   switch (mode) {
   case ExtrudeMode::NewBody:
     bodies.push_back({name, std::move(shape), material, ownerId});
+    bodies.back().elementMap = std::move(shapeMap);
     return true;
 
   case ExtrudeMode::Add: {
     if (bodies.empty()) {
       LOG_WARN("ApplyBodyMode '{}': Add with no bodies, creating one", name);
       bodies.push_back({name, std::move(shape), material, ownerId});
+      bodies.back().elementMap = std::move(shapeMap);
       return true;
     }
     // Fuse into the last body whose bbox overlaps the shape, else the last.
@@ -39,13 +43,17 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
         break;
       }
     }
-    CADShape fused = bodies[target].shape.Union(shape);
+    ElementMap fusedMap;
+    CADShape fused =
+        topo::BooleanNamed(BooleanOp::Union, bodies[target].shape,
+                           bodies[target].elementMap, shape, shapeMap, ownerId,
+                           fusedMap);
     if (!fused.IsValid()) {
       LOG_ERROR("ApplyBodyMode '{}': fuse failed", name);
       return false;
     }
     bodies[target].shape = std::move(fused);
-    bodies[target].elementMap = {}; // the boolean renumbered faces (T2/T5)
+    bodies[target].elementMap = std::move(fusedMap); // propagated (T5)
     return true;
   }
 
@@ -55,10 +63,13 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
       return false;
     }
     for (auto& body : bodies) {
-      CADShape cut = body.shape.Difference(shape);
+      ElementMap cutMap;
+      CADShape cut = topo::BooleanNamed(BooleanOp::Subtract, body.shape,
+                                        body.elementMap, shape, shapeMap,
+                                        ownerId, cutMap);
       if (cut.IsValid()) {
         body.shape = std::move(cut);
-        body.elementMap = {}; // the cut renumbered faces
+        body.elementMap = std::move(cutMap); // propagated (T5)
       }
     }
     // Drop bodies the cut fully consumed.

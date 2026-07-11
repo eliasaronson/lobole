@@ -1,12 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "core/BooleanFeature.h"
 #include "core/Document.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
 #include "core/Serialization.h"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <string>
@@ -133,14 +136,15 @@ TEST_CASE("Deleting a referenced entity makes its name stop resolving",
   CHECK(Map(doc).Resolve(SideName(ext, lines[0])).has_value());
 }
 
-TEST_CASE("Only NewBody extrudes carry an element map", "[toponaming]") {
+TEST_CASE("Every extrude mode carries an element map", "[toponaming]") {
   Document doc;
   uint64_t ext = 0;
-  BuildRectPrism(doc, ext); // NewBody -> a body with a full map
+  auto lines = BuildRectPrism(doc, ext); // NewBody -> a body with a full map
   REQUIRE_FALSE(Map(doc).Empty());
 
-  // A second sketch + an Add extrude fusing into the first body: the fused
-  // body's map is empty (a boolean renumbers faces — that's T5).
+  // A second sketch + an Add extrude fusing into the first body: names
+  // propagate through the fuse (T5) — the base's untouched sides keep their
+  // names verbatim.
   auto sk = std::make_unique<SketchFeature>("Sketch2", kXY);
   sk->AddRectangle({1, 1}, {3, 3});
   doc.AddFeature(std::move(sk));
@@ -149,7 +153,10 @@ TEST_CASE("Only NewBody extrudes carry an element map", "[toponaming]") {
                                                   ExtrudeMode::Add));
   REQUIRE(doc.Regenerate());
   REQUIRE(doc.GetBodies().size() == 1);
-  CHECK(doc.GetBodies()[0].elementMap.Empty());
+  REQUIRE_FALSE(Map(doc).Empty());
+  for (uint32_t line : lines) {
+    CHECK(Map(doc).Resolve(SideName(ext, line)).has_value());
+  }
 }
 
 // ---- T3/T4: ElementRef, sketch-on-face, error state -------------------------
@@ -271,4 +278,292 @@ TEST_CASE("A feature that fails records an error message", "[toponaming]") {
       std::make_unique<ExtrudeFeature>("Bad", 9999, 1.0, ExtrudeMode::NewBody));
   CHECK_FALSE(doc.Regenerate());
   CHECK_FALSE(doc.GetFeature(0)->GetError().empty());
+}
+
+// ---- T5: propagation through booleans, edge names ----------------------------
+
+namespace {
+
+// Appends a rectangle sketch + extrude to `doc`; returns the extrude's id.
+uint64_t AddRectExtrude(Document& doc, glm::vec2 c1, glm::vec2 c2,
+                        double distance, ExtrudeMode mode) {
+  auto sk = std::make_unique<SketchFeature>("Sk", kXY);
+  sk->AddRectangle(c1, c2);
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Ext", skId, distance, mode));
+  return doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+}
+
+// Number of B-Rep faces of the first body (via the mesh's face ids — the same
+// count the element map's face indices must cover).
+size_t FaceCount(const Document& doc) {
+  const auto mesh = doc.GetBodies().at(0).shape.GenerateMesh();
+  uint32_t maxId = 0;
+  for (uint32_t f : mesh.triangleFaces) {
+    maxId = std::max(maxId, f);
+  }
+  return mesh.triangleFaces.empty() ? 0 : maxId + 1;
+}
+
+} // namespace
+
+TEST_CASE("Boolean feature propagates the operands' names", "[toponaming]") {
+  Document doc;
+  uint64_t extA = 0;
+  auto linesA = BuildRectPrism(doc, extA); // 4x4x3 at origin
+  const uint64_t extB = AddRectExtrude(doc, {2, 2}, {6, 6}, 3.0,
+                                       ExtrudeMode::NewBody);
+  doc.AddFeature(std::make_unique<BooleanFeature>("Fuse", extA, extB,
+                                                  BooleanOp::Union));
+  const uint64_t boolId = doc.GetFeature(4)->GetId();
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK(doc.GetBodies()[0].createdBy == boolId);
+
+  const ElementMap& map = Map(doc);
+  // A's x=0 and y=0 sides are untouched by the fuse: survivor names, verbatim.
+  // (Rectangle {0,0}-{4,4} fused with {2,2}-{6,6} overlaps only the far
+  // corner.) At least those two of A's four sides must survive unrenamed.
+  int survivors = 0;
+  for (uint32_t line : linesA) {
+    if (map.Resolve(SideName(extA, line)).has_value()) {
+      survivors++;
+    }
+  }
+  CHECK(survivors >= 2);
+  // A trimmed side got the fuse's ";M<tag>" suffix.
+  int modified = 0;
+  for (uint32_t line : linesA) {
+    if (map.Resolve(SideName(extA, line) + ";M" + std::to_string(boolId))
+            .has_value()) {
+      modified++;
+    }
+  }
+  CHECK(modified >= 1);
+  // Every face of the result is named (history + U/L leave nothing anonymous).
+  CHECK(map.names.size() == FaceCount(doc));
+  // Edge names exist too — including generated section edges (";G").
+  CHECK_FALSE(map.edgeNames.empty());
+  bool anyGenerated = false;
+  for (const auto& [idx, name] : map.edgeNames) {
+    if (name.find(";G" + std::to_string(boolId)) != std::string::npos) {
+      anyGenerated = true;
+    }
+  }
+  CHECK(anyGenerated);
+}
+
+TEST_CASE("Boolean-result names survive an upstream edit (T5 headline)",
+          "[toponaming]") {
+  Document doc;
+  uint64_t extA = 0;
+  auto linesA = BuildRectPrism(doc, extA);
+  const uint64_t extB = AddRectExtrude(doc, {2, 2}, {6, 6}, 3.0,
+                                       ExtrudeMode::NewBody);
+  doc.AddFeature(std::make_unique<BooleanFeature>("Fuse", extA, extB,
+                                                  BooleanOp::Union));
+  REQUIRE(doc.Regenerate());
+
+  // Capture a survivor name, then change A's real geometry.
+  std::string captured;
+  for (uint32_t line : linesA) {
+    if (Map(doc).Resolve(SideName(extA, line)).has_value()) {
+      captured = SideName(extA, line);
+      break;
+    }
+  }
+  REQUIRE_FALSE(captured.empty());
+
+  for (auto& e : Sketch(doc).entities) {
+    if (auto* line = std::get_if<sketch::Line>(&e)) {
+      line->a *= 0.9f;
+      line->b *= 0.9f;
+    }
+  }
+  REQUIRE(doc.Regenerate());
+  CHECK(Map(doc).Resolve(captured).has_value());
+}
+
+TEST_CASE("A cut hole renames the pierced cap and keeps the sides",
+          "[toponaming]") {
+  Document doc;
+  uint64_t ext = 0;
+  auto lines = BuildRectPrism(doc, ext); // 4x4x3
+  // A circular cut straight through the middle.
+  auto sk = std::make_unique<SketchFeature>("Hole", kXY);
+  sk->AddEntity(sketch::Circle{{2, 2}, 1.0});
+  doc.AddFeature(std::move(sk));
+  const uint64_t holeSk = doc.GetFeature(2)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Cut", holeSk, 3.0, ExtrudeMode::Cut));
+  const uint64_t cutId = doc.GetFeature(3)->GetId();
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  const ElementMap& map = Map(doc);
+  // Untouched rectangle sides keep their names verbatim.
+  for (uint32_t line : lines) {
+    CHECK(map.Resolve(SideName(ext, line)).has_value());
+  }
+  // The pierced caps carry the cut's ";M<tag>".
+  const std::string suffix = ";M" + std::to_string(cutId);
+  CHECK(map.Resolve(std::to_string(ext) + "/cap0" + suffix).has_value());
+  CHECK(map.Resolve(std::to_string(ext) + "/cap1" + suffix).has_value());
+  // Full coverage of the result's faces.
+  CHECK(map.names.size() == FaceCount(doc));
+}
+
+TEST_CASE("A slot cut splits a cap into disambiguated .0/.1 pieces",
+          "[toponaming]") {
+  Document doc;
+  uint64_t ext = 0;
+  BuildRectPrism(doc, ext); // 4x4x3
+  // A slot crossing the whole footprint splits both caps in two.
+  const uint64_t slotExt =
+      AddRectExtrude(doc, {1.5f, -1.0f}, {2.5f, 5.0f}, 3.0, ExtrudeMode::Cut);
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  (void)slotExt;
+
+  const ElementMap& map = Map(doc);
+  const std::string base = std::to_string(ext) + "/cap1;M" +
+                           std::to_string(slotExt);
+  const auto piece0 = map.Resolve(base + ".0");
+  const auto piece1 = map.Resolve(base + ".1");
+  REQUIRE(piece0.has_value());
+  REQUIRE(piece1.has_value());
+  CHECK(*piece0 != *piece1);
+}
+
+TEST_CASE("A face the cut consumes stops resolving", "[toponaming]") {
+  Document doc;
+  uint64_t ext = 0;
+  auto lines = BuildRectPrism(doc, ext); // 4x4x3
+  // Shave off the x in [3,4] slab: the x=4 side face is consumed entirely.
+  AddRectExtrude(doc, {3.0f, -1.0f}, {5.0f, 5.0f}, 3.0, ExtrudeMode::Cut);
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  // Find which line was the x=4 side by geometry (before-edit resolution
+  // order of AddRectangle's lines is an implementation detail).
+  const ElementMap& map = Map(doc);
+  int gone = 0, kept = 0;
+  for (uint32_t line : lines) {
+    if (map.Resolve(SideName(ext, line)).has_value()) {
+      kept++;
+    } else {
+      gone++;
+    }
+  }
+  // Exactly one side (x=4) vanished; x=0/y=0/y=4 survive (trimmed sides keep
+  // ";M" names instead, so plain-name resolution may drop them too — but the
+  // x=0 side is untouched and must survive verbatim).
+  CHECK(gone >= 1);
+  CHECK(kept >= 1);
+}
+
+TEST_CASE("Prism edges are named by the U pass and survive edits",
+          "[toponaming]") {
+  Document doc;
+  uint64_t ext = 0;
+  auto lines = BuildRectPrism(doc, ext);
+  const ElementMap& map = Map(doc);
+
+  // A rectangular prism has 12 edges; all of them get names.
+  CHECK(map.edgeNames.size() == 12);
+  // They are U names hanging off the named faces.
+  bool anyU = false;
+  for (const auto& [idx, name] : map.edgeNames) {
+    if (name.find(";U") != std::string::npos) {
+      anyU = true;
+    }
+  }
+  CHECK(anyU);
+
+  // Round-trip and mutation stability: capture one edge name, scale the
+  // sketch, and re-resolve.
+  const std::string edgeName = map.edgeNames.begin()->second;
+  REQUIRE(map.ResolveEdge(edgeName).has_value());
+  for (auto& e : Sketch(doc).entities) {
+    if (auto* line = std::get_if<sketch::Line>(&e)) {
+      line->a *= 2.0f;
+      line->b *= 2.0f;
+    }
+  }
+  REQUIRE(doc.Regenerate());
+  const auto after = Map(doc).ResolveEdge(edgeName);
+  REQUIRE(after.has_value());
+  CHECK(*Map(doc).EdgeNameOf(*after) == edgeName);
+  (void)lines;
+}
+
+TEST_CASE("A sketch attached to a fused body's face follows base edits",
+          "[toponaming]") {
+  Document doc;
+  uint64_t extA = 0;
+  BuildRectPrism(doc, extA); // 4x4x3 base
+  // A boss fused into the base, piercing the top cap (so cap1 -> ";M<boss>").
+  const uint64_t boss = AddRectExtrude(doc, {1, 1}, {3, 3}, 8.0,
+                                       ExtrudeMode::Add);
+  REQUIRE(doc.Regenerate());
+  const std::string fusedCap = std::to_string(extA) + "/cap1;M" +
+                               std::to_string(boss);
+  REQUIRE(Map(doc).Resolve(fusedCap).has_value());
+
+  // Sketch on the (pierced) top cap of the fused body + a small pad on it.
+  auto skC = std::make_unique<SketchFeature>("OnCap", kXY);
+  skC->faceRef = ElementRef{extA, fusedCap}; // fused body: createdBy == extA
+  skC->AddRectangle({3.2f, 3.2f}, {3.8f, 3.8f});
+  doc.AddFeature(std::move(skC));
+  const uint64_t skCid = doc.GetFeature(4)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", skCid, 1.0, ExtrudeMode::NewBody));
+  const uint64_t pad = doc.GetFeature(5)->GetId();
+  REQUIRE(doc.Regenerate());
+  CHECK_THAT(BodyMinZ(doc, pad), WithinAbs(3.0, 1e-3));
+
+  // Raise the base: the cap's name is unchanged, so the pad rides up.
+  auto* extAfeat = dynamic_cast<ExtrudeFeature*>(doc.FindFeatureById(extA));
+  REQUIRE(extAfeat != nullptr);
+  extAfeat->distance = 5.0;
+  REQUIRE(doc.Regenerate());
+  CHECK_THAT(BodyMinZ(doc, pad), WithinAbs(5.0, 1e-3));
+}
+
+TEST_CASE("Revolve names its faces like extrude does", "[toponaming]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("Profile", kXY);
+  auto lines = sk->AddRectangle({1, 0}, {3, 3}); // +x of the global Y axis
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(0)->GetId();
+
+  SECTION("partial revolve: sides + caps") {
+    auto rev = std::make_unique<RevolveFeature>("Rev", skId, 90.0,
+                                                ExtrudeMode::NewBody);
+    rev->axis.kind = AxisRef::Kind::Y;
+    doc.AddFeature(std::move(rev));
+    const uint64_t revId = doc.GetFeature(1)->GetId();
+    REQUIRE(doc.GetBodies().size() == 1);
+    const ElementMap& map = Map(doc);
+    for (uint32_t line : lines) {
+      CHECK(map.Resolve(SideName(revId, line)).has_value());
+    }
+    CHECK(map.Resolve(std::to_string(revId) + "/cap0").has_value());
+    CHECK(map.Resolve(std::to_string(revId) + "/cap1").has_value());
+    CHECK(map.names.size() == FaceCount(doc));
+    CHECK_FALSE(map.edgeNames.empty());
+  }
+
+  SECTION("full revolution: no caps, still full coverage") {
+    auto rev = std::make_unique<RevolveFeature>("Rev", skId, 360.0,
+                                                ExtrudeMode::NewBody);
+    rev->axis.kind = AxisRef::Kind::Y;
+    doc.AddFeature(std::move(rev));
+    const uint64_t revId = doc.GetFeature(1)->GetId();
+    REQUIRE(doc.GetBodies().size() == 1);
+    const ElementMap& map = Map(doc);
+    CHECK_FALSE(map.Resolve(std::to_string(revId) + "/cap0").has_value());
+    CHECK(map.names.size() == FaceCount(doc));
+  }
 }

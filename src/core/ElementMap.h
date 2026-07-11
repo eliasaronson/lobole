@@ -24,8 +24,12 @@ struct ElementRef {
 // every regeneration alongside the body's shape, never serialized.
 struct ElementMap {
   std::map<int, std::string> names; // faceIndex -> MappedName
+  // edgeIndex -> MappedName (T5). Edge indices follow the deduplicated
+  // first-appearance order of TopExp::MapShapes(shape, TopAbs_EDGE) — unlike
+  // faces, a raw explorer walk visits shared edges once per adjacent face.
+  std::map<int, std::string> edgeNames;
 
-  [[nodiscard]] bool Empty() const { return names.empty(); }
+  [[nodiscard]] bool Empty() const { return names.empty() && edgeNames.empty(); }
 
   // The name of the face at `faceIndex`, or nullptr if none.
   [[nodiscard]] const std::string* NameOf(int faceIndex) const {
@@ -33,11 +37,28 @@ struct ElementMap {
     return it == names.end() ? nullptr : &it->second;
   }
 
+  // The name of the edge at `edgeIndex`, or nullptr if none.
+  [[nodiscard]] const std::string* EdgeNameOf(int edgeIndex) const {
+    const auto it = edgeNames.find(edgeIndex);
+    return it == edgeNames.end() ? nullptr : &it->second;
+  }
+
   // The current faceIndex a name resolves to, or nullopt if the name is gone
   // (its generating element was deleted). This is the toponaming lookup:
   // resolution failure is a first-class signal, not a silent renumber.
   [[nodiscard]] std::optional<int> Resolve(const std::string& name) const {
     for (const auto& [index, n] : names) {
+      if (n == name) {
+        return index;
+      }
+    }
+    return std::nullopt;
+  }
+
+  // The current edgeIndex a name resolves to, or nullopt if the name is gone
+  // (e.g. the edge was consumed by a fillet or boolean).
+  [[nodiscard]] std::optional<int> ResolveEdge(const std::string& name) const {
+    for (const auto& [index, n] : edgeNames) {
       if (n == name) {
         return index;
       }

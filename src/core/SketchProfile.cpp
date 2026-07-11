@@ -1,6 +1,7 @@
 #include "core/SketchProfile.h"
 
 #include "Logger.h"
+#include "core/ElementHistory.h"
 
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
@@ -15,7 +16,9 @@
 #include <GC_MakeSegment.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <ShapeFix_Wire.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
@@ -37,6 +40,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 
 namespace sketch {
 
@@ -709,7 +713,119 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
       out.names[topIdx] = tag + "cap1";
     }
 
-    return CADShape(shape);
+    // U/L fallback passes: the prism's edges take names from their faces
+    // ("<faceName>;U<i>"), which is what makes them referenceable by a fillet.
+    CADShape result(shape);
+    topo::ApplyFallbackPasses(result, out);
+    return result;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
+    return CADShape();
+  }
+}
+
+CADShape BuildRevolveNamed(const SketchPlane& plane,
+                           const std::vector<Loop>& loops,
+                           const glm::vec3& axisOrigin,
+                           const glm::vec3& axisDir, double angleRadians,
+                           bool reversed, bool symmetric, uint64_t featureTag,
+                           ElementMap& out) {
+  out = {};
+  double angle = std::abs(angleRadians);
+  if (loops.empty() || angle < 1e-9) {
+    return CADShape();
+  }
+  if (angle > 2.0 * M_PI) {
+    angle = 2.0 * M_PI;
+  }
+  const bool full = angle >= 2.0 * M_PI - 1e-9;
+
+  try {
+    TopoDS_Face face = BuildProfileFace(plane, loops);
+    if (face.IsNull()) {
+      return CADShape();
+    }
+
+    gp_Ax1 ax(gp_Pnt(axisOrigin.x, axisOrigin.y, axisOrigin.z),
+              gp_Dir(axisDir.x, axisDir.y, axisDir.z));
+
+    TopoDS_Shape profile = face;
+    double sweep = reversed ? -angle : angle;
+    // Symmetric: pre-rotate the profile (see BuildRevolve). Kept alive so the
+    // original profile edges can be mapped to their swept copies below.
+    std::unique_ptr<BRepBuilderAPI_Transform> xform;
+    if (symmetric && !full) {
+      gp_Trsf pre;
+      pre.SetRotation(ax, -angle / 2.0);
+      xform =
+          std::make_unique<BRepBuilderAPI_Transform>(profile, pre, /*Copy=*/true);
+      profile = xform->Shape();
+      sweep = angle;
+    }
+
+    BRepPrimAPI_MakeRevol revol(profile, ax, sweep);
+    if (!revol.IsDone()) {
+      LOG_ERROR("Sketch profile: revolve construction failed");
+      return CADShape();
+    }
+    CADShape result(revol.Shape());
+    if (!result.IsValid() || result.Volume() < 1e-9) {
+      LOG_ERROR("Sketch profile: revolve produced an invalid solid "
+                "(does the profile cross the axis?)");
+      return CADShape();
+    }
+    const TopoDS_Shape& shape = result.GetShape();
+
+    const std::string tag = std::to_string(featureTag) + "/";
+    // Side faces: each profile edge sweeps into a face of revolution, named
+    // from the sketch entity that produced the edge. When the profile was
+    // pre-rotated, query the swept *copy* of each original edge.
+    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+      const uint32_t entityId = MatchEntityId(edge, plane, loops);
+      if (entityId == 0) {
+        continue;
+      }
+      const TopoDS_Shape query = xform ? xform->ModifiedShape(edge)
+                                       : TopoDS_Shape(edge);
+      const std::string name = tag + "g" + std::to_string(entityId);
+      for (const TopoDS_Shape& sideFace : revol.Generated(query)) {
+        const int idx = FaceIndexOf(shape, sideFace);
+        if (idx >= 0) {
+          out.names[idx] = name;
+        }
+      }
+    }
+
+    // Caps: the planar ends of a partial revolve. A full revolution has none
+    // (FirstShape/LastShape are not part of the result; FaceIndexOf misses).
+    if (!revol.FirstShape().IsNull()) {
+      const int baseIdx = FaceIndexOf(shape, revol.FirstShape());
+      if (baseIdx >= 0) {
+        out.names[baseIdx] = tag + "cap0";
+      }
+    }
+    if (!revol.LastShape().IsNull()) {
+      const int topIdx = FaceIndexOf(shape, revol.LastShape());
+      if (topIdx >= 0) {
+        out.names[topIdx] = tag + "cap1";
+      }
+    }
+
+    // Degenerate pole edges at the axis have no generating parent
+    // (Generated() is empty for them) — name them by position so they never
+    // go unnamed.
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+    int pole = 0;
+    for (int i = 1; i <= edges.Extent(); i++) {
+      if (BRep_Tool::Degenerated(TopoDS::Edge(edges(i)))) {
+        out.edgeNames[i - 1] = tag + "pole" + std::to_string(pole++);
+      }
+    }
+
+    topo::ApplyFallbackPasses(result, out);
+    return result;
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
     return CADShape();

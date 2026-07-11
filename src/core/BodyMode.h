@@ -10,13 +10,17 @@
 // Applies a freshly built solid to the body list according to `mode`, shared
 // by the solid-producing features (extrude, revolve):
 //   NewBody: append `shape` as its own body, stamped with `ownerId` as its
-//            createdBy.
+//            createdBy and carrying `shapeMap` as its element map.
 //   Add:     fuse into the last body whose bbox overlaps (else the last),
-//            leaving that body's createdBy (and material) untouched.
-//   Cut:     subtract from every body, dropping any the cut fully consumes.
+//            leaving that body's createdBy (and material) untouched; element
+//            names propagate through the fuse (toponaming T5) — the target's
+//            names plus `shapeMap`'s, rewritten onto the fused shape.
+//   Cut:     subtract from every body, dropping any the cut fully consumes;
+//            each surviving body's names propagate through its cut.
 // Returns false only on an operation that genuinely failed (a fuse/cut error,
-// or Cut with no bodies). `shape` is moved from.
-bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape, ExtrudeMode mode,
+// or Cut with no bodies). `shape` and `shapeMap` are moved from.
+bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
+                   ElementMap shapeMap, ExtrudeMode mode,
                    const std::string& name, const std::string& material,
                    uint64_t ownerId);
 

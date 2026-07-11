@@ -50,14 +50,15 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  CADShape solid = sketch::BuildRevolve(sketch->plane, loops, axisOrigin,
-                                        axisDir, glm::radians(angleDeg),
-                                        reversed, symmetric);
+  ElementMap map;
+  CADShape solid = sketch::BuildRevolveNamed(sketch->plane, loops, axisOrigin,
+                                             axisDir, glm::radians(angleDeg),
+                                             reversed, symmetric, GetId(), map);
   if (!solid.IsValid()) {
     LOG_ERROR("RevolveFeature '{}': revolve construction failed", m_name);
     return false;
   }
 
-  return ApplyBodyMode(ctx.bodies, std::move(solid), mode, m_name, m_material,
-                       GetId());
+  return ApplyBodyMode(ctx.bodies, std::move(solid), std::move(map), mode,
+                       m_name, m_material, GetId());
 }

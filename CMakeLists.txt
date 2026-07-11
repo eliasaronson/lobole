@@ -182,6 +182,7 @@ set(core_sources
     src/core/RevolveFeature.cpp
     src/core/DatumAxisFeature.cpp
     src/core/BooleanFeature.cpp
+    src/core/ElementHistory.cpp
     src/core/PatternFeature.cpp
     src/core/SketchSolver.cpp
 )

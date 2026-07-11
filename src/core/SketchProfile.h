@@ -66,6 +66,18 @@ CADShape BuildRevolve(const SketchPlane& plane, const std::vector<Loop>& loops,
                       const glm::vec3& axisOrigin, const glm::vec3& axisDir,
                       double angleRadians, bool reversed, bool symmetric);
 
+// Like BuildRevolve, but also fills `out` with stable names (topological
+// naming, T5): side faces "<featureTag>/g<entityId>" from the generating
+// sketch entity, the two planar ends of a partial revolve "cap0"/"cap1" (a
+// full revolution has none), degenerate pole edges at the axis
+// "<featureTag>/pole<n>", and the U/L fallback passes for everything else.
+CADShape BuildRevolveNamed(const SketchPlane& plane,
+                           const std::vector<Loop>& loops,
+                           const glm::vec3& axisOrigin,
+                           const glm::vec3& axisDir, double angleRadians,
+                           bool reversed, bool symmetric, uint64_t featureTag,
+                           ElementMap& out);
+
 // Tessellates one entity into a UV polyline for rendering/preview: Line = 2
 // points, Circle = 33 (closed, 32 segments), Point = empty (rendered as a
 // marker elsewhere).

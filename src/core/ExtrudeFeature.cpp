@@ -27,26 +27,13 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  // NewBody: the prism *is* the body, so its face indices survive into the
-  // rendered mesh — name its faces (topological naming, T2) and attach the map.
-  // Add/Cut run a boolean that renumbers faces, so leave those unnamed (T5).
-  if (mode == ExtrudeMode::NewBody) {
-    ElementMap map;
-    CADShape prism = sketch::BuildPrismNamed(sketch->plane, loops, distance,
-                                             reversed, GetId(), map);
-    if (!prism.IsValid()) {
-      SetError("profile could not be extruded (disjoint profiles in one "
-               "sketch are not supported — use one feature per profile)");
-      LOG_ERROR("ExtrudeFeature '{}': prism construction failed", m_name);
-      return false;
-    }
-    ctx.bodies.push_back({m_name, std::move(prism), m_material, GetId()});
-    ctx.bodies.back().elementMap = std::move(map);
-    return true;
-  }
-
-  CADShape prism =
-      sketch::BuildPrism(sketch->plane, loops, distance, reversed);
+  // Name the prism's faces from the sketch entities that generate them
+  // (topological naming, T2), for every mode: NewBody attaches the map as-is,
+  // and Add/Cut propagate it through their boolean (T5) — a face the boolean
+  // leaves alone keeps its name, a pierced one gains ";M<id>".
+  ElementMap map;
+  CADShape prism = sketch::BuildPrismNamed(sketch->plane, loops, distance,
+                                           reversed, GetId(), map);
   if (!prism.IsValid()) {
     SetError("profile could not be extruded (disjoint profiles in one "
              "sketch are not supported — use one feature per profile)");
@@ -54,6 +41,6 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  return ApplyBodyMode(ctx.bodies, std::move(prism), mode, m_name, m_material,
-                       GetId());
+  return ApplyBodyMode(ctx.bodies, std::move(prism), std::move(map), mode,
+                       m_name, m_material, GetId());
 }

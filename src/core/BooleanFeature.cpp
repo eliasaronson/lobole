@@ -1,6 +1,7 @@
 #include "core/BooleanFeature.h"
 
 #include "Logger.h"
+#include "core/ElementHistory.h"
 
 #include <algorithm>
 
@@ -30,18 +31,12 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  CADShape result;
-  switch (op) {
-  case BooleanOp::Union:
-    result = target->shape.Union(tool->shape);
-    break;
-  case BooleanOp::Subtract:
-    result = target->shape.Difference(tool->shape);
-    break;
-  case BooleanOp::Intersect:
-    result = target->shape.Intersection(tool->shape);
-    break;
-  }
+  // Run the boolean with history kept alive so the operands' element names
+  // propagate onto the result (toponaming T5).
+  ElementMap map;
+  CADShape result = topo::BooleanNamed(op, target->shape, target->elementMap,
+                                       tool->shape, tool->elementMap, GetId(),
+                                       map);
   if (!result.IsValid() || result.Volume() < 1e-9) {
     LOG_ERROR("BooleanFeature '{}': operation produced an empty or invalid "
               "solid (are the bodies disjoint?)",
@@ -59,5 +54,6 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
   bodies.erase(tool);
   bodies.erase(target);
   bodies.push_back({m_name, std::move(result), material, GetId()});
+  bodies.back().elementMap = std::move(map);
   return true;
 }
