@@ -170,6 +170,7 @@ set(core_sources
     src/core/Autosaver.cpp
     src/core/Checkpoints.cpp
     src/core/GitVault.cpp
+    src/core/Measure.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
     src/core/Command.cpp

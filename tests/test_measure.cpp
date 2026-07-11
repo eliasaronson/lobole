@@ -1,0 +1,98 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
+
+#include "core/Document.h"
+#include "core/Feature.h"
+#include "core/Measure.h"
+
+#include <algorithm>
+#include <vector>
+
+using Catch::Matchers::WithinRel;
+using Catch::Matchers::WithinAbs;
+
+namespace {
+// A box owns faces "<id>/faceN"; return them sorted so tests are stable.
+std::vector<std::string> FaceNames(const Body& body) {
+  std::vector<std::string> out;
+  for (const auto& [idx, name] : body.elementMap.names)
+    out.push_back(name);
+  std::sort(out.begin(), out.end());
+  return out;
+}
+std::vector<std::string> EdgeNames(const Body& body) {
+  std::vector<std::string> out;
+  for (const auto& [idx, name] : body.elementMap.edgeNames)
+    out.push_back(name);
+  std::sort(out.begin(), out.end());
+  return out;
+}
+} // namespace
+
+TEST_CASE("Measure a box's face areas and edge lengths", "[measure]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2.0, 3.0,
+                                              4.0));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const Body& body = doc.GetBodies()[0];
+
+  // Every face resolves and reports one of the three distinct areas.
+  std::vector<double> areas;
+  for (const std::string& name : FaceNames(body)) {
+    auto e = Measure::Describe(doc.GetBodies(), ElementRef{id, name});
+    REQUIRE(e.has_value());
+    CHECK(e->kind == "face");
+    areas.push_back(e->area);
+  }
+  std::sort(areas.begin(), areas.end());
+  REQUIRE(areas.size() == 6);
+  CHECK_THAT(areas[0], WithinRel(6.0, 1e-9));  // 2x3
+  CHECK_THAT(areas[2], WithinRel(8.0, 1e-9));  // 2x4
+  CHECK_THAT(areas[5], WithinRel(12.0, 1e-9)); // 3x4
+
+  // Edge lengths are the box's side lengths {2,3,4}.
+  std::vector<double> lengths;
+  for (const std::string& name : EdgeNames(body)) {
+    auto e = Measure::Describe(doc.GetBodies(), ElementRef{id, name});
+    REQUIRE(e.has_value());
+    CHECK(e->kind == "edge");
+    lengths.push_back(e->length);
+  }
+  REQUIRE(lengths.size() == 12);
+  double lo = *std::min_element(lengths.begin(), lengths.end());
+  double hi = *std::max_element(lengths.begin(), lengths.end());
+  CHECK_THAT(lo, WithinRel(2.0, 1e-9));
+  CHECK_THAT(hi, WithinRel(4.0, 1e-9));
+}
+
+TEST_CASE("Measure distance between two boxes' faces", "[measure]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
+                                              1.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 1.0,
+                                              1.0, 1.0));
+  const uint64_t idA = doc.GetFeature(0)->GetId();
+  const uint64_t idB = doc.GetFeature(1)->GetId();
+
+  // A spans x[0,1], B spans x[5,6] -> nearest faces are 4 apart. Any
+  // face-face pair is at least that far; find the minimum over all pairs.
+  double best = 1e30;
+  for (const std::string& na : FaceNames(doc.GetBodies()[0]))
+    for (const std::string& nb : FaceNames(doc.GetBodies()[1])) {
+      auto d = Measure::Distance(doc.GetBodies(), ElementRef{idA, na},
+                                 ElementRef{idB, nb});
+      REQUIRE(d.has_value());
+      best = std::min(best, *d);
+    }
+  CHECK_THAT(best, WithinAbs(4.0, 1e-6));
+}
+
+TEST_CASE("Measure of a dangling ref returns nullopt", "[measure]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1, 1, 1));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  CHECK_FALSE(
+      Measure::Describe(doc.GetBodies(), ElementRef{id, "nope"}).has_value());
+  CHECK_FALSE(
+      Measure::Describe(doc.GetBodies(), ElementRef{999, "x"}).has_value());
+}

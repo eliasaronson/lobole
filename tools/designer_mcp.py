@@ -216,6 +216,19 @@ def mass_properties(body: int = -1) -> dict:
     return _call("mass_properties", **({"body": body} if body >= 0 else {}))
 
 
+@mcp.tool(description="Measure geometry over stable element names (from "
+          "list_elements). With `a` only: that element's own measure — a "
+          "face's area or an edge's length. With `a` and `b`: the minimum "
+          "distance between the two elements (faces or edges). Each ref is "
+          "{feature_id, element}. Verify dimensions with this instead of "
+          "trusting your inputs.")
+def measure(a: dict, b: dict | None = None) -> dict:
+    params = {"a": a}
+    if b is not None:
+        params["b"] = b
+    return _call("measure", **params)
+
+
 @mcp.tool(description="Stable element names (topological naming) for each "
           "body's faces and edges, plus the body's created_by feature id. "
           "This is how Fillet/Chamfer edge refs are built: edges: "

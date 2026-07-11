@@ -10,6 +10,7 @@
 #include "core/Checkpoints.h"
 #include "core/Expression.h"
 #include "core/GitVault.h"
+#include "core/Measure.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "core/SketchSolver.h"
@@ -679,6 +680,29 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
              {{"volume", totalVolume},
               {"center_of_mass", {com.x, com.y, com.z}},
               {"mass_g", massKnown ? json(totalMass) : json(nullptr)}}}};
+  }
+  if (m == "measure") {
+    // Geometry queries over stable element names (I1). params:
+    // {a: {feature_id, element}, b?: {feature_id, element}}.
+    // With `b`: minimum distance between the two elements. Without: the
+    // element's own measure (face area / edge length).
+    auto refOf = [](const json& r) {
+      return ElementRef{r.at("feature_id").get<uint64_t>(),
+                        r.at("element").get<std::string>()};
+    };
+    const ElementRef a = refOf(p.at("a"));
+    const auto& bodies = doc->GetBodies();
+    if (p.contains("b")) {
+      const auto d = Measure::Distance(bodies, a, refOf(p.at("b")));
+      if (!d) throw std::runtime_error("measure: an element did not resolve");
+      return {{"distance", *d}};
+    }
+    const auto e = Measure::Describe(bodies, a);
+    if (!e) throw std::runtime_error("measure: element did not resolve");
+    json out = {{"kind", e->kind}};
+    if (e->kind == "face") out["area"] = e->area;
+    else out["length"] = e->length;
+    return out;
   }
   if (m == "list_elements") {
     // Stable element names (topological naming) for each body's faces and

@@ -118,6 +118,26 @@ def main():
         expect(mp["bodies"][0]["mass_g"] is None, "unknown density: no mass")
         expect(mp["total"]["mass_g"] is None, "unknown density: no total")
 
+        # Measure over element names (I1): the pad's cap face area, and a
+        # top-face edge length.
+        pels = d.call("list_elements")["bodies"][0]
+        face = next(f["name"] for f in pels["faces"])
+        marea = d.call("measure", a={"feature_id": pels["created_by"],
+                                     "element": face})
+        expect(marea["kind"] == "face" and marea["area"] > 0,
+               "measure face area")
+        edge = pels["edges"][0]["name"]
+        mlen = d.call("measure", a={"feature_id": pels["created_by"],
+                                    "element": edge})
+        expect(mlen["kind"] == "edge" and mlen["length"] > 0,
+               "measure edge length")
+        try:
+            d.call("measure", a={"feature_id": pels["created_by"],
+                                 "element": "nonsense"})
+            expect(False, "measuring a dangling ref must error")
+        except RuntimeError:
+            pass
+
         # Element names drive a 3D chamfer headless (T5 consumer over RPC)
         els = d.call("list_elements")["bodies"][0]
         expect(els["created_by"] == pad["id"], "created_by is the pad")
