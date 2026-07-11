@@ -142,9 +142,13 @@ pipeline; toolbar/menu creation with preview, radius as an expression,
 dangling-ref error + "Pick edges…" repair. Format v17. Tests:
 `test_fillet.cpp` + a `fillet_body_edge_via_click` GUI case.
 
-### M8+ — advanced
-Sweep, loft (`BRepOffsetAPI_ThruSections`), shell (face-select → M6), hole/thread
-wizards, rib, draft on selected faces. All either need M6 or build on M1–M5.
+### M8 — advanced solids
+**Shell** and **loft shipped (July 2026).** ShellFeature hollows a body
+(BRepOffsetAPI_MakeThickSolid, open-face required); LoftFeature skins a solid
+through 2+ profile sketches (BRepOffsetAPI_ThruSections). Both are toponaming
+consumers (shell removes faces by ElementRef; the results get fresh
+primitive-style names). *Still to do:* sweep (profile along a path), hole/
+thread wizards, rib, draft on selected faces.
 
 ## Cross-cutting
 
