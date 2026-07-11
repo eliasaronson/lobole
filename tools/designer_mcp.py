@@ -88,6 +88,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "edges": [{{"feature_id": <the body's created_by feature id>,
   "element": <stable edge name>}}, ...]}} — all edges must belong to one
   body. Discover edge names + created_by with the list_elements tool.
+- Shell (hollow a body into a wall): {{"type": "Shell", "name": str,
+  "body_id": <the body's created_by feature id>, "thickness": num,
+  "thickness_expr"?: str, "open_faces": [{{"feature_id": <same body>,
+  "element": <stable face name from list_elements>}}, ...]}} — at least one
+  open face is required (the faces removed to hollow through).
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
 
 {AXIS_REF}

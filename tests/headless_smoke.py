@@ -182,6 +182,22 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
+        # Shell (M8): hollow a box into a bin via list_elements face name
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Blk", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 10})
+        bels = d.call("list_elements")["bodies"][0]
+        d.call("add_feature", feature={
+            "type": "Shell", "name": "Bin", "body_id": bels["created_by"],
+            "thickness": 1.0,
+            "open_faces": [{"feature_id": bels["created_by"],
+                            "element": bels["faces"][0]["name"]}]})
+        st = d.call("get_state")
+        expect(not any("error" in f for f in st["features"]),
+               "shell regenerated clean")
+        expect(abs(st["bodies"][0]["volume"] - 424.0) < 5.0, "bin volume ~424")
+
         # Export STEP/STL/BREP (E1), then re-import the STEP to verify it
         # round-trips to the same volume.
         d.call("new_project")

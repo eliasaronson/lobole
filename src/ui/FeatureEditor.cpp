@@ -9,6 +9,7 @@
 #include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/ShellFeature.h"
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/Serialization.h"
@@ -699,6 +700,27 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     DrawBooleanParams(state, *boo, index, commit);
   } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {
     DrawPatternParams(state, *pat, index, commit);
+  } else if (auto* sh = dynamic_cast<ShellFeature*>(&feature)) {
+    ExprDim(state, feature, index, commit, "Thickness", sh->thicknessExpr,
+            sh->thickness);
+    if (Feature* src = state.document->FindFeatureById(sh->bodyId))
+      ImGui::Text("Body: %s", src->GetName().c_str());
+    else
+      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Body: missing");
+    ImGui::Text("Open faces: %zu", sh->openFaces.size());
+    for (size_t e = 0; e < sh->openFaces.size(); e++) {
+      ImGui::PushID(static_cast<int>(e));
+      if (ImGui::SmallButton("x")) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*sh);
+        sh->openFaces.erase(sh->openFaces.begin() + static_cast<long>(e));
+        CommitDiscrete(state, feature, before, index, commit);
+        ImGui::PopID();
+        break;
+      }
+      ImGui::SameLine();
+      ImGui::TextUnformatted(sh->openFaces[e].name.c_str());
+      ImGui::PopID();
+    }
   } else if (auto* fil = dynamic_cast<FilletFeature*>(&feature)) {
     const char* ops[] = {"Fillet", "Chamfer"};
     int op = static_cast<int>(fil->op);

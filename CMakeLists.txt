@@ -184,6 +184,7 @@ set(core_sources
     src/core/DatumPlaneFeature.cpp
     src/core/BodyMode.cpp
     src/core/RevolveFeature.cpp
+    src/core/ShellFeature.cpp
     src/core/DatumAxisFeature.cpp
     src/core/BooleanFeature.cpp
     src/core/ElementHistory.cpp

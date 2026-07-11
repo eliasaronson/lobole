@@ -1,0 +1,13 @@
+{
+  "format": "designer-document",
+  "version": 19,
+  "rollback": 2,
+  "features": [
+    {"type": "Box", "name": "A", "id": 1, "position": [0, 0, 0],
+     "width": 2, "height": 2, "depth": 2},
+    {"type": "Box", "name": "B", "id": 2, "position": [5, 0, 0],
+     "width": 1, "height": 1, "depth": 1, "suppressed": true},
+    {"type": "Box", "name": "C", "id": 3, "position": [10, 0, 0],
+     "width": 3, "height": 1, "depth": 1}
+  ]
+}
