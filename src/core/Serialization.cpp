@@ -21,7 +21,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 17; // v17: fillet/chamfer (v16: sketch face_ref)
+constexpr int kVersion = 18; // v18: extrude end conditions (v17: fillet/chamfer)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -389,6 +389,15 @@ json FeatureToJson(const Feature& feature) {
       j["distance_expr"] = ext->distanceExpr;
     j["reversed"] = ext->reversed;
     j["mode"] = ExtrudeModeToString(ext->mode);
+    if (ext->endMode != ExtrudeEnd::Blind) { // v18; omit the default
+      j["end_mode"] = ext->endMode == ExtrudeEnd::Symmetric ? "symmetric"
+                                                            : "two_sided";
+      if (ext->endMode == ExtrudeEnd::TwoSided) {
+        j["distance2"] = ext->distance2;
+        if (!ext->distance2Expr.empty())
+          j["distance2_expr"] = ext->distance2Expr;
+      }
+    }
   } else if (auto* box = dynamic_cast<const BoxFeature*>(&feature)) {
     j["position"] = Vec3ToJson(box->position);
     j["width"] = box->width;
@@ -598,6 +607,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.value("reversed", false));
     ext->distanceExpr =
         j.value("distance_expr", std::string{}); // absent (pre-v11) = literal
+    // End condition (v18); absent = blind.
+    const std::string end = j.value("end_mode", "blind");
+    ext->endMode = end == "symmetric"   ? ExtrudeEnd::Symmetric
+                   : end == "two_sided" ? ExtrudeEnd::TwoSided
+                                        : ExtrudeEnd::Blind;
+    ext->distance2 = j.value("distance2", 1.0);
+    ext->distance2Expr = j.value("distance2_expr", std::string{});
     out = std::move(ext);
   } else if (type == "Box") {
     out = std::make_unique<BoxFeature>(

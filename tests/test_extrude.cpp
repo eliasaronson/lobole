@@ -439,3 +439,70 @@ TEST_CASE("Multi-profile prisms keep element names per group",
   // Every face of both cylinders is named (3 faces each).
   CHECK(map.names.size() == 6);
 }
+
+TEST_CASE("Symmetric extrude straddles the sketch plane", "[extrude][end]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", kXY);
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 6.0,
+                                              ExtrudeMode::NewBody);
+  ext->endMode = ExtrudeEnd::Symmetric;
+  doc.AddFeature(std::move(ext));
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(48.0, 1e-6));
+  glm::vec3 min, max;
+  doc.GetBodies()[0].shape.GetBoundingBox(min, max);
+  CHECK_THAT(min.z, Catch::Matchers::WithinAbs(-3.0, 1e-4));
+  CHECK_THAT(max.z, Catch::Matchers::WithinAbs(3.0, 1e-4));
+}
+
+TEST_CASE("Two-sided extrude sweeps both ways with separate distances",
+          "[extrude][end]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", kXY);
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 5.0,
+                                              ExtrudeMode::NewBody);
+  ext->endMode = ExtrudeEnd::TwoSided;
+  ext->distance2 = 2.0;
+  doc.AddFeature(std::move(ext));
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0 * 7.0, 1e-6));
+  glm::vec3 min, max;
+  doc.GetBodies()[0].shape.GetBoundingBox(min, max);
+  CHECK_THAT(min.z, Catch::Matchers::WithinAbs(-2.0, 1e-4));
+  CHECK_THAT(max.z, Catch::Matchers::WithinAbs(5.0, 1e-4));
+}
+
+TEST_CASE("End conditions round-trip through serialization (v18)",
+          "[extrude][end][serialization]") {
+  Document doc;
+  doc.SetParameter("back", "2", "");
+  auto sk = std::make_unique<SketchFeature>("S", kXY);
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 5.0,
+                                              ExtrudeMode::NewBody);
+  ext->endMode = ExtrudeEnd::TwoSided;
+  ext->distance2 = 1.0;
+  ext->distance2Expr = "back";
+  doc.AddFeature(std::move(ext));
+
+  const auto path = std::filesystem::temp_directory_path() / "end_rt.json";
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(loaded != nullptr);
+  auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
+  REQUIRE(rt != nullptr);
+  CHECK(rt->endMode == ExtrudeEnd::TwoSided);
+  CHECK(rt->distance2Expr == "back");
+  CHECK_THAT(loaded->GetBodies()[0].shape.Volume(),
+             WithinRel(8.0 * 7.0, 1e-6)); // 5 forward + expr-driven 2 back
+  std::filesystem::remove(path);
+}

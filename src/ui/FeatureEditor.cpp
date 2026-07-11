@@ -605,10 +605,22 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* da = dynamic_cast<DatumAxisFeature*>(&feature)) {
     DrawDatumAxisParams(state, *da, index, commit);
   } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
+    const char* ends[] = {"Blind", "Symmetric", "Two-sided"};
+    int end = static_cast<int>(ext->endMode);
+    if (ImGui::Combo("End", &end, ends, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*ext);
+      ext->endMode = static_cast<ExtrudeEnd>(end);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
     ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
             ext->distance);
-    HandleEdit(state, feature, ImGui::Checkbox("Reversed", &ext->reversed),
-               index, commit);
+    if (ext->endMode == ExtrudeEnd::TwoSided) {
+      ExprDim(state, feature, index, commit, "Distance 2", ext->distance2Expr,
+              ext->distance2);
+    }
+    if (ext->endMode != ExtrudeEnd::Symmetric) // no effect on symmetric
+      HandleEdit(state, feature, ImGui::Checkbox("Reversed", &ext->reversed),
+                 index, commit);
 
     const char* modes[] = {"New Body", "Add", "Cut"};
     int mode = static_cast<int>(ext->mode);
