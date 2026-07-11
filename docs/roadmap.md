@@ -72,10 +72,10 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **In progress** (M1–M5 + M7 shipped, incl. M3 multi-profile/symmetric/two-sided/up-to-face/thin; M8+ remain) |
 | 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | **Complete** (T1–T5; consumers: sketch-on-face, fillet/chamfer, up-to-face extrude) |
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Shipped** (V1–V3; units algebra deferred) |
-| 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | Remote, MCP (S1), headless + CI (S2), record/replay (S4) shipped; Python pkg (S3) remains |
-| 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | F1/F2/F4 shipped (spec+corpus, autosave, checkpoints+rollback); F3 designed, F5 git remains |
+| 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | **Complete** (S1 MCP, S2 headless+CI, S3 python client, S4 record/replay) |
+| 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | **Complete v1** (F1 spec+corpus, F2 autosave, F3 directory format, F4 checkpoints+rollback, F5 git); semantic merge later |
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
-| 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | I2 mass properties shipped (RPC/MCP; panel pending); I1/I3 remain |
+| 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | I1 measure + I2 mass properties shipped (RPC/MCP; panels pending); I3 section view remains |
 | 9. Rendering | [rendering/plan.md](rendering/plan.md) | Planned (normals → AA → PBR → … → RT) |
 | 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | Planned; gated (see plan) |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | Unstarted (kernel STEP/STL writers exist, unexposed) |
