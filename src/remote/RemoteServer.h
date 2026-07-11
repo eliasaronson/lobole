@@ -45,7 +45,7 @@ private:
     nlohmann::json params;
   };
 
-  void ReaderThread(uint16_t port);
+  void ReaderThread(); // accept loop; the listen socket is bound in Start
   void Send(const nlohmann::json& message);
   void Respond(const nlohmann::json& id, const nlohmann::json& result);
   void RespondError(const nlohmann::json& id, const std::string& error);
@@ -53,6 +53,7 @@ private:
   nlohmann::json HandleSemantic(const Request& request, ui::AppState& state,
                                 bool& handled);
   bool QueueUiAction(const Request& request); // returns false if unknown
+  static bool IsUiAction(const std::string& method);
 
   ImGuiTestEngine* m_engine = nullptr;
   std::thread m_thread;

@@ -8,6 +8,7 @@
 #include "IBLTextures.h"
 #include "Logger.h"
 #include "Screenshot.h"
+#include "HeadlessMain.h"
 #include "remote/RemoteServer.h"
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
@@ -765,12 +766,16 @@ void printUsage(const char *programName) {
   std::cout << "  --remote <port>      Enable JSON-RPC remote control on "
                "127.0.0.1:<port>"
             << std::endl;
+  std::cout << "  --headless           No window/GPU: serve --remote with the "
+               "document engine only"
+            << std::endl;
 }
 
 struct CommandLineArgs {
   std::string fileToLoad;
   spdlog::level::level_enum logLevel = spdlog::level::info;
   bool runGuiTests = false;
+  bool headless = false;
   int remotePort = 0;
 };
 
@@ -794,6 +799,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
       }
     } else if (arg == "--gui-tests") {
       args.runGuiTests = true;
+    } else if (arg == "--headless") {
+      args.headless = true;
     } else if (arg == "--remote") {
       if (i + 1 < argc) {
         args.remotePort = std::atoi(argv[i + 1]);
@@ -823,6 +830,23 @@ int main(int argc, char **argv) {
 
   // Initialize logger with specified level
   Logger::Initialize(args.logLevel);
+
+  // Headless: document engine + remote server, no GLFW/Vulkan/ImGui at all.
+  // Must branch before any windowing call — this path runs with no display
+  // server and no GPU (CI).
+  if (args.headless) {
+    if (args.remotePort <= 0) {
+      std::cerr << "Error: --headless requires --remote <port> (there is "
+                   "nothing else to serve)"
+                << std::endl;
+      return 2;
+    }
+    if (args.runGuiTests) {
+      std::cerr << "Error: --gui-tests cannot run with --headless" << std::endl;
+      return 2;
+    }
+    return RunHeadless(args.remotePort, args.fileToLoad);
+  }
 
 #ifdef HAVE_NATIVEFILEDIALOG
   LOG_INFO("nativefiledialog available");

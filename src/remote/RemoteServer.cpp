@@ -46,13 +46,35 @@ bool RemoteServer::Start(uint16_t port, ImGuiTestEngine* engine) {
   m_engine = engine;
   s_Instance = this;
 
-  s_UiActionTest = IM_REGISTER_TEST(engine, "remote", "action");
-  s_UiActionTest->TestFunc = [](ImGuiTestContext* ctx) {
-    RemoteServerRunUiAction(ctx);
-  };
+  // Headless (--headless) passes no engine: UI actions and screenshots then
+  // degrade with specific errors in ProcessPending.
+  if (engine) {
+    s_UiActionTest = IM_REGISTER_TEST(engine, "remote", "action");
+    s_UiActionTest->TestFunc = [](ImGuiTestContext* ctx) {
+      RemoteServerRunUiAction(ctx);
+    };
+  }
+
+  // Bind synchronously so a taken/privileged port fails Start (headless CI
+  // must exit non-zero, not serve nothing); the thread only accepts.
+  m_listenFd = ::socket(AF_INET, SOCK_STREAM, 0);
+  int opt = 1;
+  ::setsockopt(m_listenFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // localhost only
+  addr.sin_port = htons(port);
+  if (::bind(m_listenFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
+          0 ||
+      ::listen(m_listenFd, 1) < 0) {
+    LOG_ERROR("Remote control: cannot listen on port {}", port);
+    ::close(m_listenFd);
+    m_listenFd = -1;
+    return false;
+  }
 
   m_running = true;
-  m_thread = std::thread([this, port] { ReaderThread(port); });
+  m_thread = std::thread([this] { ReaderThread(); });
   LOG_INFO("Remote control listening on 127.0.0.1:{}", port);
   return true;
 }
@@ -73,23 +95,7 @@ void RemoteServer::Stop() {
     m_thread.join();
 }
 
-void RemoteServer::ReaderThread(uint16_t port) {
-  m_listenFd = ::socket(AF_INET, SOCK_STREAM, 0);
-  int opt = 1;
-  ::setsockopt(m_listenFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // localhost only
-  addr.sin_port = htons(port);
-  if (::bind(m_listenFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
-          0 ||
-      ::listen(m_listenFd, 1) < 0) {
-    LOG_ERROR("Remote control: cannot listen on port {}", port);
-    m_running = false;
-    return;
-  }
-
+void RemoteServer::ReaderThread() {
   while (m_running) {
     int client = ::accept(m_listenFd, nullptr, nullptr);
     if (client < 0)
@@ -243,7 +249,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       bodies.push_back(entry);
     }
     json selection = nullptr;
-    if (const Face* face = state.faceSelector->GetSelectedFace()) {
+    if (const Face* face =
+            state.faceSelector ? state.faceSelector->GetSelectedFace()
+                               : nullptr) {
       selection = {{"mesh", face->meshId},
                    {"face", face->faceIndex},
                    {"normal", Vec3ToJson(face->normal)},
@@ -638,6 +646,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"distance", state.camera->GetDistance()}};
   }
   if (m == "select_face") {
+    if (!state.faceSelector || !state.meshRenderer)
+      throw std::runtime_error(
+          "face selection needs render meshes — unavailable in --headless");
     const uint32_t mesh = p.at("mesh").get<uint32_t>();
     const uint32_t face = p.at("face").get<uint32_t>();
     uint32_t first = 0, count = 0;
@@ -649,6 +660,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"center", Vec3ToJson(state.faceSelector->GetFaceCenter(mesh, face))}};
   }
   if (m == "orient_to_face") {
+    if (!state.faceSelector)
+      throw std::runtime_error(
+          "face selection needs render meshes — unavailable in --headless");
     const Face* face = state.faceSelector->GetSelectedFace();
     if (!face) throw std::runtime_error("no face selected");
     state.camera->AlignToFace(
@@ -659,6 +673,17 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 
   handled = false;
   return json();
+}
+
+bool RemoteServer::IsUiAction(const std::string& method) {
+  static const char* kActions[] = {"menu_click",     "item_click",
+                                   "item_input",     "viewport_click",
+                                   "viewport_drag",  "key_press",
+                                   "scroll"};
+  for (const char* a : kActions)
+    if (method == a)
+      return true;
+  return false;
 }
 
 bool RemoteServer::QueueUiAction(const Request& request) {
@@ -765,10 +790,20 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         continue;
       }
       if (request.method == "screenshot") {
+        if (!m_engine) {
+          RespondError(request.id, "screenshot requires the GUI — start "
+                                   "designer without --headless");
+          continue;
+        }
         m_screenshotId = request.id;
         m_screenshotPath = request.params.at("path").get<std::string>();
         m_screenshotPending = true;
         return; // main loop captures after this frame renders
+      }
+      if (!m_engine && IsUiAction(request.method)) {
+        RespondError(request.id, "UI actions are unavailable in --headless — "
+                                 "start designer without it");
+        continue;
       }
       if (QueueUiAction(request)) {
         return; // response sent when the engine finishes the action
