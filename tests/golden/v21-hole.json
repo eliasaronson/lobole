@@ -1,0 +1,14 @@
+{
+  "format": "designer-document",
+  "version": 21,
+  "features": [
+    {"type": "Box", "name": "B", "id": 1, "position": [0, 0, 0],
+     "width": 10, "height": 10, "depth": 10},
+    {"type": "Sketch", "name": "Pts", "id": 2, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [{"type": "point", "id": 1, "p": [5, 5]}],
+     "constraints": []},
+    {"type": "Hole", "name": "H", "id": 3, "sketch_id": 2,
+     "hole_kind": "simple", "diameter": 2.0, "depth": 5.0}
+  ]
+}

@@ -9,6 +9,7 @@
 #include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/DraftFeature.h"
 #include "core/HoleFeature.h"
 #include "core/LoftFeature.h"
 #include "core/SweepFeature.h"
@@ -703,6 +704,30 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     DrawBooleanParams(state, *boo, index, commit);
   } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {
     DrawPatternParams(state, *pat, index, commit);
+  } else if (auto* dr = dynamic_cast<DraftFeature*>(&feature)) {
+    ExprDim(state, feature, index, commit, "Angle (deg)", dr->angleExpr,
+            dr->angleDeg);
+    const char* planes[] = {"XY (pull +Z)", "XZ (pull +Y)", "YZ (pull +X)"};
+    int pl = static_cast<int>(dr->neutralPlane);
+    if (ImGui::Combo("Neutral", &pl, planes, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*dr);
+      dr->neutralPlane = static_cast<PlaneType>(pl);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    ImGui::Text("Faces: %zu", dr->faces.size());
+    for (size_t e = 0; e < dr->faces.size(); e++) {
+      ImGui::PushID(static_cast<int>(e));
+      if (ImGui::SmallButton("x")) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*dr);
+        dr->faces.erase(dr->faces.begin() + static_cast<long>(e));
+        CommitDiscrete(state, feature, before, index, commit);
+        ImGui::PopID();
+        break;
+      }
+      ImGui::SameLine();
+      ImGui::TextUnformatted(dr->faces[e].name.c_str());
+      ImGui::PopID();
+    }
   } else if (auto* ho = dynamic_cast<HoleFeature*>(&feature)) {
     const char* kinds[] = {"Simple", "Counterbore", "Countersink"};
     int k = static_cast<int>(ho->kind);

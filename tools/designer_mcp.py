@@ -88,6 +88,12 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "edges": [{{"feature_id": <the body's created_by feature id>,
   "element": <stable edge name>}}, ...]}} — all edges must belong to one
   body. Discover edge names + created_by with the list_elements tool.
+- Draft (taper faces by an angle for mould release): {{"type": "Draft",
+  "name": str, "body_id": <the body's created_by feature id>,
+  "angle_deg": num, "angle_expr"?: str, "neutral_plane": "xy"|"xz"|"yz"
+  (the pull direction is this plane's normal), "faces": [{{"feature_id":
+  <same body>, "element": <side-face name from list_elements>}}, ...]}} —
+  faces perpendicular to the pull can't be tapered (pick side faces).
 - Hole (drill holes at a sketch's Point entities, cut into the bodies below
   along the sketch plane's -normal): {{"type": "Hole", "name": str,
   "sketch_id": <a sketch whose points are the hole centers>,

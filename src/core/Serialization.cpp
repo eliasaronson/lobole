@@ -7,6 +7,7 @@
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/DraftFeature.h"
 #include "core/HoleFeature.h"
 #include "core/LoftFeature.h"
 #include "core/SweepFeature.h"
@@ -29,7 +30,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 21; // v21: hole wizard (v20: shell/loft/sweep)
+constexpr int kVersion = 22; // v22: draft (v21: hole wizard)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -539,6 +540,15 @@ json FeatureToJson(const Feature& feature) {
       j["cs_diameter"] = ho->csDiameter;
       j["cs_depth"] = ho->csDepth;
     }
+  } else if (auto* dr = dynamic_cast<const DraftFeature*>(&feature)) {
+    j["body_id"] = dr->bodyId;
+    j["angle_deg"] = dr->angleDeg;
+    if (!dr->angleExpr.empty()) j["angle_expr"] = dr->angleExpr;
+    j["neutral_plane"] = PlaneTypeToString(dr->neutralPlane);
+    json arr = json::array();
+    for (const auto& ref : dr->faces)
+      arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
+    j["faces"] = std::move(arr);
   } else if (auto* pat = dynamic_cast<const PatternFeature*>(&feature)) {
     j["kind"] = PatternKindToString(pat->kind);
     j["source_id"] = pat->sourceId;
@@ -812,6 +822,17 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ho->csDiameter = j.value("cs_diameter", 2.0);
     ho->csDepth = j.value("cs_depth", 0.5);
     out = std::move(ho);
+  } else if (type == "Draft") { // v22
+    std::vector<ElementRef> refs;
+    for (const auto& ej : j.value("faces", json::array()))
+      refs.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
+                                ej.value("element", std::string{})});
+    auto dr = std::make_unique<DraftFeature>(
+        name, j.at("body_id").get<uint64_t>(), std::move(refs),
+        j.value("angle_deg", 5.0),
+        PlaneTypeFromString(j.value("neutral_plane", "xy")));
+    dr->angleExpr = j.value("angle_expr", std::string{});
+    out = std::move(dr);
   } else if (type == "Pattern") {
     auto pat = std::make_unique<PatternFeature>(
         name, PatternKindFromString(j.at("kind").get<std::string>()),

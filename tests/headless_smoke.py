@@ -182,6 +182,36 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
+        # Draft (M8): taper a box's side faces; volume drops
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Blk", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 10})
+        bx = d.call("list_elements")["bodies"][0]
+        # A side face: pick the first whose name resolves; the feature rejects
+        # caps, so try faces until one drafts. Use get_state face normals via
+        # measure is overkill — just try face names, catching the cap error.
+        vol0 = d.call("get_state")["bodies"][0]["volume"]
+        drafted = False
+        for f in bx["faces"]:
+            try:
+                idx = d.call("add_feature", feature={
+                    "type": "Draft", "name": "Taper",
+                    "body_id": bx["created_by"], "angle_deg": 8.0,
+                    "neutral_plane": "xy",
+                    "faces": [{"feature_id": bx["created_by"],
+                               "element": f["name"]}]})
+                st = d.call("get_state")
+                if not any("error" in ff for ff in st["features"]):
+                    expect(st["bodies"][0]["volume"] < vol0,
+                           "draft reduced the volume")
+                    drafted = True
+                    break
+                d.call("delete_feature", index=idx["index"])
+            except RuntimeError:
+                pass
+        expect(drafted, "at least one side face drafted")
+
         # Hole wizard (M8): a 4-hole bolt pattern from one point sketch,
         # then interference (I4) between two boxes.
         d.call("new_project")
