@@ -143,12 +143,14 @@ dangling-ref error + "Pick edges…" repair. Format v17. Tests:
 `test_fillet.cpp` + a `fillet_body_edge_via_click` GUI case.
 
 ### M8 — advanced solids
-**Shell** and **loft shipped (July 2026).** ShellFeature hollows a body
-(BRepOffsetAPI_MakeThickSolid, open-face required); LoftFeature skins a solid
-through 2+ profile sketches (BRepOffsetAPI_ThruSections). Both are toponaming
-consumers (shell removes faces by ElementRef; the results get fresh
-primitive-style names). *Still to do:* sweep (profile along a path), hole/
-thread wizards, rib, draft on selected faces.
+**Shell, loft, and sweep shipped (July 2026)** — the solid-creation quartet
+(extrude/revolve/loft/sweep) is complete. ShellFeature hollows a body
+(BRepOffsetAPI_MakeThickSolid, open-face required); LoftFeature skins through
+2+ profile sketches (ThruSections); SweepFeature sweeps a profile along an
+open path sketch (MakePipeShell, RoundCorner so sharp corners sweep fully).
+Shell is a toponaming consumer (faces by ElementRef); all give their results
+fresh primitive-style names. *Still to do:* hole/thread wizards, rib, draft
+on selected faces.
 
 ## Cross-cutting
 
