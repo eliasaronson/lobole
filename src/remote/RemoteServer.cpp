@@ -81,6 +81,16 @@ bool RemoteServer::Start(uint16_t port, ImGuiTestEngine* engine) {
   return true;
 }
 
+bool RemoteServer::StartRecording(const std::string& path) {
+  m_recording.open(path, std::ios::trunc);
+  if (!m_recording.is_open()) {
+    LOG_ERROR("Cannot open session recording file {}", path);
+    return false;
+  }
+  LOG_INFO("Recording session to {}", path);
+  return true;
+}
+
 void RemoteServer::Stop() {
   if (!m_running)
     return;
@@ -937,6 +947,16 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
       bool handled = false;
       json result = HandleSemantic(request, state, handled);
       if (handled) {
+        // Session recording (S4): successful semantic requests only — a
+        // throwing call mutates nothing, so replay equivalence holds without
+        // it (UI actions/screenshots are also skipped: not headless-replayable).
+        if (m_recording.is_open() && request.method != "ping") {
+          m_recording << json{{"method", request.method},
+                              {"params", request.params}}
+                             .dump()
+                      << "\n";
+          m_recording.flush();
+        }
         Respond(request.id, result);
         continue;
       }

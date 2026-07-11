@@ -43,6 +43,10 @@ class Designer:
                 return msg.get("result")
 
     def close(self):
+        # makefile() dups the socket fd — close BOTH, or the server never
+        # sees EOF and keeps serving a ghost client (the remote handles one
+        # client at a time, so the next connection would hang).
+        self.file.close()
         self.sock.close()
 
     @staticmethod

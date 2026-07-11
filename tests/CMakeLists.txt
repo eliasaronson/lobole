@@ -64,6 +64,12 @@ add_test(NAME headless_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
 
+# Records a session and replays it into a fresh headless instance (S4).
+add_test(NAME replay_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/replay_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(replay_smoke PROPERTIES TIMEOUT 300)
+
 # Models a bracket through the MCP server (stdio) over the same live app.
 # Skips (77) when the python mcp SDK is not installed.
 add_test(NAME mcp_smoke

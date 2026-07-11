@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <deque>
+#include <fstream>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -32,6 +33,11 @@ public:
 
   // Main-thread pump: executes queued requests against the app state.
   void ProcessPending(ui::AppState& state);
+
+  // Session recording (S4): tee every handled semantic request as one JSON
+  // per line — a replayable session (tools/designer_replay.py). UI actions
+  // and screenshots are not recorded (not replayable headless).
+  bool StartRecording(const std::string& path);
 
   // Screenshot handshake with the frame loop (capture needs the frame's
   // draw data, so main.cpp performs it and reports back).
@@ -63,6 +69,8 @@ private:
 
   std::mutex m_queueMutex;
   std::deque<Request> m_requests;
+
+  std::ofstream m_recording; // open = recording (main thread only)
 
   std::mutex m_sendMutex;
 

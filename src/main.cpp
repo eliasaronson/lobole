@@ -773,6 +773,9 @@ void printUsage(const char *programName) {
   std::cout << "  --autosave <sec>     Autosave interval in seconds "
                "(default 60, 0 = off)"
             << std::endl;
+  std::cout << "  --record <file>      Record the --remote session's semantic "
+               "requests as replayable JSONL"
+            << std::endl;
 }
 
 struct CommandLineArgs {
@@ -782,6 +785,7 @@ struct CommandLineArgs {
   bool headless = false;
   int remotePort = 0;
   double autosaveSeconds = 60.0;
+  std::string recordPath;
 };
 
 CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
@@ -806,6 +810,14 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
       args.runGuiTests = true;
     } else if (arg == "--headless") {
       args.headless = true;
+    } else if (arg == "--record") {
+      if (i + 1 < argc) {
+        args.recordPath = argv[i + 1];
+        i++;
+      } else {
+        std::cerr << "Error: --record requires a file path" << std::endl;
+        exit(1);
+      }
     } else if (arg == "--autosave") {
       if (i + 1 < argc) {
         args.autosaveSeconds = std::atof(argv[i + 1]);
@@ -860,7 +872,7 @@ int main(int argc, char **argv) {
       return 2;
     }
     return RunHeadless(args.remotePort, args.fileToLoad,
-                       args.autosaveSeconds);
+                       args.autosaveSeconds, args.recordPath);
   }
 
 #ifdef HAVE_NATIVEFILEDIALOG
@@ -1094,6 +1106,9 @@ int main(int argc, char **argv) {
   RemoteServer remoteServer;
   if (args.remotePort > 0) {
     remoteServer.Start(static_cast<uint16_t>(args.remotePort), testEngine);
+    if (!args.recordPath.empty()) {
+      remoteServer.StartRecording(args.recordPath);
+    }
   }
 
   // Autosave (F2). GUI tests force it off: a mid-test autosave would break
