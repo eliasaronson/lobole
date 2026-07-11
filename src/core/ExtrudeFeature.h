@@ -1,16 +1,19 @@
 #pragma once
 
+#include "core/ElementMap.h"
 #include "core/Feature.h"
 
 #include <cstdint>
 
 enum class ExtrudeMode { NewBody, Add, Cut };
 
-// End condition (M3.2): Blind sweeps `distance` from the sketch plane;
+// End condition (M3.2/M3.3): Blind sweeps `distance` from the sketch plane;
 // Symmetric centers `distance` on it; TwoSided sweeps `distance` forward and
-// `distance2` backward. All build ONE prism of the total length translated
-// back along the normal, so element names are identical to a blind extrude.
-enum class ExtrudeEnd { Blind, Symmetric, TwoSided };
+// `distance2` backward; UpToFace sweeps to a referenced planar face
+// (endTarget), following it across upstream edits. All build ONE prism of
+// the computed total length translated back along the normal, so element
+// names are identical to a blind extrude's.
+enum class ExtrudeEnd { Blind, Symmetric, TwoSided, UpToFace };
 
 // Extrudes a referenced SketchFeature's closed profile into a solid.
 //   NewBody: append the prism as its own body
@@ -41,6 +44,10 @@ public:
   double distance2 = 1.0;
   std::string distance2Expr;
   ExtrudeEnd endMode = ExtrudeEnd::Blind;
+  // UpToFace target: a planar face by stable element name (toponaming).
+  // Planar only in v1 — a curved target needs a trimmed boolean, not a
+  // distance.
+  ElementRef endTarget;
   bool reversed = false;
   ExtrudeMode mode = ExtrudeMode::NewBody;
 };

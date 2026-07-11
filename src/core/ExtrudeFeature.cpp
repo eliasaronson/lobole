@@ -34,14 +34,33 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   // the element map stays exactly a blind extrude's.
   double total = distance;
   double backOffset = 0.0; // along the sweep direction, before `reversed`
+  bool sweepReversed = reversed;
   if (endMode == ExtrudeEnd::Symmetric) {
     backOffset = distance / 2.0;
   } else if (endMode == ExtrudeEnd::TwoSided) {
     total = distance + distance2;
     backOffset = distance2;
+  } else if (endMode == ExtrudeEnd::UpToFace) {
+    if (!endTarget.IsSet()) {
+      SetError("no target face set for up-to-face");
+      return false;
+    }
+    const auto target = ResolveFacePlane(ctx, endTarget);
+    if (!target) {
+      SetError("target face '" + endTarget.name +
+               "' no longer exists (or is not planar)");
+      return false;
+    }
+    // Signed sweep along the sketch normal to the target's plane — the sign
+    // picks the side, so `reversed` does not apply.
+    const glm::vec3 n = sketch->plane.GetNormal();
+    total = glm::dot(target->GetOrigin() - sketch->plane.GetOrigin(), n);
+    sweepReversed = false;
   }
   if (std::abs(total) < 1e-9) {
-    SetError("extrude distance is zero");
+    SetError(endMode == ExtrudeEnd::UpToFace
+                 ? "target face lies on the sketch plane"
+                 : "extrude distance is zero");
     return false;
   }
 
@@ -51,7 +70,7 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   // leaves alone keeps its name, a pierced one gains ";M<id>".
   ElementMap map;
   CADShape prism = sketch::BuildPrismNamed(sketch->plane, loops, total,
-                                           reversed, GetId(), map);
+                                           sweepReversed, GetId(), map);
   if (!prism.IsValid()) {
     SetError("profile could not be extruded (overlapping loops? see log)");
     LOG_ERROR("ExtrudeFeature '{}': prism construction failed", m_name);

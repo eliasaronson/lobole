@@ -390,12 +390,17 @@ json FeatureToJson(const Feature& feature) {
     j["reversed"] = ext->reversed;
     j["mode"] = ExtrudeModeToString(ext->mode);
     if (ext->endMode != ExtrudeEnd::Blind) { // v18; omit the default
-      j["end_mode"] = ext->endMode == ExtrudeEnd::Symmetric ? "symmetric"
-                                                            : "two_sided";
+      j["end_mode"] = ext->endMode == ExtrudeEnd::Symmetric   ? "symmetric"
+                      : ext->endMode == ExtrudeEnd::TwoSided ? "two_sided"
+                                                              : "up_to_face";
       if (ext->endMode == ExtrudeEnd::TwoSided) {
         j["distance2"] = ext->distance2;
         if (!ext->distance2Expr.empty())
           j["distance2_expr"] = ext->distance2Expr;
+      }
+      if (ext->endMode == ExtrudeEnd::UpToFace) {
+        j["end_target"] = {{"feature_id", ext->endTarget.featureId},
+                           {"element", ext->endTarget.name}};
       }
     }
   } else if (auto* box = dynamic_cast<const BoxFeature*>(&feature)) {
@@ -609,11 +614,17 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.value("distance_expr", std::string{}); // absent (pre-v11) = literal
     // End condition (v18); absent = blind.
     const std::string end = j.value("end_mode", "blind");
-    ext->endMode = end == "symmetric"   ? ExtrudeEnd::Symmetric
-                   : end == "two_sided" ? ExtrudeEnd::TwoSided
-                                        : ExtrudeEnd::Blind;
+    ext->endMode = end == "symmetric"    ? ExtrudeEnd::Symmetric
+                   : end == "two_sided"  ? ExtrudeEnd::TwoSided
+                   : end == "up_to_face" ? ExtrudeEnd::UpToFace
+                                         : ExtrudeEnd::Blind;
     ext->distance2 = j.value("distance2", 1.0);
     ext->distance2Expr = j.value("distance2_expr", std::string{});
+    if (j.contains("end_target")) {
+      ext->endTarget =
+          ElementRef{j["end_target"].value("feature_id", uint64_t{0}),
+                     j["end_target"].value("element", std::string{})};
+    }
     out = std::move(ext);
   } else if (type == "Box") {
     out = std::make_unique<BoxFeature>(

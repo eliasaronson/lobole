@@ -605,20 +605,43 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* da = dynamic_cast<DatumAxisFeature*>(&feature)) {
     DrawDatumAxisParams(state, *da, index, commit);
   } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
-    const char* ends[] = {"Blind", "Symmetric", "Two-sided"};
+    const char* ends[] = {"Blind", "Symmetric", "Two-sided", "Up to face"};
     int end = static_cast<int>(ext->endMode);
-    if (ImGui::Combo("End", &end, ends, 3)) {
+    if (ImGui::Combo("End", &end, ends, 4)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ext);
       ext->endMode = static_cast<ExtrudeEnd>(end);
       CommitDiscrete(state, feature, before, index, commit);
     }
-    ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
-            ext->distance);
+    if (ext->endMode != ExtrudeEnd::UpToFace) {
+      ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
+              ext->distance);
+    } else {
+      // Target face: every named face of every body (stable element names).
+      const std::string current =
+          ext->endTarget.IsSet() ? ext->endTarget.name : "(pick a face)";
+      if (ImGui::BeginCombo("Target face", current.c_str())) {
+        for (const auto& body : state.document->GetBodies()) {
+          for (const auto& [idx, name] : body.elementMap.names) {
+            const std::string label = body.name + ": " + name;
+            const bool selected = ext->endTarget.featureId ==
+                                      body.createdBy &&
+                                  ext->endTarget.name == name;
+            if (ImGui::Selectable(label.c_str(), selected)) {
+              nlohmann::json before = DocumentIO::FeatureToJson(*ext);
+              ext->endTarget = ElementRef{body.createdBy, name};
+              CommitDiscrete(state, feature, before, index, commit);
+            }
+          }
+        }
+        ImGui::EndCombo();
+      }
+    }
     if (ext->endMode == ExtrudeEnd::TwoSided) {
       ExprDim(state, feature, index, commit, "Distance 2", ext->distance2Expr,
               ext->distance2);
     }
-    if (ext->endMode != ExtrudeEnd::Symmetric) // no effect on symmetric
+    if (ext->endMode == ExtrudeEnd::Blind ||
+        ext->endMode == ExtrudeEnd::TwoSided) // no effect otherwise
       HandleEdit(state, feature, ImGui::Checkbox("Reversed", &ext->reversed),
                  index, commit);
 

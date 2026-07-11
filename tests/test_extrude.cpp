@@ -506,3 +506,72 @@ TEST_CASE("End conditions round-trip through serialization (v18)",
              WithinRel(8.0 * 7.0, 1e-6)); // 5 forward + expr-driven 2 back
   std::filesystem::remove(path);
 }
+
+TEST_CASE("Up-to-face extrude reaches the target and follows upstream edits",
+          "[extrude][end][toponaming]") {
+  Document doc;
+  // Pad A: 4x2 rect at origin, height 6 -> top cap is "<padId>/cap1" at z=6.
+  auto skA = std::make_unique<SketchFeature>("A", kXY);
+  skA->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(skA));
+  const uint64_t skAId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto padA = std::make_unique<ExtrudeFeature>("PadA", skAId, 6.0,
+                                               ExtrudeMode::NewBody);
+  doc.AddFeature(std::move(padA));
+  const uint64_t padAId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+
+  // Pad B: a 2x1 rect beside A, extruded up to A's top face.
+  auto skB = std::make_unique<SketchFeature>("B", kXY);
+  skB->AddRectangle({10, 0}, {12, 1});
+  doc.AddFeature(std::move(skB));
+  const uint64_t skBId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto padB = std::make_unique<ExtrudeFeature>("PadB", skBId, 1.0,
+                                               ExtrudeMode::NewBody);
+  padB->endMode = ExtrudeEnd::UpToFace;
+  padB->endTarget = ElementRef{padAId, std::to_string(padAId) + "/cap1"};
+  doc.AddFeature(std::move(padB));
+
+  REQUIRE(doc.GetBodies().size() == 2);
+  CHECK_THAT(doc.GetBodies()[1].shape.Volume(), WithinRel(2.0 * 6.0, 1e-6));
+
+  // The toponaming payoff: raise pad A -> pad B follows its face.
+  auto* a = dynamic_cast<ExtrudeFeature*>(doc.FindFeatureById(padAId));
+  REQUIRE(a != nullptr);
+  a->distance = 9.0;
+  REQUIRE(doc.Regenerate());
+  CHECK_THAT(doc.GetBodies()[1].shape.Volume(), WithinRel(2.0 * 9.0, 1e-6));
+
+  // Losing the target is a loud feature error, not a stale guess.
+  a->distance = 6.0;
+  auto* b = dynamic_cast<ExtrudeFeature*>(
+      doc.GetFeature(doc.FeatureCount() - 1));
+  b->endTarget.name = "nonsense";
+  CHECK_FALSE(doc.Regenerate());
+  CHECK(!b->GetError().empty());
+}
+
+TEST_CASE("Up-to-face round-trips through serialization",
+          "[extrude][end][serialization]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", kXY);
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 5.0,
+                                              ExtrudeMode::NewBody);
+  ext->endMode = ExtrudeEnd::UpToFace;
+  ext->endTarget = ElementRef{7, "7/cap1"};
+  doc.AddFeature(std::move(ext));
+
+  const auto path = std::filesystem::temp_directory_path() / "utf_rt.json";
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(loaded != nullptr);
+  auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
+  REQUIRE(rt != nullptr);
+  CHECK(rt->endMode == ExtrudeEnd::UpToFace);
+  CHECK(rt->endTarget.featureId == 7);
+  CHECK(rt->endTarget.name == "7/cap1");
+  std::filesystem::remove(path);
+}

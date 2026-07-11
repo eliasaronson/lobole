@@ -608,11 +608,11 @@ void SketchFeature::RemoveDerivedOp(size_t opIndex) {
   derived.erase(derived.begin() + opIndex);
 }
 
-namespace {
 // Resolves a face ElementRef to a work plane: find the body the referenced
 // feature produced whose element map still holds the name, then extract the
 // planar face's frame. nullopt if the name no longer resolves (deleted /
-// renamed element) or the face isn't planar.
+// renamed element) or the face isn't planar. Shared with the up-to-face
+// extrude end condition (M3.3).
 std::optional<SketchPlane> ResolveFacePlane(const RegenContext& ctx,
                                             const ElementRef& ref) {
   for (const Body& body : ctx.bodies) {
@@ -630,7 +630,6 @@ std::optional<SketchPlane> ResolveFacePlane(const RegenContext& ctx,
   }
   return std::nullopt;
 }
-} // namespace
 
 bool SketchFeature::Execute(RegenContext& ctx) {
   if (faceRef.IsSet()) {

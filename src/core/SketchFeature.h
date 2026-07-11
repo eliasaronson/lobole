@@ -526,3 +526,8 @@ private:
   bool TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a, glm::vec2& ab,
                    float& tLo, float& tHi) const;
 };
+
+// Resolves a face ElementRef to a work plane (planar faces only): shared by
+// sketch-on-face (v16) and the up-to-face extrude end condition (M3.3).
+std::optional<SketchPlane> ResolveFacePlane(const RegenContext& ctx,
+                                            const ElementRef& ref);
