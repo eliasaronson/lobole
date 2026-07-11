@@ -162,11 +162,45 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
+        # Checkpoints (F4): create, list, mutate, restore, and error paths
+        d.call("new_project")  # fresh document: no project path yet
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Seed", "position": [0, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        try:
+            d.call("checkpoint_create", name="nope")
+            expect(False, "checkpoint without a saved project must fail")
+        except RuntimeError as e:
+            expect("save the project" in str(e), "checkpoint needs a project")
+        cp_project = os.path.join(tmp, "cp.json")
+        d.call("save_project", path=cp_project)
+        d.call("checkpoint_create", name="v1")
+        expect(os.path.exists(cp_project + ".checkpoints/v1.json"),
+               "checkpoint file written beside the project")
+        volume_before = d.call("get_state")["bodies"][0]["volume"]
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Extra", "position": [90, 0, 0],
+            "width": 1, "height": 1, "depth": 1})
+        expect(len(d.call("get_state")["bodies"]) == 2, "mutated after cp")
+        cps = d.call("checkpoint_list")["checkpoints"]
+        expect([c["name"] for c in cps] == ["v1"], "checkpoint listed")
+        d.call("checkpoint_restore", name="v1")
+        st = d.call("get_state")
+        expect(len(st["bodies"]) == 1
+               and abs(st["bodies"][0]["volume"] - volume_before) < 1e-9,
+               "restore returns the checkpointed state")
+        try:
+            d.call("checkpoint_restore", name="missing")
+            expect(False, "restoring a missing checkpoint must fail")
+        except RuntimeError:
+            pass
+
         # Autosave + crash recovery (F2): save clean, dirty the doc, let the
         # 1s autosave fire, SIGKILL (a real crash — no signal handler), then
         # prove a fresh instance sees and recovers the autosave.
         crash_project = os.path.join(tmp, "crashme.json")
         d.call("save_project", path=crash_project)
+        saved_features = len(d.call("get_state")["features"])
         expect(not os.path.exists(crash_project + ".autosave"),
                "clean save leaves no sidecar")
         d.call("add_feature", feature={
@@ -189,10 +223,10 @@ def main():
             d2 = Designer.wait_for(port2)
             r = d2.call("open_project", path=crash_project)
             expect(r["autosave_available"], "recovery offered after crash")
-            expect(len(d2.call("get_state")["features"]) == 2,
+            expect(len(d2.call("get_state")["features"]) == saved_features,
                    "the saved file itself has the pre-crash features")
             d2.call("open_project", path=r["autosave_path"])
-            expect(len(d2.call("get_state")["features"]) == 3,
+            expect(len(d2.call("get_state")["features"]) == saved_features + 1,
                    "the autosave carries the unsaved work")
             d2.call("save_project", path=crash_project)
             expect(not os.path.exists(crash_project + ".autosave"),

@@ -384,6 +384,26 @@ def import_step(path: str) -> dict:
     return _call("import_step", path=path)
 
 
+@mcp.tool(description="Snapshot the current document as a named checkpoint "
+          "(stored beside the project — save_project first). Checkpoint "
+          "before risky multi-step edits; restore beats reconstructing.")
+def checkpoint_create(name: str) -> dict:
+    return _call("checkpoint_create", name=name)
+
+
+@mcp.tool(description="List the project's checkpoints (name + modified "
+          "unix time, newest first).")
+def checkpoint_list() -> dict:
+    return _call("checkpoint_list")
+
+
+@mcp.tool(description="Replace the current document with a checkpoint's "
+          "state (same project path; the restored state is unsaved until "
+          "you save_project).")
+def checkpoint_restore(name: str) -> dict:
+    return _call("checkpoint_restore", name=name)
+
+
 # ---------------------------------------------------------------------------
 # View & verify
 # ---------------------------------------------------------------------------

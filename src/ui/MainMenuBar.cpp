@@ -4,7 +4,9 @@
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "OutlineRenderer.h"
+#include "core/Checkpoints.h"
 #include "core/Feature.h"
+#include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
@@ -25,6 +27,7 @@ void DrawFileMenu(AppState& state) {
 
   if (ImGui::MenuItem("New", "Ctrl+N")) {
     ReplaceDocument(state, std::make_unique<Document>());
+    MarkProjectOpened(state, ""); // a fresh document has no home yet
   }
 #ifdef HAVE_NATIVEFILEDIALOG
   if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
@@ -34,6 +37,38 @@ void DrawFileMenu(AppState& state) {
     SaveProjectDialog(state);
   }
 #endif
+  // Checkpoints (F4 v1): snapshot/restore full document states beside the
+  // project. Disabled until the project has been saved somewhere.
+  if (ImGui::BeginMenu("Checkpoints", !state.projectPath.empty())) {
+    const auto list = Checkpoints::List(state.projectPath);
+    if (ImGui::MenuItem(
+            ("Create \"checkpoint-" + std::to_string(list.size() + 1) + "\"")
+                .c_str())) {
+      std::string error;
+      if (state.document &&
+          !Checkpoints::Create(*state.document, state.projectPath,
+                               "checkpoint-" + std::to_string(list.size() + 1),
+                               &error)) {
+        LOG_ERROR("Checkpoint failed: {}", error);
+      }
+    }
+    if (!list.empty())
+      ImGui::Separator();
+    for (const auto& info : list) {
+      if (ImGui::MenuItem(("Restore " + info.name).c_str())) {
+        std::string error;
+        if (auto loaded = DocumentIO::Load(
+                Checkpoints::PathOf(state.projectPath, info.name), &error)) {
+          ReplaceDocument(state, std::move(loaded));
+          FitCameraToDocument(state);
+          MarkProjectRecovered(state, state.projectPath);
+        } else {
+          LOG_ERROR("Checkpoint restore failed: {}", error);
+        }
+      }
+    }
+    ImGui::EndMenu();
+  }
   ImGui::Separator();
   if (ImGui::MenuItem("Import STEP...", "Ctrl+I")) {
     OpenStepFileDialog(state);

@@ -7,6 +7,7 @@
 #include "RayTracingRenderer.h"
 #include "MeshRenderer.h"
 #include "core/Autosaver.h"
+#include "core/Checkpoints.h"
 #include "core/Expression.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
@@ -728,6 +729,37 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     ui::MarkProjectOpened(state, path);
     return {{"autosave_available", autosaveAvailable},
             {"autosave_path", Autosaver::SidecarPath(path)}};
+  }
+  if (m == "checkpoint_create") {
+    // Snapshot the live document under <project>.checkpoints/<name>.json.
+    // Needs a saved project (the checkpoints live beside it). params: {name}
+    const std::string name = p.at("name").get<std::string>();
+    std::string error;
+    if (!Checkpoints::Create(*doc, state.projectPath, name, &error))
+      throw std::runtime_error(error);
+    return {{"path", Checkpoints::PathOf(state.projectPath, name)}};
+  }
+  if (m == "checkpoint_list") {
+    json list = json::array();
+    for (const auto& info : Checkpoints::List(state.projectPath))
+      list.push_back(
+          {{"name", info.name}, {"modified_unix", info.modifiedUnix}});
+    return {{"checkpoints", list}};
+  }
+  if (m == "checkpoint_restore") {
+    // Load the checkpoint as the current document: same project path,
+    // deliberately dirty (the restored state is unsaved until saved).
+    const std::string name = p.at("name").get<std::string>();
+    const std::string path = Checkpoints::PathOf(state.projectPath, name);
+    std::string error;
+    auto loaded = path.empty() ? nullptr : DocumentIO::Load(path, &error);
+    if (!loaded)
+      throw std::runtime_error(error.empty() ? "no such checkpoint: " + name
+                                             : error);
+    ui::ReplaceDocument(state, std::move(loaded));
+    ui::FitCameraToDocument(state);
+    ui::MarkProjectRecovered(state, state.projectPath);
+    return json::object();
   }
   if (m == "import_step") {
     const size_t before = doc->GetBodies().size();
