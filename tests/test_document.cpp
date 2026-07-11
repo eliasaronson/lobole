@@ -153,3 +153,37 @@ TEST_CASE("Suppressed features are skipped and round-trip", "[document][regen]")
   CHECK_FALSE(loaded->GetFeature(1)->IsSuppressed());
   std::filesystem::remove(path);
 }
+
+TEST_CASE("Rollback bar regenerates only the prefix and round-trips",
+          "[document][rollback]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
+                                              1.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0,
+                                              1.0, 1.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("C", glm::vec3(10, 0, 0), 3.0,
+                                              1.0, 1.0));
+  REQUIRE(doc.GetBodies().size() == 3);
+
+  doc.SetRollback(1); // only A
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(1.0, 1e-9));
+  CHECK(doc.GetFeature(2)->GetError().empty()); // no stale errors past the bar
+
+  // Persisted with the document.
+  const auto path = std::filesystem::temp_directory_path() / "rollback.json";
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->Rollback() == 1);
+  CHECK(loaded->GetBodies().size() == 1);
+  std::filesystem::remove(path);
+
+  // Rolling to the end restores everything; out-of-range means end.
+  doc.SetRollback(-1);
+  CHECK(doc.GetBodies().size() == 3);
+  doc.SetRollback(99);
+  CHECK(doc.Rollback() == -1);
+  CHECK(doc.GetBodies().size() == 3);
+}

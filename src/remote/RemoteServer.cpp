@@ -268,6 +268,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               {"distance", state.camera->GetDistance()}}},
             {"can_undo", state.commands->CanUndo()},
             {"can_redo", state.commands->CanRedo()},
+            {"rollback", doc->Rollback()},
             {"pending_feature_id", state.pendingFeatureId}};
   }
   if (m == "rt_build") {
@@ -364,6 +365,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json::object();
+  }
+  if (m == "set_rollback") {
+    // Move the rollback bar: regeneration executes features [0, index) only;
+    // -1 (or >= count) = end. Not undoable — it is a view of the history,
+    // not an edit of it. params: {index}
+    doc->SetRollback(p.at("index").get<int>());
+    return {{"rollback", doc->Rollback()}};
   }
   if (m == "suppress_feature") {
     // Toggle suppression (by feature id) as one undoable edit; a suppressed

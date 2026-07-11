@@ -68,7 +68,17 @@ bool Document::Regenerate() {
   m_version++;
   bool allOk = true;
 
-  for (size_t i = 0; i < m_features.size(); i++) {
+  // Rollback bar: only the prefix regenerates; the tail keeps its params but
+  // contributes nothing (and holds no stale errors).
+  const size_t upTo = m_rollback < 0
+                          ? m_features.size()
+                          : std::min(m_features.size(),
+                                     static_cast<size_t>(m_rollback));
+  for (size_t i = upTo; i < m_features.size(); i++) {
+    m_features[i]->ClearError();
+  }
+
+  for (size_t i = 0; i < upTo; i++) {
     // Refresh expression-driven fields first, so the feature executes (and a
     // sketch solves) against current parameter values. Failed evaluations
     // keep the field's last good value.

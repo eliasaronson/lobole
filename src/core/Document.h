@@ -89,6 +89,19 @@ public:
   // render meshes without observing individual edits.
   uint64_t Version() const { return m_version; }
 
+  // Rollback bar (R2): regeneration executes features [0, rollback) only;
+  // the rest are skipped (grayed in the tree, params untouched). -1 = end.
+  // Persisted with the document, like SolidWorks' marker position.
+  int Rollback() const { return m_rollback; }
+  void SetRollback(int index) {
+    if (index < 0 || index >= static_cast<int>(m_features.size()))
+      index = -1; // at or past the end = no marker
+    if (index == m_rollback)
+      return;
+    m_rollback = index;
+    Regenerate();
+  }
+
 private:
   // Topo-sorts m_parameters by expression dependency and evaluates them into
   // m_symbols. Failures (parse error, unknown name, cycle) set the affected
@@ -101,4 +114,5 @@ private:
   SymbolTable m_symbols;
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;
+  int m_rollback = -1;
 };

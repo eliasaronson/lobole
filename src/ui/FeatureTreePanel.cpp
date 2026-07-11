@@ -33,8 +33,15 @@ void DrawFeatureTreePanel(AppState& state) {
     }
 
     ImGui::SeparatorText("Features");
+    const int rollback = doc->Rollback();
     for (size_t i = 0; i < doc->FeatureCount(); i++) {
       Feature* feature = doc->GetFeature(i);
+      // The rollback bar: features at/after the marker are skipped by
+      // regeneration and render dimmed below the divider.
+      const bool rolledPast =
+          rollback >= 0 && i >= static_cast<size_t>(rollback);
+      if (rollback >= 0 && i == static_cast<size_t>(rollback))
+        ImGui::SeparatorText("Rolled back");
       // Suffix keeps IDs unique and test paths stable even if names repeat
       const std::string label =
           feature->GetName() + "##" + std::to_string(i);
@@ -44,12 +51,13 @@ void DrawFeatureTreePanel(AppState& state) {
       const ImGuiSelectableFlags flags =
           datum ? ImGuiSelectableFlags_AllowDoubleClick : 0;
       // Features that failed to regenerate show red, with the reason on
-      // hover; suppressed features show dimmed.
+      // hover; suppressed and rolled-past features show dimmed.
       const bool suppressed = feature->IsSuppressed();
-      const bool errored = !suppressed && !feature->GetError().empty();
+      const bool dimmed = suppressed || rolledPast;
+      const bool errored = !dimmed && !feature->GetError().empty();
       if (errored)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.35f, 0.35f, 1.0f));
-      else if (suppressed)
+      else if (dimmed)
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
       if (ImGui::Selectable(label.c_str(),
@@ -65,10 +73,10 @@ void DrawFeatureTreePanel(AppState& state) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
           ImGui::SetTooltip("%s", feature->GetError().c_str());
-      } else if (suppressed) {
+      } else if (dimmed) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
-          ImGui::SetTooltip("Suppressed");
+          ImGui::SetTooltip(suppressed ? "Suppressed" : "After the rollback bar");
       }
       if (ImGui::BeginPopupContextItem()) {
         // Suppress/unsuppress: skipped by regeneration, params kept. One
@@ -80,6 +88,13 @@ void DrawFeatureTreePanel(AppState& state) {
           nlohmann::json after = DocumentIO::FeatureToJson(*feature);
           state.commands->Execute(
               std::make_unique<ModifyFeatureCommand>(i, before, after), *doc);
+        }
+        // Rollback bar (not undoable — a view of the history, not an edit).
+        if (ImGui::MenuItem("Rollback to here")) {
+          doc->SetRollback(static_cast<int>(i));
+        }
+        if (rollback >= 0 && ImGui::MenuItem("Roll to end")) {
+          doc->SetRollback(-1);
         }
         // A face-attached sketch can be re-pointed at another face (e.g. after
         // its face was consumed): arms face-picking for this sketch's faceRef.

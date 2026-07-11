@@ -771,6 +771,9 @@ bool Save(const Document& doc, const std::string& path, std::string* error) {
     json j;
     j["format"] = kFormat;
     j["version"] = kVersion;
+    if (doc.Rollback() >= 0) { // v19; omit when the marker is at the end
+      j["rollback"] = doc.Rollback();
+    }
     if (!doc.GetParameters().empty()) { // omit when empty to keep JSON compact
       j["parameters"] = json::array();
       for (const Parameter& p : doc.GetParameters()) {
@@ -831,6 +834,7 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
     for (const auto& fj : j.at("features")) {
       doc->AddFeature(FeatureFromJson(fj));
     }
+    doc->SetRollback(j.value("rollback", -1)); // v19; absent = end
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
              path);
     return doc;
