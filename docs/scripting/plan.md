@@ -64,7 +64,7 @@ wrapping the JSON-RPC client — tools mirroring the RPC surface
 (the text-to-cad skill is the template: brief → build → inspect → snapshot →
 iterate). Smoke test: an agent models a dimensioned bracket end-to-end.
 
-### S2 — Headless mode (~1–2 days)
+### S2 — Headless mode (~2 days incl. I2 + CI) — [design: s2-headless.md](s2-headless.md)
 `--headless`: run `designer_core` + `CADKernel` with no window/GPU — execute a
 command script or serve RPC. Geometry ops need no Vulkan already (unit tests
 prove it); the work is a startup path that skips renderer/ImGui init and a
