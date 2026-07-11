@@ -1,0 +1,26 @@
+{
+  "format": "designer-document",
+  "version": 20,
+  "features": [
+    {"type": "Sketch", "name": "Bottom", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [-2, -2], "b": [2, -2]},
+       {"type": "line", "id": 2, "a": [2, -2], "b": [2, 2]},
+       {"type": "line", "id": 3, "a": [2, 2], "b": [-2, 2]},
+       {"type": "line", "id": 4, "a": [-2, 2], "b": [-2, -2]}
+     ],
+     "constraints": []},
+    {"type": "Sketch", "name": "Top", "id": 2, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 6], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [-1, -1], "b": [1, -1]},
+       {"type": "line", "id": 2, "a": [1, -1], "b": [1, 1]},
+       {"type": "line", "id": 3, "a": [1, 1], "b": [-1, 1]},
+       {"type": "line", "id": 4, "a": [-1, 1], "b": [-1, -1]}
+     ],
+     "constraints": []},
+    {"type": "Loft", "name": "Frustum", "id": 3, "sketch_ids": [1, 2],
+     "mode": "new_body"}
+  ]
+}

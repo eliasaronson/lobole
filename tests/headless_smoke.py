@@ -182,6 +182,49 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
+        # Hole wizard (M8): a 4-hole bolt pattern from one point sketch,
+        # then interference (I4) between two boxes.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Plate", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 4})
+        holes = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Bolts",
+            "plane": {"origin": [0, 0, 4], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "point", "p": [2, 2]},
+                         {"type": "point", "p": [8, 2]},
+                         {"type": "point", "p": [8, 8]},
+                         {"type": "point", "p": [2, 8]}]})
+        d.call("add_feature", feature={
+            "type": "Hole", "name": "BoltHoles", "sketch_id": holes["id"],
+            "hole_kind": "simple", "diameter": 1.0, "depth": 1.0,
+            "through": True})
+        import math as _m3
+        st = d.call("get_state")
+        expect(not any("error" in f for f in st["features"]),
+               "holes regenerated clean")
+        expect(abs(st["bodies"][0]["volume"]
+                   - (400.0 - 4.0 * _m3.pi * 0.25 * 4.0)) < 0.5,
+               "4-hole plate volume")
+
+        # Interference: two overlapping boxes clash; disjoint ones don't.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "A", "position": [0, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        d.call("add_feature", feature={
+            "type": "Box", "name": "B", "position": [1, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        clash = d.call("interference", a=0, b=1)
+        expect(clash["clash"] and abs(clash["volume"] - 4.0) < 1e-3,
+               "overlapping boxes clash with overlap volume 4")
+        d.call("modify_feature", index=1, feature={
+            "type": "Box", "name": "B", "position": [10, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        expect(not d.call("interference", a=0, b=1)["clash"],
+               "disjoint boxes do not clash")
+
         # Sweep (M8): circle along a straight path = a cylinder
         d.call("new_project")
         pf = d.call("add_feature", feature={

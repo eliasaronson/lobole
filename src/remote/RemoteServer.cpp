@@ -626,6 +626,19 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     }
     return {{"variables", variables}};
   }
+  if (m == "interference") {
+    // Clash detection (inspection I4): two bodies interfere when their
+    // intersection has volume. params: {a: index, b: index}
+    const auto& bodies = doc->GetBodies();
+    const int ia = p.at("a").get<int>();
+    const int ib = p.at("b").get<int>();
+    if (ia < 0 || ib < 0 || ia >= static_cast<int>(bodies.size()) ||
+        ib >= static_cast<int>(bodies.size()))
+      throw std::runtime_error("body index out of range");
+    CADShape common = bodies[ia].shape.Intersection(bodies[ib].shape);
+    const double v = common.IsValid() ? common.Volume() : 0.0;
+    return {{"clash", v > 1e-9}, {"volume", v}};
+  }
   if (m == "mass_properties") {
     // Volume, surface area, center of mass, and inertia (about the CoM) per
     // body, plus a document total. Mass assumes model units are millimetres:

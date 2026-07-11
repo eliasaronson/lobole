@@ -22,6 +22,7 @@ add_executable(designer_tests
     test_shell.cpp
     test_loft.cpp
     test_sweep.cpp
+    test_hole.cpp
     test_autosaver.cpp
     test_command_modify.cpp
     test_expression.cpp

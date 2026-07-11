@@ -88,6 +88,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "edges": [{{"feature_id": <the body's created_by feature id>,
   "element": <stable edge name>}}, ...]}} — all edges must belong to one
   body. Discover edge names + created_by with the list_elements tool.
+- Hole (drill holes at a sketch's Point entities, cut into the bodies below
+  along the sketch plane's -normal): {{"type": "Hole", "name": str,
+  "sketch_id": <a sketch whose points are the hole centers>,
+  "hole_kind": "simple"|"counterbore"|"countersink", "diameter": num,
+  "diameter_expr"?: str, "depth": num, "depth_expr"?: str, "through"?: bool,
+  counterbore: "cb_diameter"/"cb_depth", countersink: "cs_diameter"/
+  "cs_depth"}} — far cleaner than a construction circle + cut-extrude per
+  bolt hole; put the point sketch on the face you drill from.
 - Sweep (sweep a closed profile sketch along an open path sketch):
   {{"type": "Sweep", "name": str, "profile_id": <sketch feature id>,
   "path_id": <sketch feature id>, "mode": "new_body"|"add"|"cut"}} — put the
@@ -219,6 +227,13 @@ def get_state() -> dict:
           "value, comment, and error if the expression fails to evaluate.")
 def list_variables() -> dict:
     return _call("list_variables")
+
+
+@mcp.tool(description="Interference (clash) check between two bodies by "
+          "index: returns {clash: bool, volume} — the volume of their "
+          "overlap. Use before committing an assembly-like layout.")
+def interference(a: int, b: int) -> dict:
+    return _call("interference", a=a, b=b)
 
 
 @mcp.tool(description="Mass properties per body (and a document total): "

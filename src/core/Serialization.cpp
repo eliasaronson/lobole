@@ -7,6 +7,7 @@
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/HoleFeature.h"
 #include "core/LoftFeature.h"
 #include "core/SweepFeature.h"
 #include "core/PatternFeature.h"
@@ -28,7 +29,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 20; // v20: shell (v19: suppressed features)
+constexpr int kVersion = 21; // v21: hole wizard (v20: shell/loft/sweep)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -521,6 +522,23 @@ json FeatureToJson(const Feature& feature) {
     j["profile_id"] = sw->profileSketchId;
     j["path_id"] = sw->pathSketchId;
     j["mode"] = ExtrudeModeToString(sw->mode);
+  } else if (auto* ho = dynamic_cast<const HoleFeature*>(&feature)) {
+    j["sketch_id"] = ho->sketchId;
+    j["hole_kind"] = ho->kind == HoleKind::Counterbore ? "counterbore"
+                     : ho->kind == HoleKind::Countersink ? "countersink"
+                                                         : "simple";
+    j["diameter"] = ho->diameter;
+    if (!ho->diameterExpr.empty()) j["diameter_expr"] = ho->diameterExpr;
+    j["depth"] = ho->depth;
+    if (!ho->depthExpr.empty()) j["depth_expr"] = ho->depthExpr;
+    if (ho->through) j["through"] = true;
+    if (ho->kind == HoleKind::Counterbore) {
+      j["cb_diameter"] = ho->cbDiameter;
+      j["cb_depth"] = ho->cbDepth;
+    } else if (ho->kind == HoleKind::Countersink) {
+      j["cs_diameter"] = ho->csDiameter;
+      j["cs_depth"] = ho->csDepth;
+    }
   } else if (auto* pat = dynamic_cast<const PatternFeature*>(&feature)) {
     j["kind"] = PatternKindToString(pat->kind);
     j["source_id"] = pat->sourceId;
@@ -778,6 +796,22 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, j.at("profile_id").get<uint64_t>(),
         j.at("path_id").get<uint64_t>(),
         ExtrudeModeFromString(j.value("mode", "new_body")));
+  } else if (type == "Hole") { // v21
+    const std::string k = j.value("hole_kind", "simple");
+    HoleKind kind = k == "counterbore"  ? HoleKind::Counterbore
+                    : k == "countersink" ? HoleKind::Countersink
+                                         : HoleKind::Simple;
+    auto ho = std::make_unique<HoleFeature>(
+        name, j.at("sketch_id").get<uint64_t>(), kind,
+        j.value("diameter", 1.0), j.value("depth", 1.0));
+    ho->diameterExpr = j.value("diameter_expr", std::string{});
+    ho->depthExpr = j.value("depth_expr", std::string{});
+    ho->through = j.value("through", false);
+    ho->cbDiameter = j.value("cb_diameter", 2.0);
+    ho->cbDepth = j.value("cb_depth", 0.5);
+    ho->csDiameter = j.value("cs_diameter", 2.0);
+    ho->csDepth = j.value("cs_depth", 0.5);
+    out = std::move(ho);
   } else if (type == "Pattern") {
     auto pat = std::make_unique<PatternFeature>(
         name, PatternKindFromString(j.at("kind").get<std::string>()),

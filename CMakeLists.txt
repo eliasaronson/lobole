@@ -187,6 +187,7 @@ set(core_sources
     src/core/ShellFeature.cpp
     src/core/LoftFeature.cpp
     src/core/SweepFeature.cpp
+    src/core/HoleFeature.cpp
     src/core/DatumAxisFeature.cpp
     src/core/BooleanFeature.cpp
     src/core/ElementHistory.cpp

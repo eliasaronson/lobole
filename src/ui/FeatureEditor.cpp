@@ -9,6 +9,7 @@
 #include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/HoleFeature.h"
 #include "core/LoftFeature.h"
 #include "core/SweepFeature.h"
 #include "core/ShellFeature.h"
@@ -702,6 +703,36 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     DrawBooleanParams(state, *boo, index, commit);
   } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {
     DrawPatternParams(state, *pat, index, commit);
+  } else if (auto* ho = dynamic_cast<HoleFeature*>(&feature)) {
+    const char* kinds[] = {"Simple", "Counterbore", "Countersink"};
+    int k = static_cast<int>(ho->kind);
+    if (ImGui::Combo("Type", &k, kinds, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*ho);
+      ho->kind = static_cast<HoleKind>(k);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    ExprDim(state, feature, index, commit, "Diameter", ho->diameterExpr,
+            ho->diameter);
+    HandleEdit(state, feature, ImGui::Checkbox("Through all", &ho->through),
+               index, commit);
+    if (!ho->through)
+      ExprDim(state, feature, index, commit, "Depth", ho->depthExpr,
+              ho->depth);
+    if (ho->kind == HoleKind::Counterbore) {
+      HandleEdit(state, feature, DragDim("C'bore dia", &ho->cbDiameter),
+                 index, commit);
+      HandleEdit(state, feature, DragDim("C'bore depth", &ho->cbDepth), index,
+                 commit);
+    } else if (ho->kind == HoleKind::Countersink) {
+      HandleEdit(state, feature, DragDim("C'sink dia", &ho->csDiameter),
+                 index, commit);
+      HandleEdit(state, feature, DragDim("C'sink depth", &ho->csDepth), index,
+                 commit);
+    }
+    if (Feature* src = state.document->FindFeatureById(ho->sketchId))
+      ImGui::Text("Points: %s", src->GetName().c_str());
+    else
+      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Points: missing");
   } else if (auto* sw = dynamic_cast<SweepFeature*>(&feature)) {
     Feature* pf = state.document->FindFeatureById(sw->profileSketchId);
     Feature* pa = state.document->FindFeatureById(sw->pathSketchId);
