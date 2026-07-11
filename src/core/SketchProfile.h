@@ -48,6 +48,13 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities);
 TopoDS_Wire BuildProfileWire(const SketchPlane& plane,
                              const std::vector<Loop>& loops);
 
+// An OPEN chain of a sketch's non-construction line/arc entities as a world-
+// space wire — the spine for a sweep (modeling M8). Chains edges by endpoint
+// proximity like BuildLoops, but keeps the result open (a closed chain, a
+// lone circle, or a branching/disconnected set returns a null wire).
+TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
+                              const std::vector<Entity>& entities);
+
 // Builds the profile face (largest-|area| loop is the outer boundary, the
 // rest become holes) and extrudes it along the plane normal. Returns an
 // invalid CADShape on failure.

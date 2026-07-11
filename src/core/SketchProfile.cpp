@@ -472,6 +472,101 @@ TopoDS_Wire BuildProfileWire(const SketchPlane& plane,
   return MakeLoopWire(plane, loops[groups[0].outer]);
 }
 
+TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
+                              const std::vector<Entity>& entities) {
+  // Collect line/arc edges (circles/points/construction can't be a path).
+  std::vector<LoopEdge> edges;
+  for (const auto& entity : entities) {
+    if (IsConstruction(entity))
+      continue;
+    if (const auto* l = std::get_if<Line>(&entity)) {
+      edges.push_back({false, l->a, l->b, {}, 0.0, 0.0, 0.0, l->id});
+    } else if (const auto* a = std::get_if<Arc>(&entity)) {
+      double s = a->startAngle, en = a->endAngle;
+      while (en <= s)
+        en += 2.0 * M_PI;
+      edges.push_back({true, ArcPointUV(*a, 1), ArcPointUV(*a, 2), a->center,
+                       a->radius, s, en, a->id});
+    }
+  }
+  if (edges.empty())
+    return TopoDS_Wire();
+
+  // Walk from the one endpoint that no other edge shares (an open chain has
+  // exactly two such endpoints; a closed loop or a branch has none/too many).
+  // Greedy chain by proximity, reusing MakeLoopWire's edge geometry via a
+  // one-loop container.
+  std::vector<bool> used(edges.size(), false);
+  std::vector<LoopEdge> chain = {edges[0]};
+  used[0] = true;
+  glm::vec2 head = edges[0].a, tail = edges[0].b;
+  bool extended = true;
+  while (extended) {
+    extended = false;
+    for (size_t i = 0; i < edges.size(); i++) {
+      if (used[i])
+        continue;
+      LoopEdge cand = edges[i];
+      if (Near(cand.a, tail)) {
+        tail = cand.b;
+      } else if (Near(cand.b, tail)) {
+        std::swap(cand.a, cand.b);
+        tail = cand.b;
+      } else if (Near(cand.b, head)) {
+        head = cand.a;
+        chain.insert(chain.begin(), cand);
+        used[i] = true;
+        extended = true;
+        continue;
+      } else if (Near(cand.a, head)) {
+        std::swap(cand.a, cand.b);
+        head = cand.a;
+        chain.insert(chain.begin(), cand);
+        used[i] = true;
+        extended = true;
+        continue;
+      } else {
+        continue;
+      }
+      chain.push_back(cand);
+      used[i] = true;
+      extended = true;
+    }
+  }
+  // All edges must be consumed (a disconnected set is not a single path), and
+  // the chain must be open (a closed one is a profile, not a path).
+  for (bool u : used)
+    if (!u)
+      return TopoDS_Wire();
+  if (Near(head, tail))
+    return TopoDS_Wire();
+
+  // Build the open wire directly — MakeLoopWire's shared-vertex scheme assumes
+  // a closed loop and collapses a single edge, so it can't be reused here.
+  const glm::vec3 n3 = plane.GetNormal();
+  const gp_Dir normal(n3.x, n3.y, n3.z);
+  const glm::vec3 uAxis = plane.GetUAxis();
+  auto toPnt = [&](const glm::vec2& uv) {
+    const glm::vec3 w = plane.PlaneToWorld(uv);
+    return gp_Pnt(w.x, w.y, w.z);
+  };
+  BRepBuilderAPI_MakeWire wire;
+  for (const LoopEdge& e : chain) {
+    if (e.arc) {
+      gp_Ax2 axis(toPnt(e.center), normal, gp_Dir(uAxis.x, uAxis.y, uAxis.z));
+      gp_Circ circ(axis, e.radius);
+      const gp_Pnt s = toPnt(OnCircle(e.center, e.radius, e.angStart));
+      const gp_Pnt en = toPnt(OnCircle(e.center, e.radius, e.angEnd));
+      wire.Add(BRepBuilderAPI_MakeEdge(circ, s, en).Edge());
+    } else {
+      wire.Add(BRepBuilderAPI_MakeEdge(toPnt(e.a), toPnt(e.b)).Edge());
+    }
+    if (wire.Error() != BRepBuilderAPI_WireDone)
+      return TopoDS_Wire();
+  }
+  return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
+}
+
 CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
                     double distance, bool reversed) {
   if (loops.empty() || std::abs(distance) < 1e-9) {

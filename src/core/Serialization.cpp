@@ -8,6 +8,7 @@
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
 #include "core/LoftFeature.h"
+#include "core/SweepFeature.h"
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/ShellFeature.h"
@@ -516,6 +517,10 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* lo = dynamic_cast<const LoftFeature*>(&feature)) {
     j["sketch_ids"] = lo->sketchIds;
     j["mode"] = ExtrudeModeToString(lo->mode);
+  } else if (auto* sw = dynamic_cast<const SweepFeature*>(&feature)) {
+    j["profile_id"] = sw->profileSketchId;
+    j["path_id"] = sw->pathSketchId;
+    j["mode"] = ExtrudeModeToString(sw->mode);
   } else if (auto* pat = dynamic_cast<const PatternFeature*>(&feature)) {
     j["kind"] = PatternKindToString(pat->kind);
     j["source_id"] = pat->sourceId;
@@ -768,6 +773,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::make_unique<LoftFeature>(
         name, std::move(ids), ExtrudeModeFromString(j.value("mode",
                                                             "new_body")));
+  } else if (type == "Sweep") { // v20
+    out = std::make_unique<SweepFeature>(
+        name, j.at("profile_id").get<uint64_t>(),
+        j.at("path_id").get<uint64_t>(),
+        ExtrudeModeFromString(j.value("mode", "new_body")));
   } else if (type == "Pattern") {
     auto pat = std::make_unique<PatternFeature>(
         name, PatternKindFromString(j.at("kind").get<std::string>()),

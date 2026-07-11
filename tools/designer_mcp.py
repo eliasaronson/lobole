@@ -88,6 +88,12 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "edges": [{{"feature_id": <the body's created_by feature id>,
   "element": <stable edge name>}}, ...]}} — all edges must belong to one
   body. Discover edge names + created_by with the list_elements tool.
+- Sweep (sweep a closed profile sketch along an open path sketch):
+  {{"type": "Sweep", "name": str, "profile_id": <sketch feature id>,
+  "path_id": <sketch feature id>, "mode": "new_body"|"add"|"cut"}} — put the
+  profile at the path's start, on a plane perpendicular to the path (e.g.
+  profile on XY, path on XZ/YZ from the origin). Path = one open chain of
+  lines/arcs (not closed).
 - Loft (skin a solid through 2+ profile sketches): {{"type": "Loft",
   "name": str, "sketch_ids": [<feature id>, <feature id>, ...],
   "mode": "new_body"|"add"|"cut"}} — each sketch's outer profile is a

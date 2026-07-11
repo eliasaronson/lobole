@@ -182,6 +182,28 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
+        # Sweep (M8): circle along a straight path = a cylinder
+        d.call("new_project")
+        pf = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Prof",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [0, 0], "radius": 1}]})
+        pa = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Path",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [0, 0], "b": [0, 8]}]})
+        d.call("add_feature", feature={
+            "type": "Sweep", "name": "Pipe", "profile_id": pf["id"],
+            "path_id": pa["id"], "mode": "new_body"})
+        st = d.call("get_state")
+        expect(not any("error" in f for f in st["features"]),
+               "sweep regenerated clean")
+        import math as _m2
+        expect(abs(st["bodies"][0]["volume"] - _m2.pi * 8) < 0.2,
+               "swept cylinder volume ~8pi")
+
         # Loft (M8): frustum between two squares on offset datum planes
         d.call("new_project")
         dp = d.call("add_feature", feature={

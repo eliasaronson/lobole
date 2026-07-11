@@ -186,6 +186,7 @@ set(core_sources
     src/core/RevolveFeature.cpp
     src/core/ShellFeature.cpp
     src/core/LoftFeature.cpp
+    src/core/SweepFeature.cpp
     src/core/DatumAxisFeature.cpp
     src/core/BooleanFeature.cpp
     src/core/ElementHistory.cpp
