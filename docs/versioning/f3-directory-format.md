@@ -1,8 +1,9 @@
-# F3 — Diffable directory format — design (NOT yet implemented)
+# F3 — Diffable directory format — design
 
-> Status: design for sign-off. One genuine product decision below is
-> deliberately left open — everything else is ready to build (~1–2 days).
-> Gate honored: the F1 golden corpus exists and guards the migration.
+> **SHIPPED 2026-07-11.** Decision (Elias): directory format is the DEFAULT
+> for new saves — a no-extension save becomes `<name>.dsgn`; `.json` remains
+> fully supported as the single-file interchange form. Unchanged feature
+> files keep their mtime (identical writes are skipped).
 
 ## Layout
 

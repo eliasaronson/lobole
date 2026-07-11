@@ -53,7 +53,7 @@ void OpenProjectFile(AppState& state, const std::string& path) {
 
 void OpenProjectDialog(AppState& state) {
   nfdchar_t* outPath = nullptr;
-  if (NFD_OpenDialog("json", nullptr, &outPath) == NFD_OKAY) {
+  if (NFD_OpenDialog("json,dsgn", nullptr, &outPath) == NFD_OKAY) {
     std::string path(outPath);
     free(outPath);
     if (Autosaver::HasNewerAutosave(path)) {
@@ -71,11 +71,11 @@ void SaveProjectDialog(AppState& state) {
   if (!state.document)
     return;
   nfdchar_t* outPath = nullptr;
-  if (NFD_SaveDialog("json", nullptr, &outPath) == NFD_OKAY) {
+  if (NFD_SaveDialog("dsgn,json", nullptr, &outPath) == NFD_OKAY) {
     std::string path(outPath);
     free(outPath);
     if (std::filesystem::path(path).extension().empty()) {
-      path += ".json";
+      path += ".dsgn"; // directory format is the default for new saves (F3)
     }
     std::string error;
     if (!DocumentIO::Save(*state.document, path, &error)) {

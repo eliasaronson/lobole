@@ -86,6 +86,17 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 16 | `3020d0e` | Sketch `face_ref` (ElementRef, toponaming) |
 | 17 | `48dab10` | `Fillet`/`Chamfer` on ElementRef edges |
 
+## The directory format (F3, default for new saves)
+
+`part.dsgn/` = `index.json` (envelope: format/version/rollback/parameters +
+the ordered feature-id list) + `features/<id>-<kebab-type>.json`, one file
+per feature named by stable id (the type suffix is cosmetic). The single
+`.json` file remains the interchange form; `Save`/`Load` dispatch on the
+path (`.dsgn` or an existing directory; picking an `index.json` inside a
+`.dsgn` opens the project). Feature files with unchanged content are not
+rewritten, and deleted features' files are removed on save — a git diff
+shows exactly the edited features.
+
 ## The golden corpus (`tests/golden/`)
 
 One file per era, each **hand-derived from the loader branch it exercises**

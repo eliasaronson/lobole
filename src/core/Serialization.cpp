@@ -14,7 +14,11 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 
 using nlohmann::json;
 
@@ -766,24 +770,199 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   return out;
 }
 
-bool Save(const Document& doc, const std::string& path, std::string* error) {
-  try {
-    json j;
-    j["format"] = kFormat;
-    j["version"] = kVersion;
-    if (doc.Rollback() >= 0) { // v19; omit when the marker is at the end
-      j["rollback"] = doc.Rollback();
+namespace {
+
+// Path classification (F3): a `.dsgn` path or existing directory is the
+// directory format; picking the index.json inside one opens the project.
+bool IsDirFormatPath(const std::string& path) {
+  if (path.ends_with(".dsgn"))
+    return true;
+  std::error_code ec;
+  return std::filesystem::is_directory(path, ec);
+}
+
+std::string NormalizeProjectPath(const std::string& path) {
+  const std::filesystem::path p(path);
+  if (p.filename() == "index.json" && p.parent_path().string().ends_with(".dsgn"))
+    return p.parent_path().string();
+  return path;
+}
+
+// "DatumPlane" -> "datum-plane": readable feature filenames. The stable id
+// prefix is the identity; this suffix is cosmetic.
+std::string KebabType(const std::string& type) {
+  std::string out;
+  for (char c : type) {
+    if (std::isupper(static_cast<unsigned char>(c))) {
+      if (!out.empty())
+        out += '-';
+      out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    } else {
+      out += c;
     }
-    if (!doc.GetParameters().empty()) { // omit when empty to keep JSON compact
-      j["parameters"] = json::array();
-      for (const Parameter& p : doc.GetParameters()) {
-        json pj = {{"name", p.name}, {"expression", p.expression}};
-        if (!p.comment.empty()) {
-          pj["comment"] = p.comment;
-        }
-        j["parameters"].push_back(std::move(pj));
+  }
+  return out;
+}
+
+json DocumentEnvelope(const Document& doc) {
+  json j;
+  j["format"] = kFormat;
+  j["version"] = kVersion;
+  if (doc.Rollback() >= 0) {
+    j["rollback"] = doc.Rollback();
+  }
+  if (!doc.GetParameters().empty()) {
+    j["parameters"] = json::array();
+    for (const Parameter& p : doc.GetParameters()) {
+      json pj = {{"name", p.name}, {"expression", p.expression}};
+      if (!p.comment.empty()) {
+        pj["comment"] = p.comment;
       }
+      j["parameters"].push_back(std::move(pj));
     }
+  }
+  return j;
+}
+
+bool WriteTextAtomic(const std::filesystem::path& target,
+                     const std::string& text, std::string* error) {
+  // Skip identical content: an untouched feature keeps its mtime, so git
+  // status, rsync, and build tools see exactly the files that changed.
+  {
+    std::ifstream existing(target, std::ios::binary);
+    if (existing) {
+      std::string current((std::istreambuf_iterator<char>(existing)),
+                          std::istreambuf_iterator<char>());
+      if (current == text)
+        return true;
+    }
+  }
+  const std::filesystem::path tmp = target.string() + ".tmp";
+  {
+    std::ofstream out(tmp);
+    if (!out) {
+      if (error) *error = "Cannot open file for writing: " + tmp.string();
+      return false;
+    }
+    out << text;
+  }
+  std::error_code ec;
+  std::filesystem::rename(tmp, target, ec);
+  if (ec) {
+    if (error) *error = "rename failed: " + ec.message();
+    return false;
+  }
+  return true;
+}
+
+// Directory format (F3, docs/versioning/f3-directory-format.md): one file
+// per feature named by stable id, an ordered index written LAST (a torn
+// save leaves a stale-but-loadable index), document-level parameters file.
+bool SaveDir(const Document& doc, const std::string& dirPath,
+             std::string* error) {
+  namespace fs = std::filesystem;
+  try {
+    const fs::path dir(dirPath);
+    const fs::path featuresDir = dir / "features";
+    fs::create_directories(featuresDir);
+
+    json index = DocumentEnvelope(doc);
+    index["features"] = json::array();
+    std::set<std::string> wanted;
+    for (const auto& feature : doc.GetFeatures()) {
+      const std::string file = std::to_string(feature->GetId()) + "-" +
+                               KebabType(feature->TypeName()) + ".json";
+      if (!WriteTextAtomic(featuresDir / file,
+                           FeatureToJson(*feature).dump(2) + "\n", error))
+        return false;
+      index["features"].push_back(feature->GetId());
+      wanted.insert(file);
+    }
+    // Deleted features leave no stale files behind.
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(featuresDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wanted.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+    // Parameters live in the index envelope (small, diff-friendly there).
+    if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
+      return false;
+    LOG_INFO("Saved document ({} features) to {}", doc.FeatureCount(),
+             dirPath);
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+}
+
+std::unique_ptr<Document> LoadDir(const std::string& dirPath,
+                                  std::string* error) {
+  namespace fs = std::filesystem;
+  try {
+    std::ifstream in(fs::path(dirPath) / "index.json");
+    if (!in) {
+      if (error) *error = "Not a designer project directory: " + dirPath;
+      return nullptr;
+    }
+    json index = json::parse(in);
+    if (index.value("format", "") != kFormat) {
+      if (error) *error = "Not a designer document: " + dirPath;
+      return nullptr;
+    }
+    if (index.value("version", 0) > kVersion) {
+      if (error) *error = "Document version is newer than this build supports";
+      return nullptr;
+    }
+
+    auto doc = std::make_unique<Document>();
+    for (const auto& pj : index.value("parameters", json::array())) {
+      doc->SetParameter(pj.at("name").get<std::string>(),
+                        pj.at("expression").get<std::string>(),
+                        pj.value("comment", std::string{}));
+    }
+    // Feature files are found by their id prefix — the type suffix is
+    // cosmetic and may lag a (hypothetical) rename.
+    std::map<uint64_t, fs::path> byId;
+    std::error_code ec;
+    for (const auto& entry :
+         fs::directory_iterator(fs::path(dirPath) / "features", ec)) {
+      if (entry.path().extension() != ".json")
+        continue;
+      byId[std::stoull(entry.path().filename().string())] = entry.path();
+    }
+    for (const auto& idJson : index.at("features")) {
+      const uint64_t id = idJson.get<uint64_t>();
+      const auto it = byId.find(id);
+      if (it == byId.end()) {
+        if (error)
+          *error = "missing feature file for id " + std::to_string(id);
+        return nullptr;
+      }
+      std::ifstream fin(it->second);
+      doc->AddFeature(FeatureFromJson(json::parse(fin)));
+    }
+    doc->SetRollback(index.value("rollback", -1));
+    LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
+             dirPath);
+    return doc;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    LOG_ERROR("Failed to load project directory {}: {}", dirPath, e.what());
+    return nullptr;
+  }
+}
+
+} // namespace
+
+bool Save(const Document& doc, const std::string& path, std::string* error) {
+  const std::string normalized = NormalizeProjectPath(path);
+  if (IsDirFormatPath(normalized)) {
+    return SaveDir(doc, normalized, error);
+  }
+  try {
+    json j = DocumentEnvelope(doc);
     j["features"] = json::array();
     for (const auto& feature : doc.GetFeatures()) {
       j["features"].push_back(FeatureToJson(*feature));
@@ -805,6 +984,10 @@ bool Save(const Document& doc, const std::string& path, std::string* error) {
 }
 
 std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
+  const std::string normalized = NormalizeProjectPath(path);
+  if (IsDirFormatPath(normalized)) {
+    return LoadDir(normalized, error);
+  }
   try {
     std::ifstream in(path);
     if (!in) {

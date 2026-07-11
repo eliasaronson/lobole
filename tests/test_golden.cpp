@@ -2,12 +2,14 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "core/Document.h"
+#include "core/Feature.h"
 #include "core/Serialization.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <filesystem>
+#include <map>
 #include <fstream>
 #include <vector>
 
@@ -75,4 +77,95 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       fs::remove(tmp);
     }
   }
+}
+
+TEST_CASE("Golden corpus round-trips through the directory format (F3)",
+          "[golden][dirformat]") {
+  const fs::path dir = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden";
+  std::vector<fs::path> goldens;
+  for (const auto& entry : fs::directory_iterator(dir)) {
+    const fs::path& p = entry.path();
+    if (p.extension() == ".json" && !p.stem().string().ends_with(".expect"))
+      goldens.push_back(p);
+  }
+  std::sort(goldens.begin(), goldens.end());
+
+  for (const fs::path& golden : goldens) {
+    DYNAMIC_SECTION(golden.filename().string()) {
+      fs::path expectPath = golden;
+      expectPath.replace_extension(".expect.json");
+      nlohmann::json expect;
+      std::ifstream(expectPath) >> expect;
+
+      std::string error;
+      auto doc = DocumentIO::Load(golden.string(), &error);
+      REQUIRE(doc != nullptr);
+
+      const fs::path proj = fs::temp_directory_path() /
+                            ("golden_dir_" + golden.stem().string() + ".dsgn");
+      fs::remove_all(proj);
+      REQUIRE(DocumentIO::Save(*doc, proj.string(), &error));
+      CHECK(fs::exists(proj / "index.json"));
+      auto reloaded = DocumentIO::Load(proj.string(), &error);
+      REQUIRE((reloaded != nullptr && error.empty()));
+      AssertMatchesExpect(*reloaded, expect);
+      fs::remove_all(proj);
+    }
+  }
+}
+
+TEST_CASE("Directory format: editing one feature touches one file",
+          "[dirformat]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1, 1, 1));
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2, 1,
+                                              1));
+  const fs::path proj = fs::temp_directory_path() / "onefile.dsgn";
+  fs::remove_all(proj);
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, proj.string(), &error));
+
+  auto mtimes = [&] {
+    std::map<std::string, fs::file_time_type> m;
+    for (const auto& e : fs::recursive_directory_iterator(proj))
+      if (e.is_regular_file())
+        m[e.path().string()] = fs::last_write_time(e.path());
+    return m;
+  };
+  const auto before = mtimes();
+  dynamic_cast<BoxFeature*>(doc.GetFeature(1))->width = 3.0;
+  doc.Regenerate();
+  REQUIRE(DocumentIO::Save(doc, proj.string(), &error));
+  const auto after = mtimes();
+  REQUIRE(before.size() == after.size());
+  int changed = 0;
+  for (const auto& [path, t] : after)
+    if (before.at(path) != t)
+      changed++;
+  // The edited feature's file and the (always-rewritten) index. This is the
+  // git-friendliness property that justifies F3.
+  CHECK(changed <= 2);
+
+  // Deleting a feature removes its file.
+  doc.RemoveFeature(0);
+  REQUIRE(DocumentIO::Save(doc, proj.string(), &error));
+  int featureFiles = 0;
+  for (const auto& e : fs::directory_iterator(proj / "features"))
+    featureFiles++;
+  CHECK(featureFiles == 1);
+  fs::remove_all(proj);
+}
+
+TEST_CASE("Opening the index.json inside a .dsgn opens the project",
+          "[dirformat]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 2, 2, 2));
+  const fs::path proj = fs::temp_directory_path() / "viaindex.dsgn";
+  fs::remove_all(proj);
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, proj.string(), &error));
+  auto loaded = DocumentIO::Load((proj / "index.json").string(), &error);
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->FeatureCount() == 1);
+  fs::remove_all(proj);
 }
