@@ -165,3 +165,66 @@ TEST_CASE("Picking a box through the screen selects the facing face",
   CHECK_THAT(c.y, WithinAbs(1.0f, 1e-3f));
   CHECK_THAT(c.z, WithinAbs(1.0f, 1e-3f));
 }
+
+// ---- T5: B-Rep edge polylines + edge picking ---------------------------------
+
+TEST_CASE("GenerateEdgePolylines covers every edge in index order",
+          "[picking][edges]") {
+  CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
+  const auto polys = box.GenerateEdgePolylines(0.1);
+  REQUIRE(polys.size() == 12); // a box has 12 edges
+  for (const auto& poly : polys) {
+    REQUIRE(poly.size() >= 2); // straight edges: at least the two endpoints
+    // Box edges are axis-aligned unit-direction segments of length 2.
+    CHECK_THAT(glm::length(poly.back() - poly.front()), WithinAbs(2.0f, 1e-4f));
+  }
+}
+
+TEST_CASE("PickEdge finds the edge under the ray and honors occlusion",
+          "[picking][edges]") {
+  CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
+  CADShape::Mesh mesh = box.GenerateMesh(0.1);
+  std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh, glm::vec3(0.5f));
+  const auto polys = box.GenerateEdgePolylines(0.1);
+
+  FaceSelector selector;
+  selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces,
+                   glm::mat4(1.0f), polys);
+
+  // Aim just outside the box at the vertical edge x=2, y=2 (a silhouette
+  // edge from this viewpoint), from far along +X+Y.
+  Ray ray;
+  ray.origin = glm::vec3(12.0f, 12.0f, 1.0f);
+  ray.direction = glm::normalize(glm::vec3(2.0f, 2.0f, 1.0f) - ray.origin);
+  const EdgeHit hit = selector.PickEdge(ray);
+  REQUIRE(hit.hit);
+  CHECK(hit.meshId == 1);
+  // The hit point lies on that edge: x = y = 2, z within [0, 2].
+  CHECK_THAT(hit.point.x, WithinAbs(2.0f, 1e-2f));
+  CHECK_THAT(hit.point.y, WithinAbs(2.0f, 1e-2f));
+  CHECK(hit.point.z > -0.01f);
+  CHECK(hit.point.z < 2.01f);
+  // The reported index matches the polyline it hit.
+  REQUIRE(hit.edgeIndex < polys.size());
+  const auto& poly = polys[hit.edgeIndex];
+  CHECK_THAT(poly.front().x, WithinAbs(2.0f, 1e-4f));
+  CHECK_THAT(poly.front().y, WithinAbs(2.0f, 1e-4f));
+
+  // A ray straight at the middle of the +X face passes near no edge: miss.
+  Ray faceRay;
+  faceRay.origin = glm::vec3(12.0f, 1.0f, 1.0f);
+  faceRay.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+  CHECK_FALSE(selector.PickEdge(faceRay).hit);
+
+  // A ray toward the far edge (x=0, y=0) is blocked by the box: the front
+  // face is hit well before the edge, so the pick rejects it.
+  Ray blocked;
+  blocked.origin = glm::vec3(12.0f, 12.0f, 1.0f);
+  blocked.direction = glm::normalize(glm::vec3(0.0f, 0.0f, 1.0f) - blocked.origin);
+  const EdgeHit far = selector.PickEdge(blocked);
+  if (far.hit) {
+    // If anything is picked it must be a near silhouette edge, not the far one.
+    CHECK(glm::length(glm::vec2(far.point.x, far.point.y)) > 1.0f);
+  }
+}

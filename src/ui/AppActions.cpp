@@ -484,10 +484,14 @@ void SyncDocumentRenderers(AppState& state) {
     uint32_t outlineId = 0;
     if (state.outlineRenderer)
       outlineId = state.outlineRenderer->AddMesh(vertices, cadMesh.indices);
+    std::vector<std::vector<glm::vec3>> edges =
+        body.shape.GenerateEdgePolylines(0.1);
     if (state.faceSelector)
       state.faceSelector->AddMesh(meshId, vertices, cadMesh.indices,
-                                  cadMesh.triangleFaces);
-    state.documentMeshes.push_back({meshId, outlineId, bi});
+                                  cadMesh.triangleFaces, glm::mat4(1.0f),
+                                  edges);
+    state.documentMeshes.push_back(
+        {meshId, outlineId, bi, std::move(edges)});
   }
 
   // Sketch line geometry (static inactive sketches + the active sketch's

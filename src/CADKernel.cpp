@@ -20,8 +20,12 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Solid.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <GCPnts_TangentialDeflection.hxx>
 #include <GeomAbs_SurfaceType.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <Poly_Triangulation.hxx>
@@ -330,6 +334,50 @@ CADShape::Mesh CADShape::GenerateMesh(double deflection) const {
     }
 
     return mesh;
+}
+
+std::vector<std::vector<glm::vec3>> CADShape::GenerateEdgePolylines(
+    double deflection) const {
+    std::vector<std::vector<glm::vec3>> polylines;
+    if (!IsValid()) return polylines;
+
+    // Same model-relative deflection scaling as GenerateMesh, so edge
+    // polylines match the mesh's fidelity.
+    Bnd_Box bbox;
+    BRepBndLib::Add(m_shape, bbox);
+    double linDeflection = deflection;
+    if (!bbox.IsVoid()) {
+        double xmin, ymin, zmin, xmax, ymax, zmax;
+        bbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+        const double diag = std::sqrt((xmax - xmin) * (xmax - xmin) +
+                                      (ymax - ymin) * (ymax - ymin) +
+                                      (zmax - zmin) * (zmax - zmin));
+        if (diag > Precision::Confusion())
+            linDeflection = diag * 0.002;
+    }
+    const double angDeflection = 0.2; // radians, matches GenerateMesh
+
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(m_shape, TopAbs_EDGE, edges);
+    polylines.resize(edges.Extent());
+    for (int i = 1; i <= edges.Extent(); i++) {
+        const TopoDS_Edge& edge = TopoDS::Edge(edges(i));
+        if (BRep_Tool::Degenerated(edge)) continue; // empty keeps indices aligned
+        try {
+            BRepAdaptor_Curve curve(edge);
+            GCPnts_TangentialDeflection discretizer(
+                curve, angDeflection, linDeflection, /*minPoints=*/2);
+            auto& poly = polylines[i - 1];
+            poly.reserve(discretizer.NbPoints());
+            for (int p = 1; p <= discretizer.NbPoints(); p++) {
+                const gp_Pnt pt = discretizer.Value(p);
+                poly.emplace_back(pt.X(), pt.Y(), pt.Z());
+            }
+        } catch (const Standard_Failure&) {
+            polylines[i - 1].clear(); // unparameterizable edge: skip, keep index
+        }
+    }
+    return polylines;
 }
 
 // CADKernel implementation

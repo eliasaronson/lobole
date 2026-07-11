@@ -32,6 +32,17 @@ struct RayHit {
     uint32_t faceIndex = 0;
 };
 
+// A picked B-Rep edge (toponaming T5 / fillet M7). `edgeIndex` follows the
+// same deduplicated order as CADShape::GenerateEdgePolylines and
+// ElementMap::edgeNames.
+struct EdgeHit {
+    bool hit = false;
+    float distance = 0.0f; // along the ray to the closest point on the edge
+    glm::vec3 point;       // that closest point (on the edge polyline)
+    uint32_t meshId = 0;
+    uint32_t edgeIndex = 0;
+};
+
 class FaceSelector {
 public:
     FaceSelector();
@@ -39,16 +50,23 @@ public:
 
     // Mesh management. triangleFaces maps each triangle to its B-Rep face id
     // (from CADShape::Mesh); if empty, every triangle is its own face.
+    // edgePolylines (from CADShape::GenerateEdgePolylines) enables PickEdge;
+    // its indices are the mesh's edgeIndex space.
     void AddMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices,
                  const std::vector<uint32_t>& indices,
                  const std::vector<uint32_t>& triangleFaces = {},
-                 const glm::mat4& transform = glm::mat4(1.0f));
+                 const glm::mat4& transform = glm::mat4(1.0f),
+                 const std::vector<std::vector<glm::vec3>>& edgePolylines = {});
     void UpdateMeshTransform(uint32_t meshId, const glm::mat4& transform);
     void RemoveMesh(uint32_t meshId);
     void Clear();
 
     // Selection
     RayHit PickFace(const Ray& ray) const;
+    // The edge nearest the ray within a small angular tolerance (~a few
+    // pixels at any zoom), rejecting edges hidden behind a surface the same
+    // ray hits first. Misses when no mesh carries edge polylines.
+    EdgeHit PickEdge(const Ray& ray) const;
     Ray ScreenToWorldRay(float screenX, float screenY, int screenWidth, int screenHeight, 
                         const Camera& camera) const;
     
@@ -75,6 +93,9 @@ private:
         std::vector<uint32_t> indices;
         std::vector<uint32_t> triangleFaces; // B-Rep face id per triangle
         std::vector<Face> faces;
+        // B-Rep edge polylines in edgeIndex order (untransformed, like
+        // vertices); empty when the mesh has no pickable edges.
+        std::vector<std::vector<glm::vec3>> edgePolylines;
         glm::mat4 transform = glm::mat4(1.0f);
     };
 

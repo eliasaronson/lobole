@@ -71,6 +71,15 @@ public:
 
     Mesh GenerateMesh(double deflection = 0.1) const;
 
+    // Tessellates each B-Rep edge into a world-space polyline, indexed by
+    // edgeIndex in the deduplicated TopExp::MapShapes(TopAbs_EDGE)
+    // first-appearance order — the convention ElementMap::edgeNames and edge
+    // picking share. Degenerate edges (a revolve pole) yield an empty
+    // polyline so indices stay aligned. Curve-based tessellation, so the
+    // result is independent of the face triangulation.
+    std::vector<std::vector<glm::vec3>> GenerateEdgePolylines(
+        double deflection = 0.1) const;
+
 private:
     TopoDS_Shape m_shape;
 };
@@ -131,6 +140,8 @@ public:
     };
 
     Mesh GenerateMesh(double deflection = 0.1) const { return Mesh(); }
+    std::vector<std::vector<glm::vec3>> GenerateEdgePolylines(
+        double deflection = 0.1) const { return {}; }
     std::vector<CADShape> SplitSolids() const { return {}; }
     bool FacePlane(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
 };

@@ -16,11 +16,13 @@ FaceSelector::~FaceSelector() {
 void FaceSelector::AddMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices,
                           const std::vector<uint32_t>& indices,
                           const std::vector<uint32_t>& triangleFaces,
-                          const glm::mat4& transform) {
+                          const glm::mat4& transform,
+                          const std::vector<std::vector<glm::vec3>>& edgePolylines) {
     auto meshData = std::make_unique<MeshData>();
     meshData->meshId = meshId;
     meshData->vertices = vertices;
     meshData->indices = indices;
+    meshData->edgePolylines = edgePolylines;
     meshData->transform = transform;
 
     // Without face info, treat each triangle as its own face
@@ -226,7 +228,69 @@ RayHit FaceSelector::PickFace(const Ray& ray) const {
     return closestHit;
 }
 
-bool FaceSelector::RayTriangleIntersect(const Ray& ray, const glm::vec3& v0, const glm::vec3& v1, 
+EdgeHit FaceSelector::PickEdge(const Ray& ray) const {
+    // Pick radius as an angle off the ray (~0.8° ≈ a handful of pixels at a
+    // typical FOV), so the tolerance tracks zoom without needing the camera.
+    constexpr float kTanPickAngle = 0.014f;
+    constexpr float kMinRadius = 1e-4f; // absolute floor very close to the eye
+
+    EdgeHit best;
+    float bestAngular = std::numeric_limits<float>::max();
+
+    for (const auto& mesh : m_meshes) {
+        for (size_t e = 0; e < mesh->edgePolylines.size(); e++) {
+            const auto& poly = mesh->edgePolylines[e];
+            for (size_t i = 0; i + 1 < poly.size(); i++) {
+                const glm::vec3 p0 =
+                    glm::vec3(mesh->transform * glm::vec4(poly[i], 1.0f));
+                const glm::vec3 p1 =
+                    glm::vec3(mesh->transform * glm::vec4(poly[i + 1], 1.0f));
+
+                // Closest approach between the ray (o + t·d, t ≥ 0) and the
+                // segment p0 + s·(p1 − p0), s ∈ [0,1].
+                const glm::vec3 u = ray.direction; // unit
+                const glm::vec3 v = p1 - p0;
+                const glm::vec3 w = ray.origin - p0;
+                const float b = glm::dot(u, v);
+                const float c = glm::dot(v, v);
+                const float d = glm::dot(u, w);
+                const float ee = glm::dot(v, w);
+                const float denom = c - b * b; // ≥ 0; 0 when parallel
+                float s = (denom > 1e-12f) ? (ee - b * d) / denom : 0.0f;
+                s = glm::clamp(s, 0.0f, 1.0f);
+                const glm::vec3 onSeg = p0 + s * v;
+                const float t = glm::dot(onSeg - ray.origin, u);
+                if (t <= 0.0f) continue; // behind the eye
+                const float perp = glm::length(onSeg - (ray.origin + t * u));
+
+                const float radius = std::max(kTanPickAngle * t, kMinRadius);
+                if (perp > radius) continue;
+                const float angular = perp / t;
+                if (angular < bestAngular) {
+                    bestAngular = angular;
+                    best.hit = true;
+                    best.distance = t;
+                    best.point = onSeg;
+                    best.meshId = mesh->meshId;
+                    best.edgeIndex = static_cast<uint32_t>(e);
+                }
+            }
+        }
+    }
+
+    // Occlusion: an edge behind a surface the same ray hits first isn't
+    // pickable. Edges on the hit face's own boundary/silhouette sit at the
+    // face's depth (within the pick radius), so give a proportional slack.
+    if (best.hit) {
+        const RayHit face = PickFace(ray);
+        if (face.hit && best.distance > face.distance * 1.05f + 1e-3f) {
+            return EdgeHit{};
+        }
+    }
+    return best;
+}
+
+bool FaceSelector::RayTriangleIntersect(const Ray& ray, const glm::vec3& v0, const glm::vec3& v1,
                                        const glm::vec3& v2, float& distance, glm::vec3& hitPoint) const {
     const float EPSILON = 0.0000001f;
     
