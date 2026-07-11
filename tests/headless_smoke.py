@@ -195,6 +195,43 @@ def main():
         except RuntimeError:
             pass
 
+        # Directory format + git history (F3+F5): saves commit, checkpoints
+        # tag, restore rewinds
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Base", "position": [0, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        proj = os.path.join(tmp, "gitproj.dsgn")
+        d.call("save_project", path=proj, message="first")
+        expect(os.path.isdir(proj) and
+               os.path.exists(os.path.join(proj, "index.json")),
+               "directory project written")
+        expect(os.path.isdir(os.path.join(proj, ".git")),
+               "save initialized a git repo")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "More", "position": [5, 0, 0],
+            "width": 1, "height": 1, "depth": 1})
+        d.call("save_project", path=proj, message="second")
+        log = d.call("history_log")["log"]
+        expect([e["subject"] for e in log] == ["second", "first"],
+               "one commit per save, newest first")
+        d.call("checkpoint_create", name="beta")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Even more", "position": [10, 0, 0],
+            "width": 1, "height": 1, "depth": 1})
+        d.call("save_project", path=proj, message="third")
+        d.call("history_restore", commit=log[-1]["hash"])  # back to "first"
+        expect(len(d.call("get_state")["features"]) == 1,
+               "restored the first commit's single feature")
+        d.call("history_restore", commit="cp/beta")  # checkpoint tag works
+        expect(len(d.call("get_state")["features"]) == 2,
+               "restored the checkpoint tag")
+        try:
+            d.call("history_restore", commit="nonsense")
+            expect(False, "unknown commit must fail")
+        except RuntimeError:
+            pass
+
         # Autosave + crash recovery (F2): save clean, dirty the doc, let the
         # 1s autosave fire, SIGKILL (a real crash — no signal handler), then
         # prove a fresh instance sees and recovers the autosave.

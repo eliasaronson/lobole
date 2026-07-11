@@ -22,7 +22,8 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc);
 
 // Track the on-disk identity for dirty-state + autosave: call after every
 // clean save (also clears the autosave sidecar) / open / new. "" = unsaved.
-void MarkProjectSaved(AppState& state, const std::string& path);
+void MarkProjectSaved(AppState& state, const std::string& path,
+                      const std::string& message = "save");
 void MarkProjectOpened(AppState& state, const std::string& path);
 // After loading a recovery sidecar: the document belongs at `path` but is
 // deliberately dirty (unsaved recovered changes), so autosave keeps running

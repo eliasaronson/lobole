@@ -169,6 +169,7 @@ set(core_sources
     src/FaceSelector.cpp
     src/core/Autosaver.cpp
     src/core/Checkpoints.cpp
+    src/core/GitVault.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
     src/core/Command.cpp

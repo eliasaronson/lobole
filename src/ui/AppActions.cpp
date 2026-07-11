@@ -11,6 +11,7 @@
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
 #include "core/Autosaver.h"
+#include "core/GitVault.h"
 #include "core/BooleanFeature.h"
 #include "core/Command.h"
 #include "core/DatumAxisFeature.h"
@@ -463,13 +464,25 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.syncedDocumentVersion = UINT64_MAX;
 }
 
-void MarkProjectSaved(AppState& state, const std::string& path) {
+void MarkProjectSaved(AppState& state, const std::string& path,
+                      const std::string& message) {
   state.projectPath = path;
   state.lastSavedVersion = state.document ? state.document->Version() : 0;
   // The save supersedes both possible sidecars: this project's, and the
   // unsaved slot if the document lived there before its first save.
   Autosaver::Clear(path);
   Autosaver::Clear("");
+  // Git-backed history (F5): a directory project is its own repository;
+  // every clean save becomes a commit. No-ops without git.
+  if (path.ends_with(".dsgn") && GitVault::Available()) {
+    if (!GitVault::IsRepo(path)) {
+      GitVault::Init(path);
+    }
+    std::string error;
+    if (!GitVault::CommitAll(path, message, &error)) {
+      LOG_WARN("Git commit failed: {}", error);
+    }
+  }
 }
 
 void MarkProjectOpened(AppState& state, const std::string& path) {

@@ -397,9 +397,12 @@ def open_project(path: str) -> dict:
     return _call("open_project", path=path)
 
 
-@mcp.tool(description="Save the document as Designer project JSON.")
-def save_project(path: str) -> dict:
-    return _call("save_project", path=path)
+@mcp.tool(description="Save the document. A .dsgn path (the default "
+          "format) is a project DIRECTORY, git-backed: every save commits "
+          "with `message`. A .json path is the single-file interchange "
+          "form.")
+def save_project(path: str, message: str = "save") -> dict:
+    return _call("save_project", path=path, message=message)
 
 
 @mcp.tool(description="Import a STEP file's bodies as an Import feature.")
@@ -425,6 +428,20 @@ def checkpoint_list() -> dict:
           "you save_project).")
 def checkpoint_restore(name: str) -> dict:
     return _call("checkpoint_restore", name=name)
+
+
+@mcp.tool(description="Git history of a directory (.dsgn) project: every "
+          "save is a commit, checkpoints are tags (cp/<name>). Returns "
+          "{log: [{hash, subject, unix}]}, newest first.")
+def history_log(limit: int = 20) -> dict:
+    return _call("history_log", limit=limit)
+
+
+@mcp.tool(description="Restore the project to a commit (hash, tag like "
+          "'cp/v1', or any git rev) and reload it. History stays linear — "
+          "the restored state becomes a new commit on the next save.")
+def history_restore(commit: str) -> dict:
+    return _call("history_restore", commit=commit)
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@
 #include "core/Autosaver.h"
 #include "core/Checkpoints.h"
 #include "core/Expression.h"
+#include "core/GitVault.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "core/SketchSolver.h"
@@ -718,11 +719,14 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return json::object();
   }
   if (m == "save_project") {
+    // params: {path, message?} — message becomes the git commit subject for
+    // directory (.dsgn) projects (F5); ignored otherwise.
     const std::string path = p.at("path").get<std::string>();
     std::string error;
     if (!DocumentIO::Save(*doc, path, &error))
       throw std::runtime_error(error);
-    ui::MarkProjectSaved(state, path); // also clears the autosave sidecar
+    // Also clears the autosave sidecar and commits git-backed projects.
+    ui::MarkProjectSaved(state, path, p.value("message", "save"));
     return json::object();
   }
   if (m == "open_project") {
@@ -747,6 +751,14 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     std::string error;
     if (!Checkpoints::Create(*doc, state.projectPath, name, &error))
       throw std::runtime_error(error);
+    // Git-backed projects (F5): a checkpoint is also a commit + tag of the
+    // live state.
+    if (state.projectPath.ends_with(".dsgn") && GitVault::Available()) {
+      if (DocumentIO::Save(*doc, state.projectPath, &error)) {
+        ui::MarkProjectSaved(state, state.projectPath, "checkpoint: " + name);
+        GitVault::Tag(state.projectPath, "cp/" + name);
+      }
+    }
     return {{"path", Checkpoints::PathOf(state.projectPath, name)}};
   }
   if (m == "checkpoint_list") {
@@ -766,6 +778,31 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!loaded)
       throw std::runtime_error(error.empty() ? "no such checkpoint: " + name
                                              : error);
+    ui::ReplaceDocument(state, std::move(loaded));
+    ui::FitCameraToDocument(state);
+    ui::MarkProjectRecovered(state, state.projectPath);
+    return json::object();
+  }
+  if (m == "history_log") {
+    // Git history of a directory project (F5). params: {limit?: 20}
+    json entries = json::array();
+    for (const auto& e :
+         GitVault::Log(state.projectPath, p.value("limit", 20)))
+      entries.push_back({{"hash", e.hash},
+                         {"subject", e.subject},
+                         {"unix", e.unixTime}});
+    return {{"log", entries}};
+  }
+  if (m == "history_restore") {
+    // Check out a commit's tree over the project and reload it; history
+    // stays linear (the restored state commits on the next save).
+    // params: {commit} (hash, tag like "cp/v1", or any git rev)
+    const std::string commit = p.at("commit").get<std::string>();
+    std::string error;
+    if (!GitVault::RestoreTo(state.projectPath, commit, &error))
+      throw std::runtime_error(error);
+    auto loaded = DocumentIO::Load(state.projectPath, &error);
+    if (!loaded) throw std::runtime_error(error);
     ui::ReplaceDocument(state, std::move(loaded));
     ui::FitCameraToDocument(state);
     ui::MarkProjectRecovered(state, state.projectPath);
