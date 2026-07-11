@@ -305,3 +305,26 @@ TEST_CASE("Extrude survives a document JSON round-trip", "[extrude][io]") {
 
   fs::remove(path);
 }
+
+TEST_CASE("Solver float noise at a line/arc joint does not distort the prism",
+          "[extrude][arc]") {
+  // Regression: coordinates exactly as PlaneGCS wrote them back after
+  // solving a filleted 40x20 rectangle (float32 noise ~1e-7 at the joint
+  // between the trimmed top line and the fillet arc). The noisy joint made
+  // the profile lose ~5% of its area while still extruding "successfully".
+  std::vector<sketch::Entity> e;
+  e.push_back(sketch::Line{{0.0f, 0.0f}, {40.0f, 0.0f}});
+  e.push_back(sketch::Line{{40.0f, 0.0f}, {40.0f, 20.0f}});
+  e.push_back(sketch::Line{{40.0f, 20.0f}, {3.999999761581421f, 20.0f}});
+  e.push_back(sketch::Line{{0.0f, 16.0f}, {0.0f, 0.0f}});
+  e.push_back(sketch::Arc{{4.0f, 16.0f}, 3.9999999543595246,
+                          1.5707963501871345, 3.1415926649999117});
+
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 1);
+  CADShape prism = sketch::BuildPrism(kXY, loops, 5.0, false);
+  REQUIRE(prism.IsValid());
+  const double area = 40.0 * 20.0 - (16.0 - M_PI * 4.0);
+  CHECK_THAT(prism.Volume(), WithinRel(area * 5.0, 1e-4));
+}
+

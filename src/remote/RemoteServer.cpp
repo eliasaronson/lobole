@@ -6,6 +6,7 @@
 #include "Logger.h"
 #include "RayTracingRenderer.h"
 #include "MeshRenderer.h"
+#include "core/Expression.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "core/SketchSolver.h"
@@ -394,6 +395,18 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // Optional expression driving the value, evaluated against the document's
     // variables on every regeneration (angles in degrees, like the UI).
     c.valueExpr = p.value("expr", std::string{});
+    if (!c.valueExpr.empty()) {
+      // Evaluate now too: the immediate solve below runs before
+      // Document::Regenerate refreshes dimension values (VisitExprs), and
+      // solving with the default 0 collapses the geometry irrecoverably.
+      ExprError err;
+      const auto v = ExpressionEngine::Default().EvaluateText(
+          c.valueExpr, doc->Symbols(), &err);
+      if (!v) throw std::runtime_error("bad expr: " + err.message);
+      c.value = (c.kind == sketch::ConstraintKind::Angle)
+                    ? glm::radians(*v)
+                    : *v;
+    }
     const json& refs = p.at("refs");
     if (refs.size() > 0)
       c.a = {refs[0][0].get<uint32_t>(), refs[0][1].get<uint8_t>()};

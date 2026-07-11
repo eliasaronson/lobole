@@ -2,6 +2,8 @@
 
 #include "Logger.h"
 
+#include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -17,7 +19,9 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
+#include <Precision.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <Standard_Failure.hxx>
 #include <gp_Ax1.hxx>
@@ -211,20 +215,75 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
     gp_Elips ell(axis, el.rMajor, el.rMinor);
     wire.Add(BRepBuilderAPI_MakeEdge(ell).Edge());
   } else {
-    for (const auto& e : loop.edges) {
+    // Consecutive edges share one explicit vertex per chain joint. BuildLoops
+    // matched the endpoints within kChainTol, but solver float noise can
+    // leave joints ~1e-7 apart — just past MakeWire's default merge tolerance
+    // — and MakeWire then silently DROPS the unconnectable edge (a filleted
+    // profile lost its arc and 5% of its area this way). Shared vertices
+    // connect by construction. Line geometry snaps to the joints exactly;
+    // arcs keep their circle, so each joint's tolerance is the measured
+    // distance to the adjacent arc endpoints (bounding boxes include vertex
+    // tolerances — keep them as tight as the geometry allows).
+    const size_t n = loop.edges.size();
+
+    // Whether edge i is traversed along its canonical CCW span (BuildLoops
+    // may have swapped a/b to fit the walk; the span itself is untouched).
+    std::vector<bool> forward(n, true);
+    for (size_t i = 0; i < n; i++) {
+      const LoopEdge& e = loop.edges[i];
+      if (!e.arc)
+        continue;
+      const glm::vec2 canonStart = OnCircle(e.center, e.radius, e.angStart);
+      forward[i] =
+          glm::length(e.a - canonStart) <= glm::length(e.b - canonStart);
+    }
+    // World-space point where edge i's traversal starts (atB=false) or ends.
+    auto endPointWorld = [&](size_t i, bool atB) {
+      const LoopEdge& e = loop.edges[i];
+      if (!e.arc)
+        return toPnt(atB ? e.b : e.a);
+      const double ang = (atB == forward[i]) ? e.angEnd : e.angStart;
+      return toPnt(OnCircle(e.center, e.radius, ang));
+    };
+
+    BRep_Builder builder;
+    std::vector<TopoDS_Vertex> joints(n); // joints[i]: edge i -> edge i+1
+    for (size_t i = 0; i < n; i++) {
+      const size_t next = (i + 1) % n;
+      const glm::vec2 mid = (loop.edges[i].b + loop.edges[next].a) * 0.5f;
+      const gp_Pnt p = toPnt(mid);
+      double tol = Precision::Confusion();
+      if (loop.edges[i].arc)
+        tol = std::max(tol, p.Distance(endPointWorld(i, true)) +
+                                Precision::Confusion());
+      if (loop.edges[next].arc)
+        tol = std::max(tol, p.Distance(endPointWorld(next, false)) +
+                                Precision::Confusion());
+      builder.MakeVertex(joints[i], p, tol);
+    }
+
+    for (size_t i = 0; i < n; i++) {
+      const LoopEdge& e = loop.edges[i];
+      const TopoDS_Vertex& from = joints[(i + n - 1) % n];
+      const TopoDS_Vertex& to = joints[i];
       if (e.arc) {
-        // Build the canonical CCW arc (angStart → angEnd) as a trimmed gp_Circ;
-        // its in-loop orientation is fixed up by ShapeFix_Wire below.
+        // Trim the gp_Circ by the shared vertices, ordered to match the
+        // canonical CCW span; ShapeFix_Wire fixes up the in-loop orientation.
         glm::vec3 u = plane.GetUAxis();
         gp_Ax2 axis(toPnt(e.center), normal, gp_Dir(u.x, u.y, u.z));
         gp_Circ circ(axis, e.radius);
-        gp_Pnt s = toPnt(OnCircle(e.center, e.radius, e.angStart));
-        gp_Pnt en = toPnt(OnCircle(e.center, e.radius, e.angEnd));
-        wire.Add(BRepBuilderAPI_MakeEdge(circ, s, en).Edge());
+        wire.Add(forward[i] ? BRepBuilderAPI_MakeEdge(circ, from, to).Edge()
+                            : BRepBuilderAPI_MakeEdge(circ, to, from).Edge());
       } else {
-        Handle(Geom_TrimmedCurve) seg =
-            GC_MakeSegment(toPnt(e.a), toPnt(e.b)).Value();
-        wire.Add(BRepBuilderAPI_MakeEdge(seg).Edge());
+        const gp_Pnt p0 = BRep_Tool::Pnt(from), p1 = BRep_Tool::Pnt(to);
+        if (p0.Distance(p1) < Precision::Confusion())
+          continue; // degenerate sliver after snapping
+        Handle(Geom_TrimmedCurve) seg = GC_MakeSegment(p0, p1).Value();
+        wire.Add(BRepBuilderAPI_MakeEdge(seg, from, to).Edge());
+      }
+      if (wire.Error() != BRepBuilderAPI_WireDone) {
+        LOG_ERROR("Sketch profile: wire rejected edge {} of {}", i, n);
+        return TopoDS_Wire();
       }
     }
   }
