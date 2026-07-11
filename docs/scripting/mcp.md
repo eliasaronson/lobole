@@ -9,14 +9,17 @@
    — or with no window/GPU/display at all: `designer --headless --remote 8437`
    (full modeling + `mass_properties`/`list_elements`; `screenshot`,
    `render_still`, face selection and `ui_action` error with the remedy)
-2. Register the server with your client, e.g. Claude Code:
+2. Register the server with your client. Claude Code sessions started in this
+   repo pick it up automatically from the checked-in **`.mcp.json`**
+   (approve the project server when prompted; `python3` must have the `mcp`
+   SDK — run Claude Code from inside `nix-shell`, or `pip install mcp`).
+   For other clients:
 
    ```
    claude mcp add designer -- python3 /path/to/Designer/tools/designer_mcp.py --port 8437
    ```
 
-   The port also comes from `$DESIGNER_PORT`; the flag wins. Requires the
-   official MCP Python SDK (`pip install mcp`, or the repo's `shell.nix`).
+   The port also comes from `$DESIGNER_PORT`; the flag wins.
 
 The server connects lazily — registering before the app is running is fine;
 tools error with the remedy until it is reachable.

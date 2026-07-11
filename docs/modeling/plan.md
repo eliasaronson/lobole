@@ -75,10 +75,11 @@ modes), `test_datum.cpp` datum-axis cases, a `remote_smoke.py` block.
 
 *Deferred:* axis-by-B-Rep-edge → after toponaming (M6).
 
-### M3 — Richer extrude
+### M3 — Richer extrude — [design: m3-extrude.md](m3-extrude.md)
 Symmetric / two-sided, blind distance both ways, **thin/shell** (wall
-thickness), **draft angle**. Blind is easy; **up-to-face / up-to-body** needs a
-face/body ref → the up-to-face variant waits for M6.
+thickness), **up-to-face** (unblocked by M6/T5 — planar-face v1), and
+**multi-profile sketches** as the headline. Draft angle explicitly deferred
+(see the design doc).
 
 Also: **multi-profile sketches** (several disjoint loops → one face per outer
 with its own holes, e.g. a four-bolt-hole cut in one sketch). Found via the

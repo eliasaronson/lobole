@@ -16,7 +16,7 @@ prerequisite for everything below) already exist.
 
 ## Milestones
 
-### F1 — Format spec + golden-file corpus (~0.5–1 day)
+### F1 — Format spec + golden-file corpus (~0.5–1 day) — [design: f1-f2.md](f1-f2.md)
 Write `docs/versioning/format.md`: the JSON schema, the id-stability
 guarantees, and the **migration policy** (every version bump ships a loader
 migration + a round-trip test — already the de-facto practice; codify it).
@@ -24,7 +24,7 @@ Add a golden-file corpus: real saved projects, one per format version, loaded
 + regenerated + geometry-asserted in ctest. This is what makes "your old files
 still open" a tested promise instead of a hope.
 
-### F2 — Autosave + crash recovery (~0.5–1 day)
+### F2 — Autosave + crash recovery (~0.5–1 day) — [design: f1-f2.md](f1-f2.md)
 Timed autosave of dirty documents to a sidecar (`project.dsgn.autosave`),
 atomic write (temp + rename), recover-on-start prompt when a sidecar is newer
 than its project, sidecar cleared on clean save/exit. Dirty-state already

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "designer": {
+      "command": "python3",
+      "args": ["tools/designer_mcp.py", "--port", "8437"]
+    }
+  }
+}
