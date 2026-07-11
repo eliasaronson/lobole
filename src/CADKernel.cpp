@@ -65,10 +65,34 @@ bool CADShape::IsValid() const {
 
 double CADShape::Volume() const {
     if (!IsValid()) return 0.0;
-    
+
     GProp_GProps props;
     BRepGProp::VolumeProperties(m_shape, props);
     return props.Mass();
+}
+
+bool CADShape::ComputeMassProps(MassProps& out) const {
+    if (!IsValid()) return false;
+
+    GProp_GProps volumeProps;
+    BRepGProp::VolumeProperties(m_shape, volumeProps);
+    out.volume = volumeProps.Mass();
+    const gp_Pnt com = volumeProps.CentreOfMass();
+    out.centerOfMass = glm::vec3(com.X(), com.Y(), com.Z());
+
+    // A GProps' inertia matrix is about its system location — anchor a second
+    // pass at the center of mass so the matrix is the physical one.
+    GProp_GProps aboutCom(com);
+    BRepGProp::VolumeProperties(m_shape, aboutCom);
+    const gp_Mat inertia = aboutCom.MatrixOfInertia();
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++)
+            out.inertia[r][c] = inertia.Value(r + 1, c + 1);
+
+    GProp_GProps surfaceProps;
+    BRepGProp::SurfaceProperties(m_shape, surfaceProps);
+    out.surfaceArea = surfaceProps.Mass();
+    return true;
 }
 
 void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max) const {

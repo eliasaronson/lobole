@@ -120,3 +120,50 @@ TEST_CASE("STEP save/load roundtrip preserves volume", "[kernel][io]") {
 
     fs::remove(path);
 }
+
+TEST_CASE("Mass properties of a box match the analytic values",
+          "[kernel][massprops]") {
+  using Catch::Matchers::WithinAbs;
+  const double a = 2.0, b = 3.0, c = 4.0;
+  CADShape box = CADKernel::Instance().CreateBox(glm::vec3(0, 0, 0),
+                                                 glm::vec3(a, b, c));
+  CADShape::MassProps mp;
+  REQUIRE(box.ComputeMassProps(mp));
+  CHECK_THAT(mp.volume, WithinRel(a * b * c, 1e-9));
+  CHECK_THAT(mp.surfaceArea, WithinRel(2 * (a * b + b * c + c * a), 1e-9));
+  CHECK_THAT(mp.centerOfMass.x, WithinAbs(a / 2, 1e-9));
+  CHECK_THAT(mp.centerOfMass.y, WithinAbs(b / 2, 1e-9));
+  CHECK_THAT(mp.centerOfMass.z, WithinAbs(c / 2, 1e-9));
+  // Unit density: I_xx = m/12 (b^2 + c^2) about the CoM, and no products of
+  // inertia for an axis-aligned box.
+  const double m = a * b * c;
+  CHECK_THAT(mp.inertia[0][0], WithinRel(m / 12 * (b * b + c * c), 1e-9));
+  CHECK_THAT(mp.inertia[1][1], WithinRel(m / 12 * (a * a + c * c), 1e-9));
+  CHECK_THAT(mp.inertia[2][2], WithinRel(m / 12 * (a * a + b * b), 1e-9));
+  CHECK_THAT(mp.inertia[0][1], WithinAbs(0.0, 1e-9));
+  CHECK_THAT(mp.inertia[0][2], WithinAbs(0.0, 1e-9));
+}
+
+TEST_CASE("Mass properties of a cylinder match the analytic values",
+          "[kernel][massprops]") {
+  using Catch::Matchers::WithinAbs;
+  const double r = 1.5, h = 4.0;
+  CADShape cyl = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0), glm::vec3(0, 0, 1), r, h);
+  CADShape::MassProps mp;
+  REQUIRE(cyl.ComputeMassProps(mp));
+  const double v = M_PI * r * r * h;
+  CHECK_THAT(mp.volume, WithinRel(v, 1e-6));
+  CHECK_THAT(mp.surfaceArea, WithinRel(2 * M_PI * r * (r + h), 1e-6));
+  CHECK_THAT(mp.centerOfMass.z, WithinAbs(h / 2, 1e-6));
+  // About the CoM: I_zz = m r^2 / 2, I_xx = I_yy = m (3r^2 + h^2) / 12.
+  CHECK_THAT(mp.inertia[2][2], WithinRel(v * r * r / 2, 1e-6));
+  CHECK_THAT(mp.inertia[0][0], WithinRel(v * (3 * r * r + h * h) / 12, 1e-6));
+  CHECK_THAT(mp.inertia[1][1], WithinRel(v * (3 * r * r + h * h) / 12, 1e-6));
+}
+
+TEST_CASE("Mass properties of an invalid shape fail cleanly",
+          "[kernel][massprops]") {
+  CADShape::MassProps mp;
+  CHECK_FALSE(CADShape().ComputeMassProps(mp));
+}

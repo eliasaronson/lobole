@@ -584,6 +584,87 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     }
     return {{"variables", variables}};
   }
+  if (m == "mass_properties") {
+    // Volume, surface area, center of mass, and inertia (about the CoM) per
+    // body, plus a document total. Mass assumes model units are millimetres:
+    // grams = density[kg/m^3] * volume[mm^3] * 1e-6; bodies without an
+    // assigned material report mass null (density unknown), and so does the
+    // total if any contributor is unknown. params: {body?: index}
+    const auto& bodies = doc->GetBodies();
+    const int only = p.value("body", -1);
+    if (only >= static_cast<int>(bodies.size()))
+      throw std::runtime_error("body index out of range");
+    json out = json::array();
+    double totalVolume = 0.0, totalMass = 0.0;
+    glm::dvec3 weightedCom(0.0);
+    bool massKnown = true;
+    for (size_t i = 0; i < bodies.size(); i++) {
+      if (only >= 0 && i != static_cast<size_t>(only)) continue;
+      CADShape::MassProps mp;
+      if (!bodies[i].shape.ComputeMassProps(mp))
+        throw std::runtime_error("mass properties failed for body " +
+                                 bodies[i].name);
+      json inertia = json::array();
+      for (int r = 0; r < 3; r++)
+        inertia.push_back({mp.inertia[r][0], mp.inertia[r][1],
+                           mp.inertia[r][2]});
+      json entry = {{"body", i},
+                    {"name", bodies[i].name},
+                    {"volume", mp.volume},
+                    {"surface_area", mp.surfaceArea},
+                    {"center_of_mass", Vec3ToJson(mp.centerOfMass)},
+                    {"inertia", inertia},
+                    {"material", bodies[i].material}};
+      const float density = CADMaterials::MaterialLibrary::GetMaterial(
+                                CADMaterials::MaterialLibrary::FromSlug(
+                                    bodies[i].material))
+                                .density;
+      if (!bodies[i].material.empty() && density > 0.0f) {
+        entry["density"] = density;
+        entry["mass_g"] = density * mp.volume * 1e-6;
+        totalMass += density * mp.volume * 1e-6;
+      } else {
+        entry["mass_g"] = nullptr;
+        massKnown = false;
+      }
+      totalVolume += mp.volume;
+      weightedCom += glm::dvec3(mp.centerOfMass) * mp.volume;
+      out.push_back(entry);
+    }
+    if (out.empty()) throw std::runtime_error("no bodies");
+    const glm::dvec3 com =
+        totalVolume > 0.0 ? weightedCom / totalVolume : glm::dvec3(0.0);
+    return {{"bodies", out},
+            {"total",
+             {{"volume", totalVolume},
+              {"center_of_mass", {com.x, com.y, com.z}},
+              {"mass_g", massKnown ? json(totalMass) : json(nullptr)}}}};
+  }
+  if (m == "list_elements") {
+    // Stable element names (topological naming) for each body's faces and
+    // edges — what Fillet/Chamfer edge refs {feature_id, element} point at
+    // (feature_id = the body's created_by). Document-only: works headless.
+    // params: {body?: index}
+    const auto& bodies = doc->GetBodies();
+    const int only = p.value("body", -1);
+    if (only >= static_cast<int>(bodies.size()))
+      throw std::runtime_error("body index out of range");
+    json out = json::array();
+    for (size_t i = 0; i < bodies.size(); i++) {
+      if (only >= 0 && i != static_cast<size_t>(only)) continue;
+      json faces = json::array(), edges = json::array();
+      for (const auto& [idx, name] : bodies[i].elementMap.names)
+        faces.push_back({{"index", idx}, {"name", name}});
+      for (const auto& [idx, name] : bodies[i].elementMap.edgeNames)
+        edges.push_back({{"index", idx}, {"name", name}});
+      out.push_back({{"body", i},
+                     {"name", bodies[i].name},
+                     {"created_by", bodies[i].createdBy},
+                     {"faces", faces},
+                     {"edges", edges}});
+    }
+    return {{"bodies", out}};
+  }
   if (m == "undo") {
     state.commands->Undo(*doc);
     return {{"can_undo", state.commands->CanUndo()}};

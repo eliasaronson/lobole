@@ -148,6 +148,25 @@ void MaterialLibrary::InitializeMaterials() {
     
     // Default material
     materials[MaterialType::DEFAULT] = materials[MaterialType::ALUMINUM];
+
+    // Densities (kg/m^3), for mass properties (inspection I2). Set after the
+    // DEFAULT copy above so DEFAULT keeps density 0 = unknown: an unassigned
+    // body reports no mass instead of a silently-guessed aluminum one.
+    materials[MaterialType::ALUMINUM].density = 2700.0f;
+    materials[MaterialType::STEEL].density = 7850.0f;
+    materials[MaterialType::STAINLESS_STEEL].density = 8000.0f;
+    materials[MaterialType::BRASS].density = 8530.0f;
+    materials[MaterialType::BRONZE].density = 8800.0f;
+    materials[MaterialType::COPPER].density = 8960.0f;
+    materials[MaterialType::CHROME].density = 7190.0f;
+    materials[MaterialType::GOLD].density = 19300.0f;
+    materials[MaterialType::SILVER].density = 10490.0f;
+    materials[MaterialType::TITANIUM].density = 4506.0f;
+    materials[MaterialType::PLASTIC_WHITE].density = 1040.0f;
+    materials[MaterialType::PLASTIC_BLACK].density = 1040.0f;
+    materials[MaterialType::RUBBER].density = 1200.0f;
+    materials[MaterialType::GLASS].density = 2500.0f;
+    materials[MaterialType::CONCRETE].density = 2400.0f;
 }
 
 const MaterialProperties& MaterialLibrary::GetMaterial(MaterialType type) {

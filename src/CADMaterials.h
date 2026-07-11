@@ -38,6 +38,9 @@ struct MaterialProperties {
     float specular;
     float reflectance;
     std::string name;
+    // kg/m^3; 0 = unknown, so mass_properties reports no mass rather than a
+    // guessed one (DEFAULT deliberately stays 0).
+    float density = 0.0f;
 };
 
 class MaterialLibrary {

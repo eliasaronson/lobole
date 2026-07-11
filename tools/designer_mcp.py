@@ -75,6 +75,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "two_points"|"sketch_line"|"global_x"|"global_y"|"global_z", ...}}
   two_points: "points": [[x,y,z],[x,y,z]]
   sketch_line: "sketch_id": <feature id>, "entity_id": <line id>
+- Fillet / Chamfer (3D, on B-Rep edges): {{"type": "Fillet"|"Chamfer",
+  "name": str, "radius": num, "radius_expr"?: str,
+  "edges": [{{"feature_id": <the body's created_by feature id>,
+  "element": <stable edge name>}}, ...]}} — all edges must belong to one
+  body. Discover edge names + created_by with the list_elements tool.
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
 
 {AXIS_REF}
@@ -123,10 +128,13 @@ The loop that works — follow it every time:
 3. Extrude/Revolve referencing the sketch by the id add_feature returned.
    Never guess ids — read them from tool results or get_state.
 4. VERIFY after every mutating step: get_state (feature list, body volumes,
-   bounding boxes — sanity-check against the brief), then screenshot
-   (view="iso" default; front/top/right for dimensional checks). Do not
-   batch-build blind.
-5. Iterate. A wrong step is one undo away — prefer undo over compensating
+   bounding boxes, per-feature "error" fields — sanity-check against the
+   brief), mass_properties for the real oracle (CoM, mass, inertia), then
+   screenshot (view="iso" default; front/top/right for dimensional checks).
+   Do not batch-build blind.
+5. For 3D fillets/chamfers: list_elements to get stable edge names, then
+   add_feature with type Fillet/Chamfer referencing them.
+6. Iterate. A wrong step is one undo away — prefer undo over compensating
    edits. When done: save_project, and render_still for a presentation shot.
 """
 
@@ -183,6 +191,26 @@ def get_state() -> dict:
           "value, comment, and error if the expression fails to evaluate.")
 def list_variables() -> dict:
     return _call("list_variables")
+
+
+@mcp.tool(description="Mass properties per body (and a document total): "
+          "volume, surface_area, center_of_mass, inertia matrix (about the "
+          "CoM), density and mass_g (grams, assuming model units are mm; "
+          "null when the body has no material assigned). The geometry "
+          "oracle — verify against the brief with this, not just volume. "
+          "Optional body index restricts to one body.")
+def mass_properties(body: int = -1) -> dict:
+    return _call("mass_properties", **({"body": body} if body >= 0 else {}))
+
+
+@mcp.tool(description="Stable element names (topological naming) for each "
+          "body's faces and edges, plus the body's created_by feature id. "
+          "This is how Fillet/Chamfer edge refs are built: edges: "
+          "[{feature_id: <created_by>, element: <edge name>}]. Names survive "
+          "upstream edits; re-query after changing the feature history. "
+          "Optional body index restricts to one body.")
+def list_elements(body: int = -1) -> dict:
+    return _call("list_elements", **({"body": body} if body >= 0 else {}))
 
 
 # ---------------------------------------------------------------------------

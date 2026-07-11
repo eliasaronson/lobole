@@ -22,7 +22,18 @@ public:
     bool IsValid() const;
     double Volume() const;
     void GetBoundingBox(glm::vec3& min, glm::vec3& max) const;
-    
+
+    // Mass properties at unit density: volume, surface area, center of mass,
+    // and the inertia matrix about the center of mass (multiply by density
+    // for physical values). Inspection I2.
+    struct MassProps {
+        double volume = 0.0;
+        double surfaceArea = 0.0;
+        glm::vec3 centerOfMass{0.0f};
+        double inertia[3][3] = {}; // about centerOfMass, world-axis aligned
+    };
+    bool ComputeMassProps(MassProps& out) const;
+
     // Boolean operations
     CADShape Union(const CADShape& other) const;
     CADShape Intersection(const CADShape& other) const;
