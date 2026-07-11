@@ -1,8 +1,10 @@
 #include "ui/FeatureTreePanel.h"
 
+#include "core/Command.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "ui/SketchInteraction.h"
 
@@ -41,10 +43,15 @@ void DrawFeatureTreePanel(AppState& state) {
       auto* datum = dynamic_cast<DatumPlaneFeature*>(feature);
       const ImGuiSelectableFlags flags =
           datum ? ImGuiSelectableFlags_AllowDoubleClick : 0;
-      // Features that failed to regenerate show red, with the reason on hover.
-      const bool errored = !feature->GetError().empty();
+      // Features that failed to regenerate show red, with the reason on
+      // hover; suppressed features show dimmed.
+      const bool suppressed = feature->IsSuppressed();
+      const bool errored = !suppressed && !feature->GetError().empty();
       if (errored)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.35f, 0.35f, 1.0f));
+      else if (suppressed)
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
       if (ImGui::Selectable(label.c_str(),
                             state.selectedFeature == static_cast<int>(i),
                             flags)) {
@@ -58,8 +65,22 @@ void DrawFeatureTreePanel(AppState& state) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
           ImGui::SetTooltip("%s", feature->GetError().c_str());
+      } else if (suppressed) {
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Suppressed");
       }
       if (ImGui::BeginPopupContextItem()) {
+        // Suppress/unsuppress: skipped by regeneration, params kept. One
+        // undoable edit (suppressed round-trips through the feature JSON).
+        if (ImGui::MenuItem(suppressed ? "Unsuppress" : "Suppress")) {
+          nlohmann::json before = DocumentIO::FeatureToJson(*feature);
+          feature->SetSuppressed(!suppressed);
+          doc->Regenerate();
+          nlohmann::json after = DocumentIO::FeatureToJson(*feature);
+          state.commands->Execute(
+              std::make_unique<ModifyFeatureCommand>(i, before, after), *doc);
+        }
         // A face-attached sketch can be re-pointed at another face (e.g. after
         // its face was consumed): arms face-picking for this sketch's faceRef.
         auto* sk = dynamic_cast<SketchFeature*>(feature);

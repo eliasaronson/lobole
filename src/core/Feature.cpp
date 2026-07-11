@@ -7,8 +7,10 @@ const Feature* RegenContext::FindById(uint64_t id) const {
   if (id == 0)
     return nullptr;
   for (size_t i = 0; i < currentIndex && i < features.size(); i++) {
+    // A suppressed feature is invisible to references — its consumers fail
+    // with their normal missing-reference errors, same rule as deletion (R1).
     if (features[i]->GetId() == id)
-      return features[i].get();
+      return features[i]->IsSuppressed() ? nullptr : features[i].get();
   }
   return nullptr;
 }

@@ -97,11 +97,19 @@ public:
   void SetError(const std::string& error) { m_error = error; }
   void ClearError() { m_error.clear(); }
 
+  // Suppressed features are skipped by regeneration (contributing nothing)
+  // but keep their parameters; anything referencing their outputs fails with
+  // its normal missing-reference error — same rule as deletion. Serialized
+  // (v19), unlike the transient m_error.
+  [[nodiscard]] bool IsSuppressed() const { return m_suppressed; }
+  void SetSuppressed(bool suppressed) { m_suppressed = suppressed; }
+
 protected:
   std::string m_name;
   std::string m_material;
   uint64_t m_id = 0;
   std::string m_error;
+  bool m_suppressed = false;
 };
 
 class BoxFeature : public Feature {

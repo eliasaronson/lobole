@@ -66,6 +66,7 @@ bool Document::Regenerate() {
 
   m_bodies.clear();
   m_version++;
+  bool allOk = true;
 
   for (size_t i = 0; i < m_features.size(); i++) {
     // Refresh expression-driven fields first, so the feature executes (and a
@@ -83,17 +84,24 @@ bool Document::Regenerate() {
     });
 
     m_features[i]->ClearError();
+    if (m_features[i]->IsSuppressed()) {
+      continue; // skipped entirely; keeps params, contributes nothing
+    }
     RegenContext ctx{m_bodies, m_features, i, &m_symbols};
     if (!m_features[i]->Execute(ctx)) {
       if (m_features[i]->GetError().empty()) {
         m_features[i]->SetError("regeneration failed");
       }
-      LOG_ERROR("Regeneration stopped at feature '{}': {}",
+      // Continue past the failure (R1): the broken feature contributes
+      // nothing; downstream features see the bodies as of this point and
+      // fail on their own if they referenced its outputs. One bad fillet no
+      // longer blanks the rest of the model.
+      LOG_ERROR("Feature '{}' failed to regenerate: {}",
                 m_features[i]->GetName(), m_features[i]->GetError());
-      return false;
+      allOk = false;
     }
   }
-  return true;
+  return allOk;
 }
 
 const Parameter* Document::FindParameter(const std::string& name) const {

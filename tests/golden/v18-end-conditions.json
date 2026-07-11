@@ -1,0 +1,27 @@
+{
+  "format": "designer-document",
+  "version": 18,
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 2]},
+       {"type": "line", "id": 3, "a": [4, 2], "b": [0, 2]},
+       {"type": "line", "id": 4, "a": [0, 2], "b": [0, 0]}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "TwoSided", "id": 2, "sketch_id": 1,
+     "distance": 5.0, "mode": "new_body",
+     "end_mode": "two_sided", "distance2": 2.0},
+    {"type": "Sketch", "name": "Ring", "id": 3, "next_entity_id": 2,
+     "plane": {"origin": [20, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "circle", "id": 1, "center": [0, 0], "radius": 3}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Wall", "id": 4, "sketch_id": 3,
+     "distance": 4.0, "mode": "new_body",
+     "thin": {"thickness": 0.5, "side": "out"}}
+  ]
+}

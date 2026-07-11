@@ -21,7 +21,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 18; // v18: extrude end conditions (v17: fillet/chamfer)
+constexpr int kVersion = 19; // v19: suppressed features (v18: extrude end conditions)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -355,6 +355,9 @@ json FeatureToJson(const Feature& feature) {
   }
   if (!feature.GetMaterial().empty()) { // omit default to keep JSON compact
     j["material"] = feature.GetMaterial();
+  }
+  if (feature.IsSuppressed()) { // v19; omit when active
+    j["suppressed"] = true;
   }
 
   if (auto* sk = dynamic_cast<const SketchFeature*>(&feature)) {
@@ -759,6 +762,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   }
   out->SetId(j.value("id", uint64_t{0})); // v1 files have no id; Document assigns
   out->SetMaterial(j.value("material", std::string{})); // absent (pre-v10) = default
+  out->SetSuppressed(j.value("suppressed", false)); // absent (pre-v19) = active
   return out;
 }
 

@@ -365,6 +365,22 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json::object();
   }
+  if (m == "suppress_feature") {
+    // Toggle suppression (by feature id) as one undoable edit; a suppressed
+    // feature is skipped by regeneration but keeps its parameters. params:
+    // {feature_id, suppressed}
+    size_t index = 0;
+    Feature* f =
+        doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
+    if (!f) throw std::runtime_error("no such feature");
+    json before = DocumentIO::FeatureToJson(*f);
+    f->SetSuppressed(p.at("suppressed").get<bool>());
+    doc->Regenerate();
+    json after = DocumentIO::FeatureToJson(*f);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    return json::object();
+  }
   if (m == "delete_feature") {
     if (!state.commands->Execute(std::make_unique<RemoveFeatureCommand>(
                                      p.at("index").get<size_t>()),

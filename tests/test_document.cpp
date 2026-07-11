@@ -3,7 +3,12 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/Serialization.h"
+#include "core/SketchFeature.h"
+
+#include <filesystem>
 
 using Catch::Matchers::WithinRel;
 
@@ -93,4 +98,58 @@ TEST_CASE("Regeneration is deterministic", "[document]") {
   REQUIRE(doc.GetBodies().size() == 2);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(1.0, 1e-6));
   CHECK_THAT(doc.GetBodies()[1].shape.Volume(), WithinRel(8.0, 1e-6));
+}
+
+TEST_CASE("Regeneration continues past a failed feature", "[document][regen]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
+                                              1.0));
+  // Extrude referencing a nonexistent sketch: fails, contributes nothing.
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Broken", 9999, 1.0,
+                                                  ExtrudeMode::NewBody));
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 1.0,
+                                              1.0, 1.0));
+  CHECK_FALSE(doc.Regenerate()); // something errored...
+  REQUIRE(doc.GetBodies().size() == 2); // ...but B still regenerated
+  CHECK(!doc.GetFeature(1)->GetError().empty());
+  CHECK(doc.GetFeature(0)->GetError().empty());
+  CHECK(doc.GetFeature(2)->GetError().empty());
+}
+
+TEST_CASE("Suppressed features are skipped and round-trip", "[document][regen]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
+                                              1.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0,
+                                              1.0, 1.0));
+  REQUIRE(doc.GetBodies().size() == 2);
+
+  doc.GetFeature(0)->SetSuppressed(true);
+  REQUIRE(doc.Regenerate()); // suppressed is not an error
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(2.0, 1e-9));
+
+  // Referencing a suppressed feature's output fails like a deleted one.
+  Document doc2;
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  sk->AddRectangle({0, 0}, {4, 2});
+  sk->SetSuppressed(true);
+  doc2.AddFeature(std::move(sk));
+  const uint64_t skId = doc2.GetFeature(0)->GetId();
+  doc2.AddFeature(std::make_unique<ExtrudeFeature>("Pad", skId, 3.0,
+                                                   ExtrudeMode::NewBody));
+  CHECK_FALSE(doc2.Regenerate());
+  CHECK(doc2.GetBodies().empty());
+  CHECK(!doc2.GetFeature(1)->GetError().empty());
+
+  // suppressed survives save/load (v19).
+  const auto path =
+      std::filesystem::temp_directory_path() / "suppress_rt.json";
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc2, path.string(), &error));
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->GetFeature(0)->IsSuppressed());
+  CHECK_FALSE(loaded->GetFeature(1)->IsSuppressed());
+  std::filesystem::remove(path);
 }
