@@ -27,4 +27,12 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
 std::optional<double> Distance(const std::vector<Body>& bodies,
                                const ElementRef& a, const ElementRef& b);
 
+// Total cross-section area where the plane (through `origin`, unit `normal`)
+// cuts through all bodies (inspection I3): the sum over bodies of the area of
+// their intersection with the plane. 0 when the plane misses everything;
+// nullopt on an OCC failure.
+std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
+                                       const glm::vec3& origin,
+                                       const glm::vec3& normal);
+
 } // namespace Measure

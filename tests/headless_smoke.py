@@ -238,6 +238,16 @@ def main():
                    - (400.0 - 4.0 * _m3.pi * 0.25 * 4.0)) < 0.5,
                "4-hole plate volume")
 
+        # Section (I3): cross-section area of a plate at a mid-cut
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "P", "position": [0, 0, 0],
+            "width": 4, "height": 5, "depth": 6})
+        sec = d.call("section", base_plane="xy", offset=3.0)  # z=3 -> 4x5=20
+        expect(abs(sec["area"] - 20.0) < 1e-3, "cross-section area 20")
+        miss = d.call("section", base_plane="xy", offset=99.0)
+        expect(abs(miss["area"]) < 1e-6, "section miss = 0 area")
+
         # Interference: two overlapping boxes clash; disjoint ones don't.
         d.call("new_project")
         d.call("add_feature", feature={

@@ -626,6 +626,29 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     }
     return {{"variables", variables}};
   }
+  if (m == "section") {
+    // Cross-section area where a plane cuts through all bodies (I3). Plane:
+    // {base_plane: "xy"|"xz"|"yz", offset?: 0} OR {origin: [x,y,z],
+    // normal: [x,y,z]}.
+    glm::vec3 origin(0.0f), normal(0.0f, 0.0f, 1.0f);
+    if (p.contains("base_plane")) {
+      const std::string bp = p.at("base_plane").get<std::string>();
+      normal = bp == "xz" ? glm::vec3(0, 1, 0)
+               : bp == "yz" ? glm::vec3(1, 0, 0)
+                            : glm::vec3(0, 0, 1);
+      origin = normal * static_cast<float>(p.value("offset", 0.0));
+    } else {
+      const auto& o = p.at("origin");
+      const auto& nrm = p.at("normal");
+      origin = {o[0].get<float>(), o[1].get<float>(), o[2].get<float>()};
+      normal = {nrm[0].get<float>(), nrm[1].get<float>(),
+                nrm[2].get<float>()};
+    }
+    const auto area = Measure::CrossSectionArea(doc->GetBodies(), origin,
+                                                normal);
+    if (!area) throw std::runtime_error("section failed");
+    return {{"area", *area}};
+  }
   if (m == "interference") {
     // Clash detection (inspection I4): two bodies interfere when their
     // intersection has volume. params: {a: index, b: index}

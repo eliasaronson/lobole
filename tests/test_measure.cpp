@@ -96,3 +96,25 @@ TEST_CASE("Measure of a dangling ref returns nullopt", "[measure]") {
   CHECK_FALSE(
       Measure::Describe(doc.GetBodies(), ElementRef{999, "x"}).has_value());
 }
+
+TEST_CASE("Cross-section area of a box", "[measure][section]") {
+  using Catch::Matchers::WithinRel;
+  Document doc;
+  // Box 2x3x4 spanning [0,2]x[0,3]x[0,4].
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 3, 4));
+  // A horizontal (XY-normal) cut at z=2 slices a 2x3 rectangle = area 6.
+  auto a = Measure::CrossSectionArea(doc.GetBodies(), glm::vec3(0, 0, 2),
+                                     glm::vec3(0, 0, 1));
+  REQUIRE(a.has_value());
+  CHECK_THAT(*a, WithinRel(6.0, 1e-6));
+  // A vertical (YZ-normal) cut at x=1 slices a 3x4 rectangle = area 12.
+  auto b = Measure::CrossSectionArea(doc.GetBodies(), glm::vec3(1, 0, 0),
+                                     glm::vec3(1, 0, 0));
+  REQUIRE(b.has_value());
+  CHECK_THAT(*b, WithinRel(12.0, 1e-6));
+  // A plane that misses the body -> zero area.
+  auto miss = Measure::CrossSectionArea(doc.GetBodies(), glm::vec3(0, 0, 99),
+                                        glm::vec3(0, 0, 1));
+  REQUIRE(miss.has_value());
+  CHECK_THAT(*miss, Catch::Matchers::WithinAbs(0.0, 1e-6));
+}

@@ -235,6 +235,17 @@ def list_variables() -> dict:
     return _call("list_variables")
 
 
+@mcp.tool(description="Cross-section area where a plane cuts through all "
+          "bodies (inspection). Plane: base_plane 'xy'|'xz'|'yz' + offset, "
+          "or explicit origin+normal. Returns {area}. Use to check wall "
+          "thickness / material at a cut.")
+def section(base_plane: str = "xy", offset: float = 0.0,
+            origin: list | None = None, normal: list | None = None) -> dict:
+    if origin is not None and normal is not None:
+        return _call("section", origin=origin, normal=normal)
+    return _call("section", base_plane=base_plane, offset=offset)
+
+
 @mcp.tool(description="Interference (clash) check between two bodies by "
           "index: returns {clash: bool, volume} — the volume of their "
           "overlap. Use before committing an assembly-like layout.")
