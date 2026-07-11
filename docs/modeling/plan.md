@@ -149,8 +149,9 @@ dangling-ref error + "Pick edges…" repair. Format v17. Tests:
 2+ profile sketches (ThruSections); SweepFeature sweeps a profile along an
 open path sketch (MakePipeShell, RoundCorner so sharp corners sweep fully).
 Shell is a toponaming consumer (faces by ElementRef); all give their results
-fresh primitive-style names. *Still to do:* hole/thread wizards, rib, draft
-on selected faces.
+fresh primitive-style names. **Hole wizard shipped** (HoleFeature: simple/counterbore/countersink
+holes at a sketch's points, cut into the bodies below — a bolt pattern is
+one feature). *Still to do:* thread wizards, rib, draft on selected faces.
 
 ## Cross-cutting
 
