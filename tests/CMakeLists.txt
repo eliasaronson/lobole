@@ -53,3 +53,11 @@ add_test(NAME remote_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/remote_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(remote_smoke PROPERTIES LABELS gui TIMEOUT 600)
+
+# Models a bracket through the MCP server (stdio) over the same live app.
+# Skips (77) when the python mcp SDK is not installed.
+add_test(NAME mcp_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(mcp_smoke PROPERTIES LABELS gui TIMEOUT 600
+                     SKIP_RETURN_CODE 77)

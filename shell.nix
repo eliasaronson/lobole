@@ -14,7 +14,7 @@ pkgs.mkShell {
     gcc
     pkg-config
     ccache # auto-detected by CMakeLists, no-op if absent
-    python3 # tools/designer_remote.py + remote_smoke ctest
+    (python3.withPackages (ps: [ ps.mcp ])) # tools/*.py + remote/mcp ctests
     git # submodules
 
     # Vulkan
