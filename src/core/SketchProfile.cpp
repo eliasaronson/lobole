@@ -299,6 +299,44 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
   return fix.Wire();
 }
 
+// The loop's boundary as a UV polygon (arcs/circles tessellated).
+std::vector<glm::vec2> LoopPolygon(const Loop& loop) {
+  std::vector<glm::vec2> poly;
+  if (loop.circle || loop.ellipse) {
+    const glm::vec2 c = loop.circle ? loop.circle->center
+                                    : loop.ellipse->center;
+    const double rx = loop.circle ? loop.circle->radius : loop.ellipse->rMajor;
+    const double ry = loop.circle ? loop.circle->radius : loop.ellipse->rMinor;
+    const double rot = loop.ellipse ? loop.ellipse->rotation : 0.0;
+    for (int i = 0; i < kCircleSegments; i++) {
+      const double a = 2.0 * M_PI * i / kCircleSegments;
+      const double x = rx * std::cos(a), y = ry * std::sin(a);
+      poly.push_back({c.x + x * std::cos(rot) - y * std::sin(rot),
+                      c.y + x * std::sin(rot) + y * std::cos(rot)});
+    }
+    return poly;
+  }
+  for (const auto& e : loop.edges) {
+    std::vector<glm::vec2> seg = TessellateLoopEdge(e);
+    for (size_t i = (poly.empty() ? 0 : 1); i < seg.size(); i++)
+      poly.push_back(seg[i]);
+  }
+  return poly;
+}
+
+// Even-odd point-in-polygon test in UV space.
+bool PolygonContains(const std::vector<glm::vec2>& poly, const glm::vec2& p) {
+  bool inside = false;
+  for (size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+    const glm::vec2& a = poly[i];
+    const glm::vec2& b = poly[j];
+    if ((a.y > p.y) != (b.y > p.y) &&
+        p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
+      inside = !inside;
+  }
+  return inside;
+}
+
 // Builds the planar profile face from the loops: the largest-|area| loop is
 // the outer boundary, the rest become holes. Null face on failure. Shared by
 // BuildPrism (extrude) and BuildRevolve.
@@ -311,6 +349,24 @@ TopoDS_Face BuildProfileFace(const SketchPlane& plane,
     if (area > outerArea) {
       outerArea = area;
       outer = i;
+    }
+  }
+
+  // Every other loop must be a hole INSIDE the outer. A profile of disjoint
+  // loops (e.g. four separate bolt-hole circles) is not supported yet; treat
+  // it as an error rather than let the bogus outer+holes face produce a
+  // silent no-op boolean downstream.
+  const std::vector<glm::vec2> outerPoly = LoopPolygon(loops[outer]);
+  for (size_t i = 0; i < loops.size(); i++) {
+    if (i == outer)
+      continue;
+    const std::vector<glm::vec2> poly = LoopPolygon(loops[i]);
+    if (poly.empty() || !PolygonContains(outerPoly, poly.front())) {
+      LOG_ERROR("Sketch profile: loop {} lies outside the outer boundary "
+                "(multiple disjoint profiles are not supported yet — use one "
+                "feature per profile)",
+                i);
+      return TopoDS_Face();
     }
   }
 

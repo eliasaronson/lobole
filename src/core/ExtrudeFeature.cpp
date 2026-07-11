@@ -22,6 +22,7 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
 
   std::vector<sketch::Loop> loops = sketch::BuildLoops(sketch->entities);
   if (loops.empty()) {
+    SetError("sketch has no closed profile");
     LOG_ERROR("ExtrudeFeature '{}': sketch has no closed profile", m_name);
     return false;
   }
@@ -34,6 +35,8 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     CADShape prism = sketch::BuildPrismNamed(sketch->plane, loops, distance,
                                              reversed, GetId(), map);
     if (!prism.IsValid()) {
+      SetError("profile could not be extruded (disjoint profiles in one "
+               "sketch are not supported — use one feature per profile)");
       LOG_ERROR("ExtrudeFeature '{}': prism construction failed", m_name);
       return false;
     }
@@ -45,6 +48,8 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   CADShape prism =
       sketch::BuildPrism(sketch->plane, loops, distance, reversed);
   if (!prism.IsValid()) {
+    SetError("profile could not be extruded (disjoint profiles in one "
+             "sketch are not supported — use one feature per profile)");
     LOG_ERROR("ExtrudeFeature '{}': prism construction failed", m_name);
     return false;
   }

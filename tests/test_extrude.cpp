@@ -328,3 +328,24 @@ TEST_CASE("Solver float noise at a line/arc joint does not distort the prism",
   CHECK_THAT(prism.Volume(), WithinRel(area * 5.0, 1e-4));
 }
 
+TEST_CASE("Disjoint profiles in one sketch fail loudly instead of a silent "
+          "no-op",
+          "[extrude][profile]") {
+  // Two separate circles (a bolt-hole sketch): unsupported as one profile.
+  // The old largest-loop-plus-holes assumption built a bogus face whose
+  // boolean was a silent no-op; now the build fails so the feature errors.
+  std::vector<sketch::Entity> e = {sketch::Circle{{10, 0}, 3},
+                                   sketch::Circle{{-10, 0}, 3}};
+  auto loops = sketch::BuildLoops(e);
+  REQUIRE(loops.size() == 2);
+  CADShape prism = sketch::BuildPrism(kXY, loops, 5.0, false);
+  CHECK(!prism.IsValid());
+
+  // A circle properly inside another still extrudes as a ring.
+  std::vector<sketch::Entity> ring = {sketch::Circle{{0, 0}, 5},
+                                      sketch::Circle{{0, 0}, 2}};
+  CADShape tube = sketch::BuildPrism(kXY, sketch::BuildLoops(ring), 2.0,
+                                     false);
+  REQUIRE(tube.IsValid());
+  CHECK_THAT(tube.Volume(), WithinRel(M_PI * (25.0 - 4.0) * 2.0, 1e-3));
+}

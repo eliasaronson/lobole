@@ -50,7 +50,13 @@ evaluate CSG into a body — could be a community feature someday; not planned.)
 
 ## Milestones
 
-### S1 — MCP server (~1 day) — [design: s1-mcp.md](s1-mcp.md)
+### S1 — MCP server — SHIPPED — [design: s1-mcp.md](s1-mcp.md), [usage: mcp.md](mcp.md)
+
+Shipped 2026-07-10: `tools/designer_mcp.py` (28 tools, inline screenshot/
+render images, `modeling-workflow` prompt), the `view` standard-views RPC,
+and the `mcp_smoke` bracket test. Driving sketches over RPC also surfaced and
+fixed two core bugs: expression-only constraints solved with value 0, and
+profile wires silently dropping arc edges on solver float noise.
 `tools/designer_mcp.py`: an MCP server (official Python SDK, stdio transport)
 wrapping the JSON-RPC client — tools mirroring the RPC surface
 (`create_sketch`, `add_line`, `add_constraint`, `extrude`, `query_document`,

@@ -70,7 +70,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **In progress** (M1/M2/M4/M5 shipped — all toponaming-free features; M3 up-to-face + M6–M8 need toponaming) |
 | 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | **T1–T4 done** (sketch-on-face follows base edits); T5 booleans/fillet history is the remaining, larger piece |
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Shipped** (V1–V3; units algebra deferred) |
-| 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | Remote shipped; MCP/Python/headless remain |
+| 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | Remote + MCP (S1) shipped; Python/headless remain |
 | 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | Format v9 exists; the rest unstarted |
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
 | 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | Unstarted |

@@ -80,6 +80,13 @@ Symmetric / two-sided, blind distance both ways, **thin/shell** (wall
 thickness), **draft angle**. Blind is easy; **up-to-face / up-to-body** needs a
 face/body ref → the up-to-face variant waits for M6.
 
+Also: **multi-profile sketches** (several disjoint loops → one face per outer
+with its own holes, e.g. a four-bolt-hole cut in one sketch). Found via the
+MCP live run (2026-07-10): `BuildProfileFace` assumes largest-loop-outer +
+rest-are-holes; disjoint loops now fail the feature loudly (containment check)
+instead of the previous silent no-op boolean, but supporting them properly
+needs loop classification by containment + one prism per outer, fused.
+
 ### M4 — Body booleans as features — toponaming-free
 **Shipped (July 2026).** `BooleanFeature` (union / subtract / intersect) over
 two bodies referenced by their **producing feature's id** — the new

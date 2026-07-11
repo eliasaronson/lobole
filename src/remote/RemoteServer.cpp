@@ -218,6 +218,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     for (size_t i = 0; i < doc->FeatureCount(); i++) {
       json f = DocumentIO::FeatureToJson(*doc->GetFeature(i));
       f["index"] = i;
+      // Regeneration errors, so remote callers see WHY a feature contributed
+      // nothing instead of silently reading stale bodies.
+      if (!doc->GetFeature(i)->GetError().empty()) {
+        f["error"] = doc->GetFeature(i)->GetError();
+      }
       features.push_back(f);
     }
     json bodies = json::array();
