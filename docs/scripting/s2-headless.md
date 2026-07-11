@@ -1,5 +1,10 @@
 # S2 — Headless mode (`--headless`) — design
 
+> **SHIPPED 2026-07-10** as designed, plus one addition found during T5
+> review: a `list_elements` RPC/tool (stable face/edge names + `created_by`
+> per body, pure document state) so agents can build Fillet/Chamfer edge
+> refs — landed with the I2 step below.
+
 Run the document/geometry engine with **no window, no GPU, no display server**:
 serve the JSON-RPC remote (and therefore MCP) from a machine with nothing but
 a CPU. Payoff: geometry tests + scripted regeneration on CI, and agents can

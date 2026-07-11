@@ -6,6 +6,9 @@
 ## Setup
 
 1. Start the app with the remote interface: `designer --remote 8437`
+   — or with no window/GPU/display at all: `designer --headless --remote 8437`
+   (full modeling + `mass_properties`/`list_elements`; `screenshot`,
+   `render_still`, face selection and `ui_action` error with the remedy)
 2. Register the server with your client, e.g. Claude Code:
 
    ```
@@ -20,10 +23,12 @@ tools error with the remedy until it is reachable.
 
 ## What's exposed
 
-28 tools mirroring the JSON-RPC remote surface (same names): document state
+30 tools mirroring the JSON-RPC remote surface (same names): document state
 (`get_state`), features (`add_feature`, `modify_feature`, …), sketch
 constraints and ops (`add_constraint`, `fillet`, `mirror`, `pattern`,
 `offset`), variables, undo/redo, project I/O, and the verification loop —
+`mass_properties` (volume/CoM/inertia/mass) and `list_elements` (stable
+face/edge names for Fillet/Chamfer refs) as the geometry oracles;
 `screenshot` and `render_still` return inline images; `view` snaps standard
 views. `ui_action` exposes raw GUI events (menus, clicks, keys) for
 driving/testing the GUI itself.

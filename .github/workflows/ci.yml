@@ -1,0 +1,46 @@
+# Build + the headless test suite: unit tests and headless_smoke run with no
+# display server and no GPU (designer --headless never initializes Vulkan).
+# GUI-labeled tests (gui_smoke, remote_smoke, mcp_smoke) stay local-only.
+# Deps mirror the README's apt list — CI doubles as its validation.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build build-essential ccache \
+            libvulkan-dev glslc libglfw3-dev libglm-dev \
+            libspdlog-dev libgtk-3-dev nlohmann-json3-dev \
+            libeigen3-dev libboost-dev \
+            libocct-data-exchange-dev libocct-modeling-algorithms-dev \
+            libocct-modeling-data-dev libocct-foundation-dev \
+            libocct-ocaf-dev libocct-visualization-dev
+
+      - name: ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test (headless — everything without the gui label)
+        run: ctest --test-dir build -LE gui --output-on-failure

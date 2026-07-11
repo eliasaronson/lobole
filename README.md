@@ -1,5 +1,7 @@
 # Designer
 
+[![CI](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml/badge.svg)](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml)
+
 Project to build an open-source parametric 3D CAD application using Vulkan, ImGui and
 OpenCASCADE — working similarly to professionally used CAD software (Onshape, SolidWorks),
 with transformation checkpoints, global variables, a Python REPL/scripting API, git-based
@@ -14,7 +16,7 @@ System packages (Ubuntu 24.04):
 
 ```
 sudo apt install cmake build-essential libvulkan-dev glslc libglfw3-dev libglm-dev \
-    libspdlog-dev libgtk-3-dev \
+    libspdlog-dev libgtk-3-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
     libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-modeling-data-dev \
     libocct-foundation-dev libocct-ocaf-dev libocct-visualization-dev
 ```

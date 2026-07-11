@@ -64,7 +64,14 @@ wrapping the JSON-RPC client — tools mirroring the RPC surface
 (the text-to-cad skill is the template: brief → build → inspect → snapshot →
 iterate). Smoke test: an agent models a dimensioned bracket end-to-end.
 
-### S2 — Headless mode (~2 days incl. I2 + CI) — [design: s2-headless.md](s2-headless.md)
+### S2 — Headless mode — SHIPPED — [design: s2-headless.md](s2-headless.md)
+
+Shipped 2026-07-10: `--headless --remote <port>` runs the document engine +
+remote server with no window/GPU/display; GUI-dependent methods degrade with
+specific errors. Landed with inspection I2 (`mass_properties` with a material
+density table) plus `list_elements` (stable face/edge names → agents drive
+Fillet/Chamfer), `tests/headless_smoke.py`, and the first CI
+(`.github/workflows/ci.yml`: build + `ctest -LE gui` on ubuntu-24.04).
 `--headless`: run `designer_core` + `CADKernel` with no window/GPU — execute a
 command script or serve RPC. Geometry ops need no Vulkan already (unit tests
 prove it); the work is a startup path that skips renderer/ImGui init and a
