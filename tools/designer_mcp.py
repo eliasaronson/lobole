@@ -88,6 +88,10 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "edges": [{{"feature_id": <the body's created_by feature id>,
   "element": <stable edge name>}}, ...]}} — all edges must belong to one
   body. Discover edge names + created_by with the list_elements tool.
+- Loft (skin a solid through 2+ profile sketches): {{"type": "Loft",
+  "name": str, "sketch_ids": [<feature id>, <feature id>, ...],
+  "mode": "new_body"|"add"|"cut"}} — each sketch's outer profile is a
+  section, in order; put the sketches on datum planes at different heights.
 - Shell (hollow a body into a wall): {{"type": "Shell", "name": str,
   "body_id": <the body's created_by feature id>, "thickness": num,
   "thickness_expr"?: str, "open_faces": [{{"feature_id": <same body>,

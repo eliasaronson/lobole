@@ -7,6 +7,7 @@
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/LoftFeature.h"
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/ShellFeature.h"
@@ -512,6 +513,9 @@ json FeatureToJson(const Feature& feature) {
     for (const auto& ref : sh->openFaces)
       arr.push_back({{"feature_id", ref.featureId}, {"element", ref.name}});
     j["open_faces"] = std::move(arr);
+  } else if (auto* lo = dynamic_cast<const LoftFeature*>(&feature)) {
+    j["sketch_ids"] = lo->sketchIds;
+    j["mode"] = ExtrudeModeToString(lo->mode);
   } else if (auto* pat = dynamic_cast<const PatternFeature*>(&feature)) {
     j["kind"] = PatternKindToString(pat->kind);
     j["source_id"] = pat->sourceId;
@@ -757,6 +761,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.value("thickness", 1.0));
     sh->thicknessExpr = j.value("thickness_expr", std::string{});
     out = std::move(sh);
+  } else if (type == "Loft") { // v20
+    std::vector<uint64_t> ids;
+    for (const auto& idj : j.value("sketch_ids", json::array()))
+      ids.push_back(idj.get<uint64_t>());
+    out = std::make_unique<LoftFeature>(
+        name, std::move(ids), ExtrudeModeFromString(j.value("mode",
+                                                            "new_body")));
   } else if (type == "Pattern") {
     auto pat = std::make_unique<PatternFeature>(
         name, PatternKindFromString(j.at("kind").get<std::string>()),

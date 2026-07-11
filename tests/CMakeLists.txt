@@ -20,6 +20,7 @@ add_executable(designer_tests
     test_golden.cpp
     test_measure.cpp
     test_shell.cpp
+    test_loft.cpp
     test_autosaver.cpp
     test_command_modify.cpp
     test_expression.cpp

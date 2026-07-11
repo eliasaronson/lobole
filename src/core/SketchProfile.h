@@ -5,6 +5,8 @@
 #include "core/ElementMap.h"
 #include "core/SketchFeature.h"
 
+#include <TopoDS_Wire.hxx>
+
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -39,6 +41,12 @@ struct Loop {
 // free Line entities are chained by endpoint proximity (tolerance 1e-4) into
 // closed loops. Open chains are discarded with a warning.
 std::vector<Loop> BuildLoops(const std::vector<Entity>& entities);
+
+// The outer boundary wire of a single-profile sketch, in world space on the
+// plane — the section input for a loft (modeling M8). Null wire when the
+// sketch has no single outer profile (empty, or several disjoint outers).
+TopoDS_Wire BuildProfileWire(const SketchPlane& plane,
+                             const std::vector<Loop>& loops);
 
 // Builds the profile face (largest-|area| loop is the outer boundary, the
 // rest become holes) and extrudes it along the plane normal. Returns an

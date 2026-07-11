@@ -182,6 +182,32 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
+        # Loft (M8): frustum between two squares on offset datum planes
+        d.call("new_project")
+        dp = d.call("add_feature", feature={
+            "type": "DatumPlane", "name": "High", "kind": "offset",
+            "base_plane": "xy", "offset": 6.0})
+        a = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Bottom",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [0, 0], "radius": 3}]})
+        b = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Top", "plane_ref": dp["id"],
+            "plane": {"origin": [0, 0, 6], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [0, 0], "radius": 1}]})
+        d.call("add_feature", feature={
+            "type": "Loft", "name": "Cone", "sketch_ids": [a["id"], b["id"]],
+            "mode": "new_body"})
+        st = d.call("get_state")
+        expect(not any("error" in f for f in st["features"]),
+               "loft regenerated clean")
+        # Conical frustum r=3->1 over h=6: V = pi h/3 (R^2+Rr+r^2) = pi*2*13.
+        import math as _m
+        expect(abs(st["bodies"][0]["volume"] - _m.pi * 2 * 13) < 1.0,
+               "loft frustum volume")
+
         # Shell (M8): hollow a box into a bin via list_elements face name
         d.call("new_project")
         d.call("add_feature", feature={

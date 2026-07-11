@@ -464,6 +464,14 @@ int CountFaces(const TopoDS_Shape& shape) {
 
 } // namespace
 
+TopoDS_Wire BuildProfileWire(const SketchPlane& plane,
+                             const std::vector<Loop>& loops) {
+  const std::vector<ProfileGroup> groups = ClassifyLoops(loops);
+  if (groups.size() != 1) // v1 loft: exactly one outer profile per section
+    return TopoDS_Wire();
+  return MakeLoopWire(plane, loops[groups[0].outer]);
+}
+
 CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
                     double distance, bool reversed) {
   if (loops.empty() || std::abs(distance) < 1e-9) {

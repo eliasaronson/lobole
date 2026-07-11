@@ -9,6 +9,7 @@
 #include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/LoftFeature.h"
 #include "core/ShellFeature.h"
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
@@ -700,6 +701,13 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     DrawBooleanParams(state, *boo, index, commit);
   } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {
     DrawPatternParams(state, *pat, index, commit);
+  } else if (auto* lo = dynamic_cast<LoftFeature*>(&feature)) {
+    ImGui::Text("Sections: %zu", lo->sketchIds.size());
+    for (uint64_t sid : lo->sketchIds) {
+      Feature* src = state.document->FindFeatureById(sid);
+      ImGui::BulletText("%s", src ? src->GetName().c_str() : "(missing)");
+    }
+    ImGui::TextDisabled("Add sections via add_feature / the RPC");
   } else if (auto* sh = dynamic_cast<ShellFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Thickness", sh->thicknessExpr,
             sh->thickness);
