@@ -1,0 +1,10 @@
+{
+  "format": "designer-document",
+  "version": 15,
+  "features": [
+    {"type": "Box", "name": "Seed", "id": 1, "position": [0, 0, 0],
+     "width": 1, "height": 1, "depth": 1},
+    {"type": "Pattern", "name": "Row", "id": 2, "kind": "linear",
+     "source_id": 1, "axis": {"kind": "x"}, "count": 3, "spacing": 2.0}
+  ]
+}

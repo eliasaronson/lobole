@@ -1,0 +1,12 @@
+{
+  "format": "designer-document",
+  "version": 14,
+  "features": [
+    {"type": "Box", "name": "Target", "id": 1, "position": [0, 0, 0],
+     "width": 2, "height": 2, "depth": 2},
+    {"type": "Box", "name": "Tool", "id": 2, "position": [1, 0, 0],
+     "width": 2, "height": 2, "depth": 2},
+    {"type": "Boolean", "name": "Notch", "id": 3,
+     "target_id": 1, "tool_id": 2, "op": "subtract"}
+  ]
+}

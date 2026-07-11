@@ -17,6 +17,7 @@ add_executable(designer_tests
     test_sketch.cpp
     test_document.cpp
     test_serialization.cpp
+    test_golden.cpp
     test_command_modify.cpp
     test_expression.cpp
     test_variables.cpp
