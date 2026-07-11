@@ -269,6 +269,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"can_undo", state.commands->CanUndo()},
             {"can_redo", state.commands->CanRedo()},
             {"rollback", doc->Rollback()},
+            {"regen",
+             {{"executed", doc->LastRegenStats().executed},
+              {"cached", doc->LastRegenStats().cached}}},
             {"pending_feature_id", state.pendingFeatureId}};
   }
   if (m == "rt_build") {

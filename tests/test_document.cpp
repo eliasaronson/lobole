@@ -187,3 +187,72 @@ TEST_CASE("Rollback bar regenerates only the prefix and round-trips",
   CHECK(doc.Rollback() == -1);
   CHECK(doc.GetBodies().size() == 3);
 }
+
+TEST_CASE("Incremental regeneration re-runs only from the first change",
+          "[document][regen][cache]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
+                                              1.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0,
+                                              1.0, 1.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("C", glm::vec3(10, 0, 0), 3.0,
+                                              1.0, 1.0));
+
+  // Nothing changed: fully cached.
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.LastRegenStats().executed == 0);
+  CHECK(doc.LastRegenStats().cached == 3);
+  REQUIRE(doc.GetBodies().size() == 3);
+  CHECK_THAT(doc.GetBodies()[2].shape.Volume(), WithinRel(3.0, 1e-9));
+
+  // Edit the LAST feature: only it re-runs.
+  dynamic_cast<BoxFeature*>(doc.GetFeature(2))->width = 4.0;
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.LastRegenStats().executed == 1);
+  CHECK(doc.LastRegenStats().cached == 2);
+  CHECK_THAT(doc.GetBodies()[2].shape.Volume(), WithinRel(4.0, 1e-9));
+
+  // Edit the FIRST: everything after re-runs.
+  dynamic_cast<BoxFeature*>(doc.GetFeature(0))->width = 2.0;
+  REQUIRE(doc.Regenerate());
+  CHECK(doc.LastRegenStats().executed == 3);
+  CHECK(doc.LastRegenStats().cached == 0);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(2.0, 1e-9));
+  CHECK_THAT(doc.GetBodies()[2].shape.Volume(), WithinRel(4.0, 1e-9));
+
+  // Rollback reuses the cache both ways.
+  doc.SetRollback(1);
+  CHECK(doc.LastRegenStats().executed == 0);
+  CHECK(doc.GetBodies().size() == 1);
+  doc.SetRollback(-1);
+  CHECK(doc.LastRegenStats().executed == 0);
+  CHECK(doc.GetBodies().size() == 3);
+}
+
+TEST_CASE("Expression edits invalidate the cache through parameters",
+          "[document][regen][cache]") {
+  Document doc;
+  doc.SetParameter("w", "2", "");
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  sk->AddRectangle({0, 0}, {4, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(0)->GetId();
+  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 1.0,
+                                              ExtrudeMode::NewBody);
+  ext->distanceExpr = "w";
+  doc.AddFeature(std::move(ext));
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(16.0, 1e-6));
+
+  // Changing the parameter changes the evaluated JSON -> suffix re-runs
+  // (SetParameter regenerates internally; read the stats of THAT run).
+  doc.SetParameter("w", "3", "");
+  CHECK(doc.LastRegenStats().executed == 1); // sketch cached, extrude re-ran
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(24.0, 1e-6));
+
+  // A cached failure stays an error without re-executing.
+  doc.GetFeature(1)->SetSuppressed(true);
+  doc.Regenerate();
+  doc.GetFeature(1)->SetSuppressed(false);
+  doc.Regenerate();
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(24.0, 1e-6));
+}

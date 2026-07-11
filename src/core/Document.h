@@ -89,6 +89,15 @@ public:
   // render meshes without observing individual edits.
   uint64_t Version() const { return m_version; }
 
+  // Incremental regeneration (R3): how much of the last Regenerate came
+  // from the prefix cache vs. actually executed. Observable, not vibes.
+  struct RegenStats {
+    size_t executed = 0;
+    size_t cached = 0;
+  };
+  const RegenStats& LastRegenStats() const { return m_lastStats; }
+  void ClearRegenCache() { m_cache.clear(); }
+
   // Rollback bar (R2): regeneration executes features [0, rollback) only;
   // the rest are skipped (grayed in the tree, params untouched). -1 = end.
   // Persisted with the document, like SolidWorks' marker position.
@@ -115,4 +124,15 @@ private:
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;
   int m_rollback = -1;
+
+  // Prefix cache (R3): per feature, the chain hash of everything up to and
+  // including it, plus a snapshot of the body list after it executed. Body
+  // snapshots are cheap (TopoDS_Shape is refcounted). Entries beyond the
+  // current rollback stay — rolling forward again is then instant.
+  struct RegenCacheEntry {
+    size_t hash = 0;
+    std::vector<Body> bodiesAfter;
+  };
+  std::vector<RegenCacheEntry> m_cache;
+  RegenStats m_lastStats;
 };

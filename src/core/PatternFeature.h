@@ -4,6 +4,8 @@
 #include "core/AxisRef.h"
 #include "core/Feature.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -28,9 +30,15 @@ public:
   bool Execute(RegenContext& ctx) override;
 
   void VisitExprs(const ExprVisitor& visit) override {
-    // count is an int, evaluated separately in Execute against ctx.symbols.
     visit(spacingExpr, spacing);
     visit(angleExpr, angleDeg);
+    // count is an int: round-trip through a double so expression-driven
+    // counts land in the serialized feature BEFORE execution — the regen
+    // cache (R3) hashes that JSON, and an in-Execute-only evaluation would
+    // leave the hash (and therefore the cache) stale on parameter edits.
+    double countValue = static_cast<double>(count);
+    visit(countExpr, countValue);
+    count = std::max(1, static_cast<int>(std::lround(countValue)));
   }
 
   PatternKind kind = PatternKind::Linear;

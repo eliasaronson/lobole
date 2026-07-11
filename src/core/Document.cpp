@@ -1,8 +1,11 @@
 #include "core/Document.h"
 
 #include "Logger.h"
+#include "core/Serialization.h" // FeatureToJson: the regen-cache hash input
 
 #include <algorithm>
+#include <functional>
+#include <string>
 #include <deque>
 #include <unordered_map>
 
@@ -64,9 +67,9 @@ bool Document::ReplaceFeature(size_t index, std::unique_ptr<Feature> feature) {
 bool Document::Regenerate() {
   EvaluateParameters();
 
-  m_bodies.clear();
   m_version++;
   bool allOk = true;
+  m_lastStats = {};
 
   // Rollback bar: only the prefix regenerates; the tail keeps its params but
   // contributes nothing (and holds no stale errors).
@@ -78,10 +81,11 @@ bool Document::Regenerate() {
     m_features[i]->ClearError();
   }
 
+  // Refresh expression-driven fields before hashing: the serialized feature
+  // (with evaluated values) is exactly the state that determines outputs
+  // (the F1 contract), so it is what the cache keys on. Failed evaluations
+  // keep the field's last good value.
   for (size_t i = 0; i < upTo; i++) {
-    // Refresh expression-driven fields first, so the feature executes (and a
-    // sketch solves) against current parameter values. Failed evaluations
-    // keep the field's last good value.
     m_features[i]->VisitExprs([this](std::string& text, double& value) {
       if (text.empty()) {
         return;
@@ -92,25 +96,60 @@ bool Document::Regenerate() {
         value = *v;
       }
     });
+  }
 
-    m_features[i]->ClearError();
-    if (m_features[i]->IsSuppressed()) {
-      continue; // skipped entirely; keeps params, contributes nothing
-    }
-    RegenContext ctx{m_bodies, m_features, i, &m_symbols};
-    if (!m_features[i]->Execute(ctx)) {
-      if (m_features[i]->GetError().empty()) {
-        m_features[i]->SetError("regeneration failed");
-      }
-      // Continue past the failure (R1): the broken feature contributes
-      // nothing; downstream features see the bodies as of this point and
-      // fail on their own if they referenced its outputs. One bad fillet no
-      // longer blanks the rest of the model.
-      LOG_ERROR("Feature '{}' failed to regenerate: {}",
-                m_features[i]->GetName(), m_features[i]->GetError());
+  // Incremental regeneration (R3): chain hashes make any change invalidate
+  // everything after it — editing feature k re-runs [k, N) only. Precise
+  // dependency tracking is deliberately v2; chaining is what makes retained
+  // feature-internal state (solved sketches, cached datum planes) safe: a
+  // matching prefix implies identical inputs, hence identical state.
+  std::vector<size_t> hashes(upTo);
+  size_t chain = 0x9e3779b97f4a7c15ull;
+  for (size_t i = 0; i < upTo; i++) {
+    chain = std::hash<std::string>{}(
+        std::to_string(chain) + DocumentIO::FeatureToJson(*m_features[i]).dump());
+    hashes[i] = chain;
+  }
+  size_t divergence = 0;
+  while (divergence < upTo && divergence < m_cache.size() &&
+         m_cache[divergence].hash == hashes[divergence]) {
+    divergence++;
+  }
+  m_lastStats.cached = divergence;
+  m_bodies = divergence > 0 ? m_cache[divergence - 1].bodiesAfter
+                            : std::vector<Body>{};
+  // Errors in the cached prefix persist from their last (deterministic)
+  // execution; they still count against the result.
+  for (size_t i = 0; i < divergence; i++) {
+    if (!m_features[i]->GetError().empty()) {
       allOk = false;
     }
   }
+
+  if (divergence < upTo) {
+    m_cache.resize(divergence); // stale suffix; rebuilt below
+    for (size_t i = divergence; i < upTo; i++) {
+      m_features[i]->ClearError();
+      if (!m_features[i]->IsSuppressed()) {
+        RegenContext ctx{m_bodies, m_features, i, &m_symbols};
+        m_lastStats.executed++;
+        if (!m_features[i]->Execute(ctx)) {
+          if (m_features[i]->GetError().empty()) {
+            m_features[i]->SetError("regeneration failed");
+          }
+          // Continue past the failure (R1): the broken feature contributes
+          // nothing; downstream features see the bodies as of this point
+          // and fail on their own if they referenced its outputs.
+          LOG_ERROR("Feature '{}' failed to regenerate: {}",
+                    m_features[i]->GetName(), m_features[i]->GetError());
+          allOk = false;
+        }
+      }
+      m_cache.push_back({hashes[i], m_bodies});
+    }
+  }
+  // divergence == upTo: fully cached — keep any entries beyond upTo so
+  // rolling the bar forward again is instant (their hashes re-verify then).
   return allOk;
 }
 
