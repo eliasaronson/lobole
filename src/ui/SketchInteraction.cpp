@@ -567,6 +567,14 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   }
 
   HandleSketchKeys(state); // Onshape sketch-context shortcuts
+  // A key shortcut can apply a constraint, which REPLACES the sketch feature
+  // (ModifyFeatureCommand swaps the object) — the pointer above is then a
+  // dangling free. Re-resolve before any further use. (Latent use-after-free;
+  // it started crashing once R3's regeneration allocations reused the freed
+  // block.)
+  sketch = ResolveActiveSketch(state, &index);
+  if (!sketch)
+    return true; // the shortcut ended sketch edit; viewport was consumed
 
   if (!overViewport)
     return true;
