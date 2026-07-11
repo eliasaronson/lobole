@@ -26,12 +26,19 @@ tolerance. This is a day of work sitting on top of what OCC already computes.
 
 ## I3 — Section view (clipping plane)
 
-See inside: a clipping plane (pick a datum/default plane + drag an offset)
-implemented in the raster path — plane equation in the UBO, `discard` beyond
-it in `mesh.frag`, outline pass gets the same test. V1 leaves the cut hollow
-(industry-common for a quick section); capped/hatched cut faces (real section
-geometry via `BRepAlgoAPI_Section`) is the v2. Toggle per viewport, not a
-document feature.
+**Geometry half shipped (July 2026):** `Measure::CrossSectionArea` +
+`section` RPC/MCP — cut all bodies with a plane (base_plane+offset or
+origin+normal), return the summed cross-section area (BRepAlgoAPI_Common
+against a big planar face). Headless-testable; the LLM can check material at
+a cut.
+
+**Visual half (deferred — needs a reviewable session):** the raster
+clipping plane — a clip plane in the mesh + outline push constants, `discard`
+beyond it in `mesh.frag`/`outline.frag`, an AppState toggle + RPC + drag UI.
+It is a shader-ABI change across both renderers, verifiable only by eye, so
+it was deliberately left for a session where the render can be reviewed
+rather than landed autonomously. V1 leaves the cut hollow; capped/hatched
+cut faces are v2.
 
 ## I4 — Later
 

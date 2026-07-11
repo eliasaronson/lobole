@@ -8,6 +8,10 @@ paints us into a corner.
 
 ## Prerequisites (gates — don't start A2+ without them)
 
+> **Status 2026-07-11:** gates 1 (incremental regen), 3 (toponaming), 4
+> (diffable format) are DONE. Only gate 2 (renderer instancing) remains, and
+> it blocks A2, not A1. See [a1-design.md](a1-design.md).
+
 1. **Incremental regeneration** (roadmap "Continuous"): `Document::Regenerate()`
    recomputes every feature per edit. Per-part feature caching (output shape
    keyed by an input hash) is the entry ticket — an assembly edit must not
@@ -37,7 +41,7 @@ real 100-part assembly before any allocator work.
 
 ## Milestones
 
-### A1 — Multi-part projects
+### A1 — Multi-part projects — [design: a1-design.md](a1-design.md) (unblocked, awaiting sign-off)
 A project holds multiple part documents; UI for switching (document tabs above
 the viewport; the feature tree shows the active part). Open/save moves from
 "one document" to a project container — coordinate with versioning F3
