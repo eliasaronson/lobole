@@ -1,6 +1,7 @@
 #include "ui/FileDialogs.h"
 
 #include "Logger.h"
+#include "core/Autosaver.h"
 #include "core/Serialization.h"
 #include "ui/AppActions.h"
 
@@ -35,18 +36,34 @@ void OpenStepFileDialog(AppState& state) {
   }
 }
 
+namespace {
+
+// Load `path` (a project or a recovery sidecar) into the app.
+void OpenProjectFile(AppState& state, const std::string& path) {
+  std::string error;
+  if (auto doc = DocumentIO::Load(path, &error)) {
+    ReplaceDocument(state, std::move(doc));
+    FitCameraToDocument(state);
+  } else {
+    LOG_ERROR("Failed to open project: {}", error);
+  }
+}
+
+} // namespace
+
 void OpenProjectDialog(AppState& state) {
   nfdchar_t* outPath = nullptr;
   if (NFD_OpenDialog("json", nullptr, &outPath) == NFD_OKAY) {
     std::string path(outPath);
     free(outPath);
-    std::string error;
-    if (auto doc = DocumentIO::Load(path, &error)) {
-      ReplaceDocument(state, std::move(doc));
-      FitCameraToDocument(state);
-    } else {
-      LOG_ERROR("Failed to open project: {}", error);
+    if (Autosaver::HasNewerAutosave(path)) {
+      // Defer to the recovery modal (DrawFileBrowser) — the user picks
+      // between the saved file and the newer autosave.
+      state.recoveryOffer = path;
+      return;
     }
+    OpenProjectFile(state, path);
+    MarkProjectOpened(state, path);
   }
 }
 
@@ -63,11 +80,42 @@ void SaveProjectDialog(AppState& state) {
     std::string error;
     if (!DocumentIO::Save(*state.document, path, &error)) {
       LOG_ERROR("Failed to save project: {}", error);
+    } else {
+      MarkProjectSaved(state, path);
     }
   }
 }
 
-void DrawFileBrowser(AppState&) {}
+void DrawFileBrowser(AppState& state) {
+  // Crash-recovery prompt: OpenProjectDialog found an autosave newer than
+  // the picked project file.
+  if (state.recoveryOffer.empty())
+    return;
+  if (!ImGui::IsPopupOpen("Recover autosave?"))
+    ImGui::OpenPopup("Recover autosave?");
+  if (ImGui::BeginPopupModal("Recover autosave?", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextWrapped(
+        "An autosave newer than\n%s\nexists (probably from a crash). "
+        "Recover the autosaved changes?",
+        state.recoveryOffer.c_str());
+    if (ImGui::Button("Recover autosave")) {
+      OpenProjectFile(state, Autosaver::SidecarPath(state.recoveryOffer));
+      MarkProjectRecovered(state, state.recoveryOffer);
+      state.recoveryOffer.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Open saved file")) {
+      OpenProjectFile(state, state.recoveryOffer);
+      MarkProjectOpened(state, state.recoveryOffer);
+      Autosaver::Clear(state.recoveryOffer); // explicit discard
+      state.recoveryOffer.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
 
 #else // fallback ImGui browser
 

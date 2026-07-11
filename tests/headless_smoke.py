@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
@@ -46,10 +47,12 @@ def main():
     env = dict(os.environ)
     env.pop("DISPLAY", None)  # a display server must NOT be needed
     env.pop("WAYLAND_DISPLAY", None)
-    app = subprocess.Popen([binary, "--headless", "--remote", str(port)],
+    tmp = tempfile.mkdtemp(prefix="designer_headless_")
+    env["XDG_STATE_HOME"] = tmp  # keep unsaved-slot autosaves out of $HOME
+    app = subprocess.Popen([binary, "--headless", "--remote", str(port),
+                            "--autosave", "1"],
                            env=env, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
-    tmp = tempfile.mkdtemp(prefix="designer_headless_")
     try:
         d = Designer.wait_for(port)
         expect(d.call("ping")["ok"], "ping")
@@ -159,9 +162,53 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
-        # Clean shutdown on SIGTERM
-        app.send_signal(signal.SIGTERM)
-        expect(app.wait(timeout=10) == 0, "exit 0 on SIGTERM")
+        # Autosave + crash recovery (F2): save clean, dirty the doc, let the
+        # 1s autosave fire, SIGKILL (a real crash — no signal handler), then
+        # prove a fresh instance sees and recovers the autosave.
+        crash_project = os.path.join(tmp, "crashme.json")
+        d.call("save_project", path=crash_project)
+        expect(not os.path.exists(crash_project + ".autosave"),
+               "clean save leaves no sidecar")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Unsaved work", "position": [50, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        deadline = time.time() + 10
+        while (not os.path.exists(crash_project + ".autosave")
+               and time.time() < deadline):
+            time.sleep(0.1)
+        expect(os.path.exists(crash_project + ".autosave"),
+               "autosave sidecar written while dirty")
+        app.send_signal(signal.SIGKILL)
+        app.wait(timeout=10)
+
+        port2 = free_port()
+        app2 = subprocess.Popen(
+            [binary, "--headless", "--remote", str(port2), "--autosave", "1"],
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            d2 = Designer.wait_for(port2)
+            r = d2.call("open_project", path=crash_project)
+            expect(r["autosave_available"], "recovery offered after crash")
+            expect(len(d2.call("get_state")["features"]) == 2,
+                   "the saved file itself has the pre-crash features")
+            d2.call("open_project", path=r["autosave_path"])
+            expect(len(d2.call("get_state")["features"]) == 3,
+                   "the autosave carries the unsaved work")
+            d2.call("save_project", path=crash_project)
+            expect(not os.path.exists(crash_project + ".autosave"),
+                   "saving the recovery clears the sidecar")
+        finally:
+            app2.terminate()
+            app2.wait(timeout=10)
+
+        # Clean shutdown on SIGTERM (fresh instance; the first was SIGKILLed)
+        port3 = free_port()
+        app3 = subprocess.Popen(
+            [binary, "--headless", "--remote", str(port3)],
+            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        Designer.wait_for(port3).close()
+        app3.send_signal(signal.SIGTERM)
+        expect(app3.wait(timeout=10) == 0, "exit 0 on SIGTERM")
 
         # A taken port must exit non-zero (CI fail-fast), not serve nothing
         blocker = socket.socket()

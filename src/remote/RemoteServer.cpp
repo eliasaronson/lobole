@@ -6,6 +6,7 @@
 #include "Logger.h"
 #include "RayTracingRenderer.h"
 #include "MeshRenderer.h"
+#include "core/Autosaver.h"
 #include "core/Expression.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
@@ -675,21 +676,31 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   }
   if (m == "new_project") {
     ui::ReplaceDocument(state, std::make_unique<Document>());
+    ui::MarkProjectOpened(state, "");
     return json::object();
   }
   if (m == "save_project") {
+    const std::string path = p.at("path").get<std::string>();
     std::string error;
-    if (!DocumentIO::Save(*doc, p.at("path").get<std::string>(), &error))
+    if (!DocumentIO::Save(*doc, path, &error))
       throw std::runtime_error(error);
+    ui::MarkProjectSaved(state, path); // also clears the autosave sidecar
     return json::object();
   }
   if (m == "open_project") {
+    // autosave_available: a sidecar newer than this file exists (crash
+    // recovery). Recovering = open_project on Autosaver::SidecarPath(path);
+    // callers see the same signal the GUI recovery modal acts on.
+    const std::string path = p.at("path").get<std::string>();
+    const bool autosaveAvailable = Autosaver::HasNewerAutosave(path);
     std::string error;
-    auto loaded = DocumentIO::Load(p.at("path").get<std::string>(), &error);
+    auto loaded = DocumentIO::Load(path, &error);
     if (!loaded) throw std::runtime_error(error);
     ui::ReplaceDocument(state, std::move(loaded));
     ui::FitCameraToDocument(state);
-    return json::object();
+    ui::MarkProjectOpened(state, path);
+    return {{"autosave_available", autosaveAvailable},
+            {"autosave_path", Autosaver::SidecarPath(path)}};
   }
   if (m == "import_step") {
     const size_t before = doc->GetBodies().size();

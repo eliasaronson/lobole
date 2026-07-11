@@ -10,6 +10,7 @@
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
+#include "core/Autosaver.h"
 #include "core/BooleanFeature.h"
 #include "core/Command.h"
 #include "core/DatumAxisFeature.h"
@@ -460,6 +461,27 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.sketchEdit = SketchEditState{};
   // Force a resync even if the version counters happen to collide
   state.syncedDocumentVersion = UINT64_MAX;
+}
+
+void MarkProjectSaved(AppState& state, const std::string& path) {
+  state.projectPath = path;
+  state.lastSavedVersion = state.document ? state.document->Version() : 0;
+  // The save supersedes both possible sidecars: this project's, and the
+  // unsaved slot if the document lived there before its first save.
+  Autosaver::Clear(path);
+  Autosaver::Clear("");
+}
+
+void MarkProjectOpened(AppState& state, const std::string& path) {
+  state.projectPath = path;
+  state.lastSavedVersion = state.document ? state.document->Version() : 0;
+}
+
+void MarkProjectRecovered(AppState& state, const std::string& path) {
+  state.projectPath = path;
+  // Never equal to the live version: the recovered changes are unsaved.
+  state.lastSavedVersion =
+      state.document ? state.document->Version() - 1 : UINT64_MAX;
 }
 
 void FitCameraToDocument(AppState& state) {

@@ -230,6 +230,15 @@ struct AppState {
   bool runGuiTests = false;
   nlohmann::json editBaseline; // parameter-edit snapshot while a widget is active
 
+  // Where the document lives on disk ("" = never saved) and the document
+  // version at the last clean save/open — dirty = Version() != lastSaved.
+  // Drives autosave (core/Autosaver) and its recovery sidecars.
+  std::string projectPath;
+  uint64_t lastSavedVersion = 0;
+  // Non-empty: OpenProjectDialog found an autosave newer than this project
+  // file; the recovery modal (DrawFileBrowser) resolves it.
+  std::string recoveryOffer;
+
   // Document -> renderer sync bookkeeping
   uint64_t syncedDocumentVersion = 0;
   std::vector<DocumentRenderMesh> documentMeshes;

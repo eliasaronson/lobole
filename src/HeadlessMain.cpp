@@ -2,6 +2,7 @@
 
 #include "Camera.h"
 #include "Logger.h"
+#include "core/Autosaver.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "remote/RemoteServer.h"
@@ -22,7 +23,8 @@ void HandleStopSignal(int) { g_stopRequested = true; }
 
 } // namespace
 
-int RunHeadless(int remotePort, const std::string& fileToLoad) {
+int RunHeadless(int remotePort, const std::string& fileToLoad,
+                double autosaveSeconds) {
   LOG_INFO("Headless mode: document engine + remote server, no GUI");
 
   // Same defaults as the GUI so view/fit_view/get_state.camera behave
@@ -53,12 +55,30 @@ int RunHeadless(int remotePort, const std::string& fileToLoad) {
   std::signal(SIGINT, HandleStopSignal);
   std::signal(SIGTERM, HandleStopSignal);
 
+  const auto start = std::chrono::steady_clock::now();
+  auto seconds = [&] {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                         start)
+        .count();
+  };
+  Autosaver autosaver(autosaveSeconds);
+  autosaver.Prime(seconds());
+
   while (!g_stopRequested) {
     server.ProcessPending(state);
+    if (state.document) {
+      autosaver.MaybeSave(*state.document, state.projectPath,
+                          state.lastSavedVersion, seconds());
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
 
   LOG_INFO("Headless: stop requested, shutting down");
   server.Stop();
+  // Clean exit with nothing unsaved: drop the sidecar. Dirty exits keep it.
+  if (state.document &&
+      state.document->Version() == state.lastSavedVersion) {
+    Autosaver::Clear(state.projectPath);
+  }
   return 0;
 }

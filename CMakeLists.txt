@@ -167,6 +167,7 @@ set(core_sources
     src/Sketch.cpp
     src/SketchManager.cpp
     src/FaceSelector.cpp
+    src/core/Autosaver.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
     src/core/Command.cpp

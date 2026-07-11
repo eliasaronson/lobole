@@ -9,6 +9,7 @@
 #include "Logger.h"
 #include "Screenshot.h"
 #include "HeadlessMain.h"
+#include "core/Autosaver.h"
 #include "remote/RemoteServer.h"
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
@@ -769,6 +770,9 @@ void printUsage(const char *programName) {
   std::cout << "  --headless           No window/GPU: serve --remote with the "
                "document engine only"
             << std::endl;
+  std::cout << "  --autosave <sec>     Autosave interval in seconds "
+               "(default 60, 0 = off)"
+            << std::endl;
 }
 
 struct CommandLineArgs {
@@ -777,6 +781,7 @@ struct CommandLineArgs {
   bool runGuiTests = false;
   bool headless = false;
   int remotePort = 0;
+  double autosaveSeconds = 60.0;
 };
 
 CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
@@ -801,6 +806,15 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
       args.runGuiTests = true;
     } else if (arg == "--headless") {
       args.headless = true;
+    } else if (arg == "--autosave") {
+      if (i + 1 < argc) {
+        args.autosaveSeconds = std::atof(argv[i + 1]);
+        i++;
+      } else {
+        std::cerr << "Error: --autosave requires seconds (0 = off)"
+                  << std::endl;
+        exit(1);
+      }
     } else if (arg == "--remote") {
       if (i + 1 < argc) {
         args.remotePort = std::atoi(argv[i + 1]);
@@ -845,7 +859,8 @@ int main(int argc, char **argv) {
       std::cerr << "Error: --gui-tests cannot run with --headless" << std::endl;
       return 2;
     }
-    return RunHeadless(args.remotePort, args.fileToLoad);
+    return RunHeadless(args.remotePort, args.fileToLoad,
+                       args.autosaveSeconds);
   }
 
 #ifdef HAVE_NATIVEFILEDIALOG
@@ -1081,6 +1096,11 @@ int main(int argc, char **argv) {
     remoteServer.Start(static_cast<uint16_t>(args.remotePort), testEngine);
   }
 
+  // Autosave (F2). GUI tests force it off: a mid-test autosave would break
+  // their determinism (and there is nothing worth recovering).
+  Autosaver autosaver(args.runGuiTests ? 0.0 : args.autosaveSeconds);
+  autosaver.Prime(glfwGetTime());
+
   const ui::ClearColor vp = ui::ViewportClearColor();
   ImVec4 clear_color = ImVec4(vp.r, vp.g, vp.b, 1.00f);
 
@@ -1140,6 +1160,11 @@ int main(int argc, char **argv) {
 
     // Remote-control requests act on the document/UI before this frame
     remoteServer.ProcessPending(g_App);
+
+    if (g_App.document) {
+      autosaver.MaybeSave(*g_App.document, g_App.projectPath,
+                          g_App.lastSavedVersion, glfwGetTime());
+    }
 
     // Mirror document changes (edits, undo, redo) into the renderers
     ui::SyncDocumentRenderers(g_App);
@@ -1229,6 +1254,12 @@ int main(int argc, char **argv) {
   }
 
   remoteServer.Stop();
+
+  // Clean exit with nothing unsaved: the sidecar has no recovery value.
+  // A dirty exit deliberately KEEPS it (safety over tidiness).
+  if (g_App.document && g_App.document->Version() == g_App.lastSavedVersion) {
+    Autosaver::Clear(g_App.projectPath);
+  }
 
   // Collect GUI test results before teardown
   int exitCode = 0;

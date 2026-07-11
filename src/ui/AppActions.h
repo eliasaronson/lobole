@@ -20,6 +20,15 @@ namespace ui {
 // forces the renderers to resync.
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc);
 
+// Track the on-disk identity for dirty-state + autosave: call after every
+// clean save (also clears the autosave sidecar) / open / new. "" = unsaved.
+void MarkProjectSaved(AppState& state, const std::string& path);
+void MarkProjectOpened(AppState& state, const std::string& path);
+// After loading a recovery sidecar: the document belongs at `path` but is
+// deliberately dirty (unsaved recovered changes), so autosave keeps running
+// and a save prompt is meaningful.
+void MarkProjectRecovered(AppState& state, const std::string& path);
+
 // Frames the camera on the document's combined bounding box.
 void FitCameraToDocument(AppState& state);
 
