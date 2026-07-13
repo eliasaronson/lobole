@@ -61,10 +61,12 @@ this is untangling singletons (`AppState` assumes one document).
 > project container): assembly is a distinct document kind, parts have stable
 > ids, occurrences (translation+quaternion) round-trip through a v2 project;
 > add_assembly/add_occurrence RPCs + MCP + assembly_smoke test. **Phase 2
-> SHIPPED** (45ae3e8): assemblies RENDER — one asset per part body, one
-> instance per occurrence (shared assets); assembly camera-fit; GUI robust to
-> an assembly tab; hit→occurrence picking wired. Remaining: phase 3 (move/
-> rotate gizmo, occurrence-selection UX, occurrence-edit undo).
+> SHIPPED** (45ae3e8): assemblies RENDER — shared asset per part body, one
+> instance per occurrence; assembly camera-fit; hit→occurrence picking.
+> **Phase 3 SHIPPED** (4860eea + ae5c808): editing UX — occurrence panel
+> (list + numeric transform/rename/visibility/fixed/delete), click-to-select
+> with highlight, occurrence-edit snapshot undo. **A2 is a usable v1 assembly.**
+> Deferred to a follow-up: the 3D drag gizmo (numeric-first was chosen).
 
 A new document type: an ordered list of **occurrences** `{ partRef, transform,
 name, visibility }` — instances of parts placed by explicit transform.

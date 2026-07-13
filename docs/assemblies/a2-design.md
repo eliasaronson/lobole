@@ -274,8 +274,22 @@ All six settled with Elias; the format above reflects them.
    full occurrence-selection UX (single-click selects the whole occurrence,
    double-click enters the part) and the CPU-geometry-sharing FaceSelector/
    OutlineRenderer split — both land with phase 3.
-3. **Gizmo + commands** — move/rotate manipulator, `set_occurrence_transform`,
-   snapshot undo for occurrence edits (needs a command mechanism for
-   `AssemblyDocument`, which `Command`/`CommandStack` don't cover today), a real
-   per-mesh model in OutlineRenderer (replacing the phase-2 vertex bake so live
-   drags are cheap), and the occurrence-selection UX. The interactive layer.
+3. **Editing UX — SHIPPED 2026-07-13** (`4860eea` + `ae5c808`). Decision
+   (Elias): **numeric transform first**, drag gizmo as a follow-up.
+   - `set_occurrence_transform/visible/fixed` + `rename_occurrence` RPCs (+ MCP)
+     with snapshot-based undo (`AssemblyHistory`: full-copy undo/redo stacks —
+     `Command`/`CommandStack` are `Document`-only; the assembly is small).
+     undo/redo + Ctrl+Z route to it on an assembly tab.
+   - Occurrence panel in the Model dock: list (visibility toggle + fixed
+     marker), and a selected-occurrence editor (rename, numeric position +
+     Euler rotation, fixed, delete). A drag is one undo step.
+   - 3D pick selects a whole occurrence (click → highlight all instances,
+     double-click → enter the part). Fixed a guard bug that blocked UI actions
+     on an assembly tab.
+   - **Still deferred (gizmo follow-up):** the 3D move/rotate drag manipulator
+     (net-new — no gizmo infra exists), the OutlineRenderer per-mesh model
+     (only needed for smooth dragging; numeric edits resync fine), and the
+     FaceSelector/OutlineRenderer CPU-geometry-sharing split.
+
+A2 now delivers a usable v1 assembly: place parts, position them numerically,
+select/hide/ground/rename/delete, undo, save/reopen. Mates are A3.
