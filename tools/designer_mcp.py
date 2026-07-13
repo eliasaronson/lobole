@@ -503,8 +503,9 @@ def export_brep(path: str, body: int = -1) -> dict:
                  **({"body": body} if body >= 0 else {}))
 
 
-@mcp.tool(description="List the project's parts (multi-part assemblies) and "
-          "which is active. Every modeling tool acts on the active part.")
+@mcp.tool(description="List the project's tabs (parts and assemblies) with "
+          "each one's type and stable id, and which is active. Modeling tools "
+          "act on the active part; assembly tools on the active assembly.")
 def list_parts() -> dict:
     return _call("list_parts")
 
@@ -524,6 +525,45 @@ def set_active_part(index: int) -> dict:
 @mcp.tool(description="Delete a part by index (never the last one).")
 def delete_part(index: int) -> dict:
     return _call("delete_part", index=index)
+
+
+# ---------------------------------------------------------------------------
+# Assemblies (A2): an assembly tab holds occurrences — placed instances of
+# parts. list_parts reports each tab's type ("part"/"assembly") and stable id.
+# ---------------------------------------------------------------------------
+
+@mcp.tool(description="Add a new empty ASSEMBLY tab to the project and switch "
+          "to it. An assembly places copies (occurrences) of parts by "
+          "transform. Part-editing tools do not act on an assembly tab — use "
+          "add_occurrence. Returns its index and stable id.")
+def add_assembly(name: str = "") -> dict:
+    return _call("add_assembly", **({"name": name} if name else {}))
+
+
+@mcp.tool(description="Place a part into the ACTIVE assembly as an occurrence. "
+          "part = the part's name (referenced by stable id, so renames are "
+          "safe). transform = {position:[x,y,z], orientation:[x,y,z,w] "
+          "quaternion}; omitted = identity. fixed=true grounds it as the "
+          "assembly anchor; visible=false hides it. Returns the occurrence id.")
+def add_occurrence(part: str, name: str = "", transform: dict | None = None,
+                   fixed: bool = False, visible: bool = True) -> dict:
+    params = {"part": part, "fixed": fixed, "visible": visible}
+    if name:
+        params["name"] = name
+    if transform is not None:
+        params["transform"] = transform
+    return _call("add_occurrence", **params)
+
+
+@mcp.tool(description="Remove an occurrence from the active assembly by id.")
+def remove_occurrence(id: int) -> dict:
+    return _call("remove_occurrence", id=id)
+
+
+@mcp.tool(description="List the active assembly's occurrences: id, name, "
+          "part_id, transform, visible, fixed.")
+def list_occurrences() -> dict:
+    return _call("list_occurrences")
 
 
 @mcp.tool(description="Import a STEP file's bodies as an Import feature.")

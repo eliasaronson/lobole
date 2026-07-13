@@ -2,6 +2,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Occurrence.h"
 #include "core/SketchFeature.h"
 #include "core/SketchInference.h"
 #include "core/SketchSolver.h"
@@ -193,25 +194,37 @@ struct RenderJob {
 // document and undo stack are owned here (they are swapped by File > New /
 // Open); everything else is a non-owning pointer to objects whose lifetime
 // main.cpp manages alongside the Vulkan context.
-// One part of a multi-part project (assemblies A1). The ACTIVE part's
-// document/commands live in AppState.document/commands (so all existing
-// single-document code is unchanged); an inactive part stashes them here.
+// The kind of document a project tab holds (A2). A part is a feature list that
+// builds bodies; an assembly is an occurrence list that places other parts.
+enum class DocKind { Part, Assembly };
+
+// One document of a project (assemblies A1/A2). The ACTIVE tab's
+// document/assembly/commands live in AppState (so all existing single-document
+// code is unchanged); an inactive tab stashes them here. Exactly one of
+// `doc`/`assembly` is populated, per `kind`.
 struct PartSlot {
+  uint64_t id = 0;   // stable per-document id (A2): what occurrences reference
   std::string name;
-  std::unique_ptr<Document> doc;      // null while this part is active
-  std::unique_ptr<CommandStack> commands; // null while active
-  uint64_t lastSavedVersion = 0;      // per-part dirty tracking
+  DocKind kind = DocKind::Part;
+  std::unique_ptr<Document> doc;          // part: null while this tab is active
+  std::unique_ptr<AssemblyDocument> assembly; // assembly: null while active
+  std::unique_ptr<CommandStack> commands; // null while active (parts only)
+  uint64_t lastSavedVersion = 0;      // per-document dirty tracking
 };
 
 struct AppState {
-  // Owned: the ACTIVE part's model
+  // Owned: the ACTIVE tab's model. For a part tab, `document`/`commands` are
+  // live and `assembly` is null; for an assembly tab, `assembly` is live and
+  // `document`/`commands` are null. They are mutually exclusive.
   std::unique_ptr<Document> document;
   std::unique_ptr<CommandStack> commands;
+  std::unique_ptr<AssemblyDocument> assembly;
 
-  // Multi-part project (A1): all parts by name; `activePart` indexes the one
-  // whose document/commands are live above. One entry = today's single part.
+  // Multi-document project (A1/A2): all tabs; `activePart` indexes the one
+  // whose model is live above. One entry = today's single part.
   std::vector<PartSlot> parts;
   int activePart = 0;
+  uint64_t nextPartId = 1; // stable document-id allocator (A2)
 
   // Non-owning
   Scene* scene = nullptr;

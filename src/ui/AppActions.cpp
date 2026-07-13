@@ -466,10 +466,41 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.syncedDocumentVersion = UINT64_MAX;
 }
 
+namespace {
+// Move the active tab's live model (part doc+commands OR assembly) back into
+// its slot. Moving a null pointer is a no-op, so this handles both kinds.
+void StashActive(AppState& state) {
+  PartSlot& slot = state.parts[state.activePart];
+  slot.doc = std::move(state.document);
+  slot.assembly = std::move(state.assembly);
+  slot.commands = std::move(state.commands);
+  slot.lastSavedVersion = state.lastSavedVersion;
+}
+// Move a slot's model into AppState as the active tab. Assumes AppState holds
+// nothing live (call StashActive first, or after a clear).
+void ActivateSlot(AppState& state, size_t index) {
+  PartSlot& slot = state.parts[index];
+  state.document = std::move(slot.doc);
+  state.assembly = std::move(slot.assembly);
+  state.commands = std::move(slot.commands);
+  state.lastSavedVersion = slot.lastSavedVersion;
+  state.activePart = static_cast<int>(index);
+}
+// Shared reset after a tab switch/create.
+void ResetActiveTabUiState(AppState& state) {
+  state.selectedFeature = -1;
+  state.pendingFeatureId = 0;
+  state.sketchEdit = SketchEditState{};
+  state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
+}
+} // namespace
+
 void EnsureParts(AppState& state, const std::string& firstName) {
   if (state.parts.empty()) {
     PartSlot slot;
+    slot.id = state.nextPartId++;
     slot.name = firstName;
+    slot.kind = DocKind::Part;
     slot.lastSavedVersion = state.lastSavedVersion;
     state.parts.push_back(std::move(slot)); // active: doc/commands stay in AppState
     state.activePart = 0;
@@ -478,23 +509,45 @@ void EnsureParts(AppState& state, const std::string& firstName) {
 
 size_t AddPart(AppState& state, const std::string& name) {
   EnsureParts(state);
-  // Stash the current active part.
-  state.parts[state.activePart].doc = std::move(state.document);
-  state.parts[state.activePart].commands = std::move(state.commands);
-  state.parts[state.activePart].lastSavedVersion = state.lastSavedVersion;
+  StashActive(state);
   // Create and activate the new part.
   state.document = std::make_unique<Document>();
+  state.assembly = nullptr;
   state.commands = std::make_unique<CommandStack>();
   state.lastSavedVersion = 0;
   PartSlot slot;
+  slot.id = state.nextPartId++;
   slot.name = name;
+  slot.kind = DocKind::Part;
   state.parts.push_back(std::move(slot));
   state.activePart = static_cast<int>(state.parts.size()) - 1;
-  state.selectedFeature = -1;
-  state.pendingFeatureId = 0;
-  state.sketchEdit = SketchEditState{};
-  state.syncedDocumentVersion = UINT64_MAX; // force a resync
+  ResetActiveTabUiState(state);
   return state.parts.size() - 1;
+}
+
+size_t AddAssembly(AppState& state, const std::string& name) {
+  EnsureParts(state);
+  StashActive(state);
+  // Create and activate the new assembly. Occurrence undo is Phase 3, so an
+  // assembly tab currently carries no CommandStack.
+  state.document = nullptr;
+  state.assembly = std::make_unique<AssemblyDocument>();
+  state.commands = nullptr;
+  state.lastSavedVersion = 0;
+  PartSlot slot;
+  slot.id = state.nextPartId++;
+  slot.name = name;
+  slot.kind = DocKind::Assembly;
+  state.parts.push_back(std::move(slot));
+  state.activePart = static_cast<int>(state.parts.size()) - 1;
+  ResetActiveTabUiState(state);
+  return state.parts.size() - 1;
+}
+
+uint64_t PartIdByName(const AppState& state, const std::string& name) {
+  for (const PartSlot& slot : state.parts)
+    if (slot.kind == DocKind::Part && slot.name == name) return slot.id;
+  return 0;
 }
 
 void SetActivePart(AppState& state, size_t index) {
@@ -503,24 +556,15 @@ void SetActivePart(AppState& state, size_t index) {
       index == static_cast<size_t>(state.activePart)) {
     return;
   }
-  // Stash the current active part, restore the target.
-  state.parts[state.activePart].doc = std::move(state.document);
-  state.parts[state.activePart].commands = std::move(state.commands);
-  state.parts[state.activePart].lastSavedVersion = state.lastSavedVersion;
-  state.document = std::move(state.parts[index].doc);
-  state.commands = std::move(state.parts[index].commands);
-  state.lastSavedVersion = state.parts[index].lastSavedVersion;
-  state.activePart = static_cast<int>(index);
-  state.selectedFeature = -1;
-  state.pendingFeatureId = 0;
-  state.sketchEdit = SketchEditState{};
-  state.syncedDocumentVersion = UINT64_MAX;
+  StashActive(state);
+  ActivateSlot(state, index);
+  ResetActiveTabUiState(state);
 }
 
 bool DeletePart(AppState& state, size_t index) {
   EnsureParts(state);
   if (state.parts.size() <= 1 || index >= state.parts.size()) {
-    return false; // never delete the last part
+    return false; // never delete the last tab
   }
   const bool deletingActive = index == static_cast<size_t>(state.activePart);
   if (deletingActive) {
@@ -536,9 +580,15 @@ bool DeletePart(AppState& state, size_t index) {
 
 namespace {
 // A part's document, whether active (in AppState) or stashed (in its slot).
-Document* PartDoc(AppState& state, size_t i) {
+// Null for an assembly slot.
+Document* SlotDoc(AppState& state, size_t i) {
   return static_cast<int>(i) == state.activePart ? state.document.get()
                                                  : state.parts[i].doc.get();
+}
+// An assembly slot's document, active or stashed. Null for a part slot.
+AssemblyDocument* SlotAssembly(AppState& state, size_t i) {
+  return static_cast<int>(i) == state.activePart ? state.assembly.get()
+                                                 : state.parts[i].assembly.get();
 }
 } // namespace
 
@@ -546,26 +596,34 @@ bool SaveProject(AppState& state, const std::string& path,
                  std::string* error) {
   namespace fs = std::filesystem;
   EnsureParts(state);
-  // Single part: keep the flat .dsgn form (backward compatible).
-  if (state.parts.size() == 1) {
+  // A single part keeps the flat .dsgn form (backward compatible). A lone
+  // assembly, or any multi-document project, uses the project container.
+  if (state.parts.size() == 1 && state.parts[0].kind == DocKind::Part) {
     return DocumentIO::Save(*state.document, path, error);
   }
-  // Multi-part: project.json + parts/<name>/ (each a part directory).
+  // Multi-document: project.json (v2) + parts/<name>/ and assemblies/<name>/.
   try {
     const fs::path dir(path);
-    fs::create_directories(dir / "parts");
     nlohmann::json index;
     index["format"] = "designer-project";
-    index["version"] = 1;
+    index["version"] = 2;
     index["active"] = state.activePart;
-    index["parts"] = nlohmann::json::array();
+    index["documents"] = nlohmann::json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
-      const std::string& name = state.parts[i].name;
-      const fs::path partDir = dir / "parts" / name;
-      fs::create_directories(partDir);
-      if (!DocumentIO::Save(*PartDoc(state, i), partDir.string(), error))
-        return false;
-      index["parts"].push_back({{"name", name}, {"dir", "parts/" + name}});
+      const PartSlot& slot = state.parts[i];
+      const bool isAsm = slot.kind == DocKind::Assembly;
+      const std::string sub = isAsm ? "assemblies/" : "parts/";
+      const fs::path docDir = dir / sub / slot.name;
+      fs::create_directories(docDir);
+      const bool ok =
+          isAsm ? DocumentIO::SaveAssembly(*SlotAssembly(state, i),
+                                           docDir.string(), error)
+                : DocumentIO::Save(*SlotDoc(state, i), docDir.string(), error);
+      if (!ok) return false;
+      index["documents"].push_back({{"id", slot.id},
+                                    {"name", slot.name},
+                                    {"dir", sub + slot.name},
+                                    {"type", isAsm ? "assembly" : "part"}});
     }
     std::ofstream out(dir / "project.json");
     if (!out) {
@@ -585,43 +643,64 @@ bool OpenProject(AppState& state, const std::string& path,
   namespace fs = std::filesystem;
   const fs::path projFile = fs::path(path) / "project.json";
   if (!fs::exists(projFile)) {
-    // Not a multi-part project: load as a single part.
+    // Not a multi-document project: load as a single part.
     auto doc = DocumentIO::Load(path, error);
     if (!doc)
       return false;
     ReplaceDocument(state, std::move(doc));
     state.parts.clear();
+    state.nextPartId = 1;
     EnsureParts(state, fs::path(path).stem().string());
     return true;
   }
   try {
     nlohmann::json index;
     std::ifstream(projFile) >> index;
-    // Load part 0 as the active document; stash the rest.
+    // v2 has a typed `documents` list; v1 had a flat `parts` list (all parts,
+    // no ids/types). Normalize v1 into the same shape with defaulted reads.
+    nlohmann::json docs;
+    if (index.contains("documents")) {
+      docs = index.at("documents");
+    } else {
+      docs = nlohmann::json::array();
+      for (const auto& p : index.at("parts"))
+        docs.push_back({{"name", p.at("name")}, {"dir", p.at("dir")},
+                        {"type", "part"}});
+    }
+
+    // Load every document into its slot; AppState holds nothing live yet.
+    state.document = nullptr;
+    state.assembly = nullptr;
+    state.commands = nullptr;
     state.parts.clear();
-    const auto& parts = index.at("parts");
-    for (size_t i = 0; i < parts.size(); i++) {
-      const std::string name = parts[i].at("name").get<std::string>();
+    uint64_t maxId = 0;
+    for (size_t i = 0; i < docs.size(); i++) {
+      const std::string name = docs[i].at("name").get<std::string>();
       const std::string dir =
-          (fs::path(path) / parts[i].at("dir").get<std::string>()).string();
-      auto doc = DocumentIO::Load(dir, error);
-      if (!doc)
-        return false;
+          (fs::path(path) / docs[i].at("dir").get<std::string>()).string();
+      const bool isAsm = docs[i].value("type", std::string("part")) == "assembly";
       PartSlot slot;
+      slot.id = docs[i].value("id", static_cast<uint64_t>(i + 1)); // v1: 1..n
       slot.name = name;
-      if (i == 0) {
-        ReplaceDocument(state, std::move(doc)); // active
+      slot.kind = isAsm ? DocKind::Assembly : DocKind::Part;
+      if (isAsm) {
+        slot.assembly = DocumentIO::LoadAssembly(dir, error);
+        if (!slot.assembly) return false;
       } else {
-        slot.doc = std::move(doc);
+        slot.doc = DocumentIO::Load(dir, error);
+        if (!slot.doc) return false;
         slot.commands = std::make_unique<CommandStack>();
       }
+      maxId = std::max(maxId, slot.id);
       state.parts.push_back(std::move(slot));
     }
-    state.activePart = 0;
-    const int wantActive = index.value("active", 0);
-    if (wantActive != 0)
-      SetActivePart(state, static_cast<size_t>(wantActive));
-    FitCameraToDocument(state);
+    state.nextPartId = maxId + 1;
+
+    size_t wantActive = static_cast<size_t>(index.value("active", 0));
+    if (wantActive >= state.parts.size()) wantActive = 0;
+    ActivateSlot(state, wantActive);
+    ResetActiveTabUiState(state);
+    if (state.document) FitCameraToDocument(state);
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();

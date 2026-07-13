@@ -57,9 +57,12 @@ this is untangling singletons (`AppState` assumes one document).
 
 ### A2 — Assembly document + occurrences — [design: a2-design.md](a2-design.md)
 > **2026-07-13:** instancing gate cleared (6a99c38); A2 design **signed off**
-> — [a2-design.md](a2-design.md). Assembly is a distinct document kind; parts
-> gain stable ids; occurrences store translation+quaternion transforms;
-> phase 1 (format spine) ready to build.
+> ([a2-design.md](a2-design.md)). **Phase 1 SHIPPED** (format spine 0949554 +
+> project container): assembly is a distinct document kind, parts have stable
+> ids, occurrences (translation+quaternion) round-trip through a v2 project;
+> add_assembly/add_occurrence RPCs + MCP + assembly_smoke test. Remaining:
+> phase 2 (rendering: occurrences via the instancing API + hit→occurrence
+> picking) and phase 3 (move/rotate gizmo + occurrence-edit undo).
 
 A new document type: an ordered list of **occurrences** `{ partRef, transform,
 name, visibility }` — instances of parts placed by explicit transform.

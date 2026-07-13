@@ -20,15 +20,21 @@ namespace ui {
 // forces the renderers to resync.
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc);
 
-// Multi-part projects (assemblies A1). EnsureParts makes the parts list
+// Multi-document projects (assemblies A1/A2). EnsureParts makes the parts list
 // non-empty (one slot for the active document) — call once after the initial
-// document is created. AddPart appends a new empty part and switches to it.
-// SetActivePart swaps the active document out to its slot and the target in.
-// DeletePart removes a part (never the last). All resync the renderers.
+// document is created. AddPart/AddAssembly append a new empty tab of that kind
+// and switch to it. SetActivePart swaps the active document out to its slot
+// and the target in. DeletePart removes a tab (never the last). All resync the
+// renderers.
 void EnsureParts(AppState& state, const std::string& firstName = "Part 1");
 size_t AddPart(AppState& state, const std::string& name);
+size_t AddAssembly(AppState& state, const std::string& name);
 void SetActivePart(AppState& state, size_t index);
 bool DeletePart(AppState& state, size_t index);
+
+// The document id (PartSlot::id) for a part name, or 0 if no such part.
+// Occurrences reference parts by this stable id, never by name.
+uint64_t PartIdByName(const AppState& state, const std::string& name);
 
 // Save/open a project directory. A multi-part project writes a project.json
 // index + one `parts/<name>/` directory each; a single-part project stays

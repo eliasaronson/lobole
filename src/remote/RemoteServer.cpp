@@ -231,6 +231,20 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   Document* doc = state.document.get();
   handled = true;
 
+  // Methods that act on the project container or the active assembly tab, not
+  // on an active part document. Everything else needs a live part: when an
+  // assembly tab is active, `doc` is null, so fail with a clear message rather
+  // than dereferencing null.
+  static const std::set<std::string> kNoPartDoc = {
+      "ping",         "list_parts",       "add_part",
+      "add_assembly", "set_active_part",  "delete_part",
+      "new_project",  "save_project",     "open_project",
+      "add_occurrence", "remove_occurrence", "list_occurrences"};
+  if (!doc && !kNoPartDoc.count(m)) {
+    throw std::runtime_error(
+        "the active document is an assembly, not a part; switch to a part tab");
+  }
+
   if (m == "ping") {
     return {{"ok", true}, {"app", "designer"}};
   }
@@ -800,18 +814,68 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"can_redo", state.commands->CanRedo()}};
   }
   if (m == "list_parts") {
-    // Multi-part project (assemblies A1): the parts and which is active.
+    // Multi-document project (assemblies A1/A2): the tabs and which is active.
     ui::EnsureParts(state);
     json arr = json::array();
     for (size_t i = 0; i < state.parts.size(); i++)
-      arr.push_back({{"name", state.parts[i].name}, {"index", i}});
+      arr.push_back({{"name", state.parts[i].name},
+                     {"index", i},
+                     {"id", state.parts[i].id},
+                     {"type", state.parts[i].kind == ui::DocKind::Assembly
+                                  ? "assembly"
+                                  : "part"}});
     return {{"parts", arr}, {"active", state.activePart}};
   }
   if (m == "add_part") {
     const std::string name =
         p.value("name", "Part " + std::to_string(state.parts.size() + 1));
     const size_t idx = ui::AddPart(state, name);
-    return {{"index", idx}, {"name", name}};
+    return {{"index", idx}, {"name", name}, {"id", state.parts[idx].id}};
+  }
+  if (m == "add_assembly") {
+    const std::string name =
+        p.value("name", "Assembly " + std::to_string(state.parts.size() + 1));
+    const size_t idx = ui::AddAssembly(state, name);
+    return {{"index", idx}, {"name", name}, {"id", state.parts[idx].id}};
+  }
+  if (m == "add_occurrence") {
+    // Places a part in the active assembly. `part` is the part's NAME (resolved
+    // to its stable id); optional `transform` = {position:[x,y,z],
+    // orientation:[x,y,z,w]}. Direct mutation — occurrence undo is Phase 3.
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    const std::string partName = p.at("part").get<std::string>();
+    const uint64_t partId = ui::PartIdByName(state, partName);
+    if (partId == 0)
+      throw std::runtime_error("no part named '" + partName + "'");
+    const json identityTransform = {{"position", {0.0, 0.0, 0.0}},
+                                    {"orientation", {0.0, 0.0, 0.0, 1.0}}};
+    // Build one occurrence-JSON and reuse the loader (id is reassigned on add).
+    Occurrence occ = DocumentIO::OccurrenceFromJson(
+        {{"id", 0},
+         {"name", p.value("name", partName)},
+         {"part_id", partId},
+         {"part_version", nullptr},
+         {"transform", p.value("transform", identityTransform)},
+         {"visible", p.value("visible", true)},
+         {"fixed", p.value("fixed", false)}});
+    const uint64_t id = state.assembly->AddOccurrence(occ);
+    return {{"id", id}, {"part_id", partId}};
+  }
+  if (m == "remove_occurrence") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    if (!state.assembly->RemoveOccurrence(p.at("id").get<uint64_t>()))
+      throw std::runtime_error("no such occurrence");
+    return json::object();
+  }
+  if (m == "list_occurrences") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    json arr = json::array();
+    for (const Occurrence& o : state.assembly->GetOccurrences())
+      arr.push_back(DocumentIO::OccurrenceToJson(o));
+    return {{"occurrences", arr}};
   }
   if (m == "set_active_part") {
     ui::SetActivePart(state, p.at("index").get<size_t>());

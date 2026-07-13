@@ -247,14 +247,23 @@ All six settled with Elias; the format above reflects them.
 
 ## Phasing
 
-1. **Format + model** — `AssemblyDocument` kind, occurrence schema, project
-   `documents` list, `TrsfToJson`/`FromJson`, v23 bump + golden assembly +
-   round-trip test. Headless/RPC-testable with no rendering.
+1. **Format + model + container — SHIPPED 2026-07-13.**
+   - *1a* (`0949554`): `AssemblyDocument`/`Occurrence`, quaternion transforms,
+     Save/LoadAssembly (single-file + F3 dir), v23 bump, frozen golden +
+     round-trip tests.
+   - *1b*: project container — `AppState` holds mixed part/assembly tabs, each
+     with a stable id; `project.json` v2 typed `documents` list (v1
+     back-compat); `AddAssembly`; `SaveProject`/`OpenProject` round-trip;
+     RPCs `add_assembly`/`add_occurrence`/`remove_occurrence`/
+     `list_occurrences`, `list_parts` reports type+id, part-only RPCs error
+     cleanly on an active assembly; MCP tools; `assembly_smoke` headless test.
+     Occurrence *editing* (transform RPC) + undo are deferred to phase 3 —
+     `add_occurrence` is a direct mutation for now (an assembly tab carries no
+     CommandStack yet).
 2. **Rendering + picking** — assembly `SyncDocumentRenderers` path
    (`CreateAsset`/`AddInstance`), FaceSelector/OutlineRenderer instance-space
    split, hit→occurrence, double-click-to-enter.
-3. **Gizmo + commands** — move/rotate manipulator, the `*_occurrence` RPCs,
-   snapshot undo. The interactive UX layer.
-
-Phase 1 is the format spine and is the piece that most needs sign-off before
-code; 2 and 3 are additive on top of it.
+3. **Gizmo + commands** — move/rotate manipulator, `set_occurrence_transform`,
+   snapshot undo for occurrence edits (needs a command mechanism for
+   `AssemblyDocument`, which `Command`/`CommandStack` don't cover today). The
+   interactive UX layer.

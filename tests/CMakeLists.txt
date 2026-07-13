@@ -71,6 +71,12 @@ add_test(NAME headless_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
 
+# Assemblies A2 project container: parts + assembly + occurrences, round-trip.
+add_test(NAME assembly_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(assembly_smoke PROPERTIES TIMEOUT 120)
+
 # Models a bracket through the pythonic client (S3).
 add_test(NAME pyclient_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/pyclient_smoke.py
