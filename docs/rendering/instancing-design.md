@@ -179,11 +179,13 @@ documents, which is what makes this safe to land before A2 exists.
 
 ## Decisions that need you
 
-1. **Per-instance draws vs. true GPU instancing now.** Recommendation above:
-   per-instance draws with shared buffers; batch later only if a profile
-   demands it. Cheap, preserves highlight/visibility semantics, and is 100%
-   of the memory win. Say the word if you want `instanceCount = N` from day
-   one instead — the cost is a per-instance SSBO + highlight redesign now.
+1. **Per-instance draws vs. true GPU instancing now.** — **DECIDED
+   (2026-07-12): per-instance draws** with shared buffers; batch later only
+   if a profile of a real large assembly shows command submission as the
+   cost. Rationale: push constants live in the command stream (zero CPU/GPU
+   sync — the sync burden is on the batched side's per-instance buffer),
+   and per-draw record cost only matters at tens of thousands of draws,
+   far past CAD-assembly scale.
 2. **Dropping `Vertex3D.color`.** — **DECIDED (2026-07-12): remove.**
    Albedo moves to per-instance state; vertices go to 24 bytes; the vertex
    input layout, converter, and `SetMeshMaterial` are updated rather than
