@@ -55,7 +55,10 @@ the viewport; the feature tree shows the active part). Open/save moves from
 (directory layout: `parts/<name>/…`). No cross-part references yet. Much of
 this is untangling singletons (`AppState` assumes one document).
 
-### A2 — Assembly document + occurrences
+### A2 — Assembly document + occurrences — [design: a2-design.md](a2-design.md)
+> **2026-07-13:** instancing gate cleared (6a99c38); A2 design drafted for
+> sign-off — [a2-design.md](a2-design.md), persistence format as centerpiece.
+
 A new document type: an ordered list of **occurrences** `{ partRef, transform,
 name, visibility }` — instances of parts placed by explicit transform.
 Move/rotate gizmo for positioning. Rendering via the instancing prerequisite.
