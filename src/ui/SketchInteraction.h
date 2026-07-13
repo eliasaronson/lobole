@@ -10,7 +10,7 @@
 
 class SketchFeature;
 class DatumPlaneFeature;
-struct Vertex3D;
+struct LineVertex3D;
 
 namespace ui {
 
@@ -58,7 +58,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 
 // Appends the in-progress rubber-band preview (pending point → cursor) to the
 // sketch renderer's overlay. No-op when not drawing.
-void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out);
+void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out);
 
 // Draws the auto-constraint snap indicator + ghost glyphs (H, V, coincident, …)
 // at the snapped cursor, via ImGui's foreground draw list. No-op when not

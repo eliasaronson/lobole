@@ -167,15 +167,41 @@ patterned geometry stays one body, one asset.
    destroy, per-instance draw loop, albedo → push constant, `clipPlane` →
    UBO, `Vertex3D` loses `color`. Single-part rendering is pixel-identical
    (verify via gui_smoke screenshots).
-2. **FaceSelector + OutlineRenderer split** — instance-space picking,
-   shared outline buffers; migrate `documentMeshes` bookkeeping and the
-   highlight/RPC call sites.
+   **Shipped 2026-07-12** (see status note below).
+2. **FaceSelector + OutlineRenderer instance-space split** — shared geometry
+   per asset, ray-in-instance-space picking, shared outline buffers.
+   **Folded into A2, not landed in phase 1.** Rationale discovered during
+   phase 1: with the transitional `AddMesh` (asset + one instance in one
+   shot), an instance id *equals* the old `meshId` 1:1, so `FaceSelector`,
+   `OutlineRenderer`, `documentMeshes`, the highlight wiring, and RPC picking
+   all keep working unchanged — the meshId→instanceId migration is already a
+   no-op. The genuinely new code (one geometry record shared by N occurrences,
+   picking against it in instance space) has *no test surface until A2 creates
+   a second occurrence of one asset*. Building it in phase 1 would be untested
+   generality; it lands with A2, which exercises it.
 3. **Tests** — a unit/GUI test that creates one asset with two instances at
    different transforms + materials, verifies picking resolves each
-   instance, and screenshots. (A2 will then exercise this for real.)
+   instance, and screenshots. Lands with phase 2 / A2 (needs the multi-
+   occurrence path that only A2 introduces).
 
-Phase 1 and 2 are one PR each; both are behavior-preserving for single-part
-documents, which is what makes this safe to land before A2 exists.
+Phase 1 is the whole memory lever (shared refcounted tessellation +
+per-instance material/transform) and is behavior-preserving for single-part
+documents, which is what makes it safe to land before A2 exists. The
+`AddInstance`/`SetInstanceMaterial`/`SetInstanceTransform` API A2 needs is
+already in place.
+
+## Status (2026-07-12)
+
+Phase 1 shipped. `MeshRenderer` is now `MeshAsset` (shared, refcounted,
+uploaded once) + `MeshInstance` (transform/albedo/material/highlight/visible,
+per draw). `Vertex3D` dropped `color` (36→24 B); sketch/overlay geometry moved
+to a dedicated `LineVertex3D {position, color}` (the sketch pipeline is unlit
+and never used the normal); the section clip plane moved from the per-mesh push
+constant to the shared UBO. Shaders updated (`mesh`, `outline`, `wireframe`,
+`sketch`, `closesthit`). Build clean; 295/297 tests pass — the 2 failures
+(`remote_smoke`, `mcp_smoke`) are GUI-window/X-display launch failures in the
+headless build shell, not logic regressions. Visual confirmation (gui_smoke /
+launching the app) needs a real desktop session.
 
 ## Decisions that need you
 

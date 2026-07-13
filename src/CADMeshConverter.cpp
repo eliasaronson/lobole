@@ -3,18 +3,17 @@
 #include <glm/gtx/normal.hpp>
 #include <unordered_map>
 
-std::vector<Vertex3D> CADMeshConverter::ConvertCADMeshToVertices(const CADShape::Mesh& cadMesh, const glm::vec3& color) {
+std::vector<Vertex3D> CADMeshConverter::ConvertCADMeshToVertices(const CADShape::Mesh& cadMesh) {
     std::vector<Vertex3D> vertices;
     vertices.reserve(cadMesh.vertices.size());
-    
+
     for (const auto& cadVertex : cadMesh.vertices) {
         Vertex3D vertex;
         vertex.position = cadVertex.position;
         vertex.normal = cadVertex.normal;
-        vertex.color = color;
         vertices.push_back(vertex);
     }
-    
+
     return vertices;
 }
 

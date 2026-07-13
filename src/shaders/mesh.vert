@@ -6,7 +6,6 @@ struct Light {
 };
 
 layout(binding = 0) uniform UniformBufferObject {
-    mat4 model; // unused; per-mesh model comes via push constant
     mat4 view;
     mat4 proj;
     vec4 viewPos;      // Camera position
@@ -14,6 +13,10 @@ layout(binding = 0) uniform UniformBufferObject {
     Light fillLight;    // Fill light
     Light rimLight;     // Rim light
     vec4 ambientColor;  // rgb = ambient color, a = intensity
+    // Section clip plane (world space): xyz = normal, w = distance. Global for
+    // the frame, so it lives here rather than in per-draw push constants.
+    // Disabled when xyz == 0 (fragClipDist is then 0 and nothing is clipped).
+    vec4 clipPlane;
 } ubo;
 
 layout(push_constant) uniform PushConstants {
@@ -22,14 +25,12 @@ layout(push_constant) uniform PushConstants {
     uvec4 highlight;
     // PBR: x=metallic, y=roughness, z=specular, w=reflectance (used in frag)
     vec4 material;
-    // Section clip plane (world space): xyz = normal, w = distance; fragments
-    // with dot(worldPos,xyz) > w are discarded. Disabled when xyz == 0.
-    vec4 clipPlane;
+    // Per-instance albedo (rgb); instances of one asset can differ in color
+    vec4 baseColor;
 } pc;
 
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec3 inColor;
 
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec3 fragNormal;
@@ -40,6 +41,7 @@ layout(location = 6) out Light fragFillLight;
 layout(location = 8) out Light fragRimLight;
 layout(location = 10) out vec3 fragAmbientColor;
 layout(location = 11) out float fragHighlight;
+layout(location = 12) out float fragClipDist;
 
 void main() {
     // Transform position to world space
@@ -58,11 +60,15 @@ void main() {
     fragHighlight = 0.0;
     if (v >= pc.highlight.z && v < pc.highlight.w) fragHighlight = 0.5;
     if (v >= pc.highlight.x && v < pc.highlight.y) fragHighlight = 1.0;
-    
-    // Pass through color and camera position
-    fragColor = inColor;
+
+    // Signed distance past the section plane (linear in world pos, so the
+    // interpolated value is exact); frag discards where it is > 0.
+    fragClipDist = dot(ubo.clipPlane.xyz, worldPos.xyz) - ubo.clipPlane.w;
+
+    // Albedo from the per-instance push constant, plus camera position
+    fragColor = pc.baseColor.rgb;
     fragViewPos = ubo.viewPos.xyz;
-    
+
     // Pass through light data
     fragPrimaryLight = ubo.primaryLight;
     fragFillLight = ubo.fillLight;

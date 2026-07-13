@@ -94,11 +94,11 @@ void DrawUI(AppState& state) {
   // or while picking a plane; the active sketch and rubber-band preview draw
   // as an overlay on top of the static sketch lines.
   if (state.sketchRenderer) {
-    std::vector<Vertex3D> quads = BuildPlaneQuads(
+    std::vector<LineVertex3D> quads = BuildPlaneQuads(
         EffectivePlaneVisibility(state), state.sketchEdit.hoveredPlane);
     AppendDatumPlaneQuads(state, quads); // user datum planes (own visibility)
 
-    std::vector<Vertex3D> overlay =
+    std::vector<LineVertex3D> overlay =
         BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
     BuildSketchOverlay(state, overlay);
     AppendOriginGizmo(overlay); // always show the world origin + axes

@@ -129,11 +129,11 @@ std::vector<std::pair<uint64_t, std::string>> BodyProducers(
 // tinted distinctly from the base planes; the hovered/selected/pending datum
 // is brightened. Visible while picking a plane, or when showPlanes is on
 // (datums are user reference geometry, so they don't auto-hide behind bodies).
-void AppendDatumPlaneQuads(AppState& state, std::vector<Vertex3D>& quads);
+void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads);
 
 // Appends a line segment for every DatumAxisFeature (same visibility rule as
 // the datum planes), tinted distinctly; selected/pending is brightened.
-void AppendDatumAxisLines(AppState& state, std::vector<Vertex3D>& lines);
+void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines);
 
 // Draws each visible datum plane's and datum axis's name as a 2D label
 // (foreground draw list). Call inside the ImGui frame, near DrawDimensions.
@@ -149,24 +149,24 @@ bool EffectivePlaneVisibility(const AppState& state);
 
 // Translucent default-plane quads (Front/Top/Right); hoveredPlane 0/1/2 is
 // brightened, -1 for none. Empty when show is false.
-std::vector<Vertex3D> BuildPlaneQuads(bool show, int hoveredPlane);
+std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane);
 
 // Appends a translucent fill quad for one plane (e.g. the active sketch plane).
 void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color,
-                     float half, std::vector<Vertex3D>& quads);
+                     float half, std::vector<LineVertex3D>& quads);
 
 // Appends grid lines for a sketch's work plane (minor/major cells + colored
 // U/V axes), so it is clear what surface you are drawing on.
-void AppendSketchGrid(const SketchPlane& plane, std::vector<Vertex3D>& lines);
+void AppendSketchGrid(const SketchPlane& plane, std::vector<LineVertex3D>& lines);
 
 // Appends the world-origin gizmo: three arrows (X red / Y green / Z blue).
-void AppendOriginGizmo(std::vector<Vertex3D>& lines);
+void AppendOriginGizmo(std::vector<LineVertex3D>& lines);
 
 // Highlighted line geometry for the sketch currently being edited (empty if
 // none). Rendered as a per-frame overlay on top of the static sketch lines.
 // Holds the rubber-band preview + gizmo/grid; entity lines and vertex dots go
 // through BuildActiveSketchPrimitives instead.
-std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,
+std::vector<LineVertex3D> BuildActiveSketchOverlay(AppState& state,
                                                uint64_t activeSketchId);
 
 // Thick anti-aliased entity lines + constant-size vertex dots for the active
@@ -176,7 +176,7 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
 
 // Base-color thin lines for every sketch except the active one (which renders
 // through BuildActiveSketchPrimitives). Rebuilt per-frame.
-std::vector<Vertex3D> BuildStaticSketchLines(AppState& state,
+std::vector<LineVertex3D> BuildStaticSketchLines(AppState& state,
                                              uint64_t activeSketchId);
 
 } // namespace ui

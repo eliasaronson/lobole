@@ -41,15 +41,15 @@ public:
 
   // Sketch entity lines (line list: pairs of endpoints). Replaced on
   // document change.
-  void SetStaticLines(std::vector<Vertex3D> lines) {
+  void SetStaticLines(std::vector<LineVertex3D> lines) {
     m_staticLines = std::move(lines);
   }
   // Rubber-band preview, replaced every frame while drawing.
-  void SetOverlayLines(std::vector<Vertex3D> lines) {
+  void SetOverlayLines(std::vector<LineVertex3D> lines) {
     m_overlayLines = std::move(lines);
   }
   // Translucent default-plane quads (triangle list).
-  void SetQuads(std::vector<Vertex3D> quads) { m_quads = std::move(quads); }
+  void SetQuads(std::vector<LineVertex3D> quads) { m_quads = std::move(quads); }
   // Screen-space-expanded primitives (thick lines + point dots), replaced on
   // document/selection change.
   void SetPrimitives(std::vector<PrimVertex> prims) {
@@ -92,8 +92,8 @@ private:
   uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props);
   VkShaderModule LoadShader(const std::string& spvName);
   // Grows the buffer if needed and uploads verts; returns the vertex count.
-  uint32_t Upload(DynamicBuffer& buf, const std::vector<Vertex3D>& verts);
-  // Raw-bytes variant shared by the Vertex3D and PrimVertex upload paths.
+  uint32_t Upload(DynamicBuffer& buf, const std::vector<LineVertex3D>& verts);
+  // Raw-bytes variant shared by the LineVertex3D and PrimVertex upload paths.
   uint32_t UploadRaw(DynamicBuffer& buf, const void* data, VkDeviceSize bytes,
                      uint32_t count);
   void DestroyDynamic(DynamicBuffer& buf);
@@ -123,9 +123,9 @@ private:
   DynamicBuffer m_quadBuffers[kFramesInFlight];
   DynamicBuffer m_primBuffers[kFramesInFlight];
 
-  std::vector<Vertex3D> m_staticLines;
-  std::vector<Vertex3D> m_overlayLines;
-  std::vector<Vertex3D> m_quads;
+  std::vector<LineVertex3D> m_staticLines;
+  std::vector<LineVertex3D> m_overlayLines;
+  std::vector<LineVertex3D> m_quads;
   std::vector<PrimVertex> m_primitives;
 
   glm::mat4 m_view = glm::mat4(1.0f);

@@ -30,26 +30,20 @@ VkVertexInputBindingDescription Vertex3D::getBindingDescription() {
 }
 
 std::vector<VkVertexInputAttributeDescription> Vertex3D::getAttributeDescriptions() {
-    std::vector<VkVertexInputAttributeDescription> attributeDescriptions(3);
-    
+    std::vector<VkVertexInputAttributeDescription> attributeDescriptions(2);
+
     // Position
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[0].offset = offsetof(Vertex3D, position);
-    
+
     // Normal
     attributeDescriptions[1].binding = 0;
     attributeDescriptions[1].location = 1;
     attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
     attributeDescriptions[1].offset = offsetof(Vertex3D, normal);
-    
-    // Color
-    attributeDescriptions[2].binding = 0;
-    attributeDescriptions[2].location = 2;
-    attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[2].offset = offsetof(Vertex3D, color);
-    
+
     return attributeDescriptions;
 }
 
@@ -72,27 +66,28 @@ bool MeshRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
     m_graphicsQueue = graphicsQueue;
     m_queueFamily = queueFamily;
     m_commandPool = commandPool;
-    
+
     if (!CreateDescriptorSetLayout()) return false;
     if (!CreateGraphicsPipeline()) return false;
     if (!CreateUniformBuffers()) return false;
     if (!CreateDescriptorPool()) return false;
     if (!CreateDescriptorSets()) return false;
-    
+
     return true;
 }
 
 void MeshRenderer::Shutdown() {
     if (m_device == VK_NULL_HANDLE) return;
-    
-    // Cleanup meshes
-    for (auto& mesh : m_meshes) {
-        if (mesh) {
-            DestroyMeshBuffers(mesh.get());
+
+    // Cleanup assets + instances
+    for (auto& asset : m_assets) {
+        if (asset) {
+            DestroyAssetBuffers(asset.get());
         }
     }
-    m_meshes.clear();
-    
+    m_assets.clear();
+    m_instances.clear();
+
     // Cleanup uniform buffers
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         if (m_uniformBuffers[i] != VK_NULL_HANDLE) {
@@ -102,107 +97,127 @@ void MeshRenderer::Shutdown() {
             vkFreeMemory(m_device, m_uniformBuffersMemory[i], nullptr);
         }
     }
-    
+
     if (m_descriptorPool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
     }
-    
+
     if (m_graphicsPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
     }
-    
+
     if (m_pipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     }
-    
+
     if (m_descriptorSetLayout != VK_NULL_HANDLE) {
         vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
     }
 }
 
-uint32_t MeshRenderer::AddMesh(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
-    auto mesh = std::make_unique<Mesh>();
-    mesh->vertices = vertices;
-    mesh->indices = indices;
-    
-    if (!CreateMeshBuffers(mesh.get())) {
-        return 0; // Invalid mesh ID
+MeshAsset* MeshRenderer::GetAsset(uint32_t assetId) {
+    if (assetId == 0 || assetId > m_assets.size()) return nullptr;
+    return m_assets[assetId - 1].get();
+}
+
+MeshInstance* MeshRenderer::GetInstance(uint32_t instanceId) {
+    if (instanceId == 0 || instanceId > m_instances.size()) return nullptr;
+    return m_instances[instanceId - 1].get();
+}
+
+uint32_t MeshRenderer::CreateAsset(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
+    auto asset = std::make_unique<MeshAsset>();
+    asset->vertices = vertices;
+    asset->indices = indices;
+
+    if (!CreateAssetBuffers(asset.get())) {
+        return 0; // Invalid asset id
     }
-    
-    uint32_t meshId = m_nextMeshId++;
-    m_meshes.push_back(std::move(mesh));
-    
-    return meshId;
+
+    m_assets.push_back(std::move(asset));
+    return static_cast<uint32_t>(m_assets.size());
 }
 
-void MeshRenderer::UpdateMesh(uint32_t meshId, const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
-    if (meshId == 0 || meshId > m_meshes.size()) return;
-    
-    Mesh* mesh = m_meshes[meshId - 1].get();
-    if (!mesh) return;
-    
-    mesh->vertices = vertices;
-    mesh->indices = indices;
-    mesh->isDirty = true;
-    
-    UpdateMeshBuffers(mesh);
+void MeshRenderer::UpdateAsset(uint32_t assetId, const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
+    MeshAsset* asset = GetAsset(assetId);
+    if (!asset) return;
+
+    asset->vertices = vertices;
+    asset->indices = indices;
+
+    // Ensure the old buffers aren't referenced by an in-flight frame before
+    // destroying them.
+    vkDeviceWaitIdle(m_device);
+    DestroyAssetBuffers(asset);
+    CreateAssetBuffers(asset);
 }
 
-void MeshRenderer::RemoveMesh(uint32_t meshId) {
-    if (meshId == 0 || meshId > m_meshes.size()) return;
+uint32_t MeshRenderer::AddInstance(uint32_t assetId, const glm::mat4& transform) {
+    MeshAsset* asset = GetAsset(assetId);
+    if (!asset) return 0;
 
-    if (m_meshes[meshId - 1]) {
-        // Ensure the buffers aren't referenced by an in-flight frame before
-        // destroying them (rapid resync, e.g. accepting a feature preview,
-        // otherwise causes a GPU device-lost).
+    auto instance = std::make_unique<MeshInstance>();
+    instance->assetId = assetId;
+    instance->transform = transform;
+    asset->refCount++;
+
+    m_instances.push_back(std::move(instance));
+    return static_cast<uint32_t>(m_instances.size());
+}
+
+void MeshRenderer::RemoveInstance(uint32_t instanceId) {
+    MeshInstance* instance = GetInstance(instanceId);
+    if (!instance) return;
+
+    MeshAsset* asset = GetAsset(instance->assetId);
+    if (asset && --asset->refCount == 0) {
+        // Last occurrence gone: drop the tessellation too. Ensure the buffers
+        // aren't referenced by an in-flight frame before destroying them
+        // (rapid resync, e.g. accepting a feature preview, otherwise causes a
+        // GPU device-lost).
         vkDeviceWaitIdle(m_device);
-        DestroyMeshBuffers(m_meshes[meshId - 1].get());
-        m_meshes[meshId - 1].reset();
+        DestroyAssetBuffers(asset);
+        m_assets[instance->assetId - 1].reset();
+    }
+    m_instances[instanceId - 1].reset();
+}
+
+void MeshRenderer::SetInstanceTransform(uint32_t instanceId, const glm::mat4& transform) {
+    if (MeshInstance* instance = GetInstance(instanceId)) {
+        instance->transform = transform;
     }
 }
 
-void MeshRenderer::SetMeshTransform(uint32_t meshId, const glm::mat4& transform) {
-    if (meshId == 0 || meshId > m_meshes.size()) return;
-    
-    Mesh* mesh = m_meshes[meshId - 1].get();
-    if (mesh) {
-        mesh->modelMatrix = transform;
+void MeshRenderer::SetInstanceColor(uint32_t instanceId, const glm::vec3& albedo) {
+    if (MeshInstance* instance = GetInstance(instanceId)) {
+        instance->baseColor = glm::vec4(albedo, 1.0f);
     }
 }
 
-void MeshRenderer::SetMeshColor(uint32_t meshId, const glm::vec3& color) {
-    if (meshId == 0 || meshId > m_meshes.size()) return;
-    
-    Mesh* mesh = m_meshes[meshId - 1].get();
-    if (mesh) {
-        mesh->color = color;
-        
-        // Update vertex colors
-        for (auto& vertex : mesh->vertices) {
-            vertex.color = color;
-        }
-        
-        mesh->isDirty = true;
-        UpdateMeshBuffers(mesh);
+void MeshRenderer::SetInstanceMaterial(uint32_t instanceId, const glm::vec3& albedo,
+                                       const glm::vec4& params) {
+    if (MeshInstance* instance = GetInstance(instanceId)) {
+        instance->baseColor = glm::vec4(albedo, 1.0f);
+        instance->materialParams = params;
     }
 }
 
-void MeshRenderer::SetMeshMaterial(uint32_t meshId, const glm::vec3& albedo,
-                                   const glm::vec4& params) {
-    if (meshId == 0 || meshId > m_meshes.size()) return;
-
-    Mesh* mesh = m_meshes[meshId - 1].get();
-    if (mesh) {
-        mesh->materialParams = params;
-        // Albedo rides in the vertex color (same path as SetMeshColor), so no
-        // extra push-constant space is needed for it.
-        mesh->color = albedo;
-        for (auto& vertex : mesh->vertices) {
-            vertex.color = albedo;
-        }
-        mesh->isDirty = true;
-        UpdateMeshBuffers(mesh);
+void MeshRenderer::SetInstanceVisible(uint32_t instanceId, bool visible) {
+    if (MeshInstance* instance = GetInstance(instanceId)) {
+        instance->visible = visible;
     }
+}
+
+uint32_t MeshRenderer::AddMesh(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
+    uint32_t assetId = CreateAsset(vertices, indices);
+    if (assetId == 0) return 0;
+    return AddInstance(assetId);
+}
+
+void MeshRenderer::UpdateMesh(uint32_t instanceId, const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
+    MeshInstance* instance = GetInstance(instanceId);
+    if (!instance) return;
+    UpdateAsset(instance->assetId, vertices, indices);
 }
 
 void MeshRenderer::UpdateCamera(const glm::mat4& view, const glm::mat4& projection) {
@@ -215,32 +230,35 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     UniformBufferObject ubo{};
     ubo.view = m_viewMatrix;
     ubo.proj = m_projectionMatrix;
-    
+
     // Extract camera position from inverse view matrix
     glm::mat4 invView = glm::inverse(m_viewMatrix);
     ubo.viewPos = glm::vec4(invView[3][0], invView[3][1], invView[3][2], 1.0f);
-    
+
     // FreeCAD-style multi-light setup for professional CAD lighting
-    
+
     // Primary directional light (main illumination from upper right)
     ubo.primaryLight.direction = glm::vec4(glm::normalize(glm::vec3(1.0f, 1.5f, 1.0f)), 1.8f); // High intensity
     ubo.primaryLight.color = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f); // Slightly warm white
-    
+
     // Fill light (softer light from opposite direction to reduce harsh shadows)
     ubo.fillLight.direction = glm::vec4(glm::normalize(glm::vec3(-0.5f, -0.8f, -0.5f)), 0.4f); // Lower intensity
     ubo.fillLight.color = glm::vec4(0.8f, 0.85f, 1.0f, 1.0f); // Slightly cool blue fill
-    
+
     // Rim light (side lighting for edge definition)
     ubo.rimLight.direction = glm::vec4(glm::normalize(glm::vec3(0.8f, 0.2f, -0.9f)), 0.6f); // Medium intensity
     ubo.rimLight.color = glm::vec4(1.0f, 1.0f, 0.9f, 1.0f); // Neutral white
-    
+
     // Ambient light (reduced for better contrast)
     ubo.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 0.8f); // Cool ambient with intensity
-    
-    
+
+    // Section clip plane is global (same for every instance), so it rides in
+    // the shared UBO rather than per-draw push constants.
+    ubo.clipPlane = m_clipPlane;
+
     // Bind pipeline
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-    
+
     // Set viewport to the central region (excludes the side panels)
     VkViewport viewport{};
     viewport.x = static_cast<float>(m_viewportX);
@@ -255,70 +273,76 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     scissor.offset = {m_viewportX, m_viewportY};
     scissor.extent = {m_viewportWidth, m_viewportHeight};
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-    
-    // Shared UBO (camera + lights); the model matrix rides per-mesh in push
-    // constants so one UBO write serves every draw this frame
-    ubo.model = glm::mat4(1.0f);
+
+    // Shared UBO (camera + lights + clip plane); one write serves every draw
+    // this frame — everything per-instance rides in push constants
     memcpy(m_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
 
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                            m_pipelineLayout, 0, 1, &m_descriptorSets[currentFrame], 0, nullptr);
 
-    // Render each mesh
+    // One draw per instance; the asset's buffers are bound once per run of
+    // consecutive instances sharing it. Push constants live in the command
+    // stream, so per-instance data costs no descriptor or sync machinery.
     struct PushConstants {
         glm::mat4 model;
         glm::uvec4 highlight;
-        glm::vec4 material; // metallic, roughness, specular, reflectance
-        glm::vec4 clipPlane; // section clip (world): xyz=normal, w=dist
+        glm::vec4 material;  // metallic, roughness, specular, reflectance
+        glm::vec4 baseColor; // per-instance albedo
     } push;
 
-    for (const auto& mesh : m_meshes) {
-        if (!mesh || mesh->vertices.empty()) continue;
+    uint32_t boundAssetId = 0;
+    for (const auto& instance : m_instances) {
+        if (!instance || !instance->visible) continue;
 
-        push.model = mesh->modelMatrix;
-        push.highlight = mesh->highlight;
-        push.material = mesh->materialParams;
-        push.clipPlane = m_clipPlane;
+        MeshAsset* asset = GetAsset(instance->assetId);
+        if (!asset || asset->vertices.empty()) continue;
+
+        push.model = instance->transform;
+        push.highlight = instance->highlight;
+        push.material = instance->materialParams;
+        push.baseColor = instance->baseColor;
         vkCmdPushConstants(commandBuffer, m_pipelineLayout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(push), &push);
 
-        // Bind vertex buffer
-        VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        if (instance->assetId != boundAssetId) {
+            VkBuffer vertexBuffers[] = {asset->vertexBuffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(commandBuffer, asset->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            boundAssetId = instance->assetId;
+        }
 
-        // Bind index buffer
-        vkCmdBindIndexBuffer(commandBuffer, mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-
-        // Draw
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(mesh->indices.size()), 1, 0, 0, 0);
+        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(asset->indices.size()), 1, 0, 0, 0);
     }
 }
 
-void MeshRenderer::SetFaceHighlight(uint32_t meshId, uint32_t firstVertex, uint32_t count) {
-    if (meshId == 0 || meshId > m_meshes.size() || !m_meshes[meshId - 1]) return;
+void MeshRenderer::SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex, uint32_t count) {
+    MeshInstance* instance = GetInstance(instanceId);
+    if (!instance) return;
     ClearFaceHighlight();
-    m_meshes[meshId - 1]->highlight.x = firstVertex;
-    m_meshes[meshId - 1]->highlight.y = firstVertex + count;
+    instance->highlight.x = firstVertex;
+    instance->highlight.y = firstVertex + count;
 }
 
-void MeshRenderer::SetFaceHover(uint32_t meshId, uint32_t firstVertex, uint32_t count) {
-    if (meshId == 0 || meshId > m_meshes.size() || !m_meshes[meshId - 1]) return;
+void MeshRenderer::SetFaceHover(uint32_t instanceId, uint32_t firstVertex, uint32_t count) {
+    MeshInstance* instance = GetInstance(instanceId);
+    if (!instance) return;
     ClearFaceHover();
-    m_meshes[meshId - 1]->highlight.z = firstVertex;
-    m_meshes[meshId - 1]->highlight.w = firstVertex + count;
+    instance->highlight.z = firstVertex;
+    instance->highlight.w = firstVertex + count;
 }
 
 void MeshRenderer::ClearFaceHighlight() {
-    for (auto& mesh : m_meshes) {
-        if (mesh) { mesh->highlight.x = mesh->highlight.y = 0; }
+    for (auto& instance : m_instances) {
+        if (instance) { instance->highlight.x = instance->highlight.y = 0; }
     }
 }
 
 void MeshRenderer::ClearFaceHover() {
-    for (auto& mesh : m_meshes) {
-        if (mesh) { mesh->highlight.z = mesh->highlight.w = 0; }
+    for (auto& instance : m_instances) {
+        if (instance) { instance->highlight.z = instance->highlight.w = 0; }
     }
 }
 
@@ -364,58 +388,58 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     std::string execDir = GetExecutableDirectory();
     std::string vertShaderPath = execDir + "/libraries/shaders/mesh_vert.spv";
     std::string fragShaderPath = execDir + "/libraries/shaders/mesh_frag.spv";
-    
+
     // Load shaders
     auto vertShaderCode = ReadFile(vertShaderPath);
     auto fragShaderCode = ReadFile(fragShaderPath);
-    
+
     if (vertShaderCode.empty() || fragShaderCode.empty()) {
         std::cerr << "Failed to load shader files from: " << execDir << "/libraries/shaders/" << std::endl;
         std::cerr << "Vertex shader path: " << vertShaderPath << std::endl;
         std::cerr << "Fragment shader path: " << fragShaderPath << std::endl;
         return false;
     }
-    
+
     VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
-    
+
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
     vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStageInfo.module = vertShaderModule;
     vertShaderStageInfo.pName = "main";
-    
+
     VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
     fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     fragShaderStageInfo.module = fragShaderModule;
     fragShaderStageInfo.pName = "main";
-    
+
     VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
-    
+
     // Vertex input
     auto bindingDescription = Vertex3D::getBindingDescription();
     auto attributeDescriptions = Vertex3D::getAttributeDescriptions();
-    
+
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertexInputInfo.vertexBindingDescriptionCount = 1;
     vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
     vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
-    
+
     // Input assembly
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
-    
+
     // Viewport and scissor (dynamic)
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
-    
+
     // Rasterizer
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -429,13 +453,13 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     // by the "camera-facing triangles are CCW" unit test)
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable = VK_FALSE;
-    
+
     // Multisampling
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = m_msaaSamples;
-    
+
     // Depth testing
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -444,32 +468,32 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
-    
+
     // Color blending
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     colorBlendAttachment.blendEnable = VK_FALSE;
-    
+
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.logicOpEnable = VK_FALSE;
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments = &colorBlendAttachment;
-    
+
     // Dynamic state
     std::vector<VkDynamicState> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
     };
-    
+
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
-    
+
     // Pipeline layout
-    // Per-mesh model matrix + highlight ranges (vertex) + PBR material
-    // (fragment) via push constants
+    // Per-instance model matrix + highlight ranges (vertex) + PBR material +
+    // albedo (fragment) via push constants
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags =
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -483,14 +507,14 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
-    
+
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
         std::cerr << "Failed to create pipeline layout!" << std::endl;
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
         return false;
     }
-    
+
     // Create pipeline
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -507,37 +531,37 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     pipelineInfo.layout = m_pipelineLayout;
     pipelineInfo.renderPass = m_renderPass;
     pipelineInfo.subpass = 0;
-    
+
     if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline) != VK_SUCCESS) {
         std::cerr << "Failed to create graphics pipeline!" << std::endl;
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
         return false;
     }
-    
+
     vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
     vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
-    
+
     return true;
 }
 
 bool MeshRenderer::CreateUniformBuffers() {
     VkDeviceSize bufferSize = sizeof(UniformBufferObject);
-    
+
     m_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     m_uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
     m_uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
-    
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, 
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+        if (!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                          m_uniformBuffers[i], m_uniformBuffersMemory[i])) {
             return false;
         }
-        
+
         vkMapMemory(m_device, m_uniformBuffersMemory[i], 0, bufferSize, 0, &m_uniformBuffersMapped[i]);
     }
-    
+
     return true;
 }
 
@@ -554,12 +578,12 @@ bool MeshRenderer::CreateDescriptorPool() {
     poolInfo.poolSizeCount = 2;
     poolInfo.pPoolSizes = poolSizes;
     poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-    
+
     if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
         std::cerr << "Failed to create descriptor pool!" << std::endl;
         return false;
     }
-    
+
     return true;
 }
 
@@ -570,13 +594,13 @@ bool MeshRenderer::CreateDescriptorSets() {
     allocInfo.descriptorPool = m_descriptorPool;
     allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
     allocInfo.pSetLayouts = layouts.data();
-    
+
     m_descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
     if (vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data()) != VK_SUCCESS) {
         std::cerr << "Failed to allocate descriptor sets!" << std::endl;
         return false;
     }
-    
+
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         VkDescriptorBufferInfo bufferInfo{};
         bufferInfo.buffer = m_uniformBuffers[i];
@@ -621,59 +645,59 @@ VkShaderModule MeshRenderer::CreateShaderModule(const std::vector<char>& code) {
     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     createInfo.codeSize = code.size();
     createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-    
+
     VkShaderModule shaderModule;
     if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
         throw std::runtime_error("failed to create shader module!");
     }
-    
+
     return shaderModule;
 }
 
 std::vector<char> MeshRenderer::ReadFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
-    
+
     if (!file.is_open()) {
         std::cerr << "Failed to open file: " << filename << std::endl;
         return {};
     }
-    
+
     size_t fileSize = static_cast<size_t>(file.tellg());
     std::vector<char> buffer(fileSize);
-    
+
     file.seekg(0);
     file.read(buffer.data(), fileSize);
     file.close();
-    
+
     return buffer;
 }
 
-bool MeshRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, 
+bool MeshRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
                                VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
     bufferInfo.usage = usage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    
+
     if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
         std::cerr << "Failed to create buffer!" << std::endl;
         return false;
     }
-    
+
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
-    
+
     VkMemoryAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocInfo.allocationSize = memRequirements.size;
     allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
-    
+
     if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
         std::cerr << "Failed to allocate buffer memory!" << std::endl;
         return false;
     }
-    
+
     vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
     return true;
 }
@@ -681,13 +705,13 @@ bool MeshRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
 uint32_t MeshRenderer::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
-    
+
     for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
         if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
             return i;
         }
     }
-    
+
     throw std::runtime_error("failed to find suitable memory type!");
 }
 
@@ -697,111 +721,101 @@ void MeshRenderer::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSi
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandPool = m_commandPool;
     allocInfo.commandBufferCount = 1;
-    
+
     VkCommandBuffer commandBuffer;
     vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
-    
+
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    
+
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
-    
+
     VkBufferCopy copyRegion{};
     copyRegion.size = size;
     vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-    
+
     vkEndCommandBuffer(commandBuffer);
-    
+
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
-    
+
     vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
     vkQueueWaitIdle(m_graphicsQueue);
-    
+
     vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
 }
 
-bool MeshRenderer::CreateMeshBuffers(Mesh* mesh) {
-    if (!mesh || mesh->vertices.empty()) return false;
-    
-    VkDeviceSize vertexBufferSize = sizeof(mesh->vertices[0]) * mesh->vertices.size();
-    VkDeviceSize indexBufferSize = sizeof(mesh->indices[0]) * mesh->indices.size();
-    
+bool MeshRenderer::CreateAssetBuffers(MeshAsset* asset) {
+    if (!asset || asset->vertices.empty()) return false;
+
+    VkDeviceSize vertexBufferSize = sizeof(asset->vertices[0]) * asset->vertices.size();
+    VkDeviceSize indexBufferSize = sizeof(asset->indices[0]) * asset->indices.size();
+
     // Create staging buffers
     VkBuffer vertexStagingBuffer;
     VkDeviceMemory vertexStagingBufferMemory;
-    CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+    CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                 vertexStagingBuffer, vertexStagingBufferMemory);
-    
+
     void* data;
     vkMapMemory(m_device, vertexStagingBufferMemory, 0, vertexBufferSize, 0, &data);
-    memcpy(data, mesh->vertices.data(), static_cast<size_t>(vertexBufferSize));
+    memcpy(data, asset->vertices.data(), static_cast<size_t>(vertexBufferSize));
     vkUnmapMemory(m_device, vertexStagingBufferMemory);
-    
+
     // Create vertex buffer
-    CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh->vertexBuffer, mesh->vertexBufferMemory);
-    
-    CopyBuffer(vertexStagingBuffer, mesh->vertexBuffer, vertexBufferSize);
-    
+    CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asset->vertexBuffer, asset->vertexBufferMemory);
+
+    CopyBuffer(vertexStagingBuffer, asset->vertexBuffer, vertexBufferSize);
+
     vkDestroyBuffer(m_device, vertexStagingBuffer, nullptr);
     vkFreeMemory(m_device, vertexStagingBufferMemory, nullptr);
-    
+
     // Create index buffer if indices exist
-    if (!mesh->indices.empty()) {
+    if (!asset->indices.empty()) {
         VkBuffer indexStagingBuffer;
         VkDeviceMemory indexStagingBufferMemory;
-        CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 
+        CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                     indexStagingBuffer, indexStagingBufferMemory);
-        
+
         vkMapMemory(m_device, indexStagingBufferMemory, 0, indexBufferSize, 0, &data);
-        memcpy(data, mesh->indices.data(), static_cast<size_t>(indexBufferSize));
+        memcpy(data, asset->indices.data(), static_cast<size_t>(indexBufferSize));
         vkUnmapMemory(m_device, indexStagingBufferMemory);
-        
-        CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, 
-                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh->indexBuffer, mesh->indexBufferMemory);
-        
-        CopyBuffer(indexStagingBuffer, mesh->indexBuffer, indexBufferSize);
-        
+
+        CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asset->indexBuffer, asset->indexBufferMemory);
+
+        CopyBuffer(indexStagingBuffer, asset->indexBuffer, indexBufferSize);
+
         vkDestroyBuffer(m_device, indexStagingBuffer, nullptr);
         vkFreeMemory(m_device, indexStagingBufferMemory, nullptr);
     }
-    
-    mesh->isDirty = false;
+
     return true;
 }
 
-void MeshRenderer::UpdateMeshBuffers(Mesh* mesh) {
-    if (!mesh || !mesh->isDirty) return;
-    
-    // For simplicity, destroy and recreate buffers
-    // In production, you'd want to reuse buffers when possible
-    DestroyMeshBuffers(mesh);
-    CreateMeshBuffers(mesh);
-}
+void MeshRenderer::DestroyAssetBuffers(MeshAsset* asset) {
+    if (!asset) return;
 
-void MeshRenderer::DestroyMeshBuffers(Mesh* mesh) {
-    if (!mesh) return;
-    
-    if (mesh->vertexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, mesh->vertexBuffer, nullptr);
-        mesh->vertexBuffer = VK_NULL_HANDLE;
+    if (asset->vertexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_device, asset->vertexBuffer, nullptr);
+        asset->vertexBuffer = VK_NULL_HANDLE;
     }
-    if (mesh->vertexBufferMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(m_device, mesh->vertexBufferMemory, nullptr);
-        mesh->vertexBufferMemory = VK_NULL_HANDLE;
+    if (asset->vertexBufferMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(m_device, asset->vertexBufferMemory, nullptr);
+        asset->vertexBufferMemory = VK_NULL_HANDLE;
     }
-    if (mesh->indexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, mesh->indexBuffer, nullptr);
-        mesh->indexBuffer = VK_NULL_HANDLE;
+    if (asset->indexBuffer != VK_NULL_HANDLE) {
+        vkDestroyBuffer(m_device, asset->indexBuffer, nullptr);
+        asset->indexBuffer = VK_NULL_HANDLE;
     }
-    if (mesh->indexBufferMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(m_device, mesh->indexBufferMemory, nullptr);
-        mesh->indexBufferMemory = VK_NULL_HANDLE;
+    if (asset->indexBufferMemory != VK_NULL_HANDLE) {
+        vkFreeMemory(m_device, asset->indexBufferMemory, nullptr);
+        asset->indexBufferMemory = VK_NULL_HANDLE;
     }
 }

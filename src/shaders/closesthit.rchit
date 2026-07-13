@@ -25,7 +25,7 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
 } ubo;
 
 // Per-body vertex/index data reached by device address. std430 float/uint
-// arrays have stride 4, matching the 9-float Vertex3D layout exactly.
+// arrays have stride 4, matching the 6-float Vertex3D layout exactly.
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer FloatBuf { float f[]; };
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer UintBuf { uint u[]; };
 
@@ -65,7 +65,6 @@ layout(binding = 8, set = 0) uniform sampler2D uEnvironment; // full-res HDRI
 struct Vertex {
     vec3 pos;
     vec3 normal;
-    vec3 color;
 };
 
 const float PI = 3.14159265359;
@@ -122,11 +121,10 @@ vec3 coneSample(vec3 dir, float cosMax, inout uint s) {
 
 Vertex unpackVertex(GeometryInfo g, uint index) {
     uint vi = g.inds.u[index];
-    uint o = vi * 9u; // 3 pos + 3 normal + 3 color
+    uint o = vi * 6u; // 3 pos + 3 normal
     Vertex v;
     v.pos = vec3(g.verts.f[o + 0], g.verts.f[o + 1], g.verts.f[o + 2]);
     v.normal = vec3(g.verts.f[o + 3], g.verts.f[o + 4], g.verts.f[o + 5]);
-    v.color = vec3(g.verts.f[o + 6], g.verts.f[o + 7], g.verts.f[o + 8]);
     return v;
 }
 

@@ -1,7 +1,7 @@
 #include "SketchRenderer.h"
 
 #include "Logger.h"
-#include "MeshRenderer.h" // Vertex3D
+#include "MeshRenderer.h" // LineVertex3D
 
 #include <array>
 #include <cstring>
@@ -163,12 +163,11 @@ bool SketchRenderer::CreatePipelines() {
 
   VkVertexInputBindingDescription binding{};
   binding.binding = 0;
-  binding.stride = sizeof(Vertex3D);
+  binding.stride = sizeof(LineVertex3D);
   binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-  std::array<VkVertexInputAttributeDescription, 3> attrs{};
-  attrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex3D, position)};
-  attrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex3D, normal)};
-  attrs[2] = {2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex3D, color)};
+  std::array<VkVertexInputAttributeDescription, 2> attrs{};
+  attrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LineVertex3D, position)};
+  attrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LineVertex3D, color)};
   VkPipelineVertexInputStateCreateInfo vertexInput{
       VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
   vertexInput.vertexBindingDescriptionCount = 1;
@@ -337,8 +336,8 @@ uint32_t SketchRenderer::UploadRaw(DynamicBuffer& buf, const void* data,
 }
 
 uint32_t SketchRenderer::Upload(DynamicBuffer& buf,
-                                const std::vector<Vertex3D>& verts) {
-  return UploadRaw(buf, verts.data(), verts.size() * sizeof(Vertex3D),
+                                const std::vector<LineVertex3D>& verts) {
+  return UploadRaw(buf, verts.data(), verts.size() * sizeof(LineVertex3D),
                    static_cast<uint32_t>(verts.size()));
 }
 

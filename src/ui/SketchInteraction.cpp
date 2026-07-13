@@ -3,7 +3,7 @@
 #include "Camera.h"
 #include "FaceSelector.h"
 #include "Logger.h"
-#include "MeshRenderer.h" // Vertex3D
+#include "MeshRenderer.h" // LineVertex3D
 #include "core/DatumPlaneFeature.h"
 #include "core/Expression.h"
 #include "core/Serialization.h"
@@ -26,10 +26,9 @@ namespace {
 
 constexpr glm::vec3 kPreviewColor{0.95f, 0.85f, 0.35f};
 
-Vertex3D LineVertex(const glm::vec3& p) {
-  Vertex3D v;
+LineVertex3D LineVertex(const glm::vec3& p) {
+  LineVertex3D v;
   v.position = p;
-  v.normal = glm::vec3(0.0f);
   v.color = kPreviewColor;
   return v;
 }
@@ -912,7 +911,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   return true;
 }
 
-void BuildSketchOverlay(AppState& state, std::vector<Vertex3D>& out) {
+void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
   SketchEditState& edit = state.sketchEdit;
   if (!edit.IsEditing())
     return;

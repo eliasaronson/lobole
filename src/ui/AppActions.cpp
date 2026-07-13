@@ -46,17 +46,16 @@ namespace {
 constexpr glm::vec3 kSketchColor{0.40f, 0.72f, 1.00f};
 constexpr glm::vec3 kActiveSketchColor{0.55f, 0.85f, 1.00f};
 
-Vertex3D LineVertex(const glm::vec3& pos, const glm::vec3& color) {
-  Vertex3D v;
+LineVertex3D LineVertex(const glm::vec3& pos, const glm::vec3& color) {
+  LineVertex3D v;
   v.position = pos;
-  v.normal = glm::vec3(0.0f);
   v.color = color;
   return v;
 }
 
 // Appends a sketch feature's entities as world-space line segments.
 void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
-                       std::vector<Vertex3D>& out) {
+                       std::vector<LineVertex3D>& out) {
   for (const auto& entity : sk.entities) {
     // Points render as a small world-space cross
     if (std::holds_alternative<sketch::Point>(entity)) {
@@ -82,8 +81,8 @@ void AppendSketchLines(const SketchFeature& sk, const glm::vec3& color,
 
 // Builds translucent quads for the three default planes (Front/Top/Right),
 // tinted by axis; the hovered plane (0/1/2, -1 = none) is brighter.
-std::vector<Vertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
-  std::vector<Vertex3D> quads;
+std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
+  std::vector<LineVertex3D> quads;
   if (!show)
     return quads;
 
@@ -111,7 +110,7 @@ std::vector<Vertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
 }
 
 void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color, float half,
-                     std::vector<Vertex3D>& quads) {
+                     std::vector<LineVertex3D>& quads) {
   glm::vec3 o = plane.GetOrigin();
   glm::vec3 u = plane.GetUAxis() * half;
   glm::vec3 v = plane.GetVAxis() * half;
@@ -121,7 +120,7 @@ void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color, float hal
   }
 }
 
-void AppendSketchGrid(const SketchPlane& plane, std::vector<Vertex3D>& lines) {
+void AppendSketchGrid(const SketchPlane& plane, std::vector<LineVertex3D>& lines) {
   const int half = 5;      // grid extends -5..5 in plane units
   const float step = 1.0f; // one grid cell per unit
   const glm::vec3 minor(0.30f, 0.34f, 0.42f);
@@ -145,7 +144,7 @@ void AppendSketchGrid(const SketchPlane& plane, std::vector<Vertex3D>& lines) {
   }
 }
 
-void AppendOriginGizmo(std::vector<Vertex3D>& lines) {
+void AppendOriginGizmo(std::vector<LineVertex3D>& lines) {
   const float L = 1.5f;  // axis length
   const float h = 0.22f; // arrowhead size
   struct Axis {
@@ -343,7 +342,7 @@ static bool DatumPlanesVisible(const AppState& state) {
          state.showPlanes;
 }
 
-void AppendDatumPlaneQuads(AppState& state, std::vector<Vertex3D>& quads) {
+void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads) {
   if (!state.document || !DatumPlanesVisible(state))
     return;
   const glm::vec3 kDatumTint(0.85f, 0.62f, 0.28f); // amber, distinct from bases
@@ -360,7 +359,7 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<Vertex3D>& quads) {
   }
 }
 
-void AppendDatumAxisLines(AppState& state, std::vector<Vertex3D>& lines) {
+void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines) {
   if (!state.document || !DatumPlanesVisible(state))
     return;
   const glm::vec3 kAxisTint(0.90f, 0.75f, 0.35f); // brighter amber than planes
@@ -712,12 +711,14 @@ void SyncDocumentRenderers(AppState& state) {
     if (cadMesh.vertices.empty())
       continue;
 
-    std::vector<Vertex3D> vertices = CADMeshConverter::ConvertCADMeshToVertices(
-        cadMesh, kBodyPalette[palette++ % std::size(kBodyPalette)]);
+    std::vector<Vertex3D> vertices =
+        CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
     uint32_t meshId = state.meshRenderer->AddMesh(vertices, cadMesh.indices);
-    // A body with an assigned material overrides the palette color with the
-    // material's base color and real PBR params; unassigned bodies keep the
-    // palette color and the mesh's neutral-dielectric defaults.
+    // Albedo is per-instance state (not baked into vertices): palette color
+    // by default; a body with an assigned material overrides it with the
+    // material's base color and real PBR params.
+    state.meshRenderer->SetMeshColor(
+        meshId, kBodyPalette[palette++ % std::size(kBodyPalette)]);
     if (!body.material.empty()) {
       const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
           CADMaterials::MaterialLibrary::FromSlug(body.material));
@@ -775,7 +776,7 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     uint32_t matId = state.rayTracer->AddMaterial(rtm);
 
     std::vector<Vertex3D> vertices =
-        CADMeshConverter::ConvertCADMeshToVertices(cadMesh, mat.baseColor);
+        CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
     for (const Vertex3D& v : vertices) {
       bbMin = glm::min(bbMin, v.position);
       bbMax = glm::max(bbMax, v.position);
@@ -795,12 +796,11 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     const float half = 10.0f * diag;             // covers every camera angle
     const float y = bbMin.y - 0.001f * diag;     // just below: no coplanar fizz
     const glm::vec3 n(0.0f, 1.0f, 0.0f);
-    const glm::vec3 white(1.0f);
     std::vector<Vertex3D> quad = {
-        {{center.x - half, y, center.z - half}, n, white},
-        {{center.x + half, y, center.z - half}, n, white},
-        {{center.x + half, y, center.z + half}, n, white},
-        {{center.x - half, y, center.z + half}, n, white},
+        {{center.x - half, y, center.z - half}, n},
+        {{center.x + half, y, center.z - half}, n},
+        {{center.x + half, y, center.z + half}, n},
+        {{center.x - half, y, center.z + half}, n},
     };
     std::vector<uint32_t> quadIdx = {0, 1, 2, 0, 2, 3};
     state.rayTracer->AddGeometry(quad, quadIdx, 0, RT_GEOM_SHADOW_CATCHER);
@@ -937,7 +937,7 @@ void PumpRenderJob(AppState& state) {
   finish(ok, err.empty() ? "readback failed" : err);
 }
 
-std::vector<Vertex3D> BuildActiveSketchOverlay(AppState& state,
+std::vector<LineVertex3D> BuildActiveSketchOverlay(AppState& state,
                                                uint64_t activeSketchId) {
   // Entity lines and selection markers now render through the expanded
   // primitive path (BuildActiveSketchPrimitives); the caller adds the
@@ -1009,9 +1009,9 @@ void AppendPrimDot(glm::vec3 p, float radiusPx, const glm::vec4& color,
 }
 } // namespace
 
-std::vector<Vertex3D> BuildStaticSketchLines(AppState& state,
+std::vector<LineVertex3D> BuildStaticSketchLines(AppState& state,
                                              uint64_t activeSketchId) {
-  std::vector<Vertex3D> lines;
+  std::vector<LineVertex3D> lines;
   if (!state.document)
     return lines;
   for (const auto& feature : state.document->GetFeatures()) {

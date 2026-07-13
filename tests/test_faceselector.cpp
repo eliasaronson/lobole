@@ -140,7 +140,7 @@ TEST_CASE("Picking a box through the screen selects the facing face",
 
   CADShape::Mesh mesh = BoxMesh(); // spans (0,0,0)..(2,2,2)
   std::vector<Vertex3D> vertices =
-      CADMeshConverter::ConvertCADMeshToVertices(mesh, glm::vec3(0.5f));
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
 
   FaceSelector selector;
   selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces);
@@ -185,7 +185,7 @@ TEST_CASE("PickEdge finds the edge under the ray and honors occlusion",
   CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
   CADShape::Mesh mesh = box.GenerateMesh(0.1);
   std::vector<Vertex3D> vertices =
-      CADMeshConverter::ConvertCADMeshToVertices(mesh, glm::vec3(0.5f));
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
   const auto polys = box.GenerateEdgePolylines(0.1);
 
   FaceSelector selector;
