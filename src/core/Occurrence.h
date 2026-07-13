@@ -58,7 +58,13 @@ public:
     if (next > m_nextId) m_nextId = next;
   }
 
+  // Monotonic change counter — bumped on every add/remove/mutate — so the
+  // renderer can skip resyncing an unchanged assembly (mirrors Document).
+  uint64_t Version() const { return m_version; }
+  void BumpVersion() { m_version++; }
+
 private:
   std::vector<Occurrence> m_occurrences;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused
+  uint64_t m_version = 1;
 };

@@ -31,12 +31,16 @@
 
 #include "imgui.h"
 
+#include <glm/gtc/matrix_transform.hpp> // glm::translate
+#include <glm/gtc/quaternion.hpp>       // glm::mat4_cast
+
 #include <algorithm>
 #include <cfloat>
 #include <filesystem>
 #include <fstream>
 #include <cmath>
 #include <set>
+#include <unordered_map>
 
 namespace ui {
 
@@ -741,29 +745,188 @@ void MarkProjectRecovered(AppState& state, const std::string& path) {
       state.document ? state.document->Version() - 1 : UINT64_MAX;
 }
 
+namespace {
+// An occurrence's placement as a model matrix (translate ∘ rotate).
+glm::mat4 OccurrenceMatrix(const Occurrence& o) {
+  return glm::translate(glm::mat4(1.0f), o.position) * glm::mat4_cast(o.orientation);
+}
+
+// The part document an occurrence references, by stable id (active or stashed).
+Document* PartDocById(AppState& state, uint64_t partId) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].kind == DocKind::Part && state.parts[i].id == partId)
+      return SlotDoc(state, i);
+  return nullptr;
+}
+} // namespace
+
 void FitCameraToDocument(AppState& state) {
-  if (!state.document || !state.camera || state.document->GetBodies().empty())
+  if (!state.camera)
     return;
 
   glm::vec3 min(FLT_MAX), max(-FLT_MAX);
-  for (const auto& body : state.document->GetBodies()) {
-    glm::vec3 bmin, bmax;
-    body.shape.GetBoundingBox(bmin, bmax);
-    min = glm::min(min, bmin);
-    max = glm::max(max, bmax);
+  bool any = false;
+  if (state.assembly) {
+    // Bound every visible occurrence's part bodies, transformed into place.
+    for (const Occurrence& occ : state.assembly->GetOccurrences()) {
+      if (!occ.visible)
+        continue;
+      Document* part = PartDocById(state, occ.partId);
+      if (!part)
+        continue;
+      const glm::mat4 xf = OccurrenceMatrix(occ);
+      for (const auto& body : part->GetBodies()) {
+        glm::vec3 bmin, bmax;
+        body.shape.GetBoundingBox(bmin, bmax);
+        for (int c = 0; c < 8; c++) { // transform all 8 corners
+          const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
+                                 (c & 2) ? bmax.y : bmin.y,
+                                 (c & 4) ? bmax.z : bmin.z);
+          const glm::vec3 w = glm::vec3(xf * glm::vec4(corner, 1.0f));
+          min = glm::min(min, w);
+          max = glm::max(max, w);
+          any = true;
+        }
+      }
+    }
+  } else if (state.document) {
+    for (const auto& body : state.document->GetBodies()) {
+      glm::vec3 bmin, bmax;
+      body.shape.GetBoundingBox(bmin, bmax);
+      min = glm::min(min, bmin);
+      max = glm::max(max, bmax);
+      any = true;
+    }
   }
+  if (!any)
+    return;
+
   const glm::vec3 center = (min + max) * 0.5f;
   const float radius = glm::length(max - min) * 0.5f;
   state.camera->SetTarget(center);
   state.camera->SetDistance(std::max(radius * 2.5f, 1.0f));
 }
 
+namespace {
+// Muted, theme-matched palette cycled per body so bodies/parts read apart.
+const glm::vec3 kBodyPalette[] = {
+    {0.58f, 0.66f, 0.78f}, // steel blue
+    {0.80f, 0.62f, 0.42f}, // amber
+    {0.55f, 0.74f, 0.62f}, // sage
+    {0.76f, 0.58f, 0.70f}, // mauve
+    {0.72f, 0.72f, 0.55f}, // olive
+};
+
+// One part body, tessellated once and cached so N occurrences of the same part
+// share a single GPU asset (the instancing lever). CPU copies are kept for the
+// outline + face-selector, whose geometry sharing is a later optimization.
+struct SharedBody {
+  uint32_t assetId = 0;
+  std::vector<Vertex3D> vertices;
+  std::vector<uint32_t> indices;
+  std::vector<uint32_t> triangleFaces;
+  std::vector<std::vector<glm::vec3>> edges;
+  glm::vec3 palette;
+  bool hasMaterial = false;
+  glm::vec3 albedo;
+  glm::vec4 pbr;
+};
+
+// Renders an assembly: one asset per referenced part body, one instance per
+// occurrence. Assets are shared across occurrences of the same part.
+void SyncAssemblyRenderers(AppState& state) {
+  std::unordered_map<uint64_t, std::vector<SharedBody>> byPart; // partId -> bodies
+  size_t palette = 0;
+
+  for (const Occurrence& occ : state.assembly->GetOccurrences()) {
+    if (!occ.visible)
+      continue; // hidden: not rendered, not pickable
+    Document* part = PartDocById(state, occ.partId);
+    if (!part)
+      continue; // dangling reference (part deleted) — skip
+
+    auto it = byPart.find(occ.partId);
+    if (it == byPart.end()) {
+      // First time we see this part: tessellate its bodies + create assets.
+      std::vector<SharedBody> shared;
+      const auto& bodies = part->GetBodies();
+      for (const auto& body : bodies) {
+        SharedBody sb;
+        CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
+        if (cadMesh.vertices.empty()) {
+          shared.push_back(std::move(sb)); // keep index alignment; assetId 0
+          continue;
+        }
+        sb.vertices = CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
+        sb.indices = cadMesh.indices;
+        sb.triangleFaces = cadMesh.triangleFaces;
+        sb.edges = body.shape.GenerateEdgePolylines(0.1);
+        sb.palette = kBodyPalette[palette++ % std::size(kBodyPalette)];
+        sb.assetId = state.meshRenderer->CreateAsset(sb.vertices, sb.indices);
+        if (!body.material.empty()) {
+          const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
+              CADMaterials::MaterialLibrary::FromSlug(body.material));
+          sb.hasMaterial = true;
+          sb.albedo = mat.baseColor;
+          sb.pbr = glm::vec4(mat.metallic, mat.roughness, mat.specular,
+                             mat.reflectance);
+        }
+        shared.push_back(std::move(sb));
+      }
+      it = byPart.emplace(occ.partId, std::move(shared)).first;
+    }
+
+    const glm::mat4 xf = OccurrenceMatrix(occ);
+    for (size_t bi = 0; bi < it->second.size(); bi++) {
+      const SharedBody& sb = it->second[bi];
+      if (sb.assetId == 0)
+        continue; // empty body
+      uint32_t meshId = state.meshRenderer->AddInstance(sb.assetId, xf);
+      if (sb.hasMaterial)
+        state.meshRenderer->SetInstanceMaterial(meshId, sb.albedo, sb.pbr);
+      else
+        state.meshRenderer->SetInstanceColor(meshId, sb.palette);
+      uint32_t outlineId = 0;
+      if (state.outlineRenderer) {
+        // OutlineRenderer renders every mesh at identity (its per-mesh model is
+        // a TODO — see OutlineRenderer::UpdateUniformBuffers), so bake the
+        // occurrence transform into the uploaded vertices. Fine for static
+        // placement; live occurrence drags (phase 3) will want a real per-mesh
+        // model there, landing with the OutlineRenderer instance-space split.
+        std::vector<Vertex3D> ov = sb.vertices;
+        const glm::mat3 nrm(xf); // rigid transform: rotation part for normals
+        for (Vertex3D& v : ov) {
+          v.position = glm::vec3(xf * glm::vec4(v.position, 1.0f));
+          v.normal = glm::normalize(nrm * v.normal);
+        }
+        outlineId = state.outlineRenderer->AddMesh(ov, sb.indices);
+      }
+      if (state.faceSelector)
+        state.faceSelector->AddMesh(meshId, sb.vertices, sb.indices,
+                                    sb.triangleFaces, xf, sb.edges);
+      state.documentMeshes.push_back(
+          {meshId, outlineId, bi, occ.id, sb.edges});
+    }
+  }
+  LOG_INFO("Assembly synced: {} occurrences",
+           state.assembly->OccurrenceCount());
+}
+} // namespace
+
 void SyncDocumentRenderers(AppState& state) {
-  if (!state.document || !state.meshRenderer)
+  if (!state.meshRenderer)
     return;
-  if (state.document->Version() == state.syncedDocumentVersion)
+  // Which active tab drives the sync, and its change counter.
+  uint64_t activeVersion;
+  if (state.assembly)
+    activeVersion = state.assembly->Version();
+  else if (state.document)
+    activeVersion = state.document->Version();
+  else
     return;
-  state.syncedDocumentVersion = state.document->Version();
+  if (activeVersion == state.syncedDocumentVersion)
+    return;
+  state.syncedDocumentVersion = activeVersion;
 
   for (const auto& m : state.documentMeshes) {
     state.meshRenderer->RemoveMesh(m.meshId);
@@ -774,14 +937,11 @@ void SyncDocumentRenderers(AppState& state) {
   }
   state.documentMeshes.clear();
 
-  // Muted, theme-matched palette cycled per body so parts read apart
-  static const glm::vec3 kBodyPalette[] = {
-      {0.58f, 0.66f, 0.78f}, // steel blue
-      {0.80f, 0.62f, 0.42f}, // amber
-      {0.55f, 0.74f, 0.62f}, // sage
-      {0.76f, 0.58f, 0.70f}, // mauve
-      {0.72f, 0.72f, 0.55f}, // olive
-  };
+  if (state.assembly) {
+    SyncAssemblyRenderers(state);
+    return;
+  }
+
   size_t palette = 0;
   const auto& bodies = state.document->GetBodies();
   for (size_t bi = 0; bi < bodies.size(); bi++) {
@@ -815,7 +975,7 @@ void SyncDocumentRenderers(AppState& state) {
                                   cadMesh.triangleFaces, glm::mat4(1.0f),
                                   edges);
     state.documentMeshes.push_back(
-        {meshId, outlineId, bi, std::move(edges)});
+        {meshId, outlineId, bi, /*occurrenceId=*/0, std::move(edges)});
   }
 
   // Sketch line geometry (static inactive sketches + the active sketch's
@@ -1200,6 +1360,8 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
 
 std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
                                          uint32_t edgeIndex) {
+  if (!state.document) // edge picking is a part-only flow; assembly tab: no-op
+    return std::nullopt;
   const auto& meshes = state.documentMeshes;
   const auto it = std::find_if(
       meshes.begin(), meshes.end(),

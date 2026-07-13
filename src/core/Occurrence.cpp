@@ -5,6 +5,7 @@
 uint64_t AssemblyDocument::AddOccurrence(Occurrence occ) {
   occ.id = m_nextId++;
   m_occurrences.push_back(std::move(occ));
+  m_version++;
   return m_occurrences.back().id;
 }
 
@@ -14,6 +15,7 @@ bool AssemblyDocument::RemoveOccurrence(uint64_t id) {
       [id](const Occurrence& o) { return o.id == id; });
   if (it == m_occurrences.end()) return false;
   m_occurrences.erase(it);
+  m_version++;
   return true;
 }
 

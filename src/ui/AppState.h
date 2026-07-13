@@ -27,11 +27,14 @@ struct GLFWwindow;
 
 namespace ui {
 
-// A document body mirrored into the renderers.
+// A document body mirrored into the renderers. For a part tab, one per body.
+// For an assembly tab, one per (occurrence × referenced-part body): meshId is
+// the shared asset's instance, occurrenceId ties the hit back to the placement.
 struct DocumentRenderMesh {
   uint32_t meshId;
   uint32_t outlineId;
-  size_t bodyIndex; // index into Document::GetBodies() (for element-name lookup)
+  size_t bodyIndex; // index into the source part's GetBodies() (element names)
+  uint64_t occurrenceId = 0; // assembly: the occurrence; 0 for a part body
   // B-Rep edge polylines (world space, edgeIndex order — the ElementMap /
   // PickEdge convention). Cached here for edge highlighting.
   std::vector<std::vector<glm::vec3>> edgePolylines;

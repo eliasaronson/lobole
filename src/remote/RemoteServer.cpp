@@ -239,7 +239,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "ping",         "list_parts",       "add_part",
       "add_assembly", "set_active_part",  "delete_part",
       "new_project",  "save_project",     "open_project",
-      "add_occurrence", "remove_occurrence", "list_occurrences"};
+      "add_occurrence", "remove_occurrence", "list_occurrences",
+      // Camera / rendering act on the viewport, not the part document, so they
+      // work on an assembly tab too.
+      "view",         "fit_view",         "screenshot"};
   if (!doc && !kNoPartDoc.count(m)) {
     throw std::runtime_error(
         "the active document is an assembly, not a part; switch to a part tab");

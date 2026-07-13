@@ -55,15 +55,20 @@ void DrawPartTabs(AppState& state) {
       // Right-click a tab to delete it (never the last).
       if (ImGui::BeginPopupContextItem(
               ("##pctx" + std::to_string(i)).c_str())) {
-        if (ImGui::MenuItem("Delete part", nullptr, false,
-                            state.parts.size() > 1))
+        const char* label = state.parts[i].kind == DocKind::Assembly
+                                ? "Delete assembly"
+                                : "Delete part";
+        if (ImGui::MenuItem(label, nullptr, false, state.parts.size() > 1))
           DeletePart(state, i);
         ImGui::EndPopup();
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button("+##addpart"))
+    if (ImGui::Button("+Part##addpart"))
       AddPart(state, "Part " + std::to_string(state.parts.size() + 1));
+    ImGui::SameLine();
+    if (ImGui::Button("+Asm##addasm"))
+      AddAssembly(state, "Assembly " + std::to_string(state.parts.size() + 1));
   }
   ImGui::End();
 }
@@ -81,10 +86,15 @@ void DrawUI(AppState& state) {
   BeginDockspace(state);
   DrawPartTabs(state);
 
-  DrawFeatureTreePanel(state);
-  DrawVariablesPanel(state);
-  DrawPropertiesPanel(state);
-  DrawSketchToolbar(state);
+  // The part-editing panels apply to a part tab; an active assembly tab (A2)
+  // has no `document`, so they'd have nothing to show. The viewport still
+  // renders the assembly's occurrences (SyncDocumentRenderers handles both).
+  if (state.document) {
+    DrawFeatureTreePanel(state);
+    DrawVariablesPanel(state);
+    DrawPropertiesPanel(state);
+    DrawSketchToolbar(state);
+  }
   DrawPreviewDialog(state);
   DrawFileBrowser(state);
 
@@ -94,46 +104,60 @@ void DrawUI(AppState& state) {
   // or while picking a plane; the active sketch and rubber-band preview draw
   // as an overlay on top of the static sketch lines.
   if (state.sketchRenderer) {
-    std::vector<LineVertex3D> quads = BuildPlaneQuads(
-        EffectivePlaneVisibility(state), state.sketchEdit.hoveredPlane);
-    AppendDatumPlaneQuads(state, quads); // user datum planes (own visibility)
+    std::vector<LineVertex3D> quads;
+    std::vector<LineVertex3D> overlay;
+    // Sketch/plane/datum overlays are part-tab geometry; an assembly tab has
+    // no document, so build them only for a part (the world-origin gizmo below
+    // shows for both). Line segments are order-independent.
+    if (state.document) {
+      quads = BuildPlaneQuads(EffectivePlaneVisibility(state),
+                              state.sketchEdit.hoveredPlane);
+      AppendDatumPlaneQuads(state, quads); // user datum planes (own visibility)
+      overlay =
+          BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
+      BuildSketchOverlay(state, overlay);
+      AppendDatumAxisLines(state, overlay); // user datum axes as line segments
 
-    std::vector<LineVertex3D> overlay =
-        BuildActiveSketchOverlay(state, state.sketchEdit.activeSketchId);
-    BuildSketchOverlay(state, overlay);
-    AppendOriginGizmo(overlay); // always show the world origin + axes
-    AppendDatumAxisLines(state, overlay); // user datum axes as line segments
-
-    // While editing, draw a grid + subtle fill on the work plane so it's
-    // clear what surface the sketch is on.
-    if (SketchFeature* active = ResolveActiveSketch(state)) {
-      AppendSketchGrid(active->plane, overlay);
-      AppendPlaneQuad(active->plane, glm::vec3(0.30f, 0.36f, 0.48f), 5.0f,
-                      quads);
+      // While editing, draw a grid + subtle fill on the work plane so it's
+      // clear what surface the sketch is on.
+      if (SketchFeature* active = ResolveActiveSketch(state)) {
+        AppendSketchGrid(active->plane, overlay);
+        AppendPlaneQuad(active->plane, glm::vec3(0.30f, 0.36f, 0.48f), 5.0f,
+                        quads);
+      }
     }
+    AppendOriginGizmo(overlay); // world origin + axes: parts and assemblies
 
     state.sketchRenderer->SetQuads(std::move(quads));
     state.sketchRenderer->SetOverlayLines(std::move(overlay));
-    // Inactive sketches as thin lines; the active sketch as thick AA primitives
-    // with vertex dots and hover/selection emphasis. Rebuilt each frame so
-    // edit-mode, selection, and hover changes show immediately.
-    UpdateSketchStatus(state); // DOF + conflicts for coloring/feedback
-    state.sketchRenderer->SetStaticLines(
-        BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
-    std::vector<PrimVertex> prims =
-        BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId);
-    AppendEdgePickPrimitives(state, prims); // fillet/chamfer edge picking
-    state.sketchRenderer->SetPrimitives(std::move(prims));
 
-    // Auto-constraint snap indicator + ghost glyphs, and dimension annotations
-    // (2D overlays).
-    DrawSnapGlyphs(state);
-    DrawSelectionBox(state);
-    DrawDatumLabels(state);
-    DrawElementNameOverlay(state); // toponaming debug: hovered face's name
-    DrawDimensions(state);
-    DrawConstraintGlyphs(state);
-    DrawToolPrompt(state);
+    // The sketch lines, edit primitives, and 2D annotations below are all
+    // part-tab geometry. On an assembly tab clear them and skip the overlays.
+    if (state.document) {
+      // Inactive sketches as thin lines; the active sketch as thick AA
+      // primitives with vertex dots and hover/selection emphasis. Rebuilt each
+      // frame so edit-mode, selection, and hover changes show immediately.
+      UpdateSketchStatus(state); // DOF + conflicts for coloring/feedback
+      state.sketchRenderer->SetStaticLines(
+          BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
+      std::vector<PrimVertex> prims =
+          BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId);
+      AppendEdgePickPrimitives(state, prims); // fillet/chamfer edge picking
+      state.sketchRenderer->SetPrimitives(std::move(prims));
+
+      // Auto-constraint snap indicator + ghost glyphs, and dimension
+      // annotations (2D overlays).
+      DrawSnapGlyphs(state);
+      DrawSelectionBox(state);
+      DrawDatumLabels(state);
+      DrawElementNameOverlay(state); // toponaming debug: hovered face's name
+      DrawDimensions(state);
+      DrawConstraintGlyphs(state);
+      DrawToolPrompt(state);
+    } else {
+      state.sketchRenderer->SetStaticLines({});
+      state.sketchRenderer->SetPrimitives({});
+    }
   }
 
   // Point the renderers, camera, and picking at the central-node region so
