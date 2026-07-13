@@ -60,9 +60,11 @@ this is untangling singletons (`AppState` assumes one document).
 > ([a2-design.md](a2-design.md)). **Phase 1 SHIPPED** (format spine 0949554 +
 > project container): assembly is a distinct document kind, parts have stable
 > ids, occurrences (translation+quaternion) round-trip through a v2 project;
-> add_assembly/add_occurrence RPCs + MCP + assembly_smoke test. Remaining:
-> phase 2 (rendering: occurrences via the instancing API + hit→occurrence
-> picking) and phase 3 (move/rotate gizmo + occurrence-edit undo).
+> add_assembly/add_occurrence RPCs + MCP + assembly_smoke test. **Phase 2
+> SHIPPED** (45ae3e8): assemblies RENDER — one asset per part body, one
+> instance per occurrence (shared assets); assembly camera-fit; GUI robust to
+> an assembly tab; hit→occurrence picking wired. Remaining: phase 3 (move/
+> rotate gizmo, occurrence-selection UX, occurrence-edit undo).
 
 A new document type: an ordered list of **occurrences** `{ partRef, transform,
 name, visibility }` — instances of parts placed by explicit transform.

@@ -260,10 +260,22 @@ All six settled with Elias; the format above reflects them.
      Occurrence *editing* (transform RPC) + undo are deferred to phase 3 —
      `add_occurrence` is a direct mutation for now (an assembly tab carries no
      CommandStack yet).
-2. **Rendering + picking** — assembly `SyncDocumentRenderers` path
-   (`CreateAsset`/`AddInstance`), FaceSelector/OutlineRenderer instance-space
-   split, hit→occurrence, double-click-to-enter.
+2. **Rendering + picking — SHIPPED 2026-07-13** (`45ae3e8`). Assembly
+   `SyncDocumentRenderers` branch: one `CreateAsset` per referenced part body,
+   one `AddInstance` per occurrence (N occurrences of a part share one GPU
+   asset). Occurrence pos+quat → mat4; hidden occurrences skipped.
+   `DocumentRenderMesh` carries `occurrenceId`; FaceSelector fed per-occurrence
+   so a pick resolves to an occurrence. `FitCameraToDocument` bounds an
+   assembly; the GUI is robust to an active assembly (part panels/overlays
+   gated on `state.document`); `+Asm` tab button. Fixed a latent OutlineRenderer
+   bug (it rendered every mesh at identity — a pre-existing TODO — which only
+   surfaced once occurrences used non-identity transforms; baked the transform
+   into outline vertices as a stopgap). Verified visually. *Deferred still:*
+   full occurrence-selection UX (single-click selects the whole occurrence,
+   double-click enters the part) and the CPU-geometry-sharing FaceSelector/
+   OutlineRenderer split — both land with phase 3.
 3. **Gizmo + commands** — move/rotate manipulator, `set_occurrence_transform`,
    snapshot undo for occurrence edits (needs a command mechanism for
-   `AssemblyDocument`, which `Command`/`CommandStack` don't cover today). The
-   interactive UX layer.
+   `AssemblyDocument`, which `Command`/`CommandStack` don't cover today), a real
+   per-mesh model in OutlineRenderer (replacing the phase-2 vertex bake so live
+   drags are cheap), and the occurrence-selection UX. The interactive layer.
