@@ -184,13 +184,10 @@ documents, which is what makes this safe to land before A2 exists.
    demands it. Cheap, preserves highlight/visibility semantics, and is 100%
    of the memory win. Say the word if you want `instanceCount = N` from day
    one instead — the cost is a per-instance SSBO + highlight redesign now.
-2. **Dropping `Vertex3D.color`.** It's currently the albedo channel and the
-   only per-vertex data that isn't geometry. Moving albedo to per-instance
-   state is clearly right for instancing; the question is whether you want
-   to keep the vertex attribute around (dead weight, but zero-risk) or
-   remove it (24-byte vertices, touches the vertex input layout + converter
-   + `SetMeshMaterial`). Recommendation: remove it — it's exactly the kind
-   of baked-in assumption this refactor exists to clear.
-3. **Scope check.** Inactive-tab GPU residency (fast part switching) is
-   deliberately out; it's a natural follow-up once assets are refcounted.
-   Fine to defer, or want it folded in?
+2. **Dropping `Vertex3D.color`.** — **DECIDED (2026-07-12): remove.**
+   Albedo moves to per-instance state; vertices go to 24 bytes; the vertex
+   input layout, converter, and `SetMeshMaterial` are updated rather than
+   carrying a dead attribute.
+3. **Scope check.** — **DECIDED (2026-07-12): defer.** Inactive-tab GPU
+   residency stays out of scope; natural follow-up once assets are
+   refcounted.
