@@ -4,6 +4,9 @@
 > offline render button, items 2/1/4/5/6a): **[showcase-v1.md](showcase-v1.md)**
 > — with verified code facts and phase-by-phase tasks. 6b (real-time hybrid RT)
 > stays here, gated as described below.
+>
+> **Renderer instancing** (asset/instance split — the assemblies A2 gate):
+> design in [instancing-design.md](instancing-design.md).
 
 Most open-source CAD looks cheap, and that alone makes it unpleasant to use. The fix is
 mostly *not* raytracing — it's a modern raster pipeline done properly. Ordered by

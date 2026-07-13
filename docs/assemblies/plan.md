@@ -11,6 +11,8 @@ paints us into a corner.
 > **Status 2026-07-11:** gates 1 (incremental regen), 3 (toponaming), 4
 > (diffable format) are DONE. Only gate 2 (renderer instancing) remains, and
 > it blocks A2, not A1. See [a1-design.md](a1-design.md).
+> **2026-07-12:** instancing design drafted for sign-off —
+> [../rendering/instancing-design.md](../rendering/instancing-design.md).
 
 1. **Incremental regeneration** (roadmap "Continuous"): `Document::Regenerate()`
    recomputes every feature per edit. Per-part feature caching (output shape
