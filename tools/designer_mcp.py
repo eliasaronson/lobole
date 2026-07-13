@@ -560,6 +560,30 @@ def remove_occurrence(id: int) -> dict:
     return _call("remove_occurrence", id=id)
 
 
+@mcp.tool(description="Reposition an occurrence. transform = {position:[x,y,z], "
+          "orientation:[x,y,z,w] quaternion}. Undoable. Returns the occurrence.")
+def set_occurrence_transform(id: int, transform: dict) -> dict:
+    return _call("set_occurrence_transform", id=id, transform=transform)
+
+
+@mcp.tool(description="Show or hide an occurrence (hidden ones are not "
+          "rendered or pickable). Undoable.")
+def set_occurrence_visible(id: int, visible: bool) -> dict:
+    return _call("set_occurrence_visible", id=id, visible=visible)
+
+
+@mcp.tool(description="Ground an occurrence (fixed=true) or free it. A fixed "
+          "occurrence is the assembly's immovable anchor. Undoable.")
+def set_occurrence_fixed(id: int, fixed: bool) -> dict:
+    return _call("set_occurrence_fixed", id=id, fixed=fixed)
+
+
+@mcp.tool(description="Rename an occurrence (its display label; the referenced "
+          "part is unchanged). Undoable.")
+def rename_occurrence(id: int, name: str) -> dict:
+    return _call("rename_occurrence", id=id, name=name)
+
+
 @mcp.tool(description="List the active assembly's occurrences: id, name, "
           "part_id, transform, visible, fixed.")
 def list_occurrences() -> dict:

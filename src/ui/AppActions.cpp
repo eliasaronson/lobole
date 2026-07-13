@@ -478,6 +478,7 @@ void StashActive(AppState& state) {
   slot.doc = std::move(state.document);
   slot.assembly = std::move(state.assembly);
   slot.commands = std::move(state.commands);
+  slot.history = std::move(state.assemblyHistory);
   slot.lastSavedVersion = state.lastSavedVersion;
 }
 // Move a slot's model into AppState as the active tab. Assumes AppState holds
@@ -487,6 +488,7 @@ void ActivateSlot(AppState& state, size_t index) {
   state.document = std::move(slot.doc);
   state.assembly = std::move(slot.assembly);
   state.commands = std::move(slot.commands);
+  state.assemblyHistory = std::move(slot.history);
   state.lastSavedVersion = slot.lastSavedVersion;
   state.activePart = static_cast<int>(index);
 }
@@ -552,6 +554,30 @@ uint64_t PartIdByName(const AppState& state, const std::string& name) {
   for (const PartSlot& slot : state.parts)
     if (slot.kind == DocKind::Part && slot.name == name) return slot.id;
   return 0;
+}
+
+void SnapshotAssembly(AppState& state) {
+  if (!state.assembly) return;
+  state.assemblyHistory.undo.push_back(*state.assembly); // full-state copy
+  state.assemblyHistory.redo.clear();
+}
+
+bool UndoAssembly(AppState& state) {
+  if (!state.assembly || state.assemblyHistory.undo.empty()) return false;
+  state.assemblyHistory.redo.push_back(*state.assembly);
+  *state.assembly = std::move(state.assemblyHistory.undo.back());
+  state.assemblyHistory.undo.pop_back();
+  state.syncedDocumentVersion = UINT64_MAX; // restored state may share a version
+  return true;
+}
+
+bool RedoAssembly(AppState& state) {
+  if (!state.assembly || state.assemblyHistory.redo.empty()) return false;
+  state.assemblyHistory.undo.push_back(*state.assembly);
+  *state.assembly = std::move(state.assemblyHistory.redo.back());
+  state.assemblyHistory.redo.pop_back();
+  state.syncedDocumentVersion = UINT64_MAX;
+  return true;
 }
 
 void SetActivePart(AppState& state, size_t index) {

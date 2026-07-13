@@ -36,6 +36,14 @@ bool DeletePart(AppState& state, size_t index);
 // Occurrences reference parts by this stable id, never by name.
 uint64_t PartIdByName(const AppState& state, const std::string& name);
 
+// Assembly occurrence-edit undo (snapshot-based; A2 phase 3). Call
+// SnapshotAssembly *before* mutating the active assembly's occurrences; Undo/
+// Redo restore a snapshot and force a renderer resync. No-ops without an active
+// assembly / empty stack (Undo/Redo return whether they did anything).
+void SnapshotAssembly(AppState& state);
+bool UndoAssembly(AppState& state);
+bool RedoAssembly(AppState& state);
+
 // Save/open a project directory. A multi-part project writes a project.json
 // index + one `parts/<name>/` directory each; a single-part project stays
 // the flat `.dsgn` (index.json + features/) form for backward compatibility.

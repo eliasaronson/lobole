@@ -205,6 +205,14 @@ enum class DocKind { Part, Assembly };
 // document/assembly/commands live in AppState (so all existing single-document
 // code is unchanged); an inactive tab stashes them here. Exactly one of
 // `doc`/`assembly` is populated, per `kind`.
+// Snapshot-based undo for an assembly tab's occurrence edits. The assembly is
+// small (a list of occurrences), so each edit pushes a full copy — simpler than
+// generalizing Command/CommandStack, which are Document-only.
+struct AssemblyHistory {
+  std::vector<AssemblyDocument> undo;
+  std::vector<AssemblyDocument> redo;
+};
+
 struct PartSlot {
   uint64_t id = 0;   // stable per-document id (A2): what occurrences reference
   std::string name;
@@ -212,6 +220,7 @@ struct PartSlot {
   std::unique_ptr<Document> doc;          // part: null while this tab is active
   std::unique_ptr<AssemblyDocument> assembly; // assembly: null while active
   std::unique_ptr<CommandStack> commands; // null while active (parts only)
+  AssemblyHistory history;                // assembly undo/redo (stashed here)
   uint64_t lastSavedVersion = 0;      // per-document dirty tracking
 };
 
@@ -222,6 +231,7 @@ struct AppState {
   std::unique_ptr<Document> document;
   std::unique_ptr<CommandStack> commands;
   std::unique_ptr<AssemblyDocument> assembly;
+  AssemblyHistory assemblyHistory; // active assembly's undo/redo (A2 phase 3)
 
   // Multi-document project (A1/A2): all tabs; `activePart` indexes the one
   // whose model is live above. One entry = today's single part.

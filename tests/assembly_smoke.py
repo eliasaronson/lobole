@@ -98,6 +98,34 @@ def main():
         except RuntimeError as e:
             expect("nope" in str(e), f"names the missing part: {e}")
 
+        # --- Occurrence edits + undo/redo (phase 3) ------------------------
+        oid = occ[0]["id"]
+        d.call("set_occurrence_transform", id=oid,
+               transform={"position": [1, 2, 3], "orientation": [0, 0, 0, 1]})
+        moved = d.call("list_occurrences")["occurrences"][0]
+        expect(abs(moved["transform"]["position"][1] - 2.0) < 1e-5, "moved")
+
+        d.call("rename_occurrence", id=oid, name="anchor")
+        d.call("set_occurrence_fixed", id=oid, fixed=False)
+        cur = d.call("list_occurrences")["occurrences"][0]
+        expect(cur["name"] == "anchor" and cur["fixed"] is False, "renamed+freed")
+
+        # Undo unwinds edits newest-first: unfix, rename, then the move.
+        d.call("undo"); d.call("undo")
+        back = d.call("list_occurrences")["occurrences"][0]
+        expect(back["name"] == "base" and back["fixed"] is True,
+               f"undo restored name+fixed: {back['name']}, {back['fixed']}")
+        d.call("undo")
+        origin = d.call("list_occurrences")["occurrences"][0]
+        expect(abs(origin["transform"]["position"][1]) < 1e-5,
+               "undo restored the position")
+        # Redo re-applies the move.
+        d.call("redo")
+        expect(abs(d.call("list_occurrences")["occurrences"][0]
+                   ["transform"]["position"][1] - 2.0) < 1e-5, "redo re-moved")
+        # Leave it where it started for the round-trip below.
+        d.call("undo")
+
         # --- Save, reopen, verify the whole project survives ---------------
         proj = os.path.join(tmp, "robot.dsgn")
         d.call("save_project", path=proj)

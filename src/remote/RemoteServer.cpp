@@ -240,6 +240,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "add_assembly", "set_active_part",  "delete_part",
       "new_project",  "save_project",     "open_project",
       "add_occurrence", "remove_occurrence", "list_occurrences",
+      "set_occurrence_transform", "set_occurrence_visible",
+      "set_occurrence_fixed", "rename_occurrence",
+      // undo/redo route to the assembly's snapshot history on an assembly tab.
+      "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
       // work on an assembly tab too.
       "view",         "fit_view",         "screenshot"};
@@ -809,10 +813,18 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"bodies", out}};
   }
   if (m == "undo") {
+    if (state.assembly) { // assembly tab: snapshot-based occurrence undo
+      ui::UndoAssembly(state);
+      return {{"can_undo", !state.assemblyHistory.undo.empty()}};
+    }
     state.commands->Undo(*doc);
     return {{"can_undo", state.commands->CanUndo()}};
   }
   if (m == "redo") {
+    if (state.assembly) {
+      ui::RedoAssembly(state);
+      return {{"can_redo", !state.assemblyHistory.redo.empty()}};
+    }
     state.commands->Redo(*doc);
     return {{"can_redo", state.commands->CanRedo()}};
   }
@@ -844,7 +856,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (m == "add_occurrence") {
     // Places a part in the active assembly. `part` is the part's NAME (resolved
     // to its stable id); optional `transform` = {position:[x,y,z],
-    // orientation:[x,y,z,w]}. Direct mutation — occurrence undo is Phase 3.
+    // orientation:[x,y,z,w]}.
     if (!state.assembly)
       throw std::runtime_error("the active document is not an assembly");
     const std::string partName = p.at("part").get<std::string>();
@@ -862,14 +874,18 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
          {"transform", p.value("transform", identityTransform)},
          {"visible", p.value("visible", true)},
          {"fixed", p.value("fixed", false)}});
+    ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddOccurrence(occ);
     return {{"id", id}, {"part_id", partId}};
   }
   if (m == "remove_occurrence") {
     if (!state.assembly)
       throw std::runtime_error("the active document is not an assembly");
-    if (!state.assembly->RemoveOccurrence(p.at("id").get<uint64_t>()))
+    ui::SnapshotAssembly(state);
+    if (!state.assembly->RemoveOccurrence(p.at("id").get<uint64_t>())) {
+      state.assemblyHistory.undo.pop_back(); // nothing changed; drop the snapshot
       throw std::runtime_error("no such occurrence");
+    }
     return json::object();
   }
   if (m == "list_occurrences") {
@@ -879,6 +895,34 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     for (const Occurrence& o : state.assembly->GetOccurrences())
       arr.push_back(DocumentIO::OccurrenceToJson(o));
     return {{"occurrences", arr}};
+  }
+  // Occurrence property edits. All snapshot for undo, then bump the assembly
+  // version so the renderer resyncs. `id` names the occurrence.
+  if (m == "set_occurrence_transform" || m == "set_occurrence_visible" ||
+      m == "set_occurrence_fixed" || m == "rename_occurrence") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    Occurrence* occ = state.assembly->FindById(p.at("id").get<uint64_t>());
+    if (!occ)
+      throw std::runtime_error("no such occurrence");
+    ui::SnapshotAssembly(state);
+    if (m == "set_occurrence_transform") {
+      const json& t = p.at("transform");
+      const json& pos = t.at("position");
+      occ->position = glm::vec3(pos.at(0).get<float>(), pos.at(1).get<float>(),
+                                pos.at(2).get<float>());
+      const json& q = t.at("orientation"); // [x,y,z,w]
+      occ->orientation = glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
+                                   q.at(1).get<float>(), q.at(2).get<float>());
+    } else if (m == "set_occurrence_visible") {
+      occ->visible = p.at("visible").get<bool>();
+    } else if (m == "set_occurrence_fixed") {
+      occ->fixed = p.at("fixed").get<bool>();
+    } else { // rename_occurrence
+      occ->name = p.at("name").get<std::string>();
+    }
+    state.assembly->BumpVersion();
+    return DocumentIO::OccurrenceToJson(*occ);
   }
   if (m == "set_active_part") {
     ui::SetActivePart(state, p.at("index").get<size_t>());
