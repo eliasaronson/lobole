@@ -85,6 +85,8 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 15 | `7343eef` | 3D `Pattern` feature |
 | 16 | `3020d0e` | Sketch `face_ref` (ElementRef, toponaming) |
 | 17 | `48dab10` | `Fillet`/`Chamfer` on ElementRef edges |
+| … | | (v18–v22: end-conditions, shell, loft/sweep, hole, draft — see golden corpus) |
+| 23 | `c84c774` | Assembly document `kind:"assembly"` + `Occurrence` list (A2) |
 
 ## The directory format (F3, default for new saves)
 
@@ -96,6 +98,25 @@ path (`.dsgn` or an existing directory; picking an `index.json` inside a
 `.dsgn` opens the project). Feature files with unchanged content are not
 rewritten, and deleted features' files are removed on save — a git diff
 shows exactly the edited features.
+
+## Assemblies (v23+)
+
+An **assembly** shares this same `designer-document` format string and version
+number, discriminated by `"kind": "assembly"` in the envelope (a part has no
+`kind`, defaulting to `"part"`). Its body is an ordered `occurrences` list
+instead of `features`; each occurrence is `{id, name, part_id, part_version,
+transform:{position, orientation}, visible, fixed}` where `orientation` is a
+quaternion `[x,y,z,w]`. Occurrences reference parts by **stable id**
+(`part_id`), never by name, so renaming a part cannot break an assembly — the
+same rule features follow for cross-references. The occurrence `transform` is
+always the last solved placement (loadable standalone); A3 mates will re-solve
+over non-`fixed` occurrences on load, mirroring the literal-plus-`_expr` rule
+(guarantee 4). Directory form: `index.json` (`kind` + occurrence-id order) +
+`occurrences/<id>-<label>.json`. See `docs/assemblies/a2-design.md`.
+
+The multi-document **project** envelope is separate (`"format":
+"designer-project"`): `{version, active, documents:[{id, name, dir, type}]}`,
+where `type` is `"part"` or `"assembly"` and `id` is a stable per-document id.
 
 ## The golden corpus (`tests/golden/`)
 

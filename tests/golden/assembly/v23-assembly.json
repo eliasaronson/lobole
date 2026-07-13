@@ -1,0 +1,46 @@
+{
+  "format": "designer-document",
+  "version": 23,
+  "kind": "assembly",
+  "occurrences": [
+    {
+      "type": "Occurrence",
+      "id": 1,
+      "name": "base",
+      "part_id": 1,
+      "part_version": null,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": true,
+      "fixed": true
+    },
+    {
+      "type": "Occurrence",
+      "id": 2,
+      "name": "arm",
+      "part_id": 2,
+      "part_version": null,
+      "transform": {
+        "position": [10.0, 0.0, 0.0],
+        "orientation": [0.0, 0.0, 0.70710677, 0.70710677]
+      },
+      "visible": true,
+      "fixed": false
+    },
+    {
+      "type": "Occurrence",
+      "id": 3,
+      "name": "arm (2)",
+      "part_id": 2,
+      "part_version": "abc123",
+      "transform": {
+        "position": [-5.0, 3.0, 1.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": false,
+      "fixed": false
+    }
+  ]
+}

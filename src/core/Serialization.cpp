@@ -11,6 +11,7 @@
 #include "core/HoleFeature.h"
 #include "core/LoftFeature.h"
 #include "core/SweepFeature.h"
+#include "core/Occurrence.h"
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/ShellFeature.h"
@@ -30,13 +31,22 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 22; // v22: draft (v21: hole wizard)
+constexpr int kVersion = 23; // v23: assembly kind + occurrences (v22: draft)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
 glm::vec3 Vec3FromJson(const json& j) {
   return glm::vec3(j.at(0).get<float>(), j.at(1).get<float>(),
                    j.at(2).get<float>());
+}
+
+// Quaternion as [x, y, z, w] (glm stores it (w,x,y,z); the JSON order matches
+// the a2-design occurrence schema).
+json QuatToJson(const glm::quat& q) { return json::array({q.x, q.y, q.z, q.w}); }
+
+glm::quat QuatFromJson(const json& j) {
+  return glm::quat(j.at(3).get<float>(), j.at(0).get<float>(),
+                   j.at(1).get<float>(), j.at(2).get<float>()); // (w,x,y,z)
 }
 
 json Vec2ToJson(const glm::vec2& v) { return json::array({v.x, v.y}); }
@@ -866,6 +876,35 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   return out;
 }
 
+json OccurrenceToJson(const Occurrence& o) {
+  json j;
+  j["type"] = "Occurrence";
+  j["id"] = o.id;
+  j["name"] = o.name;
+  j["part_id"] = o.partId;
+  j["part_version"] = o.partVersion ? json(*o.partVersion) : json(nullptr);
+  j["transform"] = {{"position", Vec3ToJson(o.position)},
+                    {"orientation", QuatToJson(o.orientation)}};
+  j["visible"] = o.visible;
+  j["fixed"] = o.fixed;
+  return j;
+}
+
+Occurrence OccurrenceFromJson(const json& j) {
+  Occurrence o;
+  o.id = j.at("id").get<uint64_t>();
+  o.name = j.value("name", std::string{});
+  o.partId = j.at("part_id").get<uint64_t>();
+  if (j.contains("part_version") && !j.at("part_version").is_null())
+    o.partVersion = j.at("part_version").get<std::string>();
+  const json& t = j.at("transform");
+  o.position = Vec3FromJson(t.at("position"));
+  o.orientation = QuatFromJson(t.at("orientation"));
+  o.visible = j.value("visible", true);
+  o.fixed = j.value("fixed", false);
+  return o;
+}
+
 namespace {
 
 // Path classification (F3): a `.dsgn` path or existing directory is the
@@ -918,6 +957,50 @@ json DocumentEnvelope(const Document& doc) {
     }
   }
   return j;
+}
+
+// ---- Assemblies (A2) ------------------------------------------------------
+// An assembly shares the document format string + version, discriminated by
+// `kind: "assembly"`. OccurrenceToJson/FromJson are public (defined near
+// FeatureToJson); these are the internal file-layout helpers. See
+// docs/assemblies/a2-design.md.
+
+json AssemblyEnvelope() {
+  json j;
+  j["format"] = kFormat;
+  j["version"] = kVersion;
+  j["kind"] = "assembly";
+  return j;
+}
+
+// A filesystem-safe, lowercase [a-z0-9-] slug for an occurrence's cosmetic
+// label (user-set, unlike a feature's PascalCase TypeName). The occurrence id
+// is the real identity — files load by the numeric prefix — so a lossy slug
+// is fine; this only keeps the filename readable and safe.
+std::string OccurrenceLabelSlug(const std::string& label) {
+  std::string out;
+  for (char c : label) {
+    const unsigned char uc = static_cast<unsigned char>(c);
+    if (std::isalnum(uc))
+      out += static_cast<char>(std::tolower(uc));
+    else if (!out.empty() && out.back() != '-')
+      out += '-';
+  }
+  while (!out.empty() && out.back() == '-') out.pop_back();
+  return out;
+}
+
+// Restores occurrences into `asm` in the given order and pins the id counter
+// past the highest restored id so future adds never collide.
+void LoadOccurrences(AssemblyDocument& asmDoc,
+                     const std::vector<json>& occJsons) {
+  uint64_t maxId = 0;
+  for (const json& oj : occJsons) {
+    Occurrence o = OccurrenceFromJson(oj);
+    maxId = std::max(maxId, o.id);
+    asmDoc.GetOccurrences().push_back(std::move(o));
+  }
+  asmDoc.EnsureNextIdAtLeast(maxId + 1);
 }
 
 bool WriteTextAtomic(const std::filesystem::path& target,
@@ -1011,6 +1094,10 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       if (error) *error = "Document version is newer than this build supports";
       return nullptr;
     }
+    if (index.value("kind", "part") == "assembly") {
+      if (error) *error = "This is an assembly, not a part: " + dirPath;
+      return nullptr;
+    }
 
     auto doc = std::make_unique<Document>();
     for (const auto& pj : index.value("parameters", json::array())) {
@@ -1046,6 +1133,102 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
   } catch (const std::exception& e) {
     if (error) *error = e.what();
     LOG_ERROR("Failed to load project directory {}: {}", dirPath, e.what());
+    return nullptr;
+  }
+}
+
+// Assembly directory format (mirrors SaveDir): one file per occurrence named
+// by its stable id, an ordered index written LAST, `kind: "assembly"`.
+bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
+                     std::string* error) {
+  namespace fs = std::filesystem;
+  try {
+    const fs::path dir(dirPath);
+    const fs::path occDir = dir / "occurrences";
+    fs::create_directories(occDir);
+
+    json index = AssemblyEnvelope();
+    index["occurrences"] = json::array();
+    std::set<std::string> wanted;
+    for (const Occurrence& o : asmDoc.GetOccurrences()) {
+      const std::string file =
+          std::to_string(o.id) + "-" + OccurrenceLabelSlug(o.name) + ".json";
+      if (!WriteTextAtomic(occDir / file, OccurrenceToJson(o).dump(2) + "\n",
+                           error))
+        return false;
+      index["occurrences"].push_back(o.id);
+      wanted.insert(file);
+    }
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(occDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wanted.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+    if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
+      return false;
+    LOG_INFO("Saved assembly ({} occurrences) to {}",
+             asmDoc.OccurrenceCount(), dirPath);
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+}
+
+std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
+                                                  std::string* error) {
+  namespace fs = std::filesystem;
+  try {
+    std::ifstream in(fs::path(dirPath) / "index.json");
+    if (!in) {
+      if (error) *error = "Not a designer project directory: " + dirPath;
+      return nullptr;
+    }
+    json index = json::parse(in);
+    if (index.value("format", "") != kFormat) {
+      if (error) *error = "Not a designer document: " + dirPath;
+      return nullptr;
+    }
+    if (index.value("version", 0) > kVersion) {
+      if (error) *error = "Document version is newer than this build supports";
+      return nullptr;
+    }
+    if (index.value("kind", "part") != "assembly") {
+      if (error) *error = "Not an assembly: " + dirPath;
+      return nullptr;
+    }
+
+    // Occurrence files are found by their id prefix — the label suffix is
+    // cosmetic and may lag a rename.
+    std::map<uint64_t, fs::path> byId;
+    std::error_code ec;
+    for (const auto& entry :
+         fs::directory_iterator(fs::path(dirPath) / "occurrences", ec)) {
+      if (entry.path().extension() != ".json")
+        continue;
+      byId[std::stoull(entry.path().filename().string())] = entry.path();
+    }
+    std::vector<json> occJsons;
+    for (const auto& idJson : index.value("occurrences", json::array())) {
+      const uint64_t id = idJson.get<uint64_t>();
+      const auto it = byId.find(id);
+      if (it == byId.end()) {
+        if (error)
+          *error = "missing occurrence file for id " + std::to_string(id);
+        return nullptr;
+      }
+      std::ifstream fin(it->second);
+      occJsons.push_back(json::parse(fin));
+    }
+    auto asmDoc = std::make_unique<AssemblyDocument>();
+    LoadOccurrences(*asmDoc, occJsons);
+    LOG_INFO("Loaded assembly ({} occurrences) from {}",
+             asmDoc->OccurrenceCount(), dirPath);
+    return asmDoc;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    LOG_ERROR("Failed to load assembly directory {}: {}", dirPath, e.what());
     return nullptr;
   }
 }
@@ -1101,6 +1284,10 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
         *error = "Document version is newer than this build supports";
       return nullptr;
     }
+    if (j.value("kind", "part") == "assembly") {
+      if (error) *error = "This is an assembly, not a part: " + path;
+      return nullptr;
+    }
 
     auto doc = std::make_unique<Document>();
     // Parameters first: features' expressions evaluate against them on the
@@ -1120,6 +1307,72 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
   } catch (const std::exception& e) {
     if (error) *error = e.what();
     LOG_ERROR("Failed to load document from {}: {}", path, e.what());
+    return nullptr;
+  }
+}
+
+bool SaveAssembly(const AssemblyDocument& asmDoc, const std::string& path,
+                  std::string* error) {
+  const std::string normalized = NormalizeProjectPath(path);
+  if (IsDirFormatPath(normalized)) {
+    return SaveAssemblyDir(asmDoc, normalized, error);
+  }
+  try {
+    json j = AssemblyEnvelope();
+    j["occurrences"] = json::array();
+    for (const Occurrence& o : asmDoc.GetOccurrences()) {
+      j["occurrences"].push_back(OccurrenceToJson(o));
+    }
+    std::ofstream out(path);
+    if (!out) {
+      if (error) *error = "Cannot open file for writing: " + path;
+      return false;
+    }
+    out << j.dump(2) << "\n";
+    LOG_INFO("Saved assembly ({} occurrences) to {}", asmDoc.OccurrenceCount(),
+             path);
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    LOG_ERROR("Failed to save assembly to {}: {}", path, e.what());
+    return false;
+  }
+}
+
+std::unique_ptr<AssemblyDocument> LoadAssembly(const std::string& path,
+                                               std::string* error) {
+  const std::string normalized = NormalizeProjectPath(path);
+  if (IsDirFormatPath(normalized)) {
+    return LoadAssemblyDir(normalized, error);
+  }
+  try {
+    std::ifstream in(path);
+    if (!in) {
+      if (error) *error = "Cannot open file: " + path;
+      return nullptr;
+    }
+    json j = json::parse(in);
+    if (j.value("format", "") != kFormat) {
+      if (error) *error = "Not a designer document: " + path;
+      return nullptr;
+    }
+    if (j.value("version", 0) > kVersion) {
+      if (error) *error = "Document version is newer than this build supports";
+      return nullptr;
+    }
+    if (j.value("kind", "part") != "assembly") {
+      if (error) *error = "Not an assembly: " + path;
+      return nullptr;
+    }
+    auto asmDoc = std::make_unique<AssemblyDocument>();
+    LoadOccurrences(*asmDoc, j.value("occurrences", json::array())
+                                .get<std::vector<json>>());
+    LOG_INFO("Loaded assembly ({} occurrences) from {}",
+             asmDoc->OccurrenceCount(), path);
+    return asmDoc;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    LOG_ERROR("Failed to load assembly from {}: {}", path, e.what());
     return nullptr;
   }
 }

@@ -173,6 +173,7 @@ set(core_sources
     src/core/Measure.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
+    src/core/Occurrence.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/Serialization.cpp
