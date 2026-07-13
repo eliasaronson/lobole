@@ -295,10 +295,37 @@ Plus MCP tools mirroring each (`tools/designer_mcp.py`), and an
 *edit the base part*, re-solve, assert the mated occurrence moved — the payoff
 loop as a regression test.
 
+### Why connector frames and not SolidWorks-style constraint pairs
+
+Both models represent the same assemblies: the DOF states two rigid bodies can
+be left in are the six classical lower kinematic pairs + fully-fixed, and a
+SolidWorks constraint stack converges to one of them — the mate type is the
+*normal form* of a constraint stack (a hinge is one revolute mate instead of
+concentric+coincident whose "hinge-ness" is implicit). What the constraint
+model buys — deliberately partial relations like parallel-only or tangent —
+Onshape covers with extra mate types, addable to this schema additively.
+
+The honest cost (raised at sign-off): Onshape's model is pleasant *because of
+connector inference* — hover snap points (circle centers, edge midpoints,
+corners) that place the frame origin well in one click. v1's coarse anchors
+(centroid / axis) are sufficient for fastened/revolute/slider — the axis is
+exact, and centroid misplacement is a single `offset`/`rotation` adjustment —
+but **connector inference is a named "rest of A3" milestone, not a maybe**
+(see below). Inference changes only the frame-origin derivation rule: same
+solver, same mate types, same anchor `ElementRef` + an added qualifier —
+an additive schema extension built on existing picking (`PickEdge`, B-Rep
+vertices/circle centers). v1's creation flow can still take the cheap
+SW-flavored sweetener: infer the *mate type* from the picked pair (two
+cylinders → suggest revolute, two planes → fastened).
+
 ## Explicitly out of v1 (so their absence is a decision, not a gap)
 
 - **Cylindrical / planar / ball mates** — rest of A3; schema extends
   additively (planar needs `dx`/`dy`, ball a quaternion).
+- **Connector inference snap points** (circle centers, edge midpoints,
+  corners, face center picker) — **the priority UX item of "rest of A3"**,
+  likely alongside A2.5 (hover markers + drag handles share the interactive
+  layer). Additive: anchor gains a qualifier next to its `ElementRef`.
 - **Loop solving** — v1 detects + reports over-constrained; an iterative
   solve over genuine mate loops is a later milestone if real models demand it.
 - **Expression-driven `rotation`/`offset`** — assemblies have no variable
