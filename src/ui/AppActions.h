@@ -13,6 +13,7 @@
 
 class SketchPlane;
 struct RTStillDesc; // defined in RayTracingRenderer.h
+struct Ray;         // defined in FaceSelector.h
 
 namespace ui {
 
@@ -47,6 +48,23 @@ bool RedoAssembly(AppState& state);
 // Selects an occurrence in the active assembly (0 = clear): records it and
 // highlights all its rendered instances. Safe with null renderers.
 void SelectOccurrence(AppState& state, uint64_t occId);
+
+// Re-solves the active assembly's mates (A3): places every mated, non-fixed
+// occurrence by direct frame alignment, then bumps the version so the renderer
+// resyncs. No-op without an active assembly. Call after any mate/occurrence
+// edit and after loading. Returns the number of mates left in an error state.
+int SolveActiveAssembly(AppState& state);
+
+// Resolves a viewport ray to a face of an occurrence in the active assembly:
+// the occurrence hit and a persistent ElementRef naming the face (for building
+// a mate connector). Returns false if the ray misses, hits an occurrence whose
+// part isn't loaded, or lands on an unnamed face (e.g. a pattern output). The
+// `ray` is in the same space FaceSelector::PickFace expects.
+struct AssemblyFacePick {
+  uint64_t occurrenceId = 0;
+  ElementRef face;
+};
+bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
 
 // The occurrence list + properties editor for an active assembly tab (drawn
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.

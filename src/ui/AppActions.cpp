@@ -10,6 +10,7 @@
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
+#include "core/AssemblySolve.h"
 #include "core/Autosaver.h"
 #include "core/GitVault.h"
 #include "core/BooleanFeature.h"
@@ -798,6 +799,52 @@ Document* PartDocById(AppState& state, uint64_t partId) {
   return nullptr;
 }
 } // namespace
+
+int SolveActiveAssembly(AppState& state) {
+  if (!state.assembly)
+    return 0;
+  const assembly::PartResolver resolve =
+      [&state](uint64_t partId) -> const Document* {
+    return PartDocById(state, partId);
+  };
+  const assembly::SolveReport rep = assembly::Solve(*state.assembly, resolve);
+  state.assembly->BumpVersion(); // solved transforms changed → renderer resync
+  return rep.erroredMates;
+}
+
+bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
+  if (!state.assembly || !state.faceSelector)
+    return false;
+  const RayHit hit = state.faceSelector->PickFace(ray);
+  if (!hit.hit)
+    return false;
+
+  // meshId → the occurrence + which of its part's bodies was hit (both carried
+  // on the render mesh precisely so an assembly pick can be named).
+  const DocumentRenderMesh* rm = nullptr;
+  for (const DocumentRenderMesh& m : state.documentMeshes)
+    if (m.meshId == hit.meshId) { rm = &m; break; }
+  if (!rm || rm->occurrenceId == 0)
+    return false;
+
+  const Occurrence* occ = state.assembly->FindById(rm->occurrenceId);
+  if (!occ)
+    return false;
+  Document* part = PartDocById(state, occ->partId);
+  if (!part || rm->bodyIndex >= part->GetBodies().size())
+    return false;
+
+  // The face's persistent toponaming name → an ElementRef the mate stores.
+  const Body& body = part->GetBodies()[rm->bodyIndex];
+  const std::string* name =
+      body.elementMap.NameOf(static_cast<int>(hit.faceIndex));
+  if (!name)
+    return false; // an unnamed face (e.g. a pattern output) can't be mated
+
+  out.occurrenceId = rm->occurrenceId;
+  out.face = ElementRef{body.createdBy, *name};
+  return true;
+}
 
 void FitCameraToDocument(AppState& state) {
   if (!state.camera)

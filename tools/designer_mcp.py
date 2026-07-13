@@ -590,6 +590,64 @@ def list_occurrences() -> dict:
     return _call("list_occurrences")
 
 
+@mcp.tool(description="Add a MATE between two occurrences of the active "
+          "assembly (A3). type is 'fastened' (rigid), 'revolute' (free to "
+          "rotate about the connector Z), or 'slider' (free to slide along "
+          "Z). Each connector `a`/`b` is {occurrence:<id>, origin:true} for "
+          "the part origin, or {occurrence:<id>, face:{feature_id, element}} "
+          "for a named face (see list_elements). `b`'s occurrence is placed "
+          "relative to `a`. flipped opposes the two Z axes (default true, so "
+          "touching planar faces mate); rotation/offset set the DOF pose. "
+          "Solves immediately.")
+def add_mate(type: str, a: dict, b: dict, name: str = "",
+             flipped: bool = True, rotation: float = 0.0,
+             offset: float = 0.0) -> dict:
+    params = {"type": type, "a": a, "b": b, "flipped": flipped,
+              "rotation": rotation, "offset": offset}
+    if name:
+        params["name"] = name
+    return _call("add_mate", **params)
+
+
+@mcp.tool(description="Adjust a mate (by id) and re-solve: rotation (revolute "
+          "angle, radians), offset (slider distance), flipped, or name. This "
+          "is how you MOVE a mechanism numerically — e.g. set a revolute's "
+          "rotation to swing a hinge.")
+def set_mate(id: int, rotation: float | None = None, offset: float | None = None,
+             flipped: bool | None = None, name: str | None = None) -> dict:
+    params: dict = {"id": id}
+    if rotation is not None:
+        params["rotation"] = rotation
+    if offset is not None:
+        params["offset"] = offset
+    if flipped is not None:
+        params["flipped"] = flipped
+    if name is not None:
+        params["name"] = name
+    return _call("set_mate", **params)
+
+
+@mcp.tool(description="Remove a mate (by id) and re-solve. Occurrences it "
+          "positioned keep their last solved pose.")
+def remove_mate(id: int) -> dict:
+    return _call("remove_mate", id=id)
+
+
+@mcp.tool(description="List the active assembly's mates: id, name, type, the "
+          "two connectors, DOF pose, and a per-mate 'error' when a connector "
+          "ref is dangling or the mate is over-constrained.")
+def list_mates() -> dict:
+    return _call("list_mates")
+
+
+@mcp.tool(description="Re-solve the active assembly's mates (place every "
+          "mated, non-fixed occurrence by frame alignment). Returns the "
+          "count of errored mates and each mate's status. Solves run "
+          "automatically after mate/occurrence edits; call this to inspect.")
+def solve_assembly() -> dict:
+    return _call("solve_assembly")
+
+
 @mcp.tool(description="Import a STEP file's bodies as an Import feature.")
 def import_step(path: str) -> dict:
     return _call("import_step", path=path)

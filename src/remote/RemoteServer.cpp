@@ -242,6 +242,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "add_occurrence", "remove_occurrence", "list_occurrences",
       "set_occurrence_transform", "set_occurrence_visible",
       "set_occurrence_fixed", "rename_occurrence",
+      "add_mate", "set_mate", "remove_mate", "list_mates", "solve_assembly",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
@@ -924,7 +925,102 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       occ->name = p.at("name").get<std::string>();
     }
     state.assembly->BumpVersion();
+    // Moving/grounding an occurrence can shift what the mates solve to (a fixed
+    // anchor moved, or a mated occurrence was nudged and must be re-placed).
+    if (m == "set_occurrence_transform" || m == "set_occurrence_fixed")
+      ui::SolveActiveAssembly(state);
     return DocumentIO::OccurrenceToJson(*occ);
+  }
+  // ---- Mates (A3) ---------------------------------------------------------
+  // A connector spec is {occurrence, origin:true} or
+  // {occurrence, face:{feature_id, element}}; translated to the on-disk anchor
+  // shape and parsed by DocumentIO::MateFromJson.
+  if (m == "add_mate") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    auto connToJson = [](const json& c) -> json {
+      json anchor;
+      if (c.value("origin", false))
+        anchor = {{"origin", true}};
+      else if (c.contains("face"))
+        anchor = {{"face", {{"feature_id", c.at("face").at("feature_id")},
+                            {"element", c.at("face").at("element")}}}};
+      else
+        throw std::runtime_error(
+            "connector needs 'origin:true' or 'face:{feature_id,element}'");
+      return {{"occurrence", c.at("occurrence")}, {"anchor", anchor}};
+    };
+    Mate mate = DocumentIO::MateFromJson(
+        {{"id", 0},
+         {"name", p.value("name", std::string{"Mate"})},
+         {"mate_type", p.value("type", std::string{"fastened"})},
+         {"a", connToJson(p.at("a"))},
+         {"b", connToJson(p.at("b"))},
+         {"flipped", p.value("flipped", true)},
+         {"rotation", p.value("rotation", 0.0f)},
+         {"offset", p.value("offset", 0.0f)}});
+    // Both occurrences must exist before we solve against them.
+    if (!state.assembly->FindById(mate.a.occurrenceId) ||
+        !state.assembly->FindById(mate.b.occurrenceId))
+      throw std::runtime_error("mate references a missing occurrence");
+    ui::SnapshotAssembly(state);
+    const uint64_t id = state.assembly->AddMate(mate);
+    const int errored = ui::SolveActiveAssembly(state);
+    json out = DocumentIO::MateToJson(*state.assembly->FindMateById(id));
+    out["errored_mates"] = errored;
+    if (const Mate* mm = state.assembly->FindMateById(id); mm && !mm->error.empty())
+      out["error"] = mm->error;
+    return out;
+  }
+  if (m == "set_mate") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    Mate* mate = state.assembly->FindMateById(p.at("id").get<uint64_t>());
+    if (!mate)
+      throw std::runtime_error("no such mate");
+    ui::SnapshotAssembly(state);
+    if (p.contains("rotation")) mate->rotation = p.at("rotation").get<float>();
+    if (p.contains("offset")) mate->offset = p.at("offset").get<float>();
+    if (p.contains("flipped")) mate->flipped = p.at("flipped").get<bool>();
+    if (p.contains("name")) mate->name = p.at("name").get<std::string>();
+    ui::SolveActiveAssembly(state);
+    json out = DocumentIO::MateToJson(*mate);
+    if (!mate->error.empty()) out["error"] = mate->error;
+    return out;
+  }
+  if (m == "remove_mate") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    ui::SnapshotAssembly(state);
+    if (!state.assembly->RemoveMate(p.at("id").get<uint64_t>())) {
+      state.assemblyHistory.undo.pop_back(); // nothing changed; drop snapshot
+      throw std::runtime_error("no such mate");
+    }
+    ui::SolveActiveAssembly(state); // freed occurrences keep their last pose
+    return json::object();
+  }
+  if (m == "list_mates") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    json arr = json::array();
+    for (const Mate& mate : state.assembly->GetMates()) {
+      json mj = DocumentIO::MateToJson(mate);
+      if (!mate.error.empty()) mj["error"] = mate.error;
+      arr.push_back(mj);
+    }
+    return {{"mates", arr}};
+  }
+  if (m == "solve_assembly") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    const int errored = ui::SolveActiveAssembly(state);
+    json arr = json::array();
+    for (const Mate& mate : state.assembly->GetMates()) {
+      json mj = {{"id", mate.id}, {"name", mate.name}};
+      if (!mate.error.empty()) mj["error"] = mate.error;
+      arr.push_back(mj);
+    }
+    return {{"errored_mates", errored}, {"mates", arr}};
   }
   if (m == "set_active_part") {
     ui::SetActivePart(state, p.at("index").get<size_t>());
