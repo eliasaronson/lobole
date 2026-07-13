@@ -56,8 +56,10 @@ the viewport; the feature tree shows the active part). Open/save moves from
 this is untangling singletons (`AppState` assumes one document).
 
 ### A2 — Assembly document + occurrences — [design: a2-design.md](a2-design.md)
-> **2026-07-13:** instancing gate cleared (6a99c38); A2 design drafted for
-> sign-off — [a2-design.md](a2-design.md), persistence format as centerpiece.
+> **2026-07-13:** instancing gate cleared (6a99c38); A2 design **signed off**
+> — [a2-design.md](a2-design.md). Assembly is a distinct document kind; parts
+> gain stable ids; occurrences store translation+quaternion transforms;
+> phase 1 (format spine) ready to build.
 
 A new document type: an ordered list of **occurrences** `{ partRef, transform,
 name, visibility }` — instances of parts placed by explicit transform.

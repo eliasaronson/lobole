@@ -1,11 +1,12 @@
-# Assemblies A2 — assembly document + occurrences — design (for sign-off)
+# Assemblies A2 — assembly document + occurrences — design
 
-> Status: design for Elias's sign-off. A2 is where the app first becomes a
-> real assembly tool: place parts in space, move/rotate them, eyeball a fit.
-> Its renderer-instancing gate shipped 2026-07-12 (commit 6a99c38); every
-> other prerequisite was already done. This doc leads with the **save format**
-> — the decision most likely to box in A3 (mates) — then covers rendering,
-> picking, the gizmo, and commands.
+> Status: **signed off 2026-07-13** (all six decisions below). A2 is where the
+> app first becomes a real assembly tool: place parts in space, move/rotate
+> them, eyeball a fit. Its renderer-instancing gate shipped 2026-07-12 (commit
+> 6a99c38); every other prerequisite was already done. This doc leads with the
+> **save format** — the decision most likely to box in A3 (mates) — then covers
+> rendering, picking, the gizmo, and commands. Phase 1 (the format spine) is
+> ready to build.
 
 ## Gate status (2026-07-13)
 
@@ -63,17 +64,22 @@ project envelope to **version 2**:
 ```json
 { "format": "designer-project", "version": 2, "active": 2,
   "documents": [
-    {"name": "base",  "dir": "parts/base",       "type": "part"},
-    {"name": "arm",   "dir": "parts/arm",        "type": "part"},
-    {"name": "robot", "dir": "assemblies/robot", "type": "assembly"}
+    {"id": 1, "name": "base",  "dir": "parts/base",       "type": "part"},
+    {"id": 2, "name": "arm",   "dir": "parts/arm",        "type": "part"},
+    {"id": 3, "name": "robot", "dir": "assemblies/robot", "type": "assembly"}
   ] }
 ```
 
+- **`id`** — a stable per-document id (uint64), unique and never reused, the
+  identity a part is referenced by (decision 5). `name` and `dir` are
+  cosmetic/derived and may change freely; the id never does, so renaming or
+  moving a part cannot break an occurrence that references it.
 - **Back-compat, no migration code:** a v1 project has `parts` and no
   `documents`; the loader reads `documents` if present, else falls back to
-  `parts` and defaults every entry's `type` to `"part"` — the same
-  defaulted-read pattern the codebase already uses for every additive field
-  (`Serialization.cpp` `j.value("key", default)`).
+  `parts`, defaults every entry's `type` to `"part"`, and **assigns ids in
+  list order** — the same defaulted-read + assign-on-load pattern the codebase
+  already uses (v1 feature files get ids stamped in list order the same way;
+  `Serialization.cpp` `j.value("key", default)`).
 - `active` indexes `documents` (the bottom tab bar already switches active
   document; an assembly is just another tab).
 - Single-part projects still save as a flat `.dsgn` (A1's rule, unchanged); a
@@ -85,8 +91,8 @@ project envelope to **version 2**:
 assemblies/robot/
   index.json                 # {format, version, kind:"assembly", occurrences:[ids]}
   occurrences/
-    1-base.json              # <id>-<partname>.json — one file per occurrence
-    2-arm.json
+    1-base.json              # <occ-id>-<label>.json — one file per occurrence
+    2-arm.json               # label is cosmetic (the occ id is identity, per F3)
     3-arm.json               # a second occurrence of the same part
 ```
 
@@ -117,7 +123,7 @@ size — see decision 4.
   "type": "Occurrence",
   "id": 2,
   "name": "arm",
-  "part": "arm",
+  "part_id": 2,
   "part_version": null,
   "transform": { "position": [10, 0, 0], "orientation": [0, 0, 0, 1] },
   "visible": true,
@@ -128,10 +134,13 @@ size — see decision 4.
 - **`id`** — stable uint64, unique-and-never-reused, exactly like feature ids
   (A3 mates reference occurrences by this id; undo/redo and stable file naming
   need it).
-- **`part`** — the referenced document's name (A1 keys parts by name). A part
-  rename must propagate to referencing occurrences — a rename command updates
-  the `part` field of every occurrence that names it. (Decision 5: by-name vs.
-  a stable part-id.)
+- **`name`** — the occurrence's own display label (e.g. "arm", "arm (2)"),
+  cosmetic; independent of the referenced part's name.
+- **`part_id`** — the stable id of the referenced document (decision 5:
+  by-id, not by-name). Renaming or moving the part changes its `name`/`dir` in
+  `project.json` but not its id, so occurrences never break and no
+  rename-propagation is needed — the same rename-safety features already enjoy
+  by referencing each other by id, not display name.
 - **`part_version`** — reserved for the git-commit pin the assemblies plan
   calls for (`plan.md` cross-cutting); `null` until F5 wires "reference a
   specific part version." Present now so adding it later is not a format bump.
@@ -214,26 +223,27 @@ same way. Copy the existing templates:
 Undo/redo reuses the `CommandStack` (snapshot before/after, like
 `ModifyFeatureCommand`).
 
-## Decisions that need you
+## Decisions — SIGNED OFF (2026-07-13)
 
-1. **Assembly as a distinct document kind** (a `kind:"assembly"` directory
-   holding occurrences, *not* a `Feature` list) — recommended, because
-   `RegenContext` can't reach other parts anyway. Confirm.
-2. **`project.json`: generalize `parts` → typed `documents`** (recommended, one
-   `active` index across all tabs) vs. keeping `parts` and adding a parallel
-   `assemblies` array. Both back-compat via defaulted reads.
-3. **Transform as translation + quaternion** (recommended) vs. origin+axes
-   (matches the plane convention exactly) vs. raw `mat4` (simplest to apply,
-   worst to diff).
-4. **File-per-occurrence** (recommended, git-conflict-free like F3) vs. a
-   single `occurrences.json` array (simpler, and occurrences are tiny so the
-   per-feature rationale is weaker here).
-5. **`partRef` by name with rename-propagation** (recommended, matches A1's
-   name-keyed parts) vs. introducing a stable per-part id (more robust, but A1
-   has no part ids today).
-6. **Confirm the A3-proofing principle** — occurrences always store an explicit
-   transform; mates (A3) re-solve over non-fixed ones. This is the one call
-   that shapes A3's format, so it wants an explicit yes.
+All six settled with Elias; the format above reflects them.
+
+1. **Assembly is a distinct document kind** (a `kind:"assembly"` directory of
+   occurrences, *not* a `Feature` list) — `RegenContext` can't reach other
+   parts, so this is forced.
+2. **`project.json` generalizes `parts` → typed `documents`** with one `active`
+   index across all tabs; v1 files load via defaulted reads.
+3. **Transform = translation + quaternion** (`position` + `orientation` xyzw).
+4. **File-per-occurrence** (git-conflict-free, consistent with F3).
+5. **Parts get a stable id; occurrences reference `part_id`, not name.** Prompted
+   by Elias: by-name would break an assembly on any part rename that didn't run
+   propagation (git merge, manual edit, file move). Referencing by stable id
+   makes renames free and matches how features already reference each other
+   (id = identity, name = cosmetic). Cost is a small `id` field on each
+   `project.json` document entry, stamped on load for old files. Variables stay
+   name-keyed (they're expression symbols); parts are structural refs, so they
+   follow the feature/id model.
+6. **A3-proofing confirmed:** occurrences always store an explicit transform;
+   A3 mates re-solve over the non-`fixed` ones on load.
 
 ## Phasing
 
