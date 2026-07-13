@@ -44,6 +44,14 @@ void SnapshotAssembly(AppState& state);
 bool UndoAssembly(AppState& state);
 bool RedoAssembly(AppState& state);
 
+// Selects an occurrence in the active assembly (0 = clear): records it and
+// highlights all its rendered instances. Safe with null renderers.
+void SelectOccurrence(AppState& state, uint64_t occId);
+
+// The occurrence list + properties editor for an active assembly tab (drawn
+// where the feature tree is for a part). Defined in OccurrencePanel.cpp.
+void DrawOccurrencePanel(AppState& state);
+
 // Save/open a project directory. A multi-part project writes a project.json
 // index + one `parts/<name>/` directory each; a single-part project stays
 // the flat `.dsgn` (index.json + features/) form for backward compatibility.

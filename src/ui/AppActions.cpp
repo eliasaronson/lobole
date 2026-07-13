@@ -495,6 +495,7 @@ void ActivateSlot(AppState& state, size_t index) {
 // Shared reset after a tab switch/create.
 void ResetActiveTabUiState(AppState& state) {
   state.selectedFeature = -1;
+  state.selectedOccurrence = 0;
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};
   state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
@@ -578,6 +579,18 @@ bool RedoAssembly(AppState& state) {
   state.assemblyHistory.redo.pop_back();
   state.syncedDocumentVersion = UINT64_MAX;
   return true;
+}
+
+void SelectOccurrence(AppState& state, uint64_t occId) {
+  state.selectedOccurrence = occId;
+  if (!state.meshRenderer) return;
+  state.meshRenderer->ClearFaceHighlight();
+  if (occId == 0) return;
+  // Highlight every instance belonging to the occurrence (a multi-body part
+  // has one instance per body).
+  for (const DocumentRenderMesh& m : state.documentMeshes)
+    if (m.occurrenceId == occId)
+      state.meshRenderer->HighlightInstance(m.meshId);
 }
 
 void SetActivePart(AppState& state, size_t index) {
@@ -934,6 +947,9 @@ void SyncAssemblyRenderers(AppState& state) {
           {meshId, outlineId, bi, occ.id, sb.edges});
     }
   }
+  // Resync recreates instances (highlight reset), so re-apply the selection.
+  if (state.selectedOccurrence)
+    SelectOccurrence(state, state.selectedOccurrence);
   LOG_INFO("Assembly synced: {} occurrences",
            state.assembly->OccurrenceCount());
 }

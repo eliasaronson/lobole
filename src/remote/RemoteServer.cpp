@@ -247,7 +247,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // Camera / rendering act on the viewport, not the part document, so they
       // work on an assembly tab too.
       "view",         "fit_view",         "screenshot"};
-  if (!doc && !kNoPartDoc.count(m)) {
+  // UI actions (item_click, viewport_click, …) fall through to QueueUiAction,
+  // not HandleSemantic, so don't guard them here — they drive the assembly tab.
+  if (!doc && !kNoPartDoc.count(m) && !IsUiAction(m)) {
     throw std::runtime_error(
         "the active document is an assembly, not a part; switch to a part tab");
   }

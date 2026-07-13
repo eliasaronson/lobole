@@ -334,6 +334,16 @@ void MeshRenderer::SetFaceHover(uint32_t instanceId, uint32_t firstVertex, uint3
     instance->highlight.w = firstVertex + count;
 }
 
+void MeshRenderer::HighlightInstance(uint32_t instanceId) {
+    MeshInstance* instance = GetInstance(instanceId);
+    if (!instance) return;
+    MeshAsset* asset = GetAsset(instance->assetId);
+    if (!asset) return;
+    // Full vertex range = the whole instance; additive (no ClearFaceHighlight).
+    instance->highlight.x = 0;
+    instance->highlight.y = static_cast<uint32_t>(asset->vertices.size());
+}
+
 void MeshRenderer::ClearFaceHighlight() {
     for (auto& instance : m_instances) {
         if (instance) { instance->highlight.x = instance->highlight.y = 0; }

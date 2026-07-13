@@ -119,6 +119,11 @@ public:
     void ClearFaceHighlight();
     void ClearFaceHover();
 
+    // Highlights a whole instance (its full vertex range) WITHOUT clearing
+    // others, so all instances of a selected occurrence highlight together
+    // (assemblies A2). Pair with ClearFaceHighlight to deselect.
+    void HighlightInstance(uint32_t instanceId);
+
     // Rendering
     void UpdateCamera(const glm::mat4& view, const glm::mat4& projection);
     void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);

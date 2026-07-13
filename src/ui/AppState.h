@@ -252,6 +252,7 @@ struct AppState {
 
   // UI state
   int selectedFeature = -1;
+  uint64_t selectedOccurrence = 0; // active assembly's selected occurrence (0 = none)
   // Feature being previewed (in the document + rendered, but NOT on the undo
   // stack until accepted). 0 = none. See PreviewFeature.
   uint64_t pendingFeatureId = 0;

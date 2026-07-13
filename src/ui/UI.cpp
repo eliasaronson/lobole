@@ -94,6 +94,8 @@ void DrawUI(AppState& state) {
     DrawVariablesPanel(state);
     DrawPropertiesPanel(state);
     DrawSketchToolbar(state);
+  } else if (state.assembly) {
+    DrawOccurrencePanel(state); // occurrence list + editor in the Model panel
   }
   DrawPreviewDialog(state);
   DrawFileBrowser(state);

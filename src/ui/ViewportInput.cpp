@@ -184,9 +184,40 @@ void HandleViewportInput(AppState& state) {
     return;
   }
 
-  // Face picking: click to select, otherwise hover pre-highlight
   if (!state.faceSelector || !state.meshRenderer)
     return;
+
+  // Assembly tab: pick whole occurrences — click selects (highlights every
+  // instance), double-click enters the referenced part.
+  if (state.assembly) {
+    if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      Ray ray = state.faceSelector->ScreenToWorldRay(
+          io.MousePos.x - state.viewportPos.x,
+          io.MousePos.y - state.viewportPos.y,
+          static_cast<int>(state.viewportSize.x),
+          static_cast<int>(state.viewportSize.y), *state.camera);
+      const RayHit hit = state.faceSelector->PickFace(ray);
+      uint64_t occId = 0;
+      if (hit.hit) {
+        for (const DocumentRenderMesh& m : state.documentMeshes)
+          if (m.meshId == hit.meshId) { occId = m.occurrenceId; break; }
+      }
+      if (occId && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        if (const Occurrence* o = state.assembly->FindById(occId))
+          for (size_t i = 0; i < state.parts.size(); i++)
+            if (state.parts[i].kind == DocKind::Part &&
+                state.parts[i].id == o->partId) {
+              SetActivePart(state, i); // enter the part tab
+              break;
+            }
+      } else {
+        SelectOccurrence(state, occId); // 0 clears the selection
+      }
+    }
+    return;
+  }
+
+  // Face picking: click to select, otherwise hover pre-highlight
   if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     Pick(state, io.MousePos, true, io.KeyCtrl);
   } else if (overViewport && state.viewportDrag == ViewportDrag::None) {
