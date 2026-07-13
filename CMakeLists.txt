@@ -174,6 +174,7 @@ set(core_sources
     src/core/Feature.cpp
     src/core/Document.cpp
     src/core/Occurrence.cpp
+    src/core/AssemblySolve.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/Serialization.cpp

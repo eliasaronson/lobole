@@ -30,3 +30,31 @@ const Occurrence* AssemblyDocument::FindById(uint64_t id) const {
     if (o.id == id) return &o;
   return nullptr;
 }
+
+uint64_t AssemblyDocument::AddMate(Mate mate) {
+  mate.id = m_nextId++;
+  m_mates.push_back(std::move(mate));
+  m_version++;
+  return m_mates.back().id;
+}
+
+bool AssemblyDocument::RemoveMate(uint64_t id) {
+  const auto it = std::find_if(m_mates.begin(), m_mates.end(),
+                               [id](const Mate& m) { return m.id == id; });
+  if (it == m_mates.end()) return false;
+  m_mates.erase(it);
+  m_version++;
+  return true;
+}
+
+Mate* AssemblyDocument::FindMateById(uint64_t id) {
+  for (Mate& m : m_mates)
+    if (m.id == id) return &m;
+  return nullptr;
+}
+
+const Mate* AssemblyDocument::FindMateById(uint64_t id) const {
+  for (const Mate& m : m_mates)
+    if (m.id == id) return &m;
+  return nullptr;
+}

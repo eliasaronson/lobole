@@ -42,4 +42,9 @@ std::unique_ptr<AssemblyDocument> LoadAssembly(const std::string& path,
 nlohmann::json OccurrenceToJson(const Occurrence& occurrence);
 Occurrence OccurrenceFromJson(const nlohmann::json& j);
 
+// Single-mate (de)serialization (A3); used to echo mates from the add_mate/
+// set_mate RPCs. Throws on malformed input.
+nlohmann::json MateToJson(const Mate& mate);
+Mate MateFromJson(const nlohmann::json& j);
+
 }  // namespace DocumentIO

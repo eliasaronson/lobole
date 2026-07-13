@@ -87,6 +87,7 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 17 | `48dab10` | `Fillet`/`Chamfer` on ElementRef edges |
 | … | | (v18–v22: end-conditions, shell, loft/sweep, hole, draft — see golden corpus) |
 | 23 | `0949554` | Assembly document `kind:"assembly"` + `Occurrence` list (A2) |
+| 24 | (A3) | Assembly `mates` list (connector frames + type; fastened/revolute/slider) |
 
 ## The directory format (F3, default for new saves)
 
@@ -109,10 +110,21 @@ transform:{position, orientation}, visible, fixed}` where `orientation` is a
 quaternion `[x,y,z,w]`. Occurrences reference parts by **stable id**
 (`part_id`), never by name, so renaming a part cannot break an assembly — the
 same rule features follow for cross-references. The occurrence `transform` is
-always the last solved placement (loadable standalone); A3 mates will re-solve
+always the last solved placement (loadable standalone); A3 mates re-solve
 over non-`fixed` occurrences on load, mirroring the literal-plus-`_expr` rule
 (guarantee 4). Directory form: `index.json` (`kind` + occurrence-id order) +
 `occurrences/<id>-<label>.json`. See `docs/assemblies/a2-design.md`.
+
+**Mates (v24, A3):** the envelope gains a `mates` id list beside
+`occurrences`, and the directory form a `mates/<id>-<label>.json` file per
+mate (the `mates/` dir is absent when there are none, so a v23 assembly is
+byte-identical). A mate is `{id, name, mate_type, a, b, flipped, rotation,
+offset}`; `a`/`b` are connectors `{occurrence, anchor}` where `anchor` is
+`{origin:true}` or `{face:{feature_id, element}}` (the same inline
+`ElementRef` shape features use). Mate ids share the occurrence id counter
+(one never-reused space per assembly). Occurrences still store their last
+solved transform, so a mates-stripped file still opens at sane positions. See
+`docs/assemblies/a3-design.md`.
 
 The multi-document **project** envelope is separate (`"format":
 "designer-project"`): `{version, active, documents:[{id, name, dir, type}]}`,

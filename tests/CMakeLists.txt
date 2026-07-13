@@ -19,6 +19,7 @@ add_executable(designer_tests
     test_serialization.cpp
     test_golden.cpp
     test_assembly.cpp
+    test_assembly_solve.cpp
     test_measure.cpp
     test_shell.cpp
     test_loft.cpp

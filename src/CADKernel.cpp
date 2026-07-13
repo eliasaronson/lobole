@@ -28,6 +28,7 @@
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
+#include <gp_Cylinder.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Poly_Triangle.hxx>
 #include <Geom_Surface.hxx>
@@ -260,6 +261,42 @@ bool CADShape::FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
                                             : glm::vec3(1, 0, 0);
     uAxis = glm::normalize(u - glm::dot(u, normal) * normal);
     return true;
+}
+
+bool CADShape::FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
+                        glm::vec3& xAxis) const {
+  if (!IsValid() || faceIndex < 0) return false;
+
+  // Walk to the face in the same order FacePlane / GenerateMesh / picking use.
+  int i = 0;
+  TopoDS_Face face;
+  for (TopExp_Explorer exp(m_shape, TopAbs_FACE); exp.More(); exp.Next(), i++) {
+    if (i == faceIndex) { face = TopoDS::Face(exp.Current()); break; }
+  }
+  if (face.IsNull()) return false;
+
+  BRepAdaptor_Surface surf(face);
+  if (surf.GetType() != GeomAbs_Cylinder) return false;
+
+  const gp_Ax1 ax = surf.Cylinder().Axis();
+  const gp_Pnt ap = ax.Location();
+  const gp_Dir ad = ax.Direction();
+  const glm::vec3 axisPoint(ap.X(), ap.Y(), ap.Z());
+  axis = glm::normalize(glm::vec3(ad.X(), ad.Y(), ad.Z()));
+
+  // Origin = the face centroid projected onto the axis, so the frame sits at
+  // the middle of the actual (possibly partial) cylindrical patch rather than
+  // at OCC's arbitrary axis location.
+  GProp_GProps props;
+  BRepGProp::SurfaceProperties(face, props);
+  const gp_Pnt c = props.CentreOfMass();
+  const glm::vec3 centroid(c.X(), c.Y(), c.Z());
+  origin = axisPoint + glm::dot(centroid - axisPoint, axis) * axis;
+
+  // Deterministic perpendicular (matches FacePlane's u-axis heuristic).
+  glm::vec3 u = std::abs(axis.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+  xAxis = glm::normalize(u - glm::dot(u, axis) * axis);
+  return true;
 }
 
 CADShape::Mesh CADShape::GenerateMesh(double deflection) const {

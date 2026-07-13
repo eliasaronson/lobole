@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 23; // v23: assembly kind + occurrences (v22: draft)
+constexpr int kVersion = 24; // v24: assembly mates (v23: assembly occurrences)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -905,6 +905,79 @@ Occurrence OccurrenceFromJson(const json& j) {
   return o;
 }
 
+// ---- Mates (A3) -----------------------------------------------------------
+
+namespace {
+
+const char* MateTypeToString(MateType t) {
+  switch (t) {
+    case MateType::Fastened: return "fastened";
+    case MateType::Revolute: return "revolute";
+    case MateType::Slider: return "slider";
+  }
+  return "fastened";
+}
+
+MateType MateTypeFromString(const std::string& s) {
+  if (s == "revolute") return MateType::Revolute;
+  if (s == "slider") return MateType::Slider;
+  return MateType::Fastened; // default / "fastened"
+}
+
+json ConnectorToJson(const Connector& c) {
+  json j;
+  j["occurrence"] = c.occurrenceId;
+  if (c.anchor.origin)
+    j["anchor"] = {{"origin", true}};
+  else
+    j["anchor"] = {{"face", {{"feature_id", c.anchor.face.featureId},
+                             {"element", c.anchor.face.name}}}};
+  return j;
+}
+
+Connector ConnectorFromJson(const json& j) {
+  Connector c;
+  c.occurrenceId = j.at("occurrence").get<uint64_t>();
+  const json& a = j.at("anchor");
+  if (a.value("origin", false)) {
+    c.anchor.origin = true;
+  } else if (a.contains("face")) {
+    const json& f = a.at("face");
+    c.anchor.face = ElementRef{f.value("feature_id", uint64_t{0}),
+                               f.value("element", std::string{})};
+  }
+  return c;
+}
+
+} // namespace
+
+json MateToJson(const Mate& m) {
+  json j;
+  j["type"] = "Mate";
+  j["id"] = m.id;
+  j["name"] = m.name;
+  j["mate_type"] = MateTypeToString(m.type);
+  j["a"] = ConnectorToJson(m.a);
+  j["b"] = ConnectorToJson(m.b);
+  j["flipped"] = m.flipped;
+  j["rotation"] = m.rotation;
+  j["offset"] = m.offset;
+  return j;
+}
+
+Mate MateFromJson(const json& j) {
+  Mate m;
+  m.id = j.at("id").get<uint64_t>();
+  m.name = j.value("name", std::string{});
+  m.type = MateTypeFromString(j.value("mate_type", std::string{"fastened"}));
+  m.a = ConnectorFromJson(j.at("a"));
+  m.b = ConnectorFromJson(j.at("b"));
+  m.flipped = j.value("flipped", true);
+  m.rotation = j.value("rotation", 0.0f);
+  m.offset = j.value("offset", 0.0f);
+  return m;
+}
+
 namespace {
 
 // Path classification (F3): a `.dsgn` path or existing directory is the
@@ -973,11 +1046,11 @@ json AssemblyEnvelope() {
   return j;
 }
 
-// A filesystem-safe, lowercase [a-z0-9-] slug for an occurrence's cosmetic
-// label (user-set, unlike a feature's PascalCase TypeName). The occurrence id
-// is the real identity — files load by the numeric prefix — so a lossy slug
-// is fine; this only keeps the filename readable and safe.
-std::string OccurrenceLabelSlug(const std::string& label) {
+// A filesystem-safe, lowercase [a-z0-9-] slug for an occurrence's or mate's
+// cosmetic label (user-set, unlike a feature's PascalCase TypeName). The
+// stable id is the real identity — files load by the numeric prefix — so a
+// lossy slug is fine; this only keeps the filename readable and safe.
+std::string LabelSlug(const std::string& label) {
   std::string out;
   for (char c : label) {
     const unsigned char uc = static_cast<unsigned char>(c);
@@ -999,6 +1072,19 @@ void LoadOccurrences(AssemblyDocument& asmDoc,
     Occurrence o = OccurrenceFromJson(oj);
     maxId = std::max(maxId, o.id);
     asmDoc.GetOccurrences().push_back(std::move(o));
+  }
+  asmDoc.EnsureNextIdAtLeast(maxId + 1);
+}
+
+// Restores mates into `asm` in the given order and pins the id counter past
+// the highest restored id. Mates share the id space with occurrences, so
+// pinning here (after LoadOccurrences) leaves the counter above both.
+void LoadMates(AssemblyDocument& asmDoc, const std::vector<json>& mateJsons) {
+  uint64_t maxId = 0;
+  for (const json& mj : mateJsons) {
+    Mate m = MateFromJson(mj);
+    maxId = std::max(maxId, m.id);
+    asmDoc.GetMates().push_back(std::move(m));
   }
   asmDoc.EnsureNextIdAtLeast(maxId + 1);
 }
@@ -1149,26 +1235,48 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
 
     json index = AssemblyEnvelope();
     index["occurrences"] = json::array();
-    std::set<std::string> wanted;
+    std::set<std::string> wantedOcc;
     for (const Occurrence& o : asmDoc.GetOccurrences()) {
       const std::string file =
-          std::to_string(o.id) + "-" + OccurrenceLabelSlug(o.name) + ".json";
+          std::to_string(o.id) + "-" + LabelSlug(o.name) + ".json";
       if (!WriteTextAtomic(occDir / file, OccurrenceToJson(o).dump(2) + "\n",
                            error))
         return false;
       index["occurrences"].push_back(o.id);
-      wanted.insert(file);
+      wantedOcc.insert(file);
     }
     std::error_code ec;
     for (const auto& entry : fs::directory_iterator(occDir, ec)) {
       if (entry.path().extension() == ".json" &&
-          !wanted.contains(entry.path().filename().string()))
+          !wantedOcc.contains(entry.path().filename().string()))
         fs::remove(entry.path(), ec);
     }
+
+    // Mates mirror the occurrence block: one file per mate under mates/, the
+    // ordered id list in the same index.json (written last). A v23 assembly
+    // has none — the mates/ dir simply stays empty.
+    const fs::path mateDir = dir / "mates";
+    index["mates"] = json::array();
+    if (!asmDoc.GetMates().empty()) fs::create_directories(mateDir);
+    std::set<std::string> wantedMate;
+    for (const Mate& m : asmDoc.GetMates()) {
+      const std::string file =
+          std::to_string(m.id) + "-" + LabelSlug(m.name) + ".json";
+      if (!WriteTextAtomic(mateDir / file, MateToJson(m).dump(2) + "\n", error))
+        return false;
+      index["mates"].push_back(m.id);
+      wantedMate.insert(file);
+    }
+    for (const auto& entry : fs::directory_iterator(mateDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedMate.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
     if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
       return false;
-    LOG_INFO("Saved assembly ({} occurrences) to {}",
-             asmDoc.OccurrenceCount(), dirPath);
+    LOG_INFO("Saved assembly ({} occurrences, {} mates) to {}",
+             asmDoc.OccurrenceCount(), asmDoc.MateCount(), dirPath);
     return true;
   } catch (const std::exception& e) {
     if (error) *error = e.what();
@@ -1223,8 +1331,31 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
     }
     auto asmDoc = std::make_unique<AssemblyDocument>();
     LoadOccurrences(*asmDoc, occJsons);
-    LOG_INFO("Loaded assembly ({} occurrences) from {}",
-             asmDoc->OccurrenceCount(), dirPath);
+
+    // Mates (v24): found by id prefix under mates/, loaded in index order. A
+    // v23 assembly has no `mates` key ⇒ the loop is empty.
+    std::map<uint64_t, fs::path> mateById;
+    for (const auto& entry :
+         fs::directory_iterator(fs::path(dirPath) / "mates", ec)) {
+      if (entry.path().extension() != ".json")
+        continue;
+      mateById[std::stoull(entry.path().filename().string())] = entry.path();
+    }
+    std::vector<json> mateJsons;
+    for (const auto& idJson : index.value("mates", json::array())) {
+      const uint64_t id = idJson.get<uint64_t>();
+      const auto it = mateById.find(id);
+      if (it == mateById.end()) {
+        if (error) *error = "missing mate file for id " + std::to_string(id);
+        return nullptr;
+      }
+      std::ifstream fin(it->second);
+      mateJsons.push_back(json::parse(fin));
+    }
+    LoadMates(*asmDoc, mateJsons);
+
+    LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
+             asmDoc->OccurrenceCount(), asmDoc->MateCount(), dirPath);
     return asmDoc;
   } catch (const std::exception& e) {
     if (error) *error = e.what();
@@ -1323,6 +1454,10 @@ bool SaveAssembly(const AssemblyDocument& asmDoc, const std::string& path,
     for (const Occurrence& o : asmDoc.GetOccurrences()) {
       j["occurrences"].push_back(OccurrenceToJson(o));
     }
+    j["mates"] = json::array();
+    for (const Mate& m : asmDoc.GetMates()) {
+      j["mates"].push_back(MateToJson(m));
+    }
     std::ofstream out(path);
     if (!out) {
       if (error) *error = "Cannot open file for writing: " + path;
@@ -1367,8 +1502,10 @@ std::unique_ptr<AssemblyDocument> LoadAssembly(const std::string& path,
     auto asmDoc = std::make_unique<AssemblyDocument>();
     LoadOccurrences(*asmDoc, j.value("occurrences", json::array())
                                 .get<std::vector<json>>());
-    LOG_INFO("Loaded assembly ({} occurrences) from {}",
-             asmDoc->OccurrenceCount(), path);
+    LoadMates(*asmDoc,
+              j.value("mates", json::array()).get<std::vector<json>>());
+    LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
+             asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);
     return asmDoc;
   } catch (const std::exception& e) {
     if (error) *error = e.what();

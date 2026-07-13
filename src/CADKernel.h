@@ -61,7 +61,16 @@ public:
     // range or the face is not planar (topological naming, sketch-on-face).
     bool FacePlane(int faceIndex, glm::vec3& center, glm::vec3& normal,
                    glm::vec3& uAxis) const;
-    
+
+    // For the cylindrical face at `faceIndex` (same explorer order as
+    // FacePlane), outputs a frame on the cylinder axis: `origin` = the face
+    // centroid projected onto the axis, `axis` = the (unit) axis direction,
+    // `xAxis` = a deterministic perpendicular. Returns false if the index is
+    // out of range or the face is not cylindrical. Used by A3 revolute/slider
+    // mate connectors, which align along the axis (assemblies A3).
+    bool FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
+                  glm::vec3& xAxis) const;
+
     // Access to underlying shape
     const TopoDS_Shape& GetShape() const { return m_shape; }
     
@@ -160,6 +169,7 @@ public:
         double deflection = 0.1) const { return {}; }
     std::vector<CADShape> SplitSolids() const { return {}; }
     bool FacePlane(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
+    bool FaceAxis(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
 };
 
 class CADKernel {

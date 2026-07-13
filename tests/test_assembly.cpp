@@ -162,6 +162,142 @@ TEST_CASE("Frozen v23 assembly golden loads at the exact schema", "[assembly][go
   CHECK(*arm2->partVersion == "abc123");
 }
 
+// ---- Mates (A3, v24) ------------------------------------------------------
+
+namespace {
+
+// Adds a revolute mate between the two arm occurrences (a face anchor on the
+// base, an origin anchor on the arm) to SampleAssembly. Returns the mate id.
+uint64_t AddSampleMate(AssemblyDocument& asmDoc) {
+  Mate m;
+  m.name = "hinge";
+  m.type = MateType::Revolute;
+  m.a.occurrenceId = 1;
+  m.a.anchor.face = ElementRef{4, "4/cap1"};
+  m.b.occurrenceId = 2;
+  m.b.anchor.origin = true;
+  m.flipped = true;
+  m.rotation = 0.7853981f;
+  m.offset = 2.0f;
+  return asmDoc.AddMate(m);
+}
+
+void ExpectSameMates(const AssemblyDocument& a, const AssemblyDocument& b) {
+  REQUIRE(a.MateCount() == b.MateCount());
+  const auto& ma = a.GetMates();
+  const auto& mb = b.GetMates();
+  for (size_t i = 0; i < ma.size(); i++) {
+    CHECK(ma[i].id == mb[i].id);
+    CHECK(ma[i].name == mb[i].name);
+    CHECK(ma[i].type == mb[i].type);
+    CHECK(ma[i].a.occurrenceId == mb[i].a.occurrenceId);
+    CHECK(ma[i].a.anchor.origin == mb[i].a.anchor.origin);
+    CHECK(ma[i].a.anchor.face.featureId == mb[i].a.anchor.face.featureId);
+    CHECK(ma[i].a.anchor.face.name == mb[i].a.anchor.face.name);
+    CHECK(ma[i].b.occurrenceId == mb[i].b.occurrenceId);
+    CHECK(ma[i].b.anchor.origin == mb[i].b.anchor.origin);
+    CHECK(ma[i].flipped == mb[i].flipped);
+    CHECK_THAT(ma[i].rotation, WithinAbs(mb[i].rotation, 1e-6f));
+    CHECK_THAT(ma[i].offset, WithinAbs(mb[i].offset, 1e-6f));
+  }
+}
+
+} // namespace
+
+TEST_CASE("Mates share the occurrence id counter and find/remove", "[assembly]") {
+  AssemblyDocument asmDoc = SampleAssembly(); // occurrences 1,2,3
+  const uint64_t mateId = AddSampleMate(asmDoc);
+  CHECK(mateId == 4); // one id space: next after occurrence 3
+
+  // A subsequent occurrence add continues past the mate.
+  Occurrence extra;
+  extra.partId = 9;
+  CHECK(asmDoc.AddOccurrence(extra) == 5);
+
+  REQUIRE(asmDoc.FindMateById(4) != nullptr);
+  CHECK(asmDoc.FindMateById(4)->name == "hinge");
+  CHECK(asmDoc.FindMateById(2) == nullptr); // that id is an occurrence
+
+  REQUIRE(asmDoc.RemoveMate(4));
+  CHECK(asmDoc.MateCount() == 0);
+  CHECK_FALSE(asmDoc.RemoveMate(4));
+}
+
+TEST_CASE("Assembly with mates round-trips (single-file + directory)", "[assembly]") {
+  AssemblyDocument original = SampleAssembly();
+  AddSampleMate(original);
+
+  SECTION("single file") {
+    const fs::path path = fs::temp_directory_path() / "designer_asm_mates.json";
+    std::string error;
+    REQUIRE(DocumentIO::SaveAssembly(original, path.string(), &error));
+    {
+      std::ifstream in(path);
+      nlohmann::json j = nlohmann::json::parse(in);
+      CHECK(j.at("mates").size() == 1);
+      CHECK(j.at("mates")[0].at("mate_type") == "revolute");
+      CHECK(j.at("mates")[0].at("a").at("anchor").at("face").at("element") ==
+            "4/cap1");
+      CHECK(j.at("mates")[0].at("b").at("anchor").at("origin") == true);
+    }
+    auto reloaded = DocumentIO::LoadAssembly(path.string(), &error);
+    REQUIRE(reloaded != nullptr);
+    ExpectSameAssembly(original, *reloaded);
+    ExpectSameMates(original, *reloaded);
+    fs::remove(path);
+  }
+
+  SECTION("directory") {
+    const fs::path dir = fs::temp_directory_path() / "designer_asm_mates.dsgn";
+    fs::remove_all(dir);
+    std::string error;
+    REQUIRE(DocumentIO::SaveAssembly(original, dir.string(), &error));
+    CHECK(fs::exists(dir / "mates" / "4-hinge.json"));
+    auto reloaded = DocumentIO::LoadAssembly(dir.string(), &error);
+    REQUIRE(reloaded != nullptr);
+    ExpectSameAssembly(original, *reloaded);
+    ExpectSameMates(original, *reloaded);
+    // The id counter is pinned past the mate: a new add is 5, not a reuse.
+    CHECK(reloaded->AddOccurrence(Occurrence{}) == 5);
+    fs::remove_all(dir);
+  }
+}
+
+TEST_CASE("A v23 assembly (no mates) still loads under v24", "[assembly]") {
+  // Additive bump: the frozen v23 golden must still load, with zero mates.
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v23-assembly.json";
+  std::string error;
+  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  REQUIRE(asmDoc != nullptr);
+  CHECK(asmDoc->OccurrenceCount() == 3);
+  CHECK(asmDoc->MateCount() == 0);
+}
+
+TEST_CASE("Frozen v24 assembly golden loads at the exact schema", "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v24-assembly.json";
+  REQUIRE(fs::exists(golden));
+  std::string error;
+  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(asmDoc->OccurrenceCount() == 2);
+  REQUIRE(asmDoc->MateCount() == 1);
+
+  const Mate* hinge = asmDoc->FindMateById(3);
+  REQUIRE(hinge != nullptr);
+  CHECK(hinge->type == MateType::Revolute);
+  CHECK(hinge->name == "hinge");
+  CHECK(hinge->a.occurrenceId == 1);
+  CHECK_FALSE(hinge->a.anchor.origin);
+  CHECK(hinge->a.anchor.face.featureId == 4);
+  CHECK(hinge->a.anchor.face.name == "4/cap1");
+  CHECK(hinge->b.occurrenceId == 2);
+  CHECK(hinge->b.anchor.origin);
+  CHECK(hinge->flipped);
+  CHECK_THAT(hinge->rotation, WithinAbs(0.7853981f, 1e-6f));
+}
+
 TEST_CASE("A part loader rejects an assembly and vice versa", "[assembly]") {
   AssemblyDocument asmDoc = SampleAssembly();
   const fs::path path = fs::temp_directory_path() / "designer_asm_kind.json";
