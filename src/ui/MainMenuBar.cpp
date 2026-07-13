@@ -27,6 +27,8 @@ void DrawFileMenu(AppState& state) {
 
   if (ImGui::MenuItem("New", "Ctrl+N")) {
     ReplaceDocument(state, std::make_unique<Document>());
+    state.parts.clear();
+    EnsureParts(state, "Part 1");
     MarkProjectOpened(state, ""); // a fresh document has no home yet
   }
 #ifdef HAVE_NATIVEFILEDIALOG

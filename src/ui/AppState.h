@@ -193,10 +193,25 @@ struct RenderJob {
 // document and undo stack are owned here (they are swapped by File > New /
 // Open); everything else is a non-owning pointer to objects whose lifetime
 // main.cpp manages alongside the Vulkan context.
+// One part of a multi-part project (assemblies A1). The ACTIVE part's
+// document/commands live in AppState.document/commands (so all existing
+// single-document code is unchanged); an inactive part stashes them here.
+struct PartSlot {
+  std::string name;
+  std::unique_ptr<Document> doc;      // null while this part is active
+  std::unique_ptr<CommandStack> commands; // null while active
+  uint64_t lastSavedVersion = 0;      // per-part dirty tracking
+};
+
 struct AppState {
-  // Owned: the model
+  // Owned: the ACTIVE part's model
   std::unique_ptr<Document> document;
   std::unique_ptr<CommandStack> commands;
+
+  // Multi-part project (A1): all parts by name; `activePart` indexes the one
+  // whose document/commands are live above. One entry = today's single part.
+  std::vector<PartSlot> parts;
+  int activePart = 0;
 
   // Non-owning
   Scene* scene = nullptr;

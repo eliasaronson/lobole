@@ -38,6 +38,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
   state.camera = &camera;
+  ui::EnsureParts(state); // one part to start (assemblies A1)
   // All renderer/selector pointers stay null: SyncDocumentRenderers no-ops,
   // and RemoteServer degrades the GUI-dependent methods with specific errors.
 

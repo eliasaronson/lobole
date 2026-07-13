@@ -20,6 +20,23 @@ namespace ui {
 // forces the renderers to resync.
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc);
 
+// Multi-part projects (assemblies A1). EnsureParts makes the parts list
+// non-empty (one slot for the active document) — call once after the initial
+// document is created. AddPart appends a new empty part and switches to it.
+// SetActivePart swaps the active document out to its slot and the target in.
+// DeletePart removes a part (never the last). All resync the renderers.
+void EnsureParts(AppState& state, const std::string& firstName = "Part 1");
+size_t AddPart(AppState& state, const std::string& name);
+void SetActivePart(AppState& state, size_t index);
+bool DeletePart(AppState& state, size_t index);
+
+// Save/open a project directory. A multi-part project writes a project.json
+// index + one `parts/<name>/` directory each; a single-part project stays
+// the flat `.dsgn` (index.json + features/) form for backward compatibility.
+// Open detects project.json to load all parts, else loads one part.
+bool SaveProject(AppState& state, const std::string& path, std::string* error);
+bool OpenProject(AppState& state, const std::string& path, std::string* error);
+
 // Track the on-disk identity for dirty-state + autosave: call after every
 // clean save (also clears the autosave sidecar) / open / new. "" = unsaved.
 void MarkProjectSaved(AppState& state, const std::string& path,

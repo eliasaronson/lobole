@@ -799,8 +799,33 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     state.commands->Redo(*doc);
     return {{"can_redo", state.commands->CanRedo()}};
   }
+  if (m == "list_parts") {
+    // Multi-part project (assemblies A1): the parts and which is active.
+    ui::EnsureParts(state);
+    json arr = json::array();
+    for (size_t i = 0; i < state.parts.size(); i++)
+      arr.push_back({{"name", state.parts[i].name}, {"index", i}});
+    return {{"parts", arr}, {"active", state.activePart}};
+  }
+  if (m == "add_part") {
+    const std::string name =
+        p.value("name", "Part " + std::to_string(state.parts.size() + 1));
+    const size_t idx = ui::AddPart(state, name);
+    return {{"index", idx}, {"name", name}};
+  }
+  if (m == "set_active_part") {
+    ui::SetActivePart(state, p.at("index").get<size_t>());
+    return {{"active", state.activePart}};
+  }
+  if (m == "delete_part") {
+    if (!ui::DeletePart(state, p.at("index").get<size_t>()))
+      throw std::runtime_error("cannot delete the last (or a missing) part");
+    return {{"active", state.activePart}};
+  }
   if (m == "new_project") {
     ui::ReplaceDocument(state, std::make_unique<Document>());
+    state.parts.clear(); // reset to a single fresh part (A1)
+    ui::EnsureParts(state, "Part 1");
     ui::MarkProjectOpened(state, "");
     return json::object();
   }
@@ -809,7 +834,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // directory (.dsgn) projects (F5); ignored otherwise.
     const std::string path = p.at("path").get<std::string>();
     std::string error;
-    if (!DocumentIO::Save(*doc, path, &error))
+    if (!ui::SaveProject(state, path, &error)) // multi-part aware (A1)
       throw std::runtime_error(error);
     // Also clears the autosave sidecar and commits git-backed projects.
     ui::MarkProjectSaved(state, path, p.value("message", "save"));
@@ -822,10 +847,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const std::string path = p.at("path").get<std::string>();
     const bool autosaveAvailable = Autosaver::HasNewerAutosave(path);
     std::string error;
-    auto loaded = DocumentIO::Load(path, &error);
-    if (!loaded) throw std::runtime_error(error);
-    ui::ReplaceDocument(state, std::move(loaded));
-    ui::FitCameraToDocument(state);
+    if (!ui::OpenProject(state, path, &error)) // multi-part aware (A1)
+      throw std::runtime_error(error);
     ui::MarkProjectOpened(state, path);
     return {{"autosave_available", autosaveAvailable},
             {"autosave_path", Autosaver::SidecarPath(path)}};

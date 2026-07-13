@@ -968,6 +968,7 @@ int main(int argc, char **argv) {
   g_Camera = std::make_unique<Camera>();
   g_App.document = std::make_unique<Document>();
   g_App.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(g_App); // one part to start (assemblies A1)
   g_App.scene = g_Scene.get();
   g_App.camera = g_Camera.get();
   g_App.window = window;

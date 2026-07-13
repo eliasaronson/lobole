@@ -238,6 +238,44 @@ def main():
                    - (400.0 - 4.0 * _m3.pi * 0.25 * 4.0)) < 0.5,
                "4-hole plate volume")
 
+        # Multi-part project (assemblies A1): two parts, switch, save/load
+        d.call("new_project")
+        expect(d.call("list_parts")["parts"][0]["name"] == "Part 1",
+               "starts with one part")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "A", "position": [0, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        d.call("add_part", name="Arm")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "B", "position": [0, 0, 0],
+            "width": 3, "height": 3, "depth": 3})
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 27) < 1e-6,
+               "part 2 has its own box")
+        d.call("set_active_part", index=0)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8) < 1e-6,
+               "part 1 intact after switching back")
+        # Save + reload the whole multi-part project.
+        proj = os.path.join(tmp, "asm.dsgn")
+        d.call("save_project", path=proj)
+        expect(os.path.exists(os.path.join(proj, "project.json")),
+               "multi-part writes project.json")
+        d.call("new_project")
+        d.call("open_project", path=proj)
+        parts = d.call("list_parts")["parts"]
+        expect([p["name"] for p in parts] == ["Part 1", "Arm"],
+               "both parts reloaded")
+        d.call("set_active_part", index=1)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 27) < 1e-6,
+               "reloaded part 2 geometry")
+        # Delete a part; can't delete the last.
+        d.call("delete_part", index=1)
+        expect(len(d.call("list_parts")["parts"]) == 1, "part deleted")
+        try:
+            d.call("delete_part", index=0)
+            expect(False, "deleting the last part must fail")
+        except RuntimeError:
+            pass
+
         # Section (I3): cross-section area of a plate at a mid-cut
         d.call("new_project")
         d.call("add_feature", feature={

@@ -20,6 +20,8 @@
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
 #include "core/Serialization.h"
+
+#include <nlohmann/json.hpp>
 #include "core/PatternFeature.h"
 #include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
@@ -32,6 +34,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <filesystem>
+#include <fstream>
 #include <cmath>
 #include <set>
 
@@ -462,6 +465,169 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.sketchEdit = SketchEditState{};
   // Force a resync even if the version counters happen to collide
   state.syncedDocumentVersion = UINT64_MAX;
+}
+
+void EnsureParts(AppState& state, const std::string& firstName) {
+  if (state.parts.empty()) {
+    PartSlot slot;
+    slot.name = firstName;
+    slot.lastSavedVersion = state.lastSavedVersion;
+    state.parts.push_back(std::move(slot)); // active: doc/commands stay in AppState
+    state.activePart = 0;
+  }
+}
+
+size_t AddPart(AppState& state, const std::string& name) {
+  EnsureParts(state);
+  // Stash the current active part.
+  state.parts[state.activePart].doc = std::move(state.document);
+  state.parts[state.activePart].commands = std::move(state.commands);
+  state.parts[state.activePart].lastSavedVersion = state.lastSavedVersion;
+  // Create and activate the new part.
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  state.lastSavedVersion = 0;
+  PartSlot slot;
+  slot.name = name;
+  state.parts.push_back(std::move(slot));
+  state.activePart = static_cast<int>(state.parts.size()) - 1;
+  state.selectedFeature = -1;
+  state.pendingFeatureId = 0;
+  state.sketchEdit = SketchEditState{};
+  state.syncedDocumentVersion = UINT64_MAX; // force a resync
+  return state.parts.size() - 1;
+}
+
+void SetActivePart(AppState& state, size_t index) {
+  EnsureParts(state);
+  if (index >= state.parts.size() ||
+      index == static_cast<size_t>(state.activePart)) {
+    return;
+  }
+  // Stash the current active part, restore the target.
+  state.parts[state.activePart].doc = std::move(state.document);
+  state.parts[state.activePart].commands = std::move(state.commands);
+  state.parts[state.activePart].lastSavedVersion = state.lastSavedVersion;
+  state.document = std::move(state.parts[index].doc);
+  state.commands = std::move(state.parts[index].commands);
+  state.lastSavedVersion = state.parts[index].lastSavedVersion;
+  state.activePart = static_cast<int>(index);
+  state.selectedFeature = -1;
+  state.pendingFeatureId = 0;
+  state.sketchEdit = SketchEditState{};
+  state.syncedDocumentVersion = UINT64_MAX;
+}
+
+bool DeletePart(AppState& state, size_t index) {
+  EnsureParts(state);
+  if (state.parts.size() <= 1 || index >= state.parts.size()) {
+    return false; // never delete the last part
+  }
+  const bool deletingActive = index == static_cast<size_t>(state.activePart);
+  if (deletingActive) {
+    // Activate a neighbor first so AppState always holds a live document.
+    SetActivePart(state, index == 0 ? 1 : index - 1);
+  }
+  state.parts.erase(state.parts.begin() + static_cast<long>(index));
+  // Fix up the active index after the erase.
+  if (static_cast<size_t>(state.activePart) > index)
+    state.activePart--;
+  return true;
+}
+
+namespace {
+// A part's document, whether active (in AppState) or stashed (in its slot).
+Document* PartDoc(AppState& state, size_t i) {
+  return static_cast<int>(i) == state.activePart ? state.document.get()
+                                                 : state.parts[i].doc.get();
+}
+} // namespace
+
+bool SaveProject(AppState& state, const std::string& path,
+                 std::string* error) {
+  namespace fs = std::filesystem;
+  EnsureParts(state);
+  // Single part: keep the flat .dsgn form (backward compatible).
+  if (state.parts.size() == 1) {
+    return DocumentIO::Save(*state.document, path, error);
+  }
+  // Multi-part: project.json + parts/<name>/ (each a part directory).
+  try {
+    const fs::path dir(path);
+    fs::create_directories(dir / "parts");
+    nlohmann::json index;
+    index["format"] = "designer-project";
+    index["version"] = 1;
+    index["active"] = state.activePart;
+    index["parts"] = nlohmann::json::array();
+    for (size_t i = 0; i < state.parts.size(); i++) {
+      const std::string& name = state.parts[i].name;
+      const fs::path partDir = dir / "parts" / name;
+      fs::create_directories(partDir);
+      if (!DocumentIO::Save(*PartDoc(state, i), partDir.string(), error))
+        return false;
+      index["parts"].push_back({{"name", name}, {"dir", "parts/" + name}});
+    }
+    std::ofstream out(dir / "project.json");
+    if (!out) {
+      if (error) *error = "cannot write project.json";
+      return false;
+    }
+    out << index.dump(2) << "\n";
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+}
+
+bool OpenProject(AppState& state, const std::string& path,
+                 std::string* error) {
+  namespace fs = std::filesystem;
+  const fs::path projFile = fs::path(path) / "project.json";
+  if (!fs::exists(projFile)) {
+    // Not a multi-part project: load as a single part.
+    auto doc = DocumentIO::Load(path, error);
+    if (!doc)
+      return false;
+    ReplaceDocument(state, std::move(doc));
+    state.parts.clear();
+    EnsureParts(state, fs::path(path).stem().string());
+    return true;
+  }
+  try {
+    nlohmann::json index;
+    std::ifstream(projFile) >> index;
+    // Load part 0 as the active document; stash the rest.
+    state.parts.clear();
+    const auto& parts = index.at("parts");
+    for (size_t i = 0; i < parts.size(); i++) {
+      const std::string name = parts[i].at("name").get<std::string>();
+      const std::string dir =
+          (fs::path(path) / parts[i].at("dir").get<std::string>()).string();
+      auto doc = DocumentIO::Load(dir, error);
+      if (!doc)
+        return false;
+      PartSlot slot;
+      slot.name = name;
+      if (i == 0) {
+        ReplaceDocument(state, std::move(doc)); // active
+      } else {
+        slot.doc = std::move(doc);
+        slot.commands = std::make_unique<CommandStack>();
+      }
+      state.parts.push_back(std::move(slot));
+    }
+    state.activePart = 0;
+    const int wantActive = index.value("active", 0);
+    if (wantActive != 0)
+      SetActivePart(state, static_cast<size_t>(wantActive));
+    FitCameraToDocument(state);
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
 }
 
 void MarkProjectSaved(AppState& state, const std::string& path,

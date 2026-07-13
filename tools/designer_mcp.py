@@ -503,6 +503,29 @@ def export_brep(path: str, body: int = -1) -> dict:
                  **({"body": body} if body >= 0 else {}))
 
 
+@mcp.tool(description="List the project's parts (multi-part assemblies) and "
+          "which is active. Every modeling tool acts on the active part.")
+def list_parts() -> dict:
+    return _call("list_parts")
+
+
+@mcp.tool(description="Add a new empty part to the project and switch to it "
+          "(subsequent modeling goes into it). Returns its index.")
+def add_part(name: str = "") -> dict:
+    return _call("add_part", **({"name": name} if name else {}))
+
+
+@mcp.tool(description="Switch the active part by index (from list_parts). "
+          "The document tools then act on that part.")
+def set_active_part(index: int) -> dict:
+    return _call("set_active_part", index=index)
+
+
+@mcp.tool(description="Delete a part by index (never the last one).")
+def delete_part(index: int) -> dict:
+    return _call("delete_part", index=index)
+
+
 @mcp.tool(description="Import a STEP file's bodies as an Import feature.")
 def import_step(path: str) -> dict:
     return _call("import_step", path=path)

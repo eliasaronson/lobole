@@ -23,6 +23,52 @@
 
 namespace ui {
 
+namespace {
+// Part tabs pinned to the bottom of the screen (assemblies A1): one tab per
+// part + a "+" to add. Clicking a tab switches the active part.
+void DrawPartTabs(AppState& state) {
+  EnsureParts(state);
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const float h = ImGui::GetFrameHeightWithSpacing() + 4.0f;
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y +
+                                                    vp->WorkSize.y - h));
+  ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, h));
+  ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar |
+                           ImGuiWindowFlags_NoResize |
+                           ImGuiWindowFlags_NoMove |
+                           ImGuiWindowFlags_NoScrollbar |
+                           ImGuiWindowFlags_NoSavedSettings |
+                           ImGuiWindowFlags_NoDocking;
+  if (ImGui::Begin("##PartTabs", nullptr, flags)) {
+    for (size_t i = 0; i < state.parts.size(); i++) {
+      if (i > 0)
+        ImGui::SameLine();
+      const bool active = static_cast<int>(i) == state.activePart;
+      if (active)
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+      if (ImGui::Button((state.parts[i].name + "##part" + std::to_string(i))
+                            .c_str()))
+        SetActivePart(state, i);
+      if (active)
+        ImGui::PopStyleColor();
+      // Right-click a tab to delete it (never the last).
+      if (ImGui::BeginPopupContextItem(
+              ("##pctx" + std::to_string(i)).c_str())) {
+        if (ImGui::MenuItem("Delete part", nullptr, false,
+                            state.parts.size() > 1))
+          DeletePart(state, i);
+        ImGui::EndPopup();
+      }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+##addpart"))
+      AddPart(state, "Part " + std::to_string(state.parts.size() + 1));
+  }
+  ImGui::End();
+}
+} // namespace
+
 void DrawUI(AppState& state) {
   // One place to keep the selection valid across delete/undo/File > New
   if (state.document &&
@@ -33,6 +79,7 @@ void DrawUI(AppState& state) {
 
   DrawMainMenuBar(state);
   BeginDockspace(state);
+  DrawPartTabs(state);
 
   DrawFeatureTreePanel(state);
   DrawVariablesPanel(state);
