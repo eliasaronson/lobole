@@ -101,7 +101,11 @@ OutlineRenderer per-mesh model (self-contained, needed by both). See
 > inline connector frames on planar/cylindrical faces + part origin (via the
 > T-series `ElementRef`s), fastened/revolute/slider with stored DOF pose,
 > sequential direct-frame-alignment solve (loops reported, not solved),
-> format v24 (`mates/` file-per-mate).
+> format v24 (`mates/` file-per-mate). **Phase 1 SHIPPED** (e94a776): the
+> mate model, `CADShape::FaceAxis`, the `AssemblySolve` placement pass, and
+> v24 serialization — all headless, with the payoff loop (edit base part →
+> mated occurrence follows) as a unit test. Next: phase 2 (RPC/MCP +
+> assembly face-picking), phase 3 (GUI mate tool + list).
 
 **Onshape's mate-connector model, not SolidWorks' constraint soup**: a mate
 connects two **connector frames** (coordinate frames placed on parts — on
