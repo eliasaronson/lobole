@@ -208,6 +208,30 @@ void DrawViewMenu(AppState& state) {
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
 
+  // Section view (I3): a viewport clipping plane. Cut on a base plane; drag
+  // the offset. Zero sectionPlane = off.
+  if (ImGui::BeginMenu("Section View")) {
+    // sectionPlane = {normal.xyz, distance}; base-plane normal along one axis
+    // makes distance == the offset.
+    bool on = state.sectionPlane != glm::vec4(0.0f);
+    static int planeIdx = 0; // 0 XY, 1 XZ, 2 YZ
+    static float offset = 0.0f;
+    const glm::vec3 normals[3] = {{0, 0, 1}, {0, 1, 0}, {1, 0, 0}};
+    auto set = [&] {
+      state.sectionPlane =
+          on ? glm::vec4(normals[planeIdx], offset) : glm::vec4(0.0f);
+    };
+    if (ImGui::MenuItem("Enabled", nullptr, &on))
+      set();
+    const char* planes[] = {"XY (cut along Z)", "XZ (cut along Y)",
+                            "YZ (cut along X)"};
+    if (ImGui::Combo("Plane", &planeIdx, planes, 3) && on)
+      set();
+    if (ImGui::DragFloat("Offset", &offset, 0.1f) && on)
+      set();
+    ImGui::EndMenu();
+  }
+
   if (ImGui::MenuItem("Reset Layout")) {
     // Rebuild the default docking layout next frame — recovers from a panel
     // dragged huge or a stale imgui.ini.

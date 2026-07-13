@@ -1184,6 +1184,12 @@ int main(int argc, char **argv) {
     // Mirror document changes (edits, undo, redo) into the renderers
     ui::SyncDocumentRenderers(g_App);
 
+    // Section view (I3): push the clip plane to the renderers each frame.
+    if (g_MeshRenderer)
+      g_MeshRenderer->SetClipPlane(g_App.sectionPlane);
+    if (g_OutlineRenderer)
+      g_OutlineRenderer->SetClipPlane(g_App.sectionPlane);
+
     // Advance an in-flight offline render by one sample batch (the Render modal
     // shows progress; runs on the main thread with its own one-shot submits).
     ui::PumpRenderJob(g_App);

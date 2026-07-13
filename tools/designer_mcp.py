@@ -235,6 +235,22 @@ def list_variables() -> dict:
     return _call("list_variables")
 
 
+@mcp.tool(description="Toggle the viewport SECTION VIEW — a clipping plane "
+          "that cuts the model open so you can see inside (screenshot to "
+          "view it). enabled=False clears it. Plane by base_plane+offset or "
+          "origin+normal. (This is the visual cut; use `section` for the "
+          "cross-section AREA.)")
+def set_section(enabled: bool = True, base_plane: str = "xy",
+                offset: float = 0.0, origin: list | None = None,
+                normal: list | None = None) -> dict:
+    if not enabled:
+        return _call("set_section", enabled=False)
+    if origin is not None and normal is not None:
+        return _call("set_section", enabled=True, origin=origin, normal=normal)
+    return _call("set_section", enabled=True, base_plane=base_plane,
+                 offset=offset)
+
+
 @mcp.tool(description="Cross-section area where a plane cuts through all "
           "bodies (inspection). Plane: base_plane 'xy'|'xz'|'yz' + offset, "
           "or explicit origin+normal. Returns {area}. Use to check wall "

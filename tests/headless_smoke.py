@@ -243,6 +243,10 @@ def main():
         d.call("add_feature", feature={
             "type": "Box", "name": "P", "position": [0, 0, 0],
             "width": 4, "height": 5, "depth": 6})
+        # set_section just toggles the viewport clip (no visible effect
+        # headless), but the RPC must accept and clear it without error.
+        d.call("set_section", enabled=True, base_plane="yz", offset=0.0)
+        d.call("set_section", enabled=False)
         sec = d.call("section", base_plane="xy", offset=3.0)  # z=3 -> 4x5=20
         expect(abs(sec["area"] - 20.0) < 1e-3, "cross-section area 20")
         miss = d.call("section", base_plane="xy", offset=99.0)

@@ -1074,6 +1074,7 @@ void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
     // Update wireframe uniform buffer  
     WireframeUniformBufferObject wireframeUBO{};
     wireframeUBO.model = model;
+    wireframeUBO.clipPlane = m_clipPlane;
     wireframeUBO.view = m_viewMatrix;
     wireframeUBO.proj = m_projectionMatrix;
     wireframeUBO.viewPos = glm::vec4(m_cameraPosition, 1.0f);

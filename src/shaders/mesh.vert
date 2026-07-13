@@ -22,6 +22,9 @@ layout(push_constant) uniform PushConstants {
     uvec4 highlight;
     // PBR: x=metallic, y=roughness, z=specular, w=reflectance (used in frag)
     vec4 material;
+    // Section clip plane (world space): xyz = normal, w = distance; fragments
+    // with dot(worldPos,xyz) > w are discarded. Disabled when xyz == 0.
+    vec4 clipPlane;
 } pc;
 
 layout(location = 0) in vec3 inPosition;

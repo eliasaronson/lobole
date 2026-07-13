@@ -626,6 +626,31 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     }
     return {{"variables", variables}};
   }
+  if (m == "set_section") {
+    // Toggle/position the viewport section clip plane (I3 raster). params:
+    // {enabled, base_plane: "xy"|"xz"|"yz", offset?} or {enabled, origin,
+    // normal}. Disabled clears it.
+    if (!p.value("enabled", true)) {
+      state.sectionPlane = glm::vec4(0.0f);
+      return json::object();
+    }
+    glm::vec3 nrm(0, 0, 1), origin(0.0f);
+    if (p.contains("base_plane")) {
+      const std::string bp = p.at("base_plane").get<std::string>();
+      nrm = bp == "xz" ? glm::vec3(0, 1, 0)
+            : bp == "yz" ? glm::vec3(1, 0, 0)
+                         : glm::vec3(0, 0, 1);
+      origin = nrm * static_cast<float>(p.value("offset", 0.0));
+    } else {
+      const auto& o = p.at("origin");
+      const auto& n = p.at("normal");
+      origin = {o[0].get<float>(), o[1].get<float>(), o[2].get<float>()};
+      nrm = glm::normalize(glm::vec3(n[0].get<float>(), n[1].get<float>(),
+                                     n[2].get<float>()));
+    }
+    state.sectionPlane = glm::vec4(nrm, glm::dot(origin, nrm));
+    return json::object();
+  }
   if (m == "section") {
     // Cross-section area where a plane cuts through all bodies (I3). Plane:
     // {base_plane: "xy"|"xz"|"yz", offset?: 0} OR {origin: [x,y,z],

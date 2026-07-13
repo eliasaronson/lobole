@@ -21,6 +21,7 @@ layout(push_constant) uniform PushConstants {
     mat4 model;        // used in the vertex stage
     uvec4 highlight;   // used in the vertex stage
     vec4 material;      // x=metallic, y=roughness, z=specular, w=reflectance
+    vec4 clipPlane;     // section clip: xyz=normal, w=dist; discard beyond it
 } pc;
 
 // Image-based lighting maps (equirectangular; see IBL.cpp for the convention).
@@ -76,6 +77,11 @@ vec3 calculateLight(Light light, vec3 normal, vec3 viewDir, vec3 albedo, float m
 }
 
 void main() {
+    // Section view: clip fragments past the plane (disabled when xyz == 0).
+    if (dot(pc.clipPlane.xyz, pc.clipPlane.xyz) > 0.0 &&
+        dot(fragWorldPos, pc.clipPlane.xyz) > pc.clipPlane.w) {
+        discard;
+    }
     // Normalize vectors
     vec3 normal = normalize(fragNormal);
     vec3 viewDir = normalize(fragViewPos - fragWorldPos);

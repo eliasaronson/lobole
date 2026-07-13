@@ -53,6 +53,10 @@ public:
     void SetOutlineSettings(const OutlineSettings& settings) { m_settings = settings; }
     const OutlineSettings& GetOutlineSettings() const { return m_settings; }
     void SetViewportSize(uint32_t width, uint32_t height) { SetViewport(0, 0, width, height); }
+
+    // Section clip plane (world): xyz = normal, w = distance; edges past it
+    // are discarded. Zero = disabled (default).
+    void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
     void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
     
     bool IsInitialized() const { return m_isInitialized; }
@@ -94,6 +98,7 @@ private:
         glm::vec4 wireframeColor;
         float lineWidth;
         float _padding[3];
+        glm::vec4 clipPlane; // section clip (world): xyz=normal, w=dist
     };
 
     // Initialization helpers
@@ -168,6 +173,7 @@ private:
 
     // Settings
     OutlineSettings m_settings;
+    glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
     
     // State
     bool m_isInitialized = false;

@@ -91,6 +91,10 @@ public:
     
     // Viewport
     void SetViewportSize(uint32_t width, uint32_t height) { SetViewport(0, 0, width, height); }
+
+    // Section clip plane (world space): xyz = normal, w = distance; fragments
+    // past it are discarded. Zero vector = no clipping (the default).
+    void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
     void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
 
     // IBL textures for the fragment shader. Must be set BEFORE Initialize()
@@ -105,6 +109,7 @@ public:
     }
 
 private:
+    glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
     VkDevice m_device = VK_NULL_HANDLE;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;

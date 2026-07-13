@@ -216,6 +216,9 @@ struct AppState {
   uint64_t pendingFeatureId = 0;
   ViewportDrag viewportDrag = ViewportDrag::None;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
+  // Section view (I3): a world-space clip plane {xyz=normal, w=dist};
+  // fragments past it are discarded. Zero = disabled.
+  glm::vec4 sectionPlane = glm::vec4(0.0f);
   bool showElementNames = false; // debug: element name of the hovered face
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;

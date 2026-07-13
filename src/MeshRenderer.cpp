@@ -269,6 +269,7 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
         glm::mat4 model;
         glm::uvec4 highlight;
         glm::vec4 material; // metallic, roughness, specular, reflectance
+        glm::vec4 clipPlane; // section clip (world): xyz=normal, w=dist
     } push;
 
     for (const auto& mesh : m_meshes) {
@@ -277,6 +278,7 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
         push.model = mesh->modelMatrix;
         push.highlight = mesh->highlight;
         push.material = mesh->materialParams;
+        push.clipPlane = m_clipPlane;
         vkCmdPushConstants(commandBuffer, m_pipelineLayout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(push), &push);
@@ -472,8 +474,8 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     pushConstantRange.stageFlags =
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
-    pushConstantRange.size =
-        sizeof(glm::mat4) + sizeof(glm::uvec4) + sizeof(glm::vec4);
+    pushConstantRange.size = sizeof(glm::mat4) + sizeof(glm::uvec4) +
+                             sizeof(glm::vec4) + sizeof(glm::vec4);
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
