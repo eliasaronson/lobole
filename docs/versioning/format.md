@@ -86,7 +86,7 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 16 | `3020d0e` | Sketch `face_ref` (ElementRef, toponaming) |
 | 17 | `48dab10` | `Fillet`/`Chamfer` on ElementRef edges |
 | … | | (v18–v22: end-conditions, shell, loft/sweep, hole, draft — see golden corpus) |
-| 23 | `c84c774` | Assembly document `kind:"assembly"` + `Occurrence` list (A2) |
+| 23 | `0949554` | Assembly document `kind:"assembly"` + `Occurrence` list (A2) |
 
 ## The directory format (F3, default for new saves)
 
