@@ -96,7 +96,13 @@ next step). The one piece worth pulling forward on its own if convenient is the
 OutlineRenderer per-mesh model (self-contained, needed by both). See
 [a2-design.md](a2-design.md) phase 3.
 
-### A3 — Mates
+### A3 — Mates — [design: a3-design.md](a3-design.md)
+> **2026-07-13:** design drafted for sign-off ([a3-design.md](a3-design.md)) —
+> inline connector frames on planar/cylindrical faces + part origin (via the
+> T-series `ElementRef`s), fastened/revolute/slider with stored DOF pose,
+> sequential direct-frame-alignment solve (loops reported, not solved),
+> format v24 (`mates/` file-per-mate).
+
 **Onshape's mate-connector model, not SolidWorks' constraint soup**: a mate
 connects two **connector frames** (coordinate frames placed on parts — on
 faces via toponaming refs, or on datums), with one mate type per connection
