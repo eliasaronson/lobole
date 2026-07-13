@@ -32,13 +32,12 @@ origin+normal), return the summed cross-section area (BRepAlgoAPI_Common
 against a big planar face). Headless-testable; the LLM can check material at
 a cut.
 
-**Visual half (deferred — needs a reviewable session):** the raster
-clipping plane — a clip plane in the mesh + outline push constants, `discard`
-beyond it in `mesh.frag`/`outline.frag`, an AppState toggle + RPC + drag UI.
-It is a shader-ABI change across both renderers, verifiable only by eye, so
-it was deliberately left for a session where the render can be reviewed
-rather than landed autonomously. V1 leaves the cut hollow; capped/hatched
-cut faces are v2.
+**Visual half shipped (July 2026):** the raster clipping plane — a vec4
+clip plane through the mesh push constant (`discard` in `mesh.frag`) and the
+wireframe UBO (`discard` in `wireframe.frag`), `AppState.sectionPlane` +
+`set_section` RPC/MCP + a View > Section View menu (enable / plane / offset).
+V1 leaves the cut hollow; capped/hatched cut faces (real section geometry
+via BRepAlgoAPI_Section) are v2.
 
 ## I4 — Later
 

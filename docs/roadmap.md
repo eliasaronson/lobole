@@ -75,7 +75,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | **Complete** (S1 MCP, S2 headless+CI, S3 python client, S4 record/replay) |
 | 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | **Complete v1** (F1 spec+corpus, F2 autosave, F3 directory format, F4 checkpoints+rollback, F5 git); semantic merge later |
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
-| 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | I1 measure, I2 mass properties, I3 section (geometry), I4 interference shipped; I3 raster clip view + panels remain |
+| 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | I1 measure, I2 mass properties, I3 section (geometry + raster clip), I4 interference shipped; result panels remain |
 | 9. Rendering | [rendering/plan.md](rendering/plan.md) | Planned (normals → AA → PBR → … → RT) |
 | 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | Planned; gated (see plan) |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | E1 export shipped (STEP/STL/BREP, RPC+MCP+menu); glTF/3MF + import widening remain |
