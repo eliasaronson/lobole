@@ -77,7 +77,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
 | 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | I1 measure, I2 mass properties, I3 section (geometry + raster clip), I4 interference shipped; result panels remain |
 | 9. Rendering | [rendering/plan.md](rendering/plan.md) | Planned (normals → AA → PBR → … → RT) |
-| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | A1 multi-part shipped; A2 occurrences (needs renderer instancing) + A3 mates remain |
+| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1 multi-part + A2 occurrences shipped** (render via instancing, numeric editing, undo — usable v1). Remain: A3 mates → A2.5 interactive drag gizmo (deferred to land with A3's DOF-drag, shared infra) → A4 |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | E1 export shipped (STEP/STL/BREP, RPC+MCP+menu); glTF/3MF + import widening remain |
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
@@ -113,7 +113,11 @@ The recommended interleaving, with the rationale:
 9. **Rendering** demo-driven: normals + AA are overdue quality-of-life; the rest when
    it hurts or when a release needs to look good.
 10. **Assemblies last** — gated on incremental regeneration, renderer instancing, and
-    (for face mates) toponaming. See the plan's prerequisites section.
+    (for face mates) toponaming. See the plan's prerequisites section. A1+A2 are
+    shipped (usable v1: multi-part, occurrences, numeric editing). Next is **A3
+    mates**; the deferred **3D drag gizmo (A2.5)** is planned to land *with* A3's
+    drag-within-mate, since they share the interactive-drag + per-mesh-model
+    infrastructure — build it once, not before A3.
 
 ## Continuous
 

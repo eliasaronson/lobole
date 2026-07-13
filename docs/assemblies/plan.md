@@ -74,6 +74,28 @@ Move/rotate gizmo for positioning. Rendering via the instancing prerequisite.
 Picking maps hit → occurrence (then into the part on double-click). This alone
 is a usable v1 assembly (many real workflows are "place parts, eyeball it").
 
+### A2.5 — Interactive manipulation (3D drag gizmo) — **planned, land with A3's DOF-drag**
+The A2 editing UX shipped **numeric-first** (Elias's call): occurrences are
+positioned via panel fields, not a 3D drag manipulator. The drag gizmo is
+deliberately deferred here rather than built as a standalone A2 epilogue,
+because it **shares infrastructure with A3's payoff feature** (drag-within-mate):
+both need a pick-handle → mouse-delta → live-transform drag layer, plus a real
+**OutlineRenderer per-mesh model** (replacing the Phase-2 vertex-bake stopgap)
+so a live drag updates cheaply instead of a full resync. Building them together
+writes that layer once.
+
+Scope when it lands: translate + rotate handles (screen-space sizing, axis/
+plane drags) for a free occurrence, and the same drag layer constrained to a
+mate's remaining DOF for drag-within-mate. Also folds in the deferred
+FaceSelector/OutlineRenderer CPU-geometry-sharing split.
+
+**Trigger:** do it as the interactive-manipulation push *after* A3's mate/
+placement core lands (mates position most occurrences by constraint, so free
+drag matters mainly for initial/unmated placement — mates are the higher-value
+next step). The one piece worth pulling forward on its own if convenient is the
+OutlineRenderer per-mesh model (self-contained, needed by both). See
+[a2-design.md](a2-design.md) phase 3.
+
 ### A3 — Mates
 **Onshape's mate-connector model, not SolidWorks' constraint soup**: a mate
 connects two **connector frames** (coordinate frames placed on parts — on
@@ -103,7 +125,10 @@ configurations. All later; listed so A1–A3 decisions don't preclude them.
 
 ## Recommended order
 
-A1 → A2 (already useful) → A3 fastened/revolute/slider → the rest of A3 → A4.
+A1 ✓ → A2 ✓ (usable v1) → **A3 fastened/revolute/slider → A2.5 interactive
+drag (gizmo + drag-within-mate, shared layer) → the rest of A3 → A4.** A2.5
+lands with A3's DOF-drag rather than before it, because they share the
+interactive-drag + OutlineRenderer per-mesh-model infrastructure (build once).
 Do not begin A1 until modeling M1–M5 + variables are done and the incremental-
 regen cache exists; begin the mate-connector design sketch alongside toponaming
 T4/T5 since they share the reference model.
