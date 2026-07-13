@@ -77,7 +77,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
 | 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | I1 measure, I2 mass properties, I3 section (geometry + raster clip), I4 interference shipped; result panels remain |
 | 9. Rendering | [rendering/plan.md](rendering/plan.md) | Planned (normals → AA → PBR → … → RT) |
-| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | Planned; gated (see plan) |
+| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | A1 multi-part shipped; A2 occurrences (needs renderer instancing) + A3 mates remain |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | E1 export shipped (STEP/STL/BREP, RPC+MCP+menu); glTF/3MF + import widening remain |
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the

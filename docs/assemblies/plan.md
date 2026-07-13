@@ -41,7 +41,12 @@ real 100-part assembly before any allocator work.
 
 ## Milestones
 
-### A1 — Multi-part projects — [design: a1-design.md](a1-design.md) (unblocked, awaiting sign-off)
+### A1 — Multi-part projects — **shipped (July 2026)** — [design: a1-design.md](a1-design.md)
+**Shipped:** a project holds multiple part documents (thin container); the
+active part's document/commands live in AppState, inactive parts stash in a
+PartSlot; add/switch/delete via bottom part tabs + RPCs/MCP. Persistence:
+project.json + parts/<name>/ (single-part stays flat .dsgn). A2 (occurrences)
+needs renderer instancing next.
 A project holds multiple part documents; UI for switching (document tabs above
 the viewport; the feature tree shows the active part). Open/save moves from
 "one document" to a project container — coordinate with versioning F3
