@@ -104,8 +104,12 @@ OutlineRenderer per-mesh model (self-contained, needed by both). See
 > format v24 (`mates/` file-per-mate). **Phase 1 SHIPPED** (e94a776): the
 > mate model, `CADShape::FaceAxis`, the `AssemblySolve` placement pass, and
 > v24 serialization — all headless, with the payoff loop (edit base part →
-> mated occurrence follows) as a unit test. Next: phase 2 (RPC/MCP +
-> assembly face-picking), phase 3 (GUI mate tool + list).
+> mated occurrence follows) as a unit test. **Phase 2 SHIPPED** (048b0aa):
+> mate RPCs (`add_mate`/`set_mate`/`remove_mate`/`list_mates`/`solve_assembly`)
+> + MCP, `ui::SolveActiveAssembly` wired into mate/occurrence edits, and the
+> `ui::PickAssemblyFace` join (an assembly click resolves a persistent face
+> `ElementRef`). Headless `assembly_mates_smoke`. Next: phase 3 (GUI mate
+> tool + mate list).
 
 **Onshape's mate-connector model, not SolidWorks' constraint soup**: a mate
 connects two **connector frames** (coordinate frames placed on parts — on
