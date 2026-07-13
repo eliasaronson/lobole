@@ -97,7 +97,7 @@ OutlineRenderer per-mesh model (self-contained, needed by both). See
 [a2-design.md](a2-design.md) phase 3.
 
 ### A3 — Mates — [design: a3-design.md](a3-design.md)
-> **2026-07-13:** design drafted for sign-off ([a3-design.md](a3-design.md)) —
+> **2026-07-13:** design **signed off** ([a3-design.md](a3-design.md)) —
 > inline connector frames on planar/cylindrical faces + part origin (via the
 > T-series `ElementRef`s), fastened/revolute/slider with stored DOF pose,
 > sequential direct-frame-alignment solve (loops reported, not solved),

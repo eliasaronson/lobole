@@ -1,6 +1,7 @@
 # Assemblies A3 — mates — design
 
-> Status: **draft, for sign-off.** A3 is where assemblies stop being "eyeball
+> Status: **signed off 2026-07-13** (all six decisions below, as recommended).
+> A3 is where assemblies stop being "eyeball
 > it": occurrences become *constrained* to each other through mates, so a part
 > edit or a re-solve keeps the assembly consistent. The model is **Onshape's
 > mate-connector approach, not SolidWorks' constraint soup** (the plan's call):
@@ -335,7 +336,7 @@ cylinders → suggest revolute, two planes → fastened).
 - **Mate limits** (min/max angle), **suppression**, and cross-*project* part
   references (F5 pins) — A4/cross-cutting.
 
-## Decisions for sign-off
+## Decisions — SIGNED OFF (2026-07-13)
 
 1. **Mate = two inline connector frames + one type** (Onshape model). No
    first-class connector features in v1; no SolidWorks-style pairwise
