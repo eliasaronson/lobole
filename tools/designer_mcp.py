@@ -823,6 +823,116 @@ def render_still(width: int = 640, height: int = 480, samples: int = 64,
 
 
 # ---------------------------------------------------------------------------
+# Simulation (FEM stress analysis)
+# ---------------------------------------------------------------------------
+# A Study is a document-level linear-static analysis: fix faces, load faces,
+# solve for von Mises stress + displacement. Faces are {feature_id, element}
+# refs from list_elements (feature_id = the body's created_by). Assign a real
+# material first (set_material, e.g. "steel") — a study on the default material
+# has no stiffness data and errors. Magnitudes are N (force) / MPa (pressure);
+# mesh sizes are mm (0 = auto). Results are derived and go stale on any edit;
+# re-run explicitly. The whole loop is headless: no GUI needed.
+
+
+@mcp.tool(description="Create a FEM study on the active part. Returns {id, "
+          "name}. A study fixes/loads faces and solves for stress.")
+def add_study(name: str = "") -> dict:
+    return _call("add_study", **({"name": name} if name else {}))
+
+
+@mcp.tool(description="Delete a study (by id) and its cached results.")
+def remove_study(study: int) -> dict:
+    return _call("remove_study", study=study)
+
+
+@mcp.tool(description="List studies: id, name, evaluated mesh_size, loads, "
+          "refinement count, has_results, and stale (results outdated by an "
+          "edit).")
+def list_studies() -> dict:
+    return _call("list_studies")
+
+
+@mcp.tool(description="Set a study's name and/or global mesh size (mm; 0 = "
+          "auto from the bounding box). mesh_size may be a number or an "
+          "expression string over document variables.")
+def set_study(study: int, name: str | None = None,
+              mesh_size=None) -> dict:
+    params: dict = {"study": study}
+    for k, v in (("name", name), ("mesh_size", mesh_size)):
+        if v is not None:
+            params[k] = v
+    return _call("set_study", **params)
+
+
+@mcp.tool(description="Add a per-face mesh refinement (smaller elements on one "
+          "face). face is {feature_id, element}; size is mm (number or "
+          "expression).")
+def add_refinement(study: int, face: dict, size) -> dict:
+    return _call("add_refinement", study=study, face=face, size=size)
+
+
+@mcp.tool(description="Remove the refinement on a face ({feature_id, element}).")
+def remove_refinement(study: int, face: dict) -> dict:
+    return _call("remove_refinement", study=study, face=face)
+
+
+@mcp.tool(description="Add a boundary condition to a study. type is 'fixed' "
+          "(zero displacement), 'force' (a total vector in N over the face), "
+          "or 'pressure' (MPa along the inward normal). face is {feature_id, "
+          "element}. magnitude is N/MPa (number or expression); direction is "
+          "[x,y,z] for a force. Returns {id} of the new load. Every loaded "
+          "body needs at least one fixed face.")
+def add_load(study: int, type: str, face: dict, magnitude=None,
+             direction: list | None = None) -> dict:
+    params: dict = {"study": study, "type": type, "face": face}
+    if magnitude is not None:
+        params["magnitude"] = magnitude
+    if direction is not None:
+        params["direction"] = direction
+    return _call("add_load", **params)
+
+
+@mcp.tool(description="Remove a load (by id) from a study.")
+def remove_load(study: int, load: int) -> dict:
+    return _call("remove_load", study=study, load=load)
+
+
+@mcp.tool(description="Mesh a study's bodies without solving (a quick check). "
+          "Returns per-body node/element counts and worst element quality.")
+def mesh_study(study: int) -> dict:
+    return _call("mesh_study", study=study)
+
+
+@mcp.tool(description="Mesh + solve a study now (explicit; never automatic). "
+          "Returns nodes, elements, max_von_mises_mpa {value, at, body}, "
+          "max_displacement_mm {value, at, body}, per-body breakdown, "
+          "factor_of_safety (vs material yield), and stale:false. Errors name "
+          "the offending face/material/support.")
+def run_study(study: int) -> dict:
+    return _call("run_study", study=study)
+
+
+@mcp.tool(description="Read a study's cached results (never solves). Same "
+          "summary as run_study plus the current stale flag.")
+def study_results(study: int) -> dict:
+    return _call("study_results", study=study)
+
+
+@mcp.tool(description="Show a study's result overlay in the viewport (for a "
+          "screenshot). field is 'von_mises', 'displacement', or 'none'; "
+          "deform_scale exaggerates the deformed shape (0 = undeformed). "
+          "Enters simulation mode; display-only, like set_explode.")
+def set_result_display(study: int | None = None, field: str = "von_mises",
+                       deform_scale: float | None = None) -> dict:
+    params: dict = {"field": field}
+    if study is not None:
+        params["study"] = study
+    if deform_scale is not None:
+        params["deform_scale"] = deform_scale
+    return _call("set_result_display", **params)
+
+
+# ---------------------------------------------------------------------------
 # Escape hatch: raw UI events (for driving/testing the Designer GUI itself)
 # ---------------------------------------------------------------------------
 

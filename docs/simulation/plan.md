@@ -1,8 +1,11 @@
 # Simulation — FEM structural analysis — design
 
-> Status: **signed off; FEM0–FEM2 shipped** (the headless mesh+solve loop is
-> live; FEM3 GUI + FEM4 MCP/polish remain). Two facts the spike settled,
-> corrected throughout this doc:
+> Status: **COMPLETE — FEM0–FEM4 shipped.** The headless mesh+solve loop, the
+> Simulation-mode GUI (Studies panel, load face-picking, colormapped result
+> overlay with deform warp + max marker + legend), the MCP mirrors, and the
+> `fem_smoke` headless test are all live. v1 (single-part linear static) is
+> done; modal/assembly/thermal remain future work per "explicitly deferred".
+> Two facts the FEM0 spike settled, corrected throughout this doc:
 > the studies format bump is **v29** (v28 was already taken by C2's
 > unit-suffixed expressions), and the FEM code lives as flat `src/core/Fem*.cpp`
 > files in a `namespace fem` (matching the flat `src/core/` house style) rather
@@ -333,11 +336,17 @@ when Netgen is in the CI shell.
    `run_study`/`study_results` RPCs with factor of safety; analytic benchmark
    suite (bar/cantilever/pressure). **The LLM loop is closed** — verified
    headless (set variable → run_study → read stress vs yield → iterate).
-3. **FEM3 — display:** field renderer (warp, colormap, legend, max marker),
-   Studies panel (list, loads via face picking, run, field/deform controls,
-   stale badge). Verified visually via dev-watch.
-4. **FEM4 — integration:** MCP mirrors, `fem_smoke.py`, stale/error UX
-   polish, docs; VTU export if it's still cheap by then.
+3. **FEM3 — display: DONE.** Simulation mode (enter/exit workspace like sketch
+   mode — no FEM UI until entered): toolbar swap, Studies panel (list, loads via
+   viewport face-picking, run, results + FoS + stale badge, field/deform
+   controls), and the `FieldRenderer` (own pipeline/`FieldVertex`, Turbo
+   colormap, shader deform warp, section-clip via shared UBO, hidden-body
+   swap-in, peak marker, colorbar legend). `enter_simulation`/`exit_simulation`/
+   `set_result_display` RPCs drive it headlessly. Verified via dev-watch.
+4. **FEM4 — integration: DONE.** MCP mirrors for every study RPC;
+   `tests/fem_smoke.py` (headless fix+load+solve+iterate, self-skips without
+   Netgen); docs. VTU export left as a future nicety (the XCAF export path
+   doesn't fit FEM field data; a raw `.vtu` writer can come later).
 
 Order rationale: 0 de-risks the only external unknown for the price of a
 day; 1 before 2 because the solver is meaningless without elements to

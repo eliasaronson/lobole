@@ -125,6 +125,13 @@ add_test(NAME bom_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(bom_smoke PROPERTIES TIMEOUT 120)
 
+# FEM stress study: fix + load a steel bar, solve, iterate (S3-style loop).
+# Needs meshing; self-skips (77) at runtime on a build without Netgen.
+add_test(NAME fem_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fem_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(fem_smoke PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
 # Models a bracket through the pythonic client (S3).
 add_test(NAME pyclient_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/pyclient_smoke.py
