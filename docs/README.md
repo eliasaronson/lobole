@@ -42,5 +42,9 @@ top-level vision + workstream index and holds the recommended sequencing.
   meshing, in-house linear-static solver on Eigen, face BCs via toponaming
   refs, colormapped results. **Design for sign-off** (consciously reverses
   the roadmap's "simulation/FEA out of scope" line).
+- **[drawings/](drawings/plan.md)** — 2D drafting: a third document kind with
+  HLR-projected views, driven dimensions via toponaming refs, title block,
+  SVG/PDF export. **Design for sign-off** (the roadmap's planned
+  post-assemblies revisit of "2D drawings").
 
 Project-level files (`README.md`, `THIRD_PARTY.md`) stay at the repo root.

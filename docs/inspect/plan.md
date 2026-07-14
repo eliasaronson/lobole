@@ -51,9 +51,9 @@ via BRepAlgoAPI_Section) are v2.
 ## Not here: 2D drawings
 
 Dimensioned drafting output (the classic "drawing" document) is a separate,
-large workstream — consciously **not planned** until after assemblies (see
-roadmap "Explicitly not planned"). The measure tool + section views cover the
-day-to-day inspection need until then.
+large workstream — deferred until after assemblies, and now designed: see
+[drawings/plan.md](../drawings/plan.md). The measure tool + section views
+cover the day-to-day inspection need until it ships.
 
 ## Recommended order
 

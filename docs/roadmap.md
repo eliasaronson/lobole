@@ -80,6 +80,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1–A3 + A2.5 shipped** — multi-part, occurrences (instanced), all six mate types (connector frames, direct-frame-alignment solve, mate tool + list), and interactive manipulation (per-mesh outline model, translate/rotate drag gizmo, drag-within-mate, hole-center connector snap). Remain: **A4** (in-context edit, assembly features, BOM, exploded views, configurations) + snap-marker UX polish |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | E1 export shipped (STEP/STL/BREP, RPC+MCP+menu); glTF/3MF + import widening remain |
 | 12. Simulation: FEM | [simulation/plan.md](simulation/plan.md) | **Design for sign-off** — v1 = single-part linear static (Netgen tets, Eigen solver, face BCs via toponaming, von Mises/displacement); FEM0 spike gates the workstream |
+| 13. Drawings: 2D drafting | [drawings/plan.md](drawings/plan.md) | **Design for sign-off** — v1 = drawing doc kind, HLR-projected views (parts + assemblies), driven dimensions, title block, SVG/PDF export; D0 HLR spike gates the workstream |
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
 differentiators — the reason this project exists rather than being a worse
@@ -137,9 +138,9 @@ The recommended interleaving, with the rationale:
 
 ## Explicitly not planned (conscious decisions, not omissions)
 
-- **2D drawings / drafting output** — the classic fifth pillar of CAD (part / assembly /
-  drawing / render / measure). Deliberately out of scope until after assemblies; revisit
-  then.
+- ~~**2D drawings / drafting output**~~ — was "deliberately out of scope until after
+  assemblies; revisit then". Assemblies shipped, revisited July 2026: now workstream 13,
+  see [drawings/plan.md](drawings/plan.md).
 - **CAM** — out of scope. (Simulation/FEA was listed here until July 2026;
   reversed once its real prerequisites — toponaming, materials, headless
   testing — had shipped. See [simulation/plan.md](simulation/plan.md).)
