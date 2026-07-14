@@ -44,6 +44,7 @@ add_executable(designer_tests
     test_sketch_selection.cpp
     test_camera.cpp
     test_ibl.cpp
+    test_fem.cpp
 )
 target_link_libraries(designer_tests PRIVATE designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)

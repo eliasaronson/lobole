@@ -1,6 +1,16 @@
 # Simulation — FEM structural analysis — design
 
-> Status: **draft, for sign-off**. The roadmap has listed "CAM, simulation/FEA
+> Status: **signed off; FEM0 spike complete**. Implementation underway per the
+> plan below. Two facts the spike settled, corrected throughout this doc:
+> the studies format bump is **v29** (v28 was already taken by C2's
+> unit-suffixed expressions), and the FEM code lives as flat `src/core/Fem*.cpp`
+> files in a `namespace fem` (matching the flat `src/core/` house style) rather
+> than a `src/core/fem/` subdirectory. FEM0 also proved the Netgen path: the
+> C++ `OCCGeometry` interface (the C nglib API can't attribute surface elements
+> to OCC faces), second order via an explicit `MakeSecondOrder()`, and the
+> nixpkgs `netgen` links in-process against our OCC 7.9.3 — no fallback needed.
+>
+> The roadmap has listed "CAM, simulation/FEA
 > — out of scope" since day one; this doc is a conscious reversal of half of
 > that line (CAM stays out). What changed: the prerequisites FEM usually
 > founders on in a parametric CAD are now *shipped* — stable face references
@@ -111,7 +121,7 @@ formats, deterministic error surfaces ("body has loads but no fixed support"
 detected *before* a singular factorization, not after). CalculiX would trade
 all that for nonlinear capability v1 doesn't want.
 
-Solver contract (all in `src/core/fem/`, GUI-free):
+Solver contract (all in flat `src/core/Fem*.cpp`, `namespace fem`, GUI-free):
 
 - **Units: the mm–N–MPa system** (consistent with the document's mm
   convention): lengths/displacements mm, forces N, pressures/stresses/moduli
@@ -182,7 +192,7 @@ Study { id, name,
   solve, re-solving is *not* automatic — meshing+solving can take seconds
   and must stay an explicit act (a button, an RPC call).
 
-**Persistence — format bump (v28, assuming A4's v27 lands first):** additive
+**Persistence — format bump (v29; v28 is C2's unit-suffixed expressions):** additive
 per the F3 discipline, mirroring the assembly `mates/` pattern:
 
 ```
@@ -289,7 +299,7 @@ when Netgen is in the CI shell.
    bodies, produces no geometry): sibling list to parameters, ids from
    `m_nextId`, loads/refinements hold `ElementRef`s with dangling-ref errors
    per the toponaming contract, magnitudes expression-driven via the
-   text+value convention. **Format v28** (after A4's v27): `studies/` dir in
+   text+value convention. **Format v29** (v28 = unit-suffixed expressions): `studies/` dir in
    the part `.dsgn`, file per study, golden per bump.
 5. **Mesh + results are derived, never stored** (element-names/BOM rule);
    results stamped with `Document::Version()`, regeneration marks them
@@ -309,7 +319,7 @@ when Netgen is in the CI shell.
    harness meshes a golden part from its `TopoDS_Shape`, prints
    node/element/quality stats. Proves the nixpkgs nglib+OCC combination.
    **No further FEM work until this passes** — or the fallback is chosen.
-1. **FEM1 — mesh:** Study model + Commands + serialization (v28 + golden) +
+1. **FEM1 — mesh:** Study model + Commands + serialization (v29 + golden) +
    `add_study`/`set_study`/refinement RPCs; `core/fem` mesher wrapper
    (global + per-face size, second order, stats, error mapping);
    boundary-edge mesh preview; `test_fem.cpp` mesher cases.

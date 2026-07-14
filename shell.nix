@@ -30,8 +30,9 @@ pkgs.mkShell {
     spdlog
     nlohmann_json
     opencascade-occt # CAD kernel, found via find_package(OpenCASCADE)
-    eigen # PlaneGCS constraint solver
+    eigen # PlaneGCS constraint solver + FEM solver
     boost # PlaneGCS (headers only)
+    netgen # FEM tet mesher (nglib + OCC interface, LGPL); gated HAVE_NETGEN
     gtk3 # nativefiledialog
     libx11 # non-blocking XMapWindow path (see main.cpp)
     catch2_3 # unit tests (FetchContent fallback needs network otherwise)

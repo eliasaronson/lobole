@@ -227,9 +227,41 @@ else()
     message(WARNING "PlaneGCS disabled: Eigen3/Boost not found")
 endif()
 
+# Netgen tetrahedral mesher (LGPL, linked — not vendored; see THIRD_PARTY.md).
+# Optional, gated HAVE_NETGEN on the HAVE_PLANEGCS template: the app builds and
+# runs without it (fem::Mesh returns a "built without FEM support" error).
+# The wrapper is its own static library so Netgen's heavy build requirements
+# (the PARALLEL/MPI defines and -fabi-version=17 the nixpkgs package was built
+# with, which must match or the process heap-corrupts — proven in the FEM0
+# spike) stay contained to FemMesher.cpp and never leak into the rest of core.
+find_package(Netgen CONFIG QUIET)
+add_library(fem_mesher STATIC src/core/FemMesher.cpp)
+target_include_directories(fem_mesher PRIVATE src)
+target_link_libraries(fem_mesher PRIVATE glm::glm)
+target_compile_definitions(fem_mesher PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)
+if(OPENCASCADE_FOUND)
+    target_link_libraries(fem_mesher PRIVATE ${OPENCASCADE_LIBS})
+endif()
+if(Netgen_FOUND AND OPENCASCADE_FOUND)
+    set(HAVE_NETGEN TRUE)
+    # Linking nglib/ngcore PRIVATE applies their include dirs, PARALLEL/ABI
+    # definitions and -fabi-version=17 to this TU only; $<LINK_ONLY> keeps them
+    # out of designer_core's usage requirements.
+    target_link_libraries(fem_mesher PRIVATE nglib ngcore)
+    target_compile_definitions(fem_mesher PRIVATE HAVE_NETGEN)
+    message(STATUS "Netgen enabled (FEM meshing)")
+else()
+    message(WARNING "Netgen not found: FEM meshing disabled (app runs; run_study errors)")
+endif()
+
 add_library(designer_core STATIC ${core_sources})
 target_include_directories(designer_core PUBLIC src)
-target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json)
+target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json fem_mesher)
+if(HAVE_NETGEN)
+    # Lets core sources (and tests, transitively) switch on FEM availability
+    # without pulling in any Netgen header.
+    target_compile_definitions(designer_core PUBLIC HAVE_NETGEN)
+endif()
 if(HAVE_PLANEGCS)
     target_link_libraries(designer_core PUBLIC planegcs)
     target_compile_definitions(designer_core PUBLIC HAVE_PLANEGCS)
