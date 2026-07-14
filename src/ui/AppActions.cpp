@@ -1029,28 +1029,78 @@ Occurrence* GizmoOccurrence(AppState& state) {
   return (o && !o->fixed) ? o : nullptr;
 }
 
-// Which handle the ray is over (axis 0-2, rotate?), or false if none. Arrows
-// win ties with arcs when closer.
-bool GizmoHitTest(const AppState& state, const Ray& ray, const glm::vec3& C,
+// The gizmo's frame + which handles show. A free occurrence gets world axes at
+// its origin with all 6 handles; a mated occurrence gets its mate's connector-A
+// world frame with only the mate's free DOF (drag-within-mate, phase 3).
+struct GizmoSpec {
+  glm::vec3 origin{0};
+  glm::vec3 axis[3]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  bool trans[3] = {false, false, false}; // translate arrow per axis
+  bool rot[3] = {false, false, false};   // rotate arc per axis
+};
+
+// The mate whose placed (`b`) side is this occurrence, if any (its DOF the
+// gizmo drives). Skips errored mates.
+Mate* MateDrivingOccurrence(AssemblyDocument& asmDoc, uint64_t occId) {
+  for (Mate& m : asmDoc.GetMates())
+    if (m.b.occurrenceId == occId && m.error.empty()) return &m;
+  return nullptr;
+}
+
+// Fills `spec` for the selected occurrence and reports the driving mate (null =
+// free 6-DOF). Returns false if no gizmo should show (fastened mate / dangling
+// connector).
+bool BuildGizmoSpec(AppState& state, Occurrence* occ, GizmoSpec& spec,
+                    Mate*& mate) {
+  mate = MateDrivingOccurrence(*state.assembly, occ->id);
+  if (!mate) {
+    spec.origin = occ->position; // free: world axes, all handles
+    for (int i = 0; i < 3; i++) {
+      spec.axis[i] = kGizmoAxis[i];
+      spec.trans[i] = spec.rot[i] = true;
+    }
+    return true;
+  }
+  const auto Wa = ConnectorWorldFrame(state, mate->a);
+  if (!Wa) return false; // dangling connector → no meaningful DOF gizmo
+  spec.origin = glm::vec3((*Wa)[3]);
+  for (int i = 0; i < 3; i++)
+    spec.axis[i] = glm::normalize(glm::vec3((*Wa)[i]));
+  switch (mate->type) {
+    case MateType::Revolute: spec.rot[2] = true; break;
+    case MateType::Slider: spec.trans[2] = true; break;
+    case MateType::Cylindrical: spec.rot[2] = spec.trans[2] = true; break;
+    case MateType::Planar:
+      spec.trans[0] = spec.trans[1] = spec.rot[2] = true;
+      break;
+    case MateType::Ball: spec.rot[0] = spec.rot[1] = spec.rot[2] = true; break;
+    case MateType::Fastened: return false; // no DOF
+  }
+  return true;
+}
+
+// Ray vs the spec's enabled handles → (axis, rotate). Arrows win ties.
+bool GizmoHitTest(const AppState& state, const GizmoSpec& spec, const Ray& ray,
                   int& axis, bool& rotate) {
   const float scale = GizmoScale(state);
-  const float grab = 0.14f * scale;   // pick tolerance
-  const float L = scale;              // arrow length
-  const float R = 0.78f * scale;      // arc radius
+  const float grab = 0.14f * scale, L = scale, R = 0.78f * scale;
   float best = grab;
   bool found = false;
   for (int i = 0; i < 3; i++) {
-    const glm::vec3 A = kGizmoAxis[i];
-    // Arrow: closest point on [C+0.15L·A, C+L·A] to the ray.
-    float t = RayAxisParam(ray.origin, ray.direction, C, A);
-    t = std::clamp(t, 0.15f * L, L);
-    const float da = PointRayDist(C + A * t, ray.origin, ray.direction);
-    if (da < best) { best = da; axis = i; rotate = false; found = true; }
-    // Arc: distance from the ray's plane-hit to the circle of radius R.
-    glm::vec3 hit;
-    if (RayPlane(ray.origin, ray.direction, C, A, hit)) {
-      const float dr = std::abs(glm::length(hit - C) - R);
-      if (dr < best) { best = dr; axis = i; rotate = true; found = true; }
+    const glm::vec3 A = spec.axis[i];
+    if (spec.trans[i]) {
+      float t = std::clamp(
+          RayAxisParam(ray.origin, ray.direction, spec.origin, A), 0.15f * L, L);
+      const float da =
+          PointRayDist(spec.origin + A * t, ray.origin, ray.direction);
+      if (da < best) { best = da; axis = i; rotate = false; found = true; }
+    }
+    if (spec.rot[i]) {
+      glm::vec3 hit;
+      if (RayPlane(ray.origin, ray.direction, spec.origin, A, hit)) {
+        const float dr = std::abs(glm::length(hit - spec.origin) - R);
+        if (dr < best) { best = dr; axis = i; rotate = true; found = true; }
+      }
     }
   }
   return found;
@@ -1068,39 +1118,45 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
     if (state.outlineRenderer) state.outlineRenderer->SetMeshTransform(m.outlineId, xf);
   }
 }
+
+// Appends one axis's handles (arrow and/or arc) per the spec.
+void AppendGizmoHandles(const GizmoSpec& spec, float L,
+                        std::vector<LineVertex3D>& lines) {
+  const float R = 0.78f * L, head = 0.18f * L;
+  for (int i = 0; i < 3; i++) {
+    const glm::vec3 A = spec.axis[i], col = kGizmoColor[i], C = spec.origin;
+    if (spec.trans[i]) {
+      const glm::vec3 tip = C + A * L, side = PerpTo(A);
+      lines.push_back(LineVertex(C, col));
+      lines.push_back(LineVertex(tip, col));
+      lines.push_back(LineVertex(tip, col));
+      lines.push_back(LineVertex(tip - A * head + side * head, col));
+      lines.push_back(LineVertex(tip, col));
+      lines.push_back(LineVertex(tip - A * head - side * head, col));
+    }
+    if (spec.rot[i]) {
+      const glm::vec3 b1 = PerpTo(A), b2 = glm::cross(A, b1);
+      const int seg = 40;
+      glm::vec3 prev = C + b1 * R;
+      for (int s = 1; s <= seg; s++) {
+        const float a = (float)s / seg * glm::two_pi<float>();
+        const glm::vec3 p = C + (std::cos(a) * b1 + std::sin(a) * b2) * R;
+        lines.push_back(LineVertex(prev, col));
+        lines.push_back(LineVertex(p, col));
+        prev = p;
+      }
+    }
+  }
+}
 } // namespace
 
 void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
   Occurrence* occ = GizmoOccurrence(state);
   if (!occ) return;
-  const glm::vec3 C = occ->position; // world-aligned gizmo at the occurrence origin
-  const float L = GizmoScale(state);
-  const float R = 0.78f * L;
-  const float head = 0.18f * L;
-  for (int i = 0; i < 3; i++) {
-    const glm::vec3 A = kGizmoAxis[i];
-    const glm::vec3 col = kGizmoColor[i];
-    // Translate arrow + a two-line head.
-    const glm::vec3 tip = C + A * L;
-    const glm::vec3 side = PerpTo(A);
-    lines.push_back(LineVertex(C, col));
-    lines.push_back(LineVertex(tip, col));
-    lines.push_back(LineVertex(tip, col));
-    lines.push_back(LineVertex(tip - A * head + side * head, col));
-    lines.push_back(LineVertex(tip, col));
-    lines.push_back(LineVertex(tip - A * head - side * head, col));
-    // Rotate arc: a circle of radius R in the plane ⟂ A.
-    const glm::vec3 b1 = PerpTo(A), b2 = glm::cross(A, b1);
-    const int seg = 40;
-    glm::vec3 prev = C + b1 * R;
-    for (int s = 1; s <= seg; s++) {
-      const float a = (float)s / seg * glm::two_pi<float>();
-      const glm::vec3 p = C + (std::cos(a) * b1 + std::sin(a) * b2) * R;
-      lines.push_back(LineVertex(prev, col));
-      lines.push_back(LineVertex(p, col));
-      prev = p;
-    }
-  }
+  GizmoSpec spec;
+  Mate* mate = nullptr;
+  if (!BuildGizmoSpec(state, occ, spec, mate)) return;
+  AppendGizmoHandles(spec, GizmoScale(state), lines);
 }
 
 bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
@@ -1111,19 +1167,44 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     Occurrence* occ =
         state.assembly ? state.assembly->FindById(state.selectedOccurrence)
                        : nullptr;
-    if (released || !down || !occ) {
+    Mate* mate = g.mateId ? state.assembly->FindMateById(g.mateId) : nullptr;
+    if (released || !down || !occ || (g.mateId && !mate)) {
       g.active = false;
-      if (occ && state.assembly) SolveActiveAssembly(state); // one undo step + resync
+      if (state.assembly) SolveActiveAssembly(state); // one undo step + resync
       return true;
     }
-    const glm::vec3 A = kGizmoAxis[g.axis];
-    if (!g.rotate) {
-      const float t = RayAxisParam(ray.origin, ray.direction, g.startPos, A);
-      occ->position = g.startPos + A * (t - g.startParam);
+    const glm::vec3 A = g.frameAxis[g.axis];
+    if (!g.mateId) {
+      // Free occurrence: drag its transform directly.
+      if (!g.rotate) {
+        const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+        occ->position = g.startPos + A * (t - g.startParam);
+      } else {
+        float ang;
+        if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang))
+          occ->orientation = glm::angleAxis(ang - g.startParam, A) * g.startRot;
+      }
     } else {
-      float ang;
-      if (RotateAngle(ray.origin, ray.direction, g.startPos, A, ang))
-        occ->orientation = glm::angleAxis(ang - g.startParam, A) * g.startRot;
+      // Drag-within-mate: write the mate's DOF, then re-solve so the
+      // occurrence follows.
+      if (!g.rotate) {
+        const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+        const float v = g.startDof + (t - g.startParam);
+        if (g.axis == 0) mate->dx = v;
+        else if (g.axis == 1) mate->dy = v;
+        else mate->offset = v;
+      } else {
+        float ang;
+        if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
+          const float d = ang - g.startParam;
+          if (mate->type == MateType::Ball)
+            mate->ballRotation = glm::angleAxis(d, A) * g.startBall;
+          else
+            mate->rotation = g.startDof + d;
+        }
+      }
+      SolveActiveAssembly(state);
+      return true; // solve already repositioned + resynced
     }
     PushOccurrenceLive(state, occ->id);
     return true;
@@ -1131,23 +1212,35 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
 
   Occurrence* occ = GizmoOccurrence(state);
   if (!occ || !clicked) return false;
+  GizmoSpec spec;
+  Mate* mate = nullptr;
+  if (!BuildGizmoSpec(state, occ, spec, mate)) return false;
   int axis = 0;
   bool rotate = false;
-  if (!GizmoHitTest(state, ray, occ->position, axis, rotate)) return false;
+  if (!GizmoHitTest(state, spec, ray, axis, rotate)) return false;
 
-  SnapshotAssembly(state); // one snapshot per drag (undo restores pre-drag)
+  SnapshotAssembly(state); // one snapshot per drag
   g.active = true;
   g.axis = axis;
   g.rotate = rotate;
+  g.frameOrigin = spec.origin;
+  for (int i = 0; i < 3; i++) g.frameAxis[i] = spec.axis[i];
+  g.mateId = mate ? mate->id : 0;
   g.startPos = occ->position;
   g.startRot = occ->orientation;
-  const glm::vec3 A = kGizmoAxis[axis];
-  if (!rotate) {
-    g.startParam = RayAxisParam(ray.origin, ray.direction, occ->position, A);
-  } else {
+  const glm::vec3 A = spec.axis[axis];
+  if (!rotate)
+    g.startParam = RayAxisParam(ray.origin, ray.direction, spec.origin, A);
+  else {
     float ang = 0.0f;
-    RotateAngle(ray.origin, ray.direction, occ->position, A, ang);
+    RotateAngle(ray.origin, ray.direction, spec.origin, A, ang);
     g.startParam = ang;
+  }
+  if (mate) { // capture the DOF value at grab
+    g.startDof = rotate ? mate->rotation
+                        : (axis == 0 ? mate->dx : axis == 1 ? mate->dy
+                                                            : mate->offset);
+    g.startBall = mate->ballRotation;
   }
   return true; // consumed the click (don't also re-select)
 }

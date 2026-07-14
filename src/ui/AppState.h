@@ -268,11 +268,21 @@ struct AppState {
   // per-instance update, no resync) and snapshots/solves once on release.
   struct GizmoDrag {
     bool active = false;
-    int axis = -1;         // 0=X, 1=Y, 2=Z
+    int axis = -1;         // handle axis index (into the gizmo frame below)
     bool rotate = false;   // false = translate along axis, true = rotate about it
-    glm::vec3 startPos{0}; // occurrence position at grab
-    glm::quat startRot{1, 0, 0, 0}; // occurrence orientation at grab
+    glm::vec3 startPos{0}; // occurrence position at grab (free drag)
+    glm::quat startRot{1, 0, 0, 0}; // occurrence orientation at grab (free drag)
     float startParam = 0.0f; // axis coordinate (translate) / angle (rotate) at grab
+    // The gizmo's frame: world axes at the occurrence origin for a free drag,
+    // or the mate's connector-A world frame for a drag-within-mate (phase 3).
+    glm::vec3 frameOrigin{0};
+    glm::vec3 frameAxis[3]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    // Drag-within-mate: non-zero → the drag writes this mate's DOF (offset/dx/
+    // dy/rotation/ballRotation) instead of the occurrence transform. Only one
+    // scalar DOF drags at a time (startDof); ball uses the quaternion.
+    uint64_t mateId = 0;
+    float startDof = 0.0f;
+    glm::quat startBall{1, 0, 0, 0};
   };
 
   // UI state
