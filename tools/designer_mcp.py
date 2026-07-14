@@ -591,39 +591,47 @@ def list_occurrences() -> dict:
 
 
 @mcp.tool(description="Add a MATE between two occurrences of the active "
-          "assembly (A3). type is 'fastened' (rigid), 'revolute' (free to "
-          "rotate about the connector Z), or 'slider' (free to slide along "
-          "Z). Each connector `a`/`b` is {occurrence:<id>, origin:true} for "
-          "the part origin, or {occurrence:<id>, face:{feature_id, element}} "
-          "for a named face (see list_elements). `b`'s occurrence is placed "
-          "relative to `a`. flipped opposes the two Z axes (default true, so "
-          "touching planar faces mate); rotation/offset set the DOF pose. "
-          "Solves immediately.")
+          "assembly (A3). type is 'fastened' (rigid), 'revolute' (rotate "
+          "about Z), 'slider' (slide along Z), 'cylindrical' (rotate AND "
+          "slide), 'planar' (slide in-plane via dx/dy + spin), or 'ball' "
+          "(free 3-axis rotation). Each connector `a`/`b` is {occurrence:<id>, "
+          "origin:true} for the part origin, or {occurrence:<id>, face:"
+          "{feature_id, element}} for a named face (see list_elements). `b`'s "
+          "occurrence is placed relative to `a`. flipped opposes the two Z "
+          "axes (default true, so touching faces mate); rotation/offset/dx/dy "
+          "and ball_rotation ([x,y,z,w]) set the DOF pose. Solves immediately.")
 def add_mate(type: str, a: dict, b: dict, name: str = "",
-             flipped: bool = True, rotation: float = 0.0,
-             offset: float = 0.0) -> dict:
+             flipped: bool = True, rotation: float = 0.0, offset: float = 0.0,
+             dx: float = 0.0, dy: float = 0.0,
+             ball_rotation: list | None = None) -> dict:
     params = {"type": type, "a": a, "b": b, "flipped": flipped,
               "rotation": rotation, "offset": offset}
+    if dx:
+        params["dx"] = dx
+    if dy:
+        params["dy"] = dy
+    if ball_rotation is not None:
+        params["ball_rotation"] = ball_rotation
     if name:
         params["name"] = name
     return _call("add_mate", **params)
 
 
-@mcp.tool(description="Adjust a mate (by id) and re-solve: rotation (revolute "
-          "angle, radians), offset (slider distance), flipped, or name. This "
-          "is how you MOVE a mechanism numerically — e.g. set a revolute's "
-          "rotation to swing a hinge.")
+@mcp.tool(description="Adjust a mate (by id) and re-solve — how you MOVE a "
+          "mechanism numerically. rotation (revolute/cylindrical angle, "
+          "radians), offset (slider/cylindrical distance), dx/dy (planar "
+          "in-plane slide), ball_rotation ([x,y,z,w] for a ball), flipped, or "
+          "name. e.g. set a revolute's rotation to swing a hinge.")
 def set_mate(id: int, rotation: float | None = None, offset: float | None = None,
+             dx: float | None = None, dy: float | None = None,
+             ball_rotation: list | None = None,
              flipped: bool | None = None, name: str | None = None) -> dict:
     params: dict = {"id": id}
-    if rotation is not None:
-        params["rotation"] = rotation
-    if offset is not None:
-        params["offset"] = offset
-    if flipped is not None:
-        params["flipped"] = flipped
-    if name is not None:
-        params["name"] = name
+    for k, v in (("rotation", rotation), ("offset", offset), ("dx", dx),
+                 ("dy", dy), ("ball_rotation", ball_rotation),
+                 ("flipped", flipped), ("name", name)):
+        if v is not None:
+            params[k] = v
     return _call("set_mate", **params)
 
 

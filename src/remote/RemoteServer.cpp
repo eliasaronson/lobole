@@ -242,7 +242,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "add_occurrence", "remove_occurrence", "list_occurrences",
       "set_occurrence_transform", "set_occurrence_visible",
       "set_occurrence_fixed", "rename_occurrence",
-      "add_mate", "set_mate", "remove_mate", "list_mates", "solve_assembly",
+      "add_mate", "set_mate", "remove_mate", "list_mates", "select_mate",
+      "solve_assembly",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
@@ -950,15 +951,18 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             "connector needs 'origin:true' or 'face:{feature_id,element}'");
       return {{"occurrence", c.at("occurrence")}, {"anchor", anchor}};
     };
-    Mate mate = DocumentIO::MateFromJson(
-        {{"id", 0},
-         {"name", p.value("name", std::string{"Mate"})},
-         {"mate_type", p.value("type", std::string{"fastened"})},
-         {"a", connToJson(p.at("a"))},
-         {"b", connToJson(p.at("b"))},
-         {"flipped", p.value("flipped", true)},
-         {"rotation", p.value("rotation", 0.0f)},
-         {"offset", p.value("offset", 0.0f)}});
+    json mateJson = {{"id", 0},
+                     {"name", p.value("name", std::string{"Mate"})},
+                     {"mate_type", p.value("type", std::string{"fastened"})},
+                     {"a", connToJson(p.at("a"))},
+                     {"b", connToJson(p.at("b"))},
+                     {"flipped", p.value("flipped", true)},
+                     {"rotation", p.value("rotation", 0.0f)},
+                     {"offset", p.value("offset", 0.0f)}};
+    if (p.contains("dx")) mateJson["dx"] = p.at("dx");             // planar
+    if (p.contains("dy")) mateJson["dy"] = p.at("dy");            // planar
+    if (p.contains("ball_rotation")) mateJson["ball_rotation"] = p.at("ball_rotation");
+    Mate mate = DocumentIO::MateFromJson(mateJson);
     // Both occurrences must exist before we solve against them.
     if (!state.assembly->FindById(mate.a.occurrenceId) ||
         !state.assembly->FindById(mate.b.occurrenceId))
@@ -983,6 +987,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (p.contains("offset")) mate->offset = p.at("offset").get<float>();
     if (p.contains("flipped")) mate->flipped = p.at("flipped").get<bool>();
     if (p.contains("name")) mate->name = p.at("name").get<std::string>();
+    if (p.contains("dx")) mate->dx = p.at("dx").get<float>();       // planar
+    if (p.contains("dy")) mate->dy = p.at("dy").get<float>();       // planar
+    if (p.contains("ball_rotation")) {                              // ball [x,y,z,w]
+      const json& q = p.at("ball_rotation");
+      mate->ballRotation = glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
+                                     q.at(1).get<float>(), q.at(2).get<float>());
+    }
     ui::SolveActiveAssembly(state);
     json out = DocumentIO::MateToJson(*mate);
     if (!mate->error.empty()) out["error"] = mate->error;
@@ -1009,6 +1020,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       arr.push_back(mj);
     }
     return {{"mates", arr}};
+  }
+  if (m == "select_mate") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    const uint64_t id = p.value("id", uint64_t{0}); // 0 clears the selection
+    if (id && !state.assembly->FindMateById(id))
+      throw std::runtime_error("no such mate");
+    state.selectedMate = id;
+    return {{"selected", id}};
   }
   if (m == "solve_assembly") {
     if (!state.assembly)

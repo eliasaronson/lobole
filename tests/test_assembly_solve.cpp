@@ -244,3 +244,92 @@ TEST_CASE("A dangling connector ref errors the mate", "[assembly][solve]") {
   CHECK(rep.erroredMates == 1);
   CHECK_FALSE(asmDoc.FindMateById(mateId)->error.empty());
 }
+
+// ---- Wider mate set (v25): cylindrical / planar / ball --------------------
+
+namespace {
+// A face-anchored connector on both sides (base cap1, arm cap0) with the given
+// mate type; base fixed at origin, arm parked away. Returns the assembly ready
+// to solve. `box` is shared as both parts (origin anchors unused here).
+Mate FaceMate(uint64_t ext, MateType type) {
+  Mate m;
+  m.type = type;
+  m.a.occurrenceId = 1;
+  m.a.anchor.face = ElementRef{ext, std::to_string(ext) + "/cap1"};
+  m.b.occurrenceId = 2;
+  m.b.anchor.origin = true; // arm origin onto the base's top face
+  m.flipped = false;
+  return m;
+}
+} // namespace
+
+TEST_CASE("Cylindrical mate frees both rotation and offset", "[assembly][solve]") {
+  uint64_t ext = 0;
+  auto box = BuildBox(3.0, ext);
+  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+
+  AssemblyDocument asmDoc;
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
+  Mate m = FaceMate(ext, MateType::Cylindrical);
+  m.offset = 4.0f;                     // slides along the cap normal (+Z)
+  m.rotation = glm::radians(30.0f);    // and spins about it
+  asmDoc.AddMate(m);
+
+  assembly::Solve(asmDoc, resolve);
+  const Occurrence* arm = asmDoc.FindById(2);
+  CHECK_THAT(arm->position.z, WithinAbs(7.0f, 1e-4f)); // 3 + 4
+  // Rotation took effect (non-identity orientation).
+  CHECK(std::abs(glm::dot(arm->orientation, glm::quat(1, 0, 0, 0))) < 0.999f);
+}
+
+TEST_CASE("Planar mate slides in-plane by dx/dy", "[assembly][solve]") {
+  uint64_t ext = 0;
+  auto box = BuildBox(3.0, ext);
+  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+
+  AssemblyDocument asmDoc;
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
+  Mate m = FaceMate(ext, MateType::Planar);
+  m.dx = 5.0f; // along the cap frame's in-plane X (world +X for a +Z cap)
+  m.dy = 0.0f;
+  asmDoc.AddMate(m);
+
+  assembly::Solve(asmDoc, resolve);
+  const Occurrence* arm = asmDoc.FindById(2);
+  // Base cap centroid is (2,2,3); +5 along the frame X axis.
+  CHECK_THAT(arm->position.z, WithinAbs(3.0f, 1e-4f)); // stays on the plane
+  const float inPlane = glm::length(glm::vec2(arm->position.x - 2.0f,
+                                              arm->position.y - 2.0f));
+  CHECK_THAT(inPlane, WithinAbs(5.0f, 1e-4f)); // slid 5 units within the plane
+}
+
+TEST_CASE("Ball mate rotates freely without translating", "[assembly][solve]") {
+  uint64_t ext = 0;
+  auto box = BuildBox(3.0, ext);
+  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+
+  AssemblyDocument asmDoc;
+  asmDoc.AddOccurrence(MakeOcc(1, {7, 8, 9}, true)); // fixed somewhere
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
+
+  Mate m;
+  m.type = MateType::Ball;
+  m.a.occurrenceId = 1;
+  m.a.anchor.origin = true;
+  m.b.occurrenceId = 2;
+  m.b.anchor.origin = true;
+  m.flipped = false;
+  m.ballRotation = glm::angleAxis(glm::radians(60.0f), glm::vec3(0, 1, 0));
+  asmDoc.AddMate(m);
+
+  assembly::Solve(asmDoc, resolve);
+  const Occurrence* arm = asmDoc.FindById(2);
+  // Origins coincide (ball is a point joint) — arm sits on the fixed origin.
+  CHECK_THAT(arm->position.x, WithinAbs(7.0f, 1e-4f));
+  CHECK_THAT(arm->position.y, WithinAbs(8.0f, 1e-4f));
+  CHECK_THAT(arm->position.z, WithinAbs(9.0f, 1e-4f));
+  // ...but it's rotated by the ball DOF.
+  CHECK(std::abs(glm::dot(arm->orientation, glm::quat(1, 0, 0, 0))) < 0.999f);
+}

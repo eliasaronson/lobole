@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 24; // v24: assembly mates (v23: assembly occurrences)
+constexpr int kVersion = 25; // v25: cylindrical/planar/ball mates (v24: mates)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -914,6 +914,9 @@ const char* MateTypeToString(MateType t) {
     case MateType::Fastened: return "fastened";
     case MateType::Revolute: return "revolute";
     case MateType::Slider: return "slider";
+    case MateType::Cylindrical: return "cylindrical";
+    case MateType::Planar: return "planar";
+    case MateType::Ball: return "ball";
   }
   return "fastened";
 }
@@ -921,6 +924,9 @@ const char* MateTypeToString(MateType t) {
 MateType MateTypeFromString(const std::string& s) {
   if (s == "revolute") return MateType::Revolute;
   if (s == "slider") return MateType::Slider;
+  if (s == "cylindrical") return MateType::Cylindrical;
+  if (s == "planar") return MateType::Planar;
+  if (s == "ball") return MateType::Ball;
   return MateType::Fastened; // default / "fastened"
 }
 
@@ -962,6 +968,12 @@ json MateToJson(const Mate& m) {
   j["flipped"] = m.flipped;
   j["rotation"] = m.rotation;
   j["offset"] = m.offset;
+  // Additive DOF for the wider mate set (v25); omit when zero/identity so
+  // fastened/revolute/slider files stay byte-identical to v24.
+  if (m.dx != 0.0f) j["dx"] = m.dx;
+  if (m.dy != 0.0f) j["dy"] = m.dy;
+  if (m.ballRotation != glm::quat(1.0f, 0.0f, 0.0f, 0.0f))
+    j["ball_rotation"] = QuatToJson(m.ballRotation);
   return j;
 }
 
@@ -975,6 +987,9 @@ Mate MateFromJson(const json& j) {
   m.flipped = j.value("flipped", true);
   m.rotation = j.value("rotation", 0.0f);
   m.offset = j.value("offset", 0.0f);
+  m.dx = j.value("dx", 0.0f);
+  m.dy = j.value("dy", 0.0f);
+  if (j.contains("ball_rotation")) m.ballRotation = QuatFromJson(j.at("ball_rotation"));
   return m;
 }
 

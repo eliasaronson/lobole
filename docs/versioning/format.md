@@ -88,6 +88,7 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | … | | (v18–v22: end-conditions, shell, loft/sweep, hole, draft — see golden corpus) |
 | 23 | `0949554` | Assembly document `kind:"assembly"` + `Occurrence` list (A2) |
 | 24 | (A3) | Assembly `mates` list (connector frames + type; fastened/revolute/slider) |
+| 25 | (A3) | Cylindrical/planar/ball mates (+ optional `dx`/`dy`/`ball_rotation`) |
 
 ## The directory format (F3, default for new saves)
 
@@ -125,6 +126,12 @@ offset}`; `a`/`b` are connectors `{occurrence, anchor}` where `anchor` is
 (one never-reused space per assembly). Occurrences still store their last
 solved transform, so a mates-stripped file still opens at sane positions. See
 `docs/assemblies/a3-design.md`.
+
+**Wider mate set (v25):** `mate_type` adds `cylindrical` (rotation + offset
+both free), `planar` (in-plane slide + spin), and `ball` (free rotation).
+Planar's in-plane DOF are optional `dx`/`dy` floats; ball's rotation is an
+optional `ball_rotation` quaternion `[x,y,z,w]`. All three are omitted when
+zero/identity, so fastened/revolute/slider mates are byte-identical to v24.
 
 The multi-document **project** envelope is separate (`"format":
 "designer-project"`): `{version, active, documents:[{id, name, dir, type}]}`,

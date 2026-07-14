@@ -43,14 +43,18 @@ glm::mat4 FrameMatrix(const glm::vec3& origin, const glm::vec3& xHint,
   return m;
 }
 
-// Adjustment from a's connector frame to b's connector frame: an optional
-// 180° flip about X (so two touching planar faces have opposing normals),
-// then a twist about Z, then a slide along Z. For a fastened mate with no
-// flip and zero DOF this is the identity ⇒ the two frames coincide exactly.
+// Adjustment from a's connector frame to b's connector frame, composed as
+// T(dx,dy,offset) · Rz(rotation) · R_ball · Flip. Each mate type uses a
+// subset: fastened/revolute/slider/cylindrical leave dx=dy=0 and R_ball=I (so
+// this reduces to the original T(0,0,offset)·Rz·Flip); planar adds the in-plane
+// dx,dy; ball uses R_ball. An optional 180° flip about X makes two touching
+// planar faces oppose normals. For a fastened mate with no flip and zero DOF
+// this is the identity ⇒ the two frames coincide exactly.
 glm::mat4 MateAdjust(const Mate& m) {
   glm::mat4 a(1.0f);
-  a = glm::translate(a, glm::vec3(0.0f, 0.0f, m.offset));
+  a = glm::translate(a, glm::vec3(m.dx, m.dy, m.offset));
   a = glm::rotate(a, m.rotation, glm::vec3(0.0f, 0.0f, 1.0f));
+  a *= glm::mat4_cast(m.ballRotation);
   if (m.flipped)
     a = glm::rotate(a, glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
   return a;

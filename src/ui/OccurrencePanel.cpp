@@ -22,6 +22,9 @@ const char* MateTypeLabel(MateType t) {
     case MateType::Fastened: return "fastened";
     case MateType::Revolute: return "revolute";
     case MateType::Slider: return "slider";
+    case MateType::Cylindrical: return "cylindrical";
+    case MateType::Planar: return "planar";
+    case MateType::Ball: return "ball";
   }
   return "?";
 }
@@ -105,23 +108,51 @@ void DrawMatesSection(AppState& state) {
     SolveActiveAssembly(state);
   }
 
-  // The DOF control: a revolute's angle, a slider's distance. Editing it here
-  // IS moving the mechanism numerically (the pre-gizmo stand-in).
-  if (sel->type == MateType::Revolute) {
+  // The DOF controls: which fields are live depends on the mate type. Editing
+  // them IS moving the mechanism numerically (the pre-gizmo stand-in). Each
+  // snapshots once per drag (IsItemActivated) and re-solves on change.
+  auto angleDof = [&](const char* label) {
     float deg = glm::degrees(sel->rotation);
-    const bool changed = ImGui::DragFloat("Angle (deg)", &deg, 1.0f);
-    if (ImGui::IsItemActivated())
-      SnapshotAssembly(state);
-    if (changed) {
-      sel->rotation = glm::radians(deg);
-      SolveActiveAssembly(state);
+    const bool changed = ImGui::DragFloat(label, &deg, 1.0f);
+    if (ImGui::IsItemActivated()) SnapshotAssembly(state);
+    if (changed) { sel->rotation = glm::radians(deg); SolveActiveAssembly(state); }
+  };
+  auto offsetDof = [&](const char* label) {
+    const bool changed = ImGui::DragFloat(label, &sel->offset, 0.1f);
+    if (ImGui::IsItemActivated()) SnapshotAssembly(state);
+    if (changed) SolveActiveAssembly(state);
+  };
+  switch (sel->type) {
+    case MateType::Revolute:
+      angleDof("Angle (deg)");
+      break;
+    case MateType::Slider:
+      offsetDof("Offset");
+      break;
+    case MateType::Cylindrical:
+      angleDof("Angle (deg)");
+      offsetDof("Offset");
+      break;
+    case MateType::Planar: {
+      float dxy[2] = {sel->dx, sel->dy};
+      const bool changed = ImGui::DragFloat2("Slide (x,y)", dxy, 0.1f);
+      if (ImGui::IsItemActivated()) SnapshotAssembly(state);
+      if (changed) { sel->dx = dxy[0]; sel->dy = dxy[1]; SolveActiveAssembly(state); }
+      angleDof("Spin (deg)");
+      break;
     }
-  } else if (sel->type == MateType::Slider) {
-    const bool changed = ImGui::DragFloat("Offset", &sel->offset, 0.1f);
-    if (ImGui::IsItemActivated())
-      SnapshotAssembly(state);
-    if (changed)
-      SolveActiveAssembly(state);
+    case MateType::Ball: {
+      glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->ballRotation));
+      const bool changed = ImGui::DragFloat3("Rotation (deg)", &euler.x, 1.0f);
+      if (ImGui::IsItemActivated()) SnapshotAssembly(state);
+      if (changed) {
+        sel->ballRotation = glm::quat(glm::radians(euler));
+        SolveActiveAssembly(state);
+      }
+      break;
+    }
+    case MateType::Fastened:
+      break; // no DOF
   }
 
   if (!sel->error.empty())

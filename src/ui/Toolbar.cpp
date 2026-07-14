@@ -266,6 +266,11 @@ void DrawAssemblyToolbar(AppState& state) {
   mateBtn(ICON_FA_LOCK, "Fastened mate (rigid)", MateType::Fastened);
   mateBtn(ICON_FA_ARROWS_SPIN, "Revolute mate (hinge)", MateType::Revolute);
   mateBtn(ICON_FA_ARROWS_LEFT_RIGHT, "Slider mate", MateType::Slider);
+  mateBtn(ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT, "Cylindrical mate (spin + slide)",
+          MateType::Cylindrical);
+  mateBtn(ICON_FA_TABLE_CELLS_LARGE, "Planar mate (slide in a plane)",
+          MateType::Planar);
+  mateBtn(ICON_FA_CIRCLE_DOT, "Ball mate (free rotation)", MateType::Ball);
   Divider();
   if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)"))
     FitCameraToDocument(state);

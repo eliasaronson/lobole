@@ -51,9 +51,13 @@ struct Connector {
 // lower kinematic pairs, shipped incrementally — the type is the *normal
 // form* a constraint stack would converge to.
 enum class MateType {
-  Fastened, // nothing free
-  Revolute, // rotation about Z free (`rotation` is the DOF's current value)
-  Slider,   // translation along Z free (`offset` is the DOF's current value)
+  Fastened,    // nothing free
+  Revolute,    // rotation about Z free (`rotation` is the DOF value)
+  Slider,      // translation along Z free (`offset` is the DOF value)
+  Cylindrical, // rotation about Z AND translation along Z free (both DOF)
+  Planar,      // faces coincident; free to slide in-plane (`dx`,`dy`) + spin
+               //   about Z (`rotation`); `offset` = the fixed plane gap
+  Ball,        // origins coincident; free 3-axis rotation (`ballRotation`)
 };
 
 // A mate: one connection between two connector frames, with one type. The
@@ -72,8 +76,12 @@ struct Mate {
 
   bool flipped = true;   // reverse b's Z against a's Z (two touching planar
                          // faces have opposing normals, hence default true)
-  float rotation = 0.0f; // twist about Z, radians (revolute: the DOF value)
-  float offset = 0.0f;   // translation along Z (slider: the DOF value)
+  float rotation = 0.0f; // twist about Z, radians (revolute/cylindrical DOF)
+  float offset = 0.0f;   // translation along Z (slider/cylindrical DOF; planar
+                         // plane gap)
+  float dx = 0.0f;       // in-plane X translation (planar DOF)
+  float dy = 0.0f;       // in-plane Y translation (planar DOF)
+  glm::quat ballRotation{1.0f, 0.0f, 0.0f, 0.0f}; // free rotation (ball DOF)
 
   // Transient solve status (mirrors Feature::m_error): stamped by the
   // placement pass, cleared on every solve, never serialized. Empty = ok.

@@ -196,9 +196,14 @@ void ExpectSameMates(const AssemblyDocument& a, const AssemblyDocument& b) {
     CHECK(ma[i].a.anchor.face.name == mb[i].a.anchor.face.name);
     CHECK(ma[i].b.occurrenceId == mb[i].b.occurrenceId);
     CHECK(ma[i].b.anchor.origin == mb[i].b.anchor.origin);
+    CHECK(ma[i].type == mb[i].type);
     CHECK(ma[i].flipped == mb[i].flipped);
     CHECK_THAT(ma[i].rotation, WithinAbs(mb[i].rotation, 1e-6f));
     CHECK_THAT(ma[i].offset, WithinAbs(mb[i].offset, 1e-6f));
+    CHECK_THAT(ma[i].dx, WithinAbs(mb[i].dx, 1e-6f));
+    CHECK_THAT(ma[i].dy, WithinAbs(mb[i].dy, 1e-6f));
+    for (int k = 0; k < 4; k++)
+      CHECK_THAT(ma[i].ballRotation[k], WithinAbs(mb[i].ballRotation[k], 1e-6f));
   }
 }
 
@@ -296,6 +301,39 @@ TEST_CASE("Frozen v24 assembly golden loads at the exact schema", "[assembly][go
   CHECK(hinge->b.anchor.origin);
   CHECK(hinge->flipped);
   CHECK_THAT(hinge->rotation, WithinAbs(0.7853981f, 1e-6f));
+}
+
+TEST_CASE("Frozen v25 golden: cylindrical/planar/ball mate schema", "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v25-assembly.json";
+  REQUIRE(fs::exists(golden));
+  std::string error;
+  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(asmDoc->MateCount() == 2);
+
+  const Mate* planar = asmDoc->FindMateById(3);
+  REQUIRE(planar != nullptr);
+  CHECK(planar->type == MateType::Planar);
+  CHECK_THAT(planar->dx, WithinAbs(3.0f, 1e-6f));
+  CHECK_THAT(planar->dy, WithinAbs(4.0f, 1e-6f));
+  CHECK_THAT(planar->rotation, WithinAbs(0.5f, 1e-6f));
+
+  const Mate* ball = asmDoc->FindMateById(4);
+  REQUIRE(ball != nullptr);
+  CHECK(ball->type == MateType::Ball);
+  CHECK_THAT(ball->ballRotation.z, WithinAbs(0.3826834f, 1e-6f)); // 45° about Z
+  CHECK_THAT(ball->ballRotation.w, WithinAbs(0.9238795f, 1e-6f));
+
+  // Round-trips (write at v25, reload) without losing the new DOF fields.
+  const fs::path tmp = fs::temp_directory_path() / "designer_v25_rt.json";
+  REQUIRE(DocumentIO::SaveAssembly(*asmDoc, tmp.string(), &error));
+  auto again = DocumentIO::LoadAssembly(tmp.string(), &error);
+  REQUIRE(again != nullptr);
+  CHECK(again->FindMateById(3)->type == MateType::Planar);
+  CHECK_THAT(again->FindMateById(3)->dx, WithinAbs(3.0f, 1e-6f));
+  CHECK(again->FindMateById(4)->type == MateType::Ball);
+  fs::remove(tmp);
 }
 
 TEST_CASE("A part loader rejects an assembly and vice versa", "[assembly]") {
