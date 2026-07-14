@@ -250,9 +250,24 @@ struct AppState {
   IBLTextures* ibl = nullptr;
   GLFWwindow* window = nullptr;
 
+  // Mate creation tool (A3 phase 3): a toolbar button starts it with a mate
+  // type; the user clicks two occurrence faces (connectors), then a preview
+  // mate is added + solved live for accept/cancel. See AppActions mate-tool
+  // helpers + OccurrencePanel.
+  struct MateToolState {
+    bool active = false;       // picking connectors for a new mate
+    MateType type = MateType::Fastened;
+    bool haveFirst = false;    // the first connector is picked
+    Connector first;           // occurrence + face anchor of the first pick
+    uint64_t previewMateId = 0; // non-zero once both picked: the live preview
+    std::string message;       // transient hint (e.g. "pick a named face")
+  };
+
   // UI state
   int selectedFeature = -1;
   uint64_t selectedOccurrence = 0; // active assembly's selected occurrence (0 = none)
+  uint64_t selectedMate = 0;       // active assembly's selected mate (0 = none)
+  MateToolState mateTool;
   // Feature being previewed (in the document + rendered, but NOT on the undo
   // stack until accepted). 0 = none. See PreviewFeature.
   uint64_t pendingFeatureId = 0;

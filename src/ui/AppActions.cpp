@@ -846,6 +846,121 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   return true;
 }
 
+std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
+                                             const Connector& c) {
+  if (!state.assembly)
+    return std::nullopt;
+  const assembly::PartResolver resolve =
+      [&state](uint64_t partId) -> const Document* {
+    return PartDocById(state, partId);
+  };
+  const auto local = assembly::ConnectorLocalFrame(c, *state.assembly, resolve);
+  if (!local)
+    return std::nullopt;
+  const Occurrence* occ = state.assembly->FindById(c.occurrenceId);
+  if (!occ)
+    return std::nullopt;
+  return OccurrenceMatrix(*occ) * *local;
+}
+
+void StartMateTool(AppState& state, MateType type) {
+  if (!state.assembly)
+    return;
+  CancelMateTool(state); // discard any in-progress preview first
+  state.mateTool = AppState::MateToolState{};
+  state.mateTool.active = true;
+  state.mateTool.type = type;
+  state.mateTool.message = "Pick the first face (connector A)";
+  SelectOccurrence(state, 0); // the tool owns clicks now
+}
+
+void MateToolPick(AppState& state, const Ray& ray) {
+  if (!state.assembly || !state.mateTool.active ||
+      state.mateTool.previewMateId != 0)
+    return;
+  AssemblyFacePick pick;
+  if (!PickAssemblyFace(state, ray, pick)) {
+    state.mateTool.message = "No named face there — pick a face of a part";
+    return;
+  }
+  auto& tool = state.mateTool;
+  if (!tool.haveFirst) {
+    tool.first.occurrenceId = pick.occurrenceId;
+    tool.first.anchor.origin = false;
+    tool.first.anchor.face = pick.face;
+    tool.haveFirst = true;
+    tool.message = "Pick the second face (connector B)";
+    return;
+  }
+  if (pick.occurrenceId == tool.first.occurrenceId) {
+    tool.message = "Pick a face on a different occurrence";
+    return;
+  }
+  // Second connector: add a live preview mate (snapshot first, so accept is a
+  // single undo step and cancel just pops it) and solve.
+  Mate mate;
+  mate.type = tool.type;
+  mate.name = "Mate";
+  mate.a = tool.first;
+  mate.b.occurrenceId = pick.occurrenceId;
+  mate.b.anchor.origin = false;
+  mate.b.anchor.face = pick.face;
+  SnapshotAssembly(state);
+  tool.previewMateId = state.assembly->AddMate(mate);
+  const int errored = SolveActiveAssembly(state);
+  tool.message = errored ? "Over-constrained — try Flip, or Cancel"
+                         : "Accept, Flip, or Cancel";
+}
+
+void AcceptMateTool(AppState& state) {
+  if (!state.mateTool.active)
+    return;
+  const uint64_t id = state.mateTool.previewMateId;
+  state.mateTool = AppState::MateToolState{}; // keep the mate; clear the tool
+  if (id)
+    state.selectedMate = id;
+}
+
+void CancelMateTool(AppState& state) {
+  auto& tool = state.mateTool;
+  if (tool.previewMateId && state.assembly) {
+    state.assembly->RemoveMate(tool.previewMateId);
+    if (!state.assemblyHistory.undo.empty())
+      state.assemblyHistory.undo.pop_back(); // drop the snapshot we pushed
+    SolveActiveAssembly(state);
+  }
+  tool = AppState::MateToolState{};
+}
+
+namespace {
+void AppendFrameTriad(std::vector<LineVertex3D>& lines, const glm::mat4& f,
+                      float scale) {
+  const glm::vec3 o(f[3]);
+  const glm::vec3 cols[3] = {{0.90f, 0.32f, 0.32f},
+                             {0.35f, 0.82f, 0.38f},
+                             {0.38f, 0.55f, 0.95f}};
+  for (int a = 0; a < 3; a++) {
+    lines.push_back(LineVertex(o, cols[a]));
+    lines.push_back(LineVertex(o + glm::vec3(f[a]) * scale, cols[a]));
+  }
+}
+} // namespace
+
+void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
+  if (!state.assembly || !state.mateTool.active)
+    return;
+  const float scale = 1.2f;
+  if (state.mateTool.haveFirst)
+    if (const auto f = ConnectorWorldFrame(state, state.mateTool.first))
+      AppendFrameTriad(lines, *f, scale);
+  if (const Mate* m = state.mateTool.previewMateId
+                          ? state.assembly->FindMateById(state.mateTool.previewMateId)
+                          : nullptr) {
+    if (const auto fb = ConnectorWorldFrame(state, m->b))
+      AppendFrameTriad(lines, *fb, scale);
+  }
+}
+
 void FitCameraToDocument(AppState& state) {
   if (!state.camera)
     return;

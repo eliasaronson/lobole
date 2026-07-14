@@ -129,6 +129,7 @@ void DrawUI(AppState& state) {
       }
     }
     AppendOriginGizmo(overlay); // world origin + axes: parts and assemblies
+    BuildMateToolOverlay(state, overlay); // A3 mate connector triads (assembly)
 
     state.sketchRenderer->SetQuads(std::move(quads));
     state.sketchRenderer->SetOverlayLines(std::move(overlay));

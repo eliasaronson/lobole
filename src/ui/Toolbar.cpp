@@ -247,11 +247,42 @@ void DrawSketchModeToolbar(AppState& state) {
   ImGui::NewLine();
 }
 
+// The assembly-mode toolbar: mate-creation tools (A3). Shown when an assembly
+// tab is active (no part document). Fit reuses FitCameraToDocument.
+void DrawAssemblyToolbar(AppState& state) {
+  auto mateBtn = [&](const char* icon, const char* tip, MateType t) {
+    const bool active = state.mateTool.active && state.mateTool.type == t;
+    if (active)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button(icon))
+      StartMateTool(state, t);
+    if (active)
+      ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", tip);
+    ImGui::SameLine();
+  };
+  mateBtn(ICON_FA_LOCK, "Fastened mate (rigid)", MateType::Fastened);
+  mateBtn(ICON_FA_ARROWS_SPIN, "Revolute mate (hinge)", MateType::Revolute);
+  mateBtn(ICON_FA_ARROWS_LEFT_RIGHT, "Slider mate", MateType::Slider);
+  Divider();
+  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)"))
+    FitCameraToDocument(state);
+  if (state.mateTool.active && !state.mateTool.message.empty()) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", state.mateTool.message.c_str());
+  }
+  ImGui::NewLine();
+}
+
 } // namespace
 
 void DrawToolbar(AppState& state) {
   if (state.sketchEdit.IsEditing())
     DrawSketchModeToolbar(state);
+  else if (state.assembly)
+    DrawAssemblyToolbar(state);
   else
     DrawModelToolbar(state);
 }

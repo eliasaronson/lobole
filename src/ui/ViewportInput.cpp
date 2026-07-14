@@ -188,8 +188,24 @@ void HandleViewportInput(AppState& state) {
     return;
 
   // Assembly tab: pick whole occurrences — click selects (highlights every
-  // instance), double-click enters the referenced part.
+  // instance), double-click enters the referenced part. While the mate tool is
+  // arming, clicks pick connector faces instead.
   if (state.assembly) {
+    // Escape cancels an in-progress mate.
+    if (state.mateTool.active && ImGui::IsKeyPressed(ImGuiKey_Escape))
+      CancelMateTool(state);
+
+    if (state.mateTool.active && state.mateTool.previewMateId == 0 &&
+        overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      Ray ray = state.faceSelector->ScreenToWorldRay(
+          io.MousePos.x - state.viewportPos.x,
+          io.MousePos.y - state.viewportPos.y,
+          static_cast<int>(state.viewportSize.x),
+          static_cast<int>(state.viewportSize.y), *state.camera);
+      MateToolPick(state, ray);
+      return;
+    }
+
     if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       Ray ray = state.faceSelector->ScreenToWorldRay(
           io.MousePos.x - state.viewportPos.x,

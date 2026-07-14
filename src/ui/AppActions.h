@@ -66,6 +66,20 @@ struct AssemblyFacePick {
 };
 bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
 
+// Mate creation tool (A3 phase 3). StartMateTool arms it with a type;
+// MateToolPick feeds it a viewport ray (picks the two connector faces, then
+// adds a live preview mate); Accept keeps the preview, Cancel removes it.
+// All no-op without an active assembly.
+void StartMateTool(AppState& state, MateType type);
+void MateToolPick(AppState& state, const Ray& ray);
+void AcceptMateTool(AppState& state);
+void CancelMateTool(AppState& state);
+// The world frame of a connector (occurrence placement ∘ its part-local frame),
+// or nullopt if it doesn't resolve. For drawing the connector triad.
+std::optional<glm::mat4> ConnectorWorldFrame(AppState& state, const Connector& c);
+// Appends the mate tool's connector triads (picked connectors) to `lines`.
+void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
+
 // The occurrence list + properties editor for an active assembly tab (drawn
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.
 void DrawOccurrencePanel(AppState& state);

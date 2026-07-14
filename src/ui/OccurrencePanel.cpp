@@ -16,6 +16,126 @@ std::string PartNameById(const AppState& state, uint64_t partId) {
     if (s.kind == DocKind::Part && s.id == partId) return s.name;
   return "(missing part)";
 }
+
+const char* MateTypeLabel(MateType t) {
+  switch (t) {
+    case MateType::Fastened: return "fastened";
+    case MateType::Revolute: return "revolute";
+    case MateType::Slider: return "slider";
+  }
+  return "?";
+}
+
+// The name of the occurrence an id refers to (its label, else its part name).
+std::string OccLabel(const AppState& state, const AssemblyDocument& asmDoc,
+                     uint64_t occId) {
+  const Occurrence* o = asmDoc.FindById(occId);
+  if (!o) return "(missing)";
+  return o->name.empty() ? PartNameById(state, o->partId) : o->name;
+}
+
+// The mate-creation preview controls (Flip / Accept / Cancel) + the mate list
+// and its selected-mate editor. Split out to keep DrawOccurrencePanel legible.
+void DrawMatesSection(AppState& state) {
+  AssemblyDocument& asmDoc = *state.assembly;
+
+  // Live preview of a mate being created: adjust the flip, then accept/cancel.
+  if (state.mateTool.active && state.mateTool.previewMateId) {
+    ImGui::SeparatorText("New mate (preview)");
+    if (Mate* pm = asmDoc.FindMateById(state.mateTool.previewMateId)) {
+      ImGui::Text("%s: %s -> %s", MateTypeLabel(pm->type),
+                  OccLabel(state, asmDoc, pm->a.occurrenceId).c_str(),
+                  OccLabel(state, asmDoc, pm->b.occurrenceId).c_str());
+      if (ImGui::Checkbox("Flip", &pm->flipped))
+        SolveActiveAssembly(state);
+      if (!pm->error.empty())
+        ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
+                           pm->error.c_str());
+      if (ImGui::Button("Accept"))
+        AcceptMateTool(state);
+      ImGui::SameLine();
+      if (ImGui::Button("Cancel"))
+        CancelMateTool(state);
+    }
+    return; // don't also show the list mid-preview
+  }
+
+  ImGui::SeparatorText("Mates");
+  if (asmDoc.MateCount() == 0) {
+    ImGui::TextDisabled("None. Use the mate tools in the toolbar.");
+    return;
+  }
+
+  for (const Mate& mate : asmDoc.GetMates()) {
+    ImGui::PushID(static_cast<int>(mate.id));
+    const std::string label =
+        (mate.name.empty() ? std::string(MateTypeLabel(mate.type)) : mate.name) +
+        "  [" + MateTypeLabel(mate.type) + "]";
+    if (!mate.error.empty()) {
+      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s", "(!)");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", mate.error.c_str());
+      ImGui::SameLine();
+    }
+    if (ImGui::Selectable(label.c_str(), state.selectedMate == mate.id))
+      state.selectedMate = mate.id;
+    ImGui::PopID();
+  }
+
+  Mate* sel = state.selectedMate ? asmDoc.FindMateById(state.selectedMate)
+                                 : nullptr;
+  if (!sel)
+    return;
+
+  ImGui::SeparatorText("Selected mate");
+  ImGui::Text("%s -> %s", OccLabel(state, asmDoc, sel->a.occurrenceId).c_str(),
+              OccLabel(state, asmDoc, sel->b.occurrenceId).c_str());
+
+  char name[128];
+  std::snprintf(name, sizeof(name), "%s", sel->name.c_str());
+  if (ImGui::InputText("Name##mate", name, sizeof(name),
+                       ImGuiInputTextFlags_EnterReturnsTrue)) {
+    SnapshotAssembly(state);
+    sel->name = name;
+    asmDoc.BumpVersion();
+  }
+
+  if (ImGui::Checkbox("Flip##mate", &sel->flipped)) {
+    SnapshotAssembly(state);
+    SolveActiveAssembly(state);
+  }
+
+  // The DOF control: a revolute's angle, a slider's distance. Editing it here
+  // IS moving the mechanism numerically (the pre-gizmo stand-in).
+  if (sel->type == MateType::Revolute) {
+    float deg = glm::degrees(sel->rotation);
+    const bool changed = ImGui::DragFloat("Angle (deg)", &deg, 1.0f);
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state);
+    if (changed) {
+      sel->rotation = glm::radians(deg);
+      SolveActiveAssembly(state);
+    }
+  } else if (sel->type == MateType::Slider) {
+    const bool changed = ImGui::DragFloat("Offset", &sel->offset, 0.1f);
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state);
+    if (changed)
+      SolveActiveAssembly(state);
+  }
+
+  if (!sel->error.empty())
+    ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
+                       sel->error.c_str());
+
+  if (ImGui::Button("Delete mate")) {
+    const uint64_t id = sel->id;
+    SnapshotAssembly(state);
+    asmDoc.RemoveMate(id);
+    state.selectedMate = 0;
+    SolveActiveAssembly(state);
+  }
+}
 } // namespace
 
 // The occurrence list + properties editor, drawn in the "Model" panel (where a
@@ -96,8 +216,11 @@ void DrawOccurrencePanel(AppState& state) {
       SnapshotAssembly(state);
       asmDoc.RemoveOccurrence(id);
       SelectOccurrence(state, 0);
+      SolveActiveAssembly(state); // a mate referencing it now dangles/frees
     }
   }
+
+  DrawMatesSection(state);
 
   ImGui::End();
 }
