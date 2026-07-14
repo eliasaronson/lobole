@@ -204,6 +204,7 @@ set(core_sources
     src/core/PatternFeature.cpp
     src/core/SketchSolver.cpp
     src/core/FemStudy.cpp
+    src/core/FemSolver.cpp
 )
 
 find_package(nlohmann_json 3 REQUIRED)
@@ -262,6 +263,14 @@ if(HAVE_NETGEN)
     # Lets core sources (and tests, transitively) switch on FEM availability
     # without pulling in any Netgen header.
     target_compile_definitions(designer_core PUBLIC HAVE_NETGEN)
+endif()
+# The FEM solver (FemSolver.cpp) needs Eigen directly — independently of
+# PlaneGCS, which links Eigen only through its own target. Eigen is header-only,
+# so this is a compile requirement; gated HAVE_FEM_SOLVER so a build without
+# Eigen still links (Solve returns an error).
+if(Eigen3_FOUND)
+    target_link_libraries(designer_core PUBLIC Eigen3::Eigen)
+    target_compile_definitions(designer_core PUBLIC HAVE_FEM_SOLVER)
 endif()
 if(HAVE_PLANEGCS)
     target_link_libraries(designer_core PUBLIC planegcs)

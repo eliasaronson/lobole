@@ -188,6 +188,7 @@ bool Document::RemoveStudy(uint64_t id) {
   for (auto it = m_studies.begin(); it != m_studies.end(); ++it) {
     if (it->id == id) {
       m_studies.erase(it);
+      m_studyRuntime.erase(id);  // drop derived mesh/results too
       return true;
     }
   }

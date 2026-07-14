@@ -167,6 +167,33 @@ void MaterialLibrary::InitializeMaterials() {
     materials[MaterialType::RUBBER].density = 1200.0f;
     materials[MaterialType::GLASS].density = 2500.0f;
     materials[MaterialType::CONCRETE].density = 2400.0f;
+
+    // Linear-elastic properties for FEM (Young's modulus GPa, Poisson ratio,
+    // yield strength MPa). Representative handbook values; like density they
+    // are left 0 on DEFAULT so a study on an unassigned body fails loudly.
+    // Yield is 0 where it isn't a meaningful single number (brittle/soft
+    // materials) — the study then reports stress without a factor of safety.
+    auto elastic = [&](MaterialType t, float e, float nu, float yield) {
+        materials[t].youngGPa = e;
+        materials[t].poisson = nu;
+        materials[t].yieldMPa = yield;
+    };
+    elastic(MaterialType::ALUMINUM, 69.0f, 0.33f, 95.0f);
+    elastic(MaterialType::STEEL, 200.0f, 0.30f, 250.0f);
+    elastic(MaterialType::STAINLESS_STEEL, 193.0f, 0.30f, 215.0f);
+    elastic(MaterialType::BRASS, 100.0f, 0.34f, 200.0f);
+    elastic(MaterialType::BRONZE, 110.0f, 0.34f, 125.0f);
+    elastic(MaterialType::COPPER, 117.0f, 0.34f, 70.0f);
+    elastic(MaterialType::CHROME, 279.0f, 0.21f, 0.0f);
+    elastic(MaterialType::GOLD, 79.0f, 0.44f, 0.0f);
+    elastic(MaterialType::SILVER, 83.0f, 0.37f, 0.0f);
+    elastic(MaterialType::TITANIUM, 116.0f, 0.32f, 880.0f);
+    elastic(MaterialType::PLASTIC_WHITE, 2.5f, 0.35f, 50.0f);
+    elastic(MaterialType::PLASTIC_BLACK, 2.5f, 0.35f, 50.0f);
+    elastic(MaterialType::GLASS, 70.0f, 0.22f, 0.0f);
+    elastic(MaterialType::CONCRETE, 30.0f, 0.20f, 0.0f);
+    // RUBBER and DEFAULT intentionally left at 0 (near-incompressible /
+    // unassigned): a linear-static study on them errors rather than guessing.
 }
 
 const MaterialProperties& MaterialLibrary::GetMaterial(MaterialType type) {

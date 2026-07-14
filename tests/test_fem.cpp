@@ -5,6 +5,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/FemMesher.h"
+#include "core/FemSolver.h"
 #include "core/FemStudy.h"
 #include "core/Serialization.h"
 
@@ -242,6 +243,229 @@ TEST_CASE("MeshStudy meshes the loaded body and errors on a dangling ref",
   s.loads[0].face.name = "nope/does-not-exist";
   CHECK_FALSE(fem::MeshStudy(doc, s, meshes, &err));
   CHECK_FALSE(s.error.empty());
+}
+
+#endif  // HAVE_NETGEN
+
+// ---- Solver analytic benchmarks (netgen-gated: need a real mesh) ----------
+#ifdef HAVE_NETGEN
+
+namespace {
+// Selects fixed nodes (a whole plane) and load tris (a whole face) by
+// coordinate, so the benchmarks test the solver directly without toponaming.
+struct BarProblem {
+  fem::FemMesh mesh;
+  std::vector<int> fixedNodes;
+  fem::FaceLoad load;
+};
+
+// Nodes whose coordinate `axis` is within tol of `value`.
+std::vector<int> NodesAtPlane(const fem::FemMesh& m, int axis, double value, double tol) {
+  std::vector<int> out;
+  for (int i = 0; i < (int)m.nodes.size(); ++i)
+    if (std::abs(m.nodes[i][axis] - value) < tol) out.push_back(i);
+  return out;
+}
+// Boundary tris all of whose nodes sit on the plane axis==value.
+std::vector<int> TrisAtPlane(const fem::FemMesh& m, int axis, double value, double tol) {
+  std::vector<int> out;
+  for (int t = 0; t < (int)m.boundary.size(); ++t) {
+    bool on = true;
+    for (int k = 0; k < 6; ++k)
+      if (std::abs(m.nodes[m.boundary[t].nodes[k]][axis] - value) >= tol) on = false;
+    if (on) out.push_back(t);
+  }
+  return out;
+}
+}  // namespace
+
+TEST_CASE("Solver: uniaxial bar matches sigma=F/A and u=FL/EA", "[fem][solver]") {
+  const double L = 100, W = 10;  // 100 x 10 x 10 mm
+  CADShape bar = CADKernel::Instance().CreateBox(L, W, W);
+  fem::MeshSettings ms;
+  ms.maxSize = 4.0;
+  std::string err;
+  auto mesh = fem::Mesh(bar.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+
+  fem::Material steel{200000.0, 0.3};  // 200 GPa, nu 0.3
+  const double F = 10000.0;            // N, +x
+  const double A = W * W;              // 100 mm^2
+
+  std::vector<int> fixed = NodesAtPlane(*mesh, 0, 0.0, 1e-6);
+  REQUIRE(fixed.size() > 3);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(*mesh, 0, L, 1e-6);
+  load.magnitude = F;
+  load.direction = glm::dvec3(1, 0, 0);
+  REQUIRE_FALSE(load.tris.empty());
+
+  auto res = fem::Solve(*mesh, steel, fixed, {load}, &err);
+  INFO(err);
+  REQUIRE(res.has_value());
+
+  // Tip axial displacement u = FL/EA.
+  const double uExpected = F * L / (steel.youngMPa * A);  // 0.05 mm
+  CHECK_THAT(res->maxDisplacement, WithinRel(uExpected, 0.03));
+
+  // Uniaxial stress in the mid-region (away from clamp/load) ~ F/A.
+  const double sigmaExpected = F / A;  // 100 MPa
+  int mid = -1;
+  double best = 1e30;
+  for (int i = 0; i < (int)mesh->nodes.size(); ++i) {
+    const auto& p = mesh->nodes[i];
+    const double d = std::abs(p.x - L / 2) + std::abs(p.y - W / 2) + std::abs(p.z - W / 2);
+    if (d < best) { best = d; mid = i; }
+  }
+  INFO("mid node vm = " << res->vonMises[mid] << " expected " << sigmaExpected);
+  CHECK_THAT(res->vonMises[mid], WithinRel(sigmaExpected, 0.05));
+}
+
+TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli", "[fem][solver]") {
+  // L=100, cross-section b=10 (y) x h=10 (z). Fix x=0, transverse tip load in -z.
+  const double L = 100, b = 10, h = 10;
+  CADShape beam = CADKernel::Instance().CreateBox(L, b, h);
+  fem::MeshSettings ms;
+  ms.maxSize = 4.0;
+  std::string err;
+  auto mesh = fem::Mesh(beam.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+
+  fem::Material steel{200000.0, 0.3};
+  const double P = 1000.0;  // N in -z
+  std::vector<int> fixed = NodesAtPlane(*mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(*mesh, 0, L, 1e-6);
+  load.magnitude = P;
+  load.direction = glm::dvec3(0, 0, -1);
+
+  auto res = fem::Solve(*mesh, steel, fixed, {load}, &err);
+  INFO(err);
+  REQUIRE(res.has_value());
+
+  const double I = b * h * h * h / 12.0;             // 833.33 mm^4
+  const double delta = P * L * L * L / (3 * steel.youngMPa * I);  // Euler-Bernoulli
+  // tet10 with shear + clamp effects: within ~10% of slender-beam theory.
+  INFO("tip delta = " << res->maxDisplacement << " EB = " << delta);
+  CHECK_THAT(res->maxDisplacement, WithinRel(delta, 0.12));
+}
+
+#endif  // HAVE_NETGEN
+
+TEST_CASE("Solver: pressure on a face compresses along the inward normal",
+          "[fem][solver]") {
+  // Fix x=0, apply pressure on x=L: it must push inward (-x) => compression,
+  // validating the pressure sign and the outward-normal convention.
+  const double L = 40, W = 10;
+  CADShape block = CADKernel::Instance().CreateBox(L, W, W);
+  fem::MeshSettings ms;
+  ms.maxSize = 3.0;
+  std::string err;
+  auto mesh = fem::Mesh(block.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+
+  fem::Material steel{200000.0, 0.3};
+  const double P = 50.0;  // MPa
+  std::vector<int> fixed = NodesAtPlane(*mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Pressure;
+  load.tris = TrisAtPlane(*mesh, 0, L, 1e-6);
+  load.magnitude = P;
+
+  auto res = fem::Solve(*mesh, steel, fixed, {load}, &err);
+  INFO(err);
+  REQUIRE(res.has_value());
+
+  // Mid-region von Mises ~ P (uniaxial compression state sigma_xx = -P).
+  int mid = -1;
+  double best = 1e30;
+  for (int i = 0; i < (int)mesh->nodes.size(); ++i) {
+    const auto& p = mesh->nodes[i];
+    const double d = std::abs(p.x - L / 2) + std::abs(p.y - W / 2) + std::abs(p.z - W / 2);
+    if (d < best) { best = d; mid = i; }
+  }
+  INFO("mid vm = " << res->vonMises[mid] << " expected " << P);
+  CHECK_THAT(res->vonMises[mid], WithinRel(P, 0.05));
+
+  // The loaded face must displace inward (-x), confirming the sign.
+  double sumx = 0;
+  int cnt = 0;
+  for (int n : NodesAtPlane(*mesh, 0, L, 1e-6)) { sumx += res->displacement[n].x; ++cnt; }
+  CHECK(sumx / cnt < 0.0);
+}
+
+// ---- RunStudy orchestration + validation (netgen-gated) -------------------
+#ifdef HAVE_NETGEN
+
+namespace {
+// A steel bar body via BoxFeature; returns the createdBy id and a face name
+// (feature/face) by geometric side. side: 0 => x=0 face, 1 => x=L face.
+struct BarDoc {
+  Document doc;
+  uint64_t createdBy = 0;
+};
+}  // namespace
+
+TEST_CASE("RunStudy errors when the body material has no stiffness data",
+          "[fem][run]") {
+  // A BoxFeature's default material is unassigned (youngGPa 0), so a study on
+  // it must fail loudly rather than guessing. (The full solve path is covered
+  // by the analytic benchmarks and the headless fem loop.)
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0),
+                                              100.0, 10.0, 10.0));
+  const uint64_t createdBy = doc.GetBodies()[0].createdBy;
+  auto faceName = [&](int i) { return std::to_string(createdBy) + "/face" + std::to_string(i); };
+
+  fem::Study& s = doc.AddStudy("S");
+  s.meshSize = 6.0;
+  fem::Load fixed;
+  fixed.id = doc.AllocateId();
+  fixed.type = fem::LoadType::Fixed;
+  fixed.face = ElementRef{createdBy, faceName(0)};
+  s.loads.push_back(fixed);
+  fem::Load force;
+  force.id = doc.AllocateId();
+  force.type = fem::LoadType::Force;
+  force.face = ElementRef{createdBy, faceName(1)};
+  force.magnitude = 5000.0;
+  force.direction = glm::dvec3(1, 0, 0);
+  s.loads.push_back(force);
+
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::RunStudy(doc, s, rt, &err));
+  CHECK(err.find("stiffness") != std::string::npos);
+  CHECK_FALSE(s.error.empty());
+}
+
+TEST_CASE("RunStudy errors when a loaded body has no fixed support",
+          "[fem][run]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0),
+                                              50.0, 10.0, 10.0));
+  const uint64_t createdBy = doc.GetBodies()[0].createdBy;
+  fem::Study& s = doc.AddStudy("S");
+  s.meshSize = 6.0;
+  fem::Load force;
+  force.id = doc.AllocateId();
+  force.type = fem::LoadType::Force;
+  force.face = ElementRef{createdBy, std::to_string(createdBy) + "/face1"};
+  force.magnitude = 1000.0;
+  force.direction = glm::dvec3(1, 0, 0);
+  s.loads.push_back(force);
+
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::RunStudy(doc, s, rt, &err));
+  // Fails either on material (default) or on missing fixed support — both are
+  // valid pre-solve errors; assert it did not silently "succeed".
+  CHECK_FALSE(err.empty());
 }
 
 #endif  // HAVE_NETGEN

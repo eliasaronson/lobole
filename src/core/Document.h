@@ -2,9 +2,11 @@
 
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/FemSolver.h"
 #include "core/FemStudy.h"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -106,6 +108,22 @@ public:
   // Backs the study modify Command.
   bool ReplaceStudy(fem::Study study);
 
+  // The transient mesh+results cache for a study, or nullptr if it has never
+  // been run. Derived data, never serialized; stale when its solvedAtVersion
+  // differs from Version(). Mutable so const RPC reads can populate/query it.
+  const fem::StudyRuntime* StudyResults(uint64_t studyId) const {
+    auto it = m_studyRuntime.find(studyId);
+    return it == m_studyRuntime.end() ? nullptr : &it->second;
+  }
+  void StoreStudyResults(uint64_t studyId, fem::StudyRuntime rt) {
+    m_studyRuntime[studyId] = std::move(rt);
+  }
+  bool StudyResultsStale(uint64_t studyId) const {
+    auto it = m_studyRuntime.find(studyId);
+    return it == m_studyRuntime.end() ? true
+                                      : it->second.solvedAtVersion != m_version;
+  }
+
   // Allocates the next document-unique id (studies and their loads draw from
   // the same counter as features, so ids never collide across kinds).
   uint64_t AllocateId() { return m_nextId++; }
@@ -159,6 +177,8 @@ private:
   std::vector<Body> m_bodies;
   std::vector<Parameter> m_parameters;
   std::vector<fem::Study> m_studies;
+  // Transient per-study mesh+results (never serialized); keyed by study id.
+  std::map<uint64_t, fem::StudyRuntime> m_studyRuntime;
   SymbolTable m_symbols;
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;

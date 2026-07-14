@@ -699,7 +699,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                          {"name", s.name},
                          {"mesh_size", eval.meshSize},
                          {"loads", loads},
-                         {"refinements", eval.refinements.size()}});
+                         {"refinements", eval.refinements.size()},
+                         {"has_results", doc->StudyResults(s.id) != nullptr},
+                         {"stale", doc->StudyResultsStale(s.id)}});
     }
     return {{"studies", studies}};
   }
@@ -811,6 +813,69 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                         {"worst_quality", bm.mesh.stats.worstQuality}});
     }
     return {{"bodies", bodies}};
+  }
+  if (m == "run_study" || m == "study_results") {
+    // run_study: mesh + solve now (explicit act, never automatic) and cache the
+    // results. study_results: read the cached results (never solves). Both
+    // return the same summary. params: {study}
+    const uint64_t id = p.at("study").get<uint64_t>();
+    fem::Study* s = doc->FindStudy(id);
+    if (!s) throw std::runtime_error("no such study");
+
+    if (m == "run_study") {
+      fem::StudyRuntime rt;
+      std::string err;
+      if (!fem::RunStudy(*doc, *s, rt, &err)) throw std::runtime_error(err);
+      rt.solvedAtVersion = doc->Version();
+      doc->StoreStudyResults(id, std::move(rt));
+    }
+
+    const fem::StudyRuntime* rt = doc->StudyResults(id);
+    if (!rt) throw std::runtime_error("study has not been run");
+
+    // Aggregate mesh size and a factor of safety (min over bodies with yield
+    // data) from the governing von Mises.
+    std::size_t nodes = 0, elements = 0;
+    double minFoS = 0.0;
+    bool haveFoS = false;
+    json perBody = json::array();
+    for (const fem::StudyBodyResult& b : rt->bodies) {
+      nodes += b.mesh.stats.nodeCount;
+      elements += b.mesh.stats.tetCount;
+      json bj = {{"body", b.bodyName},
+                 {"max_von_mises_mpa", b.results.maxVonMises},
+                 {"max_displacement_mm", b.results.maxDisplacement}};
+      // Factor of safety against yield, when the body's material defines one.
+      if (b.bodyIndex >= 0 && b.bodyIndex < (int)doc->GetBodies().size() &&
+          b.results.maxVonMises > 0) {
+        const auto mt = CADMaterials::MaterialLibrary::FromSlug(
+            doc->GetBodies()[b.bodyIndex].material);
+        const float yield = CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
+        if (yield > 0) {
+          const double fos = yield / b.results.maxVonMises;
+          bj["factor_of_safety"] = fos;
+          if (!haveFoS || fos < minFoS) minFoS = fos;
+          haveFoS = true;
+        }
+      }
+      perBody.push_back(std::move(bj));
+    }
+
+    json result = {
+        {"nodes", nodes},
+        {"elements", elements},
+        {"max_von_mises_mpa",
+         {{"value", rt->maxVonMises},
+          {"at", {rt->maxVmAt.x, rt->maxVmAt.y, rt->maxVmAt.z}},
+          {"body", rt->maxVmBody}}},
+        {"max_displacement_mm",
+         {{"value", rt->maxDisplacement},
+          {"at", {rt->maxDispAt.x, rt->maxDispAt.y, rt->maxDispAt.z}},
+          {"body", rt->maxDispBody}}},
+        {"bodies", perBody},
+        {"stale", doc->StudyResultsStale(id)}};
+    if (haveFoS) result["factor_of_safety"] = minFoS;
+    return result;
   }
 
   if (m == "set_section") {
