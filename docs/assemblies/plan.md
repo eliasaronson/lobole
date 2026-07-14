@@ -108,8 +108,13 @@ OutlineRenderer per-mesh model (self-contained, needed by both). See
 > mate RPCs (`add_mate`/`set_mate`/`remove_mate`/`list_mates`/`solve_assembly`)
 > + MCP, `ui::SolveActiveAssembly` wired into mate/occurrence edits, and the
 > `ui::PickAssemblyFace` join (an assembly click resolves a persistent face
-> `ElementRef`). Headless `assembly_mates_smoke`. Next: phase 3 (GUI mate
-> tool + mate list).
+> `ElementRef`). Headless `assembly_mates_smoke`. **Phase 3 SHIPPED**
+> (4578518): the GUI — an assembly-mode toolbar (Fasten/Revolute/Slider), a
+> two-click mate tool with a live connector-triad preview + Accept/Cancel/Flip,
+> and a mate list + editor in the Model dock (DOF drag = numeric mechanism
+> motion, error badges, delete). **A3 v1 is a usable mate workflow.** Remaining
+> A3: cylindrical/planar/ball types + connector inference snap points (see
+> below); the drag gizmo is A2.5.
 
 **Onshape's mate-connector model, not SolidWorks' constraint soup**: a mate
 connects two **connector frames** (coordinate frames placed on parts — on
