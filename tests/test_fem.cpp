@@ -398,6 +398,77 @@ TEST_CASE("Solver: pressure on a face compresses along the inward normal",
   CHECK(sumx / cnt < 0.0);
 }
 
+TEST_CASE("Solver: Lame thick-wall cylinder von Mises on a curved surface",
+          "[fem][solver]") {
+  // A pressurized thick tube — the one benchmark with CURVED geometry, so it
+  // validates the second-order (tet10) midside projection onto curved faces.
+  // a=10, b=20 mm, internal p=10 MPa, along z, length H. Both ends fully
+  // clamped: away from the ends the mid-plane (a symmetry plane, u_z=0)
+  // approaches plane strain, matching Lame with sigma_z = nu*(sigma_r+sigma_t).
+  const double a = 10, b = 20, H = 60, p = 10;
+  CADShape outer =
+      CADKernel::Instance().CreateCylinder(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), b, H);
+  CADShape bore =
+      CADKernel::Instance().CreateCylinder(glm::vec3(0, 0, -1), glm::vec3(0, 0, 1), a, H + 2);
+  CADShape tube = outer.Difference(bore);
+  REQUIRE(tube.IsValid());
+
+  fem::MeshSettings ms;
+  ms.maxSize = 4.0;
+  std::string err;
+  auto mesh = fem::Mesh(tube.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+
+  auto radius = [&](int n) {
+    return std::hypot(mesh->nodes[n].x, mesh->nodes[n].y);
+  };
+  // Fix both end faces fully (z=0 and z=H).
+  std::vector<int> fixed;
+  for (int i = 0; i < (int)mesh->nodes.size(); ++i)
+    if (std::abs(mesh->nodes[i].z) < 1e-6 || std::abs(mesh->nodes[i].z - H) < 1e-6)
+      fixed.push_back(i);
+  REQUIRE(fixed.size() > 6);
+
+  // Pressure on the bore: every node of the tri sits at radius ~ a (the flat
+  // end rings span a..b, so they don't qualify).
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Pressure;
+  load.magnitude = p;
+  for (int t = 0; t < (int)mesh->boundary.size(); ++t) {
+    bool bore6 = true;
+    for (int k = 0; k < 6; ++k)
+      if (std::abs(radius(mesh->boundary[t].nodes[k]) - a) > 0.6) bore6 = false;
+    if (bore6) load.tris.push_back(t);
+  }
+  REQUIRE_FALSE(load.tris.empty());
+
+  fem::Material steel{200000.0, 0.3};
+  auto res = fem::Solve(*mesh, steel, fixed, {load}, &err);
+  INFO(err);
+  REQUIRE(res.has_value());
+
+  // Plane-strain Lame stresses at the inner radius, then von Mises.
+  const double nu = 0.3;
+  const double sr = -p;
+  const double st = p * (b * b + a * a) / (b * b - a * a);
+  const double sz = nu * (sr + st);
+  const double vmExpected =
+      std::sqrt(0.5 * ((sr - st) * (sr - st) + (st - sz) * (st - sz) +
+                       (sz - sr) * (sz - sr)));  // ~23.1 MPa
+
+  // Inner-radius node nearest the mid-plane (away from the clamped ends).
+  int inner = -1;
+  double best = 1e30;
+  for (int i = 0; i < (int)mesh->nodes.size(); ++i) {
+    const double d = std::abs(radius(i) - a) + std::abs(mesh->nodes[i].z - H / 2);
+    if (d < best) { best = d; inner = i; }
+  }
+  INFO("inner mid-plane vm = " << res->vonMises[inner] << " expected " << vmExpected);
+  // ~4% on a 4 mm mesh; headroom for Netgen's non-bit-stable remeshing.
+  CHECK_THAT(res->vonMises[inner], WithinRel(vmExpected, 0.08));
+}
+
 #endif  // HAVE_NETGEN
 
 // ---- RunStudy orchestration + validation (netgen-gated) -------------------
@@ -467,6 +538,61 @@ TEST_CASE("RunStudy errors when a loaded body has no fixed support",
   // Fails either on material (default) or on missing fixed support — both are
   // valid pre-solve errors; assert it did not silently "succeed".
   CHECK_FALSE(err.empty());
+}
+
+TEST_CASE("RunStudy solves multiple loaded bodies and aggregates the maxima",
+          "[fem][run]") {
+  // Two disjoint steel bars in one study, loaded to different stress levels.
+  // Exercises the per-body solve loop and the cross-body max aggregation.
+  Document doc;
+  auto a = std::make_unique<BoxFeature>("BarA", glm::vec3(0, 0, 0), 100, 10, 10);
+  a->SetMaterial("steel");
+  doc.AddFeature(std::move(a));
+  auto b = std::make_unique<BoxFeature>("BarB", glm::vec3(0, 0, 50), 100, 10, 10);
+  b->SetMaterial("steel");
+  doc.AddFeature(std::move(b));
+  REQUIRE(doc.GetBodies().size() == 2);
+  const uint64_t cbA = doc.GetBodies()[0].createdBy;
+  const uint64_t cbB = doc.GetBodies()[1].createdBy;
+
+  fem::Study& s = doc.AddStudy("Two bars");
+  s.meshSize = 6.0;
+  auto addBar = [&](uint64_t cb, double force) {
+    auto face = [&](int i) { return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)}; };
+    fem::Load fx;
+    fx.id = doc.AllocateId();
+    fx.type = fem::LoadType::Fixed;
+    fx.face = face(0);
+    s.loads.push_back(fx);
+    fem::Load fo;
+    fo.id = doc.AllocateId();
+    fo.type = fem::LoadType::Force;
+    fo.face = face(1);
+    fo.magnitude = force;
+    fo.direction = glm::dvec3(1, 0, 0);
+    s.loads.push_back(fo);
+  };
+  addBar(cbA, 2000.0);   // low stress
+  addBar(cbB, 10000.0);  // 5x the load -> the governing body
+
+  fem::StudyRuntime rt;
+  std::string err;
+  INFO(err);
+  REQUIRE(fem::RunStudy(doc, s, rt, &err));
+
+  REQUIRE(rt.bodies.size() == 2);
+  // Per-body results, and the aggregate max drawn from the higher-loaded bar.
+  double perBodyMax = 0;
+  double barBMax = 0, barAMax = 0;
+  for (const fem::StudyBodyResult& br : rt.bodies) {
+    CHECK(br.results.maxVonMises > 0);
+    perBodyMax = std::max(perBodyMax, br.results.maxVonMises);
+    if (br.bodyName == "BarB") barBMax = br.results.maxVonMises;
+    if (br.bodyName == "BarA") barAMax = br.results.maxVonMises;
+  }
+  CHECK(barBMax > barAMax);                  // heavier bar is more stressed
+  CHECK(rt.maxVmBody == "BarB");             // aggregate governed by BarB
+  CHECK_THAT(rt.maxVonMises, WithinRel(perBodyMax, 1e-9));  // = max over bodies
 }
 
 #endif  // HAVE_NETGEN
