@@ -74,7 +74,19 @@ Move/rotate gizmo for positioning. Rendering via the instancing prerequisite.
 Picking maps hit → occurrence (then into the part on double-click). This alone
 is a usable v1 assembly (many real workflows are "place parts, eyeball it").
 
-### A2.5 — Interactive manipulation (3D drag gizmo) — **planned, land with A3's DOF-drag**
+### A2.5 — Interactive manipulation (3D drag gizmo) — **SHIPPED (July 2026)** — [design: a2_5-design.md](a2_5-design.md)
+**Shipped** all four phases: (1) OutlineRenderer per-mesh model push constant
+(deleted the A2 vertex-bake stopgap; a live drag is a matrix update); (2) a
+world-aligned translate/rotate gizmo on the selected occurrence, drawn in a
+no-depth channel, live drag → snapshot-at-grab/solve-at-release; (3)
+drag-within-mate (a mated occurrence's gizmo shows only the mate's free DOF,
+oriented by the connector frame, and drives the mate DOF); (4) connector
+inference snap — a mate connector snaps to the nearest hole (circular-edge)
+center on pick. Verified via ImGui-test-engine `viewport_drag` over dev-watch.
+Format v26. Remaining refinement: a hover snap-marker UI (edge midpoint /
+vertex / face-center picker) on the same `snap_edge` mechanism.
+
+
 The A2 editing UX shipped **numeric-first** (Elias's call): occurrences are
 positioned via panel fields, not a 3D drag manipulator. The drag gizmo is
 deliberately deferred here rather than built as a standalone A2 epilogue,

@@ -77,7 +77,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
 | 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | I1 measure, I2 mass properties, I3 section (geometry + raster clip), I4 interference shipped; result panels remain |
 | 9. Rendering | [rendering/plan.md](rendering/plan.md) | Planned (normals → AA → PBR → … → RT) |
-| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1 multi-part + A2 occurrences + A3 mates v1 shipped** (fastened/revolute/slider via connector frames, direct-frame-alignment solve, mate tool + list UI). Remain: rest of A3 (cylindrical/planar/ball + connector inference snap points) → A2.5 interactive drag gizmo → A4 |
+| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1–A3 + A2.5 shipped** — multi-part, occurrences (instanced), all six mate types (connector frames, direct-frame-alignment solve, mate tool + list), and interactive manipulation (per-mesh outline model, translate/rotate drag gizmo, drag-within-mate, hole-center connector snap). Remain: **A4** (in-context edit, assembly features, BOM, exploded views, configurations) + snap-marker UX polish |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | E1 export shipped (STEP/STL/BREP, RPC+MCP+menu); glTF/3MF + import widening remain |
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
