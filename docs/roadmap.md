@@ -52,7 +52,9 @@ standalone datum axes. **Booleans** (M4) over bodies by producing-feature id, an
 solids with expression-driven counts. `--remote <port>` JSON-RPC: semantic commands + human-parity UI
 actions + screenshots (`tools/designer_remote.py`). STEP import, face picking with real
 B-Rep face mapping, docking dark-theme workbench with icon toolbar and preview→accept.
-Rendering: MSAA + ACES tonemap + IBL/PBR from a studio HDR.
+Rendering: MSAA + ACES tonemap + IBL/PBR from a studio HDR, per-instance
+transparency (A4 ghosts), and an offline path-traced Render button
+(`render_still` RPC, shadow-catcher ground plane).
 
 **Thin or missing:** the face/edge-referencing solid features (fillets/chamfers,
 up-to-face extrude, shell) — all gated on persistent face/edge references (**toponaming**) —
@@ -76,7 +78,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | **Complete v1** (F1 spec+corpus, F2 autosave, F3 directory format, F4 checkpoints+rollback, F5 git); semantic merge later |
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
 | 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | I1 measure, I2 mass properties, I3 section (geometry + raster clip), I4 interference shipped; result panels remain |
-| 9. Rendering | [rendering/plan.md](rendering/plan.md) | Planned (normals → AA → PBR → … → RT) |
+| 9. Rendering | [rendering/plan.md](rendering/plan.md) | **Showcase arc shipped** (R1 PBR materials, R2 4×MSAA+ACES, R3 IBL, R4 offline path-traced render; instancing; A4 ghost transparency). Remain: SSAO + key-light soft shadows (raster polish), real-time hybrid RT (6b — gated on the `main.cpp` render-path cleanup) |
 | 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1–A4 v1 shipped** — multi-part, occurrences (instanced), all six mate types (connector frames, direct-frame-alignment solve, mate tool + list), interactive manipulation (drag gizmo, drag-within-mate, hole-center snap), part→assembly propagation, BOM, in-context editing (ghosted assembly), exploded views (v27). Remain: assembly-level features + configurations (own designs), cross-part refs in-context, snap-marker UX polish |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | E1 export shipped (STEP/STL/BREP, RPC+MCP+menu); glTF/3MF + import widening remain |
 | 12. Simulation: FEM | [simulation/plan.md](simulation/plan.md) | **Design for sign-off** — v1 = single-part linear static (Netgen tets, Eigen solver, face BCs via toponaming, von Mises/displacement); FEM0 spike gates the workstream |
@@ -112,8 +114,9 @@ The recommended interleaving, with the rationale:
    Same goes for **interchange X1 (STEP/STL export)**: the kernel writers already
    exist, it's ~a day including RPCs, and it's the first real-world need (3D
    printing, sending a part to another tool).
-9. **Rendering** demo-driven: normals + AA are overdue quality-of-life; the rest when
-   it hurts or when a release needs to look good.
+9. **Rendering** demo-driven: ~~normals + AA~~ the showcase arc (materials/MSAA/ACES/
+   IBL/offline render) shipped; SSAO/soft shadows/hybrid RT when it hurts or when a
+   release needs to look good.
 10. **Assemblies last** — gated on incremental regeneration, renderer instancing, and
     (for face mates) toponaming. See the plan's prerequisites section. A1+A2 are
     shipped (usable v1: multi-part, occurrences, numeric editing). Next is **A3

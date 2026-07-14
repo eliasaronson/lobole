@@ -1,12 +1,22 @@
 # Rendering & visual fidelity — plan
 
-> **Implementation plan for the first arc** (materials → MSAA/ACES → IBL →
-> offline render button, items 2/1/4/5/6a): **[showcase-v1.md](showcase-v1.md)**
-> — with verified code facts and phase-by-phase tasks. 6b (real-time hybrid RT)
-> stays here, gated as described below.
+> **Status 2026-07-14: the showcase arc is SHIPPED** — R1 PBR materials
+> (`d206a26`), R2 4×MSAA + ACES (`310b833`), R3 IBL from a studio HDR
+> (`517cf51` + `d9a8272`), R4 offline path-traced render button with
+> shadow-catcher ground plane (`c6b6fef` → `de3d896`), exposed as the
+> `render_still` RPC + UI modal. Phase detail: [showcase-v1.md](showcase-v1.md)
+> / [r4-offline-render.md](r4-offline-render.md). **Renderer instancing**
+> (asset/instance split, the assemblies A2 gate) also shipped (`6a99c38`):
+> [instancing-design.md](instancing-design.md). Assemblies A4 additionally
+> gave the mesh renderer its **first transparency** (the ghost pipeline:
+> alpha blend, depth-write-off second pass, per-instance alpha) — the
+> pipeline glass materials would reuse.
 >
-> **Renderer instancing** (asset/instance split — the assemblies A2 gate):
-> design in [instancing-design.md](instancing-design.md).
+> **Remaining** (item numbers below): 3 SSAO, the soft-shadow-map half of 5,
+> TAA (later, needs a G-buffer), and **6b real-time hybrid RT** — still gated
+> on the `main.cpp` render-path cleanup (not started: `main.cpp` is ~1300
+> lines, no extracted `VulkanContext`). Of 6b's two preconditions, PBR (✓)
+> is met; the cleanup is not.
 
 Most open-source CAD looks cheap, and that alone makes it unpleasant to use. The fix is
 mostly *not* raytracing — it's a modern raster pipeline done properly. Ordered by
@@ -15,35 +25,35 @@ work. Everything through 6.5 works on any GPU; 6.6 needs RT hardware.
 
 ~~Prerequisite: real vertex normals~~ — **done** (shipped with the face-selection fix):
 `CADKernel` tessellation emits exact B-Rep surface normals with a triangle-average fallback,
-and `CADMeshConverter` passes them through. Note the current `mesh.frag` is further along
-than "flat Lambert": three lights, Blinn-Phong + Fresnel, Reinhard-ish tone-map — but
-metallic/roughness are *guessed from the albedo color* (brightness/hue heuristics). Step 2
-replaces that guess with real per-body material properties (`MaterialProperties` in
-`CADMaterials.h` already has metallic/roughness fields).
+and `CADMeshConverter` passes them through. (The albedo-guess shading this paragraph
+originally described was replaced by real per-body materials in R1.)
 
-1. **Anti-aliasing** — the #1 "this looks cheap" tell. Start with MSAA (a render-pass +
-   pipeline change; note the current pass is color+D32 single-sample, so this touches the
-   shared depth-buffer setup in `main.cpp`). TAA later if/when a G-buffer exists.
-2. **PBR materials + sane defaults** — metallic-roughness model in `mesh.frag`, a small
-   material library that reads as real metal/plastic. Replaces the current flat Lambert-ish
-   shading. Ties into `CADMaterials`.
-3. **SSAO** — contact shadows in corners and crevices. Enormous readability win for
-   mechanical parts specifically (you *see* the geometry). Needs a depth (and ideally normal)
-   prepass to sample against.
-4. **Tone mapping (ACES)** — a final full-screen pass so highlights roll off instead of
-   clipping to flat white. Cheap, and it's what makes everything else look "finished."
-5. **IBL environment + soft shadows** — a studio HDRI for image-based lighting (diffuse
-   irradiance + prefiltered specular) plus soft-shadow maps from the key light. This is the
-   "premium product render" look. Bundle one or two neutral studio HDRIs.
+1. ~~**Anti-aliasing**~~ — **SHIPPED** (R2, `310b833`): 4× MSAA through the shared
+   `main.cpp` pass + every renderer's pipelines. TAA remains a later option if/when a
+   G-buffer exists.
+2. ~~**PBR materials + sane defaults**~~ — **SHIPPED** (R1, `d206a26`): metallic-roughness
+   in `mesh.frag` fed by real per-body `CADMaterials` properties (the albedo-guess
+   heuristic is gone); per-instance since the instancing split (material rides push
+   constants, `SetInstanceMaterial`).
+3. **SSAO** — *open; the biggest remaining raster win.* Contact shadows in corners and
+   crevices — an enormous readability win for mechanical parts specifically (you *see* the
+   geometry). Needs a depth (and ideally normal) prepass to sample against.
+4. ~~**Tone mapping (ACES)**~~ — **SHIPPED** (R2): ACES filmic (Narkowicz fit) in
+   `mesh.frag`, highlights roll off instead of clipping.
+5. **IBL environment + soft shadows** — **half SHIPPED** (R3, `517cf51`+`d9a8272`):
+   diffuse irradiance + prefiltered specular + BRDF LUT precomputed from a bundled studio
+   HDR, sampled in `mesh.frag` (split-sum). *Open:* soft-shadow maps from the key light —
+   the remaining raster-quality item alongside SSAO.
 
    > 6.1–6.5 together get ~80% of the "whoa, this looks good" reaction at a fraction of the
    > cost and risk of raytracing, and they work everywhere. Do them first.
 
 6. **Raytracing** — the cherry on top, not the foundation. Two deliverables, in order:
-   - **6a. Offline "render" button** — a present-quality still (path-traced soft shadows,
-     AO, reflections, real materials) triggered on demand, output through the existing
-     offscreen path (`Screenshot.cpp`). Low risk: reuses `RayTracingRenderer` *without*
-     touching the interactive loop. This is the KeyShot-style money shot.
+   - ~~**6a. Offline "render" button**~~ — **SHIPPED** (R4, `c6b6fef` → `de3d896`):
+     path-traced still with accumulation, real materials, environment lighting, and a
+     shadow-catcher ground plane; synchronous `render_still` RPC (reproducible via a
+     fixed seed) + a progress-modal Render button in the UI. See
+     [r4-offline-render.md](r4-offline-render.md).
    - **6b. Real-time RT lighting (hybrid)** — RT shadows/AO/reflections composited under the
      raster viewport. Higher risk. The scaffolding does most of the plumbing; the hard,
      un-built 30% is: keep the **TLAS refit/rebuilt on every geometry edit** (extrude, sketch
