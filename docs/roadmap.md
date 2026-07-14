@@ -131,13 +131,14 @@ The recommended interleaving, with the rationale:
   seed).
 - **Dismantle `main.cpp`** and the tripled Vulkan boilerplate (extract a `VulkanContext` +
   shared renderer utilities) — opportunistically while touching code, not big-bang.
-- **CI** — build + ctest on every push; the test suites exist, they should run
-  automatically. GUI tests need a virtual display; headless mode (scripting S2) makes the
-  geometry tests trivially CI-able first.
+- ~~**CI**~~ — **done** (scripting S2): `.github/workflows/ci.yml` builds + runs
+  `ctest -LE gui` on every push. Still open: running the GUI-labeled tests under a
+  virtual display.
 - **Build hygiene** — `-isystem` for OCC/ImGui headers, a PCH for the heavy common set,
   Ninja, ccache (see sketching plan cross-cutting).
-- **Incremental regeneration** — per-feature output-shape cache keyed by an input hash.
-  The scaling limiter, and the entry ticket to assemblies.
+- ~~**Incremental regeneration**~~ — **done**: `Document` keeps a per-feature
+  output-shape cache keyed by an input hash (`RegenCacheEntry` + `RegenStats`); it was
+  the assemblies gate-1 and cleared before A1.
 
 ## Explicitly not planned (conscious decisions, not omissions)
 
