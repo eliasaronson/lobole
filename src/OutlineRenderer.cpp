@@ -849,8 +849,18 @@ void OutlineRenderer::UpdateMeshEdgesForView(OutlineMesh& mesh) {
     
     // Update the edge buffer if we have visible edges and they changed
     if (!visibleEdges.empty() && visibleEdges.size() != mesh.edgeIndexCount) {
-        // Recreate edge index buffer with new data
+        // Recreate edge index buffer with new data.
         if (mesh.edgeIndexBuffer != VK_NULL_HANDLE) {
+            // The old buffer may still be referenced by an in-flight frame's
+            // wireframe draw (this runs mid-frame from Render/UpdateUniformBuffers).
+            // Destroying it while the GPU reads it is a use-after-free that shows
+            // up as VK_ERROR_DEVICE_LOST once frames overlap enough (more/larger
+            // geometry) — e.g. an assembly of two distinct extruded parts, whose
+            // asymmetric silhouettes actually change edge count. Wait for prior
+            // GPU work before freeing. (This renderer is already synchronous here
+            // — every CopyBuffer does a queue wait-idle; a per-frame-in-flight
+            // edge-buffer ring would remove the stall, TODO.)
+            vkDeviceWaitIdle(m_device);
             vkDestroyBuffer(m_device, mesh.edgeIndexBuffer, nullptr);
             vkFreeMemory(m_device, mesh.edgeIndexBufferMemory, nullptr);
         }
