@@ -481,6 +481,8 @@ void StashActive(AppState& state) {
   slot.commands = std::move(state.commands);
   slot.history = std::move(state.assemblyHistory);
   slot.lastSavedVersion = state.lastSavedVersion;
+  slot.solvedPartVersions = std::move(state.solvedPartVersions);
+  state.solvedPartVersions.clear(); // moved-from: guarantee empty
 }
 // Move a slot's model into AppState as the active tab. Assumes AppState holds
 // nothing live (call StashActive first, or after a clear).
@@ -491,6 +493,8 @@ void ActivateSlot(AppState& state, size_t index) {
   state.commands = std::move(slot.commands);
   state.assemblyHistory = std::move(slot.history);
   state.lastSavedVersion = slot.lastSavedVersion;
+  state.solvedPartVersions = std::move(slot.solvedPartVersions);
+  slot.solvedPartVersions.clear();
   state.activePart = static_cast<int>(index);
 }
 // Shared reset after a tab switch/create.
@@ -523,6 +527,7 @@ size_t AddPart(AppState& state, const std::string& name) {
   state.assembly = nullptr;
   state.commands = std::make_unique<CommandStack>();
   state.lastSavedVersion = 0;
+  state.solvedPartVersions.clear();
   PartSlot slot;
   slot.id = state.nextPartId++;
   slot.name = name;
@@ -542,6 +547,7 @@ size_t AddAssembly(AppState& state, const std::string& name) {
   state.assembly = std::make_unique<AssemblyDocument>();
   state.commands = nullptr;
   state.lastSavedVersion = 0;
+  state.solvedPartVersions.clear();
   PartSlot slot;
   slot.id = state.nextPartId++;
   slot.name = name;
@@ -603,6 +609,11 @@ void SetActivePart(AppState& state, size_t index) {
   StashActive(state);
   ActivateSlot(state, index);
   ResetActiveTabUiState(state);
+  // Part→assembly propagation (A4): entering an assembly whose referenced
+  // parts regenerated since its last solve re-solves it, so mates track part
+  // edits without an explicit solve_assembly.
+  if (state.assembly && AssemblyPartsStale(state))
+    SolveActiveAssembly(state);
 }
 
 bool DeletePart(AppState& state, size_t index) {
@@ -744,6 +755,10 @@ bool OpenProject(AppState& state, const std::string& path,
     if (wantActive >= state.parts.size()) wantActive = 0;
     ActivateSlot(state, wantActive);
     ResetActiveTabUiState(state);
+    // A4: an assembly active on open solves immediately (no stamps yet), so
+    // mates re-solve on load — the format's stated contract.
+    if (state.assembly && AssemblyPartsStale(state))
+      SolveActiveAssembly(state);
     if (state.document) FitCameraToDocument(state);
     return true;
   } catch (const std::exception& e) {
@@ -809,7 +824,28 @@ int SolveActiveAssembly(AppState& state) {
   };
   const assembly::SolveReport rep = assembly::Solve(*state.assembly, resolve);
   state.assembly->BumpVersion(); // solved transforms changed → renderer resync
+  // Stamp the referenced parts' versions (A4): AssemblyPartsStale compares
+  // against these, so a later part edit re-solves on tab activation. Stamped
+  // at solve (not render sync) so propagation also works headless.
+  state.solvedPartVersions.clear();
+  for (const Occurrence& occ : state.assembly->GetOccurrences())
+    if (const Document* part = PartDocById(state, occ.partId))
+      state.solvedPartVersions[occ.partId] = part->Version();
   return rep.erroredMates;
+}
+
+bool AssemblyPartsStale(AppState& state) {
+  if (!state.assembly)
+    return false;
+  for (const Occurrence& occ : state.assembly->GetOccurrences()) {
+    const Document* part = PartDocById(state, occ.partId);
+    if (!part)
+      continue; // dangling reference — nothing to compare (solve won't fix it)
+    const auto it = state.solvedPartVersions.find(occ.partId);
+    if (it == state.solvedPartVersions.end() || it->second != part->Version())
+      return true; // never stamped, or the part regenerated since the stamp
+  }
+  return false;
 }
 
 bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {

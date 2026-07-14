@@ -1,6 +1,7 @@
 # Assemblies A4 — assembly features & beyond — design
 
-> Status: **draft for sign-off.** A1–A3 + A2.5 are complete: multi-part
+> Status: **signed off 2026-07-13** (all six decisions, as recommended).
+> A1–A3 + A2.5 are complete: multi-part
 > projects, instanced occurrences, all six mate types with the
 > direct-frame-alignment solve, and interactive manipulation. A4 is the plan's
 > grab-bag milestone — "in-context editing, assembly-level features,
@@ -63,10 +64,11 @@ the assembly on screen.
 
 **The fix — per-part version stamps:**
 
-- `SyncAssemblyRenderers` already visits every referenced part
-  (`PartDocById`, `AppActions.cpp:1355`); it now records
-  `{partId → Document::Version()}` into AppState
-  (`assemblySyncedPartVersions`) as it goes.
+- `SolveActiveAssembly` already visits every referenced part (the
+  `PartResolver`); it now records `{partId → Document::Version()}` into
+  AppState (`solvedPartVersions`, stashed per-slot on tab switch). Stamping
+  at *solve* rather than render sync means propagation works headless too
+  (headless has no renderer, so sync never runs there).
 - A cheap staleness check (`AssemblyPartsStale(state)`: walk occurrences,
   compare two ints per part) runs:
   - on **assembly tab activation** — if stale, `SolveActiveAssembly` (solve →
@@ -238,7 +240,7 @@ MCP mirrors.
    views.** Assembly-level features and configurations are deferred to their
    own designs (each has format/architecture implications A4 must not rush);
    interference is already shipped (I4). Nothing in v1 precludes either.
-2. **Propagation via per-part version stamps** recorded at assembly sync,
+2. **Propagation via per-part version stamps** recorded at assembly solve,
    checked on assembly tab activation and after in-context part regens; stale
    → auto `SolveActiveAssembly`. Absorbs the solve-on-tab-switch polish item.
    In-memory only; the `partVersion` F5 pin stays reserved.

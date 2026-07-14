@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class Scene;
@@ -222,6 +223,9 @@ struct PartSlot {
   std::unique_ptr<CommandStack> commands; // null while active (parts only)
   AssemblyHistory history;                // assembly undo/redo (stashed here)
   uint64_t lastSavedVersion = 0;      // per-document dirty tracking
+  // Assembly tabs only (A4): referenced parts' Document::Version() at this
+  // assembly's last solve, stashed while inactive. See AppState field.
+  std::unordered_map<uint64_t, uint64_t> solvedPartVersions;
 };
 
 struct AppState {
@@ -232,6 +236,12 @@ struct AppState {
   std::unique_ptr<CommandStack> commands;
   std::unique_ptr<AssemblyDocument> assembly;
   AssemblyHistory assemblyHistory; // active assembly's undo/redo (A2 phase 3)
+  // Part→assembly change propagation (A4): {partId → Document::Version()}
+  // stamped at the active assembly's last solve. AssemblyPartsStale compares
+  // against these on tab activation, so a part edit re-solves mates
+  // automatically. In-memory session state — never persisted (the F5
+  // `partVersion` git pin is a separate, reserved concept).
+  std::unordered_map<uint64_t, uint64_t> solvedPartVersions;
 
   // Multi-document project (A1/A2): all tabs; `activePart` indexes the one
   // whose model is live above. One entry = today's single part.

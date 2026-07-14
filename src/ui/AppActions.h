@@ -55,6 +55,13 @@ void SelectOccurrence(AppState& state, uint64_t occId);
 // edit and after loading. Returns the number of mates left in an error state.
 int SolveActiveAssembly(AppState& state);
 
+// Part→assembly change propagation (A4): true when any part referenced by the
+// active assembly has regenerated since the assembly's last solve (compared
+// against the version stamps SolveActiveAssembly records). SetActivePart and
+// OpenProject use it to re-solve automatically; in-context editing re-checks
+// after every part regeneration. False without an active assembly.
+bool AssemblyPartsStale(AppState& state);
+
 // Resolves a viewport ray to a face of an occurrence in the active assembly:
 // the occurrence hit and a persistent ElementRef naming the face (for building
 // a mate connector). Returns false if the ray misses, hits an occurrence whose
