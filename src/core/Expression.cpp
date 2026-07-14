@@ -9,6 +9,23 @@ namespace {
 
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDegToRad = kPi / 180.0;
+constexpr double kRadToDeg = 180.0 / kPi;
+
+// Unit suffixes (C2 units algebra): a factor that converts a unit-suffixed
+// literal to the document's base unit — millimetres for length, degrees for
+// angle. There is deliberately NO dimensional analysis: a bare number is
+// already in base units, the field context (length vs angle) decides which
+// base applies, and mixing (`10mm + 45deg`) is arithmetically legal nonsense.
+// nullopt = not a unit name.
+std::optional<double> UnitFactor(const std::string& name) {
+  static const std::unordered_map<std::string, double> kUnits = {
+      {"mm", 1.0}, {"cm", 10.0}, {"m", 1000.0}, {"in", 25.4}, {"ft", 304.8},
+      {"deg", 1.0}, {"rad", kRadToDeg},
+  };
+  const auto it = kUnits.find(name);
+  return it == kUnits.end() ? std::nullopt
+                            : std::optional<double>(it->second);
+}
 
 // ---------------------------------------------------------------- Tokenizer
 
@@ -47,6 +64,33 @@ bool Tokenize(const std::string& src, std::vector<Token>& out,
           *outError = {"invalid number", i, 1};
         }
         return false;
+      }
+      // Optional unit suffix (`10mm`, `10 mm`, `1.5in`): if an identifier-run
+      // immediately follows the number (past optional whitespace) and is a
+      // known unit, fold its factor into the literal and consume it. It never
+      // becomes an Ident token, so Dependencies()/RenameIdentifier never see
+      // it. "Units win after a number": the suffix binds here even if a
+      // same-named parameter could exist (parameters can't be named after a
+      // unit — see IsValidParameterName). A non-unit run is left alone (it
+      // tokenizes as the next Ident, an error after a number, exactly as
+      // before units existed).
+      size_t after = i + len;
+      size_t u = after;
+      while (u < n && std::isspace(static_cast<unsigned char>(src[u])) != 0) {
+        ++u;
+      }
+      if (u < n && (std::isalpha(static_cast<unsigned char>(src[u])) != 0 ||
+                    src[u] == '_')) {
+        size_t e = u + 1;
+        while (e < n && (std::isalnum(static_cast<unsigned char>(src[e])) != 0 ||
+                         src[e] == '_')) {
+          ++e;
+        }
+        if (const auto factor = UnitFactor(src.substr(u, e - u))) {
+          out.push_back({TokKind::Number, i, e - i, value * *factor, {}});
+          i = e;
+          continue;
+        }
       }
       out.push_back({TokKind::Number, i, len, value, {}});
       i += len;
@@ -540,7 +584,11 @@ std::string BuiltinExpressionEngine::RenameIdentifier(
 
 bool BuiltinExpressionEngine::IsValidParameterName(
     const std::string& name) const {
-  if (name.empty() || IsReservedName(name)) {
+  // Unit names are reserved: a suffix binds to a preceding number regardless
+  // of parameters, so a parameter literally named `mm`/`in`/`m`/… would be
+  // unreachable in `10 <name>` and confusing everywhere else. (Existing docs
+  // keep working — units only activate directly after a number token.)
+  if (name.empty() || IsReservedName(name) || UnitFactor(name).has_value()) {
     return false;
   }
   if (std::isalpha(static_cast<unsigned char>(name[0])) == 0 &&

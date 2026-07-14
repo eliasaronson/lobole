@@ -92,6 +92,13 @@ add_test(NAME assembly_propagation_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_propagation_smoke PROPERTIES TIMEOUT 120)
 
+# Variables C2 units: unit-suffixed expressions resolve, unit names reserved,
+# v28 round-trip. Headless (no display).
+add_test(NAME units_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/units_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(units_smoke PROPERTIES TIMEOUT 120)
+
 # Interchange X2 visual export: glTF/OBJ/PLY of a part + assembly, material
 # carry-through, instancing. Headless (no display).
 add_test(NAME visual_export_smoke

@@ -39,7 +39,15 @@ env; none are linked yet.
 - After C1, X3 (IGES/DXF/mesh import) is **declared demand-driven** and the
   workstream is complete.
 
-## C2 — Units algebra (closes Variables)
+## C2 — Units algebra (closes Variables) — **SHIPPED**
+
+> Done: unit-suffixed literals in the `BuiltinExpressionEngine` tokenizer
+> (mm/cm/m/in/ft → mm, deg/rad → degrees), folded into the number token so
+> dependencies/rename never see them; unit names reserved
+> (`IsValidParameterName`); format v28 + `v28-units` golden; `units_smoke`
+> RPC test + engine unit tests. No dimensional analysis (recorded deferral).
+> Variables workstream complete.
+
 
 `10 mm + 1 in` evaluates; `hole_pitch = 0.5in` just works.
 

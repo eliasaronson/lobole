@@ -16,7 +16,16 @@ expression-driven from day one instead of retrofitted.
 > set/delete/rename commands, docked Variables panel, expression editing in
 > Properties + the inline dimension editor, and
 > `set/delete/rename/list_variables` RPCs (`add_constraint` takes `expr`,
-> `add_feature` takes `distance_expr`). Deferred items below still stand.
+> `add_feature` takes `distance_expr`).
+>
+> **Units algebra shipped (C2, July 2026).** A numeric literal may carry a
+> unit suffix — `mm`/`cm`/`m`/`in`/`ft` (→ mm) and `deg`/`rad` (→ degrees) —
+> converted to base units at parse in the `BuiltinExpressionEngine`
+> tokenizer. The unit folds into the number token, so `Dependencies()` and
+> `RenameIdentifier` never see it; unit names are reserved parameter names;
+> format v28. **No dimensional analysis** (`10mm + 5` = 15, `2in * 3` =
+> 152.4) — the recorded deferral, along with per-document unit
+> display/switching. **The Variables workstream is complete for v1.**
 
 ## Design
 
@@ -87,7 +96,8 @@ the RPC surface, `remote_smoke.py` coverage.
 
 ## Deferred
 
-- **Units algebra** (`10 mm + 1 in`) and per-document unit switching.
+- ~~**Units algebra**~~ — **shipped (C2)**; *dimensional analysis* and
+  per-document unit display/switching remain deferred.
 - **Derived/measured variables** (a variable bound to a measurement — wants
   [inspect/plan.md](../inspect/plan.md)).
 - **Per-sketch local variables**; global-only first.

@@ -137,4 +137,68 @@ TEST_CASE("expression parameter name validation", "[expression]") {
   CHECK_FALSE(engine.IsValidParameterName("a b"));
   CHECK_FALSE(engine.IsValidParameterName("pi"));
   CHECK_FALSE(engine.IsValidParameterName("sin"));
+  // Unit names are reserved (C2) so a suffix can't be shadowed by a param.
+  CHECK_FALSE(engine.IsValidParameterName("mm"));
+  CHECK_FALSE(engine.IsValidParameterName("cm"));
+  CHECK_FALSE(engine.IsValidParameterName("m"));
+  CHECK_FALSE(engine.IsValidParameterName("in"));
+  CHECK_FALSE(engine.IsValidParameterName("ft"));
+  CHECK_FALSE(engine.IsValidParameterName("deg"));
+  CHECK_FALSE(engine.IsValidParameterName("rad"));
+  // A name that merely starts with a unit is still fine.
+  CHECK(engine.IsValidParameterName("mm_gap"));
+  CHECK(engine.IsValidParameterName("inner"));
+}
+
+TEST_CASE("expression unit-suffixed literals convert to base units",
+          "[expression]") {
+  // Length → millimetres, with and without a space.
+  CHECK_THAT(Eval("10mm"), WithinRel(10.0, 1e-9));
+  CHECK_THAT(Eval("10 mm"), WithinRel(10.0, 1e-9));
+  CHECK_THAT(Eval("1cm"), WithinRel(10.0, 1e-9));
+  CHECK_THAT(Eval("1 m"), WithinRel(1000.0, 1e-9));
+  CHECK_THAT(Eval("1in"), WithinRel(25.4, 1e-9));
+  CHECK_THAT(Eval("1.5in"), WithinRel(38.1, 1e-9));
+  CHECK_THAT(Eval("1ft"), WithinRel(304.8, 1e-9));
+  // Angle → degrees.
+  CHECK_THAT(Eval("90deg"), WithinRel(90.0, 1e-9));
+  CHECK_THAT(Eval("1rad"), WithinRel(57.29577951308232, 1e-9));
+  // Mixed arithmetic: `10mm + 1in` = 10 + 25.4.
+  CHECK_THAT(Eval("10mm + 1in"), WithinRel(35.4, 1e-9));
+  // A bare number is already base units; units bind only to the literal.
+  CHECK_THAT(Eval("10mm + 5"), WithinRel(15.0, 1e-9));
+  // Units bind to the literal, not the whole product: 2in * 3 = 152.4.
+  CHECK_THAT(Eval("2in * 3"), WithinRel(152.4, 1e-9));
+  // Units in a sub-expression and with functions.
+  CHECK_THAT(Eval("(1cm + 1cm) * 2"), WithinRel(40.0, 1e-9));
+}
+
+TEST_CASE("expression units win after a number, identifiers elsewhere",
+          "[expression]") {
+  // `2 in` is a unit suffix (50.8), NOT 2 * a variable `in` (which can't
+  // exist — reserved).
+  CHECK_THAT(Eval("2in"), WithinRel(50.8, 1e-9));
+  // A unit name after an operator (not a number) is a plain identifier again:
+  // `4 + m` is 4 plus the variable m — confirm it's an unknown-VARIABLE error
+  // (an identifier), not a parse error and not a unit.
+  const ExprError e = EvalError("4 + m");
+  CHECK(e.message.find("unknown variable 'm'") != std::string::npos);
+  // A standalone unit-like name is an identifier, not a number.
+  const ExprError e2 = EvalError("mm");
+  CHECK(e2.message.find("unknown variable 'mm'") != std::string::npos);
+  // But directly after a number it IS a unit: `4 m` = 4000 mm.
+  CHECK_THAT(Eval("4 m"), WithinRel(4000.0, 1e-9));
+}
+
+TEST_CASE("expression units are invisible to dependencies and rename",
+          "[expression]") {
+  const auto& engine = ExpressionEngine::Default();
+  ExprError err;
+  // A unit suffix never enters the dependency set.
+  const auto compiled = engine.Compile("gap + 10mm", &err);
+  REQUIRE(compiled != nullptr);
+  CHECK(compiled->Dependencies() == std::set<std::string>{"gap"});
+  // Rename leaves unit-bearing literals byte-for-byte untouched.
+  CHECK(engine.RenameIdentifier("gap + 10mm", "gap", "g") == "g + 10mm");
+  CHECK(engine.RenameIdentifier("2in * width", "width", "w") == "2in * w");
 }

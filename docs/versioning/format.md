@@ -45,7 +45,13 @@ Files may rely on exactly these invariants:
    an optional twin `x_expr`; when present it re-evaluates each
    regeneration and wins over the stored literal (which is kept as the last
    evaluated value, so files load meaningfully even if a variable is
-   removed). Angle expressions are in degrees.
+   removed). Angle expressions are in degrees; bare numbers are in the
+   document's base units (mm). Since **v28** a numeric literal may carry a
+   **unit suffix** (`10mm` `1.5in` `2cm` `1m` `1ft`, `45deg` `1rad`) that
+   converts it to the base unit at parse — additive syntax with no structural
+   change, so the version bump exists only so a pre-v28 build refuses a
+   unit-bearing file cleanly rather than erroring each expression. Unit names
+   are reserved and cannot be parameter names.
 5. JSON key order is not significant; writers emit stable ordering
    (nlohmann sorts keys) so diffs stay readable.
 
@@ -91,6 +97,7 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 25 | (A3) | Cylindrical/planar/ball mates (+ optional `dx`/`dy`/`ball_rotation`) |
 | 26 | (A2.5) | Connector inference snap (`anchor.snap_edge` → a hole-center frame) |
 | 27 | (A4) | Assembly `exploded` views (named per-occurrence offset sets) |
+| 28 | (C2) | Unit-suffixed expression literals (`10mm`, `1in`, `45deg`) |
 
 ## The directory format (F3, default for new saves)
 

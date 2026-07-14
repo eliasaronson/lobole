@@ -73,7 +73,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 1. Sketching | [sketching/plan.md](sketching/plan.md) | **Complete** (B-splines deferred) |
 | 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **In progress** (M1–M8: primitives, extrude/revolve/loft/sweep, datums, booleans, patterns, toponaming, fillet/chamfer, shell, hole wizard, draft; thread/rib remain) |
 | 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | **Complete** (T1–T5; consumers: sketch-on-face, fillet/chamfer, up-to-face extrude) |
-| 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Shipped** (V1–V3; units algebra deferred) |
+| 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Complete** (V1–V3 + C2 unit-suffixed literals, format v28; dimensional analysis + unit display deferred) |
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | **Complete** (S1 MCP, S2 headless+CI, S3 python client, S4 record/replay) |
 | 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | **Complete v1** (F1 spec+corpus, F2 autosave, F3 directory format, F4 checkpoints+rollback, F5 git); semantic merge later |
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |

@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 27; // v27: exploded views (v26: connector snap)
+constexpr int kVersion = 28; // v28: unit-suffixed expressions (v27: exploded views)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
