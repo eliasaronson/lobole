@@ -1,7 +1,8 @@
 # Simulation — FEM structural analysis — design
 
-> Status: **signed off; FEM0 spike complete**. Implementation underway per the
-> plan below. Two facts the spike settled, corrected throughout this doc:
+> Status: **signed off; FEM0–FEM2 shipped** (the headless mesh+solve loop is
+> live; FEM3 GUI + FEM4 MCP/polish remain). Two facts the spike settled,
+> corrected throughout this doc:
 > the studies format bump is **v29** (v28 was already taken by C2's
 > unit-suffixed expressions), and the FEM code lives as flat `src/core/Fem*.cpp`
 > files in a `namespace fem` (matching the flat `src/core/` house style) rather
@@ -315,17 +316,23 @@ when Netgen is in the CI shell.
 
 ## Phasing
 
-0. **FEM0 — spike (gate):** `shell.nix` + CMake `HAVE_NETGEN`; headless
-   harness meshes a golden part from its `TopoDS_Shape`, prints
-   node/element/quality stats. Proves the nixpkgs nglib+OCC combination.
-   **No further FEM work until this passes** — or the fallback is chosen.
-1. **FEM1 — mesh:** Study model + Commands + serialization (v29 + golden) +
-   `add_study`/`set_study`/refinement RPCs; `core/fem` mesher wrapper
-   (global + per-face size, second order, stats, error mapping);
-   boundary-edge mesh preview; `test_fem.cpp` mesher cases.
-2. **FEM2 — solve:** material E/ν/yield; load model + RPCs; assembly, BCs,
-   solve, recovery; the analytic benchmark suite; `run_study` /
-   `study_results`. **The LLM loop is closed here**, before any GUI.
+0. **FEM0 — spike (gate): DONE.** `shell.nix` + CMake `HAVE_NETGEN` (mesher
+   built as its own `fem_mesher` lib so Netgen's PARALLEL/MPI/`-fabi-version=17`
+   requirements stay contained); `FemMesher` wrapper + netgen-gated
+   `test_fem.cpp`. Proved the C++ `OCCGeometry` path (the C nglib API can't
+   attribute surface elements to faces), tet10 via explicit `MakeSecondOrder`,
+   1:1 face attribution, per-face sizing, in-process reuse — no fallback needed.
+1. **FEM1 — mesh: DONE.** Study model (`FemStudy`) + Commands + serialization
+   (v29 + golden + studies/ dir) + `add_study`/`set_study`/refinement/load RPCs;
+   `FemMesher` (global + per-face size, second order, stats, canonical tet10/
+   tri6 ordering, error mapping) + `MeshStudy` orchestration + `mesh_study`;
+   `test_fem.cpp` mesher + command cases.
+2. **FEM2 — solve: DONE.** material E/ν/yield; `FemSolver` (tet10 assembly,
+   Dirichlet elimination, `SimplicialLDLT`, consistent loads, von Mises
+   recovery); `RunStudy` + Document result cache (derived, stale-not-autosolved);
+   `run_study`/`study_results` RPCs with factor of safety; analytic benchmark
+   suite (bar/cantilever/pressure). **The LLM loop is closed** — verified
+   headless (set variable → run_study → read stress vs yield → iterate).
 3. **FEM3 — display:** field renderer (warp, colormap, legend, max marker),
    Studies panel (list, loads via face picking, run, field/deform controls,
    stale badge). Verified visually via dev-watch.
