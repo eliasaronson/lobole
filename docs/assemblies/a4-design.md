@@ -1,6 +1,7 @@
 # Assemblies A4 — assembly features & beyond — design
 
-> Status: **signed off 2026-07-13** (all six decisions, as recommended).
+> Status: **SHIPPED 2026-07-13** (signed off same day, all six decisions as
+> recommended; phases 1–4 = d2e1e6e, 278ba4c, 4ff371c, 3b33bc1).
 > A1–A3 + A2.5 are complete: multi-part
 > projects, instanced occurrences, all six mate types with the
 > direct-frame-alignment solve, and interactive manipulation. A4 is the plan's

@@ -140,11 +140,27 @@ over-constrained. This dodges writing/embedding a 3D constraint solver (PlaneGCS
 is 2D-only) for the 95% case. Degrees-of-freedom display + drag-within-mate
 (spin a revolute) is the payoff feature.
 
-### A4 — Assembly features & beyond
+### A4 — Assembly features & beyond — **v1 SHIPPED (July 2026)** — [design: a4-design.md](a4-design.md)
+> **2026-07-13:** design signed off and **all four phases shipped**:
+> (1) part→assembly change propagation — per-part version stamps at solve,
+> auto re-solve on tab activation/open (d2e1e6e); (2) bill of materials —
+> derived rows by part, shared `Measure::MassOfBodies`, panel + `bom`/
+> `export_bom` RPCs + CSV (278ba4c); (3) in-context editing (visual v1) —
+> double-click an occurrence to edit its part with the assembly ghosted
+> (part at identity, ghosts inverse-transformed; the renderer's first
+> transparency: alpha-blend/depth-write-off second pass), live re-solve so
+> ghosts track mates (4ff371c); (4) exploded views — persistent named views
+> as pure view state, gizmo-authored offsets + radial auto-explode, format
+> v27 (3b33bc1). **Deferred to their own designs:** assembly-level features
+> (per-occurrence geometry breaks instancing; assemblies have no feature
+> list) and configurations (needs occurrence suppression + assembly
+> variables + part-config pinning); cross-part references in-context
+> (occurrence-qualified ElementRefs) build on the shipped ghost frame math.
+
 In-context editing (edit a part with the assembly ghosted around it),
 assembly-level features (hole through multiple parts), interference check
 ([inspect I4](../inspect/plan.md)), bill of materials, exploded views,
-configurations. All later; listed so A1–A3 decisions don't preclude them.
+configurations.
 
 ## Cross-cutting
 

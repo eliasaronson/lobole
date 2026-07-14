@@ -90,6 +90,7 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 24 | (A3) | Assembly `mates` list (connector frames + type; fastened/revolute/slider) |
 | 25 | (A3) | Cylindrical/planar/ball mates (+ optional `dx`/`dy`/`ball_rotation`) |
 | 26 | (A2.5) | Connector inference snap (`anchor.snap_edge` → a hole-center frame) |
+| 27 | (A4) | Assembly `exploded` views (named per-occurrence offset sets) |
 
 ## The directory format (F3, default for new saves)
 
@@ -139,6 +140,15 @@ zero/identity, so fastened/revolute/slider mates are byte-identical to v24.
 characteristic point (a circular edge's center, else its midpoint) instead of
 the face centroid, e.g. a mate snapped to a hole center. The face still gives
 the Z normal. Omitted when unset, so v25 mates are byte-identical.
+
+**Exploded views (v27, A4):** the envelope gains an `exploded` id list and
+the directory form an `exploded/<id>-<label>.json` file per view (both absent
+when there are none, so a v26 assembly is byte-identical). A view is `{id,
+name, steps:[{occurrence, offset:[x,y,z]}]}` — per-occurrence world offsets
+at explode factor 1; ids share the assembly's never-reused counter. Pure view
+state: the applied view and factor are transient (never serialized), and the
+offset composes into rendered transforms only — occurrences keep storing
+their solved placements, so exploding can never corrupt them.
 
 The multi-document **project** envelope is separate (`"format":
 "designer-project"`): `{version, active, documents:[{id, name, dir, type}]}`,
