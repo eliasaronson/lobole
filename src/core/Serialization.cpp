@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 28; // v28: unit-suffixed expressions (v27: exploded views)
+constexpr int kVersion = 29; // v29: FEM studies (v28: unit-suffixed expressions)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -1034,6 +1034,91 @@ ExplodedView ExplodedViewFromJson(const json& j) {
   return v;
 }
 
+// ---- FEM studies (v29) ----------------------------------------------------
+// A study is document-level configuration, not geometry; mesh and results are
+// derived and never appear here. Face refs use the {feature_id, element}
+// shape shared with feature files and the RPCs. Expression fields follow the
+// value+expr convention: the numeric field is always written, the expression
+// only when non-empty (a plain literal round-trips byte-identically).
+
+namespace {
+
+json ElementRefJson(const ElementRef& ref) {
+  return json{{"feature_id", ref.featureId}, {"element", ref.name}};
+}
+
+ElementRef ElementRefFromJson(const json& j) {
+  return ElementRef{j.value("feature_id", uint64_t{0}),
+                    j.value("element", std::string{})};
+}
+
+}  // namespace
+
+json StudyToJson(const fem::Study& s) {
+  json j;
+  j["type"] = "Study";
+  j["id"] = s.id;
+  j["name"] = s.name;
+  j["mesh_size"] = s.meshSize;
+  if (!s.meshSizeExpr.empty()) j["mesh_size_expr"] = s.meshSizeExpr;
+
+  if (!s.refinements.empty()) {
+    j["refinements"] = json::array();
+    for (const fem::Refinement& r : s.refinements) {
+      json rj = {{"face", ElementRefJson(r.face)}, {"size", r.size}};
+      if (!r.sizeExpr.empty()) rj["size_expr"] = r.sizeExpr;
+      j["refinements"].push_back(std::move(rj));
+    }
+  }
+
+  if (!s.loads.empty()) {
+    j["loads"] = json::array();
+    for (const fem::Load& l : s.loads) {
+      json lj = {{"id", l.id},
+                 {"type", fem::LoadTypeToString(l.type)},
+                 {"face", ElementRefJson(l.face)},
+                 {"magnitude", l.magnitude}};
+      if (!l.magnitudeExpr.empty()) lj["magnitude_expr"] = l.magnitudeExpr;
+      if (l.type == fem::LoadType::Force)
+        lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
+      j["loads"].push_back(std::move(lj));
+    }
+  }
+  return j;
+}
+
+fem::Study StudyFromJson(const json& j) {
+  fem::Study s;
+  s.id = j.at("id").get<uint64_t>();
+  s.name = j.value("name", std::string{});
+  s.meshSize = j.value("mesh_size", 0.0);
+  s.meshSizeExpr = j.value("mesh_size_expr", std::string{});
+
+  for (const json& rj : j.value("refinements", json::array())) {
+    fem::Refinement r;
+    r.face = ElementRefFromJson(rj.at("face"));
+    r.size = rj.value("size", 0.0);
+    r.sizeExpr = rj.value("size_expr", std::string{});
+    s.refinements.push_back(std::move(r));
+  }
+
+  for (const json& lj : j.value("loads", json::array())) {
+    fem::Load l;
+    l.id = lj.at("id").get<uint64_t>();
+    fem::LoadTypeFromString(lj.value("type", std::string{"fixed"}), l.type);
+    l.face = ElementRefFromJson(lj.at("face"));
+    l.magnitude = lj.value("magnitude", 0.0);
+    l.magnitudeExpr = lj.value("magnitude_expr", std::string{});
+    if (lj.contains("direction")) {
+      const auto& d = lj.at("direction");
+      l.direction = glm::dvec3(d.at(0).get<double>(), d.at(1).get<double>(),
+                               d.at(2).get<double>());
+    }
+    s.loads.push_back(std::move(l));
+  }
+  return s;
+}
+
 namespace {
 
 // Path classification (F3): a `.dsgn` path or existing directory is the
@@ -1218,6 +1303,29 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           !wanted.contains(entry.path().filename().string()))
         fs::remove(entry.path(), ec);
     }
+    // FEM studies (v29): file-per-study under studies/, id list in the index.
+    // Both the key and the directory stay absent when there are no studies, so
+    // a pre-v29 document re-saves byte-identically (the exploded-views v27
+    // discipline). Mesh/results are derived and never written.
+    if (!doc.GetStudies().empty()) {
+      const fs::path studyDir = dir / "studies";
+      fs::create_directories(studyDir);
+      index["studies"] = json::array();
+      std::set<std::string> wantedStudies;
+      for (const fem::Study& s : doc.GetStudies()) {
+        const std::string file =
+            std::to_string(s.id) + "-" + LabelSlug(s.name) + ".json";
+        if (!WriteTextAtomic(studyDir / file, StudyToJson(s).dump(2) + "\n", error))
+          return false;
+        index["studies"].push_back(s.id);
+        wantedStudies.insert(file);
+      }
+      for (const auto& entry : fs::directory_iterator(studyDir, ec)) {
+        if (entry.path().extension() == ".json" &&
+            !wantedStudies.contains(entry.path().filename().string()))
+          fs::remove(entry.path(), ec);
+      }
+    }
     // Parameters live in the index envelope (small, diff-friendly there).
     if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
       return false;
@@ -1279,6 +1387,26 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       }
       std::ifstream fin(it->second);
       doc->AddFeature(FeatureFromJson(json::parse(fin)));
+    }
+    // FEM studies (v29): id-prefix files under studies/, index order. A pre-v29
+    // document has no `studies` key ⇒ the loop is empty.
+    {
+      std::map<uint64_t, fs::path> studyById;
+      for (const auto& entry :
+           fs::directory_iterator(fs::path(dirPath) / "studies", ec)) {
+        if (entry.path().extension() != ".json") continue;
+        studyById[std::stoull(entry.path().filename().string())] = entry.path();
+      }
+      for (const auto& idJson : index.value("studies", json::array())) {
+        const uint64_t id = idJson.get<uint64_t>();
+        const auto it = studyById.find(id);
+        if (it == studyById.end()) {
+          if (error) *error = "missing study file for id " + std::to_string(id);
+          return nullptr;
+        }
+        std::ifstream sin(it->second);
+        doc->RestoreStudy(StudyFromJson(json::parse(sin)));
+      }
     }
     doc->SetRollback(index.value("rollback", -1));
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
@@ -1492,6 +1620,13 @@ bool Save(const Document& doc, const std::string& path, std::string* error) {
     for (const auto& feature : doc.GetFeatures()) {
       j["features"].push_back(FeatureToJson(*feature));
     }
+    // FEM studies (v29), inline here (unlike the dir format's studies/ files);
+    // absent when none so pre-v29 files stay byte-identical.
+    if (!doc.GetStudies().empty()) {
+      j["studies"] = json::array();
+      for (const fem::Study& s : doc.GetStudies())
+        j["studies"].push_back(StudyToJson(s));
+    }
 
     std::ofstream out(path);
     if (!out) {
@@ -1545,6 +1680,9 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
     }
     for (const auto& fj : j.at("features")) {
       doc->AddFeature(FeatureFromJson(fj));
+    }
+    for (const auto& sj : j.value("studies", json::array())) {  // v29
+      doc->RestoreStudy(StudyFromJson(sj));
     }
     doc->SetRollback(j.value("rollback", -1)); // v19; absent = end
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),

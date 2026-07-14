@@ -162,6 +162,44 @@ const Parameter* Document::FindParameter(const std::string& name) const {
   return nullptr;
 }
 
+const fem::Study* Document::FindStudy(uint64_t id) const {
+  for (const fem::Study& s : m_studies) {
+    if (s.id == id) return &s;
+  }
+  return nullptr;
+}
+
+fem::Study* Document::FindStudy(uint64_t id) {
+  for (fem::Study& s : m_studies) {
+    if (s.id == id) return &s;
+  }
+  return nullptr;
+}
+
+fem::Study& Document::AddStudy(const std::string& name) {
+  fem::Study study;
+  study.id = m_nextId++;
+  study.name = name.empty() ? ("Study " + std::to_string(m_studies.size() + 1)) : name;
+  m_studies.push_back(std::move(study));
+  return m_studies.back();
+}
+
+bool Document::RemoveStudy(uint64_t id) {
+  for (auto it = m_studies.begin(); it != m_studies.end(); ++it) {
+    if (it->id == id) {
+      m_studies.erase(it);
+      return true;
+    }
+  }
+  return false;
+}
+
+void Document::RestoreStudy(fem::Study study) {
+  EnsureNextIdAtLeast(study.id + 1);
+  for (const fem::Load& l : study.loads) EnsureNextIdAtLeast(l.id + 1);
+  m_studies.push_back(std::move(study));
+}
+
 bool Document::SetParameter(const std::string& name,
                             const std::string& expression,
                             const std::string& comment) {

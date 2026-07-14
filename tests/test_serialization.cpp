@@ -152,3 +152,105 @@ TEST_CASE("Loading rejects unknown feature types", "[serialization]") {
 
   fs::remove(path);
 }
+
+// ---- FEM studies (v29) ----------------------------------------------------
+
+namespace {
+Document DocWithStudy() {
+  Document doc;
+  doc.SetParameter("load_n", "1000");
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0),
+                                              10.0, 4.0, 4.0));
+  fem::Study& s = doc.AddStudy("Static 1");
+  s.meshSize = 5.0;
+  s.meshSizeExpr = "";
+  s.refinements.push_back(
+      {ElementRef{2, "2/g1"}, 1.0, std::string{}});
+  fem::Load fixed;
+  fixed.id = doc.AllocateId();
+  fixed.type = fem::LoadType::Fixed;
+  fixed.face = ElementRef{2, "2/cap0"};
+  s.loads.push_back(fixed);
+  fem::Load force;
+  force.id = doc.AllocateId();
+  force.type = fem::LoadType::Force;
+  force.face = ElementRef{2, "2/cap1"};
+  force.magnitude = 1000.0;
+  force.magnitudeExpr = "load_n";
+  force.direction = glm::dvec3(0, 0, -1);
+  s.loads.push_back(force);
+  return doc;
+}
+
+void CheckStudyMatches(const Document& loaded) {
+  REQUIRE(loaded.GetStudies().size() == 1);
+  const fem::Study& s = loaded.GetStudies()[0];
+  CHECK(s.name == "Static 1");
+  CHECK(s.meshSize == 5.0);
+  REQUIRE(s.refinements.size() == 1);
+  CHECK(s.refinements[0].face.name == "2/g1");
+  CHECK(s.refinements[0].size == 1.0);
+  REQUIRE(s.loads.size() == 2);
+  CHECK(s.loads[0].type == fem::LoadType::Fixed);
+  CHECK(s.loads[0].face.name == "2/cap0");
+  CHECK(s.loads[1].type == fem::LoadType::Force);
+  CHECK(s.loads[1].magnitude == 1000.0);
+  CHECK(s.loads[1].magnitudeExpr == "load_n");
+  CHECK(s.loads[1].direction.z == -1.0);
+}
+}  // namespace
+
+TEST_CASE("Study round-trips through the single-file format", "[serialization][fem]") {
+  Document doc = DocWithStudy();
+  fs::path path = TempFile("designer_test_study.json");
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  INFO(error);
+  REQUIRE(loaded != nullptr);
+  CheckStudyMatches(*loaded);
+  fs::remove(path);
+}
+
+TEST_CASE("Study round-trips through the directory format", "[serialization][fem]") {
+  Document doc = DocWithStudy();
+  fs::path dir = fs::temp_directory_path() / "designer_test_study.dsgn";
+  fs::remove_all(dir);
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, dir.string(), &error));
+  CHECK(fs::exists(dir / "studies"));
+  auto loaded = DocumentIO::Load(dir.string(), &error);
+  INFO(error);
+  REQUIRE(loaded != nullptr);
+  CheckStudyMatches(*loaded);
+  // A freshly allocated id must not collide with the loaded study/load ids
+  // (the high-water mark was restored on load).
+  const fem::Study& s = loaded->GetStudies()[0];
+  uint64_t maxId = s.id;
+  for (const fem::Load& l : s.loads) maxId = std::max(maxId, l.id);
+  CHECK(loaded->AllocateId() > maxId);
+  fs::remove_all(dir);
+}
+
+TEST_CASE("A document with no studies writes no studies key or dir",
+          "[serialization][fem]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0),
+                                              1.0, 1.0, 1.0));
+  // Single-file: no "studies" key.
+  fs::path path = TempFile("designer_test_nostudy.json");
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  std::ifstream in(path);
+  const std::string body((std::istreambuf_iterator<char>(in)),
+                         std::istreambuf_iterator<char>());
+  CHECK(body.find("studies") == std::string::npos);
+  fs::remove(path);
+
+  // Directory: no studies/ subdir.
+  fs::path dir = fs::temp_directory_path() / "designer_test_nostudy.dsgn";
+  fs::remove_all(dir);
+  REQUIRE(DocumentIO::Save(doc, dir.string(), &error));
+  CHECK_FALSE(fs::exists(dir / "studies"));
+  fs::remove_all(dir);
+}

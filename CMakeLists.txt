@@ -203,6 +203,7 @@ set(core_sources
     src/core/FilletFeature.cpp
     src/core/PatternFeature.cpp
     src/core/SketchSolver.cpp
+    src/core/FemStudy.cpp
 )
 
 find_package(nlohmann_json 3 REQUIRED)

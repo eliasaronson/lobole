@@ -2,6 +2,7 @@
 
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/FemStudy.h"
 
 #include <cstdint>
 #include <memory>
@@ -77,6 +78,38 @@ public:
   // (and UI previews) evaluate against.
   const SymbolTable& Symbols() const { return m_symbols; }
 
+  // ---- Studies (FEM) ----------------------------------------------------
+  // Document-level analysis definitions, a sibling to the parameter table.
+  // A study consumes the finished bodies and produces no geometry, so it is
+  // not a Feature and does not participate in regeneration. Mesh and results
+  // are derived data held elsewhere (never serialized); only this
+  // configuration persists. Edits do NOT auto-regenerate (a study is inert
+  // until explicitly meshed/solved).
+
+  const std::vector<fem::Study>& GetStudies() const { return m_studies; }
+  std::vector<fem::Study>& GetStudies() { return m_studies; }
+  const fem::Study* FindStudy(uint64_t id) const;
+  fem::Study* FindStudy(uint64_t id);
+
+  // Appends a new study with a document-unique id and returns it. `name`
+  // empty means an auto-generated "Study N".
+  fem::Study& AddStudy(const std::string& name = "");
+  // Removes the study with `id`; returns false if absent.
+  bool RemoveStudy(uint64_t id);
+
+  // Appends a fully-formed study (keeping its ids) and raises the id
+  // high-water mark past the study and all its loads. For deserialization.
+  void RestoreStudy(fem::Study study);
+
+  // Allocates the next document-unique id (studies and their loads draw from
+  // the same counter as features, so ids never collide across kinds).
+  uint64_t AllocateId() { return m_nextId++; }
+  // Raises the id high-water mark on load so freshly allocated ids never
+  // collide with deserialized ones.
+  void EnsureNextIdAtLeast(uint64_t id) {
+    if (id > m_nextId) m_nextId = id;
+  }
+
   // Rebuilds all bodies by executing the feature list in order, after
   // re-evaluating the parameter table and every expression-driven feature
   // field. Returns false if any feature failed; bodies then reflect the
@@ -120,6 +153,7 @@ private:
   std::vector<std::unique_ptr<Feature>> m_features;
   std::vector<Body> m_bodies;
   std::vector<Parameter> m_parameters;
+  std::vector<fem::Study> m_studies;
   SymbolTable m_symbols;
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;

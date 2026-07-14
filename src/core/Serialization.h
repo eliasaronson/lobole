@@ -51,4 +51,10 @@ Mate MateFromJson(const nlohmann::json& j);
 nlohmann::json ExplodedViewToJson(const ExplodedView& view);
 ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
 
+// Single-study (de)serialization (v29, FEM); used both for the studies/ dir
+// files and to echo/snapshot studies from the RPCs and Commands. Throws on
+// malformed input.
+nlohmann::json StudyToJson(const fem::Study& study);
+fem::Study StudyFromJson(const nlohmann::json& j);
+
 }  // namespace DocumentIO
