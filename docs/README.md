@@ -38,5 +38,9 @@ top-level vision + workstream index and holds the recommended sequencing.
 - **[assemblies/](assemblies/plan.md)** — multi-part projects, occurrences +
   instancing, mate connectors; the prerequisites gate (incremental regen,
   instancing, toponaming) and the memory/performance strategy.
+- **[simulation/](simulation/plan.md)** — FEM structural analysis: Netgen tet
+  meshing, in-house linear-static solver on Eigen, face BCs via toponaming
+  refs, colormapped results. **Design for sign-off** (consciously reverses
+  the roadmap's "simulation/FEA out of scope" line).
 
 Project-level files (`README.md`, `THIRD_PARTY.md`) stay at the repo root.
