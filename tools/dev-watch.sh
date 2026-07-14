@@ -27,14 +27,20 @@ if [ ! -x "$BIN" ]; then
   exit 1
 fi
 
+LOG="${DEV_WATCH_LOG:-/tmp/designer-dev.log}"
+
 stamp() { stat -c %Y "$BIN" 2>/dev/null || echo 0; }
 launch() {
-  "$BIN" --remote "$PORT" &
+  # Tee app output to $LOG (readable by tooling/an assistant) and the terminal.
+  # `stdbuf -oL -eL` keeps the log line-buffered so a crash's last lines flush.
+  echo "===== launch $(date '+%H:%M:%S') pid-to-follow on --remote $PORT =====" >> "$LOG"
+  stdbuf -oL -eL "$BIN" --remote "$PORT" > >(tee -a "$LOG") 2>&1 &
   APP=$!
-  echo "dev-watch: Designer running (pid $APP) on --remote $PORT"
+  echo "dev-watch: Designer running (pid $APP) on --remote $PORT (log: $LOG)"
 }
 
 echo "dev-watch: watching $BIN; relaunches on rebuild. Ctrl-C to stop."
+echo "dev-watch: app log -> $LOG"
 launch
 LAST="$(stamp)"
 trap 'echo; echo "dev-watch: stopping"; kill "$APP" 2>/dev/null; exit 0' INT TERM
