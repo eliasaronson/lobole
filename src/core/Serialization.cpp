@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 25; // v25: cylindrical/planar/ball mates (v24: mates)
+constexpr int kVersion = 26; // v26: connector snap (v25: cyl/planar/ball mates)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -933,11 +933,16 @@ MateType MateTypeFromString(const std::string& s) {
 json ConnectorToJson(const Connector& c) {
   json j;
   j["occurrence"] = c.occurrenceId;
-  if (c.anchor.origin)
+  if (c.anchor.origin) {
     j["anchor"] = {{"origin", true}};
-  else
-    j["anchor"] = {{"face", {{"feature_id", c.anchor.face.featureId},
+  } else {
+    json anchor = {{"face", {{"feature_id", c.anchor.face.featureId},
                              {"element", c.anchor.face.name}}}};
+    if (c.anchor.snapEdge.IsSet()) // inference snap (v26); omit when unset
+      anchor["snap_edge"] = {{"feature_id", c.anchor.snapEdge.featureId},
+                             {"element", c.anchor.snapEdge.name}};
+    j["anchor"] = std::move(anchor);
+  }
   return j;
 }
 
@@ -951,6 +956,11 @@ Connector ConnectorFromJson(const json& j) {
     const json& f = a.at("face");
     c.anchor.face = ElementRef{f.value("feature_id", uint64_t{0}),
                                f.value("element", std::string{})};
+    if (a.contains("snap_edge")) {
+      const json& s = a.at("snap_edge");
+      c.anchor.snapEdge = ElementRef{s.value("feature_id", uint64_t{0}),
+                                     s.value("element", std::string{})};
+    }
   }
   return c;
 }

@@ -63,6 +63,7 @@ int SolveActiveAssembly(AppState& state);
 struct AssemblyFacePick {
   uint64_t occurrenceId = 0;
   ElementRef face;
+  ElementRef snapEdge; // inference snap: nearest circular-edge (hole) center, if any
 };
 bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
 

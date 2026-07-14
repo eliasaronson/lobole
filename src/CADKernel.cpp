@@ -29,6 +29,8 @@
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Circ.hxx>
+#include <GeomAbs_CurveType.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Poly_Triangle.hxx>
 #include <Geom_Surface.hxx>
@@ -296,6 +298,54 @@ bool CADShape::FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
   // Deterministic perpendicular (matches FacePlane's u-axis heuristic).
   glm::vec3 u = std::abs(axis.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
   xAxis = glm::normalize(u - glm::dot(u, axis) * axis);
+  return true;
+}
+
+void CADShape::FaceCircleCenters(int faceIndex, std::vector<glm::vec3>& centers,
+                                 std::vector<int>& edgeIndices) const {
+  centers.clear();
+  edgeIndices.clear();
+  if (!IsValid() || faceIndex < 0) return;
+  int i = 0;
+  TopoDS_Face face;
+  for (TopExp_Explorer exp(m_shape, TopAbs_FACE); exp.More(); exp.Next(), i++) {
+    if (i == faceIndex) { face = TopoDS::Face(exp.Current()); break; }
+  }
+  if (face.IsNull()) return;
+
+  // Global edge order (0-based) matches ElementMap::edgeNames / edge picking.
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(m_shape, TopAbs_EDGE, edges);
+  for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(edge)) continue;
+    BRepAdaptor_Curve curve(edge);
+    if (curve.GetType() != GeomAbs_Circle) continue;
+    const gp_Pnt c = curve.Circle().Location();
+    const int idx = edges.FindIndex(edge) - 1; // -> 0-based edgeNames index
+    if (idx < 0) continue;
+    centers.emplace_back(c.X(), c.Y(), c.Z());
+    edgeIndices.push_back(idx);
+  }
+}
+
+bool CADShape::EdgeSnapPoint(int edgeIndex, glm::vec3& point) const {
+  if (!IsValid() || edgeIndex < 0) return false;
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(m_shape, TopAbs_EDGE, edges);
+  if (edgeIndex >= edges.Extent()) return false;
+  const TopoDS_Edge& edge = TopoDS::Edge(edges(edgeIndex + 1)); // 1-based map
+  if (edge.IsNull()) return false;
+  BRepAdaptor_Curve curve(edge);
+  if (curve.GetType() == GeomAbs_Circle) {
+    const gp_Pnt c = curve.Circle().Location();
+    point = glm::vec3(c.X(), c.Y(), c.Z());
+  } else {
+    // Midpoint of the parameter range for a non-circular edge.
+    const gp_Pnt m =
+        curve.Value(0.5 * (curve.FirstParameter() + curve.LastParameter()));
+    point = glm::vec3(m.X(), m.Y(), m.Z());
+  }
   return true;
 }
 

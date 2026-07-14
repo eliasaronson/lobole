@@ -843,6 +843,28 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
 
   out.occurrenceId = rm->occurrenceId;
   out.face = ElementRef{body.createdBy, *name};
+  out.snapEdge = ElementRef{}; // default: face centroid
+
+  // Inference snap (A2.5 phase 4): if the face has circular edges (holes/
+  // bosses), snap the connector to the one nearest the click. Centers are in
+  // part-local space; compare in world via the occurrence transform.
+  std::vector<glm::vec3> centers;
+  std::vector<int> edgeIdx;
+  body.shape.FaceCircleCenters(static_cast<int>(hit.faceIndex), centers, edgeIdx);
+  if (!centers.empty()) {
+    const glm::mat4 xf = OccurrenceMatrix(*occ);
+    float best = FLT_MAX;
+    int bestI = -1;
+    for (size_t k = 0; k < centers.size(); k++) {
+      const glm::vec3 w = glm::vec3(xf * glm::vec4(centers[k], 1.0f));
+      const float d = glm::length(w - hit.point);
+      if (d < best) { best = d; bestI = static_cast<int>(k); }
+    }
+    if (bestI >= 0) {
+      if (const std::string* en = body.elementMap.EdgeNameOf(edgeIdx[bestI]))
+        out.snapEdge = ElementRef{body.createdBy, *en}; // named → persistable
+    }
+  }
   return true;
 }
 
@@ -888,8 +910,11 @@ void MateToolPick(AppState& state, const Ray& ray) {
     tool.first.occurrenceId = pick.occurrenceId;
     tool.first.anchor.origin = false;
     tool.first.anchor.face = pick.face;
+    tool.first.anchor.snapEdge = pick.snapEdge; // hole-center snap, if any
     tool.haveFirst = true;
-    tool.message = "Pick the second face (connector B)";
+    tool.message = pick.snapEdge.IsSet()
+                       ? "Snapped to a hole center — pick connector B"
+                       : "Pick the second face (connector B)";
     return;
   }
   if (pick.occurrenceId == tool.first.occurrenceId) {
@@ -905,6 +930,7 @@ void MateToolPick(AppState& state, const Ray& ray) {
   mate.b.occurrenceId = pick.occurrenceId;
   mate.b.anchor.origin = false;
   mate.b.anchor.face = pick.face;
+  mate.b.anchor.snapEdge = pick.snapEdge; // hole-center snap, if any
   SnapshotAssembly(state);
   tool.previewMateId = state.assembly->AddMate(mate);
   const int errored = SolveActiveAssembly(state);

@@ -943,10 +943,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       json anchor;
       if (c.value("origin", false))
         anchor = {{"origin", true}};
-      else if (c.contains("face"))
+      else if (c.contains("face")) {
         anchor = {{"face", {{"feature_id", c.at("face").at("feature_id")},
                             {"element", c.at("face").at("element")}}}};
-      else
+        if (c.contains("snap_edge")) // inference snap (hole center) — v26
+          anchor["snap_edge"] = {{"feature_id", c.at("snap_edge").at("feature_id")},
+                                 {"element", c.at("snap_edge").at("element")}};
+      } else
         throw std::runtime_error(
             "connector needs 'origin:true' or 'face:{feature_id,element}'");
       return {{"occurrence", c.at("occurrence")}, {"anchor", anchor}};

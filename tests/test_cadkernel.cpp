@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <filesystem>
 
+using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
 TEST_CASE("CreateBox produces a valid solid with correct volume", "[kernel][primitives]") {
@@ -45,6 +46,37 @@ TEST_CASE("CreateCylinder volume", "[kernel][primitives]") {
     REQUIRE(cyl.IsValid());
     const double expected = 3.14159265358979 * r * r * h;
     CHECK_THAT(cyl.Volume(), WithinRel(expected, 1e-4));
+}
+
+TEST_CASE("FaceCircleCenters + EdgeSnapPoint find a cylinder's circle", "[kernel]") {
+  // A cylinder about +Z at the origin: its flat cap faces each have one
+  // circular edge, centered on the axis (A2.5 connector inference).
+  const double r = 1.0, h = 2.0;
+  CADShape cyl =
+      CADKernel::Instance().CreateCylinder(glm::vec3(0), glm::vec3(0, 0, 1), r, h);
+  REQUIRE(cyl.IsValid());
+
+  // Find a planar cap face (the flat end), and confirm it reports a circle
+  // center on the Z axis.
+  bool foundCap = false;
+  for (int f = 0; f < 8 && !foundCap; f++) {
+    glm::vec3 c, n, u;
+    if (!cyl.FacePlane(f, c, n, u)) continue; // skip the curved side
+    std::vector<glm::vec3> centers;
+    std::vector<int> edges;
+    cyl.FaceCircleCenters(f, centers, edges);
+    if (centers.empty()) continue;
+    foundCap = true;
+    CHECK_THAT(centers[0].x, WithinAbs(0.0, 1e-6)); // on the axis
+    CHECK_THAT(centers[0].y, WithinAbs(0.0, 1e-6));
+    // The named-edge snap point matches the circle center.
+    glm::vec3 snap;
+    REQUIRE(cyl.EdgeSnapPoint(edges[0], snap));
+    CHECK_THAT(snap.x, WithinAbs(centers[0].x, 1e-6));
+    CHECK_THAT(snap.y, WithinAbs(centers[0].y, 1e-6));
+    CHECK_THAT(snap.z, WithinAbs(centers[0].z, 1e-6));
+  }
+  CHECK(foundCap);
 }
 
 TEST_CASE("Boolean union of overlapping boxes", "[kernel][booleans]") {

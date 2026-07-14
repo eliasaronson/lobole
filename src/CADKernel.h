@@ -71,6 +71,17 @@ public:
     bool FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
                   glm::vec3& xAxis) const;
 
+    // Connector inference (A2.5): the centers of the face's circular edges,
+    // with each edge's index in the deduplicated TopExp::MapShapes(EDGE) order
+    // (the ElementMap::edgeNames convention). Used to snap a mate connector to
+    // a hole/boss center on pick. Empty when the face has no circular edges.
+    void FaceCircleCenters(int faceIndex, std::vector<glm::vec3>& centers,
+                           std::vector<int>& edgeIndices) const;
+    // The characteristic point of the edge at `edgeIndex` (same order): a
+    // circular edge's center, else the edge's midpoint. Returns false if out of
+    // range. Used to derive a snapped connector frame origin.
+    bool EdgeSnapPoint(int edgeIndex, glm::vec3& point) const;
+
     // Access to underlying shape
     const TopoDS_Shape& GetShape() const { return m_shape; }
     
@@ -170,6 +181,9 @@ public:
     std::vector<CADShape> SplitSolids() const { return {}; }
     bool FacePlane(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
     bool FaceAxis(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
+    void FaceCircleCenters(int, std::vector<glm::vec3>&,
+                           std::vector<int>&) const {}
+    bool EdgeSnapPoint(int, glm::vec3&) const { return false; }
 };
 
 class CADKernel {

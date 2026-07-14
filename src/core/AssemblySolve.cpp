@@ -97,11 +97,19 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
     if (!faceIdx) return std::nullopt; // owner found, name no longer resolves
 
     glm::vec3 origin, primary, xHint;
-    if (body.shape.FacePlane(*faceIdx, origin, primary, xHint))
-      return FrameMatrix(origin, xHint, /*z=*/primary); // planar: Z = normal
-    if (body.shape.FaceAxis(*faceIdx, origin, primary, xHint))
-      return FrameMatrix(origin, xHint, /*z=*/primary); // cylindrical: Z = axis
-    return std::nullopt; // resolved to a face we can't derive a frame from
+    bool ok = body.shape.FacePlane(*faceIdx, origin, primary, xHint) ||
+              body.shape.FaceAxis(*faceIdx, origin, primary, xHint);
+    if (!ok) return std::nullopt; // a face we can't derive a frame from
+
+    // Inference snap (A2.5 phase 4): override the origin with the snapped edge's
+    // characteristic point (a hole center, etc.), keeping the face's Z normal.
+    if (c.anchor.snapEdge.IsSet()) {
+      if (const auto edgeIdx = body.elementMap.ResolveEdge(c.anchor.snapEdge.name)) {
+        glm::vec3 snap;
+        if (body.shape.EdgeSnapPoint(*edgeIdx, snap)) origin = snap;
+      }
+    }
+    return FrameMatrix(origin, xHint, /*z=*/primary);
   }
   return std::nullopt; // no body from the referenced feature
 }

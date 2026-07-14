@@ -39,6 +39,11 @@ struct Occurrence {
 struct ConnectorAnchor {
   bool origin = false; // true → the part origin; `face` is ignored
   ElementRef face;     // valid when !origin
+  // Inference snap (A2.5 phase 4): when set, the frame ORIGIN is this edge's
+  // characteristic point (a circular edge's center, else its midpoint) instead
+  // of the face centroid — e.g. a mate snapped to a hole center. The face still
+  // gives the Z normal. Additive; face-centroid when unset.
+  ElementRef snapEdge;
 };
 
 // One side of a mate: a frame on some occurrence of this assembly.

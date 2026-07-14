@@ -336,6 +336,37 @@ TEST_CASE("Frozen v25 golden: cylindrical/planar/ball mate schema", "[assembly][
   fs::remove(tmp);
 }
 
+TEST_CASE("Connector inference snap edge round-trips (v26)", "[assembly]") {
+  AssemblyDocument asmDoc = SampleAssembly();
+  Mate m;
+  m.name = "bolt";
+  m.type = MateType::Fastened;
+  m.a.occurrenceId = 1;
+  m.a.anchor.face = ElementRef{4, "4/cap1"};
+  m.a.anchor.snapEdge = ElementRef{4, "4/g7;M1"}; // snapped to a hole center
+  m.b.occurrenceId = 2;
+  m.b.anchor.origin = true;
+  asmDoc.AddMate(m);
+
+  const fs::path path = fs::temp_directory_path() / "designer_snap_rt.json";
+  std::string error;
+  REQUIRE(DocumentIO::SaveAssembly(asmDoc, path.string(), &error));
+  {
+    std::ifstream in(path);
+    nlohmann::json j = nlohmann::json::parse(in);
+    const auto& a = j.at("mates")[0].at("a").at("anchor");
+    CHECK(a.at("snap_edge").at("element") == "4/g7;M1");
+  }
+  auto reloaded = DocumentIO::LoadAssembly(path.string(), &error);
+  REQUIRE(reloaded != nullptr);
+  const Mate* rm = reloaded->GetMates()[0].id ? &reloaded->GetMates()[0] : nullptr;
+  REQUIRE(rm != nullptr);
+  CHECK(rm->a.anchor.snapEdge.featureId == 4);
+  CHECK(rm->a.anchor.snapEdge.name == "4/g7;M1");
+  CHECK_FALSE(rm->b.anchor.snapEdge.IsSet()); // origin anchor: no snap
+  fs::remove(path);
+}
+
 TEST_CASE("A part loader rejects an assembly and vice versa", "[assembly]") {
   AssemblyDocument asmDoc = SampleAssembly();
   const fs::path path = fs::temp_directory_path() / "designer_asm_kind.json";

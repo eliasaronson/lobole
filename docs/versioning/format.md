@@ -89,6 +89,7 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 23 | `0949554` | Assembly document `kind:"assembly"` + `Occurrence` list (A2) |
 | 24 | (A3) | Assembly `mates` list (connector frames + type; fastened/revolute/slider) |
 | 25 | (A3) | Cylindrical/planar/ball mates (+ optional `dx`/`dy`/`ball_rotation`) |
+| 26 | (A2.5) | Connector inference snap (`anchor.snap_edge` → a hole-center frame) |
 
 ## The directory format (F3, default for new saves)
 
@@ -132,6 +133,12 @@ both free), `planar` (in-plane slide + spin), and `ball` (free rotation).
 Planar's in-plane DOF are optional `dx`/`dy` floats; ball's rotation is an
 optional `ball_rotation` quaternion `[x,y,z,w]`. All three are omitted when
 zero/identity, so fastened/revolute/slider mates are byte-identical to v24.
+
+**Connector inference snap (v26, A2.5):** a face anchor may carry an optional
+`snap_edge` (an inline `ElementRef`) — the frame origin is then that edge's
+characteristic point (a circular edge's center, else its midpoint) instead of
+the face centroid, e.g. a mate snapped to a hole center. The face still gives
+the Z normal. Omitted when unset, so v25 mates are byte-identical.
 
 The multi-document **project** envelope is separate (`"format":
 "designer-project"`): `{version, active, documents:[{id, name, dir, type}]}`,
