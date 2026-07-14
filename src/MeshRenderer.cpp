@@ -106,6 +106,10 @@ void MeshRenderer::Shutdown() {
         vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
     }
 
+    if (m_ghostPipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(m_device, m_ghostPipeline, nullptr);
+    }
+
     if (m_pipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     }
@@ -208,6 +212,14 @@ void MeshRenderer::SetInstanceVisible(uint32_t instanceId, bool visible) {
     }
 }
 
+void MeshRenderer::SetInstanceGhost(uint32_t instanceId, float alpha) {
+    // Call after SetInstanceColor/Material — those reset baseColor.a to 1.
+    if (MeshInstance* instance = GetInstance(instanceId)) {
+        instance->ghost = true;
+        instance->baseColor.a = alpha;
+    }
+}
+
 uint32_t MeshRenderer::AddMesh(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
     uint32_t assetId = CreateAsset(vertices, indices);
     if (assetId == 0) return 0;
@@ -256,9 +268,6 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     // the shared UBO rather than per-draw push constants.
     ubo.clipPlane = m_clipPlane;
 
-    // Bind pipeline
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-
     // Set viewport to the central region (excludes the side panels)
     VkViewport viewport{};
     viewport.x = static_cast<float>(m_viewportX);
@@ -284,37 +293,45 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     // One draw per instance; the asset's buffers are bound once per run of
     // consecutive instances sharing it. Push constants live in the command
     // stream, so per-instance data costs no descriptor or sync machinery.
+    // Two passes (A4): all opaque instances through the blend-disabled
+    // pipeline first, then ghosts through the alpha-blended, depth-write-off
+    // ghost pipeline (translucent context geometry never occludes anything).
     struct PushConstants {
         glm::mat4 model;
         glm::uvec4 highlight;
         glm::vec4 material;  // metallic, roughness, specular, reflectance
-        glm::vec4 baseColor; // per-instance albedo
+        glm::vec4 baseColor; // per-instance albedo (a = ghost opacity)
     } push;
 
-    uint32_t boundAssetId = 0;
-    for (const auto& instance : m_instances) {
-        if (!instance || !instance->visible) continue;
+    for (const bool ghostPass : {false, true}) {
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          ghostPass ? m_ghostPipeline : m_graphicsPipeline);
+        uint32_t boundAssetId = 0;
+        for (const auto& instance : m_instances) {
+            if (!instance || !instance->visible) continue;
+            if (instance->ghost != ghostPass) continue;
 
-        MeshAsset* asset = GetAsset(instance->assetId);
-        if (!asset || asset->vertices.empty()) continue;
+            MeshAsset* asset = GetAsset(instance->assetId);
+            if (!asset || asset->vertices.empty()) continue;
 
-        push.model = instance->transform;
-        push.highlight = instance->highlight;
-        push.material = instance->materialParams;
-        push.baseColor = instance->baseColor;
-        vkCmdPushConstants(commandBuffer, m_pipelineLayout,
-                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(push), &push);
+            push.model = instance->transform;
+            push.highlight = instance->highlight;
+            push.material = instance->materialParams;
+            push.baseColor = instance->baseColor;
+            vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(push), &push);
 
-        if (instance->assetId != boundAssetId) {
-            VkBuffer vertexBuffers[] = {asset->vertexBuffer};
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-            vkCmdBindIndexBuffer(commandBuffer, asset->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            boundAssetId = instance->assetId;
+            if (instance->assetId != boundAssetId) {
+                VkBuffer vertexBuffers[] = {asset->vertexBuffer};
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(commandBuffer, asset->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                boundAssetId = instance->assetId;
+            }
+
+            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(asset->indices.size()), 1, 0, 0, 0);
         }
-
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(asset->indices.size()), 1, 0, 0, 0);
     }
 }
 
@@ -544,6 +561,25 @@ bool MeshRenderer::CreateGraphicsPipeline() {
 
     if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline) != VK_SUCCESS) {
         std::cerr << "Failed to create graphics pipeline!" << std::endl;
+        vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
+        return false;
+    }
+
+    // Ghost pipeline (A4 in-context editing): identical except alpha blending
+    // on and depth writes off — translucent context geometry drawn in a
+    // second pass, depth-tested against (but never occluding) the opaque
+    // scene. Unsorted; fine at reference-visual alphas.
+    depthStencil.depthWriteEnable = VK_FALSE;
+    colorBlendAttachment.blendEnable = VK_TRUE;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+    if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_ghostPipeline) != VK_SUCCESS) {
+        std::cerr << "Failed to create ghost pipeline!" << std::endl;
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
         return false;

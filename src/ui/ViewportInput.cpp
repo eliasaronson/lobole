@@ -188,8 +188,8 @@ void HandleViewportInput(AppState& state) {
     return;
 
   // Assembly tab: pick whole occurrences — click selects (highlights every
-  // instance), double-click enters the referenced part. While the mate tool is
-  // arming, clicks pick connector faces instead.
+  // instance), double-click enters the referenced part in context (assembly
+  // ghosted, A4). While the mate tool is arming, clicks pick connector faces.
   if (state.assembly) {
     // Escape cancels an in-progress mate.
     if (state.mateTool.active && ImGui::IsKeyPressed(ImGuiKey_Escape))
@@ -238,13 +238,9 @@ void HandleViewportInput(AppState& state) {
           if (m.meshId == hit.meshId) { occId = m.occurrenceId; break; }
       }
       if (occId && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        if (const Occurrence* o = state.assembly->FindById(occId))
-          for (size_t i = 0; i < state.parts.size(); i++)
-            if (state.parts[i].kind == DocKind::Part &&
-                state.parts[i].id == o->partId) {
-              SetActivePart(state, i); // enter the part tab
-              break;
-            }
+        // Enter the part IN CONTEXT (A4): the part tab with the rest of the
+        // assembly ghosted around it. Falls back to nothing on a dangling ref.
+        EnterInContextEdit(state, occId);
       } else {
         SelectOccurrence(state, occId); // 0 clears the selection
       }

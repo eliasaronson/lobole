@@ -24,6 +24,36 @@
 namespace ui {
 
 namespace {
+// In-context editing banner (A4): floats top-center over the viewport while
+// a part is edited with its context assembly ghosted. Return (or any tab
+// switch) exits the mode.
+void DrawInContextBanner(AppState& state) {
+  if (!state.document || !state.inContext.assemblySlotId)
+    return;
+  const auto asmIndex = SlotIndexById(state, state.inContext.assemblySlotId);
+  if (!asmIndex)
+    return;
+  ImGui::SetNextWindowPos(
+      ImVec2(state.viewportPos.x + state.viewportSize.x * 0.5f,
+             state.viewportPos.y + 34.0f),
+      ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.8f);
+  ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+                           ImGuiWindowFlags_AlwaysAutoResize |
+                           ImGuiWindowFlags_NoSavedSettings |
+                           ImGuiWindowFlags_NoMove |
+                           ImGuiWindowFlags_NoDocking;
+  if (ImGui::Begin("##InContextBanner", nullptr, flags)) {
+    ImGui::Text("Editing %s in context of %s",
+                state.parts[state.activePart].name.c_str(),
+                state.parts[*asmIndex].name.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Return"))
+      SetActivePart(state, *asmIndex); // clears the mode + re-solves if stale
+  }
+  ImGui::End();
+}
+
 // Part tabs pinned to the bottom of the screen (assemblies A1): one tab per
 // part + a "+" to add. Clicking a tab switches the active part.
 void DrawPartTabs(AppState& state) {
@@ -163,6 +193,7 @@ void DrawUI(AppState& state) {
       DrawDimensions(state);
       DrawConstraintGlyphs(state);
       DrawToolPrompt(state);
+      DrawInContextBanner(state);
     } else {
       state.sketchRenderer->SetStaticLines({});
       state.sketchRenderer->SetPrimitives({});

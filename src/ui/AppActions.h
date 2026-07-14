@@ -62,6 +62,18 @@ int SolveActiveAssembly(AppState& state);
 // after every part regeneration. False without an active assembly.
 bool AssemblyPartsStale(AppState& state);
 
+// In-context editing (A4): switch to the part tab of `occurrenceId` (in the
+// active assembly) with the assembly ghosted around it — the part renders at
+// identity and every other occurrence at OccMatrix(edited)⁻¹·OccMatrix(other),
+// alpha-blended, unpickable, no outlines. The context re-solves after each
+// part regeneration so ghosts track mates live. Exit = activating any other
+// tab (SetActivePart clears the mode). False when the occurrence or its part
+// can't be resolved.
+bool EnterInContextEdit(AppState& state, uint64_t occurrenceId);
+// The tab index of the slot with a stable id (nullopt when gone) — the
+// in-context banner's Return button and RPCs resolve slots through this.
+std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId);
+
 // Resolves a viewport ray to a face of an occurrence in the active assembly:
 // the occurrence hit and a persistent ElementRef naming the face (for building
 // a mate connector). Returns false if the ray misses, hits an occurrence whose

@@ -505,6 +505,9 @@ void ResetActiveTabUiState(AppState& state) {
   state.selectedOccurrence = 0;
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};
+  // Any tab change exits in-context editing (EnterInContextEdit re-arms it
+  // after its SetActivePart returns).
+  state.inContext = AppState::InContextEdit{};
   state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
 } // namespace
@@ -616,6 +619,30 @@ void SetActivePart(AppState& state, size_t index) {
   // edits without an explicit solve_assembly.
   if (state.assembly && AssemblyPartsStale(state))
     SolveActiveAssembly(state);
+}
+
+std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].id == slotId) return i;
+  return std::nullopt;
+}
+
+bool EnterInContextEdit(AppState& state, uint64_t occurrenceId) {
+  if (!state.assembly)
+    return false;
+  const Occurrence* occ = state.assembly->FindById(occurrenceId);
+  if (!occ)
+    return false;
+  std::optional<size_t> partIndex;
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].kind == DocKind::Part && state.parts[i].id == occ->partId)
+      partIndex = i;
+  if (!partIndex)
+    return false; // dangling part reference
+  const uint64_t asmSlotId = state.parts[state.activePart].id;
+  SetActivePart(state, *partIndex); // clears inContext; re-arm after
+  state.inContext = {asmSlotId, occurrenceId};
+  return true;
 }
 
 bool DeletePart(AppState& state, size_t index) {
@@ -1531,6 +1558,93 @@ void SyncAssemblyRenderers(AppState& state) {
   LOG_INFO("Assembly synced: {} occurrences",
            state.assembly->OccurrenceCount());
 }
+
+// In-context editing (A4): appends the context assembly's other occurrences
+// as GHOST instances around the active part — alpha-blended, unpickable, no
+// outlines. The part stays at identity; each ghost renders at
+// OccMatrix(edited)⁻¹ · OccMatrix(other), so every spatial relationship reads
+// the same as in the assembly with zero changes to part tooling. Before
+// placing ghosts the context re-solves if any referenced part regenerated
+// (this runs inside the version-gated resync, so a part edit updates the
+// ghosts in the same frame — mates track live).
+void SyncInContextGhosts(AppState& state) {
+  if (!state.inContext.assemblySlotId)
+    return;
+  PartSlot* asmSlot = nullptr;
+  for (PartSlot& s : state.parts)
+    if (s.kind == DocKind::Assembly && s.id == state.inContext.assemblySlotId)
+      asmSlot = &s;
+  if (!asmSlot || !asmSlot->assembly)
+    return; // the context assembly is gone; the mode quietly shows nothing
+  AssemblyDocument& asmDoc = *asmSlot->assembly;
+  const assembly::PartResolver resolve =
+      [&state](uint64_t partId) -> const Document* {
+    return PartDocById(state, partId);
+  };
+
+  // Stale check against the stashed slot's stamps (the active-tab machinery
+  // in SolveActiveAssembly/AssemblyPartsStale can't see a stashed assembly).
+  bool stale = false;
+  for (const Occurrence& occ : asmDoc.GetOccurrences()) {
+    const Document* part = PartDocById(state, occ.partId);
+    if (!part) continue;
+    const auto it = asmSlot->solvedPartVersions.find(occ.partId);
+    if (it == asmSlot->solvedPartVersions.end() ||
+        it->second != part->Version()) {
+      stale = true;
+      break;
+    }
+  }
+  if (stale) {
+    assembly::Solve(asmDoc, resolve);
+    asmDoc.BumpVersion();
+    asmSlot->solvedPartVersions.clear();
+    for (const Occurrence& occ : asmDoc.GetOccurrences())
+      if (const Document* part = PartDocById(state, occ.partId))
+        asmSlot->solvedPartVersions[occ.partId] = part->Version();
+  }
+
+  const Occurrence* edited = asmDoc.FindById(state.inContext.occurrenceId);
+  if (!edited)
+    return;
+  const glm::mat4 inv = glm::inverse(OccurrenceMatrix(*edited));
+
+  // One shared asset per context part body (as in SyncAssemblyRenderers),
+  // minus everything a ghost doesn't need: outlines, picking, materials.
+  const glm::vec3 kGhostTint(0.55f, 0.60f, 0.68f);
+  std::unordered_map<uint64_t, std::vector<uint32_t>> byPart; // partId->assets
+  for (const Occurrence& occ : asmDoc.GetOccurrences()) {
+    if (!occ.visible || occ.id == edited->id)
+      continue;
+    Document* part = PartDocById(state, occ.partId);
+    if (!part)
+      continue;
+    auto it = byPart.find(occ.partId);
+    if (it == byPart.end()) {
+      std::vector<uint32_t> assets;
+      for (const auto& body : part->GetBodies()) {
+        CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
+        if (cadMesh.vertices.empty()) {
+          assets.push_back(0); // keep index alignment
+          continue;
+        }
+        assets.push_back(state.meshRenderer->CreateAsset(
+            CADMeshConverter::ConvertCADMeshToVertices(cadMesh),
+            cadMesh.indices));
+      }
+      it = byPart.emplace(occ.partId, std::move(assets)).first;
+    }
+    const glm::mat4 xf = inv * OccurrenceMatrix(occ);
+    for (size_t bi = 0; bi < it->second.size(); bi++) {
+      if (it->second[bi] == 0)
+        continue; // empty body
+      const uint32_t meshId = state.meshRenderer->AddInstance(it->second[bi], xf);
+      state.meshRenderer->SetInstanceColor(meshId, kGhostTint);
+      state.meshRenderer->SetInstanceGhost(meshId); // after color: sets alpha
+      state.documentMeshes.push_back({meshId, /*outlineId=*/0, bi, occ.id, {}});
+    }
+  }
+}
 } // namespace
 
 void SyncDocumentRenderers(AppState& state) {
@@ -1597,6 +1711,11 @@ void SyncDocumentRenderers(AppState& state) {
     state.documentMeshes.push_back(
         {meshId, outlineId, bi, /*occurrenceId=*/0, std::move(edges)});
   }
+
+  // In-context editing (A4): ghost the context assembly around the part.
+  // Appended AFTER the part bodies so documentMeshes[i] still aligns with
+  // GetBodies()[i] for the part-tab consumers (get_state, face picking).
+  SyncInContextGhosts(state);
 
   // Sketch line geometry (static inactive sketches + the active sketch's
   // expanded primitives) is rebuilt per-frame in UI.cpp, since it must react to

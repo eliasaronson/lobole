@@ -246,6 +246,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "set_occurrence_fixed", "rename_occurrence",
       "add_mate", "set_mate", "remove_mate", "list_mates", "select_mate",
       "select_occurrence", "solve_assembly", "bom", "export_bom",
+      "edit_in_context",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
@@ -1085,6 +1086,18 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (m == "set_active_part") {
     ui::SetActivePart(state, p.at("index").get<size_t>());
     return {{"active", state.activePart}};
+  }
+  if (m == "edit_in_context") {
+    // In-context editing (A4): activates the occurrence's part tab with the
+    // assembly ghosted around it. Exit with set_active_part. params:
+    // {occurrence}
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    if (!ui::EnterInContextEdit(state, p.at("occurrence").get<uint64_t>()))
+      throw std::runtime_error("no such occurrence (or its part is missing)");
+    return {{"active", state.activePart},
+            {"assembly_slot", state.inContext.assemblySlotId},
+            {"occurrence", state.inContext.occurrenceId}};
   }
   if (m == "delete_part") {
     if (!ui::DeletePart(state, p.at("index").get<size_t>()))

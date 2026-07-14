@@ -101,6 +101,17 @@ def main():
         d.call("set_active_part", index=parts["rig"]["index"])
         expect(abs(arm_z() - 8.0) < 1e-4, "clean round trip: pose unchanged")
 
+        # --- in-context entry/exit (A4 phase 3) drives the same machinery ---
+        occs = d.call("list_occurrences")["occurrences"]
+        base_occ = [o for o in occs if o["id"] == o1][0]["id"]
+        ctx = d.call("edit_in_context", occurrence=base_occ)
+        expect(ctx["active"] == parts["base"]["index"],
+               f"in-context activated the base part tab: {ctx}")
+        d.call("set_variable", name="h", expression="6")  # edit in context
+        d.call("set_active_part", index=parts["rig"]["index"])  # Return
+        expect(abs(arm_z() - 6.0) < 1e-4,
+               f"return from in-context re-solved: z={arm_z()}")
+
         print("assembly_propagation_smoke: OK")
     finally:
         app.terminate()

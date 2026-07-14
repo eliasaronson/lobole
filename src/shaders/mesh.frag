@@ -138,5 +138,8 @@ void main() {
     const vec3 highlightColor = vec3(1.0, 0.65, 0.15);
     finalColor = mix(finalColor, highlightColor, fragHighlight * 0.55);
 
-    outColor = vec4(finalColor, 1.0);
+    // Per-instance alpha (ghosted in-context instances, A4). Opaque instances
+    // carry 1.0 and render through a blend-disabled pipeline, so this only
+    // takes effect on the ghost pass.
+    outColor = vec4(finalColor, pc.baseColor.a);
 }

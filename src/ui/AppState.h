@@ -295,6 +295,17 @@ struct AppState {
     glm::quat startBall{1, 0, 0, 0};
   };
 
+  // In-context editing (A4): non-zero while a part tab is being edited with
+  // its context assembly ghosted around it. The part renders at identity;
+  // every other occurrence renders at OccMatrix(edited)⁻¹·OccMatrix(other)
+  // (the assembly brought to the part, so part tooling is untouched). Set by
+  // EnterInContextEdit; cleared by any tab switch (SetActivePart).
+  struct InContextEdit {
+    uint64_t assemblySlotId = 0; // PartSlot::id of the context assembly
+    uint64_t occurrenceId = 0;   // the occurrence being edited
+  };
+  InContextEdit inContext;
+
   // UI state
   int selectedFeature = -1;
   uint64_t selectedOccurrence = 0; // active assembly's selected occurrence (0 = none)

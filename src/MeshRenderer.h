@@ -74,6 +74,11 @@ struct MeshInstance {
     glm::uvec4 highlight = glm::uvec4(0);
 
     bool visible = true;
+
+    // Ghosted context geometry (A4 in-context editing): drawn by the alpha-
+    // blended, depth-write-off ghost pipeline in a second pass after all
+    // opaque instances. baseColor.a carries the opacity.
+    bool ghost = false;
 };
 
 class MeshRenderer {
@@ -102,6 +107,10 @@ public:
     void SetInstanceMaterial(uint32_t instanceId, const glm::vec3& albedo,
                              const glm::vec4& params);
     void SetInstanceVisible(uint32_t instanceId, bool visible);
+    // Marks an instance as ghosted context geometry (A4): translucent
+    // (`alpha`), no depth write, drawn after all opaque instances. Unsorted
+    // blending — acceptable at reference-visual alphas (~0.25).
+    void SetInstanceGhost(uint32_t instanceId, float alpha = 0.25f);
 
     // Transitional one-body-one-mesh API (asset + instance in one shot);
     // call sites migrate to the split API with assemblies A2.
@@ -161,6 +170,9 @@ private:
     VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
+    // The renderer's first transparency (A4 ghosts): same shaders/layout,
+    // alpha blend on, depth test on / depth write off.
+    VkPipeline m_ghostPipeline = VK_NULL_HANDLE;
 
     // Uniform buffers
     std::vector<VkBuffer> m_uniformBuffers;

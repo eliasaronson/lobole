@@ -310,6 +310,12 @@ void DrawOccurrencePanel(AppState& state) {
       asmDoc.BumpVersion();
     }
 
+    if (ImGui::Button("Edit in context")) { // A4: part tab, assembly ghosted
+      EnterInContextEdit(state, sel->id);
+      ImGui::End();
+      return; // the panel just switched to a part tab
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Delete occurrence")) {
       const uint64_t id = sel->id;
       SnapshotAssembly(state);
