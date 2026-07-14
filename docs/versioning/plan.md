@@ -1,12 +1,21 @@
 # Versioning — file format, autosave, checkpoints, git — plan
 
+> **Status 2026-07-14: v1 complete.** F1 format spec + golden corpus, F2
+> autosave/recovery, F3 diffable directory format, F4 checkpoints + rollback
+> bar, and F5 git integration are all shipped. The only recorded later work is
+> **semantic feature-list merge** (a separate project — do not promise it in
+> v1) and **insert-feature-at-marker** (F4 v2). Nothing here blocks other
+> workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
+> history — the number has moved well past this doc's original snapshot as
+> later workstreams added features/assemblies/units).
+
 Goals 1 + 4 of the [roadmap](../roadmap.md): named checkpoints in the model's
 history, and models stored in a diffable, mergeable text format under git.
 Also home to the unglamorous prerequisites: format stability and autosave —
 cheap insurance that matters the moment anyone (including future-us) has real
 models at stake.
 
-## Current state
+## Current state (original snapshot; see the status banner above for what shipped)
 
 JSON project serialization, `kVersion = 18` (`src/core/Serialization.cpp`),
 with load-time migrations back to v1, a newer-version guard, a written
@@ -32,7 +41,7 @@ atomic write (temp + rename), recover-on-start prompt when a sidecar is newer
 than its project, sidecar cleared on clean save/exit. Dirty-state already
 implied by the command stack.
 
-### F3 — Diffable on-disk layout (~1–2 days, decide before F5) — [design: f3-directory-format.md](f3-directory-format.md), awaiting the default-format decision
+### F3 — Diffable on-disk layout — **shipped (July 2026)** — [design: f3-directory-format.md](f3-directory-format.md)
 The monolithic JSON diffs poorly and merges worse. Evaluate a **directory
 format**: one file per feature (named by stable id) + an ordered index +
 document-level files (parameters, settings). Feature-level files make git
@@ -53,7 +62,7 @@ Two related things, built together:
   copy under `.checkpoints/`. Checkpoint list panel: view (read-only open),
   roll back to, branch from.
 
-### F5 — Git integration (~2–4 days)
+### F5 — Git integration — **shipped (July 2026, v1: linear history)**
 Repo-per-project. **Shell out to `git`** rather than embedding libgit2 —
 simpler, and this product's audience has git. Features, in order:
 - init-on-create (optional), commit-on-save with a generated or prompted

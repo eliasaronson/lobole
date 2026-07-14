@@ -630,21 +630,24 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 ## Recommended order
 
 A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → F ✓ → G ✓ → H ✓ → I ✓ → J ✓ → K ✓ →
-L ✓ (ellipses; B-splines deferred) → M ✓ → **N (next)**.
+L ✓ (ellipses; B-splines deferred) → M ✓ → **N ✓**.
 
-**A–M all shipped** — the sketcher is feature-complete for v1 (geometry:
+**A–N all shipped** — the sketcher is **feature-complete for v1** (geometry:
 lines/rects/arcs/ellipses; constraints: the full standard set + dimensions +
 construction + status/conflict management; generative: mirror/fillet/pattern/
 offset; interaction: select-default/Escape/box-select + Onshape keymap + icon
-toolbar). **Remaining:**
-- **Phase N** — UI staging, generative-op editing, and point-alignment inference
-  ([phase-n.md](phase-n.md)). The last sketch milestone.
-- **B-splines** — Phase L's second half, planned in
-  [phase-l.md](phase-l.md), awaiting review.
-- **Follow-ups** (see Deferred): ellipse full constrainability, offset as a
-  regenerating DerivedOp, extend/transform tools, convenience primitives.
+toolbar; plus Phase N's UI staging, generative-op editing, and point-alignment
+inference — see line above, `08428cd`…, "Phase N and all its follow-ups are
+complete"). **The one recorded deferral:**
+- **B-splines** — Phase L's second half ([phase-l.md](phase-l.md)); a large
+  own-milestone (poles/knots/weights UX + the OCC B-spline edge). Not needed
+  for v1.
 
-Orthogonal, non-sketch work surfaced later: the **quaternion camera**
-(`refactor/quaternion-camera`) and an **incremental-regeneration** rework for
-large models (current `Document::Regenerate()` recomputes every feature each
-edit — fine now, the scaling limiter later).
+Nice-to-have follow-ups (see Deferred, all unscheduled): ellipse full
+constrainability, offset as a regenerating DerivedOp, extend/transform tools,
+convenience primitives (slot/polygon).
+
+Orthogonal, non-sketch work: the **quaternion camera**
+(`refactor/quaternion-camera`) — still open. (Incremental regeneration, once
+listed here, shipped: `Document` keeps a per-feature output-shape cache —
+`RegenCacheEntry`/`RegenStats`.)

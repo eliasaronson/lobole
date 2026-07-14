@@ -124,9 +124,10 @@ OutlineRenderer per-mesh model (self-contained, needed by both). See
 > (4578518): the GUI — an assembly-mode toolbar (Fasten/Revolute/Slider), a
 > two-click mate tool with a live connector-triad preview + Accept/Cancel/Flip,
 > and a mate list + editor in the Model dock (DOF drag = numeric mechanism
-> motion, error badges, delete). **A3 v1 is a usable mate workflow.** Remaining
-> A3: cylindrical/planar/ball types + connector inference snap points (see
-> below); the drag gizmo is A2.5.
+> motion, error badges, delete). **Rest of A3 SHIPPED** (`6c59632`):
+> cylindrical/planar/ball mate types (format v25) + connector inference snap
+> points (hole-center snap, format v26, landed with A2.5). **A3 is complete —
+> all six mate types.** (The drag gizmo was A2.5, also shipped.)
 
 **Onshape's mate-connector model, not SolidWorks' constraint soup**: a mate
 connects two **connector frames** (coordinate frames placed on parts — on

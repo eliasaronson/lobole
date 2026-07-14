@@ -139,7 +139,14 @@ Filled cut faces so a sectioned part reads solid instead of hollow.
 - With C3+C4, inspection is complete; the recorded deferrals: hatching,
   angle measure, bbox readout, curvature/thickness maps.
 
-## C5 — Docs truth pass (closes Versioning by declaration)
+## C5 — Docs truth pass (closes Versioning by declaration) — **SHIPPED**
+
+> Done: versioning/plan.md F3/F5 marked shipped + a v1-complete banner;
+> sketching/plan.md's closing list corrected (Phase N shipped, B-splines the
+> lone deferral, incremental-regen noted done); assemblies/plan.md "rest of
+> A3" line updated (cyl/planar/ball + snap shipped, all six mate types done);
+> roadmap rows already current. Versioning is v1-complete by declaration
+> (semantic merge = separate later project).
 
 No code. Fix the stale "remaining" claims found in the sizing survey:
 
@@ -180,5 +187,17 @@ No code. Fix the stale "remaining" claims found in the sizing survey:
    measure tool; GUI verification over dev-watch.
 4. **C4 section caps** (~1d) — cap mesh build + resync wiring; dev-watch
    screenshots (sectioned part reads solid).
-5. **C5 docs truth pass** (~0.5d) — plan-doc fixes + roadmap rows; final
-   state: 9 of 13 workstreams complete.
+5. **C5 docs truth pass** (~0.5d) — plan-doc fixes + roadmap rows.
+
+## Outcome — SHIPPED (2026-07-14)
+
+All five items landed (C1 `3d523be`, C2 `f1d6c12`, C3 `da943e9`, C4
+`6a8bf93`, C5 this commit). **Seven of thirteen workstreams are now
+v1-complete**: Sketching, Topological naming, Variables, Scripting,
+Versioning, Inspection, Interchange. Substantially done but not closed:
+Rendering (showcase arc shipped; SSAO / soft shadows / hybrid RT remain) and
+Assemblies (A1–A4 shipped; assembly features + configurations are their own
+later designs). Genuinely open: Modeling (thread/rib), UI/UX (polish),
+Simulation + Drawings (designs awaiting sign-off). The board is now four
+clean blocks — Drawings, FEM, Assemblies round 2, hybrid RT — plus small
+polish tails.
