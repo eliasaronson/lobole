@@ -149,6 +149,41 @@ constexpr double kTriW = (1.0 / 3) * (1.0 / 2);
 
 }  // namespace
 
+std::array<double, 900> Tet10Stiffness(const std::array<glm::dvec3, 10>& nodes,
+                                       double youngMPa, double poisson) {
+  Vector3d X[10];
+  for (int i = 0; i < 10; ++i) X[i] = Vector3d(nodes[i].x, nodes[i].y, nodes[i].z);
+  const auto D = Elasticity(youngMPa, poisson);
+  Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
+  for (const auto& g : kTetGauss) {
+    Eigen::Matrix<double, 6, 30> B;
+    const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+    Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D * B);
+  }
+  std::array<double, 900> out;
+  for (int i = 0; i < 30; ++i)
+    for (int j = 0; j < 30; ++j) out[i * 30 + j] = Ke(i, j);
+  return out;
+}
+
+std::array<double, 6> Tet10Stress(const std::array<glm::dvec3, 10>& nodes,
+                                  const std::array<glm::dvec3, 10>& disp,
+                                  double youngMPa, double poisson, double r,
+                                  double s, double t) {
+  Vector3d X[10];
+  Eigen::Matrix<double, 30, 1> ue;
+  for (int i = 0; i < 10; ++i) {
+    X[i] = Vector3d(nodes[i].x, nodes[i].y, nodes[i].z);
+    ue(3 * i + 0) = disp[i].x;
+    ue(3 * i + 1) = disp[i].y;
+    ue(3 * i + 2) = disp[i].z;
+  }
+  Eigen::Matrix<double, 6, 30> B;
+  StrainDisp(X, r, s, t, B);
+  const Eigen::Matrix<double, 6, 1> sig = Elasticity(youngMPa, poisson) * (B * ue);
+  return {sig(0), sig(1), sig(2), sig(3), sig(4), sig(5)};
+}
+
 std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
                                 const std::vector<int>& fixedNodes,
                                 const std::vector<FaceLoad>& loads, std::string* error) {
@@ -272,6 +307,13 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
     return fail("model is insufficiently constrained (singular stiffness matrix)");
   const Eigen::VectorXd u = solver.solve(F);
   if (solver.info() != Eigen::Success) return fail("linear solve failed");
+  // SimplicialLDLT can factor a singular K (a rigid-body mode the fixed faces
+  // didn't kill) with a near-zero pivot and still report Success, then return a
+  // garbage solution. The robust signal is the residual: a genuine solution
+  // satisfies K u = F, an under-constrained one does not.
+  if (!u.allFinite() ||
+      (F.norm() > 0 && (K * u - F).norm() > 1e-6 * F.norm()))
+    return fail("model is insufficiently constrained (singular stiffness matrix)");
 
   // Expand to full displacement (fixed DOFs are zero).
   FemResults out;

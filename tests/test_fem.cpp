@@ -16,6 +16,7 @@
 #include <cmath>
 #include <set>
 
+using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
 namespace {
@@ -354,8 +355,6 @@ TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli", "[fem][solve
   CHECK_THAT(res->maxDisplacement, WithinRel(delta, 0.12));
 }
 
-#endif  // HAVE_NETGEN
-
 TEST_CASE("Solver: pressure on a face compresses along the inward normal",
           "[fem][solver]") {
   // Fix x=0, apply pressure on x=L: it must push inward (-x) => compression,
@@ -398,6 +397,8 @@ TEST_CASE("Solver: pressure on a face compresses along the inward normal",
   for (int n : NodesAtPlane(*mesh, 0, L, 1e-6)) { sumx += res->displacement[n].x; ++cnt; }
   CHECK(sumx / cnt < 0.0);
 }
+
+#endif  // HAVE_NETGEN
 
 // ---- RunStudy orchestration + validation (netgen-gated) -------------------
 #ifdef HAVE_NETGEN
@@ -469,3 +470,194 @@ TEST_CASE("RunStudy errors when a loaded body has no fixed support",
 }
 
 #endif  // HAVE_NETGEN
+
+// ---- Element-level solver unit tests (no mesher: Eigen-gated only) ---------
+// These pin the tet10 element math directly, so they run in CI whether or not
+// Netgen is present (unlike the analytic benchmarks, which need a real mesh).
+#ifdef HAVE_FEM_SOLVER
+
+namespace {
+constexpr double kE = 200000.0;  // steel, MPa
+constexpr double kNu = 0.3;
+
+// A well-shaped (irregular, straight-edged) reference tet10: corners then edge
+// midpoints in the canonical order edges (0,1)(1,2)(0,2)(0,3)(1,3)(2,3).
+std::array<glm::dvec3, 10> RefTet10() {
+  glm::dvec3 c0(0, 0, 0), c1(2, 0, 0), c2(0.3, 3, 0), c3(0.5, 0.7, 4);
+  return {c0, c1, c2, c3,
+          0.5 * (c0 + c1), 0.5 * (c1 + c2), 0.5 * (c0 + c2),
+          0.5 * (c0 + c3), 0.5 * (c1 + c3), 0.5 * (c2 + c3)};
+}
+
+// y = Ke * u for the row-major 30x30 Ke.
+std::array<double, 30> MatVec(const std::array<double, 900>& Ke,
+                              const std::array<double, 30>& u) {
+  std::array<double, 30> y{};
+  for (int i = 0; i < 30; ++i)
+    for (int j = 0; j < 30; ++j) y[i] += Ke[i * 30 + j] * u[j];
+  return y;
+}
+double Norm(const std::array<double, 30>& v) {
+  double s = 0;
+  for (double x : v) s += x * x;
+  return std::sqrt(s);
+}
+double FroNorm(const std::array<double, 900>& m) {
+  double s = 0;
+  for (double x : m) s += x * x;
+  return std::sqrt(s);
+}
+// Flatten a per-node displacement field to a 30-vector.
+std::array<double, 30> Flatten(const std::array<glm::dvec3, 10>& d) {
+  std::array<double, 30> u{};
+  for (int i = 0; i < 10; ++i) {
+    u[3 * i + 0] = d[i].x; u[3 * i + 1] = d[i].y; u[3 * i + 2] = d[i].z;
+  }
+  return u;
+}
+}  // namespace
+
+TEST_CASE("Element: tet10 stiffness is symmetric", "[fem][element]") {
+  const auto Ke = fem::Tet10Stiffness(RefTet10(), kE, kNu);
+  double worst = 0;
+  for (int i = 0; i < 30; ++i)
+    for (int j = i + 1; j < 30; ++j)
+      worst = std::max(worst, std::abs(Ke[i * 30 + j] - Ke[j * 30 + i]));
+  CHECK(worst <= 1e-6 * FroNorm(Ke));
+}
+
+TEST_CASE("Element: tet10 has exactly the 6 rigid-body zero-energy modes",
+          "[fem][element]") {
+  const auto nodes = RefTet10();
+  const auto Ke = fem::Tet10Stiffness(nodes, kE, kNu);
+  const double scale = FroNorm(Ke);
+
+  // Three translations and three infinitesimal rotations (u = omega x x) must
+  // produce zero nodal forces (they induce no strain).
+  const glm::dvec3 axes[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  for (const glm::dvec3& a : axes) {
+    std::array<glm::dvec3, 10> trans, rot;
+    for (int i = 0; i < 10; ++i) {
+      trans[i] = a;                        // rigid translation
+      rot[i] = glm::cross(a, nodes[i]);    // rigid rotation about the axis
+    }
+    INFO("axis " << a.x << "," << a.y << "," << a.z);
+    CHECK(Norm(MatVec(Ke, Flatten(trans))) <= 1e-6 * scale);
+    CHECK(Norm(MatVec(Ke, Flatten(rot))) <= 1e-6 * scale);
+  }
+
+  // A genuine straining mode (uniaxial stretch in x) must store energy.
+  std::array<glm::dvec3, 10> stretch;
+  for (int i = 0; i < 10; ++i) stretch[i] = glm::dvec3(nodes[i].x, 0, 0);
+  const auto u = Flatten(stretch);
+  const auto Ku = MatVec(Ke, u);
+  double energy = 0;
+  for (int i = 0; i < 30; ++i) energy += u[i] * Ku[i];
+  CHECK(energy > 0.0);
+}
+
+TEST_CASE("Element: tet10 reproduces a constant strain state exactly "
+          "(patch test)", "[fem][element]") {
+  const auto nodes = RefTet10();
+  // A constant displacement gradient G -> constant strain everywhere. tet10
+  // must reproduce this to machine precision at every point (the patch test).
+  glm::dmat3 G(0.0);
+  G[0][0] = 1e-3;  G[1][1] = -4e-4; G[2][2] = 2e-4;  // normal strains
+  G[1][0] = 6e-4;  G[0][1] = 6e-4;                    // symmetric shear xy
+  std::array<glm::dvec3, 10> disp;
+  for (int i = 0; i < 10; ++i) disp[i] = G * nodes[i];
+
+  // Expected stress from D * strain (Voigt: engineering shear = 2*eps_xy).
+  const double lam = kE * kNu / ((1 + kNu) * (1 - 2 * kNu));
+  const double mu = kE / (2 * (1 + kNu));
+  const double exx = G[0][0], eyy = G[1][1], ezz = G[2][2];
+  const double tr = exx + eyy + ezz;
+  const double sxx = lam * tr + 2 * mu * exx;
+  const double syy = lam * tr + 2 * mu * eyy;
+  const double szz = lam * tr + 2 * mu * ezz;
+  const double sxy = mu * (G[1][0] + G[0][1]);  // = 2*mu*eps_xy
+
+  // Sample several natural points; the stress must be constant and correct.
+  const double pts[4][3] = {{0.25, 0.25, 0.25}, {0.1, 0.2, 0.6}, {0.6, 0.1, 0.1},
+                            {0.0, 0.0, 0.0}};
+  for (const auto& p : pts) {
+    const auto s = fem::Tet10Stress(nodes, disp, kE, kNu, p[0], p[1], p[2]);
+    INFO("at " << p[0] << "," << p[1] << "," << p[2]);
+    CHECK_THAT(s[0], WithinAbs(sxx, 1e-6 * kE));
+    CHECK_THAT(s[1], WithinAbs(syy, 1e-6 * kE));
+    CHECK_THAT(s[2], WithinAbs(szz, 1e-6 * kE));
+    CHECK_THAT(s[3], WithinAbs(sxy, 1e-6 * kE));
+    CHECK_THAT(s[4], WithinAbs(0.0, 1e-6 * kE));
+    CHECK_THAT(s[5], WithinAbs(0.0, 1e-6 * kE));
+  }
+}
+
+namespace {
+// A single-tet10 FemMesh. With boundary, adds the 4 tri6 faces so loads can be
+// applied (used for the singular-detection test).
+fem::FemMesh SingleTetMesh(bool withBoundary) {
+  fem::FemMesh m;
+  const auto nodes = RefTet10();
+  m.nodes.assign(nodes.begin(), nodes.end());
+  std::array<int, 10> tet;
+  for (int i = 0; i < 10; ++i) tet[i] = i;
+  m.tets.push_back(tet);
+  m.stats.nodeCount = 10;
+  m.stats.tetCount = 1;
+  if (withBoundary) {
+    auto edgeMid = [](int a, int b) {
+      const int lo = std::min(a, b), hi = std::max(a, b);
+      if (lo == 0 && hi == 1) return 4;
+      if (lo == 1 && hi == 2) return 5;
+      if (lo == 0 && hi == 2) return 6;
+      if (lo == 0 && hi == 3) return 7;
+      if (lo == 1 && hi == 3) return 8;
+      return 9;  // (2,3)
+    };
+    const int faces[4][3] = {{1, 2, 3}, {0, 2, 3}, {0, 1, 3}, {0, 1, 2}};
+    for (int f = 0; f < 4; ++f) {
+      const int a = faces[f][0], b = faces[f][1], c = faces[f][2];
+      fem::FemMesh::BoundaryTri tri;
+      tri.nodes = {a, b, c, edgeMid(a, b), edgeMid(b, c), edgeMid(c, a)};
+      tri.faceIndex = f;
+      m.boundary.push_back(tri);
+    }
+  }
+  return m;
+}
+}  // namespace
+
+TEST_CASE("Solver rejects a body with no stiffness data", "[fem][element]") {
+  std::string err;
+  auto r = fem::Solve(SingleTetMesh(false), fem::Material{0.0, 0.3}, {0}, {}, &err);
+  CHECK_FALSE(r.has_value());
+  CHECK(err.find("stiffness") != std::string::npos);
+}
+
+TEST_CASE("Solver rejects a fully constrained model", "[fem][element]") {
+  std::vector<int> allFixed;
+  for (int i = 0; i < 10; ++i) allFixed.push_back(i);
+  std::string err;
+  auto r = fem::Solve(SingleTetMesh(false), fem::Material{kE, kNu}, allFixed, {}, &err);
+  CHECK_FALSE(r.has_value());
+  CHECK(err.find("constrained") != std::string::npos);
+}
+
+TEST_CASE("Solver detects an under-constrained (singular) model",
+          "[fem][element]") {
+  // Fix only one node (kills translation, leaves rotation modes) and push a
+  // face: the stiffness matrix is singular, so the solve must fail rather than
+  // return garbage.
+  fem::FemMesh mesh = SingleTetMesh(true);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = {0};
+  load.magnitude = 100.0;
+  load.direction = glm::dvec3(1, 0, 0);
+  std::string err;
+  auto r = fem::Solve(mesh, fem::Material{kE, kNu}, {0}, {load}, &err);
+  CHECK_FALSE(r.has_value());
+  CHECK(err.find("constrained") != std::string::npos);
+}
+
+#endif  // HAVE_FEM_SOLVER
