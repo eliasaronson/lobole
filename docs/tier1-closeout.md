@@ -116,7 +116,15 @@ The GUI face for what already works over RPC.
 - Angle-between-faces and point picking stay out (they were I1's "needs
   unified selection" tail — record as polish, not workstream-blocking).
 
-## C4 — Section caps (I3 v2)
+## C4 — Section caps (I3 v2) — **SHIPPED**
+
+> Done: `Measure::SectionCaps` (Common vs the shared cutter, per-body cap
+> shapes with real area); `AppendSectionCaps` in SyncDocumentRenderers builds
+> double-sided opaque instances nudged onto the kept side, rebuilt on
+> plane-change when no widget is dragged. `test_measure` section-cap case.
+> Verified on dev-watch: the box cut face fills solid. **Inspection v1
+> complete.** Hatching + assembly caps deferred.
+
 
 Filled cut faces so a sectioned part reads solid instead of hollow.
 

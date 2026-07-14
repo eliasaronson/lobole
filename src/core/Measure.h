@@ -38,4 +38,13 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
                                        const glm::vec3& origin,
                                        const glm::vec3& normal);
 
+// The section-cut cap faces (I3 v2, C4): one CADShape per body — the body's
+// intersection with the section plane, lying on the plane — for rendering a
+// filled cut face so a sectioned part reads solid. Same plane as
+// CrossSectionArea. The returned vector aligns with `bodies` (a body that
+// doesn't meet the plane yields an empty/invalid CADShape); empty on failure.
+std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
+                                  const glm::vec3& origin,
+                                  const glm::vec3& normal);
+
 } // namespace Measure

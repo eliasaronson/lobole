@@ -118,3 +118,25 @@ TEST_CASE("Cross-section area of a box", "[measure][section]") {
   REQUIRE(miss.has_value());
   CHECK_THAT(*miss, Catch::Matchers::WithinAbs(0.0, 1e-6));
 }
+
+TEST_CASE("Section caps fill the cut face (C4)", "[measure][section]") {
+  using Catch::Matchers::WithinRel;
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 3, 4));
+  // The cap shape for a YZ cut at x=1 is the 3x4 section rectangle: a valid
+  // planar face whose surface area matches CrossSectionArea (12).
+  auto caps = Measure::SectionCaps(doc.GetBodies(), glm::vec3(1, 0, 0),
+                                   glm::vec3(1, 0, 0));
+  REQUIRE(caps.size() == 1);
+  REQUIRE(caps[0].IsValid());
+  CADShape::MassProps mp;
+  REQUIRE(caps[0].ComputeMassProps(mp));
+  CHECK_THAT(mp.surfaceArea, WithinRel(12.0, 1e-6));
+  // The cap tessellates to a non-empty mesh (what the renderer fills with).
+  CHECK_FALSE(caps[0].GenerateMesh(0.05).vertices.empty());
+  // A plane missing the body yields an empty/invalid cap, not a crash.
+  auto missCaps = Measure::SectionCaps(doc.GetBodies(), glm::vec3(0, 0, 99),
+                                       glm::vec3(0, 0, 1));
+  REQUIRE(missCaps.size() == 1);
+  CHECK_FALSE(missCaps[0].IsValid());
+}

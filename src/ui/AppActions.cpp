@@ -1877,6 +1877,74 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
   return items;
 }
 
+namespace {
+// Section caps (I3 v2, C4): builds a filled cut face for each body that meets
+// the active section plane and adds it as an opaque instance, so the
+// sectioned part reads solid instead of hollow. The cap sits ON the plane; it
+// is nudged to the kept side (`-normal`) so the global shader clip doesn't
+// discard it, its winding is made consistent so back-face culling can't hide
+// it, and its normal faces the viewer for correct lighting. Cap instance ids
+// go in state.sectionCapMeshes (removed on the next resync).
+void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
+                       const std::vector<glm::vec3>& bodyColors) {
+  const glm::vec3 nRaw(state.sectionPlane);
+  if (glm::length(nRaw) < 1e-6f)
+    return; // no active section
+  const glm::vec3 n = glm::normalize(nRaw);
+  const glm::vec3 planeOrigin = n * state.sectionPlane.w; // dot(origin,n)=w
+  const std::vector<CADShape> caps = Measure::SectionCaps(bodies, planeOrigin, n);
+  const float eps = 1e-3f; // nudge to the kept side; invisible at mm scale
+  for (size_t bi = 0; bi < caps.size(); bi++) {
+    if (!caps[bi].IsValid())
+      continue;
+    CADShape::Mesh cm = caps[bi].GenerateMesh(0.05);
+    if (cm.vertices.empty())
+      continue;
+    const std::vector<Vertex3D> base =
+        CADMeshConverter::ConvertCADMeshToVertices(cm);
+    // Double-sided: the cut is viewed from the open (removed) side, but the
+    // user can orbit either way, so emit both faces. Front copy carries +n,
+    // back copy -n; back-face culling then draws exactly the side facing the
+    // camera, correctly lit, from whichever side. Both are nudged onto the
+    // kept half so the global shader clip keeps them.
+    std::vector<Vertex3D> vs;
+    vs.reserve(base.size() * 2);
+    for (const Vertex3D& v : base) {
+      Vertex3D f = v;
+      f.normal = n;
+      f.position -= n * eps;
+      vs.push_back(f);
+    }
+    for (const Vertex3D& v : base) {
+      Vertex3D b = v;
+      b.normal = -n;
+      b.position -= n * eps;
+      vs.push_back(b);
+    }
+    const uint32_t half = static_cast<uint32_t>(base.size());
+    std::vector<uint32_t> idx;
+    idx.reserve(cm.indices.size() * 2);
+    for (size_t t = 0; t + 2 < cm.indices.size(); t += 3) {
+      const uint32_t a = cm.indices[t], b = cm.indices[t + 1],
+                     c = cm.indices[t + 2];
+      const glm::vec3& p0 = base[a].position;
+      const glm::vec3& p1 = base[b].position;
+      const glm::vec3& p2 = base[c].position;
+      // Order the +n copy so its geometric winding front-faces +n.
+      const bool flip = glm::dot(glm::cross(p1 - p0, p2 - p0), n) < 0.0f;
+      const uint32_t f1 = flip ? c : b, f2 = flip ? b : c;
+      idx.push_back(a); idx.push_back(f1); idx.push_back(f2);
+      // The -n copy is the opposite winding, on the second vertex block.
+      idx.push_back(half + a); idx.push_back(half + f2); idx.push_back(half + f1);
+    }
+    const uint32_t capId = state.meshRenderer->AddMesh(vs, idx);
+    state.meshRenderer->SetMeshColor(
+        capId, bi < bodyColors.size() ? bodyColors[bi] : glm::vec3(0.7f));
+    state.sectionCapMeshes.push_back(capId);
+  }
+}
+} // namespace
+
 void SyncDocumentRenderers(AppState& state) {
   if (!state.meshRenderer)
     return;
@@ -1888,6 +1956,15 @@ void SyncDocumentRenderers(AppState& state) {
     activeVersion = state.document->Version();
   else
     return;
+  // Section caps (C4): a change to the clip plane forces a rebuild so the
+  // filled cut faces follow it. Gated on no widget being active so caps
+  // settle when the offset slider is released, not every drag frame (the
+  // shader clip itself previews live regardless).
+  if (state.sectionPlane != state.syncedSectionPlane &&
+      !ImGui::IsAnyItemActive()) {
+    state.syncedSectionPlane = state.sectionPlane;
+    state.syncedDocumentVersion = UINT64_MAX; // force the rebuild below
+  }
   if (activeVersion == state.syncedDocumentVersion)
     return;
   state.syncedDocumentVersion = activeVersion;
@@ -1900,6 +1977,11 @@ void SyncDocumentRenderers(AppState& state) {
       state.faceSelector->RemoveMesh(m.meshId);
   }
   state.documentMeshes.clear();
+  // Section caps live outside documentMeshes (no outline/pick, and they must
+  // not disturb the body↔index alignment); remove them on every resync.
+  for (uint32_t capId : state.sectionCapMeshes)
+    state.meshRenderer->RemoveMesh(capId);
+  state.sectionCapMeshes.clear();
 
   if (state.assembly) {
     SyncAssemblyRenderers(state);
@@ -1908,6 +1990,7 @@ void SyncDocumentRenderers(AppState& state) {
 
   size_t palette = 0;
   const auto& bodies = state.document->GetBodies();
+  std::vector<glm::vec3> bodyColors(bodies.size(), glm::vec3(0.7f));
   for (size_t bi = 0; bi < bodies.size(); bi++) {
     const auto& body = bodies[bi];
     CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
@@ -1920,15 +2003,17 @@ void SyncDocumentRenderers(AppState& state) {
     // Albedo is per-instance state (not baked into vertices): palette color
     // by default; a body with an assigned material overrides it with the
     // material's base color and real PBR params.
-    state.meshRenderer->SetMeshColor(
-        meshId, kBodyPalette[palette++ % std::size(kBodyPalette)]);
+    glm::vec3 albedo = kBodyPalette[palette++ % std::size(kBodyPalette)];
+    state.meshRenderer->SetMeshColor(meshId, albedo);
     if (!body.material.empty()) {
       const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
           CADMaterials::MaterialLibrary::FromSlug(body.material));
       state.meshRenderer->SetMeshMaterial(
           meshId, mat.baseColor,
           glm::vec4(mat.metallic, mat.roughness, mat.specular, mat.reflectance));
+      albedo = mat.baseColor;
     }
+    bodyColors[bi] = albedo; // section caps reuse the body's color
     uint32_t outlineId = 0;
     if (state.outlineRenderer)
       outlineId = state.outlineRenderer->AddMesh(vertices, cadMesh.indices);
@@ -1941,6 +2026,8 @@ void SyncDocumentRenderers(AppState& state) {
     state.documentMeshes.push_back(
         {meshId, outlineId, bi, /*occurrenceId=*/0, std::move(edges)});
   }
+
+  AppendSectionCaps(state, bodies, bodyColors);
 
   // In-context editing (A4): ghost the context assembly around the part.
   // Appended AFTER the part bodies so documentMeshes[i] still aligns with

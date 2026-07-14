@@ -85,18 +85,14 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
   return out;
 }
 
-std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
-                                       const glm::vec3& origin,
-                                       const glm::vec3& normal) {
-  if (bodies.empty())
-    return 0.0;
-  const glm::vec3 n = glm::normalize(normal);
-  // In-plane axes.
+namespace {
+// A planar cutting face spanning every body's bounds, centered on the section
+// plane. Null if `bodies` is empty. Shared by CrossSectionArea + SectionCaps.
+TopoDS_Face BuildSectionCutter(const std::vector<Body>& bodies,
+                               const glm::vec3& origin, const glm::vec3& n) {
   glm::vec3 u = std::abs(n.x) < 0.9f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
   u = glm::normalize(u - n * glm::dot(u, n));
   const glm::vec3 v = glm::cross(n, u);
-
-  // A cutting face big enough to span every body.
   glm::vec3 lo(1e30f), hi(-1e30f);
   for (const auto& b : bodies) {
     glm::vec3 bmin, bmax;
@@ -105,16 +101,24 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
     hi = glm::max(hi, bmax);
   }
   const float s = glm::length(hi - lo) + 1.0f;
-  const glm::vec3 c = origin; // a point on the plane
   auto pt = [&](float su, float sv) {
-    const glm::vec3 w = c + u * su + v * sv;
+    const glm::vec3 w = origin + u * su + v * sv;
     return gp_Pnt(w.x, w.y, w.z);
   };
-  try {
-    BRepBuilderAPI_MakePolygon poly(pt(-s, -s), pt(s, -s), pt(s, s),
-                                    pt(-s, s), Standard_True);
-    TopoDS_Face cutter = BRepBuilderAPI_MakeFace(poly.Wire()).Face();
+  BRepBuilderAPI_MakePolygon poly(pt(-s, -s), pt(s, -s), pt(s, s), pt(-s, s),
+                                  Standard_True);
+  return BRepBuilderAPI_MakeFace(poly.Wire()).Face();
+}
+} // namespace
 
+std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
+                                       const glm::vec3& origin,
+                                       const glm::vec3& normal) {
+  if (bodies.empty())
+    return 0.0;
+  try {
+    const TopoDS_Face cutter =
+        BuildSectionCutter(bodies, origin, glm::normalize(normal));
     double area = 0.0;
     for (const auto& b : bodies) {
       if (b.shape.GetShape().IsNull())
@@ -131,6 +135,41 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
     LOG_ERROR("Cross-section failed: {}", e.what());
     return std::nullopt;
   }
+}
+
+std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
+                                  const glm::vec3& origin,
+                                  const glm::vec3& normal) {
+  std::vector<CADShape> caps;
+  if (bodies.empty())
+    return caps;
+  try {
+    const TopoDS_Face cutter =
+        BuildSectionCutter(bodies, origin, glm::normalize(normal));
+    for (const auto& b : bodies) {
+      if (b.shape.GetShape().IsNull()) {
+        caps.emplace_back(); // keep alignment with bodies[]
+        continue;
+      }
+      BRepAlgoAPI_Common common(b.shape.GetShape(), cutter);
+      // A body that doesn't meet the plane yields an empty compound (not
+      // null); keep a cap only when it has real area, so callers can test
+      // IsValid() to mean "there is a cut face here".
+      if (common.IsDone() && !common.Shape().IsNull()) {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(common.Shape(), props);
+        if (props.Mass() > 1e-9) {
+          caps.emplace_back(common.Shape());
+          continue;
+        }
+      }
+      caps.emplace_back();
+    }
+  } catch (const std::exception& e) {
+    LOG_ERROR("Section caps failed: {}", e.what());
+    caps.clear();
+  }
+  return caps;
 }
 
 std::optional<double> Distance(const std::vector<Body>& bodies,

@@ -1,5 +1,11 @@
 # Inspection — measure, mass properties, sections — plan
 
+> **Status 2026-07-14: v1 complete.** I1 measure (RPC + GUI tool, C3), I2 mass
+> properties (RPC + panel + CoG marker, C3), I3 section (geometry + raster
+> clip + filled caps, C4), I4 interference — all shipped. Deferred polish:
+> hatched cut faces, angle/point measure, bbox readout, assembly section
+> caps, measurement-driven variables, curvature/thickness maps.
+
 The "is it right?" toolset: measuring geometry, mass/volume properties, and
 seeing inside a part. Small, high-value, and disproportionately useful to the
 LLM interface (a model that can *ask* "how far apart are these faces / what
@@ -41,8 +47,17 @@ a cut.
 clip plane through the mesh push constant (`discard` in `mesh.frag`) and the
 wireframe UBO (`discard` in `wireframe.frag`), `AppState.sectionPlane` +
 `set_section` RPC/MCP + a View > Section View menu (enable / plane / offset).
-V1 leaves the cut hollow; capped/hatched cut faces (real section geometry
-via BRepAlgoAPI_Section) are v2.
+
+**Section caps shipped (C4, July 2026):** the cut no longer reads hollow.
+`Measure::SectionCaps` intersects each body with the section plane
+(`BRepAlgoAPI_Common` against a big planar face, sharing CrossSectionArea's
+cutter) and returns the cap faces; `SyncDocumentRenderers` tessellates them
+into **double-sided** opaque instances (both windings so the fill shows from
+either orbit side), nudged onto the kept half so the global shader clip
+keeps them, in the body's color. Caps rebuild when the plane changes and no
+widget is being dragged (they settle on slider release; the shader clip
+previews live). Part-tab only; **hatching** stays deferred (cosmetic, wants
+the drawings hatch style), as do **assembly** section caps.
 
 ## I4 — Later
 

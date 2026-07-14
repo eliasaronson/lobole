@@ -350,6 +350,13 @@ struct AppState {
   // Section view (I3): a world-space clip plane {xyz=normal, w=dist};
   // fragments past it are discarded. Zero = disabled.
   glm::vec4 sectionPlane = glm::vec4(0.0f);
+  // Section cap fills (I3 v2, C4): the section plane at the last cap rebuild,
+  // and the cap instance ids (separate from documentMeshes so body↔index
+  // alignment holds; removed on the next resync). A cap rebuild is triggered
+  // when sectionPlane changes and no widget is being dragged (so caps settle
+  // on slider release while the shader clip previews live).
+  glm::vec4 syncedSectionPlane = glm::vec4(0.0f);
+  std::vector<uint32_t> sectionCapMeshes;
   bool showElementNames = false; // debug: element name of the hovered face
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
