@@ -92,6 +92,12 @@ add_test(NAME assembly_propagation_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_propagation_smoke PROPERTIES TIMEOUT 120)
 
+# Assemblies A4 exploded views: RPCs, pure-view-state contract, persistence.
+add_test(NAME exploded_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/exploded_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(exploded_smoke PROPERTIES TIMEOUT 120)
+
 # Assemblies A4 BOM: grouped rows, mass taint, CSV export. Headless.
 add_test(NAME bom_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/bom_smoke.py

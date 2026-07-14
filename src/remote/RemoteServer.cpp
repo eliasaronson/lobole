@@ -19,6 +19,7 @@
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 
@@ -246,7 +247,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "set_occurrence_fixed", "rename_occurrence",
       "add_mate", "set_mate", "remove_mate", "list_mates", "select_mate",
       "select_occurrence", "solve_assembly", "bom", "export_bom",
-      "edit_in_context",
+      "edit_in_context", "add_exploded_view", "remove_exploded_view",
+      "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
@@ -1048,6 +1050,95 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       arr.push_back(mj);
     }
     return {{"errored_mates", errored}, {"mates", arr}};
+  }
+  if (m == "add_exploded_view") {
+    // params: {name?} — appends an empty view. Returns its id.
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    ui::SnapshotAssembly(state);
+    ExplodedView v;
+    v.name = p.value("name", std::string{"Exploded"});
+    const uint64_t id = state.assembly->AddExplodedView(std::move(v));
+    return {{"id", id}};
+  }
+  if (m == "remove_exploded_view") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    const uint64_t id = p.at("id").get<uint64_t>();
+    ui::SnapshotAssembly(state);
+    if (!state.assembly->RemoveExplodedView(id))
+      throw std::runtime_error("no such exploded view");
+    if (state.activeExplodedView == id) {
+      state.activeExplodedView = 0;
+      state.syncedDocumentVersion = UINT64_MAX;
+    }
+    state.assembly->BumpVersion();
+    return json::object();
+  }
+  if (m == "list_exploded_views") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    json views = json::array();
+    for (const ExplodedView& v : state.assembly->GetExplodedViews())
+      views.push_back(DocumentIO::ExplodedViewToJson(v));
+    return {{"views", views},
+            {"active", state.activeExplodedView},
+            {"factor", state.explodeFactor}};
+  }
+  if (m == "set_explode_step") {
+    // params: {view, occurrence, offset: [x,y,z]} — find-or-create the step.
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    ExplodedView* v =
+        state.assembly->FindExplodedViewById(p.at("view").get<uint64_t>());
+    if (!v) throw std::runtime_error("no such exploded view");
+    const uint64_t occId = p.at("occurrence").get<uint64_t>();
+    if (!state.assembly->FindById(occId))
+      throw std::runtime_error("no such occurrence");
+    const auto& o = p.at("offset");
+    const glm::vec3 offset(o.at(0).get<float>(), o.at(1).get<float>(),
+                           o.at(2).get<float>());
+    ui::SnapshotAssembly(state);
+    ExplodeStep* step = nullptr;
+    for (ExplodeStep& s : v->steps)
+      if (s.occurrenceId == occId) { step = &s; break; }
+    if (!step) {
+      v->steps.push_back({occId, offset});
+    } else {
+      step->offset = offset;
+    }
+    state.assembly->BumpVersion(); // resyncs when this view is active
+    return DocumentIO::ExplodedViewToJson(*v);
+  }
+  if (m == "auto_explode") {
+    // params: {view} — radial seed from the assembly centroid (snapshots).
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    const uint64_t id = p.at("view").get<uint64_t>();
+    if (!ui::AutoExplode(state, id))
+      throw std::runtime_error(
+          "no such exploded view (or fewer than two placed occurrences)");
+    return DocumentIO::ExplodedViewToJson(
+        *state.assembly->FindExplodedViewById(id));
+  }
+  if (m == "set_explode") {
+    // Display state (transient, never saved): which view is applied and how
+    // far. params: {view?, factor?} — view 0/omitted-with-factor keeps the
+    // current view; view 0 explicitly = none.
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    if (p.contains("view")) {
+      const uint64_t id = p.at("view").get<uint64_t>();
+      if (id && !state.assembly->FindExplodedViewById(id))
+        throw std::runtime_error("no such exploded view");
+      state.activeExplodedView = id;
+    }
+    if (p.contains("factor"))
+      state.explodeFactor =
+          std::clamp(p.at("factor").get<float>(), 0.0f, 1.0f);
+    state.syncedDocumentVersion = UINT64_MAX; // display change: force resync
+    return {{"active", state.activeExplodedView},
+            {"factor", state.explodeFactor}};
   }
   if (m == "bom") {
     // Bill of materials (A4): derived, one row per referenced part.

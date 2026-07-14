@@ -293,6 +293,11 @@ struct AppState {
     uint64_t mateId = 0;
     float startDof = 0.0f;
     glm::quat startBall{1, 0, 0, 0};
+    // Explode authoring (A4): non-zero → the drag writes the occurrence's
+    // ExplodeStep.offset in this exploded view (translate only; the solved
+    // transform is untouched).
+    uint64_t explodeView = 0;
+    glm::vec3 startOffset{0};
   };
 
   // In-context editing (A4): non-zero while a part tab is being edited with
@@ -305,6 +310,13 @@ struct AppState {
     uint64_t occurrenceId = 0;   // the occurrence being edited
   };
   InContextEdit inContext;
+
+  // Exploded-view display state (A4): TRANSIENT, never saved — which of the
+  // active assembly's exploded views is applied, and how far. Rendering (and
+  // picking, which follows it) composes Translate(factor·step.offset) in
+  // front of each solved occurrence transform; the document is untouched.
+  uint64_t activeExplodedView = 0; // 0 = none (normal display)
+  float explodeFactor = 1.0f;
 
   // UI state
   int selectedFeature = -1;

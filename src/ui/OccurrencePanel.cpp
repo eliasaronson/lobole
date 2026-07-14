@@ -173,6 +173,69 @@ void DrawMatesSection(AppState& state) {
 // The occurrence list + properties editor, drawn in the "Model" panel (where a
 // part tab shows its feature tree) when an assembly tab is active. Edits
 // snapshot for undo; a drag is one undo step (snapshot on IsItemActivated).
+// Exploded views (A4): persistent named views; the ACTIVE one + factor are
+// transient display state. Activating (or sliding the factor) never touches
+// the document — the offset composes into rendered transforms only.
+void DrawExplodedSection(AppState& state) {
+  AssemblyDocument& asmDoc = *state.assembly;
+  ImGui::SeparatorText("Exploded views");
+
+  // "None" + one selectable per view; the active one drives the display.
+  if (ImGui::Selectable("None##explode", state.activeExplodedView == 0)) {
+    state.activeExplodedView = 0;
+    state.syncedDocumentVersion = UINT64_MAX; // display change: force resync
+  }
+  uint64_t deleteId = 0;
+  for (ExplodedView& v : asmDoc.GetExplodedViews()) {
+    ImGui::PushID(static_cast<int>(v.id));
+    const bool active = state.activeExplodedView == v.id;
+    if (ImGui::Selectable(v.name.empty() ? "(unnamed)" : v.name.c_str(),
+                          active)) {
+      state.activeExplodedView = v.id;
+      state.syncedDocumentVersion = UINT64_MAX;
+    }
+    ImGui::PopID();
+  }
+  if (ImGui::SmallButton("Add view")) {
+    SnapshotAssembly(state);
+    ExplodedView v;
+    v.name = "Exploded " + std::to_string(asmDoc.GetExplodedViews().size() + 1);
+    state.activeExplodedView = asmDoc.AddExplodedView(std::move(v));
+    state.syncedDocumentVersion = UINT64_MAX;
+  }
+
+  if (ExplodedView* sel =
+          asmDoc.FindExplodedViewById(state.activeExplodedView)) {
+    char name[128];
+    snprintf(name, sizeof name, "%s", sel->name.c_str());
+    if (ImGui::InputText("Name##explode", name, sizeof name,
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+      SnapshotAssembly(state);
+      sel->name = name;
+      asmDoc.BumpVersion();
+    }
+    // Factor slider: cheap live path (matrix updates only); picking catches
+    // up on the resync forced when the slider is released.
+    if (ImGui::SliderFloat("Factor", &state.explodeFactor, 0.0f, 1.0f))
+      ApplyExplodeTransforms(state);
+    if (ImGui::IsItemDeactivatedAfterEdit())
+      state.syncedDocumentVersion = UINT64_MAX;
+    if (ImGui::SmallButton("Auto-explode")) { // radial seed, then drag to taste
+      if (AutoExplode(state, sel->id))
+        state.syncedDocumentVersion = UINT64_MAX;
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Delete view")) {
+      SnapshotAssembly(state);
+      asmDoc.RemoveExplodedView(sel->id);
+      state.activeExplodedView = 0;
+      state.syncedDocumentVersion = UINT64_MAX;
+      asmDoc.BumpVersion();
+    }
+    ImGui::TextDisabled("Drag the gizmo to set an occurrence's offset.");
+  }
+}
+
 // Bill of materials (A4): derived rows per referenced part. The mass math
 // (OCC volume properties per body) is not per-frame cheap, so the table is
 // cached and recomputed only when the assembly or a referenced part changed.
@@ -326,6 +389,7 @@ void DrawOccurrencePanel(AppState& state) {
   }
 
   DrawMatesSection(state);
+  DrawExplodedSection(state);
   DrawBomSection(state);
 
   ImGui::End();

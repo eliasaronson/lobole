@@ -93,6 +93,24 @@ struct Mate {
   std::string error;
 };
 
+// One occurrence's displacement within an exploded view (A4): a world-space
+// offset, scaled by the transient explode factor at render time.
+struct ExplodeStep {
+  uint64_t occurrenceId = 0;
+  glm::vec3 offset{0.0f}; // world space, at factor 1.0
+};
+
+// A named, persistent exploded view (A4). PURE VIEW STATE: applying it never
+// touches occurrence transforms, mates, or the solve — the offset composes
+// into the rendered instance transform only, so a saved exploded view cannot
+// corrupt placements by construction. The active view + factor are transient
+// (AppState), not stored.
+struct ExplodedView {
+  uint64_t id = 0;  // stable, shares the assembly's id counter
+  std::string name; // display label (cosmetic)
+  std::vector<ExplodeStep> steps; // at most one per occurrence
+};
+
 // An assembly document: an ordered list of occurrences that *place* the bodies
 // of other parts by explicit transform, plus the mates that constrain them
 // (A3 — re-solved over non-`fixed` occurrences by a placement pass). A
@@ -135,6 +153,22 @@ public:
   Mate* FindMateById(uint64_t id);
   const Mate* FindMateById(uint64_t id) const;
 
+  const std::vector<ExplodedView>& GetExplodedViews() const {
+    return m_explodedViews;
+  }
+  std::vector<ExplodedView>& GetExplodedViews() { return m_explodedViews; }
+
+  // Appends an exploded view, assigning a fresh stable id from the shared
+  // counter. Returns the assigned id.
+  uint64_t AddExplodedView(ExplodedView view);
+
+  // Removes the exploded view with this id; returns false if absent.
+  bool RemoveExplodedView(uint64_t id);
+
+  // Lookup by stable id; nullptr if absent.
+  ExplodedView* FindExplodedViewById(uint64_t id);
+  const ExplodedView* FindExplodedViewById(uint64_t id) const;
+
   // Directly set the next-id counter (used by the loader so restored ids are
   // never reissued). No-op if `next` is not greater than the current counter.
   void EnsureNextIdAtLeast(uint64_t next) {
@@ -149,7 +183,8 @@ public:
 private:
   std::vector<Occurrence> m_occurrences;
   std::vector<Mate> m_mates;
+  std::vector<ExplodedView> m_explodedViews;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused; one id
-                         // space shared by occurrences and mates
+                         // space shared by occurrences, mates, and views
   uint64_t m_version = 1;
 };

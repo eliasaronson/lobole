@@ -367,6 +367,96 @@ TEST_CASE("Connector inference snap edge round-trips (v26)", "[assembly]") {
   fs::remove(path);
 }
 
+TEST_CASE("Frozen v26 golden: connector snap-edge schema", "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v26-assembly.json";
+  REQUIRE(fs::exists(golden));
+  std::string error;
+  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(asmDoc->MateCount() == 1);
+
+  const Mate* bolt = asmDoc->FindMateById(3);
+  REQUIRE(bolt != nullptr);
+  CHECK(bolt->a.anchor.face.name == "4/cap1");
+  CHECK(bolt->a.anchor.snapEdge.featureId == 4);
+  CHECK(bolt->a.anchor.snapEdge.name == "4/g7;M1");
+  CHECK(asmDoc->GetExplodedViews().empty()); // pre-v27: none
+
+  // Round-trips at the current version; a view-less assembly writes NO
+  // `exploded` key (the v27 bump is invisible to v26 content).
+  const fs::path tmp = fs::temp_directory_path() / "designer_v26_rt.json";
+  REQUIRE(DocumentIO::SaveAssembly(*asmDoc, tmp.string(), &error));
+  {
+    std::ifstream in(tmp);
+    nlohmann::json j = nlohmann::json::parse(in);
+    CHECK_FALSE(j.contains("exploded"));
+    CHECK(j.at("mates")[0].at("a").at("anchor").at("snap_edge").at("element") ==
+          "4/g7;M1");
+  }
+  auto again = DocumentIO::LoadAssembly(tmp.string(), &error);
+  REQUIRE(again != nullptr);
+  CHECK(again->FindMateById(3)->a.anchor.snapEdge.name == "4/g7;M1");
+  fs::remove(tmp);
+}
+
+TEST_CASE("Exploded views round-trip (v27, single-file + directory)",
+          "[assembly]") {
+  AssemblyDocument asmDoc = SampleAssembly();
+  ExplodedView view;
+  view.name = "service";
+  view.steps.push_back({1, glm::vec3(0.0f, 0.0f, 30.0f)});
+  view.steps.push_back({2, glm::vec3(-15.0f, 0.0f, 10.0f)});
+  const uint64_t viewId = asmDoc.AddExplodedView(view);
+  CHECK(viewId >= 3); // shares the occurrence/mate id counter
+
+  std::string error;
+
+  SECTION("single JSON file") {
+    const fs::path path = fs::temp_directory_path() / "designer_explode_rt.json";
+    REQUIRE(DocumentIO::SaveAssembly(asmDoc, path.string(), &error));
+    auto reloaded = DocumentIO::LoadAssembly(path.string(), &error);
+    REQUIRE(reloaded != nullptr);
+    REQUIRE(reloaded->GetExplodedViews().size() == 1);
+    const ExplodedView* v = reloaded->FindExplodedViewById(viewId);
+    REQUIRE(v != nullptr);
+    CHECK(v->name == "service");
+    REQUIRE(v->steps.size() == 2);
+    CHECK(v->steps[0].occurrenceId == 1);
+    CHECK_THAT(v->steps[0].offset.z, WithinAbs(30.0f, 1e-6f));
+    CHECK(v->steps[1].occurrenceId == 2);
+    CHECK_THAT(v->steps[1].offset.x, WithinAbs(-15.0f, 1e-6f));
+    // The id counter is pinned past the view: no reuse after reload.
+    CHECK(reloaded->AddOccurrence(Occurrence{}) == viewId + 1);
+    fs::remove(path);
+  }
+
+  SECTION("directory form: file-per-view under exploded/") {
+    const fs::path dir = fs::temp_directory_path() / "designer_explode_rt.dsgn";
+    fs::remove_all(dir);
+    REQUIRE(DocumentIO::SaveAssembly(asmDoc, dir.string(), &error));
+    CHECK(fs::exists(dir / "exploded" /
+                     (std::to_string(viewId) + "-service.json")));
+    auto reloaded = DocumentIO::LoadAssembly(dir.string(), &error);
+    REQUIRE(reloaded != nullptr);
+    REQUIRE(reloaded->GetExplodedViews().size() == 1);
+    CHECK(reloaded->FindExplodedViewById(viewId)->steps.size() == 2);
+
+    // Removing the view removes its file on the next save (F3 discipline),
+    // and the index drops the `exploded` key entirely.
+    REQUIRE(reloaded->RemoveExplodedView(viewId));
+    REQUIRE(DocumentIO::SaveAssembly(*reloaded, dir.string(), &error));
+    CHECK_FALSE(fs::exists(dir / "exploded" /
+                           (std::to_string(viewId) + "-service.json")));
+    {
+      std::ifstream in(dir / "index.json");
+      nlohmann::json index = nlohmann::json::parse(in);
+      CHECK_FALSE(index.contains("exploded"));
+    }
+    fs::remove_all(dir);
+  }
+}
+
 TEST_CASE("A part loader rejects an assembly and vice versa", "[assembly]") {
   AssemblyDocument asmDoc = SampleAssembly();
   const fs::path path = fs::temp_directory_path() / "designer_asm_kind.json";

@@ -656,6 +656,52 @@ def solve_assembly() -> dict:
     return _call("solve_assembly")
 
 
+@mcp.tool(description="Add a named exploded view to the active assembly "
+          "(A4). Returns its id. Views are persistent; apply one with "
+          "set_explode.")
+def add_exploded_view(name: str = "Exploded") -> dict:
+    return _call("add_exploded_view", name=name)
+
+
+@mcp.tool(description="Remove an exploded view by id.")
+def remove_exploded_view(id: int) -> dict:
+    return _call("remove_exploded_view", id=id)
+
+
+@mcp.tool(description="List the active assembly's exploded views (id, name, "
+          "per-occurrence offsets) plus the applied view id and factor.")
+def list_exploded_views() -> dict:
+    return _call("list_exploded_views")
+
+
+@mcp.tool(description="Set one occurrence's world-space offset in an "
+          "exploded view (creates the step if missing). offset is [x,y,z] "
+          "at factor 1.")
+def set_explode_step(view: int, occurrence: int, offset: list) -> dict:
+    return _call("set_explode_step", view=view, occurrence=occurrence,
+                 offset=offset)
+
+
+@mcp.tool(description="Seed an exploded view radially: every occurrence "
+          "pushed away from the assembly centroid, scaled by assembly size. "
+          "A starting point to refine with set_explode_step.")
+def auto_explode(view: int) -> dict:
+    return _call("auto_explode", view=view)
+
+
+@mcp.tool(description="Apply an exploded view to the display (transient, "
+          "never saved): view id (0 = none) and/or factor 0..1. The solved "
+          "transforms are untouched — screenshot an exploded assembly with "
+          "set_explode + screenshot.")
+def set_explode(view: int = -1, factor: float = -1.0) -> dict:
+    args = {}
+    if view >= 0:
+        args["view"] = view
+    if factor >= 0:
+        args["factor"] = factor
+    return _call("set_explode", **args)
+
+
 @mcp.tool(description="Bill of materials for the active assembly (A4): one "
           "row per referenced part with quantity, material, unit/total mass "
           "(grams; null when a body has no material density) and a mass "

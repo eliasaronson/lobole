@@ -58,3 +58,32 @@ const Mate* AssemblyDocument::FindMateById(uint64_t id) const {
     if (m.id == id) return &m;
   return nullptr;
 }
+
+uint64_t AssemblyDocument::AddExplodedView(ExplodedView view) {
+  view.id = m_nextId++;
+  m_explodedViews.push_back(std::move(view));
+  m_version++;
+  return m_explodedViews.back().id;
+}
+
+bool AssemblyDocument::RemoveExplodedView(uint64_t id) {
+  const auto it =
+      std::find_if(m_explodedViews.begin(), m_explodedViews.end(),
+                   [id](const ExplodedView& v) { return v.id == id; });
+  if (it == m_explodedViews.end()) return false;
+  m_explodedViews.erase(it);
+  m_version++;
+  return true;
+}
+
+ExplodedView* AssemblyDocument::FindExplodedViewById(uint64_t id) {
+  for (ExplodedView& v : m_explodedViews)
+    if (v.id == id) return &v;
+  return nullptr;
+}
+
+const ExplodedView* AssemblyDocument::FindExplodedViewById(uint64_t id) const {
+  for (const ExplodedView& v : m_explodedViews)
+    if (v.id == id) return &v;
+  return nullptr;
+}

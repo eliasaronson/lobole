@@ -135,6 +135,17 @@ BomTable ComputeBom(AppState& state); // empty without an active assembly
 // The table as CSV (quoted where needed); unknown masses are empty cells.
 std::string BomToCsv(const BomTable& bom);
 
+// Exploded views (A4). AutoExplode replaces `viewId`'s steps with a radial
+// seed (each occurrence pushed away from the assembly centroid, scaled by the
+// assembly's size) — a starting point to refine by gizmo drag. Snapshots for
+// undo; false without an active assembly / unknown view / fewer than two
+// placed occurrences. ApplyExplodeTransforms re-applies display transforms
+// (solved ∘ explode) to every occurrence's render instances WITHOUT a resync
+// — the factor slider's cheap live path (picking refreshes on the next real
+// resync).
+bool AutoExplode(AppState& state, uint64_t viewId);
+void ApplyExplodeTransforms(AppState& state);
+
 // Save/open a project directory. A multi-part project writes a project.json
 // index + one `parts/<name>/` directory each; a single-part project stays
 // the flat `.dsgn` (index.json + features/) form for backward compatibility.

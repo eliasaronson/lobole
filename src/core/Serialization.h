@@ -47,4 +47,8 @@ Occurrence OccurrenceFromJson(const nlohmann::json& j);
 nlohmann::json MateToJson(const Mate& mate);
 Mate MateFromJson(const nlohmann::json& j);
 
+// Single-exploded-view (de)serialization (v27, A4); same convention as mates.
+nlohmann::json ExplodedViewToJson(const ExplodedView& view);
+ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
+
 }  // namespace DocumentIO

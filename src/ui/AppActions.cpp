@@ -508,6 +508,9 @@ void ResetActiveTabUiState(AppState& state) {
   // Any tab change exits in-context editing (EnterInContextEdit re-arms it
   // after its SetActivePart returns).
   state.inContext = AppState::InContextEdit{};
+  // Explode display state is per-tab and transient: reset on switch.
+  state.activeExplodedView = 0;
+  state.explodeFactor = 1.0f;
   state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
 } // namespace
@@ -833,6 +836,28 @@ namespace {
 // An occurrence's placement as a model matrix (translate ∘ rotate).
 glm::mat4 OccurrenceMatrix(const Occurrence& o) {
   return glm::translate(glm::mat4(1.0f), o.position) * glm::mat4_cast(o.orientation);
+}
+
+// Exploded-view display (A4): the occurrence's factor-scaled world offset in
+// the active exploded view (zero when none / no step). PURE VIEW STATE —
+// composed into rendered/picked transforms only, never into the document.
+glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId) {
+  if (!state.activeExplodedView || !state.assembly)
+    return glm::vec3(0.0f);
+  const ExplodedView* v =
+      state.assembly->FindExplodedViewById(state.activeExplodedView);
+  if (!v)
+    return glm::vec3(0.0f);
+  for (const ExplodeStep& s : v->steps)
+    if (s.occurrenceId == occId) return s.offset * state.explodeFactor;
+  return glm::vec3(0.0f);
+}
+
+// What an occurrence renders (and picks) at: the solved placement, displaced
+// by the active exploded view.
+glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o) {
+  return glm::translate(glm::mat4(1.0f), ExplodeOffset(state, o.id)) *
+         OccurrenceMatrix(o);
 }
 
 // The part document an occurrence references, by stable id (active or stashed).
@@ -1192,7 +1217,11 @@ Occurrence* GizmoOccurrence(AppState& state) {
   if (!state.assembly || !state.selectedOccurrence || state.mateTool.active)
     return nullptr;
   Occurrence* o = state.assembly->FindById(state.selectedOccurrence);
-  return (o && !o->fixed) ? o : nullptr;
+  if (!o) return nullptr;
+  // Explode mode drags a view offset, not the placement — even a fixed base
+  // part explodes.
+  if (state.activeExplodedView) return o;
+  return !o->fixed ? o : nullptr;
 }
 
 // The gizmo's frame + which handles show. A free occurrence gets world axes at
@@ -1218,6 +1247,20 @@ Mate* MateDrivingOccurrence(AssemblyDocument& asmDoc, uint64_t occId) {
 // connector).
 bool BuildGizmoSpec(AppState& state, Occurrence* occ, GizmoSpec& spec,
                     Mate*& mate) {
+  mate = nullptr;
+  if (state.activeExplodedView) {
+    // Explode authoring (A4): world-aligned translate arrows at the DISPLAYED
+    // position; the drag writes the view's step offset. No rotation — an
+    // exploded view is pure displacement.
+    if (!state.assembly->FindExplodedViewById(state.activeExplodedView))
+      return false;
+    spec.origin = occ->position + ExplodeOffset(state, occ->id);
+    for (int i = 0; i < 3; i++) {
+      spec.axis[i] = kGizmoAxis[i];
+      spec.trans[i] = true;
+    }
+    return true;
+  }
   mate = MateDrivingOccurrence(*state.assembly, occ->id);
   if (!mate) {
     spec.origin = occ->position; // free: world axes, all handles
@@ -1277,7 +1320,7 @@ bool GizmoHitTest(const AppState& state, const GizmoSpec& spec, const Ray& ray,
 void PushOccurrenceLive(AppState& state, uint64_t occId) {
   const Occurrence* occ = state.assembly->FindById(occId);
   if (!occ) return;
-  const glm::mat4 xf = OccurrenceMatrix(*occ);
+  const glm::mat4 xf = DisplayMatrix(state, *occ);
   for (const DocumentRenderMesh& m : state.documentMeshes) {
     if (m.occurrenceId != occId) continue;
     if (state.meshRenderer) state.meshRenderer->SetInstanceTransform(m.meshId, xf);
@@ -1336,10 +1379,33 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     Mate* mate = g.mateId ? state.assembly->FindMateById(g.mateId) : nullptr;
     if (released || !down || !occ || (g.mateId && !mate)) {
       g.active = false;
-      if (state.assembly) SolveActiveAssembly(state); // one undo step + resync
+      if (state.assembly) {
+        if (g.explodeView)
+          state.assembly->BumpVersion(); // view edit: resync, nothing to solve
+        else
+          SolveActiveAssembly(state); // one undo step + resync
+      }
       return true;
     }
     const glm::vec3 A = g.frameAxis[g.axis];
+    if (g.explodeView) {
+      // Explode authoring: the drag writes the step's offset so that the
+      // DISPLAYED position follows the mouse (offset scales by 1/factor).
+      ExplodedView* view = state.assembly->FindExplodedViewById(g.explodeView);
+      ExplodeStep* step = nullptr;
+      if (view)
+        for (ExplodeStep& s : view->steps)
+          if (s.occurrenceId == occ->id) { step = &s; break; }
+      if (!step) { // view or step vanished mid-drag (undo?) — abort cleanly
+        g.active = false;
+        return true;
+      }
+      const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+      const float f = std::max(state.explodeFactor, 0.05f); // never divide by ~0
+      step->offset = g.startOffset + A * ((t - g.startParam) / f);
+      PushOccurrenceLive(state, occ->id);
+      return true;
+    }
     if (!g.mateId) {
       // Free occurrence: drag its transform directly.
       if (!g.rotate) {
@@ -1392,6 +1458,20 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
   g.frameOrigin = spec.origin;
   for (int i = 0; i < 3; i++) g.frameAxis[i] = spec.axis[i];
   g.mateId = mate ? mate->id : 0;
+  g.explodeView = state.activeExplodedView;
+  if (g.explodeView) {
+    // Find-or-create this occurrence's step in the active view (after the
+    // snapshot, so the whole drag is one undo step).
+    ExplodedView* view = state.assembly->FindExplodedViewById(g.explodeView);
+    ExplodeStep* step = nullptr;
+    for (ExplodeStep& s : view->steps)
+      if (s.occurrenceId == occ->id) { step = &s; break; }
+    if (!step) {
+      view->steps.push_back({occ->id, glm::vec3(0.0f)});
+      step = &view->steps.back();
+    }
+    g.startOffset = step->offset;
+  }
   g.startPos = occ->position;
   g.startRot = occ->orientation;
   const glm::vec3 A = spec.axis[axis];
@@ -1411,6 +1491,71 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
   return true; // consumed the click (don't also re-select)
 }
 
+bool AutoExplode(AppState& state, uint64_t viewId) {
+  if (!state.assembly)
+    return false;
+  ExplodedView* view = state.assembly->FindExplodedViewById(viewId);
+  if (!view)
+    return false;
+
+  // World-space center of every placed occurrence + the whole-assembly box.
+  struct OccCenter { uint64_t id; glm::vec3 center; };
+  std::vector<OccCenter> centers;
+  glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+  for (const Occurrence& occ : state.assembly->GetOccurrences()) {
+    Document* part = PartDocById(state, occ.partId);
+    if (!part)
+      continue;
+    const glm::mat4 xf = OccurrenceMatrix(occ);
+    glm::vec3 bmin(FLT_MAX), bmax(-FLT_MAX);
+    bool any = false;
+    for (const auto& body : part->GetBodies()) {
+      glm::vec3 mn, mx;
+      body.shape.GetBoundingBox(mn, mx);
+      for (int c = 0; c < 8; c++) {
+        const glm::vec3 corner((c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y,
+                               (c & 4) ? mx.z : mn.z);
+        const glm::vec3 w = glm::vec3(xf * glm::vec4(corner, 1.0f));
+        bmin = glm::min(bmin, w);
+        bmax = glm::max(bmax, w);
+        any = true;
+      }
+    }
+    if (!any)
+      continue;
+    centers.push_back({occ.id, (bmin + bmax) * 0.5f});
+    lo = glm::min(lo, bmin);
+    hi = glm::max(hi, bmax);
+  }
+  if (centers.size() < 2)
+    return false; // nothing to spread apart
+
+  glm::vec3 centroid(0.0f);
+  for (const OccCenter& c : centers) centroid += c.center;
+  centroid /= static_cast<float>(centers.size());
+  const float spread = 0.6f * glm::length(hi - lo);
+
+  SnapshotAssembly(state);
+  view->steps.clear();
+  for (size_t i = 0; i < centers.size(); i++) {
+    glm::vec3 dir = centers[i].center - centroid;
+    if (glm::length(dir) < 1e-6f)
+      dir = kGizmoAxis[i % 3]; // concentric parts: cycle world axes
+    else
+      dir = glm::normalize(dir);
+    view->steps.push_back({centers[i].id, dir * spread});
+  }
+  state.assembly->BumpVersion();
+  return true;
+}
+
+void ApplyExplodeTransforms(AppState& state) {
+  if (!state.assembly)
+    return;
+  for (const Occurrence& occ : state.assembly->GetOccurrences())
+    PushOccurrenceLive(state, occ.id);
+}
+
 void FitCameraToDocument(AppState& state) {
   if (!state.camera)
     return;
@@ -1425,7 +1570,7 @@ void FitCameraToDocument(AppState& state) {
       Document* part = PartDocById(state, occ.partId);
       if (!part)
         continue;
-      const glm::mat4 xf = OccurrenceMatrix(occ);
+      const glm::mat4 xf = DisplayMatrix(state, occ); // fit exploded extents
       for (const auto& body : part->GetBodies()) {
         glm::vec3 bmin, bmax;
         body.shape.GetBoundingBox(bmin, bmax);
@@ -1527,7 +1672,7 @@ void SyncAssemblyRenderers(AppState& state) {
       it = byPart.emplace(occ.partId, std::move(shared)).first;
     }
 
-    const glm::mat4 xf = OccurrenceMatrix(occ);
+    const glm::mat4 xf = DisplayMatrix(state, occ); // solved ∘ explode offset
     for (size_t bi = 0; bi < it->second.size(); bi++) {
       const SharedBody& sb = it->second[bi];
       if (sb.assetId == 0)

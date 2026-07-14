@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""Integration test: A4 exploded views, headless over JSON-RPC.
+
+Checks the RPC surface (add/remove/list/set_explode_step/auto_explode/
+set_explode), the pure-view-state contract (applying a view never changes
+occurrence transforms), undo, and that views persist through save/reopen
+while the applied view + factor stay transient.
+
+Usage: exploded_smoke.py <path-to-designer-binary>
+"""
+import os
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from designer_remote import Designer  # noqa: E402
+
+
+def free_port():
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def expect(condition, message):
+    if not condition:
+        raise AssertionError(message)
+
+
+def main():
+    binary = sys.argv[1]
+    port = free_port()
+    env = dict(os.environ)
+    env.pop("DISPLAY", None)
+    env.pop("WAYLAND_DISPLAY", None)
+    tmp = tempfile.mkdtemp(prefix="designer_exploded_")
+    env["XDG_STATE_HOME"] = tmp
+    app = subprocess.Popen([binary, "--headless", "--remote", str(port)],
+                           env=env, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL)
+    try:
+        d = Designer.wait_for(port)
+        expect(d.call("ping")["ok"], "ping")
+
+        d.call("new_project")
+        d.call("add_part", name="base")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Blk", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 10})
+        d.call("add_part", name="cap")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Blk", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 2})
+        d.call("add_assembly", name="stack")
+        o1 = d.call("add_occurrence", part="base", fixed=True)["id"]
+        o2 = d.call("add_occurrence", part="cap",
+                    transform={"position": [0, 0, 10],
+                               "orientation": [0, 0, 0, 1]})["id"]
+
+        def transforms():
+            return {o["id"]: o["transform"]["position"]
+                    for o in d.call("list_occurrences")["occurrences"]}
+
+        before = transforms()
+
+        # --- author a view: manual step + radial auto-seed -------------------
+        view = d.call("add_exploded_view", name="service")["id"]
+        expect(view > o2, f"view id from the shared counter: {view}")
+        v = d.call("set_explode_step", view=view, occurrence=o2,
+                   offset=[0, 0, 25])
+        expect(v["steps"] == [{"occurrence": o2, "offset": [0.0, 0.0, 25.0]}],
+               f"manual step: {v}")
+        v = d.call("auto_explode", view=view)
+        expect(len(v["steps"]) == 2, f"auto seeded both occurrences: {v}")
+
+        # --- applying the view is PURE display state -------------------------
+        d.call("set_explode", view=view, factor=1.0)
+        expect(transforms() == before,
+               "exploding never touches occurrence transforms")
+        st = d.call("list_exploded_views")
+        expect(st["active"] == view and abs(st["factor"] - 1.0) < 1e-6,
+               f"display state readable: {st}")
+        d.call("set_explode", view=0)
+        expect(d.call("list_exploded_views")["active"] == 0, "view off")
+
+        # --- undo: the auto-seed and the manual step are separate steps ------
+        d.call("undo")  # undoes auto_explode
+        st = d.call("list_exploded_views")["views"][0]
+        expect(st["steps"] == [{"occurrence": o2, "offset": [0.0, 0.0, 25.0]}],
+               f"undo restored the manual-step state: {st}")
+
+        # --- persistence: views survive; applied state does not --------------
+        d.call("set_explode", view=view, factor=0.5)
+        proj = os.path.join(tmp, "stack.dsgn")
+        d.call("save_project", path=proj)
+        expect(os.path.isdir(os.path.join(proj, "assemblies", "stack",
+                                          "exploded")),
+               "exploded/ directory written")
+        d.call("new_project")
+        d.call("open_project", path=proj)
+        parts = {p["name"]: p for p in d.call("list_parts")["parts"]}
+        d.call("set_active_part", index=parts["stack"]["index"])
+        st = d.call("list_exploded_views")
+        expect(len(st["views"]) == 1 and st["views"][0]["name"] == "service",
+               f"view reopened: {st}")
+        expect(st["views"][0]["steps"][0]["offset"] == [0.0, 0.0, 25.0],
+               f"step survived: {st}")
+        expect(st["active"] == 0 and abs(st["factor"] - 1.0) < 1e-6,
+               f"applied view + factor are transient: {st}")
+
+        # --- removal ----------------------------------------------------------
+        vid = st["views"][0]["id"]
+        d.call("remove_exploded_view", id=vid)
+        expect(d.call("list_exploded_views")["views"] == [], "view removed")
+
+        print("exploded_smoke: OK")
+    finally:
+        app.terminate()
+        try:
+            app.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            app.kill()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

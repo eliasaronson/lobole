@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 26; // v26: connector snap (v25: cyl/planar/ball mates)
+constexpr int kVersion = 27; // v27: exploded views (v26: connector snap)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -1003,6 +1003,37 @@ Mate MateFromJson(const json& j) {
   return m;
 }
 
+// ---- Exploded views (v27, A4) ---------------------------------------------
+
+json ExplodedViewToJson(const ExplodedView& v) {
+  json j;
+  j["type"] = "ExplodedView";
+  j["id"] = v.id;
+  j["name"] = v.name;
+  j["steps"] = json::array();
+  for (const ExplodeStep& s : v.steps) {
+    j["steps"].push_back(
+        {{"occurrence", s.occurrenceId},
+         {"offset", {s.offset.x, s.offset.y, s.offset.z}}});
+  }
+  return j;
+}
+
+ExplodedView ExplodedViewFromJson(const json& j) {
+  ExplodedView v;
+  v.id = j.at("id").get<uint64_t>();
+  v.name = j.value("name", std::string{});
+  for (const json& sj : j.value("steps", json::array())) {
+    ExplodeStep s;
+    s.occurrenceId = sj.at("occurrence").get<uint64_t>();
+    const auto& o = sj.at("offset");
+    s.offset = glm::vec3(o.at(0).get<float>(), o.at(1).get<float>(),
+                         o.at(2).get<float>());
+    v.steps.push_back(std::move(s));
+  }
+  return v;
+}
+
 namespace {
 
 // Path classification (F3): a `.dsgn` path or existing directory is the
@@ -1110,6 +1141,18 @@ void LoadMates(AssemblyDocument& asmDoc, const std::vector<json>& mateJsons) {
     Mate m = MateFromJson(mj);
     maxId = std::max(maxId, m.id);
     asmDoc.GetMates().push_back(std::move(m));
+  }
+  asmDoc.EnsureNextIdAtLeast(maxId + 1);
+}
+
+// Exploded views (v27) follow the same restore-and-pin discipline.
+void LoadExplodedViews(AssemblyDocument& asmDoc,
+                       const std::vector<json>& viewJsons) {
+  uint64_t maxId = 0;
+  for (const json& vj : viewJsons) {
+    ExplodedView v = ExplodedViewFromJson(vj);
+    maxId = std::max(maxId, v.id);
+    asmDoc.GetExplodedViews().push_back(std::move(v));
   }
   asmDoc.EnsureNextIdAtLeast(maxId + 1);
 }
@@ -1298,6 +1341,30 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
         fs::remove(entry.path(), ec);
     }
 
+    // Exploded views (v27) mirror mates: file-per-view under exploded/, the
+    // id list in the index. Both the key and the dir are absent when there
+    // are none, so a v26 assembly stays byte-identical.
+    const fs::path viewDir = dir / "exploded";
+    if (!asmDoc.GetExplodedViews().empty()) {
+      index["exploded"] = json::array();
+      fs::create_directories(viewDir);
+    }
+    std::set<std::string> wantedView;
+    for (const ExplodedView& v : asmDoc.GetExplodedViews()) {
+      const std::string file =
+          std::to_string(v.id) + "-" + LabelSlug(v.name) + ".json";
+      if (!WriteTextAtomic(viewDir / file,
+                           ExplodedViewToJson(v).dump(2) + "\n", error))
+        return false;
+      index["exploded"].push_back(v.id);
+      wantedView.insert(file);
+    }
+    for (const auto& entry : fs::directory_iterator(viewDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedView.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
     if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
       return false;
     LOG_INFO("Saved assembly ({} occurrences, {} mates) to {}",
@@ -1378,6 +1445,29 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       mateJsons.push_back(json::parse(fin));
     }
     LoadMates(*asmDoc, mateJsons);
+
+    // Exploded views (v27): id-prefix files under exploded/, index order. A
+    // pre-v27 assembly has no `exploded` key ⇒ the loop is empty.
+    std::map<uint64_t, fs::path> viewById;
+    for (const auto& entry :
+         fs::directory_iterator(fs::path(dirPath) / "exploded", ec)) {
+      if (entry.path().extension() != ".json")
+        continue;
+      viewById[std::stoull(entry.path().filename().string())] = entry.path();
+    }
+    std::vector<json> viewJsons;
+    for (const auto& idJson : index.value("exploded", json::array())) {
+      const uint64_t id = idJson.get<uint64_t>();
+      const auto it = viewById.find(id);
+      if (it == viewById.end()) {
+        if (error)
+          *error = "missing exploded-view file for id " + std::to_string(id);
+        return nullptr;
+      }
+      std::ifstream fin(it->second);
+      viewJsons.push_back(json::parse(fin));
+    }
+    LoadExplodedViews(*asmDoc, viewJsons);
 
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), dirPath);
@@ -1483,6 +1573,11 @@ bool SaveAssembly(const AssemblyDocument& asmDoc, const std::string& path,
     for (const Mate& m : asmDoc.GetMates()) {
       j["mates"].push_back(MateToJson(m));
     }
+    if (!asmDoc.GetExplodedViews().empty()) { // absent when none (v27)
+      j["exploded"] = json::array();
+      for (const ExplodedView& v : asmDoc.GetExplodedViews())
+        j["exploded"].push_back(ExplodedViewToJson(v));
+    }
     std::ofstream out(path);
     if (!out) {
       if (error) *error = "Cannot open file for writing: " + path;
@@ -1529,6 +1624,8 @@ std::unique_ptr<AssemblyDocument> LoadAssembly(const std::string& path,
                                 .get<std::vector<json>>());
     LoadMates(*asmDoc,
               j.value("mates", json::array()).get<std::vector<json>>());
+    LoadExplodedViews(
+        *asmDoc, j.value("exploded", json::array()).get<std::vector<json>>());
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);
     return asmDoc;
