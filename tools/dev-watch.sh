@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# dev-watch — keep a fresh-build Designer running on a fixed --remote port.
+#
+# Run this ONCE in your own GPU/display session (a normal terminal, or your
+# window-manager autostart). It launches the windowed app on a fixed port and
+# relaunches it whenever `build/designer` changes (i.e. after every rebuild),
+# so an assistant — or you, via tools/designer_remote.py — can always drive and
+# screenshot the CURRENT build without you restarting anything.
+#
+# Why a windowed instance and not --headless: --headless has no renderer, so it
+# cannot take screenshots. The app must own a real swapchain, which means it has
+# to run in your display session (not a sandboxed background process).
+#
+# This is relaunch-on-rebuild, not hot code reload (impossible for a compiled
+# Vulkan app) — but it gives the same "always current" behaviour for driving.
+#
+# Usage:  ./tools/dev-watch.sh [port]   (default port 8799)
+#         Ctrl-C to stop.
+set -u
+
+PORT="${1:-8799}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$ROOT/build/designer"
+
+if [ ! -x "$BIN" ]; then
+  echo "dev-watch: no binary at $BIN — build it first (cmake --build build)." >&2
+  exit 1
+fi
+
+stamp() { stat -c %Y "$BIN" 2>/dev/null || echo 0; }
+launch() {
+  "$BIN" --remote "$PORT" &
+  APP=$!
+  echo "dev-watch: Designer running (pid $APP) on --remote $PORT"
+}
+
+echo "dev-watch: watching $BIN; relaunches on rebuild. Ctrl-C to stop."
+launch
+LAST="$(stamp)"
+trap 'echo; echo "dev-watch: stopping"; kill "$APP" 2>/dev/null; exit 0' INT TERM
+
+while true; do
+  sleep 1
+  NOW="$(stamp)"
+  if [ "$NOW" != "$LAST" ]; then
+    # The binary changed. Wait a beat for the link to finish, then relaunch.
+    sleep 1
+    LAST="$(stamp)"
+    echo "dev-watch: rebuild detected — relaunching"
+    kill "$APP" 2>/dev/null
+    wait "$APP" 2>/dev/null
+    launch
+  elif ! kill -0 "$APP" 2>/dev/null; then
+    # App exited on its own (you closed the window, or it crashed) — bring it
+    # back so the port stays live for the next connection.
+    echo "dev-watch: app exited — relaunching"
+    launch
+  fi
+done
