@@ -101,6 +101,11 @@ public:
   // high-water mark past the study and all its loads. For deserialization.
   void RestoreStudy(fem::Study study);
 
+  // Replaces the study with `study.id` in place (preserving list order),
+  // raising the id high-water mark past its loads. Returns false if absent.
+  // Backs the study modify Command.
+  bool ReplaceStudy(fem::Study study);
+
   // Allocates the next document-unique id (studies and their loads draw from
   // the same counter as features, so ids never collide across kinds).
   uint64_t AllocateId() { return m_nextId++; }

@@ -8,12 +8,15 @@
 
 #include "core/ElementMap.h"
 #include "core/Expression.h"
+#include "core/FemMesher.h"
 
 #include <glm/glm.hpp>
 
 #include <cstdint>
 #include <string>
 #include <vector>
+
+class Document;
 
 namespace fem {
 
@@ -73,5 +76,34 @@ bool LoadTypeFromString(const std::string& s, LoadType& out);
 // solve time, not during regeneration (a Study is not visited by the feature
 // loop, and results are never auto-solved).
 bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols, std::string* error);
+
+// The face a load/refinement ref resolves to: a body (index into
+// doc.GetBodies()) and a face index in that body (TopExp_Explorer order).
+struct ResolvedFace {
+  int bodyIndex = -1;
+  int faceIndex = -1;
+};
+
+// Resolves `ref` against the document bodies exactly as ShellFeature/Measure
+// do (body.createdBy == ref.featureId, then elementMap.Resolve). Returns false
+// and sets *error (naming `what`) if the body or the element name is gone —
+// the toponaming contract: a dangling ref is a first-class study error.
+bool ResolveFace(const Document& doc, const ElementRef& ref, const std::string& what,
+                 ResolvedFace& out, std::string* error);
+
+// One meshed body of a study.
+struct StudyBodyMesh {
+  int bodyIndex = -1;
+  std::string bodyName;
+  FemMesh mesh;
+};
+
+// Evaluates the study's expressions, resolves every ref, and meshes each body
+// the study touches (any body referenced by a load or refinement), applying
+// the global size and per-face refinement sizes. On any error (bad expression,
+// dangling ref, mesher failure) sets study.error and *error and returns false.
+// Pure meshing — no solve. Used by mesh_study (and, in FEM2, run_study).
+bool MeshStudy(const Document& doc, Study& study, std::vector<StudyBodyMesh>& out,
+               std::string* error);
 
 }  // namespace fem

@@ -126,6 +126,63 @@ void RenameVariableCommand::Undo(Document& doc) {
   doc.RenameParameter(m_newName, m_oldName);
 }
 
+// ---- FEM studies ----------------------------------------------------------
+
+AddStudyCommand::AddStudyCommand(std::string name) : m_name(std::move(name)) {}
+
+std::string AddStudyCommand::Description() const {
+  return m_name.empty() ? "Add study" : "Add study '" + m_name + "'";
+}
+
+bool AddStudyCommand::Execute(Document& doc) {
+  if (m_id == 0) {
+    fem::Study& s = doc.AddStudy(m_name);
+    m_id = s.id;
+    m_name = s.name;  // capture the auto-generated name for redo/description
+  } else {
+    // Redo: restore the same (empty) study with its original id so refs stay
+    // stable across undo/redo, like AddFeatureCommand reusing its feature.
+    fem::Study s;
+    s.id = m_id;
+    s.name = m_name;
+    doc.RestoreStudy(std::move(s));
+  }
+  return true;
+}
+
+void AddStudyCommand::Undo(Document& doc) { doc.RemoveStudy(m_id); }
+
+RemoveStudyCommand::RemoveStudyCommand(uint64_t studyId) : m_id(studyId) {}
+
+std::string RemoveStudyCommand::Description() const { return "Remove study"; }
+
+bool RemoveStudyCommand::Execute(Document& doc) {
+  const fem::Study* s = doc.FindStudy(m_id);
+  if (!s) return false;
+  m_snapshot = DocumentIO::StudyToJson(*s);
+  return doc.RemoveStudy(m_id);
+}
+
+void RemoveStudyCommand::Undo(Document& doc) {
+  doc.RestoreStudy(DocumentIO::StudyFromJson(m_snapshot));
+}
+
+ModifyStudyCommand::ModifyStudyCommand(std::string description,
+                                       nlohmann::json before, nlohmann::json after)
+    : m_description(std::move(description)),
+      m_before(std::move(before)),
+      m_after(std::move(after)) {}
+
+std::string ModifyStudyCommand::Description() const { return m_description; }
+
+bool ModifyStudyCommand::Execute(Document& doc) {
+  return doc.ReplaceStudy(DocumentIO::StudyFromJson(m_after));
+}
+
+void ModifyStudyCommand::Undo(Document& doc) {
+  doc.ReplaceStudy(DocumentIO::StudyFromJson(m_before));
+}
+
 bool CommandStack::Execute(std::unique_ptr<Command> command, Document& doc) {
   if (!command->Execute(doc)) {
     return false;

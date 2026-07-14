@@ -200,6 +200,17 @@ void Document::RestoreStudy(fem::Study study) {
   m_studies.push_back(std::move(study));
 }
 
+bool Document::ReplaceStudy(fem::Study study) {
+  for (fem::Study& s : m_studies) {
+    if (s.id == study.id) {
+      for (const fem::Load& l : study.loads) EnsureNextIdAtLeast(l.id + 1);
+      s = std::move(study);
+      return true;
+    }
+  }
+  return false;
+}
+
 bool Document::SetParameter(const std::string& name,
                             const std::string& expression,
                             const std::string& comment) {
