@@ -48,6 +48,11 @@ public:
   void SetOverlayLines(std::vector<LineVertex3D> lines) {
     m_overlayLines = std::move(lines);
   }
+  // On-top gizmo handles (A2.5), drawn last with depth test off so they stay
+  // visible/grabbable through geometry.
+  void SetGizmoLines(std::vector<LineVertex3D> lines) {
+    m_gizmoLines = std::move(lines);
+  }
   // Translucent default-plane quads (triangle list).
   void SetQuads(std::vector<LineVertex3D> quads) { m_quads = std::move(quads); }
   // Screen-space-expanded primitives (thick lines + point dots), replaced on
@@ -113,6 +118,7 @@ private:
   VkPipeline m_linePipeline = VK_NULL_HANDLE;
   VkPipeline m_quadPipeline = VK_NULL_HANDLE;
   VkPipeline m_primPipeline = VK_NULL_HANDLE;
+  VkPipeline m_gizmoPipeline = VK_NULL_HANDLE; // depth-test off (A2.5)
   VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
 
   DynamicBuffer m_uniformBuffers[kFramesInFlight];
@@ -120,11 +126,13 @@ private:
                                                        VK_NULL_HANDLE};
   DynamicBuffer m_lineBuffers[kFramesInFlight];
   DynamicBuffer m_overlayBuffers[kFramesInFlight];
+  DynamicBuffer m_gizmoBuffers[kFramesInFlight];
   DynamicBuffer m_quadBuffers[kFramesInFlight];
   DynamicBuffer m_primBuffers[kFramesInFlight];
 
   std::vector<LineVertex3D> m_staticLines;
   std::vector<LineVertex3D> m_overlayLines;
+  std::vector<LineVertex3D> m_gizmoLines;
   std::vector<LineVertex3D> m_quads;
   std::vector<PrimVertex> m_primitives;
 

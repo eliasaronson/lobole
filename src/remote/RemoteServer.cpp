@@ -243,7 +243,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "set_occurrence_transform", "set_occurrence_visible",
       "set_occurrence_fixed", "rename_occurrence",
       "add_mate", "set_mate", "remove_mate", "list_mates", "select_mate",
-      "solve_assembly",
+      "select_occurrence", "solve_assembly",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
@@ -1028,6 +1028,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (id && !state.assembly->FindMateById(id))
       throw std::runtime_error("no such mate");
     state.selectedMate = id;
+    return {{"selected", id}};
+  }
+  if (m == "select_occurrence") {
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    const uint64_t id = p.value("id", uint64_t{0}); // 0 clears the selection
+    if (id && !state.assembly->FindById(id))
+      throw std::runtime_error("no such occurrence");
+    ui::SelectOccurrence(state, id); // highlights + shows the drag gizmo
     return {{"selected", id}};
   }
   if (m == "solve_assembly") {

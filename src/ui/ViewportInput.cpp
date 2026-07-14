@@ -195,6 +195,25 @@ void HandleViewportInput(AppState& state) {
     if (state.mateTool.active && ImGui::IsKeyPressed(ImGuiKey_Escape))
       CancelMateTool(state);
 
+    // The drag gizmo gets first shot: a live drag continues even off-viewport,
+    // and a click on a handle starts one (consuming the click so it doesn't
+    // also re-select). Built each frame from the current mouse ray.
+    {
+      const bool clicked =
+          overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+      const bool down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+      const bool released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+      if (state.gizmoDrag.active || clicked) {
+        Ray ray = state.faceSelector->ScreenToWorldRay(
+            io.MousePos.x - state.viewportPos.x,
+            io.MousePos.y - state.viewportPos.y,
+            static_cast<int>(state.viewportSize.x),
+            static_cast<int>(state.viewportSize.y), *state.camera);
+        if (HandleGizmoInput(state, ray, clicked, down, released))
+          return;
+      }
+    }
+
     if (state.mateTool.active && state.mateTool.previewMateId == 0 &&
         overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       Ray ray = state.faceSelector->ScreenToWorldRay(

@@ -80,6 +80,14 @@ std::optional<glm::mat4> ConnectorWorldFrame(AppState& state, const Connector& c
 // Appends the mate tool's connector triads (picked connectors) to `lines`.
 void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
 
+// The 3D drag gizmo (A2.5). BuildGizmoOverlay appends the translate/rotate
+// handles for the selected non-fixed occurrence; HandleGizmoInput runs the drag
+// state machine (grab → live per-frame transform → release snapshots+solves) and
+// returns true when it consumed the viewport (so the caller skips pick/orbit).
+void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines);
+bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked,
+                      bool down, bool released);
+
 // The occurrence list + properties editor for an active assembly tab (drawn
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.
 void DrawOccurrencePanel(AppState& state);

@@ -263,11 +263,24 @@ struct AppState {
     std::string message;       // transient hint (e.g. "pick a named face")
   };
 
+  // 3D drag gizmo for the selected occurrence (A2.5). World-aligned translate
+  // arrows + rotate arcs; a drag mutates the occurrence transform live (cheap
+  // per-instance update, no resync) and snapshots/solves once on release.
+  struct GizmoDrag {
+    bool active = false;
+    int axis = -1;         // 0=X, 1=Y, 2=Z
+    bool rotate = false;   // false = translate along axis, true = rotate about it
+    glm::vec3 startPos{0}; // occurrence position at grab
+    glm::quat startRot{1, 0, 0, 0}; // occurrence orientation at grab
+    float startParam = 0.0f; // axis coordinate (translate) / angle (rotate) at grab
+  };
+
   // UI state
   int selectedFeature = -1;
   uint64_t selectedOccurrence = 0; // active assembly's selected occurrence (0 = none)
   uint64_t selectedMate = 0;       // active assembly's selected mate (0 = none)
   MateToolState mateTool;
+  GizmoDrag gizmoDrag;
   // Feature being previewed (in the document + rendered, but NOT on the undo
   // stack until accepted). 0 = none. See PreviewFeature.
   uint64_t pendingFeatureId = 0;

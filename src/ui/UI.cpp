@@ -131,8 +131,14 @@ void DrawUI(AppState& state) {
     AppendOriginGizmo(overlay); // world origin + axes: parts and assemblies
     BuildMateToolOverlay(state, overlay); // A3 mate connector triads (assembly)
 
+    // The occurrence drag gizmo goes to its own no-depth channel so its handles
+    // stay visible/grabbable through geometry (A2.5).
+    std::vector<LineVertex3D> gizmo;
+    BuildGizmoOverlay(state, gizmo);
+
     state.sketchRenderer->SetQuads(std::move(quads));
     state.sketchRenderer->SetOverlayLines(std::move(overlay));
+    state.sketchRenderer->SetGizmoLines(std::move(gizmo));
 
     // The sketch lines, edit primitives, and 2D annotations below are all
     // part-tab geometry. On an assembly tab clear them and skip the overlays.

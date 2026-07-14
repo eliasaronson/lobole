@@ -228,10 +228,15 @@ bool SketchRenderer::CreatePipelines() {
   auto makePipeline = [&](VkPipelineShaderStageCreateInfo* st,
                           const VkPipelineVertexInputStateCreateInfo* vin,
                           VkPrimitiveTopology topology, bool depthBias,
-                          VkPipeline& out) -> bool {
+                          VkPipeline& out, bool depthTest = true) -> bool {
     VkPipelineInputAssemblyStateCreateInfo ia{
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
     ia.topology = topology;
+
+    // A no-depth-test variant (the gizmo) draws over geometry so its handles
+    // stay visible/grabbable; everything else keeps the shared depth state.
+    VkPipelineDepthStencilStateCreateInfo depthLocal = depth;
+    if (!depthTest) depthLocal.depthTestEnable = VK_FALSE;
 
     VkPipelineRasterizationStateCreateInfo raster{
         VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
@@ -254,7 +259,7 @@ bool SketchRenderer::CreatePipelines() {
     info.pViewportState = &viewport;
     info.pRasterizationState = &raster;
     info.pMultisampleState = &msaa;
-    info.pDepthStencilState = &depth;
+    info.pDepthStencilState = &depthLocal;
     info.pColorBlendState = &colorBlend;
     info.pDynamicState = &dynamic;
     info.layout = m_pipelineLayout;
@@ -268,7 +273,9 @@ bool SketchRenderer::CreatePipelines() {
       makePipeline(stages, &vertexInput, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, true,
                    m_linePipeline) &&
       makePipeline(stages, &vertexInput, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                   false, m_quadPipeline);
+                   false, m_quadPipeline) &&
+      makePipeline(stages, &vertexInput, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, false,
+                   m_gizmoPipeline, /*depthTest=*/false); // A2.5 on-top gizmo
 
   // Screen-space-expanded primitive pipeline (thick AA lines + point dots).
   VkShaderModule primVert = LoadShader("sketch_prim_vert.spv");
@@ -369,11 +376,13 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
   const uint32_t quadCount = Upload(m_quadBuffers[frame], m_quads);
   const uint32_t lineCount = Upload(m_lineBuffers[frame], m_staticLines);
   const uint32_t overlayCount = Upload(m_overlayBuffers[frame], m_overlayLines);
+  const uint32_t gizmoCount = Upload(m_gizmoBuffers[frame], m_gizmoLines);
   const uint32_t primCount =
       UploadRaw(m_primBuffers[frame], m_primitives.data(),
                 m_primitives.size() * sizeof(PrimVertex),
                 static_cast<uint32_t>(m_primitives.size()));
-  if (quadCount == 0 && lineCount == 0 && overlayCount == 0 && primCount == 0)
+  if (quadCount == 0 && lineCount == 0 && overlayCount == 0 && primCount == 0 &&
+      gizmoCount == 0)
     return;
 
   VkViewport vp{};
@@ -399,6 +408,9 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
              overlayCount, 1.0f);
   // Expanded primitives (thick entity lines + dots) draw last, on top.
   DrawBuffer(commandBuffer, m_primPipeline, m_primBuffers[frame], primCount,
+             1.0f);
+  // Gizmo handles draw absolutely last with depth test off (A2.5).
+  DrawBuffer(commandBuffer, m_gizmoPipeline, m_gizmoBuffers[frame], gizmoCount,
              1.0f);
 }
 
@@ -426,11 +438,14 @@ void SketchRenderer::Shutdown() {
     DestroyDynamic(m_uniformBuffers[i]);
     DestroyDynamic(m_lineBuffers[i]);
     DestroyDynamic(m_overlayBuffers[i]);
+    DestroyDynamic(m_gizmoBuffers[i]);
     DestroyDynamic(m_quadBuffers[i]);
     DestroyDynamic(m_primBuffers[i]);
   }
   if (m_linePipeline)
     vkDestroyPipeline(m_device, m_linePipeline, nullptr);
+  if (m_gizmoPipeline)
+    vkDestroyPipeline(m_device, m_gizmoPipeline, nullptr);
   if (m_quadPipeline)
     vkDestroyPipeline(m_device, m_quadPipeline, nullptr);
   if (m_primPipeline)
