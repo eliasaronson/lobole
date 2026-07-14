@@ -126,11 +126,42 @@ The recommended interleaving, with the rationale:
 
 ## Continuous
 
+### Refactoring policy: split what the next feature extends, not big-bang
+
+The large files fall into two kinds, and the "add tests before you refactor" rule
+points opposite ways for each:
+
+- **Testable-logic files — refactor freely, guarded by the existing smokes.**
+  `RemoteServer.cpp` (~1580 LOC: 83 RPC handlers in one `HandleSemantic` if-chain),
+  `AppActions.cpp` (~2680 LOC: ~79 grab-bag free functions), `Serialization.cpp`
+  (~1640, grows every format bump). These are pure logic that the 13 Python smokes
+  already characterize end-to-end, so splitting them is *verifiable today* without new
+  tests. Both next workstreams (Drawings, FEM) add RPC handlers + a new document kind +
+  new AppActions helpers — i.e. they pile straight into these three. **Do the split as
+  the first step of whichever lands next, not as a standalone pass:** the best time to
+  refactor a file is the moment before you extend it.
+  - `RemoteServer` → domain modules (part / assembly / inspection / export / project /
+    view). An 83-branch dispatch is exactly what a new workstream's RPCs make worse.
+  - `AppActions` → carve out the assembly + section + measure + gizmo code into their
+    own TUs (the extraction is also what makes some of it unit-testable).
+  - Backfill tests **opportunistically** — when you extract a chunk, add a test for that
+    chunk then; don't run a separate test-backfill sprint. (The two genuinely thin
+    unit spots, `GitVault` + `ElementHistory`, are worth a direct test each regardless,
+    ~an hour — a small aside, not a phase.)
+- **Untestable files — leave them until a feature forces it.** `main.cpp` (~1330 LOC
+  Vulkan) and the renderers (~4000) can't be unit-tested (need a GPU), so "test first"
+  isn't a real gate and a refactor is pure regression risk. There is **no forcing
+  function now**: the `main.cpp` dismantle only matters for real-time hybrid RT (6b),
+  which isn't scheduled. Do it *when 6b lands*, not before.
+
+### Standing items
+
 - **Dead code purge** — `Application`, `SimpleApp`, `Viewport`, `ColorPicker`,
   `FaceHighlighter`, the duplicated View menu. *Keep* `RayTracingRenderer` (rendering 6a/6b
   seed).
 - **Dismantle `main.cpp`** and the tripled Vulkan boilerplate (extract a `VulkanContext` +
-  shared renderer utilities) — opportunistically while touching code, not big-bang.
+  shared renderer utilities) — opportunistically while touching code, not big-bang; gated
+  on 6b hybrid RT (no forcing function until then — see the policy above).
 - ~~**CI**~~ — **done** (scripting S2): `.github/workflows/ci.yml` builds + runs
   `ctest -LE gui` on every push. Still open: running the GUI-labeled tests under a
   virtual display.
@@ -139,6 +170,18 @@ The recommended interleaving, with the rationale:
 - ~~**Incremental regeneration**~~ — **done**: `Document` keeps a per-feature
   output-shape cache keyed by an input hash (`RegenCacheEntry` + `RegenStats`); it was
   the assemblies gate-1 and cleared before A1.
+
+### Test coverage (state 2026-07-14)
+
+334 tests pass (320 C++ Catch2 cases + 13 Python integration smokes + `gui_smoke`'s 39
+ImGui-test-engine cases); CI runs the headless subset every push. **Strong:** the
+headless core — geometry/features, format+golden-corpus migrations, expression engine,
+and the full RPC surface via smokes (every feature since assemblies shipped with a test).
+**By-construction untested:** renderers + `main.cpp` (need a GPU — verified via gui_smoke
++ dev-watch screenshots) and much of the UI interaction layer (partial via gui_smoke +
+`viewport_drag` smokes). **The real exposure is the GPU/GUI gap** — bugs like the A2.5
+device-lost and the C4 back-face-culling surfaced on-screen, not in tests. No coverage
+gate in CI; new-feature coverage is by author discipline, not enforced threshold.
 
 ## Explicitly not planned (conscious decisions, not omissions)
 
