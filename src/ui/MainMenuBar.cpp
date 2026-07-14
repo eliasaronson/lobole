@@ -75,8 +75,12 @@ void DrawFileMenu(AppState& state) {
   if (ImGui::MenuItem("Import STEP...", "Ctrl+I")) {
     OpenStepFileDialog(state);
   }
-  if (ImGui::MenuItem("Export...", nullptr, false,
-                      state.document && !state.document->GetBodies().empty())) {
+  // Enabled for a part with bodies, or an assembly (visual export walks its
+  // occurrences).
+  const bool canExport =
+      (state.document && !state.document->GetBodies().empty()) ||
+      (state.assembly && state.assembly->OccurrenceCount() > 0);
+  if (ImGui::MenuItem("Export...", nullptr, false, canExport)) {
     ExportDialog(state);
   }
   ImGui::Separator();

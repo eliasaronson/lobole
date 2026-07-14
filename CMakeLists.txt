@@ -82,13 +82,17 @@ if(OPENCASCADE_FOUND)
     set(OPENCASCADE_LIBS
         TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo
         TKTopAlgo TKPrim TKMesh TKBO TKXSBase TKShHealing TKOffset
+        # Visual-mesh export (interchange X2): the XCAF document stack +
+        # RWMesh. The glTF/OBJ/PLY writers live in TKRWMesh through OCCT 7.7
+        # and split into TKDE* in 7.8 (appended below when present).
+        TKLCAF TKCAF TKXCAF TKVCAF TKRWMesh
     )
 
     # STEP/STL data-exchange libraries were renamed in OCCT 7.8
     # (TKSTEP*/TKSTL -> TKDESTEP/TKDESTL)
     find_library(OCCT_TKDESTEP TKDESTEP)
     if(TARGET TKDESTEP OR OCCT_TKDESTEP)
-        list(APPEND OPENCASCADE_LIBS TKDESTEP TKDESTL)
+        list(APPEND OPENCASCADE_LIBS TKDESTEP TKDESTL TKDEGLTF TKDEOBJ TKDEPLY)
     else()
         list(APPEND OPENCASCADE_LIBS TKSTEP TKSTEPBase TKSTEPAttr TKSTEP209 TKSTL)
     endif()
@@ -162,6 +166,7 @@ set(core_sources
     src/CADKernel.cpp
     src/CADMeshConverter.cpp
     src/CADMaterials.cpp
+    src/MeshExport.cpp
     src/IBL.cpp
     src/SketchPlane.cpp
     src/Sketch.cpp

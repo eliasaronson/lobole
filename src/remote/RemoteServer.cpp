@@ -5,6 +5,7 @@
 #include "Camera.h"
 #include "FaceSelector.h"
 #include "Logger.h"
+#include "MeshExport.h"
 #include "RayTracingRenderer.h"
 #include "MeshRenderer.h"
 #include "core/Autosaver.h"
@@ -249,6 +250,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "select_occurrence", "solve_assembly", "bom", "export_bom",
       "edit_in_context", "add_exploded_view", "remove_exploded_view",
       "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
+      // export_visual works on a part OR an assembly (occurrence walk).
+      "export_visual",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
@@ -1327,6 +1330,21 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!ok) throw std::runtime_error("export failed (see log)");
     return {{"path", path},
             {"bodies", only < 0 ? bodies.size() : size_t{1}}};
+  }
+  if (m == "export_visual") {
+    // Visual-mesh export (interchange X2): glTF (.glb/.gltf), OBJ, or PLY,
+    // chosen by the path extension. Works on a part (bodies at identity) OR
+    // the active assembly (occurrences at solved placements). Materials carry
+    // through (glTF is PBR). params: {path, deflection?: 0.1}
+    const std::string path = p.at("path").get<std::string>();
+    const std::vector<MeshExport::Item> items =
+        ui::BuildVisualExportItems(state);
+    if (items.empty())
+      throw std::runtime_error("nothing to export");
+    std::string err;
+    if (!MeshExport::SaveVisual(path, items, p.value("deflection", 0.1), &err))
+      throw std::runtime_error(err);
+    return {{"path", path}, {"items", items.size()}};
   }
   if (m == "import_step") {
     const size_t before = doc->GetBodies().size();

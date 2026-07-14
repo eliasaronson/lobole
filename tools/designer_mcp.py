@@ -503,6 +503,15 @@ def export_brep(path: str, body: int = -1) -> dict:
                  **({"body": body} if body >= 0 else {}))
 
 
+@mcp.tool(description="Export the tessellated mesh to glTF (.glb/.gltf), OBJ, "
+          "or PLY, chosen by the path extension — for viewers (Blender, web, "
+          "engines), not CAD round-trips. Materials carry through (glTF is "
+          "PBR). Works on a part OR the active assembly (all occurrences at "
+          "their solved placements). `deflection` sets mesh fineness.")
+def export_visual(path: str, deflection: float = 0.1) -> dict:
+    return _call("export_visual", path=path, deflection=deflection)
+
+
 @mcp.tool(description="List the project's tabs (parts and assemblies) with "
           "each one's type and stable id, and which is active. Modeling tools "
           "act on the active part; assembly tools on the active assembly.")

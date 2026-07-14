@@ -89,20 +89,46 @@ void SaveProjectDialog(AppState& state) {
 }
 
 void ExportDialog(AppState& state) {
-  if (!state.document || state.document->GetBodies().empty())
+  const bool haveAssembly =
+      state.assembly && state.assembly->OccurrenceCount() > 0;
+  const bool havePart =
+      state.document && !state.document->GetBodies().empty();
+  if (!haveAssembly && !havePart)
     return;
+  // Assemblies export only through the visual (tessellation) writers; a part
+  // additionally offers the B-Rep CAD formats.
+  const char* filter = haveAssembly ? "glb,gltf,obj,ply"
+                                     : "step,stp,stl,brep,glb,gltf,obj,ply";
   nfdchar_t* outPath = nullptr;
-  if (NFD_SaveDialog("step,stp,stl,brep", nullptr, &outPath) != NFD_OKAY)
+  if (NFD_SaveDialog(filter, nullptr, &outPath) != NFD_OKAY)
     return;
   std::string path(outPath);
   free(outPath);
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
   if (ext.empty()) {
-    ext = ".step";
+    ext = haveAssembly ? ".glb" : ".step";
     path += ext;
   }
 
+  // Visual mesh formats (glTF/OBJ/PLY): tessellation of the part or the whole
+  // assembly, materials carried through. Works on either tab.
+  if (ext == ".glb" || ext == ".gltf" || ext == ".obj" || ext == ".ply") {
+    const std::vector<MeshExport::Item> items = BuildVisualExportItems(state);
+    std::string error;
+    if (MeshExport::SaveVisual(path, items, 0.1, &error))
+      LOG_INFO("Exported {} item(s) to {}", items.size(), path);
+    else
+      LOG_ERROR("Export failed: {}", error);
+    return;
+  }
+
+  // B-Rep CAD formats (part only).
+  if (!havePart) {
+    LOG_WARN("STEP/STL/BREP export needs a part tab; use glTF/OBJ/PLY for an "
+             "assembly");
+    return;
+  }
   auto& kernel = CADKernel::Instance();
   const auto& bodies = state.document->GetBodies();
   bool ok = false;

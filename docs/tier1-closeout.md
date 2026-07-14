@@ -1,12 +1,20 @@
 # Tier-1 closeout — finishing four workstreams — plan
 
-> Status: **draft, for sign-off.** The goal is breadth, not depth: close out
+> Status: **signed off 2026-07-14** (all five decisions as recommended).
+> The goal is breadth, not depth: close out
 > every workstream whose remainder is small — Interchange, Variables,
 > Inspection, Versioning — so the board reduces to the four big blocks
 > (Drawings, FEM, Assemblies round 2, hybrid RT). Four items plus a docs
 > truth pass; each independently shippable, ordered cheapest-first.
 
-## C1 — glTF/OBJ/PLY export (closes Interchange)
+## C1 — glTF/OBJ/PLY export (closes Interchange) — **SHIPPED**
+
+> Done: `src/MeshExport.{h,cpp}` (XCAF bridge → RWGltf/RWObj/RWPly),
+> `ui::BuildVisualExportItems` (part bodies / assembly occurrences at solved
+> placements, shared TShapes → instanced), `export_visual` RPC + MCP, File →
+> Export… dispatch, `visual_export_smoke`. PBR materials carry through;
+> assemblies export. Interchange v1 complete.
+
 
 Interchange X2 as planned: the visualization interchange (Blender, web
 viewers, engines). Verified available: OCC 7.9.3 ships `TKDEGLTF`/`TKDEOBJ`/
@@ -60,6 +68,18 @@ env; none are linked yet.
   and belong with a later inspect/variables follow-up). With C2 the
   variables workstream is complete; units *display/switching* is the
   recorded deferral.
+- **Considered and rejected: an embedded runtime (Python/Julia) + units
+  library.** In-document expressions re-evaluate on every regeneration and
+  must be deterministic across builds/years (a file's geometry must not
+  depend on a CPython/pint version), safe against malicious files
+  (expressions evaluate on open; sandboxing CPython is a lost cause — today
+  the engine guarantees even NaN/inf can't reach the kernel), and support
+  tokenizer-level services (byte-preserving rename, dependency sets, error
+  offsets) a runtime doesn't give. Python's place is *outside* the document
+  — the S3 client over RPC — the same document-DSL/API-scripting split
+  Onshape draws with FeatureScript. If in-document logic ever needs to grow,
+  the swappable `ExpressionEngine` interface is the seam for a small
+  deterministic DSL, not a general-purpose runtime.
 
 ## C3 — Result panels (with C4, closes Inspection)
 

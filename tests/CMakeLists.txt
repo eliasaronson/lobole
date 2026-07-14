@@ -92,6 +92,13 @@ add_test(NAME assembly_propagation_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_propagation_smoke PROPERTIES TIMEOUT 120)
 
+# Interchange X2 visual export: glTF/OBJ/PLY of a part + assembly, material
+# carry-through, instancing. Headless (no display).
+add_test(NAME visual_export_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/visual_export_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(visual_export_smoke PROPERTIES TIMEOUT 120)
+
 # Assemblies A4 exploded views: RPCs, pure-view-state contract, persistence.
 add_test(NAME exploded_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/exploded_smoke.py

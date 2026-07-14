@@ -1,5 +1,6 @@
 #pragma once
 
+#include "MeshExport.h"      // MeshExport::Item
 #include "SketchRenderer.h" // Vertex3D, PrimVertex
 #include "core/ElementMap.h" // ElementRef
 #include "ui/AppState.h"
@@ -134,6 +135,14 @@ struct BomTable {
 BomTable ComputeBom(AppState& state); // empty without an active assembly
 // The table as CSV (quoted where needed); unknown masses are empty cells.
 std::string BomToCsv(const BomTable& bom);
+
+// Visual-mesh export items (interchange X2) for the active tab: a part's
+// bodies at identity, or an assembly's occurrences at their SOLVED placements
+// (occurrences of one part share the underlying shape, so the writers emit
+// instanced geometry). Each item carries the body's material color/PBR (or a
+// palette color for an unassigned body). Empty when nothing is active.
+// Defined in AppActions.cpp; the return type is MeshExport::Item.
+std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state);
 
 // Exploded views (A4). AutoExplode replaces `viewId`'s steps with a radial
 // seed (each occurrence pushed away from the assembly centroid, scaled by the

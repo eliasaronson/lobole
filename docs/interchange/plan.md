@@ -1,5 +1,11 @@
 # Interchange — export (and import widening) — plan
 
+> **Status 2026-07-14: v1 complete.** X1 (STEP/STL/BREP) and X2 (glTF/OBJ/PLY,
+> parts + assemblies) are shipped and reachable from the File menu, RPC, and
+> MCP. X3 (IGES / mesh import / DXF) and 3MF are **explicitly demand-driven**
+> — added when a real need appears, not before. Nothing here blocks other
+> workstreams.
+
 Getting geometry *out* of Designer. STEP import shipped early (modeling), but
 no export is reachable from the UI or RPC — even though the kernel already has
 `CADKernel::SaveSTEP` / `SaveSTL` (`src/CADKernel.h:116,119`) with **zero
@@ -44,14 +50,33 @@ The 90% milestone; everything sits on existing kernel code.
   via the existing import path; STL re-imports as a mesh so assert triangle
   count/AABB instead). Headless mode makes these plain ctest cases in CI.
 
-### X2 — glTF export (+ OBJ/PLY if trivial) (~1 day)
+### X2 — glTF export (+ OBJ/PLY) — **SHIPPED (July 2026)**
 
-The visualization interchange: Blender, web viewers, game engines.
-`RWGltf_CafWriter` (and `RWObj_CafWriter` / `RWPly_CafWriter`) work off an
-**XCAF document** rather than a bare shape — the milestone is mostly building
-the small shape→XCAF bridge (`TDocStd_Document` + color/name attributes),
-which then serves all three writers. Map `CADMaterials` colors so exported
-parts keep their appearance. Binary `.glb` default.
+The visualization interchange: Blender, web viewers, game engines. Shipped as
+planned: `src/MeshExport.{h,cpp}` builds one shape→XCAF bridge
+(`TDocStd_Document` + `XCAFDoc_ShapeTool`/`ColorTool` labels + a
+`XCAFDoc_VisMaterial` per node) that feeds `RWGltf_CafWriter` /
+`RWObj_CafWriter` / `RWPly_CafWriter`, format chosen by extension
+(`.glb` binary default / `.gltf` / `.obj` / `.ply`).
+
+- **Materials carry through as real PBR**: `CADMaterials` baseColor/metallic/
+  roughness → `XCAFDoc_VisMaterialPBR` (glTF is natively metallic-roughness),
+  so an export looks like the viewport; an unassigned body gets its palette
+  color. Verified: a steel body exports `metallicFactor > 0.5`.
+- **Assemblies export too** (decision 1): `ui::BuildVisualExportItems` walks a
+  part's bodies (identity) *or* the active assembly's occurrences at their
+  **solved** placements (never exploded). Occurrences of one part share the
+  underlying `TShape`, so the writers emit **instanced** geometry — verified
+  (two pin occurrences → one mesh, three placed nodes).
+- **Surface**: `export_visual(path, deflection?)` RPC (part or assembly tab) +
+  MCP tool; **File → Export…** offers the visual formats (assembly tabs) or
+  visual + STEP/STL/BREP (part tabs). `visual_export_smoke` parses the binary
+  glTF container directly (no external deps) and asserts meshes/materials/
+  instancing.
+- OCC 7.9.3's writers split into `TKDEGLTF`/`TKDEOBJ`/`TKDEPLY` (7.8+); the
+  CMake block appends them beside `TKDESTEP`, and the XCAF stack
+  (`TKXCAF`/`TKLCAF`/`TKCAF`/`TKVCAF`/`TKRWMesh`) is linked into
+  `designer_core`.
 
 ### X3 — Import widening (later, demand-driven)
 

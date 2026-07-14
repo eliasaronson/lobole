@@ -1792,6 +1792,73 @@ void SyncInContextGhosts(AppState& state) {
 }
 } // namespace
 
+namespace {
+// A body's export appearance: its material's PBR, or a palette color (cycled
+// by `paletteIndex`) with a neutral-plastic default when unassigned — the
+// same rule the renderer uses, so an export looks like the viewport.
+void FillItemAppearance(const Body& body, size_t paletteIndex,
+                        MeshExport::Item& item) {
+  if (!body.material.empty()) {
+    const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
+        CADMaterials::MaterialLibrary::FromSlug(body.material));
+    item.baseColor = mat.baseColor;
+    item.metallic = mat.metallic;
+    item.roughness = mat.roughness;
+  } else {
+    item.baseColor = kBodyPalette[paletteIndex % std::size(kBodyPalette)];
+    item.metallic = 0.0f;
+    item.roughness = 0.5f;
+  }
+}
+} // namespace
+
+std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
+  std::vector<MeshExport::Item> items;
+  size_t palette = 0;
+  if (state.assembly) {
+    // One item per (occurrence × body) at the occurrence's SOLVED placement
+    // (never exploded — an export is the real assembly). Occurrences of one
+    // part reuse the part's shapes, so the shared TShapes let the writers
+    // instance the geometry rather than copy it.
+    for (const Occurrence& occ : state.assembly->GetOccurrences()) {
+      if (!occ.visible)
+        continue;
+      Document* part = PartDocById(state, occ.partId);
+      if (!part)
+        continue;
+      const glm::mat4 xf = OccurrenceMatrix(occ); // solved, not exploded
+      const auto& bodies = part->GetBodies();
+      for (size_t bi = 0; bi < bodies.size(); bi++) {
+        if (!bodies[bi].shape.IsValid())
+          continue;
+        MeshExport::Item item;
+        item.shape = bodies[bi].shape;
+        const std::string label = occ.name.empty()
+                                      ? ("occ" + std::to_string(occ.id))
+                                      : occ.name;
+        item.name = bodies.size() > 1
+                        ? label + "-" + bodies[bi].name
+                        : label;
+        item.transform = xf;
+        FillItemAppearance(bodies[bi], palette++, item);
+        items.push_back(std::move(item));
+      }
+    }
+  } else if (state.document) {
+    const auto& bodies = state.document->GetBodies();
+    for (size_t bi = 0; bi < bodies.size(); bi++) {
+      if (!bodies[bi].shape.IsValid())
+        continue;
+      MeshExport::Item item;
+      item.shape = bodies[bi].shape;
+      item.name = bodies[bi].name;
+      FillItemAppearance(bodies[bi], palette++, item);
+      items.push_back(std::move(item));
+    }
+  }
+  return items;
+}
+
 void SyncDocumentRenderers(AppState& state) {
   if (!state.meshRenderer)
     return;
