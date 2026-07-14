@@ -173,6 +173,24 @@ struct EdgePickState {
   bool Active() const { return filletId != 0; }
 };
 
+// Measure tool (inspection I1 GUI, C3): a viewport mode that reads geometry
+// off picked elements. Pick one element → its own measure (face area / edge
+// length + radius); pick a second → the distance between them. Faces and
+// edges both pick; the readout string is shown in an overlay + the Properties
+// panel. Part-tab only.
+struct MeasureState {
+  bool active = false;      // the tool is armed (toolbar toggle)
+  bool hasFirst = false;    // the first element is picked
+  ElementRef first;         // the first element (face or edge)
+  bool firstIsEdge = false; // kind of `first`, for the readout label
+  std::string readout;      // formatted result ("" = nothing measured yet)
+  // Hover feedback (mirrors EdgePickState): the element under the cursor.
+  bool hasHover = false;
+  bool hoverIsEdge = false;
+  uint32_t hoverMeshId = 0;
+  uint32_t hoverIndex = 0; // face index or edge index per hoverIsEdge
+};
+
 // Drives an offline path-traced still across UI frames (one sample batch per
 // frame) so the Render modal can show progress and stay cancellable. main.cpp
 // owns the pump; the toolbar modal reads/writes the request + result fields.
@@ -336,6 +354,12 @@ struct AppState {
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
   EdgePickState edgePick;
+  MeasureState measure;
+  // Mass-properties center-of-gravity marker (C3): drawn as a small world-space
+  // cross when the Properties panel's Mass properties section is open. The
+  // panel computes the CoM and stamps it here; the overlay build reads it.
+  bool showCog = false;
+  glm::vec3 cogWorld{0.0f};
 
   // The 3D viewport = the central dock node (between the side panels), in
   // ImGui display coords. The renderers draw only here and picking maps

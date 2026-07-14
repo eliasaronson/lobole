@@ -13,6 +13,7 @@
 #include "core/AssemblySolve.h"
 #include "core/Autosaver.h"
 #include "core/MassProps.h"
+#include "core/Measure.h"
 #include "core/GitVault.h"
 #include "core/BooleanFeature.h"
 #include "core/Command.h"
@@ -171,6 +172,23 @@ void AppendOriginGizmo(std::vector<LineVertex3D>& lines) {
     lines.push_back(LineVertex(tip - a.dir * h + a.side * h, a.color));
     lines.push_back(LineVertex(tip, a.color));
     lines.push_back(LineVertex(tip - a.dir * h - a.side * h, a.color));
+  }
+}
+
+void AppendCogMarker(const AppState& state, std::vector<LineVertex3D>& lines) {
+  if (!state.showCog)
+    return;
+  // A small screen-stable 3-axis cross at the center of mass. Drawn in the
+  // no-depth gizmo channel so it stays visible inside solid geometry.
+  const float L = state.camera
+                      ? std::max(0.05f * state.camera->GetDistance(), 0.1f)
+                      : 1.0f;
+  const glm::vec3 c = state.cogWorld;
+  const glm::vec3 col(0.98f, 0.80f, 0.20f); // amber, distinct from the axes
+  const glm::vec3 ax[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+  for (const glm::vec3& a : ax) {
+    lines.push_back(LineVertex(c - a * L, col));
+    lines.push_back(LineVertex(c + a * L, col));
   }
 }
 
@@ -2410,6 +2428,96 @@ bool HandleEdgePickInput(AppState& state, bool overViewport) {
     } else {
       state.sketchEdit.actionMsg =
           "This edge has no stable name and can't be blended.";
+    }
+  }
+  return true; // the mode owns viewport clicks and hover
+}
+
+namespace {
+// A measured element as a one-line readout.
+std::string FormatElement(const Measure::Element& e) {
+  char buf[128];
+  if (e.kind == "face") {
+    snprintf(buf, sizeof buf, "Face area: %.3f mm\xc2\xb2", e.area);
+  } else if (e.hasRadius) {
+    snprintf(buf, sizeof buf, "Edge length: %.3f mm   radius: %.3f mm",
+             e.length, e.radius);
+  } else {
+    snprintf(buf, sizeof buf, "Edge length: %.3f mm", e.length);
+  }
+  return buf;
+}
+} // namespace
+
+bool HandleMeasureInput(AppState& state, bool overViewport) {
+  if (!state.measure.active)
+    return false;
+  // Escape exits the tool (clearing any in-progress pair + readout).
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    state.measure = MeasureState{};
+    return true;
+  }
+  state.measure.hasHover = false;
+  if (!state.document || !state.faceSelector || !overViewport)
+    return true; // the mode owns the viewport even with nothing under-cursor
+
+  ImGuiIO& io = ImGui::GetIO();
+  const Ray ray = state.faceSelector->ScreenToWorldRay(
+      io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
+      static_cast<int>(state.viewportSize.x),
+      static_cast<int>(state.viewportSize.y), *state.camera);
+  const EdgeHit edge = state.faceSelector->PickEdge(ray);
+  const RayHit face = state.faceSelector->PickFace(ray);
+  // Prefer an edge when the cursor is near one and it isn't behind the face
+  // under the cursor (edges sit on the surface, so their ray distance is ≈
+  // the face's at the silhouette; a much larger distance means it's occluded).
+  const bool useEdge =
+      edge.hit && (!face.hit || edge.distance <= face.distance + 0.25f);
+  if (useEdge) {
+    state.measure.hasHover = true;
+    state.measure.hoverIsEdge = true;
+    state.measure.hoverMeshId = edge.meshId;
+    state.measure.hoverIndex = edge.edgeIndex;
+  } else if (face.hit) {
+    state.measure.hasHover = true;
+    state.measure.hoverIsEdge = false;
+    state.measure.hoverMeshId = face.meshId;
+    state.measure.hoverIndex = face.faceIndex;
+  }
+
+  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && state.measure.hasHover) {
+    const bool isEdge = state.measure.hoverIsEdge;
+    const auto ref =
+        isEdge ? EdgeElementRef(state, state.measure.hoverMeshId,
+                                state.measure.hoverIndex)
+               : FaceElementRef(state, state.measure.hoverMeshId,
+                                state.measure.hoverIndex);
+    if (!ref) {
+      state.measure.readout =
+          "That element has no stable name and can't be measured.";
+      return true;
+    }
+    const auto& bodies = state.document->GetBodies();
+    if (!state.measure.hasFirst) {
+      // First pick: describe the element on its own.
+      state.measure.first = *ref;
+      state.measure.firstIsEdge = isEdge;
+      state.measure.hasFirst = true;
+      if (const auto e = Measure::Describe(bodies, *ref))
+        state.measure.readout = FormatElement(*e);
+      else
+        state.measure.readout = "Could not measure that element.";
+    } else {
+      // Second pick: the distance between the two, then start fresh so a
+      // click chain alternates describe → distance → describe → …
+      const auto d = Measure::Distance(bodies, state.measure.first, *ref);
+      char buf[96];
+      if (d)
+        snprintf(buf, sizeof buf, "Distance: %.3f mm", *d);
+      else
+        snprintf(buf, sizeof buf, "Could not measure the distance.");
+      state.measure.readout = buf;
+      state.measure.hasFirst = false;
     }
   }
   return true; // the mode owns viewport clicks and hover

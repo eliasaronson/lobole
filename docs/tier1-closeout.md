@@ -89,7 +89,17 @@ env; none are linked yet.
   the swappable `ExpressionEngine` interface is the seam for a small
   deterministic DSL, not a general-purpose runtime.
 
-## C3 — Result panels (with C4, closes Inspection)
+## C3 — Result panels (with C4, closes Inspection) — **SHIPPED**
+
+> Done: a Mass properties Properties-dock section (volume/area/mass/CoM,
+> cached by doc version) + an amber CoG cross in the no-depth overlay
+> (`AppendCogMarker`); a toolbar-armed Measure tool (`HandleMeasureInput`)
+> picking faces/edges for area/length/radius and two-element distance, into a
+> Properties readout. `Measure::Describe` gained circular-edge radius;
+> `measure` RPC returns it. `measure_smoke`. Verified on dev-watch (box area
+> 600, mass 47.1 g steel, CoM (15,10,5); cylinder radius 5). Inspection
+> closes with C4.
+
 
 The GUI face for what already works over RPC.
 

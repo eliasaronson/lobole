@@ -787,8 +787,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const auto e = Measure::Describe(bodies, a);
     if (!e) throw std::runtime_error("measure: element did not resolve");
     json out = {{"kind", e->kind}};
-    if (e->kind == "face") out["area"] = e->area;
-    else out["length"] = e->length;
+    if (e->kind == "face") {
+      out["area"] = e->area;
+    } else {
+      out["length"] = e->length;
+      if (e->hasRadius) out["radius"] = e->radius; // circular/arc edges
+    }
     return out;
   }
   if (m == "list_elements") {

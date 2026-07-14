@@ -235,6 +235,11 @@ void StartNewSketch(AppState& state);
 std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
                                          uint32_t edgeIndex);
 
+// Routes viewport hover/click to the Measure tool while state.measure.active
+// (C3): picks a face or edge, describes one element or the distance between
+// two, into state.measure.readout. Returns true when it consumed the input.
+bool HandleMeasureInput(AppState& state, bool overViewport);
+
 // Routes viewport hover/click to B-Rep edge picking while state.edgePick is
 // active (fillet/chamfer edge collection). Returns true when it consumed the
 // viewport input for this frame.
@@ -286,6 +291,10 @@ void AppendSketchGrid(const SketchPlane& plane, std::vector<LineVertex3D>& lines
 
 // Appends the world-origin gizmo: three arrows (X red / Y green / Z blue).
 void AppendOriginGizmo(std::vector<LineVertex3D>& lines);
+
+// Appends the center-of-gravity marker (C3): a small amber 3-axis cross at
+// state.cogWorld, when state.showCog is set by the mass-properties panel.
+void AppendCogMarker(const AppState& state, std::vector<LineVertex3D>& lines);
 
 // Highlighted line geometry for the sketch currently being edited (empty if
 // none). Rendered as a per-frame overlay on top of the static sketch lines.

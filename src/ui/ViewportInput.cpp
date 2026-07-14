@@ -184,6 +184,11 @@ void HandleViewportInput(AppState& state) {
     return;
   }
 
+  // Measure tool (C3): picks faces/edges to read area/length/radius/distance.
+  if (HandleMeasureInput(state, overViewport)) {
+    return;
+  }
+
   if (!state.faceSelector || !state.meshRenderer)
     return;
 

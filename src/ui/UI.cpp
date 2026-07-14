@@ -165,6 +165,7 @@ void DrawUI(AppState& state) {
     // stay visible/grabbable through geometry (A2.5).
     std::vector<LineVertex3D> gizmo;
     BuildGizmoOverlay(state, gizmo);
+    AppendCogMarker(state, gizmo); // mass-props CoG cross (no-depth channel)
 
     state.sketchRenderer->SetQuads(std::move(quads));
     state.sketchRenderer->SetOverlayLines(std::move(overlay));

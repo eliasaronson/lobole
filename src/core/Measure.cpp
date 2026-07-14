@@ -2,11 +2,13 @@
 
 #include "Logger.h"
 
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
+#include <GeomAbs_CurveType.hxx>
 #include <GProp_GProps.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -71,6 +73,14 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
   } else {
     BRepGProp::LinearProperties(shape, props);
     out.length = props.Mass();
+    // A circular or arc edge also reports its radius — the top measure use
+    // (hole/fillet sizing). Straight edges leave hasRadius false.
+    BRepAdaptor_Curve curve(TopoDS::Edge(shape));
+    const GeomAbs_CurveType type = curve.GetType();
+    if (type == GeomAbs_Circle) {
+      out.radius = curve.Circle().Radius();
+      out.hasRadius = true;
+    }
   }
   return out;
 }

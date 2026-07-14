@@ -15,6 +15,9 @@ struct Element {
   std::string kind; // "face" | "edge"
   double area = 0.0;    // faces
   double length = 0.0;  // edges
+  // A circular/arc edge additionally reports its radius (0/false otherwise).
+  double radius = 0.0;
+  bool hasRadius = false;
 };
 
 // Resolve + describe one element (face area / edge length). nullopt when the

@@ -157,6 +157,20 @@ void DrawModelToolbar(AppState& state) {
   if (ToolButton(ICON_FA_TABLE_CELLS, "Toggle planes (Shift+P)", hasDoc))
     state.showPlanes = !state.showPlanes;
 
+  // Measure tool (C3): a viewport mode — pick a face/edge for its own measure,
+  // a second element for the distance. The button reflects the armed state.
+  if (state.measure.active)
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  if (ToolButton(ICON_FA_RULER, "Measure (pick 1-2 faces/edges; Esc to exit)",
+                 hasBody)) {
+    const bool wasActive = state.measure.active;
+    state.measure = MeasureState{};       // clear any in-progress measurement
+    state.measure.active = !wasActive;    // toggle
+  }
+  if (state.measure.active)
+    ImGui::PopStyleColor();
+
   Divider();
 
   // Offline path-traced still (KeyShot-style). Opens the render dialog.

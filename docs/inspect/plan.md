@@ -6,23 +6,28 @@ LLM interface (a model that can *ask* "how far apart are these faces / what
 does it weigh" closes the text-to-cad verification loop — see
 [scripting/plan.md](../scripting/plan.md)).
 
-## I1 — Measure tool
+## I1 — Measure tool — **GUI shipped (C3, July 2026)**
 
-Select two things → get the answer: point–point / point–face / face–face
-distance (OCC `BRepExtrema_DistShapeShape`), edge length, angle between
-faces/edges, circle/arc radius from an edge. UI: a Measure mode using the
-unified selection (ui U1) with a readout overlay + a docked results panel.
-**Needs edge picking** (modeling cross-cutting) for the edge cases; the
-face/point subset can ship before it. RPC: `measure(ref_a, ref_b)`.
+Select two things → get the answer. **Shipped:** the `measure` RPC (I1
+headless) plus the GUI Measure tool (C3) — a toolbar-armed viewport mode
+(`state.measure`, `HandleMeasureInput`) that picks a face or edge (reusing
+the fillet edge-pick + `FaceElementRef` machinery), reads **face area / edge
+length / circular-edge radius** for one element and **min distance** (OCC
+`BRepExtrema_DistShapeShape`) for two, into a Properties-panel readout. The
+tool alternates describe → distance on successive clicks. Radius was added to
+`Measure::Describe` (`BRepAdaptor_Curve` → `GeomAbs_Circle`).
+**Deferred polish:** point picking, angle-between-faces/edges, and the
+unified-selection (U1) integration + floating readout overlay.
 
-## I2 — Mass properties (nearly free — do early)
+## I2 — Mass properties — **shipped; panel + CoG marker added (C3)**
 
 `BRepGProp::VolumeProperties/SurfaceProperties` → volume, surface area,
-center of mass, inertia matrix. `CADMaterials` gains a **density** per
-material → mass. Panel showing the selected body's (or whole document's)
-properties; a CoG marker in the viewport. RPC: `mass_properties(body_id)`.
-Tests: analytic solids (box, cylinder, extruded rect with hole) match to
-tolerance. This is a day of work sitting on top of what OCC already computes.
+center of mass, inertia matrix; `CADMaterials` density → mass. The
+`mass_properties` RPC shipped early; **C3 added the GUI**: a Mass properties
+section in the Properties dock (volume / surface area / mass with the
+null-taint rule / center of mass, cached by document version via
+`Measure::MassOfBodies`) and an amber CoG cross drawn at the center of mass
+in the no-depth overlay channel (`AppendCogMarker`, `state.showCog`).
 
 ## I3 — Section view (clipping plane)
 
