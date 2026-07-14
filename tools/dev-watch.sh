@@ -29,6 +29,21 @@ fi
 
 LOG="${DEV_WATCH_LOG:-/tmp/designer-dev.log}"
 
+# DEV_WATCH_VALIDATE=1 forces the Vulkan validation layer on (with
+# synchronization + GPU-assisted validation) so device-lost / out-of-bounds
+# GPU bugs are named in $LOG. Run this INSIDE `nix-shell` so VK_LAYER_PATH is
+# set (shell.nix exports it); this block also derives it from nixpkgs as a
+# fallback. Validation is slow — only for debugging, not day-to-day.
+if [ "${DEV_WATCH_VALIDATE:-0}" = "1" ]; then
+  if [ -z "${VK_LAYER_PATH:-}" ]; then
+    VK_LAYER_PATH="$(nix-build --no-out-link '<nixpkgs>' -A vulkan-validation-layers 2>/dev/null)/share/vulkan/explicit_layer.d"
+    export VK_LAYER_PATH
+  fi
+  export VK_INSTANCE_LAYERS="VK_LAYER_KHRONOS_validation"
+  export VK_LAYER_ENABLES="VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT"
+  echo "dev-watch: VALIDATION ON (VK_LAYER_PATH=$VK_LAYER_PATH)"
+fi
+
 stamp() { stat -c %Y "$BIN" 2>/dev/null || echo 0; }
 launch() {
   # Tee app output to $LOG (readable by tooling/an assistant) and the terminal.
