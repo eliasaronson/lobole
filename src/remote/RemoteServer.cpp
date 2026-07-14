@@ -891,6 +891,24 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     ui::ExitSimulation(state);
     return json::object();
   }
+  if (m == "set_result_display") {
+    // Show/warp a study's result overlay (display only, like set_explode).
+    // params: {study?, field: "von_mises"|"displacement"|"none", deform_scale?}
+    ui::EnterSimulation(state);
+    if (p.contains("study")) {
+      const uint64_t id = p.at("study").get<uint64_t>();
+      if (!doc->FindStudy(id)) throw std::runtime_error("no such study");
+      state.simulation.activeStudyId = id;
+    }
+    const std::string f = p.value("field", std::string("von_mises"));
+    state.simulation.field =
+        f == "displacement" ? ui::SimulationState::Field::Displacement
+        : f == "none"       ? ui::SimulationState::Field::None
+                            : ui::SimulationState::Field::VonMises;
+    if (p.contains("deform_scale"))
+      state.simulation.deformScale = static_cast<float>(p.at("deform_scale").get<double>());
+    return {{"field", f}, {"deform_scale", state.simulation.deformScale}};
+  }
 
   if (m == "set_section") {
     // Toggle/position the viewport section clip plane (I3 raster). params:

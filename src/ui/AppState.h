@@ -22,6 +22,7 @@ class MeshRenderer;
 class OutlineRenderer;
 class RayTracingRenderer;
 class SketchRenderer;
+class FieldRenderer;
 class FaceSelector;
 class IBLTextures;
 struct GLFWwindow;
@@ -214,6 +215,9 @@ struct SimulationState {
   // Body render instances hidden while the field overlay replaces them, so
   // ExitSimulation / field=None restores exactly those.
   std::vector<uint32_t> hiddenMeshes;
+  // Signature of the last-built field overlay (field, study, results epoch);
+  // the vertex rebuild is skipped when unchanged. 0 = nothing built.
+  uint64_t fieldBuiltKey = 0;
 
   bool IsActive() const { return active; }
 };
@@ -301,6 +305,7 @@ struct AppState {
   OutlineRenderer* outlineRenderer = nullptr;
   RayTracingRenderer* rayTracer = nullptr;
   SketchRenderer* sketchRenderer = nullptr;
+  FieldRenderer* fieldRenderer = nullptr; // FEM result overlay
   FaceSelector* faceSelector = nullptr;
   IBLTextures* ibl = nullptr;
   GLFWwindow* window = nullptr;

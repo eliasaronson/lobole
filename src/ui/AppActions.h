@@ -131,10 +131,26 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error);
 // in StudyPanel.cpp.
 void DrawStudyPanel(AppState& state);
 
+// The result-field colorbar legend overlaid on the viewport while a field is
+// displayed. Defined in StudyPanel.cpp.
+void DrawFieldLegend(AppState& state);
+
 // Assigns the armed boundary condition (state.simulation.tool) to the face
 // under `ray`, as an undoable study edit. No-op if no tool is armed or the
 // pick misses a named face. Defined in StudyPanel.cpp.
 void SimulationPick(AppState& state, const Ray& ray);
+
+// A world-space cross at the peak of the displayed result field (max von Mises
+// or max displacement), warped by the deform scale. Pushed into the no-depth
+// gizmo channel like the CoG marker. Defined in AppActions.cpp.
+void AppendStudyMarker(const AppState& state, std::vector<LineVertex3D>& lines);
+
+// Rebuilds the FEM field overlay from the active study's cached results and
+// toggles the solved bodies' normal render (hidden while a field is shown,
+// restored otherwise). Cheap and idempotent — the vertex rebuild is gated on
+// a change signature; the deform scale rides a push constant (no rebuild).
+// Called every frame. Defined in AppActions.cpp.
+void SyncFieldRenderer(AppState& state);
 
 // Bill of materials (A4): derived from the active assembly every call, never
 // stored. One row per referenced part, in first-occurrence order; masses via

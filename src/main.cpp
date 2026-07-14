@@ -11,6 +11,7 @@
 #include "HeadlessMain.h"
 #include "core/Autosaver.h"
 #include "remote/RemoteServer.h"
+#include "FieldRenderer.h"
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "RayTracingRenderer.h"
@@ -91,6 +92,7 @@ static std::unique_ptr<Camera> g_Camera;
 static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<SketchRenderer> g_SketchRenderer;
+static std::unique_ptr<FieldRenderer> g_FieldRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<FaceSelector> g_FaceSelector;
 static std::unique_ptr<IBLTextures> g_IBLTextures;
@@ -700,6 +702,9 @@ static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
   if (g_MeshRenderer) {
     g_MeshRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
+  if (g_FieldRenderer) { // FEM result overlay (stands in for hidden bodies)
+    g_FieldRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
+  }
   if (g_OutlineRenderer) {
     g_OutlineRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
@@ -1058,6 +1063,16 @@ int main(int argc, char **argv) {
     std::cout << "Warning: SketchRenderer initialization failed" << std::endl;
   }
 
+  // Initialize FieldRenderer (FEM result overlay)
+  g_FieldRenderer = std::make_unique<FieldRenderer>();
+  if (g_FieldRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
+                                  g_Queue, g_QueueFamily, g_CommandPool,
+                                  g_MSAASamples)) {
+    g_FieldRenderer->SetViewport(0, 0, 1280, 720);
+  } else {
+    std::cout << "Warning: FieldRenderer initialization failed" << std::endl;
+  }
+
   // Initialize RayTracingRenderer
   g_RayTracingRenderer = std::make_unique<RayTracingRenderer>();
   bool rtInitialized = g_RayTracingRenderer->Initialize(
@@ -1074,6 +1089,7 @@ int main(int argc, char **argv) {
   g_App.meshRenderer = g_MeshRenderer.get();
   g_App.outlineRenderer = g_OutlineRenderer.get();
   g_App.sketchRenderer = g_SketchRenderer.get();
+  g_App.fieldRenderer = g_FieldRenderer.get();
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
@@ -1153,6 +1169,9 @@ int main(int argc, char **argv) {
       if (g_SketchRenderer) {
         g_SketchRenderer->SetViewportSize(fb_width, fb_height);
       }
+      if (g_FieldRenderer) {
+        g_FieldRenderer->SetViewport(0, 0, fb_width, fb_height);
+      }
       if (g_Camera) {
         g_Camera->SetAspectRatio(static_cast<float>(fb_width) /
                                  static_cast<float>(fb_height));
@@ -1184,12 +1203,19 @@ int main(int argc, char **argv) {
 
     // Mirror document changes (edits, undo, redo) into the renderers
     ui::SyncDocumentRenderers(g_App);
+    // Rebuild the FEM field overlay (and hide/show bodies) when the study or
+    // result changes; cheap no-op otherwise.
+    ui::SyncFieldRenderer(g_App);
 
     // Section view (I3): push the clip plane to the renderers each frame.
     if (g_MeshRenderer)
       g_MeshRenderer->SetClipPlane(g_App.sectionPlane);
     if (g_OutlineRenderer)
       g_OutlineRenderer->SetClipPlane(g_App.sectionPlane);
+    if (g_FieldRenderer) {
+      g_FieldRenderer->SetClipPlane(g_App.sectionPlane);
+      g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
+    }
 
     // Advance an in-flight offline render by one sample batch (the Render modal
     // shows progress; runs on the main thread with its own one-shot submits).
@@ -1216,6 +1242,11 @@ int main(int argc, char **argv) {
     if (g_SketchRenderer && g_Camera) {
       g_SketchRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
                                      g_Camera->GetProjectionMatrix());
+    }
+
+    if (g_FieldRenderer && g_Camera) {
+      g_FieldRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
+                                    g_Camera->GetProjectionMatrix());
     }
 
     // Rendering
@@ -1259,6 +1290,7 @@ int main(int argc, char **argv) {
             wd->ClearValue,
             [&](VkCommandBuffer cb) {
               if (g_MeshRenderer) g_MeshRenderer->Render(cb, wd->FrameIndex);
+              if (g_FieldRenderer) g_FieldRenderer->Render(cb, wd->FrameIndex);
               if (g_OutlineRenderer)
                 g_OutlineRenderer->Render(cb, wd->FrameIndex);
               if (g_SketchRenderer)
@@ -1303,6 +1335,7 @@ int main(int argc, char **argv) {
   g_Camera.reset();
   g_MeshRenderer.reset();
   g_SketchRenderer.reset();
+  g_FieldRenderer.reset();
   g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
   g_FaceSelector.reset();

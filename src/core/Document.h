@@ -117,7 +117,11 @@ public:
   }
   void StoreStudyResults(uint64_t studyId, fem::StudyRuntime rt) {
     m_studyRuntime[studyId] = std::move(rt);
+    ++m_studyResultsEpoch;
   }
+  // Monotonic counter bumped on every StoreStudyResults; lets the field
+  // overlay detect a re-solve (study edits don't bump Version()).
+  uint64_t StudyResultsEpoch() const { return m_studyResultsEpoch; }
   bool StudyResultsStale(uint64_t studyId) const {
     auto it = m_studyRuntime.find(studyId);
     return it == m_studyRuntime.end() ? true
@@ -179,6 +183,7 @@ private:
   std::vector<fem::Study> m_studies;
   // Transient per-study mesh+results (never serialized); keyed by study id.
   std::map<uint64_t, fem::StudyRuntime> m_studyRuntime;
+  uint64_t m_studyResultsEpoch = 0;
   SymbolTable m_symbols;
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;

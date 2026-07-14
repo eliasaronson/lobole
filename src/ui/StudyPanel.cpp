@@ -228,6 +228,54 @@ void DrawStudyPanel(AppState& state) {
   ImGui::End();
 }
 
+namespace {
+// Analytic Turbo colormap (matches field.frag) for the legend colorbar.
+ImU32 Turbo(float x) {
+  x = x < 0 ? 0 : (x > 1 ? 1 : x);
+  const float r = 0.13572138f + x * (4.61539260f + x * (-42.66032258f + x * 132.13108234f)) +
+                  x * x * x * x * (-152.94239396f + x * 59.28637943f);
+  const float g = 0.09140261f + x * (2.19418839f + x * (4.84296658f + x * -14.18503333f)) +
+                  x * x * x * x * (4.27729857f + x * 2.82956604f);
+  const float b = 0.10667330f + x * (12.64194608f + x * (-60.58204836f + x * 110.36276771f)) +
+                  x * x * x * x * (-89.90310912f + x * 27.34824973f);
+  auto ch = [](float v) { return (int)(255.0f * (v < 0 ? 0 : (v > 1 ? 1 : v))); };
+  return IM_COL32(ch(r), ch(g), ch(b), 255);
+}
+}  // namespace
+
+void DrawFieldLegend(AppState& state) {
+  const SimulationState& sim = state.simulation;
+  if (!sim.IsActive() || sim.field == SimulationState::Field::None ||
+      !state.document)
+    return;
+  const fem::StudyRuntime* rt = state.document->StudyResults(sim.activeStudyId);
+  if (!rt) return;
+  const bool vm = sim.field == SimulationState::Field::VonMises;
+  const double maxVal = vm ? rt->maxVonMises : rt->maxDisplacement;
+  const char* unit = vm ? "MPa" : "mm";
+  const char* title = vm ? "von Mises" : "displacement";
+
+  // A vertical Turbo colorbar anchored to the viewport's lower-left corner.
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const float x = state.viewportPos.x + 16.0f;
+  const float barW = 18.0f, barH = 180.0f;
+  const float y1 = state.viewportPos.y + state.viewportSize.y - 28.0f;
+  const float y0 = y1 - barH;
+  const int segs = 48;
+  for (int i = 0; i < segs; ++i) {
+    const float t0 = i / (float)segs, t1 = (i + 1) / (float)segs;
+    // High value at the top.
+    dl->AddRectFilledMultiColor(ImVec2(x, y1 - t1 * barH), ImVec2(x + barW, y1 - t0 * barH),
+                                Turbo(t1), Turbo(t1), Turbo(t0), Turbo(t0));
+  }
+  dl->AddRect(ImVec2(x, y0), ImVec2(x + barW, y1), IM_COL32(255, 255, 255, 160));
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%.3g %s", maxVal, unit);
+  dl->AddText(ImVec2(x + barW + 6, y0 - 6), IM_COL32_WHITE, buf);
+  dl->AddText(ImVec2(x + barW + 6, y1 - 6), IM_COL32_WHITE, "0");
+  dl->AddText(ImVec2(x, y0 - 22), IM_COL32_WHITE, title);
+}
+
 void SimulationPick(AppState& state, const Ray& ray) {
   SimulationState& sim = state.simulation;
   Document* doc = state.document.get();

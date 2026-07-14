@@ -122,10 +122,12 @@ void DrawUI(AppState& state) {
   if (state.document) {
     // Simulation mode turns the Model dock into the Studies panel, the way an
     // assembly tab turns it into the occurrence panel.
-    if (state.simulation.IsActive())
+    if (state.simulation.IsActive()) {
       DrawStudyPanel(state);
-    else
+      DrawFieldLegend(state); // colorbar overlay when a field is shown
+    } else {
       DrawFeatureTreePanel(state);
+    }
     DrawVariablesPanel(state);
     DrawPropertiesPanel(state);
     DrawSketchToolbar(state);
@@ -171,6 +173,7 @@ void DrawUI(AppState& state) {
     std::vector<LineVertex3D> gizmo;
     BuildGizmoOverlay(state, gizmo);
     AppendCogMarker(state, gizmo); // mass-props CoG cross (no-depth channel)
+    AppendStudyMarker(state, gizmo); // FEM peak-field cross (no-depth channel)
 
     state.sketchRenderer->SetQuads(std::move(quads));
     state.sketchRenderer->SetOverlayLines(std::move(overlay));
