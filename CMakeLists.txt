@@ -310,6 +310,7 @@ set(app_sources
     src/ui/MainMenuBar.cpp
     src/ui/FeatureTreePanel.cpp
     src/ui/OccurrencePanel.cpp
+    src/ui/StudyPanel.cpp
     src/ui/PropertiesPanel.cpp
     src/ui/VariablesPanel.cpp
     src/ui/SketchToolbar.cpp

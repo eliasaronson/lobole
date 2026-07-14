@@ -120,7 +120,12 @@ void DrawUI(AppState& state) {
   // has no `document`, so they'd have nothing to show. The viewport still
   // renders the assembly's occurrences (SyncDocumentRenderers handles both).
   if (state.document) {
-    DrawFeatureTreePanel(state);
+    // Simulation mode turns the Model dock into the Studies panel, the way an
+    // assembly tab turns it into the occurrence panel.
+    if (state.simulation.IsActive())
+      DrawStudyPanel(state);
+    else
+      DrawFeatureTreePanel(state);
     DrawVariablesPanel(state);
     DrawPropertiesPanel(state);
     DrawSketchToolbar(state);

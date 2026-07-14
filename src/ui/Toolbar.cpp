@@ -1,5 +1,6 @@
 #include "ui/Toolbar.h"
 
+#include "Logger.h"
 #include "RayTracingRenderer.h"
 #include "core/SketchFeature.h"
 #include "ui/AppActions.h"
@@ -157,6 +158,10 @@ void DrawModelToolbar(AppState& state) {
   if (ToolButton(ICON_FA_TABLE_CELLS, "Toggle planes (Shift+P)", hasDoc))
     state.showPlanes = !state.showPlanes;
 
+  // Enter the FEM simulation workspace (needs a body to analyze).
+  if (ToolButton(ICON_FA_GAUGE_HIGH, "Simulation (FEM stress study)", hasBody && idle))
+    EnterSimulation(state);
+
   // Measure tool (C3): a viewport mode — pick a face/edge for its own measure,
   // a second element for the distance. The button reflects the armed state.
   if (state.measure.active)
@@ -295,11 +300,60 @@ void DrawAssemblyToolbar(AppState& state) {
   ImGui::NewLine();
 }
 
+// The simulation-mode toolbar: boundary-condition tools, run, exit — replaces
+// the model tools while a FEM study is being set up.
+void DrawSimulationToolbar(AppState& state) {
+  SimulationState& sim = state.simulation;
+  Document* doc = state.document.get();
+  const bool hasStudy = doc && doc->FindStudy(sim.activeStudyId);
+
+  // A boundary-condition tool button: armed state highlighted like Measure.
+  auto bcBtn = [&](const char* icon, const char* tip, SimulationState::Tool t) {
+    const bool armed = sim.tool == t;
+    if (armed)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ToolButton(icon, tip, hasStudy))
+      sim.tool = armed ? SimulationState::Tool::None : t; // toggle
+    if (armed)
+      ImGui::PopStyleColor();
+  };
+  bcBtn(ICON_FA_LOCK, "Fixed support (click a face)", SimulationState::Tool::Fixed);
+  bcBtn(ICON_FA_BOLT, "Force load (click a face)", SimulationState::Tool::Force);
+  bcBtn(ICON_FA_DOWN_LONG, "Pressure load (click a face)",
+        SimulationState::Tool::Pressure);
+
+  Divider();
+
+  if (ToolButton(ICON_FA_PLAY, "Run study (mesh + solve)", hasStudy)) {
+    std::string err;
+    if (!RunStudyAndCache(*doc, sim.activeStudyId, &err))
+      LOG_WARN("run study failed: {}", err);
+  }
+
+  Divider();
+
+  if (ToolButton(ICON_FA_ARROW_RIGHT_FROM_BRACKET, "Exit Simulation (Esc)"))
+    ExitSimulation(state);
+
+  // Hint while a BC tool is armed.
+  if (sim.tool != SimulationState::Tool::None) {
+    ImGui::SameLine();
+    const char* what = sim.tool == SimulationState::Tool::Fixed ? "fixed support"
+                       : sim.tool == SimulationState::Tool::Force ? "force"
+                                                                  : "pressure";
+    ImGui::TextDisabled("click a face to place the %s", what);
+  }
+  ImGui::NewLine();
+}
+
 } // namespace
 
 void DrawToolbar(AppState& state) {
   if (state.sketchEdit.IsEditing())
     DrawSketchModeToolbar(state);
+  else if (state.simulation.IsActive())
+    DrawSimulationToolbar(state);
   else if (state.assembly)
     DrawAssemblyToolbar(state);
   else

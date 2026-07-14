@@ -113,6 +113,29 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked,
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.
 void DrawOccurrencePanel(AppState& state);
 
+// ---- Simulation mode (FEM) ------------------------------------------------
+
+// Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter
+// arms `state.simulation.active` and selects (creating if none) a study; exit
+// restores any hidden body instances and clears the mode.
+void EnterSimulation(AppState& state);
+void ExitSimulation(AppState& state);
+
+// Meshes + solves study `id` on the active document and caches the results
+// (stamped with the current Version). Returns false and fills *error on any
+// failure — the one source of truth shared by the panel Run button and the
+// run_study RPC. Defined in AppActions.cpp.
+bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error);
+
+// The Studies panel drawn in the Model dock while in simulation mode. Defined
+// in StudyPanel.cpp.
+void DrawStudyPanel(AppState& state);
+
+// Assigns the armed boundary condition (state.simulation.tool) to the face
+// under `ray`, as an undoable study edit. No-op if no tool is armed or the
+// pick misses a named face. Defined in StudyPanel.cpp.
+void SimulationPick(AppState& state, const Ray& ray);
+
 // Bill of materials (A4): derived from the active assembly every call, never
 // stored. One row per referenced part, in first-occurrence order; masses via
 // Measure::MassOfBodies (a part with any density-less body reports its mass

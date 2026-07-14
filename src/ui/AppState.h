@@ -191,6 +191,33 @@ struct MeasureState {
   uint32_t hoverIndex = 0; // face index or edge index per hoverIsEdge
 };
 
+// Simulation mode (FEM): a workspace the user enters and exits, like sketch
+// mode — `active` is the mode gate. While active the toolbar swaps to
+// simulation tools, the Model dock shows the Studies panel, and a viewport
+// click assigns the armed boundary condition to the picked face. Results are
+// derived data on the Document; this holds only transient UI/display state.
+struct SimulationState {
+  bool active = false;        // in simulation mode (the mode gate)
+  uint64_t activeStudyId = 0; // study being edited/viewed (0 = none)
+
+  // Armed boundary-condition tool: a viewport face click assigns this load.
+  enum class Tool { None, Fixed, Force, Pressure };
+  Tool tool = Tool::None;
+  // Params applied to the load placed by the next face pick.
+  double pendingMagnitude = 0.0;
+  glm::dvec3 pendingDirection{0.0, 0.0, -1.0};
+
+  // Result overlay display.
+  enum class Field { None, VonMises, Displacement };
+  Field field = Field::None;
+  float deformScale = 0.0f; // shader-side warp multiplier (0 = undeformed)
+  // Body render instances hidden while the field overlay replaces them, so
+  // ExitSimulation / field=None restores exactly those.
+  std::vector<uint32_t> hiddenMeshes;
+
+  bool IsActive() const { return active; }
+};
+
 // Drives an offline path-traced still across UI frames (one sample batch per
 // frame) so the Render modal can show progress and stay cancellable. main.cpp
 // owns the pump; the toolbar modal reads/writes the request + result fields.
@@ -362,6 +389,7 @@ struct AppState {
   SketchDragSession sketchDrag;
   EdgePickState edgePick;
   MeasureState measure;
+  SimulationState simulation;
   // Mass-properties center-of-gravity marker (C3): drawn as a small world-space
   // cross when the Properties panel's Mass properties section is open. The
   // panel computes the CoM and stamps it here; the overlay build reads it.

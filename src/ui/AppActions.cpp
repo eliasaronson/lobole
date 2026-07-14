@@ -529,6 +529,9 @@ void ResetActiveTabUiState(AppState& state) {
   // Explode display state is per-tab and transient: reset on switch.
   state.activeExplodedView = 0;
   state.explodeFactor = 1.0f;
+  // Any tab change exits simulation mode (results themselves live on the
+  // Document and survive; only the mode/display state resets).
+  state.simulation = SimulationState{};
   state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
 } // namespace
@@ -664,6 +667,41 @@ bool EnterInContextEdit(AppState& state, uint64_t occurrenceId) {
   SetActivePart(state, *partIndex); // clears inContext; re-arm after
   state.inContext = {asmSlotId, occurrenceId};
   return true;
+}
+
+// ---- Simulation mode (FEM) ------------------------------------------------
+
+bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
+  fem::Study* s = doc.FindStudy(studyId);
+  if (!s) {
+    if (error) *error = "no such study";
+    return false;
+  }
+  fem::StudyRuntime rt;
+  if (!fem::RunStudy(doc, *s, rt, error)) return false;
+  rt.solvedAtVersion = doc.Version();
+  doc.StoreStudyResults(studyId, std::move(rt));
+  return true;
+}
+
+void EnterSimulation(AppState& state) {
+  Document* doc = state.document.get();
+  if (!doc) return; // parts only (an assembly tab has no studies)
+  state.simulation.active = true;
+  if (doc->GetStudies().empty() && state.commands)
+    state.commands->Execute(std::make_unique<AddStudyCommand>(""), *doc);
+  // Select a study to edit (the first, unless one is already active).
+  if (!doc->FindStudy(state.simulation.activeStudyId) && !doc->GetStudies().empty())
+    state.simulation.activeStudyId = doc->GetStudies().front().id;
+}
+
+void ExitSimulation(AppState& state) {
+  // Restore any body instances the field overlay hid.
+  if (state.meshRenderer)
+    for (uint32_t meshId : state.simulation.hiddenMeshes)
+      state.meshRenderer->SetInstanceVisible(meshId, true);
+  state.simulation = SimulationState{};
+  state.syncedDocumentVersion = UINT64_MAX; // force a clean renderer resync
 }
 
 bool DeletePart(AppState& state, size_t index) {

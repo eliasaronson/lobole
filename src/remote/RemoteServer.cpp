@@ -823,11 +823,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!s) throw std::runtime_error("no such study");
 
     if (m == "run_study") {
-      fem::StudyRuntime rt;
       std::string err;
-      if (!fem::RunStudy(*doc, *s, rt, &err)) throw std::runtime_error(err);
-      rt.solvedAtVersion = doc->Version();
-      doc->StoreStudyResults(id, std::move(rt));
+      if (!ui::RunStudyAndCache(*doc, id, &err)) throw std::runtime_error(err);
     }
 
     const fem::StudyRuntime* rt = doc->StudyResults(id);
@@ -876,6 +873,23 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"stale", doc->StudyResultsStale(id)}};
     if (haveFoS) result["factor_of_safety"] = minFoS;
     return result;
+  }
+  if (m == "enter_simulation") {
+    // Enter the FEM simulation workspace (the GUI mode), optionally selecting a
+    // study. The LLM drives the same mode a human enters from the toolbar.
+    // params: {study?}
+    ui::EnterSimulation(state);
+    if (p.contains("study")) {
+      const uint64_t id = p.at("study").get<uint64_t>();
+      if (!doc->FindStudy(id)) throw std::runtime_error("no such study");
+      state.simulation.activeStudyId = id;
+    }
+    return {{"active", state.simulation.active},
+            {"study", state.simulation.activeStudyId}};
+  }
+  if (m == "exit_simulation") {
+    ui::ExitSimulation(state);
+    return json::object();
   }
 
   if (m == "set_section") {

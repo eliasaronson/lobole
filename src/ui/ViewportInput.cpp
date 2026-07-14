@@ -192,6 +192,30 @@ void HandleViewportInput(AppState& state) {
   if (!state.faceSelector || !state.meshRenderer)
     return;
 
+  // Simulation mode (FEM): Escape disarms the boundary-condition tool, or
+  // exits the mode when nothing is armed. While a tool is armed, a viewport
+  // click assigns it to the picked face.
+  if (state.simulation.IsActive()) {
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+      if (state.simulation.tool != SimulationState::Tool::None)
+        state.simulation.tool = SimulationState::Tool::None;
+      else
+        ExitSimulation(state);
+      return;
+    }
+    if (state.simulation.tool != SimulationState::Tool::None) {
+      if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        Ray ray = state.faceSelector->ScreenToWorldRay(
+            io.MousePos.x - state.viewportPos.x,
+            io.MousePos.y - state.viewportPos.y,
+            static_cast<int>(state.viewportSize.x),
+            static_cast<int>(state.viewportSize.y), *state.camera);
+        SimulationPick(state, ray);
+      }
+      return; // BC tool armed: consume viewport clicks
+    }
+  }
+
   // Assembly tab: pick whole occurrences — click selects (highlights every
   // instance), double-click enters the referenced part in context (assembly
   // ghosted, A4). While the mate tool is arming, clicks pick connector faces.
