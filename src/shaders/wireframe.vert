@@ -12,13 +12,21 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 clipPlane; // section clip (world): xyz=normal, w=dist
 } ubo;
 
+// Per-mesh model matrix (A2.5): the UBO's `model` is left as legacy padding so
+// std140 offsets (and the clipPlane alignment) don't shift; the real per-mesh
+// model comes from the push constant, so an occurrence drag is a matrix update,
+// not a vertex re-upload.
+layout(push_constant) uniform PushConstants {
+    mat4 model;
+} pc;
+
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 
 layout(location = 0) out vec3 fragWorldPos;
 
 void main() {
-    vec4 worldPos = ubo.model * vec4(inPosition, 1.0);
+    vec4 worldPos = pc.model * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
     gl_Position = ubo.proj * ubo.view * worldPos;
 }

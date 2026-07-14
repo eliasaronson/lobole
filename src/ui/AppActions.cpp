@@ -1089,18 +1089,11 @@ void SyncAssemblyRenderers(AppState& state) {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
       uint32_t outlineId = 0;
       if (state.outlineRenderer) {
-        // OutlineRenderer renders every mesh at identity (its per-mesh model is
-        // a TODO — see OutlineRenderer::UpdateUniformBuffers), so bake the
-        // occurrence transform into the uploaded vertices. Fine for static
-        // placement; live occurrence drags (phase 3) will want a real per-mesh
-        // model there, landing with the OutlineRenderer instance-space split.
-        std::vector<Vertex3D> ov = sb.vertices;
-        const glm::mat3 nrm(xf); // rigid transform: rotation part for normals
-        for (Vertex3D& v : ov) {
-          v.position = glm::vec3(xf * glm::vec4(v.position, 1.0f));
-          v.normal = glm::normalize(nrm * v.normal);
-        }
-        outlineId = state.outlineRenderer->AddMesh(ov, sb.indices);
+        // Untransformed vertices + a per-mesh model matrix (A2.5): the outline
+        // draws at the occurrence transform via a push constant, so a live drag
+        // is a SetMeshTransform matrix update, not a vertex re-upload/resync.
+        outlineId = state.outlineRenderer->AddMesh(sb.vertices, sb.indices);
+        state.outlineRenderer->SetMeshTransform(outlineId, xf);
       }
       if (state.faceSelector)
         state.faceSelector->AddMesh(meshId, sb.vertices, sb.indices,

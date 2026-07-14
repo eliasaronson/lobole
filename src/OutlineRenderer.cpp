@@ -258,11 +258,20 @@ bool OutlineRenderer::CreateOutlinePipeline() {
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
     
+    // Per-mesh model matrix (A2.5): a vertex-stage push constant so each mesh
+    // draws at its own transform instead of the shared UBO identity.
+    VkPushConstantRange pushRange{};
+    pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushRange.offset = 0;
+    pushRange.size = sizeof(glm::mat4);
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &m_outlineDescriptorSetLayout;
-    
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_outlinePipelineLayout) != VK_SUCCESS) {
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
@@ -407,11 +416,18 @@ bool OutlineRenderer::CreateWireframePipeline() {
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
     
+    VkPushConstantRange pushRange{}; // per-mesh model matrix (A2.5)
+    pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushRange.offset = 0;
+    pushRange.size = sizeof(glm::mat4);
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 1;
     pipelineLayoutInfo.pSetLayouts = &m_wireframeDescriptorSetLayout;
-    
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &pushRange;
+
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_wireframePipelineLayout) != VK_SUCCESS) {
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
@@ -1109,6 +1125,9 @@ void OutlineRenderer::RenderOutlines(VkCommandBuffer commandBuffer, uint32_t cur
     
     for (const auto& mesh : m_meshes) {
         if (mesh && mesh->vertexBuffer != VK_NULL_HANDLE && mesh->indexBuffer != VK_NULL_HANDLE) {
+            vkCmdPushConstants(commandBuffer, m_outlinePipelineLayout,
+                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
+                               &mesh->transform); // per-mesh model (A2.5)
             VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
             VkDeviceSize offsets[] = {0};
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
@@ -1141,6 +1160,9 @@ void OutlineRenderer::RenderWireframes(VkCommandBuffer commandBuffer, uint32_t c
     
     for (const auto& mesh : m_meshes) {
         if (mesh && mesh->vertexBuffer != VK_NULL_HANDLE && mesh->edgeIndexBuffer != VK_NULL_HANDLE) {
+            vkCmdPushConstants(commandBuffer, m_wireframePipelineLayout,
+                               VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
+                               &mesh->transform); // per-mesh model (A2.5)
             VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
             VkDeviceSize offsets[] = {0};
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
