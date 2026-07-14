@@ -100,6 +100,29 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked,
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.
 void DrawOccurrencePanel(AppState& state);
 
+// Bill of materials (A4): derived from the active assembly every call, never
+// stored. One row per referenced part, in first-occurrence order; masses via
+// Measure::MassOfBodies (a part with any density-less body reports its mass
+// unknown and taints the total). `visible=false` occurrences count —
+// visibility is a display state, not suppression.
+struct BomRow {
+  uint64_t partId = 0;
+  std::string partName;      // "(missing part)" when the reference dangles
+  int quantity = 0;
+  std::string material;      // slug; "" = none, "mixed" when bodies differ
+  double unitVolume = 0.0;   // mm^3, all bodies of the part
+  bool massKnown = false;
+  double unitMassG = 0.0;    // valid when massKnown
+};
+struct BomTable {
+  std::vector<BomRow> rows;
+  bool massKnown = true;     // false when any row's mass is unknown
+  double totalMassG = 0.0;   // valid when massKnown
+};
+BomTable ComputeBom(AppState& state); // empty without an active assembly
+// The table as CSV (quoted where needed); unknown masses are empty cells.
+std::string BomToCsv(const BomTable& bom);
+
 // Save/open a project directory. A multi-part project writes a project.json
 // index + one `parts/<name>/` directory each; a single-part project stays
 // the flat `.dsgn` (index.json + features/) form for backward compatibility.

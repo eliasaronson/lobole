@@ -12,6 +12,9 @@ void SaveProjectDialog(AppState& state);
 // Export the whole document; format chosen by the chosen file's extension
 // (.step/.stp, .stl, .brep). No-op without NFD.
 void ExportDialog(AppState& state);
+// Export the active assembly's bill of materials as CSV (A4). No-op without
+// NFD or an active assembly.
+void ExportBomDialog(AppState& state);
 
 // Draws the fallback browser window if it is open (no-op with NFD).
 void DrawFileBrowser(AppState& state);

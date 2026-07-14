@@ -171,6 +171,7 @@ set(core_sources
     src/core/Checkpoints.cpp
     src/core/GitVault.cpp
     src/core/Measure.cpp
+    src/core/MassProps.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
     src/core/Occurrence.cpp

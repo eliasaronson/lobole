@@ -656,6 +656,20 @@ def solve_assembly() -> dict:
     return _call("solve_assembly")
 
 
+@mcp.tool(description="Bill of materials for the active assembly (A4): one "
+          "row per referenced part with quantity, material, unit/total mass "
+          "(grams; null when a body has no material density) and a mass "
+          "total. Derived fresh from the document on every call.")
+def bom() -> dict:
+    return _call("bom")
+
+
+@mcp.tool(description="Write the active assembly's bill of materials to a "
+          "CSV file at `path` (same rows as `bom`).")
+def export_bom(path: str) -> dict:
+    return _call("export_bom", path=path)
+
+
 @mcp.tool(description="Import a STEP file's bodies as an Import feature.")
 def import_step(path: str) -> dict:
     return _call("import_step", path=path)

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 
 #ifdef HAVE_NATIVEFILEDIALOG
@@ -124,6 +125,25 @@ void ExportDialog(AppState& state) {
     LOG_ERROR("Export failed: {}", path);
 }
 
+void ExportBomDialog(AppState& state) {
+  if (!state.assembly)
+    return;
+  nfdchar_t* outPath = nullptr;
+  if (NFD_SaveDialog("csv", nullptr, &outPath) != NFD_OKAY)
+    return;
+  std::string path(outPath);
+  free(outPath);
+  if (!path.ends_with(".csv"))
+    path += ".csv";
+  std::ofstream out(path);
+  if (!out) {
+    LOG_ERROR("BOM export failed: cannot write {}", path);
+    return;
+  }
+  out << BomToCsv(ComputeBom(state));
+  LOG_INFO("BOM exported to {}", path);
+}
+
 void DrawFileBrowser(AppState& state) {
   // Crash-recovery prompt: OpenProjectDialog found an autosave newer than
   // the picked project file.
@@ -210,6 +230,10 @@ void SaveProjectDialog(AppState&) {
 
 void ExportDialog(AppState&) {
   LOG_WARN("Export requires nativefiledialog");
+}
+
+void ExportBomDialog(AppState&) {
+  LOG_WARN("BOM export requires nativefiledialog");
 }
 
 void DrawFileBrowser(AppState& state) {

@@ -1,4 +1,5 @@
 #include "ui/AppActions.h"
+#include "ui/FileDialogs.h"
 
 #include "imgui.h"
 
@@ -172,6 +173,73 @@ void DrawMatesSection(AppState& state) {
 // The occurrence list + properties editor, drawn in the "Model" panel (where a
 // part tab shows its feature tree) when an assembly tab is active. Edits
 // snapshot for undo; a drag is one undo step (snapshot on IsItemActivated).
+// Bill of materials (A4): derived rows per referenced part. The mass math
+// (OCC volume properties per body) is not per-frame cheap, so the table is
+// cached and recomputed only when the assembly or a referenced part changed.
+void DrawBomSection(AppState& state) {
+  ImGui::Spacing();
+  if (!ImGui::CollapsingHeader("Bill of materials"))
+    return;
+
+  static BomTable cache;
+  static const void* cachedAsm = nullptr;
+  static uint64_t cachedKey = 0;
+  // While an assembly tab is active every part doc is stashed in its slot, so
+  // this folds all referenced-part versions plus the assembly's own.
+  uint64_t key = state.assembly->Version();
+  for (const PartSlot& s : state.parts)
+    if (s.kind == DocKind::Part && s.doc)
+      key = key * 1315423911ull + s.doc->Version();
+  if (cachedAsm != static_cast<const void*>(state.assembly.get()) ||
+      cachedKey != key) {
+    cache = ComputeBom(state);
+    cachedAsm = state.assembly.get();
+    cachedKey = key;
+  }
+
+  if (cache.rows.empty()) {
+    ImGui::TextDisabled("No occurrences.");
+    return;
+  }
+  if (ImGui::BeginTable("bom", 5,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Part");
+    ImGui::TableSetupColumn("Qty");
+    ImGui::TableSetupColumn("Material");
+    ImGui::TableSetupColumn("Unit g");
+    ImGui::TableSetupColumn("Total g");
+    ImGui::TableHeadersRow();
+    for (const BomRow& r : cache.rows) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(r.partName.c_str());
+      ImGui::TableNextColumn();
+      ImGui::Text("%d", r.quantity);
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(r.material.empty() ? "-" : r.material.c_str());
+      ImGui::TableNextColumn();
+      if (r.massKnown) ImGui::Text("%.2f", r.unitMassG);
+      else ImGui::TextDisabled("?"); // no material/density assigned
+      ImGui::TableNextColumn();
+      if (r.massKnown) ImGui::Text("%.2f", r.unitMassG * r.quantity);
+      else ImGui::TextDisabled("?");
+    }
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted("Total");
+    ImGui::TableNextColumn();
+    ImGui::TableNextColumn();
+    ImGui::TableNextColumn();
+    ImGui::TableNextColumn();
+    if (cache.massKnown) ImGui::Text("%.2f", cache.totalMassG);
+    else ImGui::TextDisabled("?");
+    ImGui::EndTable();
+  }
+  if (ImGui::Button("Export CSV"))
+    ExportBomDialog(state);
+}
+
 void DrawOccurrencePanel(AppState& state) {
   ImGui::Begin("Model");
   if (!state.assembly) {
@@ -252,6 +320,7 @@ void DrawOccurrencePanel(AppState& state) {
   }
 
   DrawMatesSection(state);
+  DrawBomSection(state);
 
   ImGui::End();
 }

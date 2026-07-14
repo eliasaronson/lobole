@@ -12,6 +12,7 @@
 #include "SketchRenderer.h"
 #include "core/AssemblySolve.h"
 #include "core/Autosaver.h"
+#include "core/MassProps.h"
 #include "core/GitVault.h"
 #include "core/BooleanFeature.h"
 #include "core/Command.h"
@@ -37,6 +38,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <cmath>
@@ -846,6 +848,81 @@ bool AssemblyPartsStale(AppState& state) {
       return true; // never stamped, or the part regenerated since the stamp
   }
   return false;
+}
+
+BomTable ComputeBom(AppState& state) {
+  BomTable table;
+  if (!state.assembly)
+    return table;
+  for (const Occurrence& occ : state.assembly->GetOccurrences()) {
+    BomRow* row = nullptr;
+    for (BomRow& r : table.rows)
+      if (r.partId == occ.partId) { row = &r; break; }
+    if (row) {
+      row->quantity++;
+      continue;
+    }
+    BomRow fresh;
+    fresh.partId = occ.partId;
+    fresh.quantity = 1;
+    for (const PartSlot& slot : state.parts)
+      if (slot.kind == DocKind::Part && slot.id == occ.partId)
+        fresh.partName = slot.name;
+    const Document* part = PartDocById(state, occ.partId);
+    if (!part) {
+      fresh.partName = "(missing part)"; // dangling reference — mass unknown
+    } else if (const auto mass = Measure::MassOfBodies(part->GetBodies())) {
+      fresh.unitVolume = mass->volume;
+      fresh.massKnown = mass->massKnown;
+      fresh.unitMassG = mass->massG;
+      for (size_t i = 0; i < mass->bodies.size(); i++) {
+        if (i == 0)
+          fresh.material = mass->bodies[i].material;
+        else if (mass->bodies[i].material != fresh.material) {
+          fresh.material = "mixed";
+          break;
+        }
+      }
+    }
+    table.rows.push_back(std::move(fresh));
+  }
+  for (const BomRow& r : table.rows) {
+    if (r.massKnown)
+      table.totalMassG += r.unitMassG * r.quantity;
+    else
+      table.massKnown = false;
+  }
+  if (!table.massKnown)
+    table.totalMassG = 0.0;
+  return table;
+}
+
+std::string BomToCsv(const BomTable& bom) {
+  auto field = [](const std::string& s) {
+    if (s.find_first_of(",\"\n") == std::string::npos) return s;
+    std::string quoted = "\"";
+    for (char c : s) { if (c == '"') quoted += '"'; quoted += c; }
+    return quoted + "\"";
+  };
+  std::string csv = "part,quantity,material,unit_volume_mm3,unit_mass_g,total_mass_g\n";
+  char buf[64];
+  auto num = [&buf](double v) {
+    snprintf(buf, sizeof buf, "%.6g", v);
+    return std::string(buf);
+  };
+  for (const BomRow& r : bom.rows) {
+    csv += field(r.partName) + "," + std::to_string(r.quantity) + "," +
+           field(r.material) + "," + num(r.unitVolume) + ",";
+    if (r.massKnown)
+      csv += num(r.unitMassG) + "," + num(r.unitMassG * r.quantity);
+    else
+      csv += ",";
+    csv += "\n";
+  }
+  csv += "total,,,,,";
+  if (bom.massKnown) csv += num(bom.totalMassG);
+  csv += "\n";
+  return csv;
 }
 
 bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {

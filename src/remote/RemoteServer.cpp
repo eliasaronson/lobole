@@ -11,6 +11,7 @@
 #include "core/Checkpoints.h"
 #include "core/Expression.h"
 #include "core/GitVault.h"
+#include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
@@ -18,6 +19,7 @@
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
 
+#include <fstream>
 #include <map>
 
 #include "imgui.h"
@@ -243,7 +245,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "set_occurrence_transform", "set_occurrence_visible",
       "set_occurrence_fixed", "rename_occurrence",
       "add_mate", "set_mate", "remove_mate", "list_mates", "select_mate",
-      "select_occurrence", "solve_assembly",
+      "select_occurrence", "solve_assembly", "bom", "export_bom",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
@@ -722,51 +724,43 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
+    // The math is shared with the BOM (A4): Measure::MassOfBodies. A single
+    // body's Body copy is cheap (the shape is a refcounted OCC handle).
+    std::vector<Body> subset;
+    if (only >= 0) subset.push_back(bodies[only]);
+    std::string err;
+    const auto mass = Measure::MassOfBodies(only >= 0 ? subset : bodies, &err);
+    if (!mass) throw std::runtime_error(err);
+    if (mass->bodies.empty()) throw std::runtime_error("no bodies");
     json out = json::array();
-    double totalVolume = 0.0, totalMass = 0.0;
-    glm::dvec3 weightedCom(0.0);
-    bool massKnown = true;
-    for (size_t i = 0; i < bodies.size(); i++) {
-      if (only >= 0 && i != static_cast<size_t>(only)) continue;
-      CADShape::MassProps mp;
-      if (!bodies[i].shape.ComputeMassProps(mp))
-        throw std::runtime_error("mass properties failed for body " +
-                                 bodies[i].name);
+    for (size_t i = 0; i < mass->bodies.size(); i++) {
+      const Measure::BodyMass& bm = mass->bodies[i];
       json inertia = json::array();
       for (int r = 0; r < 3; r++)
-        inertia.push_back({mp.inertia[r][0], mp.inertia[r][1],
-                           mp.inertia[r][2]});
-      json entry = {{"body", i},
-                    {"name", bodies[i].name},
-                    {"volume", mp.volume},
-                    {"surface_area", mp.surfaceArea},
-                    {"center_of_mass", Vec3ToJson(mp.centerOfMass)},
+        inertia.push_back({bm.inertia[r][0], bm.inertia[r][1],
+                           bm.inertia[r][2]});
+      json entry = {{"body", only >= 0 ? static_cast<size_t>(only) : i},
+                    {"name", bm.name},
+                    {"volume", bm.volume},
+                    {"surface_area", bm.surfaceArea},
+                    {"center_of_mass",
+                     {bm.centerOfMass.x, bm.centerOfMass.y, bm.centerOfMass.z}},
                     {"inertia", inertia},
-                    {"material", bodies[i].material}};
-      const float density = CADMaterials::MaterialLibrary::GetMaterial(
-                                CADMaterials::MaterialLibrary::FromSlug(
-                                    bodies[i].material))
-                                .density;
-      if (!bodies[i].material.empty() && density > 0.0f) {
-        entry["density"] = density;
-        entry["mass_g"] = density * mp.volume * 1e-6;
-        totalMass += density * mp.volume * 1e-6;
+                    {"material", bm.material}};
+      if (bm.massKnown) {
+        entry["density"] = bm.density;
+        entry["mass_g"] = bm.massG;
       } else {
         entry["mass_g"] = nullptr;
-        massKnown = false;
       }
-      totalVolume += mp.volume;
-      weightedCom += glm::dvec3(mp.centerOfMass) * mp.volume;
       out.push_back(entry);
     }
-    if (out.empty()) throw std::runtime_error("no bodies");
-    const glm::dvec3 com =
-        totalVolume > 0.0 ? weightedCom / totalVolume : glm::dvec3(0.0);
+    const glm::dvec3& com = mass->centerOfMass;
     return {{"bodies", out},
             {"total",
-             {{"volume", totalVolume},
+             {{"volume", mass->volume},
               {"center_of_mass", {com.x, com.y, com.z}},
-              {"mass_g", massKnown ? json(totalMass) : json(nullptr)}}}};
+              {"mass_g", mass->massKnown ? json(mass->massG) : json(nullptr)}}}};
   }
   if (m == "measure") {
     // Geometry queries over stable element names (I1). params:
@@ -1053,6 +1047,40 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       arr.push_back(mj);
     }
     return {{"errored_mates", errored}, {"mates", arr}};
+  }
+  if (m == "bom") {
+    // Bill of materials (A4): derived, one row per referenced part.
+    // Unknown masses (a body without a density) are null and taint the total.
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    const ui::BomTable bom = ui::ComputeBom(state);
+    json rows = json::array();
+    for (const ui::BomRow& r : bom.rows) {
+      json row = {{"part_id", r.partId},
+                  {"part", r.partName},
+                  {"quantity", r.quantity},
+                  {"material", r.material},
+                  {"unit_volume", r.unitVolume}};
+      row["unit_mass_g"] = r.massKnown ? json(r.unitMassG) : json(nullptr);
+      row["total_mass_g"] =
+          r.massKnown ? json(r.unitMassG * r.quantity) : json(nullptr);
+      rows.push_back(row);
+    }
+    return {{"rows", rows},
+            {"total",
+             {{"mass_g", bom.massKnown ? json(bom.totalMassG) : json(nullptr)}}}};
+  }
+  if (m == "export_bom") {
+    // params: {path} — writes the BOM as CSV. Same rows as `bom`.
+    if (!state.assembly)
+      throw std::runtime_error("the active document is not an assembly");
+    const std::string path = p.at("path").get<std::string>();
+    const ui::BomTable bom = ui::ComputeBom(state);
+    std::ofstream out(path);
+    if (!out)
+      throw std::runtime_error("cannot write " + path);
+    out << ui::BomToCsv(bom);
+    return {{"path", path}, {"rows", bom.rows.size()}};
   }
   if (m == "set_active_part") {
     ui::SetActivePart(state, p.at("index").get<size_t>());
