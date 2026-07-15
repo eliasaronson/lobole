@@ -107,7 +107,33 @@ def main():
         ratio = res2["max_von_mises_mpa"]["value"] / sigma
         expect(abs(ratio - 2.0) < 0.05, f"stress scales 2x with load, got {ratio}")
 
-        print("fem_smoke: OK")
+        # --- modal analysis: cantilever natural frequencies (v2) ------------
+        modal = d.call("add_study", name="Modes")["id"]
+        d.call("set_study", study=modal, type="modal", num_modes=4, mesh_size=4.0)
+        d.call("add_load", study=modal, type="fixed",
+               face={"feature_id": created_by, "element": fixed_face})
+        try:
+            mres = d.call("run_study", study=modal)
+            freqs = mres["bodies"][0]["frequencies_hz"]
+            expect(len(freqs) >= 1, "modal returned frequencies")
+            # first bending ~815 Hz for a 100x10x10 steel bar; generous bound.
+            expect(700 < freqs[0] < 950, f"first frequency ~815 Hz, got {freqs[0]}")
+            expect(freqs[1] >= freqs[0], "frequencies ascend")
+
+            # --- gravity / self-weight static study -------------------------
+            grav = d.call("add_study", name="Weight")["id"]
+            d.call("set_study", study=grav, mesh_size=4.0, gravity=[0, 0, -9.81])
+            d.call("add_load", study=grav, type="fixed",
+                   face={"feature_id": created_by, "element": fixed_face})
+            gres = d.call("run_study", study=grav)
+            expect(gres["max_displacement_mm"]["value"] > 0,
+                   "self-weight produced a deflection")
+            print("fem_smoke: OK")
+        except Exception as e:
+            if "modal support" in str(e) or "Spectra" in str(e):
+                print("fem_smoke: OK (static; modal skipped, no Spectra)")
+            else:
+                raise
     except Exception as e:  # a no-Netgen build reports "built without FEM support"
         if "FEM support" in str(e) or "Netgen" in str(e):
             print("fem_smoke: SKIP (built without Netgen)")

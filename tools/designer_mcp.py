@@ -908,13 +908,18 @@ def list_studies() -> dict:
     return _call("list_studies")
 
 
-@mcp.tool(description="Set a study's name and/or global mesh size (mm; 0 = "
-          "auto from the bounding box). mesh_size may be a number or an "
-          "expression string over document variables.")
-def set_study(study: int, name: str | None = None,
-              mesh_size=None) -> dict:
+@mcp.tool(description="Set a study's name, global mesh size, analysis type, or "
+          "loads. mesh_size (mm; 0 = auto) may be a number or an expression "
+          "string. type is 'static' (stress) or 'modal' (natural frequencies). "
+          "num_modes sets how many modes a modal study computes. gravity "
+          "([x,y,z] m/s^2, e.g. [0,0,-9.81]) applies self-weight to a static "
+          "study (needs a material density).")
+def set_study(study: int, name: str | None = None, mesh_size=None,
+              type: str | None = None, num_modes: int | None = None,
+              gravity: list | None = None) -> dict:
     params: dict = {"study": study}
-    for k, v in (("name", name), ("mesh_size", mesh_size)):
+    for k, v in (("name", name), ("mesh_size", mesh_size), ("type", type),
+                 ("num_modes", num_modes), ("gravity", gravity)):
         if v is not None:
             params[k] = v
     return _call("set_study", **params)
@@ -960,10 +965,11 @@ def mesh_study(study: int) -> dict:
 
 
 @mcp.tool(description="Mesh + solve a study now (explicit; never automatic). "
-          "Returns nodes, elements, max_von_mises_mpa {value, at, body}, "
-          "max_displacement_mm {value, at, body}, per-body breakdown, "
-          "factor_of_safety (vs material yield), and stale:false. Errors name "
-          "the offending face/material/support.")
+          "A static study returns nodes, elements, max_von_mises_mpa {value, "
+          "at, body}, max_displacement_mm, factor_of_safety (vs yield), and "
+          "stale:false. A modal study returns per-body frequencies_hz (the "
+          "natural frequencies). Errors name the offending face/material/"
+          "support.")
 def run_study(study: int) -> dict:
     return _call("run_study", study=study)
 
@@ -976,15 +982,19 @@ def study_results(study: int) -> dict:
 
 @mcp.tool(description="Show a study's result overlay in the viewport (for a "
           "screenshot). field is 'von_mises', 'displacement', or 'none'; "
-          "deform_scale exaggerates the deformed shape (0 = undeformed). "
+          "deform_scale exaggerates the deformed shape (0 = undeformed). For a "
+          "modal study, mode selects which mode shape (0-based) to display. "
           "Enters simulation mode; display-only, like set_explode.")
 def set_result_display(study: int | None = None, field: str = "von_mises",
-                       deform_scale: float | None = None) -> dict:
+                       deform_scale: float | None = None,
+                       mode: int | None = None) -> dict:
     params: dict = {"field": field}
     if study is not None:
         params["study"] = study
     if deform_scale is not None:
         params["deform_scale"] = deform_scale
+    if mode is not None:
+        params["mode"] = mode
     return _call("set_result_display", **params)
 
 

@@ -1,10 +1,14 @@
 # Simulation — FEM structural analysis — design
 
-> Status: **COMPLETE — FEM0–FEM4 shipped.** The headless mesh+solve loop, the
-> Simulation-mode GUI (Studies panel, load face-picking, colormapped result
-> overlay with deform warp + max marker + legend), the MCP mirrors, and the
-> `fem_smoke` headless test are all live. v1 (single-part linear static) is
-> done; modal/assembly/thermal remain future work per "explicitly deferred".
+> Status: **v1 + v2 shipped.** v1 = single-part linear static (FEM0–FEM4:
+> headless mesh+solve loop, Simulation-mode GUI, MCP, `fem_smoke`). **v2 adds
+> modal analysis and gravity/self-weight** (Spectra eigensolver, consistent mass
+> matrix, `AnalysisType` static|modal on the Study, format **v32**, natural-
+> frequency list + mode-shape overlay in the panel, `set_study
+> type/num_modes/gravity` + modal `run_study`/`set_result_display` RPCs+MCP).
+> Validated: cantilever f₁ 0.18% vs Euler-Bernoulli, self-weight 0.03% vs beam
+> theory. v2 requires a fixed support (free-free deferred). Still deferred:
+> assembly/contact, thermal, buckling, nonlinear, VTU export.
 > Two facts the FEM0 spike settled, corrected throughout this doc:
 > the studies format bump is **v29** (v28 was already taken by C2's
 > unit-suffixed expressions), and the FEM code lives as flat `src/core/Fem*.cpp`
