@@ -82,6 +82,8 @@ if(OPENCASCADE_FOUND)
     set(OPENCASCADE_LIBS
         TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo
         TKTopAlgo TKPrim TKMesh TKBO TKXSBase TKShHealing TKOffset
+        # Hidden-line-removed projection for 2D drawings (D0+).
+        TKHLR
         # Visual-mesh export (interchange X2): the XCAF document stack +
         # RWMesh. The glTF/OBJ/PLY writers live in TKRWMesh through OCCT 7.7
         # and split into TKDE* in 7.8 (appended below when present).
@@ -181,6 +183,7 @@ set(core_sources
     src/core/Document.cpp
     src/core/Occurrence.cpp
     src/core/AssemblySolve.cpp
+    src/core/DrawingProjection.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/Serialization.cpp

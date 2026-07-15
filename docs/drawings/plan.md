@@ -64,12 +64,44 @@ title block, SVG/PDF export.**
 
 ## 1. Projection: OCC HLR, spike-gated
 
+> **D0 gate: PASSED (2026-07-14).** Shipped as `core/DrawingProjection.{h,cpp}`
+> (exact `HLRBRep_Algo`, TKHLR linked) + `tests/test_drawing_hlr.cpp`
+> (`[drawing][hlr]`, all green in the 363-test suite). Results, measured on
+> the dev machine, Release `-O3`:
+> - **Traceability — PASS.** `unresolvedSources == 0` on every fixture (box,
+>   cylinder, blind-bore block, two shared-TShape instances, the v17-full
+>   part, 25/49-instance grids). Cylinder side-view silhouettes trace to the
+>   generating cylindrical face; the "shaft diameter" case works. Key finding:
+>   the `HLRAlgo_EdgesBlock::OutLine` flag is **not** the silhouette signal
+>   (HLR sets it on a face's real boundary edges when the face is viewed
+>   edge-on). The robust rule is *"a silhouette is a DS edge that maps to no
+>   source model edge"*, and its generating face is the DS face whose wire
+>   block contains it. Edge identity is IsSame, then a shared stored-geometry-
+>   handle + location fallback for edges the outliner splits.
+> - **Performance — PASS by ~3 orders of magnitude.** Real part (3 bodies):
+>   ~1.5 ms/view. 25-instance assembly (~525 DS edges): ~12 ms. 49-instance
+>   (~1029 edges): ~26 ms. Thresholds were 5 s (part) / 15 s (assembly). No
+>   crashes or hangs on any fixture. **`HLRBRep_PolyAlgo` promotion NOT
+>   triggered** — exact HLR is the default for both parts and assemblies;
+>   the crash/hang mitigations (`OSD::SetSignal` + `try/catch`, per-view error
+>   string) are in the wrapper as insurance, not because these fixtures needed
+>   them.
+> - **Curve output — documented.** Iso view returns lines (`GeomAbs_Line`) +
+>   ellipses (`GeomAbs_Ellipse`, tilted circles) — conics stay symbolic and
+>   are recoverable via `Circle()`/`Ellipse()` (the wrapper exports
+>   `conicCenter`/`conicRadius`; a flat bore rim comes back a `GeomAbs_Circle`
+>   with radius 8.0 exactly). Discretization scales with deflection (82→146
+>   points on the top view at 0.05→0.01 mm). SVG mapping for D4: line→`L`,
+>   circle/ellipse→`A`, else polyline at the deflection default (0.05 sheet-mm
+>   post-scale). No design amendments — `sil/<faceName>` refs (decision 4)
+>   stand. **Proceed to D1.**
+
 `HLRBRep_Algo` (exact) takes shapes + a projector and yields visible/hidden
 edge curves in view space, categorized by `HLRBRep_HLRToShape`: sharp edges,
 smooth edges, **outlines (silhouettes)** — the projection-generated curves a
 shaft's side view is made of — each in visible and hidden flavors. TKHLR
-ships in our OCC 7.9.3 install but is not yet linked; adding it to
-`OPENCASCADE_LIBS` (`CMakeLists.txt:82-85`) is one token.
+ships in our OCC 7.9.3 install; D0 linked it in `OPENCASCADE_LIBS`
+(`CMakeLists.txt`, one token).
 
 **D0 is a spike with a decision gate**, exactly like FEM0:
 
@@ -137,8 +169,8 @@ DrawingDocument {
   exact HLR costs seconds, same never-auto rule as FEM solves, deliberately
   unlike the cheap A4 assembly re-solve.
 
-**Persistence** — format bump (**v29**, assuming FEM's v28; whichever lands
-first takes the lower number), additive per F3:
+**Persistence** — format bump (**v30**; FEM shipped as v29, so drawings take
+v30), additive per F3:
 
 ```
 drawings/bracket-dwg/
@@ -290,7 +322,7 @@ OCC versions, the FEM rule).
    resolver-based lookup; **projected geometry and measured values are
    derived, never stored**; staleness via per-view source-version stamps
    with **explicit update** (HLR is expensive — the FEM rule, not the A4
-   auto-solve rule). Format **v29** (after FEM's v28), `drawings/` dir,
+   auto-solve rule). Format **v30** (FEM shipped v29), `drawings/` dir,
    file-per-view/dim, one kVersion, golden per bump.
 4. **Dimension refs extend toponaming by a view qualifier**: sharp edges by
    source-edge `ElementRef` (occurrence-qualified for assembly sources),
@@ -318,7 +350,7 @@ OCC versions, the FEM rule).
    source-edge + silhouette-face traceability, measure timings. **No
    further drawings work until this passes.**
 1. **D1 — the sheet spine:** `DocKind::Drawing` plumbing (the §2 touch
-   list), `DrawingDocument` + Commands + serialization (v29 + golden),
+   list), `DrawingDocument` + Commands + serialization (v30 + golden),
    sheet viewport (2D pan/zoom, border + title block via PrimVertex +
    quads), tab + panel shell, `create_drawing` RPC.
 2. **D2 — views:** projection core in `core/` (HLR wrapper → categorized
