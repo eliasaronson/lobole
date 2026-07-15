@@ -857,3 +857,41 @@ TEST_CASE("Modal: requires a fixed support and density", "[fem][modal]") {
 }
 
 #endif  // HAVE_NETGEN && HAVE_SPECTRA
+
+// ---- Gravity / self-weight (netgen-gated) ---------------------------------
+#ifdef HAVE_NETGEN
+
+TEST_CASE("Solver: cantilever self-weight tip deflection", "[fem][solver][gravity]") {
+  // Steel cantilever under gravity (-z). Tip deflection vs distributed-load
+  // beam theory delta = w L^4 / (8 E I), with w = rho*g*A (force per length).
+  const double L = 100, W = 10;
+  CADShape bar = CADKernel::Instance().CreateBox(L, W, W);
+  fem::MeshSettings ms;
+  ms.maxSize = 4.0;
+  std::string err;
+  auto mesh = fem::Mesh(bar.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+
+  // steel; density in t/mm^3, gravity in mm/s^2 (-z).
+  fem::Material steel{200000.0, 0.3, 7.85e-9};
+  std::vector<int> fixed;
+  for (int i = 0; i < (int)mesh->nodes.size(); ++i)
+    if (std::abs(mesh->nodes[i].x) < 1e-6) fixed.push_back(i);
+  REQUIRE(fixed.size() > 6);
+
+  auto res = fem::Solve(*mesh, steel, fixed, {}, &err, glm::dvec3(0, 0, -9810.0));
+  INFO(err);
+  REQUIRE(res.has_value());
+
+  const double E = 200000.0, rho = 7.85e-9, g = 9810.0;
+  const double I = W * W * W * W / 12.0;
+  const double A = W * W;
+  const double w = rho * g * A;                       // N/mm
+  const double delta = w * L * L * L * L / (8 * E * I);  // beam theory
+  INFO("tip delta = " << res->maxDisplacement << " expected " << delta);
+  CHECK_THAT(res->maxDisplacement, WithinRel(delta, 0.10));
+  CHECK(res->maxDisplacement > 0);  // it actually deflected (gravity applied)
+}
+
+#endif  // HAVE_NETGEN

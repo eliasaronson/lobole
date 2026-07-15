@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 31; // v31: configurations (v30: 2D drawings)
+constexpr int kVersion = 32; // v32: FEM modal/gravity (v31: configurations)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -1059,6 +1059,13 @@ json StudyToJson(const fem::Study& s) {
   j["type"] = "Study";
   j["id"] = s.id;
   j["name"] = s.name;
+  // Analysis type / modal / gravity (v32) — written only when non-default so
+  // v31 static studies stay byte-identical.
+  if (s.type != fem::AnalysisType::Static)
+    j["analysis"] = fem::AnalysisTypeToString(s.type);
+  if (s.type == fem::AnalysisType::Modal) j["num_modes"] = s.numModes;
+  if (s.gravity.x != 0 || s.gravity.y != 0 || s.gravity.z != 0)
+    j["gravity"] = {s.gravity.x, s.gravity.y, s.gravity.z};
   j["mesh_size"] = s.meshSize;
   if (!s.meshSizeExpr.empty()) j["mesh_size_expr"] = s.meshSizeExpr;
 
@@ -1091,6 +1098,13 @@ fem::Study StudyFromJson(const json& j) {
   fem::Study s;
   s.id = j.at("id").get<uint64_t>();
   s.name = j.value("name", std::string{});
+  fem::AnalysisTypeFromString(j.value("analysis", std::string{"static"}), s.type);
+  s.numModes = j.value("num_modes", 6);
+  if (j.contains("gravity")) {
+    const auto& g = j.at("gravity");
+    s.gravity = glm::dvec3(g.at(0).get<double>(), g.at(1).get<double>(),
+                           g.at(2).get<double>());
+  }
   s.meshSize = j.value("mesh_size", 0.0);
   s.meshSizeExpr = j.value("mesh_size_expr", std::string{});
 

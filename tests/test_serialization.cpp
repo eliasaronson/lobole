@@ -254,3 +254,46 @@ TEST_CASE("A document with no studies writes no studies key or dir",
   CHECK_FALSE(fs::exists(dir / "studies"));
   fs::remove_all(dir);
 }
+
+TEST_CASE("Modal analysis type + gravity round-trip (v32)", "[serialization][fem]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0),
+                                              100.0, 10.0, 10.0));
+  fem::Study& modal = doc.AddStudy("Modes");
+  modal.type = fem::AnalysisType::Modal;
+  modal.numModes = 8;
+  modal.meshSize = 5.0;
+  fem::Study& grav = doc.AddStudy("Self weight");
+  grav.gravity = glm::dvec3(0, 0, -9.81);
+  grav.meshSize = 5.0;
+
+  fs::path path = TempFile("designer_test_modal.json");
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  // A static study with no gravity writes none of the new keys (byte-identity).
+  {
+    Document plain;
+    plain.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 1, 1, 1));
+    plain.AddStudy("S");
+    fs::path p2 = TempFile("designer_test_plainstudy.json");
+    REQUIRE(DocumentIO::Save(plain, p2.string(), &error));
+    std::ifstream in(p2);
+    const std::string body((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    CHECK(body.find("analysis") == std::string::npos);
+    CHECK(body.find("gravity") == std::string::npos);
+    fs::remove(p2);
+  }
+
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  INFO(error);
+  REQUIRE(loaded != nullptr);
+  REQUIRE(loaded->GetStudies().size() == 2);
+  const fem::Study& m = loaded->GetStudies()[0];
+  CHECK(m.type == fem::AnalysisType::Modal);
+  CHECK(m.numModes == 8);
+  const fem::Study& g = loaded->GetStudies()[1];
+  CHECK(g.type == fem::AnalysisType::Static);
+  CHECK(g.gravity.z == -9.81);
+  fs::remove(path);
+}

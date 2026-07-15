@@ -1,0 +1,22 @@
+{
+  "format": "designer-document",
+  "version": 32,
+  "features": [
+    {"type": "Box", "name": "Bar", "id": 1,
+     "position": [0, 0, 0], "width": 100, "height": 10, "depth": 10}
+  ],
+  "studies": [
+    {"type": "Study", "id": 2, "name": "Modes", "analysis": "modal",
+     "num_modes": 8, "mesh_size": 5.0,
+     "loads": [
+       {"id": 3, "type": "fixed",
+        "face": {"feature_id": 1, "element": "1/face0"}, "magnitude": 0.0}
+     ]},
+    {"type": "Study", "id": 4, "name": "Self weight", "gravity": [0, 0, -9.81],
+     "mesh_size": 5.0,
+     "loads": [
+       {"id": 5, "type": "fixed",
+        "face": {"feature_id": 1, "element": "1/face1"}, "magnitude": 0.0}
+     ]}
+  ]
+}

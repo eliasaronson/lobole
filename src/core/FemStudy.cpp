@@ -37,6 +37,16 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
   return false;
 }
 
+const char* AnalysisTypeToString(AnalysisType type) {
+  return type == AnalysisType::Modal ? "modal" : "static";
+}
+
+bool AnalysisTypeFromString(const std::string& s, AnalysisType& out) {
+  if (s == "static") { out = AnalysisType::Static; return true; }
+  if (s == "modal") { out = AnalysisType::Modal; return true; }
+  return false;
+}
+
 bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols, std::string* error) {
   bool ok = true;
   // Evaluate one value+expr pair; on failure records the first error but keeps
@@ -216,26 +226,42 @@ bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt, std::string* 
     if (fixedSet.empty())
       return fail("body '" + body.name + "': fixed face meshed to no nodes");
 
-    Material mat{mp.youngGPa * 1000.0, mp.poisson};  // GPa -> MPa
+    // GPa -> MPa; density kg/m^3 -> tonne/mm^3 for the consistent mm-N-t-s
+    // system (so gravity loads and modal frequencies come out right).
+    Material mat{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
     std::vector<int> fixedNodes(fixedSet.begin(), fixedSet.end());
-    auto res = Solve(*mesh, mat, fixedNodes, faceLoads, &err);
-    if (!res) return fail("body '" + body.name + "': " + err);
 
     StudyBodyResult sbr;
     sbr.bodyIndex = bodyIndex;
     sbr.bodyName = body.name;
-    if (res->maxVonMises > rt.maxVonMises) {
-      rt.maxVonMises = res->maxVonMises;
-      rt.maxVmAt = res->maxVmAt;
-      rt.maxVmBody = body.name;
-    }
-    if (res->maxDisplacement > rt.maxDisplacement) {
-      rt.maxDisplacement = res->maxDisplacement;
-      rt.maxDispAt = res->maxDispAt;
-      rt.maxDispBody = body.name;
+
+    if (study.type == AnalysisType::Modal) {
+      if (mp.density <= 0.0f)
+        return fail("body '" + body.name + "': material has no density (needed "
+                    "for modal analysis)");
+      auto modes = SolveModal(*mesh, mat, fixedNodes, study.numModes, &err);
+      if (!modes) return fail("body '" + body.name + "': " + err);
+      sbr.results.modes = std::move(*modes);
+    } else {
+      const glm::dvec3 g = study.gravity * 1000.0;  // m/s^2 -> mm/s^2
+      if ((g.x != 0 || g.y != 0 || g.z != 0) && mp.density <= 0.0f)
+        return fail("body '" + body.name + "': material has no density (needed "
+                    "for gravity)");
+      auto res = Solve(*mesh, mat, fixedNodes, faceLoads, &err, g);
+      if (!res) return fail("body '" + body.name + "': " + err);
+      if (res->maxVonMises > rt.maxVonMises) {
+        rt.maxVonMises = res->maxVonMises;
+        rt.maxVmAt = res->maxVmAt;
+        rt.maxVmBody = body.name;
+      }
+      if (res->maxDisplacement > rt.maxDisplacement) {
+        rt.maxDisplacement = res->maxDisplacement;
+        rt.maxDispAt = res->maxDispAt;
+        rt.maxDispBody = body.name;
+      }
+      sbr.results = std::move(*res);
     }
     sbr.mesh = std::move(*mesh);
-    sbr.results = std::move(*res);
     rt.bodies.push_back(std::move(sbr));
   }
   return true;

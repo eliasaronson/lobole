@@ -49,10 +49,17 @@ struct Load {
   glm::dvec3 direction{0.0, 0.0, -1.0};
 };
 
-// A single-part linear-static analysis definition.
+// What a study solves for.
+enum class AnalysisType {
+  Static,  // linear-static: stress + displacement under loads
+  Modal,   // natural frequencies + mode shapes (no external loads)
+};
+
+// A single-part analysis definition (linear static or modal).
 struct Study {
   uint64_t id = 0;
   std::string name;
+  AnalysisType type = AnalysisType::Static;
 
   // Global maximum element size (mm); 0 = auto from the body bounding box.
   double meshSize = 0.0;
@@ -61,6 +68,13 @@ struct Study {
   std::vector<Refinement> refinements;
   std::vector<Load> loads;
 
+  // Static only: uniform gravity/self-weight acceleration (m/s^2 in world
+  // axes; 0 = off). Needs the body's material density.
+  glm::dvec3 gravity{0.0, 0.0, 0.0};
+
+  // Modal only: how many lowest natural frequencies to compute.
+  int numModes = 6;
+
   // Transient: the most recent mesh/solve error (dangling ref, no fixed
   // support, singular matrix, ...). Never serialized. Empty when healthy.
   std::string error;
@@ -68,6 +82,8 @@ struct Study {
 
 const char* LoadTypeToString(LoadType type);
 bool LoadTypeFromString(const std::string& s, LoadType& out);
+const char* AnalysisTypeToString(AnalysisType type);
+bool AnalysisTypeFromString(const std::string& s, AnalysisType& out);
 
 // Evaluates every expression-driven field (mesh size, refinement sizes, load
 // magnitudes) against `symbols`, writing results into the value fields. On a
