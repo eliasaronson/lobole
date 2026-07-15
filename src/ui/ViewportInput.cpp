@@ -57,6 +57,11 @@ void Pick(AppState& state, const ImVec2& pos, bool select, bool alignCamera) {
 } // namespace
 
 void HandleViewportInput(AppState& state) {
+  // A drawing tab drives a 2D sheet, not the orbit camera.
+  if (state.drawing) {
+    HandleSheetInput(state);
+    return;
+  }
   if (!state.camera)
     return;
 

@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 29; // v29: FEM studies (v28: unit-suffixed expressions)
+constexpr int kVersion = 30; // v30: 2D drawings (v29: FEM studies)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -1356,8 +1356,10 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       if (error) *error = "Document version is newer than this build supports";
       return nullptr;
     }
-    if (index.value("kind", "part") == "assembly") {
-      if (error) *error = "This is an assembly, not a part: " + dirPath;
+    if (index.value("kind", "part") != "part") {
+      if (error)
+        *error = "This is a " + index.value("kind", "part") +
+                 ", not a part: " + dirPath;
       return nullptr;
     }
 
@@ -1665,8 +1667,9 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
         *error = "Document version is newer than this build supports";
       return nullptr;
     }
-    if (j.value("kind", "part") == "assembly") {
-      if (error) *error = "This is an assembly, not a part: " + path;
+    if (j.value("kind", "part") != "part") {
+      if (error)
+        *error = "This is a " + j.value("kind", "part") + ", not a part: " + path;
       return nullptr;
     }
 
@@ -1770,6 +1773,330 @@ std::unique_ptr<AssemblyDocument> LoadAssembly(const std::string& path,
   } catch (const std::exception& e) {
     if (error) *error = e.what();
     LOG_ERROR("Failed to load assembly from {}: {}", path, e.what());
+    return nullptr;
+  }
+}
+
+// ---- Drawings (v30) --------------------------------------------------------
+// A drawing serializes like a part/assembly: kind:"drawing", the sheet inline,
+// one file per view and per dim in the dir format. Projected geometry and
+// measured dimension values are derived, never stored (design doc §2).
+
+namespace {
+
+json SheetJson(const Sheet& s) {
+  json tb = json::object();
+  const TitleBlock& t = s.titleBlock;
+  if (!t.project.empty()) tb["project"] = t.project;
+  if (!t.document.empty()) tb["document"] = t.document;
+  if (!t.author.empty()) tb["author"] = t.author;
+  if (!t.date.empty()) tb["date"] = t.date;
+  if (!t.notes.empty()) tb["notes"] = t.notes;
+  json j = {{"size", SheetSizeToString(s.size)}, {"landscape", s.landscape}};
+  if (!tb.empty()) j["title_block"] = std::move(tb);
+  return j;
+}
+
+Sheet SheetFromJson(const json& j) {
+  Sheet s;
+  SheetSizeFromString(j.value("size", std::string("a4")), s.size);
+  s.landscape = j.value("landscape", true);
+  const json tb = j.value("title_block", json::object());
+  s.titleBlock.project = tb.value("project", std::string{});
+  s.titleBlock.document = tb.value("document", std::string{});
+  s.titleBlock.author = tb.value("author", std::string{});
+  s.titleBlock.date = tb.value("date", std::string{});
+  s.titleBlock.notes = tb.value("notes", std::string{});
+  return s;
+}
+
+json ProjRefJson(const ProjRef& r) {
+  json j = {{"view", r.viewId}, {"end", r.end}};
+  if (r.occurrenceId) j["occurrence"] = r.occurrenceId;
+  if (r.edge.IsSet()) j["edge"] = ElementRefJson(r.edge);
+  if (r.silFace.IsSet()) j["sil_face"] = ElementRefJson(r.silFace);
+  return j;
+}
+
+ProjRef ProjRefFromJson(const json& j) {
+  ProjRef r;
+  r.viewId = j.value("view", uint64_t{0});
+  r.occurrenceId = j.value("occurrence", uint64_t{0});
+  r.end = j.value("end", 0);
+  if (j.contains("edge")) r.edge = ElementRefFromJson(j.at("edge"));
+  if (j.contains("sil_face")) r.silFace = ElementRefFromJson(j.at("sil_face"));
+  return r;
+}
+
+json DrawingEnvelope() {
+  json j;
+  j["format"] = kFormat;
+  j["version"] = kVersion;
+  j["kind"] = "drawing";
+  return j;
+}
+
+}  // namespace
+
+json DrawingViewToJson(const DrawingView& v) {
+  json j = {{"id", v.id},
+            {"name", v.name},
+            {"source", v.sourceDocId},
+            {"orientation", ViewOrientationToString(v.orientation)},
+            {"scale", v.scale},
+            {"position", {v.position.x, v.position.y}},
+            {"show_hidden", v.showHidden}};
+  if (v.baseViewId) j["base_view"] = v.baseViewId;
+  if (!v.scaleExpr.empty()) j["scale_expr"] = v.scaleExpr;
+  return j;
+}
+
+DrawingView DrawingViewFromJson(const json& j) {
+  DrawingView v;
+  v.id = j.value("id", uint64_t{0});
+  v.name = j.value("name", std::string{});
+  v.sourceDocId = j.value("source", uint64_t{0});
+  ViewOrientationFromString(j.value("orientation", std::string("front")),
+                            v.orientation);
+  v.baseViewId = j.value("base_view", uint64_t{0});
+  v.scale = j.value("scale", 1.0);
+  v.scaleExpr = j.value("scale_expr", std::string{});
+  const json p = j.value("position", json::array({0.0, 0.0}));
+  if (p.is_array() && p.size() == 2)
+    v.position = {p[0].get<double>(), p[1].get<double>()};
+  v.showHidden = j.value("show_hidden", true);
+  return v;
+}
+
+json DrawingDimToJson(const DrawingDim& d) {
+  json refs = json::array();
+  for (const ProjRef& r : d.refs) refs.push_back(ProjRefJson(r));
+  return json{{"id", d.id},
+              {"kind", DrawingDimKindToString(d.kind)},
+              {"view", d.viewId},
+              {"refs", std::move(refs)},
+              {"label_offset", {d.labelOffset.x, d.labelOffset.y}}};
+}
+
+DrawingDim DrawingDimFromJson(const json& j) {
+  DrawingDim d;
+  d.id = j.value("id", uint64_t{0});
+  DrawingDimKindFromString(j.value("kind", std::string("distance")), d.kind);
+  d.viewId = j.value("view", uint64_t{0});
+  for (const json& rj : j.value("refs", json::array()))
+    d.refs.push_back(ProjRefFromJson(rj));
+  const json o = j.value("label_offset", json::array({0.0, 0.0}));
+  if (o.is_array() && o.size() == 2)
+    d.labelOffset = {o[0].get<double>(), o[1].get<double>()};
+  return d;
+}
+
+namespace {
+
+bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
+                    std::string* error) {
+  namespace fs = std::filesystem;
+  try {
+    const fs::path dir(dirPath);
+    fs::create_directories(dir);
+
+    json index = DrawingEnvelope();
+    index["sheet"] = SheetJson(dwg.GetSheet());
+
+    const fs::path viewDir = dir / "views";
+    index["views"] = json::array();
+    if (!dwg.GetViews().empty()) fs::create_directories(viewDir);
+    std::set<std::string> wantedView;
+    for (const DrawingView& v : dwg.GetViews()) {
+      const std::string file =
+          std::to_string(v.id) + "-" + LabelSlug(v.name) + ".json";
+      if (!WriteTextAtomic(viewDir / file, DrawingViewToJson(v).dump(2) + "\n",
+                           error))
+        return false;
+      index["views"].push_back(v.id);
+      wantedView.insert(file);
+    }
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(viewDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedView.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
+    const fs::path dimDir = dir / "dims";
+    index["dims"] = json::array();
+    if (!dwg.GetDims().empty()) fs::create_directories(dimDir);
+    std::set<std::string> wantedDim;
+    for (const DrawingDim& d : dwg.GetDims()) {
+      const std::string file = std::to_string(d.id) + "-" +
+                               DrawingDimKindToString(d.kind) + ".json";
+      if (!WriteTextAtomic(dimDir / file, DrawingDimToJson(d).dump(2) + "\n",
+                           error))
+        return false;
+      index["dims"].push_back(d.id);
+      wantedDim.insert(file);
+    }
+    for (const auto& entry : fs::directory_iterator(dimDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedDim.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
+    if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
+      return false;
+    LOG_INFO("Saved drawing ({} views, {} dims) to {}", dwg.ViewCount(),
+             dwg.DimCount(), dirPath);
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return false;
+  }
+}
+
+std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
+                                                std::string* error) {
+  namespace fs = std::filesystem;
+  try {
+    std::ifstream in(fs::path(dirPath) / "index.json");
+    if (!in) {
+      if (error) *error = "Not a designer project directory: " + dirPath;
+      return nullptr;
+    }
+    json index = json::parse(in);
+    if (index.value("format", "") != kFormat) {
+      if (error) *error = "Not a designer document: " + dirPath;
+      return nullptr;
+    }
+    if (index.value("version", 0) > kVersion) {
+      if (error) *error = "Document version is newer than this build supports";
+      return nullptr;
+    }
+    if (index.value("kind", "part") != "drawing") {
+      if (error) *error = "Not a drawing: " + dirPath;
+      return nullptr;
+    }
+
+    auto dwg = std::make_unique<DrawingDocument>();
+    dwg->GetSheet() = SheetFromJson(index.value("sheet", json::object()));
+
+    std::map<uint64_t, fs::path> viewById;
+    std::error_code ec;
+    for (const auto& entry :
+         fs::directory_iterator(fs::path(dirPath) / "views", ec)) {
+      if (entry.path().extension() == ".json")
+        viewById[std::stoull(entry.path().filename().string())] = entry.path();
+    }
+    uint64_t maxId = 0;
+    for (const auto& idJson : index.value("views", json::array())) {
+      const auto it = viewById.find(idJson.get<uint64_t>());
+      if (it == viewById.end()) continue;
+      std::ifstream vin(it->second);
+      DrawingView v = DrawingViewFromJson(json::parse(vin));
+      maxId = std::max(maxId, v.id);
+      dwg->GetViews().push_back(std::move(v));
+    }
+
+    std::map<uint64_t, fs::path> dimById;
+    for (const auto& entry :
+         fs::directory_iterator(fs::path(dirPath) / "dims", ec)) {
+      if (entry.path().extension() == ".json")
+        dimById[std::stoull(entry.path().filename().string())] = entry.path();
+    }
+    for (const auto& idJson : index.value("dims", json::array())) {
+      const auto it = dimById.find(idJson.get<uint64_t>());
+      if (it == dimById.end()) continue;
+      std::ifstream din(it->second);
+      DrawingDim d = DrawingDimFromJson(json::parse(din));
+      maxId = std::max(maxId, d.id);
+      dwg->GetDims().push_back(std::move(d));
+    }
+    dwg->EnsureNextIdAtLeast(maxId + 1);
+    LOG_INFO("Loaded drawing ({} views, {} dims) from {}", dwg->ViewCount(),
+             dwg->DimCount(), dirPath);
+    return dwg;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    return nullptr;
+  }
+}
+
+}  // namespace
+
+bool SaveDrawing(const DrawingDocument& dwg, const std::string& path,
+                 std::string* error) {
+  const std::string normalized = NormalizeProjectPath(path);
+  if (IsDirFormatPath(normalized)) {
+    return SaveDrawingDir(dwg, normalized, error);
+  }
+  try {
+    json j = DrawingEnvelope();
+    j["sheet"] = SheetJson(dwg.GetSheet());
+    j["views"] = json::array();
+    for (const DrawingView& v : dwg.GetViews())
+      j["views"].push_back(DrawingViewToJson(v));
+    j["dims"] = json::array();
+    for (const DrawingDim& d : dwg.GetDims())
+      j["dims"].push_back(DrawingDimToJson(d));
+    std::ofstream out(path);
+    if (!out) {
+      if (error) *error = "Cannot open file for writing: " + path;
+      return false;
+    }
+    out << j.dump(2) << "\n";
+    LOG_INFO("Saved drawing ({} views) to {}", dwg.ViewCount(), path);
+    return true;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    LOG_ERROR("Failed to save drawing to {}: {}", path, e.what());
+    return false;
+  }
+}
+
+std::unique_ptr<DrawingDocument> LoadDrawing(const std::string& path,
+                                             std::string* error) {
+  const std::string normalized = NormalizeProjectPath(path);
+  if (IsDirFormatPath(normalized)) {
+    return LoadDrawingDir(normalized, error);
+  }
+  try {
+    std::ifstream in(path);
+    if (!in) {
+      if (error) *error = "Cannot open file: " + path;
+      return nullptr;
+    }
+    json j = json::parse(in);
+    if (j.value("format", "") != kFormat) {
+      if (error) *error = "Not a designer document: " + path;
+      return nullptr;
+    }
+    if (j.value("version", 0) > kVersion) {
+      if (error) *error = "Document version is newer than this build supports";
+      return nullptr;
+    }
+    if (j.value("kind", "part") != "drawing") {
+      if (error) *error = "Not a drawing: " + path;
+      return nullptr;
+    }
+    auto dwg = std::make_unique<DrawingDocument>();
+    dwg->GetSheet() = SheetFromJson(j.value("sheet", json::object()));
+    uint64_t maxId = 0;
+    for (const json& vj : j.value("views", json::array())) {
+      DrawingView v = DrawingViewFromJson(vj);
+      maxId = std::max(maxId, v.id);
+      dwg->GetViews().push_back(std::move(v));
+    }
+    for (const json& dj : j.value("dims", json::array())) {
+      DrawingDim d = DrawingDimFromJson(dj);
+      maxId = std::max(maxId, d.id);
+      dwg->GetDims().push_back(std::move(d));
+    }
+    dwg->EnsureNextIdAtLeast(maxId + 1);
+    LOG_INFO("Loaded drawing ({} views, {} dims) from {}", dwg->ViewCount(),
+             dwg->DimCount(), path);
+    return dwg;
+  } catch (const std::exception& e) {
+    if (error) *error = e.what();
+    LOG_ERROR("Failed to load drawing from {}: {}", path, e.what());
     return nullptr;
   }
 }

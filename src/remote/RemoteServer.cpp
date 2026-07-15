@@ -242,6 +242,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   static const std::set<std::string> kNoPartDoc = {
       "ping",         "list_parts",       "add_part",
       "add_assembly", "set_active_part",  "delete_part",
+      "create_drawing", "list_drawings",
       "new_project",  "save_project",     "open_project",
       "add_occurrence", "remove_occurrence", "list_occurrences",
       "set_occurrence_transform", "set_occurrence_visible",
@@ -260,8 +261,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // UI actions (item_click, viewport_click, …) fall through to QueueUiAction,
   // not HandleSemantic, so don't guard them here — they drive the assembly tab.
   if (!doc && !kNoPartDoc.count(m) && !IsUiAction(m)) {
-    throw std::runtime_error(
-        "the active document is an assembly, not a part; switch to a part tab");
+    const char* kind = state.assembly ? "an assembly"
+                       : state.drawing ? "a drawing"
+                                       : "not a part";
+    throw std::runtime_error("the active document is " + std::string(kind) +
+                             ", not a part; switch to a part tab");
   }
 
   if (m == "ping") {
@@ -1076,6 +1080,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       ui::UndoAssembly(state);
       return {{"can_undo", !state.assemblyHistory.undo.empty()}};
     }
+    if (state.drawing) { // drawing tab: snapshot-based sheet/view/dim undo
+      ui::UndoDrawing(state);
+      return {{"can_undo", !state.drawingHistory.undo.empty()}};
+    }
     state.commands->Undo(*doc);
     return {{"can_undo", state.commands->CanUndo()}};
   }
@@ -1084,6 +1092,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       ui::RedoAssembly(state);
       return {{"can_redo", !state.assemblyHistory.redo.empty()}};
     }
+    if (state.drawing) {
+      ui::RedoDrawing(state);
+      return {{"can_redo", !state.drawingHistory.redo.empty()}};
+    }
     state.commands->Redo(*doc);
     return {{"can_redo", state.commands->CanRedo()}};
   }
@@ -1091,13 +1103,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // Multi-document project (assemblies A1/A2): the tabs and which is active.
     ui::EnsureParts(state);
     json arr = json::array();
-    for (size_t i = 0; i < state.parts.size(); i++)
+    for (size_t i = 0; i < state.parts.size(); i++) {
+      const char* type = state.parts[i].kind == ui::DocKind::Assembly ? "assembly"
+                         : state.parts[i].kind == ui::DocKind::Drawing ? "drawing"
+                                                                       : "part";
       arr.push_back({{"name", state.parts[i].name},
                      {"index", i},
                      {"id", state.parts[i].id},
-                     {"type", state.parts[i].kind == ui::DocKind::Assembly
-                                  ? "assembly"
-                                  : "part"}});
+                     {"type", type}});
+    }
     return {{"parts", arr}, {"active", state.activePart}};
   }
   if (m == "add_part") {
@@ -1111,6 +1125,53 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         p.value("name", "Assembly " + std::to_string(state.parts.size() + 1));
     const size_t idx = ui::AddAssembly(state, name);
     return {{"index", idx}, {"name", name}, {"id", state.parts[idx].id}};
+  }
+  if (m == "create_drawing") {
+    // Adds a drawing tab. Optional `sheet` seeds paper size / orientation /
+    // title-block fields so a headless caller can set them in one call.
+    const std::string name =
+        p.value("name", "Drawing " + std::to_string(state.parts.size() + 1));
+    const size_t idx = ui::AddDrawing(state, name);
+    if (p.contains("sheet") && state.drawing) {
+      const json& sj = p.at("sheet");
+      Sheet& sheet = state.drawing->GetSheet();
+      SheetSize size;
+      if (sj.contains("size") &&
+          SheetSizeFromString(sj.at("size").get<std::string>(), size))
+        sheet.size = size;
+      sheet.landscape = sj.value("landscape", sheet.landscape);
+      if (sj.contains("title_block")) {
+        const json& tb = sj.at("title_block");
+        sheet.titleBlock.project = tb.value("project", sheet.titleBlock.project);
+        sheet.titleBlock.document = tb.value("document", sheet.titleBlock.document);
+        sheet.titleBlock.author = tb.value("author", sheet.titleBlock.author);
+        sheet.titleBlock.date = tb.value("date", sheet.titleBlock.date);
+        sheet.titleBlock.notes = tb.value("notes", sheet.titleBlock.notes);
+      }
+      state.drawing->BumpVersion();
+    }
+    return {{"index", idx},
+            {"name", name},
+            {"id", state.parts[idx].id},
+            {"size", SheetSizeToString(state.drawing->GetSheet().size)}};
+  }
+  if (m == "list_drawings") {
+    ui::EnsureParts(state);
+    json arr = json::array();
+    for (size_t i = 0; i < state.parts.size(); i++) {
+      if (state.parts[i].kind != ui::DocKind::Drawing) continue;
+      // The active drawing lives in AppState; a stashed one in its slot.
+      const DrawingDocument* dwg =
+          static_cast<int>(i) == state.activePart
+              ? state.drawing.get()
+              : state.parts[i].drawing.get();
+      arr.push_back({{"name", state.parts[i].name},
+                     {"index", i},
+                     {"id", state.parts[i].id},
+                     {"views", dwg ? dwg->ViewCount() : 0},
+                     {"dims", dwg ? dwg->DimCount() : 0}});
+    }
+    return {{"drawings", arr}};
   }
   if (m == "add_occurrence") {
     // Places a part in the active assembly. `part` is the part's NAME (resolved

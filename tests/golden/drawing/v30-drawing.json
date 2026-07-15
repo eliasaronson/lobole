@@ -1,0 +1,51 @@
+{
+  "format": "designer-document",
+  "version": 30,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a3",
+    "landscape": true,
+    "title_block": {
+      "project": "Gearbox",
+      "document": "Bracket rev B",
+      "author": "E. Aronsson",
+      "date": "2026-07-14"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "Front",
+      "source": 3,
+      "orientation": "front",
+      "scale": 0.5,
+      "position": [80.0, 150.0],
+      "show_hidden": true
+    },
+    {
+      "id": 2,
+      "name": "Top",
+      "source": 3,
+      "orientation": "top",
+      "base_view": 1,
+      "scale": 0.5,
+      "position": [80.0, 90.0],
+      "show_hidden": false
+    }
+  ],
+  "dims": [
+    {
+      "id": 3,
+      "kind": "diameter",
+      "view": 1,
+      "refs": [
+        {
+          "view": 1,
+          "end": 0,
+          "sil_face": { "feature_id": 5, "element": "4/g7" }
+        }
+      ],
+      "label_offset": [12.0, -6.0]
+    }
+  ]
+}

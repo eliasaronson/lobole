@@ -2,6 +2,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/DrawingDocument.h"
 #include "core/Occurrence.h"
 #include "core/SketchFeature.h"
 #include "core/SketchInference.h"
@@ -247,9 +248,10 @@ struct RenderJob {
 // document and undo stack are owned here (they are swapped by File > New /
 // Open); everything else is a non-owning pointer to objects whose lifetime
 // main.cpp manages alongside the Vulkan context.
-// The kind of document a project tab holds (A2). A part is a feature list that
-// builds bodies; an assembly is an occurrence list that places other parts.
-enum class DocKind { Part, Assembly };
+// The kind of document a project tab holds (A2/drawings). A part is a feature
+// list that builds bodies; an assembly is an occurrence list that places other
+// parts; a drawing projects a part or assembly onto a 2D sheet.
+enum class DocKind { Part, Assembly, Drawing };
 
 // One document of a project (assemblies A1/A2). The ACTIVE tab's
 // document/assembly/commands live in AppState (so all existing single-document
@@ -263,14 +265,24 @@ struct AssemblyHistory {
   std::vector<AssemblyDocument> redo;
 };
 
+// Snapshot-based undo for a drawing tab (the AssemblyHistory pattern): a
+// drawing is a small setup object (sheet + a few views/dims), so each edit
+// pushes a full copy rather than generalizing the Document-only Command stack.
+struct DrawingHistory {
+  std::vector<DrawingDocument> undo;
+  std::vector<DrawingDocument> redo;
+};
+
 struct PartSlot {
   uint64_t id = 0;   // stable per-document id (A2): what occurrences reference
   std::string name;
   DocKind kind = DocKind::Part;
   std::unique_ptr<Document> doc;          // part: null while this tab is active
   std::unique_ptr<AssemblyDocument> assembly; // assembly: null while active
+  std::unique_ptr<DrawingDocument> drawing;   // drawing: null while active
   std::unique_ptr<CommandStack> commands; // null while active (parts only)
   AssemblyHistory history;                // assembly undo/redo (stashed here)
+  DrawingHistory drawingHistory;          // drawing undo/redo (stashed here)
   uint64_t lastSavedVersion = 0;      // per-document dirty tracking
   // Assembly tabs only (A4): referenced parts' Document::Version() at this
   // assembly's last solve, stashed while inactive. See AppState field.
@@ -285,6 +297,11 @@ struct AppState {
   std::unique_ptr<CommandStack> commands;
   std::unique_ptr<AssemblyDocument> assembly;
   AssemblyHistory assemblyHistory; // active assembly's undo/redo (A2 phase 3)
+  // Active drawing tab (workstream 13): exactly one of document/assembly/
+  // drawing is live, per the active PartSlot's kind. A drawing projects other
+  // documents onto a 2D sheet — no feature list, no occurrences.
+  std::unique_ptr<DrawingDocument> drawing;
+  DrawingHistory drawingHistory;
   // Part→assembly change propagation (A4): {partId → Document::Version()}
   // stamped at the active assembly's last solve. AssemblyPartsStale compares
   // against these on tab activation, so a part edit re-solves mates
@@ -390,6 +407,19 @@ struct AppState {
   glm::vec4 syncedSectionPlane = glm::vec4(0.0f);
   std::vector<uint32_t> sectionCapMeshes;
   bool showElementNames = false; // debug: element name of the hovered face
+
+  // 2D sheet viewport (workstream 13): a drawing tab pans/zooms an
+  // orthographic sheet, never the orbit camera (there is no 2D camera today —
+  // sketch mode aligns the perspective camera to a plane; a sheet wants none
+  // of that). `offset` is the sheet-mm point drawn at the viewport center;
+  // `scale` is pixels-per-mm (scroll-to-cursor zoom, middle-drag pan). Zeroed
+  // scale means "fit on first paint".
+  struct Sheet2DView {
+    glm::dvec2 offset{0.0};
+    double scale = 0.0;
+    bool panning = false;
+  } sheetView;
+
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
   EdgePickState edgePick;

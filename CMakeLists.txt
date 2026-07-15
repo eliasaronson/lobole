@@ -184,6 +184,7 @@ set(core_sources
     src/core/Occurrence.cpp
     src/core/AssemblySolve.cpp
     src/core/DrawingProjection.cpp
+    src/core/DrawingDocument.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/Serialization.cpp
@@ -315,6 +316,7 @@ set(app_sources
     src/ui/FeatureTreePanel.cpp
     src/ui/OccurrencePanel.cpp
     src/ui/StudyPanel.cpp
+    src/ui/DrawingPanel.cpp
     src/ui/PropertiesPanel.cpp
     src/ui/VariablesPanel.cpp
     src/ui/SketchToolbar.cpp

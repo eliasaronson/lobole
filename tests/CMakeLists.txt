@@ -46,6 +46,7 @@ add_executable(designer_tests
     test_ibl.cpp
     test_fem.cpp
     test_drawing_hlr.cpp
+    test_drawing.cpp
 )
 target_link_libraries(designer_tests PRIVATE designer_core Catch2::Catch2WithMain)
 target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -73,6 +74,13 @@ add_test(NAME headless_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/headless_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
+
+# Drawings D1 sheet spine: a drawing tab (third DocKind), sheet + title block,
+# v30 round-trip through the project container. Headless (no display).
+add_test(NAME drawing_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(drawing_smoke PROPERTIES TIMEOUT 120)
 
 # Assemblies A2 project container: parts + assembly + occurrences, round-trip.
 add_test(NAME assembly_smoke

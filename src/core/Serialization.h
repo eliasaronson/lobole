@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Document.h"
+#include "core/DrawingDocument.h"
 #include "core/Occurrence.h"
 
 #include <nlohmann/json.hpp>
@@ -56,5 +57,21 @@ ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
 // malformed input.
 nlohmann::json StudyToJson(const fem::Study& study);
 fem::Study StudyFromJson(const nlohmann::json& j);
+
+// Drawing (de)serialization (v30). Same on-disk form as a part/assembly —
+// directory (one file per view/dim) or single JSON file, dispatched on the
+// path — discriminated by `kind: "drawing"`. Save returns false / Load
+// returns nullptr and fills *error on failure.
+bool SaveDrawing(const DrawingDocument& drawing, const std::string& path,
+                 std::string* error = nullptr);
+std::unique_ptr<DrawingDocument> LoadDrawing(const std::string& path,
+                                             std::string* error = nullptr);
+
+// Single-view / single-dim (de)serialization; used for the dir-format files
+// and to echo views/dims from the RPCs. Throw on malformed input.
+nlohmann::json DrawingViewToJson(const DrawingView& view);
+DrawingView DrawingViewFromJson(const nlohmann::json& j);
+nlohmann::json DrawingDimToJson(const DrawingDim& dim);
+DrawingDim DrawingDimFromJson(const nlohmann::json& j);
 
 }  // namespace DocumentIO

@@ -87,6 +87,8 @@ void DrawPartTabs(AppState& state) {
               ("##pctx" + std::to_string(i)).c_str())) {
         const char* label = state.parts[i].kind == DocKind::Assembly
                                 ? "Delete assembly"
+                            : state.parts[i].kind == DocKind::Drawing
+                                ? "Delete drawing"
                                 : "Delete part";
         if (ImGui::MenuItem(label, nullptr, false, state.parts.size() > 1))
           DeletePart(state, i);
@@ -99,6 +101,9 @@ void DrawPartTabs(AppState& state) {
     ImGui::SameLine();
     if (ImGui::Button("+Asm##addasm"))
       AddAssembly(state, "Assembly " + std::to_string(state.parts.size() + 1));
+    ImGui::SameLine();
+    if (ImGui::Button("+Dwg##adddwg"))
+      AddDrawing(state, "Drawing " + std::to_string(state.parts.size() + 1));
   }
   ImGui::End();
 }
@@ -133,11 +138,17 @@ void DrawUI(AppState& state) {
     DrawSketchToolbar(state);
   } else if (state.assembly) {
     DrawOccurrencePanel(state); // occurrence list + editor in the Model panel
+  } else if (state.drawing) {
+    DrawSheetPanel(state); // sheet settings + title block in the Model panel
   }
   DrawPreviewDialog(state);
   DrawFileBrowser(state);
 
   HandleViewportInput(state);
+
+  // A drawing tab paints its 2D sheet into the (mesh-free) viewport.
+  if (state.drawing)
+    DrawSheet(state);
 
   // Refresh sketch overlays for this frame. Planes show when the toggle is on
   // or while picking a plane; the active sketch and rubber-band preview draw

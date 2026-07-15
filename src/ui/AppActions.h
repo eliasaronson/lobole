@@ -31,6 +31,7 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc);
 void EnsureParts(AppState& state, const std::string& firstName = "Part 1");
 size_t AddPart(AppState& state, const std::string& name);
 size_t AddAssembly(AppState& state, const std::string& name);
+size_t AddDrawing(AppState& state, const std::string& name);
 void SetActivePart(AppState& state, size_t index);
 bool DeletePart(AppState& state, size_t index);
 
@@ -45,6 +46,12 @@ uint64_t PartIdByName(const AppState& state, const std::string& name);
 void SnapshotAssembly(AppState& state);
 bool UndoAssembly(AppState& state);
 bool RedoAssembly(AppState& state);
+
+// Drawing-edit undo (snapshot-based, the assembly pattern; workstream 13).
+// Call SnapshotDrawing before mutating the active drawing's sheet/views/dims.
+void SnapshotDrawing(AppState& state);
+bool UndoDrawing(AppState& state);
+bool RedoDrawing(AppState& state);
 
 // Selects an occurrence in the active assembly (0 = clear): records it and
 // highlights all its rendered instances. Safe with null renderers.
@@ -112,6 +119,18 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked,
 // The occurrence list + properties editor for an active assembly tab (drawn
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.
 void DrawOccurrencePanel(AppState& state);
+
+// The sheet settings + title-block editor for an active drawing tab (drawn
+// where the feature tree is for a part). Defined in DrawingPanel.cpp. The view
+// list and dimension tools arrive in later drawings milestones.
+void DrawSheetPanel(AppState& state);
+// Renders the active drawing's sheet (border, title block, and later views/
+// dims) into the viewport through the 2D sheet camera. Defined in
+// DrawingPanel.cpp; called from the frame loop when a drawing tab is active.
+void DrawSheet(AppState& state);
+// 2D sheet pan/zoom (scroll-to-cursor zoom, middle-drag pan) — the drawing-tab
+// replacement for the orbit-camera viewport input. Defined in DrawingPanel.cpp.
+void HandleSheetInput(AppState& state);
 
 // ---- Simulation mode (FEM) ------------------------------------------------
 

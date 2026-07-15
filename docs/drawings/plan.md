@@ -349,10 +349,19 @@ OCC versions, the FEM rule).
    bracket part + a mid-size assembly; extract categorized edges, prove
    source-edge + silhouette-face traceability, measure timings. **No
    further drawings work until this passes.**
-1. **D1 — the sheet spine:** `DocKind::Drawing` plumbing (the §2 touch
-   list), `DrawingDocument` + Commands + serialization (v30 + golden),
-   sheet viewport (2D pan/zoom, border + title block via PrimVertex +
-   quads), tab + panel shell, `create_drawing` RPC.
+1. **D1 — the sheet spine — SHIPPED (2026-07-14):** `DocKind::Drawing`
+   plumbing (the §2 touch list), `DrawingDocument` (+ `DrawingHistory`
+   snapshot undo) + serialization (v30, `kind:"drawing"`, `drawings/<name>/`
+   dir + golden `tests/golden/drawing/v30-drawing.json`), the sheet viewport
+   (2D ortho pan/zoom in `AppState::Sheet2DView`, border + title block via the
+   ImGui background draw list — simpler than the PrimVertex path the design
+   proposed, and sufficient for D1's static chrome; D2 can migrate view
+   line-work to PrimVertex if AA/perf needs it), `+Dwg` tab + `DrawSheetPanel`,
+   `create_drawing`/`list_drawings` RPCs + MCP mirrors. Verified headless by
+   `tests/drawing_smoke.py` (create → save → reopen → list) and
+   `tests/test_drawing.cpp` (model + v30 round-trip + kind-guard). The
+   `DrawingView`/`DrawingDim`/`ProjRef` structs are already defined and
+   serialized so D2/D3 populate them without a format bump.
 2. **D2 — views:** projection core in `core/` (HLR wrapper → categorized
    sheet polylines with refs), view model (orientations, folding alignment,
    scale), visible/hidden rendering, staleness stamps + explicit update,

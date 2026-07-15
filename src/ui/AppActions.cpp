@@ -531,8 +531,10 @@ void StashActive(AppState& state) {
   PartSlot& slot = state.parts[state.activePart];
   slot.doc = std::move(state.document);
   slot.assembly = std::move(state.assembly);
+  slot.drawing = std::move(state.drawing);
   slot.commands = std::move(state.commands);
   slot.history = std::move(state.assemblyHistory);
+  slot.drawingHistory = std::move(state.drawingHistory);
   slot.lastSavedVersion = state.lastSavedVersion;
   slot.solvedPartVersions = std::move(state.solvedPartVersions);
   state.solvedPartVersions.clear(); // moved-from: guarantee empty
@@ -543,8 +545,10 @@ void ActivateSlot(AppState& state, size_t index) {
   PartSlot& slot = state.parts[index];
   state.document = std::move(slot.doc);
   state.assembly = std::move(slot.assembly);
+  state.drawing = std::move(slot.drawing);
   state.commands = std::move(slot.commands);
   state.assemblyHistory = std::move(slot.history);
+  state.drawingHistory = std::move(slot.drawingHistory);
   state.lastSavedVersion = slot.lastSavedVersion;
   state.solvedPartVersions = std::move(slot.solvedPartVersions);
   slot.solvedPartVersions.clear();
@@ -562,6 +566,9 @@ void ResetActiveTabUiState(AppState& state) {
   // Explode display state is per-tab and transient: reset on switch.
   state.activeExplodedView = 0;
   state.explodeFactor = 1.0f;
+  // The 2D sheet pan/zoom is per-tab and transient: a fresh scale=0 makes the
+  // next drawing paint fit-to-window (harmless for non-drawing tabs).
+  state.sheetView = AppState::Sheet2DView{};
   // Any tab change exits simulation mode (results themselves live on the
   // Document and survive; only the mode/display state resets).
   state.simulation = SimulationState{};
@@ -587,6 +594,7 @@ size_t AddPart(AppState& state, const std::string& name) {
   // Create and activate the new part.
   state.document = std::make_unique<Document>();
   state.assembly = nullptr;
+  state.drawing = nullptr;
   state.commands = std::make_unique<CommandStack>();
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -607,6 +615,7 @@ size_t AddAssembly(AppState& state, const std::string& name) {
   // assembly tab currently carries no CommandStack.
   state.document = nullptr;
   state.assembly = std::make_unique<AssemblyDocument>();
+  state.drawing = nullptr;
   state.commands = nullptr;
   state.lastSavedVersion = 0;
   state.solvedPartVersions.clear();
@@ -618,6 +627,51 @@ size_t AddAssembly(AppState& state, const std::string& name) {
   state.activePart = static_cast<int>(state.parts.size()) - 1;
   ResetActiveTabUiState(state);
   return state.parts.size() - 1;
+}
+
+size_t AddDrawing(AppState& state, const std::string& name) {
+  EnsureParts(state);
+  StashActive(state);
+  // Create and activate the new drawing. Undo is a snapshot stack (the
+  // assembly pattern), so a drawing tab carries no CommandStack.
+  state.document = nullptr;
+  state.assembly = nullptr;
+  state.drawing = std::make_unique<DrawingDocument>();
+  state.commands = nullptr;
+  state.lastSavedVersion = 0;
+  state.solvedPartVersions.clear();
+  PartSlot slot;
+  slot.id = state.nextPartId++;
+  slot.name = name;
+  slot.kind = DocKind::Drawing;
+  state.parts.push_back(std::move(slot));
+  state.activePart = static_cast<int>(state.parts.size()) - 1;
+  ResetActiveTabUiState(state);
+  return state.parts.size() - 1;
+}
+
+void SnapshotDrawing(AppState& state) {
+  if (!state.drawing) return;
+  state.drawingHistory.undo.push_back(*state.drawing); // full-state copy
+  state.drawingHistory.redo.clear();
+}
+
+bool UndoDrawing(AppState& state) {
+  if (!state.drawing || state.drawingHistory.undo.empty()) return false;
+  state.drawingHistory.redo.push_back(*state.drawing);
+  *state.drawing = std::move(state.drawingHistory.undo.back());
+  state.drawingHistory.undo.pop_back();
+  state.syncedDocumentVersion = UINT64_MAX;
+  return true;
+}
+
+bool RedoDrawing(AppState& state) {
+  if (!state.drawing || state.drawingHistory.redo.empty()) return false;
+  state.drawingHistory.undo.push_back(*state.drawing);
+  *state.drawing = std::move(state.drawingHistory.redo.back());
+  state.drawingHistory.redo.pop_back();
+  state.syncedDocumentVersion = UINT64_MAX;
+  return true;
 }
 
 uint64_t PartIdByName(const AppState& state, const std::string& name) {
@@ -841,6 +895,11 @@ AssemblyDocument* SlotAssembly(AppState& state, size_t i) {
   return static_cast<int>(i) == state.activePart ? state.assembly.get()
                                                  : state.parts[i].assembly.get();
 }
+// A drawing slot's document, active or stashed. Null for a part/assembly slot.
+DrawingDocument* SlotDrawing(AppState& state, size_t i) {
+  return static_cast<int>(i) == state.activePart ? state.drawing.get()
+                                                 : state.parts[i].drawing.get();
+}
 } // namespace
 
 bool SaveProject(AppState& state, const std::string& path,
@@ -862,19 +921,33 @@ bool SaveProject(AppState& state, const std::string& path,
     index["documents"] = nlohmann::json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
       const PartSlot& slot = state.parts[i];
-      const bool isAsm = slot.kind == DocKind::Assembly;
-      const std::string sub = isAsm ? "assemblies/" : "parts/";
+      const char* sub = slot.kind == DocKind::Assembly ? "assemblies/"
+                        : slot.kind == DocKind::Drawing ? "drawings/"
+                                                        : "parts/";
+      const char* type = slot.kind == DocKind::Assembly ? "assembly"
+                         : slot.kind == DocKind::Drawing ? "drawing"
+                                                         : "part";
       const fs::path docDir = dir / sub / slot.name;
       fs::create_directories(docDir);
-      const bool ok =
-          isAsm ? DocumentIO::SaveAssembly(*SlotAssembly(state, i),
-                                           docDir.string(), error)
-                : DocumentIO::Save(*SlotDoc(state, i), docDir.string(), error);
+      bool ok = false;
+      switch (slot.kind) {
+        case DocKind::Assembly:
+          ok = DocumentIO::SaveAssembly(*SlotAssembly(state, i),
+                                        docDir.string(), error);
+          break;
+        case DocKind::Drawing:
+          ok = DocumentIO::SaveDrawing(*SlotDrawing(state, i), docDir.string(),
+                                       error);
+          break;
+        case DocKind::Part:
+          ok = DocumentIO::Save(*SlotDoc(state, i), docDir.string(), error);
+          break;
+      }
       if (!ok) return false;
       index["documents"].push_back({{"id", slot.id},
                                     {"name", slot.name},
-                                    {"dir", sub + slot.name},
-                                    {"type", isAsm ? "assembly" : "part"}});
+                                    {"dir", std::string(sub) + slot.name},
+                                    {"type", type}});
     }
     std::ofstream out(dir / "project.json");
     if (!out) {
@@ -922,6 +995,7 @@ bool OpenProject(AppState& state, const std::string& path,
     // Load every document into its slot; AppState holds nothing live yet.
     state.document = nullptr;
     state.assembly = nullptr;
+    state.drawing = nullptr;
     state.commands = nullptr;
     state.parts.clear();
     uint64_t maxId = 0;
@@ -929,15 +1003,20 @@ bool OpenProject(AppState& state, const std::string& path,
       const std::string name = docs[i].at("name").get<std::string>();
       const std::string dir =
           (fs::path(path) / docs[i].at("dir").get<std::string>()).string();
-      const bool isAsm = docs[i].value("type", std::string("part")) == "assembly";
+      const std::string type = docs[i].value("type", std::string("part"));
       PartSlot slot;
       slot.id = docs[i].value("id", static_cast<uint64_t>(i + 1)); // v1: 1..n
       slot.name = name;
-      slot.kind = isAsm ? DocKind::Assembly : DocKind::Part;
-      if (isAsm) {
+      if (type == "assembly") {
+        slot.kind = DocKind::Assembly;
         slot.assembly = DocumentIO::LoadAssembly(dir, error);
         if (!slot.assembly) return false;
+      } else if (type == "drawing") {
+        slot.kind = DocKind::Drawing;
+        slot.drawing = DocumentIO::LoadDrawing(dir, error);
+        if (!slot.drawing) return false;
       } else {
+        slot.kind = DocKind::Part;
         slot.doc = DocumentIO::Load(dir, error);
         if (!slot.doc) return false;
         slot.commands = std::make_unique<CommandStack>();
@@ -2098,6 +2177,8 @@ void SyncDocumentRenderers(AppState& state) {
   uint64_t activeVersion;
   if (state.assembly)
     activeVersion = state.assembly->Version();
+  else if (state.drawing)
+    activeVersion = state.drawing->Version();
   else if (state.document)
     activeVersion = state.document->Version();
   else
@@ -2128,6 +2209,11 @@ void SyncDocumentRenderers(AppState& state) {
   for (uint32_t capId : state.sectionCapMeshes)
     state.meshRenderer->RemoveMesh(capId);
   state.sectionCapMeshes.clear();
+
+  // A drawing tab has no 3D geometry — the meshes were just cleared and the
+  // sheet renders through the 2D viewport overlay (DrawSheet). Nothing more.
+  if (state.drawing)
+    return;
 
   if (state.assembly) {
     SyncAssemblyRenderers(state);

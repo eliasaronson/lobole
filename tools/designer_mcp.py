@@ -933,6 +933,31 @@ def set_result_display(study: int | None = None, field: str = "von_mises",
 
 
 # ---------------------------------------------------------------------------
+# Drawings (workstream 13): a drawing tab holds a 2D sheet with projected views
+# of a part or assembly. list_parts reports drawing tabs with type "drawing".
+# ---------------------------------------------------------------------------
+
+@mcp.tool(description="Add a new DRAWING tab (a 2D sheet) and switch to it. "
+          "Optional sheet = {size: 'a4'|'a3'|'a2'|'a1'|'a0'|'letter', "
+          "landscape: bool, title_block: {project, document, author, date}}. "
+          "Views and dimensions are added in later tools. Returns its index, "
+          "stable id, and sheet size.")
+def create_drawing(name: str = "", sheet: dict | None = None) -> dict:
+    params = {}
+    if name:
+        params["name"] = name
+    if sheet is not None:
+        params["sheet"] = sheet
+    return _call("create_drawing", **params)
+
+
+@mcp.tool(description="List the project's drawing tabs with each one's stable "
+          "id, index, and view/dimension counts.")
+def list_drawings() -> dict:
+    return _call("list_drawings")
+
+
+# ---------------------------------------------------------------------------
 # Escape hatch: raw UI events (for driving/testing the Designer GUI itself)
 # ---------------------------------------------------------------------------
 
