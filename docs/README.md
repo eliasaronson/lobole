@@ -44,7 +44,7 @@ top-level vision + workstream index and holds the recommended sequencing.
   the roadmap's "simulation/FEA out of scope" line).
 - **[drawings/](drawings/plan.md)** — 2D drafting: a third document kind with
   HLR-projected views, driven dimensions via toponaming refs, title block,
-  SVG/PDF export. **Design for sign-off** (the roadmap's planned
-  post-assemblies revisit of "2D drawings").
+  SVG/PDF export. **Shipped** (D0–D3; D4 = PDF + GUI polish). See
+  [guide.md](drawings/guide.md) for the workflow; `plan.md` is the design.
 
 Project-level files (`README.md`, `THIRD_PARTY.md`) stay at the repo root.

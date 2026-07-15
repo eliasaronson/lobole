@@ -432,9 +432,28 @@ void DrawViewsSection(AppState& state) {
   ImGui::TextUnformatted("Views");
   ImGui::Separator();
 
+  // Count views whose source changed since their last projection, or that
+  // failed to project — the "needs update" signal.
+  int stale = 0, errored = 0;
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    const auto it = state.drawingRenders.find(view.id);
+    if (it == state.drawingRenders.end() ||
+        DrawingSourceVersion(state, view.sourceDocId) != it->second.solvedSourceVersion)
+      ++stale;
+    if (it != state.drawingRenders.end() && !it->second.error.empty()) ++errored;
+  }
+  const bool needsUpdate = stale > 0;
+  if (needsUpdate)  // amber Update button when anything is out of date
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.42f, 0.12f, 1.0f));
   if (ImGui::Button("Update views")) UpdateDrawingRenders(state);
+  if (needsUpdate) ImGui::PopStyleColor();
   ImGui::SameLine();
-  ImGui::TextDisabled("(re-projects; explicit)");
+  if (needsUpdate)
+    ImGui::TextColored(ImVec4(0.85f, 0.62f, 0.25f, 1.0f), "%d stale", stale);
+  else if (errored)
+    ImGui::TextColored(ImVec4(0.82f, 0.31f, 0.27f, 1.0f), "%d error", errored);
+  else
+    ImGui::TextDisabled("up to date");
 
   // Add a view: pick a source part, orientation, scale.
   static int srcIdx = 0, orientIdx = 0;
