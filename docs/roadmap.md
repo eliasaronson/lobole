@@ -33,36 +33,40 @@ history), variables (an expression pass during regeneration), scripting (the com
 *is* the API), git (text format), LLM interface (same command layer + headless mode), and
 testability (geometry ops unit-testable without a GUI).
 
-## Current state (July 2026)
+## Current state (2026-07-14)
 
-**Working:** the full Onshape loop — sketch → extrude → sketch-on-a-face → cut. The 2D
-sketcher is feature-complete (lines/rects/arcs/ellipses; the full constraint set +
-dimensions + construction geometry + conflict management; mirror/fillet/pattern/offset;
-select-default/Escape/box-select + Onshape keymap). Parametric core: `Document` feature
-list with deterministic regeneration, stable feature + sketch-entity ids, undo/redo,
-JSON project serialization (v12). PlaneGCS constraint solving with the FreeCAD drag
-recipe. **Variables & expressions** (V1–V3): a document parameter table with a swappable
-expression engine, expression-driven dimensions/extrude/datum params, a Variables panel,
-and `set/rename/delete/list_variables` RPCs. **Datum planes** (M1): offset/angled/
-through-points reference geometry, with sketches that track a datum by id so upstream
-edits move dependents. **Revolve** (M2): profile revolved about an axis (global / sketch
-line / datum axis) through an expression-driven angle, with a symmetric option; plus
-standalone datum axes. **Booleans** (M4) over bodies by producing-feature id, and
-**mirror/linear/circular patterns** (M5) that fuse-and-split instances into connected
-solids with expression-driven counts. `--remote <port>` JSON-RPC: semantic commands + human-parity UI
-actions + screenshots (`tools/designer_remote.py`). STEP import, face picking with real
-B-Rep face mapping, docking dark-theme workbench with icon toolbar and preview→accept.
-Rendering: MSAA + ACES tonemap + IBL/PBR from a studio HDR, per-instance
-transparency (A4 ghosts), and an offline path-traced Render button
-(`render_still` RPC, shadow-catcher ground plane).
+The app is a working parametric CAD with simulation and drawings; twelve of the
+thirteen workstreams are v1-complete (see the table below). What that means concretely:
 
-**Thin or missing:** the face/edge-referencing solid features (fillets/chamfers,
-up-to-face extrude, shell) — all gated on persistent face/edge references (**toponaming**) —
-face/edge sketches still bake at creation, upstream edits don't move those dependents;
-checkpoints + git; MCP wrapper, Python API, headless mode; measurement + mass properties;
-**no export** (kernel STEP/STL writers exist with no UI/RPC callers — see
-[interchange/plan.md](interchange/plan.md)); no assemblies;
-`Document::Regenerate()` recomputes every feature per edit; no CI.
+**Modeling & core:** the full Onshape loop (sketch → extrude → sketch-on-a-face → cut)
+plus M1–M8 — datum planes/axes, revolve, loft, sweep, booleans, mirror/linear/circular
+patterns, **toponaming** (persistent face/edge references), fillet/chamfer, shell, hole
+wizard, and draft. The 2D sketcher is feature-complete. Parametric core: `Document`
+feature list with deterministic regeneration + a per-feature output-shape cache
+(incremental regen), stable ids, undo/redo, PlaneGCS solving. **Variables & expressions**
+everywhere, including unit-suffixed literals. Serialization is at **format v30** (a
+diffable directory format, golden-corpus migrations).
+
+**Differentiators:** **checkpoints + rollback** and **git-backed history** (F4/F5);
+the **scripting stack** — JSON-RPC remote, an **MCP server**, **headless mode**, a Python
+client, and record/replay session tests; **CI** runs `ctest -LE gui` on every push.
+
+**Beyond the core:** **assemblies** A1–A4 (occurrences + instancing, all six mate types,
+drag gizmo + drag-within-mate, part→assembly propagation, BOM, in-context edit, exploded
+views); **inspection** (measure, mass properties, section views, interference);
+**interchange** (STEP/STL/BREP + glTF/OBJ/PLY export, STEP import) via menu/RPC/MCP;
+**FEM** single-part linear static (Netgen meshing, in-house Eigen solver, colormapped
+results); **drawings** (HLR views of parts/assemblies, driven dimensions, SVG + PDF).
+**Rendering:** MSAA + ACES + IBL/PBR, per-instance transparency, an offline path-traced
+Render button.
+
+**Thin or missing:** **configurations** (parametric part/assembly families) — the next
+workstream; assembly-level features; **UI/UX polish** (unified selection, command
+palette, a consistent feature-dialog pattern); modeling's thread/rib; rendering's
+SSAO + soft shadows + real-time hybrid RT (gated on the `main.cpp` render-path cleanup);
+semantic (three-way) merge for the git format. The three large logic files
+(`RemoteServer`/`AppActions`/`Serialization`) want a domain split — see the refactoring
+policy below.
 
 ## Workstreams
 
@@ -82,13 +86,19 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1–A4 v1 shipped** — multi-part, occurrences (instanced), all six mate types (connector frames, direct-frame-alignment solve, mate tool + list), interactive manipulation (drag gizmo, drag-within-mate, hole-center snap), part→assembly propagation, BOM, in-context editing (ghosted assembly), exploded views (v27). Remain: assembly-level features + configurations (own designs), cross-part refs in-context, snap-marker UX polish |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | **v1 complete** — X1 STEP/STL/BREP + X2 glTF/OBJ/PLY (parts + assemblies, PBR materials, instanced), all via menu/RPC/MCP. X3 (IGES/mesh-import/DXF) + 3MF demand-driven |
 | 12. Simulation: FEM | [simulation/plan.md](simulation/plan.md) | **v1 shipped (FEM0–FEM4)** — single-part linear static: Netgen tet10 meshing, in-house Eigen solver (validated vs analytic bar/cantilever/pressure), face BCs via toponaming, von Mises + displacement with factor of safety; Simulation-mode GUI (Studies panel, load face-picking, Turbo colormap overlay with deform warp + marker + legend); MCP mirrors + `fem_smoke`. Remain: modal, assembly/contact, thermal, gravity, VTU export (all deferred by design) |
-| 13. Drawings: 2D drafting | [drawings/plan.md](drawings/plan.md) | **Design for sign-off** — v1 = drawing doc kind, HLR-projected views (parts + assemblies), driven dimensions, title block, SVG/PDF export; D0 HLR spike gates the workstream |
+| 13. Drawings: 2D drafting | [drawings/plan.md](drawings/plan.md) + [guide.md](drawings/guide.md) | **v1 complete (D0–D4)** — drawing doc kind (format v30), HLR-projected views of parts + assemblies with projected-child folding, six driven dimensions via toponaming refs, title block, SVG + PDF export; GUI picking + headless/MCP. Deferred to own designs: section/detail views, on-sheet BOM/balloons, exploded drawing views, multi-sheet, GD&T, DXF (→ interchange) |
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
 differentiators — the reason this project exists rather than being a worse
 SolidWorks. 7–9 make it pleasant; 10 makes it complete.
 
 ## Sequencing
+
+> **Largely executed** (this was the plan as of early 2026; kept as the
+> rationale record). Variables, modeling M1–M8, toponaming, scripting,
+> versioning, inspection, interchange, rendering's showcase arc, assemblies
+> A1–A4, FEM, and drawings have all shipped in roughly this order. What
+> remains is configurations (next), UI/UX polish, and the rendering tail.
 
 The recommended interleaving, with the rationale:
 
@@ -132,14 +142,15 @@ The large files fall into two kinds, and the "add tests before you refactor" rul
 points opposite ways for each:
 
 - **Testable-logic files — refactor freely, guarded by the existing smokes.**
-  `RemoteServer.cpp` (~1580 LOC: 83 RPC handlers in one `HandleSemantic` if-chain),
-  `AppActions.cpp` (~2680 LOC: ~79 grab-bag free functions), `Serialization.cpp`
-  (~1640, grows every format bump). These are pure logic that the 13 Python smokes
+  `RemoteServer.cpp` (~2120 LOC: 108 RPC handlers in one `HandleSemantic` if-chain),
+  `AppActions.cpp` (~3170 LOC: grab-bag free functions), `Serialization.cpp`
+  (~2100, grows every format bump). These are pure logic that the 16 Python smokes
   already characterize end-to-end, so splitting them is *verifiable today* without new
-  tests. Both next workstreams (Drawings, FEM) add RPC handlers + a new document kind +
-  new AppActions helpers — i.e. they pile straight into these three. **Do the split as
-  the first step of whichever lands next, not as a standalone pass:** the best time to
-  refactor a file is the moment before you extend it.
+  tests. FEM **and** Drawings both shipped since this note was written and piled
+  straight into all three (a new document kind, ~a dozen RPCs, new AppActions helpers
+  each) **without** the split — so the debt is now acute, not hypothetical. **Do the
+  split as the first step of the next workstream (Configurations), not a standalone
+  pass:** the best time to refactor a file is the moment before you extend it.
   - `RemoteServer` → domain modules (part / assembly / inspection / export / project /
     view). An 83-branch dispatch is exactly what a new workstream's RPCs make worse.
   - `AppActions` → carve out the assembly + section + measure + gizmo code into their
@@ -173,8 +184,9 @@ points opposite ways for each:
 
 ### Test coverage (state 2026-07-14)
 
-334 tests pass (320 C++ Catch2 cases + 13 Python integration smokes + `gui_smoke`'s 39
-ImGui-test-engine cases); CI runs the headless subset every push. **Strong:** the
+374 tests pass under `ctest -LE gui` (360 C++ Catch2 cases + 14 headless Python
+integration smokes), plus `gui_smoke`'s ImGui-test-engine cases and the display-gated
+smokes (remote/mcp); CI runs the headless subset every push. **Strong:** the
 headless core — geometry/features, format+golden-corpus migrations, expression engine,
 and the full RPC surface via smokes (every feature since assemblies shipped with a test).
 **By-construction untested:** renderers + `main.cpp` (need a GPU — verified via gui_smoke

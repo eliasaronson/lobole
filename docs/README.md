@@ -40,8 +40,8 @@ top-level vision + workstream index and holds the recommended sequencing.
   instancing, toponaming) and the memory/performance strategy.
 - **[simulation/](simulation/plan.md)** — FEM structural analysis: Netgen tet
   meshing, in-house linear-static solver on Eigen, face BCs via toponaming
-  refs, colormapped results. **Design for sign-off** (consciously reverses
-  the roadmap's "simulation/FEA out of scope" line).
+  refs, colormapped results. **Shipped** (FEM0–FEM4; single-part linear static).
+  Modal / assembly-contact / thermal deferred.
 - **[drawings/](drawings/plan.md)** — 2D drafting: a third document kind with
   HLR-projected views, driven dimensions via toponaming refs, title block,
   SVG/PDF export. **Shipped** (D0–D3; D4 = PDF + GUI polish). See
