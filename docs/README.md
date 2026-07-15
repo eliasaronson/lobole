@@ -44,7 +44,12 @@ top-level vision + workstream index and holds the recommended sequencing.
   Modal / assembly-contact / thermal deferred.
 - **[drawings/](drawings/plan.md)** — 2D drafting: a third document kind with
   HLR-projected views, driven dimensions via toponaming refs, title block,
-  SVG/PDF export. **Shipped** (D0–D3; D4 = PDF + GUI polish). See
-  [guide.md](drawings/guide.md) for the workflow; `plan.md` is the design.
+  SVG/PDF export. **Shipped** (D0–D4). See [guide.md](drawings/guide.md) for
+  the workflow; `plan.md` is the design.
+- **[configurations/](configurations/plan.md)** — parametric part/assembly
+  families: a doc-level named object (the FEM Study pattern) that overrides
+  parameters + suppresses features, applied by regenerating against an override
+  symbol table. **Design for sign-off** (the roadmap's next workstream; the
+  deferred-from-A4 design).
 
 Project-level files (`README.md`, `THIRD_PARTY.md`) stay at the repo root.
