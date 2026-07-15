@@ -362,18 +362,30 @@ OCC versions, the FEM rule).
    `tests/test_drawing.cpp` (model + v30 round-trip + kind-guard). The
    `DrawingView`/`DrawingDim`/`ProjRef` structs are already defined and
    serialized so D2/D3 populate them without a format bump.
-2. **D2 — views:** projection core in `core/` (HLR wrapper → categorized
-   sheet polylines with refs), view model (orientations, folding alignment,
-   scale), visible/hidden rendering, staleness stamps + explicit update,
-   view RPCs. **The LLM loop closes here** with D4's exporter stub for SVG
-   — a headless dimensionless drawing.
+2. **D2 — views — SHIPPED (2026-07-14):** the projection core
+   (`core/DrawingRender.h` `SheetView`/`SheetCurve` + the `UpdateDrawingRenders`
+   driver in AppActions) resolves a view's source **part or assembly** to
+   bodies, runs the D0 HLR, places curves at the view scale + position, and
+   joins index-space refs to `ElementRef`s (occurrence-qualified for
+   assemblies). All seven orientations; **projected-child folding** locks a
+   child to its base along the shared sheet axis (front↔top share X, front↔
+   right share Y; iso free). Visible-solid / hidden-dashed sheet rendering +
+   per-view frame/label + stale badge. **Staleness is real**: the render cache
+   stashes per slot, so a view reads stale after its source changes and only
+   an explicit `update_drawing` clears it (the FEM rule); first view of a tab /
+   opened drawing auto-projects. RPCs `add_drawing_view` / `remove_drawing_view`
+   / `update_drawing` / `list_drawing_views` + MCP. **The LLM loop closes
+   here**: `core/DrawingExport::SaveSVG` + `export_drawing` write a real vector
+   SVG (border, title block, visible/hidden edges), headless-tested by parsing
+   (`drawing_smoke.py`, `drawing_assembly_smoke.py`, a `test_drawing.cpp` unit
+   test). The SVG landed in D2 (not deferred to D4) to close the loop.
 3. **D3 — dimensions (the long pole):** projected-geometry picking, the six
    kinds, `ProjRef` resolution + dangling behavior, dimension rendering
    (ported `DrawDimensions` + sheet-anchored text), label drag,
    `core::FormatLength`, dim RPCs.
-4. **D4 — output + polish:** SVG writer (may land early in D2 for the smoke
-   test), PDF writer, export dialog/menu/RPC/MCP, `drawing_smoke.py`,
-   stale/error UX, docs.
+4. **D4 — output + polish:** SVG writer **shipped in D2**; remaining: PDF
+   writer, the GUI Export dialog/menu entry (RPC/MCP already done),
+   stale/error UX polish, docs. (D3 lands before D4.)
 
 Order rationale: D0 kills the only unknown for a day's work; D1 before D2
 because views need somewhere to live and render; SVG export deliberately
