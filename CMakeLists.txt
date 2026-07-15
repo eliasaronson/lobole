@@ -320,6 +320,7 @@ set(app_sources
     src/ui/OccurrencePanel.cpp
     src/ui/StudyPanel.cpp
     src/ui/DrawingPanel.cpp
+    src/ui/ConfigurationsPanel.cpp
     src/ui/PropertiesPanel.cpp
     src/ui/VariablesPanel.cpp
     src/ui/SketchToolbar.cpp

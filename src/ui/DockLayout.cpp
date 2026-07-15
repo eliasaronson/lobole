@@ -79,6 +79,7 @@ void BeginDockspace(AppState& state) {
                                                 nullptr, &center);
     ImGui::DockBuilderDockWindow("Model", left);
     ImGui::DockBuilderDockWindow("Variables", left); // tabbed behind Model
+    ImGui::DockBuilderDockWindow("Configurations", left); // tabbed behind Model
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderDockWindow("Sketch", right); // sketch options, tabbed
     ImGui::DockBuilderFinish(dockspaceId);

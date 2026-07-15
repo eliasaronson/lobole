@@ -14,6 +14,7 @@
 #include "ui/PropertiesPanel.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
+#include "ui/ConfigurationsPanel.h"
 #include "ui/VariablesPanel.h"
 #include "ui/ViewportInput.h"
 
@@ -134,6 +135,7 @@ void DrawUI(AppState& state) {
       DrawFeatureTreePanel(state);
     }
     DrawVariablesPanel(state);
+    DrawConfigurationsPanel(state);
     DrawPropertiesPanel(state);
     DrawSketchToolbar(state);
   } else if (state.assembly) {
