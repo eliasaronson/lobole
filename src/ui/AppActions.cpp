@@ -2191,42 +2191,63 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
 
 namespace {
 
-// One body of a view's source document, ready to project: its shape + world
-// placement, plus the featureId and ElementMap needed to name projected edges/
-// faces back to stable toponaming refs.
+// One body of a view's source document, ready to project. `input.sourceId` is
+// a slot index into the gathered list (how ProjectView tags each curve so the
+// join finds this entry); `refId` is the SEMANTIC source a dimension attaches
+// to — a body's createdBy for a part, or the occurrence id for an assembly.
 struct SourceBody {
   drawing::InputBody input;
   uint64_t featureId = 0;    // the body's createdBy (owner of its element names)
+  uint64_t refId = 0;        // semantic source id -> SheetCurve.sourceId
   const ElementMap* map = nullptr;
 };
 
-// Gathers the projectable bodies of a drawing view's source document. D2a
-// resolves part sources (identity placement); assembly sources arrive in D2b.
-// Returns false and sets *error when the source can't be resolved.
+// Appends one part document's bodies at the given world placement.
+void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
+                  std::vector<SourceBody>& out) {
+  for (const Body& body : doc.GetBodies()) {
+    if (body.shape.GetShape().IsNull()) continue;
+    SourceBody sb;
+    sb.input.shape = body.shape.GetShape();
+    sb.input.transform = xf;
+    sb.input.sourceId = out.size();  // slot index: picks this entry on join
+    sb.featureId = body.createdBy;
+    sb.refId = occId ? occId : body.createdBy;  // occurrence, else body owner
+    sb.map = &body.elementMap;
+    out.push_back(std::move(sb));
+  }
+}
+
+// Gathers the projectable bodies of a drawing view's source document — a part
+// (identity placement) or an assembly (each visible occurrence's bodies at its
+// solved transform, tagged with the occurrence id). Returns false and sets
+// *error when the source can't be resolved.
 bool GatherSourceBodies(AppState& state, const DrawingView& view,
                         std::vector<SourceBody>& out, uint64_t* sourceVersion,
                         std::string* error) {
   for (size_t i = 0; i < state.parts.size(); i++) {
     if (state.parts[i].id != view.sourceDocId) continue;
-    if (state.parts[i].kind != DocKind::Part) {
-      *error = "assembly drawing views are not supported yet";  // D2b
-      return false;
+    if (state.parts[i].kind == DocKind::Part) {
+      const Document* doc = SlotDoc(state, i);
+      if (!doc) { *error = "source document is empty"; return false; }
+      *sourceVersion = doc->Version();
+      AppendBodies(*doc, glm::dmat4(1.0), 0, out);
+      return true;
     }
-    const Document* doc = SlotDoc(state, i);
-    if (!doc) { *error = "source document is empty"; return false; }
-    *sourceVersion = doc->Version();
-    const auto& bodies = doc->GetBodies();
-    for (size_t bi = 0; bi < bodies.size(); bi++) {
-      if (bodies[bi].shape.GetShape().IsNull()) continue;
-      SourceBody sb;
-      sb.input.shape = bodies[bi].shape.GetShape();
-      sb.input.transform = glm::dmat4(1.0);
-      sb.input.sourceId = bi;  // body index: picks the ElementMap on join
-      sb.featureId = bodies[bi].createdBy;
-      sb.map = &bodies[bi].elementMap;
-      out.push_back(std::move(sb));
+    if (state.parts[i].kind == DocKind::Assembly) {
+      const AssemblyDocument* asmDoc = SlotAssembly(state, i);
+      if (!asmDoc) { *error = "source assembly is empty"; return false; }
+      *sourceVersion = asmDoc->Version();
+      for (const Occurrence& occ : asmDoc->GetOccurrences()) {
+        if (!occ.visible) continue;
+        const Document* part = PartDocById(state, occ.partId);
+        if (!part) continue;  // dangling part reference — skip
+        AppendBodies(*part, glm::dmat4(OccurrenceMatrix(occ)), occ.id, out);
+      }
+      return true;
     }
-    return true;
+    *error = "a drawing cannot be a source for another drawing";
+    return false;
   }
   *error = "source document not found";
   return false;
@@ -2273,21 +2294,41 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) 
   };
 
   const double s = view.scale != 0.0 ? view.scale : 1.0;
+
+  // Folding alignment: a projected child is kept aligned to its base along the
+  // shared sheet axis (design §2). Two orthographic views share sheet-X when
+  // they map the same world direction to it (equal `right` vectors), and
+  // sheet-Y when their `up` vectors match; the shared coordinate locks to the
+  // base's, leaving the fold axis free. Iso shares neither -> placed freely.
+  glm::dvec2 effectivePos = view.position;
+  if (view.baseViewId) {
+    if (const DrawingView* base = state.drawing->FindView(view.baseViewId)) {
+      glm::dvec3 vd, up, bvd, bup;
+      OrientationAxes(view.orientation, vd, up);
+      OrientationAxes(base->orientation, bvd, bup);
+      const glm::dvec3 right = glm::normalize(glm::cross(vd, up));
+      const glm::dvec3 bright = glm::normalize(glm::cross(bvd, bup));
+      constexpr double eps = 1e-6;
+      if (glm::length(right - bright) < eps) effectivePos.x = base->position.x;
+      if (glm::length(up - bup) < eps) effectivePos.y = base->position.y;
+    }
+  }
+
   glm::dvec2 lo(1e30), hi(-1e30);
   for (const drawing::ProjectedCurve& pc : projected->curves) {
     drawing::SheetCurve sc;
     sc.kind = pc.kind;
     sc.visible = pc.visible;
     sc.curveType = pc.curveType;
-    sc.sourceId = pc.source.sourceId;
     sc.points.reserve(pc.points.size());
     for (const glm::dvec2& p : pc.points) {
-      const glm::dvec2 sheet = view.position + s * p;
+      const glm::dvec2 sheet = effectivePos + s * p;
       sc.points.push_back(sheet);
       lo = glm::min(lo, sheet);
       hi = glm::max(hi, sheet);
     }
     if (const SourceBody* sb = bodyOf(pc.source.sourceId)) {
+      sc.sourceId = sb->refId;  // occurrence id (assembly) or body owner (part)
       if (pc.source.edgeIndex >= 0 && sb->map) {
         if (const std::string* n = sb->map->EdgeNameOf(pc.source.edgeIndex))
           sc.edge = ElementRef{sb->featureId, *n};

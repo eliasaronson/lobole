@@ -270,9 +270,10 @@ void DrawViewsSection(AppState& state) {
   static float addScale = 1.0f;
   std::vector<const PartSlot*> partSlots;
   for (const PartSlot& s : state.parts)
-    if (s.kind == DocKind::Part) partSlots.push_back(&s);
+    if (s.kind == DocKind::Part || s.kind == DocKind::Assembly)
+      partSlots.push_back(&s);
   if (partSlots.empty()) {
-    ImGui::TextDisabled("Add a part to project from.");
+    ImGui::TextDisabled("Add a part or assembly to project from.");
   } else {
     if (srcIdx >= static_cast<int>(partSlots.size())) srcIdx = 0;
     if (ImGui::BeginCombo("Source", partSlots[srcIdx]->name.c_str())) {

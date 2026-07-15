@@ -75,12 +75,18 @@ add_test(NAME headless_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
 
-# Drawings D1 sheet spine: a drawing tab (third DocKind), sheet + title block,
-# v30 round-trip through the project container. Headless (no display).
+# Drawings D1/D2: a drawing tab (third DocKind), sheet + title block, projected
+# part views (HLR), v30 round-trip, and SVG export. Headless (no display).
 add_test(NAME drawing_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(drawing_smoke PROPERTIES TIMEOUT 120)
+
+# Drawings D2b: assembly-sourced views + projected-child folding. Headless.
+add_test(NAME drawing_assembly_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_assembly_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(drawing_assembly_smoke PROPERTIES TIMEOUT 120)
 
 # Assemblies A2 project container: parts + assembly + occurrences, round-trip.
 add_test(NAME assembly_smoke

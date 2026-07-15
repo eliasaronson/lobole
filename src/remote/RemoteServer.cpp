@@ -1179,12 +1179,19 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (m == "add_drawing_view") {
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
-    // `source` = the source document's NAME (a part; assemblies in D2b),
-    // resolved to its stable id.
+    // `source` = the source document's NAME (a part or an assembly), resolved
+    // to its stable id.
     const std::string sourceName = p.at("source").get<std::string>();
-    const uint64_t sourceId = ui::PartIdByName(state, sourceName);
+    uint64_t sourceId = 0;
+    for (const auto& slot : state.parts) {
+      if (slot.name == sourceName && (slot.kind == ui::DocKind::Part ||
+                                      slot.kind == ui::DocKind::Assembly)) {
+        sourceId = slot.id;
+        break;
+      }
+    }
     if (sourceId == 0)
-      throw std::runtime_error("no part named '" + sourceName + "'");
+      throw std::runtime_error("no part or assembly named '" + sourceName + "'");
     DrawingView v;
     v.sourceDocId = sourceId;
     if (p.contains("orientation") &&
