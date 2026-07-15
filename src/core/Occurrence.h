@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Configuration.h"
 #include "core/ElementMap.h"
 
 #include <glm/glm.hpp>
@@ -175,6 +176,34 @@ public:
     if (next > m_nextId) m_nextId = next;
   }
 
+  // Configurations (workstream 13, C4): named assembly variants. Reuses the
+  // Configuration type — for an assembly, `suppressedFeatures` holds suppressed
+  // OCCURRENCE ids (a suppressed occurrence is hidden from render / solve /
+  // BOM). Parameter overrides are unused (an assembly has no parameters).
+  // Per-occurrence part-config selection is a planned follow-on. The active
+  // configuration (0 = base) is persisted.
+  const std::vector<Configuration>& GetConfigurations() const {
+    return m_configurations;
+  }
+  std::vector<Configuration>& GetConfigurations() { return m_configurations; }
+  const Configuration* FindConfiguration(uint64_t id) const;
+  Configuration* FindConfiguration(uint64_t id);
+  Configuration& AddConfiguration(const std::string& name = "");
+  bool RemoveConfiguration(uint64_t id);
+  void RestoreConfiguration(Configuration cfg);  // load/undo, keeps id
+
+  uint64_t ActiveConfiguration() const { return m_activeConfiguration; }
+  // Sets the active id (0 = base) and bumps the version so renderers resync;
+  // returns false for an unknown non-zero id.
+  bool SetActiveConfiguration(uint64_t id);
+  void SetActiveConfigurationRaw(uint64_t id) { m_activeConfiguration = id; }
+  const Configuration* ActiveConfig() const;
+
+  // Whether an occurrence is hidden by the active configuration (its base
+  // `visible` flag is separate; this is the config layer). Render/solve/BOM
+  // skip an occurrence that is suppressed OR not visible.
+  bool OccurrenceSuppressed(uint64_t occurrenceId) const;
+
   // Monotonic change counter — bumped on every add/remove/mutate — so the
   // renderer can skip resyncing an unchanged assembly (mirrors Document).
   uint64_t Version() const { return m_version; }
@@ -184,6 +213,8 @@ private:
   std::vector<Occurrence> m_occurrences;
   std::vector<Mate> m_mates;
   std::vector<ExplodedView> m_explodedViews;
+  std::vector<Configuration> m_configurations;
+  uint64_t m_activeConfiguration = 0;
   uint64_t m_nextId = 1; // stable ids grow from 1, never reused; one id
                          // space shared by occurrences, mates, and views
   uint64_t m_version = 1;

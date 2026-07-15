@@ -5,6 +5,7 @@
 #include <string>
 
 class Document;
+class AssemblyDocument;
 namespace ui {
 struct AppState;
 }
@@ -22,5 +23,13 @@ namespace remote {
 bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
                             const std::string& method,
                             const nlohmann::json& params, nlohmann::json& out);
+
+// The same config RPCs on an assembly tab: for an assembly a configuration's
+// override set is suppressed OCCURRENCE ids (`suppressed_occurrences`). Undo is
+// the assembly snapshot history, not the command stack.
+bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asmDoc,
+                                    const std::string& method,
+                                    const nlohmann::json& params,
+                                    nlohmann::json& out);
 
 }  // namespace remote

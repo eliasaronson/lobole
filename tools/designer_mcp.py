@@ -429,13 +429,13 @@ def delete_variable(name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Configurations (parametric variants of the active part)
+# Configurations (parametric variants of the active part OR assembly)
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Add a configuration to the active part — a named variant "
-          "that overrides variable values and/or suppresses features, applied "
-          "by regenerating against it. Empty until you set_configuration it. "
-          "Returns its id.")
+@mcp.tool(description="Add a configuration to the active part or assembly — a "
+          "named variant. On a part it overrides variables / suppresses "
+          "features; on an assembly it suppresses occurrences. Empty until you "
+          "set_configuration it. Returns its id.")
 def add_configuration(name: str = "") -> dict:
     return _call("add_configuration", **({"name": name} if name else {}))
 
@@ -453,15 +453,17 @@ def list_configurations() -> dict:
     return _call("list_configurations")
 
 
-@mcp.tool(description="Edit a configuration (by id). parameter_overrides = a "
-          "list of {name, expression} that REPLACES the config's overrides "
-          "(each is a variable name + an override expression, e.g. "
-          "{'name':'depth','expression':'12'}). suppressed_features = a list of "
-          "feature ids the config suppresses (replaces). name renames it. Read "
-          "list_configurations, adjust, send back. One undoable edit.")
+@mcp.tool(description="Edit a configuration (by id). On a PART: "
+          "parameter_overrides = a list of {name, expression} replacing the "
+          "config's variable overrides (e.g. {'name':'depth','expression':"
+          "'12'}); suppressed_features = feature ids to suppress. On an "
+          "ASSEMBLY: suppressed_occurrences = occurrence ids to hide. name "
+          "renames. Each list replaces. Read list_configurations, adjust, send "
+          "back. One undoable edit.")
 def set_configuration(id: int, name: str = "",
                       parameter_overrides: list | None = None,
-                      suppressed_features: list | None = None) -> dict:
+                      suppressed_features: list | None = None,
+                      suppressed_occurrences: list | None = None) -> dict:
     params = {"id": id}
     if name:
         params["name"] = name
@@ -469,6 +471,8 @@ def set_configuration(id: int, name: str = "",
         params["parameter_overrides"] = parameter_overrides
     if suppressed_features is not None:
         params["suppressed_features"] = suppressed_features
+    if suppressed_occurrences is not None:
+        params["suppressed_occurrences"] = suppressed_occurrences
     return _call("set_configuration", **params)
 
 

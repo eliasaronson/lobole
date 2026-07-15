@@ -6,6 +6,7 @@
 #include <glm/gtc/quaternion.hpp> // eulerAngles, quat(vec3)
 #include <glm/trigonometric.hpp>  // degrees, radians
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -238,6 +239,64 @@ void DrawExplodedSection(AppState& state) {
 
 // Bill of materials (A4): derived rows per referenced part. The mass math
 // (OCC volume properties per body) is not per-frame cheap, so the table is
+// Assembly configurations (C4): named variants that suppress occurrences.
+// The active selector switches the shown variant; the active config's editor
+// is a per-occurrence suppression checklist.
+void DrawConfigsSection(AppState& state) {
+  AssemblyDocument& asmDoc = *state.assembly;
+  ImGui::SeparatorText("Configurations");
+  const uint64_t active = asmDoc.ActiveConfiguration();
+
+  if (ImGui::Selectable("Base (all shown)", active == 0)) {
+    SnapshotAssembly(state);
+    asmDoc.SetActiveConfiguration(0);
+  }
+  for (const Configuration& c : asmDoc.GetConfigurations()) {
+    ImGui::PushID(1000 + static_cast<int>(c.id));
+    if (ImGui::Selectable(c.name.c_str(), active == c.id)) {
+      SnapshotAssembly(state);
+      asmDoc.SetActiveConfiguration(c.id);
+    }
+    ImGui::PopID();
+  }
+  if (ImGui::Button("+ Add configuration")) {
+    SnapshotAssembly(state);
+    const uint64_t id = asmDoc.AddConfiguration().id;
+    asmDoc.SetActiveConfiguration(id);
+  }
+
+  Configuration* cfg = asmDoc.FindConfiguration(active);
+  if (!cfg) return;  // base
+
+  char nm[128];
+  std::snprintf(nm, sizeof(nm), "%s", cfg->name.c_str());
+  if (ImGui::InputText("Config name", nm, sizeof(nm),
+                       ImGuiInputTextFlags_EnterReturnsTrue)) {
+    SnapshotAssembly(state);
+    asmDoc.FindConfiguration(active)->name = nm;
+    asmDoc.BumpVersion();
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Delete##cfg")) {
+    SnapshotAssembly(state);
+    asmDoc.RemoveConfiguration(active);
+    return;
+  }
+  ImGui::TextUnformatted("Suppressed occurrences");
+  for (const Occurrence& o : asmDoc.GetOccurrences()) {
+    bool sup = cfg->Suppresses(o.id);
+    ImGui::PushID(2000 + static_cast<int>(o.id));
+    if (ImGui::Checkbox(OccLabel(state, asmDoc, o.id).c_str(), &sup)) {
+      SnapshotAssembly(state);
+      auto& v = asmDoc.FindConfiguration(active)->suppressedFeatures;
+      v.erase(std::remove(v.begin(), v.end(), o.id), v.end());
+      if (sup) v.push_back(o.id);
+      asmDoc.BumpVersion();
+    }
+    ImGui::PopID();
+  }
+}
+
 // cached and recomputed only when the assembly or a referenced part changed.
 void DrawBomSection(AppState& state) {
   ImGui::Spacing();
@@ -389,6 +448,7 @@ void DrawOccurrencePanel(AppState& state) {
   }
 
   DrawMatesSection(state);
+  DrawConfigsSection(state);
   DrawExplodedSection(state);
   DrawBomSection(state);
 

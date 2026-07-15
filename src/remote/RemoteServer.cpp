@@ -244,6 +244,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   static const std::set<std::string> kNoPartDoc = {
       "ping",         "list_parts",       "add_part",
       "add_assembly", "set_active_part",  "delete_part",
+      // Configuration RPCs target the active tab: part-doc handling above,
+      // assembly handling below. Listed here so they are allowed on an
+      // assembly tab (where doc is null).
+      "add_configuration", "remove_configuration", "list_configurations",
+      "set_configuration", "set_active_configuration",
       "create_drawing", "list_drawings", "add_drawing_view",
       "remove_drawing_view", "update_drawing", "list_drawing_views",
       "export_drawing", "list_drawing_geometry", "add_drawing_dim",
@@ -273,10 +278,14 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                              ", not a part; switch to a part tab");
   }
 
-  // Doc-level-object RPCs carved into their own module (decision 7). Part-doc
-  // methods, so `doc` is guaranteed non-null past the guard above.
+  // Doc-level-object RPCs carved into their own module (decision 7). The
+  // config RPCs target whichever tab is active — part or assembly.
   if (doc) {
     if (json cfgOut; remote::HandleConfigurationRpc(state, *doc, m, p, cfgOut))
+      return cfgOut;
+  } else if (state.assembly) {
+    if (json cfgOut;
+        remote::HandleAssemblyConfigurationRpc(state, *state.assembly, m, p, cfgOut))
       return cfgOut;
   }
 

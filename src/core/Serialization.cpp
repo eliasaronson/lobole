@@ -1578,6 +1578,31 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
         fs::remove(entry.path(), ec);
     }
 
+    // Configurations (v31): file-per-config + active id in the index; absent
+    // when none so older assemblies stay byte-identical.
+    if (asmDoc.ActiveConfiguration() != 0)
+      index["active_configuration"] = asmDoc.ActiveConfiguration();
+    const fs::path cfgDir = dir / "configurations";
+    if (!asmDoc.GetConfigurations().empty()) {
+      index["configurations"] = json::array();
+      fs::create_directories(cfgDir);
+    }
+    std::set<std::string> wantedCfg;
+    for (const Configuration& c : asmDoc.GetConfigurations()) {
+      const std::string file =
+          std::to_string(c.id) + "-" + LabelSlug(c.name) + ".json";
+      if (!WriteTextAtomic(cfgDir / file, ConfigurationToJson(c).dump(2) + "\n",
+                           error))
+        return false;
+      index["configurations"].push_back(c.id);
+      wantedCfg.insert(file);
+    }
+    for (const auto& entry : fs::directory_iterator(cfgDir, ec)) {
+      if (entry.path().extension() == ".json" &&
+          !wantedCfg.contains(entry.path().filename().string()))
+        fs::remove(entry.path(), ec);
+    }
+
     if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
       return false;
     LOG_INFO("Saved assembly ({} occurrences, {} mates) to {}",
@@ -1681,6 +1706,28 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       viewJsons.push_back(json::parse(fin));
     }
     LoadExplodedViews(*asmDoc, viewJsons);
+
+    // Configurations (v31): id-prefix files under configurations/, index order.
+    {
+      std::map<uint64_t, fs::path> cfgById;
+      for (const auto& entry :
+           fs::directory_iterator(fs::path(dirPath) / "configurations", ec)) {
+        if (entry.path().extension() != ".json") continue;
+        cfgById[std::stoull(entry.path().filename().string())] = entry.path();
+      }
+      for (const auto& idJson : index.value("configurations", json::array())) {
+        const auto it = cfgById.find(idJson.get<uint64_t>());
+        if (it == cfgById.end()) {
+          if (error)
+            *error = "missing configuration file for id " +
+                     std::to_string(idJson.get<uint64_t>());
+          return nullptr;
+        }
+        std::ifstream cin(it->second);
+        asmDoc->RestoreConfiguration(ConfigurationFromJson(json::parse(cin)));
+      }
+    }
+    asmDoc->SetActiveConfiguration(index.value("active_configuration", uint64_t{0}));
 
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), dirPath);
@@ -1812,6 +1859,13 @@ bool SaveAssembly(const AssemblyDocument& asmDoc, const std::string& path,
       for (const ExplodedView& v : asmDoc.GetExplodedViews())
         j["exploded"].push_back(ExplodedViewToJson(v));
     }
+    if (asmDoc.ActiveConfiguration() != 0)  // v31
+      j["active_configuration"] = asmDoc.ActiveConfiguration();
+    if (!asmDoc.GetConfigurations().empty()) {
+      j["configurations"] = json::array();
+      for (const Configuration& c : asmDoc.GetConfigurations())
+        j["configurations"].push_back(ConfigurationToJson(c));
+    }
     std::ofstream out(path);
     if (!out) {
       if (error) *error = "Cannot open file for writing: " + path;
@@ -1860,6 +1914,9 @@ std::unique_ptr<AssemblyDocument> LoadAssembly(const std::string& path,
               j.value("mates", json::array()).get<std::vector<json>>());
     LoadExplodedViews(
         *asmDoc, j.value("exploded", json::array()).get<std::vector<json>>());
+    for (const auto& cj : j.value("configurations", json::array()))  // v31
+      asmDoc->RestoreConfiguration(ConfigurationFromJson(cj));
+    asmDoc->SetActiveConfiguration(j.value("active_configuration", uint64_t{0}));
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);
     return asmDoc;

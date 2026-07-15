@@ -3,7 +3,9 @@
 #include "core/Command.h"
 #include "core/Configuration.h"
 #include "core/Document.h"
+#include "core/Occurrence.h"
 #include "core/Serialization.h"
+#include "ui/AppActions.h"
 #include "ui/AppState.h"
 
 #include <memory>
@@ -87,6 +89,62 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
     out = {{"active", doc.ActiveConfiguration()},
            {"bodies", doc.GetBodies().size()},
            {"volumes", vols}};
+    return true;
+  }
+  return false;
+}
+
+bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
+                                    const std::string& m, const json& p,
+                                    json& out) {
+  if (m == "add_configuration") {
+    ui::SnapshotAssembly(state);
+    const Configuration& c = asm_.AddConfiguration(p.value("name", std::string{}));
+    out = {{"id", c.id}, {"name", c.name}};
+    return true;
+  }
+  if (m == "remove_configuration") {
+    const uint64_t id = p.at("id").get<uint64_t>();
+    if (!asm_.FindConfiguration(id))
+      throw std::runtime_error("no such configuration");
+    ui::SnapshotAssembly(state);
+    asm_.RemoveConfiguration(id);
+    out = json::object();
+    return true;
+  }
+  if (m == "list_configurations") {
+    json arr = json::array();
+    for (const Configuration& c : asm_.GetConfigurations())
+      arr.push_back({{"id", c.id},
+                     {"name", c.name},
+                     {"suppressed_occurrences", c.suppressedFeatures}});
+    out = {{"configurations", arr}, {"active", asm_.ActiveConfiguration()}};
+    return true;
+  }
+  if (m == "set_configuration") {
+    const uint64_t id = p.at("id").get<uint64_t>();
+    Configuration* c = asm_.FindConfiguration(id);
+    if (!c) throw std::runtime_error("no such configuration");
+    ui::SnapshotAssembly(state);
+    if (p.contains("name")) c->name = p.at("name").get<std::string>();
+    if (p.contains("suppressed_occurrences"))
+      c->suppressedFeatures =
+          p.at("suppressed_occurrences").get<std::vector<uint64_t>>();
+    asm_.BumpVersion();
+    out = {{"id", id}};
+    return true;
+  }
+  if (m == "set_active_configuration") {
+    const uint64_t id = p.value("id", uint64_t{0});
+    if (id != 0 && !asm_.FindConfiguration(id))
+      throw std::runtime_error("no such configuration");
+    ui::SnapshotAssembly(state);
+    asm_.SetActiveConfiguration(id);
+    int visible = 0;
+    for (const Occurrence& o : asm_.GetOccurrences())
+      if (o.visible && !asm_.OccurrenceSuppressed(o.id)) ++visible;
+    out = {{"active", asm_.ActiveConfiguration()},
+           {"visible_occurrences", visible}};
     return true;
   }
   return false;

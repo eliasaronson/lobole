@@ -127,6 +127,46 @@ def main():
         names = {c["name"] for c in reop["configurations"]}
         expect(names == {"Tall", "Plain"}, f"configs survived reopen: {names}")
 
+        # --- Assembly configurations: occurrence suppression (C4) ----------
+        d.call("new_project")
+        d.call("add_part", name="widget")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "W", "position": [0, 0, 0],
+            "width": 5, "height": 5, "depth": 5})
+        d.call("add_assembly", name="rig")
+        o1 = d.call("add_occurrence", part="widget", fixed=True)["id"]
+        o2 = d.call("add_occurrence", part="widget",
+                    transform={"position": [10, 0, 0], "orientation": [0, 0, 0, 1]})["id"]
+        # A config that suppresses the second occurrence.
+        acfg = d.call("add_configuration", name="Half")["id"]
+        d.call("set_configuration", id=acfg, suppressed_occurrences=[o2])
+        cur = {c["id"]: c for c in d.call("list_configurations")["configurations"]}
+        expect(cur[acfg]["suppressed_occurrences"] == [o2],
+               f"assembly config stores suppressed occurrence: {cur}")
+
+        # Base: BOM counts both occurrences; Half: only one.
+        base_bom = d.call("bom")["rows"]
+        base_qty = sum(r["quantity"] for r in base_bom)
+        r = d.call("set_active_configuration", id=acfg)
+        expect(r["visible_occurrences"] == 1, f"Half hides one occurrence: {r}")
+        half_qty = sum(r2["quantity"] for r2 in d.call("bom")["rows"])
+        expect(half_qty == base_qty - 1,
+               f"Half BOM drops the suppressed occurrence: {half_qty} vs {base_qty}")
+
+        # Save/reopen preserves the assembly config + active id.
+        aproj = os.path.join(tmp, "rig.dsgn")
+        d.call("save_project", path=aproj)
+        d.call("new_project")
+        d.call("open_project", path=aproj)
+        # Reactivate the rig tab to read its configs.
+        rig_idx = [p for p in d.call("list_parts")["parts"]
+                   if p["name"] == "rig"][0]["index"]
+        d.call("set_active_part", index=rig_idx)
+        areop = d.call("list_configurations")
+        expect(areop["active"] == acfg, f"assembly active config survived: {areop}")
+        expect(areop["configurations"][0]["suppressed_occurrences"] == [o2],
+               f"assembly suppression survived reopen: {areop}")
+
         print("configuration_smoke: OK")
     finally:
         app.terminate()

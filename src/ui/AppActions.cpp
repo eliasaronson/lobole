@@ -1171,6 +1171,8 @@ BomTable ComputeBom(AppState& state) {
   if (!state.assembly)
     return table;
   for (const Occurrence& occ : state.assembly->GetOccurrences()) {
+    if (state.assembly->OccurrenceSuppressed(occ.id))
+      continue;  // suppressed by the active config: out of the BOM
     BomRow* row = nullptr;
     for (BomRow& r : table.rows)
       if (r.partId == occ.partId) { row = &r; break; }
@@ -1829,7 +1831,7 @@ void FitCameraToDocument(AppState& state) {
   if (state.assembly) {
     // Bound every visible occurrence's part bodies, transformed into place.
     for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-      if (!occ.visible)
+      if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
         continue;
       Document* part = PartDocById(state, occ.partId);
       if (!part)
@@ -1899,8 +1901,8 @@ void SyncAssemblyRenderers(AppState& state) {
   size_t palette = 0;
 
   for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-    if (!occ.visible)
-      continue; // hidden: not rendered, not pickable
+    if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
+      continue; // hidden (or suppressed by the active config): not rendered
     Document* part = PartDocById(state, occ.partId);
     if (!part)
       continue; // dangling reference (part deleted) — skip
@@ -2085,7 +2087,7 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
     // part reuse the part's shapes, so the shared TShapes let the writers
     // instance the geometry rather than copy it.
     for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-      if (!occ.visible)
+      if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
         continue;
       Document* part = PartDocById(state, occ.partId);
       if (!part)
@@ -2243,7 +2245,7 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
       if (!asmDoc) { *error = "source assembly is empty"; return false; }
       *sourceVersion = asmDoc->Version();
       for (const Occurrence& occ : asmDoc->GetOccurrences()) {
-        if (!occ.visible) continue;
+        if (!occ.visible || asmDoc->OccurrenceSuppressed(occ.id)) continue;
         const Document* part = PartDocById(state, occ.partId);
         if (!part) continue;  // dangling part reference — skip
         AppendBodies(*part, glm::dmat4(OccurrenceMatrix(occ)), occ.id, out);
