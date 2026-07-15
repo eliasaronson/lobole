@@ -191,6 +191,7 @@ set(core_sources
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/Serialization.cpp
+    src/core/SerializeFeatures.cpp
     src/core/SketchFeature.cpp
     src/core/SketchProfile.cpp
     src/core/SketchInference.cpp
