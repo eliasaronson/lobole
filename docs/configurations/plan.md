@@ -1,7 +1,9 @@
 # Configurations — parametric part/assembly families — design
 
-> Status: **draft, for sign-off**. Deferred from assemblies A4 as "their own
-> design" ([a4-design.md](../assemblies/a4-design.md):38); the roadmap's next
+> Status: **SIGNED OFF (2026-07-14)** — the 7 decisions below stand, with
+> **assembly configurations included in scope** (C4 is committed, not a
+> "maybe-later" phase). Deferred from assemblies A4 as "their own design"
+> ([a4-design.md](../assemblies/a4-design.md):38); the roadmap's next
 > workstream. Verdict: build it — the substrate is already here. A
 > configuration is a *doc-level named object* (the FEM Study pattern, verbatim),
 > its effect is *regenerate against an override symbol table + a suppression
@@ -30,9 +32,11 @@ CI-testable without a GPU, per the headless-core rule.
 
 ## What v1 is — and is not
 
-**v1: part configurations — named override sets (parameter values + feature
-suppression), an active-configuration selector, serialization, GUI panel, and
-RPC/MCP surface. Assembly configurations land as a second phase.**
+**v1: part configurations first (named override sets = parameter values +
+feature suppression, an active-configuration selector, serialization, GUI
+panel, RPC/MCP), then assembly configurations (C4) — both committed scope.**
+The part machine ships and gets used before the assembly phase builds on it;
+they are sequenced, not one deferred.
 
 - A **configuration** is a doc-level named object on a part `Document`
   (`Document.h:83-129`, the Study storage pattern): an id, a name, a set of
@@ -56,14 +60,17 @@ RPC/MCP surface. Assembly configurations land as a second phase.**
   RPCs + MCP mirrors. Export/drawing/FEM naturally reflect the active config
   because they read the regenerated bodies.
 
-**Explicitly deferred (decisions, not gaps):**
+**In scope, sequenced last (C4):**
 
 - **Assembly configurations** — per-occurrence config selection (an occurrence
-  shows a chosen config of its part) + occurrence suppression. This is a real
-  second phase (C4 below): `Occurrence` gains a config selector, and resolving
-  an occurrence regenerates its part *at that config*. Occurrence suppression
-  was always "arrives with configurations" (a4-design.md:107). Scoped out of
-  v1 core so part configs ship first.
+  shows a chosen config of its part) + occurrence suppression. `Occurrence`
+  gains a config selector, and resolving an occurrence regenerates its part
+  *at that config*. Occurrence suppression was always "arrives with
+  configurations" (a4-design.md:107). Built on the finished part machine (§7),
+  so it lands last but is committed, not deferred.
+
+**Explicitly deferred (decisions, not gaps):**
+
 - **Configured properties beyond parameters + suppression** — per-config
   material, per-config custom properties / part number, per-config
   dimensions that aren't already global parameters. v1 configures the two
@@ -249,9 +256,9 @@ The LLM parity chain is the acceptance test: `add_configuration Tall` →
 `export bracket-tall.step`, fully headless. Batch that over a list and you have
 "export the whole family," the capability no mainstream CAD exposes.
 
-## 7. Assembly configurations (C4 — the second phase)
+## 7. Assembly configurations (C4 — committed, sequenced last)
 
-Deferred from v1 core, designed here so v1 doesn't foreclose it:
+In scope; built on the finished part machine so it lands last:
 
 - `AssemblyDocument` gains its own `m_configurations` + active id (the same
   `Configuration` type, reused). An assembly config's overrides are **occurrence
@@ -271,13 +278,14 @@ Deferred from v1 core, designed here so v1 doesn't foreclose it:
 
 ## Decisions for sign-off
 
-1. **Scope: v1 = part configurations** — named override sets (parameter-value
-   overrides as expressions + feature suppression), a persisted active
-   configuration (`id 0` = base), serialization v31, a Model-dock panel, and
-   the RPC/MCP surface. **Assembly configurations** (occurrence suppression +
-   per-occurrence part-config selection) are C4, a second phase. Configured
-   materials/properties, design tables, and implicit active-config editing
-   are deferred.
+1. **Scope: part configurations then assembly configurations, both committed.**
+   Part side = named override sets (parameter-value overrides as expressions +
+   feature suppression), a persisted active configuration (`id 0` = base),
+   serialization v31, a Model-dock panel, the RPC/MCP surface. **Assembly
+   configurations** (occurrence suppression + per-occurrence part-config
+   selection) are **C4, in scope** — sequenced after the part machine, not
+   deferred. Configured materials/properties, design tables, and implicit
+   active-config editing remain deferred.
 2. **A configuration is a doc-level named object**, the FEM Study pattern
    verbatim (`Document` storage + accessors, Command trio, tagged
    serialization) — **not a new `DocKind`**, edited by a panel section within
