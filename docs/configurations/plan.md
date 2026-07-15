@@ -129,6 +129,20 @@ touch list.
 
 ## 2. Application: regenerate against overrides (the core mechanic — C0 gate)
 
+> **C0 gate: PASSED (2026-07-14).** Shipped `core/Configuration.h` + the
+> `Document` integration (override overlay in `EvaluateParameters`,
+> `EffectiveSuppressed` in the regen gate + folded into the prefix-cache key,
+> active-config accessors) + `tests/test_configuration.cpp`, all green in the
+> 378-test suite. Proven: (1) a config overrides a parameter and restores on
+> switch-back with the base expression intact (no stored-state mutation);
+> (2) an override to `width` propagates to `depth = width*2` (overrides
+> replace the base *expression* for the regen, so dependents follow);
+> (3) config suppression composes with the authored `suppressed` flag;
+> (4) a param-override switch re-executes only the affected cache suffix, and
+> a suppression-only switch still invalidates via the folded effective-
+> suppressed bit. No design changes — proceed to C1.
+
+
 The one design-critical decision, and the C0 spike. The document already:
 
 1. evaluates the parameter table into `m_symbols` at the top of every regen

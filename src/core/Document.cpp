@@ -106,8 +106,14 @@ bool Document::Regenerate() {
   std::vector<size_t> hashes(upTo);
   size_t chain = 0x9e3779b97f4a7c15ull;
   for (size_t i = 0; i < upTo; i++) {
+    // Fold in the active configuration's effective suppression: the feature
+    // JSON encodes only the authored `suppressed` flag, so a config that
+    // suppresses feature i (without changing any field value) must still move
+    // the cache divergence to i. Parameter overrides invalidate for free —
+    // they change the evaluated field values already baked into the JSON.
     chain = std::hash<std::string>{}(
-        std::to_string(chain) + DocumentIO::FeatureToJson(*m_features[i]).dump());
+        std::to_string(chain) + DocumentIO::FeatureToJson(*m_features[i]).dump() +
+        (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));
     hashes[i] = chain;
   }
   size_t divergence = 0;
@@ -130,7 +136,7 @@ bool Document::Regenerate() {
     m_cache.resize(divergence); // stale suffix; rebuilt below
     for (size_t i = divergence; i < upTo; i++) {
       m_features[i]->ClearError();
-      if (!m_features[i]->IsSuppressed()) {
+      if (!EffectiveSuppressed(i)) {
         RegenContext ctx{m_bodies, m_features, i, &m_symbols};
         m_lastStats.executed++;
         if (!m_features[i]->Execute(ctx)) {
@@ -210,6 +216,80 @@ bool Document::ReplaceStudy(fem::Study study) {
     }
   }
   return false;
+}
+
+// ---- Configurations -------------------------------------------------------
+
+const Configuration* Document::FindConfiguration(uint64_t id) const {
+  for (const Configuration& c : m_configurations)
+    if (c.id == id) return &c;
+  return nullptr;
+}
+
+Configuration* Document::FindConfiguration(uint64_t id) {
+  for (Configuration& c : m_configurations)
+    if (c.id == id) return &c;
+  return nullptr;
+}
+
+Configuration& Document::AddConfiguration(const std::string& name) {
+  Configuration cfg;
+  cfg.id = m_nextId++;
+  cfg.name = name.empty()
+                 ? ("Configuration " + std::to_string(m_configurations.size() + 1))
+                 : name;
+  m_configurations.push_back(std::move(cfg));
+  return m_configurations.back();
+}
+
+bool Document::RemoveConfiguration(uint64_t id) {
+  for (auto it = m_configurations.begin(); it != m_configurations.end(); ++it) {
+    if (it->id == id) {
+      m_configurations.erase(it);
+      if (m_activeConfiguration == id) {
+        m_activeConfiguration = 0;  // fall back to base
+        Regenerate();
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+void Document::RestoreConfiguration(Configuration cfg) {
+  EnsureNextIdAtLeast(cfg.id + 1);
+  m_configurations.push_back(std::move(cfg));
+}
+
+bool Document::ReplaceConfiguration(Configuration cfg) {
+  for (Configuration& c : m_configurations) {
+    if (c.id == cfg.id) {
+      const bool active = m_activeConfiguration == cfg.id;
+      c = std::move(cfg);
+      if (active) Regenerate();  // its overrides changed the applied model
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Document::SetActiveConfiguration(uint64_t id) {
+  if (id != 0 && FindConfiguration(id) == nullptr) return false;
+  m_activeConfiguration = id;
+  Regenerate();
+  return true;
+}
+
+const Configuration* Document::ActiveConfig() const {
+  return m_activeConfiguration == 0 ? nullptr
+                                    : FindConfiguration(m_activeConfiguration);
+}
+
+bool Document::EffectiveSuppressed(size_t index) const {
+  if (index >= m_features.size()) return false;
+  if (m_features[index]->IsSuppressed()) return true;
+  const Configuration* c = ActiveConfig();
+  return c != nullptr && c->Suppresses(m_features[index]->GetId());
 }
 
 bool Document::SetParameter(const std::string& name,
@@ -321,13 +401,22 @@ void Document::EvaluateParameters() {
   for (size_t i = 0; i < n; i++) {
     indexByName[m_parameters[i].name] = i;
   }
+  // The active configuration overrides parameters by replacing their
+  // expression for this regeneration (never mutating the stored one), so
+  // dependents propagate: overriding `width` re-evaluates `depth = width*3`.
+  // `p.value` is a transient last-good cache (not serialized), so writing the
+  // override result to it below is safe and self-corrects on the next regen.
+  const Configuration* cfg = ActiveConfig();
+
   std::vector<std::unique_ptr<CompiledExpr>> compiled(n);
   std::vector<std::vector<size_t>> dependents(n);
   std::vector<size_t> pendingDeps(n, 0);
   for (size_t i = 0; i < n; i++) {
     Parameter& p = m_parameters[i];
+    const std::string* overrideExpr = cfg ? cfg->OverrideFor(p.name) : nullptr;
+    const std::string& expression = overrideExpr ? *overrideExpr : p.expression;
     ExprError err;
-    compiled[i] = engine.Compile(p.expression, &err);
+    compiled[i] = engine.Compile(expression, &err);
     if (compiled[i] == nullptr) {
       p.error = err.message;
       continue;

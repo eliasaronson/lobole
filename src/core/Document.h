@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Configuration.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/FemSolver.h"
@@ -128,6 +129,50 @@ public:
                                       : it->second.solvedAtVersion != m_version;
   }
 
+  // ---- Configurations ---------------------------------------------------
+  // Named variants (parameter overrides + feature suppression), a sibling to
+  // the parameter table like studies — not Features. The ACTIVE configuration
+  // (0 = base, the model as authored) is applied during regeneration by
+  // overlaying its overrides onto the symbol table and composing its
+  // suppression set; no stored parameter/feature state is mutated. See
+  // docs/configurations/plan.md.
+
+  const std::vector<Configuration>& GetConfigurations() const {
+    return m_configurations;
+  }
+  std::vector<Configuration>& GetConfigurations() { return m_configurations; }
+  const Configuration* FindConfiguration(uint64_t id) const;
+  Configuration* FindConfiguration(uint64_t id);
+
+  // Appends a configuration with a doc-unique id (auto-named "Configuration N"
+  // when empty) and returns it. Does not change the active configuration.
+  Configuration& AddConfiguration(const std::string& name = "");
+  // Removes the configuration with `id`; if it was active, falls back to base
+  // and regenerates. Returns false if absent.
+  bool RemoveConfiguration(uint64_t id);
+  // Appends a fully-formed configuration (keeping its id) and raises the id
+  // high-water mark. For deserialization / undo.
+  void RestoreConfiguration(Configuration cfg);
+  // Replaces the configuration with `cfg.id` in place. Returns false if absent.
+  // Regenerates when it is the active one. Backs the modify Command.
+  bool ReplaceConfiguration(Configuration cfg);
+
+  // Which configuration regeneration applies (0 = base). Persisted like the
+  // rollback bar. SetActiveConfiguration regenerates; returns false for an
+  // unknown non-zero id.
+  uint64_t ActiveConfiguration() const { return m_activeConfiguration; }
+  bool SetActiveConfiguration(uint64_t id);
+  // Loader hook: set the active id without regenerating (the load's own regen
+  // rebuilds bodies once).
+  void SetActiveConfigurationRaw(uint64_t id) { m_activeConfiguration = id; }
+  // The active configuration, or nullptr when base (0) or unknown.
+  const Configuration* ActiveConfig() const;
+
+  // Whether feature `index` is suppressed under the active configuration: its
+  // authored `suppressed` flag OR the active config suppresses its id. This is
+  // what regeneration honors (and folds into the prefix-cache key).
+  bool EffectiveSuppressed(size_t index) const;
+
   // Allocates the next document-unique id (studies and their loads draw from
   // the same counter as features, so ids never collide across kinds).
   uint64_t AllocateId() { return m_nextId++; }
@@ -184,6 +229,8 @@ private:
   // Transient per-study mesh+results (never serialized); keyed by study id.
   std::map<uint64_t, fem::StudyRuntime> m_studyRuntime;
   uint64_t m_studyResultsEpoch = 0;
+  std::vector<Configuration> m_configurations;
+  uint64_t m_activeConfiguration = 0;  // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;
