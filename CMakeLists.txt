@@ -193,6 +193,7 @@ set(core_sources
     src/core/Serialization.cpp
     src/core/SerializeFeatures.cpp
     src/core/SerializeStudies.cpp
+    src/core/SerializeConfigurations.cpp
     src/core/SketchFeature.cpp
     src/core/SketchProfile.cpp
     src/core/SketchInference.cpp
