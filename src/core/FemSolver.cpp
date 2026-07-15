@@ -9,11 +9,22 @@
 #include <Eigen/SparseCore>
 #endif
 
+#ifdef HAVE_SPECTRA
+#include <Spectra/MatOp/SparseSymMatProd.h>
+#include <Spectra/MatOp/SymShiftInvert.h>
+#include <Spectra/SymGEigsShiftSolver.h>
+#endif
+
 namespace fem {
 
 #ifdef HAVE_FEM_SOLVER
 
 bool SolverAvailable() { return true; }
+#ifdef HAVE_SPECTRA
+bool ModalAvailable() { return true; }
+#else
+bool ModalAvailable() { return false; }
+#endif
 
 namespace {
 
@@ -45,6 +56,16 @@ void TetShapeGrad(double r, double s, double t, double dN[10][3]) {
     for (int k = 0; k < 3; ++k)
       dN[4 + e][k] = 4 * (dL[a][k] * L[b] + L[a] * dL[b][k]);
   }
+}
+
+// tet10 shape function VALUES N[10] at (r,s,t). Same convention as
+// TetShapeGrad: corner Ni = Li(2Li-1), edge N = 4 La Lb. For the mass matrix
+// and body (gravity) loads.
+void TetShape(double r, double s, double t, double N[10]) {
+  const double L[4] = {1 - r - s - t, r, s, t};
+  for (int i = 0; i < 4; ++i) N[i] = L[i] * (2 * L[i] - 1);
+  const int edge[6][2] = {{0, 1}, {1, 2}, {0, 2}, {0, 3}, {1, 3}, {2, 3}};
+  for (int e = 0; e < 6; ++e) N[4 + e] = 4 * L[edge[e][0]] * L[edge[e][1]];
 }
 
 // The 6x30 strain-displacement matrix B and detJ at natural point (r,s,t) for
@@ -186,7 +207,8 @@ std::array<double, 6> Tet10Stress(const std::array<glm::dvec3, 10>& nodes,
 
 std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
                                 const std::vector<int>& fixedNodes,
-                                const std::vector<FaceLoad>& loads, std::string* error) {
+                                const std::vector<FaceLoad>& loads, std::string* error,
+                                const glm::dvec3& gravityAccel) {
   auto fail = [&](const std::string& m) -> std::optional<FemResults> {
     if (error) *error = m;
     return std::nullopt;
@@ -300,6 +322,29 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
     }
   }
 
+  // Body force (gravity / self-weight): b = rho * g per unit volume, consistent
+  // nodal loads f_i = integral rho*g*N_i dV. Units: rho in t/mm^3, g in mm/s^2
+  // => t*mm/s^2/mm^3 = N/mm^3, integrated over mm^3 => N.
+  if ((gravityAccel.x != 0 || gravityAccel.y != 0 || gravityAccel.z != 0) &&
+      material.densityTPerMM3 > 0) {
+    const Vector3d b = material.densityTPerMM3 *
+                       Vector3d(gravityAccel.x, gravityAccel.y, gravityAccel.z);
+    for (const auto& tet : mesh.tets) {
+      Vector3d X[10];
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh.nodes[tet[i]];
+        X[i] = Vector3d(p.x, p.y, p.z);
+      }
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B;  // only need detJ
+        const double dV = kTetW * std::abs(StrainDisp(X, g[0], g[1], g[2], B));
+        double N[10];
+        TetShape(g[0], g[1], g[2], N);
+        for (int i = 0; i < 10; ++i) addNodal(tet[i], (N[i] * dV) * b);
+      }
+    }
+  }
+
   // Solve the reduced system.
   Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
   solver.compute(K);
@@ -379,12 +424,153 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
   return out;
 }
 
+#ifdef HAVE_SPECTRA
+std::optional<std::vector<FemResults::ModeShape>> SolveModal(
+    const FemMesh& mesh, const Material& material,
+    const std::vector<int>& fixedNodes, int numModes, std::string* error) {
+  auto fail = [&](const std::string& m)
+      -> std::optional<std::vector<FemResults::ModeShape>> {
+    if (error) *error = m;
+    return std::nullopt;
+  };
+  const int nNodes = static_cast<int>(mesh.nodes.size());
+  if (nNodes == 0 || mesh.tets.empty()) return fail("empty mesh");
+  if (material.youngMPa <= 0) return fail("material has no stiffness data");
+  if (material.densityTPerMM3 <= 0)
+    return fail("material has no density (needed for modal mass)");
+  if (numModes < 1) numModes = 1;
+
+  // Reduced-DOF map; v1 requires a support so K is positive-definite (sigma=0
+  // shift-invert). Free-free (unconstrained) modes are deferred.
+  std::vector<char> fixed(3 * nNodes, 0);
+  int nFixed = 0;
+  for (int n : fixedNodes)
+    if (n >= 0 && n < nNodes)
+      for (int k = 0; k < 3; ++k)
+        if (!fixed[3 * n + k]) { fixed[3 * n + k] = 1; ++nFixed; }
+  if (nFixed == 0)
+    return fail("modal analysis needs at least one fixed support");
+  std::vector<int> dofMap(3 * nNodes, -1);
+  int nFree = 0;
+  for (int d = 0; d < 3 * nNodes; ++d)
+    if (!fixed[d]) dofMap[d] = nFree++;
+  if (nFree < numModes + 1) return fail("mesh too small for the requested modes");
+
+  const auto D = Elasticity(material.youngMPa, material.poisson);
+  std::vector<Eigen::Triplet<double>> kt, mt;
+  kt.reserve(mesh.tets.size() * 900);
+  mt.reserve(mesh.tets.size() * 300);
+  for (const auto& tet : mesh.tets) {
+    Vector3d X[10];
+    for (int i = 0; i < 10; ++i) {
+      const auto& p = mesh.nodes[tet[i]];
+      X[i] = Vector3d(p.x, p.y, p.z);
+    }
+    Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
+    Eigen::Matrix<double, 10, 10> Me = Eigen::Matrix<double, 10, 10>::Zero();
+    for (const auto& g : kTetGauss) {
+      Eigen::Matrix<double, 6, 30> B;
+      const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+      if (std::abs(detJ) < 1e-12) return fail("mesh has a degenerate element");
+      const double dV = kTetW * std::abs(detJ);
+      Ke += dV * (B.transpose() * D * B);
+      double N[10];
+      TetShape(g[0], g[1], g[2], N);
+      for (int i = 0; i < 10; ++i)
+        for (int j = 0; j < 10; ++j)
+          Me(i, j) += material.densityTPerMM3 * dV * N[i] * N[j];
+    }
+    for (int a = 0; a < 30; ++a) {
+      const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
+      if (ga < 0) continue;
+      for (int b = 0; b < 30; ++b) {
+        const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
+        if (gb < 0) continue;
+        kt.emplace_back(ga, gb, Ke(a, b));
+      }
+    }
+    // Consistent mass couples same-direction DOFs (block-diagonal in x/y/z).
+    for (int i = 0; i < 10; ++i)
+      for (int j = 0; j < 10; ++j)
+        for (int d = 0; d < 3; ++d) {
+          const int ga = dofMap[3 * tet[i] + d];
+          const int gb = dofMap[3 * tet[j] + d];
+          if (ga >= 0 && gb >= 0) mt.emplace_back(ga, gb, Me(i, j));
+        }
+  }
+  Eigen::SparseMatrix<double> K(nFree, nFree), M(nFree, nFree);
+  K.setFromTriplets(kt.begin(), kt.end());
+  M.setFromTriplets(mt.begin(), mt.end());
+  K.makeCompressed();
+  M.makeCompressed();
+
+  // Generalized eigenproblem K phi = lambda M phi, lowest eigenvalues via
+  // shift-invert at sigma=0 (K is positive-definite here).
+  using OpType = Spectra::SymShiftInvert<double, Eigen::Sparse, Eigen::Sparse>;
+  using BOpType = Spectra::SparseSymMatProd<double>;
+  OpType op(K, M);
+  BOpType Bop(M);
+  const int nev = std::min(numModes, nFree - 1);
+  const int ncv = std::min(std::max(2 * nev + 1, 20), nFree);
+  Spectra::SymGEigsShiftSolver<OpType, BOpType, Spectra::GEigsMode::ShiftInvert>
+      geigs(op, Bop, nev, ncv, 0.0);
+  try {
+    geigs.init();
+    geigs.compute(Spectra::SortRule::LargestMagn, 1000, 1e-10,
+                  Spectra::SortRule::SmallestAlge);
+  } catch (const std::exception& e) {
+    return fail(std::string("modal eigensolver failed: ") + e.what());
+  }
+  if (geigs.info() != Spectra::CompInfo::Successful)
+    return fail("modal eigensolver did not converge");
+  const Eigen::VectorXd evals = geigs.eigenvalues();   // omega^2, ascending
+  const Eigen::MatrixXd evecs = geigs.eigenvectors();
+
+  std::vector<FemResults::ModeShape> modes;
+  for (int m = 0; m < evals.size(); ++m) {
+    const double lambda = std::max(evals(m), 0.0);  // clamp tiny negatives
+    constexpr double kTwoPi = 6.283185307179586;
+    FemResults::ModeShape mode;
+    mode.frequencyHz = std::sqrt(lambda) / kTwoPi;
+    mode.displacement.assign(nNodes, glm::dvec3(0, 0, 0));
+    double maxMag = 0.0;
+    for (int n = 0; n < nNodes; ++n) {
+      glm::dvec3 u(0, 0, 0);
+      for (int k = 0; k < 3; ++k) {
+        const int g = dofMap[3 * n + k];
+        if (g >= 0) u[k] = evecs(g, m);
+      }
+      mode.displacement[n] = u;
+      maxMag = std::max(maxMag, glm::length(u));
+    }
+    if (maxMag > 0)  // normalize the shape to max |u| = 1 for display
+      for (auto& u : mode.displacement) u /= maxMag;
+    modes.push_back(std::move(mode));
+  }
+  return modes;
+}
+#else   // !HAVE_SPECTRA
+std::optional<std::vector<FemResults::ModeShape>> SolveModal(
+    const FemMesh&, const Material&, const std::vector<int>&, int, std::string* error) {
+  if (error) *error = "built without modal support (Spectra not found)";
+  return std::nullopt;
+}
+#endif  // HAVE_SPECTRA
+
 #else  // !HAVE_FEM_SOLVER
 
 bool SolverAvailable() { return false; }
+bool ModalAvailable() { return false; }
 
 std::optional<FemResults> Solve(const FemMesh&, const Material&, const std::vector<int>&,
-                                const std::vector<FaceLoad>&, std::string* error) {
+                                const std::vector<FaceLoad>&, std::string* error,
+                                const glm::dvec3&) {
+  if (error) *error = "built without FEM solver support (Eigen not found)";
+  return std::nullopt;
+}
+
+std::optional<std::vector<FemResults::ModeShape>> SolveModal(
+    const FemMesh&, const Material&, const std::vector<int>&, int, std::string* error) {
   if (error) *error = "built without FEM solver support (Eigen not found)";
   return std::nullopt;
 }

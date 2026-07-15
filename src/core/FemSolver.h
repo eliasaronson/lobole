@@ -21,6 +21,10 @@ namespace fem {
 struct Material {
   double youngMPa = 0.0;  // Young's modulus, MPa (E in GPa * 1000)
   double poisson = 0.0;
+  // Mass density in tonne/mm^3 (the consistent mm-N-t-s unit system, so
+  // frequencies come out in rad/s -> Hz). Convert the library's kg/m^3 by
+  // *1e-12. 0 = unused (static without gravity).
+  double densityTPerMM3 = 0.0;
 };
 
 // A traction boundary condition on one B-Rep face, given as the boundary
@@ -44,17 +48,36 @@ struct FemResults {
   double maxDisplacement = 0.0;
   int maxDispNode = -1;
   glm::dvec3 maxDispAt{0, 0, 0};
+
+  // Modal analysis results (empty for a static study). One entry per computed
+  // mode, ascending frequency; displacement is the normalized mode shape.
+  struct ModeShape {
+    double frequencyHz = 0.0;
+    std::vector<glm::dvec3> displacement;  // normalized (max |u| = 1)
+  };
+  std::vector<ModeShape> modes;
 };
 
 // Solves K u = f with the given fixed nodes (all three DOF zeroed, eliminated
-// from the system) and face tractions. Returns std::nullopt and sets *error on
-// a singular system (insufficiently constrained) or when built without Eigen.
+// from the system), face tractions, and an optional body force (gravity
+// acceleration in mm/s^2; needs material.densityTPerMM3). Returns std::nullopt
+// and sets *error on a singular system or when built without Eigen.
 std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
                                 const std::vector<int>& fixedNodes,
-                                const std::vector<FaceLoad>& loads, std::string* error);
+                                const std::vector<FaceLoad>& loads, std::string* error,
+                                const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
 
-// True when the build links Eigen (the solver is available).
+// Solves the generalized eigenproblem K phi = omega^2 M phi for the lowest
+// `numModes` natural frequencies + mode shapes (consistent mass matrix). Needs
+// at least one fixed support (v1) and material.densityTPerMM3 > 0. Returns
+// std::nullopt and sets *error on failure or when built without Spectra.
+std::optional<std::vector<FemResults::ModeShape>> SolveModal(
+    const FemMesh& mesh, const Material& material,
+    const std::vector<int>& fixedNodes, int numModes, std::string* error);
+
+// True when the build links Eigen (static solver) / Spectra (modal).
 bool SolverAvailable();
+bool ModalAvailable();
 
 // ---- Element-level hooks (unit tests + diagnostics) -----------------------
 // These expose the tet10 element math directly so it can be pinned without a

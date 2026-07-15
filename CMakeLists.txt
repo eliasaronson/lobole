@@ -279,6 +279,17 @@ if(Eigen3_FOUND)
     target_link_libraries(designer_core PUBLIC Eigen3::Eigen)
     target_compile_definitions(designer_core PUBLIC HAVE_FEM_SOLVER)
 endif()
+# Spectra: header-only sparse eigensolver for FEM modal analysis. Optional,
+# gated HAVE_SPECTRA on the HAVE_FEM_SOLVER template: absent it, static FEM still
+# works and modal solves return "built without modal support". Pulls Eigen.
+find_package(Spectra QUIET)
+if(Spectra_FOUND AND Eigen3_FOUND)
+    target_link_libraries(designer_core PUBLIC Spectra::Spectra)
+    target_compile_definitions(designer_core PUBLIC HAVE_SPECTRA)
+    message(STATUS "Spectra enabled (FEM modal analysis)")
+else()
+    message(WARNING "Spectra not found: FEM modal analysis disabled")
+endif()
 if(HAVE_PLANEGCS)
     target_link_libraries(designer_core PUBLIC planegcs)
     target_compile_definitions(designer_core PUBLIC HAVE_PLANEGCS)

@@ -17,6 +17,16 @@ Local changes to build it standalone (without the rest of FreeCAD):
 Depends on Eigen (MPL2) and Boost.Graph. Built as the `planegcs` static library,
 gated by `HAVE_PLANEGCS` (the app builds without it, constraints disabled).
 
+## Spectra — sparse eigensolver (header-only, not vendored)
+
+No Spectra source lives in this tree; it is a **header-only library** provided by
+the `spectra` package in `shell.nix` and found via `find_package(Spectra)`.
+Licensed under the **Mozilla Public License 2.0** (MPL-2.0). Used only by
+`src/core/FemSolver.cpp` for the FEM modal generalized eigenproblem
+(K φ = ω²M φ, `SymGEigsShiftSolver`), gated by `HAVE_SPECTRA` — absent it, static
+FEM works and modal solves report "built without modal support". Header-only, so
+it pulls in Eigen (already a dependency) and adds no runtime library.
+
 ## Netgen — tetrahedral mesher (linked, not vendored)
 
 No Netgen source lives in this tree; it is an **external shared library** linked

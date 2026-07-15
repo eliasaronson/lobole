@@ -787,3 +787,73 @@ TEST_CASE("Solver detects an under-constrained (singular) model",
 }
 
 #endif  // HAVE_FEM_SOLVER
+
+// ---- Modal analysis (needs Netgen mesh + Spectra eigensolver) -------------
+#if defined(HAVE_NETGEN) && defined(HAVE_SPECTRA)
+
+TEST_CASE("Modal: cantilever first bending frequency", "[fem][solver][modal]") {
+  // Steel cantilever 100 x 10 x 10 mm, fixed at x=0. The first natural
+  // frequency matches Euler-Bernoulli f1 = (1.875^2/2pi)*sqrt(EI/(rho A L^4)).
+  const double L = 100, W = 10;
+  CADShape bar = CADKernel::Instance().CreateBox(L, W, W);
+  fem::MeshSettings ms;
+  ms.maxSize = 4.0;
+  std::string err;
+  auto mesh = fem::Mesh(bar.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+
+  // steel: E=200 GPa, nu=0.3, rho=7850 kg/m^3 = 7.85e-9 t/mm^3
+  fem::Material steel{200000.0, 0.3, 7.85e-9};
+
+  std::vector<int> fixed;
+  for (int i = 0; i < (int)mesh->nodes.size(); ++i)
+    if (std::abs(mesh->nodes[i].x) < 1e-6) fixed.push_back(i);
+  REQUIRE(fixed.size() > 6);
+
+  auto modes = fem::SolveModal(*mesh, steel, fixed, 4, &err);
+  INFO(err);
+  REQUIRE(modes.has_value());
+  REQUIRE(modes->size() >= 1);
+
+  // Analytic first bending frequency.
+  const double E = 200000.0, rho = 7.85e-9;
+  const double I = W * W * W * W / 12.0;  // b h^3/12, square section
+  const double A = W * W;
+  const double beta = 1.8751040687;
+  const double omega1 = beta * beta * std::sqrt(E * I / (rho * A * L * L * L * L));
+  const double f1 = omega1 / 6.283185307179586;  // ~815 Hz
+
+  const double got = (*modes)[0].frequencyHz;
+  INFO("f1 got = " << got << " expected " << f1);
+  // ~0.2% on a 4 mm mesh; headroom for Netgen's non-bit-stable remeshing.
+  CHECK_THAT(got, WithinRel(f1, 0.05));
+  // Frequencies ascend and the mode shape is normalized.
+  CHECK((*modes)[1].frequencyHz >= (*modes)[0].frequencyHz);
+  double maxu = 0;
+  for (const auto& u : (*modes)[0].displacement) maxu = std::max(maxu, glm::length(u));
+  CHECK_THAT(maxu, WithinRel(1.0, 1e-9));
+}
+
+TEST_CASE("Modal: requires a fixed support and density", "[fem][modal]") {
+  const double L = 40, W = 10;
+  CADShape bar = CADKernel::Instance().CreateBox(L, W, W);
+  fem::MeshSettings ms;
+  ms.maxSize = 6.0;
+  std::string err;
+  auto mesh = fem::Mesh(bar.GetShape(), ms, &err);
+  REQUIRE(mesh.has_value());
+
+  // No fixed support -> clear error (free-free deferred).
+  auto m1 = fem::SolveModal(*mesh, fem::Material{200000.0, 0.3, 7.85e-9}, {}, 4, &err);
+  CHECK_FALSE(m1.has_value());
+  CHECK(err.find("fixed support") != std::string::npos);
+
+  // No density -> no mass.
+  std::vector<int> fixed = {0, 1, 2, 3, 4, 5, 6, 7};
+  auto m2 = fem::SolveModal(*mesh, fem::Material{200000.0, 0.3, 0.0}, fixed, 4, &err);
+  CHECK_FALSE(m2.has_value());
+  CHECK(err.find("density") != std::string::npos);
+}
+
+#endif  // HAVE_NETGEN && HAVE_SPECTRA

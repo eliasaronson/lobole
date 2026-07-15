@@ -33,6 +33,7 @@ pkgs.mkShell {
     eigen # PlaneGCS constraint solver + FEM solver
     boost # PlaneGCS (headers only)
     netgen # FEM tet mesher (nglib + OCC interface, LGPL); gated HAVE_NETGEN
+    spectra # sparse eigensolver for FEM modal analysis (header-only); HAVE_SPECTRA
     gtk3 # nativefiledialog
     libx11 # non-blocking XMapWindow path (see main.cpp)
     catch2_3 # unit tests (FetchContent fallback needs network otherwise)
