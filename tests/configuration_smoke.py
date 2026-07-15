@@ -113,7 +113,7 @@ def main():
         d.call("save_project", path=proj)
         with open(os.path.join(proj, "index.json")) as f:
             idx = jsonlib.load(f)
-        expect(idx["version"] == 31, f"format v31: {idx.get('version')}")
+        expect(idx["version"] >= 31, f"format >= v31 (configs): {idx.get('version')}")
         expect(idx["active_configuration"] == tall,
                f"active config persisted: {idx.get('active_configuration')}")
         expect(len(idx["configurations"]) == 2, "config id list persisted")

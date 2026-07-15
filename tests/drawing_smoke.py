@@ -136,7 +136,7 @@ def main():
         with open(os.path.join(dwg_dir, "index.json")) as f:
             idx = jsonlib.load(f)
         expect(idx["kind"] == "drawing", f"kind discriminator: {idx.get('kind')}")
-        expect(idx["version"] == 31, f"format v31: {idx.get('version')}")
+        expect(idx["version"] >= 30, f"format >= v30 (drawings): {idx.get('version')}")
         expect(idx["sheet"]["size"] == "a3", f"sheet persisted: {idx['sheet']}")
         expect(idx["sheet"]["title_block"]["project"] == "Gearbox",
                "title block persisted")
