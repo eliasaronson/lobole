@@ -1,14 +1,15 @@
 # Drawings — 2D drafting output — design
 
-> Status: **draft, for sign-off**. The roadmap has carried "2D drawings /
-> drafting output — deliberately out of scope until after assemblies; revisit
-> then" since the beginning. Assemblies are done (A1–A3 + A2.5; A4 in
-> flight), so this is the revisit. Verdict: build it — the geometric core
-> (hidden-line-removed projection) is OCC's `HLRBRep`, not code we write, and
-> the supporting machinery (a third document kind, stable edge references,
-> screen-space line rendering, staleness stamps, export plumbing) all has a
-> shipped pattern in this codebase. The honest cost is assemblies-scale
-> (A1–A3 together), with dimensions as the long pole.
+> Status: **SHIPPED (D0–D4, 2026-07-14)** — v1-complete. This doc is the
+> design + the as-built record (each phase below is annotated with what
+> landed); the phase notes are the source of truth. See
+> [guide.md](guide.md) for the workflow. Original framing kept for context:
+> the roadmap carried "2D drawings — out of scope until after assemblies" from
+> the beginning; assemblies done, this was the revisit. The bet held — the
+> geometric core was OCC's `HLRBRep` (not code we wrote) and every supporting
+> piece (third document kind, stable edge refs, screen-space rendering,
+> staleness stamps, export) had a shipped pattern in the codebase. Cost came
+> in at the estimated assemblies-scale, dimensions the long pole.
 
 ## Why
 
@@ -390,10 +391,16 @@ OCC versions, the FEM rule).
    `add_drawing_dim` / `remove_drawing_dim` / `list_drawing_dims` + MCP. Tests:
    solver + formatter units, `drawing_smoke.py` dim + dangling loop. Label
    drag deferred (RPC `offset` sets it; GUI drag is D4 polish).
-4. **D4 — output + polish:** SVG writer **shipped in D2**, dimensions in it
-   **in D3**; remaining: PDF writer, the GUI Export dialog/menu entry + GUI
-   dimension picking + label drag (RPC/MCP already done), stale/error UX
-   polish, docs.
+4. **D4 — output + polish — SHIPPED (2026-07-14):** hand-rolled vector **PDF**
+   writer (`SavePDF`, base-14 Helvetica, points, Y-up, WinAnsi Ø/°) +
+   `export_drawing` `.pdf` dispatch; **File → Export…** on a drawing tab (SVG/
+   PDF) via `ui::ExportActiveDrawing` (shared with the RPC); **GUI dimension
+   picking** (arm a kind → click projected edges/circles, `HandleDimTool`
+   hit-tests + creates) + **label drag** (drag the value box → `labelOffset`);
+   **stale UX** (amber Update button + stale count); [guide.md](guide.md).
+   **Drawings are v1-complete.** Later (own designs): section/detail views,
+   balloons + on-sheet BOM, exploded drawing views, multi-sheet, GD&T, DXF
+   (goes to interchange).
 
 Order rationale: D0 kills the only unknown for a day's work; D1 before D2
 because views need somewhere to live and render; SVG export deliberately
