@@ -10,8 +10,11 @@
 
 #include <glm/glm.hpp>
 
+#include <cstdint>
+
 class Document;
 class AssemblyDocument;
+struct Occurrence;
 
 namespace ui {
 
@@ -23,5 +26,18 @@ inline LineVertex3D LineVertex(const glm::vec3& pos, const glm::vec3& color) {
   v.color = color;
   return v;
 }
+
+// Assembly-domain helpers defined in AppActions.cpp (they stay because the
+// core lifecycle/renderer/drawing code also uses them) but called by the
+// extracted AssemblyActions.cpp TU.
+glm::mat4 OccurrenceMatrix(const Occurrence& o);
+glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId);
+glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o);
+Document* PartDocById(AppState& state, uint64_t partId);
+extern const glm::vec3 kBodyPalette[5];
+
+// Defined in AssemblyActions.cpp; called by SyncDocumentRenderers (AppActions).
+void SyncAssemblyRenderers(AppState& state);
+void SyncInContextGhosts(AppState& state);
 
 }  // namespace ui
