@@ -379,13 +379,21 @@ OCC versions, the FEM rule).
    SVG (border, title block, visible/hidden edges), headless-tested by parsing
    (`drawing_smoke.py`, `drawing_assembly_smoke.py`, a `test_drawing.cpp` unit
    test). The SVG landed in D2 (not deferred to D4) to close the loop.
-3. **D3 — dimensions (the long pole):** projected-geometry picking, the six
-   kinds, `ProjRef` resolution + dangling behavior, dimension rendering
-   (ported `DrawDimensions` + sheet-anchored text), label drag,
-   `core::FormatLength`, dim RPCs.
-4. **D4 — output + polish:** SVG writer **shipped in D2**; remaining: PDF
-   writer, the GUI Export dialog/menu entry (RPC/MCP already done),
-   stale/error UX polish, docs. (D3 lands before D4.)
+3. **D3 — dimensions — SHIPPED (2026-07-14):** `core/DrawingDimension`
+   `ResolveDim(dim, view)` matches ProjRefs against a view's projected curves
+   and lays out draw-ready sheet-mm geometry + the measured value for all six
+   kinds (distance/-X/-Y, radius/diameter incl. a silhouette-pair fallback,
+   angle). Dangling refs → `resolved=false`, never rebound (T3). Shared
+   `core::FormatLength`/`FormatAngle` (`core/Format`); `SheetCurve` carries the
+   sheet-mm conic. Rendered identically in the viewport (`DrawDims`) and SVG
+   (`SaveSVG` arrows + text). RPCs `list_drawing_geometry` (ref discovery) /
+   `add_drawing_dim` / `remove_drawing_dim` / `list_drawing_dims` + MCP. Tests:
+   solver + formatter units, `drawing_smoke.py` dim + dangling loop. Label
+   drag deferred (RPC `offset` sets it; GUI drag is D4 polish).
+4. **D4 — output + polish:** SVG writer **shipped in D2**, dimensions in it
+   **in D3**; remaining: PDF writer, the GUI Export dialog/menu entry + GUI
+   dimension picking + label drag (RPC/MCP already done), stale/error UX
+   polish, docs.
 
 Order rationale: D0 kills the only unknown for a day's work; D1 before D2
 because views need somewhere to live and render; SVG export deliberately
