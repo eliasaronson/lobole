@@ -269,6 +269,35 @@ void DrawSketchModeToolbar(AppState& state) {
 // The assembly-mode toolbar: mate-creation tools (A3). Shown when an assembly
 // tab is active (no part document). Fit reuses FitCameraToDocument.
 void DrawAssemblyToolbar(AppState& state) {
+  // Insert part: place an occurrence of an existing part. Opens a picker of
+  // the project's part tabs (the only GUI path to add an occurrence).
+  if (ToolButton(ICON_FA_CIRCLE_PLUS, "Insert part (place an occurrence)"))
+    ImGui::OpenPopup("insert_part");
+  if (ImGui::BeginPopup("insert_part")) {
+    ImGui::TextDisabled("Insert part");
+    ImGui::Separator();
+    bool any = false;
+    for (const PartSlot& s : state.parts) {
+      if (s.kind != DocKind::Part) continue;
+      any = true;
+      if (ImGui::MenuItem(s.name.c_str())) {
+        SnapshotAssembly(state);
+        Occurrence occ;
+        occ.partId = s.id;
+        occ.name = s.name;
+        occ.fixed = state.assembly->OccurrenceCount() == 0;  // first = anchor
+        const uint64_t id = state.assembly->AddOccurrence(occ);
+        SelectOccurrence(state, id);
+        SolveActiveAssembly(state);
+      }
+    }
+    if (!any)
+      ImGui::TextDisabled("No parts yet — add a part with +Part first.");
+    ImGui::EndPopup();
+  }
+  ImGui::SameLine();
+  Divider();
+
   auto mateBtn = [&](const char* icon, const char* tip, MateType t) {
     const bool active = state.mateTool.active && state.mateTool.type == t;
     if (active)

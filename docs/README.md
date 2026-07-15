@@ -48,8 +48,9 @@ top-level vision + workstream index and holds the recommended sequencing.
   the workflow; `plan.md` is the design.
 - **[configurations/](configurations/plan.md)** — parametric part/assembly
   families: a doc-level named object (the FEM Study pattern) that overrides
-  parameters + suppresses features, applied by regenerating against an override
-  symbol table. **Design for sign-off** (the roadmap's next workstream; the
-  deferred-from-A4 design).
+  parameters + suppresses features (parts) or suppresses occurrences
+  (assemblies), applied by regenerating against an override symbol table.
+  **Shipped** (C0–C4; format v31). Per-occurrence part-config selection is the
+  one follow-on.
 
 Project-level files (`README.md`, `THIRD_PARTY.md`) stay at the repo root.

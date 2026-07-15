@@ -1,8 +1,11 @@
 # Configurations — parametric part/assembly families — design
 
-> Status: **SIGNED OFF (2026-07-14)** — the 7 decisions below stand, with
-> **assembly configurations included in scope** (C4 is committed, not a
-> "maybe-later" phase). Deferred from assemblies A4 as "their own design"
+> Status: **SHIPPED (C0–C4, 2026-07-14)** — v1 complete. Part configs
+> (override-regen + feature suppression) and assembly configs (occurrence
+> suppression), format v31, RPC/MCP (in `remote/RemoteConfigurations.cpp`) +
+> GUI panels. The one planned follow-on is per-occurrence part-config
+> selection (§7). This doc is the design + as-built record. Deferred from
+> assemblies A4 as "their own design"
 > ([a4-design.md](../assemblies/a4-design.md):38); the roadmap's next
 > workstream. Verdict: build it — the substrate is already here. A
 > configuration is a *doc-level named object* (the FEM Study pattern, verbatim),

@@ -60,13 +60,14 @@ results); **drawings** (HLR views of parts/assemblies, driven dimensions, SVG + 
 **Rendering:** MSAA + ACES + IBL/PBR, per-instance transparency, an offline path-traced
 Render button.
 
-**Thin or missing:** **configurations** (parametric part/assembly families) — the next
-workstream; assembly-level features; **UI/UX polish** (unified selection, command
-palette, a consistent feature-dialog pattern); modeling's thread/rib; rendering's
-SSAO + soft shadows + real-time hybrid RT (gated on the `main.cpp` render-path cleanup);
-semantic (three-way) merge for the git format. The three large logic files
-(`RemoteServer`/`AppActions`/`Serialization`) want a domain split — see the refactoring
-policy below.
+**Thin or missing:** **UI/UX polish** (unified selection, command palette, a
+consistent feature-dialog pattern) — the natural next workstream; assembly-level
+features; per-occurrence part-config selection (the one configurations follow-on);
+modeling's thread/rib; rendering's SSAO + soft shadows + real-time hybrid RT (gated on
+the `main.cpp` render-path cleanup); semantic (three-way) merge for the git format. The
+three large logic files (`RemoteServer`/`AppActions`/`Serialization`) want a domain
+split — config RPCs already carved into `remote/RemoteConfigurations.cpp`; see the
+refactoring policy below.
 
 ## Workstreams
 
@@ -87,6 +88,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | **v1 complete** — X1 STEP/STL/BREP + X2 glTF/OBJ/PLY (parts + assemblies, PBR materials, instanced), all via menu/RPC/MCP. X3 (IGES/mesh-import/DXF) + 3MF demand-driven |
 | 12. Simulation: FEM | [simulation/plan.md](simulation/plan.md) | **v1 shipped (FEM0–FEM4)** — single-part linear static: Netgen tet10 meshing, in-house Eigen solver (validated vs analytic bar/cantilever/pressure), face BCs via toponaming, von Mises + displacement with factor of safety; Simulation-mode GUI (Studies panel, load face-picking, Turbo colormap overlay with deform warp + marker + legend); MCP mirrors + `fem_smoke`. Remain: modal, assembly/contact, thermal, gravity, VTU export (all deferred by design) |
 | 13. Drawings: 2D drafting | [drawings/plan.md](drawings/plan.md) + [guide.md](drawings/guide.md) | **v1 complete (D0–D4)** — drawing doc kind (format v30), HLR-projected views of parts + assemblies with projected-child folding, six driven dimensions via toponaming refs, title block, SVG + PDF export; GUI picking + headless/MCP. Deferred to own designs: section/detail views, on-sheet BOM/balloons, exploded drawing views, multi-sheet, GD&T, DXF (→ interchange) |
+| 14. Configurations | [configurations/plan.md](configurations/plan.md) | **v1 complete (C0–C4; format v31)** — parametric families: part configs (variable overrides as expressions + feature suppression, applied by regenerating against an override symbol table) and assembly configs (occurrence suppression); persisted active config; RPC/MCP (`remote/RemoteConfigurations.cpp`) + GUI panels. Follow-on: per-occurrence part-config selection |
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
 differentiators — the reason this project exists rather than being a worse
