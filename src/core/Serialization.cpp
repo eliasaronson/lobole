@@ -1,4 +1,5 @@
 #include "core/Serialization.h"
+#include "core/SerializationInternal.h"
 
 #include "Logger.h"
 #include "core/BooleanFeature.h"
@@ -30,30 +31,6 @@ using nlohmann::json;
 
 namespace {
 
-constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 32; // v32: FEM modal/gravity (v31: configurations)
-
-json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
-
-glm::vec3 Vec3FromJson(const json& j) {
-  return glm::vec3(j.at(0).get<float>(), j.at(1).get<float>(),
-                   j.at(2).get<float>());
-}
-
-// Quaternion as [x, y, z, w] (glm stores it (w,x,y,z); the JSON order matches
-// the a2-design occurrence schema).
-json QuatToJson(const glm::quat& q) { return json::array({q.x, q.y, q.z, q.w}); }
-
-glm::quat QuatFromJson(const json& j) {
-  return glm::quat(j.at(3).get<float>(), j.at(0).get<float>(),
-                   j.at(1).get<float>(), j.at(2).get<float>()); // (w,x,y,z)
-}
-
-json Vec2ToJson(const glm::vec2& v) { return json::array({v.x, v.y}); }
-
-glm::vec2 Vec2FromJson(const json& j) {
-  return glm::vec2(j.at(0).get<float>(), j.at(1).get<float>());
-}
 
 json EntityToJson(const sketch::Entity& entity) {
   json j = std::visit(
@@ -1041,18 +1018,6 @@ ExplodedView ExplodedViewFromJson(const json& j) {
 // value+expr convention: the numeric field is always written, the expression
 // only when non-empty (a plain literal round-trips byte-identically).
 
-namespace {
-
-json ElementRefJson(const ElementRef& ref) {
-  return json{{"feature_id", ref.featureId}, {"element", ref.name}};
-}
-
-ElementRef ElementRefFromJson(const json& j) {
-  return ElementRef{j.value("feature_id", uint64_t{0}),
-                    j.value("element", std::string{})};
-}
-
-}  // namespace
 
 json StudyToJson(const fem::Study& s) {
   json j;
