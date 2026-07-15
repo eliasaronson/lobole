@@ -1000,10 +1000,10 @@ def list_drawing_views() -> dict:
 
 
 @mcp.tool(description="Export the active drawing to a vector file (path ending "
-          ".svg; PDF lands in D4). Re-projects first so the file reflects the "
-          "current geometry, then writes the sheet — border, title block, "
-          "every view's visible (solid)/hidden (dashed) edges, and each "
-          "resolved dimension. Returns the path and view count.")
+          ".svg or .pdf). Re-projects first so the file reflects the current "
+          "geometry, then writes the sheet — border, title block, every view's "
+          "visible (solid)/hidden (dashed) edges, and each resolved dimension. "
+          "Returns the path and view count.")
 def export_drawing(path: str) -> dict:
     return _call("export_drawing", path=path)
 

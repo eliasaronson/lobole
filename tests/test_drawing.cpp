@@ -343,6 +343,57 @@ TEST_CASE("SVG export writes the sheet, views, and title block",
   fs::remove(out);
 }
 
+TEST_CASE("PDF export writes a valid single-page document", "[drawing][export]") {
+  DrawingDocument doc;
+  doc.GetSheet().size = SheetSize::A3;
+  doc.GetSheet().landscape = true;
+  doc.GetSheet().titleBlock.project = "Gearbox";
+
+  drawing::SheetView view;
+  view.viewId = 1;
+  view.hasGeometry = true;
+  drawing::SheetCurve c;
+  c.visible = true;
+  c.points = {{20, 20}, {60, 20}, {60, 50}, {20, 50}, {20, 20}};
+  view.curves.push_back(c);
+
+  drawing::ResolvedDim dim;
+  dim.id = 1;
+  dim.kind = DrawingDimKind::Diameter;
+  dim.resolved = true;
+  dim.radial = true;
+  dim.center = {40, 35};
+  dim.radius = 6;
+  dim.rim = {44, 39};
+  dim.value = 12;
+  dim.text = "\xC3\x98" "12";  // Ø12 — exercises the WinAnsi mapping
+  dim.labelPos = {48, 42};
+
+  const fs::path out = fs::temp_directory_path() / "drawing_export.pdf";
+  std::string err;
+  REQUIRE(DrawingExport::SavePDF(doc, {view}, {dim}, out.string(), &err));
+  INFO(err);
+
+  std::ifstream in(out, std::ios::binary);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  const std::string pdf = ss.str();
+
+  CHECK(pdf.rfind("%PDF-1.", 0) == 0);
+  CHECK(pdf.find("/Type /Catalog") != std::string::npos);
+  CHECK(pdf.find("/MediaBox [0 0 ") != std::string::npos);
+  CHECK(pdf.find("/BaseFont /Helvetica") != std::string::npos);
+  CHECK(pdf.find("stream") != std::string::npos);
+  CHECK(pdf.find("startxref") != std::string::npos);
+  // The A3 landscape long edge is 420 mm -> ~1190.55 pt.
+  CHECK(pdf.find("1190.55") != std::string::npos);
+  // Ø became the WinAnsi byte 0xD8, not the raw UTF-8 pair.
+  CHECK(pdf.find("\xD8" "12") != std::string::npos);
+  CHECK(pdf.find("\xC3\x98") == std::string::npos);
+  CHECK(pdf.rfind("%%EOF") != std::string::npos);
+  fs::remove(out);
+}
+
 TEST_CASE("Drawing loaders reject the wrong document kind",
           "[drawing][serialization]") {
   // A drawing saved and read back by the part loader must be refused, and

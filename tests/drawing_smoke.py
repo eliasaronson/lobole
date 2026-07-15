@@ -184,6 +184,15 @@ def main():
                f"dimension survived reopen and re-measured: {dims2}")
         dim_id = dims2[0]["id"]
 
+        # PDF export produces a valid single-page vector document.
+        pdf_path = os.path.join(tmp, "bracket.pdf")
+        d.call("export_drawing", path=pdf_path)
+        pdf = open(pdf_path, "rb").read()
+        expect(pdf.startswith(b"%PDF-1."), "PDF header")
+        expect(pdf.rstrip().endswith(b"%%EOF"), "PDF trailer")
+        expect(b"/BaseFont /Helvetica" in pdf, "PDF font")
+        expect(b"startxref" in pdf, "PDF xref")
+
         # --- D3: dangling refs are first-class, never rebound ---------------
         # Delete the box feature its width dim references; the projected edges
         # vanish, so the dim reads dangling after an explicit update.

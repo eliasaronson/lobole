@@ -1309,9 +1309,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     bool ok = false;
     if (ext == ".svg")
       ok = DrawingExport::SaveSVG(*state.drawing, views, dims, path, &err);
+    else if (ext == ".pdf")
+      ok = DrawingExport::SavePDF(*state.drawing, views, dims, path, &err);
     else
       throw std::runtime_error("unsupported drawing format '" + ext +
-                               "' (svg only; pdf lands in D4)");
+                               "' (use .svg or .pdf)");
     if (!ok) throw std::runtime_error(err);
     return {{"path", path}, {"views", views.size()}};
   }
