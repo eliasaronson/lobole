@@ -1288,34 +1288,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     const std::string path = p.at("path").get<std::string>();
-    // Export reflects current geometry: project first, then gather the views
-    // in drawing order.
-    ui::UpdateDrawingRenders(state);
-    std::vector<drawing::SheetView> views;
-    for (const DrawingView& view : state.drawing->GetViews()) {
-      const auto it = state.drawingRenders.find(view.id);
-      if (it != state.drawingRenders.end()) views.push_back(it->second);
-    }
-    std::vector<drawing::ResolvedDim> dims;
-    for (const DrawingDim& dim : state.drawing->GetDims())
-      dims.push_back(ui::ResolveDrawingDim(state, dim));
-    std::string ext;
-    const auto dot = path.find_last_of('.');
-    if (dot != std::string::npos) {
-      ext = path.substr(dot);
-      for (char& c : ext) c = static_cast<char>(std::tolower(c));
-    }
     std::string err;
-    bool ok = false;
-    if (ext == ".svg")
-      ok = DrawingExport::SaveSVG(*state.drawing, views, dims, path, &err);
-    else if (ext == ".pdf")
-      ok = DrawingExport::SavePDF(*state.drawing, views, dims, path, &err);
-    else
-      throw std::runtime_error("unsupported drawing format '" + ext +
-                               "' (use .svg or .pdf)");
-    if (!ok) throw std::runtime_error(err);
-    return {{"path", path}, {"views", views.size()}};
+    if (!ui::ExportActiveDrawing(state, path, &err))
+      throw std::runtime_error(err);
+    return {{"path", path}, {"views", state.drawing->ViewCount()}};
   }
   if (m == "list_drawing_geometry") {
     // Discovery for dimensioning: the distinct source edges/silhouettes of a

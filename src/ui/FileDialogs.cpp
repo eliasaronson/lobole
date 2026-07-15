@@ -89,6 +89,27 @@ void SaveProjectDialog(AppState& state) {
 }
 
 void ExportDialog(AppState& state) {
+  // A drawing tab exports to vector sheet formats (SVG / PDF), not the mesh /
+  // B-Rep writers below.
+  if (state.drawing) {
+    if (state.drawing->GetViews().empty())
+      return;  // nothing projected to export yet
+    nfdchar_t* out = nullptr;
+    if (NFD_SaveDialog("svg,pdf", nullptr, &out) != NFD_OKAY)
+      return;
+    std::string path(out);
+    free(out);
+    std::string ext = std::filesystem::path(path).extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    if (ext != ".svg" && ext != ".pdf") path += ".pdf";  // default
+    std::string error;
+    if (ExportActiveDrawing(state, path, &error))
+      LOG_INFO("Exported drawing to {}", path);
+    else
+      LOG_ERROR("Drawing export failed: {}", error);
+    return;
+  }
+
   const bool haveAssembly =
       state.assembly && state.assembly->OccurrenceCount() > 0;
   const bool havePart =

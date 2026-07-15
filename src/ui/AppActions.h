@@ -149,6 +149,12 @@ uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId);
 // not projected or a ref is dangling. Defined in AppActions.cpp.
 drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim);
 
+// Re-projects and writes the active drawing to `path` (.svg or .pdf by
+// extension). The shared export path for the export_drawing RPC and the GUI
+// Export dialog. Returns false and fills *error on failure.
+bool ExportActiveDrawing(AppState& state, const std::string& path,
+                         std::string* error);
+
 // ---- Simulation mode (FEM) ------------------------------------------------
 
 // Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter

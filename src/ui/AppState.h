@@ -432,6 +432,17 @@ struct AppState {
   // serialized. Cleared on tab switch (ResetActiveTabUiState).
   std::map<uint64_t, drawing::SheetView> drawingRenders;
 
+  // Dimension-placement tool (D4): armed from the panel with a kind, then the
+  // user clicks projected edges/circles on the sheet to pick refs; the dim is
+  // created once enough are picked. All refs must share one view.
+  struct DimTool {
+    bool active = false;
+    DrawingDimKind kind = DrawingDimKind::Distance;
+    uint64_t viewId = 0;        // the view the first pick fixed
+    std::vector<ProjRef> refs;  // picked so far
+  } dimTool;
+  uint64_t dimDrag = 0;  // id of the dimension whose label is being dragged
+
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
   EdgePickState edgePick;

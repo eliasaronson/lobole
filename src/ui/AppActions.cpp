@@ -24,6 +24,7 @@
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
 #include "core/DrawingDimension.h"
+#include "core/DrawingExport.h"
 #include "core/DrawingProjection.h"
 #include "core/DrawingRender.h"
 #include "core/Serialization.h"
@@ -579,6 +580,8 @@ void ResetActiveTabUiState(AppState& state) {
   // NOTE: drawingRenders is NOT cleared here — it is stashed/restored per slot
   // (StashActive/ActivateSlot) so a drawing keeps its projected geometry across
   // tab switches and only an explicit update re-projects.
+  state.dimTool = AppState::DimTool{};  // transient dimension-pick state
+  state.dimDrag = 0;
   // Any tab change exits simulation mode (results themselves live on the
   // Document and survive; only the mode/display state resets).
   state.simulation = SimulationState{};
@@ -2364,6 +2367,31 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
     return rd;
   }
   return drawing::ResolveDim(dim, it->second);
+}
+
+bool ExportActiveDrawing(AppState& state, const std::string& path,
+                         std::string* error) {
+  if (!state.drawing) {
+    if (error) *error = "no active drawing";
+    return false;
+  }
+  UpdateDrawingRenders(state);  // export reflects current geometry
+  std::vector<drawing::SheetView> views;
+  for (const DrawingView& v : state.drawing->GetViews()) {
+    const auto it = state.drawingRenders.find(v.id);
+    if (it != state.drawingRenders.end()) views.push_back(it->second);
+  }
+  std::vector<drawing::ResolvedDim> dims;
+  for (const DrawingDim& dm : state.drawing->GetDims())
+    dims.push_back(ResolveDrawingDim(state, dm));
+  std::string ext = std::filesystem::path(path).extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+  if (ext == ".svg")
+    return DrawingExport::SaveSVG(*state.drawing, views, dims, path, error);
+  if (ext == ".pdf")
+    return DrawingExport::SavePDF(*state.drawing, views, dims, path, error);
+  if (error) *error = "unsupported drawing format '" + ext + "' (use .svg or .pdf)";
+  return false;
 }
 
 uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId) {

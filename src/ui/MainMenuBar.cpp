@@ -75,11 +75,12 @@ void DrawFileMenu(AppState& state) {
   if (ImGui::MenuItem("Import STEP...", "Ctrl+I")) {
     OpenStepFileDialog(state);
   }
-  // Enabled for a part with bodies, or an assembly (visual export walks its
-  // occurrences).
+  // Enabled for a part with bodies, an assembly (visual export walks its
+  // occurrences), or a drawing with views (SVG/PDF sheet export).
   const bool canExport =
       (state.document && !state.document->GetBodies().empty()) ||
-      (state.assembly && state.assembly->OccurrenceCount() > 0);
+      (state.assembly && state.assembly->OccurrenceCount() > 0) ||
+      (state.drawing && !state.drawing->GetViews().empty());
   if (ImGui::MenuItem("Export...", nullptr, false, canExport)) {
     ExportDialog(state);
   }

@@ -87,6 +87,93 @@ void StrokeDashed(ImDrawList* dl, AppState& state,
   }
 }
 
+// How many refs a dimension kind needs before it can be created.
+int NeededRefs(DrawingDimKind k) {
+  return (k == DrawingDimKind::Radius || k == DrawingDimKind::Diameter) ? 1 : 2;
+}
+
+double PointSegDist(glm::dvec2 p, glm::dvec2 a, glm::dvec2 b) {
+  const glm::dvec2 ab = b - a;
+  const double len2 = glm::dot(ab, ab);
+  const double t = len2 < 1e-12 ? 0.0 : glm::clamp(glm::dot(p - a, ab) / len2, 0.0, 1.0);
+  return glm::length(p - (a + t * ab));
+}
+
+// The projected curve nearest `cursor` (sheet mm) across all views, within
+// `maxDist`, that carries a dimensionable ref. Sets `viewIdOut` to its view.
+const drawing::SheetCurve* PickCurve(AppState& state, glm::dvec2 cursor,
+                                     double maxDist, uint64_t& viewIdOut) {
+  const drawing::SheetCurve* best = nullptr;
+  double bestDist = maxDist;
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    const auto it = state.drawingRenders.find(view.id);
+    if (it == state.drawingRenders.end()) continue;
+    for (const drawing::SheetCurve& c : it->second.curves) {
+      if (!c.edge.IsSet() && !c.silFace.IsSet()) continue;
+      for (size_t i = 1; i < c.points.size(); ++i) {
+        const double d = PointSegDist(cursor, c.points[i - 1], c.points[i]);
+        if (d < bestDist) {
+          bestDist = d;
+          best = &c;
+          viewIdOut = view.id;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+ProjRef RefOfCurve(const drawing::SheetCurve& c, uint64_t viewId) {
+  ProjRef r;
+  r.viewId = viewId;
+  r.occurrenceId = c.sourceId;
+  if (c.edge.IsSet()) r.edge = c.edge;
+  else r.silFace = c.silFace;
+  return r;
+}
+
+// Dimension-placement interaction (D4): highlights the projected edge under the
+// cursor, picks it on click (all refs share one view), and creates the dim once
+// enough are picked. Called from DrawSheet while the tool is armed.
+void HandleDimTool(ImDrawList* dl, AppState& state) {
+  if (!state.dimTool.active || !state.drawing) return;
+  ImGuiIO& io = ImGui::GetIO();
+  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    state.dimTool = AppState::DimTool{};
+    return;
+  }
+  if (io.WantCaptureMouse) return;  // cursor is over a panel
+
+  const glm::dvec2 cursor = ScreenToSheet(state, io.MousePos);
+  const double maxDist = state.sheetView.scale > 0 ? 5.0 / state.sheetView.scale : 5.0;
+  uint64_t viewId = 0;
+  const drawing::SheetCurve* hit = PickCurve(state, cursor, maxDist, viewId);
+  // Once the first ref fixes a view, only that view's geometry is pickable.
+  if (hit && state.dimTool.viewId && viewId != state.dimTool.viewId) hit = nullptr;
+
+  if (hit) {
+    const ImU32 hl = IM_COL32(80, 170, 255, 255);
+    for (size_t i = 1; i < hit->points.size(); ++i)
+      dl->AddLine(SheetToScreen(state, hit->points[i - 1]),
+                  SheetToScreen(state, hit->points[i]), hl, 2.6f);
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      state.dimTool.refs.push_back(RefOfCurve(*hit, viewId));
+      state.dimTool.viewId = viewId;
+      if (static_cast<int>(state.dimTool.refs.size()) >=
+          NeededRefs(state.dimTool.kind)) {
+        DrawingDim d;
+        d.kind = state.dimTool.kind;
+        d.viewId = state.dimTool.viewId;
+        d.refs = state.dimTool.refs;
+        d.labelOffset = {0.0, -12.0};  // a sensible default; drag to move
+        SnapshotDrawing(state);
+        state.drawing->AddDim(d);
+        state.dimTool = AppState::DimTool{};  // done — disarm
+      }
+    }
+  }
+}
+
 // A filled arrowhead at `tip` pointing along unit `dir` (sheet mm), ported from
 // the sketch Arrow but in sheet space so it scales with zoom.
 void SheetArrow(ImDrawList* dl, AppState& state, glm::dvec2 tip, glm::dvec2 dir,
@@ -108,8 +195,10 @@ void DrawDims(ImDrawList* dl, AppState& state) {
   const ImU32 err = IM_COL32(210, 80, 70, 255);
   const float fontPx = static_cast<float>(3.0 * state.sheetView.scale);
   ImFont* font = ImGui::GetFont();
+  ImGuiIO& io = ImGui::GetIO();
+  const bool overPanel = io.WantCaptureMouse;
 
-  for (const DrawingDim& dim : state.drawing->GetDims()) {
+  for (DrawingDim& dim : state.drawing->GetDims()) {
     const drawing::ResolvedDim d = ResolveDrawingDim(state, dim);
     if (!d.resolved) {
       // Dangling: a red marker at the label offset from the (stored) offset.
@@ -135,14 +224,34 @@ void DrawDims(ImDrawList* dl, AppState& state) {
         SheetArrow(dl, state, d.dim2, -u, ink);
       }
     }
+    // Value text with a white backing box; the box is a drag handle that moves
+    // the label (dim.labelOffset), the sketch labelOffset pattern.
+    const ImVec2 tp = SheetToScreen(state, d.labelPos);
+    const ImVec2 tsz = font->CalcTextSizeA(fontPx >= 4.0f ? fontPx : 11.0f,
+                                           FLT_MAX, 0.0f, d.text.c_str());
+    const ImVec2 org(tp.x - tsz.x * 0.5f, tp.y - tsz.y * 0.5f);
     if (fontPx >= 4.0f) {
-      const ImVec2 tp = SheetToScreen(state, d.labelPos);
-      const ImVec2 tsz = font->CalcTextSizeA(fontPx, FLT_MAX, 0.0f, d.text.c_str());
-      const ImVec2 org(tp.x - tsz.x * 0.5f, tp.y - tsz.y * 0.5f);
       dl->AddRectFilled(ImVec2(org.x - 2, org.y - 1),
                         ImVec2(org.x + tsz.x + 2, org.y + tsz.y + 1),
                         IM_COL32(250, 250, 250, 230), 2.0f);
       dl->AddText(font, fontPx, org, ink, d.text.c_str());
+    }
+    // Label drag (only when the dimension tool isn't picking).
+    if (!state.dimTool.active && !overPanel) {
+      const bool overLabel = io.MousePos.x >= org.x - 2 &&
+                             io.MousePos.x <= org.x + tsz.x + 2 &&
+                             io.MousePos.y >= org.y - 1 &&
+                             io.MousePos.y <= org.y + tsz.y + 1;
+      if (overLabel && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        SnapshotDrawing(state);
+        state.dimDrag = dim.id;
+      }
+      if (state.dimDrag == dim.id) {
+        const double s = state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
+        dim.labelOffset.x += io.MouseDelta.x / s;
+        dim.labelOffset.y -= io.MouseDelta.y / s;  // screen +Y is sheet -Y
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) state.dimDrag = 0;
+      }
     }
   }
 }
@@ -291,6 +400,7 @@ void DrawSheet(AppState& state) {
 
   DrawViews(dl, state);
   DrawDims(dl, state);
+  HandleDimTool(dl, state);
 
   dl->PopClipRect();
 }
@@ -388,6 +498,58 @@ void DrawViewsSection(AppState& state) {
   }
 }
 
+// The dimension tools + dimension list. Arming a kind puts the sheet into
+// pick mode (HandleDimTool); the created dims are re-measured on every update.
+void DrawDimsSection(AppState& state) {
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Dimensions");
+  ImGui::Separator();
+
+  if (state.dimTool.active) {
+    const int need = NeededRefs(state.dimTool.kind);
+    ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f),
+                       "Pick edge %d of %d  (Esc to cancel)",
+                       static_cast<int>(state.dimTool.refs.size()) + 1, need);
+    if (ImGui::Button("Cancel")) state.dimTool = AppState::DimTool{};
+  } else {
+    struct Tool { const char* label; DrawingDimKind kind; };
+    static const Tool tools[] = {
+        {"Distance", DrawingDimKind::Distance},
+        {"Dist X", DrawingDimKind::DistanceX},
+        {"Dist Y", DrawingDimKind::DistanceY},
+        {"Radius", DrawingDimKind::Radius},
+        {"Diameter", DrawingDimKind::Diameter},
+        {"Angle", DrawingDimKind::Angle}};
+    for (size_t i = 0; i < std::size(tools); ++i) {
+      if (i % 3 != 0) ImGui::SameLine();
+      if (ImGui::Button(tools[i].label)) {
+        state.dimTool = AppState::DimTool{};
+        state.dimTool.active = true;
+        state.dimTool.kind = tools[i].kind;
+      }
+    }
+  }
+
+  for (const DrawingDim& dim : state.drawing->GetDims()) {
+    ImGui::PushID(static_cast<int>(dim.id) + 100000);
+    const drawing::ResolvedDim rd = ResolveDrawingDim(state, dim);
+    if (rd.resolved)
+      ImGui::BulletText("%s = %s", DrawingDimKindToString(dim.kind),
+                        rd.text.c_str());
+    else
+      ImGui::TextColored(ImVec4(0.82f, 0.31f, 0.27f, 1.0f),
+                         "  %s (dangling)", DrawingDimKindToString(dim.kind));
+    ImGui::SameLine();
+    if (ImGui::SmallButton("x")) {
+      SnapshotDrawing(state);
+      state.drawing->RemoveDim(dim.id);
+      ImGui::PopID();
+      break;
+    }
+    ImGui::PopID();
+  }
+}
+
 }  // namespace
 
 void DrawSheetPanel(AppState& state) {
@@ -435,10 +597,7 @@ void DrawSheetPanel(AppState& state) {
   if (ImGui::Button("Redo")) RedoDrawing(state);
 
   DrawViewsSection(state);
-
-  ImGui::Spacing();
-  ImGui::TextDisabled("%zu dimension(s) — dimensions arrive in D3.",
-                      state.drawing->DimCount());
+  DrawDimsSection(state);
 
   ImGui::End();
 }
