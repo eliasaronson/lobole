@@ -215,6 +215,7 @@ struct SimulationState {
   enum class Field { None, VonMises, Displacement };
   Field field = Field::None;
   float deformScale = 0.0f; // shader-side warp multiplier (0 = undeformed)
+  int activeMode = 0;       // modal: which mode shape the overlay displays
   // Body render instances hidden while the field overlay replaces them, so
   // ExitSimulation / field=None restores exactly those.
   std::vector<uint32_t> hiddenMeshes;

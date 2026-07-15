@@ -763,6 +763,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           s.meshSizeExpr.clear();
         }
       }
+      if (p.contains("type") &&
+          !fem::AnalysisTypeFromString(p.at("type").get<std::string>(), s.type))
+        throw std::runtime_error("analysis type must be static or modal");
+      if (p.contains("num_modes")) s.numModes = p.at("num_modes").get<int>();
+      if (p.contains("gravity")) {
+        const auto& g = p.at("gravity");
+        s.gravity = glm::dvec3(g.at(0).get<double>(), g.at(1).get<double>(),
+                               g.at(2).get<double>());
+      }
     });
     return json::object();
   }
@@ -855,6 +864,24 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const fem::StudyRuntime* rt = doc->StudyResults(id);
     if (!rt) throw std::runtime_error("study has not been run");
 
+    // Modal studies report per-body natural frequencies instead of stress.
+    if (s->type == fem::AnalysisType::Modal) {
+      std::size_t nodes = 0, elements = 0;
+      json bodies = json::array();
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        nodes += b.mesh.stats.nodeCount;
+        elements += b.mesh.stats.tetCount;
+        json freqs = json::array();
+        for (const auto& mode : b.results.modes) freqs.push_back(mode.frequencyHz);
+        bodies.push_back({{"body", b.bodyName}, {"frequencies_hz", freqs}});
+      }
+      return {{"analysis", "modal"},
+              {"nodes", nodes},
+              {"elements", elements},
+              {"bodies", bodies},
+              {"stale", doc->StudyResultsStale(id)}};
+    }
+
     // Aggregate mesh size and a factor of safety (min over bodies with yield
     // data) from the governing von Mises.
     std::size_t nodes = 0, elements = 0;
@@ -932,7 +959,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                             : ui::SimulationState::Field::VonMises;
     if (p.contains("deform_scale"))
       state.simulation.deformScale = static_cast<float>(p.at("deform_scale").get<double>());
-    return {{"field", f}, {"deform_scale", state.simulation.deformScale}};
+    if (p.contains("mode"))  // modal: which mode shape to display (0-based)
+      state.simulation.activeMode = p.at("mode").get<int>();
+    return {{"field", f},
+            {"deform_scale", state.simulation.deformScale},
+            {"mode", state.simulation.activeMode}};
   }
 
   if (m == "set_section") {

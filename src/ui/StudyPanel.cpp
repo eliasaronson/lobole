@@ -160,6 +160,34 @@ void DrawResults(AppState& state, const fem::Study& s) {
     elements += b.mesh.stats.tetCount;
   }
   ImGui::Text("Mesh: %zu nodes / %zu elements", nodes, elements);
+
+  if (s.type == fem::AnalysisType::Modal) {
+    // Natural frequencies: a selectable list; picking one shows that mode
+    // shape in the viewport.
+    ImGui::SeparatorText("Natural frequencies");
+    const fem::StudyBodyResult* b = nullptr;
+    for (const auto& br : rt->bodies)
+      if (!br.results.modes.empty()) { b = &br; break; }
+    if (b) {
+      for (int i = 0; i < (int)b->results.modes.size(); ++i) {
+        char lbl[64];
+        std::snprintf(lbl, sizeof(lbl), "Mode %d:  %.4g Hz", i + 1,
+                      b->results.modes[i].frequencyHz);
+        if (ImGui::Selectable(lbl, sim.activeMode == i)) {
+          sim.activeMode = i;
+          sim.field = SimulationState::Field::Displacement;  // show the shape
+        }
+      }
+    }
+    ImGui::SeparatorText("Display");
+    bool showing = sim.field != SimulationState::Field::None;
+    if (ImGui::Checkbox("Show mode shape", &showing))
+      sim.field = showing ? SimulationState::Field::Displacement
+                          : SimulationState::Field::None;
+    ImGui::SliderFloat("Deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
+    return;
+  }
+
   ImGui::Text("Max von Mises: %.3g MPa", rt->maxVonMises);
   ImGui::Text("Max displacement: %.4g mm", rt->maxDisplacement);
 
@@ -206,6 +234,15 @@ void DrawStudyPanel(AppState& state) {
     ModifyStudy(state, s->id, "Rename study",
                 [&](fem::Study& cs) { cs.name = newName; });
   }
+  // Analysis type: Static (stress) or Modal (natural frequencies).
+  const char* kTypes[] = {"Static", "Modal"};
+  int typeIdx = s->type == fem::AnalysisType::Modal ? 1 : 0;
+  if (ImGui::Combo("Analysis", &typeIdx, kTypes, 2)) {
+    const auto nt = typeIdx == 1 ? fem::AnalysisType::Modal
+                                 : fem::AnalysisType::Static;
+    ModifyStudy(state, s->id, "Set analysis type",
+                [&](fem::Study& cs) { cs.type = nt; });
+  }
   double meshSize = s->meshSize;
   if (ImGui::InputDouble("Mesh size (mm, 0=auto)", &meshSize, 0.0, 0.0, "%.3g",
                          ImGuiInputTextFlags_EnterReturnsTrue)) {
@@ -213,6 +250,29 @@ void DrawStudyPanel(AppState& state) {
       cs.meshSize = meshSize;
       cs.meshSizeExpr.clear();
     });
+  }
+
+  if (s->type == fem::AnalysisType::Modal) {
+    int nm = s->numModes;
+    if (ImGui::InputInt("Modes", &nm) && nm >= 1)
+      ModifyStudy(state, s->id, "Set mode count",
+                  [&](fem::Study& cs) { cs.numModes = nm; });
+  } else {
+    // Static: an optional gravity / self-weight load.
+    bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
+    if (ImGui::Checkbox("Gravity (self-weight)", &on)) {
+      const glm::dvec3 g = on ? glm::dvec3(0, 0, -9.81) : glm::dvec3(0, 0, 0);
+      ModifyStudy(state, s->id, "Toggle gravity",
+                  [&](fem::Study& cs) { cs.gravity = g; });
+    }
+    if (on) {
+      float g[3] = {(float)s->gravity.x, (float)s->gravity.y, (float)s->gravity.z};
+      if (ImGui::InputFloat3("g (m/s^2)", g, "%.2f",
+                             ImGuiInputTextFlags_EnterReturnsTrue))
+        ModifyStudy(state, s->id, "Set gravity", [&](fem::Study& cs) {
+          cs.gravity = glm::dvec3(g[0], g[1], g[2]);
+        });
+    }
   }
 
   DrawLoads(state, *s);
@@ -250,10 +310,13 @@ void DrawFieldLegend(AppState& state) {
     return;
   const fem::StudyRuntime* rt = state.document->StudyResults(sim.activeStudyId);
   if (!rt) return;
-  const bool vm = sim.field == SimulationState::Field::VonMises;
-  const double maxVal = vm ? rt->maxVonMises : rt->maxDisplacement;
-  const char* unit = vm ? "MPa" : "mm";
-  const char* title = vm ? "von Mises" : "displacement";
+  const fem::Study* study = state.document->FindStudy(sim.activeStudyId);
+  const bool modal = study && study->type == fem::AnalysisType::Modal;
+  const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
+  // Modal displays a normalized mode shape (0..1); static shows the real field.
+  const double maxVal = modal ? 1.0 : (vm ? rt->maxVonMises : rt->maxDisplacement);
+  const char* unit = modal ? "" : (vm ? "MPa" : "mm");
+  const char* title = modal ? "mode shape" : (vm ? "von Mises" : "displacement");
 
   // A vertical Turbo colorbar anchored to the viewport's lower-left corner.
   ImDrawList* dl = ImGui::GetForegroundDrawList();

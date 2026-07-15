@@ -835,16 +835,22 @@ void SyncFieldRenderer(AppState& state) {
     return;
   }
 
-  // Rebuild only when the field, study, or results generation changes; the
-  // deform scale is a push constant (updated every frame in the main loop).
-  const uint64_t key = (static_cast<uint64_t>(sim.field) * 1000003ull +
-                        sim.activeStudyId) * 1000003ull +
-                       doc->StudyResultsEpoch();
+  // A modal study displays a normalized mode shape (displacement field of the
+  // active mode); a static study displays von Mises or displacement magnitude.
+  const fem::Study* study = doc->FindStudy(sim.activeStudyId);
+  const bool modal = study && study->type == fem::AnalysisType::Modal;
+
+  // Rebuild only when the field, study, results generation, or active mode
+  // changes; the deform scale is a push constant (updated every frame).
+  const uint64_t key = ((static_cast<uint64_t>(sim.field) * 1000003ull +
+                         sim.activeStudyId) * 1000003ull +
+                        doc->StudyResultsEpoch()) * 1000003ull +
+                       (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0);
   if (key == sim.fieldBuiltKey) return;
 
-  const bool vm = sim.field == SimulationState::Field::VonMises;
+  const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
   const double fmax = vm ? rt->maxVonMises : rt->maxDisplacement;
-  const double inv = fmax > 0 ? 1.0 / fmax : 0.0;
+  const double inv = modal ? 1.0 : (fmax > 0 ? 1.0 / fmax : 0.0);
 
   std::vector<FieldVertex> verts;
   std::vector<uint32_t> indices;
@@ -852,12 +858,21 @@ void SyncFieldRenderer(AppState& state) {
   // midsides 3,4,5): (0,3,5)(3,1,4)(5,4,2)(3,4,5).
   static const int kSub[4][3] = {{0, 3, 5}, {3, 1, 4}, {5, 4, 2}, {3, 4, 5}};
   for (const fem::StudyBodyResult& b : rt->bodies) {
+    // Pick the displacement source: the active mode shape (modal) or the
+    // static solution.
+    const std::vector<glm::dvec3>* disp = &b.results.displacement;
+    if (modal) {
+      if (b.results.modes.empty()) continue;
+      const int mi = std::clamp(sim.activeMode, 0,
+                                static_cast<int>(b.results.modes.size()) - 1);
+      disp = &b.results.modes[mi].displacement;
+    }
     for (const auto& tri : b.mesh.boundary) {
       const uint32_t base = static_cast<uint32_t>(verts.size());
       for (int i = 0; i < 6; ++i) {
         const int n = tri.nodes[i];
         const glm::dvec3& p = b.mesh.nodes[n];
-        const glm::dvec3& d = b.results.displacement[n];
+        const glm::dvec3& d = (*disp)[n];
         const double val = vm ? b.results.vonMises[n] : glm::length(d);
         FieldVertex fv;
         fv.position = glm::vec3(p);
