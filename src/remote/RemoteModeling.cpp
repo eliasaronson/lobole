@@ -9,8 +9,6 @@
 #include "core/SketchFeature.h"
 #include "core/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
-#include "remote/RemoteSimulation.h"
-#include "remote/RemoteInspection.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/PreviewFeature.h"
@@ -345,13 +343,6 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     return json{{"variables", variables}};
   }
 
-  if (doc) {
-    if (auto r = remote::HandleSimulationRpc(state, *doc, m, p)) return *r;
-  }
-
-  if (doc) {
-    if (auto r = remote::HandleInspectionRpc(state, *doc, m, p)) return *r;
-  }
   return std::nullopt;
 }
 

@@ -378,8 +378,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"ok", ok},        {"path", path},   {"width", width},
             {"height", height}, {"samples", samples}, {"error", error}};
   }
+  // Part-document domain modules (disjoint method sets; order doesn't matter).
   if (doc) {
     if (auto r = remote::HandleModelingRpc(state, *doc, m, p)) return *r;
+    if (auto r = remote::HandleSimulationRpc(state, *doc, m, p)) return *r;
+    if (auto r = remote::HandleInspectionRpc(state, *doc, m, p)) return *r;
   }
   if (m == "undo") {
     if (state.assembly) { // assembly tab: snapshot-based occurrence undo
