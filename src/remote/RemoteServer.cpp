@@ -16,6 +16,7 @@
 #include "core/Measure.h"
 #include "core/DrawingExport.h"
 #include "core/Serialization.h"
+#include "remote/RemoteConfigurations.h"
 #include "core/SketchFeature.h"
 #include "core/SketchSolver.h"
 #include "ui/AppActions.h"
@@ -270,6 +271,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                        : "not a part";
     throw std::runtime_error("the active document is " + std::string(kind) +
                              ", not a part; switch to a part tab");
+  }
+
+  // Doc-level-object RPCs carved into their own module (decision 7). Part-doc
+  // methods, so `doc` is guaranteed non-null past the guard above.
+  if (doc) {
+    if (json cfgOut; remote::HandleConfigurationRpc(state, *doc, m, p, cfgOut))
+      return cfgOut;
   }
 
   if (m == "ping") {

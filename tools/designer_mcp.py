@@ -429,6 +429,58 @@ def delete_variable(name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Configurations (parametric variants of the active part)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(description="Add a configuration to the active part — a named variant "
+          "that overrides variable values and/or suppresses features, applied "
+          "by regenerating against it. Empty until you set_configuration it. "
+          "Returns its id.")
+def add_configuration(name: str = "") -> dict:
+    return _call("add_configuration", **({"name": name} if name else {}))
+
+
+@mcp.tool(description="Remove a configuration by id (falls back to base if it "
+          "was active).")
+def remove_configuration(id: int) -> dict:
+    return _call("remove_configuration", id=id)
+
+
+@mcp.tool(description="List the active part's configurations with each one's "
+          "parameter overrides and suppressed feature ids, and which is active "
+          "(0 = base, the model as authored).")
+def list_configurations() -> dict:
+    return _call("list_configurations")
+
+
+@mcp.tool(description="Edit a configuration (by id). parameter_overrides = a "
+          "list of {name, expression} that REPLACES the config's overrides "
+          "(each is a variable name + an override expression, e.g. "
+          "{'name':'depth','expression':'12'}). suppressed_features = a list of "
+          "feature ids the config suppresses (replaces). name renames it. Read "
+          "list_configurations, adjust, send back. One undoable edit.")
+def set_configuration(id: int, name: str = "",
+                      parameter_overrides: list | None = None,
+                      suppressed_features: list | None = None) -> dict:
+    params = {"id": id}
+    if name:
+        params["name"] = name
+    if parameter_overrides is not None:
+        params["parameter_overrides"] = parameter_overrides
+    if suppressed_features is not None:
+        params["suppressed_features"] = suppressed_features
+    return _call("set_configuration", **params)
+
+
+@mcp.tool(description="Switch the active configuration of the part (0 = base). "
+          "Regenerates against it — subsequent geometry, export, drawings and "
+          "FEM all reflect the active configuration. Returns the resulting body "
+          "count and volumes.")
+def set_active_configuration(id: int) -> dict:
+    return _call("set_active_configuration", id=id)
+
+
+# ---------------------------------------------------------------------------
 # History & project
 # ---------------------------------------------------------------------------
 

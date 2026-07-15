@@ -333,6 +333,7 @@ set(app_sources
     src/ui/Toolbar.cpp
     src/Screenshot.cpp
     src/remote/RemoteServer.cpp
+    src/remote/RemoteConfigurations.cpp
 )
 
 # UI fonts, loaded at runtime relative to the executable

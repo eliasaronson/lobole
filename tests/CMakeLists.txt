@@ -83,6 +83,13 @@ add_test(NAME drawing_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(drawing_smoke PROPERTIES TIMEOUT 120)
 
+# Configurations: part variants (parameter overrides + feature suppression),
+# active-config switching, undo, family STEP export, v31 round-trip. Headless.
+add_test(NAME configuration_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/configuration_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(configuration_smoke PROPERTIES TIMEOUT 120)
+
 # Drawings D2b: assembly-sourced views + projected-child folding. Headless.
 add_test(NAME drawing_assembly_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_assembly_smoke.py
