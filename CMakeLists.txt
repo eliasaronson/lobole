@@ -341,6 +341,7 @@ set(app_sources
     src/ui/SketchToolbar.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
+    src/ui/SimulationActions.cpp
     src/ui/FeatureEditor.cpp
     src/ui/PreviewFeature.cpp
     src/ui/Theme.cpp
