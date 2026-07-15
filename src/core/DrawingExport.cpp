@@ -54,6 +54,7 @@ std::string Num(double v) {
 
 bool SaveSVG(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
+             const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error) {
   try {
     const Sheet& sheet = doc.GetSheet();
@@ -92,6 +93,55 @@ bool SaveSVG(const DrawingDocument& doc,
             << (c.visible ? "0.35" : "0.25") << '"';
         if (!c.visible) out << " stroke-dasharray=\"1.6 1.2\"";
         out << "/>\n";
+      }
+      out << "  </g>\n";
+    }
+
+    // Dimensions: extension/dimension lines (linear) or a centre->rim leader
+    // (radial), filled arrowheads, and the value text. Dangling dims are
+    // skipped in output (the viewport flags them; a shop drawing omits them).
+    const auto line = [&](glm::dvec2 a, glm::dvec2 b, double w) {
+      out << "    <line x1=\"" << Num(a.x) << "\" y1=\"" << Num(fy(a.y))
+          << "\" x2=\"" << Num(b.x) << "\" y2=\"" << Num(fy(b.y))
+          << "\" stroke=\"#141418\" stroke-width=\"" << Num(w) << "\"/>\n";
+    };
+    // A filled arrowhead at `tip` pointing along unit `dir`.
+    const auto arrow = [&](glm::dvec2 tip, glm::dvec2 dir) {
+      const glm::dvec2 n(-dir.y, dir.x);
+      const double len = 2.2, w = 0.8;  // mm
+      const glm::dvec2 base = tip - dir * len;
+      const glm::dvec2 p1 = base + n * w, p2 = base - n * w;
+      out << "    <polygon points=\"" << Num(tip.x) << ',' << Num(fy(tip.y))
+          << ' ' << Num(p1.x) << ',' << Num(fy(p1.y)) << ' ' << Num(p2.x) << ','
+          << Num(fy(p2.y)) << "\" fill=\"#141418\"/>\n";
+    };
+    const auto label = [&](glm::dvec2 at, const std::string& text) {
+      out << "    <text x=\"" << Num(at.x) << "\" y=\"" << Num(fy(at.y))
+          << "\" fill=\"#141418\" text-anchor=\"middle\">" << Esc(text)
+          << "</text>\n";
+    };
+    if (!dims.empty()) {
+      out << "  <g font-family=\"Helvetica, sans-serif\" font-size=\"3.5\">\n";
+      for (const drawing::ResolvedDim& d : dims) {
+        if (!d.resolved) continue;
+        if (d.radial) {
+          line(d.center, d.rim, 0.25);
+          arrow(d.rim, glm::normalize(d.rim - d.center));
+        } else if (d.kind == DrawingDimKind::Angle) {
+          // v1 angle: just the value, placed between the two edges.
+        } else {  // linear
+          line(d.ext1, d.dim1, 0.2);  // extension lines
+          line(d.ext2, d.dim2, 0.2);
+          line(d.dim1, d.dim2, 0.25);  // dimension line
+          const double L = glm::length(d.dim2 - d.dim1);
+          if (L > 1e-6) {
+            const glm::dvec2 u = (d.dim2 - d.dim1) / L;
+            arrow(d.dim1, u);
+            arrow(d.dim2, -u);
+          }
+        }
+        // A small white gap behind the text keeps it legible over the line.
+        label(d.labelPos, d.text);
       }
       out << "  </g>\n";
     }

@@ -186,6 +186,8 @@ set(core_sources
     src/core/DrawingProjection.cpp
     src/core/DrawingDocument.cpp
     src/core/DrawingExport.cpp
+    src/core/DrawingDimension.cpp
+    src/core/Format.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/Serialization.cpp

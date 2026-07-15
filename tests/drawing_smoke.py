@@ -101,6 +101,27 @@ def main():
         expect(by_name["iso"]["silhouettes"] >= 2,
                f"iso has cylinder silhouettes: {by_name['iso']}")
 
+        # --- D3: driven dimensions -----------------------------------------
+        front_id = by_name["front"]["id"]
+        geo = d.call("list_drawing_geometry", view=front_id)["geometry"]
+        vlines = sorted([g for g in geo if g.get("type") == "line" and
+                        abs(g["p1"][1] - g["p2"][1]) > 5], key=lambda g: g["p1"][0])
+        expect(len(vlines) >= 2, f"front view has vertical box edges: {geo}")
+        wd = d.call("add_drawing_dim", view=front_id, kind="distance_x",
+                    refs=[{"edge": vlines[0]["ref"], "occurrence": vlines[0]["source_id"]},
+                          {"edge": vlines[-1]["ref"], "occurrence": vlines[-1]["source_id"]}],
+                    offset=[0, -14])
+        # The box is 40 mm wide; the shaft sits to its right, so the overall
+        # width between outermost vertical edges is the model span.
+        expect(wd["resolved"], f"width dim resolves: {wd}")
+        expect(wd["value"] > 0, f"width dim measured: {wd}")
+
+        # A driven dim re-measures from the geometry; it is read-only (measured,
+        # never set). Confirm it appears in the list with a formatted value.
+        dims = d.call("list_drawing_dims")["dims"]
+        expect(len(dims) == 1 and dims[0]["resolved"] and dims[0]["text"],
+               f"one resolved dim: {dims}")
+
         # --- Save, reopen, verify the drawing survives ---------------------
         proj = os.path.join(tmp, "gearbox.dsgn")
         d.call("save_project", path=proj)
@@ -122,6 +143,9 @@ def main():
         expect(len(idx["views"]) == 3, f"three views persisted: {idx['views']}")
         expect(os.path.isdir(os.path.join(dwg_dir, "views")),
                "views directory written")
+        expect(len(idx["dims"]) == 1, f"the dimension persisted: {idx['dims']}")
+        expect(os.path.isdir(os.path.join(dwg_dir, "dims")),
+               "dims directory written")
 
         # Reopen in a fresh instance and re-check.
         d.call("new_project")
@@ -153,6 +177,27 @@ def main():
         expect(svg.count("<polyline") >= 20, f"has view polylines: {svg.count('<polyline')}")
         expect("stroke-dasharray" in svg, "hidden edges are dashed")
         expect("Gearbox" in svg, "title block project in the SVG")
+
+        # The dimension survived the round-trip and re-measures on open.
+        dims2 = d.call("list_drawing_dims")["dims"]
+        expect(len(dims2) == 1 and dims2[0]["resolved"],
+               f"dimension survived reopen and re-measured: {dims2}")
+        dim_id = dims2[0]["id"]
+
+        # --- D3: dangling refs are first-class, never rebound ---------------
+        # Delete the box feature its width dim references; the projected edges
+        # vanish, so the dim reads dangling after an explicit update.
+        part_idx = [p for p in d.call("list_parts")["parts"]
+                    if p["name"] == "Part 1"][0]["index"]
+        d.call("set_active_part", index=part_idx)
+        d.call("delete_feature", index=0)  # the Box
+        dwg_idx = [p for p in d.call("list_parts")["parts"]
+                   if p["name"] == "bracket-dwg"][0]["index"]
+        d.call("set_active_part", index=dwg_idx)
+        d.call("update_drawing")
+        after = {x["id"]: x for x in d.call("list_drawing_dims")["dims"]}
+        expect(not after[dim_id]["resolved"],
+               f"dim dangles after its edges are removed: {after[dim_id]}")
 
         print("drawing_smoke: OK")
     finally:

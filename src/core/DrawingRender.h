@@ -31,6 +31,11 @@ struct SheetCurve {
   ElementRef edge;                 // resolved source edge (sharp/smooth), or unset
   ElementRef silFace;              // resolved silhouette face (outline), or unset
   int curveType = -1;              // GeomAbs curve type (line/circle/…): SVG hint
+  // For a circle/ellipse curve: its centre + radius in SHEET mm (view scale
+  // applied), so radius/diameter dimensions read them without re-deriving.
+  // radius <= 0 means not a symbolic conic.
+  glm::dvec2 conicCenter{0.0};
+  double conicRadius = -1.0;
 };
 
 // All geometry for one view, ready to render or export.

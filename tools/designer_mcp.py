@@ -1001,11 +1001,47 @@ def list_drawing_views() -> dict:
 
 @mcp.tool(description="Export the active drawing to a vector file (path ending "
           ".svg; PDF lands in D4). Re-projects first so the file reflects the "
-          "current geometry, then writes the sheet — border, title block, and "
-          "every view's visible (solid) and hidden (dashed) edges. Returns the "
-          "path and view count.")
+          "current geometry, then writes the sheet — border, title block, "
+          "every view's visible (solid)/hidden (dashed) edges, and each "
+          "resolved dimension. Returns the path and view count.")
 def export_drawing(path: str) -> dict:
     return _call("export_drawing", path=path)
+
+
+@mcp.tool(description="List a projected view's dimensionable geometry: each "
+          "distinct source edge / silhouette with the `ref` to pass to "
+          "add_drawing_dim, its type (line/circle/curve), and sheet-mm "
+          "endpoints or circle centre+radius. Call update_drawing first.")
+def list_drawing_geometry(view: int) -> dict:
+    return _call("list_drawing_geometry", view=view)
+
+
+@mcp.tool(description="Add a driven dimension to a view of the active drawing. "
+          "kind = 'distance'|'distance_x'|'distance_y'|'radius'|'diameter'|"
+          "'angle'. refs = a list of {edge OR sil_face: {feature_id, element} "
+          "(from list_drawing_geometry), occurrence?: source_id, end?: 0 whole "
+          "/ 1|2 endpoint}: two refs for distance/angle, one for radius/"
+          "diameter. offset = [x,y] label offset in sheet mm. The value is "
+          "MEASURED from the projected geometry (read-only). Returns the id and "
+          "the measured value/text.")
+def add_drawing_dim(view: int, kind: str, refs: list,
+                    offset: list | None = None) -> dict:
+    params = {"view": view, "kind": kind, "refs": refs}
+    if offset is not None:
+        params["offset"] = offset
+    return _call("add_drawing_dim", **params)
+
+
+@mcp.tool(description="Remove a dimension (by id) from the active drawing.")
+def remove_drawing_dim(id: int) -> dict:
+    return _call("remove_drawing_dim", id=id)
+
+
+@mcp.tool(description="List the active drawing's dimensions with each one's "
+          "kind, measured value + formatted text, and whether it resolved "
+          "(false = a ref dangles after a source edit).")
+def list_drawing_dims() -> dict:
+    return _call("list_drawing_dims")
 
 
 # ---------------------------------------------------------------------------

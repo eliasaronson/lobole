@@ -23,6 +23,7 @@
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/DrawingDimension.h"
 #include "core/DrawingProjection.h"
 #include "core/DrawingRender.h"
 #include "core/Serialization.h"
@@ -2320,6 +2321,10 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) 
     sc.kind = pc.kind;
     sc.visible = pc.visible;
     sc.curveType = pc.curveType;
+    if (pc.conicRadius > 0.0) {  // place the conic on the sheet too
+      sc.conicCenter = effectivePos + s * pc.conicCenter;
+      sc.conicRadius = s * pc.conicRadius;
+    }
     sc.points.reserve(pc.points.size());
     for (const glm::dvec2& p : pc.points) {
       const glm::dvec2 sheet = effectivePos + s * p;
@@ -2349,6 +2354,17 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) 
 }
 
 } // namespace
+
+drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
+  const auto it = state.drawingRenders.find(dim.viewId);
+  if (it == state.drawingRenders.end()) {
+    drawing::ResolvedDim rd;  // the view isn't projected: unresolved
+    rd.id = dim.id;
+    rd.kind = dim.kind;
+    return rd;
+  }
+  return drawing::ResolveDim(dim, it->second);
+}
 
 uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId) {
   for (size_t i = 0; i < state.parts.size(); i++) {

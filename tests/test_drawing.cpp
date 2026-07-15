@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
+#include "core/DrawingDimension.h"
 #include "core/DrawingDocument.h"
 #include "core/DrawingExport.h"
 #include "core/DrawingRender.h"
+#include "core/Format.h"
 #include "core/Serialization.h"
 
 #include <filesystem>
@@ -179,6 +182,117 @@ TEST_CASE("Drawing golden loads and round-trips (v30)",
   fs::remove_all(tmp);
 }
 
+TEST_CASE("FormatLength/FormatAngle produce compact display text",
+          "[drawing][format]") {
+  CHECK(core::FormatLength(40.0) == "40");
+  CHECK(core::FormatLength(8.5) == "8.5");
+  CHECK(core::FormatLength(12.345) == "12.3");
+  CHECK(core::FormatLength(-0.0) == "0");
+  CHECK(core::FormatLength(0.0) == "0");
+  CHECK(core::FormatAngle(0.0) == "0.0\xC2\xB0");
+  CHECK(core::FormatAngle(M_PI / 2) == "90.0\xC2\xB0");
+  CHECK(core::FormatAngle(M_PI / 4) == "45.0\xC2\xB0");
+}
+
+namespace {
+
+// A projected view with the geometry a dimension test needs: two vertical
+// edges of a 30 mm-wide box (left "L", right "R"), and a circle "hole" of
+// radius 4 centred at (10, 10). All in sheet mm.
+drawing::SheetView DimTestView() {
+  drawing::SheetView v;
+  v.viewId = 1;
+  v.hasGeometry = true;
+
+  drawing::SheetCurve left;
+  left.edge = ElementRef{1, "L"};
+  left.sourceId = 1;
+  left.points = {{0, 0}, {0, 20}};
+  v.curves.push_back(left);
+
+  drawing::SheetCurve right;
+  right.edge = ElementRef{1, "R"};
+  right.sourceId = 1;
+  right.points = {{30, 0}, {30, 20}};
+  v.curves.push_back(right);
+
+  drawing::SheetCurve hole;
+  hole.edge = ElementRef{2, "hole"};
+  hole.sourceId = 1;
+  hole.curveType = 1;  // GeomAbs_Circle
+  hole.conicCenter = {10, 10};
+  hole.conicRadius = 4.0;
+  hole.points = {{14, 10}, {10, 14}, {6, 10}, {10, 6}, {14, 10}};
+  v.curves.push_back(hole);
+  return v;
+}
+
+DrawingDim MakeDim(DrawingDimKind kind, std::vector<ProjRef> refs) {
+  DrawingDim d;
+  d.id = 7;
+  d.kind = kind;
+  d.viewId = 1;
+  d.refs = std::move(refs);
+  return d;
+}
+
+ProjRef EdgeRef(uint64_t fid, const std::string& name) {
+  ProjRef r;
+  r.viewId = 1;
+  r.edge = ElementRef{fid, name};
+  return r;
+}
+
+}  // namespace
+
+TEST_CASE("ResolveDim measures projected geometry", "[drawing][dimension]") {
+  const drawing::SheetView view = DimTestView();
+
+  SECTION("distance-X between two edges is the box width") {
+    auto rd = drawing::ResolveDim(
+        MakeDim(DrawingDimKind::DistanceX, {EdgeRef(1, "L"), EdgeRef(1, "R")}),
+        view);
+    REQUIRE(rd.resolved);
+    CHECK(rd.value == Catch::Approx(30.0));
+    CHECK(rd.text == "30");
+  }
+
+  SECTION("plain distance between the edge midpoints") {
+    auto rd = drawing::ResolveDim(
+        MakeDim(DrawingDimKind::Distance, {EdgeRef(1, "L"), EdgeRef(1, "R")}),
+        view);
+    REQUIRE(rd.resolved);  // both midpoints at y=10 -> pure horizontal 30
+    CHECK(rd.value == Catch::Approx(30.0));
+  }
+
+  SECTION("diameter of the circular edge") {
+    auto rd = drawing::ResolveDim(
+        MakeDim(DrawingDimKind::Diameter, {EdgeRef(2, "hole")}), view);
+    REQUIRE(rd.resolved);
+    CHECK(rd.radial);
+    CHECK(rd.value == Catch::Approx(8.0));
+    CHECK(rd.center.x == Catch::Approx(10.0));
+    CHECK(rd.text == "\xC3\x98" "8");  // Ø8
+  }
+
+  SECTION("radius of the circular edge") {
+    auto rd = drawing::ResolveDim(
+        MakeDim(DrawingDimKind::Radius, {EdgeRef(2, "hole")}), view);
+    REQUIRE(rd.resolved);
+    CHECK(rd.value == Catch::Approx(4.0));
+    CHECK(rd.text == "R4");
+  }
+
+  SECTION("a ref that matches no curve is dangling, never rebound") {
+    auto rd = drawing::ResolveDim(
+        MakeDim(DrawingDimKind::DistanceX,
+                {EdgeRef(1, "L"), EdgeRef(9, "gone")}),
+        view);
+    CHECK_FALSE(rd.resolved);
+    CHECK(rd.value == 0.0);
+  }
+}
+
 TEST_CASE("SVG export writes the sheet, views, and title block",
           "[drawing][export]") {
   // A tiny sheet with one view of two hand-built curves — a visible triangle
@@ -203,7 +317,7 @@ TEST_CASE("SVG export writes the sheet, views, and title block",
 
   const fs::path out = fs::temp_directory_path() / "drawing_export.svg";
   std::string err;
-  REQUIRE(DrawingExport::SaveSVG(doc, {view}, out.string(), &err));
+  REQUIRE(DrawingExport::SaveSVG(doc, {view}, {}, out.string(), &err));
   INFO(err);
   REQUIRE(fs::exists(out));
 

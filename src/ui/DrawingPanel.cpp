@@ -87,6 +87,66 @@ void StrokeDashed(ImDrawList* dl, AppState& state,
   }
 }
 
+// A filled arrowhead at `tip` pointing along unit `dir` (sheet mm), ported from
+// the sketch Arrow but in sheet space so it scales with zoom.
+void SheetArrow(ImDrawList* dl, AppState& state, glm::dvec2 tip, glm::dvec2 dir,
+                ImU32 col) {
+  const glm::dvec2 n(-dir.y, dir.x);
+  const double len = 2.2, w = 0.8;  // mm
+  const glm::dvec2 base = tip - dir * len;
+  dl->AddTriangleFilled(SheetToScreen(state, tip),
+                        SheetToScreen(state, base + n * w),
+                        SheetToScreen(state, base - n * w), col);
+}
+
+// Draws the active drawing's dimensions: extension/dimension lines + arrows +
+// value text (linear), or a centre->rim leader (radial). A dangling dimension
+// (a ref no longer resolves) draws its label in the error colour, never
+// silently rebound — the toponaming T3 rule.
+void DrawDims(ImDrawList* dl, AppState& state) {
+  const ImU32 ink = IM_COL32(40, 60, 90, 255);
+  const ImU32 err = IM_COL32(210, 80, 70, 255);
+  const float fontPx = static_cast<float>(3.0 * state.sheetView.scale);
+  ImFont* font = ImGui::GetFont();
+
+  for (const DrawingDim& dim : state.drawing->GetDims()) {
+    const drawing::ResolvedDim d = ResolveDrawingDim(state, dim);
+    if (!d.resolved) {
+      // Dangling: a red marker at the label offset from the (stored) offset.
+      if (fontPx >= 4.0f)
+        dl->AddText(font, fontPx, SheetToScreen(state, dim.labelOffset), err,
+                    "dangling dim");
+      continue;
+    }
+    if (d.radial) {
+      dl->AddLine(SheetToScreen(state, d.center), SheetToScreen(state, d.rim),
+                  ink, 1.2f);
+      SheetArrow(dl, state, d.rim, glm::normalize(d.rim - d.center), ink);
+    } else if (d.kind == DrawingDimKind::Angle) {
+      // v1 angle: value only (rendered below).
+    } else {
+      dl->AddLine(SheetToScreen(state, d.ext1), SheetToScreen(state, d.dim1), ink, 0.8f);
+      dl->AddLine(SheetToScreen(state, d.ext2), SheetToScreen(state, d.dim2), ink, 0.8f);
+      dl->AddLine(SheetToScreen(state, d.dim1), SheetToScreen(state, d.dim2), ink, 1.2f);
+      const double L = glm::length(d.dim2 - d.dim1);
+      if (L > 1e-6) {
+        const glm::dvec2 u = (d.dim2 - d.dim1) / L;
+        SheetArrow(dl, state, d.dim1, u, ink);
+        SheetArrow(dl, state, d.dim2, -u, ink);
+      }
+    }
+    if (fontPx >= 4.0f) {
+      const ImVec2 tp = SheetToScreen(state, d.labelPos);
+      const ImVec2 tsz = font->CalcTextSizeA(fontPx, FLT_MAX, 0.0f, d.text.c_str());
+      const ImVec2 org(tp.x - tsz.x * 0.5f, tp.y - tsz.y * 0.5f);
+      dl->AddRectFilled(ImVec2(org.x - 2, org.y - 1),
+                        ImVec2(org.x + tsz.x + 2, org.y + tsz.y + 1),
+                        IM_COL32(250, 250, 250, 230), 2.0f);
+      dl->AddText(font, fontPx, org, ink, d.text.c_str());
+    }
+  }
+}
+
 // Draws every projected view of the active drawing onto the sheet: visible
 // edges solid, hidden edges dashed, a thin frame + label per view, and a stale
 // badge when the source changed since the last projection.
@@ -230,6 +290,7 @@ void DrawSheet(AppState& state) {
   }
 
   DrawViews(dl, state);
+  DrawDims(dl, state);
 
   dl->PopClipRect();
 }

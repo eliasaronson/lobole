@@ -2,6 +2,7 @@
 
 #include "MeshExport.h"      // MeshExport::Item
 #include "SketchRenderer.h" // Vertex3D, PrimVertex
+#include "core/DrawingDimension.h" // drawing::ResolvedDim
 #include "core/ElementMap.h" // ElementRef
 #include "ui/AppState.h"
 
@@ -142,6 +143,11 @@ void UpdateDrawingRenders(AppState& state);
 // document (part or assembly) by stable id, or 0 if absent. A drawing view is
 // stale when this differs from the version stamped at its last projection.
 uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId);
+
+// Resolves one dimension against the active drawing's projected geometry (its
+// view's cached SheetView). Returns an unresolved ResolvedDim if the view is
+// not projected or a ref is dangling. Defined in AppActions.cpp.
+drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim);
 
 // ---- Simulation mode (FEM) ------------------------------------------------
 

@@ -245,7 +245,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "add_assembly", "set_active_part",  "delete_part",
       "create_drawing", "list_drawings", "add_drawing_view",
       "remove_drawing_view", "update_drawing", "list_drawing_views",
-      "export_drawing",
+      "export_drawing", "list_drawing_geometry", "add_drawing_dim",
+      "remove_drawing_dim", "list_drawing_dims",
       "new_project",  "save_project",     "open_project",
       "add_occurrence", "remove_occurrence", "list_occurrences",
       "set_occurrence_transform", "set_occurrence_visible",
@@ -1295,6 +1296,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       const auto it = state.drawingRenders.find(view.id);
       if (it != state.drawingRenders.end()) views.push_back(it->second);
     }
+    std::vector<drawing::ResolvedDim> dims;
+    for (const DrawingDim& dim : state.drawing->GetDims())
+      dims.push_back(ui::ResolveDrawingDim(state, dim));
     std::string ext;
     const auto dot = path.find_last_of('.');
     if (dot != std::string::npos) {
@@ -1304,12 +1308,114 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     std::string err;
     bool ok = false;
     if (ext == ".svg")
-      ok = DrawingExport::SaveSVG(*state.drawing, views, path, &err);
+      ok = DrawingExport::SaveSVG(*state.drawing, views, dims, path, &err);
     else
       throw std::runtime_error("unsupported drawing format '" + ext +
                                "' (svg only; pdf lands in D4)");
     if (!ok) throw std::runtime_error(err);
     return {{"path", path}, {"views", views.size()}};
+  }
+  if (m == "list_drawing_geometry") {
+    // Discovery for dimensioning: the distinct source edges/silhouettes of a
+    // view, each with the ref to pass to add_drawing_dim and a summary of its
+    // sheet-mm geometry (endpoints, or circle centre + radius).
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    const uint64_t viewId = p.at("view").get<uint64_t>();
+    const auto it = state.drawingRenders.find(viewId);
+    if (it == state.drawingRenders.end())
+      throw std::runtime_error("view not projected; call update_drawing first");
+    // Deduplicate curves by their source ref (an edge splits into visible +
+    // hidden segments); keep the first geometry seen.
+    json edges = json::array();
+    std::set<std::string> seen;
+    for (const drawing::SheetCurve& c : it->second.curves) {
+      const bool isEdge = c.edge.IsSet();
+      const ElementRef& ref = isEdge ? c.edge : c.silFace;
+      if (!ref.IsSet()) continue;
+      const std::string key = std::to_string(c.sourceId) + "|" +
+                              (isEdge ? "e|" : "s|") +
+                              std::to_string(ref.featureId) + "|" + ref.name;
+      if (!seen.insert(key).second) continue;
+      json e = {{"kind", isEdge ? "edge" : "silhouette"},
+                {"source_id", c.sourceId},
+                {"ref", {{"feature_id", ref.featureId}, {"element", ref.name}}}};
+      if (c.conicRadius > 0.0) {
+        e["type"] = "circle";
+        e["center"] = {c.conicCenter.x, c.conicCenter.y};
+        e["radius"] = c.conicRadius;
+      } else if (c.points.size() >= 2) {
+        e["type"] = c.curveType == 0 ? "line" : "curve";
+        e["p1"] = {c.points.front().x, c.points.front().y};
+        e["p2"] = {c.points.back().x, c.points.back().y};
+      }
+      edges.push_back(std::move(e));
+    }
+    return {{"geometry", edges}};
+  }
+  if (m == "add_drawing_dim") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    const uint64_t viewId = p.at("view").get<uint64_t>();
+    if (!state.drawing->FindView(viewId))
+      throw std::runtime_error("no such view");
+    DrawingDim dim;
+    dim.viewId = viewId;
+    if (!DrawingDimKindFromString(p.value("kind", std::string("distance")),
+                                  dim.kind))
+      throw std::runtime_error("unknown dimension kind '" +
+                               p.value("kind", std::string()) + "'");
+    // refs: [{edge|sil_face: {feature_id, element}, end?, occurrence?}, ...]
+    for (const json& rj : p.at("refs")) {
+      ProjRef r;
+      r.viewId = viewId;
+      r.end = rj.value("end", 0);
+      r.occurrenceId = rj.value("occurrence", uint64_t{0});
+      if (rj.contains("edge"))
+        r.edge = ElementRef{rj.at("edge").value("feature_id", uint64_t{0}),
+                            rj.at("edge").value("element", std::string{})};
+      if (rj.contains("sil_face"))
+        r.silFace = ElementRef{rj.at("sil_face").value("feature_id", uint64_t{0}),
+                               rj.at("sil_face").value("element", std::string{})};
+      dim.refs.push_back(r);
+    }
+    if (p.contains("offset")) {
+      const json& o = p.at("offset");
+      dim.labelOffset = {o.at(0).get<double>(), o.at(1).get<double>()};
+    }
+    ui::SnapshotDrawing(state);
+    const uint64_t id = state.drawing->AddDim(dim);
+    // Echo the resolved value now (the view is already projected).
+    const drawing::ResolvedDim rd = ui::ResolveDrawingDim(state, *state.drawing->FindDim(id));
+    return {{"id", id},
+            {"resolved", rd.resolved},
+            {"value", rd.value},
+            {"text", rd.text}};
+  }
+  if (m == "remove_drawing_dim") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    ui::SnapshotDrawing(state);
+    if (!state.drawing->RemoveDim(p.at("id").get<uint64_t>())) {
+      state.drawingHistory.undo.pop_back();
+      throw std::runtime_error("no such dimension");
+    }
+    return json::object();
+  }
+  if (m == "list_drawing_dims") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    json arr = json::array();
+    for (const DrawingDim& dim : state.drawing->GetDims()) {
+      const drawing::ResolvedDim rd = ui::ResolveDrawingDim(state, dim);
+      arr.push_back({{"id", dim.id},
+                     {"kind", DrawingDimKindToString(dim.kind)},
+                     {"view", dim.viewId},
+                     {"resolved", rd.resolved},
+                     {"value", rd.value},
+                     {"text", rd.text}});
+    }
+    return {{"dims", arr}};
   }
   if (m == "add_occurrence") {
     // Places a part in the active assembly. `part` is the part's NAME (resolved

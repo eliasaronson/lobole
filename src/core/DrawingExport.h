@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/DrawingDimension.h"
 #include "core/DrawingDocument.h"
 #include "core/DrawingRender.h"
 
@@ -13,12 +14,14 @@
 
 namespace DrawingExport {
 
-// Writes the sheet — border, title block, and every view's visible (solid) and
-// hidden (dashed) edges — as an SVG in millimetre user units. Returns false and
-// fills *error on failure. `views` is the projected geometry in sheet mm,
-// typically in the drawing's view order.
+// Writes the sheet — border, title block, every view's visible (solid) and
+// hidden (dashed) edges, and each resolved dimension (extension/dimension lines
+// or a radial leader, arrows, value text) — as an SVG in millimetre user units.
+// Returns false and fills *error on failure. `views` and `dims` are in sheet
+// mm; unresolved (dangling) dims are skipped. `dims` may be empty.
 bool SaveSVG(const DrawingDocument& doc,
              const std::vector<drawing::SheetView>& views,
+             const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error = nullptr);
 
 }  // namespace DrawingExport
