@@ -1,0 +1,24 @@
+#pragma once
+
+#include "core/DrawingDocument.h"
+#include "core/DrawingRender.h"
+
+#include <string>
+#include <vector>
+
+// Vector export of a drawing sheet (workstream 13, D2/D4). GUI-free core code:
+// consumes the same DrawingDocument (sheet + title block) and projected
+// SheetViews the viewport renders, so export is headless and CI-testable
+// without a GPU. SVG lands in D2 to close the LLM loop; the PDF writer is D4.
+
+namespace DrawingExport {
+
+// Writes the sheet — border, title block, and every view's visible (solid) and
+// hidden (dashed) edges — as an SVG in millimetre user units. Returns false and
+// fills *error on failure. `views` is the projected geometry in sheet mm,
+// typically in the drawing's view order.
+bool SaveSVG(const DrawingDocument& doc,
+             const std::vector<drawing::SheetView>& views,
+             const std::string& path, std::string* error = nullptr);
+
+}  // namespace DrawingExport

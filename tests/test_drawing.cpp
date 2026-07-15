@@ -1,9 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "core/DrawingDocument.h"
+#include "core/DrawingExport.h"
+#include "core/DrawingRender.h"
 #include "core/Serialization.h"
 
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -173,6 +177,56 @@ TEST_CASE("Drawing golden loads and round-trips (v30)",
   REQUIRE((reloaded != nullptr && err.empty()));
   CheckSampleFields(*reloaded);
   fs::remove_all(tmp);
+}
+
+TEST_CASE("SVG export writes the sheet, views, and title block",
+          "[drawing][export]") {
+  // A tiny sheet with one view of two hand-built curves — a visible triangle
+  // and a hidden segment — plus a title block. The writer is GPU-free, so this
+  // exercises the whole export path headlessly.
+  DrawingDocument doc;
+  doc.GetSheet().size = SheetSize::A4;
+  doc.GetSheet().landscape = false;  // A4 portrait -> viewBox 210 x 297
+  doc.GetSheet().titleBlock.project = "Widget & Co <v2>";  // XML-escaping
+
+  drawing::SheetView view;
+  view.viewId = 1;
+  view.hasGeometry = true;
+  drawing::SheetCurve solid;
+  solid.visible = true;
+  solid.points = {{20, 20}, {60, 20}, {40, 50}, {20, 20}};
+  view.curves.push_back(solid);
+  drawing::SheetCurve dashed;
+  dashed.visible = false;
+  dashed.points = {{20, 20}, {60, 20}};
+  view.curves.push_back(dashed);
+
+  const fs::path out = fs::temp_directory_path() / "drawing_export.svg";
+  std::string err;
+  REQUIRE(DrawingExport::SaveSVG(doc, {view}, out.string(), &err));
+  INFO(err);
+  REQUIRE(fs::exists(out));
+
+  std::ifstream in(out);
+  std::stringstream ss;
+  ss << in.rdbuf();
+  const std::string svg = ss.str();
+
+  auto count = [&](const std::string& needle) {
+    size_t n = 0, pos = 0;
+    while ((pos = svg.find(needle, pos)) != std::string::npos) { ++n; ++pos; }
+    return n;
+  };
+
+  CHECK(svg.rfind("<?xml", 0) == 0);
+  CHECK(svg.find("viewBox=\"0 0 210 297\"") != std::string::npos);
+  CHECK(count("<polyline") == 2);
+  CHECK(svg.find("stroke-dasharray") != std::string::npos);  // the hidden curve
+  // Title-block text is XML-escaped, never raw.
+  CHECK(svg.find("Widget &amp; Co &lt;v2&gt;") != std::string::npos);
+  CHECK(svg.find("Widget & Co <v2>") == std::string::npos);
+  CHECK(svg.rfind("</svg>") != std::string::npos);
+  fs::remove(out);
 }
 
 TEST_CASE("Drawing loaders reject the wrong document kind",

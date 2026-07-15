@@ -14,6 +14,7 @@
 #include "core/GitVault.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/DrawingExport.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
 #include "core/SketchSolver.h"
@@ -244,6 +245,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "add_assembly", "set_active_part",  "delete_part",
       "create_drawing", "list_drawings", "add_drawing_view",
       "remove_drawing_view", "update_drawing", "list_drawing_views",
+      "export_drawing",
       "new_project",  "save_project",     "open_project",
       "add_occurrence", "remove_occurrence", "list_occurrences",
       "set_occurrence_transform", "set_occurrence_visible",
@@ -1184,13 +1186,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (sourceId == 0)
       throw std::runtime_error("no part named '" + sourceName + "'");
     DrawingView v;
-    v.name = p.value("name", sourceName);
     v.sourceDocId = sourceId;
     if (p.contains("orientation") &&
         !ViewOrientationFromString(p.at("orientation").get<std::string>(),
                                    v.orientation))
       throw std::runtime_error("unknown orientation '" +
                                p.at("orientation").get<std::string>() + "'");
+    // Default the label to the orientation (front/top/iso…) — clearer on the
+    // sheet than repeating the source name across every view.
+    v.name = p.value("name", std::string(ViewOrientationToString(v.orientation)));
     v.baseViewId = p.value("base_view", uint64_t{0});
     v.scale = p.value("scale", 1.0);
     if (p.contains("position")) {
@@ -1271,6 +1275,34 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       arr.push_back(vj);
     }
     return {{"views", arr}};
+  }
+  if (m == "export_drawing") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    const std::string path = p.at("path").get<std::string>();
+    // Export reflects current geometry: project first, then gather the views
+    // in drawing order.
+    ui::UpdateDrawingRenders(state);
+    std::vector<drawing::SheetView> views;
+    for (const DrawingView& view : state.drawing->GetViews()) {
+      const auto it = state.drawingRenders.find(view.id);
+      if (it != state.drawingRenders.end()) views.push_back(it->second);
+    }
+    std::string ext;
+    const auto dot = path.find_last_of('.');
+    if (dot != std::string::npos) {
+      ext = path.substr(dot);
+      for (char& c : ext) c = static_cast<char>(std::tolower(c));
+    }
+    std::string err;
+    bool ok = false;
+    if (ext == ".svg")
+      ok = DrawingExport::SaveSVG(*state.drawing, views, path, &err);
+    else
+      throw std::runtime_error("unsupported drawing format '" + ext +
+                               "' (svg only; pdf lands in D4)");
+    if (!ok) throw std::runtime_error(err);
+    return {{"path", path}, {"views", views.size()}};
   }
   if (m == "add_occurrence") {
     // Places a part in the active assembly. `part` is the part's NAME (resolved

@@ -51,6 +51,10 @@ def main():
         d.call("add_feature", feature={
             "type": "Box", "name": "Blk", "position": [0, 0, 0],
             "width": 40, "height": 20, "depth": 20})
+        # A cylinder body so views carry silhouettes (the "shaft" case).
+        d.call("add_feature", feature={
+            "type": "Cylinder", "name": "Shaft", "center": [60, 10, 0],
+            "direction": [0, 0, 1], "radius": 8, "height": 30})
 
         dwg = d.call("create_drawing", name="bracket-dwg", sheet={
             "size": "a3", "landscape": True,
@@ -76,6 +80,27 @@ def main():
         except RuntimeError as e:
             expect("part" in str(e).lower(), f"clear error: {e}")
 
+        # --- D2: projected views ------------------------------------------
+        for orient, pos in [("front", [110, 220]), ("top", [110, 140]),
+                            ("iso", [300, 190])]:
+            r = d.call("add_drawing_view", source="Part 1", orientation=orient,
+                       position=pos)
+            expect(r["id"] > 0 and r["needs_update"], f"view added: {r}")
+        # A view before update has no geometry (projection is explicit).
+        pre = d.call("list_drawing_views")["views"]
+        expect(all(v["curves"] == 0 for v in pre),
+               f"views not projected before update: {pre}")
+        # Update projects them; every view yields visible + hidden edges.
+        upd = d.call("update_drawing")["views"]
+        expect(len(upd) == 3, f"three views projected: {len(upd)}")
+        for v in upd:
+            expect(v["has_geometry"] and v["visible"] > 0 and v["hidden"] > 0,
+                   f"view {v['name']} has visible+hidden edges: {v}")
+        # The iso and front views see the cylinder as silhouette edges.
+        by_name = {v["name"]: v for v in upd}
+        expect(by_name["iso"]["silhouettes"] >= 2,
+               f"iso has cylinder silhouettes: {by_name['iso']}")
+
         # --- Save, reopen, verify the drawing survives ---------------------
         proj = os.path.join(tmp, "gearbox.dsgn")
         d.call("save_project", path=proj)
@@ -94,6 +119,9 @@ def main():
         expect(idx["sheet"]["size"] == "a3", f"sheet persisted: {idx['sheet']}")
         expect(idx["sheet"]["title_block"]["project"] == "Gearbox",
                "title block persisted")
+        expect(len(idx["views"]) == 3, f"three views persisted: {idx['views']}")
+        expect(os.path.isdir(os.path.join(dwg_dir, "views")),
+               "views directory written")
 
         # Reopen in a fresh instance and re-check.
         d.call("new_project")
@@ -106,6 +134,25 @@ def main():
         ld2 = d.call("list_drawings")["drawings"]
         expect(len(ld2) == 1 and ld2[0]["name"] == "bracket-dwg",
                f"drawing survived reopen: {ld2}")
+        expect(ld2[0]["views"] == 3, f"views survived reopen: {ld2}")
+
+        # --- D2: the drawing re-projects on open; export SVG closes the loop.
+        lv = d.call("list_drawing_views")["views"]
+        expect(all(not v["stale"] and v["has_geometry"] for v in lv),
+               f"reopened views re-projected fresh: {lv}")
+        svg_path = os.path.join(tmp, "bracket.svg")
+        exp = d.call("export_drawing", path=svg_path)
+        expect(exp["views"] == 3, f"exported three views: {exp}")
+        svg = open(svg_path).read()
+        # Parses as XML, is an <svg> with the A3 landscape viewBox, and carries
+        # polylines (solid + dashed) and the title-block text. Never byte-golden
+        # (HLR discretization is not stable across OCC versions).
+        import xml.dom.minidom as minidom
+        minidom.parseString(svg)  # raises on malformed XML
+        expect('viewBox="0 0 420 297"' in svg, "A3 landscape viewBox")
+        expect(svg.count("<polyline") >= 20, f"has view polylines: {svg.count('<polyline')}")
+        expect("stroke-dasharray" in svg, "hidden edges are dashed")
+        expect("Gearbox" in svg, "title block project in the SVG")
 
         print("drawing_smoke: OK")
     finally:

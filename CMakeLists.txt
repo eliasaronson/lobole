@@ -185,6 +185,7 @@ set(core_sources
     src/core/AssemblySolve.cpp
     src/core/DrawingProjection.cpp
     src/core/DrawingDocument.cpp
+    src/core/DrawingExport.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/Serialization.cpp

@@ -999,6 +999,15 @@ def list_drawing_views() -> dict:
     return _call("list_drawing_views")
 
 
+@mcp.tool(description="Export the active drawing to a vector file (path ending "
+          ".svg; PDF lands in D4). Re-projects first so the file reflects the "
+          "current geometry, then writes the sheet — border, title block, and "
+          "every view's visible (solid) and hidden (dashed) edges. Returns the "
+          "path and view count.")
+def export_drawing(path: str) -> dict:
+    return _call("export_drawing", path=path)
+
+
 # ---------------------------------------------------------------------------
 # Escape hatch: raw UI events (for driving/testing the Designer GUI itself)
 # ---------------------------------------------------------------------------
