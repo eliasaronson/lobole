@@ -183,6 +183,86 @@ void ModifyStudyCommand::Undo(Document& doc) {
   doc.ReplaceStudy(DocumentIO::StudyFromJson(m_before));
 }
 
+// ---- Configurations -------------------------------------------------------
+
+AddConfigurationCommand::AddConfigurationCommand(std::string name)
+    : m_name(std::move(name)) {}
+
+std::string AddConfigurationCommand::Description() const {
+  return m_name.empty() ? "Add configuration"
+                        : "Add configuration '" + m_name + "'";
+}
+
+bool AddConfigurationCommand::Execute(Document& doc) {
+  if (m_id == 0) {
+    Configuration& c = doc.AddConfiguration(m_name);
+    m_id = c.id;
+    m_name = c.name;
+  } else {
+    Configuration c;
+    c.id = m_id;
+    c.name = m_name;
+    doc.RestoreConfiguration(std::move(c));
+  }
+  return true;
+}
+
+void AddConfigurationCommand::Undo(Document& doc) { doc.RemoveConfiguration(m_id); }
+
+RemoveConfigurationCommand::RemoveConfigurationCommand(uint64_t id) : m_id(id) {}
+
+std::string RemoveConfigurationCommand::Description() const {
+  return "Remove configuration";
+}
+
+bool RemoveConfigurationCommand::Execute(Document& doc) {
+  const Configuration* c = doc.FindConfiguration(m_id);
+  if (!c) return false;
+  m_snapshot = DocumentIO::ConfigurationToJson(*c);
+  m_activeBefore = doc.ActiveConfiguration();
+  return doc.RemoveConfiguration(m_id);  // may drop to base + regenerate
+}
+
+void RemoveConfigurationCommand::Undo(Document& doc) {
+  doc.RestoreConfiguration(DocumentIO::ConfigurationFromJson(m_snapshot));
+  doc.SetActiveConfiguration(m_activeBefore);  // restores selection + regen
+}
+
+ModifyConfigurationCommand::ModifyConfigurationCommand(std::string description,
+                                                       nlohmann::json before,
+                                                       nlohmann::json after)
+    : m_description(std::move(description)),
+      m_before(std::move(before)),
+      m_after(std::move(after)) {}
+
+std::string ModifyConfigurationCommand::Description() const {
+  return m_description;
+}
+
+bool ModifyConfigurationCommand::Execute(Document& doc) {
+  return doc.ReplaceConfiguration(DocumentIO::ConfigurationFromJson(m_after));
+}
+
+void ModifyConfigurationCommand::Undo(Document& doc) {
+  doc.ReplaceConfiguration(DocumentIO::ConfigurationFromJson(m_before));
+}
+
+SetActiveConfigurationCommand::SetActiveConfigurationCommand(uint64_t id)
+    : m_id(id) {}
+
+std::string SetActiveConfigurationCommand::Description() const {
+  return "Set active configuration";
+}
+
+bool SetActiveConfigurationCommand::Execute(Document& doc) {
+  m_before = doc.ActiveConfiguration();
+  return doc.SetActiveConfiguration(m_id);
+}
+
+void SetActiveConfigurationCommand::Undo(Document& doc) {
+  doc.SetActiveConfiguration(m_before);
+}
+
 bool CommandStack::Execute(std::unique_ptr<Command> command, Document& doc) {
   if (!command->Execute(doc)) {
     return false;

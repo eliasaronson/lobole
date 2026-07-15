@@ -1,0 +1,110 @@
+{
+  "active_configuration": 3,
+  "configurations": [
+    {
+      "id": 3,
+      "name": "Tall",
+      "parameter_overrides": [
+        {
+          "expression": "10",
+          "name": "depth"
+        }
+      ],
+      "type": "Configuration"
+    }
+  ],
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            0.0,
+            0.0
+          ],
+          "b": [
+            4.0,
+            0.0
+          ],
+          "id": 1,
+          "type": "line"
+        },
+        {
+          "a": [
+            4.0,
+            0.0
+          ],
+          "b": [
+            4.0,
+            2.0
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            4.0,
+            2.0
+          ],
+          "b": [
+            0.0,
+            2.0
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            0.0,
+            2.0
+          ],
+          "b": [
+            0.0,
+            0.0
+          ],
+          "id": 4,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Sketch1",
+      "next_entity_id": 5,
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 10.0,
+      "distance_expr": "depth",
+      "id": 2,
+      "mode": "new_body",
+      "name": "Extrude1",
+      "reversed": false,
+      "sketch_id": 1,
+      "type": "Extrude"
+    }
+  ],
+  "format": "designer-document",
+  "parameters": [
+    {
+      "expression": "3",
+      "name": "depth"
+    }
+  ],
+  "version": 31
+}

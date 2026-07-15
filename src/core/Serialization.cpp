@@ -31,7 +31,7 @@ using nlohmann::json;
 namespace {
 
 constexpr const char* kFormat = "designer-document";
-constexpr int kVersion = 30; // v30: 2D drawings (v29: FEM studies)
+constexpr int kVersion = 31; // v31: configurations (v30: 2D drawings)
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
@@ -1119,6 +1119,38 @@ fem::Study StudyFromJson(const json& j) {
   return s;
 }
 
+// ---- Configurations (v31) -------------------------------------------------
+// A configuration persists like a study: tagged JSON, only-non-empty fields.
+// Which configuration is active lives in the document envelope (see
+// DocumentEnvelope), the rollback-bar pattern.
+
+json ConfigurationToJson(const Configuration& c) {
+  json j;
+  j["type"] = "Configuration";
+  j["id"] = c.id;
+  j["name"] = c.name;
+  if (!c.parameterOverrides.empty()) {
+    j["parameter_overrides"] = json::array();
+    for (const auto& [name, expr] : c.parameterOverrides)
+      j["parameter_overrides"].push_back({{"name", name}, {"expression", expr}});
+  }
+  if (!c.suppressedFeatures.empty())
+    j["suppressed_features"] = c.suppressedFeatures;
+  return j;
+}
+
+Configuration ConfigurationFromJson(const json& j) {
+  Configuration c;
+  c.id = j.at("id").get<uint64_t>();
+  c.name = j.value("name", std::string{});
+  for (const json& oj : j.value("parameter_overrides", json::array()))
+    c.parameterOverrides.emplace_back(oj.value("name", std::string{}),
+                                      oj.value("expression", std::string{}));
+  c.suppressedFeatures =
+      j.value("suppressed_features", std::vector<uint64_t>{});
+  return c;
+}
+
 namespace {
 
 // Path classification (F3): a `.dsgn` path or existing directory is the
@@ -1169,6 +1201,12 @@ json DocumentEnvelope(const Document& doc) {
       }
       j["parameters"].push_back(std::move(pj));
     }
+  }
+  // The active configuration (v31), omitted at base (0) so pre-v31 documents
+  // re-save byte-identically. The configurations themselves are written per
+  // save path (inline / configurations/ dir), like studies.
+  if (doc.ActiveConfiguration() != 0) {
+    j["active_configuration"] = doc.ActiveConfiguration();
   }
   return j;
 }
@@ -1326,6 +1364,29 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           fs::remove(entry.path(), ec);
       }
     }
+    // Configurations (v31): file-per-config under configurations/, id list in
+    // the index (the active id is in the envelope). Absent when none, so a
+    // pre-v31 document re-saves byte-identically.
+    if (!doc.GetConfigurations().empty()) {
+      const fs::path cfgDir = dir / "configurations";
+      fs::create_directories(cfgDir);
+      index["configurations"] = json::array();
+      std::set<std::string> wantedConfigs;
+      for (const Configuration& c : doc.GetConfigurations()) {
+        const std::string file =
+            std::to_string(c.id) + "-" + LabelSlug(c.name) + ".json";
+        if (!WriteTextAtomic(cfgDir / file, ConfigurationToJson(c).dump(2) + "\n",
+                             error))
+          return false;
+        index["configurations"].push_back(c.id);
+        wantedConfigs.insert(file);
+      }
+      for (const auto& entry : fs::directory_iterator(cfgDir, ec)) {
+        if (entry.path().extension() == ".json" &&
+            !wantedConfigs.contains(entry.path().filename().string()))
+          fs::remove(entry.path(), ec);
+      }
+    }
     // Parameters live in the index envelope (small, diff-friendly there).
     if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
       return false;
@@ -1410,7 +1471,29 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         doc->RestoreStudy(StudyFromJson(json::parse(sin)));
       }
     }
+    // Configurations (v31): id-prefix files under configurations/, index order.
+    {
+      std::map<uint64_t, fs::path> cfgById;
+      for (const auto& entry :
+           fs::directory_iterator(fs::path(dirPath) / "configurations", ec)) {
+        if (entry.path().extension() != ".json") continue;
+        cfgById[std::stoull(entry.path().filename().string())] = entry.path();
+      }
+      for (const auto& idJson : index.value("configurations", json::array())) {
+        const auto it = cfgById.find(idJson.get<uint64_t>());
+        if (it == cfgById.end()) {
+          if (error)
+            *error = "missing configuration file for id " +
+                     std::to_string(idJson.get<uint64_t>());
+          return nullptr;
+        }
+        std::ifstream cin(it->second);
+        doc->RestoreConfiguration(ConfigurationFromJson(json::parse(cin)));
+      }
+    }
     doc->SetRollback(index.value("rollback", -1));
+    // Apply the active configuration last so the final regeneration reflects it.
+    doc->SetActiveConfiguration(index.value("active_configuration", uint64_t{0}));
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
              dirPath);
     return doc;
@@ -1629,6 +1712,12 @@ bool Save(const Document& doc, const std::string& path, std::string* error) {
       for (const fem::Study& s : doc.GetStudies())
         j["studies"].push_back(StudyToJson(s));
     }
+    // Configurations (v31), inline (the active id is in the envelope above).
+    if (!doc.GetConfigurations().empty()) {
+      j["configurations"] = json::array();
+      for (const Configuration& c : doc.GetConfigurations())
+        j["configurations"].push_back(ConfigurationToJson(c));
+    }
 
     std::ofstream out(path);
     if (!out) {
@@ -1687,7 +1776,11 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
     for (const auto& sj : j.value("studies", json::array())) {  // v29
       doc->RestoreStudy(StudyFromJson(sj));
     }
+    for (const auto& cj : j.value("configurations", json::array())) {  // v31
+      doc->RestoreConfiguration(ConfigurationFromJson(cj));
+    }
     doc->SetRollback(j.value("rollback", -1)); // v19; absent = end
+    doc->SetActiveConfiguration(j.value("active_configuration", uint64_t{0}));
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
              path);
     return doc;

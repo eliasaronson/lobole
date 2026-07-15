@@ -58,6 +58,12 @@ ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
 nlohmann::json StudyToJson(const fem::Study& study);
 fem::Study StudyFromJson(const nlohmann::json& j);
 
+// Single-configuration (de)serialization (v31); the studies pattern. The
+// active-configuration id lives in the document envelope, not here. Throws on
+// malformed input.
+nlohmann::json ConfigurationToJson(const Configuration& configuration);
+Configuration ConfigurationFromJson(const nlohmann::json& j);
+
 // Drawing (de)serialization (v30). Same on-disk form as a part/assembly —
 // directory (one file per view/dim) or single JSON file, dispatched on the
 // path — discriminated by `kind: "drawing"`. Save returns false / Load

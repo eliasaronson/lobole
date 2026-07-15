@@ -171,6 +171,67 @@ private:
   nlohmann::json m_before, m_after;
 };
 
+// ---- Configurations (the study command trio, verbatim) --------------------
+
+// Adds a new (empty) configuration; the created id is captured for redo.
+class AddConfigurationCommand : public Command {
+public:
+  explicit AddConfigurationCommand(std::string name = "");
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+  uint64_t ConfigurationId() const { return m_id; }
+
+private:
+  std::string m_name;
+  uint64_t m_id = 0;
+};
+
+// Removes a configuration, snapshotting it (and the active id, restored on
+// undo since removing the active config falls back to base).
+class RemoveConfigurationCommand : public Command {
+public:
+  explicit RemoveConfigurationCommand(uint64_t id);
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  uint64_t m_id;
+  nlohmann::json m_snapshot;
+  uint64_t m_activeBefore = 0;
+};
+
+// One configuration edit (rename, override add/remove, suppression toggle),
+// snapshotted as ConfigurationToJson before/after — idempotent like
+// ModifyStudyCommand.
+class ModifyConfigurationCommand : public Command {
+public:
+  ModifyConfigurationCommand(std::string description, nlohmann::json before,
+                             nlohmann::json after);
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  std::string m_description;
+  nlohmann::json m_before, m_after;
+};
+
+// Switches the active configuration (0 = base). Regenerates on both apply and
+// undo.
+class SetActiveConfigurationCommand : public Command {
+public:
+  explicit SetActiveConfigurationCommand(uint64_t id);
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  uint64_t m_id;
+  uint64_t m_before = 0;
+};
+
 class CommandStack {
 public:
   // Executes the command and pushes it onto the undo stack (clearing any
