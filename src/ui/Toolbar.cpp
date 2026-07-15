@@ -4,6 +4,7 @@
 #include "RayTracingRenderer.h"
 #include "core/SketchFeature.h"
 #include "ui/AppActions.h"
+#include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
 
@@ -378,6 +379,100 @@ void DrawSimulationToolbar(AppState& state) {
 
 } // namespace
 
+// The drawing-mode toolbar: add a projected view of a part/assembly (the
+// "add part" of a sheet), re-project, the dimension tools, fit, export.
+void DrawDrawingToolbar(AppState& state) {
+  DrawingDocument& dwg = *state.drawing;
+
+  // Add view: a picker of part/assembly sources, each with orientation
+  // submenus — the sheet equivalent of inserting a part.
+  if (ToolButton(ICON_FA_CIRCLE_PLUS, "Add view (project a part/assembly)"))
+    ImGui::OpenPopup("add_view");
+  if (ImGui::BeginPopup("add_view")) {
+    ImGui::TextDisabled("Add view of");
+    ImGui::Separator();
+    struct Ori { const char* label; ViewOrientation o; };
+    static const Ori orients[] = {{"Front", ViewOrientation::Front},
+                                  {"Top", ViewOrientation::Top},
+                                  {"Right", ViewOrientation::Right},
+                                  {"Iso", ViewOrientation::Iso}};
+    bool any = false;
+    for (const PartSlot& s : state.parts) {
+      if (s.kind != DocKind::Part && s.kind != DocKind::Assembly) continue;
+      any = true;
+      if (ImGui::BeginMenu(s.name.c_str())) {
+        for (const Ori& ori : orients) {
+          if (ImGui::MenuItem(ori.label)) {
+            glm::dvec2 ext = SheetExtentMM(dwg.GetSheet().size);
+            if (dwg.GetSheet().landscape) ext = {ext.y, ext.x};
+            DrawingView v;
+            v.name = ori.label;
+            v.sourceDocId = s.id;
+            v.orientation = ori.o;
+            v.scale = 1.0;
+            v.position = ext * 0.5;
+            SnapshotDrawing(state);
+            dwg.AddView(v);
+            UpdateDrawingRenders(state);
+          }
+        }
+        ImGui::EndMenu();
+      }
+    }
+    if (!any)
+      ImGui::TextDisabled("No parts/assemblies — add one with +Part/+Asm.");
+    ImGui::EndPopup();
+  }
+  ImGui::SameLine();
+  Divider();
+
+  if (ToolButton(ICON_FA_ARROWS_ROTATE, "Update views (re-project)"))
+    UpdateDrawingRenders(state);
+
+  Divider();
+
+  // Dimension tools: arm state.dimTool; the sheet then picks projected refs.
+  auto dimBtn = [&](const char* icon, const char* tip, DrawingDimKind k) {
+    const bool armed = state.dimTool.active && state.dimTool.kind == k;
+    if (armed)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ToolButton(icon, tip)) {
+      state.dimTool = AppState::DimTool{};
+      state.dimTool.active = true;
+      state.dimTool.kind = k;
+    }
+    if (armed)
+      ImGui::PopStyleColor();
+  };
+  dimBtn(ICON_FA_LEFT_RIGHT, "Distance dimension", DrawingDimKind::Distance);
+  dimBtn(ICON_FA_RULER_HORIZONTAL, "Horizontal (X) distance",
+         DrawingDimKind::DistanceX);
+  dimBtn(ICON_FA_UP_DOWN, "Vertical (Y) distance", DrawingDimKind::DistanceY);
+  dimBtn(ICON_FA_CIRCLE_NOTCH, "Radius dimension", DrawingDimKind::Radius);
+  dimBtn(ICON_FA_CIRCLE_HALF_STROKE, "Diameter dimension",
+         DrawingDimKind::Diameter);
+  dimBtn(ICON_FA_ANGLE_LEFT, "Angle dimension", DrawingDimKind::Angle);
+
+  Divider();
+
+  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit sheet (F)"))
+    state.sheetView.scale = 0.0;  // refit on next paint
+  if (ToolButton(ICON_FA_FILE_EXPORT, "Export drawing (SVG / PDF)",
+                 !dwg.GetViews().empty()))
+    ExportDialog(state);
+
+  if (state.dimTool.active) {
+    ImGui::SameLine();
+    const bool radial = state.dimTool.kind == DrawingDimKind::Radius ||
+                        state.dimTool.kind == DrawingDimKind::Diameter;
+    ImGui::TextDisabled("pick edge %d of %d (Esc to cancel)",
+                        static_cast<int>(state.dimTool.refs.size()) + 1,
+                        radial ? 1 : 2);
+  }
+  ImGui::NewLine();
+}
+
 void DrawToolbar(AppState& state) {
   if (state.sketchEdit.IsEditing())
     DrawSketchModeToolbar(state);
@@ -385,6 +480,8 @@ void DrawToolbar(AppState& state) {
     DrawSimulationToolbar(state);
   else if (state.assembly)
     DrawAssemblyToolbar(state);
+  else if (state.drawing)
+    DrawDrawingToolbar(state);
   else
     DrawModelToolbar(state);
 }
