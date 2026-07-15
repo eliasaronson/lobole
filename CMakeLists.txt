@@ -349,6 +349,7 @@ set(app_sources
     src/remote/RemoteSimulation.cpp
     src/remote/RemoteInspection.cpp
     src/remote/RemoteModeling.cpp
+    src/remote/RemoteDrawings.cpp
 )
 
 # UI fonts, loaded at runtime relative to the executable
