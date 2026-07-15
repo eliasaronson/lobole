@@ -64,10 +64,12 @@ Render button.
 consistent feature-dialog pattern) — the natural next workstream; assembly-level
 features; per-occurrence part-config selection (the one configurations follow-on);
 modeling's thread/rib; rendering's SSAO + soft shadows + real-time hybrid RT (gated on
-the `main.cpp` render-path cleanup); semantic (three-way) merge for the git format. The
-three large logic files (`RemoteServer`/`AppActions`/`Serialization`) want a domain
-split — config RPCs already carved into `remote/RemoteConfigurations.cpp`; see the
-refactoring policy below.
+the `main.cpp` render-path cleanup); semantic (three-way) merge for the git format.
+**The three large logic files were split (July 2026):** `RemoteServer` 2164→663 (seven
+`remote::Handle*Rpc` domain modules), `Serialization` 2268→1135 (`Serialize{Features,
+Assembly,Studies,Configurations}` TUs + `SerializationInternal.h`), `AppActions`
+3191→2056 (`AssemblyActions` + `SimulationActions`). `main.cpp` + the renderers stay
+monolithic until 6b forces it (see the refactoring policy below).
 
 ## Workstreams
 
