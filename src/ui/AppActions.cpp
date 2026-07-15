@@ -23,6 +23,8 @@
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
+#include "core/DrawingProjection.h"
+#include "core/DrawingRender.h"
 #include "core/Serialization.h"
 
 #include <nlohmann/json.hpp>
@@ -535,6 +537,8 @@ void StashActive(AppState& state) {
   slot.commands = std::move(state.commands);
   slot.history = std::move(state.assemblyHistory);
   slot.drawingHistory = std::move(state.drawingHistory);
+  slot.drawingRenders = std::move(state.drawingRenders);
+  state.drawingRenders.clear(); // moved-from: guarantee empty
   slot.lastSavedVersion = state.lastSavedVersion;
   slot.solvedPartVersions = std::move(state.solvedPartVersions);
   state.solvedPartVersions.clear(); // moved-from: guarantee empty
@@ -549,6 +553,8 @@ void ActivateSlot(AppState& state, size_t index) {
   state.commands = std::move(slot.commands);
   state.assemblyHistory = std::move(slot.history);
   state.drawingHistory = std::move(slot.drawingHistory);
+  state.drawingRenders = std::move(slot.drawingRenders);
+  slot.drawingRenders.clear();
   state.lastSavedVersion = slot.lastSavedVersion;
   state.solvedPartVersions = std::move(slot.solvedPartVersions);
   slot.solvedPartVersions.clear();
@@ -569,6 +575,9 @@ void ResetActiveTabUiState(AppState& state) {
   // The 2D sheet pan/zoom is per-tab and transient: a fresh scale=0 makes the
   // next drawing paint fit-to-window (harmless for non-drawing tabs).
   state.sheetView = AppState::Sheet2DView{};
+  // NOTE: drawingRenders is NOT cleared here — it is stashed/restored per slot
+  // (StashActive/ActivateSlot) so a drawing keeps its projected geometry across
+  // tab switches and only an explicit update re-projects.
   // Any tab change exits simulation mode (results themselves live on the
   // Document and survive; only the mode/display state resets).
   state.simulation = SimulationState{};
@@ -730,6 +739,12 @@ void SetActivePart(AppState& state, size_t index) {
   // edits without an explicit solve_assembly.
   if (state.assembly && AssemblyPartsStale(state))
     SolveActiveAssembly(state);
+  // A drawing projects on the FIRST view of the tab (design §2): if the
+  // restored cache is empty (never projected this session) fill it; otherwise
+  // keep the stashed geometry so staleness is only cleared by explicit update.
+  if (state.drawing && state.drawingRenders.empty() &&
+      state.drawing->ViewCount() > 0)
+    UpdateDrawingRenders(state);
 }
 
 std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId) {
@@ -1034,6 +1049,8 @@ bool OpenProject(AppState& state, const std::string& path,
     // mates re-solve on load — the format's stated contract.
     if (state.assembly && AssemblyPartsStale(state))
       SolveActiveAssembly(state);
+    if (state.drawing && state.drawing->ViewCount() > 0)
+      UpdateDrawingRenders(state);  // re-project on first view of an opened drawing
     if (state.document) FitCameraToDocument(state);
     return true;
   } catch (const std::exception& e) {
@@ -2169,6 +2186,165 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
   }
 }
 } // namespace
+
+// ---- Drawing view projection (workstream 13, D2) --------------------------
+
+namespace {
+
+// One body of a view's source document, ready to project: its shape + world
+// placement, plus the featureId and ElementMap needed to name projected edges/
+// faces back to stable toponaming refs.
+struct SourceBody {
+  drawing::InputBody input;
+  uint64_t featureId = 0;    // the body's createdBy (owner of its element names)
+  const ElementMap* map = nullptr;
+};
+
+// Gathers the projectable bodies of a drawing view's source document. D2a
+// resolves part sources (identity placement); assembly sources arrive in D2b.
+// Returns false and sets *error when the source can't be resolved.
+bool GatherSourceBodies(AppState& state, const DrawingView& view,
+                        std::vector<SourceBody>& out, uint64_t* sourceVersion,
+                        std::string* error) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].id != view.sourceDocId) continue;
+    if (state.parts[i].kind != DocKind::Part) {
+      *error = "assembly drawing views are not supported yet";  // D2b
+      return false;
+    }
+    const Document* doc = SlotDoc(state, i);
+    if (!doc) { *error = "source document is empty"; return false; }
+    *sourceVersion = doc->Version();
+    const auto& bodies = doc->GetBodies();
+    for (size_t bi = 0; bi < bodies.size(); bi++) {
+      if (bodies[bi].shape.GetShape().IsNull()) continue;
+      SourceBody sb;
+      sb.input.shape = bodies[bi].shape.GetShape();
+      sb.input.transform = glm::dmat4(1.0);
+      sb.input.sourceId = bi;  // body index: picks the ElementMap on join
+      sb.featureId = bodies[bi].createdBy;
+      sb.map = &bodies[bi].elementMap;
+      out.push_back(std::move(sb));
+    }
+    return true;
+  }
+  *error = "source document not found";
+  return false;
+}
+
+// Projects one drawing view: resolves its source, runs HLR, places the curves
+// on the sheet at the view's scale + position, and joins the index-space
+// source refs to stable ElementRefs. A failure leaves `error` set and no
+// geometry (callers keep the previous SheetView so a stale view isn't blanked).
+drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) {
+  drawing::SheetView result;
+  result.viewId = view.id;
+
+  std::vector<SourceBody> bodies;
+  std::string error;
+  if (!GatherSourceBodies(state, view, bodies, &result.solvedSourceVersion,
+                          &error)) {
+    result.error = error;
+    return result;
+  }
+  if (bodies.empty()) {
+    result.error = "source has no geometry to project";
+    return result;
+  }
+
+  std::vector<drawing::InputBody> inputs;
+  inputs.reserve(bodies.size());
+  for (const SourceBody& sb : bodies) inputs.push_back(sb.input);
+
+  glm::dvec3 viewDir, up;
+  OrientationAxes(view.orientation, viewDir, up);
+  drawing::ProjectionOptions opts;
+  opts.hiddenLines = view.showHidden;
+  auto projected = drawing::ProjectView(inputs, viewDir, up, opts, &error);
+  if (!projected) {
+    result.error = error;
+    return result;
+  }
+
+  // Map an index-space SourceRef back to a stable ElementRef via the owning
+  // body's ElementMap (sourceId is the body index in `bodies`).
+  const auto bodyOf = [&](uint64_t sourceId) -> const SourceBody* {
+    return sourceId < bodies.size() ? &bodies[sourceId] : nullptr;
+  };
+
+  const double s = view.scale != 0.0 ? view.scale : 1.0;
+  glm::dvec2 lo(1e30), hi(-1e30);
+  for (const drawing::ProjectedCurve& pc : projected->curves) {
+    drawing::SheetCurve sc;
+    sc.kind = pc.kind;
+    sc.visible = pc.visible;
+    sc.curveType = pc.curveType;
+    sc.sourceId = pc.source.sourceId;
+    sc.points.reserve(pc.points.size());
+    for (const glm::dvec2& p : pc.points) {
+      const glm::dvec2 sheet = view.position + s * p;
+      sc.points.push_back(sheet);
+      lo = glm::min(lo, sheet);
+      hi = glm::max(hi, sheet);
+    }
+    if (const SourceBody* sb = bodyOf(pc.source.sourceId)) {
+      if (pc.source.edgeIndex >= 0 && sb->map) {
+        if (const std::string* n = sb->map->EdgeNameOf(pc.source.edgeIndex))
+          sc.edge = ElementRef{sb->featureId, *n};
+      }
+      if (pc.source.faceIndex >= 0 && sb->map) {
+        if (const std::string* n = sb->map->NameOf(pc.source.faceIndex))
+          sc.silFace = ElementRef{sb->featureId, *n};
+      }
+    }
+    result.curves.push_back(std::move(sc));
+  }
+  if (!result.curves.empty()) {
+    result.hasGeometry = true;
+    result.bboxMin = lo;
+    result.bboxMax = hi;
+  }
+  return result;
+}
+
+} // namespace
+
+uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].id != sourceDocId) continue;
+    if (state.parts[i].kind == DocKind::Part) {
+      const Document* doc = SlotDoc(state, i);
+      return doc ? doc->Version() : 0;
+    }
+    if (state.parts[i].kind == DocKind::Assembly) {
+      const AssemblyDocument* asmDoc = SlotAssembly(state, i);
+      return asmDoc ? asmDoc->Version() : 0;
+    }
+  }
+  return 0;
+}
+
+void UpdateDrawingRenders(AppState& state) {
+  if (!state.drawing) return;
+  std::map<uint64_t, drawing::SheetView> fresh;
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    drawing::SheetView sv = ProjectDrawingView(state, view);
+    // Keep last-good geometry on failure (design §1): a failed view shows its
+    // previous curves with an error, rather than blanking the sheet.
+    if (!sv.error.empty() && !sv.hasGeometry) {
+      const auto prev = state.drawingRenders.find(view.id);
+      if (prev != state.drawingRenders.end() && prev->second.hasGeometry) {
+        drawing::SheetView kept = prev->second;
+        kept.error = sv.error;
+        kept.solvedSourceVersion = sv.solvedSourceVersion;
+        fresh[view.id] = std::move(kept);
+        continue;
+      }
+    }
+    fresh[view.id] = std::move(sv);
+  }
+  state.drawingRenders = std::move(fresh);
+}
 
 void SyncDocumentRenderers(AppState& state) {
   if (!state.meshRenderer)

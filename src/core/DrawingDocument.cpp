@@ -74,6 +74,22 @@ glm::dvec2 SheetExtentMM(SheetSize size) {
   return {210.0, 297.0};
 }
 
+void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up) {
+  switch (o) {
+    case ViewOrientation::Front:  viewDir = {0, 1, 0};  up = {0, 0, 1}; break;
+    case ViewOrientation::Back:   viewDir = {0, -1, 0}; up = {0, 0, 1}; break;
+    case ViewOrientation::Right:  viewDir = {-1, 0, 0}; up = {0, 0, 1}; break;
+    case ViewOrientation::Left:   viewDir = {1, 0, 0};  up = {0, 0, 1}; break;
+    case ViewOrientation::Top:    viewDir = {0, 0, -1}; up = {0, 1, 0}; break;
+    case ViewOrientation::Bottom: viewDir = {0, 0, 1};  up = {0, -1, 0}; break;
+    case ViewOrientation::Iso:
+      // Standard Z-up isometric: camera above and to the front-right.
+      viewDir = glm::normalize(glm::dvec3(-1, 1, -1));
+      up = {0, 0, 1};
+      break;
+  }
+}
+
 const char* SheetSizeToString(SheetSize size) {
   switch (size) {
     case SheetSize::A4: return "a4";

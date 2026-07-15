@@ -132,6 +132,17 @@ void DrawSheet(AppState& state);
 // replacement for the orbit-camera viewport input. Defined in DrawingPanel.cpp.
 void HandleSheetInput(AppState& state);
 
+// Re-projects every view of the active drawing into state.drawingRenders (the
+// HLR-per-view work). Explicit (D2): called on drawing-tab entry and by the
+// update_drawing RPC / panel button — never per frame, since HLR is expensive.
+// Failed views keep their last-good geometry with an error string.
+void UpdateDrawingRenders(AppState& state);
+
+// The current Document::Version() / AssemblyDocument::Version() of a source
+// document (part or assembly) by stable id, or 0 if absent. A drawing view is
+// stale when this differs from the version stamped at its last projection.
+uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId);
+
 // ---- Simulation mode (FEM) ------------------------------------------------
 
 // Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter

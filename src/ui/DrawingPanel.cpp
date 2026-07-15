@@ -61,6 +61,85 @@ void FitSheet(AppState& state) {
 
 const char* kSizeLabels[] = {"A4", "A3", "A2", "A1", "A0", "Letter"};
 
+// A projected polyline in sheet mm -> screen, solid.
+void StrokePolyline(ImDrawList* dl, AppState& state,
+                    const std::vector<glm::dvec2>& pts, ImU32 col, float px) {
+  for (size_t i = 1; i < pts.size(); ++i)
+    dl->AddLine(SheetToScreen(state, pts[i - 1]), SheetToScreen(state, pts[i]),
+                col, px);
+}
+
+// Hidden edges: dashed, in sheet-mm units so the dash pattern is stable under
+// zoom (the design's CPU-dashing, in sheet space).
+void StrokeDashed(ImDrawList* dl, AppState& state,
+                  const std::vector<glm::dvec2>& pts, ImU32 col, float px) {
+  const double dash = 1.6, gap = 1.2;  // sheet mm
+  for (size_t i = 1; i < pts.size(); ++i) {
+    const glm::dvec2 a = pts[i - 1], b = pts[i];
+    const double len = glm::length(b - a);
+    if (len < 1e-9) continue;
+    const glm::dvec2 dir = (b - a) / len;
+    for (double t = 0.0; t < len; t += dash + gap) {
+      const double t2 = std::min(t + dash, len);
+      dl->AddLine(SheetToScreen(state, a + dir * t),
+                  SheetToScreen(state, a + dir * t2), col, px);
+    }
+  }
+}
+
+// Draws every projected view of the active drawing onto the sheet: visible
+// edges solid, hidden edges dashed, a thin frame + label per view, and a stale
+// badge when the source changed since the last projection.
+void DrawViews(ImDrawList* dl, AppState& state) {
+  const ImU32 visible = IM_COL32(20, 20, 24, 255);
+  const ImU32 hidden = IM_COL32(120, 120, 130, 255);
+  const ImU32 frame = IM_COL32(90, 120, 170, 130);
+  const ImU32 stale = IM_COL32(210, 140, 40, 255);
+  const float fontPx = static_cast<float>(2.6 * state.sheetView.scale);
+  ImFont* font = ImGui::GetFont();
+
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    const auto it = state.drawingRenders.find(view.id);
+    if (it == state.drawingRenders.end()) continue;
+    const drawing::SheetView& sv = it->second;
+
+    for (const drawing::SheetCurve& c : sv.curves) {
+      if (c.points.size() < 2) continue;
+      if (c.visible)
+        StrokePolyline(dl, state, c.points, visible, 1.6f);
+      else
+        StrokeDashed(dl, state, c.points, hidden, 1.0f);
+    }
+
+    if (sv.hasGeometry) {
+      // A light frame + the view name/scale label above the geometry.
+      const glm::dvec2 pad{2.0, 2.0};
+      dl->AddRect(SheetToScreen(state, sv.bboxMin - pad),
+                  SheetToScreen(state, sv.bboxMax + pad), frame, 0.0f, 0, 1.0f);
+      if (fontPx >= 4.0f) {
+        char label[128];
+        std::snprintf(label, sizeof(label), "%s  1:%g",
+                      view.name.empty() ? "view" : view.name.c_str(),
+                      view.scale > 0 ? 1.0 / view.scale : 1.0);
+        dl->AddText(font, fontPx,
+                    SheetToScreen(state, {sv.bboxMin.x, sv.bboxMax.y + 6.0}),
+                    frame, label);
+      }
+    }
+
+    // Stale badge: the source advanced past this view's last projection, or
+    // projection failed. Shown near the view's top-left.
+    const bool isStale =
+        DrawingSourceVersion(state, view.sourceDocId) != sv.solvedSourceVersion;
+    if ((isStale || !sv.error.empty()) && fontPx >= 4.0f) {
+      const glm::dvec2 at = sv.hasGeometry ? glm::dvec2(sv.bboxMin.x, sv.bboxMax.y + 12.0)
+                                           : view.position;
+      dl->AddText(font, fontPx, SheetToScreen(state, at), stale,
+                  sv.error.empty() ? "stale - update" : sv.error.c_str());
+    }
+  }
+}
+
 }  // namespace
 
 void HandleSheetInput(AppState& state) {
@@ -150,6 +229,8 @@ void DrawSheet(AppState& state) {
     }
   }
 
+  DrawViews(dl, state);
+
   dl->PopClipRect();
 }
 
@@ -170,11 +251,89 @@ bool TitleField(AppState& state, const char* label, std::string& value) {
   return changed;
 }
 
+const char* kOrientLabels[] = {"front", "back", "left", "right",
+                               "top",   "bottom", "iso"};
+
+// The view list + an "add view" control (source part + orientation + scale)
+// and the explicit Update button. Split out to keep DrawSheetPanel legible.
+void DrawViewsSection(AppState& state) {
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Views");
+  ImGui::Separator();
+
+  if (ImGui::Button("Update views")) UpdateDrawingRenders(state);
+  ImGui::SameLine();
+  ImGui::TextDisabled("(re-projects; explicit)");
+
+  // Add a view: pick a source part, orientation, scale.
+  static int srcIdx = 0, orientIdx = 0;
+  static float addScale = 1.0f;
+  std::vector<const PartSlot*> partSlots;
+  for (const PartSlot& s : state.parts)
+    if (s.kind == DocKind::Part) partSlots.push_back(&s);
+  if (partSlots.empty()) {
+    ImGui::TextDisabled("Add a part to project from.");
+  } else {
+    if (srcIdx >= static_cast<int>(partSlots.size())) srcIdx = 0;
+    if (ImGui::BeginCombo("Source", partSlots[srcIdx]->name.c_str())) {
+      for (int i = 0; i < static_cast<int>(partSlots.size()); ++i)
+        if (ImGui::Selectable(partSlots[i]->name.c_str(), i == srcIdx))
+          srcIdx = i;
+      ImGui::EndCombo();
+    }
+    ImGui::Combo("Orientation", &orientIdx, kOrientLabels,
+                 IM_ARRAYSIZE(kOrientLabels));
+    ImGui::InputFloat("Scale", &addScale, 0.0f, 0.0f, "%.3f");
+    if (ImGui::Button("Add view")) {
+      glm::dvec2 ext = SheetExtentMM(state.drawing->GetSheet().size);
+      if (state.drawing->GetSheet().landscape) ext = {ext.y, ext.x};
+      DrawingView v;
+      v.name = std::string(kOrientLabels[orientIdx]);
+      v.sourceDocId = partSlots[srcIdx]->id;
+      v.orientation = static_cast<ViewOrientation>(orientIdx);
+      v.scale = addScale > 0 ? addScale : 1.0;
+      v.position = ext * 0.5;
+      SnapshotDrawing(state);
+      state.drawing->AddView(v);
+      UpdateDrawingRenders(state);
+    }
+  }
+
+  // The view list: name, orientation, curve count / status, delete.
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    ImGui::PushID(static_cast<int>(view.id));
+    const auto it = state.drawingRenders.find(view.id);
+    const char* status = "needs update";
+    if (it != state.drawingRenders.end()) {
+      if (!it->second.error.empty()) status = it->second.error.c_str();
+      else status = it->second.hasGeometry ? "ok" : "empty";
+    }
+    ImGui::BulletText("%s [%s]  %zu curves - %s",
+                      view.name.empty() ? "view" : view.name.c_str(),
+                      ViewOrientationToString(view.orientation),
+                      it != state.drawingRenders.end() ? it->second.curves.size()
+                                                       : size_t{0},
+                      status);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("x")) {
+      SnapshotDrawing(state);
+      state.drawing->RemoveView(view.id);
+      UpdateDrawingRenders(state);
+      ImGui::PopID();
+      break;  // container mutated; redraw next frame
+    }
+    ImGui::PopID();
+  }
+}
+
 }  // namespace
 
 void DrawSheetPanel(AppState& state) {
   if (!state.drawing) return;
-  ImGui::Begin("Drawing");
+  // Docks into the left "Model" node (the DockLayout slot the feature tree and
+  // occurrence panel also use), so a drawing tab reserves the same panel space
+  // instead of floating over the sheet.
+  ImGui::Begin("Model");
 
   Sheet& sheet = state.drawing->GetSheet();
 
@@ -213,10 +372,11 @@ void DrawSheetPanel(AppState& state) {
   ImGui::SameLine();
   if (ImGui::Button("Redo")) RedoDrawing(state);
 
+  DrawViewsSection(state);
+
   ImGui::Spacing();
-  ImGui::TextDisabled("%zu view(s), %zu dimension(s)", state.drawing->ViewCount(),
+  ImGui::TextDisabled("%zu dimension(s) — dimensions arrive in D3.",
                       state.drawing->DimCount());
-  ImGui::TextDisabled("Views and dimensions arrive in the next milestone.");
 
   ImGui::End();
 }

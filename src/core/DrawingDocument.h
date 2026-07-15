@@ -134,6 +134,13 @@ private:
 // Portrait short/long sheet extents in millimetres.
 glm::dvec2 SheetExtentMM(SheetSize size);
 
+// The orthographic view direction (the way the viewer looks) and the world
+// vector that maps to sheet +Y (up), for a named orientation. World Z is up;
+// a Front view maps world +X -> sheet +X and +Z -> sheet +Y. Passed straight
+// to drawing::ProjectView. `up` for Front/Back/Left/Right is +Z; for Top/
+// Bottom the sheet is a plan, so `up` is the world Y axis.
+void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up);
+
 const char* SheetSizeToString(SheetSize size);
 bool SheetSizeFromString(const std::string& s, SheetSize& out);
 const char* ViewOrientationToString(ViewOrientation o);

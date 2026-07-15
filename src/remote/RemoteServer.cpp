@@ -242,7 +242,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   static const std::set<std::string> kNoPartDoc = {
       "ping",         "list_parts",       "add_part",
       "add_assembly", "set_active_part",  "delete_part",
-      "create_drawing", "list_drawings",
+      "create_drawing", "list_drawings", "add_drawing_view",
+      "remove_drawing_view", "update_drawing", "list_drawing_views",
       "new_project",  "save_project",     "open_project",
       "add_occurrence", "remove_occurrence", "list_occurrences",
       "set_occurrence_transform", "set_occurrence_visible",
@@ -1172,6 +1173,104 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                      {"dims", dwg ? dwg->DimCount() : 0}});
     }
     return {{"drawings", arr}};
+  }
+  if (m == "add_drawing_view") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    // `source` = the source document's NAME (a part; assemblies in D2b),
+    // resolved to its stable id.
+    const std::string sourceName = p.at("source").get<std::string>();
+    const uint64_t sourceId = ui::PartIdByName(state, sourceName);
+    if (sourceId == 0)
+      throw std::runtime_error("no part named '" + sourceName + "'");
+    DrawingView v;
+    v.name = p.value("name", sourceName);
+    v.sourceDocId = sourceId;
+    if (p.contains("orientation") &&
+        !ViewOrientationFromString(p.at("orientation").get<std::string>(),
+                                   v.orientation))
+      throw std::runtime_error("unknown orientation '" +
+                               p.at("orientation").get<std::string>() + "'");
+    v.baseViewId = p.value("base_view", uint64_t{0});
+    v.scale = p.value("scale", 1.0);
+    if (p.contains("position")) {
+      const json& pos = p.at("position");
+      v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
+    } else {  // default to the sheet centre
+      glm::dvec2 ext = SheetExtentMM(state.drawing->GetSheet().size);
+      if (state.drawing->GetSheet().landscape) ext = {ext.y, ext.x};
+      v.position = ext * 0.5;
+    }
+    ui::SnapshotDrawing(state);
+    const uint64_t id = state.drawing->AddView(v);
+    // Projection is explicit (design §2, the FEM rule): the view is added now;
+    // call update_drawing to project it.
+    return {{"id", id}, {"source_id", sourceId}, {"needs_update", true}};
+  }
+  if (m == "remove_drawing_view") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    ui::SnapshotDrawing(state);
+    if (!state.drawing->RemoveView(p.at("id").get<uint64_t>())) {
+      state.drawingHistory.undo.pop_back();  // nothing changed; drop the snapshot
+      throw std::runtime_error("no such view");
+    }
+    ui::UpdateDrawingRenders(state);  // drop the removed view's geometry
+    return json::object();
+  }
+  if (m == "update_drawing") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    ui::UpdateDrawingRenders(state);  // the explicit re-projection
+    json views = json::array();
+    for (const DrawingView& view : state.drawing->GetViews()) {
+      json vj = {{"id", view.id}, {"name", view.name}};
+      const auto it = state.drawingRenders.find(view.id);
+      if (it != state.drawingRenders.end()) {
+        int vis = 0, hid = 0, outline = 0;
+        for (const drawing::SheetCurve& c : it->second.curves) {
+          if (c.visible) ++vis; else ++hid;
+          if (c.kind == drawing::CurveKind::Outline) ++outline;
+        }
+        vj["curves"] = it->second.curves.size();
+        vj["visible"] = vis;
+        vj["hidden"] = hid;
+        vj["silhouettes"] = outline;
+        vj["has_geometry"] = it->second.hasGeometry;
+        if (!it->second.error.empty()) vj["error"] = it->second.error;
+      }
+      views.push_back(vj);
+    }
+    return {{"views", views}};
+  }
+  if (m == "list_drawing_views") {
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    json arr = json::array();
+    for (const DrawingView& view : state.drawing->GetViews()) {
+      json vj = {{"id", view.id},
+                 {"name", view.name},
+                 {"source_id", view.sourceDocId},
+                 {"orientation", ViewOrientationToString(view.orientation)},
+                 {"scale", view.scale},
+                 {"base_view", view.baseViewId},
+                 {"position", {view.position.x, view.position.y}},
+                 {"show_hidden", view.showHidden}};
+      const auto it = state.drawingRenders.find(view.id);
+      if (it != state.drawingRenders.end()) {
+        vj["curves"] = it->second.curves.size();
+        vj["has_geometry"] = it->second.hasGeometry;
+        vj["stale"] = ui::DrawingSourceVersion(state, view.sourceDocId) !=
+                      it->second.solvedSourceVersion;
+        if (!it->second.error.empty()) vj["error"] = it->second.error;
+      } else {
+        vj["curves"] = 0;
+        vj["has_geometry"] = false;
+        vj["stale"] = true;  // never projected
+      }
+      arr.push_back(vj);
+    }
+    return {{"views", arr}};
   }
   if (m == "add_occurrence") {
     // Places a part in the active assembly. `part` is the part's NAME (resolved

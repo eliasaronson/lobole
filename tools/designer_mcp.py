@@ -957,6 +957,48 @@ def list_drawings() -> dict:
     return _call("list_drawings")
 
 
+@mcp.tool(description="Add a projected VIEW of a part to the ACTIVE drawing. "
+          "source = the part's name. orientation = 'front'|'back'|'left'|"
+          "'right'|'top'|'bottom'|'iso' (default front). scale = drawing:model "
+          "ratio, e.g. 0.5 for 1:2 (default 1.0). position = [x,y] sheet mm "
+          "(default sheet centre). base_view = a view id to fold this one from "
+          "(D2b). The view is added but NOT projected — call update_drawing. "
+          "Returns the new view id.")
+def add_drawing_view(source: str, orientation: str = "", scale: float = 1.0,
+                     position: list | None = None, name: str = "",
+                     base_view: int = 0) -> dict:
+    params = {"source": source, "scale": scale}
+    if orientation:
+        params["orientation"] = orientation
+    if position is not None:
+        params["position"] = position
+    if name:
+        params["name"] = name
+    if base_view:
+        params["base_view"] = base_view
+    return _call("add_drawing_view", **params)
+
+
+@mcp.tool(description="Remove a view (by id) from the active drawing.")
+def remove_drawing_view(id: int) -> dict:
+    return _call("remove_drawing_view", id=id)
+
+
+@mcp.tool(description="Re-project every view of the active drawing (the "
+          "explicit hidden-line-removal pass — expensive, never automatic). "
+          "Returns per-view curve counts (visible/hidden/silhouettes) and any "
+          "projection error. Run after adding views or editing the source part.")
+def update_drawing() -> dict:
+    return _call("update_drawing")
+
+
+@mcp.tool(description="List the active drawing's views with their orientation, "
+          "scale, position, projected curve count, and whether each is stale "
+          "(source changed since last projection).")
+def list_drawing_views() -> dict:
+    return _call("list_drawing_views")
+
+
 # ---------------------------------------------------------------------------
 # Escape hatch: raw UI events (for driving/testing the Designer GUI itself)
 # ---------------------------------------------------------------------------

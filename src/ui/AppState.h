@@ -3,6 +3,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/DrawingDocument.h"
+#include "core/DrawingRender.h"
 #include "core/Occurrence.h"
 #include "core/SketchFeature.h"
 #include "core/SketchInference.h"
@@ -14,6 +15,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -283,6 +285,10 @@ struct PartSlot {
   std::unique_ptr<CommandStack> commands; // null while active (parts only)
   AssemblyHistory history;                // assembly undo/redo (stashed here)
   DrawingHistory drawingHistory;          // drawing undo/redo (stashed here)
+  // Projected view geometry for a stashed drawing tab (D2). Kept across tab
+  // switches so re-entering a drawing doesn't silently re-project — staleness
+  // is only cleared by an explicit update (the FEM rule).
+  std::map<uint64_t, drawing::SheetView> drawingRenders;
   uint64_t lastSavedVersion = 0;      // per-document dirty tracking
   // Assembly tabs only (A4): referenced parts' Document::Version() at this
   // assembly's last solve, stashed while inactive. See AppState field.
@@ -419,6 +425,12 @@ struct AppState {
     double scale = 0.0;
     bool panning = false;
   } sheetView;
+
+  // Projected view geometry for the active drawing tab, keyed by DrawingView
+  // id (workstream 13, D2). Derived and transient — recomputed by
+  // UpdateDrawingRenders on tab entry and explicit update_drawing, never
+  // serialized. Cleared on tab switch (ResetActiveTabUiState).
+  std::map<uint64_t, drawing::SheetView> drawingRenders;
 
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
