@@ -216,6 +216,7 @@ set(core_sources
     src/core/SketchSolver.cpp
     src/core/FemStudy.cpp
     src/core/FemSolver.cpp
+    src/core/FemTopo.cpp
 )
 
 find_package(nlohmann_json 3 REQUIRED)

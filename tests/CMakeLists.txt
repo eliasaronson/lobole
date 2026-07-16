@@ -45,6 +45,7 @@ add_executable(designer_tests
     test_camera.cpp
     test_ibl.cpp
     test_fem.cpp
+    test_topopt.cpp
     test_drawing_hlr.cpp
     test_drawing.cpp
     test_configuration.cpp

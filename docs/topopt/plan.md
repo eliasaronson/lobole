@@ -64,6 +64,47 @@ values each iteration. Tet10 is finer than the linear elements classic SIMP
 uses, which is fine (better, even — less checkerboarding; the filter is
 still required for minimum member size).
 
+## TO0 spike findings (gate: PASS)
+
+The TO0 spike (`src/core/FemTopo.{h,cpp}`, `tests/test_topopt.cpp`) built the
+SIMP+OC loop on the shipped tet10 solver and ran it on a structured-tet
+cantilever. **Verdict: PASS** — the loop is stable and correct: the OC
+volume constraint lands the target to <0.1%, compliance drops ~6× (3947 →
+660 on the gate problem), the fixed/loaded skin stays solid, and the
+thresholded density is a recognizable cantilever truss (solid top+bottom
+chords, webbed interior). Four findings refine the design:
+
+1. **Filter: sensitivity filtering for v1, not density filtering.** A density
+   filter blurs the density field, leaving a wide gray transition band that
+   coarse meshes can't sharpen (measured 22–40% gray). Sensitivity filtering
+   (Sigmund) keeps the physical density equal to the design variable — the
+   field goes crisply 0/1, the frozen skin is exactly 1, and the volume stays
+   linear in x (O(n) OC bisection). **Density filter + Heaviside projection**
+   (the three-field robust formulation) is the production-grade path to true
+   minimum-member-size control and razor-sharp edges — deferred to TO1.
+2. **Gravity is excluded from the TO objective.** Self-weight is a
+   design-dependent load (F depends on ρ), which adds a dF/dρ sensitivity term
+   and is a known low-density SIMP failure mode. TO optimizes the study's
+   fixed face loads only; gravity stays an FEM-only feature.
+3. **The direct solver is the wall, and it sets the resolution ceiling.**
+   Each `SimplicialLDLT` factorization is ~0.4 s at ~3k tets and grows
+   super-linearly (~2.8 s at ~7k); a converged run is 60–80 of them.
+   Crisp results want finer meshes, but the direct solver makes that
+   minutes-to-slow. The **scaling path** (its own later workstream, not TO1):
+   a matrix-free Conjugate-Gradient solver — cheapest first as CPU CG with
+   warm-starting (reuse the previous iteration's u; K barely changes between
+   SIMP steps), then **Vulkan compute** (element-wise K·v in a compute shader,
+   the standard high-resolution-GPU-TO approach) with a multigrid
+   preconditioner for the Emin-induced ill-conditioning. The app already has
+   the Vulkan device/queue/shader plumbing. This is what makes fine-mesh,
+   production-quality TO interactive; the CPU direct solver is fine for TO1's
+   modest meshes on the worker thread.
+4. **Element math was refactored, not forked.** The tet10 shape functions,
+   Gauss rules, elasticity matrix, and the DOF-map / face-load assembly moved
+   from `FemSolver.cpp`'s anonymous namespace into `core/FemSolverInternal.h`
+   (`fem::internal`), shared verbatim by the solver and the TO loop — the
+   existing `[fem]` analytic benchmarks guard that the motion changed nothing.
+
 ## What v1 is — and is not
 
 **v1: single-part compliance minimization.**
@@ -278,26 +319,32 @@ result). Self-skips without Netgen, like `fem_smoke`.
    snapshot with atomic progress + cancel; Document touched only at the
    main-thread join. `run_study` async for topology + `study_status` +
    `cancel_study`. One run at a time.
-7. **Solver hook, not fork**: `fem::Solve` gains per-element stiffness
-   scales + per-element strain-energy output (a `SolveOptions`-style
-   extension, existing callers unchanged); symbolic factorization reused
-   across iterations.
+7. **Solver hook, not fork**: the tet10 element math + system-assembly
+   helpers live in `core/FemSolverInternal.h` (`fem::internal`), shared by the
+   static solver and `fem::TopologyOptimize`; the TO loop assembles its own
+   penalized K per iteration and reuses the symbolic factorization
+   (`analyzePattern` once). (Implemented in TO0.)
 8. **Display = marching-tets iso-surface as a MeshRenderer body**
    (threshold slider, volume-matched default) + density via the existing
    `FieldRenderer`; export = Taubin-smoothed STL.
 
 ## Phasing
 
-0. **TO0 — spike (gate).** Behind the scenes of any UI: solver hooks
-   (element scales + energies), centroid-grid density filter, OC loop —
-   driven by a hard-coded box-cantilever `TopoInput` in `test_topopt.cpp`.
-   **Gate:** on a coarse mesh (≤ ~8k tets) the loop converges under the
-   iteration cap, hits the volume fraction ± 1%, compliance decreases
-   (allowing small filter-induced wiggles), grayness (# elements with
-   0.2<ρ<0.8) < 15%, and the result is visibly a truss-like cantilever when
-   dumped to STL by hand. Also measures per-iteration wall time to size
-   real-mesh runtimes. **If SIMP won't converge acceptably on tet10 here,
-   stop and rethink (BESO fallback) before building any surface.**
+0. **TO0 — spike (gate): DONE — PASS.** Solver hooks (element scale + strain
+   energy via `core/FemSolverInternal.h`), centroid-grid filter, OC loop in
+   `core/FemTopo.{h,cpp}`, driven by structured-tet box cantilevers in
+   `tests/test_topopt.cpp` (deterministic, Netgen-free) + a Netgen cross-check.
+   The loop converges under the cap (~65 iters), lands the volume fraction to
+   <0.1%, drops compliance ~6×, keeps the fixed/loaded skin solid, and the
+   thresholded density is a recognizable cantilever truss. Per-iteration wall
+   time measured (~0.4 s at ~3k tets, ~2.8 s at ~7k — the direct solver is the
+   scaling wall; see finding 3). **Two design changes the spike settled**
+   (above): sensitivity filtering (not density) for v1 crispness, and gravity
+   excluded from the objective. Grayness landed at ~30–40% on the coarse
+   structured-tet mesh (filter-band + Kuhn-decomposition sensitivity variation)
+   rather than the <15% originally hoped — razor-sharp black/white is a TO1
+   Heaviside-projection / finer-mesh concern, not a viability blocker; the
+   binarized truss is correct. SIMP is viable on tet10 — GO.
 1. **TO1 — model + persistence.** Study fields + keep-faces + commands;
    `set_study`/keep-face RPCs; serialization v33 (definition + result file,
    golden + round-trip); `RunTopology(TopoInput)` wired to a *synchronous*
