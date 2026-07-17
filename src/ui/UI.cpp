@@ -1,6 +1,7 @@
 #include "ui/UI.h"
 
 #include "Camera.h"
+#include "FieldRenderer.h"
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
@@ -240,6 +241,8 @@ void DrawUI(AppState& state) {
     setVp(state.meshRenderer);
     setVp(state.outlineRenderer);
     setVp(state.sketchRenderer);
+    setVp(state.fieldRenderer);  // FEM/topology overlay — else it renders full-
+                                 // window while the camera aspect is the sub-region
     if (state.camera)
       state.camera->SetAspectRatio(fbSize.x / fbSize.y);
   }
