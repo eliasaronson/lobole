@@ -51,8 +51,9 @@ struct Load {
 
 // What a study solves for.
 enum class AnalysisType {
-  Static,  // linear-static: stress + displacement under loads
-  Modal,   // natural frequencies + mode shapes (no external loads)
+  Static,    // linear-static: stress + displacement under loads
+  Modal,     // natural frequencies + mode shapes (no external loads)
+  Topology,  // generative: SIMP compliance minimization -> a density field
 };
 
 // A single-part analysis definition (linear static or modal).
@@ -74,6 +75,20 @@ struct Study {
 
   // Modal only: how many lowest natural frequencies to compute.
   int numModes = 6;
+
+  // Topology only. The optimizer removes material from the loaded body down to
+  // `volumeFraction` of its volume while keeping it as stiff as possible under
+  // the study's Force/Pressure loads (gravity is intentionally ignored — a
+  // design-dependent load). `filterRadius` (mm; 0 = auto) sets the minimum
+  // member size. `keepFaces` are frozen solid in addition to the auto-frozen
+  // support/load skin (bolt bosses, bearing seats). volumeFraction/filterRadius
+  // follow the value+expr convention.
+  double volumeFraction = 0.3;
+  std::string volumeFractionExpr;
+  double filterRadius = 0.0;
+  std::string filterRadiusExpr;
+  int maxIterations = 60;
+  std::vector<ElementRef> keepFaces;
 
   // Transient: the most recent mesh/solve error (dangling ref, no fixed
   // support, singular matrix, ...). Never serialized. Empty when healthy.

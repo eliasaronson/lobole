@@ -2,14 +2,23 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "CADKernel.h"
+#include "core/Command.h"
+#include "core/Document.h"
+#include "core/Feature.h"
 #include "core/FemMesher.h"
 #include "core/FemSolver.h"
+#include "core/FemStudy.h"
 #include "core/FemTopo.h"
+#include "core/Serialization.h"
 
+#include <nlohmann/json.hpp>
+
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <utility>
@@ -366,6 +375,123 @@ TEST_CASE("Topo: SIMP cantilever through the real Netgen mesh path",
   CHECK(res->complianceHistory.back() < res->complianceHistory.front());
 }
 
+namespace {
+// A steel design-envelope box body + a topology study fixing x=0 and pushing
+// down on the x=L face. Returns the document; the study is study 0.
+Document MakeTopoDoc() {
+  Document doc;
+  auto box = std::make_unique<BoxFeature>("Envelope", glm::vec3(0, 0, 0),
+                                          80.0, 30.0, 30.0);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  const uint64_t cb = doc.GetBodies()[0].createdBy;
+  auto face = [&](int i) { return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)}; };
+
+  fem::Study& s = doc.AddStudy("Generative");
+  s.type = fem::AnalysisType::Topology;
+  s.meshSize = 6.0;
+  s.volumeFraction = 0.35;
+  s.filterRadius = 12.0;
+  s.maxIterations = 40;
+  fem::Load fixed;
+  fixed.id = doc.AllocateId();
+  fixed.type = fem::LoadType::Fixed;
+  fixed.face = face(0);  // x = 0
+  s.loads.push_back(fixed);
+  fem::Load force;
+  force.id = doc.AllocateId();
+  force.type = fem::LoadType::Force;
+  force.face = face(1);  // x = L
+  force.magnitude = 1500.0;
+  force.direction = glm::dvec3(0, 0, -1);
+  s.loads.push_back(force);
+  return doc;
+}
+}  // namespace
+
+TEST_CASE("RunTopology optimizes the loaded body end to end", "[topopt][mesh]") {
+  Document doc = MakeTopoDoc();
+  fem::Study& s = doc.GetStudies()[0];
+  fem::StudyRuntime rt;
+  std::string err;
+  REQUIRE(fem::RunTopology(doc, s, rt, &err));
+  INFO(err);
+  REQUIRE(rt.topology);
+  REQUIRE(rt.bodies.size() == 1);
+  // The density field parallels the mesh tets and is a valid fraction field.
+  CHECK(rt.bodies[0].density.size() == rt.bodies[0].mesh.tets.size());
+  CHECK(rt.bodies[0].density.size() > 0);
+  for (double d : rt.bodies[0].density) CHECK((d >= 0.0 && d <= 1.0 + 1e-9));
+  CHECK_THAT(rt.volumeFractionAchieved, WithinAbs(0.35, 0.02));
+  CHECK(rt.iterations > 0);
+  REQUIRE(rt.complianceHistory.size() >= 2);
+  CHECK(rt.complianceHistory.back() < rt.complianceHistory.front());
+}
+
+TEST_CASE("RunTopology rejects a multi-body study (v1 is single-body)",
+          "[topopt][mesh]") {
+  Document doc;
+  auto a = std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 40, 20, 20);
+  a->SetMaterial("steel");
+  doc.AddFeature(std::move(a));
+  auto b = std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 40), 40, 20, 20);
+  b->SetMaterial("steel");
+  doc.AddFeature(std::move(b));
+  const uint64_t cbA = doc.GetBodies()[0].createdBy;
+  const uint64_t cbB = doc.GetBodies()[1].createdBy;
+  fem::Study& s = doc.AddStudy("Two");
+  s.type = fem::AnalysisType::Topology;
+  s.meshSize = 6.0;
+  auto load = [&](uint64_t cb, int f, fem::LoadType t) {
+    fem::Load l;
+    l.id = doc.AllocateId();
+    l.type = t;
+    l.face = ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(f)};
+    l.direction = glm::dvec3(0, 0, -1);
+    l.magnitude = 1000.0;
+    s.loads.push_back(l);
+  };
+  load(cbA, 0, fem::LoadType::Fixed);
+  load(cbB, 1, fem::LoadType::Force);
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::RunTopology(doc, s, rt, &err));
+  CHECK(err.find("single") != std::string::npos);
+}
+
+TEST_CASE("Topology result persists and reloads through the directory format",
+          "[topopt][mesh][serialize]") {
+  namespace fs = std::filesystem;
+  Document doc = MakeTopoDoc();
+  const uint64_t studyId = doc.GetStudies()[0].id;
+  fem::StudyRuntime rt;
+  std::string err;
+  REQUIRE(fem::RunTopology(doc, doc.GetStudies()[0], rt, &err));
+  rt.solvedAtVersion = doc.Version();
+  const std::vector<double> density = rt.bodies[0].density;  // copy to compare
+  doc.StoreStudyResults(studyId, std::move(rt));
+  REQUIRE_FALSE(doc.StudyResultsStale(studyId));
+
+  const fs::path proj =
+      fs::temp_directory_path() / "topo_result_roundtrip.dsgn";
+  fs::remove_all(proj);
+  REQUIRE(DocumentIO::Save(doc, proj.string(), &err));
+  CHECK(fs::exists(proj / "studies"));
+
+  auto reloaded = DocumentIO::Load(proj.string(), &err);
+  REQUIRE((reloaded != nullptr && err.empty()));
+  const fem::StudyRuntime* got = reloaded->StudyResults(studyId);
+  REQUIRE(got != nullptr);
+  CHECK(got->topology);
+  REQUIRE(got->bodies.size() == 1);
+  REQUIRE(got->bodies[0].density.size() == density.size());
+  for (size_t i = 0; i < density.size(); ++i)
+    CHECK_THAT(got->bodies[0].density[i], WithinAbs(density[i], 1e-9));
+  // A just-loaded result is stamped current, not stale.
+  CHECK_FALSE(reloaded->StudyResultsStale(studyId));
+  fs::remove_all(proj);
+}
+
 #endif  // HAVE_NETGEN
 
 #else  // !HAVE_FEM_SOLVER
@@ -381,3 +507,86 @@ TEST_CASE("Topo: reports a clear error when built without the FEM solver",
 }
 
 #endif  // HAVE_FEM_SOLVER
+
+// ---- Serialization (no solver/mesher needed) ----------------------------
+
+TEST_CASE("Topology study definition round-trips through JSON", "[topopt][serialize]") {
+  fem::Study s;
+  s.id = 7;
+  s.name = "Gen";
+  s.type = fem::AnalysisType::Topology;
+  s.meshSize = 3.0;
+  s.volumeFraction = 0.25;
+  s.volumeFractionExpr = "vf";
+  s.filterRadius = 4.0;
+  s.maxIterations = 45;
+  s.keepFaces = {ElementRef{2, "2/cap0"}, ElementRef{2, "2/cap1"}};
+  fem::Load l;
+  l.id = 8;
+  l.type = fem::LoadType::Force;
+  l.face = ElementRef{2, "2/g1"};
+  l.magnitude = 300.0;
+  l.direction = glm::dvec3(0, 0, -1);
+  s.loads.push_back(l);
+
+  const fem::Study r = DocumentIO::StudyFromJson(DocumentIO::StudyToJson(s));
+  CHECK(r.type == fem::AnalysisType::Topology);
+  CHECK_THAT(r.volumeFraction, WithinAbs(0.25, 1e-12));
+  CHECK(r.volumeFractionExpr == "vf");
+  CHECK_THAT(r.filterRadius, WithinAbs(4.0, 1e-12));
+  CHECK(r.maxIterations == 45);
+  REQUIRE(r.keepFaces.size() == 2);
+  CHECK(r.keepFaces[1].name == "2/cap1");
+  REQUIRE(r.loads.size() == 1);
+  CHECK(r.loads[0].id == 8);
+}
+
+TEST_CASE("Topology result round-trips through JSON", "[topopt][serialize]") {
+  // A hand-built two-tet runtime (no mesher): exercises the flat-array mesh +
+  // density encoding without depending on Netgen.
+  fem::StudyRuntime rt;
+  rt.topology = true;
+  rt.iterations = 12;
+  rt.converged = true;
+  rt.volumeFractionAchieved = 0.31;
+  rt.complianceHistory = {9.0, 5.0, 4.2};
+  fem::StudyBodyResult b;
+  b.bodyIndex = 0;
+  b.bodyName = "Envelope";
+  for (int i = 0; i < 12; ++i)
+    b.mesh.nodes.push_back(glm::dvec3(i * 0.5, i * 1.5, i * 2.5));
+  b.mesh.tets.push_back({0, 1, 2, 3, 4, 5, 6, 7, 8, 9});
+  b.mesh.tets.push_back({1, 2, 3, 4, 5, 6, 7, 8, 9, 10});
+  fem::FemMesh::BoundaryTri tri;
+  tri.nodes = {0, 1, 2, 4, 5, 6};
+  tri.faceIndex = 3;
+  b.mesh.boundary.push_back(tri);
+  b.density = {0.8, 0.2};
+  rt.bodies.push_back(std::move(b));
+
+  nlohmann::json j;
+  REQUIRE(DocumentIO::StudyResultToJson(rt, j));
+  const fem::StudyRuntime r = DocumentIO::StudyResultFromJson(j);
+  CHECK(r.topology);
+  CHECK(r.iterations == 12);
+  CHECK(r.converged);
+  CHECK_THAT(r.volumeFractionAchieved, WithinAbs(0.31, 1e-12));
+  REQUIRE(r.complianceHistory.size() == 3);
+  CHECK_THAT(r.complianceHistory[2], WithinAbs(4.2, 1e-12));
+  REQUIRE(r.bodies.size() == 1);
+  CHECK(r.bodies[0].bodyName == "Envelope");
+  REQUIRE(r.bodies[0].mesh.nodes.size() == 12);
+  CHECK_THAT(r.bodies[0].mesh.nodes[11].z, WithinAbs(27.5, 1e-12));
+  REQUIRE(r.bodies[0].mesh.tets.size() == 2);
+  CHECK(r.bodies[0].mesh.tets[1][9] == 10);
+  REQUIRE(r.bodies[0].mesh.boundary.size() == 1);
+  CHECK(r.bodies[0].mesh.boundary[0].faceIndex == 3);
+  REQUIRE(r.bodies[0].density.size() == 2);
+  CHECK_THAT(r.bodies[0].density[0], WithinAbs(0.8, 1e-12));
+}
+
+TEST_CASE("StudyResultToJson declines a non-topology runtime", "[topopt][serialize]") {
+  fem::StudyRuntime rt;  // topology defaults false (a static/modal result)
+  nlohmann::json j;
+  CHECK_FALSE(DocumentIO::StudyResultToJson(rt, j));
+}

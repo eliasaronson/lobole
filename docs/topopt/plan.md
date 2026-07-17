@@ -345,10 +345,20 @@ result). Self-skips without Netgen, like `fem_smoke`.
    rather than the <15% originally hoped — razor-sharp black/white is a TO1
    Heaviside-projection / finer-mesh concern, not a viability blocker; the
    binarized truss is correct. SIMP is viable on tet10 — GO.
-1. **TO1 — model + persistence.** Study fields + keep-faces + commands;
-   `set_study`/keep-face RPCs; serialization v33 (definition + result file,
-   golden + round-trip); `RunTopology(TopoInput)` wired to a *synchronous*
-   `run_study` for coarse meshes — the headless loop closes here.
+1. **TO1 — model + persistence: DONE.** `AnalysisType::Topology` +
+   volumeFraction/filterRadius(+expr)/maxIterations/keepFaces on `fem::Study`
+   (reusing `ModifyStudyCommand`'s before/after-JSON undo). `fem::RunTopology`
+   resolves the single loaded body + fixed/force/keep faces and drives
+   `TopologyOptimize`; `RunStudyAndCache` dispatches on type; `run_study` is
+   synchronous for now. Serialization v33: definition fields (only-when-
+   topology, so lower versions stay byte-identical) + the **persisted result**
+   (`studies/<id>.result.json`, flat mesh+density+summary arrays; loaded results
+   stamped with the settled post-load version so they read current, not stale).
+   RPCs: `set_study` topology params, `add_keep_face`/`remove_keep_face`,
+   `run_study`/`study_results` topology summaries, `list_studies` type.
+   Tests: definition + result round-trip, RunTopology end-to-end (Netgen),
+   dir-format result persistence, golden `v33-topology`. 395/395 ctest green.
+   (MCP mirrors + async run land in TO4/TO2.)
 2. **TO2 — the worker thread.** Snapshot/launch/poll/cancel machinery,
    async `run_study` + `study_status` + `cancel_study`, result stored +
    serialized at join, `topo_smoke.py`.

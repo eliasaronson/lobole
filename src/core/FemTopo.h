@@ -77,11 +77,14 @@ struct TopoResult {
 // the run and returns the best-so-far densities with cancelled=true. This is
 // the hook TO2's worker thread drives; in the spike it is used by the
 // cancel test and for timing logs.
+// `keepNodes` are frozen solid in addition to the auto-frozen support/load
+// skin (user "keep" faces — bolt bosses, bearing seats that must not vanish).
 std::optional<TopoResult> TopologyOptimize(
     const FemMesh& mesh, const Material& material,
     const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
     const TopoParams& params, std::string* error,
-    const std::function<bool(const TopoProgress&)>& progress = {});
+    const std::function<bool(const TopoProgress&)>& progress = {},
+    const std::vector<int>& keepNodes = {});
 
 // True when the build links Eigen (same gate as the static solver).
 bool TopoAvailable();

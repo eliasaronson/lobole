@@ -100,16 +100,24 @@ std::array<double, 6> Tet10Stress(const std::array<glm::dvec3, 10>& nodes,
 // ---- Study orchestration --------------------------------------------------
 
 // One body of a study: its mesh and solved fields (all derived/transient).
+// For a topology study `results` is empty and `density` carries the optimized
+// per-tet density (parallel to mesh.tets); for static/modal `density` is empty.
 struct StudyBodyResult {
   int bodyIndex = -1;
   std::string bodyName;
   FemMesh mesh;
   FemResults results;
+  std::vector<double> density;  // topology only: one entry per mesh.tets
 };
 
-// A study's derived mesh + results, cached on the Document (never serialized).
-// Stale when solvedAtVersion != Document::Version(). Maxima are aggregated
-// across all solved bodies for the summary an engineer reads.
+// A study's derived mesh + results, cached on the Document. Stale when
+// solvedAtVersion != Document::Version(). Maxima are aggregated across all
+// solved bodies for the summary an engineer reads.
+//
+// FEM (static/modal) runtimes are never serialized (recompute = seconds).
+// A TOPOLOGY runtime IS serialized (topology != 0): its result is minutes of
+// compute over a mesh that is not reproducible across Netgen versions, so it is
+// persisted into the document and reloaded into this same cache slot.
 struct StudyRuntime {
   uint64_t solvedAtVersion = 0;
   std::vector<StudyBodyResult> bodies;
@@ -119,6 +127,15 @@ struct StudyRuntime {
   double maxDisplacement = 0.0;
   glm::dvec3 maxDispAt{0, 0, 0};
   std::string maxDispBody;
+
+  // Topology summary (empty/zero for static & modal runtimes). `topology` is
+  // the flag that this runtime is a persisted generative result.
+  bool topology = false;
+  int iterations = 0;
+  bool converged = false;
+  bool cancelled = false;
+  double volumeFractionAchieved = 0.0;
+  std::vector<double> complianceHistory;
 };
 
 // (Document is forward-declared at global scope by FemStudy.h.)
@@ -129,5 +146,13 @@ struct StudyRuntime {
 // sets study.error and *error and returns false. Fills `rt` (not stamped —
 // the caller stamps solvedAtVersion and stores it in the Document cache).
 bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt, std::string* error);
+
+// Meshes the study's single loaded body (v1) and runs SIMP topology
+// optimization on it (the study's Force/Pressure loads + fixed supports; keep
+// faces frozen solid; gravity ignored). Fills `rt` with the optimized per-tet
+// density + convergence summary (rt.topology = true); not stamped — the caller
+// sets solvedAtVersion. On any failure sets study.error and *error, returns
+// false. (Synchronous; TO2 adds the worker-thread path over an immutable snapshot.)
+bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt, std::string* error);
 
 }  // namespace fem

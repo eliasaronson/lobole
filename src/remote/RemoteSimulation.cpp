@@ -57,13 +57,21 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
           lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
         loads.push_back(std::move(lj));
       }
-      studies.push_back({{"id", s.id},
-                         {"name", s.name},
-                         {"mesh_size", eval.meshSize},
-                         {"loads", loads},
-                         {"refinements", eval.refinements.size()},
-                         {"has_results", doc->StudyResults(s.id) != nullptr},
-                         {"stale", doc->StudyResultsStale(s.id)}});
+      json sj = {{"id", s.id},
+                 {"name", s.name},
+                 {"type", fem::AnalysisTypeToString(s.type)},
+                 {"mesh_size", eval.meshSize},
+                 {"loads", loads},
+                 {"refinements", eval.refinements.size()},
+                 {"has_results", doc->StudyResults(s.id) != nullptr},
+                 {"stale", doc->StudyResultsStale(s.id)}};
+      if (s.type == fem::AnalysisType::Topology) {
+        sj["volume_fraction"] = eval.volumeFraction;
+        sj["filter_radius"] = eval.filterRadius;
+        sj["max_iterations"] = eval.maxIterations;
+        sj["keep_faces"] = eval.keepFaces.size();
+      }
+      studies.push_back(std::move(sj));
     }
     return json{{"studies", studies}};
   }
@@ -102,14 +110,48 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       }
       if (p.contains("type") &&
           !fem::AnalysisTypeFromString(p.at("type").get<std::string>(), s.type))
-        throw std::runtime_error("analysis type must be static or modal");
+        throw std::runtime_error("analysis type must be static, modal, or topology");
       if (p.contains("num_modes")) s.numModes = p.at("num_modes").get<int>();
       if (p.contains("gravity")) {
         const auto& g = p.at("gravity");
         s.gravity = glm::dvec3(g.at(0).get<double>(), g.at(1).get<double>(),
                                g.at(2).get<double>());
       }
+      // Topology parameters (expression-or-literal, like mesh size).
+      if (p.contains("volume_fraction")) {
+        const json& v = p.at("volume_fraction");
+        if (v.is_string()) s.volumeFractionExpr = v.get<std::string>();
+        else { s.volumeFraction = v.get<double>(); s.volumeFractionExpr.clear(); }
+      }
+      if (p.contains("filter_radius")) {
+        const json& v = p.at("filter_radius");
+        if (v.is_string()) s.filterRadiusExpr = v.get<std::string>();
+        else { s.filterRadius = v.get<double>(); s.filterRadiusExpr.clear(); }
+      }
+      if (p.contains("max_iterations"))
+        s.maxIterations = p.at("max_iterations").get<int>();
     });
+    return json::object();
+  }
+  if (m == "add_keep_face" || m == "remove_keep_face") {
+    // Topology keep-faces: frozen solid so bolt bosses / bearing seats survive
+    // the optimization. params: {study, face:{feature_id, element}}
+    const uint64_t id = p.at("study").get<uint64_t>();
+    const ElementRef face = studyFaceOf(p.at("face"));
+    if (m == "add_keep_face") {
+      modifyStudy(id, "Add keep face",
+                  [&](fem::Study& s) { s.keepFaces.push_back(face); });
+    } else {
+      modifyStudy(id, "Remove keep face", [&](fem::Study& s) {
+        s.keepFaces.erase(
+            std::remove_if(s.keepFaces.begin(), s.keepFaces.end(),
+                           [&](const ElementRef& f) {
+                             return f.featureId == face.featureId &&
+                                    f.name == face.name;
+                           }),
+            s.keepFaces.end());
+      });
+    }
     return json::object();
   }
   if (m == "add_refinement") {
@@ -200,6 +242,27 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
 
     const fem::StudyRuntime* rt = doc->StudyResults(id);
     if (!rt) throw std::runtime_error("study has not been run");
+
+    // Topology studies report the optimization summary (the density field is
+    // read via set_result_display / export, not echoed here).
+    if (s->type == fem::AnalysisType::Topology) {
+      std::size_t nodes = 0, elements = 0;
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        nodes += b.mesh.stats.nodeCount;
+        elements += b.mesh.stats.tetCount;
+      }
+      return json{{"analysis", "topology"},
+                  {"nodes", nodes},
+                  {"elements", elements},
+                  {"iterations", rt->iterations},
+                  {"converged", rt->converged},
+                  {"cancelled", rt->cancelled},
+                  {"volume_fraction", rt->volumeFractionAchieved},
+                  {"compliance", rt->complianceHistory.empty()
+                                     ? 0.0
+                                     : rt->complianceHistory.back()},
+                  {"stale", doc->StudyResultsStale(id)}};
+    }
 
     // Modal studies report per-body natural frequencies instead of stress.
     if (s->type == fem::AnalysisType::Modal) {

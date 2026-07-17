@@ -232,12 +232,22 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
       index["studies"] = json::array();
       std::set<std::string> wantedStudies;
       for (const fem::Study& s : doc.GetStudies()) {
-        const std::string file =
-            std::to_string(s.id) + "-" + LabelSlug(s.name) + ".json";
+        const std::string base = std::to_string(s.id) + "-" + LabelSlug(s.name);
+        const std::string file = base + ".json";
         if (!WriteTextAtomic(studyDir / file, StudyToJson(s).dump(2) + "\n", error))
           return false;
         index["studies"].push_back(s.id);
         wantedStudies.insert(file);
+        // A topology study's optimized result is persisted (v33) — unlike FEM
+        // results, which are derived and never written.
+        const fem::StudyRuntime* rt = doc.StudyResults(s.id);
+        json resultJson;
+        if (rt && StudyResultToJson(*rt, resultJson)) {
+          const std::string resultFile = base + ".result.json";
+          if (!WriteTextAtomic(studyDir / resultFile, resultJson.dump() + "\n", error))
+            return false;
+          wantedStudies.insert(resultFile);
+        }
       }
       for (const auto& entry : fs::directory_iterator(studyDir, ec)) {
         if (entry.path().extension() == ".json" &&
@@ -332,14 +342,22 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       std::ifstream fin(it->second);
       doc->AddFeature(FeatureFromJson(json::parse(fin)));
     }
+    // Topology results (v33) loaded below but stored after the final regen.
+    std::vector<std::pair<uint64_t, fem::StudyRuntime>> pendingResults;
     // FEM studies (v29): id-prefix files under studies/, index order. A pre-v29
     // document has no `studies` key ⇒ the loop is empty.
     {
-      std::map<uint64_t, fs::path> studyById;
+      std::map<uint64_t, fs::path> studyById, resultById;
       for (const auto& entry :
            fs::directory_iterator(fs::path(dirPath) / "studies", ec)) {
         if (entry.path().extension() != ".json") continue;
-        studyById[std::stoull(entry.path().filename().string())] = entry.path();
+        const std::string stem = entry.path().stem().string();  // strips ".json"
+        // A topology result file is "<id>-<slug>.result.json": its stem ends
+        // ".result" — route it to the result map, not the study-def map.
+        if (stem.size() > 7 && stem.compare(stem.size() - 7, 7, ".result") == 0)
+          resultById[std::stoull(stem)] = entry.path();
+        else
+          studyById[std::stoull(stem)] = entry.path();
       }
       for (const auto& idJson : index.value("studies", json::array())) {
         const uint64_t id = idJson.get<uint64_t>();
@@ -350,6 +368,15 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         }
         std::ifstream sin(it->second);
         doc->RestoreStudy(StudyFromJson(json::parse(sin)));
+        // A persisted topology result loads into the transient runtime cache.
+        // Defer storing it until after the final regeneration below so it can
+        // be stamped with the settled document version (else the rollback /
+        // active-config regen would leave it spuriously stale).
+        const auto rit = resultById.find(id);
+        if (rit != resultById.end()) {
+          std::ifstream rin(rit->second);
+          pendingResults.emplace_back(id, StudyResultFromJson(json::parse(rin)));
+        }
       }
     }
     // Configurations (v31): id-prefix files under configurations/, index order.
@@ -375,6 +402,12 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     doc->SetRollback(index.value("rollback", -1));
     // Apply the active configuration last so the final regeneration reflects it.
     doc->SetActiveConfiguration(index.value("active_configuration", uint64_t{0}));
+    // Now that regeneration has settled, stamp the persisted topology results
+    // with the final version so they read as current (v33).
+    for (auto& [id, rt] : pendingResults) {
+      rt.solvedAtVersion = doc->Version();
+      doc->StoreStudyResults(id, std::move(rt));
+    }
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
              dirPath);
     return doc;

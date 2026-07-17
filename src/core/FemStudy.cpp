@@ -3,9 +3,11 @@
 #include "CADMaterials.h"
 #include "core/Document.h"
 #include "core/FemSolver.h"
+#include "core/FemTopo.h"
 
 #include <map>
 #include <set>
+#include <utility>
 
 namespace fem {
 
@@ -38,12 +40,18 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
 }
 
 const char* AnalysisTypeToString(AnalysisType type) {
-  return type == AnalysisType::Modal ? "modal" : "static";
+  switch (type) {
+    case AnalysisType::Modal: return "modal";
+    case AnalysisType::Topology: return "topology";
+    case AnalysisType::Static: break;
+  }
+  return "static";
 }
 
 bool AnalysisTypeFromString(const std::string& s, AnalysisType& out) {
   if (s == "static") { out = AnalysisType::Static; return true; }
   if (s == "modal") { out = AnalysisType::Modal; return true; }
+  if (s == "topology") { out = AnalysisType::Topology; return true; }
   return false;
 }
 
@@ -66,6 +74,10 @@ bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols, std::string* e
   eval(study.meshSizeExpr, study.meshSize, "mesh size");
   for (auto& r : study.refinements) eval(r.sizeExpr, r.size, "refinement size");
   for (auto& l : study.loads) eval(l.magnitudeExpr, l.magnitude, "load magnitude");
+  if (study.type == AnalysisType::Topology) {
+    eval(study.volumeFractionExpr, study.volumeFraction, "volume fraction");
+    eval(study.filterRadiusExpr, study.filterRadius, "filter radius");
+  }
   return ok;
 }
 
@@ -264,6 +276,131 @@ bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt, std::string* 
     sbr.mesh = std::move(*mesh);
     rt.bodies.push_back(std::move(sbr));
   }
+  return true;
+}
+
+bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt,
+                 std::string* error) {
+  rt = StudyRuntime{};
+  rt.topology = true;
+  study.error.clear();
+  auto fail = [&](const std::string& m) {
+    study.error = m;
+    if (error) *error = m;
+    return false;
+  };
+
+  std::string err;
+  if (!EvaluateStudyExprs(study, doc.Symbols(), &err)) return fail(err);
+  if (study.volumeFraction <= 0.0 || study.volumeFraction >= 1.0)
+    return fail("volume fraction must be in (0, 1)");
+
+  const auto& bodies = doc.GetBodies();
+
+  // Group loads by body (v1 optimizes exactly one loaded body).
+  std::map<int, std::vector<std::pair<int, size_t>>> bodyLoads;  // (faceIndex, loadIdx)
+  for (size_t i = 0; i < study.loads.size(); ++i) {
+    ResolvedFace rf;
+    if (!ResolveFace(doc, study.loads[i].face, "load " + std::to_string(i + 1), rf, &err))
+      return fail(err);
+    bodyLoads[rf.bodyIndex].push_back({rf.faceIndex, i});
+  }
+  if (bodyLoads.empty()) return fail("study has no loads");
+  if (bodyLoads.size() > 1)
+    return fail("topology optimization supports a single loaded body (v1)");
+  const int bodyIndex = bodyLoads.begin()->first;
+  const Body& body = bodies[bodyIndex];
+
+  MeshSettings settings;
+  settings.maxSize = study.meshSize;
+  for (size_t i = 0; i < study.refinements.size(); ++i) {
+    ResolvedFace rf;
+    if (!ResolveFace(doc, study.refinements[i].face,
+                     "refinement " + std::to_string(i + 1), rf, &err))
+      return fail(err);
+    if (rf.bodyIndex == bodyIndex)
+      settings.faceSizes.push_back({rf.faceIndex, study.refinements[i].size});
+  }
+
+  const auto matType = CADMaterials::MaterialLibrary::FromSlug(body.material);
+  const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(matType);
+  if (mp.youngGPa <= 0.0f)
+    return fail("body '" + body.name + "': material '" +
+                (body.material.empty() ? "default" : body.material) +
+                "' has no stiffness data");
+
+  // Keep faces (frozen solid beyond the auto-frozen support/load skin).
+  std::set<int> keepFaceIdx;
+  for (size_t i = 0; i < study.keepFaces.size(); ++i) {
+    ResolvedFace rf;
+    if (!ResolveFace(doc, study.keepFaces[i], "keep face " + std::to_string(i + 1),
+                     rf, &err))
+      return fail(err);
+    if (rf.bodyIndex == bodyIndex) keepFaceIdx.insert(rf.faceIndex);
+  }
+
+  auto mesh = Mesh(body.shape.GetShape(), settings, &err);
+  if (!mesh) return fail("body '" + body.name + "': " + err);
+
+  // Fixed nodes + face tractions + keep nodes, exactly as the static solve
+  // resolves them (fixed faces contribute their nodes; force/pressure faces
+  // their tri indices; keep faces their nodes).
+  std::set<int> fixedSet, keepSet;
+  std::vector<FaceLoad> faceLoads;
+  bool hasFixed = false, hasApplied = false;
+  for (const auto& [faceIndex, loadIdx] : bodyLoads[bodyIndex]) {
+    const Load& load = study.loads[loadIdx];
+    if (load.type == LoadType::Fixed) {
+      hasFixed = true;
+      for (const auto& tri : mesh->boundary)
+        if (tri.faceIndex == faceIndex)
+          for (int n : tri.nodes) fixedSet.insert(n);
+    } else {
+      hasApplied = true;
+      FaceLoad fl;
+      fl.type = load.type;
+      fl.magnitude = load.magnitude;
+      fl.direction = load.direction;
+      for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
+        if (mesh->boundary[t].faceIndex == faceIndex) fl.tris.push_back(t);
+      faceLoads.push_back(std::move(fl));
+    }
+  }
+  if (!hasFixed) return fail("body '" + body.name + "' has no fixed support");
+  if (!hasApplied)
+    return fail("topology optimization needs a force or pressure load");
+  if (fixedSet.empty())
+    return fail("body '" + body.name + "': fixed face meshed to no nodes");
+  for (int fi : keepFaceIdx)
+    for (const auto& tri : mesh->boundary)
+      if (tri.faceIndex == fi)
+        for (int n : tri.nodes) keepSet.insert(n);
+
+  // Density is unused (gravity is intentionally excluded from the TO objective).
+  Material mat{mp.youngGPa * 1000.0, mp.poisson, 0.0};
+  const std::vector<int> fixedNodes(fixedSet.begin(), fixedSet.end());
+  const std::vector<int> keepNodes(keepSet.begin(), keepSet.end());
+
+  TopoParams params;
+  params.volumeFraction = study.volumeFraction;
+  params.filterRadius = study.filterRadius;
+  params.maxIterations = study.maxIterations > 0 ? study.maxIterations : 60;
+
+  auto res = TopologyOptimize(*mesh, mat, fixedNodes, faceLoads, params, &err, {},
+                              keepNodes);
+  if (!res) return fail("body '" + body.name + "': " + err);
+
+  StudyBodyResult sbr;
+  sbr.bodyIndex = bodyIndex;
+  sbr.bodyName = body.name;
+  sbr.density = std::move(res->density);
+  sbr.mesh = std::move(*mesh);
+  rt.bodies.push_back(std::move(sbr));
+  rt.iterations = res->iterations;
+  rt.converged = res->converged;
+  rt.cancelled = res->cancelled;
+  rt.volumeFractionAchieved = res->volumeFractionAchieved;
+  rt.complianceHistory = std::move(res->complianceHistory);
   return true;
 }
 

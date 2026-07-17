@@ -57,7 +57,12 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
     return false;
   }
   fem::StudyRuntime rt;
-  if (!fem::RunStudy(doc, *s, rt, error)) return false;
+  // A topology study runs the SIMP optimizer (minutes, serialized result); a
+  // static/modal study runs the linear solver (seconds, transient result).
+  const bool ok = s->type == fem::AnalysisType::Topology
+                      ? fem::RunTopology(doc, *s, rt, error)
+                      : fem::RunStudy(doc, *s, rt, error);
+  if (!ok) return false;
   rt.solvedAtVersion = doc.Version();
   doc.StoreStudyResults(studyId, std::move(rt));
   return true;

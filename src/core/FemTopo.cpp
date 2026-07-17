@@ -65,7 +65,8 @@ std::optional<TopoResult> TopologyOptimize(
     const FemMesh& mesh, const Material& material,
     const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
     const TopoParams& params, std::string* error,
-    const std::function<bool(const TopoProgress&)>& progress) {
+    const std::function<bool(const TopoProgress&)>& progress,
+    const std::vector<int>& keepNodes) {
   auto fail = [&](const std::string& m) -> std::optional<TopoResult> {
     if (error) *error = m;
     return std::nullopt;
@@ -114,6 +115,8 @@ std::optional<TopoResult> TopologyOptimize(
     for (int ti : load.tris)
       if (ti >= 0 && ti < static_cast<int>(mesh.boundary.size()))
         for (int n : mesh.boundary[ti].nodes) loadedNode[n] = 1;
+  for (int n : keepNodes)  // user keep-faces freeze solid too
+    if (n >= 0 && n < nNodes) loadedNode[n] = 1;
   std::vector<char> frozen(nTets, 0);
   for (int e = 0; e < nTets; ++e)
     for (int i = 0; i < 10; ++i) {
