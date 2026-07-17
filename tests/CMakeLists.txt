@@ -59,6 +59,17 @@ include(CTest)
 include(Catch)
 catch_discover_tests(designer_tests)
 
+# GPU solver tests live in their own binary so designer_tests stays free of
+# Vulkan. Each case SKIPs itself when no usable compute device is present, so
+# these are safe to run headlessly (a compute queue needs no display).
+if(TARGET fem_gpu)
+    add_executable(femgpu_tests test_femgpu.cpp)
+    target_link_libraries(femgpu_tests PRIVATE fem_gpu designer_core
+                          Catch2::Catch2WithMain)
+    target_include_directories(femgpu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    catch_discover_tests(femgpu_tests)
+endif()
+
 # GUI smoke tests drive the real app through ImGui Test Engine.
 # Needs a display (use `ctest -LE gui` on headless machines, or xvfb-run).
 add_test(NAME gui_smoke COMMAND designer --gui-tests)

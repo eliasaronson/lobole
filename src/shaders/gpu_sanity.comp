@@ -1,0 +1,12 @@
+#version 450
+// Trivial infra self-test kernel (data[i] = 2*data[i] + 1): proves the whole
+// ComputeContext path — buffer, pipeline, dispatch, readback — independently
+// of any FEM math. Mirrors the probe that established GPU feasibility.
+layout(local_size_x = 64) in;
+layout(std430, binding = 0) buffer Data { float data[]; };
+layout(push_constant) uniform Push { uint n; } pc;
+void main() {
+  const uint i = gl_GlobalInvocationID.x;
+  if (i >= pc.n) return;
+  data[i] = data[i] * 2.0 + 1.0;
+}

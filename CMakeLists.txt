@@ -388,6 +388,45 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 
+# fem_gpu: headless Vulkan compute for the topology solver
+# (docs/topopt/gpu-plan.md). Deliberately a separate library — designer_core
+# must stay GPU-free. Compute shaders are compiled here (glslc is found early;
+# the same cache variable satisfies the graphics-shader section below) and
+# embedded as byte arrays so the library and its tests need no runtime shader
+# path (renderer .spv files load relative to the app executable, which test
+# binaries don't share).
+find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
+if(GLSLC)
+    set(FEMGPU_GEN_DIR "${CMAKE_BINARY_DIR}/femgpu_gen")
+    file(MAKE_DIRECTORY ${FEMGPU_GEN_DIR})
+    function(embed_compute_shader NAME)
+        set(spv ${FEMGPU_GEN_DIR}/${NAME}.spv)
+        set(hdr ${FEMGPU_GEN_DIR}/${NAME}_spv.h)
+        add_custom_command(
+            OUTPUT ${spv}
+            COMMAND ${GLSLC} --target-env=vulkan1.2
+                    ${CMAKE_SOURCE_DIR}/src/shaders/${NAME}.comp -o ${spv}
+            DEPENDS ${CMAKE_SOURCE_DIR}/src/shaders/${NAME}.comp
+            COMMENT "Compiling compute shader ${NAME}.comp")
+        add_custom_command(
+            OUTPUT ${hdr}
+            COMMAND ${CMAKE_COMMAND} -DINPUT=${spv} -DOUTPUT=${hdr} -DNAME=${NAME}
+                    -P ${CMAKE_SOURCE_DIR}/cmake/EmbedSpirv.cmake
+            DEPENDS ${spv} ${CMAKE_SOURCE_DIR}/cmake/EmbedSpirv.cmake
+            COMMENT "Embedding ${NAME}.spv")
+    endfunction()
+    embed_compute_shader(fem_spmv)
+    embed_compute_shader(gpu_sanity)
+    add_library(fem_gpu STATIC
+        src/femgpu/ComputeContext.cpp
+        src/femgpu/TopoSpmv.cpp
+        ${FEMGPU_GEN_DIR}/fem_spmv_spv.h
+        ${FEMGPU_GEN_DIR}/gpu_sanity_spv.h)
+    # Generated headers are PUBLIC so femgpu_tests can use the sanity kernel.
+    target_include_directories(fem_gpu PUBLIC src ${FEMGPU_GEN_DIR})
+    target_link_libraries(fem_gpu PUBLIC Vulkan::Vulkan)
+endif()
+
 # Tests
 enable_testing()
 add_subdirectory(tests)

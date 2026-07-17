@@ -1,9 +1,17 @@
 # GPU topology solver — plan
 
-> Status: **feasibility PROVEN, design for sign-off.** The linear solve is the
+> Status: **GPU0 SHIPPED — gate PASS.** The linear solve is the
 > topology wall: CPU CG-IC already cut a bulky 10k-tet cube from 42 s/iter
 > (direct) to 2.8 s/iter, but fine meshes want another order of magnitude. This
 > plan is the GPU matrix-free CG that gets it.
+>
+> GPU0 result: `fem_gpu` static lib (`src/femgpu/` — `gpu::ComputeContext` +
+> `gpu::TopoSpmv`), `fem_spmv.comp` matrix-free element SpMV with float
+> `atomicAdd` scatter, embedded SPIR-V (no runtime shader path), `femgpu_tests`
+> self-skipping without a device. Gate diff vs the CPU fp64 oracle on the same
+> fp32 inputs: **rel-∞ error ~1e-7** (bar 1e-4) on both the structured tet10
+> box and a real Netgen mesh, with SIMP-like scales spanning 1e-6..1. The
+> scatter/atomics risk is retired → GPU1 (on-device CG) is a go.
 
 ## Feasibility (settled first, because it was the whole risk)
 
@@ -60,7 +68,7 @@ Software fallback (llvmpipe) means it can even run where no real GPU exists.
 
 ## Phasing
 
-0. **GPU0 — compute infra + matrix-free SpMV (gate).** `gpu::ComputeContext`
+0. **DONE — GPU0 — compute infra + matrix-free SpMV (gate).** `gpu::ComputeContext`
    (mirrors the proven probe: headless device, host-visible + device-local
    buffers, SPIR-V pipeline, dispatch, fence). `fem_spmv.comp`: element-wise
    `Ap = K(ρ)·p` over the reduced DOF map, scatter via `atomicAdd` (float

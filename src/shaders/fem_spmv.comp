@@ -1,0 +1,41 @@
+#version 450
+// Matrix-free FEM stiffness product Ap += scale_e * Ke0_e * p_e, one workgroup
+// per tet10 element (GPU0 of docs/topopt/gpu-plan.md). The element's 30 DOF of
+// p are staged in shared memory, then 30 threads each compute one row of the
+// 30x30 element product and scatter with float atomicAdd (shared nodes are
+// touched by many elements). Fixed DOFs carry index -1: they contribute 0 on
+// gather and are skipped on scatter — identical to the CPU reduced assembly.
+#extension GL_EXT_shader_atomic_float : require
+
+layout(local_size_x = 32) in;
+
+layout(std430, binding = 0) readonly buffer ElemDof { int dof[]; };        // 30/elem, -1 = fixed
+layout(std430, binding = 1) readonly buffer ElemKe { float ke[]; };        // 900/elem, row-major
+layout(std430, binding = 2) readonly buffer ElemScale { float scaleE[]; }; // SIMP E(rho)/E0
+layout(std430, binding = 3) readonly buffer VecP { float p[]; };           // nFree
+layout(std430, binding = 4) buffer VecAp { float Ap[]; };                  // nFree, pre-zeroed
+
+layout(push_constant) uniform Push {
+  uint nElems;
+  uint groupsX;  // dispatch is 2D so >65535 elements fits the spec minimum
+} pc;
+
+shared float pe[30];
+
+void main() {
+  const uint e = gl_WorkGroupID.y * pc.groupsX + gl_WorkGroupID.x;
+  if (e >= pc.nElems) return;  // uniform across the workgroup (one elem each)
+  const uint t = gl_LocalInvocationID.x;
+  if (t < 30u) {
+    const int g = dof[e * 30u + t];
+    pe[t] = g >= 0 ? p[g] : 0.0;
+  }
+  barrier();
+  if (t >= 30u) return;
+  const int row = dof[e * 30u + t];
+  if (row < 0) return;
+  float acc = 0.0;
+  const uint base = e * 900u + t * 30u;
+  for (uint c = 0u; c < 30u; ++c) acc += ke[base + c] * pe[c];
+  atomicAdd(Ap[row], scaleE[e] * acc);
+}

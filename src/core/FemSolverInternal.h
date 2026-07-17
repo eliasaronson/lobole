@@ -1,8 +1,9 @@
 #pragma once
 
 // Internal (non-public) shared numerics for the Fem* solver translation units
-// (FemSolver.cpp, FemTopo.cpp). Only those TUs include this; consumers use
-// core/FemSolver.h / core/FemTopo.h. Everything here is small element-level
+// (FemSolver.cpp, FemTopo.cpp) and the GPU-solver gate test (test_femgpu.cpp,
+// which packs element matrices for fem_gpu). Only those TUs include this;
+// consumers use core/FemSolver.h / core/FemTopo.h. Everything here is small element-level
 // math (shape functions, Gauss rules, the elasticity matrix) plus the two
 // system-building helpers (DOF reduction, consistent face loads) the topology
 // loop reuses verbatim — moved out of FemSolver.cpp's anonymous namespace so
