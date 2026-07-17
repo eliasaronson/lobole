@@ -206,17 +206,26 @@ struct SimulationState {
   uint64_t activeStudyId = 0; // study being edited/viewed (0 = none)
 
   // Armed boundary-condition tool: a viewport face click assigns this load.
-  enum class Tool { None, Fixed, Force, Pressure };
+  // Keep (topology) freezes the picked face solid during optimization.
+  enum class Tool { None, Fixed, Force, Pressure, Keep };
   Tool tool = Tool::None;
   // Params applied to the load placed by the next face pick.
   double pendingMagnitude = 0.0;
   glm::dvec3 pendingDirection{0.0, 0.0, -1.0};
 
-  // Result overlay display.
-  enum class Field { None, VonMises, Displacement };
+  // Result overlay display. VonMises/Displacement are static/modal fields;
+  // Shape (the optimized iso-surface as a grey body) and Density (a colormap
+  // of the density field) are topology views.
+  enum class Field { None, VonMises, Displacement, Shape, Density };
   Field field = Field::None;
   float deformScale = 0.0f; // shader-side warp multiplier (0 = undeformed)
   int activeMode = 0;       // modal: which mode shape the overlay displays
+  // Topology iso-surface threshold in [0,1]; 0 = auto (volume-matched).
+  float topoThreshold = 0.0f;
+  // The MeshRenderer instance holding the extracted iso-surface (0 = none), and
+  // the signature that gates its re-extraction.
+  uint32_t topoIsoInstance = 0;
+  uint64_t topoIsoKey = 0;
   // Body render instances hidden while the field overlay replaces them, so
   // ExitSimulation / field=None restores exactly those.
   std::vector<uint32_t> hiddenMeshes;

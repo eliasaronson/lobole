@@ -160,10 +160,14 @@ void EnterSimulation(AppState& state) {
     state.simulation.activeStudyId = doc->GetStudies().front().id;
 }
 void ExitSimulation(AppState& state) {
-  // Restore any body instances the field overlay hid.
-  if (state.meshRenderer)
+  // Restore any body instances the field overlay hid, and drop the topology
+  // iso-surface instance.
+  if (state.meshRenderer) {
     for (uint32_t meshId : state.simulation.hiddenMeshes)
       state.meshRenderer->SetInstanceVisible(meshId, true);
+    if (state.simulation.topoIsoInstance)
+      state.meshRenderer->RemoveMesh(state.simulation.topoIsoInstance);
+  }
   if (state.fieldRenderer) state.fieldRenderer->SetMesh({}, {});
   state.simulation = SimulationState{};
   state.syncedDocumentVersion = UINT64_MAX; // force a clean renderer resync
@@ -178,36 +182,95 @@ void SyncFieldRenderer(AppState& state) {
       state.meshRenderer->SetInstanceVisible(meshId, true);
     sim.hiddenMeshes.clear();
   };
+  auto removeIso = [&]() {
+    if (sim.topoIsoInstance) state.meshRenderer->RemoveMesh(sim.topoIsoInstance);
+    sim.topoIsoInstance = 0;
+    sim.topoIsoKey = 0;
+  };
+  // Hide the studied bodies' normal render so the overlay stands in for them.
+  // Idempotent: a no-op once already hidden this session.
+  auto hideBodies = [&](const fem::StudyRuntime* rt) {
+    if (!sim.hiddenMeshes.empty()) return;
+    for (const fem::StudyBodyResult& b : rt->bodies)
+      for (const DocumentRenderMesh& m : state.documentMeshes)
+        if (static_cast<int>(m.bodyIndex) == b.bodyIndex) {
+          state.meshRenderer->SetInstanceVisible(m.meshId, false);
+          sim.hiddenMeshes.push_back(m.meshId);
+        }
+  };
 
   const fem::StudyRuntime* rt =
       doc ? doc->StudyResults(sim.activeStudyId) : nullptr;
+  const fem::Study* study = doc ? doc->FindStudy(sim.activeStudyId) : nullptr;
   const bool show = sim.IsActive() &&
                     sim.field != SimulationState::Field::None && rt != nullptr;
   if (!show) {
-    if (sim.fieldBuiltKey != 0) {
+    if (sim.fieldBuiltKey != 0 || sim.topoIsoInstance != 0 ||
+        !sim.hiddenMeshes.empty()) {
       restoreBodies();
+      removeIso();
       state.fieldRenderer->SetMesh({}, {});
       sim.fieldBuiltKey = 0;
     }
     return;
   }
 
-  // A modal study displays a normalized mode shape (displacement field of the
-  // active mode); a static study displays von Mises or displacement magnitude.
-  const fem::Study* study = doc->FindStudy(sim.activeStudyId);
-  const bool modal = study && study->type == fem::AnalysisType::Modal;
+  const bool topo = study && study->type == fem::AnalysisType::Topology;
 
-  // Rebuild only when the field, study, results generation, or active mode
-  // changes; the deform scale is a push constant (updated every frame).
+  // --- Topology "Shape": the optimized iso-surface as a grey MeshRenderer body.
+  if (topo && sim.field == SimulationState::Field::Shape) {
+    if (sim.fieldBuiltKey != 0) {
+      state.fieldRenderer->SetMesh({}, {});
+      sim.fieldBuiltKey = 0;
+    }
+    // Re-extract only when the study, results, or threshold changes.
+    const uint64_t tq = static_cast<uint64_t>(
+        std::lround(std::clamp(sim.topoThreshold, 0.0f, 1.0f) * 1000.0f));
+    const uint64_t key =
+        (sim.activeStudyId * 1000003ull + doc->StudyResultsEpoch()) * 100003ull +
+        tq + 1;
+    if (key != sim.topoIsoKey) {
+      std::vector<glm::vec3> pos, nrm;
+      std::vector<uint32_t> idx;
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        const double t = sim.topoThreshold > 0.0f
+                             ? sim.topoThreshold
+                             : fem::AutoIsoThreshold(b.mesh, b.density,
+                                                     rt->volumeFractionAchieved);
+        fem::ExtractIsoSurface(b.mesh, b.density, t, pos, nrm, idx);
+      }
+      std::vector<Vertex3D> verts(pos.size());
+      for (size_t i = 0; i < pos.size(); ++i) {
+        verts[i].position = pos[i];
+        verts[i].normal = nrm[i];
+      }
+      if (sim.topoIsoInstance == 0) {
+        sim.topoIsoInstance = state.meshRenderer->AddMesh(verts, idx);
+        state.meshRenderer->SetMeshColor(sim.topoIsoInstance,
+                                         glm::vec3(0.72f, 0.72f, 0.75f));
+      } else {
+        state.meshRenderer->UpdateMesh(sim.topoIsoInstance, verts, idx);
+      }
+      sim.topoIsoKey = key;
+    }
+    hideBodies(rt);
+    return;
+  }
+
+  // --- Scalar field via the FieldRenderer (von Mises / displacement / density).
+  removeIso();
+  const bool modal = study && study->type == fem::AnalysisType::Modal;
+  const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
+  const bool density = topo && sim.field == SimulationState::Field::Density;
+
   const uint64_t key = ((static_cast<uint64_t>(sim.field) * 1000003ull +
                          sim.activeStudyId) * 1000003ull +
                         doc->StudyResultsEpoch()) * 1000003ull +
                        (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0);
-  if (key == sim.fieldBuiltKey) return;
+  if (key == sim.fieldBuiltKey) { hideBodies(rt); return; }
 
-  const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
   const double fmax = vm ? rt->maxVonMises : rt->maxDisplacement;
-  const double inv = modal ? 1.0 : (fmax > 0 ? 1.0 / fmax : 0.0);
+  const double inv = (modal || density) ? 1.0 : (fmax > 0 ? 1.0 / fmax : 0.0);
 
   std::vector<FieldVertex> verts;
   std::vector<uint32_t> indices;
@@ -215,8 +278,21 @@ void SyncFieldRenderer(AppState& state) {
   // midsides 3,4,5): (0,3,5)(3,1,4)(5,4,2)(3,4,5).
   static const int kSub[4][3] = {{0, 3, 5}, {3, 1, 4}, {5, 4, 2}, {3, 4, 5}};
   for (const fem::StudyBodyResult& b : rt->bodies) {
-    // Pick the displacement source: the active mode shape (modal) or the
-    // static solution.
+    // Density: the per-tet density averaged onto every mesh node. Otherwise the
+    // displacement source (active mode shape for modal, else the static solve).
+    std::vector<double> nodeDensity;
+    if (density) {
+      nodeDensity.assign(b.mesh.nodes.size(), 0.0);
+      std::vector<int> cnt(b.mesh.nodes.size(), 0);
+      for (size_t e = 0; e < b.mesh.tets.size() && e < b.density.size(); ++e)
+        for (int i = 0; i < 10; ++i) {
+          const int n = b.mesh.tets[e][i];
+          nodeDensity[n] += b.density[e];
+          ++cnt[n];
+        }
+      for (size_t n = 0; n < nodeDensity.size(); ++n)
+        if (cnt[n]) nodeDensity[n] /= cnt[n];
+    }
     const std::vector<glm::dvec3>* disp = &b.results.displacement;
     if (modal) {
       if (b.results.modes.empty()) continue;
@@ -229,12 +305,17 @@ void SyncFieldRenderer(AppState& state) {
       for (int i = 0; i < 6; ++i) {
         const int n = tri.nodes[i];
         const glm::dvec3& p = b.mesh.nodes[n];
-        const glm::dvec3& d = (*disp)[n];
-        const double val = vm ? b.results.vonMises[n] : glm::length(d);
         FieldVertex fv;
         fv.position = glm::vec3(p);
-        fv.displacement = glm::vec3(d);
-        fv.scalar = static_cast<float>(std::clamp(val * inv, 0.0, 1.0));
+        if (density) {
+          fv.displacement = glm::vec3(0.0f);
+          fv.scalar = static_cast<float>(std::clamp(nodeDensity[n], 0.0, 1.0));
+        } else {
+          const glm::dvec3& d = (*disp)[n];
+          const double val = vm ? b.results.vonMises[n] : glm::length(d);
+          fv.displacement = glm::vec3(d);
+          fv.scalar = static_cast<float>(std::clamp(val * inv, 0.0, 1.0));
+        }
         verts.push_back(fv);
       }
       for (const auto& s : kSub) {
@@ -245,15 +326,7 @@ void SyncFieldRenderer(AppState& state) {
     }
   }
   state.fieldRenderer->SetMesh(std::move(verts), std::move(indices));
-
-  // Hide the solved bodies' normal render so the overlay stands in for them.
-  restoreBodies();
-  for (const fem::StudyBodyResult& b : rt->bodies)
-    for (const DocumentRenderMesh& m : state.documentMeshes)
-      if (static_cast<int>(m.bodyIndex) == b.bodyIndex) {
-        state.meshRenderer->SetInstanceVisible(m.meshId, false);
-        sim.hiddenMeshes.push_back(m.meshId);
-      }
+  hideBodies(rt);
   sim.fieldBuiltKey = key;
 }
 

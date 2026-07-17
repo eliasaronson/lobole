@@ -590,3 +590,67 @@ TEST_CASE("StudyResultToJson declines a non-topology runtime", "[topopt][seriali
   nlohmann::json j;
   CHECK_FALSE(DocumentIO::StudyResultToJson(rt, j));
 }
+
+// ---- Iso-surface extraction (no solver/mesher needed) -------------------
+
+namespace {
+// A per-tet density that ramps 0 -> 1 along x (each tet gets its corner-mean
+// x, normalized) — a smooth field with a well-defined iso-level per threshold.
+std::vector<double> RampDensityX(const fem::FemMesh& m, double Lx) {
+  std::vector<double> d(m.tets.size());
+  for (size_t e = 0; e < m.tets.size(); ++e) {
+    double x = 0;
+    for (int i = 0; i < 4; ++i) x += m.nodes[m.tets[e][i]].x;
+    d[e] = (x / 4.0) / Lx;
+  }
+  return d;
+}
+}  // namespace
+
+TEST_CASE("AutoIsoThreshold volume-matches the target fraction", "[topopt][iso]") {
+  const double Lx = 80;
+  fem::FemMesh mesh = GenerateBoxMesh(8, 4, 4, Lx, 40, 40);
+  const std::vector<double> d = RampDensityX(mesh, Lx);
+
+  // With a uniform 0->1 ramp, keeping fraction f of the volume means keeping
+  // the densest f, i.e. threshold ~ 1 - f.
+  const double t30 = fem::AutoIsoThreshold(mesh, d, 0.3);
+  const double t60 = fem::AutoIsoThreshold(mesh, d, 0.6);
+  CHECK_THAT(t30, WithinAbs(0.7, 0.06));
+  CHECK_THAT(t60, WithinAbs(0.4, 0.06));
+  CHECK(t60 < t30);  // a larger kept fraction -> a lower threshold
+}
+
+TEST_CASE("ExtractIsoSurface produces an oriented surface at a crossing",
+          "[topopt][iso]") {
+  const double Lx = 80, Ly = 40, Lz = 40;
+  fem::FemMesh mesh = GenerateBoxMesh(8, 4, 4, Lx, Ly, Lz);
+  const std::vector<double> d = RampDensityX(mesh, Lx);
+
+  std::vector<glm::vec3> pos, nrm;
+  std::vector<uint32_t> idx;
+  fem::ExtractIsoSurface(mesh, d, 0.5, pos, nrm, idx);
+
+  REQUIRE(pos.size() == nrm.size());
+  REQUIRE(idx.size() % 3 == 0);
+  CHECK(idx.size() > 0);  // the 0->1 ramp crosses 0.5
+  for (const glm::vec3& p : pos) {
+    CHECK((p.x >= -1e-3f && p.x <= Lx + 1e-3f));
+    CHECK((p.y >= -1e-3f && p.y <= Ly + 1e-3f));
+    CHECK((p.z >= -1e-3f && p.z <= Lz + 1e-3f));
+  }
+  for (const glm::vec3& n : nrm) CHECK_THAT(glm::length(n), WithinAbs(1.0f, 1e-4f));
+  // The ramp increases with x, so the solid (density>=t) is the +x half and
+  // the surface faces roughly -x (outward, toward the void). Average normal.x < 0.
+  glm::vec3 avg(0);
+  for (const glm::vec3& n : nrm) avg += n;
+  avg /= float(nrm.size());
+  CHECK(avg.x < 0.0f);
+
+  // A uniform field above the threshold has no crossing -> empty surface.
+  std::vector<glm::vec3> p2, n2;
+  std::vector<uint32_t> i2;
+  fem::ExtractIsoSurface(mesh, std::vector<double>(mesh.tets.size(), 0.9), 0.5,
+                         p2, n2, i2);
+  CHECK(i2.empty());
+}

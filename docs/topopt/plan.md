@@ -371,10 +371,22 @@ result). Self-skips without Netgen, like `fem_smoke`.
    async (`{started:true}`); `study_status` reports live progress or the
    cached summary; `cancel_study` keeps best-so-far. `tests/topo_smoke.py`
    drives start→poll→done, cancel, and the one-run-at-a-time guard headless.
-3. **TO3 — display.** Marching-tets extraction + threshold slider +
-   MeshRenderer preview body + density field entry + panel section
-   (progress bar, Cancel, summary, badges) + `set_result_display`
-   extension. Verified via dev-watch.
+3. **TO3 — display: DONE.** `fem::ExtractIsoSurface` (node-averaged density,
+   marching tetrahedra, outward facet normals) + `fem::AutoIsoThreshold`
+   (volume-matched bisection) — pure geometry, compiled without the solver so
+   a loaded result displays on any build; unit-tested headless. Unified
+   `SyncFieldRenderer`: **Shape** extracts the iso-surface and shows it as a
+   grey `MeshRenderer` body (threshold slider re-extracts via a rebuild key);
+   **Density** colormaps the node-averaged density through the existing
+   `FieldRenderer`; central hide/restore of the design body; `ExitSimulation`
+   drops the iso instance. Studies panel: Topology analysis type + params
+   (volume fraction / filter radius / max iterations) + keep-faces (a Keep
+   pick tool through `SimulationPick`), async Run with a live progress bar +
+   Cancel, summary (iterations/converged/cancelled/volume/compliance
+   sparkline + stale badge), and the Shape/Density/Off + threshold controls.
+   `set_result_display` gains `shape`/`density`/`threshold`. The render path
+   needs a windowed GPU (dev-watch) for visual sign-off; the extraction math
+   and the RPC surface are covered headlessly.
 4. **TO4 — export + guide + MCP.** Taubin smoothing + `export_topo_stl`;
    the modeling-mode ghost + `set_topo_ghost`; MCP mirrors; docs
    (`docs/topopt/guide.md`).

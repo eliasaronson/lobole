@@ -89,6 +89,26 @@ std::optional<TopoResult> TopologyOptimize(
 // True when the build links Eigen (same gate as the static solver).
 bool TopoAvailable();
 
+// ---- Result display (iso-surface extraction) ------------------------------
+// These are pure geometry (no Eigen), so a persisted topology result can be
+// displayed on a build without the solver/mesher.
+
+// Marching-tetrahedra iso-surface of a density field at level `threshold`
+// (in [0,1]): per-tet density is averaged to the corner nodes, then each tet's
+// linear tetrahedron is polygonised (the midside nodes are ignored). Triangles
+// are appended to the outputs with flat facet normals oriented outward (toward
+// lower density). Call once per body; the outputs accumulate.
+void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
+                       double threshold, std::vector<glm::vec3>& positions,
+                       std::vector<glm::vec3>& normals,
+                       std::vector<uint32_t>& indices);
+
+// The iso-level whose thresholded solid volume matches `targetFraction` of the
+// mesh volume (bisection over per-element density). The default when the user
+// has not set an explicit threshold.
+double AutoIsoThreshold(const FemMesh& mesh, const std::vector<double>& density,
+                        double targetFraction);
+
 // ---- Study orchestration (async-ready) ------------------------------------
 
 // A self-contained topology-optimization job: everything TopologyOptimize

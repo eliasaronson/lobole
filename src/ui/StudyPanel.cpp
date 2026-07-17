@@ -9,9 +9,11 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace ui {
 
@@ -129,9 +131,97 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   }
 }
 
+// Topology results: an async Run (worker thread) with a live progress bar +
+// Cancel, then the optimization summary and the Shape/Density display controls.
+void DrawTopoResults(AppState& state, const fem::Study& s) {
+  Document* doc = state.document.get();
+  SimulationState& sim = state.simulation;
+  ImGui::SeparatorText("Optimization");
+
+  // Store a finished run (the GUI's per-frame join point).
+  PollTopologyRun(state, *doc);
+  const TopoRunStatus st = GetTopologyStatus(state, s.id);
+  if (st.running) {
+    const float frac = st.maxIterations > 0
+                           ? std::clamp(static_cast<float>(st.iteration) /
+                                            st.maxIterations,
+                                        0.0f, 1.0f)
+                           : 0.0f;
+    char ov[48];
+    std::snprintf(ov, sizeof(ov), "iter %d / %d", st.iteration, st.maxIterations);
+    ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0), ov);
+    ImGui::Text("Compliance: %.4g   Vf: %.3f", st.compliance, st.volumeFraction);
+    if (ImGui::Button(ICON_FA_STOP " Cancel")) CancelTopologyRun(state, s.id);
+    return;
+  }
+
+  if (ImGui::Button(ICON_FA_PLAY " Run")) {
+    std::string err;
+    if (!StartTopologyRun(state, *doc, s.id, &err))
+      LOG_WARN("topology run failed: {}", err);
+  }
+  if (!s.error.empty()) {
+    ImGui::SameLine();
+    ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", s.error.c_str());
+  }
+
+  const fem::StudyRuntime* rt = doc->StudyResults(s.id);
+  if (!rt) {
+    ImGui::TextColored(kMuted, "Not run yet.");
+    return;
+  }
+  if (doc->StudyResultsStale(s.id))
+    ImGui::TextColored(kStale, ICON_FA_TRIANGLE_EXCLAMATION
+                       " Stale (model changed since last run)");
+
+  size_t nodes = 0, elements = 0;
+  for (const auto& b : rt->bodies) {
+    nodes += b.mesh.stats.nodeCount;
+    elements += b.mesh.stats.tetCount;
+  }
+  ImGui::Text("Mesh: %zu nodes / %zu elements", nodes, elements);
+  ImGui::Text("Iterations: %d%s", rt->iterations,
+              rt->converged ? " (converged)"
+                            : rt->cancelled ? " (cancelled)" : "");
+  ImGui::Text("Volume fraction: %.3f", rt->volumeFractionAchieved);
+  if (!rt->complianceHistory.empty()) {
+    ImGui::Text("Compliance: %.4g -> %.4g", rt->complianceHistory.front(),
+                rt->complianceHistory.back());
+    std::vector<float> hv(rt->complianceHistory.begin(),
+                          rt->complianceHistory.end());
+    ImGui::PlotLines("##compliance", hv.data(), static_cast<int>(hv.size()), 0,
+                     nullptr, FLT_MAX, FLT_MAX, ImVec2(-FLT_MIN, 40));
+  }
+
+  // Display: the grey iso-surface (Shape), the density colormap (Density), or
+  // the normal model (Off), plus the iso-surface threshold.
+  ImGui::SeparatorText("Display");
+  int field = sim.field == SimulationState::Field::Shape     ? 1
+              : sim.field == SimulationState::Field::Density ? 2
+                                                             : 0;
+  bool changed = ImGui::RadioButton("Off", &field, 0);
+  ImGui::SameLine();
+  changed |= ImGui::RadioButton("Shape", &field, 1);
+  ImGui::SameLine();
+  changed |= ImGui::RadioButton("Density", &field, 2);
+  if (changed)
+    sim.field = field == 1   ? SimulationState::Field::Shape
+                : field == 2 ? SimulationState::Field::Density
+                             : SimulationState::Field::None;
+  float thr = sim.topoThreshold;
+  if (ImGui::SliderFloat("Threshold (0=auto)", &thr, 0.0f, 1.0f, "%.2f"))
+    sim.topoThreshold = thr;
+}
+
 void DrawResults(AppState& state, const fem::Study& s) {
   Document* doc = state.document.get();
   SimulationState& sim = state.simulation;
+
+  if (s.type == fem::AnalysisType::Topology) {
+    DrawTopoResults(state, s);
+    return;
+  }
 
   ImGui::SeparatorText("Results");
   if (ImGui::Button(ICON_FA_PLAY " Run")) {
@@ -234,12 +324,16 @@ void DrawStudyPanel(AppState& state) {
     ModifyStudy(state, s->id, "Rename study",
                 [&](fem::Study& cs) { cs.name = newName; });
   }
-  // Analysis type: Static (stress) or Modal (natural frequencies).
-  const char* kTypes[] = {"Static", "Modal"};
-  int typeIdx = s->type == fem::AnalysisType::Modal ? 1 : 0;
-  if (ImGui::Combo("Analysis", &typeIdx, kTypes, 2)) {
-    const auto nt = typeIdx == 1 ? fem::AnalysisType::Modal
-                                 : fem::AnalysisType::Static;
+  // Analysis type: Static (stress), Modal (frequencies), or Topology
+  // (generative shape).
+  const char* kTypes[] = {"Static", "Modal", "Topology"};
+  int typeIdx = s->type == fem::AnalysisType::Modal      ? 1
+                : s->type == fem::AnalysisType::Topology ? 2
+                                                         : 0;
+  if (ImGui::Combo("Analysis", &typeIdx, kTypes, 3)) {
+    const auto nt = typeIdx == 1   ? fem::AnalysisType::Modal
+                    : typeIdx == 2 ? fem::AnalysisType::Topology
+                                   : fem::AnalysisType::Static;
     ModifyStudy(state, s->id, "Set analysis type",
                 [&](fem::Study& cs) { cs.type = nt; });
   }
@@ -257,6 +351,57 @@ void DrawStudyPanel(AppState& state) {
     if (ImGui::InputInt("Modes", &nm) && nm >= 1)
       ModifyStudy(state, s->id, "Set mode count",
                   [&](fem::Study& cs) { cs.numModes = nm; });
+  } else if (s->type == fem::AnalysisType::Topology) {
+    // Topology: target volume, minimum-member (filter) size, iteration cap.
+    float vf = static_cast<float>(s->volumeFraction);
+    if (ImGui::SliderFloat("Volume fraction", &vf, 0.05f, 0.9f, "%.2f"))
+      ModifyStudy(state, s->id, "Set volume fraction", [&](fem::Study& cs) {
+        cs.volumeFraction = vf;
+        cs.volumeFractionExpr.clear();
+      });
+    double fr = s->filterRadius;
+    if (ImGui::InputDouble("Filter radius (mm, 0=auto)", &fr, 0.0, 0.0, "%.3g",
+                           ImGuiInputTextFlags_EnterReturnsTrue))
+      ModifyStudy(state, s->id, "Set filter radius", [&](fem::Study& cs) {
+        cs.filterRadius = fr;
+        cs.filterRadiusExpr.clear();
+      });
+    int mi = s->maxIterations;
+    if (ImGui::InputInt("Max iterations", &mi) && mi >= 1)
+      ModifyStudy(state, s->id, "Set max iterations",
+                  [&](fem::Study& cs) { cs.maxIterations = mi; });
+    // Keep faces: frozen solid, added by picking a face with the Keep tool.
+    SimulationState& sim = state.simulation;
+    const bool arming = sim.tool == SimulationState::Tool::Keep;
+    if (arming)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button(ICON_FA_LOCK " Keep face"))
+      sim.tool = arming ? SimulationState::Tool::None
+                        : SimulationState::Tool::Keep;
+    if (arming) ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::TextColored(kMuted, "%zu kept", s->keepFaces.size());
+    for (size_t i = 0; i < s->keepFaces.size(); ++i) {
+      ImGui::PushID(static_cast<int>(i));
+      ImGui::TextColored(kMuted, "%s", s->keepFaces[i].name.c_str());
+      ImGui::SameLine();
+      if (ImGui::SmallButton(ICON_FA_TRASH)) {
+        const ElementRef f = s->keepFaces[i];
+        ModifyStudy(state, s->id, "Remove keep face", [&](fem::Study& cs) {
+          cs.keepFaces.erase(
+              std::remove_if(cs.keepFaces.begin(), cs.keepFaces.end(),
+                             [&](const ElementRef& k) {
+                               return k.featureId == f.featureId &&
+                                      k.name == f.name;
+                             }),
+              cs.keepFaces.end());
+        });
+        ImGui::PopID();
+        break;
+      }
+      ImGui::PopID();
+    }
   } else {
     // Static: an optional gravity / self-weight load.
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
@@ -359,6 +504,20 @@ void SimulationPick(AppState& state, const Ray& ray) {
   const Body& body = doc->GetBodies()[it->bodyIndex];
   const std::string* name = body.elementMap.NameOf(static_cast<int>(hit.faceIndex));
   if (!name) return; // unnamed face: can't anchor a stable ref
+
+  // Keep tool (topology): freeze the picked face solid.
+  if (sim.tool == SimulationState::Tool::Keep) {
+    const ElementRef ref{body.createdBy, *name};
+    ModifyStudy(state, s->id, "Add keep face", [&](fem::Study& cs) {
+      const bool dup = std::any_of(
+          cs.keepFaces.begin(), cs.keepFaces.end(), [&](const ElementRef& k) {
+            return k.featureId == ref.featureId && k.name == ref.name;
+          });
+      if (!dup) cs.keepFaces.push_back(ref);
+    });
+    sim.tool = SimulationState::Tool::None;
+    return;
+  }
 
   fem::Load load;
   load.id = doc->AllocateId();

@@ -1,5 +1,6 @@
 #include "core/FemTopo.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <unordered_map>
@@ -13,6 +14,130 @@
 #endif
 
 namespace fem {
+
+// ---- Iso-surface extraction (always compiled; pure geometry) --------------
+namespace {
+
+// Signed-magnitude tet volume from the 4 corner nodes (no Eigen).
+double CornerTetVolume(const FemMesh& m, const std::array<int, 10>& t) {
+  const glm::dvec3& p0 = m.nodes[t[0]];
+  const glm::dvec3 a = m.nodes[t[1]] - p0, b = m.nodes[t[2]] - p0,
+                   c = m.nodes[t[3]] - p0;
+  return std::abs(glm::dot(a, glm::cross(b, c))) / 6.0;
+}
+
+// Per-tet density averaged onto the corner nodes it touches.
+std::vector<double> CornerNodeDensity(const FemMesh& m,
+                                      const std::vector<double>& density) {
+  std::vector<double> sum(m.nodes.size(), 0.0);
+  std::vector<int> cnt(m.nodes.size(), 0);
+  for (size_t e = 0; e < m.tets.size(); ++e)
+    for (int i = 0; i < 4; ++i) {
+      const int n = m.tets[e][i];
+      sum[n] += density[e];
+      ++cnt[n];
+    }
+  for (size_t n = 0; n < sum.size(); ++n)
+    if (cnt[n]) sum[n] /= cnt[n];
+  return sum;
+}
+
+}  // namespace
+
+void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
+                       double threshold, std::vector<glm::vec3>& positions,
+                       std::vector<glm::vec3>& normals,
+                       std::vector<uint32_t>& indices) {
+  if (density.size() != mesh.tets.size()) return;
+  const std::vector<double> nd = CornerNodeDensity(mesh, density);
+  const double t = threshold;
+
+  // Position on edge (a,b) where the node-averaged density crosses t.
+  auto interp = [&](int a, int b) {
+    const glm::dvec3& pa = mesh.nodes[a];
+    const glm::dvec3& pb = mesh.nodes[b];
+    const double va = nd[a], vb = nd[b];
+    double s = std::abs(vb - va) < 1e-12 ? 0.5 : (t - va) / (vb - va);
+    s = std::clamp(s, 0.0, 1.0);
+    return glm::vec3(pa + s * (pb - pa));
+  };
+
+  for (const std::array<int, 10>& tet : mesh.tets) {
+    glm::dvec3 meanIn(0.0);
+    int nin = 0;
+    std::array<int, 4> ins{}, outs{};
+    int ni = 0, no = 0;
+    for (int i = 0; i < 4; ++i) {
+      const int n = tet[i];
+      if (nd[n] >= t) { ins[ni++] = n; meanIn += mesh.nodes[n]; ++nin; }
+      else { outs[no++] = n; }
+    }
+    if (nin == 0 || nin == 4) continue;  // no crossing
+    meanIn /= nin;
+
+    // Emit a triangle with an outward normal (pointing away from the solid
+    // interior) and matching winding, so a backface-culling renderer shows it.
+    auto emit = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c) {
+      glm::vec3 n = glm::cross(b - a, c - a);
+      const float len = glm::length(n);
+      if (len < 1e-12f) return;  // degenerate
+      n /= len;
+      const glm::vec3 ctr = (a + b + c) / 3.0f;
+      if (glm::dot(n, glm::vec3(meanIn) - ctr) > 0.0f) {  // points into solid
+        std::swap(b, c);
+        n = -n;
+      }
+      const uint32_t base = static_cast<uint32_t>(positions.size());
+      positions.push_back(a);
+      positions.push_back(b);
+      positions.push_back(c);
+      normals.push_back(n);
+      normals.push_back(n);
+      normals.push_back(n);
+      indices.push_back(base);
+      indices.push_back(base + 1);
+      indices.push_back(base + 2);
+    };
+
+    if (ni == 1) {  // one solid corner -> a triangle cutting its 3 edges
+      emit(interp(ins[0], outs[0]), interp(ins[0], outs[1]),
+           interp(ins[0], outs[2]));
+    } else if (ni == 3) {  // one void corner -> the complementary triangle
+      emit(interp(outs[0], ins[0]), interp(outs[0], ins[1]),
+           interp(outs[0], ins[2]));
+    } else {  // 2 solid / 2 void -> a quad split into two triangles
+      const glm::vec3 ac = interp(ins[0], outs[0]);
+      const glm::vec3 ad = interp(ins[0], outs[1]);
+      const glm::vec3 bc = interp(ins[1], outs[0]);
+      const glm::vec3 bd = interp(ins[1], outs[1]);
+      emit(ac, ad, bd);
+      emit(ac, bd, bc);
+    }
+  }
+}
+
+double AutoIsoThreshold(const FemMesh& mesh, const std::vector<double>& density,
+                        double targetFraction) {
+  if (density.size() != mesh.tets.size() || mesh.tets.empty()) return 0.5;
+  std::vector<double> vol(mesh.tets.size());
+  double vtot = 0.0;
+  for (size_t e = 0; e < mesh.tets.size(); ++e) {
+    vol[e] = CornerTetVolume(mesh, mesh.tets[e]);
+    vtot += vol[e];
+  }
+  if (vtot <= 0.0) return 0.5;
+  const double target = std::clamp(targetFraction, 0.0, 1.0) * vtot;
+  // solidVol(t) = sum vol[e] where density[e] >= t is monotone decreasing in t.
+  double lo = 0.0, hi = 1.0;
+  for (int it = 0; it < 40; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    double sv = 0.0;
+    for (size_t e = 0; e < vol.size(); ++e)
+      if (density[e] >= mid) sv += vol[e];
+    if (sv > target) lo = mid; else hi = mid;  // too much solid -> raise t
+  }
+  return 0.5 * (lo + hi);
+}
 
 #ifdef HAVE_FEM_SOLVER
 

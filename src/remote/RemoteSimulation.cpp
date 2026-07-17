@@ -378,7 +378,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   }
   if (m == "set_result_display") {
     // Show/warp a study's result overlay (display only, like set_explode).
-    // params: {study?, field: "von_mises"|"displacement"|"none", deform_scale?}
+    // params: {study?, field: "von_mises"|"displacement"|"shape"|"density"|
+    //          "none", deform_scale?, mode?, threshold?}
+    // shape/density are topology views; threshold (0..1, 0=auto) sets the
+    // iso-surface level for the "shape" view.
     ui::EnterSimulation(state);
     if (p.contains("study")) {
       const uint64_t id = p.at("study").get<uint64_t>();
@@ -388,15 +391,21 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     const std::string f = p.value("field", std::string("von_mises"));
     state.simulation.field =
         f == "displacement" ? ui::SimulationState::Field::Displacement
+        : f == "shape"      ? ui::SimulationState::Field::Shape
+        : f == "density"    ? ui::SimulationState::Field::Density
         : f == "none"       ? ui::SimulationState::Field::None
                             : ui::SimulationState::Field::VonMises;
     if (p.contains("deform_scale"))
       state.simulation.deformScale = static_cast<float>(p.at("deform_scale").get<double>());
     if (p.contains("mode"))  // modal: which mode shape to display (0-based)
       state.simulation.activeMode = p.at("mode").get<int>();
+    if (p.contains("threshold"))  // topology iso-surface level (0..1, 0=auto)
+      state.simulation.topoThreshold =
+          static_cast<float>(p.at("threshold").get<double>());
     return json{{"field", f},
             {"deform_scale", state.simulation.deformScale},
-            {"mode", state.simulation.activeMode}};
+            {"mode", state.simulation.activeMode},
+            {"threshold", state.simulation.topoThreshold}};
   }
   return std::nullopt;
 }

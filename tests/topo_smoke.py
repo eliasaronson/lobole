@@ -112,6 +112,14 @@ def main():
                f"volume fraction near target, got {res['volume_fraction']}")
         expect(res["stale"] is False, "fresh results not stale")
 
+        # --- display controls (headless: sets state, no renderer) -----------
+        disp = d.call("set_result_display", study=study, field="shape",
+                      threshold=0.0)
+        expect(disp["field"] == "shape", f"shape display echoed: {disp}")
+        disp = d.call("set_result_display", study=study, field="density")
+        expect(disp["field"] == "density", "density display echoed")
+        d.call("set_result_display", study=study, field="none")
+
         # --- cancel: a second run stopped mid-flight keeps best-so-far -----
         started2 = d.call("run_study", study=study)
         expect(started2.get("started") is True, "second run started")
