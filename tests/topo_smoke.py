@@ -120,6 +120,22 @@ def main():
         expect(disp["field"] == "density", "density display echoed")
         d.call("set_result_display", study=study, field="none")
 
+        # --- STL export of the optimized shape ------------------------------
+        stl = os.path.join(tmp, "shape.stl")
+        exp = d.call("export_topo_stl", study=study, path=stl, smooth=3)
+        expect(exp["path"] == stl, f"export echoed path: {exp}")
+        expect(os.path.getsize(stl) > 84, "STL has a header + triangles")
+        with open(stl, "rb") as fh:
+            fh.seek(80)
+            ntri = int.from_bytes(fh.read(4), "little")
+        expect(os.path.getsize(stl) == 84 + ntri * 50, "STL size matches count")
+        expect(ntri > 0, "STL has triangles")
+
+        # --- shape-guide ghost toggle ---------------------------------------
+        g = d.call("set_topo_ghost", study=study, on=True)
+        expect(g["on"] is True, f"ghost on echoed: {g}")
+        d.call("set_topo_ghost", study=study, on=False)
+
         # --- cancel: a second run stopped mid-flight keeps best-so-far -----
         started2 = d.call("run_study", study=study)
         expect(started2.get("started") is True, "second run started")

@@ -22,6 +22,7 @@
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/FemTopo.h"
 #include "core/FilletFeature.h"
 #include "core/DrawingDimension.h"
 #include "core/DrawingExport.h"
@@ -1352,6 +1353,11 @@ void SyncDocumentRenderers(AppState& state) {
   for (uint32_t capId : state.sectionCapMeshes)
     state.meshRenderer->RemoveMesh(capId);
   state.sectionCapMeshes.clear();
+  // The topology shape-guide ghost is likewise rebuilt each resync.
+  if (state.topoGhostInstance) {
+    state.meshRenderer->RemoveMesh(state.topoGhostInstance);
+    state.topoGhostInstance = 0;
+  }
 
   // A drawing tab has no 3D geometry — the meshes were just cleared and the
   // sheet renders through the 2D viewport overlay (DrawSheet). Nothing more.
@@ -1403,6 +1409,33 @@ void SyncDocumentRenderers(AppState& state) {
   }
 
   AppendSectionCaps(state, bodies, bodyColors);
+
+  // Topology shape-guide ghost (TO4): outside simulation mode, render the
+  // optimized iso-surface translucent so the user can re-model against it.
+  if (state.topoGhostStudyId && !state.simulation.active) {
+    const fem::StudyRuntime* rt =
+        state.document->StudyResults(state.topoGhostStudyId);
+    if (rt && rt->topology) {
+      std::vector<glm::vec3> gpos, gnrm;
+      std::vector<uint32_t> gidx;
+      for (const fem::StudyBodyResult& b : rt->bodies) {
+        const double t = fem::AutoIsoThreshold(b.mesh, b.density,
+                                               rt->volumeFractionAchieved);
+        fem::ExtractIsoSurface(b.mesh, b.density, t, gpos, gnrm, gidx);
+      }
+      if (!gpos.empty()) {
+        std::vector<Vertex3D> gv(gpos.size());
+        for (size_t i = 0; i < gpos.size(); ++i) {
+          gv[i].position = gpos[i];
+          gv[i].normal = gnrm[i];
+        }
+        state.topoGhostInstance = state.meshRenderer->AddMesh(gv, gidx);
+        state.meshRenderer->SetMeshColor(state.topoGhostInstance,
+                                         glm::vec3(0.45f, 0.75f, 1.0f));
+        state.meshRenderer->SetInstanceGhost(state.topoGhostInstance, 0.35f);
+      }
+    }
+  }
 
   // In-context editing (A4): ghost the context assembly around the part.
   // Appended AFTER the part bodies so documentMeshes[i] still aligns with

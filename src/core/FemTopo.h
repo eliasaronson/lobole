@@ -109,6 +109,14 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
 double AutoIsoThreshold(const FemMesh& mesh, const std::vector<double>& density,
                         double targetFraction);
 
+// Extracts the iso-surface at `threshold`, welds it, applies `smoothIters`
+// Taubin (lambda/mu) smoothing passes (shrink-free surface fairing), and writes
+// a binary STL to `path` — the print-it-directly path for a generative result.
+// Returns false + *error on an empty surface or an I/O failure. Pure geometry.
+bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
+                   double threshold, int smoothIters, const std::string& path,
+                   std::string* error);
+
 // ---- Study orchestration (async-ready) ------------------------------------
 
 // A self-contained topology-optimization job: everything TopologyOptimize

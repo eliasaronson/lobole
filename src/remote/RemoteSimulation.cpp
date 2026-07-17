@@ -5,6 +5,7 @@
 #include "core/Document.h"
 #include "core/FemSolver.h"
 #include "core/FemStudy.h"
+#include "core/FemTopo.h"
 #include "core/Serialization.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
@@ -358,6 +359,41 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
         {"stale", doc->StudyResultsStale(id)}};
     if (haveFoS) result["factor_of_safety"] = minFoS;
     return result;
+  }
+  if (m == "set_topo_ghost") {
+    // Toggle the modeling-mode shape-guide ghost for a topology study: a
+    // translucent render of its optimized shape, to re-model against.
+    // params: {study, on?: true}
+    const uint64_t id = p.at("study").get<uint64_t>();
+    if (!doc->FindStudy(id)) throw std::runtime_error("no such study");
+    const bool on = p.value("on", true);
+    state.topoGhostStudyId = on ? id : 0;
+    state.syncedDocumentVersion = UINT64_MAX;  // force a renderer resync
+    return json{{"study", id}, {"on", on}};
+  }
+  if (m == "export_topo_stl") {
+    // Export a topology result's optimized shape (iso-surface, Taubin-smoothed)
+    // as a binary STL. params: {study, path, threshold?: 0..1 (0=auto),
+    // smooth?: iterations (default 3)}
+    ui::PollTopologyRun(state, *doc);
+    const uint64_t id = p.at("study").get<uint64_t>();
+    fem::Study* s = doc->FindStudy(id);
+    if (!s) throw std::runtime_error("no such study");
+    if (s->type != fem::AnalysisType::Topology)
+      throw std::runtime_error("not a topology study");
+    const fem::StudyRuntime* rt = doc->StudyResults(id);
+    if (!rt || rt->bodies.empty())
+      throw std::runtime_error("study has no result to export");
+    const fem::StudyBodyResult& b = rt->bodies.front();
+    const double thr = p.contains("threshold") && p.at("threshold").get<double>() > 0
+                           ? p.at("threshold").get<double>()
+                           : fem::AutoIsoThreshold(b.mesh, b.density,
+                                                   rt->volumeFractionAchieved);
+    const std::string path = p.at("path").get<std::string>();
+    std::string err;
+    if (!fem::ExportTopoStl(b.mesh, b.density, thr, p.value("smooth", 3), path, &err))
+      throw std::runtime_error(err);
+    return json{{"path", path}, {"threshold", thr}};
   }
   if (m == "enter_simulation") {
     // Enter the FEM simulation workspace (the GUI mode), optionally selecting a

@@ -212,6 +212,14 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   float thr = sim.topoThreshold;
   if (ImGui::SliderFloat("Threshold (0=auto)", &thr, 0.0f, 1.0f, "%.2f"))
     sim.topoThreshold = thr;
+
+  // Shape guide: show the optimized shape translucent in the modeling
+  // workspace (visible after exiting simulation mode) to re-model against.
+  bool ghost = state.topoGhostStudyId == s.id;
+  if (ImGui::Checkbox("Shape guide (modeling overlay)", &ghost)) {
+    state.topoGhostStudyId = ghost ? s.id : 0;
+    state.syncedDocumentVersion = UINT64_MAX;  // rebuild renderers
+  }
 }
 
 void DrawResults(AppState& state, const fem::Study& s) {

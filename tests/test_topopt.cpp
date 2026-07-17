@@ -16,9 +16,11 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <utility>
@@ -653,4 +655,35 @@ TEST_CASE("ExtractIsoSurface produces an oriented surface at a crossing",
   fem::ExtractIsoSurface(mesh, std::vector<double>(mesh.tets.size(), 0.9), 0.5,
                          p2, n2, i2);
   CHECK(i2.empty());
+}
+
+TEST_CASE("ExportTopoStl writes a well-formed binary STL", "[topopt][iso]") {
+  namespace fs = std::filesystem;
+  const double Lx = 80;
+  fem::FemMesh mesh = GenerateBoxMesh(8, 4, 4, Lx, 40, 40);
+  const std::vector<double> d = RampDensityX(mesh, Lx);
+  const fs::path path = fs::temp_directory_path() / "topo_export_test.stl";
+  fs::remove(path);
+
+  std::string err;
+  REQUIRE(fem::ExportTopoStl(mesh, d, 0.5, 3, path.string(), &err));
+  INFO(err);
+  REQUIRE(fs::exists(path));
+
+  // Binary STL: 80-byte header + uint32 triangle count + 50 bytes/triangle.
+  std::ifstream in(path, std::ios::binary);
+  REQUIRE(in.good());
+  char header[80];
+  in.read(header, 80);
+  uint32_t nTri = 0;
+  in.read(reinterpret_cast<char*>(&nTri), 4);
+  CHECK(nTri > 0);
+  const auto size = fs::file_size(path);
+  CHECK(size == 84u + std::size_t(nTri) * 50u);
+
+  // An empty surface (uniform field) is an export error, not an empty file.
+  std::string err2;
+  CHECK_FALSE(fem::ExportTopoStl(mesh, std::vector<double>(mesh.tets.size(), 0.9),
+                                 0.5, 3, path.string(), &err2));
+  fs::remove(path);
 }

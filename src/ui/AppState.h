@@ -423,6 +423,13 @@ struct AppState {
   // on slider release while the shader clip previews live).
   glm::vec4 syncedSectionPlane = glm::vec4(0.0f);
   std::vector<uint32_t> sectionCapMeshes;
+  // Topology shape-guide ghost (TO4): a translucent render of a topology
+  // study's optimized iso-surface, shown in the normal modeling workspace so
+  // the user can re-model against it. `topoGhostStudyId` selects the study
+  // (0 = off); `topoGhostInstance` is its MeshRenderer instance (rebuilt on
+  // resync, like the section caps).
+  uint64_t topoGhostStudyId = 0;
+  uint32_t topoGhostInstance = 0;
   bool showElementNames = false; // debug: element name of the hovered face
 
   // 2D sheet viewport (workstream 13): a drawing tab pans/zooms an

@@ -910,19 +910,39 @@ def list_studies() -> dict:
 
 @mcp.tool(description="Set a study's name, global mesh size, analysis type, or "
           "loads. mesh_size (mm; 0 = auto) may be a number or an expression "
-          "string. type is 'static' (stress) or 'modal' (natural frequencies). "
-          "num_modes sets how many modes a modal study computes. gravity "
-          "([x,y,z] m/s^2, e.g. [0,0,-9.81]) applies self-weight to a static "
-          "study (needs a material density).")
+          "string. type is 'static' (stress), 'modal' (natural frequencies), or "
+          "'topology' (generative shape). num_modes sets how many modes a modal "
+          "study computes. gravity ([x,y,z] m/s^2, e.g. [0,0,-9.81]) applies "
+          "self-weight to a static study (needs a material density). For a "
+          "topology study: volume_fraction (0..1 target kept, number or "
+          "expression), filter_radius (mm minimum member size; 0 = auto), and "
+          "max_iterations.")
 def set_study(study: int, name: str | None = None, mesh_size=None,
               type: str | None = None, num_modes: int | None = None,
-              gravity: list | None = None) -> dict:
+              gravity: list | None = None, volume_fraction=None,
+              filter_radius=None, max_iterations: int | None = None) -> dict:
     params: dict = {"study": study}
     for k, v in (("name", name), ("mesh_size", mesh_size), ("type", type),
-                 ("num_modes", num_modes), ("gravity", gravity)):
+                 ("num_modes", num_modes), ("gravity", gravity),
+                 ("volume_fraction", volume_fraction),
+                 ("filter_radius", filter_radius),
+                 ("max_iterations", max_iterations)):
         if v is not None:
             params[k] = v
     return _call("set_study", **params)
+
+
+@mcp.tool(description="Add a KEEP FACE to a topology study (frozen solid, so a "
+          "bolt boss or bearing seat survives the optimization). face is "
+          "{feature_id, element}.")
+def add_keep_face(study: int, face: dict) -> dict:
+    return _call("add_keep_face", study=study, face=face)
+
+
+@mcp.tool(description="Remove a keep face ({feature_id, element}) from a "
+          "topology study.")
+def remove_keep_face(study: int, face: dict) -> dict:
+    return _call("remove_keep_face", study=study, face=face)
 
 
 @mcp.tool(description="Add a per-face mesh refinement (smaller elements on one "
@@ -968,26 +988,64 @@ def mesh_study(study: int) -> dict:
           "A static study returns nodes, elements, max_von_mises_mpa {value, "
           "at, body}, max_displacement_mm, factor_of_safety (vs yield), and "
           "stale:false. A modal study returns per-body frequencies_hz (the "
-          "natural frequencies). Errors name the offending face/material/"
-          "support.")
+          "natural frequencies). A TOPOLOGY study runs ASYNC (minutes on a "
+          "worker thread): it returns {started:true} immediately — poll "
+          "study_status until running:false, then read study_results. Errors "
+          "name the offending face/material/support.")
 def run_study(study: int) -> dict:
     return _call("run_study", study=study)
 
 
+@mcp.tool(description="Poll an async topology run. While running, returns "
+          "{running:true, iteration, max_iterations, compliance, "
+          "volume_fraction}. Once done, {running:false, has_results, converged, "
+          "cancelled, iterations, stale}.")
+def study_status(study: int) -> dict:
+    return _call("study_status", study=study)
+
+
+@mcp.tool(description="Cancel an in-progress topology run (keeps the best "
+          "shape found so far as a 'cancelled' result). Returns {cancelled}.")
+def cancel_study(study: int) -> dict:
+    return _call("cancel_study", study=study)
+
+
 @mcp.tool(description="Read a study's cached results (never solves). Same "
-          "summary as run_study plus the current stale flag.")
+          "summary as run_study plus the current stale flag. For topology: "
+          "iterations, converged, volume_fraction, compliance.")
 def study_results(study: int) -> dict:
     return _call("study_results", study=study)
 
 
+@mcp.tool(description="Export a topology study's optimized shape (the "
+          "iso-surface, Taubin-smoothed) to a binary STL for 3D printing. "
+          "threshold (0..1, 0 = auto volume-matched) sets how much material to "
+          "keep; smooth is the number of smoothing passes (default 3).")
+def export_topo_stl(study: int, path: str, threshold: float = 0.0,
+                    smooth: int = 3) -> dict:
+    return _call("export_topo_stl", study=study, path=path,
+                 threshold=threshold, smooth=smooth)
+
+
+@mcp.tool(description="Toggle the topology SHAPE GUIDE: a translucent overlay "
+          "of a study's optimized shape in the normal modeling workspace, to "
+          "re-model clean geometry against. on=false hides it.")
+def set_topo_ghost(study: int, on: bool = True) -> dict:
+    return _call("set_topo_ghost", study=study, on=on)
+
+
 @mcp.tool(description="Show a study's result overlay in the viewport (for a "
-          "screenshot). field is 'von_mises', 'displacement', or 'none'; "
-          "deform_scale exaggerates the deformed shape (0 = undeformed). For a "
-          "modal study, mode selects which mode shape (0-based) to display. "
-          "Enters simulation mode; display-only, like set_explode.")
+          "screenshot). field is 'von_mises', 'displacement', or 'none' for a "
+          "static/modal study, or 'shape' (grey optimized iso-surface) / "
+          "'density' (colormap) for a topology study. deform_scale exaggerates "
+          "the deformed shape (0 = undeformed). For a modal study, mode selects "
+          "which mode shape (0-based). For a topology 'shape' view, threshold "
+          "(0..1, 0 = auto) sets the iso-surface level. Enters simulation mode; "
+          "display-only, like set_explode.")
 def set_result_display(study: int | None = None, field: str = "von_mises",
                        deform_scale: float | None = None,
-                       mode: int | None = None) -> dict:
+                       mode: int | None = None,
+                       threshold: float | None = None) -> dict:
     params: dict = {"field": field}
     if study is not None:
         params["study"] = study
@@ -995,6 +1053,8 @@ def set_result_display(study: int | None = None, field: str = "von_mises",
         params["deform_scale"] = deform_scale
     if mode is not None:
         params["mode"] = mode
+    if threshold is not None:
+        params["threshold"] = threshold
     return _call("set_result_display", **params)
 
 

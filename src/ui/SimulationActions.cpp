@@ -164,6 +164,8 @@ void EnterSimulation(AppState& state) {
   // Select a study to edit (the first, unless one is already active).
   if (!doc->FindStudy(state.simulation.activeStudyId) && !doc->GetStudies().empty())
     state.simulation.activeStudyId = doc->GetStudies().front().id;
+  // Drop the modeling-mode shape-guide ghost while in simulation mode.
+  state.syncedDocumentVersion = UINT64_MAX;
 }
 void ExitSimulation(AppState& state) {
   // Restore any body instances the field overlay hid, and drop the topology

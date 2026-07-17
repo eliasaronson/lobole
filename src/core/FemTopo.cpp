@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <fstream>
+#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -137,6 +140,137 @@ double AutoIsoThreshold(const FemMesh& mesh, const std::vector<double>& density,
     if (sv > target) lo = mid; else hi = mid;  // too much solid -> raise t
   }
   return 0.5 * (lo + hi);
+}
+
+namespace {
+
+// Welds a triangle soup (positions in triangle order, 3 per tri) into unique
+// vertices + triangle index triples. Iso-surface vertices coincident across
+// tets are bit-identical, so a fine quantization welds them exactly.
+void WeldSurface(const std::vector<glm::vec3>& pos,
+                 std::vector<glm::vec3>& outVerts,
+                 std::vector<std::array<uint32_t, 3>>& outTris) {
+  glm::vec3 mn(1e30f), mx(-1e30f);
+  for (const glm::vec3& p : pos) { mn = glm::min(mn, p); mx = glm::max(mx, p); }
+  const float diag = glm::length(mx - mn);
+  const float eps = std::max(diag * 1e-6f, 1e-9f);
+  auto quant = [&](const glm::vec3& p) {
+    return std::array<int64_t, 3>{static_cast<int64_t>(std::llround(p.x / eps)),
+                                  static_cast<int64_t>(std::llround(p.y / eps)),
+                                  static_cast<int64_t>(std::llround(p.z / eps))};
+  };
+  std::map<std::array<int64_t, 3>, uint32_t> lookup;
+  std::vector<uint32_t> remap(pos.size());
+  for (size_t i = 0; i < pos.size(); ++i) {
+    const auto key = quant(pos[i]);
+    auto it = lookup.find(key);
+    if (it == lookup.end()) {
+      const uint32_t id = static_cast<uint32_t>(outVerts.size());
+      lookup.emplace(key, id);
+      outVerts.push_back(pos[i]);
+      remap[i] = id;
+    } else {
+      remap[i] = it->second;
+    }
+  }
+  for (size_t t = 0; t + 3 <= pos.size(); t += 3)
+    outTris.push_back({remap[t], remap[t + 1], remap[t + 2]});
+}
+
+// Taubin lambda/mu smoothing: a Laplacian pass with factor `lambda` (>0) then
+// one with `mu` (<0, |mu|>lambda), which cancels the shrinkage a plain
+// Laplacian smooth would cause. Vertices on an open (boundary) edge are pinned
+// so the surface stays on the design-domain faces it was cut against.
+void TaubinSmooth(std::vector<glm::vec3>& verts,
+                  const std::vector<std::array<uint32_t, 3>>& tris, int iters) {
+  if (iters <= 0 || verts.empty()) return;
+  const size_t n = verts.size();
+  std::vector<std::vector<uint32_t>> nbr(n);
+  std::map<std::pair<uint32_t, uint32_t>, int> edgeCount;
+  auto addEdge = [&](uint32_t a, uint32_t b) {
+    nbr[a].push_back(b);
+    nbr[b].push_back(a);
+    edgeCount[{std::min(a, b), std::max(a, b)}]++;
+  };
+  for (const auto& t : tris) {
+    addEdge(t[0], t[1]);
+    addEdge(t[1], t[2]);
+    addEdge(t[2], t[0]);
+  }
+  std::vector<char> pinned(n, 0);
+  for (const auto& [e, c] : edgeCount)
+    if (c == 1) { pinned[e.first] = 1; pinned[e.second] = 1; }  // open edge
+  // Dedup neighbor lists.
+  for (auto& list : nbr) {
+    std::sort(list.begin(), list.end());
+    list.erase(std::unique(list.begin(), list.end()), list.end());
+  }
+
+  const float lambda = 0.5f, mu = -0.53f;
+  std::vector<glm::vec3> next(n);
+  auto pass = [&](float f) {
+    for (size_t i = 0; i < n; ++i) {
+      if (pinned[i] || nbr[i].empty()) { next[i] = verts[i]; continue; }
+      glm::vec3 c(0.0f);
+      for (uint32_t j : nbr[i]) c += verts[j];
+      c /= static_cast<float>(nbr[i].size());
+      next[i] = verts[i] + f * (c - verts[i]);
+    }
+    verts.swap(next);
+  };
+  for (int it = 0; it < iters; ++it) { pass(lambda); pass(mu); }
+}
+
+}  // namespace
+
+bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
+                   double threshold, int smoothIters, const std::string& path,
+                   std::string* error) {
+  std::vector<glm::vec3> pos, nrm;
+  std::vector<uint32_t> idx;
+  ExtractIsoSurface(mesh, density, threshold, pos, nrm, idx);
+  if (pos.empty()) {
+    if (error) *error = "the iso-surface is empty at this threshold";
+    return false;
+  }
+
+  std::vector<glm::vec3> verts;
+  std::vector<std::array<uint32_t, 3>> tris;
+  WeldSurface(pos, verts, tris);
+  TaubinSmooth(verts, tris, smoothIters);
+
+  std::ofstream out(path, std::ios::binary);
+  if (!out) {
+    if (error) *error = "cannot open '" + path + "' for writing";
+    return false;
+  }
+  const char header[80] = {0};
+  out.write(header, 80);
+  const uint32_t nTri = static_cast<uint32_t>(tris.size());
+  out.write(reinterpret_cast<const char*>(&nTri), 4);
+  auto writeVec = [&](const glm::vec3& v) {
+    const float f[3] = {v.x, v.y, v.z};
+    out.write(reinterpret_cast<const char*>(f), 12);
+  };
+  for (const auto& t : tris) {
+    const glm::vec3& a = verts[t[0]];
+    const glm::vec3& b = verts[t[1]];
+    const glm::vec3& c = verts[t[2]];
+    glm::vec3 nn = glm::cross(b - a, c - a);
+    const float len = glm::length(nn);
+    nn = len > 1e-20f ? nn / len : glm::vec3(0.0f);
+    writeVec(nn);
+    writeVec(a);
+    writeVec(b);
+    writeVec(c);
+    const uint16_t attr = 0;
+    out.write(reinterpret_cast<const char*>(&attr), 2);
+  }
+  if (!out.good()) {
+    if (error) *error = "failed writing '" + path + "'";
+    return false;
+  }
+  return true;
 }
 
 #ifdef HAVE_FEM_SOLVER
