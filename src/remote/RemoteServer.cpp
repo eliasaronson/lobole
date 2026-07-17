@@ -579,6 +579,10 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
   if (!m_running)
     return;
 
+  // Store a finished async topology run (TO2) even if the client never polls
+  // study_status — this is the app's per-tick main-thread join point.
+  if (state.document) ui::PollTopologyRun(state, *state.document);
+
   // Finish an in-flight UI action once the engine is done with it
   if (m_uiActionInFlight && ImGuiTestEngine_IsTestQueueEmpty(m_engine)) {
     m_uiActionInFlight = false;

@@ -89,4 +89,35 @@ std::optional<TopoResult> TopologyOptimize(
 // True when the build links Eigen (same gate as the static solver).
 bool TopoAvailable();
 
+// ---- Study orchestration (async-ready) ------------------------------------
+
+// A self-contained topology-optimization job: everything TopologyOptimize
+// needs, resolved off the Document up front, so the optimizer can run on a
+// worker thread with no Document access (the one join point is on the main
+// thread — see PrepareTopology / MakeTopoRuntime). Plain fem/std data only.
+struct TopoInput {
+  int bodyIndex = -1;
+  std::string bodyName;
+  FemMesh mesh;
+  Material material;
+  std::vector<int> fixedNodes;
+  std::vector<FaceLoad> loads;
+  std::vector<int> keepNodes;
+  TopoParams params;
+};
+
+// Main-thread preparation: evaluates the study's expressions, resolves its
+// refs against the document, meshes the single loaded body (v1), and builds the
+// immutable `TopoInput` snapshot. On any failure sets study.error and *error
+// and returns false. After this returns, TopologyOptimize(input...) is a pure
+// function of `input` — safe to run on another thread.
+bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
+                     std::string* error);
+
+// Builds the persisted runtime (rt.topology = true) from a finished
+// optimization: moves `input.mesh` into the single body result, attaches the
+// density field + convergence summary. `solvedAtVersion` is left 0 (the caller
+// stamps it).
+StudyRuntime MakeTopoRuntime(TopoInput& input, const TopoResult& result);
+
 }  // namespace fem

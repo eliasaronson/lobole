@@ -227,15 +227,48 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     }
     return json{{"bodies", bodies}};
   }
-  if (m == "run_study" || m == "study_results") {
+  if (m == "run_study" || m == "study_results" || m == "study_status" ||
+      m == "cancel_study") {
     // run_study: mesh + solve now (explicit act, never automatic) and cache the
-    // results. study_results: read the cached results (never solves). Both
-    // return the same summary. params: {study}
+    // results — a topology study runs ASYNC (a worker thread) and returns
+    // immediately, the others are synchronous. study_status/cancel_study drive
+    // the async run. study_results: read the cached results (never solves).
+    // params: {study}
+    // Catch a finished async run first, so its result is stored before we read.
+    ui::PollTopologyRun(state, *doc);
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Study* s = doc->FindStudy(id);
     if (!s) throw std::runtime_error("no such study");
 
+    if (m == "cancel_study") {
+      return json{{"cancelled", ui::CancelTopologyRun(state, id)}};
+    }
+    if (m == "study_status") {
+      const ui::TopoRunStatus st = ui::GetTopologyStatus(state, id);
+      if (st.running)
+        return json{{"running", true},
+                    {"iteration", st.iteration},
+                    {"max_iterations", st.maxIterations},
+                    {"compliance", st.compliance},
+                    {"max_change", st.maxChange},
+                    {"volume_fraction", st.volumeFraction}};
+      // Not running — report the cached result's state (if any).
+      const fem::StudyRuntime* rt = doc->StudyResults(id);
+      return json{{"running", false},
+                  {"has_results", rt != nullptr},
+                  {"converged", rt && rt->converged},
+                  {"cancelled", rt && rt->cancelled},
+                  {"iterations", rt ? rt->iterations : 0},
+                  {"stale", doc->StudyResultsStale(id)}};
+    }
+
     if (m == "run_study") {
+      if (s->type == fem::AnalysisType::Topology) {
+        std::string err;
+        if (!ui::StartTopologyRun(state, *doc, id, &err))
+          throw std::runtime_error(err);
+        return json{{"started", true}, {"running", true}};
+      }
       std::string err;
       if (!ui::RunStudyAndCache(*doc, id, &err)) throw std::runtime_error(err);
     }

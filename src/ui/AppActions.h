@@ -169,6 +169,37 @@ void ExitSimulation(AppState& state);
 // run_study RPC. Defined in AppActions.cpp.
 bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error);
 
+// ---- Topology optimization runs (TO2, async) ------------------------------
+// A topology study's SIMP solve is minutes long, so it runs on a worker thread
+// over an immutable snapshot; the main thread polls and stores the result at
+// the single join point. One run at a time.
+
+// Prepares the snapshot (meshes on the calling thread) and spawns the worker.
+// Returns false + *error on a prep failure or if a run is already in progress.
+bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
+                      std::string* error);
+
+// If a run has finished (converged, capped, cancelled, or errored), joins it
+// and stores the result (or the study error). Cheap no-op otherwise — call it
+// each frame and before reporting study status. Defined in SimulationActions.cpp.
+void PollTopologyRun(AppState& state, Document& doc);
+
+// Requests cancellation of the run for `studyId` (keeps best-so-far). Returns
+// false if no such run is active.
+bool CancelTopologyRun(AppState& state, uint64_t studyId);
+
+// Live status of the active run. `running` is false when no job is running for
+// `studyId` (finished/never-started — read the cached result instead).
+struct TopoRunStatus {
+  bool running = false;
+  int iteration = 0;
+  int maxIterations = 0;
+  double compliance = 0.0;
+  double maxChange = 0.0;
+  double volumeFraction = 0.0;
+};
+TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
+
 // The Studies panel drawn in the Model dock while in simulation mode. Defined
 // in StudyPanel.cpp.
 void DrawStudyPanel(AppState& state);

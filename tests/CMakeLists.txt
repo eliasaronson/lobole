@@ -156,6 +156,13 @@ add_test(NAME fem_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(fem_smoke PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
+# Async topology optimization over JSON-RPC (TO2): start a run, poll
+# study_status to completion, cancel a second run.
+add_test(NAME topo_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/topo_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(topo_smoke PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77)
+
 # Models a bracket through the pythonic client (S3).
 add_test(NAME pyclient_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/pyclient_smoke.py

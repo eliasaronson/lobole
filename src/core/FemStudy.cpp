@@ -279,10 +279,9 @@ bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt, std::string* 
   return true;
 }
 
-bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt,
-                 std::string* error) {
-  rt = StudyRuntime{};
-  rt.topology = true;
+bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
+                     std::string* error) {
+  out = TopoInput{};
   study.error.clear();
   auto fail = [&](const std::string& m) {
     study.error = m;
@@ -376,31 +375,50 @@ bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt,
       if (tri.faceIndex == fi)
         for (int n : tri.nodes) keepSet.insert(n);
 
+  out.bodyIndex = bodyIndex;
+  out.bodyName = body.name;
+  out.mesh = std::move(*mesh);
   // Density is unused (gravity is intentionally excluded from the TO objective).
-  Material mat{mp.youngGPa * 1000.0, mp.poisson, 0.0};
-  const std::vector<int> fixedNodes(fixedSet.begin(), fixedSet.end());
-  const std::vector<int> keepNodes(keepSet.begin(), keepSet.end());
+  out.material = Material{mp.youngGPa * 1000.0, mp.poisson, 0.0};
+  out.fixedNodes.assign(fixedSet.begin(), fixedSet.end());
+  out.loads = std::move(faceLoads);
+  out.keepNodes.assign(keepSet.begin(), keepSet.end());
+  out.params.volumeFraction = study.volumeFraction;
+  out.params.filterRadius = study.filterRadius;
+  out.params.maxIterations = study.maxIterations > 0 ? study.maxIterations : 60;
+  return true;
+}
 
-  TopoParams params;
-  params.volumeFraction = study.volumeFraction;
-  params.filterRadius = study.filterRadius;
-  params.maxIterations = study.maxIterations > 0 ? study.maxIterations : 60;
-
-  auto res = TopologyOptimize(*mesh, mat, fixedNodes, faceLoads, params, &err, {},
-                              keepNodes);
-  if (!res) return fail("body '" + body.name + "': " + err);
-
+StudyRuntime MakeTopoRuntime(TopoInput& input, const TopoResult& result) {
+  StudyRuntime rt;
+  rt.topology = true;
   StudyBodyResult sbr;
-  sbr.bodyIndex = bodyIndex;
-  sbr.bodyName = body.name;
-  sbr.density = std::move(res->density);
-  sbr.mesh = std::move(*mesh);
+  sbr.bodyIndex = input.bodyIndex;
+  sbr.bodyName = input.bodyName;
+  sbr.density = result.density;
+  sbr.mesh = std::move(input.mesh);
   rt.bodies.push_back(std::move(sbr));
-  rt.iterations = res->iterations;
-  rt.converged = res->converged;
-  rt.cancelled = res->cancelled;
-  rt.volumeFractionAchieved = res->volumeFractionAchieved;
-  rt.complianceHistory = std::move(res->complianceHistory);
+  rt.iterations = result.iterations;
+  rt.converged = result.converged;
+  rt.cancelled = result.cancelled;
+  rt.volumeFractionAchieved = result.volumeFractionAchieved;
+  rt.complianceHistory = result.complianceHistory;
+  return rt;
+}
+
+bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt,
+                 std::string* error) {
+  TopoInput input;
+  if (!PrepareTopology(doc, study, input, error)) return false;
+  std::string err;
+  auto res = TopologyOptimize(input.mesh, input.material, input.fixedNodes,
+                              input.loads, input.params, &err, {}, input.keepNodes);
+  if (!res) {
+    study.error = "body '" + input.bodyName + "': " + err;
+    if (error) *error = study.error;
+    return false;
+  }
+  rt = MakeTopoRuntime(input, *res);
   return true;
 }
 

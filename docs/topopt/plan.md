@@ -359,9 +359,18 @@ result). Self-skips without Netgen, like `fem_smoke`.
    Tests: definition + result round-trip, RunTopology end-to-end (Netgen),
    dir-format result persistence, golden `v33-topology`. 395/395 ctest green.
    (MCP mirrors + async run land in TO4/TO2.)
-2. **TO2 — the worker thread.** Snapshot/launch/poll/cancel machinery,
-   async `run_study` + `study_status` + `cancel_study`, result stored +
-   serialized at join, `topo_smoke.py`.
+2. **TO2 — the worker thread: DONE.** `RunTopology` split into
+   `PrepareTopology` (main-thread: exprs/resolve/mesh → an immutable
+   `fem::TopoInput` snapshot) + `MakeTopoRuntime`. `ui::TopoJob` (thread +
+   progress/cancel atomics, owned by `AppState`, one at a time; its dtor
+   cancels+joins). `Start/Poll/Cancel TopologyRun` + `GetTopologyStatus` in
+   SimulationActions: the worker runs `TopologyOptimize` over the snapshot
+   (no Document access), publishes progress through atomics, and the main
+   thread joins + stores the result at the single poll point (in every study
+   RPC and each `ProcessPending` tick). `run_study` on a topology study is now
+   async (`{started:true}`); `study_status` reports live progress or the
+   cached summary; `cancel_study` keeps best-so-far. `tests/topo_smoke.py`
+   drives start→poll→done, cancel, and the one-run-at-a-time guard headless.
 3. **TO3 — display.** Marching-tets extraction + threshold slider +
    MeshRenderer preview body + density field entry + panel section
    (progress bar, Cancel, summary, badges) + `set_result_display`

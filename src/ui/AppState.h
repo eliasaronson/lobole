@@ -8,6 +8,7 @@
 #include "core/SketchFeature.h"
 #include "core/SketchInference.h"
 #include "core/SketchSolver.h"
+#include "ui/TopoJob.h"
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
@@ -449,6 +450,11 @@ struct AppState {
   EdgePickState edgePick;
   MeasureState measure;
   SimulationState simulation;
+  // The active topology-optimization run (TO2), or null when none is running.
+  // A minutes-long SIMP solve on a worker thread; the main thread polls it and
+  // stores the result at completion. One run at a time. See ui::TopoJob and the
+  // Start/Poll/Cancel TopologyRun helpers.
+  std::unique_ptr<TopoJob> topoJob;
   // Mass-properties center-of-gravity marker (C3): drawn as a small world-space
   // cross when the Properties panel's Mass properties section is open. The
   // panel computes the CoM and stamps it here; the overlay build reads it.

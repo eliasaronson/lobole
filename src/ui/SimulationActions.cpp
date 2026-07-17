@@ -67,6 +67,88 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
   doc.StoreStudyResults(studyId, std::move(rt));
   return true;
 }
+bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
+                      std::string* error) {
+  if (state.topoJob) {
+    if (error) *error = "a study run is already in progress";
+    return false;
+  }
+  fem::Study* s = doc.FindStudy(studyId);
+  if (!s) {
+    if (error) *error = "no such study";
+    return false;
+  }
+  if (s->type != fem::AnalysisType::Topology) {
+    if (error) *error = "study is not a topology study";
+    return false;
+  }
+  // Prepare the immutable snapshot on this (main) thread — meshing needs the
+  // Document. Everything past this point is pure fem data.
+  auto job = std::make_unique<TopoJob>();
+  if (!fem::PrepareTopology(doc, *s, job->input, error)) return false;
+  job->studyId = studyId;
+  job->maxIterations = job->input.params.maxIterations;
+
+  TopoJob* j = job.get();  // stable: the job outlives the thread (joined first)
+  job->thread = std::thread([j]() {
+    std::string err;
+    auto res = fem::TopologyOptimize(
+        j->input.mesh, j->input.material, j->input.fixedNodes, j->input.loads,
+        j->input.params, &err,
+        [j](const fem::TopoProgress& p) {
+          j->iteration.store(p.iteration, std::memory_order_relaxed);
+          j->compliance.store(p.compliance, std::memory_order_relaxed);
+          j->maxChange.store(p.maxChange, std::memory_order_relaxed);
+          j->volumeFraction.store(p.volumeFraction, std::memory_order_relaxed);
+          return !j->cancel.load(std::memory_order_relaxed);
+        },
+        j->input.keepNodes);
+    if (res)
+      j->result = std::move(*res);
+    else
+      j->error = err;
+    j->done.store(true, std::memory_order_release);
+  });
+  state.topoJob = std::move(job);
+  return true;
+}
+
+void PollTopologyRun(AppState& state, Document& doc) {
+  if (!state.topoJob || !state.topoJob->done.load(std::memory_order_acquire))
+    return;
+  TopoJob& job = *state.topoJob;
+  job.thread.join();  // finished; consume the result (single join point)
+  if (job.result) {
+    fem::StudyRuntime rt = fem::MakeTopoRuntime(job.input, *job.result);
+    rt.solvedAtVersion = doc.Version();
+    doc.StoreStudyResults(job.studyId, std::move(rt));
+  } else if (fem::Study* s = doc.FindStudy(job.studyId)) {
+    s->error = "body '" + job.input.bodyName + "': " + job.error;
+  }
+  state.topoJob.reset();
+}
+
+bool CancelTopologyRun(AppState& state, uint64_t studyId) {
+  if (!state.topoJob || state.topoJob->studyId != studyId) return false;
+  state.topoJob->cancel.store(true, std::memory_order_relaxed);
+  return true;
+}
+
+TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
+  TopoRunStatus st;
+  const TopoJob* job = state.topoJob.get();
+  if (!job || job->studyId != studyId ||
+      job->done.load(std::memory_order_acquire))
+    return st;  // running == false
+  st.running = true;
+  st.iteration = job->iteration.load(std::memory_order_relaxed);
+  st.maxIterations = job->maxIterations;
+  st.compliance = job->compliance.load(std::memory_order_relaxed);
+  st.maxChange = job->maxChange.load(std::memory_order_relaxed);
+  st.volumeFraction = job->volumeFraction.load(std::memory_order_relaxed);
+  return st;
+}
+
 void EnterSimulation(AppState& state) {
   Document* doc = state.document.get();
   if (!doc) return; // parts only (an assembly tab has no studies)
