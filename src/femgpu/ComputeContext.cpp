@@ -14,6 +14,7 @@ struct DevicePick {
   uint32_t queueFamily = 0;
   int score = -1;
   std::string name;
+  bool software = false;
 };
 
 DevicePick RankDevice(VkPhysicalDevice pd) {
@@ -62,6 +63,7 @@ DevicePick RankDevice(VkPhysicalDevice pd) {
   out.queueFamily = qfi;
   out.score = score;
   out.name = props.deviceName;
+  out.software = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
   return out;
 }
 
@@ -103,6 +105,7 @@ std::unique_ptr<ComputeContext> ComputeContext::Create(std::string* error) {
   ctx->m_phys = best.phys;
   ctx->m_queueFamily = best.queueFamily;
   ctx->m_deviceName = best.name;
+  ctx->m_software = best.software;
 
   const float prio = 1.0f;
   VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
@@ -159,7 +162,8 @@ bool ComputeContext::CreateBuffer(VkDeviceSize size, Buffer& out,
                                   std::string* error) {
   VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
   bci.size = size;
-  bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+  bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+              VK_BUFFER_USAGE_TRANSFER_DST_BIT;  // vkCmdFillBuffer zeroing
   bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   if (vkCreateBuffer(m_device, &bci, nullptr, &out.buffer) != VK_SUCCESS)
     return SetError(error, "vkCreateBuffer failed");
@@ -168,23 +172,28 @@ bool ComputeContext::CreateBuffer(VkDeviceSize size, Buffer& out,
   vkGetBufferMemoryRequirements(m_device, out.buffer, &mr);
   VkPhysicalDeviceMemoryProperties mp;
   vkGetPhysicalDeviceMemoryProperties(m_phys, &mp);
-  const VkMemoryPropertyFlags want = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-  uint32_t type = UINT32_MAX;
-  for (uint32_t i = 0; i < mp.memoryTypeCount; ++i)
-    if ((mr.memoryTypeBits & (1u << i)) &&
-        (mp.memoryTypes[i].propertyFlags & want) == want) {
-      type = i;
-      break;
+  // Preference order: device-local AND host-visible (resizable BAR, iGPU,
+  // software — the SpMV then streams at VRAM bandwidth), else plain
+  // host-visible. Fall through on allocation failure too (a small BAR window
+  // can run out long before VRAM does).
+  const VkMemoryPropertyFlags hostVis = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+  const VkMemoryPropertyFlags prefs[2] = {
+      hostVis | VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, hostVis};
+  for (const VkMemoryPropertyFlags want : prefs) {
+    for (uint32_t i = 0; i < mp.memoryTypeCount; ++i) {
+      if (!(mr.memoryTypeBits & (1u << i)) ||
+          (mp.memoryTypes[i].propertyFlags & want) != want)
+        continue;
+      VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+      mai.allocationSize = mr.size;
+      mai.memoryTypeIndex = i;
+      if (vkAllocateMemory(m_device, &mai, nullptr, &out.memory) == VK_SUCCESS)
+        break;
     }
-  if (type == UINT32_MAX) {
-    Destroy(out);
-    return SetError(error, "no host-visible coherent memory type");
+    if (out.memory) break;
   }
-  VkMemoryAllocateInfo mai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  mai.allocationSize = mr.size;
-  mai.memoryTypeIndex = type;
-  if (vkAllocateMemory(m_device, &mai, nullptr, &out.memory) != VK_SUCCESS) {
+  if (!out.memory) {
     Destroy(out);
     return SetError(error, "vkAllocateMemory failed (out of GPU memory?)");
   }
@@ -336,6 +345,112 @@ bool ComputeContext::Dispatch(const Pipeline& p,
   vkResetFences(m_device, 1, &m_fence);
   vkDestroyDescriptorPool(m_device, pool, nullptr);
   if (!ok) return SetError(error, "compute submit/wait failed");
+  return true;
+}
+
+bool ComputeContext::CreateBoundSet(const Pipeline& p,
+                                    const std::vector<const Buffer*>& buffers,
+                                    BoundSet& out, std::string* error) {
+  if (buffers.size() != p.bufferCount)
+    return SetError(error, "bound-set buffer count mismatch");
+  VkDescriptorPoolSize dps{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, p.bufferCount};
+  VkDescriptorPoolCreateInfo dpci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  dpci.maxSets = 1;
+  dpci.poolSizeCount = 1;
+  dpci.pPoolSizes = &dps;
+  if (vkCreateDescriptorPool(m_device, &dpci, nullptr, &out.pool) != VK_SUCCESS)
+    return SetError(error, "vkCreateDescriptorPool failed");
+  VkDescriptorSetAllocateInfo dsai{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  dsai.descriptorPool = out.pool;
+  dsai.descriptorSetCount = 1;
+  dsai.pSetLayouts = &p.setLayout;
+  if (vkAllocateDescriptorSets(m_device, &dsai, &out.set) != VK_SUCCESS) {
+    Destroy(out);
+    return SetError(error, "vkAllocateDescriptorSets failed");
+  }
+  std::vector<VkDescriptorBufferInfo> infos(buffers.size());
+  std::vector<VkWriteDescriptorSet> writes(buffers.size());
+  for (size_t i = 0; i < buffers.size(); ++i) {
+    infos[i] = {buffers[i]->buffer, 0, buffers[i]->size};
+    writes[i] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    writes[i].dstSet = out.set;
+    writes[i].dstBinding = static_cast<uint32_t>(i);
+    writes[i].descriptorCount = 1;
+    writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[i].pBufferInfo = &infos[i];
+  }
+  vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()),
+                         writes.data(), 0, nullptr);
+  return true;
+}
+
+void ComputeContext::Destroy(BoundSet& s) {
+  if (s.pool) vkDestroyDescriptorPool(m_device, s.pool, nullptr);
+  s = BoundSet{};
+}
+
+bool ComputeContext::BeginBatch(std::string* error) {
+  if (m_batchOpen) return SetError(error, "a batch is already recording");
+  vkResetCommandBuffer(m_cmd, 0);
+  VkCommandBufferBeginInfo bbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  bbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  if (vkBeginCommandBuffer(m_cmd, &bbi) != VK_SUCCESS)
+    return SetError(error, "vkBeginCommandBuffer failed");
+  m_batchOpen = true;
+  m_batchFirst = true;
+  return true;
+}
+
+void ComputeContext::BatchBarrier() {
+  if (m_batchFirst) {
+    m_batchFirst = false;
+    return;
+  }
+  VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+  mb.srcAccessMask =
+      VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+  mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
+                     VK_ACCESS_TRANSFER_WRITE_BIT;
+  vkCmdPipelineBarrier(
+      m_cmd,
+      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+      1, &mb, 0, nullptr, 0, nullptr);
+}
+
+void ComputeContext::BatchFill(const Buffer& b, VkDeviceSize offset,
+                               VkDeviceSize size, uint32_t value) {
+  BatchBarrier();
+  vkCmdFillBuffer(m_cmd, b.buffer, offset, size, value);
+}
+
+void ComputeContext::BatchDispatch(const Pipeline& p, const BoundSet& set,
+                                   const void* push, uint32_t pushBytes,
+                                   uint32_t gx, uint32_t gy) {
+  BatchBarrier();
+  vkCmdBindPipeline(m_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.pipeline);
+  vkCmdBindDescriptorSets(m_cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 1,
+                          &set.set, 0, nullptr);
+  if (pushBytes > 0)
+    vkCmdPushConstants(m_cmd, p.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                       pushBytes, push);
+  vkCmdDispatch(m_cmd, gx, gy, 1);
+}
+
+bool ComputeContext::SubmitBatch(std::string* error) {
+  if (!m_batchOpen) return SetError(error, "no batch is recording");
+  m_batchOpen = false;
+  vkEndCommandBuffer(m_cmd);
+  VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  si.commandBufferCount = 1;
+  si.pCommandBuffers = &m_cmd;
+  bool ok = vkQueueSubmit(m_queue, 1, &si, m_fence) == VK_SUCCESS;
+  if (ok)
+    ok = vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, UINT64_MAX) ==
+         VK_SUCCESS;
+  vkResetFences(m_device, 1, &m_fence);
+  if (!ok) return SetError(error, "batch submit/wait failed");
   return true;
 }
 

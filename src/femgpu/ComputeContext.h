@@ -19,6 +19,9 @@
 namespace gpu {
 
 // A host-visible, host-coherent storage buffer with a persistent mapping.
+// Allocation prefers DEVICE_LOCAL memory that is also host-visible (resizable
+// BAR / iGPU / software devices) so the SpMV streams from VRAM bandwidth, and
+// falls back to plain host-visible when the device has no such type.
 struct Buffer {
   VkBuffer buffer = VK_NULL_HANDLE;
   VkDeviceMemory memory = VK_NULL_HANDLE;
@@ -37,6 +40,14 @@ struct Pipeline {
   uint32_t pushBytes = 0;
 };
 
+// A pipeline's descriptor set bound to a fixed list of buffers, created once
+// and reused across dispatches — the CG loop records hundreds of dispatches
+// per submit and its buffer bindings never change.
+struct BoundSet {
+  VkDescriptorPool pool = VK_NULL_HANDLE;
+  VkDescriptorSet set = VK_NULL_HANDLE;
+};
+
 class ComputeContext {
  public:
   // Picks the best device with a compute queue AND float32 buffer atomicAdd
@@ -51,6 +62,9 @@ class ComputeContext {
   ComputeContext& operator=(const ComputeContext&) = delete;
 
   const std::string& DeviceName() const { return m_deviceName; }
+  // True when the picked device is a software rasterizer (llvmpipe). Correct
+  // but slower than the CPU Eigen path — the app should not auto-select it.
+  bool IsSoftwareDevice() const { return m_software; }
 
   // Buffers are zero-initialized. False + *error on failure.
   bool CreateBuffer(VkDeviceSize size, Buffer& out, std::string* error);
@@ -69,7 +83,32 @@ class ComputeContext {
                 const void* push, uint32_t pushBytes, uint32_t gx, uint32_t gy,
                 std::string* error);
 
+  // ---- Persistent descriptor sets + recorded batches (the CG loop) --------
+  // One CG iteration is ~8 dependent dispatches and a solve is hundreds of
+  // iterations; submitting each dispatch alone would drown in round trips.
+  // Instead: pre-bind each kernel's buffers once (CreateBoundSet), then record
+  // many dispatches into one command buffer and submit the lot.
+
+  bool CreateBoundSet(const Pipeline& p,
+                      const std::vector<const Buffer*>& buffers, BoundSet& out,
+                      std::string* error);
+  void Destroy(BoundSet& s);
+
+  // Begin recording. Only one batch may be open at a time.
+  bool BeginBatch(std::string* error);
+  // vkCmdFillBuffer (size must be a multiple of 4; VK_WHOLE_SIZE allowed).
+  void BatchFill(const Buffer& b, VkDeviceSize offset, VkDeviceSize size,
+                 uint32_t value);
+  void BatchDispatch(const Pipeline& p, const BoundSet& set, const void* push,
+                     uint32_t pushBytes, uint32_t gx, uint32_t gy);
+  // Submits the recorded commands and waits for completion.
+  bool SubmitBatch(std::string* error);
+
  private:
+  // Every batched command is preceded by a full compute/transfer memory
+  // barrier — each CG kernel depends on its predecessor, so precision-scoped
+  // barriers would buy nothing.
+  void BatchBarrier();
   ComputeContext() = default;
 
   VkInstance m_instance = VK_NULL_HANDLE;
@@ -81,6 +120,9 @@ class ComputeContext {
   VkCommandBuffer m_cmd = VK_NULL_HANDLE;
   VkFence m_fence = VK_NULL_HANDLE;
   std::string m_deviceName;
+  bool m_software = false;
+  bool m_batchOpen = false;
+  bool m_batchFirst = false;  // no barrier before the batch's first command
 };
 
 }  // namespace gpu

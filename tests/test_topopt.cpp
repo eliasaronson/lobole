@@ -78,6 +78,11 @@ void MaybeDumpStl(const fem::FemMesh& m, const std::vector<double>& density, dou
 
 #ifdef HAVE_FEM_SOLVER
 
+#include "core/FemSolverInternal.h"  // element math for the seam-test solver
+
+#include <Eigen/SparseCholesky>
+#include <Eigen/SparseCore>
+
 TEST_CASE("Topo: SIMP cantilever converges on a structured tet10 mesh (GATE)",
           "[topopt][gate]") {
   // 100 x 40 x 40 mm, 20 x 8 x 8 hexes -> 7680 tet10 (<= the ~8k gate budget).
@@ -273,6 +278,111 @@ TEST_CASE("Topo: rejects invalid inputs up front", "[topopt]") {
     CHECK_FALSE(res.has_value());
     CHECK(err.find("frozen") != std::string::npos);
   }
+}
+
+namespace {
+
+// A CPU stand-in for the GPU solver (fem_gpu): exact direct solves through the
+// TopoLinearSolver seam. Proves TopologyOptimize drives an injected solver
+// correctly — Setup once, Solve per iteration, same optimum — without any
+// Vulkan dependency in this binary.
+struct DirectSeamSolver : fem::TopoLinearSolver {
+  const fem::FemMesh* mesh = nullptr;
+  std::vector<int> dofMap;
+  int nFree = 0;
+  Eigen::Matrix<double, 6, 6> D0;
+  int setupCalls = 0, solveCalls = 0;
+
+  bool Setup(const fem::FemMesh& m, const fem::Material& mat,
+             const std::vector<int>& dm, int nf, std::string*) override {
+    mesh = &m;
+    dofMap = dm;
+    nFree = nf;
+    D0 = fem::internal::Elasticity(mat.youngMPa, mat.poisson);
+    ++setupCalls;
+    return true;
+  }
+  bool Solve(const std::vector<double>& scale, const std::vector<double>& F,
+             std::vector<double>& u, std::string* error) override {
+    ++solveCalls;
+    using namespace fem::internal;
+    std::vector<Eigen::Triplet<double>> trip;
+    for (size_t e = 0; e < mesh->tets.size(); ++e) {
+      const auto& tet = mesh->tets[e];
+      Eigen::Vector3d X[10];
+      for (int i = 0; i < 10; ++i) {
+        const auto& p = mesh->nodes[tet[i]];
+        X[i] = Eigen::Vector3d(p.x, p.y, p.z);
+      }
+      Eigen::Matrix<double, 30, 30> Ke = Eigen::Matrix<double, 30, 30>::Zero();
+      for (const auto& g : kTetGauss) {
+        Eigen::Matrix<double, 6, 30> B;
+        const double detJ = StrainDisp(X, g[0], g[1], g[2], B);
+        Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D0 * B);
+      }
+      for (int a = 0; a < 30; ++a) {
+        const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
+        if (ga < 0) continue;
+        for (int b = 0; b < 30; ++b) {
+          const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
+          if (gb >= 0) trip.emplace_back(ga, gb, scale[e] * Ke(a, b));
+        }
+      }
+    }
+    Eigen::SparseMatrix<double> K(nFree, nFree);
+    K.setFromTriplets(trip.begin(), trip.end());
+    Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt(K);
+    if (ldlt.info() != Eigen::Success) {
+      if (error) *error = "factorization failed";
+      return false;
+    }
+    Eigen::VectorXd Fv(nFree);
+    for (int i = 0; i < nFree; ++i) Fv(i) = F[i];
+    const Eigen::VectorXd uv = ldlt.solve(Fv);
+    u.assign(uv.data(), uv.data() + nFree);
+    return true;
+  }
+};
+
+}  // namespace
+
+TEST_CASE("TopologyOptimize drives an injected linear solver (the GPU seam)",
+          "[topopt]") {
+  fem::FemMesh mesh = GenerateBoxMesh(6, 3, 3, 60, 30, 30);
+  fem::Material steel{210000.0, 0.3};
+  std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, 60.0, 1e-6);
+  load.magnitude = 1000.0;
+  load.direction = glm::dvec3(0, 0, -1);
+  fem::TopoParams params;
+  params.filterRadius = 15.0;
+  params.maxIterations = 40;
+  // The 6x3x3 box's frozen support/load skin is ~1/3 of the volume, so the
+  // target must sit above that.
+  params.volumeFraction = 0.5;
+
+  std::string err;
+  auto builtin =
+      fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
+  INFO(err);
+  REQUIRE(builtin.has_value());
+
+  DirectSeamSolver seam;
+  auto injected = fem::TopologyOptimize(mesh, steel, fixed, {load}, params,
+                                        &err, {}, {}, &seam);
+  INFO(err);
+  REQUIRE(injected.has_value());
+
+  CHECK(seam.setupCalls == 1);
+  CHECK(seam.solveCalls == injected->iterations);
+  // An exact direct solve vs the built-in CG (tol 1e-6) — the optimizer must
+  // land on the same design.
+  CHECK_THAT(injected->complianceHistory.back(),
+             WithinRel(builtin->complianceHistory.back(), 1e-3));
+  CHECK_THAT(injected->volumeFractionAchieved,
+             WithinAbs(builtin->volumeFractionAchieved, 1e-3));
 }
 
 #ifdef HAVE_NETGEN

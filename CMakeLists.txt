@@ -417,14 +417,42 @@ if(GLSLC)
     endfunction()
     embed_compute_shader(fem_spmv)
     embed_compute_shader(gpu_sanity)
+    embed_compute_shader(cg_diag)
+    embed_compute_shader(cg_dot)
+    embed_compute_shader(cg_precond_dot)
+    embed_compute_shader(cg_residual)
+    embed_compute_shader(cg_copy)
+    embed_compute_shader(cg_update_xr)
+    embed_compute_shader(cg_update_p)
     add_library(fem_gpu STATIC
         src/femgpu/ComputeContext.cpp
         src/femgpu/TopoSpmv.cpp
+        src/femgpu/TopoCgSolver.cpp
         ${FEMGPU_GEN_DIR}/fem_spmv_spv.h
-        ${FEMGPU_GEN_DIR}/gpu_sanity_spv.h)
+        ${FEMGPU_GEN_DIR}/gpu_sanity_spv.h
+        ${FEMGPU_GEN_DIR}/cg_diag_spv.h
+        ${FEMGPU_GEN_DIR}/cg_dot_spv.h
+        ${FEMGPU_GEN_DIR}/cg_precond_dot_spv.h
+        ${FEMGPU_GEN_DIR}/cg_residual_spv.h
+        ${FEMGPU_GEN_DIR}/cg_copy_spv.h
+        ${FEMGPU_GEN_DIR}/cg_update_xr_spv.h
+        ${FEMGPU_GEN_DIR}/cg_update_p_spv.h)
     # Generated headers are PUBLIC so femgpu_tests can use the sanity kernel.
     target_include_directories(fem_gpu PUBLIC src ${FEMGPU_GEN_DIR})
     target_link_libraries(fem_gpu PUBLIC Vulkan::Vulkan)
+    if(Eigen3_FOUND)
+        # The TopoLinearSolver adapter packs element matrices with the shared
+        # fem element math (header-inline), so it needs Eigen but not the
+        # designer_core library itself.
+        target_sources(fem_gpu PRIVATE src/femgpu/TopoGpuSolver.cpp)
+        target_link_libraries(fem_gpu PUBLIC Eigen3::Eigen)
+        target_compile_definitions(fem_gpu PRIVATE HAVE_FEM_SOLVER)
+        # The app auto-selects the GPU solver for topology runs when a usable
+        # hardware device exists (DESIGNER_TOPO_GPU=0 disables, =1 admits a
+        # software device).
+        target_link_libraries(designer fem_gpu)
+        target_compile_definitions(designer PRIVATE HAVE_FEM_GPU)
+    endif()
 endif()
 
 # Tests

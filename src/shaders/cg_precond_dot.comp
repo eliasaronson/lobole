@@ -1,0 +1,47 @@
+#version 450
+// Fused Jacobi preconditioner application + the two reductions PCG needs from
+// it: z = r / diag, s[rzSlot] += dot(r, z), s[kRrSlot] += dot(r, r). The host
+// zeroes both slots first. rzSlot alternates per iteration parity so beta can
+// read old and new rz without a copy kernel.
+#extension GL_EXT_shader_atomic_float : require
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer VecR { float r[]; };
+layout(std430, binding = 1) readonly buffer Diag { float diagK[]; };
+layout(std430, binding = 2) writeonly buffer VecZ { float z[]; };
+layout(std430, binding = 3) buffer Scalars { float s[]; };
+
+layout(push_constant) uniform Push {
+  uint n;
+  uint rzSlot;
+  uint rrSlot;
+} pc;
+
+shared float prz[256];
+shared float prr[256];
+
+void main() {
+  const uint i = gl_GlobalInvocationID.x;
+  const uint l = gl_LocalInvocationID.x;
+  float ri = 0.0, zi = 0.0;
+  if (i < pc.n) {
+    ri = r[i];
+    zi = ri / diagK[i];  // K is SPD: every free-DOF diagonal is > 0
+    z[i] = zi;
+  }
+  prz[l] = ri * zi;
+  prr[l] = ri * ri;
+  barrier();
+  for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+    if (l < stride) {
+      prz[l] += prz[l + stride];
+      prr[l] += prr[l + stride];
+    }
+    barrier();
+  }
+  if (l == 0u) {
+    atomicAdd(s[pc.rzSlot], prz[0]);
+    atomicAdd(s[pc.rrSlot], prr[0]);
+  }
+}

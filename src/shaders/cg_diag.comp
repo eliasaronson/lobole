@@ -1,0 +1,28 @@
+#version 450
+// Element-assembled stiffness diagonal for the Jacobi preconditioner:
+// diag[g] += scale_e * Ke0_e[t][t] for each of the element's 30 DOF. Same
+// workgroup-per-element + atomicAdd scatter shape as fem_spmv.comp; diag is
+// pre-zeroed by the host batch. Rebuilt whenever the SIMP scales change.
+#extension GL_EXT_shader_atomic_float : require
+
+layout(local_size_x = 32) in;
+
+layout(std430, binding = 0) readonly buffer ElemDof { int dof[]; };
+layout(std430, binding = 1) readonly buffer ElemKe { float ke[]; };
+layout(std430, binding = 2) readonly buffer ElemScale { float scaleE[]; };
+layout(std430, binding = 3) buffer Diag { float diagK[]; };
+
+layout(push_constant) uniform Push {
+  uint nElems;
+  uint groupsX;
+} pc;
+
+void main() {
+  const uint e = gl_WorkGroupID.y * pc.groupsX + gl_WorkGroupID.x;
+  if (e >= pc.nElems) return;
+  const uint t = gl_LocalInvocationID.x;
+  if (t >= 30u) return;
+  const int g = dof[e * 30u + t];
+  if (g < 0) return;
+  atomicAdd(diagK[g], scaleE[e] * ke[e * 900u + t * 31u]);  // [t][t] row-major
+}

@@ -1,6 +1,6 @@
 # GPU topology solver — plan
 
-> Status: **GPU0 SHIPPED — gate PASS.** The linear solve is the
+> Status: **GPU0 + GPU1 SHIPPED.** The linear solve is the
 > topology wall: CPU CG-IC already cut a bulky 10k-tet cube from 42 s/iter
 > (direct) to 2.8 s/iter, but fine meshes want another order of magnitude. This
 > plan is the GPU matrix-free CG that gets it.
@@ -11,7 +11,23 @@
 > self-skipping without a device. Gate diff vs the CPU fp64 oracle on the same
 > fp32 inputs: **rel-∞ error ~1e-7** (bar 1e-4) on both the structured tet10
 > box and a real Netgen mesh, with SIMP-like scales spanning 1e-6..1. The
-> scatter/atomics risk is retired → GPU1 (on-device CG) is a go.
+> scatter/atomics risk is retired.
+>
+> GPU1 result: on-device Jacobi-PCG (`gpu::TopoCgSolver` — all kernels
+> recorded in 32-iteration chunks, one scalar readback per chunk), injected
+> into `TopologyOptimize` via the `fem::TopoLinearSolver` seam
+> (`gpu::TopoGpuSolver`), auto-selected for app topology runs when a hardware
+> device exists (`DESIGNER_TOPO_GPU=0/1` overrides). Full SIMP loop on the
+> 10368-tet cube: **1.32 s/iter GPU vs 3.57 s/iter CPU CG-IC (2.7x)**,
+> compliance matching to 0.15%. fp32 lessons baked in (measured, not
+> theoretical): the recurrence residual reads ~100x optimistic → true-residual
+> replacement at chunk boundaries; fp32 PCG walks AWAY past its round-off
+> floor → best-iterate snapshot is what's returned; the L2 residual
+> legitimately grows ~20x early (CG minimizes A-norm error, identical in
+> fp64) → no short-term divergence guards, only long-window stall + restart
+> from best. Jacobi needs ~25x the iterations of IC — that gap is the GPU2
+> (Chebyshev) / GPU3 (multigrid) headroom, now the throughput lever since
+> per-iteration cost is already near memory bandwidth.
 
 ## Feasibility (settled first, because it was the whole risk)
 
@@ -77,7 +93,7 @@ Software fallback (llvmpipe) means it can even run where no real GPU exists.
    assembly to fp tolerance on a hand mesh + a Netgen mesh. If float atomics or
    the diff don't hold up, stop and rethink (gather-based scatter) before
    building CG.
-1. **GPU1 — on-device CG.** Reduction (dot), axpy, and the CG driver as
+1. **DONE — GPU1 — on-device CG.** Reduction (dot), axpy, and the CG driver as
    kernels; Jacobi preconditioner (element-assembled diagonal); warm-start from
    the previous SIMP `u`. Wire into `TopologyOptimize` via the injection seam.
    Benchmark vs CPU CG-IC on the `[.][topobench]` cube; verify the optimized

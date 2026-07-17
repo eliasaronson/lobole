@@ -1,0 +1,16 @@
+#version 450
+// r = f - Ap (the initial residual; Ap holds K·x0 from the warm start).
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer VecF { float f[]; };
+layout(std430, binding = 1) readonly buffer VecAp { float Ap[]; };
+layout(std430, binding = 2) writeonly buffer VecR { float r[]; };
+
+layout(push_constant) uniform Push { uint n; } pc;
+
+void main() {
+  const uint i = gl_GlobalInvocationID.x;
+  if (i >= pc.n) return;
+  r[i] = f[i] - Ap[i];
+}

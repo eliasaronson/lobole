@@ -1,0 +1,29 @@
+#version 450
+// s[slot] += dot(a, b): tree reduction in shared memory, one float atomicAdd
+// per workgroup. The host zeroes the target slot first.
+#extension GL_EXT_shader_atomic_float : require
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer VecA { float a[]; };
+layout(std430, binding = 1) readonly buffer VecB { float b[]; };
+layout(std430, binding = 2) buffer Scalars { float s[]; };
+
+layout(push_constant) uniform Push {
+  uint n;
+  uint slot;
+} pc;
+
+shared float part[256];
+
+void main() {
+  const uint i = gl_GlobalInvocationID.x;
+  const uint l = gl_LocalInvocationID.x;
+  part[l] = i < pc.n ? a[i] * b[i] : 0.0;
+  barrier();
+  for (uint stride = 128u; stride > 0u; stride >>= 1u) {
+    if (l < stride) part[l] += part[l + stride];
+    barrier();
+  }
+  if (l == 0u) atomicAdd(s[pc.slot], part[0]);
+}

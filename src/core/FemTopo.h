@@ -64,6 +64,31 @@ struct TopoResult {
   double volumeFractionAchieved = 0.0;
 };
 
+// ---- Pluggable linear solver (the GPU seam) -------------------------------
+// TopologyOptimize's inner loop solves K(x) u = F once per SIMP iteration,
+// with K = sum_e scale_e * Ke0_e over the reduced DOF map. A TopoLinearSolver
+// replaces the built-in Eigen CG-IC with an external implementation — the
+// Vulkan matrix-free CG in fem_gpu (docs/topopt/gpu-plan.md) — without pulling
+// any GPU dependency into designer_core. Null = the built-in CPU path, which
+// remains the fallback and the correctness oracle.
+class TopoLinearSolver {
+ public:
+  virtual ~TopoLinearSolver() = default;
+  // Called once per optimization run, before any Solve. `dofMap` is the
+  // reduced-DOF map (3 per node, -1 = fixed), `material` gives E0/nu for the
+  // full-modulus element matrices.
+  virtual bool Setup(const FemMesh& mesh, const Material& material,
+                     const std::vector<int>& dofMap, int nFree,
+                     std::string* error) = 0;
+  // Solve sum_e scale_e Ke0_e u = F on the reduced system. `u` carries the
+  // warm start in and the solution out (size nFree). Called once per SIMP
+  // iteration; `scale` (per-element E(rho)/E0, spanning ~1e-6..1) changes
+  // between calls, F does not.
+  virtual bool Solve(const std::vector<double>& scale,
+                     const std::vector<double>& F, std::vector<double>& u,
+                     std::string* error) = 0;
+};
+
 // Minimizes compliance u^T K u subject to a volume-fraction constraint over the
 // mesh, treating each tet's density as a design variable. Every tet touching a
 // fixed node or a loaded boundary triangle is frozen solid (density 1) so
@@ -79,12 +104,14 @@ struct TopoResult {
 // cancel test and for timing logs.
 // `keepNodes` are frozen solid in addition to the auto-frozen support/load
 // skin (user "keep" faces — bolt bosses, bearing seats that must not vanish).
+// `solver`, if set, replaces the built-in Eigen CG-IC for the per-iteration
+// linear solves (see TopoLinearSolver above); a Solve failure fails the run.
 std::optional<TopoResult> TopologyOptimize(
     const FemMesh& mesh, const Material& material,
     const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
     const TopoParams& params, std::string* error,
     const std::function<bool(const TopoProgress&)>& progress = {},
-    const std::vector<int>& keepNodes = {});
+    const std::vector<int>& keepNodes = {}, TopoLinearSolver* solver = nullptr);
 
 // True when the build links Eigen (same gate as the static solver).
 bool TopoAvailable();

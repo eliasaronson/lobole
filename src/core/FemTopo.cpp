@@ -325,7 +325,7 @@ std::optional<TopoResult> TopologyOptimize(
     const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
     const TopoParams& params, std::string* error,
     const std::function<bool(const TopoProgress&)>& progress,
-    const std::vector<int>& keepNodes) {
+    const std::vector<int>& keepNodes, TopoLinearSolver* solver) {
   auto fail = [&](const std::string& m) -> std::optional<TopoResult> {
     if (error) *error = m;
     return std::nullopt;
@@ -475,7 +475,19 @@ std::optional<TopoResult> TopologyOptimize(
   cg.setTolerance(1e-6);
   Eigen::VectorXd uPrev = Eigen::VectorXd::Zero(nFree);
   std::vector<Eigen::Triplet<double>> trip;
-  trip.reserve(static_cast<size_t>(nTets) * 900);
+  if (!solver) trip.reserve(static_cast<size_t>(nTets) * 900);
+
+  // External solver (the GPU seam): set up once, then hand it the per-element
+  // scales each iteration instead of assembling K here.
+  std::vector<double> scaleE(nTets, 1.0);
+  std::vector<double> uExt, Fext;
+  if (solver) {
+    std::string serr;
+    if (!solver->Setup(mesh, material, dofMap, nFree, &serr))
+      return fail("linear solver setup failed: " + serr);
+    Fext.assign(F.data(), F.data() + nFree);
+    uExt.assign(nFree, 0.0);  // carries the warm start between iterations
+  }
 
   TopoResult result;
   result.density.assign(nTets, 0.0);
@@ -493,32 +505,46 @@ std::optional<TopoResult> TopologyOptimize(
             : params.penalty;
     const bool atFullPenalty = p >= params.penalty - 1e-9;
 
-    // Assemble the penalized stiffness K(x) (physical density = design var).
-    trip.clear();
-    for (int e = 0; e < nTets; ++e) {
-      const auto Ke0 = ElementK0(mesh, mesh.tets[e], D0);
-      const double scale = (Emin + std::pow(x[e], p) * (E0 - Emin)) / E0;
-      const auto& tet = mesh.tets[e];
-      for (int a = 0; a < 30; ++a) {
-        const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
-        if (ga < 0) continue;
-        for (int b = 0; b < 30; ++b) {
-          const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
-          if (gb < 0) continue;
-          trip.emplace_back(ga, gb, scale * Ke0(a, b));
+    // Penalized per-element stiffness scale (physical density = design var).
+    for (int e = 0; e < nTets; ++e)
+      scaleE[e] = (Emin + std::pow(x[e], p) * (E0 - Emin)) / E0;
+
+    Eigen::VectorXd u(nFree);
+    if (solver) {
+      // External (GPU) solver: matrix-free, warm-started via uExt.
+      std::string serr;
+      if (!solver->Solve(scaleE, Fext, uExt, &serr))
+        return fail("linear solve failed: " + serr);
+      for (int i = 0; i < nFree; ++i) u(i) = uExt[i];
+      if (!u.allFinite()) return fail("linear solve failed during optimization");
+    } else {
+      // Built-in path: assemble K(x) and run the Eigen CG-IC.
+      trip.clear();
+      for (int e = 0; e < nTets; ++e) {
+        const auto Ke0 = ElementK0(mesh, mesh.tets[e], D0);
+        const auto& tet = mesh.tets[e];
+        for (int a = 0; a < 30; ++a) {
+          const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
+          if (ga < 0) continue;
+          for (int b = 0; b < 30; ++b) {
+            const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
+            if (gb < 0) continue;
+            trip.emplace_back(ga, gb, scaleE[e] * Ke0(a, b));
+          }
         }
       }
-    }
-    Eigen::SparseMatrix<double> K(nFree, nFree);
-    K.setFromTriplets(trip.begin(), trip.end());
+      Eigen::SparseMatrix<double> K(nFree, nFree);
+      K.setFromTriplets(trip.begin(), trip.end());
 
-    cg.compute(K);
-    if (cg.info() != Eigen::Success)
-      return fail("stiffness matrix is not solvable (insufficiently constrained)");
-    const Eigen::VectorXd u = cg.solveWithGuess(F, uPrev);
-    if (!u.allFinite())
-      return fail("linear solve failed during optimization");
-    uPrev = u;  // warm-start the next iteration
+      cg.compute(K);
+      if (cg.info() != Eigen::Success)
+        return fail(
+            "stiffness matrix is not solvable (insufficiently constrained)");
+      u = cg.solveWithGuess(F, uPrev);
+      if (!u.allFinite())
+        return fail("linear solve failed during optimization");
+      uPrev = u;  // warm-start the next iteration
+    }
 
     const double compliance = F.dot(u);
 
@@ -616,7 +642,8 @@ bool TopoAvailable() { return false; }
 std::optional<TopoResult> TopologyOptimize(
     const FemMesh&, const Material&, const std::vector<int>&,
     const std::vector<FaceLoad>&, const TopoParams&, std::string* error,
-    const std::function<bool(const TopoProgress&)>&) {
+    const std::function<bool(const TopoProgress&)>&, const std::vector<int>&,
+    TopoLinearSolver*) {
   if (error) *error = "built without FEM solver support (Eigen not found)";
   return std::nullopt;
 }

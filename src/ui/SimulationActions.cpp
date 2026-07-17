@@ -7,12 +7,17 @@
 #include "core/Document.h"
 #include "core/FemSolver.h"
 #include "core/FemStudy.h"
+#include "Logger.h"
 #include "ui/AppActionsInternal.h"
 #include "ui/AppState.h"
+#ifdef HAVE_FEM_GPU
+#include "femgpu/TopoGpuSolver.h"
+#endif
 
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <vector>
@@ -97,6 +102,24 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
 
   TopoJob* j = job.get();  // stable: the job outlives the thread (joined first)
   job->thread = std::thread([j]() {
+    // The GPU matrix-free CG when a usable hardware device exists, else the
+    // built-in Eigen CG-IC. Created on this worker thread (its private Vulkan
+    // context stays here). DESIGNER_TOPO_GPU=0 forces CPU; =1 also admits a
+    // software (llvmpipe) device — useful for exercising the GPU path.
+#ifdef HAVE_FEM_GPU
+    const char* pref = std::getenv("DESIGNER_TOPO_GPU");
+    if (!pref || std::string(pref) != "0") {
+      std::string gerr;
+      auto gs = gpu::TopoGpuSolver::Create(pref && std::string(pref) == "1",
+                                           &gerr);
+      if (gs) {
+        LOG_INFO("topology: GPU solver on {}", gs->DeviceName());
+        j->solver = std::move(gs);
+      } else {
+        LOG_INFO("topology: CPU solver ({})", gerr);
+      }
+    }
+#endif
     std::string err;
     auto res = fem::TopologyOptimize(
         j->input.mesh, j->input.material, j->input.fixedNodes, j->input.loads,
@@ -108,7 +131,7 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
           j->volumeFraction.store(p.volumeFraction, std::memory_order_relaxed);
           return !j->cancel.load(std::memory_order_relaxed);
         },
-        j->input.keepNodes);
+        j->input.keepNodes, j->solver.get());
     if (res)
       j->result = std::move(*res);
     else

@@ -1,0 +1,22 @@
+#version 450
+// The PCG direction update with beta computed in-kernel from the on-device
+// scalars: beta = rzNew / rzOld; p = z + beta p.
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer VecZ { float z[]; };
+layout(std430, binding = 1) buffer VecP { float p[]; };
+layout(std430, binding = 2) readonly buffer Scalars { float s[]; };
+
+layout(push_constant) uniform Push {
+  uint n;
+  uint rzNewSlot;
+  uint rzOldSlot;
+} pc;
+
+void main() {
+  const uint i = gl_GlobalInvocationID.x;
+  if (i >= pc.n) return;
+  const float beta = s[pc.rzNewSlot] / s[pc.rzOldSlot];
+  p[i] = z[i] + beta * p[i];
+}

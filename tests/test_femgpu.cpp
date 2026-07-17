@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "femgpu/ComputeContext.h"
 #include "femgpu/TopoSpmv.h"
@@ -10,6 +11,9 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 
 // GPU0 — the GPU solver gate (docs/topopt/gpu-plan.md). Proves the one real
 // correctness risk of the matrix-free CG: an element-wise K(rho)·p with float
@@ -229,5 +233,280 @@ TEST_CASE("femgpu: SpMV matches the CPU on a real Netgen mesh",
   CheckSpmvAgainstCpu(*ctx, *mesh, fixed);
 }
 #endif  // HAVE_NETGEN
+
+// ---- GPU1: the on-device CG solver ----------------------------------------
+
+#include "core/FemTopo.h"
+#include "femgpu/TopoCgSolver.h"
+#include "femgpu/TopoGpuSolver.h"
+
+#include <Eigen/IterativeLinearSolvers>
+#include <Eigen/SparseCore>
+
+#include <chrono>
+
+namespace {
+
+// SIMP-like scales with a solid load path (nothing fully disconnected).
+std::vector<float> SimpScales(int nElems, uint32_t seed) {
+  uint32_t state = seed;
+  std::vector<float> scales(nElems);
+  for (int e = 0; e < nElems; ++e) {
+    const float r = Rand01(state);
+    scales[e] = r < 0.2f ? 1e-6f : (r > 0.6f ? 1.0f : r);
+  }
+  return scales;
+}
+
+// fp64 relative L2 residual |f - Kx| / |f| of a GPU solution, on the same
+// fp32 element data the GPU used.
+double ResidualNorm(const gpu::SpmvSystem& sys, const std::vector<float>& scales,
+                    const std::vector<float>& x, const std::vector<float>& f) {
+  const std::vector<double> Kx = CpuApply(sys, scales, x);
+  double rr = 0.0, ff = 0.0;
+  for (int i = 0; i < sys.nFree; ++i) {
+    const double ri = static_cast<double>(f[i]) - Kx[i];
+    rr += ri * ri;
+    ff += static_cast<double>(f[i]) * static_cast<double>(f[i]);
+  }
+  return std::sqrt(rr / ff);
+}
+
+}  // namespace
+
+TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
+  REQUIRE_GPU();
+  INFO("device: " << ctx->DeviceName());
+
+  fem::FemMesh mesh = GenerateBoxMesh(6, 3, 3, 60, 30, 30);
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 210000.0, 0.3);
+
+  std::string err;
+  auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err);
+  INFO(err);
+  REQUIRE(cg);
+
+  // A load-like right-hand side (deterministic).
+  uint32_t state = 42;
+  std::vector<float> f(sys.nFree);
+  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+
+  SECTION("uniform stiffness, achievable tolerance") {
+    // tol above the measured fp32 floor (~3e-5 on this size): the solver must
+    // genuinely converge, and its claimed residual must be honest (the
+    // chunk-boundary residual replacement measures TRUE residuals).
+    const std::vector<float> scales(sys.nElems, 1.0f);
+    REQUIRE(cg->SetScales(scales, &err));
+    std::vector<float> x(sys.nFree, 0.0f);
+    gpu::CgStats stats;
+    REQUIRE(cg->Solve(f, x, 1e-4f, 20000, &stats, &err));
+    const double res = ResidualNorm(sys, scales, x, f);
+    INFO("iterations: " << stats.iterations << "  claimed: "
+                        << stats.relResidual << "  fp64-verified: " << res);
+    CHECK(stats.converged);
+    CHECK(res < 2e-4);
+    CHECK(stats.iterations > 0);
+    // The claim matches reality (no fp32 recurrence lies).
+    CHECK(res < 2.0 * static_cast<double>(stats.relResidual) + 1e-9);
+
+    // Warm start: re-solving the same system starts at the solution.
+    gpu::CgStats warm;
+    REQUIRE(cg->Solve(f, x, 1e-4f, 20000, &warm, &err));
+    INFO("warm-start iterations: " << warm.iterations);
+    CHECK(warm.iterations == 0);
+  }
+
+  SECTION("SIMP void/solid scales, tolerance below the fp32 floor") {
+    // Scales spanning 1e-6..1 make the system brutally ill-conditioned and
+    // 1e-6 unreachable in fp32. The solver must return its best (floored)
+    // iterate — not a past-the-floor walk-away — and report honestly.
+    const std::vector<float> scales = SimpScales(sys.nElems, 777);
+    REQUIRE(cg->SetScales(scales, &err));
+    std::vector<float> x(sys.nFree, 0.0f);
+    gpu::CgStats stats;
+    REQUIRE(cg->Solve(f, x, 1e-6f, 20000, &stats, &err));
+    const double res = ResidualNorm(sys, scales, x, f);
+    INFO("iterations: " << stats.iterations << "  claimed: "
+                        << stats.relResidual << "  fp64-verified: " << res);
+    CHECK(res < 1e-3);  // the floor is far better than this in practice
+    CHECK(res < 2.0 * static_cast<double>(stats.relResidual) + 1e-9);
+  }
+}
+
+TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
+          "[femgpu][cg]") {
+  // The GPU1 verification: the same small cantilever optimized twice — the
+  // built-in Eigen CG-IC vs the injected GPU solver — must land on the same
+  // optimum (fp32 + Jacobi vs fp64 + IC changes the path negligibly since
+  // the OC update reacts to energies, not raw displacements).
+  std::string gerr;
+  auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
+  if (!solver) SKIP("no usable compute device: " << gerr);
+  INFO("device: " << solver->DeviceName());
+
+  fem::FemMesh mesh = GenerateBoxMesh(10, 4, 4, 100, 40, 40);
+  fem::Material steel{210000.0, 0.3};
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, 100.0, 1e-6);
+  load.magnitude = 1000.0;
+  load.direction = glm::dvec3(0, 0, -1);
+  fem::TopoParams params;
+  params.filterRadius = 25.0;
+  params.maxIterations = 30;
+
+  std::string err;
+  auto cpuRes = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
+  REQUIRE(cpuRes.has_value());
+  auto gpuRes = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                      {}, {}, solver.get());
+  INFO(err);
+  REQUIRE(gpuRes.has_value());
+
+  INFO("cpu compliance " << cpuRes->complianceHistory.back() << " ("
+                         << cpuRes->iterations << " it), gpu compliance "
+                         << gpuRes->complianceHistory.back() << " ("
+                         << gpuRes->iterations << " it)");
+  // SIMP is non-convex: solver differences (fp32+Jacobi vs fp64+IC) steer
+  // gray boundary elements differently, so element-wise equality is the
+  // wrong bar. Equivalence means: same objective quality (compliance within
+  // a few %), same volume, and the same solid/void classification for the
+  // overwhelming majority of elements.
+  CHECK_THAT(gpuRes->complianceHistory.back(),
+             WithinRel(cpuRes->complianceHistory.back(), 0.03));
+  CHECK_THAT(gpuRes->volumeFractionAchieved,
+             WithinAbs(cpuRes->volumeFractionAchieved, 0.01));
+  REQUIRE(gpuRes->density.size() == cpuRes->density.size());
+  int flipped = 0;
+  double meanDiff = 0.0;
+  for (size_t e = 0; e < cpuRes->density.size(); ++e) {
+    const double d = std::abs(gpuRes->density[e] - cpuRes->density[e]);
+    meanDiff += d;
+    if (d > 0.5) ++flipped;  // solid on one side, void on the other
+  }
+  meanDiff /= cpuRes->density.size();
+  const double flippedFrac = double(flipped) / cpuRes->density.size();
+  INFO("mean |density diff|: " << meanDiff
+                               << "  solid/void flips: " << flippedFrac);
+  CHECK(flippedFrac < 0.10);
+}
+
+TEST_CASE("femgpu bench: GPU CG vs CPU CG-IC on the bulky cube",
+          "[.][gpubench]") {
+  // Mirror of [topobench] (12x12x12 cube, 10368 tets): three SIMP-like solves
+  // through each path. Run with: femgpu_tests "[gpubench]"
+  REQUIRE_GPU();
+  WARN("device: " << ctx->DeviceName());
+
+  const double L = 80.0;
+  fem::FemMesh mesh = GenerateBoxMesh(12, 12, 12, L, L, L);
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 210000.0, 0.3);
+  WARN("system: " << sys.nElems << " tets, " << sys.nFree << " free DOFs");
+
+  std::string err;
+  auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err);
+  REQUIRE(cg);
+  uint32_t state = 99;
+  std::vector<float> f(sys.nFree);
+  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+
+  using clk = std::chrono::steady_clock;
+  std::vector<float> x(sys.nFree, 0.0f);
+  for (int pass = 0; pass < 3; ++pass) {
+    // Slightly different scales each pass, like consecutive SIMP iterations
+    // (so the warm start helps but is not exact).
+    std::vector<float> scales = SimpScales(sys.nElems, 1000 + pass);
+    REQUIRE(cg->SetScales(scales, &err));
+    gpu::CgStats stats;
+    const auto t0 = clk::now();
+    REQUIRE(cg->Solve(f, x, 1e-5f, 40000, &stats, &err));
+    const double ms =
+        std::chrono::duration<double, std::milli>(clk::now() - t0).count();
+    WARN("gpu solve " << pass << ": " << ms << " ms, " << stats.iterations
+                      << " CG iters, rel res " << stats.relResidual
+                      << " (fp64 check "
+                      << ResidualNorm(sys, scales, x, f) << ")");
+  }
+
+  // CPU reference: Eigen CG-IC (the shipping CPU path) on the same system.
+  {
+    const std::vector<float> scales = SimpScales(sys.nElems, 1000);
+    std::vector<Eigen::Triplet<double>> trip;
+    for (int e = 0; e < sys.nElems; ++e) {
+      const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
+      const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
+      for (int a = 0; a < 30; ++a) {
+        if (dof[a] < 0) continue;
+        for (int b = 0; b < 30; ++b)
+          if (dof[b] >= 0)
+            trip.emplace_back(dof[a], dof[b],
+                              static_cast<double>(scales[e]) *
+                                  static_cast<double>(ke[a * 30 + b]));
+      }
+    }
+    Eigen::SparseMatrix<double> K(sys.nFree, sys.nFree);
+    K.setFromTriplets(trip.begin(), trip.end());
+    Eigen::VectorXd F(sys.nFree);
+    for (int i = 0; i < sys.nFree; ++i) F(i) = f[i];
+    Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
+                             Eigen::Lower | Eigen::Upper,
+                             Eigen::IncompleteCholesky<double>>
+        cpu;
+    cpu.setTolerance(1e-6);
+    const auto t0 = clk::now();
+    cpu.compute(K);
+    const Eigen::VectorXd u = cpu.solve(F);
+    const double ms =
+        std::chrono::duration<double, std::milli>(clk::now() - t0).count();
+    WARN("cpu CG-IC solve: " << ms << " ms, " << cpu.iterations()
+                             << " CG iters (cold, incl. assembly+IC setup)");
+  }
+}
+
+TEST_CASE("femgpu bench: full SIMP loop GPU vs CPU on the bulky cube",
+          "[.][gpubench]") {
+  // The number that matters to the user: wall time of TopologyOptimize on
+  // the [topobench] cube through each solver, on the REAL SIMP systems
+  // (smooth filtered fields, warm starts) rather than harsh random scales.
+  std::string gerr;
+  auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
+  if (!solver) SKIP("no usable compute device: " << gerr);
+  WARN("device: " << solver->DeviceName());
+
+  const double L = 80.0;
+  fem::FemMesh mesh = GenerateBoxMesh(12, 12, 12, L, L, L);
+  fem::Material steel{210000.0, 0.3};
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, L, 1e-6);
+  load.magnitude = 2000.0;
+  load.direction = glm::dvec3(0, 0, -1);
+  fem::TopoParams params;
+  params.filterRadius = 18.0;
+  params.maxIterations = 6;  // enough to see steady-state per-iteration cost
+
+  using clk = std::chrono::steady_clock;
+  std::string err;
+  const auto t0 = clk::now();
+  auto gpuRes = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                      {}, {}, solver.get());
+  const double gpuS = std::chrono::duration<double>(clk::now() - t0).count();
+  REQUIRE(gpuRes.has_value());
+  WARN("gpu SIMP: " << gpuS << " s for " << gpuRes->iterations << " iters ("
+                    << gpuS / gpuRes->iterations << " s/iter), compliance "
+                    << gpuRes->complianceHistory.back());
+
+  const auto t1 = clk::now();
+  auto cpuRes = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
+  const double cpuS = std::chrono::duration<double>(clk::now() - t1).count();
+  REQUIRE(cpuRes.has_value());
+  WARN("cpu SIMP: " << cpuS << " s for " << cpuRes->iterations << " iters ("
+                    << cpuS / cpuRes->iterations << " s/iter), compliance "
+                    << cpuRes->complianceHistory.back());
+}
 
 #endif  // HAVE_FEM_SOLVER

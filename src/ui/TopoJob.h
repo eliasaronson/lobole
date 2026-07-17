@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <thread>
@@ -34,6 +35,11 @@ struct TopoJob {
   fem::TopoInput input;
   std::optional<fem::TopoResult> result;
   std::string error;
+
+  // The linear solver for the run (the GPU seam), created and used entirely
+  // on the worker thread — its private Vulkan context never crosses threads.
+  // Null = the built-in CPU path.
+  std::unique_ptr<fem::TopoLinearSolver> solver;
 
   std::thread thread;
 
