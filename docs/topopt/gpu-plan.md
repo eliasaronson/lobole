@@ -1,6 +1,7 @@
 # GPU topology solver — plan
 
-> Status: **GPU0 + GPU1 SHIPPED.** The linear solve is the
+> Status: **GPU0 + GPU1 + GPU2 SHIPPED** (GPU2 = a measured negative:
+> Jacobi stays the default). The linear solve is the
 > topology wall: CPU CG-IC already cut a bulky 10k-tet cube from 42 s/iter
 > (direct) to 2.8 s/iter, but fine meshes want another order of magnitude. This
 > plan is the GPU matrix-free CG that gets it.
@@ -25,9 +26,23 @@
 > floor → best-iterate snapshot is what's returned; the L2 residual
 > legitimately grows ~20x early (CG minimizes A-norm error, identical in
 > fp64) → no short-term divergence guards, only long-window stall + restart
-> from best. Jacobi needs ~25x the iterations of IC — that gap is the GPU2
-> (Chebyshev) / GPU3 (multigrid) headroom, now the throughput lever since
-> per-iteration cost is already near memory bandwidth.
+> from best. Jacobi needs ~25x the iterations of IC — that gap is the
+> preconditioner headroom, now the throughput lever since per-iteration cost
+> is already near memory bandwidth.
+>
+> GPU2 result — **negative, by the numbers**: Chebyshev-Jacobi preconditioning
+> (degree-m polynomial of D⁻¹K per outer iteration; on-device power-iteration
+> λmax estimate ×1.1; host-computed coefficients as push constants, zero
+> inner-loop reductions) cuts outer iterations ~2.3x but costs m SpMVs per
+> outer — full-SIMP wall time LOSES 2-2.5x vs Jacobi at every degree/ratio
+> tried (d8/r30, d4/r10, d3/r6). Cause: CG is already the optimal polynomial
+> method, and the convergence-gating void-mode tail (scales ~1e-6) sits far
+> below any usable Chebyshev interval — polynomial preconditioning cannot
+> reach what actually gates SIMP systems. Jacobi stays the app default;
+> Chebyshev remains selectable (FEMGPU_PRECOND=cheb, FEMGPU_CHEB_DEGREE/
+> RATIO) and its kernels + eigenvalue estimator are the GPU3 multigrid
+> smoother, where a top-of-spectrum polynomial is exactly right and coarse
+> grids handle the tail. **The remaining ~10x lives in GPU3.**
 
 ## Feasibility (settled first, because it was the whole risk)
 
@@ -98,8 +113,10 @@ Software fallback (llvmpipe) means it can even run where no real GPU exists.
    the previous SIMP `u`. Wire into `TopologyOptimize` via the injection seam.
    Benchmark vs CPU CG-IC on the `[.][topobench]` cube; verify the optimized
    density matches the CPU result (same gate metrics).
-2. **GPU2 — Chebyshev preconditioner** (needs only a cheap eigenvalue estimate;
-   matrix-free) if Jacobi-CG iteration counts gate throughput.
+2. **DONE — GPU2 — Chebyshev preconditioner** (needs only a cheap eigenvalue
+   estimate; matrix-free) if Jacobi-CG iteration counts gate throughput.
+   Built, benched, and rejected as the default (see status above) — kept as
+   the GPU3 smoother.
 3. **GPU3 — geometric multigrid V-cycle** only if still needed for the finest
    meshes — the strong-but-large preconditioner. Its own sub-plan.
 

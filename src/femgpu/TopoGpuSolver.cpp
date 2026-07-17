@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <string>
 
 namespace gpu {
 
@@ -72,7 +74,20 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
       for (int c = 0; c < 30; ++c) sys.ke.push_back(static_cast<float>(Ke(r, c)));
   }
 
-  im.cg = TopoCgSolver::Create(*im.ctx, sys, error);
+  // Preconditioner selection: Jacobi by default (the GPU2 bench showed
+  // Chebyshev losing 2-2.5x on SIMP systems — see gpu-plan.md). Env
+  // overrides for experiments: FEMGPU_PRECOND=jacobi|cheb,
+  // FEMGPU_CHEB_DEGREE=<int>, FEMGPU_CHEB_RATIO=<float>.
+  CgOptions opts;
+  if (const char* p = std::getenv("FEMGPU_PRECOND"))
+    opts.precond = std::string(p) == "jacobi" ? CgOptions::Precond::Jacobi
+                                              : CgOptions::Precond::Chebyshev;
+  if (const char* d = std::getenv("FEMGPU_CHEB_DEGREE"))
+    opts.chebDegree = std::max(2, std::atoi(d));
+  if (const char* r = std::getenv("FEMGPU_CHEB_RATIO"))
+    opts.chebRatio = std::max(1.5f, static_cast<float>(std::atof(r)));
+
+  im.cg = TopoCgSolver::Create(*im.ctx, sys, error, opts);
   if (!im.cg) return false;
   im.nFree = nFree;
   im.scaleF.resize(sys.nElems);

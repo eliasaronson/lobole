@@ -424,6 +424,10 @@ if(GLSLC)
     embed_compute_shader(cg_copy)
     embed_compute_shader(cg_update_xr)
     embed_compute_shader(cg_update_p)
+    embed_compute_shader(cheb_init)
+    embed_compute_shader(cheb_iter)
+    embed_compute_shader(vec_divd)
+    embed_compute_shader(vec_scale)
     add_library(fem_gpu STATIC
         src/femgpu/ComputeContext.cpp
         src/femgpu/TopoSpmv.cpp
@@ -436,7 +440,11 @@ if(GLSLC)
         ${FEMGPU_GEN_DIR}/cg_residual_spv.h
         ${FEMGPU_GEN_DIR}/cg_copy_spv.h
         ${FEMGPU_GEN_DIR}/cg_update_xr_spv.h
-        ${FEMGPU_GEN_DIR}/cg_update_p_spv.h)
+        ${FEMGPU_GEN_DIR}/cg_update_p_spv.h
+        ${FEMGPU_GEN_DIR}/cheb_init_spv.h
+        ${FEMGPU_GEN_DIR}/cheb_iter_spv.h
+        ${FEMGPU_GEN_DIR}/vec_divd_spv.h
+        ${FEMGPU_GEN_DIR}/vec_scale_spv.h)
     # Generated headers are PUBLIC so femgpu_tests can use the sanity kernel.
     target_include_directories(fem_gpu PUBLIC src ${FEMGPU_GEN_DIR})
     target_link_libraries(fem_gpu PUBLIC Vulkan::Vulkan)

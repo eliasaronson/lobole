@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "femgpu/ComputeContext.h"
@@ -282,8 +283,17 @@ TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
   const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
   const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 210000.0, 0.3);
 
+  // Cover BOTH preconditioners: Jacobi is the simple baseline, Chebyshev
+  // (GPU2) is the default. Same correctness bars for each.
+  gpu::CgOptions opts;
+  const char* precondName = GENERATE("jacobi", "chebyshev");
+  opts.precond = std::string(precondName) == "jacobi"
+                     ? gpu::CgOptions::Precond::Jacobi
+                     : gpu::CgOptions::Precond::Chebyshev;
+  INFO("preconditioner: " << precondName);
+
   std::string err;
-  auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err);
+  auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err, opts);
   INFO(err);
   REQUIRE(cg);
 
@@ -407,28 +417,34 @@ TEST_CASE("femgpu bench: GPU CG vs CPU CG-IC on the bulky cube",
   WARN("system: " << sys.nElems << " tets, " << sys.nFree << " free DOFs");
 
   std::string err;
-  auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err);
-  REQUIRE(cg);
   uint32_t state = 99;
   std::vector<float> f(sys.nFree);
   for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
 
   using clk = std::chrono::steady_clock;
-  std::vector<float> x(sys.nFree, 0.0f);
-  for (int pass = 0; pass < 3; ++pass) {
-    // Slightly different scales each pass, like consecutive SIMP iterations
-    // (so the warm start helps but is not exact).
-    std::vector<float> scales = SimpScales(sys.nElems, 1000 + pass);
-    REQUIRE(cg->SetScales(scales, &err));
-    gpu::CgStats stats;
-    const auto t0 = clk::now();
-    REQUIRE(cg->Solve(f, x, 1e-5f, 40000, &stats, &err));
-    const double ms =
-        std::chrono::duration<double, std::milli>(clk::now() - t0).count();
-    WARN("gpu solve " << pass << ": " << ms << " ms, " << stats.iterations
-                      << " CG iters, rel res " << stats.relResidual
-                      << " (fp64 check "
-                      << ResidualNorm(sys, scales, x, f) << ")");
+  for (const char* name : {"jacobi", "chebyshev"}) {
+    gpu::CgOptions opts;
+    opts.precond = std::string(name) == "jacobi"
+                       ? gpu::CgOptions::Precond::Jacobi
+                       : gpu::CgOptions::Precond::Chebyshev;
+    auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err, opts);
+    REQUIRE(cg);
+    std::vector<float> x(sys.nFree, 0.0f);
+    for (int pass = 0; pass < 3; ++pass) {
+      // Slightly different scales each pass, like consecutive SIMP
+      // iterations (so the warm start helps but is not exact).
+      std::vector<float> scales = SimpScales(sys.nElems, 1000 + pass);
+      REQUIRE(cg->SetScales(scales, &err));
+      gpu::CgStats stats;
+      const auto t0 = clk::now();
+      REQUIRE(cg->Solve(f, x, 1e-5f, 40000, &stats, &err));
+      const double ms =
+          std::chrono::duration<double, std::milli>(clk::now() - t0).count();
+      WARN(name << " solve " << pass << ": " << ms << " ms, "
+                << stats.iterations << " outer iters, rel res "
+                << stats.relResidual << " (fp64 check "
+                << ResidualNorm(sys, scales, x, f) << ")");
+    }
   }
 
   // CPU reference: Eigen CG-IC (the shipping CPU path) on the same system.

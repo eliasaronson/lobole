@@ -7,7 +7,11 @@
 #include "cg_residual_spv.h"
 #include "cg_update_p_spv.h"
 #include "cg_update_xr_spv.h"
+#include "cheb_init_spv.h"
+#include "cheb_iter_spv.h"
 #include "fem_spmv_spv.h"
+#include "vec_divd_spv.h"
+#include "vec_scale_spv.h"
 
 #include <cmath>
 #include <cstdio>
@@ -51,12 +55,22 @@ struct TwoSlotPush {
   uint32_t slotA;
   uint32_t slotB;
 };
+struct OneFloatPush {
+  uint32_t n;
+  float c;
+};
+struct TwoFloatPush {
+  uint32_t n;
+  float c1;
+  float c2;
+};
 
 }  // namespace
 
 std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
                                                    const SpmvSystem& sys,
-                                                   std::string* error) {
+                                                   std::string* error,
+                                                   const CgOptions& options) {
   auto fail = [&](const std::string& m) -> std::unique_ptr<TopoCgSolver> {
     if (error) *error = m;
     return nullptr;
@@ -65,10 +79,13 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
   if (sys.dof.size() != static_cast<size_t>(sys.nElems) * 30 ||
       sys.ke.size() != static_cast<size_t>(sys.nElems) * 900)
     return fail("CG system arrays have the wrong size");
+  if (options.chebDegree < 2 || options.chebRatio <= 1.0f)
+    return fail("bad Chebyshev options (degree >= 2, ratio > 1 required)");
 
   std::unique_ptr<TopoCgSolver> s(new TopoCgSolver(ctx));
   s->m_nFree = sys.nFree;
   s->m_nElems = sys.nElems;
+  s->m_opts = options;
   const uint32_t n = static_cast<uint32_t>(sys.nElems);
   s->m_elemGx = n < kMaxGroupsX ? n : kMaxGroupsX;
   s->m_elemGy = (n + s->m_elemGx - 1) / s->m_elemGx;
@@ -92,7 +109,15 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
       !pipe(s->m_updateXr, k_cg_update_xr_spv, k_cg_update_xr_spv_size, 5,
             sizeof(TwoSlotPush)) ||
       !pipe(s->m_updateP, k_cg_update_p_spv, k_cg_update_p_spv_size, 3,
-            sizeof(TwoSlotPush)))
+            sizeof(TwoSlotPush)) ||
+      !pipe(s->m_chebInit, k_cheb_init_spv, k_cheb_init_spv_size, 5,
+            sizeof(OneFloatPush)) ||
+      !pipe(s->m_chebIter, k_cheb_iter_spv, k_cheb_iter_spv_size, 5,
+            sizeof(TwoFloatPush)) ||
+      !pipe(s->m_vecDivd, k_vec_divd_spv, k_vec_divd_spv_size, 3,
+            sizeof(NPush)) ||
+      !pipe(s->m_vecScale, k_vec_scale_spv, k_vec_scale_spv_size, 2,
+            sizeof(OneFloatPush)))
     return nullptr;
 
   // Buffers.
@@ -105,7 +130,8 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
       !make(s->m_scale, sys.nElems * sizeof(float)) ||
       !make(s->m_diagK, vec) || !make(s->m_f, vec) || !make(s->m_x, vec) ||
       !make(s->m_r, vec) || !make(s->m_z, vec) || !make(s->m_p, vec) ||
-      !make(s->m_ap, vec) ||
+      !make(s->m_ap, vec) || !make(s->m_chebR, vec) ||
+      !make(s->m_chebD, vec) ||
       !make(s->m_scalars, kNumScalars * sizeof(float)))
     return nullptr;
   std::memcpy(s->m_dof.mapped, sys.dof.data(), s->m_dof.size);
@@ -135,7 +161,26 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
       !bind(s->m_setUpdateXr, s->m_updateXr,
             {&s->m_p, &s->m_ap, &s->m_x, &s->m_r, &s->m_scalars}) ||
       !bind(s->m_setUpdateP, s->m_updateP,
-            {&s->m_z, &s->m_p, &s->m_scalars}))
+            {&s->m_z, &s->m_p, &s->m_scalars}) ||
+      // Chebyshev preconditioner + power iteration (chebD doubles as the
+      // power vector v, chebR as its work vector w).
+      !bind(s->m_setSpmvChebD, s->m_spmv,
+            {&s->m_dof, &s->m_ke, &s->m_scale, &s->m_chebD, &s->m_ap}) ||
+      !bind(s->m_setChebInit, s->m_chebInit,
+            {&s->m_r, &s->m_diagK, &s->m_chebR, &s->m_chebD, &s->m_z}) ||
+      !bind(s->m_setChebIter, s->m_chebIter,
+            {&s->m_ap, &s->m_diagK, &s->m_chebR, &s->m_chebD, &s->m_z}) ||
+      !bind(s->m_setDotRZ, s->m_dot, {&s->m_r, &s->m_z, &s->m_scalars}) ||
+      !bind(s->m_setDotRR, s->m_dot, {&s->m_r, &s->m_r, &s->m_scalars}) ||
+      !bind(s->m_setDivdAp, s->m_vecDivd,
+            {&s->m_ap, &s->m_diagK, &s->m_chebR}) ||
+      !bind(s->m_setScaleRD, s->m_vecScale, {&s->m_chebR, &s->m_chebD}) ||
+      !bind(s->m_setDotDR, s->m_dot,
+            {&s->m_chebD, &s->m_chebR, &s->m_scalars}) ||
+      !bind(s->m_setDotDD, s->m_dot,
+            {&s->m_chebD, &s->m_chebD, &s->m_scalars}) ||
+      !bind(s->m_setDotRRcheb, s->m_dot,
+            {&s->m_chebR, &s->m_chebR, &s->m_scalars}))
     return nullptr;
 
   return s;
@@ -144,13 +189,17 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
 TopoCgSolver::~TopoCgSolver() {
   for (BoundSet* set :
        {&m_setSpmvP, &m_setSpmvX, &m_setDiag, &m_setResidual, &m_setPrecond,
-        &m_setCopyZP, &m_setDotFF, &m_setDotPAp, &m_setUpdateXr, &m_setUpdateP})
+        &m_setCopyZP, &m_setDotFF, &m_setDotPAp, &m_setUpdateXr, &m_setUpdateP,
+        &m_setSpmvChebD, &m_setChebInit, &m_setChebIter, &m_setDotRZ,
+        &m_setDotRR, &m_setDivdAp, &m_setScaleRD, &m_setDotDR, &m_setDotDD,
+        &m_setDotRRcheb})
     m_ctx.Destroy(*set);
   for (Buffer* b : {&m_dof, &m_ke, &m_scale, &m_diagK, &m_f, &m_x, &m_r, &m_z,
-                    &m_p, &m_ap, &m_scalars})
+                    &m_p, &m_ap, &m_chebR, &m_chebD, &m_scalars})
     m_ctx.Destroy(*b);
   for (Pipeline* p : {&m_spmv, &m_diag, &m_residual, &m_precondDot, &m_copy,
-                      &m_dot, &m_updateXr, &m_updateP})
+                      &m_dot, &m_updateXr, &m_updateP, &m_chebInit,
+                      &m_chebIter, &m_vecDivd, &m_vecScale})
     m_ctx.Destroy(*p);
 }
 
@@ -162,6 +211,110 @@ bool TopoCgSolver::SetScales(const std::vector<float>& scales,
   }
   std::memcpy(m_scale.mapped, scales.data(), m_scale.size);
   m_scalesDirty = true;
+  return true;
+}
+
+// Records z = M^-1 r plus the two reductions PCG needs from it
+// (s[rzSlot] = r.z, s[kRr] = r.r; both slots zeroed here).
+// Jacobi: one fused kernel. Chebyshev: a degree-m polynomial of the
+// Jacobi-scaled operator (Saad Alg. 12.1) — m-1 SpMVs with host-precomputed
+// coefficients as push constants, then the two dots. No reductions inside
+// the polynomial, so the whole application records into the same batch.
+void TopoCgSolver::RecordPrecond(uint32_t rzSlot) {
+  const uint32_t n = static_cast<uint32_t>(m_nFree);
+  const NPush np{n};
+  const ElemPush ep{static_cast<uint32_t>(m_nElems), m_elemGx};
+  m_ctx.BatchFill(m_scalars, rzSlot * sizeof(float), sizeof(float), 0);
+  m_ctx.BatchFill(m_scalars, kRr * sizeof(float), sizeof(float), 0);
+  if (m_opts.precond == CgOptions::Precond::Jacobi) {
+    const TwoSlotPush pz{n, rzSlot, kRr};
+    m_ctx.BatchDispatch(m_precondDot, m_setPrecond, &pz, sizeof(pz),
+                        m_vecGroups, 1);
+    return;
+  }
+  const OneFloatPush init{n, m_chebInvTheta};
+  m_ctx.BatchDispatch(m_chebInit, m_setChebInit, &init, sizeof(init),
+                      m_vecGroups, 1);
+  for (size_t k = 0; k < m_chebC1.size(); ++k) {
+    m_ctx.BatchFill(m_ap, 0, VK_WHOLE_SIZE, 0);
+    m_ctx.BatchDispatch(m_spmv, m_setSpmvChebD, &ep, sizeof(ep), m_elemGx,
+                        m_elemGy);
+    const TwoFloatPush cf{n, m_chebC1[k], m_chebC2[k]};
+    m_ctx.BatchDispatch(m_chebIter, m_setChebIter, &cf, sizeof(cf),
+                        m_vecGroups, 1);
+  }
+  const SlotPush rz{n, rzSlot};
+  m_ctx.BatchDispatch(m_dot, m_setDotRZ, &rz, sizeof(rz), m_vecGroups, 1);
+  const SlotPush rr{n, kRr};
+  m_ctx.BatchDispatch(m_dot, m_setDotRR, &rr, sizeof(rr), m_vecGroups, 1);
+}
+
+// Power iteration for lambda_max(D^-1 K), needed to aim the Chebyshev
+// interval. Runs on-device (chebD = v, chebR = w); a handful of submits with
+// scalar readbacks. The estimate is inflated 10% — Chebyshev must bound the
+// spectrum from ABOVE (the polynomial blows up past its interval), and power
+// iteration converges from below.
+bool TopoCgSolver::EstimateLambdaMax(std::string* error) {
+  const uint32_t n = static_cast<uint32_t>(m_nFree);
+  const ElemPush ep{static_cast<uint32_t>(m_nElems), m_elemGx};
+  const NPush np{n};
+  const float* scal = static_cast<const float*>(m_scalars.mapped);
+
+  {  // v0 = ones
+    float* v = static_cast<float*>(m_chebD.mapped);
+    for (int i = 0; i < m_nFree; ++i) v[i] = 1.0f;
+  }
+  double lambda = 0.0, prev = 0.0;
+  for (int it = 0; it < 16; ++it) {
+    if (!m_ctx.BeginBatch(error)) return false;
+    m_ctx.BatchFill(m_ap, 0, VK_WHOLE_SIZE, 0);
+    m_ctx.BatchDispatch(m_spmv, m_setSpmvChebD, &ep, sizeof(ep), m_elemGx,
+                        m_elemGy);
+    m_ctx.BatchDispatch(m_vecDivd, m_setDivdAp, &np, sizeof(np), m_vecGroups,
+                        1);  // w = D^-1 K v
+    m_ctx.BatchFill(m_scalars, kRzA * sizeof(float), 3 * sizeof(float), 0);
+    const SlotPush dvw{n, kRzA};  // v.w
+    m_ctx.BatchDispatch(m_dot, m_setDotDR, &dvw, sizeof(dvw), m_vecGroups, 1);
+    const SlotPush dvv{n, kRzB};  // v.v
+    m_ctx.BatchDispatch(m_dot, m_setDotDD, &dvv, sizeof(dvv), m_vecGroups, 1);
+    const SlotPush dww{n, kPAp};  // w.w
+    m_ctx.BatchDispatch(m_dot, m_setDotRRcheb, &dww, sizeof(dww), m_vecGroups,
+                        1);
+    if (!m_ctx.SubmitBatch(error)) return false;
+
+    const float vw = scal[kRzA], vv = scal[kRzB], ww = scal[kPAp];
+    if (!std::isfinite(vw) || !std::isfinite(ww) || vv <= 0.0f || ww <= 0.0f) {
+      if (error) *error = "power iteration broke down (singular diagonal?)";
+      return false;
+    }
+    lambda = static_cast<double>(vw) / static_cast<double>(vv);
+    // v = w / |w|
+    if (!m_ctx.BeginBatch(error)) return false;
+    const OneFloatPush sc{n, 1.0f / std::sqrt(ww)};
+    m_ctx.BatchDispatch(m_vecScale, m_setScaleRD, &sc, sizeof(sc), m_vecGroups,
+                        1);
+    if (!m_ctx.SubmitBatch(error)) return false;
+
+    if (it >= 5 && std::abs(lambda - prev) < 0.01 * lambda) break;
+    prev = lambda;
+  }
+  m_lambdaMax = static_cast<float>(1.1 * lambda);
+
+  // Host-side Chebyshev coefficients over [lambdaMax/ratio, lambdaMax].
+  const double lmax = m_lambdaMax;
+  const double lmin = lmax / m_opts.chebRatio;
+  const double theta = 0.5 * (lmax + lmin), delta = 0.5 * (lmax - lmin);
+  const double sigma1 = theta / delta;
+  m_chebInvTheta = static_cast<float>(1.0 / theta);
+  m_chebC1.clear();
+  m_chebC2.clear();
+  double rhoPrev = 1.0 / sigma1;
+  for (int k = 1; k < m_opts.chebDegree; ++k) {
+    const double rho = 1.0 / (2.0 * sigma1 - rhoPrev);
+    m_chebC1.push_back(static_cast<float>(rho * rhoPrev));
+    m_chebC2.push_back(static_cast<float>(2.0 * rho / delta));
+    rhoPrev = rho;
+  }
   return true;
 }
 
@@ -184,11 +337,7 @@ void TopoCgSolver::RecordIteration(int parity) {
   m_ctx.BatchDispatch(m_updateXr, m_setUpdateXr, &ux, sizeof(ux), m_vecGroups,
                       1);
   // z = M^-1 r; rzNew = dot(r,z); rr = dot(r,r)
-  m_ctx.BatchFill(m_scalars, rzNew * sizeof(float), sizeof(float), 0);
-  m_ctx.BatchFill(m_scalars, kRr * sizeof(float), sizeof(float), 0);
-  const TwoSlotPush pz{n, rzNew, kRr};
-  m_ctx.BatchDispatch(m_precondDot, m_setPrecond, &pz, sizeof(pz), m_vecGroups,
-                      1);
+  RecordPrecond(rzNew);
   // beta = rzNew/rzOld; p = z + beta p
   const TwoSlotPush up{n, rzNew, rzOld};
   m_ctx.BatchDispatch(m_updateP, m_setUpdateP, &up, sizeof(up), m_vecGroups, 1);
@@ -211,6 +360,7 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
   const float* scal = static_cast<const float*>(m_scalars.mapped);
 
   // ---- Init: preconditioner diagonal + |f|^2 ------------------------------
+  const bool rebuildPrecond = m_scalesDirty;
   if (!m_ctx.BeginBatch(error)) return false;
   if (m_scalesDirty) {
     m_ctx.BatchFill(m_diagK, 0, VK_WHOLE_SIZE, 0);
@@ -223,6 +373,11 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
   m_ctx.BatchDispatch(m_dot, m_setDotFF, &bbp, sizeof(bbp), m_vecGroups, 1);
   if (!m_ctx.SubmitBatch(error)) return false;
   const float bb = scal[kBb];
+  // Chebyshev needs the spectrum's top edge; the diagonal (and so the scaled
+  // operator) just changed with the SIMP scales.
+  if (m_opts.precond == CgOptions::Precond::Chebyshev && rebuildPrecond &&
+      !EstimateLambdaMax(error))
+    return false;
   if (!std::isfinite(bb)) {
     if (error) *error = "CG breakdown (non-finite |f| — bad load vector?)";
     return false;
@@ -243,11 +398,7 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
                         m_elemGy);
     m_ctx.BatchDispatch(m_residual, m_setResidual, &np, sizeof(np),
                         m_vecGroups, 1);
-    m_ctx.BatchFill(m_scalars, kRzA * sizeof(float), sizeof(float), 0);
-    m_ctx.BatchFill(m_scalars, kRr * sizeof(float), sizeof(float), 0);
-    const TwoSlotPush pz{n, kRzA, kRr};
-    m_ctx.BatchDispatch(m_precondDot, m_setPrecond, &pz, sizeof(pz),
-                        m_vecGroups, 1);
+    RecordPrecond(kRzA);
     m_ctx.BatchDispatch(m_copy, m_setCopyZP, &np, sizeof(np), m_vecGroups, 1);
     return m_ctx.SubmitBatch(error);
   };
@@ -299,12 +450,7 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
                         m_elemGy);
     m_ctx.BatchDispatch(m_residual, m_setResidual, &np, sizeof(np),
                         m_vecGroups, 1);
-    const uint32_t rzSlot = parity == 0 ? kRzA : kRzB;
-    m_ctx.BatchFill(m_scalars, rzSlot * sizeof(float), sizeof(float), 0);
-    m_ctx.BatchFill(m_scalars, kRr * sizeof(float), sizeof(float), 0);
-    const TwoSlotPush rp{n, rzSlot, kRr};
-    m_ctx.BatchDispatch(m_precondDot, m_setPrecond, &rp, sizeof(rp),
-                        m_vecGroups, 1);
+    RecordPrecond(parity == 0 ? kRzA : kRzB);
     if (!m_ctx.SubmitBatch(error)) return false;
     iter += chunk;
     rr = scal[kRr];
@@ -344,6 +490,7 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
     stats->iterations = iter;
     stats->relResidual = std::sqrt(bestRr / bb);
     stats->converged = bestRr <= target;
+    stats->lambdaMax = m_lambdaMax;
   }
   return true;
 }

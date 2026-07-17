@@ -1,0 +1,30 @@
+#version 450
+// One Chebyshev step (Saad Alg. 12.1), given Ap = K * d_prev:
+//   rc -= D^-1 Ap            (inner residual in the D^-1 K operator)
+//   d   = c1 * d + c2 * rc   (c1 = rho_k rho_{k-1}, c2 = 2 rho_k / delta)
+//   z  += d
+// Everything is element-local, so the three updates fuse into one kernel.
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer VecAp { float Ap[]; };
+layout(std430, binding = 1) readonly buffer Diag { float diagK[]; };
+layout(std430, binding = 2) buffer ChebR { float rc[]; };
+layout(std430, binding = 3) buffer ChebD { float d[]; };
+layout(std430, binding = 4) buffer VecZ { float z[]; };
+
+layout(push_constant) uniform Push {
+  uint n;
+  float c1;
+  float c2;
+} pc;
+
+void main() {
+  const uint i = gl_GlobalInvocationID.x;
+  if (i >= pc.n) return;
+  const float rci = rc[i] - Ap[i] / diagK[i];
+  rc[i] = rci;
+  const float di = pc.c1 * d[i] + pc.c2 * rci;
+  d[i] = di;
+  z[i] += di;
+}
