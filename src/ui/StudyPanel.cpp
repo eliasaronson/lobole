@@ -450,18 +450,25 @@ ImU32 Turbo(float x) {
 
 void DrawFieldLegend(AppState& state) {
   const SimulationState& sim = state.simulation;
+  // No colorbar for "off" or the grey Shape iso-surface (it has no scalar).
   if (!sim.IsActive() || sim.field == SimulationState::Field::None ||
-      !state.document)
+      sim.field == SimulationState::Field::Shape || !state.document)
     return;
   const fem::StudyRuntime* rt = state.document->StudyResults(sim.activeStudyId);
   if (!rt) return;
   const fem::Study* study = state.document->FindStudy(sim.activeStudyId);
   const bool modal = study && study->type == fem::AnalysisType::Modal;
+  const bool density = sim.field == SimulationState::Field::Density;
   const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
-  // Modal displays a normalized mode shape (0..1); static shows the real field.
-  const double maxVal = modal ? 1.0 : (vm ? rt->maxVonMises : rt->maxDisplacement);
-  const char* unit = modal ? "" : (vm ? "MPa" : "mm");
-  const char* title = modal ? "mode shape" : (vm ? "von Mises" : "displacement");
+  // Modal shows a normalized mode shape (0..1); density is 0..1; static shows
+  // the real field.
+  const double maxVal =
+      (modal || density) ? 1.0 : (vm ? rt->maxVonMises : rt->maxDisplacement);
+  const char* unit = (modal || density) ? "" : (vm ? "MPa" : "mm");
+  const char* title = density  ? "density"
+                      : modal  ? "mode shape"
+                      : vm     ? "von Mises"
+                               : "displacement";
 
   // A vertical Turbo colorbar anchored to the viewport's lower-left corner.
   ImDrawList* dl = ImGui::GetForegroundDrawList();

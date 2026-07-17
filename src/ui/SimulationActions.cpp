@@ -21,7 +21,13 @@ namespace ui {
 
 void AppendStudyMarker(const AppState& state, std::vector<LineVertex3D>& lines) {
   const SimulationState& sim = state.simulation;
-  if (!sim.IsActive() || sim.field == SimulationState::Field::None ||
+  // The peak marker only applies to the FEM scalar fields (max von Mises / max
+  // displacement). Topology views (Shape/Density) have no such peak — and a
+  // topology runtime's maxVm/DispAt are (0,0,0), which would draw a stray cross
+  // at the origin.
+  if (!sim.IsActive() ||
+      (sim.field != SimulationState::Field::VonMises &&
+       sim.field != SimulationState::Field::Displacement) ||
       !state.document)
     return;
   const fem::StudyRuntime* rt = state.document->StudyResults(sim.activeStudyId);
@@ -216,6 +222,25 @@ void SyncFieldRenderer(AppState& state) {
   }
 
   const bool topo = study && study->type == fem::AnalysisType::Topology;
+
+  // Guard against a field that doesn't match the study's result data: a
+  // topology runtime has no von Mises / displacement arrays, and a static/modal
+  // runtime has no density field. This happens when the field is left armed
+  // across an analysis-type switch (e.g. view modal displacement, then change
+  // the study to topology) — reading the empty arrays would be out of bounds.
+  // Treat a mismatched field as "off".
+  const bool applicable =
+      topo ? (sim.field == SimulationState::Field::Shape ||
+              sim.field == SimulationState::Field::Density)
+           : (sim.field == SimulationState::Field::VonMises ||
+              sim.field == SimulationState::Field::Displacement);
+  if (!applicable) {
+    restoreBodies();
+    removeIso();
+    state.fieldRenderer->SetMesh({}, {});
+    sim.fieldBuiltKey = 0;
+    return;
+  }
 
   // --- Topology "Shape": the optimized iso-surface as a grey MeshRenderer body.
   if (topo && sim.field == SimulationState::Field::Shape) {
