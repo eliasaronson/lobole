@@ -345,18 +345,21 @@ void DrawStudyPanel(AppState& state) {
     ModifyStudy(state, s->id, "Set analysis type",
                 [&](fem::Study& cs) { cs.type = nt; });
   }
+  // Numeric fields commit on deactivation (Enter OR clicking away), not only on
+  // Enter — so typing a value then clicking Run applies it instead of reverting.
   double meshSize = s->meshSize;
-  if (ImGui::InputDouble("Mesh size (mm, 0=auto)", &meshSize, 0.0, 0.0, "%.3g",
-                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+  ImGui::InputDouble("Mesh size (mm, 0=auto)", &meshSize, 0.0, 0.0, "%.3g");
+  if (ImGui::IsItemDeactivatedAfterEdit() && meshSize != s->meshSize)
     ModifyStudy(state, s->id, "Set mesh size", [&](fem::Study& cs) {
       cs.meshSize = meshSize;
       cs.meshSizeExpr.clear();
     });
-  }
 
   if (s->type == fem::AnalysisType::Modal) {
     int nm = s->numModes;
-    if (ImGui::InputInt("Modes", &nm) && nm >= 1)
+    const bool nmChanged = ImGui::InputInt("Modes", &nm);
+    if ((nmChanged || ImGui::IsItemDeactivatedAfterEdit()) && nm >= 1 &&
+        nm != s->numModes)
       ModifyStudy(state, s->id, "Set mode count",
                   [&](fem::Study& cs) { cs.numModes = nm; });
   } else if (s->type == fem::AnalysisType::Topology) {
@@ -368,14 +371,16 @@ void DrawStudyPanel(AppState& state) {
         cs.volumeFractionExpr.clear();
       });
     double fr = s->filterRadius;
-    if (ImGui::InputDouble("Filter radius (mm, 0=auto)", &fr, 0.0, 0.0, "%.3g",
-                           ImGuiInputTextFlags_EnterReturnsTrue))
+    ImGui::InputDouble("Filter radius (mm, 0=auto)", &fr, 0.0, 0.0, "%.3g");
+    if (ImGui::IsItemDeactivatedAfterEdit() && fr != s->filterRadius)
       ModifyStudy(state, s->id, "Set filter radius", [&](fem::Study& cs) {
         cs.filterRadius = fr;
         cs.filterRadiusExpr.clear();
       });
     int mi = s->maxIterations;
-    if (ImGui::InputInt("Max iterations", &mi) && mi >= 1)
+    const bool miChanged = ImGui::InputInt("Max iterations", &mi);
+    if ((miChanged || ImGui::IsItemDeactivatedAfterEdit()) && mi >= 1 &&
+        mi != s->maxIterations)
       ModifyStudy(state, s->id, "Set max iterations",
                   [&](fem::Study& cs) { cs.maxIterations = mi; });
     // Keep faces: frozen solid, added by picking a face with the Keep tool.
