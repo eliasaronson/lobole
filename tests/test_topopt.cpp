@@ -264,6 +264,37 @@ TEST_CASE("Topo: SIMP cantilever converges on a structured tet10 mesh (GATE)",
   CHECK_THAT(minFixed, WithinAbs(1.0, 1e-9));
 }
 
+TEST_CASE("Topo bench: bulky 3D cube", "[.][topobench]") {
+  // A bulky 3D domain (12x12x12 hexes = 10368 tet10) — the direct solver's
+  // fill-in worst case, and the real use case (cube/cylinder). Times a short
+  // run so the solver (direct vs CG) can be compared. Hidden from the suite.
+  const double L = 60;
+  fem::FemMesh mesh = GenerateBoxMesh(12, 12, 12, L, L, L);
+  fem::Material steel{210000.0, 0.3};
+  std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, L, 1e-6);
+  load.magnitude = 2000.0;
+  load.direction = glm::dvec3(0, 0, -1);
+
+  fem::TopoParams params;
+  params.volumeFraction = 0.4;
+  params.filterRadius = 2.0 * (L / 12);
+  params.maxIterations = 15;
+
+  std::string err;
+  const auto t0 = std::chrono::steady_clock::now();
+  auto res = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
+  const auto t1 = std::chrono::steady_clock::now();
+  REQUIRE(res.has_value());
+  const double secs = std::chrono::duration<double>(t1 - t0).count();
+  WARN("topobench: " << mesh.tets.size() << " tets, " << res->iterations
+                     << " iters, " << secs << " s ("
+                     << (secs * 1000.0 / res->iterations) << " ms/iter), Vf "
+                     << res->volumeFractionAchieved);
+}
+
 TEST_CASE("Topo: progress callback can cancel and keep best-so-far",
           "[topopt]") {
   fem::FemMesh mesh = GenerateBoxMesh(10, 4, 4, 100, 40, 40);

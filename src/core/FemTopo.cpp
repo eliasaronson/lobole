@@ -12,7 +12,7 @@
 #ifdef HAVE_FEM_SOLVER
 #include "core/FemSolverInternal.h"
 
-#include <Eigen/SparseCholesky>
+#include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseCore>
 #endif
 
@@ -462,7 +462,18 @@ std::optional<TopoResult> TopologyOptimize(
   for (int e = 0; e < nTets; ++e)
     if (!frozen[e]) x[e] = xStart;
 
-  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt;
+  // Iterative solver: Conjugate Gradient (K is symmetric positive-definite),
+  // diagonal-preconditioned, warm-started from the previous iteration's
+  // displacement. K changes only slightly between SIMP steps, so the warm start
+  // makes later solves converge in a handful of iterations — far cheaper than
+  // re-factorizing a direct solver every iteration (the resolution wall). The
+  // one-shot static solver (fem::Solve) keeps its exact direct factorization.
+  Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
+                           Eigen::Lower | Eigen::Upper,
+                           Eigen::IncompleteCholesky<double>>
+      cg;
+  cg.setTolerance(1e-6);
+  Eigen::VectorXd uPrev = Eigen::VectorXd::Zero(nFree);
   std::vector<Eigen::Triplet<double>> trip;
   trip.reserve(static_cast<size_t>(nTets) * 900);
 
@@ -501,13 +512,13 @@ std::optional<TopoResult> TopologyOptimize(
     Eigen::SparseMatrix<double> K(nFree, nFree);
     K.setFromTriplets(trip.begin(), trip.end());
 
-    if (iter == 0) ldlt.analyzePattern(K);
-    ldlt.factorize(K);
-    if (ldlt.info() != Eigen::Success)
-      return fail("stiffness matrix factorization failed (insufficiently constrained)");
-    const Eigen::VectorXd u = ldlt.solve(F);
-    if (ldlt.info() != Eigen::Success || !u.allFinite())
+    cg.compute(K);
+    if (cg.info() != Eigen::Success)
+      return fail("stiffness matrix is not solvable (insufficiently constrained)");
+    const Eigen::VectorXd u = cg.solveWithGuess(F, uPrev);
+    if (!u.allFinite())
       return fail("linear solve failed during optimization");
+    uPrev = u;  // warm-start the next iteration
 
     const double compliance = F.dot(u);
 
