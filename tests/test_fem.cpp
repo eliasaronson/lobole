@@ -137,6 +137,29 @@ TEST_CASE("FemMesher is reusable within one process", "[fem][mesh]") {
   CHECK(b->stats.tetCount > 0);
 }
 
+TEST_CASE("FemMesher meshes a positioned (located) shape in world coords",
+          "[fem][mesh]") {
+  // A body placed away from the origin carries a TopLoc_Location (not baked
+  // geometry). The mesh must come out in the SAME world coordinates the body
+  // renders in, else the result overlay is offset from the part.
+  CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
+  box.Translate(glm::vec3(100.0, 0.0, 0.0));
+  fem::MeshSettings ms;
+  ms.maxSize = 1.0;
+  std::string err;
+  auto mesh = fem::Mesh(box.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+  double mnx = 1e9, mxx = -1e9;
+  for (const auto& n : mesh->nodes) {
+    mnx = std::min(mnx, n.x);
+    mxx = std::max(mxx, n.x);
+  }
+  INFO("mesh x-range [" << mnx << ", " << mxx << "]");
+  CHECK(mnx > 50.0);   // world ~[100,102], not local ~[0,2]
+  CHECK(mxx < 150.0);
+}
+
 TEST_CASE("FemMesher reports failure on a null shape", "[fem][mesh]") {
   std::string err;
   auto m = fem::Mesh(TopoDS_Shape(), fem::MeshSettings(), &err);
