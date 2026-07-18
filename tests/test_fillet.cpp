@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "core/Document.h"
+#include "core/ElementHistory.h"
 #include "core/ExtrudeFeature.h"
 #include "core/FilletFeature.h"
 #include "core/Serialization.h"
@@ -98,6 +99,47 @@ TEST_CASE("Fillet rounds a referenced edge and names the blend face",
   CHECK_FALSE(map.ResolveEdge(edge.name).has_value());
   // The body still belongs to the extrude (fillet modifies in place).
   CHECK(doc.GetBodies()[0].createdBy == ext);
+}
+
+TEST_CASE("A second edge picked after the first blend regen still fillets",
+          "[fillet]") {
+  // The GUI multi-pick flow: pick edge, preview regenerates (body is now
+  // filleted), pick the NEXT edge against that regenerated body. The second
+  // ref must resolve against the fillet's pre-blend input on the next regen.
+  Document doc;
+  uint64_t ext = 0;
+  BuildRectPrism(doc, ext);
+  const double before = BodyVolume(doc);
+
+  const ElementRef first = PickEdge(doc, AtZ(3.0f));
+  doc.AddFeature(
+      std::make_unique<FilletFeature>("Fillet", std::vector{first}, 0.3));
+  auto* fil = dynamic_cast<FilletFeature*>(doc.GetFeature(2));
+  REQUIRE(fil != nullptr);
+  REQUIRE(doc.Regenerate());
+
+  // Second pick reads name + createdBy from the regenerated (blended) body,
+  // exactly like the viewport click does — its toponame embeds the blend's
+  // own tag, so it must be remapped onto the blend's input body before it is
+  // stored (topo::ResolveEdgeOnBody, the fix for the multi-pick bug).
+  const ElementRef picked = PickEdge(doc, AtZ(0.0f));
+  CHECK(picked.featureId == first.featureId); // same-body guard must pass
+  const Body& displayed = doc.GetBodies().at(0);
+  const auto polys = displayed.shape.GenerateEdgePolylines();
+  const auto idx = displayed.elementMap.ResolveEdge(picked.name);
+  REQUIRE(idx.has_value());
+  const auto& poly = polys.at(static_cast<size_t>(*idx));
+  const std::vector<Body>* before2 = doc.CachedBodiesAfter(1); // pre-blend
+  REQUIRE(before2 != nullptr);
+  const auto second = topo::ResolveEdgeOnBody(before2->at(0), picked.name,
+                                              poly[poly.size() / 2]);
+  REQUIRE(second.has_value());
+  fil->edges.push_back(*second);
+  REQUIRE(doc.Regenerate());
+  CHECK(fil->GetError().empty());
+
+  const double removed = (1.0 - M_PI / 4.0) * 0.3 * 0.3 * 4.0 * 2.0;
+  CHECK_THAT(BodyVolume(doc), WithinRel(before - removed, 1e-2));
 }
 
 TEST_CASE("Chamfer bevels a referenced edge", "[fillet]") {

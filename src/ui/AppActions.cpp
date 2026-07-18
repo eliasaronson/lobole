@@ -19,6 +19,7 @@
 #include "core/BooleanFeature.h"
 #include "core/Command.h"
 #include "core/DatumAxisFeature.h"
+#include "core/ElementHistory.h" // topo::ResolveEdgeOnBody (blend edge picks)
 #include "core/DatumPlaneFeature.h"
 #include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
@@ -1856,6 +1857,48 @@ std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
 
 namespace {
 
+// The viewport picks edges on the DISPLAYED body — which, once the collecting
+// blend has an edge, is the already-blended result whose toponames embed the
+// blend's own tag (e.g. "2/g1;M<id>;U2"). Those names don't exist on the
+// blend's INPUT body, so storing them errors the next regen ("edge no longer
+// exists") — the multi-edge-pick bug. Remap the picked ref onto the blend's
+// input (the regen cache's snapshot before the blend): by name when it still
+// resolves there, else by edge geometry (point-to-polyline match). Returns
+// nullopt for an edge the blend itself created — those have no pre-blend
+// counterpart and can't be blended by it.
+std::optional<ElementRef> RefOnBlendInput(AppState& state,
+                                          const FilletFeature& fil,
+                                          const ElementRef& picked,
+                                          uint32_t meshId, uint32_t edgeIndex) {
+  Document& doc = *state.document;
+  size_t filletIndex = 0;
+  if (doc.FindFeatureById(fil.GetId(), &filletIndex) == nullptr ||
+      filletIndex == 0) {
+    return picked;
+  }
+  const std::vector<Body>* before = doc.CachedBodiesAfter(filletIndex - 1);
+  if (before == nullptr)
+    return picked; // no snapshot (failed regen): keep the old behavior
+  const auto input =
+      std::find_if(before->begin(), before->end(), [&](const Body& b) {
+        return b.createdBy == picked.featureId;
+      });
+  if (input == before->end())
+    return picked;
+
+  // The displayed edge's polyline midpoint anchors the geometric fallback.
+  const auto& meshes = state.documentMeshes;
+  const auto mit = std::find_if(
+      meshes.begin(), meshes.end(),
+      [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });
+  if (mit == meshes.end() || edgeIndex >= mit->edgePolylines.size() ||
+      mit->edgePolylines[edgeIndex].size() < 2) {
+    return std::nullopt;
+  }
+  const auto& poly = mit->edgePolylines[edgeIndex];
+  return topo::ResolveEdgeOnBody(*input, picked.name, poly[poly.size() / 2]);
+}
+
 // Adds/removes one edge ref on the blend. A pending (previewing) feature is
 // edited directly — it isn't on the undo stack until accepted; an accepted
 // one goes through ModifyFeatureCommand so the change is one undo step.
@@ -1933,7 +1976,14 @@ bool HandleEdgePickInput(AppState& state, bool overViewport) {
 
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hit.hit) {
     if (auto ref = EdgeElementRef(state, hit.meshId, hit.edgeIndex)) {
-      ToggleBlendEdge(state, *fil, *ref);
+      if (auto mapped =
+              RefOnBlendInput(state, *fil, *ref, hit.meshId, hit.edgeIndex)) {
+        ToggleBlendEdge(state, *fil, *mapped);
+      } else {
+        state.sketchEdit.actionMsg =
+            "That edge was created by this blend - pick edges of the "
+            "original body.";
+      }
     } else {
       state.sketchEdit.actionMsg =
           "This edge has no stable name and can't be blended.";

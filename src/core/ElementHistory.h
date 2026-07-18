@@ -3,9 +3,13 @@
 #include "CADKernel.h"
 #include "core/BooleanFeature.h" // BooleanOp
 #include "core/ElementMap.h"
+#include "core/Feature.h"       // Body
 #include "core/FilletFeature.h" // EdgeBlendOp
 
+#include <glm/glm.hpp>
+
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -65,5 +69,16 @@ void ApplyFallbackPasses(const CADShape& shape, ElementMap& map);
 // (TopExp::MapShapes(TopAbs_EDGE) first-appearance order) — the edgeIndex
 // convention ElementMap::edgeNames uses. -1 if absent.
 int EdgeIndexOf(const TopoDS_Shape& shape, const TopoDS_Shape& edge);
+
+// Resolve a picked edge onto another state of its body — by name when
+// `pickedName` still resolves on `input`, else geometrically: `probe` (a
+// point on the displayed edge, e.g. its polyline midpoint) must lie on the
+// input edge. Edge picking uses this to store blend refs against the blend's
+// INPUT body rather than its displayed (already blended) output, whose
+// toponames embed the blend's own tag. nullopt = no counterpart on `input`
+// (e.g. an edge the blend itself created).
+std::optional<ElementRef> ResolveEdgeOnBody(const Body& input,
+                                            const std::string& pickedName,
+                                            const glm::vec3& probe);
 
 } // namespace topo

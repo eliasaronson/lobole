@@ -203,6 +203,14 @@ public:
   const RegenStats& LastRegenStats() const { return m_lastStats; }
   void ClearRegenCache() { m_cache.clear(); }
 
+  // The body list as it stood after feature `index` executed, from the regen
+  // prefix cache — i.e. feature `index + 1`'s input. Valid for the prefix the
+  // last successful Regenerate covered; null when the cache doesn't reach
+  // `index`. Used by edge picking to resolve refs against a blend's input.
+  const std::vector<Body>* CachedBodiesAfter(size_t index) const {
+    return index < m_cache.size() ? &m_cache[index].bodiesAfter : nullptr;
+  }
+
   // Rollback bar (R2): regeneration executes features [0, rollback) only;
   // the rest are skipped (grayed in the tree, params untouched). -1 = end.
   // Persisted with the document, like SolidWorks' marker position.

@@ -15,6 +15,7 @@
 #include <TopoDS.hxx>
 
 #include <algorithm>
+#include <cfloat>
 #include <memory>
 #include <string>
 #include <utility>
@@ -376,6 +377,52 @@ int EdgeIndexOf(const TopoDS_Shape& shape, const TopoDS_Shape& edge) {
   TopTools_IndexedMapOfShape edges;
   TopExp::MapShapes(shape, TopAbs_EDGE, edges);
   return edges.FindIndex(edge) - 1;
+}
+
+std::optional<ElementRef> ResolveEdgeOnBody(const Body& input,
+                                            const std::string& pickedName,
+                                            const glm::vec3& probe) {
+  if (input.elementMap.ResolveEdge(pickedName).has_value()) {
+    return ElementRef{input.createdBy, pickedName};
+  }
+
+  // Geometric fallback: an edge untouched by the downstream op is identical
+  // on both body states, so `probe` lies exactly on its input polyline.
+  const auto distToPoly = [](const glm::vec3& p,
+                             const std::vector<glm::vec3>& poly) {
+    float d = FLT_MAX;
+    for (size_t i = 0; i + 1 < poly.size(); i++) {
+      const glm::vec3 a = poly[i];
+      const glm::vec3 ab = poly[i + 1] - a;
+      const float len2 = glm::dot(ab, ab);
+      const float t =
+          len2 > 0.0f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f)
+                      : 0.0f;
+      d = std::min(d, glm::length(p - (a + ab * t)));
+    }
+    return d;
+  };
+  const auto polys = input.shape.GenerateEdgePolylines();
+  int best = -1;
+  float bestD = 1e-3f; // mm; identical geometry, so effectively exact
+  for (size_t e = 0; e < polys.size(); e++) {
+    if (polys[e].size() < 2) {
+      continue;
+    }
+    const float d = distToPoly(probe, polys[e]);
+    if (d < bestD) {
+      bestD = d;
+      best = static_cast<int>(e);
+    }
+  }
+  if (best < 0) {
+    return std::nullopt;
+  }
+  const std::string* name = input.elementMap.EdgeNameOf(best);
+  if (name == nullptr) {
+    return std::nullopt;
+  }
+  return ElementRef{input.createdBy, *name};
 }
 
 } // namespace topo
