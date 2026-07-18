@@ -11,6 +11,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 struct ImGuiTestEngine;
 struct ImGuiTestContext;
@@ -49,12 +50,20 @@ private:
     nlohmann::json id;
     std::string method;
     nlohmann::json params;
+    int client = -1;  // fd the response goes back to
   };
 
-  void ReaderThread(); // accept loop; the listen socket is bound in Start
-  void Send(const nlohmann::json& message);
-  void Respond(const nlohmann::json& id, const nlohmann::json& result);
-  void RespondError(const nlohmann::json& id, const std::string& error);
+  // Accept loop (listen socket bound in Start) spawning one reader per
+  // connection — several clients may be connected at once (e.g. the MCP
+  // server plus a hand-driven python shell); requests interleave through the
+  // single main-thread queue and responses route back by fd.
+  void ReaderThread();
+  void ClientThread(int fd);
+  void Send(int client, const nlohmann::json& message);
+  void Respond(int client, const nlohmann::json& id,
+               const nlohmann::json& result);
+  void RespondError(int client, const nlohmann::json& id,
+                    const std::string& error);
 
   nlohmann::json HandleSemantic(const Request& request, ui::AppState& state,
                                 bool& handled);
@@ -65,7 +74,10 @@ private:
   std::thread m_thread;
   std::atomic<bool> m_running{false};
   int m_listenFd = -1;
-  std::atomic<int> m_clientFd{-1};
+
+  std::mutex m_clientsMutex;
+  std::vector<int> m_clients;               // open connection fds (for Stop)
+  std::vector<std::thread> m_clientThreads; // joined in Stop
 
   std::mutex m_queueMutex;
   std::deque<Request> m_requests;
@@ -76,11 +88,13 @@ private:
 
   // One in-flight UI action at a time (runs across frames in the engine)
   nlohmann::json m_uiActionId;
+  int m_uiActionClient = -1;
   bool m_uiActionInFlight = false;
   std::function<void(ImGuiTestContext*)> m_uiAction;
 
   // Pending screenshot
   nlohmann::json m_screenshotId;
+  int m_screenshotClient = -1;
   std::string m_screenshotPath;
   bool m_screenshotPending = false;
 

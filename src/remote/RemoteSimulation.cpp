@@ -252,7 +252,9 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                     {"max_iterations", st.maxIterations},
                     {"compliance", st.compliance},
                     {"max_change", st.maxChange},
-                    {"volume_fraction", st.volumeFraction}};
+                    {"volume_fraction", st.volumeFraction},
+                    {"solver", st.solver},
+                    {"elapsed_seconds", st.elapsedSeconds}};
       // Not running — report the cached result's state (if any).
       const fem::StudyRuntime* rt = doc->StudyResults(id);
       return json{{"running", false},
@@ -260,6 +262,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                   {"converged", rt && rt->converged},
                   {"cancelled", rt && rt->cancelled},
                   {"iterations", rt ? rt->iterations : 0},
+                  {"solver", rt ? rt->solver : ""},
+                  {"solve_seconds", rt ? rt->solveSeconds : 0.0},
                   {"stale", doc->StudyResultsStale(id)}};
     }
 
@@ -295,6 +299,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                   {"compliance", rt->complianceHistory.empty()
                                      ? 0.0
                                      : rt->complianceHistory.back()},
+                  {"solver", rt->solver},
+                  {"solve_seconds", rt->solveSeconds},
                   {"stale", doc->StudyResultsStale(id)}};
     }
 

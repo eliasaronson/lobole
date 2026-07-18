@@ -166,6 +166,20 @@ def main():
         v = d.call("view", name="front")
         offset = [p - t for p, t in zip(v["position"], v["target"])]
         expect(abs(offset[0]) < 1e-4 and offset[2] > 0, "front view headless")
+        # Direct camera control (set_camera) is pure state — works headless.
+        v = d.call("set_camera", target=[1.0, 2.0, 3.0], distance=250.0)
+        expect(abs(v["distance"] - 250.0) < 1e-3, "set_camera distance")
+        expect(abs(v["target"][1] - 2.0) < 1e-6, "set_camera target")
+        v = d.call("set_camera", direction=[0, 0, 1])
+        expect(v["position"][2] > v["target"][2], "set_camera direction")
+        d.call("reset_layout")  # harmless no-op headless (flag only)
+
+        # A SECOND simultaneous client works (multi-client remote): both see
+        # the same document and responses route to the right connection.
+        d2 = Designer(port)
+        expect(len(d2.call("get_state")["bodies"]) == 1, "second client reads")
+        expect(len(d.call("get_state")["bodies"]) == 1, "first client still ok")
+        d2.close()
 
         # Every GUI-dependent method degrades with its specific error
         expect_error(d, "screenshot", "requires the GUI", path="/tmp/x.png")

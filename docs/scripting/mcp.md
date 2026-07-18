@@ -33,8 +33,16 @@ constraints and ops (`add_constraint`, `fillet`, `mirror`, `pattern`,
 `mass_properties` (volume/CoM/inertia/mass) and `list_elements` (stable
 face/edge names for Fillet/Chamfer refs) as the geometry oracles;
 `screenshot` and `render_still` return inline images; `view` snaps standard
-views. `ui_action` exposes raw GUI events (menus, clicks, keys) for
-driving/testing the GUI itself.
+views and `set_camera` gives direct target/direction/distance control;
+`select_face` prefers stable element names (`element="2/g4"`) over volatile
+mesh ids; `reset_layout` rebuilds the default panel arrangement. Topology
+`study_status`/`study_results` report the solve's provenance (`solver`:
+`gpu: <device>` or `cpu (...)`, plus elapsed seconds). `ui_action` exposes
+raw GUI events (menus, clicks, keys) for driving/testing the GUI itself.
+
+The remote server accepts several concurrent clients (e.g. the MCP server
+plus a hand-driven `tools/designer_remote.py` shell); requests interleave
+through the app's main thread and responses route back per connection.
 
 The `modeling-workflow` prompt teaches the loop that works: variables first,
 constrain fully, verify with `get_state` + `screenshot` after every step.

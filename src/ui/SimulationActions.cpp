@@ -17,6 +17,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -100,13 +101,14 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   job->studyId = studyId;
   job->maxIterations = job->input.params.maxIterations;
 
-  TopoJob* j = job.get();  // stable: the job outlives the thread (joined first)
-  job->thread = std::thread([j]() {
-    // The GPU matrix-free CG when a usable hardware device exists, else the
-    // built-in Eigen CG-IC. Created on this worker thread (its private Vulkan
-    // context stays here). DESIGNER_TOPO_GPU=0 forces CPU; =1 also admits a
-    // software (llvmpipe) device — useful for exercising the GPU path.
+  // Pick the linear solver here on the main thread, so study_status can
+  // report it from the first poll: the GPU matrix-free CG when a usable
+  // hardware device exists, else the built-in Eigen CG-IC. The worker is the
+  // only thread that touches it after launch. DESIGNER_TOPO_GPU=0 forces CPU;
+  // =1 also admits a software (llvmpipe) device — for exercising the GPU path.
+  job->solverName = "cpu (Eigen CG-IC)";
 #ifdef HAVE_FEM_GPU
+  {
     const char* pref = std::getenv("DESIGNER_TOPO_GPU");
     if (!pref || std::string(pref) != "0") {
       std::string gerr;
@@ -114,12 +116,19 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
                                            &gerr);
       if (gs) {
         LOG_INFO("topology: GPU solver on {}", gs->DeviceName());
-        j->solver = std::move(gs);
+        job->solverName = "gpu: " + gs->DeviceName();
+        job->solver = std::move(gs);
       } else {
         LOG_INFO("topology: CPU solver ({})", gerr);
+        job->solverName = "cpu (" + gerr + ")";
       }
     }
+  }
 #endif
+  job->started = std::chrono::steady_clock::now();
+
+  TopoJob* j = job.get();  // stable: the job outlives the thread (joined first)
+  job->thread = std::thread([j]() {
     std::string err;
     auto res = fem::TopologyOptimize(
         j->input.mesh, j->input.material, j->input.fixedNodes, j->input.loads,
@@ -150,6 +159,10 @@ void PollTopologyRun(AppState& state, Document& doc) {
   if (job.result) {
     fem::StudyRuntime rt = fem::MakeTopoRuntime(job.input, *job.result);
     rt.solvedAtVersion = doc.Version();
+    rt.solver = job.solverName;
+    rt.solveSeconds = std::chrono::duration<double>(
+                          std::chrono::steady_clock::now() - job.started)
+                          .count();
     doc.StoreStudyResults(job.studyId, std::move(rt));
   } else if (fem::Study* s = doc.FindStudy(job.studyId)) {
     s->error = "body '" + job.input.bodyName + "': " + job.error;
@@ -175,6 +188,10 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
   st.compliance = job->compliance.load(std::memory_order_relaxed);
   st.maxChange = job->maxChange.load(std::memory_order_relaxed);
   st.volumeFraction = job->volumeFraction.load(std::memory_order_relaxed);
+  st.solver = job->solverName;  // written before the thread launched
+  st.elapsedSeconds = std::chrono::duration<double>(
+                          std::chrono::steady_clock::now() - job->started)
+                          .count();
   return st;
 }
 

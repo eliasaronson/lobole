@@ -197,6 +197,8 @@ struct TopoRunStatus {
   double compliance = 0.0;
   double maxChange = 0.0;
   double volumeFraction = 0.0;
+  std::string solver;           // "gpu: <device>" or "cpu (<why>)"
+  double elapsedSeconds = 0.0;  // since the run started
 };
 TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
 

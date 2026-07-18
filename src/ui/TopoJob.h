@@ -10,6 +10,7 @@
 #include "core/FemTopo.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -36,10 +37,13 @@ struct TopoJob {
   std::optional<fem::TopoResult> result;
   std::string error;
 
-  // The linear solver for the run (the GPU seam), created and used entirely
-  // on the worker thread — its private Vulkan context never crosses threads.
-  // Null = the built-in CPU path.
+  // The linear solver for the run (the GPU seam), created on the MAIN thread
+  // in StartTopologyRun (so solverName is set before the worker exists), then
+  // used only by the worker — Vulkan allows the handoff as long as a single
+  // thread uses the context at a time. Null = the built-in CPU path.
   std::unique_ptr<fem::TopoLinearSolver> solver;
+  std::string solverName;  // "gpu: <device>" or "cpu (<why>)" — set pre-launch
+  std::chrono::steady_clock::time_point started;
 
   std::thread thread;
 

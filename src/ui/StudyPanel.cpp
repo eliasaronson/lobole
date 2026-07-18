@@ -151,6 +151,8 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
     std::snprintf(ov, sizeof(ov), "iter %d / %d", st.iteration, st.maxIterations);
     ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0), ov);
     ImGui::Text("Compliance: %.4g   Vf: %.3f", st.compliance, st.volumeFraction);
+    ImGui::TextColored(kMuted, "%s   %.0fs", st.solver.c_str(),
+                       st.elapsedSeconds);
     if (ImGui::Button(ICON_FA_STOP " Cancel")) CancelTopologyRun(state, s.id);
     return;
   }
@@ -185,6 +187,9 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
               rt->converged ? " (converged)"
                             : rt->cancelled ? " (cancelled)" : "");
   ImGui::Text("Volume fraction: %.3f", rt->volumeFractionAchieved);
+  if (!rt->solver.empty())  // transient provenance; empty on a reloaded result
+    ImGui::TextColored(kMuted, "Solver: %s (%.0f s)", rt->solver.c_str(),
+                       rt->solveSeconds);
   if (!rt->complianceHistory.empty()) {
     ImGui::Text("Compliance: %.4g -> %.4g", rt->complianceHistory.front(),
                 rt->complianceHistory.back());

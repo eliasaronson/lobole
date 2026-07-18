@@ -848,12 +848,41 @@ def fit_view() -> dict:
     return _call("fit_view")
 
 
-@mcp.tool(description="Select a B-Rep face by render mesh id + face index "
-          "(mesh ids from get_state bodies[].mesh — refetch after every "
-          "regeneration). Returns the face normal and center. Follow with "
-          "orient_to_face to look straight at it.")
-def select_face(mesh: int, face: int) -> dict:
+@mcp.tool(description="Select a B-Rep face. Preferred: by STABLE element name "
+          "(list_elements), e.g. element='2/g4' — survives regeneration. "
+          "Legacy: by render mesh id + face index (get_state bodies[].mesh; "
+          "ids change every regeneration). Returns the face normal and "
+          "center. Follow with orient_to_face to look straight at it.")
+def select_face(mesh: int = -1, face: int = -1, element: str = "") -> dict:
+    if element:
+        return _call("select_face", element=element)
     return _call("select_face", mesh=mesh, face=face)
+
+
+@mcp.tool(description="Direct camera control (view/fit only snap to standard "
+          "views): optional target [x,y,z], direction [x,y,z] (unit offset "
+          "from target toward the camera), up [x,y,z], and distance (mm, "
+          "zoom). Each field optional, applied in that order. Returns the "
+          "resulting position/target/distance.")
+def set_camera(target: list | None = None, direction: list | None = None,
+               up: list | None = None, distance: float | None = None) -> dict:
+    params = {}
+    if target is not None:
+        params["target"] = target
+    if direction is not None:
+        params["direction"] = direction
+    if up is not None:
+        params["up"] = up
+    if distance is not None:
+        params["distance"] = distance
+    return _call("set_camera", **params)
+
+
+@mcp.tool(description="Rebuild the default panel layout (Model left, "
+          "Properties right, 3D center) — recovery for a wedged or "
+          "misdocked panel arrangement, without restarting the app.")
+def reset_layout() -> dict:
+    return _call("reset_layout")
 
 
 @mcp.tool(description="Orient the camera to look squarely at the selected "

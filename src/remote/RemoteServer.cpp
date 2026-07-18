@@ -110,8 +110,10 @@ void RemoteServer::Stop() {
   if (!m_running)
     return;
   m_running = false;
-  if (m_clientFd >= 0) {
-    ::shutdown(m_clientFd, SHUT_RDWR);
+  {
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    for (int fd : m_clients)
+      ::shutdown(fd, SHUT_RDWR);
   }
   if (m_listenFd >= 0) {
     ::shutdown(m_listenFd, SHUT_RDWR);
@@ -120,6 +122,10 @@ void RemoteServer::Stop() {
   }
   if (m_thread.joinable())
     m_thread.join();
+  for (std::thread& t : m_clientThreads)
+    if (t.joinable())
+      t.join();
+  m_clientThreads.clear();
 }
 
 void RemoteServer::ReaderThread() {
@@ -127,65 +133,79 @@ void RemoteServer::ReaderThread() {
     int client = ::accept(m_listenFd, nullptr, nullptr);
     if (client < 0)
       break;
-    m_clientFd = client;
-    LOG_INFO("Remote control: client connected");
-
-    std::string buffer;
-    char chunk[4096];
-    while (m_running) {
-      ssize_t n = ::read(client, chunk, sizeof(chunk));
-      if (n <= 0)
-        break;
-      buffer.append(chunk, static_cast<size_t>(n));
-
-      size_t pos;
-      while ((pos = buffer.find('\n')) != std::string::npos) {
-        std::string line = buffer.substr(0, pos);
-        buffer.erase(0, pos + 1);
-        if (line.empty())
-          continue;
-
-        Request request;
-        try {
-          json msg = json::parse(line);
-          request.id = msg.value("id", json());
-          request.method = msg.value("method", "");
-          request.params = msg.value("params", json::object());
-        } catch (const std::exception& e) {
-          Send({{"id", nullptr}, {"error", std::string("parse: ") + e.what()}});
-          continue;
-        }
-        std::lock_guard<std::mutex> lock(m_queueMutex);
-        m_requests.push_back(std::move(request));
-      }
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    if (m_clients.size() >= 8) {  // runaway-connection backstop
+      ::close(client);
+      continue;
     }
-    ::close(client);
-    m_clientFd = -1;
-    LOG_INFO("Remote control: client disconnected");
+    m_clients.push_back(client);
+    m_clientThreads.emplace_back([this, client] { ClientThread(client); });
+    LOG_INFO("Remote control: client connected ({} active)", m_clients.size());
   }
 }
 
-void RemoteServer::Send(const json& message) {
-  int fd = m_clientFd;
-  if (fd < 0)
+void RemoteServer::ClientThread(int client) {
+  std::string buffer;
+  char chunk[4096];
+  while (m_running) {
+    ssize_t n = ::read(client, chunk, sizeof(chunk));
+    if (n <= 0)
+      break;
+    buffer.append(chunk, static_cast<size_t>(n));
+
+    size_t pos;
+    while ((pos = buffer.find('\n')) != std::string::npos) {
+      std::string line = buffer.substr(0, pos);
+      buffer.erase(0, pos + 1);
+      if (line.empty())
+        continue;
+
+      Request request;
+      request.client = client;
+      try {
+        json msg = json::parse(line);
+        request.id = msg.value("id", json());
+        request.method = msg.value("method", "");
+        request.params = msg.value("params", json::object());
+      } catch (const std::exception& e) {
+        Send(client,
+             {{"id", nullptr}, {"error", std::string("parse: ") + e.what()}});
+        continue;
+      }
+      std::lock_guard<std::mutex> lock(m_queueMutex);
+      m_requests.push_back(std::move(request));
+    }
+  }
+  ::close(client);
+  {
+    std::lock_guard<std::mutex> lock(m_clientsMutex);
+    m_clients.erase(std::remove(m_clients.begin(), m_clients.end(), client),
+                    m_clients.end());
+  }
+  LOG_INFO("Remote control: client disconnected");
+}
+
+void RemoteServer::Send(int client, const json& message) {
+  if (client < 0)
     return;
   std::string line = message.dump() + "\n";
   std::lock_guard<std::mutex> lock(m_sendMutex);
   size_t sent = 0;
   while (sent < line.size()) {
-    ssize_t n = ::write(fd, line.data() + sent, line.size() - sent);
+    ssize_t n = ::write(client, line.data() + sent, line.size() - sent);
     if (n <= 0)
       return;
     sent += static_cast<size_t>(n);
   }
 }
 
-void RemoteServer::Respond(const json& id, const json& result) {
-  Send({{"id", id}, {"result", result}});
+void RemoteServer::Respond(int client, const json& id, const json& result) {
+  Send(client, {{"id", id}, {"result", result}});
 }
 
-void RemoteServer::RespondError(const json& id, const std::string& error) {
-  Send({{"id", id}, {"error", error}});
+void RemoteServer::RespondError(int client, const json& id,
+                                const std::string& error) {
+  Send(client, {{"id", id}, {"error", error}});
 }
 
 // ---------------------------------------------------------------------------
@@ -470,8 +490,33 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!state.faceSelector || !state.meshRenderer)
       throw std::runtime_error(
           "face selection needs render meshes — unavailable in --headless");
-    const uint32_t mesh = p.at("mesh").get<uint32_t>();
-    const uint32_t face = p.at("face").get<uint32_t>();
+    uint32_t mesh = 0, face = 0;
+    if (p.contains("element")) {
+      // Stable element name (list_elements), e.g. {"element": "2/g4"} — no
+      // volatile mesh ids needed. Names are unique per document (prefixed by
+      // the creating feature), so the body scan is unambiguous.
+      if (!state.document) throw std::runtime_error("no document");
+      const std::string el = p.at("element").get<std::string>();
+      const auto& bodies = state.document->GetBodies();
+      bool found = false;
+      for (size_t i = 0; i < bodies.size() && !found; ++i) {
+        for (const auto& [idx, name] : bodies[i].elementMap.names) {
+          if (name != el) continue;
+          if (i >= state.documentMeshes.size())
+            throw std::runtime_error("body has no render mesh yet");
+          mesh = state.documentMeshes[i].meshId;
+          face = static_cast<uint32_t>(idx);
+          found = true;
+          break;
+        }
+      }
+      if (!found)
+        throw std::runtime_error("no face named '" + el +
+                                 "' (see list_elements)");
+    } else {
+      mesh = p.at("mesh").get<uint32_t>();
+      face = p.at("face").get<uint32_t>();
+    }
     uint32_t first = 0, count = 0;
     if (!state.faceSelector->GetFaceVertexRange(mesh, face, first, count))
       throw std::runtime_error("no such face");
@@ -479,6 +524,42 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     state.meshRenderer->SetFaceHighlight(mesh, first, count);
     return {{"normal", Vec3ToJson(state.faceSelector->GetFaceNormal(mesh, face))},
             {"center", Vec3ToJson(state.faceSelector->GetFaceCenter(mesh, face))}};
+  }
+  if (m == "set_camera") {
+    // Direct camera control (the view/fit RPCs only snap to standard views):
+    // params: {target?: [x,y,z], direction?: [x,y,z] (unit offset from target
+    // toward the camera), up?: [x,y,z], distance?: mm}. Applied in that
+    // order; each field optional. Works headless (camera state only).
+    if (!state.camera) throw std::runtime_error("no camera");
+    Camera& cam = *state.camera;
+    auto vec3 = [](const json& a) {
+      return glm::vec3(a.at(0).get<float>(), a.at(1).get<float>(),
+                       a.at(2).get<float>());
+    };
+    if (p.contains("target")) cam.SetTarget(vec3(p["target"]));
+    if (p.contains("direction")) {
+      const glm::vec3 dir = vec3(p["direction"]);
+      if (glm::length(dir) < 1e-9f)
+        throw std::runtime_error("direction must be non-zero");
+      const glm::vec3 up =
+          p.contains("up") ? vec3(p["up"]) : glm::vec3(0.0f, 1.0f, 0.0f);
+      cam.SnapToView(glm::normalize(dir), up);
+    }
+    if (p.contains("distance")) {
+      const float d = p.at("distance").get<float>();
+      if (d <= 0.0f) throw std::runtime_error("distance must be positive");
+      cam.SetMaxDistance(std::max(20.0f * d, 1000.0f));
+      cam.SetDistance(d);
+    }
+    return {{"position", Vec3ToJson(cam.GetPosition())},
+            {"target", Vec3ToJson(cam.GetTarget())},
+            {"distance", cam.GetDistance()}};
+  }
+  if (m == "reset_layout") {
+    // Rebuild the default dock layout (panels re-docked to their edges) — the
+    // recovery for a wedged imgui.ini state, without restarting the app.
+    state.buildDefaultDockLayout = true;
+    return json::object();
   }
   if (m == "orient_to_face") {
     if (!state.faceSelector)
@@ -518,7 +599,8 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     };
   } else if (m == "item_click") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
-      ctx->ItemClick(p.at("ref").get<std::string>().c_str());
+      ctx->ItemClick(p.at("ref").get<std::string>().c_str(),
+                     p.value("button", 0)); // 1 = right-click (context menus)
     };
   } else if (m == "item_input") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
@@ -570,6 +652,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
   }
 
   m_uiActionId = request.id;
+  m_uiActionClient = request.client;
   m_uiActionInFlight = true;
   ImGuiTestEngine_QueueTest(m_engine, s_UiActionTest);
   return true;
@@ -588,9 +671,10 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
     m_uiActionInFlight = false;
     m_uiAction = nullptr;
     if (s_UiActionTest->Output.Status == ImGuiTestStatus_Success) {
-      Respond(m_uiActionId, json::object());
+      Respond(m_uiActionClient, m_uiActionId, json::object());
     } else {
-      RespondError(m_uiActionId, "ui action failed (see app log)");
+      RespondError(m_uiActionClient, m_uiActionId,
+                   "ui action failed (see app log)");
     }
   }
 
@@ -621,31 +705,35 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
                       << "\n";
           m_recording.flush();
         }
-        Respond(request.id, result);
+        Respond(request.client, request.id, result);
         continue;
       }
       if (request.method == "screenshot") {
         if (!m_engine) {
-          RespondError(request.id, "screenshot requires the GUI — start "
-                                   "designer without --headless");
+          RespondError(request.client, request.id,
+                       "screenshot requires the GUI — start "
+                       "designer without --headless");
           continue;
         }
         m_screenshotId = request.id;
+        m_screenshotClient = request.client;
         m_screenshotPath = request.params.at("path").get<std::string>();
         m_screenshotPending = true;
         return; // main loop captures after this frame renders
       }
       if (!m_engine && IsUiAction(request.method)) {
-        RespondError(request.id, "UI actions are unavailable in --headless — "
-                                 "start designer without it");
+        RespondError(request.client, request.id,
+                     "UI actions are unavailable in --headless — "
+                     "start designer without it");
         continue;
       }
       if (QueueUiAction(request)) {
         return; // response sent when the engine finishes the action
       }
-      RespondError(request.id, "unknown method: " + request.method);
+      RespondError(request.client, request.id,
+                   "unknown method: " + request.method);
     } catch (const std::exception& e) {
-      RespondError(request.id, e.what());
+      RespondError(request.client, request.id, e.what());
     }
   }
 }
@@ -660,8 +748,8 @@ bool RemoteServer::WantsScreenshot(std::string& path) {
 void RemoteServer::ScreenshotDone(bool ok, const std::string& error) {
   m_screenshotPending = false;
   if (ok) {
-    Respond(m_screenshotId, {{"path", m_screenshotPath}});
+    Respond(m_screenshotClient, m_screenshotId, {{"path", m_screenshotPath}});
   } else {
-    RespondError(m_screenshotId, error);
+    RespondError(m_screenshotClient, m_screenshotId, error);
   }
 }

@@ -136,6 +136,12 @@ struct StudyRuntime {
   bool cancelled = false;
   double volumeFractionAchieved = 0.0;
   std::vector<double> complianceHistory;
+
+  // Provenance of the solve — transient (NOT serialized; a reloaded result
+  // reads empty/zero): which linear solver ran ("gpu: <device>" /
+  // "cpu (...)") and the wall time of the whole optimization.
+  std::string solver;
+  double solveSeconds = 0.0;
 };
 
 // (Document is forward-declared at global scope by FemStudy.h.)

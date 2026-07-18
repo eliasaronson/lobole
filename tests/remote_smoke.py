@@ -123,6 +123,14 @@ def main():
         expect(len(sel["normal"]) == 3, "face selected")
         d.call("orient_to_face")
 
+        # The same face by STABLE element name (no volatile mesh id): resolve
+        # the name of face index 0 via list_elements and expect the same
+        # geometry back.
+        els = d.call("list_elements")["bodies"][0]["faces"]
+        name0 = next(f["name"] for f in els if f["index"] == 0)
+        sel2 = d.call("select_face", element=name0)
+        expect(sel2["center"] == sel["center"], "select_face by element name")
+
         # Project save/load roundtrip
         project = os.path.join(tmp, "part.json")
         d.call("save_project", path=project)

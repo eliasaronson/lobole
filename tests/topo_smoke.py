@@ -104,10 +104,16 @@ def main():
         expect(st["has_results"], "results stored after the run finished")
         expect(st["cancelled"] is False, "a completed run is not cancelled")
         expect(st["iterations"] > 0, "it iterated")
+        # Solve provenance: which linear solver ran ("gpu: ..." on a machine
+        # with a usable device, else "cpu (...)") and how long it took.
+        expect(st["solver"].startswith(("gpu", "cpu")),
+               f"solver reported: {st.get('solver')}")
+        expect(st["solve_seconds"] > 0.0, "solve time reported")
 
         res = d.call("study_results", study=study)
         expect(res["analysis"] == "topology", f"topology summary: {res}")
         expect(res["elements"] > 0, "solved a mesh")
+        expect(res["solver"] == st["solver"], "results echo the solver")
         expect(abs(res["volume_fraction"] - 0.4) < 0.03,
                f"volume fraction near target, got {res['volume_fraction']}")
         expect(res["stale"] is False, "fresh results not stale")
