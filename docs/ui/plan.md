@@ -103,7 +103,13 @@ occurrence / mate / sketch-region) living in `AppState` + `ViewportInput`:
 
 ## U3 — Feature-dialog pattern
 
-Feature creation/editing as a consistent small form (the Onshape dialog):
+**SHIPPED 2026-07-18** (pick slots): PickSlotRow + SlotPickState armed
+context; wired for extrude up-to-face (replacing the all-faces combo),
+boolean target/tool, pattern source, shell body/open-faces, draft faces,
+and U2's Profiles regions. Combos remain the precision path. Remaining from
+the original sketch (folded into U5/U6 polish): a full dialog *frame*
+beyond the slots — the current dialogs already share LeftLabel/slot rows.
+Original design:
 named **pick slots** ("Profiles", "Axis", "Mirror plane") with the active
 slot highlighted and driving U1's filter — clicking in the viewport fills the
 slot; the existing ref combos remain as the alternate/precision path. Numeric
@@ -115,9 +121,13 @@ dialog's pick slots + the feature tree as an alternate pick surface.
 
 ## U2 — Sketch-region selection for extrude/revolve
 
-The user-pain: extrude takes the whole sketch — you can't pick *which closed
-region* to extrude. `SketchProfile::BuildLoops` already computes the loops;
-make them first-class:
+**SHIPPED 2026-07-18** (format v34): regions stored as outer-loop entity-id
+sets (empty = whole sketch, back-compat); regen filters BuildLoops with
+holes riding along; vanished region = regen error with re-pick guidance;
+picked in the viewport via the U3 Profiles slot (even-odd containment;
+hover/selected loop boundaries emphasized). Deferred: shaded region fill
+(boundary emphasis shipped instead — shading needs face triangulation).
+Original design:
 
 - Hit-test regions (point-in-loop, respecting holes), shade the hovered
   region, click to toggle — multi-region select (Onshape's shaded-profile
