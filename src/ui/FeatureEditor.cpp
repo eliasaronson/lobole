@@ -23,6 +23,8 @@
 #include "imgui.h"
 #include "imgui_internal.h" // GetCurrentWindowRead (LeftLabel auto-resize case)
 
+#include "ui/SelectionPipeline.h" // ParseRegionIds (U2 region slots)
+
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
@@ -712,7 +714,23 @@ void SlotPickClicked(AppState& state, const SelectionItem& item) {
     break;
   case PickSlot::ExtrudeRegions:
   case PickSlot::RevolveRegions:
-    break; // U2 wires these
+    if (item.kind == SelectionItem::Kind::SketchRegion) {
+      const std::vector<uint32_t> ids = ParseRegionIds(item.element.name);
+      std::vector<std::vector<uint32_t>>* regions = nullptr;
+      if (auto* ext = dynamic_cast<ExtrudeFeature*>(f))
+        regions = &ext->regions;
+      else if (auto* rev = dynamic_cast<RevolveFeature*>(f))
+        regions = &rev->regions;
+      if (regions != nullptr && !ids.empty()) {
+        const auto it = std::find(regions->begin(), regions->end(), ids);
+        if (it != regions->end())
+          regions->erase(it); // click a selected region again = remove
+        else
+          regions->push_back(ids);
+        changed = true;
+      }
+    }
+    break;
   }
 
   if (changed)
@@ -866,6 +884,12 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     } else {
       ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch: missing");
     }
+    PickSlotRow(state, feature, PickSlot::ExtrudeRegions, "Profiles",
+                ext->regions.empty()
+                    ? "All regions"
+                    : std::to_string(ext->regions.size()) + " selected",
+                SlotKind(SelectionItem::Kind::SketchRegion), /*multi=*/true,
+                "Click sketch regions to extrude (again removes; none = all)");
   } else if (auto* rev = dynamic_cast<RevolveFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Angle (deg)", rev->angleExpr,
             rev->angleDeg);
@@ -889,6 +913,12 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     } else {
       ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch: missing");
     }
+    PickSlotRow(state, feature, PickSlot::RevolveRegions, "Profiles",
+                rev->regions.empty()
+                    ? "All regions"
+                    : std::to_string(rev->regions.size()) + " selected",
+                SlotKind(SelectionItem::Kind::SketchRegion), /*multi=*/true,
+                "Click sketch regions to revolve (again removes; none = all)");
   } else if (auto* boo = dynamic_cast<BooleanFeature*>(&feature)) {
     DrawBooleanParams(state, *boo, index, commit);
   } else if (auto* pat = dynamic_cast<PatternFeature*>(&feature)) {

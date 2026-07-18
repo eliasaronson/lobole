@@ -135,6 +135,9 @@ std::vector<uint32_t> LoopEntityIds(const Loop& loop);
 // Even-odd point-in-loop test in plane UV (arcs sampled to segments).
 bool PointInLoop(const Loop& loop, const glm::vec2& p);
 
+// The loop's boundary as a sampled UV polygon (region-pick overlays).
+std::vector<glm::vec2> LoopBoundaryPolygon(const Loop& loop);
+
 // Keeps only the loops whose id set matches one of `regions`, plus every
 // loop nested inside a kept one (holes ride along with their outer). Returns
 // false — leaving `loops` untouched — when a region matches no current loop.

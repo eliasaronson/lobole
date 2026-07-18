@@ -4,6 +4,7 @@
 #include "FaceSelector.h"
 #include "core/BooleanFeature.h"
 #include "core/Document.h"
+#include "core/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
 #include "core/Serialization.h"
@@ -1415,5 +1416,67 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       if (std::abs(b.shape.Volume() - 12.0) < 1e-3)
         sawUnion = true;
     IM_CHECK(sawUnion);
+  };
+
+  // U2: region picking — arm the extrude's Profiles slot and toggle one of
+  // a two-region sketch's profiles by clicking inside it in the viewport.
+  t = IM_REGISTER_TEST(engine, "region", "pick_one_of_two_regions");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    auto sk = std::make_unique<SketchFeature>("Profiles",
+                                              SketchPlane(PlaneType::XY));
+    const uint32_t c1 = sk->AddEntity(sketch::Circle{{0, 0}, 1.0});
+    sk->AddEntity(sketch::Circle{{5, 0}, 1.0});
+    Doc()->AddFeature(std::move(sk));
+    const uint64_t skId = Doc()->GetFeature(0)->GetId();
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>(
+        "Pad", skId, 2.0, ExtrudeMode::NewBody));
+    Doc()->Regenerate();
+    const uint64_t extId = Doc()->GetFeature(1)->GetId();
+    ui::SelectFeature(*s_App, extId);
+
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(2.5f, 0.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(2.5f, 0.5f, 12.0f));
+    ctx->Yield();
+
+    // Arm the Profiles slot (committed feature → Properties panel).
+    ctx->ItemClick("//Properties/###slot7");
+    IM_CHECK(s_App->slotPick.Active());
+
+    // Click inside circle 1's region (the sketch-plane point, not the body).
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(0.0f, 0.0f, 0.0f)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    auto* ext =
+        dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->regions.size(), (size_t)1);
+    // NOLINT: ext is re-fetched after every committed edit below.
+    IM_CHECK(ext->regions[0] == std::vector<uint32_t>{c1});
+    IM_CHECK(s_App->slotPick.Active()); // multi slot stays armed
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 2.0 * M_PI) <
+             1e-2);
+
+    // Clicking the same region again removes it: back to all regions.
+    // (Re-fetch: the committed edit replaced the feature object.)
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ext = dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->regions.size(), (size_t)0);
+    // A multi-region extrude is one body (compound of both cylinders).
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 4.0 * M_PI) <
+             1e-2);
+
+    ctx->KeyPress(ImGuiKey_Escape); // disarm the slot
+    ctx->Yield();
+    IM_CHECK(!s_App->slotPick.Active());
   };
 }

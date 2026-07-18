@@ -7,6 +7,11 @@
 #include "ui/FeatureEditor.h"     // SlotPickClicked (U3)
 #include "ui/SketchInteraction.h" // FaceElementRef
 
+#include "core/ExtrudeFeature.h"
+#include "core/RevolveFeature.h"
+#include "core/SketchFeature.h"
+#include "core/SketchProfile.h"
+
 #include "imgui.h"
 
 #include <algorithm>
@@ -46,9 +51,15 @@ struct Candidate {
 // outrank the face they bound (PickEdge's angular tolerance only fires near
 // an edge, and it already rejects occluded ones); the face's body comes last
 // so same-spot cycling reaches it (edge → face → body).
+std::optional<Candidate> RegionCandidate(AppState& state, const Ray& ray);
+
 std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
                                   uint32_t kinds) {
   std::vector<Candidate> out;
+  if (kinds & KindBit(SelectionItem::Kind::SketchRegion)) {
+    if (auto region = RegionCandidate(state, ray))
+      out.push_back(*region);
+  }
   if (kinds & KindBit(SelectionItem::Kind::Occurrence)) {
     // Assembly tab: a face hit selects the whole occurrence it belongs to.
     const RayHit face = state.faceSelector->PickFace(ray);
@@ -87,6 +98,67 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
     }
   }
   return out;
+}
+
+// U2 region candidates: intersect the pick ray with the armed feature's
+// sketch plane, and find the region whose material contains the hit point —
+// even-odd: the point is in material when an odd number of loops contain it,
+// and the region's OUTER loop is the innermost containing one. The region is
+// carried in the item's element as {sketchId, "id,id,..."} (the outer loop's
+// entity ids — the same key ExtrudeFeature::regions stores).
+std::string JoinIds(const std::vector<uint32_t>& ids) {
+  std::string s;
+  for (uint32_t id : ids)
+    s += (s.empty() ? "" : ",") + std::to_string(id);
+  return s;
+}
+
+const SketchFeature* SlotFeatureSketch(AppState& state) {
+  if (!state.document)
+    return nullptr;
+  Feature* f = state.document->FindFeatureById(state.slotPick.featureId);
+  uint64_t sketchId = 0;
+  if (auto* ext = dynamic_cast<ExtrudeFeature*>(f))
+    sketchId = ext->sketchId;
+  else if (auto* rev = dynamic_cast<RevolveFeature*>(f))
+    sketchId = rev->sketchId;
+  return dynamic_cast<const SketchFeature*>(
+      state.document->FindFeatureById(sketchId));
+}
+
+std::optional<Candidate> RegionCandidate(AppState& state, const Ray& ray) {
+  const SketchFeature* sk = SlotFeatureSketch(state);
+  if (sk == nullptr)
+    return std::nullopt;
+  const glm::vec3 n = sk->plane.GetNormal();
+  const float denom = glm::dot(ray.direction, n);
+  if (std::abs(denom) < 1e-6f)
+    return std::nullopt; // plane edge-on
+  const float t = glm::dot(sk->plane.GetOrigin() - ray.origin, n) / denom;
+  if (t <= 0.0f)
+    return std::nullopt;
+  const glm::vec2 uv = sk->plane.WorldToPlane(ray.origin + t * ray.direction);
+
+  const std::vector<sketch::Loop> loops = sketch::BuildLoops(sk->entities);
+  const sketch::Loop* innermost = nullptr;
+  double innermostArea = 0.0;
+  int containing = 0;
+  for (const sketch::Loop& loop : loops) {
+    if (!sketch::PointInLoop(loop, uv))
+      continue;
+    containing++;
+    const double a = std::abs(loop.SignedArea());
+    if (innermost == nullptr || a < innermostArea) {
+      innermost = &loop;
+      innermostArea = a;
+    }
+  }
+  if (innermost == nullptr || containing % 2 == 0)
+    return std::nullopt; // empty space or inside a hole
+  Candidate c;
+  c.item = {SelectionItem::Kind::SketchRegion, 0,
+            ElementRef{sk->GetId(), JoinIds(sketch::LoopEntityIds(*innermost))}};
+  return c;
 }
 
 // The armed pick context, derived fresh each frame from the tools' own state
@@ -142,6 +214,7 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
 
 void ClearHoverPreviews(AppState& state) {
   state.pick.edgeHover = false;
+  state.pick.regionHoverIds.clear();
   if (state.faceSelector)
     state.faceSelector->ClearHover();
   if (state.meshRenderer)
@@ -230,7 +303,9 @@ void HandleSelectionInput(AppState& state, bool overViewport,
   ClearHoverPreviews(state);
   if (!candidates.empty()) {
     const Candidate& top = candidates.front();
-    if (top.item.kind == SelectionItem::Kind::Edge) {
+    if (top.item.kind == SelectionItem::Kind::SketchRegion) {
+      state.pick.regionHoverIds = ParseRegionIds(top.item.element.name);
+    } else if (top.item.kind == SelectionItem::Kind::Edge) {
       state.pick.edgeHover = true;
       state.pick.edgeHoverMesh = top.meshId;
       state.pick.edgeHoverIndex = top.index;
@@ -375,6 +450,67 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
   }
   if (state.pick.edgeHover)
     drawEdge(state.pick.edgeHoverMesh, state.pick.edgeHoverIndex, kHover);
+}
+
+std::vector<uint32_t> ParseRegionIds(const std::string& joined) {
+  std::vector<uint32_t> ids;
+  size_t pos = 0;
+  while (pos < joined.size()) {
+    const size_t comma = joined.find(',', pos);
+    const std::string tok = joined.substr(
+        pos, comma == std::string::npos ? std::string::npos : comma - pos);
+    if (!tok.empty())
+      ids.push_back(static_cast<uint32_t>(std::stoul(tok)));
+    if (comma == std::string::npos)
+      break;
+    pos = comma + 1;
+  }
+  return ids;
+}
+
+void AppendRegionPickPrimitives(AppState& state,
+                                std::vector<PrimVertex>& out) {
+  if (!state.slotPick.Active() ||
+      !(state.slotPick.kinds &
+        KindBit(SelectionItem::Kind::SketchRegion))) {
+    return;
+  }
+  const SketchFeature* sk = SlotFeatureSketch(state);
+  Feature* f = state.document
+                   ? state.document->FindFeatureById(state.slotPick.featureId)
+                   : nullptr;
+  if (sk == nullptr || f == nullptr)
+    return;
+  const std::vector<std::vector<uint32_t>>* regions = nullptr;
+  if (auto* ext = dynamic_cast<ExtrudeFeature*>(f))
+    regions = &ext->regions;
+  else if (auto* rev = dynamic_cast<RevolveFeature*>(f))
+    regions = &rev->regions;
+  if (regions == nullptr)
+    return;
+
+  const glm::vec4 kHover{1.00f, 0.85f, 0.30f, 1.0f};
+  const glm::vec4 kSelected{0.35f, 0.80f, 1.00f, 1.0f};
+  const auto drawLoop = [&](const sketch::Loop& loop, const glm::vec4& color) {
+    const std::vector<glm::vec2> poly = sketch::LoopBoundaryPolygon(loop);
+    for (size_t i = 0; i < poly.size(); i++) {
+      const glm::vec3 a = sk->plane.PlaneToWorld(poly[i]);
+      const glm::vec3 b =
+          sk->plane.PlaneToWorld(poly[(i + 1) % poly.size()]);
+      AppendPrimLine(a, b, 2.6f, color, out);
+    }
+  };
+  for (const sketch::Loop& loop : sketch::BuildLoops(sk->entities)) {
+    const std::vector<uint32_t> ids = sketch::LoopEntityIds(loop);
+    const bool selected =
+        std::find(regions->begin(), regions->end(), ids) != regions->end();
+    const bool hovered = !state.pick.regionHoverIds.empty() &&
+                         ids == state.pick.regionHoverIds;
+    if (hovered)
+      drawLoop(loop, kHover);
+    else if (selected)
+      drawLoop(loop, kSelected);
+  }
 }
 
 } // namespace ui

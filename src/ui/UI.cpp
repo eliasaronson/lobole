@@ -273,6 +273,7 @@ void DrawUI(AppState& state) {
           BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId);
       AppendEdgePickPrimitives(state, prims); // fillet/chamfer edge picking
       AppendSelectionPrimitives(state, prims); // selected/hovered edges (U1b)
+      AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
       state.sketchRenderer->SetPrimitives(std::move(prims));
 
       // Auto-constraint snap indicator + ghost glyphs, and dimension

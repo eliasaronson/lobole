@@ -1200,6 +1200,10 @@ std::vector<uint32_t> LoopEntityIds(const Loop& loop) {
   return ids;
 }
 
+std::vector<glm::vec2> LoopBoundaryPolygon(const Loop& loop) {
+  return LoopPolygon(loop); // the internal tessellation, exported
+}
+
 bool PointInLoop(const Loop& loop, const glm::vec2& p) {
   if (loop.circle)
     return glm::length(p - loop.circle->center) <= loop.circle->radius;

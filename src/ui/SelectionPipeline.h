@@ -34,6 +34,13 @@ void SyncSelectionHighlights(AppState& state);
 // precedence while it is active).
 void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out);
 
+// U2: while a Profiles slot is armed, the sketch's selected regions and the
+// hovered one drawn as emphasized loop boundaries.
+void AppendRegionPickPrimitives(AppState& state, std::vector<PrimVertex>& out);
+
+// The "id,id,..." region key (SelectionItem element name) back to ids.
+std::vector<uint32_t> ParseRegionIds(const std::string& joined);
+
 // Resolve a stable item back to this frame's render handles. False when the
 // referent doesn't resolve on the current geometry (stale name, no meshes).
 bool ResolveFaceItem(const AppState& state, const SelectionItem& item,

@@ -468,6 +468,9 @@ struct AppState {
     bool edgeHover = false; // hovered edge preview (faces hover via FaceSelector)
     uint32_t edgeHoverMesh = 0;
     uint32_t edgeHoverIndex = 0;
+    // U2: hovered sketch region while a Profiles slot is armed — the outer
+    // loop's entity ids (empty = none).
+    std::vector<uint32_t> regionHoverIds;
     glm::vec2 lastClickPos{-1e9f, -1e9f};
     int cycle = 0;
   };
