@@ -6,6 +6,7 @@
 #include "core/FilletFeature.h"
 #include "core/Serialization.h"
 #include "core/SketchFeature.h"
+#include "ui/AppActions.h" // SelectFeature / SelectedFeatureId
 #include "ui/SketchInteraction.h"
 
 #include "imgui.h"
@@ -128,9 +129,9 @@ void DrawFeatureTreePanel(AppState& state) {
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
       if (ImGui::Selectable(label.c_str(),
-                            state.selectedFeature == static_cast<int>(i),
+                            SelectedFeatureId(state) == feature->GetId(),
                             flags)) {
-        state.selectedFeature = static_cast<int>(i);
+        SelectFeature(state, feature->GetId());
         if (datum && ImGui::IsMouseDoubleClicked(0)) {
           const int n = static_cast<int>(doc->FeatureCount()) + 1;
           BeginSketchOnDatum(state, *datum, "Sketch " + std::to_string(n));
@@ -191,9 +192,7 @@ void DrawFeatureTreePanel(AppState& state) {
         if (ImGui::MenuItem("Delete")) {
           state.commands->Execute(std::make_unique<RemoveFeatureCommand>(i),
                                   *doc);
-          if (state.selectedFeature == static_cast<int>(i)) {
-            state.selectedFeature = -1;
-          }
+          // A dangling selected id is pruned next frame (PruneSelection).
           ImGui::EndPopup();
           break; // feature list changed; redraw next frame
         }

@@ -142,12 +142,9 @@ void DrawPartTabs(AppState& state) {
 } // namespace
 
 void DrawUI(AppState& state) {
-  // One place to keep the selection valid across delete/undo/File > New
-  if (state.document &&
-      state.selectedFeature >=
-          static_cast<int>(state.document->FeatureCount())) {
-    state.selectedFeature = -1;
-  }
+  // One place to keep the selection valid across delete/undo/File > New:
+  // items are stable ids, so pruning is "does the referent still exist".
+  PruneSelection(state);
 
   DrawMainMenuBar(state);
   BeginDockspace(state);

@@ -13,6 +13,7 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -306,6 +307,52 @@ struct PartSlot {
   std::unordered_map<uint64_t, uint64_t> solvedPartVersions;
 };
 
+// THE selection (U1, docs/ui/u1-selection.md): one typed, ordered set that
+// every context reads and writes. Items are stable across regeneration —
+// features/occurrences/mates by id, geometry by stable element name — never
+// by mesh/face index (mesh ids change on every regen). Renderer highlights
+// are a per-frame projection of this set, not parallel state.
+struct SelectionItem {
+  enum class Kind : uint8_t {
+    Face, Edge, Body, Feature, Occurrence, Mate,
+    SketchRegion // U2
+  };
+  Kind kind = Kind::Feature;
+  uint64_t id = 0;    // Feature/Occurrence/Mate id; Body: its createdBy
+  ElementRef element; // Face/Edge/SketchRegion: {featureId, stable name}
+
+  bool operator==(const SelectionItem& o) const {
+    return kind == o.kind && id == o.id &&
+           element.featureId == o.element.featureId &&
+           element.name == o.element.name;
+  }
+};
+
+struct Selection {
+  std::vector<SelectionItem> items; // ordered: pick order matters to tools
+
+  bool Empty() const { return items.empty(); }
+  void Clear() { items.clear(); }
+  void Replace(const SelectionItem& it) { items.assign(1, it); }
+  // Ctrl+click semantics: present → remove, absent → append.
+  void Toggle(const SelectionItem& it) {
+    const auto f = std::find(items.begin(), items.end(), it);
+    if (f != items.end())
+      items.erase(f);
+    else
+      items.push_back(it);
+  }
+  bool Has(const SelectionItem& it) const {
+    return std::find(items.begin(), items.end(), it) != items.end();
+  }
+  const SelectionItem* First(SelectionItem::Kind k) const {
+    for (const auto& it : items)
+      if (it.kind == k)
+        return &it;
+    return nullptr;
+  }
+};
+
 struct AppState {
   // Owned: the ACTIVE tab's model. For a part tab, `document`/`commands` are
   // live and `assembly` is null; for an assembly tab, `assembly` is live and
@@ -403,7 +450,7 @@ struct AppState {
   float explodeFactor = 1.0f;
 
   // UI state
-  int selectedFeature = -1;
+  Selection selection; // U1: the one selection set (see SelectionItem)
   uint64_t selectedOccurrence = 0; // active assembly's selected occurrence (0 = none)
   uint64_t selectedMate = 0;       // active assembly's selected mate (0 = none)
   MateToolState mateTool;

@@ -31,12 +31,26 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                       const std::string& m, const json& p) {
   Document* doc = &document;
   if (m == "select_feature") {
-    // Select a feature by index (-1 clears). Drives the same selection the
-    // feature tree sets, so the Properties panel shows/edits it.
+    // Select a feature by index or feature_id (-1 / 0 clears). Drives the
+    // same Selection the feature tree sets, so Properties shows/edits it.
+    if (p.contains("feature_id")) {
+      const uint64_t id = p.at("feature_id").get<uint64_t>();
+      if (id == 0) {
+        state.selection.Clear();
+      } else if (doc->FindFeatureById(id) == nullptr) {
+        throw std::runtime_error("no such feature id");
+      } else {
+        ui::SelectFeature(state, id);
+      }
+      return json::object();
+    }
     int index = p.value("index", -1);
     if (index >= 0 && index >= static_cast<int>(doc->FeatureCount()))
       throw std::runtime_error("feature index out of range");
-    state.selectedFeature = index;
+    if (index < 0)
+      state.selection.Clear();
+    else
+      ui::SelectFeatureByIndex(state, static_cast<size_t>(index));
     return json::object();
   }
   if (m == "accept_pending") {

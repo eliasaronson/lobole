@@ -2,6 +2,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "ui/AppActions.h" // SelectFeature
 #include "ui/FeatureEditor.h"
 
 #include "IconsFontAwesome6.h"
@@ -16,7 +17,7 @@ uint64_t BeginPreviewFeature(AppState& state, std::unique_ptr<Feature> feature) 
   const size_t idx = state.document->FeatureCount() - 1;
   Feature* added = state.document->GetFeature(idx);
   state.pendingFeatureId = added->GetId();
-  state.selectedFeature = static_cast<int>(idx);
+  SelectFeature(state, added->GetId());
   return state.pendingFeatureId;
 }
 
@@ -39,11 +40,12 @@ void AcceptPendingFeature(AppState& state) {
   }
   // Remove (id preserved) then re-add through a command, so accept is a single
   // undoable action and downstream id references stay valid.
+  const uint64_t id = f->GetId();
   std::unique_ptr<Feature> owned = state.document->RemoveFeature(idx);
   state.pendingFeatureId = 0;
   state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(owned)),
                           *state.document);
-  state.selectedFeature = static_cast<int>(state.document->FeatureCount() - 1);
+  SelectFeature(state, id);
   state.edgePick = {}; // a blend preview's edge picking ends with it
 }
 
@@ -53,7 +55,7 @@ void CancelPendingFeature(AppState& state) {
     state.document->RemoveFeature(idx);
   }
   state.pendingFeatureId = 0;
-  state.selectedFeature = -1;
+  state.selection.Clear();
   state.edgePick = {};
 }
 

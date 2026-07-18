@@ -60,6 +60,47 @@ namespace ui {
 void SyncAssemblyRenderers(AppState& state);
 void SyncInContextGhosts(AppState& state);
 
+uint64_t SelectedFeatureId(const AppState& state) {
+  const SelectionItem* it = state.selection.First(SelectionItem::Kind::Feature);
+  return it != nullptr ? it->id : 0;
+}
+
+Feature* SelectedFeature(AppState& state, size_t* indexOut) {
+  const uint64_t id = SelectedFeatureId(state);
+  if (id == 0 || !state.document)
+    return nullptr;
+  return state.document->FindFeatureById(id, indexOut);
+}
+
+int SelectedFeatureIndexOrMinus1(AppState& state) {
+  size_t index = 0;
+  return SelectedFeature(state, &index) != nullptr ? static_cast<int>(index)
+                                                   : -1;
+}
+
+void SelectFeature(AppState& state, uint64_t featureId) {
+  state.selection.Replace({SelectionItem::Kind::Feature, featureId, {}});
+}
+
+void SelectFeatureByIndex(AppState& state, size_t index) {
+  if (!state.document || index >= state.document->FeatureCount())
+    return;
+  SelectFeature(state, state.document->GetFeature(index)->GetId());
+}
+
+void PruneSelection(AppState& state) {
+  auto& items = state.selection.items;
+  items.erase(std::remove_if(items.begin(), items.end(),
+                             [&](const SelectionItem& it) {
+                               if (it.kind != SelectionItem::Kind::Feature)
+                                 return false; // other kinds: later phases
+                               return !state.document ||
+                                      state.document->FindFeatureById(it.id) ==
+                                          nullptr;
+                             }),
+              items.end());
+}
+
 namespace {
 
 // Sketch line color; the active sketch is drawn brighter.
@@ -244,12 +285,8 @@ void CreateDatumPlane(AppState& state) {
                                                 DatumPlaneKind::Offset);
   dp->offset = 2.0; // scene scale (~2-unit boxes, half-extent-3 plane quads)
   // Build on the selected datum if one is selected, else the XY base plane.
-  if (state.document && state.selectedFeature >= 0) {
-    Feature* sel = state.document->GetFeature(
-        static_cast<size_t>(state.selectedFeature));
-    if (auto* parent = dynamic_cast<DatumPlaneFeature*>(sel))
-      dp->parentId = parent->GetId();
-  }
+  if (auto* parent = dynamic_cast<DatumPlaneFeature*>(SelectedFeature(state)))
+    dp->parentId = parent->GetId();
   BeginPreviewFeature(state, std::move(dp));
 }
 
@@ -391,7 +428,7 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads) {
     const bool emphasized =
         dp->GetId() == state.sketchEdit.hoveredDatumId ||
         dp->GetId() == state.pendingFeatureId ||
-        static_cast<int>(i) == state.selectedFeature;
+        dp->GetId() == SelectedFeatureId(state);
     AppendPlaneQuad(dp->OutputPlane(), kDatumTint * (emphasized ? 1.8f : 1.0f),
                     3.0f, quads);
   }
@@ -407,7 +444,7 @@ void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines) {
     if (!da)
       continue;
     const bool emphasized = da->GetId() == state.pendingFeatureId ||
-                            static_cast<int>(i) == state.selectedFeature;
+                            da->GetId() == SelectedFeatureId(state);
     const glm::vec3 c = kAxisTint * (emphasized ? 1.4f : 1.0f);
     const glm::vec3 o = da->Origin();
     const glm::vec3 d = da->Direction();
@@ -497,7 +534,7 @@ bool EffectivePlaneVisibility(const AppState& state) {
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();
-  state.selectedFeature = -1;
+  state.selection.Clear();
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};
   // Force a resync even if the version counters happen to collide
@@ -540,7 +577,7 @@ void ActivateSlot(AppState& state, size_t index) {
 }
 // Shared reset after a tab switch/create.
 void ResetActiveTabUiState(AppState& state) {
-  state.selectedFeature = -1;
+  state.selection.Clear();
   state.selectedOccurrence = 0;
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};

@@ -19,6 +19,18 @@ struct Ray;         // defined in FaceSelector.h
 
 namespace ui {
 
+// Feature selection through the one Selection set (U1a). Stored by stable
+// feature id, so it survives regeneration, reordering and sibling deletes;
+// callers that need the index resolve it fresh each time.
+uint64_t SelectedFeatureId(const AppState& state);         // 0 = none
+Feature* SelectedFeature(AppState& state, size_t* indexOut = nullptr);
+int SelectedFeatureIndexOrMinus1(AppState& state);         // RPC back-compat
+void SelectFeature(AppState& state, uint64_t featureId);   // replaces the set
+void SelectFeatureByIndex(AppState& state, size_t index);
+// Drops items whose referent no longer exists (deleted feature, undone
+// creation, File > New). Called once per frame before the panels draw.
+void PruneSelection(AppState& state);
+
 // Swaps in a new document (File > New / Open) with a fresh undo stack and
 // forces the renderers to resync.
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc);

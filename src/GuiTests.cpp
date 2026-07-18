@@ -1246,4 +1246,34 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->Rollback(), -1);
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
   };
+
+  // U1a: feature selection is a stable id, not an index — deleting an
+  // earlier sibling must not move it (the old int-index selection pointed at
+  // whatever feature slid into the vacated slot).
+  t = IM_REGISTER_TEST(engine, "selection", "survives_sibling_delete");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    MenuCreateAccept(ctx, "Create/Sphere");
+    const uint64_t sphereId = Doc()->GetFeature(1)->GetId();
+
+    ctx->ItemClick("//Model/Sphere 2##1");
+    ctx->Yield();
+    IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), sphereId);
+
+    // Delete the box above it: the selection stays on the sphere.
+    ctx->ItemClick("//Model/Box 1##0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Delete");
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), sphereId);
+
+    // Deleting the selected feature itself clears the selection (prune).
+    ctx->ItemClick("//Model/Sphere 2##0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Delete");
+    ctx->Yield();
+    IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), (uint64_t)0);
+  };
 }

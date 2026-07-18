@@ -4,6 +4,7 @@
 #include "FaceSelector.h"
 #include "core/Feature.h"
 #include "core/MassProps.h"
+#include "ui/AppActions.h" // SelectedFeature
 #include "ui/FeatureEditor.h"
 
 #include "imgui.h"
@@ -63,18 +64,14 @@ void DrawPropertiesPanel(AppState& state) {
   ImGui::Begin("Properties");
 
   ImGui::SeparatorText("Feature");
-  Document* doc = state.document.get();
-  Feature* feature =
-      (doc && state.selectedFeature >= 0)
-          ? doc->GetFeature(static_cast<size_t>(state.selectedFeature))
-          : nullptr;
+  size_t featureIndex = 0;
+  Feature* feature = SelectedFeature(state, &featureIndex);
   if (feature) {
     ImGui::Text("%s", feature->TypeName().c_str());
     // A pending (preview) feature isn't on the undo stack; edit it live
     // without committing (the preview dialog owns accept/cancel).
     const bool commit = feature->GetId() != state.pendingFeatureId;
-    DrawFeatureParamWidgets(state, *feature,
-                            static_cast<size_t>(state.selectedFeature), commit);
+    DrawFeatureParamWidgets(state, *feature, featureIndex, commit);
   } else {
     ImGui::TextDisabled("No feature selected");
     ImGui::TextDisabled("Select one in the Model panel");
