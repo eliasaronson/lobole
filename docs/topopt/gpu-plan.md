@@ -126,9 +126,13 @@ Software fallback (llvmpipe) means it can even run where no real GPU exists.
    estimate; matrix-free) if Jacobi-CG iteration counts gate throughput.
    Built, benched, and rejected as the default (see status above) — kept as
    the GPU3 smoother.
-3. **GPU3 — geometric multigrid V-cycle** only if still needed for the finest
-   meshes — the strong-but-large preconditioner. Its own sub-plan:
-   **docs/topopt/gpu3-plan.md** (designed; MG0 CPU-prototype gate first).
+3. **DONE — GPU3 — geometric multigrid V-cycle** only if still needed for the
+   finest meshes — the strong-but-large preconditioner. Its own sub-plan:
+   **docs/topopt/gpu3-plan.md** (MG0+MG1 shipped; multigrid is the default).
+4. **PLANNED (awaiting sign-off) — GPU4 — element strain energies on the
+   GPU.** The post-GPU3 bottleneck is the CPU sensitivity loop (Ke0
+   recomputed per element per iteration). One kernel + one defaulted seam
+   method: **docs/topopt/gpu4-plan.md**.
 
 Order rationale: 0 gates on the only correctness risk (the scatter/atomics) and
 reuses the proven probe; CG before preconditioner tuning; the CPU path stays
