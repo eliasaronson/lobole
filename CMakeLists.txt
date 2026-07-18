@@ -349,6 +349,7 @@ set(app_sources
     src/ui/Theme.cpp
     src/ui/ViewportInput.cpp
     src/ui/SelectionPipeline.cpp
+    src/ui/CommandPalette.cpp
     src/ui/SketchInteraction.cpp
     src/ui/Toolbar.cpp
     src/Screenshot.cpp

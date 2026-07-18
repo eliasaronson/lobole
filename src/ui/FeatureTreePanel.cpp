@@ -9,6 +9,7 @@
 #include "ui/AppActions.h" // SelectFeature / SelectedFeatureId
 #include "ui/SketchInteraction.h"
 
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 
 #include <cfloat>
@@ -19,6 +20,29 @@
 namespace ui {
 
 namespace {
+
+// Per-kind glyph for the feature tree (U5) — same atlas as the toolbar.
+const char* FeatureIcon(const std::string& type) {
+  if (type == "Sketch") return ICON_FA_PENCIL;
+  if (type == "Extrude") return ICON_FA_UP_LONG;
+  if (type == "Revolve") return ICON_FA_ARROWS_SPIN;
+  if (type == "Box") return ICON_FA_CUBE;
+  if (type == "Sphere") return ICON_FA_CIRCLE;
+  if (type == "Cylinder") return ICON_FA_DATABASE;
+  if (type == "Boolean") return ICON_FA_OBJECT_GROUP;
+  if (type == "Pattern") return ICON_FA_GRIP;
+  if (type == "DatumPlane") return ICON_FA_TABLE_CELLS_LARGE;
+  if (type == "DatumAxis") return ICON_FA_ARROWS_UP_DOWN;
+  if (type == "Fillet") return ICON_FA_BORDER_TOP_LEFT;
+  if (type == "Chamfer") return ICON_FA_CROP_SIMPLE;
+  if (type == "Hole") return ICON_FA_CIRCLE_DOT;
+  if (type == "Shell") return ICON_FA_BOX_OPEN;
+  if (type == "Draft") return ICON_FA_ANGLES_RIGHT;
+  if (type == "Loft") return ICON_FA_BEZIER_CURVE;
+  if (type == "Sweep") return ICON_FA_ROUTE;
+  if (type == "Import") return ICON_FA_FILE_IMPORT;
+  return ICON_FA_SHAPES;
+}
 
 // The rollback bar: a grabbable divider drawn where regeneration stops (or at
 // the end of the list). Sets `dragging` while the user holds it.
@@ -128,6 +152,10 @@ void DrawFeatureTreePanel(AppState& state) {
       else if (dimmed)
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+      // Per-kind glyph, drawn apart from the Selectable so item ids (and the
+      // test refs built on them) stay exactly "<Name>##<index>".
+      ImGui::TextUnformatted(FeatureIcon(feature->TypeName()));
+      ImGui::SameLine(ImGui::GetFontSize() * 1.8f);
       if (ImGui::Selectable(label.c_str(),
                             SelectedFeatureId(state) == feature->GetId(),
                             flags)) {
@@ -237,8 +265,13 @@ void DrawFeatureTreePanel(AppState& state) {
 
     ImGui::SeparatorText("Bodies");
     for (const auto& body : doc->GetBodies()) {
-      ImGui::BulletText("%s (volume %.2f)", body.name.c_str(),
-                        body.shape.Volume());
+      // Styled row (U5): glyph + name, volume as a dimmed suffix — an
+      // object, not a debug bullet.
+      ImGui::TextUnformatted(ICON_FA_CUBES);
+      ImGui::SameLine(ImGui::GetFontSize() * 1.8f);
+      ImGui::TextUnformatted(body.name.c_str());
+      ImGui::SameLine();
+      ImGui::TextDisabled("%.2f mm%s", body.shape.Volume(), "\xc2\xb3");
     }
   }
 

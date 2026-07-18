@@ -228,6 +228,38 @@ void DrawViewMenu(AppState& state) {
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
   ImGui::MenuItem("Viewport Controls", nullptr, &state.showControlsHelp);
 
+  // The Shift+1..7 views, discoverable (U5).
+  if (ImGui::BeginMenu("Standard Views")) {
+    const auto view = [&](const char* name, glm::vec3 n,
+                          const char* shortcut) {
+      if (ImGui::MenuItem(name, shortcut) && state.camera)
+        state.camera->AlignToFace(glm::vec3(0.0f), n);
+    };
+    view("Front", {0, 0, 1}, "Shift+1");
+    view("Back", {0, 0, -1}, "Shift+2");
+    view("Left", {-1, 0, 0}, "Shift+3");
+    view("Right", {1, 0, 0}, "Shift+4");
+    view("Top", {0, 1, 0}, "Shift+5");
+    view("Bottom", {0, -1, 0}, "Shift+6");
+    view("Isometric", glm::normalize(glm::vec3(1, 1, 1)), "Shift+7");
+    ImGui::EndMenu();
+  }
+
+  // Session font-size setting (U5); applied via the DPI rescale path.
+  if (ImGui::BeginMenu("Font Size")) {
+    const auto size = [&](const char* name, float scale) {
+      if (ImGui::MenuItem(name, nullptr, state.uiFontScale == scale)) {
+        state.uiFontScale = scale;
+        state.fontRebuildRequested = true;
+      }
+    };
+    size("Small", 0.85f);
+    size("Default", 1.0f);
+    size("Large", 1.2f);
+    size("Extra Large", 1.4f);
+    ImGui::EndMenu();
+  }
+
   // Section view (I3): a viewport clipping plane. Cut on a base plane; drag
   // the offset. Zero sectionPlane = off.
   if (ImGui::BeginMenu("Section View")) {

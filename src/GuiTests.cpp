@@ -1479,4 +1479,25 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     IM_CHECK(!s_App->slotPick.Active());
   };
+
+  // U6: the Ctrl+K command palette — fuzzy find "box", Enter runs the
+  // Create Box command (same action the menu calls).
+  t = IM_REGISTER_TEST(engine, "palette", "ctrl_k_creates_box");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_K);
+    ctx->Yield();
+    IM_CHECK(s_App->paletteOpen);
+    ctx->KeyChars("box");
+    ctx->Yield();
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield();
+    IM_CHECK(!s_App->paletteOpen);
+    IM_CHECK(s_App->pendingFeatureId != 0); // Box preview began
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+  };
 }

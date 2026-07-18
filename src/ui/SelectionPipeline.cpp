@@ -403,19 +403,21 @@ void SyncSelectionHighlights(AppState& state) {
     }
     return;
   }
-  // Single face-highlight slot: the most recent Face item shows.
-  const SelectionItem* lastFace = nullptr;
-  for (const SelectionItem& it : state.selection.items)
-    if (it.kind == SelectionItem::Kind::Face)
-      lastFace = &it;
-  uint32_t mesh = 0, index = 0, first = 0, count = 0;
-  if (lastFace != nullptr && ResolveFaceItem(state, *lastFace, mesh, index) &&
-      state.faceSelector->GetFaceVertexRange(mesh, index, first, count)) {
-    state.faceSelector->SetSelectedFace(mesh, index);
-    state.meshRenderer->SetFaceHighlight(mesh, first, count);
-  } else {
-    state.faceSelector->ClearSelection();
-    state.meshRenderer->ClearFaceHighlight();
+  // Every Face item highlights — one range per INSTANCE (renderer slot), so
+  // multi-select across bodies shows fully; several faces on one body show
+  // the most recent (renderer limitation, noted in u1-selection.md). The
+  // FaceSelector mirror carries the most recent for legacy readers.
+  state.meshRenderer->ClearFaceHighlight();
+  state.faceSelector->ClearSelection();
+  for (const SelectionItem& it : state.selection.items) {
+    if (it.kind != SelectionItem::Kind::Face)
+      continue;
+    uint32_t mesh = 0, index = 0, first = 0, count = 0;
+    if (ResolveFaceItem(state, it, mesh, index) &&
+        state.faceSelector->GetFaceVertexRange(mesh, index, first, count)) {
+      state.faceSelector->SetSelectedFace(mesh, index);
+      state.meshRenderer->SetFaceHighlight(mesh, first, count);
+    }
   }
 }
 

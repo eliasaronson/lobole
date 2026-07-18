@@ -507,6 +507,12 @@ struct AppState {
   // Viewport-controls cheat sheet overlay (View > Viewport Controls) — U4
   // moved it out of the Properties panel, where it permanently ate space.
   bool showControlsHelp = false;
+  // User font scale (View > Font Size, U5), multiplied onto the monitor
+  // content scale. Setting fontRebuildRequested makes the main loop re-apply
+  // the theme + rebuild the font atlas between frames (the U4 DPI path).
+  float uiFontScale = 1.0f;
+  bool fontRebuildRequested = false;
+  bool paletteOpen = false; // Ctrl+K command palette (U6)
 
   // 2D sheet viewport (workstream 13): a drawing tab pans/zooms an
   // orthographic sheet, never the orbit camera (there is no 2D camera today —

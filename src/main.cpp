@@ -1175,15 +1175,23 @@ int main(int argc, char **argv) {
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
 
-    // Monitor content scale changed (window moved to another display):
-    // re-apply the theme at the new scale and rebuild the font atlas — both
-    // must happen outside a frame, hence the callback only records it.
-    if (s_pendingContentScale > 0.0f) {
-      const float s = s_pendingContentScale;
+    // Monitor content scale changed (window moved to another display) or the
+    // user picked a font size (U5): re-apply the theme and rebuild the font
+    // atlas — both must happen outside a frame, hence only flags here.
+    if (s_pendingContentScale > 0.0f || g_App.fontRebuildRequested) {
+      static float s_baseContentScale = 0.0f;
+      if (s_baseContentScale <= 0.0f) {
+        float sx = 1.0f, sy = 1.0f;
+        glfwGetWindowContentScale(window, &sx, &sy);
+        s_baseContentScale = std::max(1.0f, std::max(sx, sy));
+      }
+      if (s_pendingContentScale > 0.0f)
+        s_baseContentScale = s_pendingContentScale;
       s_pendingContentScale = 0.0f;
+      g_App.fontRebuildRequested = false;
       vkDeviceWaitIdle(g_Device); // the old font texture may be in flight
       ImGui_ImplVulkan_DestroyFontsTexture();
-      ui::ApplyTheme(s);
+      ui::ApplyTheme(s_baseContentScale * g_App.uiFontScale);
       ImGui_ImplVulkan_CreateFontsTexture();
     }
 

@@ -16,6 +16,7 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
+#include "ui/CommandPalette.h"
 #include "ui/ConfigurationsPanel.h"
 #include "ui/VariablesPanel.h"
 #include "ui/ViewportInput.h"
@@ -23,6 +24,8 @@
 #include "imgui.h"
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
+
+#include <algorithm>
 
 namespace ui {
 
@@ -88,6 +91,64 @@ void DrawModelToolPrompt(AppState& state) {
   if (hasErr)
     pill(state.sketchEdit.actionMsg, IM_COL32(56, 26, 26, 235),
          IM_COL32(240, 180, 170, 255));
+}
+
+// Axis triad (U5): a bottom-right mini-gizmo showing the camera's world
+// orientation — X red, Y green, Z blue, back-facing axes drawn first and
+// dimmed. Pure overlay (Shift+1..7 / View > Standard Views reorient).
+void DrawAxisTriad(AppState& state) {
+  if (!state.camera || state.drawing)
+    return;
+  const float r = 34.0f;
+  const ImVec2 c(state.viewportPos.x + state.viewportSize.x - r - 18.0f,
+                 state.viewportPos.y + state.viewportSize.y - r - 18.0f);
+  const glm::mat3 view = glm::mat3(state.camera->GetViewMatrix());
+  struct Axis {
+    glm::vec3 v; // view-space direction
+    ImU32 color;
+    const char* label;
+  };
+  Axis axes[3] = {
+      {view * glm::vec3(1, 0, 0), IM_COL32(235, 90, 90, 255), "X"},
+      {view * glm::vec3(0, 1, 0), IM_COL32(110, 220, 110, 255), "Y"},
+      {view * glm::vec3(0, 0, 1), IM_COL32(100, 150, 250, 255), "Z"}};
+  std::sort(std::begin(axes), std::end(axes),
+            [](const Axis& a, const Axis& b) { return a.v.z < b.v.z; });
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  dl->AddCircleFilled(c, r + 10.0f, IM_COL32(20, 24, 30, 140));
+  for (const Axis& a : axes) {
+    const ImVec2 tip(c.x + a.v.x * r, c.y - a.v.y * r);
+    const bool front = a.v.z >= 0.0f; // toward the camera
+    const ImU32 col =
+        front ? a.color : (a.color & 0x00FFFFFF) | (110u << 24);
+    dl->AddLine(c, tip, col, front ? 2.4f : 1.4f);
+    const ImVec2 sz = ImGui::CalcTextSize(a.label);
+    dl->AddText(ImVec2(tip.x - sz.x * 0.5f + a.v.x * 8.0f,
+                       tip.y - sz.y * 0.5f - a.v.y * 8.0f),
+                col, a.label);
+  }
+}
+
+// Empty-state hint (U5): a fresh part tells the user where to start instead
+// of showing three anonymous planes.
+void DrawEmptyStateHint(AppState& state) {
+  if (!state.document || state.document->FeatureCount() > 0 ||
+      state.sketchEdit.IsEditing() || state.sketchEdit.pickingPlane ||
+      HasPendingFeature(state)) {
+    return;
+  }
+  const char* line1 = "No features yet";
+  const char* line2 =
+      "Double-click a plane (or press S) to sketch - or Create > Box";
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const ImVec2 c(state.viewportPos.x + state.viewportSize.x * 0.5f,
+                 state.viewportPos.y + state.viewportSize.y * 0.72f);
+  const ImVec2 s1 = ImGui::CalcTextSize(line1);
+  const ImVec2 s2 = ImGui::CalcTextSize(line2);
+  dl->AddText(ImVec2(c.x - s1.x * 0.5f, c.y), IM_COL32(200, 210, 225, 160),
+              line1);
+  dl->AddText(ImVec2(c.x - s2.x * 0.5f, c.y + s1.y + 6.0f),
+              IM_COL32(160, 170, 185, 140), line2);
 }
 
 // Viewport-controls cheat sheet (View > Viewport Controls): a dismissable
@@ -210,6 +271,9 @@ void DrawUI(AppState& state) {
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);
   DrawModelToolPrompt(state);
+  DrawEmptyStateHint(state);
+  DrawAxisTriad(state);
+  DrawCommandPalette(state);
 
   HandleViewportInput(state);
   // Renderer highlights are a projection of the Selection (U1b): one sync
