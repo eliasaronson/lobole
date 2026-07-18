@@ -174,6 +174,13 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
 
 std::optional<double> Distance(const std::vector<Body>& bodies,
                                const ElementRef& a, const ElementRef& b) {
+  const auto d = DistanceDetailed(bodies, a, b);
+  return d ? std::optional<double>(d->distance) : std::nullopt;
+}
+
+std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
+                                               const ElementRef& a,
+                                               const ElementRef& b) {
   std::string ka, kb;
   const TopoDS_Shape sa = ResolveShape(bodies, a, ka);
   const TopoDS_Shape sb = ResolveShape(bodies, b, kb);
@@ -181,9 +188,15 @@ std::optional<double> Distance(const std::vector<Body>& bodies,
     return std::nullopt;
   try {
     BRepExtrema_DistShapeShape dist(sa, sb);
-    if (!dist.IsDone())
+    if (!dist.IsDone() || dist.NbSolution() < 1)
       return std::nullopt;
-    return dist.Value();
+    DistanceResult out;
+    out.distance = dist.Value();
+    const gp_Pnt pa = dist.PointOnShape1(1);
+    const gp_Pnt pb = dist.PointOnShape2(1);
+    out.pointA = glm::vec3(pa.X(), pa.Y(), pa.Z());
+    out.pointB = glm::vec3(pb.X(), pb.Y(), pb.Z());
+    return out;
   } catch (const std::exception& e) {
     LOG_ERROR("Measure distance failed: {}", e.what());
     return std::nullopt;

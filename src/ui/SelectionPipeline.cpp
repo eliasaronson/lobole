@@ -456,7 +456,8 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
       drawEdge(mesh, index, kSelected);
     }
   }
-  // Measured edges show with the same emphasis while the tool is armed.
+  // Measured edges show with the same emphasis while the tool is armed,
+  // plus the nearest-distance line between two picked elements.
   if (state.measure.active) {
     for (const MeasureState::Element& e : state.measure.picked) {
       if (!e.isEdge)
@@ -465,6 +466,11 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
       if (ResolveEdgeItem(state, {SelectionItem::Kind::Edge, 0, e.ref}, mesh,
                           index))
         drawEdge(mesh, index, kSelected);
+    }
+    if (state.measure.hasDistanceLine) {
+      const glm::vec4 kMeasure{1.0f, 0.55f, 0.25f, 1.0f}; // orange
+      AppendPrimLine(state.measure.distA, state.measure.distB, 2.0f, kMeasure,
+                     out);
     }
   }
   if (state.pick.edgeHover)

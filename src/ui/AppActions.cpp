@@ -2069,6 +2069,7 @@ std::string FormatElement(const Measure::Element& e) {
 
 void UpdateMeasureReadout(AppState& state) {
   auto& m = state.measure;
+  m.hasDistanceLine = false;
   if (!state.document || m.picked.empty()) {
     m.readout.clear();
     return;
@@ -2082,13 +2083,21 @@ void UpdateMeasureReadout(AppState& state) {
     return;
   }
   if (m.picked.size() == 2) {
-    const auto d =
-        Measure::Distance(bodies, m.picked[0].ref, m.picked[1].ref);
-    char buf[96];
-    if (d)
-      snprintf(buf, sizeof buf, "Distance: %.3f mm", *d);
-    else
+    const auto d = Measure::DistanceDetailed(bodies, m.picked[0].ref,
+                                             m.picked[1].ref);
+    char buf[192];
+    if (d) {
+      const glm::vec3 delta = d->pointB - d->pointA;
+      snprintf(buf, sizeof buf,
+               "Distance: %.3f mm (nearest)\ndx %.3f  dy %.3f  dz %.3f mm",
+               d->distance, std::abs(delta.x), std::abs(delta.y),
+               std::abs(delta.z));
+      m.hasDistanceLine = true;
+      m.distA = d->pointA;
+      m.distB = d->pointB;
+    } else {
       snprintf(buf, sizeof buf, "Could not measure the distance.");
+    }
     m.readout = buf;
     return;
   }

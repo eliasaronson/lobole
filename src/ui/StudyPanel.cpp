@@ -4,6 +4,7 @@
 #include "core/Serialization.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -507,6 +508,99 @@ void DrawFieldLegend(AppState& state) {
   dl->AddText(ImVec2(x + barW + 6, y0 - 6), IM_COL32_WHITE, buf);
   dl->AddText(ImVec2(x + barW + 6, y1 - 6), IM_COL32_WHITE, "0");
   dl->AddText(ImVec2(x, y0 - 22), IM_COL32_WHITE, title);
+}
+
+namespace {
+// A world-space arrow from a to b with a two-line head.
+void ArrowGlyph(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color,
+                std::vector<PrimVertex>& out) {
+  ui::AppendPrimLine(a, b, 2.2f, color, out);
+  const glm::vec3 dir = glm::normalize(b - a);
+  glm::vec3 side = glm::abs(dir.y) < 0.9f ? glm::vec3(0, 1, 0)
+                                          : glm::vec3(1, 0, 0);
+  side = glm::normalize(glm::cross(dir, side));
+  const float headLen = glm::length(b - a) * 0.25f;
+  ui::AppendPrimLine(b, b - dir * headLen + side * headLen * 0.5f, 2.2f,
+                     color, out);
+  ui::AppendPrimLine(b, b - dir * headLen - side * headLen * 0.5f, 2.2f,
+                     color, out);
+}
+} // namespace
+
+void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
+  SimulationState& sim = state.simulation;
+  Document* doc = state.document.get();
+  if (!sim.IsActive() || doc == nullptr || !state.faceSelector)
+    return;
+  const fem::Study* s = doc->FindStudy(sim.activeStudyId);
+  if (s == nullptr)
+    return;
+  const glm::vec4 kFixed{0.95f, 0.35f, 0.35f, 1.0f};
+  const glm::vec4 kForce{1.00f, 0.65f, 0.20f, 1.0f};
+  const glm::vec4 kPressure{0.95f, 0.85f, 0.30f, 1.0f};
+  const glm::vec4 kKeep{0.35f, 0.85f, 0.95f, 1.0f};
+
+  const auto faceFrame = [&](const ElementRef& ref, glm::vec3& center,
+                             glm::vec3& normal) {
+    uint32_t mesh = 0, index = 0;
+    if (!ResolveFaceItem(state, {SelectionItem::Kind::Face, 0, ref}, mesh,
+                         index))
+      return false;
+    center = state.faceSelector->GetFaceCenter(mesh, index);
+    normal = state.faceSelector->GetFaceNormal(mesh, index);
+    return true;
+  };
+  const float len = 1.2f; // glyph scale, model units
+
+  for (const fem::Load& load : s->loads) {
+    glm::vec3 c(0.0f), n(0.0f);
+    if (!faceFrame(load.face, c, n))
+      continue;
+    switch (load.type) {
+    case fem::LoadType::Fixed: {
+      // Anchor hatch: short strokes fanning "into the ground" off the face.
+      glm::vec3 side = glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0)
+                                            : glm::vec3(1, 0, 0);
+      side = glm::normalize(glm::cross(n, side));
+      const glm::vec3 other = glm::normalize(glm::cross(n, side));
+      ui::AppendPrimLine(c - side * len * 0.4f, c + side * len * 0.4f, 2.4f,
+                         kFixed, out);
+      for (int i = -1; i <= 1; i++) {
+        const glm::vec3 base = c + side * (len * 0.3f * i);
+        ui::AppendPrimLine(base, base - n * len * 0.3f - side * len * 0.15f,
+                           1.8f, kFixed, out);
+      }
+      (void)other;
+      break;
+    }
+    case fem::LoadType::Force: {
+      const glm::vec3 dir =
+          glm::normalize(glm::vec3(load.direction.x, load.direction.y,
+                                   load.direction.z));
+      ArrowGlyph(c - dir * len, c, kForce, out); // arrow INTO the face point
+      break;
+    }
+    case fem::LoadType::Pressure: {
+      // Pressure presses along -normal: a shorter arrow at the face.
+      ArrowGlyph(c + n * len * 0.8f, c, kPressure, out);
+      break;
+    }
+    }
+  }
+  for (const ElementRef& keep : s->keepFaces) {
+    glm::vec3 c(0.0f), n(0.0f);
+    if (!faceFrame(keep, c, n))
+      continue;
+    glm::vec3 side = glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0)
+                                          : glm::vec3(1, 0, 0);
+    side = glm::normalize(glm::cross(n, side));
+    const glm::vec3 other = glm::normalize(glm::cross(n, side));
+    const float r = len * 0.35f;
+    const glm::vec3 pts[4] = {c + side * r, c + other * r, c - side * r,
+                              c - other * r};
+    for (int i = 0; i < 4; i++)
+      ui::AppendPrimLine(pts[i], pts[(i + 1) % 4], 2.0f, kKeep, out);
+  }
 }
 
 void SimulationApplyToFace(AppState& state, const ElementRef& face) {

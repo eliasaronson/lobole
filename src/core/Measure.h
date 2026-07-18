@@ -30,6 +30,18 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
 std::optional<double> Distance(const std::vector<Body>& bodies,
                                const ElementRef& a, const ElementRef& b);
 
+// Distance with the closest point pair and axis deltas — feeds the measure
+// visualization (the nearest-distance line drawn between the elements) and
+// the dx/dy/dz readout.
+struct DistanceResult {
+  double distance = 0.0;
+  glm::vec3 pointA{0.0f}; // closest point on element a
+  glm::vec3 pointB{0.0f}; // closest point on element b
+};
+std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
+                                               const ElementRef& a,
+                                               const ElementRef& b);
+
 // Total cross-section area where the plane (through `origin`, unit `normal`)
 // cuts through all bodies (inspection I3): the sum over bodies of the area of
 // their intersection with the plane. 0 when the plane misses everything;

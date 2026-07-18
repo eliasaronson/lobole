@@ -213,6 +213,11 @@ struct MeasureState {
   };
   std::vector<Element> picked;
   std::string readout; // formatted result ("" = nothing measured yet)
+  // Nearest-distance line between two picked elements, drawn in the
+  // viewport (set alongside the two-element readout).
+  bool hasDistanceLine = false;
+  glm::vec3 distA{0.0f};
+  glm::vec3 distB{0.0f};
   // Hover feedback comes from the selection pipeline (U1c).
 };
 

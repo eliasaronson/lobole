@@ -235,6 +235,11 @@ void DrawFieldLegend(AppState& state);
 // pipeline resolves the pick; this consumes it).
 void SimulationApplyToFace(AppState& state, const ElementRef& face);
 
+// Boundary-condition glyphs while simulation mode is active: arrows on
+// force/pressure faces (force along its direction, pressure into the face),
+// anchor hatches on fixed faces, diamonds on keep faces.
+void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out);
+
 // A world-space cross at the peak of the displayed result field (max von Mises
 // or max displacement), warped by the deform scale. Pushed into the no-depth
 // gizmo channel like the CoG marker. Defined in AppActions.cpp.
