@@ -1,0 +1,15 @@
+#version 450
+// dst += src (the post-smoothing correction fold: z += Cheb(r - A z)).
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer Src { float src[]; };
+layout(std430, binding = 1) buffer Dst { float dst[]; };
+
+layout(push_constant) uniform Push { uint n; } pc;
+
+void main() {
+  const uint i = gl_GlobalInvocationID.x;
+  if (i >= pc.n) return;
+  dst[i] += src[i];
+}

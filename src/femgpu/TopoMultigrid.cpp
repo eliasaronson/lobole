@@ -1,5 +1,7 @@
 #include "femgpu/TopoMultigrid.h"
 
+#include "femgpu/TopoCgSolver.h"  // MgGpuData
+
 #include <Eigen/SparseCholesky>
 
 #include <algorithm>
@@ -182,6 +184,12 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
   }
   for (int a = 0; a < nAgg; ++a)
     if (aggCount[a] > 0) centroid[a] /= aggCount[a];
+  out.aggCentroid.resize(3 * nAgg);
+  for (int a = 0; a < nAgg; ++a) {
+    out.aggCentroid[3 * a + 0] = centroid[a].x();
+    out.aggCentroid[3 * a + 1] = centroid[a].y();
+    out.aggCentroid[3 * a + 2] = centroid[a].z();
+  }
 
   std::vector<Eigen::Triplet<double>> pt;
   pt.reserve(static_cast<size_t>(sys.nFree) * 4);
@@ -265,6 +273,90 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
     out.elemBlockOffset[e + 1] = static_cast<int>(out.blockRow.size());
   }
   return true;
+}
+
+bool MgCoarseSolver::UpdateScales(const std::vector<float>& scales,
+                                  std::string* error) {
+  std::vector<Eigen::Triplet<double>> ct;
+  ct.reserve(m_setup.blockVal.size());
+  const int nElems = static_cast<int>(m_setup.elemBlockOffset.size()) - 1;
+  if (static_cast<int>(scales.size()) != nElems) {
+    if (error) *error = "coarse update: scale count mismatch";
+    return false;
+  }
+  for (int e = 0; e < nElems; ++e) {
+    const double s = scales[e];
+    for (int i = m_setup.elemBlockOffset[e]; i < m_setup.elemBlockOffset[e + 1];
+         ++i)
+      ct.emplace_back(m_setup.blockRow[i], m_setup.blockCol[i],
+                      s * m_setup.blockVal[i]);
+  }
+  Eigen::SparseMatrix<double> Ac(m_setup.nCoarse, m_setup.nCoarse);
+  Ac.setFromTriplets(ct.begin(), ct.end());
+  double tr = 0.0;
+  for (int i = 0; i < m_setup.nCoarse; ++i) tr += Ac.coeff(i, i);
+  const double eps = 1e-10 * (tr / std::max(1, m_setup.nCoarse));
+  Eigen::SparseMatrix<double> I(m_setup.nCoarse, m_setup.nCoarse);
+  I.setIdentity();
+  Ac += eps * I;
+  if (!m_analyzed) {
+    m_ldlt.analyzePattern(Ac);
+    m_analyzed = true;
+  }
+  m_ldlt.factorize(Ac);
+  if (m_ldlt.info() != Eigen::Success) {
+    if (error) *error = "coarse factorization failed";
+    m_ready = false;
+    return false;
+  }
+  m_ready = true;
+  return true;
+}
+
+bool MgCoarseSolver::Solve(const float* rc, float* ec,
+                           std::string* error) const {
+  if (!m_ready) {
+    if (error) *error = "coarse solver not factorized (UpdateScales first)";
+    return false;
+  }
+  Eigen::VectorXd r(m_setup.nCoarse);
+  for (int i = 0; i < m_setup.nCoarse; ++i) r[i] = rc[i];
+  const Eigen::VectorXd e = m_ldlt.solve(r);
+  for (int i = 0; i < m_setup.nCoarse; ++i) ec[i] = static_cast<float>(e[i]);
+  return true;
+}
+
+std::shared_ptr<MgGpuData> MakeMgGpuData(const std::vector<double>& nodes,
+                                         const SpmvSystem& sys,
+                                         const std::vector<int>& dofMap,
+                                         std::string* error) {
+  MgSetup setup;
+  if (!BuildMgSetup(nodes, sys, dofMap, setup, error)) return nullptr;
+  const int nNodes = static_cast<int>(nodes.size() / 3);
+  auto mg = std::make_shared<MgGpuData>();
+  mg->nNodes = nNodes;
+  mg->nCoarse = setup.nCoarse;
+  mg->nodeAgg.assign(setup.aggOfNode.begin(), setup.aggOfNode.end());
+  mg->nodeOffset.resize(static_cast<size_t>(nNodes) * 3);
+  mg->nodeDof.resize(static_cast<size_t>(nNodes) * 3);
+  for (int n = 0; n < nNodes; ++n) {
+    const int a = setup.aggOfNode[n];
+    for (int k = 0; k < 3; ++k) {
+      mg->nodeOffset[3 * n + k] =
+          a >= 0 ? static_cast<float>(nodes[3 * n + k] -
+                                      setup.aggCentroid[3 * a + k])
+                 : 0.0f;
+      mg->nodeDof[3 * n + k] = dofMap[3 * n + k];
+    }
+  }
+  auto coarse = std::make_shared<MgCoarseSolver>(std::move(setup));
+  mg->updateScales = [coarse](const std::vector<float>& s, std::string* e) {
+    return coarse->UpdateScales(s, e);
+  };
+  mg->coarseSolve = [coarse](const float* rc, float* ec, std::string* e) {
+    return coarse->Solve(rc, ec, e);
+  };
+  return mg;
 }
 
 bool MgReferencePcg(const SpmvSystem& sys, const std::vector<float>& scales,

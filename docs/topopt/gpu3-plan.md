@@ -1,8 +1,32 @@
 # GPU3 — geometric multigrid preconditioner (sub-plan)
 
-> Status: **design for sign-off.** The last order of magnitude for the GPU
-> topology solver (docs/topopt/gpu-plan.md). Everything here builds on
-> measured GPU1/GPU2 facts, not hope.
+> Status: **MG0 + MG1 SHIPPED — multigrid is the default GPU preconditioner.**
+>
+> MG0 (fp64 gate, bar ≥10x fewer outer iterations than Jacobi): uniform
+> 18.8x, harsh-random 23.8x, **real late-SIMP field 31.9x** — the void/solid
+> case that defeated polynomials wins the most. PASS.
+>
+> MG1 (GPU integration) measured:
+> - Solve-only, 45k DOF: **120-150 ms vs Jacobi ~1100 ms (7-9x)**, 25-39
+>   outer iterations, residuals honest (fp64-verified).
+> - Solve-only, 201k DOF on a real mid-optimization field: **3.6 s vs
+>   10.8 s (3x)** — and multigrid actually converged (5e-5) while Jacobi
+>   FLOORED above tolerance (2e-4 after 11712 iterations). Jacobi degrades
+>   with mesh size; multigrid holds.
+> - Full SIMP loop, 13.6k tets: 0.98 vs 1.16 s/iter — only 1.2x, because
+>   the solve now costs ~0.1 s and the CPU sensitivity/filter/OC work
+>   (~0.9 s) dominates. **Amdahl: the solver is no longer the topology
+>   bottleneck at coarse meshes.** The plan's ≥3x full-SIMP bar is met at
+>   fine meshes (where the solve dominates and MG is 3x+); at coarse meshes
+>   MG is simply never worse. Default: Multigrid, with Jacobi fallback when
+>   the hierarchy can't build (FEMGPU_PRECOND=jacobi|cheb|mg overrides).
+>
+> Known limits (MG2 candidates, none currently gating): the fp64 coarse
+> LDLT solve grows with mesh size (~20k coarse DOF at 201k fine — a per-
+> application CPU cost); pathological DISCONNECTED void fields (random-void
+> stress tests, not real SIMP states) floor fp32 MG early; and the next
+> topology speedup lever is now the CPU sensitivity loop in
+> TopologyOptimize, not the linear solver.
 
 ## Why multigrid, and why nothing else
 

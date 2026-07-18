@@ -17,6 +17,7 @@
 #include "femgpu/TopoSpmv.h"  // SpmvSystem (the packed element data)
 
 #include <Eigen/Dense>
+#include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
 
 #include <memory>
@@ -35,6 +36,7 @@ struct MgSetup {
   int nAgg = 0;
   int nCoarse = 0;                     // 6 * nAgg
   std::vector<int> aggOfNode;          // mesh node -> aggregate (-1 = none)
+  std::vector<double> aggCentroid;     // 3 per aggregate
   Eigen::SparseMatrix<double> P;       // nFree x nCoarse prolongation
   // Per-element Galerkin blocks: A_c(scales) = sum_e scale_e * block_e,
   // stored as triplet runs so reassembly is a flat weighted accumulation.
@@ -65,5 +67,34 @@ bool MgReferencePcg(const SpmvSystem& sys, const std::vector<float>& scales,
                     const MgSetup& mg, const Eigen::VectorXd& f,
                     Eigen::VectorXd& x, double tol, int maxIter,
                     int smootherDegree, MgRefStats* stats, std::string* error);
+
+// The coarse-level solver the GPU cycle calls between submits: assembles
+// A_c(scales) from the precomputed blocks (+ trace-scaled Tikhonov — see
+// MgReferencePcg) and factors it; Solve maps fp32 coarse residual -> fp32
+// coarse correction through the fp64 LDLT. The sparsity pattern never
+// changes, so refactorizations reuse the symbolic analysis.
+class MgCoarseSolver {
+ public:
+  explicit MgCoarseSolver(MgSetup setup) : m_setup(std::move(setup)) {}
+  const MgSetup& Setup() const { return m_setup; }
+  bool UpdateScales(const std::vector<float>& scales, std::string* error);
+  bool Solve(const float* rc, float* ec, std::string* error) const;
+
+ private:
+  MgSetup m_setup;
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> m_ldlt;
+  bool m_analyzed = false;
+  bool m_ready = false;
+};
+
+// One-call packaging for the GPU cycle: builds the hierarchy and returns the
+// MgGpuData TopoCgSolver consumes (node tables + coarse-solver callbacks,
+// which keep the MgCoarseSolver alive via capture). Null + *error when the
+// hierarchy cannot be built.
+struct MgGpuData;  // femgpu/TopoCgSolver.h
+std::shared_ptr<MgGpuData> MakeMgGpuData(const std::vector<double>& nodes,
+                                         const SpmvSystem& sys,
+                                         const std::vector<int>& dofMap,
+                                         std::string* error);
 
 }  // namespace gpu

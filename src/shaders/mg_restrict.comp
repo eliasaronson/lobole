@@ -1,0 +1,38 @@
+#version 450
+// Multigrid restriction rc = P^T r (GPU3): one thread per mesh node. P's
+// rows are the node's rigid-body couplings to its aggregate, so P^T gathers
+// each node's residual into its aggregate's 6 coarse DOFs (translation sums
+// + moment sums about the aggregate centroid). Aggregates span many nodes —
+// float atomicAdd scatter, coarse buffer pre-zeroed by the host batch.
+#extension GL_EXT_shader_atomic_float : require
+
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer VecR { float r[]; };       // nFree
+layout(std430, binding = 1) readonly buffer NodeAgg { int agg[]; };    // /node
+layout(std430, binding = 2) readonly buffer NodeOff { float off[]; };  // 3/node
+layout(std430, binding = 3) readonly buffer NodeDof { int ndof[]; };   // 3/node
+layout(std430, binding = 4) buffer Coarse { float rc[]; };             // 6*nAgg
+
+layout(push_constant) uniform Push { uint nNodes; } pc;
+
+void main() {
+  const uint n = gl_GlobalInvocationID.x;
+  if (n >= pc.nNodes) return;
+  const int a = agg[n];
+  if (a < 0) return;
+  const int gx = ndof[3u * n + 0u], gy = ndof[3u * n + 1u],
+            gz = ndof[3u * n + 2u];
+  const float rx = gx >= 0 ? r[gx] : 0.0;
+  const float ry = gy >= 0 ? r[gy] : 0.0;
+  const float rz = gz >= 0 ? r[gz] : 0.0;
+  const float dx = off[3u * n + 0u], dy = off[3u * n + 1u],
+              dz = off[3u * n + 2u];
+  const uint c = 6u * uint(a);
+  atomicAdd(rc[c + 0u], rx);
+  atomicAdd(rc[c + 1u], ry);
+  atomicAdd(rc[c + 2u], rz);
+  atomicAdd(rc[c + 3u], dy * rz - dz * ry);
+  atomicAdd(rc[c + 4u], dz * rx - dx * rz);
+  atomicAdd(rc[c + 5u], dx * ry - dy * rx);
+}

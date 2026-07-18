@@ -3,6 +3,7 @@
 #include "core/FemSolverInternal.h"  // element math for packing Ke (Eigen)
 #include "femgpu/ComputeContext.h"
 #include "femgpu/TopoCgSolver.h"
+#include "femgpu/TopoMultigrid.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +14,7 @@ namespace gpu {
 
 struct TopoGpuSolver::Impl {
   std::unique_ptr<ComputeContext> ctx;
-  std::unique_ptr<TopoCgSolver> cg;
+  std::unique_ptr<TopoCgSolver> cg;  // keeps the MG hierarchy alive via opts
   int nFree = 0;
   std::vector<float> scaleF, fF, xF;  // fp32 staging
   bool haveWarmStart = false;
@@ -74,14 +75,33 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
       for (int c = 0; c < 30; ++c) sys.ke.push_back(static_cast<float>(Ke(r, c)));
   }
 
-  // Preconditioner selection: Jacobi by default (the GPU2 bench showed
-  // Chebyshev losing 2-2.5x on SIMP systems — see gpu-plan.md). Env
-  // overrides for experiments: FEMGPU_PRECOND=jacobi|cheb,
+  // Preconditioner selection (measured verdicts in gpu-plan.md): MULTIGRID
+  // by default when its hierarchy builds — the fp64 gate cut outer
+  // iterations 19-32x vs Jacobi and the GPU bench confirms the win; plain
+  // Jacobi is the fallback (standalone Chebyshev measured 2-2.5x slower).
+  // Env overrides for experiments: FEMGPU_PRECOND=mg|jacobi|cheb,
   // FEMGPU_CHEB_DEGREE=<int>, FEMGPU_CHEB_RATIO=<float>.
+  std::string precond = "mg";
+  if (const char* p = std::getenv("FEMGPU_PRECOND")) precond = p;
   CgOptions opts;
-  if (const char* p = std::getenv("FEMGPU_PRECOND"))
-    opts.precond = std::string(p) == "jacobi" ? CgOptions::Precond::Jacobi
-                                              : CgOptions::Precond::Chebyshev;
+  if (precond == "cheb") {
+    opts.precond = CgOptions::Precond::Chebyshev;
+  } else if (precond == "mg") {
+    std::vector<double> flat;
+    flat.reserve(mesh.nodes.size() * 3);
+    for (const auto& p : mesh.nodes) {
+      flat.push_back(p.x);
+      flat.push_back(p.y);
+      flat.push_back(p.z);
+    }
+    std::string mgErr;
+    if (auto mg = MakeMgGpuData(flat, sys, dofMap, &mgErr)) {
+      opts.precond = CgOptions::Precond::Multigrid;
+      opts.chebDegree = 3;     // the SMOOTHER polynomial
+      opts.chebRatio = 15.0f;  // top-of-spectrum smoothing interval
+      opts.mg = std::move(mg);
+    }  // else: fall through to Jacobi
+  }
   if (const char* d = std::getenv("FEMGPU_CHEB_DEGREE"))
     opts.chebDegree = std::max(2, std::atoi(d));
   if (const char* r = std::getenv("FEMGPU_CHEB_RATIO"))

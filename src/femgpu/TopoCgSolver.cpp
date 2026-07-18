@@ -10,6 +10,9 @@
 #include "cheb_init_spv.h"
 #include "cheb_iter_spv.h"
 #include "fem_spmv_spv.h"
+#include "mg_prolong_spv.h"
+#include "mg_restrict_spv.h"
+#include "vec_add_spv.h"
 #include "vec_divd_spv.h"
 #include "vec_scale_spv.h"
 
@@ -81,6 +84,10 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
     return fail("CG system arrays have the wrong size");
   if (options.chebDegree < 2 || options.chebRatio <= 1.0f)
     return fail("bad Chebyshev options (degree >= 2, ratio > 1 required)");
+  if (options.precond == CgOptions::Precond::Multigrid &&
+      (!options.mg || options.mg->nNodes <= 0 || options.mg->nCoarse <= 0 ||
+       !options.mg->coarseSolve || !options.mg->updateScales))
+    return fail("Multigrid needs a populated CgOptions::mg");
 
   std::unique_ptr<TopoCgSolver> s(new TopoCgSolver(ctx));
   s->m_nFree = sys.nFree;
@@ -117,7 +124,12 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
       !pipe(s->m_vecDivd, k_vec_divd_spv, k_vec_divd_spv_size, 3,
             sizeof(NPush)) ||
       !pipe(s->m_vecScale, k_vec_scale_spv, k_vec_scale_spv_size, 2,
-            sizeof(OneFloatPush)))
+            sizeof(OneFloatPush)) ||
+      !pipe(s->m_mgRestrict, k_mg_restrict_spv, k_mg_restrict_spv_size, 5,
+            sizeof(NPush)) ||
+      !pipe(s->m_mgProlong, k_mg_prolong_spv, k_mg_prolong_spv_size, 5,
+            sizeof(NPush)) ||
+      !pipe(s->m_vecAdd, k_vec_add_spv, k_vec_add_spv_size, 2, sizeof(NPush)))
     return nullptr;
 
   // Buffers.
@@ -139,6 +151,24 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
   {
     float* sc = static_cast<float*>(s->m_scale.mapped);
     for (int e = 0; e < sys.nElems; ++e) sc[e] = 1.0f;
+  }
+  s->m_scalesCpu.assign(sys.nElems, 1.0f);
+
+  // Multigrid working set + node tables.
+  if (options.precond == CgOptions::Precond::Multigrid) {
+    const MgGpuData& mg = *options.mg;
+    s->m_nodeGroups = (static_cast<uint32_t>(mg.nNodes) + 255) / 256;
+    const VkDeviceSize cvec =
+        static_cast<VkDeviceSize>(mg.nCoarse) * sizeof(float);
+    if (!make(s->m_mgR, vec) || !make(s->m_mgZt, vec) ||
+        !make(s->m_mgRc, cvec) || !make(s->m_mgEc, cvec) ||
+        !make(s->m_nodeAgg, mg.nodeAgg.size() * sizeof(int32_t)) ||
+        !make(s->m_nodeOff, mg.nodeOffset.size() * sizeof(float)) ||
+        !make(s->m_nodeDof, mg.nodeDof.size() * sizeof(int32_t)))
+      return nullptr;
+    std::memcpy(s->m_nodeAgg.mapped, mg.nodeAgg.data(), s->m_nodeAgg.size);
+    std::memcpy(s->m_nodeOff.mapped, mg.nodeOffset.data(), s->m_nodeOff.size);
+    std::memcpy(s->m_nodeDof.mapped, mg.nodeDof.data(), s->m_nodeDof.size);
   }
 
   // Static bindings.
@@ -183,6 +213,26 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
             {&s->m_chebR, &s->m_chebR, &s->m_scalars}))
     return nullptr;
 
+  if (options.precond == CgOptions::Precond::Multigrid) {
+    if (!bind(s->m_setSpmvZ, s->m_spmv,
+              {&s->m_dof, &s->m_ke, &s->m_scale, &s->m_z, &s->m_ap}) ||
+        !bind(s->m_setResidualMg, s->m_residual,
+              {&s->m_r, &s->m_ap, &s->m_mgR}) ||  // r2 = r - K z
+        !bind(s->m_setMgRestrict, s->m_mgRestrict,
+              {&s->m_mgR, &s->m_nodeAgg, &s->m_nodeOff, &s->m_nodeDof,
+               &s->m_mgRc}) ||
+        !bind(s->m_setMgProlong, s->m_mgProlong,
+              {&s->m_mgEc, &s->m_nodeAgg, &s->m_nodeOff, &s->m_nodeDof,
+               &s->m_z}) ||
+        !bind(s->m_setChebInitMg, s->m_chebInit,
+              {&s->m_mgR, &s->m_diagK, &s->m_chebR, &s->m_chebD,
+               &s->m_mgZt}) ||
+        !bind(s->m_setChebIterMg, s->m_chebIter,
+              {&s->m_ap, &s->m_diagK, &s->m_chebR, &s->m_chebD, &s->m_mgZt}) ||
+        !bind(s->m_setVecAddZt, s->m_vecAdd, {&s->m_mgZt, &s->m_z}))
+      return nullptr;
+  }
+
   return s;
 }
 
@@ -192,14 +242,18 @@ TopoCgSolver::~TopoCgSolver() {
         &m_setCopyZP, &m_setDotFF, &m_setDotPAp, &m_setUpdateXr, &m_setUpdateP,
         &m_setSpmvChebD, &m_setChebInit, &m_setChebIter, &m_setDotRZ,
         &m_setDotRR, &m_setDivdAp, &m_setScaleRD, &m_setDotDR, &m_setDotDD,
-        &m_setDotRRcheb})
+        &m_setDotRRcheb, &m_setSpmvZ, &m_setResidualMg, &m_setMgRestrict,
+        &m_setMgProlong, &m_setChebInitMg, &m_setChebIterMg, &m_setVecAddZt})
     m_ctx.Destroy(*set);
-  for (Buffer* b : {&m_dof, &m_ke, &m_scale, &m_diagK, &m_f, &m_x, &m_r, &m_z,
-                    &m_p, &m_ap, &m_chebR, &m_chebD, &m_scalars})
+  for (Buffer* b :
+       {&m_dof, &m_ke, &m_scale, &m_diagK, &m_f, &m_x, &m_r, &m_z, &m_p,
+        &m_ap, &m_chebR, &m_chebD, &m_scalars, &m_mgR, &m_mgZt, &m_mgRc,
+        &m_mgEc, &m_nodeAgg, &m_nodeOff, &m_nodeDof})
     m_ctx.Destroy(*b);
   for (Pipeline* p : {&m_spmv, &m_diag, &m_residual, &m_precondDot, &m_copy,
                       &m_dot, &m_updateXr, &m_updateP, &m_chebInit,
-                      &m_chebIter, &m_vecDivd, &m_vecScale})
+                      &m_chebIter, &m_vecDivd, &m_vecScale, &m_mgRestrict,
+                      &m_mgProlong, &m_vecAdd})
     m_ctx.Destroy(*p);
 }
 
@@ -210,6 +264,7 @@ bool TopoCgSolver::SetScales(const std::vector<float>& scales,
     return false;
   }
   std::memcpy(m_scale.mapped, scales.data(), m_scale.size);
+  m_scalesCpu = scales;  // the coarse-rebuild callback needs them on the CPU
   m_scalesDirty = true;
   return true;
 }
@@ -350,6 +405,8 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
     if (error) *error = "f size != nFree";
     return false;
   }
+  if (m_opts.precond == CgOptions::Precond::Multigrid)
+    return SolveMg(f, x, tol, maxIter, stats, error);
   x.resize(m_nFree, 0.0f);
   std::memcpy(m_f.mapped, f.data(), m_f.size);
   std::memcpy(m_x.mapped, x.data(), m_x.size);
@@ -375,7 +432,7 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
   const float bb = scal[kBb];
   // Chebyshev needs the spectrum's top edge; the diagonal (and so the scaled
   // operator) just changed with the SIMP scales.
-  if (m_opts.precond == CgOptions::Precond::Chebyshev && rebuildPrecond &&
+  if (m_opts.precond != CgOptions::Precond::Jacobi && rebuildPrecond &&
       !EstimateLambdaMax(error))
     return false;
   if (!std::isfinite(bb)) {
@@ -484,6 +541,231 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
 
   // Leave the best iterate on the device too, so the next warm start (and the
   // caller) see the best solution rather than a past-the-floor walk-away.
+  std::memcpy(m_x.mapped, bestX.data(), m_x.size);
+  x = std::move(bestX);
+  if (stats) {
+    stats->iterations = iter;
+    stats->relResidual = std::sqrt(bestRr / bb);
+    stats->converged = bestRr <= target;
+    stats->lambdaMax = m_lambdaMax;
+  }
+  return true;
+}
+
+// ---- GPU3: multigrid-preconditioned PCG -----------------------------------
+
+// Records a Chebyshev polynomial application into the CURRENT batch: the
+// output vector is whatever `initSet`/`iterSet` bind (z for pre-smoothing,
+// the zt correction for post-smoothing). Coefficients are the smoother's
+// (m_chebC1/C2 from EstimateLambdaMax with the MG smoother degree/ratio).
+void TopoCgSolver::RecordChebInto(const BoundSet& initSet,
+                                  const BoundSet& iterSet) {
+  const uint32_t n = static_cast<uint32_t>(m_nFree);
+  const ElemPush ep{static_cast<uint32_t>(m_nElems), m_elemGx};
+  const OneFloatPush init{n, m_chebInvTheta};
+  m_ctx.BatchDispatch(m_chebInit, initSet, &init, sizeof(init), m_vecGroups,
+                      1);
+  for (size_t k = 0; k < m_chebC1.size(); ++k) {
+    m_ctx.BatchFill(m_ap, 0, VK_WHOLE_SIZE, 0);
+    m_ctx.BatchDispatch(m_spmv, m_setSpmvChebD, &ep, sizeof(ep), m_elemGx,
+                        m_elemGy);
+    const TwoFloatPush cf{n, m_chebC1[k], m_chebC2[k]};
+    m_ctx.BatchDispatch(m_chebIter, iterSet, &cf, sizeof(cf), m_vecGroups, 1);
+  }
+}
+
+// One V(1,1) application z = M^-1 r (r lives in m_r), split around the CPU
+// coarse solve: [pre-smooth, fine residual, restrict] -> CPU LDLT ->
+// [prolong-correct, fine residual, post-smooth, fold, rz/rr dots]. On
+// return the rz/rr scalars are refreshed (rz into `rzSlot`).
+bool TopoCgSolver::ApplyMgPrecond(uint32_t rzSlot, std::string* error) {
+  const uint32_t n = static_cast<uint32_t>(m_nFree);
+  const ElemPush ep{static_cast<uint32_t>(m_nElems), m_elemGx};
+  const NPush np{n};
+  const NPush nodes{static_cast<uint32_t>(m_opts.mg->nNodes)};
+
+  // Part 1: z = Cheb(r); r2 = r - K z; rc = P^T r2.
+  if (!m_ctx.BeginBatch(error)) return false;
+  RecordChebInto(m_setChebInit, m_setChebIter);  // writes m_z from m_r
+  m_ctx.BatchFill(m_ap, 0, VK_WHOLE_SIZE, 0);
+  m_ctx.BatchDispatch(m_spmv, m_setSpmvZ, &ep, sizeof(ep), m_elemGx, m_elemGy);
+  m_ctx.BatchDispatch(m_residual, m_setResidualMg, &np, sizeof(np),
+                      m_vecGroups, 1);
+  m_ctx.BatchFill(m_mgRc, 0, VK_WHOLE_SIZE, 0);
+  m_ctx.BatchDispatch(m_mgRestrict, m_setMgRestrict, &nodes, sizeof(nodes),
+                      m_nodeGroups, 1);
+  if (!m_ctx.SubmitBatch(error)) return false;
+
+  // CPU coarse solve between the submits.
+  if (!m_opts.mg->coarseSolve(static_cast<const float*>(m_mgRc.mapped),
+                              static_cast<float*>(m_mgEc.mapped), error))
+    return false;
+
+  // Part 2: z += P ec; r2 = r - K z; z += Cheb(r2); refresh rz/rr.
+  if (!m_ctx.BeginBatch(error)) return false;
+  m_ctx.BatchDispatch(m_mgProlong, m_setMgProlong, &nodes, sizeof(nodes),
+                      m_nodeGroups, 1);
+  m_ctx.BatchFill(m_ap, 0, VK_WHOLE_SIZE, 0);
+  m_ctx.BatchDispatch(m_spmv, m_setSpmvZ, &ep, sizeof(ep), m_elemGx, m_elemGy);
+  m_ctx.BatchDispatch(m_residual, m_setResidualMg, &np, sizeof(np),
+                      m_vecGroups, 1);
+  RecordChebInto(m_setChebInitMg, m_setChebIterMg);  // zt = Cheb(r2)
+  m_ctx.BatchDispatch(m_vecAdd, m_setVecAddZt, &np, sizeof(np), m_vecGroups,
+                      1);
+  m_ctx.BatchFill(m_scalars, rzSlot * sizeof(float), sizeof(float), 0);
+  m_ctx.BatchFill(m_scalars, kRr * sizeof(float), sizeof(float), 0);
+  const SlotPush rz{n, rzSlot};
+  m_ctx.BatchDispatch(m_dot, m_setDotRZ, &rz, sizeof(rz), m_vecGroups, 1);
+  const SlotPush rr{n, kRr};
+  m_ctx.BatchDispatch(m_dot, m_setDotRR, &rr, sizeof(rr), m_vecGroups, 1);
+  return m_ctx.SubmitBatch(error);
+}
+
+// The multigrid PCG driver. Structurally the GPU1 loop (true-residual
+// replacement, best-iterate snapshot, restart-on-stall — the fp32 lessons
+// carry over verbatim), but per-iteration submits instead of 32-iteration
+// chunks: the CPU coarse solve sits inside every preconditioner application.
+// At ~10^2 outer iterations (the fp64 gate measured 19-32x fewer than
+// Jacobi's ~10^3-10^4) the extra submit overhead is noise.
+bool TopoCgSolver::SolveMg(const std::vector<float>& f, std::vector<float>& x,
+                           float tol, int maxIter, CgStats* stats,
+                           std::string* error) {
+  x.resize(m_nFree, 0.0f);
+  std::memcpy(m_f.mapped, f.data(), m_f.size);
+  std::memcpy(m_x.mapped, x.data(), m_x.size);
+
+  const uint32_t n = static_cast<uint32_t>(m_nFree);
+  const ElemPush ep{static_cast<uint32_t>(m_nElems), m_elemGx};
+  const NPush np{n};
+  const float* scal = static_cast<const float*>(m_scalars.mapped);
+
+  // Init: diagonal + |f|^2 (+ coarse operator + smoother spectrum on a
+  // scales change).
+  const bool rebuildPrecond = m_scalesDirty;
+  if (!m_ctx.BeginBatch(error)) return false;
+  if (m_scalesDirty) {
+    m_ctx.BatchFill(m_diagK, 0, VK_WHOLE_SIZE, 0);
+    m_ctx.BatchDispatch(m_diag, m_setDiag, &ep, sizeof(ep), m_elemGx,
+                        m_elemGy);
+    m_scalesDirty = false;
+  }
+  m_ctx.BatchFill(m_scalars, kBb * sizeof(float), sizeof(float), 0);
+  const SlotPush bbp{n, kBb};
+  m_ctx.BatchDispatch(m_dot, m_setDotFF, &bbp, sizeof(bbp), m_vecGroups, 1);
+  if (!m_ctx.SubmitBatch(error)) return false;
+  if (rebuildPrecond) {
+    if (!EstimateLambdaMax(error)) return false;
+    if (!m_opts.mg->updateScales(m_scalesCpu, error)) return false;
+  }
+  const float bb = scal[kBb];
+  if (!std::isfinite(bb)) {
+    if (error) *error = "CG breakdown (non-finite |f|)";
+    return false;
+  }
+  if (bb <= 0.0f) {
+    std::fill(x.begin(), x.end(), 0.0f);
+    if (stats) *stats = {0, 0.0f, true, m_lambdaMax};
+    return true;
+  }
+  const float target = tol * tol * bb;
+
+  // (Re)start from the current device x: true residual, precondition, p = z.
+  auto startCg = [&]() -> bool {
+    if (!m_ctx.BeginBatch(error)) return false;
+    m_ctx.BatchFill(m_ap, 0, VK_WHOLE_SIZE, 0);
+    m_ctx.BatchDispatch(m_spmv, m_setSpmvX, &ep, sizeof(ep), m_elemGx,
+                        m_elemGy);
+    m_ctx.BatchDispatch(m_residual, m_setResidual, &np, sizeof(np),
+                        m_vecGroups, 1);
+    if (!m_ctx.SubmitBatch(error)) return false;
+    if (!ApplyMgPrecond(kRzA, error)) return false;
+    if (!m_ctx.BeginBatch(error)) return false;
+    m_ctx.BatchDispatch(m_copy, m_setCopyZP, &np, sizeof(np), m_vecGroups, 1);
+    return m_ctx.SubmitBatch(error);
+  };
+  if (!startCg()) return false;
+  float rr = scal[kRr];
+  if (!std::isfinite(rr)) {
+    if (error) *error = "CG breakdown (non-finite residual)";
+    return false;
+  }
+
+  // Counted in true-residual REFRESHES (one per 16 iterations): four
+  // refreshes without a new best (~64 iterations) means the fp32 floor.
+  constexpr int kStallIters = 4;
+  int iter = 0, parity = 0, sinceBest = 0, restartsNoGain = 0;
+  float bestRr = rr;
+  float bestAtRestart = rr;
+  std::vector<float> bestX(x);
+  while (rr > target && iter < maxIter && restartsNoGain < 2) {
+    const uint32_t rzOld = parity == 0 ? kRzA : kRzB;
+    const uint32_t rzNew = parity == 0 ? kRzB : kRzA;
+    // CG step: Ap = K p; pAp; alpha (on-device from slots); x += ap, r -= aAp.
+    if (!m_ctx.BeginBatch(error)) return false;
+    m_ctx.BatchFill(m_ap, 0, VK_WHOLE_SIZE, 0);
+    m_ctx.BatchFill(m_scalars, kPAp * sizeof(float), sizeof(float), 0);
+    m_ctx.BatchDispatch(m_spmv, m_setSpmvP, &ep, sizeof(ep), m_elemGx,
+                        m_elemGy);
+    const SlotPush dp{n, kPAp};
+    m_ctx.BatchDispatch(m_dot, m_setDotPAp, &dp, sizeof(dp), m_vecGroups, 1);
+    const TwoSlotPush ux{n, rzOld, kPAp};
+    m_ctx.BatchDispatch(m_updateXr, m_setUpdateXr, &ux, sizeof(ux),
+                        m_vecGroups, 1);
+    if (!m_ctx.SubmitBatch(error)) return false;
+    // z = M^-1 r (2 submits + CPU coarse), refreshing rzNew/rr.
+    if (!ApplyMgPrecond(rzNew, error)) return false;
+    // p = z + beta p.
+    if (!m_ctx.BeginBatch(error)) return false;
+    const TwoSlotPush up{n, rzNew, rzOld};
+    m_ctx.BatchDispatch(m_updateP, m_setUpdateP, &up, sizeof(up), m_vecGroups,
+                        1);
+    if (!m_ctx.SubmitBatch(error)) return false;
+    parity ^= 1;
+    ++iter;
+    rr = scal[kRr];
+
+    // TRUE-residual replacement (GPU1 lesson: the fp32 recurrence residual
+    // reads optimistic — measured ~25x after only 30 MG iterations):
+    // periodically, and ALWAYS before believing convergence, refresh
+    // r = f - K x and re-precondition into the slot the next iteration reads
+    // as rzOld (p kept). Exit decisions AND the best-iterate bookkeeping run
+    // only on these fresh measurements — a drifted recurrence value in
+    // between must neither exit the loop nor be snapshotted as "best".
+    bool fresh = false;
+    if (std::isfinite(rr) && (iter % 16 == 0 || rr <= target)) {
+      if (!m_ctx.BeginBatch(error)) return false;
+      m_ctx.BatchFill(m_ap, 0, VK_WHOLE_SIZE, 0);
+      m_ctx.BatchDispatch(m_spmv, m_setSpmvX, &ep, sizeof(ep), m_elemGx,
+                          m_elemGy);
+      m_ctx.BatchDispatch(m_residual, m_setResidual, &np, sizeof(np),
+                          m_vecGroups, 1);
+      if (!m_ctx.SubmitBatch(error)) return false;
+      if (!ApplyMgPrecond(parity == 0 ? kRzA : kRzB, error)) return false;
+      rr = scal[kRr];
+      fresh = true;
+    }
+    if (fresh && std::isfinite(rr) && rr < bestRr) {
+      bestRr = rr;
+      std::memcpy(bestX.data(), m_x.mapped, m_x.size);
+      sinceBest = 0;
+    } else if (fresh) {
+      ++sinceBest;
+    }
+    if (!std::isfinite(rr) || sinceBest >= kStallIters) {
+      restartsNoGain = bestRr < 0.999f * bestAtRestart ? 0 : restartsNoGain + 1;
+      bestAtRestart = bestRr;
+      std::memcpy(m_x.mapped, bestX.data(), m_x.size);
+      if (!startCg()) return false;
+      rr = scal[kRr];
+      if (!std::isfinite(rr)) {
+        if (error) *error = "CG breakdown (non-finite residual)";
+        return false;
+      }
+      parity = 0;
+      sinceBest = 0;
+    }
+  }
+
   std::memcpy(m_x.mapped, bestX.data(), m_x.size);
   x = std::move(bestX);
   if (stats) {

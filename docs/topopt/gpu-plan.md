@@ -1,10 +1,11 @@
 # GPU topology solver — plan
 
-> Status: **GPU0 + GPU1 + GPU2 SHIPPED** (GPU2 = a measured negative:
-> Jacobi stays the default). The linear solve is the
-> topology wall: CPU CG-IC already cut a bulky 10k-tet cube from 42 s/iter
-> (direct) to 2.8 s/iter, but fine meshes want another order of magnitude. This
-> plan is the GPU matrix-free CG that gets it.
+> Status: **GPU0-GPU3 ALL SHIPPED** (GPU2 = a measured negative kept as the
+> GPU3 smoother; GPU3 multigrid = the default preconditioner). The linear
+> solve was the topology wall: CPU CG-IC already cut a bulky 10k-tet cube
+> from 42 s/iter (direct) to 2.8 s/iter; the GPU multigrid solver now clears
+> the wall entirely — at coarse meshes the bottleneck has moved to the CPU
+> sensitivity loop.
 >
 > GPU0 result: `fem_gpu` static lib (`src/femgpu/` — `gpu::ComputeContext` +
 > `gpu::TopoSpmv`), `fem_spmv.comp` matrix-free element SpMV with float
@@ -29,6 +30,14 @@
 > from best. Jacobi needs ~25x the iterations of IC — that gap is the
 > preconditioner headroom, now the throughput lever since per-iteration cost
 > is already near memory bandwidth.
+>
+> GPU3 result — **SHIPPED, the new default**: geometric multigrid V(1,1)
+> preconditioner (rigid-body aggregation coarse space + GPU2's Chebyshev
+> kernels as smoother + CPU fp64 coarse LDLT between submits). fp64 gate:
+> 19-32x fewer outer iterations than Jacobi. GPU: 7-9x faster solves at 45k
+> DOF, 3x at 201k DOF where Jacobi no longer even converges. At coarse
+> meshes the SIMP loop is now bottlenecked by CPU sensitivity work, not the
+> solver. Details: docs/topopt/gpu3-plan.md.
 >
 > GPU2 result — **negative, by the numbers**: Chebyshev-Jacobi preconditioning
 > (degree-m polynomial of D⁻¹K per outer iteration; on-device power-iteration
