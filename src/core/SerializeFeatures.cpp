@@ -396,6 +396,8 @@ json FeatureToJson(const Feature& feature) {
                            {"element", ext->endTarget.name}};
       }
     }
+    if (!ext->regions.empty()) // v34; omit = whole sketch
+      j["regions"] = ext->regions;
     if (ext->thin) { // v18; omit when off
       json thin = {{"thickness", ext->thinThickness},
                    {"side", ext->thinSide == sketch::ThinSide::Out  ? "out"
@@ -459,6 +461,8 @@ json FeatureToJson(const Feature& feature) {
       j["symmetric"] = true;
     j["reversed"] = rev->reversed;
     j["mode"] = ExtrudeModeToString(rev->mode);
+    if (!rev->regions.empty()) // v34; omit = whole sketch
+      j["regions"] = rev->regions;
   } else if (auto* da = dynamic_cast<const DatumAxisFeature*>(&feature)) {
     j["kind"] = DatumAxisKindToString(da->kind);
     switch (da->kind) {
@@ -664,6 +668,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                          : ExtrudeEnd::Blind;
     ext->distance2 = j.value("distance2", 1.0);
     ext->distance2Expr = j.value("distance2_expr", std::string{});
+    if (j.contains("regions")) // v34
+      ext->regions =
+          j["regions"].get<std::vector<std::vector<uint32_t>>>();
     if (j.contains("end_target")) {
       ext->endTarget =
           ElementRef{j["end_target"].value("feature_id", uint64_t{0}),
@@ -728,6 +735,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     rev->axis = AxisRefFromJson(j.at("axis"));
     rev->angleExpr = j.value("angle_expr", std::string{});
     rev->symmetric = j.value("symmetric", false);
+    if (j.contains("regions")) // v34
+      rev->regions =
+          j["regions"].get<std::vector<std::vector<uint32_t>>>();
     out = std::move(rev);
   } else if (type == "DatumAxis") {
     auto da = std::make_unique<DatumAxisFeature>(

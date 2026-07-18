@@ -658,3 +658,47 @@ TEST_CASE("Thin round-trips through serialization", "[extrude][thin]") {
              WithinRel(doc.GetBodies()[0].shape.Volume(), 1e-9));
   std::filesystem::remove(path);
 }
+
+TEST_CASE("Extrude regions select one profile of a multi-region sketch",
+          "[extrude][regions]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("Profiles", kXY);
+  const uint32_t c1 = sk->AddEntity(sketch::Circle{{0, 0}, 1.0});
+  const uint32_t c2 = sk->AddEntity(sketch::Circle{{5, 0}, 1.0});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(0)->GetId();
+
+  auto ext = std::make_unique<ExtrudeFeature>("One", skId, 2.0,
+                                              ExtrudeMode::NewBody);
+  ext->regions = {{c1}};
+  doc.AddFeature(std::move(ext));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(2.0 * M_PI, 1e-3)); // one r=1 h=2 cylinder, not two
+
+  // Selecting both regions is the whole sketch again.
+  auto* e = dynamic_cast<ExtrudeFeature*>(doc.GetFeature(1));
+  REQUIRE(e != nullptr);
+  e->regions = {{c1}, {c2}};
+  REQUIRE(doc.Regenerate());
+  double total = 0.0;
+  for (const auto& b : doc.GetBodies())
+    total += b.shape.Volume();
+  CHECK_THAT(total, WithinRel(4.0 * M_PI, 1e-3));
+
+  // A hole rides along with its selected outer region.
+  auto* skf = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
+  REQUIRE(skf != nullptr);
+  skf->AddEntity(sketch::Circle{{0, 0}, 0.5}); // hole inside circle 1
+  e->regions = {{c1}};
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(2.0 * M_PI * (1.0 - 0.25), 1e-3)); // annulus
+
+  // A vanished region is a first-class regen failure, not a silent skip.
+  e->regions = {{9999}};
+  CHECK_FALSE(doc.Regenerate());
+  CHECK_FALSE(e->GetError().empty());
+}

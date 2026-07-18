@@ -127,4 +127,18 @@ std::vector<Entity> OffsetLoop(const SketchPlane& plane,
                                const std::vector<Entity>& chain, double distance,
                                bool joinArc);
 
+// Region selection (U2): a region is referenced by the sorted, deduplicated
+// entity ids of its OUTER loop's boundary — stable across sketch edits that
+// don't touch the boundary; a vanished loop is a first-class regen failure.
+std::vector<uint32_t> LoopEntityIds(const Loop& loop);
+
+// Even-odd point-in-loop test in plane UV (arcs sampled to segments).
+bool PointInLoop(const Loop& loop, const glm::vec2& p);
+
+// Keeps only the loops whose id set matches one of `regions`, plus every
+// loop nested inside a kept one (holes ride along with their outer). Returns
+// false — leaving `loops` untouched — when a region matches no current loop.
+bool FilterLoopsToRegions(std::vector<Loop>& loops,
+                          const std::vector<std::vector<uint32_t>>& regions);
+
 } // namespace sketch

@@ -58,4 +58,9 @@ public:
   sketch::ThinSide thinSide = sketch::ThinSide::Out;
   bool reversed = false;
   ExtrudeMode mode = ExtrudeMode::NewBody;
+  // Region selection (U2): each entry is one selected region — the sorted
+  // entity ids of its outer loop (sketch::LoopEntityIds). Empty = the whole
+  // sketch (every region), the pre-v34 behavior. A region that no longer
+  // matches a loop fails regeneration with a reattach-style error.
+  std::vector<std::vector<uint32_t>> regions;
 };

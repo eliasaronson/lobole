@@ -28,6 +28,16 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     LOG_ERROR("ExtrudeFeature '{}': sketch has no closed profile", m_name);
     return false;
   }
+  // Region selection (U2): keep only the chosen regions (+ their holes).
+  if (!regions.empty() && !sketch::FilterLoopsToRegions(loops, regions)) {
+    SetError("a selected region no longer exists in the sketch - re-pick "
+             "the profiles");
+    return false;
+  }
+  if (loops.empty()) {
+    SetError("the selected regions leave no profile");
+    return false;
+  }
 
   // End condition: every variant is ONE prism of the total length, shifted
   // back along the normal — geometry-identical to sweeping both ways, and

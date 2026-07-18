@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 33;  // v33: topology studies (v32: FEM modal/gravity)
+inline constexpr int kVersion = 34;  // v34: extrude/revolve region selection (v33: topology studies)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

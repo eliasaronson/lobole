@@ -1185,4 +1185,76 @@ CADShape BuildThinPrismNamed(const SketchPlane& plane,
   }
 }
 
-} // namespace sketch\n
+std::vector<uint32_t> LoopEntityIds(const Loop& loop) {
+  std::vector<uint32_t> ids;
+  if (loop.circle) {
+    ids.push_back(loop.circle->id);
+  } else if (loop.ellipse) {
+    ids.push_back(loop.ellipse->id);
+  } else {
+    for (const LoopEdge& e : loop.edges)
+      ids.push_back(e.entityId);
+  }
+  std::sort(ids.begin(), ids.end());
+  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  return ids;
+}
+
+bool PointInLoop(const Loop& loop, const glm::vec2& p) {
+  if (loop.circle)
+    return glm::length(p - loop.circle->center) <= loop.circle->radius;
+  const std::vector<glm::vec2> poly = LoopPolygon(loop);
+  if (poly.size() < 3)
+    return false;
+  bool inside = false; // even-odd ray cast toward +x
+  for (size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
+    const glm::vec2& a = poly[i];
+    const glm::vec2& b = poly[j];
+    if ((a.y > p.y) != (b.y > p.y) &&
+        p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
+      inside = !inside;
+  }
+  return inside;
+}
+
+bool FilterLoopsToRegions(std::vector<Loop>& loops,
+                          const std::vector<std::vector<uint32_t>>& regions) {
+  std::vector<bool> keep(loops.size(), false);
+  for (const auto& region : regions) {
+    bool matched = false;
+    for (size_t i = 0; i < loops.size(); i++) {
+      if (LoopEntityIds(loops[i]) == region) {
+        keep[i] = true;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched)
+      return false; // a selected region no longer exists in the sketch
+  }
+  // Holes ride along: an unselected loop nested inside a kept one stays.
+  for (size_t i = 0; i < loops.size(); i++) {
+    if (keep[i])
+      continue;
+    const std::vector<glm::vec2> poly = LoopPolygon(loops[i]);
+    if (poly.empty())
+      continue;
+    for (size_t k = 0; k < loops.size(); k++) {
+      if (!keep[k] || k == i)
+        continue;
+      if (PointInLoop(loops[k], poly.front())) {
+        keep[i] = true;
+        break;
+      }
+    }
+  }
+  size_t w = 0;
+  for (size_t i = 0; i < loops.size(); i++)
+    if (keep[i])
+      loops[w++] = std::move(loops[i]);
+  loops.resize(w);
+  return true;
+}
+
+} // namespace sketch
+

@@ -34,4 +34,6 @@ public:
   bool reversed = false;
   bool symmetric = false;
   ExtrudeMode mode = ExtrudeMode::NewBody;
+  // Region selection (U2) — see ExtrudeFeature::regions.
+  std::vector<std::vector<uint32_t>> regions;
 };

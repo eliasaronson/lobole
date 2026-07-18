@@ -98,6 +98,8 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 26 | (A2.5) | Connector inference snap (`anchor.snap_edge` → a hole-center frame) |
 | 27 | (A4) | Assembly `exploded` views (named per-occurrence offset sets) |
 | 28 | (C2) | Unit-suffixed expression literals (`10mm`, `1in`, `45deg`) |
+| … | | (v29–v33: FEM studies, drawings, configurations, modal/gravity, topology studies — see golden corpus) |
+| 34 | (U2) | Extrude/Revolve `regions` (selected profile loops by boundary entity-id sets; absent = whole sketch) |
 
 ## The directory format (F3, default for new saves)
 

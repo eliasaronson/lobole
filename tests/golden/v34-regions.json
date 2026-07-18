@@ -1,0 +1,16 @@
+{
+  "format": "designer-document",
+  "version": 34,
+  "features": [
+    {"type": "Sketch", "name": "Profiles", "id": 1, "next_entity_id": 3,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "circle", "id": 1, "center": [0, 0], "radius": 1.0},
+       {"type": "circle", "id": 2, "center": [5, 0], "radius": 1.0}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "One region", "id": 2, "sketch_id": 1,
+     "distance": 2.0, "mode": "new_body", "reversed": false,
+     "regions": [[1]]}
+  ]
+}

@@ -60,6 +60,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "side": "out"|"in"|"both"}} — walls every loop instead of filling}}.
   Sketches may hold SEVERAL disjoint profiles (e.g. four bolt-hole circles):
   nested loops become holes, islands become solids again.
+  "regions"?: [[entity ids]] — extrude only the listed regions, each named
+  by its OUTER loop's boundary entity ids (holes inside a chosen region cut
+  automatically). Absent = every region. Also on Revolve.
 - Revolve: {{"type": "Revolve", "name": str, "sketch_id": <feature id>,
   "axis": <axis ref>, "angle_deg"?: num (default 360), "angle_expr"?: str,
   "symmetric"?: bool, "reversed"?: bool, "mode": "new_body"|"add"|"cut"}}

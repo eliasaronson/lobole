@@ -31,6 +31,16 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
     LOG_ERROR("RevolveFeature '{}': sketch has no closed profile", m_name);
     return false;
   }
+  // Region selection (U2): keep only the chosen regions (+ their holes).
+  if (!regions.empty() && !sketch::FilterLoopsToRegions(loops, regions)) {
+    SetError("a selected region no longer exists in the sketch - re-pick "
+             "the profiles");
+    return false;
+  }
+  if (loops.empty()) {
+    SetError("the selected regions leave no profile");
+    return false;
+  }
 
   glm::vec3 axisOrigin{0.0f};
   glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
