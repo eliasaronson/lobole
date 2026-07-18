@@ -144,6 +144,29 @@ void HandleViewportInput(AppState& state) {
     if (modelCtx && !io.KeyShift && !state.sketchEdit.pickingPlane &&
         ImGui::IsKeyPressed(ImGuiKey_S))
       StartNewSketch(state); // `s`: start a sketch (then pick a plane/face)
+    // `n`: align the camera normal to the selected face (else the hovered
+    // one) — the model-space sibling of the sketcher's plane alignment.
+    if (modelCtx && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_N) &&
+        state.faceSelector) {
+      uint32_t mesh = 0, index = 0;
+      bool have = false;
+      if (const SelectionItem* it =
+              state.selection.First(SelectionItem::Kind::Face)) {
+        have = ResolveFaceItem(state, *it, mesh, index);
+      }
+      if (!have) {
+        if (const Face* hov = state.faceSelector->GetHoveredFace()) {
+          mesh = hov->meshId;
+          index = hov->faceIndex;
+          have = true;
+        }
+      }
+      if (have) {
+        state.camera->AlignToFace(
+            state.faceSelector->GetFaceCenter(mesh, index),
+            state.faceSelector->GetFaceNormal(mesh, index));
+      }
+    }
     if (modelCtx && io.KeyShift) {
       if (ImGui::IsKeyPressed(ImGuiKey_P))
         state.showPlanes = !state.showPlanes; // Shift+P: hide/show planes

@@ -97,10 +97,27 @@ void DrawPropertiesPanel(AppState& state) {
     }
   }
 
-  // Measure tool readout (C3): live while the tool is armed.
+  // Measure tool readout (C3): live while the tool is armed. Measured
+  // elements stay listed + highlighted; x removes one, Esc clears all.
   if (state.measure.active) {
     ImGui::SeparatorText("Measure");
-    ImGui::TextDisabled("Pick a face or edge (a second for distance). Esc exits.");
+    ImGui::TextDisabled(
+        "Pick faces/edges - click again to deselect. Esc exits.");
+    for (size_t i = 0; i < state.measure.picked.size(); i++) {
+      const auto& e = state.measure.picked[i];
+      ImGui::PushID(static_cast<int>(i));
+      if (ImGui::SmallButton("x")) {
+        state.measure.picked.erase(state.measure.picked.begin() +
+                                   static_cast<long>(i));
+        UpdateMeasureReadout(state);
+        ImGui::PopID();
+        break;
+      }
+      ImGui::SameLine();
+      ImGui::TextWrapped("%s %s", e.isEdge ? "Edge" : "Face",
+                         e.ref.name.c_str());
+      ImGui::PopID();
+    }
     if (!state.measure.readout.empty())
       ImGui::TextWrapped("%s", state.measure.readout.c_str());
   }

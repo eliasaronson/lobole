@@ -93,40 +93,103 @@ void DrawModelToolPrompt(AppState& state) {
          IM_COL32(240, 180, 170, 255));
 }
 
-// Axis triad (U5): a bottom-right mini-gizmo showing the camera's world
-// orientation — X red, Y green, Z blue, back-facing axes drawn first and
-// dimmed. Pure overlay (Shift+1..7 / View > Standard Views reorient).
-void DrawAxisTriad(AppState& state) {
+// View cube (U5, upgraded from the triad on request): a bottom-right mini
+// cube tracking the camera; clicking a visible face snaps the camera normal
+// to it (same orientations as Shift+1..7). Lives in its own tiny ImGui
+// window so clicks are captured instead of leaking into viewport picking.
+void DrawViewCube(AppState& state) {
   if (!state.camera || state.drawing)
     return;
-  const float r = 34.0f;
-  const ImVec2 c(state.viewportPos.x + state.viewportSize.x - r - 18.0f,
-                 state.viewportPos.y + state.viewportSize.y - r - 18.0f);
+  const float size = 108.0f;
+  ImGui::SetNextWindowPos(
+      ImVec2(state.viewportPos.x + state.viewportSize.x - size - 8.0f,
+             state.viewportPos.y + state.viewportSize.y - size - 8.0f),
+      ImGuiCond_Always);
+  ImGui::SetNextWindowSize(ImVec2(size, size), ImGuiCond_Always);
+  ImGui::SetNextWindowBgAlpha(0.0f);
+  const ImGuiWindowFlags flags =
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+      ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoScrollbar;
+  if (!ImGui::Begin("##ViewCube", nullptr, flags)) {
+    ImGui::End();
+    return;
+  }
+  const ImVec2 wp = ImGui::GetWindowPos();
+  const ImVec2 c(wp.x + size * 0.5f, wp.y + size * 0.5f);
+  const float h = size * 0.30f; // cube half-extent on screen
   const glm::mat3 view = glm::mat3(state.camera->GetViewMatrix());
-  struct Axis {
-    glm::vec3 v; // view-space direction
-    ImU32 color;
+
+  // Project the 8 corners (world axes through the view rotation; y flips
+  // into screen space).
+  ImVec2 corner2d[8];
+  float cornerZ[8];
+  for (int i = 0; i < 8; i++) {
+    const glm::vec3 w((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f,
+                      (i & 4) ? 1.0f : -1.0f);
+    const glm::vec3 v = view * w;
+    corner2d[i] = ImVec2(c.x + v.x * h, c.y - v.y * h);
+    cornerZ[i] = v.z;
+  }
+
+  struct CubeFace {
+    glm::vec3 normal;
+    int corners[4]; // CCW seen from outside
     const char* label;
   };
-  Axis axes[3] = {
-      {view * glm::vec3(1, 0, 0), IM_COL32(235, 90, 90, 255), "X"},
-      {view * glm::vec3(0, 1, 0), IM_COL32(110, 220, 110, 255), "Y"},
-      {view * glm::vec3(0, 0, 1), IM_COL32(100, 150, 250, 255), "Z"}};
-  std::sort(std::begin(axes), std::end(axes),
-            [](const Axis& a, const Axis& b) { return a.v.z < b.v.z; });
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
-  dl->AddCircleFilled(c, r + 10.0f, IM_COL32(20, 24, 30, 140));
-  for (const Axis& a : axes) {
-    const ImVec2 tip(c.x + a.v.x * r, c.y - a.v.y * r);
-    const bool front = a.v.z >= 0.0f; // toward the camera
-    const ImU32 col =
-        front ? a.color : (a.color & 0x00FFFFFF) | (110u << 24);
-    dl->AddLine(c, tip, col, front ? 2.4f : 1.4f);
-    const ImVec2 sz = ImGui::CalcTextSize(a.label);
-    dl->AddText(ImVec2(tip.x - sz.x * 0.5f + a.v.x * 8.0f,
-                       tip.y - sz.y * 0.5f - a.v.y * 8.0f),
-                col, a.label);
+  static const CubeFace kFaces[6] = {
+      {{1, 0, 0}, {1, 3, 7, 5}, "Right"}, {{-1, 0, 0}, {0, 4, 6, 2}, "Left"},
+      {{0, 1, 0}, {2, 6, 7, 3}, "Top"},   {{0, -1, 0}, {0, 1, 5, 4}, "Bottom"},
+      {{0, 0, 1}, {4, 5, 7, 6}, "Front"}, {{0, 0, -1}, {0, 2, 3, 1}, "Back"},
+  };
+
+  ImGui::InvisibleButton("##cube", ImVec2(size, size));
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  const bool hoveredWidget = ImGui::IsItemHovered();
+  const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+
+  const auto pointInQuad = [&](const ImVec2* q, const ImVec2& p) {
+    for (int i = 0; i < 4; i++) {
+      const ImVec2& a = q[i];
+      const ImVec2& b = q[(i + 1) % 4];
+      if ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) > 0.0f)
+        return false; // outside a CW screen-space edge
+    }
+    return true;
+  };
+
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  for (const CubeFace& f : kFaces) {
+    const glm::vec3 n = view * f.normal;
+    if (n.z <= 0.02f)
+      continue; // back-facing
+    ImVec2 quad[4];
+    ImVec2 center(0, 0);
+    for (int i = 0; i < 4; i++) {
+      quad[i] = corner2d[f.corners[i]];
+      center.x += quad[i].x * 0.25f;
+      center.y += quad[i].y * 0.25f;
+    }
+    const bool hot = hoveredWidget && pointInQuad(quad, mouse);
+    const float shade = 0.35f + 0.45f * n.z;
+    const ImU32 fill =
+        hot ? IM_COL32(90, 140, 210, 235)
+            : IM_COL32(static_cast<int>(70 * shade + 30),
+                       static_cast<int>(80 * shade + 34),
+                       static_cast<int>(95 * shade + 40), 220);
+    dl->AddConvexPolyFilled(quad, 4, fill);
+    dl->AddPolyline(quad, 4, IM_COL32(150, 160, 175, 200),
+                    ImDrawFlags_Closed, 1.0f);
+    if (n.z > 0.45f) { // label only when facing enough to read
+      const ImVec2 sz = ImGui::CalcTextSize(f.label);
+      dl->AddText(ImVec2(center.x - sz.x * 0.5f, center.y - sz.y * 0.5f),
+                  hot ? IM_COL32_WHITE : IM_COL32(205, 215, 230, 230),
+                  f.label);
+    }
+    if (hot && clicked)
+      state.camera->AlignToFace(glm::vec3(0.0f), f.normal);
   }
+  ImGui::End();
 }
 
 // Empty-state hint (U5): a fresh part tells the user where to start instead
@@ -272,7 +335,7 @@ void DrawUI(AppState& state) {
   DrawControlsHelpOverlay(state);
   DrawModelToolPrompt(state);
   DrawEmptyStateHint(state);
-  DrawAxisTriad(state);
+  DrawViewCube(state);
   DrawCommandPalette(state);
 
   HandleViewportInput(state);

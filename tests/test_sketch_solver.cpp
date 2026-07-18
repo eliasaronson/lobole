@@ -715,4 +715,26 @@ TEST_CASE("A filleted corner solves and extrudes", "[solver][arc][generative]") 
   CHECK_THAT(prism.Volume(), WithinRel(area, 1e-2));
 }
 
+TEST_CASE("Under-defined entities are identified after a solve",
+          "[sketch_solver]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk.AddEntity(sketch::Line{{0, 0}, {2, 0}});
+  sketch::Solver s;
+  s.Load(sk);
+  const sketch::SolveResult r = s.Solve();
+  CHECK(r.dof == 4); // both endpoints free
+  const std::vector<uint32_t> ud = s.UnderDefinedEntities();
+  REQUIRE(ud.size() == 1);
+  CHECK(ud[0] == l);
+
+  // Fully constrain it: fixed endpoints -> no under-defined entities.
+  sk.constraints.push_back({sketch::ConstraintKind::Fixed, {l, 0}, {}});
+  sk.constraints.push_back({sketch::ConstraintKind::Fixed, {l, 1}, {}});
+  sketch::Solver s2;
+  s2.Load(sk);
+  const sketch::SolveResult r2 = s2.Solve();
+  CHECK(r2.dof == 0);
+  CHECK(s2.UnderDefinedEntities().empty());
+}
+
 #endif // HAVE_PLANEGCS

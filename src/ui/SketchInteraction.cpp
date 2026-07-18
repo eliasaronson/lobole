@@ -417,9 +417,71 @@ void ReattachSketchFace(AppState& state, uint64_t sketchId,
 // Sketch-context keyboard shortcuts (Onshape keymap). Called each frame while a
 // sketch is being edited. Guarded so keys never fire while typing in a field or
 // during a Ctrl/Alt chord (undo/redo).
+// Copies the selected entities (deduplicated) into the app clipboard.
+static void CopySketchSelection(AppState& state, SketchFeature& sketch) {
+  std::vector<uint32_t> ids;
+  for (const auto& r : state.sketchEdit.selected)
+    if (std::find(ids.begin(), ids.end(), r.entity) == ids.end())
+      ids.push_back(r.entity);
+  state.sketchClipboard.clear();
+  for (const auto& e : sketch.entities)
+    if (std::find(ids.begin(), ids.end(), EntityId(e)) != ids.end())
+      state.sketchClipboard.push_back(e);
+  state.sketchEdit.actionMsg =
+      std::to_string(state.sketchClipboard.size()) + " entities copied";
+}
+
+// Pastes the clipboard into the active sketch as UNLINKED copies with fresh
+// ids, offset so the paste is visible beside the source. (Linked copies that
+// track the source are a separate design — docs/sketching/copy-links.md.)
+static void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
+                                 size_t index) {
+  if (state.sketchClipboard.empty())
+    return;
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  const glm::vec2 d(0.5f, 0.5f);
+  for (sketch::Entity e : state.sketchClipboard) {
+    std::visit(
+        [&](auto& ent) {
+          using T = std::decay_t<decltype(ent)>;
+          if constexpr (std::is_same_v<T, sketch::Point>) {
+            ent.p += d;
+          } else if constexpr (std::is_same_v<T, sketch::Line>) {
+            ent.a += d;
+            ent.b += d;
+          } else if constexpr (std::is_same_v<T, sketch::Circle> ||
+                               std::is_same_v<T, sketch::Arc> ||
+                               std::is_same_v<T, sketch::Ellipse>) {
+            ent.center += d;
+          }
+        },
+        e);
+    sketch.AddEntity(std::move(e)); // fresh id
+  }
+  state.sketchEdit.selected.clear();
+  sketch.RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  state.sketchEdit.actionMsg =
+      std::to_string(state.sketchClipboard.size()) + " entities pasted";
+}
+
 static void HandleSketchKeys(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   ImGuiIO& io = ImGui::GetIO();
+  // Copy/paste run on Ctrl chords, ahead of the chord early-out below.
+  if (!io.WantTextInput && io.KeyCtrl && !io.KeyAlt && !io.KeySuper) {
+    size_t index = 0;
+    if (SketchFeature* sk = ResolveActiveSketch(state, &index)) {
+      if (ImGui::IsKeyPressed(ImGuiKey_C) && !edit.selected.empty())
+        CopySketchSelection(state, *sk);
+      if (ImGui::IsKeyPressed(ImGuiKey_V))
+        PasteSketchClipboard(state, *sk, index);
+    }
+  }
   if (io.WantTextInput || io.KeyCtrl || io.KeyAlt || io.KeySuper)
     return;
   const bool shift = io.KeyShift;
@@ -1279,8 +1341,6 @@ void DrawToolPrompt(AppState& state) {
     return;
   const ToolPrompt tp = SketchToolPrompt(edit);
   const bool hasErr = !edit.actionMsg.empty();
-  if (tp.text.empty() && !hasErr)
-    return;
 
   ImDrawList* dl = ImGui::GetForegroundDrawList();
   const float cx = state.viewportPos.x + state.viewportSize.x * 0.5f;
@@ -1296,6 +1356,14 @@ void DrawToolPrompt(AppState& state) {
     dl->AddText(ImVec2(cx - sz.x * 0.5f, y + padY), fg, text.c_str());
     y = b.y + 4.0f;
   };
+  // Constraint status first — always visible while sketching, the "am I
+  // done constraining?" answer at a glance.
+  if (edit.dof == 0)
+    pill("Fully defined", IM_COL32(24, 46, 32, 230),
+         IM_COL32(140, 235, 165, 255));
+  else if (edit.dof > 0)
+    pill(std::to_string(edit.dof) + " degrees of freedom",
+         IM_COL32(26, 36, 52, 230), IM_COL32(150, 200, 255, 255));
   if (!tp.text.empty())
     pill(tp.text, IM_COL32(28, 32, 40, 225), IM_COL32(226, 232, 240, 255));
   if (hasErr)
@@ -1862,6 +1930,10 @@ void UpdateSketchStatus(AppState& state) {
   edit.conflictingConstraints = r.conflictingConstraints;
   for (size_t ri : r.redundantConstraints)
     edit.conflictingConstraints.push_back(ri); // flag redundant too
+  // Which entities still have free coordinates: they render in the base
+  // color while fully-defined geometry turns green (the SW convention).
+  edit.underDefined =
+      edit.dof > 0 ? solver.UnderDefinedEntities() : std::vector<uint32_t>{};
 }
 
 bool DeleteConstraint(AppState& state, size_t cIndex) {

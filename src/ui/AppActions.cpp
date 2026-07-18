@@ -618,6 +618,7 @@ void ActivateSlot(AppState& state, size_t index) {
 void ResetActiveTabUiState(AppState& state) {
   state.selection.Clear(); // features, occurrences and mates alike
   state.slotPick = {};
+  state.hiddenBodies.clear();
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};
   // Any tab change exits in-context editing (EnterInContextEdit re-arms it
@@ -1465,6 +1466,8 @@ void SyncDocumentRenderers(AppState& state) {
   std::vector<glm::vec3> bodyColors(bodies.size(), glm::vec3(0.7f));
   for (size_t bi = 0; bi < bodies.size(); bi++) {
     const auto& body = bodies[bi];
+    if (state.hiddenBodies.count(body.createdBy) != 0)
+      continue; // hidden (body context menu): no mesh/outline/picking
     CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
     if (cadMesh.vertices.empty())
       continue;
@@ -1857,6 +1860,9 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
   const glm::vec4 trim(1.00f, 0.35f, 0.28f, 1.0f);        // trim-will-remove
   const glm::vec4 construct(0.55f, 0.60f, 0.70f, 0.85f);  // reference geometry
   const glm::vec4 conflict(1.00f, 0.30f, 0.30f, 1.0f);    // over-defined
+  const glm::vec4 defined(0.45f, 0.90f, 0.60f, 1.0f);     // fully constrained
+  const std::set<uint32_t> underDef(edit.underDefined.begin(),
+                                    edit.underDefined.end());
 
   // Entities touched by a conflicting/redundant constraint, flagged red.
   std::set<uint32_t> conflictIds;
@@ -1876,10 +1882,14 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     const bool s = selectedEntity(id), h = hoveredEntityBody(id);
     const bool constr = sketch::IsConstruction(e);
     const bool bad = conflictIds.count(id) > 0;
+    const bool isDefined =
+        !constr && (edit.dof == 0 || underDef.count(id) == 0);
     const glm::vec4 col = bad ? conflict
                         : s   ? sel
                         : h   ? hov
-                        : (constr ? construct : base);
+                        : constr ? construct
+                        : isDefined ? defined
+                                    : base;
     const float halfPx = (s || h) ? 3.0f : (constr ? 1.3f : 1.8f);
     std::vector<glm::vec2> poly = sketch::TessellateEntity(e);
     for (size_t i = 0; i + 1 < poly.size(); i++) {
@@ -2050,32 +2060,50 @@ std::string FormatElement(const Measure::Element& e) {
 }
 } // namespace
 
-void MeasureElementClicked(AppState& state, const ElementRef& ref,
-                           bool isEdge) {
-  if (!state.measure.active || !state.document)
+void UpdateMeasureReadout(AppState& state) {
+  auto& m = state.measure;
+  if (!state.document || m.picked.empty()) {
+    m.readout.clear();
     return;
+  }
   const auto& bodies = state.document->GetBodies();
-  if (!state.measure.hasFirst) {
-    // First pick: describe the element on its own.
-    state.measure.first = ref;
-    state.measure.firstIsEdge = isEdge;
-    state.measure.hasFirst = true;
-    if (const auto e = Measure::Describe(bodies, ref))
-      state.measure.readout = FormatElement(*e);
+  if (m.picked.size() == 1) {
+    if (const auto e = Measure::Describe(bodies, m.picked[0].ref))
+      m.readout = FormatElement(*e);
     else
-      state.measure.readout = "Could not measure that element.";
-  } else {
-    // Second pick: the distance between the two, then start fresh so a
-    // click chain alternates describe -> distance -> describe -> ...
-    const auto d = Measure::Distance(bodies, state.measure.first, ref);
+      m.readout = "Could not measure that element.";
+    return;
+  }
+  if (m.picked.size() == 2) {
+    const auto d =
+        Measure::Distance(bodies, m.picked[0].ref, m.picked[1].ref);
     char buf[96];
     if (d)
       snprintf(buf, sizeof buf, "Distance: %.3f mm", *d);
     else
       snprintf(buf, sizeof buf, "Could not measure the distance.");
-    state.measure.readout = buf;
-    state.measure.hasFirst = false;
+    m.readout = buf;
+    return;
   }
+  m.readout = std::to_string(m.picked.size()) +
+              " elements selected - keep two for a distance";
+}
+
+void MeasureElementClicked(AppState& state, const ElementRef& ref,
+                           bool isEdge) {
+  if (!state.measure.active || !state.document)
+    return;
+  auto& picked = state.measure.picked;
+  const auto it = std::find_if(picked.begin(), picked.end(),
+                               [&](const MeasureState::Element& e) {
+                                 return e.ref.featureId == ref.featureId &&
+                                        e.ref.name == ref.name;
+                               });
+  if (it != picked.end())
+    picked.erase(it); // clicking a measured element again deselects it
+  else
+    picked.push_back({ref, isEdge});
+  UpdateMeasureReadout(state);
 }
 
 void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {

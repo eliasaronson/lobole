@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
 #include <map>
 #include <unordered_map>
@@ -146,6 +147,9 @@ struct SketchEditState {
   // conflicting/redundant.
   int dof = -1;
   std::vector<size_t> conflictingConstraints;
+  // Entities with free coordinates (PlaneGCS dependent-parameter diagnosis):
+  // drawn in the base color; fully-defined geometry draws green.
+  std::vector<uint32_t> underDefined;
   bool showConstraintGlyphs = true;
 
   bool IsEditing() const { return activeSketchId != 0; }
@@ -199,11 +203,16 @@ struct SlotPickState {
 // edges both pick; the readout string is shown in an overlay + the Properties
 // panel. Part-tab only.
 struct MeasureState {
-  bool active = false;      // the tool is armed (toolbar toggle)
-  bool hasFirst = false;    // the first element is picked
-  ElementRef first;         // the first element (face or edge)
-  bool firstIsEdge = false; // kind of `first`, for the readout label
-  std::string readout;      // formatted result ("" = nothing measured yet)
+  bool active = false; // the tool is armed (toolbar toggle)
+  // Every measured element stays picked (highlighted in the viewport) until
+  // clicked again, removed in the panel, or Escape clears the tool: one
+  // element reads out its own measure, two their distance.
+  struct Element {
+    ElementRef ref;
+    bool isEdge = false;
+  };
+  std::vector<Element> picked;
+  std::string readout; // formatted result ("" = nothing measured yet)
   // Hover feedback comes from the selection pipeline (U1c).
 };
 
@@ -513,6 +522,14 @@ struct AppState {
   float uiFontScale = 1.0f;
   bool fontRebuildRequested = false;
   bool paletteOpen = false; // Ctrl+K command palette (U6)
+  // Hidden part bodies by creating-feature id (transient UI state, like the
+  // camera): hidden bodies are skipped at render sync — unpickable and
+  // outline-free, the assembly occurrence recipe. Cleared on tab switch.
+  std::set<uint64_t> hiddenBodies;
+  // Sketch-entity clipboard (Ctrl+C/V in sketch mode). Plain geometry by
+  // value — pastes are unlinked copies with fresh ids; it survives tab
+  // switches, so pasting into another part's sketch works.
+  std::vector<sketch::Entity> sketchClipboard;
 
   // 2D sheet viewport (workstream 13): a drawing tab pans/zooms an
   // orthographic sheet, never the orbit camera (there is no 2D camera today —

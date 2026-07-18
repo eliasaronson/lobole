@@ -409,16 +409,22 @@ void SyncSelectionHighlights(AppState& state) {
   // FaceSelector mirror carries the most recent for legacy readers.
   state.meshRenderer->ClearFaceHighlight();
   state.faceSelector->ClearSelection();
-  for (const SelectionItem& it : state.selection.items) {
-    if (it.kind != SelectionItem::Kind::Face)
-      continue;
+  const auto highlightFace = [&](const SelectionItem& it) {
     uint32_t mesh = 0, index = 0, first = 0, count = 0;
     if (ResolveFaceItem(state, it, mesh, index) &&
         state.faceSelector->GetFaceVertexRange(mesh, index, first, count)) {
       state.faceSelector->SetSelectedFace(mesh, index);
       state.meshRenderer->SetFaceHighlight(mesh, first, count);
     }
-  }
+  };
+  for (const SelectionItem& it : state.selection.items)
+    if (it.kind == SelectionItem::Kind::Face)
+      highlightFace(it);
+  // Measured faces show with the same visuals while the tool is armed.
+  if (state.measure.active)
+    for (const MeasureState::Element& e : state.measure.picked)
+      if (!e.isEdge)
+        highlightFace({SelectionItem::Kind::Face, 0, e.ref});
 }
 
 void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
@@ -448,6 +454,17 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
     if (it.kind == SelectionItem::Kind::Edge &&
         ResolveEdgeItem(state, it, mesh, index)) {
       drawEdge(mesh, index, kSelected);
+    }
+  }
+  // Measured edges show with the same emphasis while the tool is armed.
+  if (state.measure.active) {
+    for (const MeasureState::Element& e : state.measure.picked) {
+      if (!e.isEdge)
+        continue;
+      uint32_t mesh = 0, index = 0;
+      if (ResolveEdgeItem(state, {SelectionItem::Kind::Edge, 0, e.ref}, mesh,
+                          index))
+        drawEdge(mesh, index, kSelected);
     }
   }
   if (state.pick.edgeHover)

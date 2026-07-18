@@ -1,5 +1,6 @@
 #include "ui/FeatureTreePanel.h"
 
+#include "CADMaterials.h"
 #include "core/Command.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/Feature.h"
@@ -264,14 +265,62 @@ void DrawFeatureTreePanel(AppState& state) {
     }
 
     ImGui::SeparatorText("Bodies");
+    int bodyRow = 0;
     for (const auto& body : doc->GetBodies()) {
       // Styled row (U5): glyph + name, volume as a dimmed suffix — an
-      // object, not a debug bullet.
-      ImGui::TextUnformatted(ICON_FA_CUBES);
+      // object, not a debug bullet. Right-click: material + hide/show.
+      ImGui::PushID(bodyRow++);
+      const bool hidden = state.hiddenBodies.count(body.createdBy) != 0;
+      ImGui::TextUnformatted(hidden ? ICON_FA_EYE_SLASH : ICON_FA_CUBES);
       ImGui::SameLine(ImGui::GetFontSize() * 1.8f);
-      ImGui::TextUnformatted(body.name.c_str());
+      if (hidden)
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+      ImGui::Selectable((body.name + "##body").c_str(), false,
+                        ImGuiSelectableFlags_AllowOverlap);
+      if (hidden)
+        ImGui::PopStyleColor();
+      if (ImGui::BeginPopupContextItem("##bodyctx")) {
+        if (ImGui::MenuItem(hidden ? "Show" : "Hide")) {
+          if (hidden)
+            state.hiddenBodies.erase(body.createdBy);
+          else
+            state.hiddenBodies.insert(body.createdBy);
+          state.syncedDocumentVersion = UINT64_MAX; // force renderer resync
+        }
+        if (ImGui::BeginMenu("Material")) {
+          using CADMaterials::MaterialLibrary;
+          Feature* creator = doc->FindFeatureById(body.createdBy);
+          size_t creatorIndex = 0;
+          doc->FindFeatureById(body.createdBy, &creatorIndex);
+          const auto setMaterial = [&](const std::string& slug) {
+            if (creator == nullptr)
+              return;
+            nlohmann::json before = DocumentIO::FeatureToJson(*creator);
+            creator->SetMaterial(slug);
+            doc->Regenerate();
+            nlohmann::json after = DocumentIO::FeatureToJson(*creator);
+            state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                                        creatorIndex, before, after),
+                                    *doc);
+          };
+          const std::string current =
+              creator != nullptr ? creator->GetMaterial() : std::string{};
+          if (ImGui::MenuItem("Default", nullptr, current.empty()))
+            setMaterial({});
+          for (auto type : MaterialLibrary::AllTypes()) {
+            const auto& mat = MaterialLibrary::GetMaterial(type);
+            if (ImGui::MenuItem(mat.name.c_str(), nullptr,
+                                current == MaterialLibrary::Slug(type)))
+              setMaterial(MaterialLibrary::Slug(type));
+          }
+          ImGui::EndMenu();
+        }
+        ImGui::EndPopup();
+      }
       ImGui::SameLine();
       ImGui::TextDisabled("%.2f mm%s", body.shape.Volume(), "\xc2\xb3");
+      ImGui::PopID();
     }
   }
 

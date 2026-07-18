@@ -421,6 +421,40 @@ SolveResult Solver::Solve() {
   return im.RunSolve();
 }
 
+std::vector<uint32_t> Solver::UnderDefinedEntities() const {
+  Impl& im = *m_impl;
+  GCS::VEC_pD dep;
+  im.sys.getDependentParams(dep); // valid under the last solve's diagnosis
+  const std::set<double*> free(dep.begin(), dep.end());
+  // A constraint-free sketch has a zero-row Jacobian: diagnose() returns
+  // before the dependent-parameter analysis, leaving the list empty even
+  // though everything is free. Fall back to "free = not fixed" then; when
+  // the analysis DID run (any constraint present) the QR list is exact.
+  const bool analysisRan = !free.empty();
+  const auto isFree = [&](double* p) {
+    return analysisRan ? free.count(p) != 0 : im.fixedParams.count(p) == 0;
+  };
+  std::set<uint32_t> ids;
+  const auto mark = [&](uint32_t entity) {
+    if (entity != 0 && entity < 0xFFFFFF00u) // skip the datum pseudo-entities
+      ids.insert(entity);
+  };
+  for (const auto& [key, idx] : im.pointIndex) {
+    const GCS::Point& gp = im.gcsPoints[static_cast<size_t>(idx)];
+    if (isFree(gp.x) || isFree(gp.y))
+      mark(static_cast<uint32_t>(key >> 8));
+  }
+  for (const auto& [id, idx] : im.circleOf)
+    if (isFree(im.circles[static_cast<size_t>(idx)].rad))
+      mark(id);
+  for (const auto& [id, idx] : im.arcOf) {
+    const auto& a = im.arcs[static_cast<size_t>(idx)];
+    if (isFree(a.rad) || isFree(a.startAngle) || isFree(a.endAngle))
+      mark(id);
+  }
+  return {ids.begin(), ids.end()};
+}
+
 bool Solver::BeginDrag(const std::vector<PointRef>& points) {
   Impl& im = *m_impl;
   im.dragTarget.clear();
@@ -532,6 +566,7 @@ void Solver::SetDragTargets(const std::vector<glm::vec2>&) {}
 bool Solver::BeginRadiusDrag(uint32_t) { return false; }
 void Solver::SetRadiusTarget(double) {}
 SolveResult Solver::SolveDrag() { return {true, -1, {}, {}}; }
+std::vector<uint32_t> Solver::UnderDefinedEntities() const { return {}; }
 void Solver::WriteBack(std::vector<Entity>& e) const { e = m_impl->shapes; }
 } // namespace sketch
 

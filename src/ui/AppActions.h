@@ -372,10 +372,13 @@ std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
 // Armed-tool pick consumers (U1c): the selection pipeline resolves what was
 // clicked and hands it here; the tools own what happens next.
 
-// Measure tool (C3): describe one element, or the distance once a second is
-// picked — the click chain alternates describe → distance → describe.
+// Measure tool (C3): toggles the clicked element in the measured set —
+// one element reads out its own measure, two their distance; measured
+// elements stay highlighted until re-clicked / removed / Escape.
 void MeasureElementClicked(AppState& state, const ElementRef& ref,
                            bool isEdge);
+// Recomputes the readout after the picked set changes (panel removals).
+void UpdateMeasureReadout(AppState& state);
 
 // Blend edge collection (fillet/chamfer): toggles the clicked edge on the
 // collecting feature, remapping the displayed (already blended) name onto

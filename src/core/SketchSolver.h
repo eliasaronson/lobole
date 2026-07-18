@@ -55,6 +55,11 @@ public:
   // Copies solved coordinates into a copy of the sketch's entities.
   void WriteBack(std::vector<Entity>& entities) const;
 
+  // Entity ids with at least one free (under-determined) coordinate after
+  // the last Solve — PlaneGCS's dependent-parameter diagnosis mapped back to
+  // entities. Empty when the sketch is fully constrained (or unsolved).
+  std::vector<uint32_t> UnderDefinedEntities() const;
+
 private:
   struct Impl;
   Impl* m_impl;
