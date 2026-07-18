@@ -141,6 +141,13 @@ Original design:
 
 ## U5 — Visual design pass
 
+**Core items SHIPPED 2026-07-18**: feature-tree per-kind icons + styled
+bodies rows; axis triad + View > Standard Views; empty-state hint;
+View > Font Size (session, via the DPI rebuild path); multi-face highlight
+projection (per-instance; same-body faces still last-wins). Remaining:
+spacing/padding rhythm audit, error/suppressed tree BADGES beyond color,
+shaded region fill, whole-instance occurrence hover, tooltips audit.
+Original scope:
 Make it look like a product, not a debug build: spacing/padding rhythm and
 consistent icon sizing in `Theme`/`Toolbar`; hierarchy in the feature tree
 (icons per feature kind, error/suppressed states, bodies styled as objects
@@ -151,10 +158,11 @@ empty states ("No sketch — pick a plane to start"); consistent tooltips
 
 ## U6 — Command palette + discoverability
 
-`Ctrl+K` fuzzy palette over every command (tools, constraints, features,
-views) with shortcuts shown — cheap because the command layer already
-enumerates the surface, and it doubles as living documentation of goal 5
-("the LLM and the human use the same commands" — so does the palette).
+**SHIPPED 2026-07-18** (`ui/CommandPalette.cpp`): Ctrl+K fuzzy palette over
+the model-context surface (create/tools/edit/view/file), menu gating
+mirrored, shortcuts shown, same action functions as the menus. Not yet
+enumerated: sketch-mode tools and constraint commands (the sketch keymap
+owns those contexts) — extend when the sketch toolbar consolidates.
 
 ## Backlog — standard-CAD affordances not yet scheduled
 
