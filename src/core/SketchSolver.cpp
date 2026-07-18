@@ -341,9 +341,17 @@ void Solver::Load(const SketchFeature& sketch) {
       }
       break;
     case ConstraintKind::PointOnLine:
+      // "Point on curve": dispatches on the target — line, circle or arc
+      // (circle snapping reuses this kind, so the format stays unchanged).
       if (a && im.lineOf.count(con.b.entity))
         im.sys.addConstraintPointOnLine(*a, im.lines[im.lineOf[con.b.entity]],
                                         tag++);
+      else if (a && im.circleOf.count(con.b.entity))
+        im.sys.addConstraintPointOnCircle(
+            *a, im.circles[im.circleOf[con.b.entity]], tag++);
+      else if (a && im.arcOf.count(con.b.entity))
+        im.sys.addConstraintPointOnArc(*a, im.arcs[im.arcOf[con.b.entity]],
+                                       tag++);
       break;
     case ConstraintKind::Symmetric:
       // a, b are points symmetric about the line c.entity.

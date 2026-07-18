@@ -79,7 +79,8 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
     return s; // point is pinned; no further snapping
   }
 
-  // 2. Point-on-line — nearest line body within tolerance.
+  // 2. Point-on-curve — nearest line body, circle or arc circumference
+  // within tolerance (the constraint kind dispatches per target).
   float bestEdge = edgeTol;
   for (const auto& e : entities) {
     const uint32_t id = EntityId(e);
@@ -92,6 +93,37 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
         bestEdge = d;
         s.pointOnLine = id;
         s.uv = closest;
+      }
+    } else if (auto* c = std::get_if<Circle>(&e)) {
+      const glm::vec2 off = uv - c->center;
+      const float len = glm::length(off);
+      if (len < 1e-6f)
+        continue; // at the center: direction undefined
+      const float d = std::abs(len - static_cast<float>(c->radius));
+      if (d < bestEdge) {
+        bestEdge = d;
+        s.pointOnLine = id;
+        s.uv = c->center + off * (static_cast<float>(c->radius) / len);
+      }
+    } else if (auto* ar = std::get_if<Arc>(&e)) {
+      const glm::vec2 off = uv - ar->center;
+      const float len = glm::length(off);
+      if (len < 1e-6f)
+        continue;
+      const float d = std::abs(len - static_cast<float>(ar->radius));
+      if (d >= bestEdge)
+        continue;
+      // Only within the arc's CCW angular span.
+      double ang = std::atan2(off.y, off.x);
+      double s0 = ar->startAngle, s1 = ar->endAngle;
+      while (s1 <= s0)
+        s1 += 2.0 * M_PI;
+      while (ang < s0)
+        ang += 2.0 * M_PI;
+      if (ang <= s1) {
+        bestEdge = d;
+        s.pointOnLine = id;
+        s.uv = ar->center + off * (static_cast<float>(ar->radius) / len);
       }
     }
   }
