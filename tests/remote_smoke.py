@@ -79,7 +79,7 @@ def is_black(png_path):
 def main():
     binary = sys.argv[1]
     port = free_port()
-    app = subprocess.Popen([binary, "--remote", str(port)],
+    app = subprocess.Popen([binary, "--remote", str(port), "--hidden"],
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
     tmp = tempfile.mkdtemp(prefix="designer_remote_")

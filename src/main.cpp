@@ -781,6 +781,9 @@ void printUsage(const char *programName) {
   std::cout << "  --record <file>      Record the --remote session's semantic "
                "requests as replayable JSONL"
             << std::endl;
+  std::cout << "  --hidden             Never show the window (offscreen "
+               "--remote sessions, e.g. automated tests)"
+            << std::endl;
 }
 
 struct CommandLineArgs {
@@ -788,6 +791,7 @@ struct CommandLineArgs {
   spdlog::level::level_enum logLevel = spdlog::level::info;
   bool runGuiTests = false;
   bool headless = false;
+  bool hidden = false;
   int remotePort = 0;
   double autosaveSeconds = 60.0;
   std::string recordPath;
@@ -815,6 +819,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
       args.runGuiTests = true;
     } else if (arg == "--headless") {
       args.headless = true;
+    } else if (arg == "--hidden") {
+      args.hidden = true;
     } else if (arg == "--record") {
       if (i + 1 < argc) {
         args.recordPath = argv[i + 1];
@@ -895,15 +901,15 @@ int main(int argc, char **argv) {
   // waitForVisibilityNotify until the window is unobscured; under i3 a window
   // opening behind a fullscreen window or on a non-focused workspace never gets
   // that event, so startup hangs forever (before the remote server binds).
-  // --remote is pure-headless (offscreen screenshots) and never needs a window
-  // shown; interactive and --gui-tests map it non-blocking so it's visible
-  // without the deadlock.
-  const bool pureHeadless = args.remotePort != 0;
+  // The window is shown (non-blocking) unless --hidden asks for an offscreen
+  // session — rendering and screenshots work either way, since presents don't
+  // need a mapped window. (--remote alone used to imply hidden, which made
+  // dev-watch instances invisibly render for nobody.)
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
   GLFWwindow *window = glfwCreateWindow(1280, 720, "Designer - 3D CAD Software",
                                         nullptr, nullptr);
-  if (window && !pureHeadless)
+  if (window && !args.hidden)
     ShowWindowNonBlocking(window);
 
   if (!glfwVulkanSupported()) {

@@ -173,7 +173,7 @@ async def run(port):
 def main():
     binary = sys.argv[1]
     port = free_port()
-    app = subprocess.Popen([binary, "--remote", str(port)],
+    app = subprocess.Popen([binary, "--remote", str(port), "--hidden"],
                            stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL)
     try:

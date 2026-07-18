@@ -37,6 +37,11 @@ public:
     void SetAspectRatio(float aspect) { m_aspectRatio = aspect; UpdateProjectionMatrix(); }
     void SetNearPlane(float nearPlane) { m_nearPlane = nearPlane; UpdateProjectionMatrix(); }
     void SetFarPlane(float farPlane) { m_farPlane = farPlane; UpdateProjectionMatrix(); }
+    float GetFOV() const { return m_fov; }              // vertical, degrees
+    float GetAspectRatio() const { return m_aspectRatio; }
+    // Zoom-out limit. Fit raises it to track the scene size — a fixed cap
+    // silently pinned the camera inside anything bigger than ~40mm.
+    void SetMaxDistance(float maxDistance) { m_maxDistance = maxDistance; }
 
     // Matrix getters
     const glm::mat4& GetViewMatrix() const { return m_viewMatrix; }

@@ -991,8 +991,22 @@ void FitCameraToDocument(AppState& state) {
 
   const glm::vec3 center = (min + max) * 0.5f;
   const float radius = glm::length(max - min) * 0.5f;
-  state.camera->SetTarget(center);
-  state.camera->SetDistance(std::max(radius * 2.5f, 1.0f));
+
+  // Distance that fits the bounding sphere in the LIMITING screen axis. The
+  // vertical half-FOV is fixed; the horizontal one is tan(fovY/2)*aspect, so
+  // in a portrait-ish viewport (aspect < 1 — e.g. the central region of a
+  // tall tiled window) the width is what gates the fit. The old radius*2.5
+  // constant was exactly the vertical fit for the 45-degree FOV and silently
+  // assumed a landscape viewport.
+  Camera& cam = *state.camera;
+  const float tanHalfV = std::tan(0.5f * glm::radians(cam.GetFOV()));
+  const float aspect = cam.GetAspectRatio() > 0.0f ? cam.GetAspectRatio() : 1.0f;
+  const float tanHalfLimit = tanHalfV * std::min(1.0f, aspect);
+  const float distance =
+      std::max(1.05f * radius / std::max(tanHalfLimit, 0.05f), 1.0f);
+  cam.SetTarget(center);
+  cam.SetMaxDistance(std::max(20.0f * distance, 1000.0f));  // let it zoom out
+  cam.SetDistance(distance);
 }
 
 // Muted, theme-matched palette cycled per body so bodies/parts read apart.
