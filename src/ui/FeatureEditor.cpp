@@ -121,6 +121,58 @@ bool DragFloat3Row(const char* label, float* v) {
   return ImGui::DragFloat3(id.c_str(), v, 0.05f);
 }
 
+// A dialog pick slot (U3): label left, the current value as a full-width
+// button. Clicking arms the slot — viewport picks then fill it (the armed
+// slot renders in the accent color); clicking again disarms.
+void PickSlotRow(AppState& state, const Feature& feature, PickSlot slot,
+                 const char* label, const std::string& value, uint32_t kinds,
+                 bool multi, const char* prompt) {
+  const bool armed = state.slotPick.featureId == feature.GetId() &&
+                     state.slotPick.slot == static_cast<int>(slot);
+  LeftLabel(label);
+  if (armed) {
+    const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_NavCursor);
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImVec4(accent.x, accent.y, accent.z, 0.35f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                          ImVec4(accent.x, accent.y, accent.z, 0.55f));
+  }
+  // "###" keeps the widget id stable while the shown value changes (tests
+  // reference slots as "###slotN").
+  const std::string text =
+      (value.empty() ? std::string(armed ? "(pick in viewport)" : "(none)")
+                     : value) +
+      "###slot" + std::to_string(static_cast<int>(slot));
+  if (ImGui::Button(text.c_str(),
+                    ImVec2(ImGui::CalcItemWidth(), 0.0f))) {
+    if (armed) {
+      state.slotPick = {};
+    } else {
+      state.slotPick = {feature.GetId(), static_cast<int>(slot), kinds, multi,
+                        prompt};
+    }
+  }
+  if (armed)
+    ImGui::PopStyleColor(2);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("%s", armed ? "Armed - pick in the viewport (Esc "
+                                    "cancels); click to disarm"
+                                  : "Click, then pick in the viewport");
+}
+
+constexpr uint32_t SlotKind(SelectionItem::Kind k) {
+  return 1u << static_cast<int>(k);
+}
+
+// The display label for a body reference (its producing feature's name).
+std::string BodyRefLabel(AppState& state, uint64_t featureId) {
+  if (featureId == 0 || !state.document)
+    return "";
+  if (Feature* f = state.document->FindFeatureById(featureId))
+    return f->GetName();
+  return "(missing)";
+}
+
 // Snapshot/mutate/commit for a discrete (non-drag) change like a combo.
 void CommitDiscrete(AppState& state, Feature& feature,
                     const nlohmann::json& before, size_t index, bool commit) {
@@ -478,8 +530,18 @@ void DrawBooleanParams(AppState& state, BooleanFeature& boo, size_t index,
       ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "(missing)");
     }
   };
-  operandCombo("Target", boo.targetId);
-  operandCombo("Tool", boo.toolId);
+  // Pick slots first (click a body in the viewport); the combos below stay
+  // as the precision path.
+  PickSlotRow(state, boo, PickSlot::BooleanTarget, "Target",
+              BodyRefLabel(state, boo.targetId),
+              SlotKind(SelectionItem::Kind::Body), /*multi=*/false,
+              "Pick the target body");
+  PickSlotRow(state, boo, PickSlot::BooleanTool, "Tool",
+              BodyRefLabel(state, boo.toolId),
+              SlotKind(SelectionItem::Kind::Body), /*multi=*/false,
+              "Pick the tool body");
+  operandCombo("Target (list)", boo.targetId);
+  operandCombo("Tool (list)", boo.toolId);
 }
 
 // A combo listing earlier body-producing features; sets `sourceId`.
@@ -551,6 +613,10 @@ void DrawPatternParams(AppState& state, PatternFeature& pat, size_t index,
     CommitDiscrete(state, pat, before, index, commit);
   }
 
+  PickSlotRow(state, pat, PickSlot::PatternSource, "Source",
+              BodyRefLabel(state, pat.sourceId),
+              SlotKind(SelectionItem::Kind::Body), /*multi=*/false,
+              "Pick the body to pattern");
   SourceBodyCombo(state, pat, pat.sourceId, index, commit);
 
   switch (pat.kind) {
@@ -571,7 +637,89 @@ void DrawPatternParams(AppState& state, PatternFeature& pat, size_t index,
   }
 }
 
+// Toggles `r` in a face-ref list (multi slots): present → removed.
+bool ToggleRefInList(std::vector<ElementRef>& v, const ElementRef& r) {
+  const auto it =
+      std::find_if(v.begin(), v.end(), [&](const ElementRef& e) {
+        return e.featureId == r.featureId && e.name == r.name;
+      });
+  if (it != v.end())
+    v.erase(it);
+  else
+    v.push_back(r);
+  return true;
+}
+
 } // namespace
+
+void SlotPickClicked(AppState& state, const SelectionItem& item) {
+  if (!state.slotPick.Active() || !state.document)
+    return;
+  size_t index = 0;
+  Feature* f =
+      state.document->FindFeatureById(state.slotPick.featureId, &index);
+  if (f == nullptr) {
+    state.slotPick = {}; // the slot ends with its feature
+    return;
+  }
+  const bool commit = f->GetId() != state.pendingFeatureId;
+  nlohmann::json before = DocumentIO::FeatureToJson(*f);
+  bool changed = false;
+
+  switch (static_cast<PickSlot>(state.slotPick.slot)) {
+  case PickSlot::ExtrudeEndFace:
+    if (auto* ext = dynamic_cast<ExtrudeFeature*>(f);
+        ext != nullptr && item.kind == SelectionItem::Kind::Face) {
+      ext->endTarget = item.element;
+      changed = true;
+    }
+    break;
+  case PickSlot::BooleanTarget:
+  case PickSlot::BooleanTool:
+    if (auto* boo = dynamic_cast<BooleanFeature*>(f);
+        boo != nullptr && item.kind == SelectionItem::Kind::Body) {
+      (static_cast<PickSlot>(state.slotPick.slot) == PickSlot::BooleanTarget
+           ? boo->targetId
+           : boo->toolId) = item.id;
+      changed = true;
+    }
+    break;
+  case PickSlot::PatternSource:
+    if (auto* pat = dynamic_cast<PatternFeature*>(f);
+        pat != nullptr && item.kind == SelectionItem::Kind::Body) {
+      pat->sourceId = item.id;
+      changed = true;
+    }
+    break;
+  case PickSlot::ShellBody:
+    if (auto* sh = dynamic_cast<ShellFeature*>(f);
+        sh != nullptr && item.kind == SelectionItem::Kind::Body) {
+      sh->bodyId = item.id;
+      changed = true;
+    }
+    break;
+  case PickSlot::ShellOpenFaces:
+    if (auto* sh = dynamic_cast<ShellFeature*>(f);
+        sh != nullptr && item.kind == SelectionItem::Kind::Face) {
+      changed = ToggleRefInList(sh->openFaces, item.element);
+    }
+    break;
+  case PickSlot::DraftFaces:
+    if (auto* dr = dynamic_cast<DraftFeature*>(f);
+        dr != nullptr && item.kind == SelectionItem::Kind::Face) {
+      changed = ToggleRefInList(dr->faces, item.element);
+    }
+    break;
+  case PickSlot::ExtrudeRegions:
+  case PickSlot::RevolveRegions:
+    break; // U2 wires these
+  }
+
+  if (changed)
+    CommitDiscrete(state, *f, before, index, commit);
+  if (!state.slotPick.multi)
+    state.slotPick = {};
+}
 
 void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                              bool commit) {
@@ -675,26 +823,12 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
               ext->distance);
     } else {
-      // Target face: every named face of every body (stable element names).
-      const std::string current =
-          ext->endTarget.IsSet() ? ext->endTarget.name : "(pick a face)";
-      LeftLabel("Target face");
-      if (ImGui::BeginCombo("##Target face", current.c_str())) {
-        for (const auto& body : state.document->GetBodies()) {
-          for (const auto& [idx, name] : body.elementMap.names) {
-            const std::string label = body.name + ": " + name;
-            const bool selected = ext->endTarget.featureId ==
-                                      body.createdBy &&
-                                  ext->endTarget.name == name;
-            if (ImGui::Selectable(label.c_str(), selected)) {
-              nlohmann::json before = DocumentIO::FeatureToJson(*ext);
-              ext->endTarget = ElementRef{body.createdBy, name};
-              CommitDiscrete(state, feature, before, index, commit);
-            }
-          }
-        }
-        ImGui::EndCombo();
-      }
+      // Target face: a pick slot (U3) — arm it, click the face in the
+      // viewport. Far saner than the old every-named-face combo.
+      PickSlotRow(state, feature, PickSlot::ExtrudeEndFace, "Target face",
+                  ext->endTarget.IsSet() ? ext->endTarget.name : "",
+                  SlotKind(SelectionItem::Kind::Face), /*multi=*/false,
+                  "Pick the face the extrude ends at");
     }
     if (ext->endMode == ExtrudeEnd::TwoSided) {
       ExprDim(state, feature, index, commit, "Distance 2", ext->distance2Expr,
@@ -769,7 +903,12 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       dr->neutralPlane = static_cast<PlaneType>(pl);
       CommitDiscrete(state, feature, before, index, commit);
     }
-    ImGui::Text("Faces: %zu", dr->faces.size());
+    PickSlotRow(state, feature, PickSlot::DraftFaces, "Faces",
+                dr->faces.empty()
+                    ? ""
+                    : std::to_string(dr->faces.size()) + " picked",
+                SlotKind(SelectionItem::Kind::Face), /*multi=*/true,
+                "Click side faces to taper (click again to remove)");
     for (size_t e = 0; e < dr->faces.size(); e++) {
       ImGui::PushID(static_cast<int>(e));
       if (ImGui::SmallButton("x")) {
@@ -828,11 +967,16 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* sh = dynamic_cast<ShellFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Thickness", sh->thicknessExpr,
             sh->thickness);
-    if (Feature* src = state.document->FindFeatureById(sh->bodyId))
-      ImGui::Text("Body: %s", src->GetName().c_str());
-    else
-      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Body: missing");
-    ImGui::Text("Open faces: %zu", sh->openFaces.size());
+    PickSlotRow(state, feature, PickSlot::ShellBody, "Body",
+                BodyRefLabel(state, sh->bodyId),
+                SlotKind(SelectionItem::Kind::Body), /*multi=*/false,
+                "Pick the body to hollow");
+    PickSlotRow(state, feature, PickSlot::ShellOpenFaces, "Open faces",
+                sh->openFaces.empty()
+                    ? ""
+                    : std::to_string(sh->openFaces.size()) + " picked",
+                SlotKind(SelectionItem::Kind::Face), /*multi=*/true,
+                "Click faces to open (click again to remove)");
     for (size_t e = 0; e < sh->openFaces.size(); e++) {
       ImGui::PushID(static_cast<int>(e));
       if (ImGui::SmallButton("x")) {

@@ -187,6 +187,14 @@ void HandleViewportInput(AppState& state) {
       state.edgePick = {};
       escUsed = true;
     }
+  } else if (state.slotPick.Active()) {
+    if (state.document == nullptr ||
+        state.document->FindFeatureById(state.slotPick.featureId) == nullptr) {
+      state.slotPick = {}; // the slot ends with its feature
+    } else if (esc) {
+      state.slotPick = {};
+      escUsed = true;
+    }
   } else if (state.measure.active && esc) {
     state.measure = MeasureState{}; // Escape exits (clears pair + readout)
     escUsed = true;

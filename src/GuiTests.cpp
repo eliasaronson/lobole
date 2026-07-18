@@ -2,6 +2,7 @@
 
 #include "Camera.h"
 #include "FaceSelector.h"
+#include "core/BooleanFeature.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
@@ -1346,5 +1347,73 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
     IM_CHECK(s_App->selection.Empty());
+  };
+
+  // U3: dialog pick slots — arm the Boolean's Target/Tool slots and fill
+  // them by clicking bodies in the viewport (overriding the defaults, which
+  // are the two most-recent producers).
+  t = IM_REGISTER_TEST(engine, "slots", "boolean_via_viewport_picks");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    MenuCreateAccept(ctx, "Create/Box");
+    MenuCreateAccept(ctx, "Create/Box");
+    auto* box2 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(1));
+    auto* box3 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(2));
+    IM_CHECK(box2 != nullptr && box3 != nullptr);
+    box2->position = glm::vec3(-3.0f, 0.0f, 0.0f); // overlaps box 1 by 1x2x2
+    box3->position = glm::vec3(2.0f, 0.0f, 0.0f);  // far to the right
+    Doc()->Regenerate();
+    ctx->Yield();
+
+    // Frame all three with the +Z faces toward the camera.
+    glm::vec3 min(-4.0f, 0.0f, 0.0f), max(4.0f, 2.0f, 2.0f);
+    const glm::vec3 center = (min + max) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(center);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(
+        center + glm::normalize(glm::vec3(0.3f, 0.5f, 1.0f)) * 20.0f);
+    ctx->Yield();
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Create/Boolean");
+    ctx->Yield();
+    IM_CHECK(s_App->pendingFeatureId != 0);
+    const uint64_t box1Id = Doc()->GetFeature(0)->GetId();
+    const uint64_t box2Id = box2->GetId();
+
+    // Arm Target, click box 1's TOP face; arm Tool, click box 2's —
+    // top faces project high on screen, clear of the bottom-center dialog.
+    ctx->ItemClick("//Boolean###PreviewDialog/###slot1"); // Target
+    IM_CHECK(s_App->slotPick.Active());
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(-3.7f, 2.0f, 1.0f)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(!s_App->slotPick.Active()); // single slot disarms on pick
+    ctx->ItemClick("//Boolean###PreviewDialog/###slot2"); // Tool
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(-1.3f, 2.0f, 1.0f)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    auto* boo = dynamic_cast<BooleanFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(boo != nullptr);
+    IM_CHECK_EQ(boo->targetId, box1Id);
+    IM_CHECK_EQ(boo->toolId, box2Id);
+
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    // Union of boxes 1+2 (8 + 8 - 1x2x2 overlap = 12) plus untouched box 3.
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    bool sawUnion = false;
+    for (const Body& b : Doc()->GetBodies())
+      if (std::abs(b.shape.Volume() - 12.0) < 1e-3)
+        sawUnion = true;
+    IM_CHECK(sawUnion);
   };
 }

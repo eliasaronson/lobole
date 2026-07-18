@@ -617,6 +617,7 @@ void ActivateSlot(AppState& state, size_t index) {
 // Shared reset after a tab switch/create.
 void ResetActiveTabUiState(AppState& state) {
   state.selection.Clear(); // features, occurrences and mates alike
+  state.slotPick = {};
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};
   // Any tab change exits in-context editing (EnterInContextEdit re-arms it

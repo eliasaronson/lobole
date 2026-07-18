@@ -47,6 +47,7 @@ void AcceptPendingFeature(AppState& state) {
                           *state.document);
   SelectFeature(state, id);
   state.edgePick = {}; // a blend preview's edge picking ends with it
+  state.slotPick = {}; // armed dialog slots end with the dialog
 }
 
 void CancelPendingFeature(AppState& state) {
@@ -57,6 +58,7 @@ void CancelPendingFeature(AppState& state) {
   state.pendingFeatureId = 0;
   state.selection.Clear();
   state.edgePick = {};
+  state.slotPick = {};
 }
 
 void DrawPreviewDialog(AppState& state) {

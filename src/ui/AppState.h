@@ -179,6 +179,20 @@ struct EdgePickState {
   bool Active() const { return filletId != 0; }
 };
 
+// An armed feature-dialog pick slot (U3): a reference field of the feature
+// being edited collects viewport picks. The selection pipeline filters
+// candidates to `kinds` and routes the resolved item to SlotPickClicked;
+// single-value slots disarm after one pick, multi slots (face lists) stay
+// armed until toggled off / Escape / the feature resolves.
+struct SlotPickState {
+  uint64_t featureId = 0; // feature being edited (0 = inactive)
+  int slot = -1;          // PickSlot id (FeatureEditor.h)
+  uint32_t kinds = 0;     // SelectionItem::Kind bitmask accepted
+  bool multi = false;
+  std::string prompt;     // status pill while armed
+  bool Active() const { return featureId != 0; }
+};
+
 // Measure tool (inspection I1 GUI, C3): a viewport mode that reads geometry
 // off picked elements. Pick one element → its own measure (face area / edge
 // length + radius); pick a second → the distance between them. Faces and
@@ -523,6 +537,7 @@ struct AppState {
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
   EdgePickState edgePick;
+  SlotPickState slotPick; // U3: armed dialog pick slot
   MeasureState measure;
   SimulationState simulation;
   // The active topology-optimization run (TO2), or null when none is running.

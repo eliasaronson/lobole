@@ -4,6 +4,7 @@
 #include "FaceSelector.h"
 #include "MeshRenderer.h"
 #include "ui/AppActions.h"        // EdgeElementRef, AppendPrimLine
+#include "ui/FeatureEditor.h"     // SlotPickClicked (U3)
 #include "ui/SketchInteraction.h" // FaceElementRef
 
 #include "imgui.h"
@@ -100,6 +101,9 @@ struct ArmedContext {
 void ConsumeBlendEdge(AppState& state, const Candidate& c) {
   BlendEdgeClicked(state, c.item.element, c.meshId, c.index);
 }
+void ConsumeSlotPick(AppState& state, const Candidate& c) {
+  SlotPickClicked(state, c.item);
+}
 void ConsumeMeasure(AppState& state, const Candidate& c) {
   MeasureElementClicked(state, c.item.element,
                         c.item.kind == SelectionItem::Kind::Edge);
@@ -112,6 +116,10 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
   if (state.edgePick.Active()) {
     return ArmedContext{KindBit(SelectionItem::Kind::Edge),
                         "Click edges to add or remove them", ConsumeBlendEdge};
+  }
+  if (state.slotPick.Active()) {
+    return ArmedContext{state.slotPick.kinds, state.slotPick.prompt.c_str(),
+                        ConsumeSlotPick};
   }
   if (state.measure.active) {
     return ArmedContext{KindBit(SelectionItem::Kind::Face) |
