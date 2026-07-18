@@ -1,8 +1,12 @@
 # U1 — Unified selection model (design)
 
-> Status: **signed off 2026-07-18** (phases U1a–U1d; SW/Onshape conventions:
-> click replaces, Ctrl+click toggles, repeated-click cycles — no popup in
-> v1). Parent: [plan.md](plan.md) U1.
+> Status: **SHIPPED 2026-07-18** — all four phases (U1a `eaa4fc1`, U1b
+> `754d4d0`, U1c `5e3ed9a`, U1d). SW/Onshape conventions as signed off.
+> Deliberate carve-out: mate-connector picking keeps its own picker (it
+> resolves (occurrence, face-frame) pairs the generic candidates don't
+> carry). Known limits, absorbed by U5: single face-highlight slot (last
+> Face item shows), occurrence hover previews via the hit face's range.
+> Parent: [plan.md](plan.md) U1.
 > Scope: model-space selection. The 2D sketcher's entity selection is mature
 > and stays as-is; it integrates only at the prompt/filter level.
 
