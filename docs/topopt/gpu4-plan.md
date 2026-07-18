@@ -1,7 +1,27 @@
 # GPU4 — element strain energies on the GPU (sub-plan)
 
-> Status: **design for sign-off. NOT started** — implementation waits for
-> explicit approval.
+> Status: **SHIPPED** — with a plot twist the profiler forced (below).
+>
+> Results: the energies kernel gate PASSED (rel-inf 5-8e-8 vs the fp64
+> oracle, bar 1e-4) and the CPU sensitivity step went 0.25 s -> 0.01 s per
+> SIMP run segment, exactly as designed. But the full-SIMP bench barely
+> moved — the new TOPO_PROFILE instrumentation showed the earlier "solve is
+> only ~0.1 s" attribution was wrong: mid-SIMP solves were spending 500-1100
+> outer iterations grinding at the fp32 residual floor (~1e-2 on real
+> concentrated-load/frozen-skin systems) through the stall/restart
+> machinery, while their ENERGY (compliance) converged in the first ~100.
+> Fix: warm-started SIMP solves are capped at 128 outer iterations (the
+> best iterate is returned regardless; cold first solves keep the generous
+> cap). A compliance-plateau stop was tried first and REJECTED: at the fp32
+> floor the iterate itself wanders (the GPU1 walk-away), so instantaneous
+> f^T x never stabilizes — measuring a wandering iterate is the wrong
+> concept.
+>
+> Combined GPU4 outcome (13.6k-tet bench cube): **0.98 -> 0.55 s/iter**
+> (CPU 3.47 — 6.3x end-to-end); the bracket demo runs 50 s -> **18 s** in
+> the live app, identical design to 4 digits. Diagnostics kept:
+> TOPO_PROFILE=1 (per-phase SIMP timing) and FEMGPU_SOLVE_TRACE=1
+> (per-solve iterations/residual).
 
 ## Why (measured, not projected)
 

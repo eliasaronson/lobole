@@ -1,0 +1,47 @@
+#version 450
+// Per-element strain energies at full modulus (GPU4 —
+// docs/topopt/gpu4-plan.md): se[e] = ue^T Ke0 ue, the SIMP sensitivity
+// kernel. Same workgroup-per-element shape as fem_spmv.comp: the element's
+// 30 DOF of u staged in shared memory (fixed slots read 0, the CPU
+// convention), thread t computes ue[t] * (Ke0 row t . ue), tree-reduce,
+// one write per element — no atomics anywhere.
+
+layout(local_size_x = 32) in;
+
+layout(std430, binding = 0) readonly buffer ElemDof { int dof[]; };  // 30/elem
+layout(std430, binding = 1) readonly buffer ElemKe { float ke[]; };  // 900/elem
+layout(std430, binding = 2) readonly buffer VecU { float u[]; };     // nFree
+layout(std430, binding = 3) writeonly buffer ElemSe { float se[]; }; // /elem
+
+layout(push_constant) uniform Push {
+  uint nElems;
+  uint groupsX;
+} pc;
+
+shared float ue[30];
+shared float part[32];
+
+void main() {
+  const uint e = gl_WorkGroupID.y * pc.groupsX + gl_WorkGroupID.x;
+  if (e >= pc.nElems) return;  // uniform across the workgroup
+  const uint t = gl_LocalInvocationID.x;
+  if (t < 30u) {
+    const int g = dof[e * 30u + t];
+    ue[t] = g >= 0 ? u[g] : 0.0;
+  }
+  barrier();
+  float acc = 0.0;
+  if (t < 30u) {
+    const uint base = e * 900u + t * 30u;
+    float row = 0.0;
+    for (uint c = 0u; c < 30u; ++c) row += ke[base + c] * ue[c];
+    acc = ue[t] * row;
+  }
+  part[t] = acc;
+  barrier();
+  for (uint stride = 16u; stride > 0u; stride >>= 1u) {
+    if (t < stride) part[t] += part[t + stride];
+    barrier();
+  }
+  if (t == 0u) se[e] = part[0];
+}

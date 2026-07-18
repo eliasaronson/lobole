@@ -87,6 +87,18 @@ class TopoLinearSolver {
   virtual bool Solve(const std::vector<double>& scale,
                      const std::vector<double>& F, std::vector<double>& u,
                      std::string* error) = 0;
+  // Optional capability (GPU4): per-element strain energies at FULL modulus,
+  // se_e = ue^T Ke0_e ue, for the reduced displacement `u` (size nFree,
+  // fixed DOFs implicitly zero). Returning false (the default) makes the
+  // caller run its own per-element CPU loop — which remains the oracle — so
+  // implementations may decline at any time.
+  virtual bool ElementEnergies(const std::vector<double>& u,
+                               std::vector<double>& se, std::string* error) {
+    (void)u;
+    (void)se;
+    (void)error;
+    return false;
+  }
 };
 
 // Minimizes compliance u^T K u subject to a volume-fraction constraint over the

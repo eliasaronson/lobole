@@ -32,6 +32,10 @@ class TopoGpuSolver : public fem::TopoLinearSolver {
              std::string* error) override;
   bool Solve(const std::vector<double>& scale, const std::vector<double>& F,
              std::vector<double>& u, std::string* error) override;
+  // GPU4: one dispatch over the resident element matrices instead of the
+  // caller's per-element Ke0 recompute.
+  bool ElementEnergies(const std::vector<double>& u, std::vector<double>& se,
+                       std::string* error) override;
 
  private:
   TopoGpuSolver();

@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <unordered_map>
@@ -494,6 +497,19 @@ std::optional<TopoResult> TopologyOptimize(
   std::vector<double> dcRaw(nTets, 0.0), dcFilt(nTets, 0.0);
   constexpr double kGamma = 1e-3;  // sensitivity-filter divide-by-zero guard
 
+  // TOPO_PROFILE=1: per-phase wall-time accumulators, one stderr line at run
+  // end — the honest attribution of where a SIMP iteration goes (the GPU4
+  // bench proved gut-feel attribution wrong).
+  const bool profile = std::getenv("TOPO_PROFILE") != nullptr;
+  double tSolve = 0, tSens = 0, tFilter = 0, tOc = 0;
+  using pclk = std::chrono::steady_clock;
+  auto lap = [&](pclk::time_point& t0) {
+    const auto now = pclk::now();
+    const double s = std::chrono::duration<double>(now - t0).count();
+    t0 = now;
+    return s;
+  };
+
   for (int iter = 0; iter < params.maxIterations; ++iter) {
     // Penalty continuation (optional): p ramps 1 -> params.penalty over the
     // first penaltyRampIters iterations, then holds. Disabled (0) by default —
@@ -509,6 +525,7 @@ std::optional<TopoResult> TopologyOptimize(
     for (int e = 0; e < nTets; ++e)
       scaleE[e] = (Emin + std::pow(x[e], p) * (E0 - Emin)) / E0;
 
+    pclk::time_point tp = pclk::now();
     Eigen::VectorXd u(nFree);
     if (solver) {
       // External (GPU) solver: matrix-free, warm-started via uExt.
@@ -546,6 +563,7 @@ std::optional<TopoResult> TopologyOptimize(
       uPrev = u;  // warm-start the next iteration
     }
 
+    tSolve += lap(tp);
     const double compliance = F.dot(u);
 
     // Expand the reduced displacement to a full per-node vector for the
@@ -559,20 +577,33 @@ std::optional<TopoResult> TopologyOptimize(
 
     // Raw per-element compliance sensitivity dc/dx_e = -p x_e^(p-1)(1-Emin/E0) se
     // with se = u_e^T Ke0 u_e (the element strain energy at full modulus).
+    // An injected solver may compute all the energies at once (GPU4 — the
+    // element matrices are resident on the device); on decline, the CPU
+    // loop below recomputes Ke0 per element, which stays the oracle.
     const double coef = p * (E0 - Emin) / E0;
+    std::vector<double> seExt;
+    const bool haveSe =
+        solver && solver->ElementEnergies(uExt, seExt, nullptr) &&
+        static_cast<int>(seExt.size()) == nTets;
     for (int e = 0; e < nTets; ++e) {
-      const auto Ke0 = ElementK0(mesh, mesh.tets[e], D0);
-      const auto& tet = mesh.tets[e];
-      Eigen::Matrix<double, 30, 1> ue;
-      for (int i = 0; i < 10; ++i) {
-        const auto& d = disp[tet[i]];
-        ue(3 * i + 0) = d.x;
-        ue(3 * i + 1) = d.y;
-        ue(3 * i + 2) = d.z;
+      double se;
+      if (haveSe) {
+        se = seExt[e];
+      } else {
+        const auto Ke0 = ElementK0(mesh, mesh.tets[e], D0);
+        const auto& tet = mesh.tets[e];
+        Eigen::Matrix<double, 30, 1> ue;
+        for (int i = 0; i < 10; ++i) {
+          const auto& d = disp[tet[i]];
+          ue(3 * i + 0) = d.x;
+          ue(3 * i + 1) = d.y;
+          ue(3 * i + 2) = d.z;
+        }
+        se = ue.dot(Ke0 * ue);  // >= 0
       }
-      const double se = ue.dot(Ke0 * ue);  // >= 0
       dcRaw[e] = -coef * std::pow(x[e], p - 1.0) * se;  // <= 0
     }
+    tSens += lap(tp);
     // Sensitivity filter (Sigmund): a length-scale regularizer that keeps the
     // density crisply 0/1. dcFilt_e = (sum_j H_ej x_j dcRaw_j)/(max(g,x_e) sum_j H_ej).
     for (int e = 0; e < nTets; ++e) {
@@ -580,6 +611,7 @@ std::optional<TopoResult> TopologyOptimize(
       for (const auto& [j, w] : nbr[e]) num += w * x[j] * dcRaw[j];
       dcFilt[e] = num / (std::max(kGamma, x[e]) * Hs[e]);
     }
+    tFilter += lap(tp);
 
     // ---- Optimality-criteria update: bisect the volume multiplier --------
     // Volume is linear in x, so the constraint check is O(n) per bisection step.
@@ -626,12 +658,18 @@ std::optional<TopoResult> TopologyOptimize(
       }
     }
 
+    tOc += lap(tp);
     if (atFullPenalty && maxChange < params.changeTol) {
       result.converged = true;
       break;
     }
   }
 
+  if (profile)
+    std::fprintf(stderr,
+                 "TOPO_PROFILE: %d iters — solve %.2fs, sensitivity %.2fs, "
+                 "filter %.2fs, oc+rest %.2fs\n",
+                 result.iterations, tSolve, tSens, tFilter, tOc);
   return result;
 }
 

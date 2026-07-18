@@ -288,6 +288,69 @@ double ResidualNorm(const gpu::SpmvSystem& sys, const std::vector<float>& scales
 
 }  // namespace
 
+TEST_CASE("femgpu: element energies match the CPU oracle (GPU4 GATE)",
+          "[femgpu][gate]") {
+  REQUIRE_GPU();
+  INFO("device: " << ctx->DeviceName());
+
+  auto check = [&](const fem::FemMesh& mesh) {
+    const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+    REQUIRE(fixed.size() > 3);
+    const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 210000.0, 0.3);
+
+    std::string err;
+    auto cg = gpu::TopoCgSolver::Create(*ctx, sys, &err);
+    INFO(err);
+    REQUIRE(cg);
+
+    uint32_t state = 4242;
+    std::vector<float> u(sys.nFree);
+    for (int i = 0; i < sys.nFree; ++i) u[i] = RandSym(state);
+
+    std::vector<float> se;
+    REQUIRE(cg->ElementEnergies(u, se, &err));
+    REQUIRE(se.size() == static_cast<size_t>(sys.nElems));
+
+    // fp64 oracle from the same fp32 inputs: se_e = ue^T Ke0 ue.
+    double maxRef = 0.0, maxErr = 0.0;
+    for (int e = 0; e < sys.nElems; ++e) {
+      const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
+      const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
+      double ue[30];
+      for (int s2 = 0; s2 < 30; ++s2)
+        ue[s2] = dof[s2] >= 0 ? static_cast<double>(u[dof[s2]]) : 0.0;
+      double ref = 0.0;
+      for (int a = 0; a < 30; ++a) {
+        double row = 0.0;
+        for (int b = 0; b < 30; ++b)
+          row += static_cast<double>(ke[a * 30 + b]) * ue[b];
+        ref += ue[a] * row;
+      }
+      maxRef = std::max(maxRef, std::abs(ref));
+      maxErr = std::max(maxErr, std::abs(static_cast<double>(se[e]) - ref));
+    }
+    const double rel = maxRef > 0 ? maxErr / maxRef : maxErr;
+    INFO("elements: " << sys.nElems << "  rel-inf error: " << rel);
+    CHECK(rel < 1e-4);  // fp32 accumulation noise; typically ~1e-6
+  };
+
+  SECTION("structured tet10 box") {
+    check(GenerateBoxMesh(8, 4, 4, 80, 40, 40));
+  }
+#ifdef HAVE_NETGEN
+  SECTION("real Netgen mesh") {
+    CADShape box = CADKernel::Instance().CreateBox(60, 30, 30);
+    fem::MeshSettings ms;
+    ms.maxSize = 10.0;
+    std::string err;
+    auto mesh = fem::Mesh(box.GetShape(), ms, &err);
+    INFO(err);
+    REQUIRE(mesh.has_value());
+    check(*mesh);
+  }
+#endif
+}
+
 TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
   REQUIRE_GPU();
   INFO("device: " << ctx->DeviceName());

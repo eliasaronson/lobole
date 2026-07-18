@@ -10,6 +10,7 @@
 #include "cheb_init_spv.h"
 #include "cheb_iter_spv.h"
 #include "fem_spmv_spv.h"
+#include "fem_energy_spv.h"
 #include "mg_prolong_spv.h"
 #include "mg_restrict_spv.h"
 #include "vec_add_spv.h"
@@ -129,7 +130,10 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
             sizeof(NPush)) ||
       !pipe(s->m_mgProlong, k_mg_prolong_spv, k_mg_prolong_spv_size, 5,
             sizeof(NPush)) ||
-      !pipe(s->m_vecAdd, k_vec_add_spv, k_vec_add_spv_size, 2, sizeof(NPush)))
+      !pipe(s->m_vecAdd, k_vec_add_spv, k_vec_add_spv_size, 2,
+            sizeof(NPush)) ||
+      !pipe(s->m_energy, k_fem_energy_spv, k_fem_energy_spv_size, 4,
+            sizeof(ElemPush)))
     return nullptr;
 
   // Buffers.
@@ -144,7 +148,8 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
       !make(s->m_r, vec) || !make(s->m_z, vec) || !make(s->m_p, vec) ||
       !make(s->m_ap, vec) || !make(s->m_chebR, vec) ||
       !make(s->m_chebD, vec) ||
-      !make(s->m_scalars, kNumScalars * sizeof(float)))
+      !make(s->m_scalars, kNumScalars * sizeof(float)) ||
+      !make(s->m_se, sys.nElems * sizeof(float)))
     return nullptr;
   std::memcpy(s->m_dof.mapped, sys.dof.data(), s->m_dof.size);
   std::memcpy(s->m_ke.mapped, sys.ke.data(), s->m_ke.size);
@@ -210,7 +215,11 @@ std::unique_ptr<TopoCgSolver> TopoCgSolver::Create(ComputeContext& ctx,
       !bind(s->m_setDotDD, s->m_dot,
             {&s->m_chebD, &s->m_chebD, &s->m_scalars}) ||
       !bind(s->m_setDotRRcheb, s->m_dot,
-            {&s->m_chebR, &s->m_chebR, &s->m_scalars}))
+            {&s->m_chebR, &s->m_chebR, &s->m_scalars}) ||
+      // Energies read u from the p buffer — CG scratch, dead between solves,
+      // so ElementEnergies never touches the warm-start x.
+      !bind(s->m_setEnergy, s->m_energy,
+            {&s->m_dof, &s->m_ke, &s->m_p, &s->m_se}))
     return nullptr;
 
   if (options.precond == CgOptions::Precond::Multigrid) {
@@ -248,12 +257,12 @@ TopoCgSolver::~TopoCgSolver() {
   for (Buffer* b :
        {&m_dof, &m_ke, &m_scale, &m_diagK, &m_f, &m_x, &m_r, &m_z, &m_p,
         &m_ap, &m_chebR, &m_chebD, &m_scalars, &m_mgR, &m_mgZt, &m_mgRc,
-        &m_mgEc, &m_nodeAgg, &m_nodeOff, &m_nodeDof})
+        &m_mgEc, &m_nodeAgg, &m_nodeOff, &m_nodeDof, &m_se})
     m_ctx.Destroy(*b);
   for (Pipeline* p : {&m_spmv, &m_diag, &m_residual, &m_precondDot, &m_copy,
                       &m_dot, &m_updateXr, &m_updateP, &m_chebInit,
                       &m_chebIter, &m_vecDivd, &m_vecScale, &m_mgRestrict,
-                      &m_mgProlong, &m_vecAdd})
+                      &m_mgProlong, &m_vecAdd, &m_energy})
     m_ctx.Destroy(*p);
 }
 
@@ -552,6 +561,24 @@ bool TopoCgSolver::Solve(const std::vector<float>& f, std::vector<float>& x,
   return true;
 }
 
+bool TopoCgSolver::ElementEnergies(const std::vector<float>& u,
+                                   std::vector<float>& se,
+                                   std::string* error) {
+  if (u.size() != static_cast<size_t>(m_nFree)) {
+    if (error) *error = "u size != nFree";
+    return false;
+  }
+  std::memcpy(m_p.mapped, u.data(), m_p.size);
+  const ElemPush ep{static_cast<uint32_t>(m_nElems), m_elemGx};
+  if (!m_ctx.BeginBatch(error)) return false;
+  m_ctx.BatchDispatch(m_energy, m_setEnergy, &ep, sizeof(ep), m_elemGx,
+                      m_elemGy);
+  if (!m_ctx.SubmitBatch(error)) return false;
+  se.resize(m_nElems);
+  std::memcpy(se.data(), m_se.mapped, m_se.size);
+  return true;
+}
+
 // ---- GPU3: multigrid-preconditioned PCG -----------------------------------
 
 // Records a Chebyshev polynomial application into the CURRENT batch: the
@@ -691,7 +718,10 @@ bool TopoCgSolver::SolveMg(const std::vector<float>& f, std::vector<float>& x,
   }
 
   // Counted in true-residual REFRESHES (one per 16 iterations): four
-  // refreshes without a new best (~64 iterations) means the fp32 floor.
+  // refreshes (~64 iterations) with no new low reads as the fp32 floor.
+  // Cold solves on hard systems get their legitimate slow phases via the
+  // caller's generous maxIter; warm SIMP solves are capped tight there
+  // instead (see TopoGpuSolver) — floor-grinding measured as pure waste.
   constexpr int kStallIters = 4;
   int iter = 0, parity = 0, sinceBest = 0, restartsNoGain = 0;
   float bestRr = rr;

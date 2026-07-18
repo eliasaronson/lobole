@@ -88,6 +88,14 @@ class TopoCgSolver {
   bool Solve(const std::vector<float>& f, std::vector<float>& x, float tol,
              int maxIter, CgStats* stats, std::string* error);
 
+  // Per-element strain energies at FULL modulus: se[e] = ue^T Ke0 ue for the
+  // reduced displacement `u` (GPU4 — the SIMP sensitivity kernel). One
+  // dispatch over the resident element matrices; `u` is uploaded into CG
+  // scratch (never the warm-start state), so this is safe to call with any
+  // vector at any time between solves.
+  bool ElementEnergies(const std::vector<float>& u, std::vector<float>& se,
+                       std::string* error);
+
  private:
   explicit TopoCgSolver(ComputeContext& ctx) : m_ctx(ctx) {}
   void RecordPrecond(uint32_t rzSlot);  // z = M^-1 r + refresh rz/rr slots
@@ -111,21 +119,21 @@ class TopoCgSolver {
   // Pipelines (all embedded SPIR-V).
   Pipeline m_spmv, m_diag, m_residual, m_precondDot, m_copy, m_dot, m_updateXr,
       m_updateP, m_chebInit, m_chebIter, m_vecDivd, m_vecScale, m_mgRestrict,
-      m_mgProlong, m_vecAdd;
+      m_mgProlong, m_vecAdd, m_energy;
   // Buffers: element data + the CG working set + the scalar block. chebR/
   // chebD are the Chebyshev inner residual/direction (doubling as the power-
   // iteration work vectors). mg*: multigrid working set (fine residual r2,
   // post-smoothing correction, coarse residual/correction, node tables).
   Buffer m_dof, m_ke, m_scale, m_diagK, m_f, m_x, m_r, m_z, m_p, m_ap,
       m_chebR, m_chebD, m_scalars, m_mgR, m_mgZt, m_mgRc, m_mgEc, m_nodeAgg,
-      m_nodeOff, m_nodeDof;
+      m_nodeOff, m_nodeDof, m_se;
   // Static buffer bindings, created once.
   BoundSet m_setSpmvP, m_setSpmvX, m_setDiag, m_setResidual, m_setPrecond,
       m_setCopyZP, m_setDotFF, m_setDotPAp, m_setUpdateXr, m_setUpdateP,
       m_setSpmvChebD, m_setChebInit, m_setChebIter, m_setDotRZ, m_setDotRR,
       m_setDivdAp, m_setScaleRD, m_setDotDR, m_setDotDD, m_setDotRRcheb,
       m_setSpmvZ, m_setResidualMg, m_setMgRestrict, m_setMgProlong,
-      m_setChebInitMg, m_setChebIterMg, m_setVecAddZt;
+      m_setChebInitMg, m_setChebIterMg, m_setVecAddZt, m_setEnergy;
 
   bool m_scalesDirty = true;
   std::vector<float> m_scalesCpu;         // for the coarse-rebuild callback

@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -133,18 +135,54 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
   // xF); the incoming `u` matches it, so either would do.
   if (!im.haveWarmStart) std::fill(im.xF.begin(), im.xF.end(), 0.0f);
 
-  // Same nominal tolerance as the CPU Eigen CG-IC path (1e-6). The solver
-  // measures TRUE residuals (chunk-boundary replacement), so this is honest;
-  // where fp32 round-off floors above it, the stagnation guard inside Solve
-  // accepts the best-so-far like the CPU path accepts Eigen's NoConvergence.
-  const float tol = 1e-6f;
-  const int maxIter = std::min(2 * im.nFree, 20000);
+  // 1e-5 relative residual — the fp32-realistic target (the measured MG/
+  // Jacobi floor sits just under it). Asking for the CPU path's 1e-6 made
+  // EVERY solve grind hundreds of floor iterations through the stall/restart
+  // machinery before accepting (measured: 300-460 iters/solve, ~1 s, where
+  // convergent solves take 25-60). Compliance error scales as tol^2 (energy
+  // norm), so 1e-5 is far below anything the OC update can sense; the
+  // stagnation guard still catches fields whose floor sits above it.
+  const float tol = 1e-5f;
+  // Warm-started mid-SIMP solves are capped hard: on real topology systems
+  // the fp32 residual floors near 1e-2 and the useful (energy) work is done
+  // within the first ~100 iterations — everything after was measured to be
+  // floor-grinding through the stall machinery (560-1100 iters/solve, ~2/3
+  // of the whole SIMP runtime) with no effect on the design. The cold first
+  // solve keeps the generous cap for its legitimate slow phases; capped
+  // solves still return the best iterate found.
+  const int maxIter =
+      im.haveWarmStart ? 128 : std::min(2 * im.nFree, 20000);
   CgStats stats;
+  const auto t0 = std::chrono::steady_clock::now();
   if (!im.cg->Solve(im.fF, im.xF, tol, maxIter, &stats, error)) return false;
   im.haveWarmStart = true;
+  // FEMGPU_SOLVE_TRACE=1: one stderr line per SIMP linear solve.
+  if (std::getenv("FEMGPU_SOLVE_TRACE"))
+    std::fprintf(stderr,
+                 "FEMGPU_SOLVE: %.0f ms, %d outer iters, rel res %.2e, "
+                 "converged=%d\n",
+                 std::chrono::duration<double, std::milli>(
+                     std::chrono::steady_clock::now() - t0)
+                     .count(),
+                 stats.iterations, stats.relResidual, (int)stats.converged);
 
   u.resize(im.nFree);
   for (int i = 0; i < im.nFree; ++i) u[i] = static_cast<double>(im.xF[i]);
+  return true;
+}
+
+bool TopoGpuSolver::ElementEnergies(const std::vector<double>& u,
+                                    std::vector<double>& se,
+                                    std::string* error) {
+  Impl& im = *m_impl;
+  if (!im.cg || static_cast<int>(u.size()) != im.nFree) {
+    if (error) *error = "ElementEnergies before Setup / size mismatch";
+    return false;
+  }
+  for (int i = 0; i < im.nFree; ++i) im.fF[i] = static_cast<float>(u[i]);
+  std::vector<float> seF;
+  if (!im.cg->ElementEnergies(im.fF, seF, error)) return false;
+  se.assign(seF.begin(), seF.end());
   return true;
 }
 
