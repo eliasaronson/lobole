@@ -238,6 +238,13 @@ public:
   // redoable commands). Returns false and discards the command if it failed.
   bool Execute(std::unique_ptr<Command> command, Document& doc);
 
+  // Pushes a command whose effect is ALREADY applied to the document (live
+  // UI edits followed by a snapshot command). Undo/redo behave exactly as
+  // with Execute, but the current feature objects are left untouched — an
+  // Execute here would ReplaceFeature with an identical copy, dangling every
+  // pointer the caller still holds (the material-change segfault).
+  void PushApplied(std::unique_ptr<Command> command);
+
   bool CanUndo() const { return !m_undo.empty(); }
   bool CanRedo() const { return !m_redo.empty(); }
   void Undo(Document& doc);

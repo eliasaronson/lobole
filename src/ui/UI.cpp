@@ -107,12 +107,14 @@ void DrawViewCube(AppState& state) {
       ImGuiCond_Always);
   ImGui::SetNextWindowSize(ImVec2(size, size), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f); // no frame lines
   const ImGuiWindowFlags flags =
       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoScrollbar;
   if (!ImGui::Begin("##ViewCube", nullptr, flags)) {
     ImGui::End();
+    ImGui::PopStyleVar();
     return;
   }
   const ImVec2 wp = ImGui::GetWindowPos();
@@ -190,6 +192,7 @@ void DrawViewCube(AppState& state) {
       state.camera->AlignToFace(glm::vec3(0.0f), f.normal);
   }
   ImGui::End();
+  ImGui::PopStyleVar();
 }
 
 // Empty-state hint (U5): a fresh part tells the user where to start instead

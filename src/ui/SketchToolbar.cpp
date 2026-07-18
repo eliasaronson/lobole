@@ -338,44 +338,11 @@ void DrawSketchToolbar(AppState& state) {
 
   ImGui::Separator();
   ImGui::BeginDisabled(!canExtrude);
-  if (ImGui::Button("Extrude...")) {
-    const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-    const uint64_t sketchId = edit.activeSketchId;
-    edit = SketchEditState{}; // exit sketch mode so the solid + dialog show
-    // Preview the extrude; the user accepts/cancels it.
-    BeginPreviewFeature(state, std::make_unique<ExtrudeFeature>(
-                                   "Extrude " + std::to_string(n), sketchId,
-                                   1.0, ExtrudeMode::NewBody));
-  }
+  if (ImGui::Button("Extrude..."))
+    BeginSketchExtrude(state); // Shift+E does the same
   ImGui::SameLine();
-  if (ImGui::Button("Revolve...")) {
-    const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-    const uint64_t sketchId = edit.activeSketchId;
-    // Default the axis to the sketch's sole construction line if it has
-    // exactly one; else the global Y axis. The user can change it in the
-    // preview dialog.
-    AxisRef axis;
-    axis.kind = AxisRef::Kind::Y;
-    uint32_t soleConstructionLine = 0;
-    int constructionLines = 0;
-    for (const auto& e : sketch->entities) {
-      const auto* line = std::get_if<sketch::Line>(&e);
-      if (line != nullptr && line->construction) {
-        soleConstructionLine = line->id;
-        constructionLines++;
-      }
-    }
-    if (constructionLines == 1) {
-      axis.kind = AxisRef::Kind::SketchLine;
-      axis.sketchId = sketchId;
-      axis.entityId = soleConstructionLine;
-    }
-    edit = SketchEditState{};
-    auto rev = std::make_unique<RevolveFeature>(
-        "Revolve " + std::to_string(n), sketchId, 360.0, ExtrudeMode::NewBody);
-    rev->axis = axis;
-    BeginPreviewFeature(state, std::move(rev));
-  }
+  if (ImGui::Button("Revolve..."))
+    BeginSketchRevolve(state); // Shift+R does the same
   ImGui::EndDisabled();
 
   ImGui::SameLine();
@@ -383,6 +350,58 @@ void DrawSketchToolbar(AppState& state) {
     edit = SketchEditState{};
 
   ImGui::End();
+}
+
+// Add once a body exists; the first extrude starts the solid.
+static ExtrudeMode DefaultBodyMode(const AppState& state) {
+  return (state.document && !state.document->GetBodies().empty())
+             ? ExtrudeMode::Add
+             : ExtrudeMode::NewBody;
+}
+
+void BeginSketchExtrude(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (sketch == nullptr || sketch::BuildLoops(sketch->entities).empty())
+    return;
+  const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+  const uint64_t sketchId = edit.activeSketchId;
+  edit = SketchEditState{}; // exit sketch mode so the solid + dialog show
+  BeginPreviewFeature(state, std::make_unique<ExtrudeFeature>(
+                                 "Extrude " + std::to_string(n), sketchId,
+                                 1.0, DefaultBodyMode(state)));
+}
+
+void BeginSketchRevolve(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (sketch == nullptr || sketch::BuildLoops(sketch->entities).empty())
+    return;
+  const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+  const uint64_t sketchId = edit.activeSketchId;
+  // Default the axis to the sketch's sole construction line if it has
+  // exactly one; else the global Y axis (changeable in the dialog).
+  AxisRef axis;
+  axis.kind = AxisRef::Kind::Y;
+  uint32_t soleConstructionLine = 0;
+  int constructionLines = 0;
+  for (const auto& e : sketch->entities) {
+    const auto* line = std::get_if<sketch::Line>(&e);
+    if (line != nullptr && line->construction) {
+      soleConstructionLine = line->id;
+      constructionLines++;
+    }
+  }
+  if (constructionLines == 1) {
+    axis.kind = AxisRef::Kind::SketchLine;
+    axis.sketchId = sketchId;
+    axis.entityId = soleConstructionLine;
+  }
+  edit = SketchEditState{};
+  auto rev = std::make_unique<RevolveFeature>(
+      "Revolve " + std::to_string(n), sketchId, 360.0, DefaultBodyMode(state));
+  rev->axis = axis;
+  BeginPreviewFeature(state, std::move(rev));
 }
 
 } // namespace ui

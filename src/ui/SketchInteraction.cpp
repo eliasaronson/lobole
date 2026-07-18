@@ -1,6 +1,7 @@
 #include "ui/SketchInteraction.h"
 
 #include "Camera.h"
+#include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (Shift+E/R)
 #include "ui/AppActions.h" // SelectFeature
 #include "FaceSelector.h"
 #include "Logger.h"
@@ -498,6 +499,10 @@ static void HandleSketchKeys(AppState& state) {
       setTool(SketchTool::Fillet); // Shift+F: Fillet
     else if (ImGui::IsKeyPressed(ImGuiKey_S))
       edit.autoConstrain = !edit.autoConstrain; // Shift+S: suppress inferencing
+    else if (ImGui::IsKeyPressed(ImGuiKey_E))
+      BeginSketchExtrude(state); // Shift+E: extrude the sketch
+    else if (ImGui::IsKeyPressed(ImGuiKey_R))
+      BeginSketchRevolve(state); // Shift+R: revolve the sketch
     return;
   }
 

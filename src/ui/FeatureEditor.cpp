@@ -54,10 +54,9 @@ void HandleEdit(AppState& state, Feature& feature, bool changedThisFrame,
   if (ImGui::IsItemDeactivatedAfterEdit()) {
     nlohmann::json after = DocumentIO::FeatureToJson(feature);
     if (after != state.editBaseline) {
-      state.commands->Execute(
-          std::make_unique<ModifyFeatureCommand>(index, state.editBaseline,
-                                                 after),
-          doc);
+      // Applied live during the drag: record only (see CommitDiscrete).
+      state.commands->PushApplied(std::make_unique<ModifyFeatureCommand>(
+          index, state.editBaseline, after));
     }
   } else if (ImGui::IsItemDeactivated()) {
     doc.Regenerate();
@@ -183,9 +182,12 @@ void CommitDiscrete(AppState& state, Feature& feature,
     return;
   nlohmann::json after = DocumentIO::FeatureToJson(feature);
   if (after != before) {
-    state.commands->Execute(
-        std::make_unique<ModifyFeatureCommand>(index, before, after),
-        *state.document);
+    // The live feature already holds the after-state: record without
+    // executing, so the object (and every pointer the widgets still hold
+    // this frame) survives. Execute would ReplaceFeature with an identical
+    // copy — the dangling-pointer class behind the material-change segfault.
+    state.commands->PushApplied(
+        std::make_unique<ModifyFeatureCommand>(index, before, after));
   }
 }
 

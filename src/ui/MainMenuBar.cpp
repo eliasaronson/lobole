@@ -227,6 +227,13 @@ void DrawViewMenu(AppState& state) {
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
   ImGui::MenuItem("Viewport Controls", nullptr, &state.showControlsHelp);
+  if (state.topoGhostStudyId != 0 &&
+      ImGui::MenuItem("Hide Topology Ghost")) {
+    // The translucent optimized-shape overlay a topology study leaves for
+    // re-modeling; discoverable off-switch.
+    state.topoGhostStudyId = 0;
+    state.syncedDocumentVersion = UINT64_MAX;
+  }
 
   // The Shift+1..7 views, discoverable (U5).
   if (ImGui::BeginMenu("Standard Views")) {

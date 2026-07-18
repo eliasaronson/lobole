@@ -1,6 +1,7 @@
 #include "ui/FeatureTreePanel.h"
 
 #include "CADMaterials.h"
+#include "Camera.h"
 #include "core/Command.h"
 #include "core/DatumPlaneFeature.h"
 #include "core/Feature.h"
@@ -120,9 +121,8 @@ void DrawFeatureTreePanel(AppState& state) {
             feature->SetName(renameBuf);
             doc->Regenerate();
             nlohmann::json after = DocumentIO::FeatureToJson(*feature);
-            state.commands->Execute(
-                std::make_unique<ModifyFeatureCommand>(i, before, after),
-                *doc);
+            state.commands->PushApplied(
+                std::make_unique<ModifyFeatureCommand>(i, before, after));
           }
           renaming = -1;
         } else if (ImGui::IsItemDeactivated()) {
@@ -138,11 +138,14 @@ void DrawFeatureTreePanel(AppState& state) {
       // Suffix keeps IDs unique and test paths stable even if names repeat
       const std::string label =
           feature->GetName() + "##" + std::to_string(i);
-      // Datum planes are double-clickable to start a sketch on them, like the
-      // base planes above.
+      // Datum planes double-click into a new sketch on them; sketches
+      // double-click into EDIT mode (the Properties Edit Sketch button).
       auto* datum = dynamic_cast<DatumPlaneFeature*>(feature);
+      auto* sketchFeat = dynamic_cast<SketchFeature*>(feature);
       const ImGuiSelectableFlags flags =
-          datum ? ImGuiSelectableFlags_AllowDoubleClick : 0;
+          (datum != nullptr || sketchFeat != nullptr)
+              ? ImGuiSelectableFlags_AllowDoubleClick
+              : 0;
       // Features that failed to regenerate show red, with the reason on
       // hover; suppressed and rolled-past features show dimmed.
       const bool suppressed = feature->IsSuppressed();
@@ -164,6 +167,13 @@ void DrawFeatureTreePanel(AppState& state) {
         if (datum && ImGui::IsMouseDoubleClicked(0)) {
           const int n = static_cast<int>(doc->FeatureCount()) + 1;
           BeginSketchOnDatum(state, *datum, "Sketch " + std::to_string(n));
+        } else if (sketchFeat && ImGui::IsMouseDoubleClicked(0)) {
+          state.sketchEdit = SketchEditState{};
+          state.sketchEdit.activeSketchId = sketchFeat->GetId();
+          state.measure = MeasureState{}; // sketch mode replaces measure
+          if (state.camera)
+            state.camera->AlignToFace(sketchFeat->plane.GetOrigin(),
+                                      sketchFeat->plane.GetNormal());
         }
       }
       if (errored) {
@@ -189,8 +199,8 @@ void DrawFeatureTreePanel(AppState& state) {
           feature->SetSuppressed(!suppressed);
           doc->Regenerate();
           nlohmann::json after = DocumentIO::FeatureToJson(*feature);
-          state.commands->Execute(
-              std::make_unique<ModifyFeatureCommand>(i, before, after), *doc);
+          state.commands->PushApplied(
+              std::make_unique<ModifyFeatureCommand>(i, before, after));
         }
         // Rollback bar (not undoable — a view of the history, not an edit).
         if (ImGui::MenuItem("Rollback to here")) {
@@ -265,34 +275,45 @@ void DrawFeatureTreePanel(AppState& state) {
     }
 
     ImGui::SeparatorText("Bodies");
-    int bodyRow = 0;
-    for (const auto& body : doc->GetBodies()) {
-      // Styled row (U5): glyph + name, volume as a dimmed suffix — an
-      // object, not a debug bullet. Right-click: material + hide/show.
-      ImGui::PushID(bodyRow++);
-      const bool hidden = state.hiddenBodies.count(body.createdBy) != 0;
+    // A committing menu action regenerates the document, which REBUILDS the
+    // bodies vector — so every row draws from values copied up front, the
+    // menu resolves the creator fresh by id, and the loop breaks after any
+    // commit (the earlier `body.shape.Volume()` after the popup was a
+    // use-after-free segfault).
+    const size_t bodyCount = doc->GetBodies().size();
+    for (size_t bi = 0; bi < bodyCount && bi < doc->GetBodies().size(); bi++) {
+      const std::string bodyName = doc->GetBodies()[bi].name;
+      const double bodyVolume = doc->GetBodies()[bi].shape.Volume();
+      const uint64_t createdBy = doc->GetBodies()[bi].createdBy;
+      ImGui::PushID(static_cast<int>(bi));
+      const bool hidden = state.hiddenBodies.count(createdBy) != 0;
       ImGui::TextUnformatted(hidden ? ICON_FA_EYE_SLASH : ICON_FA_CUBES);
       ImGui::SameLine(ImGui::GetFontSize() * 1.8f);
       if (hidden)
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-      ImGui::Selectable((body.name + "##body").c_str(), false,
+      ImGui::Selectable((bodyName + "##body").c_str(), false,
                         ImGuiSelectableFlags_AllowOverlap);
       if (hidden)
         ImGui::PopStyleColor();
-      if (ImGui::BeginPopupContextItem("##bodyctx")) {
+      ImGui::OpenPopupOnItemClick("##bodyctx",
+                                  ImGuiPopupFlags_MouseButtonRight);
+      ImGui::SameLine();
+      ImGui::TextDisabled("%.2f mm%s", bodyVolume, "\xc2\xb3");
+
+      bool committed = false;
+      if (ImGui::BeginPopup("##bodyctx")) {
         if (ImGui::MenuItem(hidden ? "Show" : "Hide")) {
           if (hidden)
-            state.hiddenBodies.erase(body.createdBy);
+            state.hiddenBodies.erase(createdBy);
           else
-            state.hiddenBodies.insert(body.createdBy);
+            state.hiddenBodies.insert(createdBy);
           state.syncedDocumentVersion = UINT64_MAX; // force renderer resync
         }
         if (ImGui::BeginMenu("Material")) {
           using CADMaterials::MaterialLibrary;
-          Feature* creator = doc->FindFeatureById(body.createdBy);
           size_t creatorIndex = 0;
-          doc->FindFeatureById(body.createdBy, &creatorIndex);
+          Feature* creator = doc->FindFeatureById(createdBy, &creatorIndex);
           const auto setMaterial = [&](const std::string& slug) {
             if (creator == nullptr)
               return;
@@ -300,9 +321,9 @@ void DrawFeatureTreePanel(AppState& state) {
             creator->SetMaterial(slug);
             doc->Regenerate();
             nlohmann::json after = DocumentIO::FeatureToJson(*creator);
-            state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
-                                        creatorIndex, before, after),
-                                    *doc);
+            state.commands->PushApplied(std::make_unique<ModifyFeatureCommand>(
+                creatorIndex, before, after));
+            committed = true; // the bodies vector was rebuilt: stop the loop
           };
           const std::string current =
               creator != nullptr ? creator->GetMaterial() : std::string{};
@@ -318,9 +339,9 @@ void DrawFeatureTreePanel(AppState& state) {
         }
         ImGui::EndPopup();
       }
-      ImGui::SameLine();
-      ImGui::TextDisabled("%.2f mm%s", body.shape.Volume(), "\xc2\xb3");
       ImGui::PopID();
+      if (committed)
+        break; // redraw next frame against the regenerated body list
     }
   }
 

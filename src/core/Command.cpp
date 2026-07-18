@@ -272,6 +272,11 @@ bool CommandStack::Execute(std::unique_ptr<Command> command, Document& doc) {
   return true;
 }
 
+void CommandStack::PushApplied(std::unique_ptr<Command> command) {
+  m_undo.push_back(std::move(command));
+  m_redo.clear();
+}
+
 void CommandStack::Undo(Document& doc) {
   if (m_undo.empty()) {
     return;

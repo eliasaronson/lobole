@@ -1506,6 +1506,13 @@ void SyncDocumentRenderers(AppState& state) {
 
   // Topology shape-guide ghost (TO4): outside simulation mode, render the
   // optimized iso-surface translucent so the user can re-model against it.
+  // The instance is tracked apart from documentMeshes, so remove any stale
+  // one FIRST — otherwise it survives tab switches and haunts other parts
+  // (whose documents can't resolve the study, so the re-add never runs).
+  if (state.topoGhostInstance != 0) {
+    state.meshRenderer->RemoveInstance(state.topoGhostInstance);
+    state.topoGhostInstance = 0;
+  }
   if (state.topoGhostStudyId && !state.simulation.active) {
     const fem::StudyRuntime* rt =
         state.document->StudyResults(state.topoGhostStudyId);

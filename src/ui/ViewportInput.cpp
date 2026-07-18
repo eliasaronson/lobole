@@ -41,7 +41,7 @@ void HandleViewportInput(AppState& state) {
       if (io.MouseWheelH != 0.0f)
         state.camera->Pan(io.MouseWheelH * wheelPanPx, 0.0);
       if (io.MouseWheel != 0.0f)
-        state.camera->Zoom(-io.MouseWheel * 5.0);
+        state.camera->Zoom(-io.MouseWheel * 2.0); // gentler per-notch step
     }
   }
 
