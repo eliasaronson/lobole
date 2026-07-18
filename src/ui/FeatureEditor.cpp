@@ -21,7 +21,10 @@
 #include "ui/AppActions.h" // BodyProducers
 
 #include "imgui.h"
+#include "imgui_internal.h" // GetCurrentWindowRead (LeftLabel auto-resize case)
 
+#include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -59,10 +62,63 @@ void HandleEdit(AppState& state, Feature& feature, bool changedThisFrame,
   }
 }
 
-bool DragDim(const char* label, double* value) {
+// Labels-left rows (U4): the label in a left column, the widget filling the
+// rest of the row. ImGui's default label-right layout clips labels as soon as
+// the panel narrows; this keeps them readable at any width. `reserveRight`
+// keeps room for a trailing SmallButton ("fx"/"123") on the same row.
+void LeftLabel(const char* label, float reserveRight = 0.0f) {
+  // Auto-resize windows (the preview dialog): avail-based widths are circular
+  // there (the window sizes to content), so use a fixed two-column layout —
+  // this also keeps the dialog one row per field, not towering over the
+  // viewport clicks the GUI tests make.
+  if (ImGui::GetCurrentWindowRead()->Flags & ImGuiWindowFlags_AlwaysAutoResize) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(std::max(ImGui::GetFontSize() * 7.0f,
+                             ImGui::CalcTextSize(label).x +
+                                 ImGui::GetStyle().ItemSpacing.x * 2.0f));
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f - reserveRight);
+    return;
+  }
+  const float avail = ImGui::GetContentRegionAvail().x;
+  const float col = std::max(ImGui::GetFontSize() * 7.0f, avail * 0.40f);
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted(label);
+  // Two columns only when the field keeps a usable width; in a narrow panel
+  // stack the label above the full-width field instead of squeezing it.
+  if (avail - col >= ImGui::GetFontSize() * 8.0f)
+    ImGui::SameLine(col);
+  ImGui::SetNextItemWidth(reserveRight > 0.0f ? -reserveRight : -FLT_MIN);
+}
+
+// Width a SmallButton takes on the row, for LeftLabel's reserveRight.
+float SmallButtonReserve(const char* text) {
+  const ImGuiStyle& style = ImGui::GetStyle();
+  return ImGui::CalcTextSize(text).x + style.FramePadding.x * 2.0f +
+         style.ItemSpacing.x;
+}
+
+bool DragDim(const char* label, double* value, float reserveRight = 0.0f) {
   static const double kMin = 0.01, kMax = 1e6;
-  return ImGui::DragScalar(label, ImGuiDataType_Double, value, 0.05f, &kMin,
-                           &kMax, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+  LeftLabel(label, reserveRight);
+  const std::string id = std::string("##") + label;
+  return ImGui::DragScalar(id.c_str(), ImGuiDataType_Double, value, 0.05f,
+                           &kMin, &kMax, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+}
+
+// Labels-left drop-in for ImGui::Combo.
+bool LabeledCombo(const char* label, int* sel, const char* const items[],
+                  int count) {
+  LeftLabel(label);
+  const std::string id = std::string("##") + label;
+  return ImGui::Combo(id.c_str(), sel, items, count);
+}
+
+// Labels-left drop-in for the xyz drag rows.
+bool DragFloat3Row(const char* label, float* v) {
+  LeftLabel(label);
+  const std::string id = std::string("##") + label;
+  return ImGui::DragFloat3(id.c_str(), v, 0.05f);
 }
 
 // Snapshot/mutate/commit for a discrete (non-drag) change like a combo.
@@ -91,7 +147,8 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   ImGui::PushID(label);
 
   if (exprText.empty()) {
-    HandleEdit(state, feature, DragDim(label, &value), index, commit);
+    HandleEdit(state, feature,
+               DragDim(label, &value, SmallButtonReserve("fx")), index, commit);
     ImGui::SameLine();
     if (ImGui::SmallButton("fx")) {
       nlohmann::json before = DocumentIO::FeatureToJson(feature);
@@ -113,7 +170,8 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   const bool editing = activeField == key;
   char tmp[sizeof(buf)];
   snprintf(tmp, sizeof(tmp), "%s", exprText.c_str());
-  ImGui::InputText(label, editing ? buf : tmp, sizeof(buf));
+  LeftLabel(label);
+  ImGui::InputText("##expr", editing ? buf : tmp, sizeof(buf));
   if (ImGui::IsItemActivated()) {
     activeField = key;
     snprintf(buf, sizeof(buf), "%s", exprText.c_str());
@@ -163,7 +221,9 @@ void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
   ImGui::PushID(label);
 
   if (exprText.empty()) {
-    HandleEdit(state, feature, ImGui::InputInt(label, &value), index, commit);
+    LeftLabel(label, SmallButtonReserve("fx"));
+    HandleEdit(state, feature, ImGui::InputInt("##count", &value), index,
+               commit);
     if (value < 1)
       value = 1;
     ImGui::SameLine();
@@ -182,7 +242,8 @@ void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
   const bool editing = activeField == key;
   char tmp[sizeof(buf)];
   snprintf(tmp, sizeof(tmp), "%s", exprText.c_str());
-  ImGui::InputText(label, editing ? buf : tmp, sizeof(buf));
+  LeftLabel(label);
+  ImGui::InputText("##expr", editing ? buf : tmp, sizeof(buf));
   if (ImGui::IsItemActivated()) {
     activeField = key;
     snprintf(buf, sizeof(buf), "%s", exprText.c_str());
@@ -274,7 +335,7 @@ void DrawAxisRefCombo(AppState& state, Feature& owner, AxisRef& axis,
   cstrs.reserve(labels.size());
   for (const auto& s : labels)
     cstrs.push_back(s.c_str());
-  if (ImGui::Combo("Axis", &sel, cstrs.data(),
+  if (LabeledCombo("Axis", &sel, cstrs.data(),
                    static_cast<int>(cstrs.size()))) {
     nlohmann::json before = DocumentIO::FeatureToJson(owner);
     axis = refs[static_cast<size_t>(sel)];
@@ -294,7 +355,7 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
   // Variant.
   const char* kinds[] = {"Offset", "Angled", "Through 3 Points"};
   int kind = static_cast<int>(dp.kind);
-  if (ImGui::Combo("Type", &kind, kinds, 3)) {
+  if (LabeledCombo("Type", &kind, kinds, 3)) {
     nlohmann::json before = DocumentIO::FeatureToJson(dp);
     dp.kind = static_cast<DatumPlaneKind>(kind);
     discrete(before);
@@ -322,7 +383,7 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
     } else {
       sel = static_cast<int>(dp.basePlane); // 0/1/2
     }
-    if (ImGui::Combo("Parent", &sel, labels.data(),
+    if (LabeledCombo("Parent", &sel, labels.data(),
                      static_cast<int>(labels.size()))) {
       nlohmann::json before = DocumentIO::FeatureToJson(dp);
       dp.parentId = ids[static_cast<size_t>(sel)];
@@ -342,12 +403,9 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
     break;
   }
   case DatumPlaneKind::ThroughPoints:
-    HandleEdit(state, dp, ImGui::DragFloat3("Point 1", &dp.p0.x, 0.05f), index,
-               commit);
-    HandleEdit(state, dp, ImGui::DragFloat3("Point 2", &dp.p1.x, 0.05f), index,
-               commit);
-    HandleEdit(state, dp, ImGui::DragFloat3("Point 3", &dp.p2.x, 0.05f), index,
-               commit);
+    HandleEdit(state, dp, DragFloat3Row("Point 1", &dp.p0.x), index, commit);
+    HandleEdit(state, dp, DragFloat3Row("Point 2", &dp.p1.x), index, commit);
+    HandleEdit(state, dp, DragFloat3Row("Point 3", &dp.p2.x), index, commit);
     break;
   }
 }
@@ -359,7 +417,7 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
   const char* kinds[] = {"Two Points", "Sketch Line", "Global X", "Global Y",
                          "Global Z"};
   int kind = static_cast<int>(da.kind);
-  if (ImGui::Combo("Type", &kind, kinds, 5)) {
+  if (LabeledCombo("Type", &kind, kinds, 5)) {
     nlohmann::json before = DocumentIO::FeatureToJson(da);
     da.kind = static_cast<DatumAxisKind>(kind);
     CommitDiscrete(state, da, before, index, commit);
@@ -367,10 +425,8 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
 
   switch (da.kind) {
   case DatumAxisKind::TwoPoints:
-    HandleEdit(state, da, ImGui::DragFloat3("Point 1", &da.p0.x, 0.05f), index,
-               commit);
-    HandleEdit(state, da, ImGui::DragFloat3("Point 2", &da.p1.x, 0.05f), index,
-               commit);
+    HandleEdit(state, da, DragFloat3Row("Point 1", &da.p0.x), index, commit);
+    HandleEdit(state, da, DragFloat3Row("Point 2", &da.p1.x), index, commit);
     break;
   case DatumAxisKind::SketchLine:
     if (Feature* sk = state.document->FindFeatureById(da.sketchId)) {
@@ -392,7 +448,7 @@ void DrawBooleanParams(AppState& state, BooleanFeature& boo, size_t index,
                        bool commit) {
   const char* ops[] = {"Union", "Subtract", "Intersect"};
   int op = static_cast<int>(boo.op);
-  if (ImGui::Combo("Operation", &op, ops, 3)) {
+  if (LabeledCombo("Operation", &op, ops, 3)) {
     nlohmann::json before = DocumentIO::FeatureToJson(boo);
     boo.op = static_cast<BooleanOp>(op);
     CommitDiscrete(state, boo, before, index, commit);
@@ -410,7 +466,7 @@ void DrawBooleanParams(AppState& state, BooleanFeature& boo, size_t index,
         sel = static_cast<int>(i);
       }
     }
-    if (ImGui::Combo(label, &sel, labels.data(),
+    if (LabeledCombo(label, &sel, labels.data(),
                      static_cast<int>(labels.size())) &&
         sel >= 0) {
       nlohmann::json before = DocumentIO::FeatureToJson(boo);
@@ -439,7 +495,7 @@ void SourceBodyCombo(AppState& state, Feature& owner, uint64_t& sourceId,
     if (producers[i].first == sourceId)
       sel = static_cast<int>(i);
   }
-  if (ImGui::Combo("Source", &sel, labels.data(),
+  if (LabeledCombo("Source", &sel, labels.data(),
                    static_cast<int>(labels.size())) &&
       sel >= 0) {
     nlohmann::json before = DocumentIO::FeatureToJson(owner);
@@ -474,7 +530,7 @@ void PlaneRefCombo(AppState& state, Feature& owner, uint64_t& planeId,
   } else {
     sel = static_cast<int>(basePlane);
   }
-  if (ImGui::Combo("Plane", &sel, labels.data(),
+  if (LabeledCombo("Plane", &sel, labels.data(),
                    static_cast<int>(labels.size()))) {
     nlohmann::json before = DocumentIO::FeatureToJson(owner);
     planeId = ids[static_cast<size_t>(sel)];
@@ -489,7 +545,7 @@ void DrawPatternParams(AppState& state, PatternFeature& pat, size_t index,
                        bool commit) {
   const char* kinds[] = {"Mirror", "Linear", "Circular"};
   int kind = static_cast<int>(pat.kind);
-  if (ImGui::Combo("Type", &kind, kinds, 3)) {
+  if (LabeledCombo("Type", &kind, kinds, 3)) {
     nlohmann::json before = DocumentIO::FeatureToJson(pat);
     pat.kind = static_cast<PatternKind>(kind);
     CommitDiscrete(state, pat, before, index, commit);
@@ -526,7 +582,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     snprintf(nameBuf, sizeof(nameBuf), "%s", feature.GetName().c_str());
     nameBufId = feature.GetId();
   }
-  ImGui::InputText("Name", nameBuf, sizeof(nameBuf));
+  LeftLabel("Name");
+  ImGui::InputText("##Name", nameBuf, sizeof(nameBuf));
   if (ImGui::IsItemActivated()) {
     state.editBaseline = DocumentIO::FeatureToJson(feature);
   }
@@ -555,7 +612,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     labels.push_back("Default");
     for (auto t : types)
       labels.push_back(MaterialLibrary::GetMaterial(t).name.c_str());
-    if (ImGui::Combo("Material", &sel, labels.data(),
+    if (LabeledCombo("Material", &sel, labels.data(),
                      static_cast<int>(labels.size()))) {
       nlohmann::json before = DocumentIO::FeatureToJson(feature);
       feature.SetMaterial(sel == 0 ? std::string{}
@@ -565,25 +622,21 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   }
 
   if (auto* box = dynamic_cast<BoxFeature*>(&feature)) {
-    HandleEdit(state, feature,
-               ImGui::DragFloat3("Position", &box->position.x, 0.05f), index,
-               commit);
+    HandleEdit(state, feature, DragFloat3Row("Position", &box->position.x),
+               index, commit);
     HandleEdit(state, feature, DragDim("Width", &box->width), index, commit);
     HandleEdit(state, feature, DragDim("Height", &box->height), index, commit);
     HandleEdit(state, feature, DragDim("Depth", &box->depth), index, commit);
   } else if (auto* sphere = dynamic_cast<SphereFeature*>(&feature)) {
-    HandleEdit(state, feature,
-               ImGui::DragFloat3("Center", &sphere->center.x, 0.05f), index,
-               commit);
+    HandleEdit(state, feature, DragFloat3Row("Center", &sphere->center.x),
+               index, commit);
     HandleEdit(state, feature, DragDim("Radius", &sphere->radius), index,
                commit);
   } else if (auto* cyl = dynamic_cast<CylinderFeature*>(&feature)) {
-    HandleEdit(state, feature,
-               ImGui::DragFloat3("Center", &cyl->center.x, 0.05f), index,
+    HandleEdit(state, feature, DragFloat3Row("Center", &cyl->center.x), index,
                commit);
-    HandleEdit(state, feature,
-               ImGui::DragFloat3("Direction", &cyl->direction.x, 0.05f), index,
-               commit);
+    HandleEdit(state, feature, DragFloat3Row("Direction", &cyl->direction.x),
+               index, commit);
     HandleEdit(state, feature, DragDim("Radius", &cyl->radius), index, commit);
     HandleEdit(state, feature, DragDim("Height", &cyl->height), index, commit);
   } else if (auto* import = dynamic_cast<ImportFeature*>(&feature)) {
@@ -613,7 +666,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
     const char* ends[] = {"Blind", "Symmetric", "Two-sided", "Up to face"};
     int end = static_cast<int>(ext->endMode);
-    if (ImGui::Combo("End", &end, ends, 4)) {
+    if (LabeledCombo("End", &end, ends, 4)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ext);
       ext->endMode = static_cast<ExtrudeEnd>(end);
       CommitDiscrete(state, feature, before, index, commit);
@@ -625,7 +678,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       // Target face: every named face of every body (stable element names).
       const std::string current =
           ext->endTarget.IsSet() ? ext->endTarget.name : "(pick a face)";
-      if (ImGui::BeginCombo("Target face", current.c_str())) {
+      LeftLabel("Target face");
+      if (ImGui::BeginCombo("##Target face", current.c_str())) {
         for (const auto& body : state.document->GetBodies()) {
           for (const auto& [idx, name] : body.elementMap.names) {
             const std::string label = body.name + ": " + name;
@@ -658,7 +712,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
               ext->thinThicknessExpr, ext->thinThickness);
       const char* sides[] = {"Outward", "Inward", "Both"};
       int side = static_cast<int>(ext->thinSide);
-      if (ImGui::Combo("Wall side", &side, sides, 3)) {
+      if (LabeledCombo("Wall side", &side, sides, 3)) {
         nlohmann::json before = DocumentIO::FeatureToJson(*ext);
         ext->thinSide = static_cast<sketch::ThinSide>(side);
         CommitDiscrete(state, feature, before, index, commit);
@@ -667,7 +721,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
 
     const char* modes[] = {"New Body", "Add", "Cut"};
     int mode = static_cast<int>(ext->mode);
-    if (ImGui::Combo("Mode", &mode, modes, 3)) {
+    if (LabeledCombo("Mode", &mode, modes, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ext);
       ext->mode = static_cast<ExtrudeMode>(mode);
       CommitDiscrete(state, feature, before, index, commit);
@@ -690,7 +744,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
 
     const char* modes[] = {"New Body", "Add", "Cut"};
     int mode = static_cast<int>(rev->mode);
-    if (ImGui::Combo("Mode", &mode, modes, 3)) {
+    if (LabeledCombo("Mode", &mode, modes, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*rev);
       rev->mode = static_cast<ExtrudeMode>(mode);
       CommitDiscrete(state, feature, before, index, commit);
@@ -710,7 +764,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
             dr->angleDeg);
     const char* planes[] = {"XY (pull +Z)", "XZ (pull +Y)", "YZ (pull +X)"};
     int pl = static_cast<int>(dr->neutralPlane);
-    if (ImGui::Combo("Neutral", &pl, planes, 3)) {
+    if (LabeledCombo("Neutral", &pl, planes, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*dr);
       dr->neutralPlane = static_cast<PlaneType>(pl);
       CommitDiscrete(state, feature, before, index, commit);
@@ -732,7 +786,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* ho = dynamic_cast<HoleFeature*>(&feature)) {
     const char* kinds[] = {"Simple", "Counterbore", "Countersink"};
     int k = static_cast<int>(ho->kind);
-    if (ImGui::Combo("Type", &k, kinds, 3)) {
+    if (LabeledCombo("Type", &k, kinds, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ho);
       ho->kind = static_cast<HoleKind>(k);
       CommitDiscrete(state, feature, before, index, commit);
@@ -795,7 +849,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* fil = dynamic_cast<FilletFeature*>(&feature)) {
     const char* ops[] = {"Fillet", "Chamfer"};
     int op = static_cast<int>(fil->op);
-    if (ImGui::Combo("Operation", &op, ops, 2)) {
+    if (LabeledCombo("Operation", &op, ops, 2)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*fil);
       fil->op = static_cast<EdgeBlendOp>(op);
       CommitDiscrete(state, feature, before, index, commit);

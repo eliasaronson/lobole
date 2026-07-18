@@ -83,17 +83,18 @@ void DrawPropertiesPanel(AppState& state) {
   ImGui::SeparatorText("Camera");
   if (state.camera) {
     glm::vec3 pos = state.camera->GetPosition();
-    ImGui::Text("Position: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z);
-    ImGui::Text("Distance: %.2f", state.camera->GetDistance());
+    ImGui::TextWrapped("Position: (%.2f, %.2f, %.2f)", pos.x, pos.y, pos.z);
+    ImGui::TextWrapped("Distance: %.2f", state.camera->GetDistance());
   }
 
   ImGui::SeparatorText("Selection");
   if (state.faceSelector) {
     if (const Face* face = state.faceSelector->GetSelectedFace()) {
-      ImGui::Text("Face %u on mesh %u", face->faceIndex, face->meshId);
+      ImGui::TextWrapped("Face %u on mesh %u", face->faceIndex, face->meshId);
       glm::vec3 normal =
           state.faceSelector->GetFaceNormal(face->meshId, face->faceIndex);
-      ImGui::Text("Normal: (%.3f, %.3f, %.3f)", normal.x, normal.y, normal.z);
+      ImGui::TextWrapped("Normal: (%.3f, %.3f, %.3f)", normal.x, normal.y,
+                         normal.z);
     } else {
       ImGui::TextDisabled("No face selected");
     }
@@ -108,13 +109,6 @@ void DrawPropertiesPanel(AppState& state) {
   }
 
   DrawMassPropertiesSection(state);
-
-  ImGui::SeparatorText("Controls");
-  ImGui::BulletText("Left click: select face (Ctrl: align camera)");
-  ImGui::BulletText("Middle drag: rotate");
-  ImGui::BulletText("Ctrl+Middle: pan   Shift+Middle: zoom");
-  ImGui::BulletText("Alt+Middle: roll   Scroll: zoom");
-  ImGui::BulletText("Arrows: rotate (Shift: 90\xc2\xb0)   Z: zoom");
 
   ImGui::End();
 }

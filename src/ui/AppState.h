@@ -435,6 +435,9 @@ struct AppState {
   uint64_t topoGhostStudyId = 0;
   uint32_t topoGhostInstance = 0;
   bool showElementNames = false; // debug: element name of the hovered face
+  // Viewport-controls cheat sheet overlay (View > Viewport Controls) — U4
+  // moved it out of the Properties panel, where it permanently ate space.
+  bool showControlsHelp = false;
 
   // 2D sheet viewport (workstream 13): a drawing tab pans/zooms an
   // orthographic sheet, never the orbit camera (there is no 2D camera today —
@@ -487,6 +490,9 @@ struct AppState {
   glm::vec2 viewportPos{0.0f, 0.0f};
   glm::vec2 viewportSize{1280.0f, 720.0f};
   bool buildDefaultDockLayout = false;
+  // One-shot launch check that re-docks panels a stale imgui.ini (saved
+  // before the panel existed) left floating — see BeginDockspace.
+  bool dockHomesEnforced = false;
   bool runGuiTests = false;
   nlohmann::json editBaseline; // parameter-edit snapshot while a widget is active
 

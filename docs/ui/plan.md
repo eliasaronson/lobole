@@ -38,26 +38,46 @@ Observed on the running app (empty project + `v17-full` golden):
 
 ## U4 — Layout & docking correctness
 
-**Partly shipped** (`a122590`): toolbar background bar, viewport-favoring
-default split, untracked stale `imgui.ini`, "Reset Layout" menu item,
-`select_feature` RPC. The rest, now including the audit's panel triage:
+**Shipped 2026-07-18** (this pass; earlier: `a122590` toolbar background bar,
+viewport-favoring default split, untracked stale `imgui.ini`, "Reset Layout",
+`select_feature` RPC):
 
-- **Every panel gets a persistent dock node.** Configurations, Study,
-  Occurrence, Drawing panels join the layout (right dock, tabbed with
-  Properties, or bottom — decide per panel). Fixes the floating-Configurations
-  bug and the deferred sketch-panel issue: Properties and Sketch in
-  **separate, persistent** dock nodes so gating one window's submission can't
-  garbage-collect the other's home.
-- **Properties layout**: labels-left / two-column so nothing clips at panel
-  widths; minimum sizes/constraints on panels and dialogs; audit fixed pixel
-  constants (screen-space tolerances DPI-scaled).
-- **Controls help out of the panel** — a `?` overlay or Help menu entry, not
-  permanent panel real estate.
-- **DPI awareness**: scale fonts + `ImGuiStyle` by monitor content scale
-  (GLFW `glfwGetWindowContentScale`), rescale on monitor change; user
-  font-size setting.
-- **Toolbars overflow** (wrap or scroll) instead of clipping when the window
-  is narrower than the button row (`SketchToolbar`, main `Toolbar`).
+- **Dock-home enforcement** (`DockLayout.cpp`): once per launch, after the
+  panel windows exist, panels a stale `imgui.ini` left floating are re-docked
+  — secondary panels (Variables, Configurations, Sketch) join their sibling's
+  node; a floating *core* panel (Model/Properties) triggers the full default
+  rebuild. Fixes the floating-Configurations bug for good: `DockBuilder`
+  entries only apply on rebuild, so any panel added after a user's ini was
+  saved floated forever. (Study/Occurrence/Drawing reuse the "Model" window,
+  so they were never affected.)
+- **Labels-left rows** (`FeatureEditor.cpp` `LeftLabel`): label column left,
+  field filling the row; stacks label-above-field when the panel is too
+  narrow for two usable columns; fixed two-column in auto-resize windows (the
+  preview dialog — avail-based widths are circular there). All feature
+  combos/drags/expression fields converted; checkboxes stay label-right.
+- **Controls help → View > Viewport Controls** overlay (dismissable,
+  viewport bottom-left); the static block no longer eats Properties space.
+- **`WindowMinSize` floor** (180×60, `Theme.cpp`) — applies to dock-node
+  resize limits too, so panels can't be dragged to slivers.
+- **Toolbar overflow → horizontal scroll** (`DockLayout.cpp` toolbar row;
+  the row grows by the scrollbar height while overflowed). The sketch tool
+  icons live in the same top row, so both bars are covered.
+- **DPI**: startup content-scale theme/font scaling existed; added rescale on
+  monitor change (GLFW content-scale callback → re-apply theme + rebuild the
+  Vulkan font atlas between frames).
+
+Shipped alongside (found while verifying): a pre-existing
+`FaceSelector::PickEdge` bug — the best candidate was chosen by angular
+closeness alone, so an *occluded* edge collinear with the ray (a box-diagonal
+view lines up both corners) could win and then be rejected by the
+whole-result occlusion filter, returning "no hit" over a visible edge; the
+occlusion check now filters per candidate. Also `tools/gui-tests-xvfb.sh`:
+the GUI suite on a virtual display — immune to the session-lock present
+throttling that made `ctest -R gui_smoke` time out (and the seed for the CI
+virtual-display item).
+
+Still open (folded into U5): user font-size setting; audit remaining
+screen-space pixel constants; a narrow-width toolbar GUI test.
 
 ## U1 — Unified selection model
 
@@ -125,6 +145,31 @@ empty states ("No sketch — pick a plane to start"); consistent tooltips
 views) with shortcuts shown — cheap because the command layer already
 enumerates the surface, and it doubles as living documentation of goal 5
 ("the LLM and the human use the same commands" — so does the palette).
+
+## Backlog — standard-CAD affordances not yet scheduled
+
+Collected 2026-07-18 (user ask: "what are we missing vs other CAD?").
+Feature-tree context menu (rename/suppress/delete/rollback/re-pick) and the
+draggable rollback bar shipped with U4. Still missing, roughly by value:
+
+- **Direct manipulation in previews** — drag an arrow handle to set extrude
+  distance / fillet radius in the viewport (Onshape/SW). Natural U3 follow-on
+  (the dialog and the handle edit the same param). 
+- **Feature reordering by drag in the tree** (with a dependency check and a
+  clear failure message). Standard in SW/FreeCAD; needs care with refs.
+- **Hide/show bodies** — per-body eye toggle in the tree (parts have no body
+  visibility today; assemblies already have occurrence visibility). Small.
+- **Double-click a feature row** → open its editor (today only datum planes
+  double-click, into sketch). Small, pairs with U3.
+- **Per-body appearance/material from the tree** (right-click > Material) —
+  material exists on features; surface it where users look for it.
+- **Zoom to selection** (frame the selected face/body/feature). Small.
+- **Quick toolbar at cursor** (SolidWorks "S key") — the mouse-side sibling
+  of U6's Ctrl+K palette; same command enumeration feeds both.
+- **Dimension-first sketching** — type the length/radius while drawing
+  (Onshape). Sketcher-side; bigger, belongs to a sketching follow-on.
+- **Unit display/entry in dimension fields** (deferred from variables C2).
+- **Window title = project name + dirty marker**. Trivial.
 
 ## Tests
 

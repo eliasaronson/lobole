@@ -36,10 +36,17 @@ void BeginDockspace(AppState& state) {
   barBg.w = 1.0f;
   ImGui::PushStyleColor(ImGuiCol_ChildBg, barBg);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f, 4.0f));
-  const float toolbarH = ImGui::GetFrameHeight() + 12.0f;
+  // When the window is narrower than the button row, scroll instead of
+  // clipping (U4); the row grows by the scrollbar's height while overflowed
+  // so the bar never overlays the buttons.
+  static bool toolbarOverflow = false;
+  const float toolbarH =
+      ImGui::GetFrameHeight() + 12.0f +
+      (toolbarOverflow ? ImGui::GetStyle().ScrollbarSize : 0.0f);
   ImGui::BeginChild("##ToolbarRow", ImVec2(0.0f, toolbarH), ImGuiChildFlags_None,
-                    ImGuiWindowFlags_NoScrollbar);
+                    ImGuiWindowFlags_HorizontalScrollbar);
   DrawToolbar(state);
+  toolbarOverflow = ImGui::GetScrollMaxX() > 0.0f;
   ImGui::EndChild();
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();
@@ -60,6 +67,34 @@ void BeginDockspace(AppState& state) {
     ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspaceId);
     if (root == nullptr || root->IsLeafNode())
       state.buildDefaultDockLayout = true;
+  }
+
+  // A layout can be present-but-incomplete: an imgui.ini saved before a panel
+  // existed has no dock entry for it, and DockBuilderDockWindow only applies
+  // on a rebuild — so the new panel floats over the viewport forever (this is
+  // how Configurations shipped floating). Once per launch, after the panel
+  // windows have been created from settings, re-dock strays: secondary panels
+  // join the node their sibling lives in; if a *core* panel (Model/Properties)
+  // is adrift, rebuild the whole default layout. Once-per-launch so users can
+  // still float panels freely within a session.
+  if (!state.dockHomesEnforced && !state.buildDefaultDockLayout) {
+    ImGuiWindow* model = ImGui::FindWindowByName("Model");
+    ImGuiWindow* props = ImGui::FindWindowByName("Properties");
+    if (model != nullptr && props != nullptr) {
+      state.dockHomesEnforced = true;
+      if (model->DockId == 0 || props->DockId == 0) {
+        state.buildDefaultDockLayout = true;
+      } else {
+        auto redock = [](const char* name, ImGuiID home) {
+          ImGuiWindow* w = ImGui::FindWindowByName(name);
+          if (w != nullptr && w->DockId == 0)
+            ImGui::SetWindowDock(w, home, ImGuiCond_Always);
+        };
+        redock("Variables", model->DockId);
+        redock("Configurations", model->DockId);
+        redock("Sketch", props->DockId);
+      }
+    }
   }
 
   if (state.buildDefaultDockLayout) {

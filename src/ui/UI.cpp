@@ -56,6 +56,36 @@ void DrawInContextBanner(AppState& state) {
   ImGui::End();
 }
 
+// Viewport-controls cheat sheet (View > Viewport Controls): a dismissable
+// overlay in the viewport's bottom-left corner. Replaces the static Controls
+// block that used to permanently occupy the Properties panel (U4).
+void DrawControlsHelpOverlay(AppState& state) {
+  if (!state.showControlsHelp)
+    return;
+  ImGui::SetNextWindowPos(
+      ImVec2(state.viewportPos.x + 12.0f,
+             state.viewportPos.y + state.viewportSize.y - 12.0f),
+      ImGuiCond_Always, ImVec2(0.0f, 1.0f));
+  ImGui::SetNextWindowBgAlpha(0.75f);
+  const ImGuiWindowFlags flags =
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoFocusOnAppearing;
+  if (ImGui::Begin("##ControlsHelp", nullptr, flags)) {
+    ImGui::TextUnformatted("Viewport controls");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("x"))
+      state.showControlsHelp = false;
+    ImGui::Separator();
+    ImGui::BulletText("Left click: select face (Ctrl: align camera)");
+    ImGui::BulletText("Middle drag: rotate");
+    ImGui::BulletText("Ctrl+Middle: pan   Shift+Middle: zoom");
+    ImGui::BulletText("Alt+Middle: roll   Scroll: zoom");
+    ImGui::BulletText("Arrows: rotate (Shift: 90\xc2\xb0)   Z: zoom");
+  }
+  ImGui::End();
+}
+
 // Part tabs pinned to the bottom of the screen (assemblies A1): one tab per
 // part + a "+" to add. Clicking a tab switches the active part.
 void DrawPartTabs(AppState& state) {
@@ -146,6 +176,7 @@ void DrawUI(AppState& state) {
   }
   DrawPreviewDialog(state);
   DrawFileBrowser(state);
+  DrawControlsHelpOverlay(state);
 
   HandleViewportInput(state);
 

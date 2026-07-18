@@ -120,7 +120,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(box->width, 2.0);
 
     ctx->ItemClick("//Model/Box 1##0");
-    ctx->ItemInputValue("//Properties/Width", 5.0f);
+    // Labels-left rows (U4): the widget id is "##<label>", the visible label
+    // is a separate Text item.
+    ctx->ItemInputValue("//Properties/##Width", 5.0f);
     ctx->Yield();
 
     box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
@@ -1209,5 +1211,39 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
     IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < before - 1e-6);
     IM_CHECK(s_App->commands->CanUndo()); // accept = one undoable action
+  };
+
+  // Feature tree affordances: context-menu rename (inline edit) and the
+  // draggable rollback bar.
+  t = IM_REGISTER_TEST(engine, "tree", "context_rename_and_rollback_drag");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    MenuCreateAccept(ctx, "Create/Sphere");
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+
+    // Rename "Box 1" via right-click > Rename: the row becomes a focused
+    // input; typing replaces the name, Enter commits (one undoable edit).
+    ctx->ItemClick("//Model/Box 1##0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Rename");
+    ctx->KeyCharsReplaceEnter("Chassis");
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetFeature(0)->GetName(), std::string("Chassis"));
+    IM_CHECK(s_App->commands->CanUndo());
+
+    // Drag the rollback bar (parked at the end) up above the sphere row:
+    // regeneration stops at index 1 and the sphere body disappears.
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    ctx->ItemDragWithDelta("//Model/##RollbackBar", ImVec2(0, -30));
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->Rollback(), 1);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    // Drag it back past the end: full history replays.
+    ctx->ItemDragWithDelta("//Model/##RollbackBar", ImVec2(0, 60));
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->Rollback(), -1);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
   };
 }

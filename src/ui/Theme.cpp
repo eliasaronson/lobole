@@ -117,6 +117,9 @@ void ApplyMetrics(ImGuiStyle& style) {
   style.IndentSpacing = 18;
   style.ScrollbarSize = 12;
   style.GrabMinSize = 10;
+  // Floor for windows AND dock nodes (ImGui uses it for node resize limits):
+  // panels can't be dragged to a sliver where every label clips (U4).
+  style.WindowMinSize = ImVec2(180, 60);
 
   style.WindowBorderSize = 1;
   style.ChildBorderSize = 1;

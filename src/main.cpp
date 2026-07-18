@@ -604,6 +604,12 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window *wd,
     wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(
         g_PhysicalDevice, wd->Surface, &present_modes[0],
         IM_ARRAYSIZE(present_modes));
+    // Which one we actually got matters: FIFO here means the suite will crawl
+    // whenever the window is occluded or the session is locked.
+    LOG_INFO("GUI tests: present mode {}",
+             wd->PresentMode == VK_PRESENT_MODE_MAILBOX_KHR     ? "MAILBOX"
+             : wd->PresentMode == VK_PRESENT_MODE_IMMEDIATE_KHR ? "IMMEDIATE"
+                                                                : "FIFO");
   } else {
     VkPresentModeKHR present_modes[] = {VK_PRESENT_MODE_FIFO_KHR};
     wd->PresentMode = ImGui_ImplVulkanH_SelectPresentMode(
@@ -951,10 +957,18 @@ int main(int argc, char **argv) {
   }
   g_App.runGuiTests = args.runGuiTests;
 
-  // Theme, scaled for the display's content scale (HiDPI)
+  // Theme, scaled for the display's content scale (HiDPI). A monitor change
+  // (window dragged to a display with another scale) re-applies it between
+  // frames — the font atlas can't rebuild mid-frame, so the callback only
+  // records the new scale (U4).
   float scaleX = 1.0f, scaleY = 1.0f;
   glfwGetWindowContentScale(window, &scaleX, &scaleY);
   ui::ApplyTheme(std::max(1.0f, std::max(scaleX, scaleY)));
+  static float s_pendingContentScale = 0.0f; // 0 = no change pending
+  glfwSetWindowContentScaleCallback(
+      window, [](GLFWwindow*, float sx, float sy) {
+        s_pendingContentScale = std::max(1.0f, std::max(sx, sy));
+      });
 
   ImGui_ImplGlfw_InitForVulkan(window, true);
   ImGui_ImplVulkan_InitInfo init_info = {};
@@ -1145,6 +1159,18 @@ int main(int argc, char **argv) {
   // Main loop
   while (!glfwWindowShouldClose(window)) {
     glfwPollEvents();
+
+    // Monitor content scale changed (window moved to another display):
+    // re-apply the theme at the new scale and rebuild the font atlas — both
+    // must happen outside a frame, hence the callback only records it.
+    if (s_pendingContentScale > 0.0f) {
+      const float s = s_pendingContentScale;
+      s_pendingContentScale = 0.0f;
+      vkDeviceWaitIdle(g_Device); // the old font texture may be in flight
+      ImGui_ImplVulkan_DestroyFontsTexture();
+      ui::ApplyTheme(s);
+      ImGui_ImplVulkan_CreateFontsTexture();
+    }
 
     // Resize swap chain?
     int fb_width, fb_height;

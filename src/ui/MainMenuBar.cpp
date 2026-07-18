@@ -226,6 +226,7 @@ void DrawViewMenu(AppState& state) {
   }
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
+  ImGui::MenuItem("Viewport Controls", nullptr, &state.showControlsHelp);
 
   // Section view (I3): a viewport clipping plane. Cut on a base plane; drag
   // the offset. Zero sectionPlane = off.
