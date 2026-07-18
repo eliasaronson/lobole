@@ -412,6 +412,10 @@ struct AppState {
   // stack until accepted). 0 = none. See PreviewFeature.
   uint64_t pendingFeatureId = 0;
   ViewportDrag viewportDrag = ViewportDrag::None;
+  // True when the drag was started with Alt+left (trackpad-friendly) rather
+  // than the middle button; the drag then owns the left button, so the click
+  // must not leak into picking.
+  bool viewportDragLeft = false;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
   // Section view (I3): a world-space clip plane {xyz=normal, w=dist};
   // fragments past it are discarded. Zero = disabled.

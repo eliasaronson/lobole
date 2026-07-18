@@ -156,7 +156,8 @@ void HandleDimTool(ImDrawList* dl, AppState& state) {
     for (size_t i = 1; i < hit->points.size(); ++i)
       dl->AddLine(SheetToScreen(state, hit->points[i - 1]),
                   SheetToScreen(state, hit->points[i]), hl, 2.6f);
-    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        !state.sheetView.panning) {
       state.dimTool.refs.push_back(RefOfCurve(*hit, viewId));
       state.dimTool.viewId = viewId;
       if (static_cast<int>(state.dimTool.refs.size()) >=
@@ -242,7 +243,8 @@ void DrawDims(ImDrawList* dl, AppState& state) {
                              io.MousePos.x <= org.x + tsz.x + 2 &&
                              io.MousePos.y >= org.y - 1 &&
                              io.MousePos.y <= org.y + tsz.y + 1;
-      if (overLabel && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      if (overLabel && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+          !state.sheetView.panning) {
         SnapshotDrawing(state);
         state.dimDrag = dim.id;
       }
@@ -319,18 +321,30 @@ void HandleSheetInput(AppState& state) {
   const bool overViewport = !io.WantCaptureMouse;
 
   // Scroll-to-cursor zoom: keep the sheet point under the cursor fixed.
-  if (overViewport && io.MouseWheel != 0.0f) {
-    const glm::dvec2 before = ScreenToSheet(state, io.MousePos);
-    state.sheetView.scale *= std::pow(1.1, io.MouseWheel);
-    state.sheetView.scale = std::clamp(state.sheetView.scale, 0.02, 200.0);
-    const glm::dvec2 after = ScreenToSheet(state, io.MousePos);
-    state.sheetView.offset += before - after;
+  // Shift+scroll and a horizontal wheel/swipe pan instead (trackpads).
+  if (overViewport && (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f)) {
+    const double s = state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
+    const double wheelPanPx = 30.0; // one wheel notch ≈ 30 px of drag
+    state.sheetView.offset.x -= io.MouseWheelH * wheelPanPx / s;
+    if (io.KeyShift) {
+      state.sheetView.offset.y -= io.MouseWheel * wheelPanPx / s;
+    } else if (io.MouseWheel != 0.0f) {
+      const glm::dvec2 before = ScreenToSheet(state, io.MousePos);
+      state.sheetView.scale *= std::pow(1.1, io.MouseWheel);
+      state.sheetView.scale = std::clamp(state.sheetView.scale, 0.02, 200.0);
+      const glm::dvec2 after = ScreenToSheet(state, io.MousePos);
+      state.sheetView.offset += before - after;
+    }
   }
 
-  // Middle-drag pan (no orbit camera on a sheet).
-  if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+  // Middle-drag pan (no orbit camera on a sheet); Alt+left-drag for trackpads
+  // without a usable middle button.
+  const bool altLeft = io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+  if (overViewport &&
+      (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || altLeft))
     state.sheetView.panning = true;
-  if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle))
+  if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle) ||
+      ImGui::IsMouseReleased(ImGuiMouseButton_Left))
     state.sheetView.panning = false;
   if (state.sheetView.panning &&
       (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {

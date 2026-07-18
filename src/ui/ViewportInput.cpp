@@ -70,20 +70,40 @@ void HandleViewportInput(AppState& state) {
   // panels/menus and false over the 3D viewport.
   const bool overViewport = !io.WantCaptureMouse;
 
-  // Zoom
-  if (overViewport && io.MouseWheel != 0.0f) {
-    state.camera->Zoom(-io.MouseWheel * 5.0);
+  // Scroll: plain vertical = zoom; Shift = pan (trackpad two-finger pan); a
+  // horizontal wheel/swipe always pans sideways (only trackpads emit it).
+  if (overViewport && (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f)) {
+    const double wheelPanPx = 30.0; // one wheel notch ≈ 30 px of drag
+    if (io.KeyShift) {
+      state.camera->Pan(io.MouseWheelH * wheelPanPx, -io.MouseWheel * wheelPanPx);
+    } else {
+      if (io.MouseWheelH != 0.0f)
+        state.camera->Pan(io.MouseWheelH * wheelPanPx, 0.0);
+      if (io.MouseWheel != 0.0f)
+        state.camera->Zoom(-io.MouseWheel * 5.0);
+    }
   }
 
   // SolidWorks-style middle-button drags: plain = rotate, Ctrl = pan,
   // Shift = zoom, Alt = roll. The drag starts over the viewport and keeps
   // tracking until release even if the cursor crosses a panel; modifiers
   // are re-read every frame so pressing Ctrl mid-drag switches to pan.
+  // Trackpads without a usable middle button: Alt+left-drag navigates the
+  // same way (plain = rotate, +Ctrl = pan, +Shift = zoom; no roll). Alt is
+  // only needed to start the drag, and the click never reaches picking.
   if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
     state.viewportDrag = ViewportDrag::Orbit; // actual mode resolved below
+    state.viewportDragLeft = false;
+    state.camera->StopAnimation();
+  } else if (overViewport && io.KeyAlt &&
+             ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+             state.viewportDrag == ViewportDrag::None) {
+    state.viewportDrag = ViewportDrag::Orbit;
+    state.viewportDragLeft = true;
     state.camera->StopAnimation();
   }
-  if (ImGui::IsMouseReleased(ImGuiMouseButton_Middle)) {
+  if (ImGui::IsMouseReleased(state.viewportDragLeft ? ImGuiMouseButton_Left
+                                                    : ImGuiMouseButton_Middle)) {
     state.viewportDrag = ViewportDrag::None;
   }
   if (state.viewportDrag != ViewportDrag::None) {
@@ -91,7 +111,7 @@ void HandleViewportInput(AppState& state) {
       state.viewportDrag = ViewportDrag::Pan;
     } else if (io.KeyShift) {
       state.viewportDrag = ViewportDrag::Zoom;
-    } else if (io.KeyAlt) {
+    } else if (io.KeyAlt && !state.viewportDragLeft) {
       state.viewportDrag = ViewportDrag::Roll;
     } else {
       state.viewportDrag = ViewportDrag::Orbit;
@@ -116,6 +136,11 @@ void HandleViewportInput(AppState& state) {
       break;
     }
   }
+
+  // An Alt+left navigation drag owns the left button — stop here so the click
+  // can't leak into the sketch / picking handlers below.
+  if (state.viewportDrag != ViewportDrag::None && state.viewportDragLeft)
+    return;
 
   // SolidWorks keyboard navigation (when the UI isn't capturing keys):
   // arrows rotate (Shift = 90 degree steps), Ctrl+arrows pan, Alt+left/right

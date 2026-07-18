@@ -232,6 +232,77 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->camera->GetDistance() < distBefore);
   };
 
+  // Trackpad navigation: Alt+left-drag orbits (middle-button substitute) and
+  // the click never reaches picking; Shift+scroll pans instead of zooming.
+  t = IM_REGISTER_TEST(engine, "viewport", "alt_left_drag_orbits");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    s_App->camera->StopAnimation();
+    ctx->Yield();
+    const glm::vec3 posBefore = s_App->camera->GetPosition();
+    const float distBefore = s_App->camera->GetDistance();
+
+    ImVec2 size = ImGui::GetMainViewport()->Size;
+    ImVec2 center(size.x * 0.5f, size.y * 0.5f);
+    ctx->MouseMoveToPos(center);
+    ctx->KeyDown(ImGuiMod_Alt);
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(center.x + 80.0f, center.y + 50.0f));
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->KeyUp(ImGuiMod_Alt);
+    ctx->Yield();
+
+    IM_CHECK(glm::length(s_App->camera->GetPosition() - posBefore) > 0.1f);
+    IM_CHECK(std::abs(s_App->camera->GetDistance() - distBefore) <
+             0.05f * distBefore);
+    IM_CHECK(s_App->viewportDrag == ui::ViewportDrag::None); // drag ended
+  };
+
+  t = IM_REGISTER_TEST(engine, "viewport", "shift_scroll_pans");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const glm::vec3 targetBefore = s_App->camera->GetTarget();
+    const float distBefore = s_App->camera->GetDistance();
+
+    ImVec2 size = ImGui::GetMainViewport()->Size;
+    ctx->MouseMoveToPos(ImVec2(size.x * 0.5f, size.y * 0.5f));
+    ctx->KeyDown(ImGuiMod_Shift);
+    ctx->MouseWheelY(2.0f);
+    ctx->KeyUp(ImGuiMod_Shift);
+    ctx->Yield();
+
+    // Pan moves the orbit target and keeps the distance.
+    IM_CHECK(glm::length(s_App->camera->GetTarget() - targetBefore) > 0.01f);
+    IM_CHECK(std::abs(s_App->camera->GetDistance() - distBefore) <
+             0.01f * distBefore);
+  };
+
+  // Entering simulation or sketch mode drops an armed measure tool — it owns
+  // the viewport while active and those modes have no toggle to disarm it.
+  t = IM_REGISTER_TEST(engine, "measure", "cleared_on_mode_entry");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+
+    s_App->measure.active = true;
+    ui::EnterSimulation(*s_App);
+    ctx->Yield();
+    IM_CHECK(!s_App->measure.active);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+
+    s_App->measure.active = true;
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    IM_CHECK(!s_App->measure.active);
+    s_App->sketchEdit = ui::SketchEditState{}; // leave sketch edit
+    // Entering the sketch aligned the camera with an animation; don't leak it
+    // into the next test's camera framing (it overrides setters until done).
+    s_App->camera->StopAnimation();
+    ctx->Yield();
+  };
+
   t = IM_REGISTER_TEST(engine, "viewport", "click_selects_facing_face");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
