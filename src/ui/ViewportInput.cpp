@@ -5,56 +5,12 @@
 #include "Logger.h"
 #include "MeshRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
 
 #include "imgui.h"
 
 namespace ui {
-
-namespace {
-
-void Pick(AppState& state, const ImVec2& pos, bool select, bool alignCamera) {
-  // Map the cursor through the central-node viewport rect (not the full
-  // window), matching where the 3D scene is actually drawn.
-  Ray ray = state.faceSelector->ScreenToWorldRay(
-      pos.x - state.viewportPos.x, pos.y - state.viewportPos.y,
-      static_cast<int>(state.viewportSize.x),
-      static_cast<int>(state.viewportSize.y), *state.camera);
-  RayHit hit = state.faceSelector->PickFace(ray);
-
-  uint32_t first = 0, count = 0;
-  if (select) {
-    if (hit.hit) {
-      state.faceSelector->SetSelectedFace(hit.meshId, hit.faceIndex);
-      if (state.faceSelector->GetFaceVertexRange(hit.meshId, hit.faceIndex,
-                                                 first, count)) {
-        state.meshRenderer->SetFaceHighlight(hit.meshId, first, count);
-      }
-      LOG_DEBUG("Selected face {} on mesh {}", hit.faceIndex, hit.meshId);
-      if (alignCamera) {
-        state.camera->AlignToFace(
-            state.faceSelector->GetFaceCenter(hit.meshId, hit.faceIndex),
-            state.faceSelector->GetFaceNormal(hit.meshId, hit.faceIndex));
-      }
-    } else {
-      state.faceSelector->ClearSelection();
-      state.meshRenderer->ClearFaceHighlight();
-    }
-  } else {
-    if (hit.hit) {
-      state.faceSelector->SetHoveredFace(hit.meshId, hit.faceIndex);
-      if (state.faceSelector->GetFaceVertexRange(hit.meshId, hit.faceIndex,
-                                                 first, count)) {
-        state.meshRenderer->SetFaceHover(hit.meshId, first, count);
-      }
-    } else {
-      state.faceSelector->ClearHover();
-      state.meshRenderer->ClearFaceHover();
-    }
-  }
-}
-
-} // namespace
 
 void HandleViewportInput(AppState& state) {
   // A drawing tab drives a 2D sheet, not the orbit camera.
@@ -64,6 +20,10 @@ void HandleViewportInput(AppState& state) {
   }
   if (!state.camera)
     return;
+
+  // The pick pipeline re-sets this when it runs; consumed frames (sketch,
+  // armed tools, assembly) must not leave a stale edge-hover preview behind.
+  state.pick.edgeHover = false;
 
   ImGuiIO& io = ImGui::GetIO();
   // With the passthru central dock node, WantCaptureMouse is true over
@@ -307,15 +267,9 @@ void HandleViewportInput(AppState& state) {
     return;
   }
 
-  // Face picking: click to select, otherwise hover pre-highlight
-  if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-    Pick(state, io.MousePos, true, io.KeyCtrl);
-  } else if (overViewport && state.viewportDrag == ViewportDrag::None) {
-    Pick(state, io.MousePos, false, false);
-  } else if (!overViewport) {
-    state.faceSelector->ClearHover();
-    state.meshRenderer->ClearFaceHover();
-  }
+  // Default context: the unified pick pipeline (U1b) — edges/faces/bodies,
+  // hover preview, Ctrl multi-select, same-spot disambiguation cycling.
+  HandleSelectionInput(state, overViewport);
 }
 
 } // namespace ui

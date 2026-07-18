@@ -330,9 +330,12 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         bodyCenter + glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * radius * 5.0f);
     ctx->Yield();
 
-    // Click on the projected body center: the ray must hit the camera-facing
-    // face of the box
-    ctx->MouseMoveToPos(WorldToWindow(bodyCenter));
+    // Click the +X face's center pixel: the ray hits that face's interior, a
+    // full half-extent from every edge. (The body-center pixel is unusable
+    // since U1b: on a diagonal view it lines up with the near corner, whose
+    // edges correctly outrank the face in the unified pick.)
+    const glm::vec3 faceCenter(max.x, bodyCenter.y, bodyCenter.z);
+    ctx->MouseMoveToPos(WorldToWindow(faceCenter));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
 
@@ -1275,5 +1278,73 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->ItemClick("//$FOCUSED/Delete");
     ctx->Yield();
     IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), (uint64_t)0);
+  };
+
+  // U1b: the unified pick pipeline — face/body cycling on a repeated click,
+  // edge picking outside any armed tool, Ctrl+click multi-select, Escape
+  // clears.
+  t = IM_REGISTER_TEST(engine, "selection", "pick_cycle_multiselect");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+
+    glm::vec3 min, max;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const glm::vec3 center = (min + max) * 0.5f;
+    const float radius = glm::length(max - min) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(center);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(
+        center + glm::normalize(glm::vec3(1.0f, 0.6f, 1.0f)) * radius * 5.0f);
+    ctx->Yield();
+
+    const auto& items = s_App->selection.items;
+
+    // Click the +X face's center pixel — face interior, no edge in range —
+    // → one Face item. (The body-center pixel lines up with corner edges.)
+    const glm::vec3 faceCenter(max.x, center.y, center.z);
+    ctx->MouseMoveToPos(WorldToWindow(faceCenter));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(items.size(), (size_t)1);
+    IM_CHECK(items[0].kind == ui::SelectionItem::Kind::Face);
+
+    // Same spot again: cycles to the face's body; once more wraps to face.
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(items.size(), (size_t)1);
+    IM_CHECK(items[0].kind == ui::SelectionItem::Kind::Body);
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(items[0].kind == ui::SelectionItem::Kind::Face);
+
+    // A visible edge midpoint (top edge at z-max): edges outrank faces.
+    const glm::vec3 edgeMid((min.x + max.x) * 0.5f, max.y, max.z);
+    ctx->MouseMoveToPos(WorldToWindow(edgeMid));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(items.size(), (size_t)1);
+    IM_CHECK(items[0].kind == ui::SelectionItem::Kind::Edge);
+
+    // Ctrl+click back on the face: toggles it IN alongside the edge.
+    ctx->MouseMoveToPos(WorldToWindow(faceCenter));
+    ctx->Yield();
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    IM_CHECK_EQ(items.size(), (size_t)2);
+    IM_CHECK(items[0].kind == ui::SelectionItem::Kind::Edge);
+    IM_CHECK(items[1].kind == ui::SelectionItem::Kind::Face);
+
+    // Escape clears.
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK(s_App->selection.Empty());
   };
 }

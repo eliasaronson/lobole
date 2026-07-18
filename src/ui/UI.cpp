@@ -13,6 +13,7 @@
 #include "ui/MainMenuBar.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PropertiesPanel.h"
+#include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
 #include "ui/ConfigurationsPanel.h"
@@ -77,7 +78,8 @@ void DrawControlsHelpOverlay(AppState& state) {
     if (ImGui::SmallButton("x"))
       state.showControlsHelp = false;
     ImGui::Separator();
-    ImGui::BulletText("Left click: select face (Ctrl: align camera)");
+    ImGui::BulletText("Click: select edge/face (again: cycle, Ctrl: multi)");
+    ImGui::BulletText("Shift+Click: align camera to face");
     ImGui::BulletText("Middle drag: rotate");
     ImGui::BulletText("Ctrl+Middle: pan   Shift+Middle: zoom");
     ImGui::BulletText("Alt+Middle: roll   Scroll: zoom");
@@ -176,6 +178,9 @@ void DrawUI(AppState& state) {
   DrawControlsHelpOverlay(state);
 
   HandleViewportInput(state);
+  // Renderer highlights are a projection of the Selection (U1b): one sync
+  // point after input may have changed the set.
+  SyncSelectionHighlights(state);
 
   // A drawing tab paints its 2D sheet into the (mesh-free) viewport.
   if (state.drawing)
@@ -233,6 +238,7 @@ void DrawUI(AppState& state) {
       std::vector<PrimVertex> prims =
           BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId);
       AppendEdgePickPrimitives(state, prims); // fillet/chamfer edge picking
+      AppendSelectionPrimitives(state, prims); // selected/hovered edges (U1b)
       state.sketchRenderer->SetPrimitives(std::move(prims));
 
       // Auto-constraint snap indicator + ghost glyphs, and dimension

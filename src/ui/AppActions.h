@@ -375,6 +375,10 @@ bool HandleEdgePickInput(AppState& state, bool overViewport);
 // edge dimmed, the hovered edge and the blend's picked edges emphasized.
 void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out);
 
+// A thick screen-space line segment (two triangles) for overlay primitives.
+void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
+                    const glm::vec4& color, std::vector<PrimVertex>& out);
+
 // The features in [0, beforeIndex) that produce a body (primitives, imports,
 // extrude/revolve in NewBody mode, and earlier booleans), as {featureId,
 // name}. Backs the boolean operand combos and the "Boolean" menu gate.

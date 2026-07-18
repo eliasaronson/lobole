@@ -1702,6 +1702,19 @@ std::vector<LineVertex3D> BuildActiveSketchOverlay(AppState& state,
   return {};
 }
 
+// A thick screen-space line segment (two triangles). The B-end negates
+// corner.x so both ends offset to the same world side (no bowtie). Public:
+// the selection pipeline draws its edge overlays with it too.
+void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
+                    const glm::vec4& color, std::vector<PrimVertex>& out) {
+  PrimVertex am{a, b, {-1, 0}, {halfPx, 0}, color};
+  PrimVertex ap{a, b, {1, 0}, {halfPx, 0}, color};
+  PrimVertex bp{b, a, {-1, 0}, {halfPx, 0}, color}; // logical +side at B
+  PrimVertex bm{b, a, {1, 0}, {halfPx, 0}, color};  // logical -side at B
+  for (const PrimVertex& v : {am, ap, bp, am, bp, bm})
+    out.push_back(v);
+}
+
 namespace {
 // Vertices exposed by an entity for dots (which, plane-UV).
 std::vector<std::pair<uint8_t, glm::vec2>>
@@ -1718,18 +1731,6 @@ EntityDots(const sketch::Entity& e) {
   if (auto* el = std::get_if<sketch::Ellipse>(&e))
     return {{0, el->center}};
   return {};
-}
-
-// A thick screen-space line segment (two triangles). The B-end negates
-// corner.x so both ends offset to the same world side (no bowtie).
-void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
-                    const glm::vec4& color, std::vector<PrimVertex>& out) {
-  PrimVertex am{a, b, {-1, 0}, {halfPx, 0}, color};
-  PrimVertex ap{a, b, {1, 0}, {halfPx, 0}, color};
-  PrimVertex bp{b, a, {-1, 0}, {halfPx, 0}, color}; // logical +side at B
-  PrimVertex bm{b, a, {1, 0}, {halfPx, 0}, color};  // logical -side at B
-  for (const PrimVertex& v : {am, ap, bp, am, bp, bm})
-    out.push_back(v);
 }
 
 // A dashed line (world-space dashes) for construction/reference geometry.

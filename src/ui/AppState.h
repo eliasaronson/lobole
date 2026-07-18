@@ -451,6 +451,17 @@ struct AppState {
 
   // UI state
   Selection selection; // U1: the one selection set (see SelectionItem)
+  // U1b: transient pick-pipeline state (SelectionPipeline.cpp). The hover
+  // fields cache render-side handles for this frame's preview; the click
+  // fields drive same-spot disambiguation cycling.
+  struct PickState {
+    bool edgeHover = false; // hovered edge preview (faces hover via FaceSelector)
+    uint32_t edgeHoverMesh = 0;
+    uint32_t edgeHoverIndex = 0;
+    glm::vec2 lastClickPos{-1e9f, -1e9f};
+    int cycle = 0;
+  };
+  PickState pick;
   uint64_t selectedOccurrence = 0; // active assembly's selected occurrence (0 = none)
   uint64_t selectedMate = 0;       // active assembly's selected mate (0 = none)
   MateToolState mateTool;

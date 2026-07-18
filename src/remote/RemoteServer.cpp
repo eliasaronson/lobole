@@ -27,6 +27,8 @@
 #include "core/SketchSolver.h"
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
+#include "ui/SelectionPipeline.h"  // ResolveFaceItem (U1b)
+#include "ui/SketchInteraction.h"  // FaceElementRef
 
 #include <algorithm>
 #include <fstream>
@@ -347,18 +349,46 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       }
       bodies.push_back(entry);
     }
+    // Legacy single-face block, now derived from the Selection (not the
+    // FaceSelector mirror, which only updates when a frame runs — RPC
+    // batches would read stale state).
     json selection = nullptr;
-    if (const Face* face =
-            state.faceSelector ? state.faceSelector->GetSelectedFace()
-                               : nullptr) {
-      selection = {{"mesh", face->meshId},
-                   {"face", face->faceIndex},
-                   {"normal", Vec3ToJson(face->normal)},
-                   {"center", Vec3ToJson(face->center)}};
+    if (const ui::SelectionItem* it =
+            state.selection.First(ui::SelectionItem::Kind::Face)) {
+      uint32_t mesh = 0, face = 0;
+      if (state.faceSelector && ui::ResolveFaceItem(state, *it, mesh, face)) {
+        selection = {
+            {"mesh", mesh},
+            {"face", face},
+            {"normal", Vec3ToJson(state.faceSelector->GetFaceNormal(mesh, face))},
+            {"center", Vec3ToJson(state.faceSelector->GetFaceCenter(mesh, face))}};
+      }
+    }
+    // The typed Selection (U1): every item, stable refs only.
+    json selectionItems = json::array();
+    for (const ui::SelectionItem& it : state.selection.items) {
+      const char* kind = it.kind == ui::SelectionItem::Kind::Face  ? "face"
+                         : it.kind == ui::SelectionItem::Kind::Edge ? "edge"
+                         : it.kind == ui::SelectionItem::Kind::Body ? "body"
+                         : it.kind == ui::SelectionItem::Kind::Feature
+                             ? "feature"
+                         : it.kind == ui::SelectionItem::Kind::Occurrence
+                             ? "occurrence"
+                         : it.kind == ui::SelectionItem::Kind::Mate
+                             ? "mate"
+                             : "sketch_region";
+      json entry = {{"kind", kind}};
+      if (it.id != 0)
+        entry["id"] = it.id;
+      if (!it.element.name.empty())
+        entry["element"] = {{"feature_id", it.element.featureId},
+                            {"name", it.element.name}};
+      selectionItems.push_back(entry);
     }
     return {{"features", features},
             {"bodies", bodies},
             {"selection", selection},
+            {"selection_items", selectionItems},
             {"selected_feature", ui::SelectedFeatureIndexOrMinus1(state)},
             {"camera",
              {{"position", Vec3ToJson(state.camera->GetPosition())},
@@ -520,8 +550,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     uint32_t first = 0, count = 0;
     if (!state.faceSelector->GetFaceVertexRange(mesh, face, first, count))
       throw std::runtime_error("no such face");
-    state.faceSelector->SetSelectedFace(mesh, face);
-    state.meshRenderer->SetFaceHighlight(mesh, first, count);
+    // Drive the Selection (U1b) — renderer highlights are its projection.
+    // The mirror into FaceSelector happens in SyncSelectionHighlights; a
+    // direct write here would be cleared next frame.
+    {
+      const auto ref = ui::FaceElementRef(state, mesh, face);
+      if (!ref)
+        throw std::runtime_error("face has no stable name");
+      state.selection.Replace(
+          {ui::SelectionItem::Kind::Face, 0, *ref});
+    }
     return {{"normal", Vec3ToJson(state.faceSelector->GetFaceNormal(mesh, face))},
             {"center", Vec3ToJson(state.faceSelector->GetFaceCenter(mesh, face))}};
   }
@@ -565,11 +603,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!state.faceSelector)
       throw std::runtime_error(
           "face selection needs render meshes — unavailable in --headless");
-    const Face* face = state.faceSelector->GetSelectedFace();
-    if (!face) throw std::runtime_error("no face selected");
-    state.camera->AlignToFace(
-        state.faceSelector->GetFaceCenter(face->meshId, face->faceIndex),
-        state.faceSelector->GetFaceNormal(face->meshId, face->faceIndex));
+    const ui::SelectionItem* it =
+        state.selection.First(ui::SelectionItem::Kind::Face);
+    uint32_t mesh = 0, face = 0;
+    if (it == nullptr || !ui::ResolveFaceItem(state, *it, mesh, face))
+      throw std::runtime_error("no face selected");
+    state.camera->AlignToFace(state.faceSelector->GetFaceCenter(mesh, face),
+                              state.faceSelector->GetFaceNormal(mesh, face));
     return json::object();
   }
 

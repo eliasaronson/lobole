@@ -348,6 +348,7 @@ set(app_sources
     src/ui/PreviewFeature.cpp
     src/ui/Theme.cpp
     src/ui/ViewportInput.cpp
+    src/ui/SelectionPipeline.cpp
     src/ui/SketchInteraction.cpp
     src/ui/Toolbar.cpp
     src/Screenshot.cpp

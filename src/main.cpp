@@ -1120,8 +1120,8 @@ int main(int argc, char **argv) {
     ui::LoadSTEPFile(g_App, args.fileToLoad);
   }
 
-  LOG_INFO("=== APPLICATION READY - Left-click to select faces, "
-           "Ctrl+Left-click to align camera ===");
+  LOG_INFO("=== APPLICATION READY - click selects edges/faces (again: cycle, "
+           "Ctrl: multi-select, Shift: align camera) ===");
 
   // GUI test engine: always started so tests can also be run interactively;
   // --gui-tests queues the whole suite and exits with a pass/fail code.
