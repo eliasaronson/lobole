@@ -602,6 +602,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     if (ImGui::Button("Edit Sketch")) {
       state.sketchEdit = SketchEditState{};
       state.sketchEdit.activeSketchId = sk->GetId();
+      state.measure = MeasureState{}; // sketch mode replaces the measure tool
       if (state.camera)
         state.camera->AlignToFace(sk->plane.GetOrigin(), sk->plane.GetNormal());
     }

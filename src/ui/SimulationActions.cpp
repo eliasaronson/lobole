@@ -181,6 +181,9 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
 void EnterSimulation(AppState& state) {
   Document* doc = state.document.get();
   if (!doc) return; // parts only (an assembly tab has no studies)
+  // Drop the measure tool: it owns the viewport while active, and the
+  // simulation toolbar has no Measure toggle to turn it back off.
+  state.measure = MeasureState{};
   state.simulation.active = true;
   if (doc->GetStudies().empty() && state.commands)
     state.commands->Execute(std::make_unique<AddStudyCommand>(""), *doc);

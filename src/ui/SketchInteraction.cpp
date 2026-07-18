@@ -347,6 +347,7 @@ static uint64_t BeginSketch(AppState& state, std::unique_ptr<SketchFeature> sk,
 
   state.sketchEdit = SketchEditState{};
   state.sketchEdit.activeSketchId = id;
+  state.measure = MeasureState{}; // sketch mode replaces the measure tool
   state.selectedFeature = static_cast<int>(index);
   if (state.camera) {
     state.camera->AlignToFace(plane.GetOrigin(), plane.GetNormal());
