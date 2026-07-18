@@ -816,3 +816,36 @@ TEST_CASE("Cross-sketch linked copies sync until the link breaks",
   CHECK_FALSE(doc.Regenerate());
   CHECK_FALSE(skB->GetError().empty());
 }
+
+TEST_CASE("ProjectFaceBoundary maps face outlines to construction geometry",
+          "[sketch][project]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Box", glm::vec3(0.0f), 2.0,
+                                              2.0, 2.0));
+  doc.Regenerate();
+  REQUIRE(doc.GetBodies().size() == 1);
+  const SketchPlane xy(PlaneType::XY);
+  // Every box face projects to 4 construction lines.
+  const auto ents =
+      sketch::ProjectFaceBoundary(doc.GetBodies()[0].shape, 0, xy);
+  REQUIRE(ents.size() == 4);
+  for (const auto& e : ents) {
+    REQUIRE(std::holds_alternative<sketch::Line>(e));
+    CHECK(std::get<sketch::Line>(e).construction);
+  }
+
+  Document doc2;
+  doc2.AddFeature(std::make_unique<CylinderFeature>(
+      "Cyl", glm::vec3(0.0f), glm::vec3(0, 0, 1), 1.0, 2.0));
+  doc2.Regenerate();
+  REQUIRE(doc2.GetBodies().size() == 1);
+  // Some face (a cap) projects to a single full construction circle.
+  bool sawCircle = false;
+  for (int f = 0; f < 4; f++) {
+    const auto ce =
+        sketch::ProjectFaceBoundary(doc2.GetBodies()[0].shape, f, xy);
+    if (ce.size() == 1 && std::holds_alternative<sketch::Circle>(ce[0]))
+      sawCircle = true;
+  }
+  CHECK(sawCircle);
+}

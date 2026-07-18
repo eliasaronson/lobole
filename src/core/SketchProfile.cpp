@@ -1221,6 +1221,57 @@ bool PointInLoop(const Loop& loop, const glm::vec2& p) {
   return inside;
 }
 
+std::vector<Entity> ProjectFaceBoundary(const CADShape& shape, int faceIndex,
+                                        const SketchPlane& plane) {
+  std::vector<Entity> out;
+  if (!shape.IsValid())
+    return out;
+  TopExp_Explorer faces(shape.GetShape(), TopAbs_FACE);
+  for (int i = 0; faces.More() && i < faceIndex; faces.Next(), i++) {
+  }
+  if (!faces.More())
+    return out;
+  const auto toUV = [&](const gp_Pnt& p) {
+    return plane.WorldToPlane(glm::vec3(p.X(), p.Y(), p.Z()));
+  };
+  for (TopExp_Explorer edges(faces.Current(), TopAbs_EDGE); edges.More();
+       edges.Next()) {
+    const TopoDS_Edge edge = TopoDS::Edge(edges.Current());
+    BRepAdaptor_Curve curve(edge);
+    if (curve.GetType() == GeomAbs_Line) {
+      Line l;
+      l.a = toUV(curve.Value(curve.FirstParameter()));
+      l.b = toUV(curve.Value(curve.LastParameter()));
+      l.construction = true;
+      out.push_back(l);
+    } else if (curve.GetType() == GeomAbs_Circle) {
+      const gp_Circ circ = curve.Circle();
+      const glm::vec2 c = toUV(circ.Location());
+      const double sweep = curve.LastParameter() - curve.FirstParameter();
+      if (std::abs(sweep - 2.0 * M_PI) < 1e-6) {
+        Circle e;
+        e.center = c;
+        e.radius = circ.Radius();
+        e.construction = true;
+        out.push_back(e);
+      } else {
+        // Angles in plane UV: measure the endpoints around the center.
+        const glm::vec2 a = toUV(curve.Value(curve.FirstParameter()));
+        const glm::vec2 b = toUV(curve.Value(curve.LastParameter()));
+        Arc arc;
+        arc.center = c;
+        arc.radius = circ.Radius();
+        arc.startAngle = std::atan2(a.y - c.y, a.x - c.x);
+        arc.endAngle = std::atan2(b.y - c.y, b.x - c.x);
+        arc.construction = true;
+        out.push_back(arc);
+      }
+    }
+    // Other curve types (splines, ellipses on the face) are skipped in v1.
+  }
+  return out;
+}
+
 bool FilterLoopsToRegions(std::vector<Loop>& loops,
                           const std::vector<std::vector<uint32_t>>& regions) {
   std::vector<bool> keep(loops.size(), false);

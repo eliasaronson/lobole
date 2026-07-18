@@ -395,6 +395,42 @@ uint64_t BeginSketchOnFace(AppState& state, const ElementRef& ref,
   // re-derives its plane from the (possibly moved) face on every regeneration.
   auto sketch = std::make_unique<SketchFeature>(name, plane);
   sketch->faceRef = ref;
+
+  // Project the face's boundary as FIXED construction geometry so its edges,
+  // corners and hole circles are snappable and dimensionable references.
+  // (A static snapshot in v1; a linked refresh can ride the LinkedCopy
+  // mechanism later.)
+  if (state.document) {
+    for (const Body& body : state.document->GetBodies()) {
+      if (body.createdBy != ref.featureId)
+        continue;
+      if (const auto idx = body.elementMap.Resolve(ref.name)) {
+        for (sketch::Entity e :
+             sketch::ProjectFaceBoundary(body.shape, *idx, plane)) {
+          const uint32_t id = sketch->AddEntity(std::move(e));
+          // Anchor it: lines by both endpoints, circles by center + radius,
+          // arcs by all three points.
+          const sketch::Entity& added =
+              sketch->entities[sketch->IndexOfEntity(id)];
+          using K = sketch::ConstraintKind;
+          if (std::holds_alternative<sketch::Line>(added)) {
+            sketch->constraints.push_back({K::Fixed, {id, 0}, {}});
+            sketch->constraints.push_back({K::Fixed, {id, 1}, {}});
+          } else if (auto* c = std::get_if<sketch::Circle>(&added)) {
+            sketch->constraints.push_back({K::Fixed, {id, 0}, {}});
+            sketch::Constraint rad{K::Radius, {id, 0}, {}};
+            rad.value = c->radius;
+            sketch->constraints.push_back(rad);
+          } else if (std::holds_alternative<sketch::Arc>(added)) {
+            sketch->constraints.push_back({K::Fixed, {id, 0}, {}});
+            sketch->constraints.push_back({K::Fixed, {id, 1}, {}});
+            sketch->constraints.push_back({K::Fixed, {id, 2}, {}});
+          }
+        }
+      }
+      break;
+    }
+  }
   return BeginSketch(state, std::move(sketch), plane, name);
 }
 
