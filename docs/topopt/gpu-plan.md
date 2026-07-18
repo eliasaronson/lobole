@@ -118,7 +118,8 @@ Software fallback (llvmpipe) means it can even run where no real GPU exists.
    Built, benched, and rejected as the default (see status above) — kept as
    the GPU3 smoother.
 3. **GPU3 — geometric multigrid V-cycle** only if still needed for the finest
-   meshes — the strong-but-large preconditioner. Its own sub-plan.
+   meshes — the strong-but-large preconditioner. Its own sub-plan:
+   **docs/topopt/gpu3-plan.md** (designed; MG0 CPU-prototype gate first).
 
 Order rationale: 0 gates on the only correctness risk (the scatter/atomics) and
 reuses the proven probe; CG before preconditioner tuning; the CPU path stays
