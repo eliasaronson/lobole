@@ -50,3 +50,4 @@ __pycache__/
 # All out-of-source build dirs (build/, build-asan/, ...)
 build-*/
 .cache/
+tests/golden/*.autosave
