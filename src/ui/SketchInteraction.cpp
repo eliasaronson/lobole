@@ -425,11 +425,16 @@ static void CopySketchSelection(AppState& state, SketchFeature& sketch) {
     if (std::find(ids.begin(), ids.end(), r.entity) == ids.end())
       ids.push_back(r.entity);
   state.sketchClipboard.clear();
+  state.sketchClipboardIds.clear();
   for (const auto& e : sketch.entities)
-    if (std::find(ids.begin(), ids.end(), EntityId(e)) != ids.end())
+    if (std::find(ids.begin(), ids.end(), EntityId(e)) != ids.end()) {
       state.sketchClipboard.push_back(e);
+      state.sketchClipboardIds.push_back(EntityId(e));
+    }
+  state.sketchClipboardSourceSketch = sketch.GetId();
   state.sketchEdit.actionMsg =
-      std::to_string(state.sketchClipboard.size()) + " entities copied";
+      std::to_string(state.sketchClipboard.size()) +
+      " entities copied (Ctrl+V paste, Ctrl+Shift+V paste linked)";
 }
 
 // Pastes the clipboard into the active sketch as UNLINKED copies with fresh
@@ -470,6 +475,72 @@ static void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
       std::to_string(state.sketchClipboard.size()) + " entities pasted";
 }
 
+// Pastes the clipboard as a LINKED copy (docs/sketching/copy-links.md):
+// outputs re-sync from the source until the link is broken. Cross-sketch
+// requires the source EARLIER in the history; cross-part (source not in
+// this document) falls back to a plain paste with an explanation.
+static void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
+                                       size_t index) {
+  if (state.sketchClipboardIds.empty())
+    return;
+  Document& doc = *state.document;
+  const uint64_t srcId = state.sketchClipboardSourceSketch;
+  SketchFeature* source = nullptr;
+  uint64_t opSourceId = 0; // 0 = same sketch
+  if (srcId == sketch.GetId()) {
+    source = &sketch;
+  } else {
+    size_t srcIndex = 0;
+    source = dynamic_cast<SketchFeature*>(doc.FindFeatureById(srcId, &srcIndex));
+    if (source == nullptr) {
+      state.sketchEdit.actionMsg =
+          "Source sketch is in another part - pasted unlinked";
+      PasteSketchClipboard(state, sketch, index);
+      return;
+    }
+    if (srcIndex >= index) {
+      state.sketchEdit.actionMsg =
+          "Linked copies need the source sketch earlier in the history - "
+          "pasted unlinked";
+      PasteSketchClipboard(state, sketch, index);
+      return;
+    }
+    opSourceId = srcId;
+  }
+  // Validate every copied entity still exists in the source.
+  for (uint32_t id : state.sketchClipboardIds) {
+    if (source->IndexOfEntity(id) == std::numeric_limits<size_t>::max()) {
+      state.sketchEdit.actionMsg =
+          "A copied entity no longer exists in the source - pasted unlinked";
+      PasteSketchClipboard(state, sketch, index);
+      return;
+    }
+  }
+
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  sketch::DerivedOp op;
+  op.kind = sketch::DerivedKind::LinkedCopy;
+  op.sourceIds = state.sketchClipboardIds;
+  op.vec = glm::vec2(0.5f, 0.5f); // paste offset
+  op.count = 2;
+  op.sourceSketchId = opSourceId;
+  sketch.derived.push_back(op);
+  // Materialize the outputs now; regeneration keeps them in sync after.
+  if (opSourceId == 0)
+    sketch.RegenerateDerived();
+  else
+    sketch.ReplayLinkedCopyFrom(sketch.derived.back(), *source);
+  state.sketchEdit.selected.clear();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->PushApplied(
+      std::make_unique<ModifyFeatureCommand>(index, before, after));
+  state.sketchEdit.actionMsg =
+      std::to_string(state.sketchClipboardIds.size()) +
+      " linked copies pasted (violet = synced; break the link in the "
+      "Sketch panel)";
+}
+
 static void HandleSketchKeys(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   ImGuiIO& io = ImGui::GetIO();
@@ -479,8 +550,12 @@ static void HandleSketchKeys(AppState& state) {
     if (SketchFeature* sk = ResolveActiveSketch(state, &index)) {
       if (ImGui::IsKeyPressed(ImGuiKey_C) && !edit.selected.empty())
         CopySketchSelection(state, *sk);
-      if (ImGui::IsKeyPressed(ImGuiKey_V))
-        PasteSketchClipboard(state, *sk, index);
+      if (ImGui::IsKeyPressed(ImGuiKey_V)) {
+        if (io.KeyShift)
+          PasteSketchClipboardLinked(state, *sk, index);
+        else
+          PasteSketchClipboard(state, *sk, index);
+      }
     }
   }
   if (io.WantTextInput || io.KeyCtrl || io.KeyAlt || io.KeySuper)

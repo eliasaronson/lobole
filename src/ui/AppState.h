@@ -535,6 +535,10 @@ struct AppState {
   // value — pastes are unlinked copies with fresh ids; it survives tab
   // switches, so pasting into another part's sketch works.
   std::vector<sketch::Entity> sketchClipboard;
+  // Where the clipboard came from (paste-LINKED needs it): the source
+  // sketch's feature id and the copied entity ids, in clipboard order.
+  uint64_t sketchClipboardSourceSketch = 0;
+  std::vector<uint32_t> sketchClipboardIds;
 
   // 2D sheet viewport (workstream 13): a drawing tab pans/zooms an
   // orthographic sheet, never the orbit camera (there is no 2D camera today —

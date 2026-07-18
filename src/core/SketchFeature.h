@@ -361,7 +361,18 @@ struct Constraint {
   std::string valueExpr;
 };
 
-enum class DerivedKind { LinearPattern, CircularPattern };
+enum class DerivedKind {
+  LinearPattern,
+  CircularPattern,
+  // A LINKED COPY (docs/sketching/copy-links.md): pasted entities that
+  // re-sync from their source until the link is broken. Same-sketch sources
+  // replay in RegenerateDerived; cross-sketch sources (sourceSketchId != 0)
+  // replay in SketchFeature::Execute, where the source sketch — required
+  // earlier in the history — has already executed. Outputs are solver-fixed
+  // anchors: target-sketch constraints may reference them, but their
+  // position is owned by the sync.
+  LinkedCopy,
+};
 
 // A *linked* generative op: it derives geometry from `sourceIds` and is replayed
 // by SketchFeature::RegenerateDerived when the sources change. `instances` maps
@@ -372,8 +383,10 @@ struct DerivedOp {
   DerivedKind kind;
   std::vector<uint32_t> sourceIds;
   glm::vec2 vec{0.0f}; // Linear: per-step translation. Circular: centre (UV).
+                       // LinkedCopy: the paste offset.
   double scalar = 0.0; // Circular: step angle (radians). Linear: unused.
   int count = 2;       // total instances including the seed (count-1 generated)
+  uint64_t sourceSketchId = 0; // LinkedCopy: cross-sketch source (0 = here)
   struct Inst {
     uint32_t sourceId = 0;
     int k = 0; // instance index 1..count-1
@@ -502,6 +515,17 @@ public:
   // Removes a linked DerivedOp and the entities it generated (its instances).
   // No-op if opIndex is out of range. Call RegenerateDerived after for the rest.
   void RemoveDerivedOp(size_t opIndex);
+
+  // Breaks a LinkedCopy link: removes the op record but KEEPS its output
+  // entities (ids intact, so downstream refs survive) as ordinary free
+  // geometry. No-op for other kinds / out-of-range.
+  void BreakLink(size_t opIndex);
+
+  // Replays one cross-sketch LinkedCopy op from `source`'s entities. False
+  // when any source entity id no longer exists there (the caller errors the
+  // sketch with a break-link hint).
+  bool ReplayLinkedCopyFrom(sketch::DerivedOp& op,
+                            const SketchFeature& source);
 
   SketchPlane plane;
   // When non-zero: the id of a DatumPlaneFeature earlier in the history;

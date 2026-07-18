@@ -171,21 +171,28 @@ json DerivedOpToJson(const sketch::DerivedOp& op) {
   json insts = json::array();
   for (const auto& in : op.instances)
     insts.push_back({{"source", in.sourceId}, {"k", in.k}, {"gen", in.genId}});
-  return {{"kind", op.kind == sketch::DerivedKind::CircularPattern
-                       ? "circular_pattern"
-                       : "linear_pattern"},
-          {"source_ids", op.sourceIds},
-          {"vec", Vec2ToJson(op.vec)},
-          {"scalar", op.scalar},
-          {"count", op.count},
-          {"instances", insts}};
+  json j = {{"kind", op.kind == sketch::DerivedKind::CircularPattern
+                         ? "circular_pattern"
+                     : op.kind == sketch::DerivedKind::LinkedCopy
+                         ? "linked_copy" // v35
+                         : "linear_pattern"},
+            {"source_ids", op.sourceIds},
+            {"vec", Vec2ToJson(op.vec)},
+            {"scalar", op.scalar},
+            {"count", op.count},
+            {"instances", insts}};
+  if (op.sourceSketchId != 0)
+    j["source_sketch_id"] = op.sourceSketchId;
+  return j;
 }
 
 sketch::DerivedOp DerivedOpFromJson(const json& j) {
   sketch::DerivedOp op;
-  op.kind = j.at("kind").get<std::string>() == "circular_pattern"
-                ? sketch::DerivedKind::CircularPattern
-                : sketch::DerivedKind::LinearPattern;
+  const std::string kind = j.at("kind").get<std::string>();
+  op.kind = kind == "circular_pattern" ? sketch::DerivedKind::CircularPattern
+            : kind == "linked_copy"    ? sketch::DerivedKind::LinkedCopy
+                                       : sketch::DerivedKind::LinearPattern;
+  op.sourceSketchId = j.value("source_sketch_id", uint64_t{0});
   for (const auto& s : j.at("source_ids"))
     op.sourceIds.push_back(s.get<uint32_t>());
   op.vec = Vec2FromJson(j.at("vec"));

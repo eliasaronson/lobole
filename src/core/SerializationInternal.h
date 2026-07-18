@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 34;  // v34: extrude/revolve region selection (v33: topology studies)
+inline constexpr int kVersion = 35;  // v35: linked sketch copies (v34: regions)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

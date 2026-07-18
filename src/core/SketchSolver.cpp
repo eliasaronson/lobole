@@ -82,9 +82,11 @@ struct Solver::Impl {
         unknowns.push_back(gp.y);
     }
     for (auto& r : radii)
-      unknowns.push_back(&r);
+      if (!fixedParams.count(&r)) // linked-copy outputs stay put
+        unknowns.push_back(&r);
     for (auto& ang : angles) // arc start/end angles (tied to points by ArcRules)
-      unknowns.push_back(&ang);
+      if (!fixedParams.count(&ang))
+        unknowns.push_back(&ang);
     if (unknowns.empty())
       return;
     sys.declareUnknowns(unknowns);
@@ -413,6 +415,32 @@ void Solver::Load(const SketchFeature& sketch) {
   }
   im.constraintFirstTag.back() = tag; // upper bound for the last constraint
   im.dragTag = tag;
+
+  // Linked-copy outputs are solver-FIXED anchors: their position is owned by
+  // the sync (docs/sketching/copy-links.md), so the solver may reference but
+  // never move them.
+  for (const auto& op : sketch.derived) {
+    if (op.kind != DerivedKind::LinkedCopy)
+      continue;
+    for (const auto& inst : op.instances) {
+      for (const auto& [key, idx] : im.pointIndex) {
+        if (static_cast<uint32_t>(key >> 8) != inst.genId)
+          continue;
+        const GCS::Point& gp = im.gcsPoints[static_cast<size_t>(idx)];
+        im.fixedParams.insert(gp.x);
+        im.fixedParams.insert(gp.y);
+      }
+      if (im.circleOf.count(inst.genId) != 0)
+        im.fixedParams.insert(
+            im.circles[static_cast<size_t>(im.circleOf[inst.genId])].rad);
+      if (im.arcOf.count(inst.genId) != 0) {
+        auto& a = im.arcs[static_cast<size_t>(im.arcOf[inst.genId])];
+        im.fixedParams.insert(a.rad);
+        im.fixedParams.insert(a.startAngle);
+        im.fixedParams.insert(a.endAngle);
+      }
+    }
+  }
 }
 
 SolveResult Solver::Solve() {

@@ -1868,8 +1868,14 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
   const glm::vec4 construct(0.55f, 0.60f, 0.70f, 0.85f);  // reference geometry
   const glm::vec4 conflict(1.00f, 0.30f, 0.30f, 1.0f);    // over-defined
   const glm::vec4 defined(0.45f, 0.90f, 0.60f, 1.0f);     // fully constrained
+  const glm::vec4 linked(0.72f, 0.55f, 0.95f, 1.0f);      // linked-copy output
   const std::set<uint32_t> underDef(edit.underDefined.begin(),
                                     edit.underDefined.end());
+  std::set<uint32_t> linkedIds;
+  for (const auto& op : sk->derived)
+    if (op.kind == sketch::DerivedKind::LinkedCopy)
+      for (const auto& inst : op.instances)
+        linkedIds.insert(inst.genId);
 
   // Entities touched by a conflicting/redundant constraint, flagged red.
   std::set<uint32_t> conflictIds;
@@ -1889,11 +1895,13 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     const bool s = selectedEntity(id), h = hoveredEntityBody(id);
     const bool constr = sketch::IsConstruction(e);
     const bool bad = conflictIds.count(id) > 0;
+    const bool isLinked = linkedIds.count(id) != 0;
     const bool isDefined =
         !constr && (edit.dof == 0 || underDef.count(id) == 0);
     const glm::vec4 col = bad ? conflict
                         : s   ? sel
                         : h   ? hov
+                        : isLinked ? linked
                         : constr ? construct
                         : isDefined ? defined
                                     : base;

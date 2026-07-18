@@ -763,3 +763,56 @@ TEST_CASE("Entity ids stay stable across insert and delete",
   CHECK(sk.IndexOfEntity(b) == 0u);
   CHECK(sketch::EntityId(sk.entities[0]) == b);
 }
+
+TEST_CASE("Cross-sketch linked copies sync until the link breaks",
+          "[sketch][linked_copy]") {
+  Document doc;
+  auto a = std::make_unique<SketchFeature>("A", SketchPlane(PlaneType::XY));
+  const uint32_t c1 = a->AddEntity(sketch::Circle{{0, 0}, 1.0});
+  doc.AddFeature(std::move(a));
+  const uint64_t aId = doc.GetFeature(0)->GetId();
+  auto b = std::make_unique<SketchFeature>("B", SketchPlane(PlaneType::XY));
+  doc.AddFeature(std::move(b));
+  auto* skB = dynamic_cast<SketchFeature*>(doc.GetFeature(1));
+  REQUIRE(skB != nullptr);
+
+  sketch::DerivedOp op;
+  op.kind = sketch::DerivedKind::LinkedCopy;
+  op.sourceIds = {c1};
+  op.vec = {3.0f, 0.0f};
+  op.count = 2;
+  op.sourceSketchId = aId;
+  skB->derived.push_back(op);
+  REQUIRE(doc.Regenerate());
+  REQUIRE(skB->entities.size() == 1);
+  {
+    const auto* copy = std::get_if<sketch::Circle>(&skB->entities[0]);
+    REQUIRE(copy != nullptr);
+    CHECK_THAT(copy->center.x, WithinAbs(3.0, 1e-6));
+    CHECK_THAT(copy->radius, WithinAbs(1.0, 1e-9));
+  }
+
+  // Editing the source syncs the copy on the next regeneration.
+  auto* skA = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
+  std::get<sketch::Circle>(skA->entities[0]).radius = 2.0;
+  REQUIRE(doc.Regenerate());
+  CHECK_THAT(std::get<sketch::Circle>(skB->entities[0]).radius,
+             WithinAbs(2.0, 1e-9));
+
+  // Break the link: the copy keeps its id + geometry and stops syncing.
+  const uint32_t copyId = sketch::EntityId(skB->entities[0]);
+  skB->BreakLink(0);
+  std::get<sketch::Circle>(skA->entities[0]).radius = 0.5;
+  REQUIRE(doc.Regenerate());
+  CHECK(sketch::EntityId(skB->entities[0]) == copyId);
+  CHECK_THAT(std::get<sketch::Circle>(skB->entities[0]).radius,
+             WithinAbs(2.0, 1e-9)); // no longer tracks
+
+  // A vanished source entity is a first-class regen failure.
+  sketch::DerivedOp op2 = op;
+  skB->derived.push_back(op2);
+  REQUIRE(doc.Regenerate());
+  skA->DeleteEntity(c1);
+  CHECK_FALSE(doc.Regenerate());
+  CHECK_FALSE(skB->GetError().empty());
+}

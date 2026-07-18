@@ -4,6 +4,7 @@
 #include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
+#include "core/Serialization.h" // DocumentIO (break-link commit)
 #include "core/SketchSolver.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
@@ -335,6 +336,45 @@ void DrawSketchToolbar(AppState& state) {
 
   const bool canExtrude = !sketch::BuildLoops(sketch->entities).empty();
   ImGui::Text("Closed profile: %s", canExtrude ? "yes" : "no");
+
+  // Linked copies (violet geometry): status + break-link per op.
+  {
+    bool anyLinks = false;
+    for (const auto& op : sketch->derived)
+      if (op.kind == sketch::DerivedKind::LinkedCopy)
+        anyLinks = true;
+    if (anyLinks) {
+      ImGui::SeparatorText("Linked copies");
+      for (size_t oi = 0; oi < sketch->derived.size(); oi++) {
+        const auto& op = sketch->derived[oi];
+        if (op.kind != sketch::DerivedKind::LinkedCopy)
+          continue;
+        ImGui::PushID(static_cast<int>(oi));
+        std::string srcName = "this sketch";
+        if (op.sourceSketchId != 0) {
+          Feature* src = state.document->FindFeatureById(op.sourceSketchId);
+          srcName = src != nullptr ? src->GetName() : "(missing sketch)";
+        }
+        ImGui::Text("%zu from %s", op.sourceIds.size(), srcName.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Break link")) {
+          // Keeps the outputs as free geometry (ids intact); one undo step.
+          size_t index = 0;
+          if (ResolveActiveSketch(state, &index) == sketch) {
+            nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+            sketch->BreakLink(oi);
+            state.document->Regenerate();
+            nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+            state.commands->PushApplied(
+                std::make_unique<ModifyFeatureCommand>(index, before, after));
+          }
+          ImGui::PopID();
+          break; // op list changed; redraw next frame
+        }
+        ImGui::PopID();
+      }
+    }
+  }
 
   ImGui::Separator();
   ImGui::BeginDisabled(!canExtrude);

@@ -649,6 +649,24 @@ bool SketchFeature::Execute(RegenContext& ctx) {
     plane = datum->OutputPlane();
   }
 
+  // Cross-sketch linked copies re-sync from their (already executed) source.
+  for (auto& op : derived) {
+    if (op.kind != sketch::DerivedKind::LinkedCopy || op.sourceSketchId == 0)
+      continue;
+    const auto* src =
+        dynamic_cast<const SketchFeature*>(ctx.FindById(op.sourceSketchId));
+    if (src == nullptr) {
+      SetError("linked-copy source sketch is gone - break the link to keep "
+               "the copies as free geometry");
+      return false;
+    }
+    if (!ReplayLinkedCopyFrom(op, *src)) {
+      SetError("a linked-copy source entity no longer exists in '" +
+               src->GetName() + "' - break the link or re-copy");
+      return false;
+    }
+  }
+
   const bool exprDriven =
       std::any_of(constraints.begin(), constraints.end(),
                   [](const sketch::Constraint& c) {
@@ -695,7 +713,11 @@ void SketchFeature::VisitExprs(const ExprVisitor& visit) {
 
 void SketchFeature::RegenerateDerived() {
   for (auto& op : derived) {
+    if (op.kind == sketch::DerivedKind::LinkedCopy && op.sourceSketchId != 0)
+      continue; // cross-sketch: replayed in Execute (needs the source)
     auto transform = [&](const sketch::Entity& src, int k) -> sketch::Entity {
+      if (op.kind == sketch::DerivedKind::LinkedCopy)
+        return sketch::TranslateEntity(src, op.vec);
       if (op.kind == sketch::DerivedKind::LinearPattern)
         return sketch::TranslateEntity(src, static_cast<float>(k) * op.vec);
       return sketch::RotateEntity(src, op.vec,
@@ -739,6 +761,50 @@ void SketchFeature::RegenerateDerived() {
     }
     op.instances = std::move(keep);
   }
+}
+
+bool SketchFeature::ReplayLinkedCopyFrom(sketch::DerivedOp& op,
+                                         const SketchFeature& source) {
+  std::vector<sketch::DerivedOp::Inst> keep;
+  for (uint32_t sid : op.sourceIds) {
+    const size_t si = source.IndexOfEntity(sid);
+    if (si == std::numeric_limits<size_t>::max())
+      return false; // the source entity vanished: the caller errors
+    sketch::Entity g =
+        sketch::TranslateEntity(source.entities[si], op.vec);
+    uint32_t genId = 0;
+    for (const auto& in : op.instances)
+      if (in.sourceId == sid && in.k == 1) {
+        genId = in.genId;
+        break;
+      }
+    const size_t gi = (genId != 0) ? IndexOfEntity(genId)
+                                   : std::numeric_limits<size_t>::max();
+    if (gi != std::numeric_limits<size_t>::max()) {
+      sketch::SetEntityId(g, genId);
+      entities[gi] = g;
+    } else {
+      genId = AddEntity(g);
+    }
+    keep.push_back({sid, 1, genId});
+  }
+  for (const auto& in : op.instances) {
+    bool kept = false;
+    for (const auto& kp : keep)
+      if (kp.genId == in.genId)
+        kept = true;
+    if (!kept)
+      DeleteEntity(in.genId);
+  }
+  op.instances = std::move(keep);
+  return true;
+}
+
+void SketchFeature::BreakLink(size_t opIndex) {
+  if (opIndex >= derived.size() ||
+      derived[opIndex].kind != sketch::DerivedKind::LinkedCopy)
+    return;
+  derived.erase(derived.begin() + static_cast<long>(opIndex));
 }
 
 std::vector<uint32_t>
