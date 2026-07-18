@@ -237,6 +237,12 @@ EdgeHit FaceSelector::PickEdge(const Ray& ray) const {
     EdgeHit best;
     float bestAngular = std::numeric_limits<float>::max();
 
+    // Occlusion reference: the surface the same ray hits first. Checked per
+    // candidate inside the loop — an occluded edge can be the *angular* best
+    // (e.g. a view down a box diagonal lines up the far corner's edges with
+    // the near corner's) and must lose to a visible one, not veto the pick.
+    const RayHit occluder = PickFace(ray);
+
     for (const auto& mesh : m_meshes) {
         for (size_t e = 0; e < mesh->edgePolylines.size(); e++) {
             const auto& poly = mesh->edgePolylines[e];
@@ -265,6 +271,11 @@ EdgeHit FaceSelector::PickEdge(const Ray& ray) const {
 
                 const float radius = std::max(kTanPickAngle * t, kMinRadius);
                 if (perp > radius) continue;
+                // An edge behind the first-hit surface isn't pickable. Edges
+                // on that face's own boundary/silhouette sit at the face's
+                // depth (within the pick radius), so give proportional slack.
+                if (occluder.hit && t > occluder.distance * 1.05f + 1e-3f)
+                    continue;
                 const float angular = perp / t;
                 if (angular < bestAngular) {
                     bestAngular = angular;
@@ -278,15 +289,6 @@ EdgeHit FaceSelector::PickEdge(const Ray& ray) const {
         }
     }
 
-    // Occlusion: an edge behind a surface the same ray hits first isn't
-    // pickable. Edges on the hit face's own boundary/silhouette sit at the
-    // face's depth (within the pick radius), so give a proportional slack.
-    if (best.hit) {
-        const RayHit face = PickFace(ray);
-        if (face.hit && best.distance > face.distance * 1.05f + 1e-3f) {
-            return EdgeHit{};
-        }
-    }
     return best;
 }
 
