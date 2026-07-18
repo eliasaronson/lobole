@@ -482,6 +482,165 @@ TEST_CASE("femgpu bench: GPU CG vs CPU CG-IC on the bulky cube",
   }
 }
 
+// ---- GPU3 / MG0: the multigrid coarse space (pure CPU, no device) ---------
+
+#include "femgpu/TopoMultigrid.h"
+
+namespace {
+
+// Flat node coordinates for BuildMgSetup.
+std::vector<double> FlatNodes(const fem::FemMesh& mesh) {
+  std::vector<double> out;
+  out.reserve(mesh.nodes.size() * 3);
+  for (const auto& p : mesh.nodes) {
+    out.push_back(p.x);
+    out.push_back(p.y);
+    out.push_back(p.z);
+  }
+  return out;
+}
+
+// Eigen Jacobi-PCG (DiagonalPreconditioner) iteration count — the baseline
+// the MG0 gate is measured against.
+int JacobiIters(const gpu::SpmvSystem& sys, const std::vector<float>& scales,
+                const Eigen::VectorXd& f, double tol, int maxIter) {
+  std::vector<Eigen::Triplet<double>> trip;
+  for (int e = 0; e < sys.nElems; ++e) {
+    const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
+    const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
+    for (int a = 0; a < 30; ++a) {
+      if (dof[a] < 0) continue;
+      for (int b = 0; b < 30; ++b)
+        if (dof[b] >= 0)
+          trip.emplace_back(dof[a], dof[b],
+                            static_cast<double>(scales[e]) *
+                                static_cast<double>(ke[a * 30 + b]));
+    }
+  }
+  Eigen::SparseMatrix<double> A(sys.nFree, sys.nFree);
+  A.setFromTriplets(trip.begin(), trip.end());
+  Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
+                           Eigen::Lower | Eigen::Upper>
+      cg;  // default preconditioner = Jacobi
+  cg.setTolerance(tol);
+  cg.setMaxIterations(maxIter);
+  cg.compute(A);
+  const Eigen::VectorXd x = cg.solve(f);  // assignment forces evaluation
+  (void)x;
+  return static_cast<int>(cg.iterations());
+}
+
+}  // namespace
+
+TEST_CASE("femgpu MG0: rigid-body coarse space accelerates PCG",
+          "[femgpu][mg0]") {
+  // Pure CPU (fp64) — no compute device needed. The small always-on version
+  // of the MG0 gate: the V(1,1) cycle must converge and beat Jacobi-PCG
+  // clearly even on a small system.
+  fem::FemMesh mesh = GenerateBoxMesh(8, 4, 4, 80, 40, 40);
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 210000.0, 0.3);
+  const auto dofs =
+      fem::internal::BuildDofMap(static_cast<int>(mesh.nodes.size()), fixed);
+
+  gpu::MgSetup mg;
+  std::string err;
+  REQUIRE(gpu::BuildMgSetup(FlatNodes(mesh), sys, dofs.map, mg, &err));
+  INFO("aggregates: " << mg.nAgg << "  coarse DOFs: " << mg.nCoarse
+                      << "  fine DOFs: " << mg.nFree);
+  CHECK(mg.nCoarse < mg.nFree / 4);  // a real coarsening, not a copy
+
+  // P must reproduce rigid translation exactly: a coarse vector holding
+  // t=(1,0,0) for every aggregate prolongs to u_x=1 on every free DOF.
+  Eigen::VectorXd tc = Eigen::VectorXd::Zero(mg.nCoarse);
+  for (int a = 0; a < mg.nAgg; ++a) tc[6 * a + 0] = 1.0;
+  const Eigen::VectorXd u = mg.P * tc;
+  for (int n = 0; n < static_cast<int>(mesh.nodes.size()); ++n) {
+    if (dofs.map[3 * n + 0] >= 0)
+      REQUIRE_THAT(u[dofs.map[3 * n + 0]], WithinAbs(1.0, 1e-12));
+    if (dofs.map[3 * n + 1] >= 0)
+      REQUIRE_THAT(u[dofs.map[3 * n + 1]], WithinAbs(0.0, 1e-12));
+  }
+
+  // Solve with SIMP-like scales: MG-PCG converges, and in far fewer
+  // iterations than Jacobi-PCG on the identical system.
+  const std::vector<float> scales = SimpScales(sys.nElems, 777);
+  uint32_t state = 42;
+  Eigen::VectorXd f(sys.nFree);
+  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+
+  Eigen::VectorXd x;
+  gpu::MgRefStats stats;
+  REQUIRE(gpu::MgReferencePcg(sys, scales, mg, f, x, 1e-6, 2000, 3, &stats,
+                              &err));
+  const int jac = JacobiIters(sys, scales, f, 1e-6, 40000);
+  INFO("MG iters: " << stats.iterations << "  Jacobi iters: " << jac);
+  CHECK(stats.converged);
+  CHECK(stats.iterations * 4 < jac);  // conservative; the gate bar is 10x
+}
+
+TEST_CASE("femgpu MG0 gate: bulky cube, uniform / harsh / real SIMP fields",
+          "[.][mg0gate]") {
+  // THE GPU3 GATE (docs/topopt/gpu3-plan.md): on the 45k-DOF bench cube the
+  // coarse space must cut outer iterations >=10x vs Jacobi-PCG in fp64 —
+  // including on a REAL late-iteration SIMP field (crisp void/solid
+  // contrast), the case that defeated Chebyshev. Manual: femgpu_tests
+  // "[mg0gate]" (runs minutes — it optimizes the cube on the CPU first).
+  const double L = 80.0;
+  fem::FemMesh mesh = GenerateBoxMesh(12, 12, 12, L, L, L);
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+  const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 210000.0, 0.3);
+  const auto dofs =
+      fem::internal::BuildDofMap(static_cast<int>(mesh.nodes.size()), fixed);
+
+  gpu::MgSetup mg;
+  std::string err;
+  REQUIRE(gpu::BuildMgSetup(FlatNodes(mesh), sys, dofs.map, mg, &err));
+  WARN("system: " << sys.nFree << " fine DOFs -> " << mg.nCoarse
+                  << " coarse (" << mg.nAgg << " aggregates)");
+
+  uint32_t state = 42;
+  Eigen::VectorXd f(sys.nFree);
+  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+
+  auto compare = [&](const char* name, const std::vector<float>& scales) {
+    Eigen::VectorXd x;
+    gpu::MgRefStats stats;
+    REQUIRE(gpu::MgReferencePcg(sys, scales, mg, f, x, 1e-6, 4000, 3, &stats,
+                                &err));
+    const int jac = JacobiIters(sys, scales, f, 1e-6, 40000);
+    WARN(name << ": MG " << stats.iterations << " iters (converged="
+              << stats.converged << ") vs Jacobi " << jac << " -> "
+              << (stats.iterations > 0
+                      ? static_cast<double>(jac) / stats.iterations
+                      : 0.0)
+              << "x");
+  };
+
+  compare("uniform", std::vector<float>(sys.nElems, 1.0f));
+  compare("harsh-random", SimpScales(sys.nElems, 1000));
+
+  // A REAL late-iteration SIMP field: optimize the cube (CPU path, exact)
+  // and penalize the final densities.
+  fem::Material steel{210000.0, 0.3};
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, L, 1e-6);
+  load.magnitude = 2000.0;
+  load.direction = glm::dvec3(0, 0, -1);
+  fem::TopoParams params;
+  params.filterRadius = 18.0;
+  params.maxIterations = 25;
+  auto res = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
+  REQUIRE(res.has_value());
+  std::vector<float> simpScales(sys.nElems);
+  for (int e = 0; e < sys.nElems; ++e) {
+    const double xr = res->density[e];
+    simpScales[e] = static_cast<float>(1e-6 + xr * xr * xr * (1.0 - 1e-6));
+  }
+  compare("real-late-SIMP", simpScales);
+}
+
 TEST_CASE("femgpu bench: full SIMP loop GPU vs CPU on the bulky cube",
           "[.][gpubench]") {
   // The number that matters to the user: wall time of TopologyOptimize on

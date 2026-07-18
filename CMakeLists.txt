@@ -452,7 +452,8 @@ if(GLSLC)
         # The TopoLinearSolver adapter packs element matrices with the shared
         # fem element math (header-inline), so it needs Eigen but not the
         # designer_core library itself.
-        target_sources(fem_gpu PRIVATE src/femgpu/TopoGpuSolver.cpp)
+        target_sources(fem_gpu PRIVATE src/femgpu/TopoGpuSolver.cpp
+                                       src/femgpu/TopoMultigrid.cpp)
         target_link_libraries(fem_gpu PUBLIC Eigen3::Eigen)
         target_compile_definitions(fem_gpu PRIVATE HAVE_FEM_SOLVER)
         # The app auto-selects the GPU solver for topology runs when a usable
