@@ -130,6 +130,41 @@ TEST_CASE("X alignment combines with a horizontal segment (close the rectangle)"
   CHECK_THAT(s.uv.y, WithinAbs(3.0f, 1e-5f)); // = start Y
 }
 
+TEST_CASE("Infer snaps to circle, arc and ellipse vertices", "[inference]") {
+  // Curve centres/endpoints are coincident and alignment candidates just like
+  // line endpoints (any draw tool can snap to them).
+  std::vector<sketch::Entity> e = {
+      sketch::Circle{{3.0f, 4.0f}, 1.0, 1},
+      sketch::Ellipse{{-5.0f, 2.0f}, 2.0, 1.0, 0.0, 2}};
+
+  // Coincident with the circle centre.
+  sketch::Snap c = sketch::InferPoint(e, {3.05f, 4.05f}, std::nullopt, 0, kScale);
+  REQUIRE(c.coincident.has_value());
+  CHECK(c.coincident->entity == 1u);
+  CHECK(c.coincident->which == 0);
+
+  // Coincident with the ellipse centre.
+  sketch::Snap el = sketch::InferPoint(e, {-4.95f, 2.05f}, std::nullopt, 0, kScale);
+  REQUIRE(el.coincident.has_value());
+  CHECK(el.coincident->entity == 2u);
+
+  // Vertical alignment (shared X) with the circle centre from far below.
+  sketch::Snap ax = sketch::InferPoint(e, {3.05f, -6.0f}, std::nullopt, 0, kScale);
+  CHECK_FALSE(ax.coincident.has_value());
+  REQUIRE(ax.alignShareX.has_value());
+  CHECK(ax.alignShareX->entity == 1u);
+  CHECK_THAT(ax.uv.x, WithinAbs(3.0f, 1e-5f));
+
+  // Coincident with an arc endpoint: quarter arc from 0 to pi/2 about (10,0),
+  // radius 2 → start vertex at (12,0).
+  std::vector<sketch::Entity> a = {
+      sketch::Arc{{10.0f, 0.0f}, 2.0, 0.0, 1.5707963, 3}};
+  sketch::Snap as = sketch::InferPoint(a, {12.05f, 0.05f}, std::nullopt, 0, kScale);
+  REQUIRE(as.coincident.has_value());
+  CHECK(as.coincident->entity == 3u);
+  CHECK(as.coincident->which == 1); // start point
+}
+
 TEST_CASE("Infer snaps to the origin datum", "[inference][datum]") {
   std::vector<sketch::Entity> e; // empty sketch — the origin is always present
   sketch::Snap s = sketch::InferPoint(e, {0.3f, -0.2f}, std::nullopt, 0, kScale);

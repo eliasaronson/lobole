@@ -13,8 +13,9 @@ constexpr float kAngleSinTol = 0.0349f; // sin(2 deg): parallel/perpendicular
 
 float Cross(glm::vec2 a, glm::vec2 b) { return a.x * b.y - a.y * b.x; }
 
-// Visits every named vertex of an entity: Point(0), Line(0,1), Circle centre(0),
-// Arc centre(0)/start(1)/end(2) — the same candidate set as coincident.
+// Visits every named vertex of an entity: Point(0), Line(0,1), Circle/Ellipse
+// centre(0), Arc centre(0)/start(1)/end(2) — the coincident and alignment
+// candidate set (each is a real solver point, so constraints can bind to it).
 template <class F>
 void ForEachVertex(const Entity& e, F fn) {
   if (auto* p = std::get_if<Point>(&e))
@@ -28,7 +29,8 @@ void ForEachVertex(const Entity& e, F fn) {
     fn(uint8_t{0}, a->center);
     fn(uint8_t{1}, ArcPointUV(*a, 1));
     fn(uint8_t{2}, ArcPointUV(*a, 2));
-  }
+  } else if (auto* el = std::get_if<Ellipse>(&e))
+    fn(uint8_t{0}, el->center);
 }
 
 // Distance from p to segment [a,b], plus the closest point on it.
@@ -57,26 +59,14 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
     const uint32_t id = EntityId(e);
     if (id == skipId)
       continue;
-    auto consider = [&](uint8_t which, glm::vec2 p) {
+    ForEachVertex(e, [&](uint8_t which, glm::vec2 p) {
       float d = glm::length(uv - p);
       if (d < bestPt) {
         bestPt = d;
         s.coincident = PointRef{id, which};
         s.uv = p;
       }
-    };
-    if (auto* p = std::get_if<Point>(&e))
-      consider(0, p->p);
-    else if (auto* l = std::get_if<Line>(&e)) {
-      consider(0, l->a);
-      consider(1, l->b);
-    } else if (auto* c = std::get_if<Circle>(&e))
-      consider(0, c->center);
-    else if (auto* a = std::get_if<Arc>(&e)) {
-      consider(0, a->center);
-      consider(1, ArcPointUV(*a, 1)); // start
-      consider(2, ArcPointUV(*a, 2)); // end
-    }
+    });
   }
   // Datum: the origin is always a coincident candidate.
   if (glm::length(uv) < bestPt) {

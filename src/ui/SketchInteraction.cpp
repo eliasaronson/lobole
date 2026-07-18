@@ -47,17 +47,6 @@ std::optional<glm::vec2> RayToPlaneUV(const Ray& ray, const SketchPlane& plane) 
   return plane.WorldToPlane(world);
 }
 
-// Commits an entity to the active sketch as one undoable ModifyFeatureCommand.
-void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
-                  const sketch::Entity& entity) {
-  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
-  sketch.AddEntity(entity); // stamps a stable id
-  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
-  state.commands->Execute(
-      std::make_unique<ModifyFeatureCommand>(index, before, after),
-      *state.document);
-}
-
 // Approximate pixels per UV unit at `uv` (from the current zoom), for turning
 // the inference's pixel tolerances into UV distances.
 float PixelsPerUV(AppState& state, const SketchPlane& plane, glm::vec2 uv) {
@@ -122,6 +111,47 @@ void ApplyInferred(SketchFeature& sketch,
   }
 }
 
+// Defining points of an entity eligible for snap inference — the subset of
+// its vertices that are real solver points: Point / Circle centre / Ellipse
+// centre = {0}, Arc = centre/start/end. Lines go through CommitLine instead.
+std::vector<uint8_t> InferrablePoints(const sketch::Entity& entity) {
+  if (std::holds_alternative<sketch::Arc>(entity))
+    return {0, 1, 2};
+  if (std::holds_alternative<sketch::Line>(entity))
+    return {};
+  return {0};
+}
+
+// Commits an entity to the active sketch as one undoable ModifyFeatureCommand.
+// With `infer`, each defining point is re-inferred against the existing
+// geometry (the clicks were already cursor-snapped, so this re-finds the same
+// targets) and the implied coincident / point-on-line / align constraints are
+// applied — the non-line twin of CommitLine's inference.
+void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
+                  const sketch::Entity& entity, bool infer) {
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  std::vector<std::pair<uint8_t, sketch::Snap>> snaps;
+  if (infer) {
+    for (uint8_t which : InferrablePoints(entity)) {
+      const glm::vec2 p = sketch::EntityPointUV(entity, which);
+      const float ppu = PixelsPerUV(state, sketch.plane, p);
+      snaps.emplace_back(
+          which, sketch::InferPoint(sketch.entities, p, std::nullopt, 0, ppu));
+    }
+  }
+  const uint32_t id = sketch.AddEntity(entity); // stamps a stable id
+  if (!snaps.empty()) {
+    std::vector<sketch::Constraint> candidates;
+    for (const auto& [which, snap] : snaps)
+      SnapPointConstraints(snap, id, which, candidates);
+    ApplyInferred(sketch, candidates);
+  }
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+}
+
 // Commits a line a->b with auto-constraint inference: snaps each endpoint to
 // nearby geometry and applies the implied coincident / point-on-line / H-V /
 // parallel-perpendicular constraints (each kept only if it bites). `infer`
@@ -152,11 +182,28 @@ void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
 }
 
 // Commits a rectangle (4 lines + corner/H/V constraints) as one undo record,
-// then solves so the shape settles.
+// then solves so the shape settles. With `infer`, the two clicked corners are
+// inferred against the pre-existing geometry (before the four sides are added,
+// so the rectangle can't snap to itself) and the implied constraints applied.
 void CommitRectangle(AppState& state, SketchFeature& sketch, size_t index,
-                     glm::vec2 c1, glm::vec2 c2) {
+                     glm::vec2 c1, glm::vec2 c2, bool infer) {
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
-  sketch.AddRectangle(c1, c2);
+  std::optional<sketch::Snap> s1, s2;
+  if (infer) {
+    s1 = sketch::InferPoint(sketch.entities, c1, std::nullopt, 0,
+                            PixelsPerUV(state, sketch.plane, c1));
+    s2 = sketch::InferPoint(sketch.entities, c2, std::nullopt, 0,
+                            PixelsPerUV(state, sketch.plane, c2));
+  }
+  const auto ids = sketch.AddRectangle(c1, c2);
+  if (infer) {
+    // Clicked corners: c1 = bottom line's start (l0,0), c2 = top line's start
+    // (l2,0) — see AddRectangle's corner layout.
+    std::vector<sketch::Constraint> candidates;
+    SnapPointConstraints(*s1, ids[0], 0, candidates);
+    SnapPointConstraints(*s2, ids[2], 0, candidates);
+    ApplyInferred(sketch, candidates);
+  }
   sketch::Solver solver;
   solver.Load(sketch);
   if (solver.Solve().ok)
@@ -584,15 +631,23 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     return true;
   glm::vec2 uv = *uvOpt;
 
-  // Auto-constraint inference for the Line tool: snap the cursor to nearby
+  // Auto-constraint inference for the drawing tools: snap the cursor to nearby
   // geometry so the preview and the click both use the snapped point, and stash
   // the result for the ghost-glyph overlay. Ctrl or the toggle suppresses it.
-  if (edit.tool == SketchTool::Line && edit.autoConstrain &&
-      !ImGui::GetIO().KeyCtrl) {
+  // Segment-level snaps (H/V/parallel/perp against the pending other end) only
+  // apply to the Line tool; the other tools snap point-by-point.
+  const bool drawTool =
+      edit.tool == SketchTool::Point || edit.tool == SketchTool::Line ||
+      edit.tool == SketchTool::Circle || edit.tool == SketchTool::Rectangle ||
+      edit.tool == SketchTool::Arc || edit.tool == SketchTool::ArcThreePoint ||
+      edit.tool == SketchTool::Ellipse;
+  const bool infer = drawTool && edit.autoConstrain && !ImGui::GetIO().KeyCtrl;
+  if (infer) {
     const float ppu = PixelsPerUV(state, sketch->plane, uv);
     std::optional<glm::vec2> other =
-        edit.hasPendingPoint ? std::optional<glm::vec2>(edit.pendingPoint)
-                             : std::nullopt;
+        (edit.tool == SketchTool::Line && edit.hasPendingPoint)
+            ? std::optional<glm::vec2>(edit.pendingPoint)
+            : std::nullopt;
     sketch::Snap snap =
         sketch::InferPoint(sketch->entities, uv, other, 0, ppu);
     uv = snap.uv;
@@ -838,7 +893,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     if (edit.tool == SketchTool::Point) {
-      CommitEntity(state, *sketch, index, sketch::Point{uv});
+      CommitEntity(state, *sketch, index, sketch::Point{uv}, infer);
     } else if (edit.tool == SketchTool::Arc ||
                edit.tool == SketchTool::ArcThreePoint) {
       // Both arc tools are 3-click: two pending points, then commit on the
@@ -857,7 +912,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         else
           arc = sketch::ArcFromThreePoints(edit.pendingPoint, uv, edit.pendingPoint2);
         if (arc)
-          CommitEntity(state, *sketch, index, *arc);
+          CommitEntity(state, *sketch, index, *arc, infer);
         edit.hasPendingPoint = false;
         edit.hasPendingPoint2 = false;
       }
@@ -873,7 +928,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         sketch::Ellipse el =
             sketch::EllipseFromClicks(edit.pendingPoint, edit.pendingPoint2, uv);
         if (el.rMajor > 1e-6 && el.rMinor > 1e-6)
-          CommitEntity(state, *sketch, index, el);
+          CommitEntity(state, *sketch, index, el, infer);
         edit.hasPendingPoint = false;
         edit.hasPendingPoint2 = false;
       }
@@ -884,15 +939,14 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       const glm::vec2 a = edit.pendingPoint;
       switch (edit.tool) {
       case SketchTool::Line:
-        CommitLine(state, *sketch, index, a, uv,
-                   edit.autoConstrain && !ImGui::GetIO().KeyCtrl);
+        CommitLine(state, *sketch, index, a, uv, infer);
         break;
       case SketchTool::Circle:
         CommitEntity(state, *sketch, index,
-                     sketch::Circle{a, glm::length(uv - a)});
+                     sketch::Circle{a, glm::length(uv - a)}, infer);
         break;
       case SketchTool::Rectangle:
-        CommitRectangle(state, *sketch, index, a, uv);
+        CommitRectangle(state, *sketch, index, a, uv, infer);
         break;
       default:
         break;
