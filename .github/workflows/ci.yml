@@ -43,4 +43,5 @@ jobs:
         run: cmake --build build -j"$(nproc)"
 
       - name: Test (headless — everything without the gui label)
-        run: ctest --test-dir build -LE gui --output-on-failure
+        # Parallel is safe: GPU-contending tests hold a shared RESOURCE_LOCK.
+        run: ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure

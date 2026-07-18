@@ -775,6 +775,9 @@ void printUsage(const char *programName) {
   std::cout << "  -h, --help           Show this help message" << std::endl;
   std::cout << "  --gui-tests          Run GUI test suite and exit"
             << std::endl;
+  std::cout << "  --gui-test-filter <pattern>  Run only matching GUI tests "
+               "(e.g. \"fillet\", \"selection_,tree_\"; implies --gui-tests)"
+            << std::endl;
   std::cout << "  --remote <port>      Enable JSON-RPC remote control on "
                "127.0.0.1:<port>"
             << std::endl;
@@ -796,6 +799,7 @@ struct CommandLineArgs {
   std::string fileToLoad;
   spdlog::level::level_enum logLevel = spdlog::level::info;
   bool runGuiTests = false;
+  std::string guiTestFilter = "all";
   bool headless = false;
   bool hidden = false;
   int remotePort = 0;
@@ -823,6 +827,14 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
       }
     } else if (arg == "--gui-tests") {
       args.runGuiTests = true;
+    } else if (arg == "--gui-test-filter") {
+      if (i + 1 < argc) {
+        args.guiTestFilter = argv[++i];
+        args.runGuiTests = true;
+      } else {
+        std::cerr << "--gui-test-filter requires a pattern" << std::endl;
+        exit(1);
+      }
     } else if (arg == "--headless") {
       args.headless = true;
     } else if (arg == "--hidden") {
@@ -1136,7 +1148,10 @@ int main(int argc, char **argv) {
   ImGuiTestEngine_Start(testEngine, ImGui::GetCurrentContext());
   RegisterGuiTests(testEngine, &g_App);
   if (args.runGuiTests) {
-    ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests, "all");
+    // The filter matches the test engine's syntax: substrings against
+    // "category/name", comma-separated, "-" to exclude ("all" = everything).
+    ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests,
+                               args.guiTestFilter.c_str());
   }
 
   // Remote control (opt-in)

@@ -57,6 +57,9 @@ target_compile_definitions(designer_tests PRIVATE
 
 include(CTest)
 include(Catch)
+# Discovered cases are individually registered with ctest, so the suite can
+# run parallel (`ctest -j$(nproc)`): every case uses distinct temp filenames
+# and the golden corpus is read-only.
 catch_discover_tests(designer_tests)
 
 # GPU solver tests live in their own binary so designer_tests stays free of
@@ -67,7 +70,10 @@ if(TARGET fem_gpu)
     target_link_libraries(femgpu_tests PRIVATE fem_gpu designer_core
                           Catch2::Catch2WithMain)
     target_include_directories(femgpu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    catch_discover_tests(femgpu_tests)
+    # GPU cases contend for the compute device — a shared RESOURCE_LOCK
+    # serializes them among themselves while the CPU suite runs parallel
+    # around them (the reason `ctest -j` is safe repo-wide).
+    catch_discover_tests(femgpu_tests PROPERTIES RESOURCE_LOCK gpu)
 endif()
 
 # GUI smoke tests drive the real app through ImGui Test Engine.
@@ -172,7 +178,10 @@ set_tests_properties(fem_smoke PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 add_test(NAME topo_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/topo_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(topo_smoke PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77)
+# topo runs the in-app GPU solver when a device is present: same lock as the
+# femgpu cases so it never contends with them under `ctest -j`.
+set_tests_properties(topo_smoke PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
+                     RESOURCE_LOCK gpu)
 
 # Models a bracket through the pythonic client (S3).
 add_test(NAME pyclient_smoke

@@ -8,8 +8,9 @@
 # desktop's state. The NVIDIA GPU renders and presents to Xvfb fine (verified
 # RTX 4060, IMMEDIATE present mode, 43/43 in ~15 s).
 #
-# Usage:  ./tools/gui-tests-xvfb.sh            # gui_smoke (the ImGui suite)
-#         ./tools/gui-tests-xvfb.sh -L gui     # all GUI-labeled ctest tests
+# Usage:  ./tools/gui-tests-xvfb.sh              # gui_smoke (the ImGui suite)
+#         ./tools/gui-tests-xvfb.sh -f fillet    # only matching test cases
+#         ./tools/gui-tests-xvfb.sh -L gui       # all GUI-labeled ctest tests
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,6 +22,11 @@ else
   XVFB_RUN="$(nix-shell -p xvfb-run --run 'which xvfb-run' | tail -1)"
 fi
 
+if [ "${1:-}" = "-f" ]; then
+  exec "$XVFB_RUN" -a -s '-screen 0 1600x1000x24' \
+    nix-shell "$ROOT/shell.nix" --run \
+    "cd '$ROOT/build' && ./designer --gui-tests --hidden --gui-test-filter '$2'"
+fi
 if [ "$#" -gt 0 ]; then
   exec "$XVFB_RUN" -a -s '-screen 0 1600x1000x24' \
     nix-shell "$ROOT/shell.nix" --run "cd '$ROOT/build' && ctest $* --output-on-failure"
