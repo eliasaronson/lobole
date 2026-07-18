@@ -27,6 +27,12 @@ Feature* SelectedFeature(AppState& state, size_t* indexOut = nullptr);
 int SelectedFeatureIndexOrMinus1(AppState& state);         // RPC back-compat
 void SelectFeature(AppState& state, uint64_t featureId);   // replaces the set
 void SelectFeatureByIndex(AppState& state, size_t index);
+// Assembly-tab selection through the same set (U1d). Occurrence and mate
+// items coexist (the panel lists select independently, as the old separate
+// fields did): each setter replaces only its own kind; 0 removes it.
+uint64_t SelectedOccurrenceId(const AppState& state);
+uint64_t SelectedMateId(const AppState& state);
+void SelectMate(AppState& state, uint64_t mateId);
 // Drops items whose referent no longer exists (deleted feature, undone
 // creation, File > New). Called once per frame before the panels draw.
 void PruneSelection(AppState& state);

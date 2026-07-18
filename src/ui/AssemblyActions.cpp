@@ -80,15 +80,18 @@ bool RedoAssembly(AppState& state) {
 }
 
 void SelectOccurrence(AppState& state, uint64_t occId) {
-  state.selectedOccurrence = occId;
-  if (!state.meshRenderer) return;
-  state.meshRenderer->ClearFaceHighlight();
-  if (occId == 0) return;
-  // Highlight every instance belonging to the occurrence (a multi-body part
-  // has one instance per body).
-  for (const DocumentRenderMesh& m : state.documentMeshes)
-    if (m.occurrenceId == occId)
-      state.meshRenderer->HighlightInstance(m.meshId);
+  // Occurrence items replace only their own kind (a selected mate stays, as
+  // with the old separate fields). Highlights are applied by the per-frame
+  // Selection projection (SyncSelectionHighlights), not here.
+  auto& items = state.selection.items;
+  items.erase(std::remove_if(items.begin(), items.end(),
+                             [](const SelectionItem& it) {
+                               return it.kind ==
+                                      SelectionItem::Kind::Occurrence;
+                             }),
+              items.end());
+  if (occId != 0)
+    items.push_back({SelectionItem::Kind::Occurrence, occId, {}});
 }
 
 bool EnterInContextEdit(AppState& state, uint64_t occurrenceId) {
@@ -351,7 +354,7 @@ void AcceptMateTool(AppState& state) {
   const uint64_t id = state.mateTool.previewMateId;
   state.mateTool = AppState::MateToolState{}; // keep the mate; clear the tool
   if (id)
-    state.selectedMate = id;
+    SelectMate(state, id);
 }
 
 void CancelMateTool(AppState& state) {
@@ -456,9 +459,10 @@ bool RotateAngle(const glm::vec3& O, const glm::vec3& D, const glm::vec3& C,
 
 // The gizmo-anchored occurrence: selected, non-fixed, mate tool idle. null else.
 Occurrence* GizmoOccurrence(AppState& state) {
-  if (!state.assembly || !state.selectedOccurrence || state.mateTool.active)
+  const uint64_t occId = SelectedOccurrenceId(state);
+  if (!state.assembly || occId == 0 || state.mateTool.active)
     return nullptr;
-  Occurrence* o = state.assembly->FindById(state.selectedOccurrence);
+  Occurrence* o = state.assembly->FindById(occId);
   if (!o) return nullptr;
   // Explode mode drags a view offset, not the placement — even a fixed base
   // part explodes.
@@ -616,7 +620,7 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
 
   if (g.active) {
     Occurrence* occ =
-        state.assembly ? state.assembly->FindById(state.selectedOccurrence)
+        state.assembly ? state.assembly->FindById(SelectedOccurrenceId(state))
                        : nullptr;
     Mate* mate = g.mateId ? state.assembly->FindMateById(g.mateId) : nullptr;
     if (released || !down || !occ || (g.mateId && !mate)) {
@@ -884,9 +888,8 @@ void SyncAssemblyRenderers(AppState& state) {
           {meshId, outlineId, bi, occ.id, sb.edges});
     }
   }
-  // Resync recreates instances (highlight reset), so re-apply the selection.
-  if (state.selectedOccurrence)
-    SelectOccurrence(state, state.selectedOccurrence);
+  // (Highlights re-apply themselves: they are a per-frame projection of the
+  // Selection now — see SyncSelectionHighlights.)
   LOG_INFO("Assembly synced: {} occurrences",
            state.assembly->OccurrenceCount());
 }

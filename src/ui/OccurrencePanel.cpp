@@ -82,12 +82,12 @@ void DrawMatesSection(AppState& state) {
         ImGui::SetTooltip("%s", mate.error.c_str());
       ImGui::SameLine();
     }
-    if (ImGui::Selectable(label.c_str(), state.selectedMate == mate.id))
-      state.selectedMate = mate.id;
+    if (ImGui::Selectable(label.c_str(), SelectedMateId(state) == mate.id))
+      SelectMate(state, mate.id);
     ImGui::PopID();
   }
 
-  Mate* sel = state.selectedMate ? asmDoc.FindMateById(state.selectedMate)
+  Mate* sel = SelectedMateId(state) ? asmDoc.FindMateById(SelectedMateId(state))
                                  : nullptr;
   if (!sel)
     return;
@@ -165,7 +165,7 @@ void DrawMatesSection(AppState& state) {
     const uint64_t id = sel->id;
     SnapshotAssembly(state);
     asmDoc.RemoveMate(id);
-    state.selectedMate = 0;
+    SelectMate(state, 0);
     SolveActiveAssembly(state);
   }
 }
@@ -386,13 +386,13 @@ void DrawOccurrencePanel(AppState& state) {
     const std::string label =
         (o.name.empty() ? PartNameById(state, o.partId) : o.name) +
         (o.fixed ? "  (fixed)" : "");
-    if (ImGui::Selectable(label.c_str(), state.selectedOccurrence == o.id))
+    if (ImGui::Selectable(label.c_str(), SelectedOccurrenceId(state) == o.id))
       SelectOccurrence(state, o.id);
     ImGui::PopID();
   }
 
-  Occurrence* sel = state.selectedOccurrence
-                        ? asmDoc.FindById(state.selectedOccurrence)
+  Occurrence* sel = SelectedOccurrenceId(state)
+                        ? asmDoc.FindById(SelectedOccurrenceId(state))
                         : nullptr;
   if (sel) {
     ImGui::SeparatorText("Selected occurrence");

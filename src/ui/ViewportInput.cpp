@@ -202,13 +202,16 @@ void HandleViewportInput(AppState& state) {
   if (!state.faceSelector || !state.meshRenderer)
     return;
 
-  // Assembly tab: pick whole occurrences — click selects (highlights every
-  // instance), double-click enters the referenced part in context (assembly
-  // ghosted, A4). While the mate tool is arming, clicks pick connector faces.
+  // Assembly tab: occurrences select through the pipeline; double-click
+  // enters the referenced part in context (assembly ghosted, A4). While the
+  // mate tool is arming, clicks pick connector faces (its own picker —
+  // connector frames need the (occurrence, face) pair, see U1d notes).
   if (state.assembly) {
     // Escape cancels an in-progress mate.
-    if (state.mateTool.active && ImGui::IsKeyPressed(ImGuiKey_Escape))
+    if (state.mateTool.active && esc) {
       CancelMateTool(state);
+      escUsed = true;
+    }
 
     // The drag gizmo gets first shot: a live drag continues even off-viewport,
     // and a click on a handle starts one (consuming the click so it doesn't
@@ -240,26 +243,16 @@ void HandleViewportInput(AppState& state) {
       return;
     }
 
-    if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-      Ray ray = state.faceSelector->ScreenToWorldRay(
-          io.MousePos.x - state.viewportPos.x,
-          io.MousePos.y - state.viewportPos.y,
-          static_cast<int>(state.viewportSize.x),
-          static_cast<int>(state.viewportSize.y), *state.camera);
-      const RayHit hit = state.faceSelector->PickFace(ray);
-      uint64_t occId = 0;
-      if (hit.hit) {
-        for (const DocumentRenderMesh& m : state.documentMeshes)
-          if (m.meshId == hit.meshId) { occId = m.occurrenceId; break; }
-      }
-      if (occId && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-        // Enter the part IN CONTEXT (A4): the part tab with the rest of the
-        // assembly ghosted around it. Falls back to nothing on a dangling ref.
+    // Double-click enters in context: the first click of the pair already
+    // selected the occurrence via the pipeline; consume the second so it
+    // doesn't also cycle.
+    if (overViewport && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+      if (const uint64_t occId = SelectedOccurrenceId(state))
         EnterInContextEdit(state, occId);
-      } else {
-        SelectOccurrence(state, occId); // 0 clears the selection
-      }
+      return;
     }
+
+    HandleSelectionInput(state, overViewport, /*allowEscapeClear=*/!escUsed);
     return;
   }
 

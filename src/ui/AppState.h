@@ -458,8 +458,6 @@ struct AppState {
     int cycle = 0;
   };
   PickState pick;
-  uint64_t selectedOccurrence = 0; // active assembly's selected occurrence (0 = none)
-  uint64_t selectedMate = 0;       // active assembly's selected mate (0 = none)
   MateToolState mateTool;
   GizmoDrag gizmoDrag;
   // Feature being previewed (in the document + rendered, but NOT on the undo

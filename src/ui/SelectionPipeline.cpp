@@ -48,6 +48,19 @@ struct Candidate {
 std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
                                   uint32_t kinds) {
   std::vector<Candidate> out;
+  if (kinds & KindBit(SelectionItem::Kind::Occurrence)) {
+    // Assembly tab: a face hit selects the whole occurrence it belongs to.
+    const RayHit face = state.faceSelector->PickFace(ray);
+    if (face.hit) {
+      for (const DocumentRenderMesh& m : state.documentMeshes) {
+        if (m.meshId == face.meshId && m.occurrenceId != 0) {
+          out.push_back({{SelectionItem::Kind::Occurrence, m.occurrenceId, {}},
+                         face.meshId, face.faceIndex});
+          break;
+        }
+      }
+    }
+  }
   if (kinds & KindBit(SelectionItem::Kind::Edge)) {
     const EdgeHit edge = state.faceSelector->PickEdge(ray);
     if (edge.hit) {
@@ -176,8 +189,8 @@ const char* ArmedPrompt(AppState& state) {
 
 void HandleSelectionInput(AppState& state, bool overViewport,
                           bool allowEscapeClear) {
-  if (!state.faceSelector || !state.meshRenderer || !state.document ||
-      !state.camera) {
+  if (!state.faceSelector || !state.meshRenderer || !state.camera ||
+      (!state.document && !state.assembly)) {
     return;
   }
   ImGuiIO& io = ImGui::GetIO();
@@ -198,8 +211,10 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
       static_cast<int>(state.viewportSize.x),
       static_cast<int>(state.viewportSize.y), *state.camera);
+  const uint32_t defaultKinds =
+      state.assembly ? KindBit(SelectionItem::Kind::Occurrence) : kDefaultKinds;
   const std::vector<Candidate> candidates =
-      Candidates(state, ray, armed ? armed->kinds : kDefaultKinds);
+      Candidates(state, ray, armed ? armed->kinds : defaultKinds);
 
   // Hover preview: what a click would take (the top candidate). While a
   // blend collects edges, mirror the edge hover into its own state — the
@@ -216,7 +231,10 @@ void HandleSelectionInput(AppState& state, bool overViewport,
         state.edgePick.hoverMeshId = top.meshId;
         state.edgePick.hoverEdgeIndex = top.index;
       }
-    } else if (top.item.kind == SelectionItem::Kind::Face) {
+    } else if (top.item.kind == SelectionItem::Kind::Face ||
+               top.item.kind == SelectionItem::Kind::Occurrence) {
+      // Occurrences hover via the hit face's range for now (a whole-instance
+      // hover channel is renderer work, U5).
       uint32_t first = 0, count = 0;
       state.faceSelector->SetHoveredFace(top.meshId, top.index);
       if (state.faceSelector->GetFaceVertexRange(top.meshId, top.index, first,
@@ -240,8 +258,14 @@ void HandleSelectionInput(AppState& state, bool overViewport,
   state.pick.lastClickPos = pos;
 
   if (candidates.empty()) {
-    if (!io.KeyCtrl)
-      state.selection.Clear(); // click empty space = deselect
+    if (!io.KeyCtrl) {
+      // Click empty space = deselect. On an assembly tab only the
+      // occurrence kind clears (a selected mate stays, as before U1d).
+      if (state.assembly)
+        SelectOccurrence(state, 0);
+      else
+        state.selection.Clear();
+    }
     state.pick.cycle = 0;
     return;
   }
@@ -256,8 +280,12 @@ void HandleSelectionInput(AppState& state, bool overViewport,
                            ? (state.pick.cycle + 1) %
                                  static_cast<int>(candidates.size())
                            : 0;
-    state.selection.Replace(
-        candidates[static_cast<size_t>(state.pick.cycle)].item);
+    const SelectionItem& chosen =
+        candidates[static_cast<size_t>(state.pick.cycle)].item;
+    if (chosen.kind == SelectionItem::Kind::Occurrence)
+      SelectOccurrence(state, chosen.id); // kind-scoped: mate item survives
+    else
+      state.selection.Replace(chosen);
   }
 
   // Shift+click: also align the camera to the picked face (the pre-U1 Ctrl
@@ -277,6 +305,21 @@ void HandleSelectionInput(AppState& state, bool overViewport,
 void SyncSelectionHighlights(AppState& state) {
   if (!state.faceSelector || !state.meshRenderer)
     return;
+  // Assembly tab: highlight every instance of each selected occurrence.
+  // (ClearFaceHighlight resets instance highlights too, which is why this
+  // must be part of the projection — an imperative HighlightInstance call
+  // would be wiped the next frame.)
+  if (state.assembly) {
+    state.meshRenderer->ClearFaceHighlight();
+    for (const SelectionItem& it : state.selection.items) {
+      if (it.kind != SelectionItem::Kind::Occurrence)
+        continue;
+      for (const DocumentRenderMesh& m : state.documentMeshes)
+        if (m.occurrenceId == it.id)
+          state.meshRenderer->HighlightInstance(m.meshId);
+    }
+    return;
+  }
   // Single face-highlight slot: the most recent Face item shows.
   const SelectionItem* lastFace = nullptr;
   for (const SelectionItem& it : state.selection.items)

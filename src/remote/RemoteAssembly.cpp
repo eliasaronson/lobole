@@ -196,7 +196,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     const uint64_t id = p.value("id", uint64_t{0}); // 0 clears the selection
     if (id && !state.assembly->FindMateById(id))
       throw std::runtime_error("no such mate");
-    state.selectedMate = id;
+    ui::SelectMate(state, id);
     return json{{"selected", id}};
   }
   if (m == "select_occurrence") {

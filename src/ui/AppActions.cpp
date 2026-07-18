@@ -88,17 +88,56 @@ void SelectFeatureByIndex(AppState& state, size_t index) {
   SelectFeature(state, state.document->GetFeature(index)->GetId());
 }
 
+uint64_t SelectedOccurrenceId(const AppState& state) {
+  const SelectionItem* it =
+      state.selection.First(SelectionItem::Kind::Occurrence);
+  return it != nullptr ? it->id : 0;
+}
+
+uint64_t SelectedMateId(const AppState& state) {
+  const SelectionItem* it = state.selection.First(SelectionItem::Kind::Mate);
+  return it != nullptr ? it->id : 0;
+}
+
+namespace {
+// Replace only the given kind's items (occurrence and mate selections are
+// independent, as their pre-U1 fields were); id 0 just removes the kind.
+void ReplaceKind(Selection& sel, SelectionItem::Kind kind, uint64_t id) {
+  auto& items = sel.items;
+  items.erase(std::remove_if(
+                  items.begin(), items.end(),
+                  [&](const SelectionItem& it) { return it.kind == kind; }),
+              items.end());
+  if (id != 0)
+    items.push_back({kind, id, {}});
+}
+} // namespace
+
+void SelectMate(AppState& state, uint64_t mateId) {
+  ReplaceKind(state.selection, SelectionItem::Kind::Mate, mateId);
+}
+
 void PruneSelection(AppState& state) {
   auto& items = state.selection.items;
-  items.erase(std::remove_if(items.begin(), items.end(),
-                             [&](const SelectionItem& it) {
-                               if (it.kind != SelectionItem::Kind::Feature)
-                                 return false; // other kinds: later phases
-                               return !state.document ||
-                                      state.document->FindFeatureById(it.id) ==
-                                          nullptr;
-                             }),
-              items.end());
+  items.erase(
+      std::remove_if(
+          items.begin(), items.end(),
+          [&](const SelectionItem& it) {
+            switch (it.kind) {
+            case SelectionItem::Kind::Feature:
+              return !state.document ||
+                     state.document->FindFeatureById(it.id) == nullptr;
+            case SelectionItem::Kind::Occurrence:
+              return !state.assembly ||
+                     state.assembly->FindById(it.id) == nullptr;
+            case SelectionItem::Kind::Mate:
+              return !state.assembly ||
+                     state.assembly->FindMateById(it.id) == nullptr;
+            default:
+              return false; // geometry refs resolve lazily; stale = no-op
+            }
+          }),
+      items.end());
 }
 
 namespace {
@@ -577,8 +616,7 @@ void ActivateSlot(AppState& state, size_t index) {
 }
 // Shared reset after a tab switch/create.
 void ResetActiveTabUiState(AppState& state) {
-  state.selection.Clear();
-  state.selectedOccurrence = 0;
+  state.selection.Clear(); // features, occurrences and mates alike
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};
   // Any tab change exits in-context editing (EnterInContextEdit re-arms it
