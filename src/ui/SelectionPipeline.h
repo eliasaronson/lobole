@@ -12,7 +12,16 @@ namespace ui {
 // selection (empty space clears), Ctrl+click toggles, clicking the same spot
 // again cycles the overlapping candidates, Shift+click also aligns the
 // camera to the picked face (the old Ctrl gesture — Ctrl now multi-selects).
-void HandleSelectionInput(AppState& state, bool overViewport);
+// While a tool is armed (blend edge collection, measure, sim BC/keep — U1c),
+// its filter restricts the candidates and the resolved pick is routed to the
+// tool instead of the Selection. `allowEscapeClear` is false when a tool
+// already consumed this frame's Escape (disarming), so the selection isn't
+// also cleared by the same key press.
+void HandleSelectionInput(AppState& state, bool overViewport,
+                          bool allowEscapeClear = true);
+
+// The armed context's status-bar prompt, or null when nothing is armed.
+const char* ArmedPrompt(AppState& state);
 
 // Renderer highlights as a per-frame projection of state.selection — the one
 // sync point that replaces scattered SetSelectedFace/SetFaceHighlight pairs.

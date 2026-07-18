@@ -190,11 +190,7 @@ struct MeasureState {
   ElementRef first;         // the first element (face or edge)
   bool firstIsEdge = false; // kind of `first`, for the readout label
   std::string readout;      // formatted result ("" = nothing measured yet)
-  // Hover feedback (mirrors EdgePickState): the element under the cursor.
-  bool hasHover = false;
-  bool hoverIsEdge = false;
-  uint32_t hoverMeshId = 0;
-  uint32_t hoverIndex = 0; // face index or edge index per hoverIsEdge
+  // Hover feedback comes from the selection pipeline (U1c).
 };
 
 // Simulation mode (FEM): a workspace the user enters and exits, like sketch

@@ -1975,59 +1975,24 @@ void ToggleBlendEdge(AppState& state, FilletFeature& fil,
 
 } // namespace
 
-bool HandleEdgePickInput(AppState& state, bool overViewport) {
-  if (!state.edgePick.Active() || !state.faceSelector || !state.camera ||
-      !state.document) {
-    return false;
-  }
-  // The mode ends with its feature (deleted, preview resolved elsewhere).
+void BlendEdgeClicked(AppState& state, const ElementRef& displayed,
+                      uint32_t meshId, uint32_t edgeIndex) {
+  if (!state.edgePick.Active() || !state.document)
+    return;
   auto* fil = dynamic_cast<FilletFeature*>(
       state.document->FindFeatureById(state.edgePick.filletId));
   if (fil == nullptr) {
     state.edgePick = {};
-    return false;
+    return;
   }
-  const bool pending = state.pendingFeatureId == fil->GetId();
-  // Escape ends a re-pick session; while previewing it stays with the
-  // preview's own cancel handling.
-  if (!pending && ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    state.edgePick = {};
-    return true;
+  if (auto mapped = RefOnBlendInput(state, *fil, displayed, meshId,
+                                    edgeIndex)) {
+    ToggleBlendEdge(state, *fil, *mapped);
+  } else {
+    state.sketchEdit.actionMsg =
+        "That edge was created by this blend - pick edges of the "
+        "original body.";
   }
-
-  state.edgePick.hasHover = false;
-  if (!overViewport) {
-    return false;
-  }
-
-  ImGuiIO& io = ImGui::GetIO();
-  const Ray ray = state.faceSelector->ScreenToWorldRay(
-      io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
-      static_cast<int>(state.viewportSize.x),
-      static_cast<int>(state.viewportSize.y), *state.camera);
-  const EdgeHit hit = state.faceSelector->PickEdge(ray);
-  if (hit.hit) {
-    state.edgePick.hasHover = true;
-    state.edgePick.hoverMeshId = hit.meshId;
-    state.edgePick.hoverEdgeIndex = hit.edgeIndex;
-  }
-
-  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hit.hit) {
-    if (auto ref = EdgeElementRef(state, hit.meshId, hit.edgeIndex)) {
-      if (auto mapped =
-              RefOnBlendInput(state, *fil, *ref, hit.meshId, hit.edgeIndex)) {
-        ToggleBlendEdge(state, *fil, *mapped);
-      } else {
-        state.sketchEdit.actionMsg =
-            "That edge was created by this blend - pick edges of the "
-            "original body.";
-      }
-    } else {
-      state.sketchEdit.actionMsg =
-          "This edge has no stable name and can't be blended.";
-    }
-  }
-  return true; // the mode owns viewport clicks and hover
 }
 
 namespace {
@@ -2046,78 +2011,32 @@ std::string FormatElement(const Measure::Element& e) {
 }
 } // namespace
 
-bool HandleMeasureInput(AppState& state, bool overViewport) {
-  if (!state.measure.active)
-    return false;
-  // Escape exits the tool (clearing any in-progress pair + readout).
-  if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    state.measure = MeasureState{};
-    return true;
+void MeasureElementClicked(AppState& state, const ElementRef& ref,
+                           bool isEdge) {
+  if (!state.measure.active || !state.document)
+    return;
+  const auto& bodies = state.document->GetBodies();
+  if (!state.measure.hasFirst) {
+    // First pick: describe the element on its own.
+    state.measure.first = ref;
+    state.measure.firstIsEdge = isEdge;
+    state.measure.hasFirst = true;
+    if (const auto e = Measure::Describe(bodies, ref))
+      state.measure.readout = FormatElement(*e);
+    else
+      state.measure.readout = "Could not measure that element.";
+  } else {
+    // Second pick: the distance between the two, then start fresh so a
+    // click chain alternates describe -> distance -> describe -> ...
+    const auto d = Measure::Distance(bodies, state.measure.first, ref);
+    char buf[96];
+    if (d)
+      snprintf(buf, sizeof buf, "Distance: %.3f mm", *d);
+    else
+      snprintf(buf, sizeof buf, "Could not measure the distance.");
+    state.measure.readout = buf;
+    state.measure.hasFirst = false;
   }
-  state.measure.hasHover = false;
-  if (!state.document || !state.faceSelector || !overViewport)
-    return true; // the mode owns the viewport even with nothing under-cursor
-
-  ImGuiIO& io = ImGui::GetIO();
-  const Ray ray = state.faceSelector->ScreenToWorldRay(
-      io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
-      static_cast<int>(state.viewportSize.x),
-      static_cast<int>(state.viewportSize.y), *state.camera);
-  const EdgeHit edge = state.faceSelector->PickEdge(ray);
-  const RayHit face = state.faceSelector->PickFace(ray);
-  // Prefer an edge when the cursor is near one and it isn't behind the face
-  // under the cursor (edges sit on the surface, so their ray distance is ≈
-  // the face's at the silhouette; a much larger distance means it's occluded).
-  const bool useEdge =
-      edge.hit && (!face.hit || edge.distance <= face.distance + 0.25f);
-  if (useEdge) {
-    state.measure.hasHover = true;
-    state.measure.hoverIsEdge = true;
-    state.measure.hoverMeshId = edge.meshId;
-    state.measure.hoverIndex = edge.edgeIndex;
-  } else if (face.hit) {
-    state.measure.hasHover = true;
-    state.measure.hoverIsEdge = false;
-    state.measure.hoverMeshId = face.meshId;
-    state.measure.hoverIndex = face.faceIndex;
-  }
-
-  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && state.measure.hasHover) {
-    const bool isEdge = state.measure.hoverIsEdge;
-    const auto ref =
-        isEdge ? EdgeElementRef(state, state.measure.hoverMeshId,
-                                state.measure.hoverIndex)
-               : FaceElementRef(state, state.measure.hoverMeshId,
-                                state.measure.hoverIndex);
-    if (!ref) {
-      state.measure.readout =
-          "That element has no stable name and can't be measured.";
-      return true;
-    }
-    const auto& bodies = state.document->GetBodies();
-    if (!state.measure.hasFirst) {
-      // First pick: describe the element on its own.
-      state.measure.first = *ref;
-      state.measure.firstIsEdge = isEdge;
-      state.measure.hasFirst = true;
-      if (const auto e = Measure::Describe(bodies, *ref))
-        state.measure.readout = FormatElement(*e);
-      else
-        state.measure.readout = "Could not measure that element.";
-    } else {
-      // Second pick: the distance between the two, then start fresh so a
-      // click chain alternates describe → distance → describe → …
-      const auto d = Measure::Distance(bodies, state.measure.first, *ref);
-      char buf[96];
-      if (d)
-        snprintf(buf, sizeof buf, "Distance: %.3f mm", *d);
-      else
-        snprintf(buf, sizeof buf, "Could not measure the distance.");
-      state.measure.readout = buf;
-      state.measure.hasFirst = false;
-    }
-  }
-  return true; // the mode owns viewport clicks and hover
 }
 
 void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {

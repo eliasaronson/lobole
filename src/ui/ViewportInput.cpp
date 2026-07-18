@@ -21,9 +21,10 @@ void HandleViewportInput(AppState& state) {
   if (!state.camera)
     return;
 
-  // The pick pipeline re-sets this when it runs; consumed frames (sketch,
-  // armed tools, assembly) must not leave a stale edge-hover preview behind.
+  // The pick pipeline re-sets these when it runs; consumed frames (sketch,
+  // assembly) must not leave a stale edge-hover preview behind.
   state.pick.edgeHover = false;
+  state.edgePick.hasHover = false;
 
   ImGuiIO& io = ImGui::GetIO();
   // With the passthru central dock node, WantCaptureMouse is true over
@@ -168,43 +169,38 @@ void HandleViewportInput(AppState& state) {
     return;
   }
 
-  // B-Rep edge picking (fillet/chamfer edge collection) consumes the
-  // viewport while active.
-  if (HandleEdgePickInput(state, overViewport)) {
-    return;
-  }
-
-  // Measure tool (C3): picks faces/edges to read area/length/radius/distance.
-  if (HandleMeasureInput(state, overViewport)) {
-    return;
+  // Armed-tool LIFECYCLE only (U1c) — picking itself flows through the
+  // selection pipeline below, filtered by whichever tool is armed. Escape
+  // disarms in the same priority order the tools pick in; one press feeds
+  // exactly one consumer (escUsed also keeps the pipeline's Escape-clears
+  // from firing on the same press).
+  bool escUsed = false;
+  const bool esc =
+      !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Escape);
+  if (state.edgePick.Active() && state.document) {
+    auto* fil = state.document->FindFeatureById(state.edgePick.filletId);
+    if (fil == nullptr) {
+      state.edgePick = {}; // the mode ends with its feature
+    } else if (esc && state.pendingFeatureId != state.edgePick.filletId) {
+      // Escape ends a re-pick session; while previewing it stays with the
+      // preview's own cancel handling.
+      state.edgePick = {};
+      escUsed = true;
+    }
+  } else if (state.measure.active && esc) {
+    state.measure = MeasureState{}; // Escape exits (clears pair + readout)
+    escUsed = true;
+  } else if (state.simulation.IsActive() && esc) {
+    // Escape disarms the BC tool, or exits the mode when nothing is armed.
+    if (state.simulation.tool != SimulationState::Tool::None)
+      state.simulation.tool = SimulationState::Tool::None;
+    else
+      ExitSimulation(state);
+    escUsed = true;
   }
 
   if (!state.faceSelector || !state.meshRenderer)
     return;
-
-  // Simulation mode (FEM): Escape disarms the boundary-condition tool, or
-  // exits the mode when nothing is armed. While a tool is armed, a viewport
-  // click assigns it to the picked face.
-  if (state.simulation.IsActive()) {
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-      if (state.simulation.tool != SimulationState::Tool::None)
-        state.simulation.tool = SimulationState::Tool::None;
-      else
-        ExitSimulation(state);
-      return;
-    }
-    if (state.simulation.tool != SimulationState::Tool::None) {
-      if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        Ray ray = state.faceSelector->ScreenToWorldRay(
-            io.MousePos.x - state.viewportPos.x,
-            io.MousePos.y - state.viewportPos.y,
-            static_cast<int>(state.viewportSize.x),
-            static_cast<int>(state.viewportSize.y), *state.camera);
-        SimulationPick(state, ray);
-      }
-      return; // BC tool armed: consume viewport clicks
-    }
-  }
 
   // Assembly tab: pick whole occurrences — click selects (highlights every
   // instance), double-click enters the referenced part in context (assembly
@@ -267,9 +263,10 @@ void HandleViewportInput(AppState& state) {
     return;
   }
 
-  // Default context: the unified pick pipeline (U1b) — edges/faces/bodies,
-  // hover preview, Ctrl multi-select, same-spot disambiguation cycling.
-  HandleSelectionInput(state, overViewport);
+  // The unified pick pipeline (U1b/U1c): default selection — edges/faces/
+  // bodies, hover preview, Ctrl multi-select, same-spot cycling — or, while
+  // a tool is armed, its filtered pick routed to that tool.
+  HandleSelectionInput(state, overViewport, /*allowEscapeClear=*/!escUsed);
 }
 
 } // namespace ui

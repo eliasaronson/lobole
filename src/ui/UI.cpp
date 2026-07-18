@@ -57,6 +57,39 @@ void DrawInContextBanner(AppState& state) {
   ImGui::End();
 }
 
+// Model-space prompt pill (U1c): while a tool is armed (blend edges,
+// measure, sim BC), a top-center pill says what's expected — the sketcher's
+// staged prompt bar generalized to model space. Tool feedback (actionMsg)
+// shows alongside in the error tint.
+void DrawModelToolPrompt(AppState& state) {
+  if (state.sketchEdit.IsEditing())
+    return; // the sketch prompt bar owns this spot while sketching
+  const char* prompt = ArmedPrompt(state);
+  if (prompt == nullptr)
+    return; // feedback shows only while its tool is armed
+  const bool hasErr = !state.sketchEdit.actionMsg.empty();
+
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const float cx = state.viewportPos.x + state.viewportSize.x * 0.5f;
+  float y = state.viewportPos.y + 34.0f;
+  const float padX = 10.0f, padY = 5.0f;
+  const auto pill = [&](const std::string& text, ImU32 bg, ImU32 fg) {
+    if (text.empty())
+      return;
+    const ImVec2 sz = ImGui::CalcTextSize(text.c_str());
+    const ImVec2 p0(cx - sz.x * 0.5f - padX, y);
+    const ImVec2 p1(cx + sz.x * 0.5f + padX, y + sz.y + padY * 2.0f);
+    dl->AddRectFilled(p0, p1, bg, (p1.y - p0.y) * 0.5f);
+    dl->AddText(ImVec2(p0.x + padX, p0.y + padY), fg, text.c_str());
+    y = p1.y + 6.0f;
+  };
+  if (prompt != nullptr)
+    pill(prompt, IM_COL32(24, 30, 38, 235), IM_COL32(210, 220, 235, 255));
+  if (hasErr)
+    pill(state.sketchEdit.actionMsg, IM_COL32(56, 26, 26, 235),
+         IM_COL32(240, 180, 170, 255));
+}
+
 // Viewport-controls cheat sheet (View > Viewport Controls): a dismissable
 // overlay in the viewport's bottom-left corner. Replaces the static Controls
 // block that used to permanently occupy the Properties panel (U4).
@@ -176,6 +209,7 @@ void DrawUI(AppState& state) {
   DrawPreviewDialog(state);
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);
+  DrawModelToolPrompt(state);
 
   HandleViewportInput(state);
   // Renderer highlights are a projection of the Selection (U1b): one sync

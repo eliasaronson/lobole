@@ -225,7 +225,9 @@ void DrawFieldLegend(AppState& state);
 // Assigns the armed boundary condition (state.simulation.tool) to the face
 // under `ray`, as an undoable study edit. No-op if no tool is armed or the
 // pick misses a named face. Defined in StudyPanel.cpp.
-void SimulationPick(AppState& state, const Ray& ray);
+// Applies the armed BC/keep tool to a picked face (U1c: the selection
+// pipeline resolves the pick; this consumes it).
+void SimulationApplyToFace(AppState& state, const ElementRef& face);
 
 // A world-space cross at the peak of the displayed result field (max von Mises
 // or max displacement), warped by the deform scale. Pushed into the no-depth
@@ -361,15 +363,20 @@ void StartNewSketch(AppState& state);
 std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
                                          uint32_t edgeIndex);
 
-// Routes viewport hover/click to the Measure tool while state.measure.active
-// (C3): picks a face or edge, describes one element or the distance between
-// two, into state.measure.readout. Returns true when it consumed the input.
-bool HandleMeasureInput(AppState& state, bool overViewport);
+// Armed-tool pick consumers (U1c): the selection pipeline resolves what was
+// clicked and hands it here; the tools own what happens next.
 
-// Routes viewport hover/click to B-Rep edge picking while state.edgePick is
-// active (fillet/chamfer edge collection). Returns true when it consumed the
-// viewport input for this frame.
-bool HandleEdgePickInput(AppState& state, bool overViewport);
+// Measure tool (C3): describe one element, or the distance once a second is
+// picked — the click chain alternates describe → distance → describe.
+void MeasureElementClicked(AppState& state, const ElementRef& ref,
+                           bool isEdge);
+
+// Blend edge collection (fillet/chamfer): toggles the clicked edge on the
+// collecting feature, remapping the displayed (already blended) name onto
+// the blend's input body first. meshId/edgeIndex are the displayed handles
+// the geometric remap anchors on.
+void BlendEdgeClicked(AppState& state, const ElementRef& displayed,
+                      uint32_t meshId, uint32_t edgeIndex);
 
 // Appends edge highlight primitives while edge picking is active: every body
 // edge dimmed, the hovered edge and the blend's picked edges emphasized.

@@ -9,10 +9,18 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace ui {
 
 namespace {
+
+constexpr uint32_t KindBit(SelectionItem::Kind k) {
+  return 1u << static_cast<int>(k);
+}
+constexpr uint32_t kDefaultKinds = KindBit(SelectionItem::Kind::Edge) |
+                                   KindBit(SelectionItem::Kind::Face) |
+                                   KindBit(SelectionItem::Kind::Body);
 
 // The body a render mesh mirrors, or null (assembly meshes, stale index).
 const Body* BodyOfMesh(const AppState& state, uint32_t meshId) {
@@ -25,25 +33,90 @@ const Body* BodyOfMesh(const AppState& state, uint32_t meshId) {
   return nullptr;
 }
 
-// Candidates under the cursor, best first. Edges outrank the face they bound
-// (PickEdge's angular tolerance only fires near an edge, and it already
-// rejects occluded edges); the face's body comes last so same-spot cycling
-// reaches it (face → body, or edge → face → body).
-std::vector<SelectionItem> Candidates(AppState& state, const Ray& ray) {
-  std::vector<SelectionItem> out;
-  const EdgeHit edge = state.faceSelector->PickEdge(ray);
-  if (edge.hit) {
-    if (auto ref = EdgeElementRef(state, edge.meshId, edge.edgeIndex))
-      out.push_back({SelectionItem::Kind::Edge, 0, *ref});
+// A ranked candidate: the stable item plus the render handles it resolved
+// from (armed consumers like the blend remap anchor on those).
+struct Candidate {
+  SelectionItem item;
+  uint32_t meshId = 0;
+  uint32_t index = 0;
+};
+
+// Candidates under the cursor, best first, restricted to `kinds`. Edges
+// outrank the face they bound (PickEdge's angular tolerance only fires near
+// an edge, and it already rejects occluded ones); the face's body comes last
+// so same-spot cycling reaches it (edge → face → body).
+std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
+                                  uint32_t kinds) {
+  std::vector<Candidate> out;
+  if (kinds & KindBit(SelectionItem::Kind::Edge)) {
+    const EdgeHit edge = state.faceSelector->PickEdge(ray);
+    if (edge.hit) {
+      if (auto ref = EdgeElementRef(state, edge.meshId, edge.edgeIndex))
+        out.push_back({{SelectionItem::Kind::Edge, 0, *ref}, edge.meshId,
+                       edge.edgeIndex});
+    }
   }
-  const RayHit face = state.faceSelector->PickFace(ray);
-  if (face.hit) {
-    if (auto ref = FaceElementRef(state, face.meshId, face.faceIndex))
-      out.push_back({SelectionItem::Kind::Face, 0, *ref});
-    if (const Body* body = BodyOfMesh(state, face.meshId))
-      out.push_back({SelectionItem::Kind::Body, body->createdBy, {}});
+  if (kinds & (KindBit(SelectionItem::Kind::Face) |
+               KindBit(SelectionItem::Kind::Body))) {
+    const RayHit face = state.faceSelector->PickFace(ray);
+    if (face.hit) {
+      if (kinds & KindBit(SelectionItem::Kind::Face)) {
+        if (auto ref = FaceElementRef(state, face.meshId, face.faceIndex))
+          out.push_back({{SelectionItem::Kind::Face, 0, *ref}, face.meshId,
+                         face.faceIndex});
+      }
+      if (kinds & KindBit(SelectionItem::Kind::Body)) {
+        if (const Body* body = BodyOfMesh(state, face.meshId))
+          out.push_back(
+              {{SelectionItem::Kind::Body, body->createdBy, {}}, 0, 0});
+      }
+    }
   }
   return out;
+}
+
+// The armed pick context, derived fresh each frame from the tools' own state
+// — never stored, so there is no second source of truth for "what's armed".
+// Priority mirrors the old ViewportInput chain: blend edges, measure, sim.
+struct ArmedContext {
+  uint32_t kinds = 0;
+  const char* prompt = nullptr;
+  void (*consume)(AppState&, const Candidate&) = nullptr;
+};
+
+void ConsumeBlendEdge(AppState& state, const Candidate& c) {
+  BlendEdgeClicked(state, c.item.element, c.meshId, c.index);
+}
+void ConsumeMeasure(AppState& state, const Candidate& c) {
+  MeasureElementClicked(state, c.item.element,
+                        c.item.kind == SelectionItem::Kind::Edge);
+}
+void ConsumeSimFace(AppState& state, const Candidate& c) {
+  SimulationApplyToFace(state, c.item.element);
+}
+
+std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
+  if (state.edgePick.Active()) {
+    return ArmedContext{KindBit(SelectionItem::Kind::Edge),
+                        "Click edges to add or remove them", ConsumeBlendEdge};
+  }
+  if (state.measure.active) {
+    return ArmedContext{KindBit(SelectionItem::Kind::Face) |
+                            KindBit(SelectionItem::Kind::Edge),
+                        "Measure: pick a face or edge (a second for "
+                        "distance) - Esc exits",
+                        ConsumeMeasure};
+  }
+  if (state.simulation.IsActive() &&
+      state.simulation.tool != SimulationState::Tool::None) {
+    const char* prompt =
+        state.simulation.tool == SimulationState::Tool::Keep
+            ? "Pick a face to keep solid - Esc cancels"
+            : "Pick a face for the boundary condition - Esc cancels";
+    return ArmedContext{KindBit(SelectionItem::Kind::Face), prompt,
+                        ConsumeSimFace};
+  }
+  return std::nullopt;
 }
 
 void ClearHoverPreviews(AppState& state) {
@@ -96,16 +169,23 @@ bool ResolveEdgeItem(const AppState& state, const SelectionItem& item,
   return false;
 }
 
-void HandleSelectionInput(AppState& state, bool overViewport) {
+const char* ArmedPrompt(AppState& state) {
+  const auto armed = ActiveArmedContext(state);
+  return armed ? armed->prompt : nullptr;
+}
+
+void HandleSelectionInput(AppState& state, bool overViewport,
+                          bool allowEscapeClear) {
   if (!state.faceSelector || !state.meshRenderer || !state.document ||
       !state.camera) {
     return;
   }
   ImGuiIO& io = ImGui::GetIO();
+  const std::optional<ArmedContext> armed = ActiveArmedContext(state);
 
-  // Escape clears (the armed tools each consumed Escape before reaching us).
-  if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Escape) &&
-      !state.selection.Empty()) {
+  // Escape clears the selection — only when nothing armed consumed it.
+  if (!armed && allowEscapeClear && !io.WantTextInput &&
+      ImGui::IsKeyPressed(ImGuiKey_Escape) && !state.selection.Empty()) {
     state.selection.Clear();
   }
 
@@ -118,28 +198,42 @@ void HandleSelectionInput(AppState& state, bool overViewport) {
       io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
       static_cast<int>(state.viewportSize.x),
       static_cast<int>(state.viewportSize.y), *state.camera);
-  const std::vector<SelectionItem> candidates = Candidates(state, ray);
+  const std::vector<Candidate> candidates =
+      Candidates(state, ray, armed ? armed->kinds : kDefaultKinds);
 
-  // Hover preview: what a plain click would take (the top candidate).
+  // Hover preview: what a click would take (the top candidate). While a
+  // blend collects edges, mirror the edge hover into its own state — the
+  // blend overlay and the element-name label read it.
   ClearHoverPreviews(state);
   if (!candidates.empty()) {
-    uint32_t mesh = 0, index = 0;
-    const SelectionItem& top = candidates.front();
-    if (top.kind == SelectionItem::Kind::Edge &&
-        ResolveEdgeItem(state, top, mesh, index)) {
+    const Candidate& top = candidates.front();
+    if (top.item.kind == SelectionItem::Kind::Edge) {
       state.pick.edgeHover = true;
-      state.pick.edgeHoverMesh = mesh;
-      state.pick.edgeHoverIndex = index;
-    } else if (ResolveFaceItem(state, top, mesh, index)) {
+      state.pick.edgeHoverMesh = top.meshId;
+      state.pick.edgeHoverIndex = top.index;
+      if (state.edgePick.Active()) {
+        state.edgePick.hasHover = true;
+        state.edgePick.hoverMeshId = top.meshId;
+        state.edgePick.hoverEdgeIndex = top.index;
+      }
+    } else if (top.item.kind == SelectionItem::Kind::Face) {
       uint32_t first = 0, count = 0;
-      state.faceSelector->SetHoveredFace(mesh, index);
-      if (state.faceSelector->GetFaceVertexRange(mesh, index, first, count))
-        state.meshRenderer->SetFaceHover(mesh, first, count);
+      state.faceSelector->SetHoveredFace(top.meshId, top.index);
+      if (state.faceSelector->GetFaceVertexRange(top.meshId, top.index, first,
+                                                 count))
+        state.meshRenderer->SetFaceHover(top.meshId, first, count);
     }
   }
 
   if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     return;
+
+  // An armed tool consumes the pick; the Selection itself is untouched.
+  if (armed) {
+    if (!candidates.empty())
+      armed->consume(state, candidates.front());
+    return;
+  }
 
   const glm::vec2 pos(io.MousePos.x, io.MousePos.y);
   const bool samePos = glm::length(pos - state.pick.lastClickPos) < 6.0f;
@@ -153,7 +247,7 @@ void HandleSelectionInput(AppState& state, bool overViewport) {
   }
 
   if (io.KeyCtrl) {
-    state.selection.Toggle(candidates.front()); // multi-select
+    state.selection.Toggle(candidates.front().item); // multi-select
     state.pick.cycle = 0;
   } else {
     // Same-spot repeat cycles the stacked candidates (edge → face → body,
@@ -162,18 +256,18 @@ void HandleSelectionInput(AppState& state, bool overViewport) {
                            ? (state.pick.cycle + 1) %
                                  static_cast<int>(candidates.size())
                            : 0;
-    state.selection.Replace(candidates[static_cast<size_t>(state.pick.cycle)]);
+    state.selection.Replace(
+        candidates[static_cast<size_t>(state.pick.cycle)].item);
   }
 
   // Shift+click: also align the camera to the picked face (the pre-U1 Ctrl
   // gesture; Ctrl now means multi-select).
   if (io.KeyShift) {
-    for (const SelectionItem& it : candidates) {
-      uint32_t mesh = 0, index = 0;
-      if (ResolveFaceItem(state, it, mesh, index)) {
+    for (const Candidate& c : candidates) {
+      if (c.item.kind == SelectionItem::Kind::Face) {
         state.camera->AlignToFace(
-            state.faceSelector->GetFaceCenter(mesh, index),
-            state.faceSelector->GetFaceNormal(mesh, index));
+            state.faceSelector->GetFaceCenter(c.meshId, c.index),
+            state.faceSelector->GetFaceNormal(c.meshId, c.index));
         break;
       }
     }

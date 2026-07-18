@@ -120,12 +120,14 @@ they *install* filters, which is why U1 precedes it); box/lasso select in 3D
   `get_state` grows the typed list. *Tests: edge hover outside blend mode;
   two stacked faces → second click cycles to the hidden one; Ctrl+click
   builds a 2-item set.*
-- **U1c — armed tools become filters.** Measure, blend edge collection, sim
-  BC/keep, mate connector rewired as filter + consumer; their private
-  ray/resolve code deletes; the model-space prompt bar shows each one's
-  prompt. The `ViewportInput` chain collapses to: sketch → gizmo → the one
-  pipeline. *Tests: existing measure/fillet/BC/mate gui cases stay green
-  (the real regression gate); prompt pill shows per armed tool.*
+- **U1c — armed tools become filters.** Measure, blend edge collection and
+  sim BC/keep rewired as filter + consumer; their private ray/resolve code
+  deletes; the model-space prompt bar shows each one's prompt. The part-tab
+  `ViewportInput` chain collapses to: sketch → tool lifecycle (Escape/
+  disarm) → the one pipeline. *(The mate connector moved to U1d with the
+  assembly fold-in — the pipeline doesn't run on assembly tabs until then.)*
+  *Tests: existing measure/fillet/BC gui cases stay green (the real
+  regression gate); prompt pill shows per armed tool.*
 - **U1d — assembly kinds.** Occurrence/mate selection folds into the set
   (click occurrence = `{Occurrence, id}`; mate list selection ditto);
   `selectedOccurrence`/`selectedMate` delete. *Test: assembly click/gizmo

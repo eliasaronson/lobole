@@ -509,36 +509,22 @@ void DrawFieldLegend(AppState& state) {
   dl->AddText(ImVec2(x, y0 - 22), IM_COL32_WHITE, title);
 }
 
-void SimulationPick(AppState& state, const Ray& ray) {
+void SimulationApplyToFace(AppState& state, const ElementRef& face) {
   SimulationState& sim = state.simulation;
   Document* doc = state.document.get();
-  if (!doc || sim.tool == SimulationState::Tool::None || !state.faceSelector)
+  if (!doc || sim.tool == SimulationState::Tool::None)
     return;
   fem::Study* s = doc->FindStudy(sim.activeStudyId);
   if (!s) return;
 
-  const RayHit hit = state.faceSelector->PickFace(ray);
-  if (!hit.hit) return;
-  // Resolve the picked mesh back to its Body, then that face's stable name.
-  const auto& meshes = state.documentMeshes;
-  const auto it = std::find_if(meshes.begin(), meshes.end(),
-                               [&](const DocumentRenderMesh& m) {
-                                 return m.meshId == hit.meshId;
-                               });
-  if (it == meshes.end() || it->bodyIndex >= doc->GetBodies().size()) return;
-  const Body& body = doc->GetBodies()[it->bodyIndex];
-  const std::string* name = body.elementMap.NameOf(static_cast<int>(hit.faceIndex));
-  if (!name) return; // unnamed face: can't anchor a stable ref
-
   // Keep tool (topology): freeze the picked face solid.
   if (sim.tool == SimulationState::Tool::Keep) {
-    const ElementRef ref{body.createdBy, *name};
     ModifyStudy(state, s->id, "Add keep face", [&](fem::Study& cs) {
       const bool dup = std::any_of(
           cs.keepFaces.begin(), cs.keepFaces.end(), [&](const ElementRef& k) {
-            return k.featureId == ref.featureId && k.name == ref.name;
+            return k.featureId == face.featureId && k.name == face.name;
           });
-      if (!dup) cs.keepFaces.push_back(ref);
+      if (!dup) cs.keepFaces.push_back(face);
     });
     sim.tool = SimulationState::Tool::None;
     return;
@@ -549,7 +535,7 @@ void SimulationPick(AppState& state, const Ray& ray) {
   load.type = sim.tool == SimulationState::Tool::Fixed    ? fem::LoadType::Fixed
               : sim.tool == SimulationState::Tool::Force   ? fem::LoadType::Force
                                                            : fem::LoadType::Pressure;
-  load.face = ElementRef{body.createdBy, *name};
+  load.face = face;
   if (load.type != fem::LoadType::Fixed) load.magnitude = sim.pendingMagnitude;
   if (load.type == fem::LoadType::Force) load.direction = sim.pendingDirection;
 
