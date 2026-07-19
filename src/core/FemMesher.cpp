@@ -95,8 +95,30 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape, const MeshSettings& setti
     ngmesh->SetGeometry(
         std::shared_ptr<netgen::NetgenGeometry>(&geo, [](netgen::NetgenGeometry*) {}));
 
-    const int rc = geo.GenerateMesh(ngmesh, mp);
-    if (rc != 0) return fail("meshing failed (netgen returned " + std::to_string(rc) + ")");
+    // Surface phase first, then verify every face actually meshed, then the
+    // volume phase. Netgen's volume mesher walks into corrupt memory when
+    // handed an incomplete surface mesh (measured: "SURFACE MESHING ERROR
+    // OCCURRED IN 2 FACES" followed by a double-free abort that took the
+    // whole app down) — the failure must be caught BETWEEN the phases,
+    // where it is still a clean, reportable error.
+    mp.perfstepsstart = netgen::MESHCONST_ANALYSE;
+    mp.perfstepsend = netgen::MESHCONST_OPTSURFACE;
+    int rc = geo.GenerateMesh(ngmesh, mp);
+    if (rc != 0)
+      return fail("surface meshing failed (netgen returned " +
+                  std::to_string(rc) + ")");
+    for (int i = 0; i < geo.facemeshstatus.Size(); ++i)
+      if (geo.facemeshstatus[i] <= 0)
+        return fail("surface meshing failed on face " + std::to_string(i + 1) +
+                    " of " + std::to_string(geo.facemeshstatus.Size()) +
+                    " — the shape may have sliver/degenerate faces, or the "
+                    "mesh size may not suit its smallest features");
+    mp.perfstepsstart = netgen::MESHCONST_MESHVOLUME;
+    mp.perfstepsend = netgen::MESHCONST_OPTVOLUME;
+    rc = geo.GenerateMesh(ngmesh, mp);
+    if (rc != 0)
+      return fail("volume meshing failed (netgen returned " +
+                  std::to_string(rc) + ")");
 
     // Second order with geometry adaption: midside nodes projected onto the
     // true surface rather than linearly interpolated.
