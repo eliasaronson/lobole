@@ -656,6 +656,7 @@ static void HandleSketchKeys(AppState& state) {
     edit.hasPendingPoint = edit.hasPendingPoint2 = false;
     edit.mirrorAxisPhase = false;
     edit.dimPickBody.clear();
+    edit.dimPlacing = false;
     edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
     edit.dimOnCreateOpen = false;
     if (t == SketchTool::Dimension)
@@ -750,11 +751,11 @@ double PointToLineDistance(const SketchFeature& sk, glm::vec2 p,
 // inline value editor on it so the user can type the value immediately (the
 // Dimension tool's commit tail). Clears the accumulated targets either way.
 void CommitInferredDimension(AppState& state, sketch::ConstraintKind kind,
-                             double value,
-                             std::vector<sketch::PointRef> refs) {
+                             double value, std::vector<sketch::PointRef> refs,
+                             const glm::vec2* labelOffset = nullptr) {
   SketchEditState& edit = state.sketchEdit;
   edit.selected = std::move(refs);
-  const bool ok = ApplySketchConstraint(state, kind, value);
+  const bool ok = ApplySketchConstraint(state, kind, value, {}, labelOffset);
   edit.selected.clear(); // ApplySketchConstraint clears on success; ensure
   edit.dimPickBody.clear();
   if (!ok)
@@ -764,83 +765,165 @@ void CommitInferredDimension(AppState& state, sketch::ConstraintKind kind,
     edit.editingDim = static_cast<int>(sk->constraints.size()) - 1;
 }
 
-// One Dimension-tool click: accumulate the pick and, as soon as the set
-// matches a rule, create the DRIVING dimension (Decision 1A inference):
-//   circle/arc → radius;  line + empty click (or the same line again) →
-//   length;  two parallel lines → perpendicular distance (P2L from an
-//   endpoint of the first — no parallel constraint implied);  two
-//   non-parallel lines → angle;  point + line → perpendicular distance;
-//   two points → distance.
-// May REPLACE the sketch feature through the command system; callers must
-// drop their SketchFeature pointer afterwards.
-void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
-                          const SketchPick& pick) {
+// The resolved commit for a placed point-PAIR dimension (Phase 3.7): the
+// kind switches by the cursor's zone relative to the span A→B, Onshape
+// style. Cursor offset from the midpoint within ~22.5° of the span's
+// perpendicular = pulled straight off the pair → ALIGNED (Distance); else
+// mostly up/down → HORIZONTAL dimension (DistanceX, its line is horizontal);
+// mostly sideways → VERTICAL (DistanceY). Axis-parallel spans skip the
+// choice — aligned IS the axis dimension there.
+struct PairPlacement {
+  sketch::ConstraintKind kind = sketch::ConstraintKind::Distance;
+  sketch::PointRef a, b; // ordered so the solver's signed value is positive
+  double value = 0.0;
+  glm::vec2 labelOffset{0.0f};
+};
+std::optional<PairPlacement> ClassifyPairPlacement(const SketchFeature& sk,
+                                                   sketch::PointRef A,
+                                                   sketch::PointRef B,
+                                                   glm::vec2 cursor) {
+  const auto paOpt = TargetUV(sk, A), pbOpt = TargetUV(sk, B);
+  if (!paOpt || !pbOpt)
+    return std::nullopt;
+  glm::vec2 pa = *paOpt, pb = *pbOpt;
+  const glm::vec2 span = pb - pa;
+  const float len = glm::length(span);
+  if (len < 1e-6f)
+    return std::nullopt;
+  const glm::vec2 d = span / len;
+  const glm::vec2 n(-d.y, d.x); // the aligned dimension's offset direction
+  const glm::vec2 mid = 0.5f * (pa + pb);
+  const glm::vec2 off = cursor - mid;
+  const glm::vec2 u = glm::length(off) > 1e-6f ? glm::normalize(off) : n;
+
+  PairPlacement out;
+  out.a = A;
+  out.b = B;
+  const bool axisParallel = std::abs(d.x) < 0.01f || std::abs(d.y) < 0.01f;
+  if (axisParallel || std::abs(glm::dot(u, n)) > 0.924f) {
+    out.kind = sketch::ConstraintKind::Distance;
+    out.value = len;
+    out.labelOffset = n * glm::dot(off, n);
+    if (glm::length(out.labelOffset) < 1e-3f)
+      out.labelOffset = n * 0.05f; // a zero offset would re-seed on render
+  } else if (std::abs(u.y) > std::abs(u.x)) {
+    out.kind = sketch::ConstraintKind::DistanceX;
+    if (pb.x < pa.x) { // the constraint is signed b.x - a.x: keep it positive
+      std::swap(out.a, out.b);
+      std::swap(pa, pb);
+    }
+    out.value = std::abs(span.x);
+    // x stays 0 — the item-5 drag axis for DistanceX is vertical-only.
+    out.labelOffset = {0.0f, cursor.y - std::min(pa.y, pb.y)};
+  } else {
+    out.kind = sketch::ConstraintKind::DistanceY;
+    if (pb.y < pa.y) {
+      std::swap(out.a, out.b);
+      std::swap(pa, pb);
+    }
+    out.value = std::abs(span.y);
+    out.labelOffset = {cursor.x - std::min(pa.x, pb.x), 0.0f};
+  }
+  return out;
+}
+
+// Label offset that puts a fixed-kind placement's label at (or nearest to)
+// the cursor, per that kind's rendering geometry.
+glm::vec2 FixedPlacementLabelOffset(const SketchFeature& sk,
+                                    sketch::ConstraintKind kind,
+                                    const sketch::PointRef& a,
+                                    const sketch::PointRef& b,
+                                    glm::vec2 cursor) {
+  using K = sketch::ConstraintKind;
+  if (kind == K::Radius || kind == K::Diameter) {
+    const size_t ci = sk.IndexOfEntity(a.entity);
+    if (ci == SIZE_MAX)
+      return {0.7f, 0.7f};
+    glm::vec2 center{0.0f};
+    float radius = 0.0f;
+    glm::vec2 dir(0.7071f, 0.7071f); // the renderer's circle leader anchor
+    if (const auto* c = std::get_if<sketch::Circle>(&sk.entities[ci])) {
+      center = c->center;
+      radius = static_cast<float>(c->radius);
+    } else if (const auto* arc = std::get_if<sketch::Arc>(&sk.entities[ci])) {
+      center = arc->center;
+      radius = static_cast<float>(arc->radius);
+      const double midA = 0.5 * (arc->startAngle + arc->endAngle);
+      dir = {static_cast<float>(std::cos(midA)),
+             static_cast<float>(std::sin(midA))};
+    }
+    return cursor - center - dir * radius; // label lands exactly at cursor
+  }
+  if (kind == K::DistancePL) {
+    // The label slides along the line's direction (the item-5 axis).
+    const auto p = TargetUV(sk, a);
+    const auto la = TargetUV(sk, {b.entity, 0});
+    const auto dirO = LineDirOf(sk, b.entity);
+    if (!p || !la || !dirO || glm::length(*dirO) < 1e-6f)
+      return {0.0f, 0.8f};
+    const glm::vec2 d = glm::normalize(*dirO);
+    const glm::vec2 foot = *la + d * glm::dot(*p - *la, d);
+    glm::vec2 off = d * glm::dot(cursor - 0.5f * (*p + foot), d);
+    if (glm::length(off) < 1e-3f)
+      off = d * 0.05f;
+    return off;
+  }
+  return {0.7f, 0.7f};
+}
+
+// Arms the placement stage: the ghost in DrawDimensions takes over until a
+// click commits (or Esc drops back to target accumulation).
+void StartDimensionPlacement(AppState& state, bool pair,
+                             sketch::ConstraintKind kind, sketch::PointRef a,
+                             sketch::PointRef b, double value) {
+  SketchEditState& edit = state.sketchEdit;
+  edit.dimPlacing = true;
+  edit.dimPlacePair = pair;
+  edit.dimPlaceKind = kind;
+  edit.dimPlaceA = a;
+  edit.dimPlaceB = b;
+  edit.dimPlaceValue = value;
+  // An open inline editor would commit with the ghost transiently in the
+  // constraint list (see DrawDimensions) — close it first.
+  edit.editingDim = -1;
+}
+
+// The placement click: derive kind/order/value/label from the cursor and
+// commit through the shared tail (which opens the inline editor).
+void CommitPlacedDimension(AppState& state, const SketchFeature& sketch,
+                           glm::vec2 cursor) {
+  SketchEditState& edit = state.sketchEdit;
+  edit.dimPlacing = false;
+  if (edit.dimPlacePair) {
+    const auto p =
+        ClassifyPairPlacement(sketch, edit.dimPlaceA, edit.dimPlaceB, cursor);
+    if (!p) {
+      edit.selected.clear();
+      edit.dimPickBody.clear();
+      return;
+    }
+    CommitInferredDimension(state, p->kind, p->value, {p->a, p->b},
+                            &p->labelOffset);
+    return;
+  }
+  const glm::vec2 off = FixedPlacementLabelOffset(
+      sketch, edit.dimPlaceKind, edit.dimPlaceA, edit.dimPlaceB, cursor);
+  std::vector<sketch::PointRef> refs = {edit.dimPlaceA};
+  if (edit.dimPlaceKind == sketch::ConstraintKind::DistancePL)
+    refs.push_back(edit.dimPlaceB);
+  CommitInferredDimension(state, edit.dimPlaceKind, edit.dimPlaceValue, refs,
+                          &off);
+}
+
+// Resolves the two accumulated targets into either a placement stage or an
+// immediate dimension: two parallel lines → perpendicular distance (P2L from
+// an endpoint of the first — no parallel constraint implied), fixed-kind
+// placement; two non-parallel lines → angle (immediate — its placement is
+// deferred); point + line → perpendicular distance, fixed-kind placement;
+// two points → the kind-switching pair placement.
+void ResolveAccumulatedTargets(AppState& state, const SketchFeature& sketch) {
   SketchEditState& edit = state.sketchEdit;
   using K = sketch::ConstraintKind;
-  if (edit.dimPickBody.size() != edit.selected.size()) {
-    // Selection changed under the tool (panel click etc.) — start over.
-    edit.selected.clear();
-    edit.dimPickBody.clear();
-  }
-  const auto entityOf = [&](uint32_t id) -> const sketch::Entity* {
-    const size_t idx = sketch.IndexOfEntity(id);
-    return idx == SIZE_MAX ? nullptr : &sketch.entities[idx];
-  };
-  const auto lineLength = [&](uint32_t id) {
-    const auto a = TargetUV(sketch, {id, 0}), b = TargetUV(sketch, {id, 1});
-    return (a && b) ? static_cast<double>(glm::length(*b - *a)) : 0.0;
-  };
-  const auto commitLength = [&](uint32_t id) {
-    CommitInferredDimension(state, K::Distance, lineLength(id),
-                            {{id, 0}, {id, 1}});
-  };
-
-  if (!pick.hit) {
-    // Empty space finishes a single picked line as its LENGTH.
-    if (edit.selected.size() == 1 && edit.dimPickBody[0] &&
-        !sketch::IsDatum(edit.selected[0].entity))
-      commitLength(edit.selected[0].entity);
-    return;
-  }
-
-  const sketch::Entity* e = entityOf(pick.ref.entity);
-  const bool isAxis = sketch::IsDatum(pick.ref.entity);
-
-  // A circle/arc body dimensions its radius immediately.
-  if (pick.body && e != nullptr &&
-      (std::holds_alternative<sketch::Circle>(*e) ||
-       std::holds_alternative<sketch::Arc>(*e))) {
-    const double r = std::holds_alternative<sketch::Circle>(*e)
-                         ? std::get<sketch::Circle>(*e).radius
-                         : std::get<sketch::Arc>(*e).radius;
-    CommitInferredDimension(state, K::Radius, r, {{pick.ref.entity, 0}});
-    return;
-  }
-
-  const bool lineTarget =
-      pick.body &&
-      (isAxis || (e != nullptr && std::holds_alternative<sketch::Line>(*e)));
-
-  // Clicking the picked line a second time = its length (the "double-click
-  // the line" rule).
-  if (lineTarget && edit.selected.size() == 1 && edit.dimPickBody[0] &&
-      edit.selected[0].entity == pick.ref.entity) {
-    if (!isAxis)
-      commitLength(pick.ref.entity);
-    return;
-  }
-  // Re-clicking an accumulated point is a no-op.
-  if (!lineTarget && edit.selected.size() == 1 && !edit.dimPickBody[0] &&
-      edit.selected[0].entity == pick.ref.entity &&
-      edit.selected[0].which == pick.ref.which)
-    return;
-
-  edit.selected.push_back(lineTarget ? sketch::PointRef{pick.ref.entity, 0}
-                                     : pick.ref);
-  edit.dimPickBody.push_back(lineTarget);
-  if (edit.selected.size() < 2)
-    return;
-
   const sketch::PointRef A = edit.selected[0], B = edit.selected[1];
   const bool aLine = edit.dimPickBody[0], bLine = edit.dimPickBody[1];
 
@@ -860,8 +943,8 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
       // parallel-distance recipe — no parallel constraint is implied).
       const auto p = TargetUV(sketch, {A.entity, 0});
       const double dist = p ? PointToLineDistance(sketch, *p, B.entity) : 0.0;
-      CommitInferredDimension(state, K::DistancePL, dist,
-                              {{A.entity, 0}, {B.entity, 0}});
+      StartDimensionPlacement(state, /*pair=*/false, K::DistancePL,
+                              {A.entity, 0}, {B.entity, 0}, dist);
     } else {
       // Angle. GCS's line-line angle is signed (l1 → l2): order the pair so
       // the current wedge is positive and pin exactly it.
@@ -884,14 +967,95 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
     }
     const auto p = TargetUV(sketch, pt);
     const double dist = p ? PointToLineDistance(sketch, *p, ln.entity) : 0.0;
-    CommitInferredDimension(state, K::DistancePL, dist, {pt, {ln.entity, 0}});
+    StartDimensionPlacement(state, /*pair=*/false, K::DistancePL, pt,
+                            {ln.entity, 0}, dist);
     return;
   }
-  // Two points.
-  const auto pa = TargetUV(sketch, A), pb = TargetUV(sketch, B);
-  const double dist =
-      (pa && pb) ? static_cast<double>(glm::length(*pb - *pa)) : 0.0;
-  CommitInferredDimension(state, K::Distance, dist, {A, B});
+  // Two points: the kind switches by where the dimension is placed.
+  StartDimensionPlacement(state, /*pair=*/true, K::Distance, A, B, 0.0);
+}
+
+// One Dimension-tool click (target-accumulation stage): accumulate the pick
+// and, as soon as the set matches a rule, enter the placement stage (or, for
+// angles, create the dimension — Decision 1A inference):
+//   circle/arc → radius;  line + empty click (or the same line again) →
+//   length;  see ResolveAccumulatedTargets for the two-target rules.
+// May REPLACE the sketch feature through the command system; callers must
+// drop their SketchFeature pointer afterwards.
+void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
+                          const SketchPick& pick) {
+  SketchEditState& edit = state.sketchEdit;
+  using K = sketch::ConstraintKind;
+  if (edit.dimPickBody.size() != edit.selected.size()) {
+    // Selection changed under the tool (panel click etc.) — start over.
+    edit.selected.clear();
+    edit.dimPickBody.clear();
+  }
+  // A full pair kept by an Esc'd placement: any click re-enters placement.
+  if (edit.selected.size() >= 2) {
+    ResolveAccumulatedTargets(state, sketch);
+    return;
+  }
+  const auto entityOf = [&](uint32_t id) -> const sketch::Entity* {
+    const size_t idx = sketch.IndexOfEntity(id);
+    return idx == SIZE_MAX ? nullptr : &sketch.entities[idx];
+  };
+  const auto startLengthPlacement = [&](uint32_t id) {
+    // A line's length is an endpoint pair — full kind-switching placement
+    // (a sloped line can be dimensioned by its horizontal/vertical extent).
+    StartDimensionPlacement(state, /*pair=*/true, K::Distance, {id, 0},
+                            {id, 1}, 0.0);
+  };
+
+  if (!pick.hit) {
+    // Empty space sends a single picked line to LENGTH placement.
+    if (edit.selected.size() == 1 && edit.dimPickBody[0] &&
+        !sketch::IsDatum(edit.selected[0].entity))
+      startLengthPlacement(edit.selected[0].entity);
+    return;
+  }
+
+  const sketch::Entity* e = entityOf(pick.ref.entity);
+  const bool isAxis = sketch::IsDatum(pick.ref.entity);
+
+  // A circle/arc body goes straight to radius (label-only) placement.
+  if (pick.body && e != nullptr &&
+      (std::holds_alternative<sketch::Circle>(*e) ||
+       std::holds_alternative<sketch::Arc>(*e))) {
+    const double r = std::holds_alternative<sketch::Circle>(*e)
+                         ? std::get<sketch::Circle>(*e).radius
+                         : std::get<sketch::Arc>(*e).radius;
+    edit.selected.clear();
+    edit.dimPickBody.clear();
+    StartDimensionPlacement(state, /*pair=*/false, K::Radius,
+                            {pick.ref.entity, 0}, {}, r);
+    return;
+  }
+
+  const bool lineTarget =
+      pick.body &&
+      (isAxis || (e != nullptr && std::holds_alternative<sketch::Line>(*e)));
+
+  // Clicking the picked line a second time = its length (the "double-click
+  // the line" rule).
+  if (lineTarget && edit.selected.size() == 1 && edit.dimPickBody[0] &&
+      edit.selected[0].entity == pick.ref.entity) {
+    if (!isAxis)
+      startLengthPlacement(pick.ref.entity);
+    return;
+  }
+  // Re-clicking an accumulated point is a no-op.
+  if (!lineTarget && edit.selected.size() == 1 && !edit.dimPickBody[0] &&
+      edit.selected[0].entity == pick.ref.entity &&
+      edit.selected[0].which == pick.ref.which)
+    return;
+
+  edit.selected.push_back(lineTarget ? sketch::PointRef{pick.ref.entity, 0}
+                                     : pick.ref);
+  edit.dimPickBody.push_back(lineTarget);
+  if (edit.selected.size() < 2)
+    return;
+  ResolveAccumulatedTargets(state, sketch);
 }
 
 } // namespace
@@ -1013,6 +1177,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     if (edit.editingDim >= 0 || edit.dimOnCreateOpen) {
       // The inline editor / dimension-on-create field (drawn later this
       // frame) consumes it.
+    } else if (edit.tool == SketchTool::Dimension && edit.dimPlacing) {
+      edit.dimPlacing = false; // back to target accumulation (targets kept)
     } else if (edit.hasPendingPoint || edit.hasPendingPoint2 || edit.boxActive) {
       edit.hasPendingPoint = false;
       edit.hasPendingPoint2 = false;
@@ -1332,6 +1498,16 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   }
 
   if (edit.tool == SketchTool::Dimension) {
+    if (edit.dimPlacing) {
+      // Placement stage: the ghost (DrawDimensions) follows the cursor; a
+      // click commits the kind + label position. No entity hover — the
+      // click places, it doesn't pick.
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        // May replace the sketch feature — the local pointer dies here.
+        CommitPlacedDimension(state, *sketch, uv);
+      }
+      return true;
+    }
     SketchPick hover = PickSketchEntity(
         state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
     edit.hasHover = hover.hit;
@@ -1737,10 +1913,17 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
                               : "set the distance in the panel, then Apply");
     break;
   case T::Dimension:
-    set("Dimension", edit.selected.empty() ? 1 : 2, 2,
-        edit.selected.empty()
-            ? "pick a point, line, or circle"
-            : "pick a second target, or click empty space for length");
+    if (edit.dimPlacing)
+      set("Dimension", 3, 3,
+          edit.dimPlacePair
+              ? "place the dimension — position picks horizontal/vertical/"
+                "aligned"
+              : "click to place the label");
+    else
+      set("Dimension", edit.selected.empty() ? 1 : 2, 3,
+          edit.selected.empty()
+              ? "pick a point, line, or circle"
+              : "pick a second target, or click empty space for length");
     break;
   }
   return p;
@@ -1898,6 +2081,45 @@ void DrawDimensions(AppState& state) {
   };
 
   edit.dimHot = -1; // refreshed below; the canvas reads it next frame
+
+  // Placement ghost (Phase 3.7): while the Dimension tool is placing, a
+  // transient constraint rides the list for THIS draw only — rendered like
+  // any dimension, popped before return, never serialized (StartPlacement
+  // closes the inline editor, the only in-loop committer). Pill interaction
+  // is disabled for every dim meanwhile so the placement click reaches the
+  // viewport.
+  bool ghostPushed = false;
+  if (edit.dimPlacing) {
+    std::optional<sketch::Constraint> ghost;
+    if (edit.dimPlacePair) {
+      if (const auto p = ClassifyPairPlacement(*sketch, edit.dimPlaceA,
+                                               edit.dimPlaceB,
+                                               edit.hoverPoint)) {
+        sketch::Constraint g;
+        g.kind = p->kind;
+        g.a = p->a;
+        g.b = p->b;
+        g.value = p->value;
+        g.labelOffset = p->labelOffset;
+        ghost = g;
+      }
+    } else {
+      sketch::Constraint g;
+      g.kind = edit.dimPlaceKind;
+      g.a = edit.dimPlaceA;
+      g.b = edit.dimPlaceB;
+      g.value = edit.dimPlaceValue;
+      g.labelOffset = FixedPlacementLabelOffset(*sketch, g.kind, g.a, g.b,
+                                                edit.hoverPoint);
+      ghost = g;
+    }
+    if (ghost) {
+      sketch->constraints.push_back(*ghost);
+      ghostPushed = true;
+    } else {
+      edit.dimPlacing = false; // a target vanished (undo) — drop the stage
+    }
+  }
 
   for (int i = 0; i < (int)sketch->constraints.size(); i++) {
     sketch::Constraint& con = sketch->constraints[i]; // drag writes labelOffset
@@ -2114,10 +2336,13 @@ void DrawDimensions(AppState& state) {
     const ImVec2 pmax(tp.x + tsz.x + 5.0f, tp.y + tsz.y + 2.0f);
     const bool overLabel = io.MousePos.x >= pmin.x && io.MousePos.x <= pmax.x &&
                            io.MousePos.y >= pmin.y && io.MousePos.y <= pmax.y;
+    // Pills are inert during placement — the ghost must not latch dimHot
+    // (which would eat the placement click) and real dims can't drag.
+    const bool interactive = !edit.dimPlacing;
     const bool dragging = edit.dimDrag == i;
-    if (overLabel || dragging)
+    if (interactive && (overLabel || dragging))
       edit.dimHot = i;
-    const bool hot = overLabel || dragging;
+    const bool hot = interactive && (overLabel || dragging);
     const float rounding = (pmax.y - pmin.y) * 0.5f;
     dl->AddRectFilled(pmin, pmax,
                       hot ? IM_COL32(45, 62, 82, 245)
@@ -2131,7 +2356,7 @@ void DrawDimensions(AppState& state) {
     // record on release). The pre-drag json lives across frames.
     static nlohmann::json s_dragBefore;
     static bool s_dragMoved = false;
-    if (overLabel && edit.editingDim != i && edit.dimDrag < 0 &&
+    if (interactive && overLabel && edit.editingDim != i && edit.dimDrag < 0 &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       edit.dimDrag = i;
       s_dragBefore = DocumentIO::FeatureToJson(*sketch);
@@ -2168,7 +2393,8 @@ void DrawDimensions(AppState& state) {
       }
     }
 
-    if (overLabel && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+    if (interactive && overLabel &&
+        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
       edit.editingDim = i;
       edit.dimDrag = -1; // the second press began a drag; editing wins
     }
@@ -2238,6 +2464,9 @@ void DrawDimensions(AppState& state) {
       }
     }
   }
+
+  if (ghostPushed)
+    sketch->constraints.pop_back(); // the placement ghost was render-only
 }
 
 void DrawDimensionOnCreate(AppState& state) {
@@ -2634,7 +2863,8 @@ glm::vec2 SeedLabelOffset(const SketchFeature& sk,
 } // namespace
 
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
-                           double value, const std::string& valueExpr) {
+                           double value, const std::string& valueExpr,
+                           const glm::vec2* labelOffset) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (!sketch)
@@ -2811,7 +3041,8 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
 
   nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
   if (sketch::IsDimension(kind))
-    c.labelOffset = SeedLabelOffset(*sketch, c);
+    c.labelOffset =
+        labelOffset != nullptr ? *labelOffset : SeedLabelOffset(*sketch, c);
   sketch->constraints.push_back(c);
 
   // Solve and write the result back into the sketch.

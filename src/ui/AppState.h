@@ -130,6 +130,17 @@ struct SketchEditState {
   // accumulated target was picked as a whole line (body), false for a point.
   std::vector<bool> dimPickBody;
 
+  // Dimension placement stage (Phase 3.7): armed once the tool's targets
+  // resolve; a ghost dimension follows the cursor until a click commits the
+  // kind + labelOffset. For a point PAIR (`dimPlacePair`) the kind switches
+  // live by cursor zone (horizontal / vertical / aligned, the Onshape
+  // behavior); fixed-kind targets (radius, point-line) place the label only.
+  bool dimPlacing = false;
+  bool dimPlacePair = false;
+  sketch::ConstraintKind dimPlaceKind = sketch::ConstraintKind::Distance;
+  sketch::PointRef dimPlaceA, dimPlaceB;
+  double dimPlaceValue = 0.0; // fixed-kind value (pairs recompute at commit)
+
   // Dimension-on-create: the entities the last draw-tool commit produced (a
   // rectangle keeps its 4 sides, everything else one id). Typing a digit
   // while the tool is live opens a value field that applies a driving

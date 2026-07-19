@@ -133,9 +133,12 @@ SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
 // Adds a constraint from the current selection, solves, and commits one
 // ModifyFeatureCommand. Returns false if the selection isn't valid. A
 // non-empty `valueExpr` is stored as the driving expression (`value` must
-// already be its evaluation — regeneration re-evaluates it).
+// already be its evaluation — regeneration re-evaluates it). A non-null
+// `labelOffset` places the dimension label there instead of the seeded
+// default (the placement-stage path).
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
-                           double value, const std::string& valueExpr = {});
+                           double value, const std::string& valueExpr = {},
+                           const glm::vec2* labelOffset = nullptr);
 
 // Dimension-on-create: while a draw tool is live, typing a digit opens a
 // small value field near the cursor; Enter applies it as a driving dimension

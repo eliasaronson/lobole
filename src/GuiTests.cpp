@@ -2064,18 +2064,24 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     };
 
     // Two parallel lines → perpendicular distance (DistancePL), value = gap.
+    // (3.7: targets resolve into a label-placement stage; a click places.)
     clickUV({0, -1});
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
     clickUV({0, 1});
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    IM_CHECK(!s_App->sketchEdit.dimPlacePair); // fixed kind: label only
+    clickUV({-0.5f, 0}); // place the label
     closeEditor(1);
     IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::DistancePL);
     IM_CHECK_EQ(sk->constraints[0].a.entity, lA);
     IM_CHECK_EQ(sk->constraints[0].b.entity, lB);
     IM_CHECK_LE(std::abs(sk->constraints[0].value - 2.0), 1e-3);
 
-    // Two non-parallel lines → angle, pinned at the current wedge.
+    // Two non-parallel lines → angle, pinned at the current wedge
+    // (immediate — angle placement is deferred).
     clickUV({0, -1});
     clickUV({0, 0.4f});
+    IM_CHECK(!s_App->sketchEdit.dimPlacing);
     closeEditor(2);
     IM_CHECK(sk->constraints[1].kind == sketch::ConstraintKind::Angle);
     IM_CHECK_LE(std::abs(sk->constraints[1].value - std::atan2(0.8, 3.0)),
@@ -2086,17 +2092,23 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       IM_CHECK((ea == lA && eb == lC) || (ea == lC && eb == lA));
     }
 
-    // A circle rim → radius, immediately.
+    // A circle rim → radius, with label-only placement.
     clickUV({1.3f, 1.8f});
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({2.2f, 2.4f}); // place the label
     closeEditor(3);
     IM_CHECK(sk->constraints[2].kind == sketch::ConstraintKind::Radius);
     IM_CHECK_EQ(sk->constraints[2].a.entity, ci);
     IM_CHECK_LE(std::abs(sk->constraints[2].value - 0.5), 1e-3);
 
-    // One line + a click in empty space → its LENGTH (endpoint distance).
+    // One line + a click in empty space → LENGTH placement. The span is
+    // axis-parallel, so every placement zone yields the aligned kind.
     // (x off 0 — a click ON the Y axis would dimension against the axis.)
     clickUV({0.5f, -1});
     clickUV({0.7f, -1.8f});
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    IM_CHECK(s_App->sketchEdit.dimPlacePair);
+    clickUV({0.7f, -1.8f}); // place (below the line)
     closeEditor(4);
     IM_CHECK(sk->constraints[3].kind == sketch::ConstraintKind::Distance);
     IM_CHECK_EQ(sk->constraints[3].a.entity, lA);
@@ -2111,6 +2123,122 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+  };
+
+  // Placement-driven kind inference (Phase 3.7, the Onshape behavior): a
+  // point pair enters a placement stage; the cursor zone picks the kind —
+  // above/below the pair = horizontal (DistanceX), sideways = vertical
+  // (DistanceY), pulled perpendicular to the span = aligned (Distance) —
+  // and the click also places the label. Esc walks the staged ladder.
+  t = IM_REGISTER_TEST(engine, "dims", "placement_zones");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    const glm::vec2 pa(-1.0f, -0.6f), pb(1.0f, 0.6f); // a diagonal pair
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t p0 = sk->AddEntity(sketch::Point{pa});
+    uint32_t p1 = sk->AddEntity(sketch::Point{pb});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    auto clickUV = [&](glm::vec2 uv) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    auto closeEditor = [&](size_t expectDims) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      IM_CHECK_EQ(sk->constraints.size(), expectDims);
+      IM_CHECK_EQ(s_App->sketchEdit.editingDim, (int)expectDims - 1);
+      ctx->KeyPress(ImGuiKey_Escape);
+      ctx->Yield(2);
+      IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1);
+    };
+
+    // The staged Esc ladder: placing → targets kept → targets cleared →
+    // tool disarmed.
+    ctx->KeyPress(ImGuiKey_D);
+    ctx->Yield();
+    clickUV(pa);
+    clickUV(pb);
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    IM_CHECK(s_App->sketchEdit.dimPlacePair);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.dimPlacing);
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)2); // kept
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.selected.empty());
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Dimension);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+
+    // Placed ABOVE the pair → horizontal dimension (DistanceX), |dx|.
+    ctx->KeyPress(ImGuiKey_D);
+    ctx->Yield();
+    clickUV(pa);
+    clickUV(pb);
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({0.0f, 1.5f});
+    closeEditor(1);
+    IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::DistanceX);
+    IM_CHECK_LE(std::abs(sk->constraints[0].value - 2.0), 0.03);
+    IM_CHECK_EQ(sk->constraints[0].a.entity, p0); // ordered: positive dx
+    IM_CHECK_EQ(sk->constraints[0].b.entity, p1);
+    // The label landed where clicked: x locked to the span (item 5), y at
+    // the cursor's height above the lower point.
+    IM_CHECK_LE(std::abs(sk->constraints[0].labelOffset.x), 1e-4f);
+    IM_CHECK_LE(std::abs(sk->constraints[0].labelOffset.y - (1.5f + 0.6f)),
+                0.05f);
+
+    // Placed to the SIDE → vertical dimension (DistanceY), |dy|.
+    clickUV(pa);
+    clickUV(pb);
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({2.2f, 0.0f});
+    closeEditor(2);
+    IM_CHECK(sk->constraints[1].kind == sketch::ConstraintKind::DistanceY);
+    IM_CHECK_LE(std::abs(sk->constraints[1].value - 1.2), 0.03);
+    IM_CHECK_LE(std::abs(sk->constraints[1].labelOffset.y), 1e-4f);
+    IM_CHECK_LE(std::abs(sk->constraints[1].labelOffset.x - (2.2f + 1.0f)),
+                0.05f);
+
+    // Placed on the span's PERPENDICULAR → aligned (Distance), full length.
+    const glm::vec2 d = glm::normalize(pb - pa);
+    const glm::vec2 n(-d.y, d.x);
+    const glm::vec2 mid = 0.5f * (pa + pb);
+    clickUV(pa);
+    clickUV(pb);
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV(mid + n * 1.2f);
+    closeEditor(3);
+    IM_CHECK(sk->constraints[2].kind == sketch::ConstraintKind::Distance);
+    IM_CHECK_LE(std::abs(sk->constraints[2].value - glm::length(pb - pa)),
+                0.03);
+    const glm::vec2 off = sk->constraints[2].labelOffset;
+    IM_CHECK_LE(std::abs(glm::dot(off, d)), 0.02f); // ⟂ to the span
+    IM_CHECK_LE(glm::length(off - n * 1.2f), 0.05f); // lands where clicked
+
+    ctx->KeyPress(ImGuiKey_Escape); // disarm
     ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
     ctx->Yield();
   };

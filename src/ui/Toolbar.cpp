@@ -209,6 +209,7 @@ void DrawSketchModeToolbar(AppState& state) {
       edit.hasPendingPoint = edit.hasPendingPoint2 = false;
       edit.mirrorAxisPhase = false;
       edit.dimPickBody.clear();
+      edit.dimPlacing = false;
       edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
       edit.dimOnCreateOpen = false;
       if (t == SketchTool::Dimension)
