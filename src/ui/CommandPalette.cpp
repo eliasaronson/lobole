@@ -84,6 +84,8 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
   });
 
   add("View: Fit", "F", true, [](AppState& s) { FitCameraToDocument(s); });
+  add("View: Zoom to Selection", "Shift+F", true,
+      [](AppState& s) { FitCameraToSelection(s); });
   add("View: Reset Layout", nullptr, true,
       [](AppState& s) { s.buildDefaultDockLayout = true; });
   add("View: Toggle Planes", "Shift+P", part,

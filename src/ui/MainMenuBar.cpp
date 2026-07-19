@@ -221,8 +221,11 @@ void DrawViewMenu(AppState& state) {
       state.camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     }
   }
-  if (ImGui::MenuItem("Fit View")) {
+  if (ImGui::MenuItem("Fit View", "F")) {
     FitCameraToDocument(state);
+  }
+  if (ImGui::MenuItem("Zoom to Selection", "Shift+F")) {
+    FitCameraToSelection(state);
   }
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);

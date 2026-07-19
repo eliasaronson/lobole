@@ -1072,6 +1072,33 @@ Document* PartDocById(AppState& state, uint64_t partId) {
   return nullptr;
 }
 
+namespace {
+// Aim the camera at a world-space box: the shared tail of the document and
+// selection fits.
+void FitCameraToBox(AppState& state, const glm::vec3& min,
+                    const glm::vec3& max) {
+  const glm::vec3 center = (min + max) * 0.5f;
+  const float radius = glm::length(max - min) * 0.5f;
+
+  // Distance that fits the bounding sphere in the LIMITING screen axis. The
+  // vertical half-FOV is fixed; the horizontal one is tan(fovY/2)*aspect, so
+  // in a portrait-ish viewport (aspect < 1 — e.g. the central region of a
+  // tall tiled window) the width is what gates the fit. The old radius*2.5
+  // constant was exactly the vertical fit for the 45-degree FOV and silently
+  // assumed a landscape viewport.
+  Camera& cam = *state.camera;
+  const float tanHalfV = std::tan(0.5f * glm::radians(cam.GetFOV()));
+  const float aspect =
+      cam.GetAspectRatio() > 0.0f ? cam.GetAspectRatio() : 1.0f;
+  const float tanHalfLimit = tanHalfV * std::min(1.0f, aspect);
+  const float distance =
+      std::max(1.05f * radius / std::max(tanHalfLimit, 0.05f), 1.0f);
+  cam.SetTarget(center);
+  cam.SetMaxDistance(std::max(20.0f * distance, 1000.0f)); // let it zoom out
+  cam.SetDistance(distance);
+}
+} // namespace
+
 void FitCameraToDocument(AppState& state) {
   if (!state.camera)
     return;
@@ -1112,25 +1139,92 @@ void FitCameraToDocument(AppState& state) {
   }
   if (!any)
     return;
+  FitCameraToBox(state, min, max);
+}
 
-  const glm::vec3 center = (min + max) * 0.5f;
-  const float radius = glm::length(max - min) * 0.5f;
-
-  // Distance that fits the bounding sphere in the LIMITING screen axis. The
-  // vertical half-FOV is fixed; the horizontal one is tan(fovY/2)*aspect, so
-  // in a portrait-ish viewport (aspect < 1 — e.g. the central region of a
-  // tall tiled window) the width is what gates the fit. The old radius*2.5
-  // constant was exactly the vertical fit for the 45-degree FOV and silently
-  // assumed a landscape viewport.
-  Camera& cam = *state.camera;
-  const float tanHalfV = std::tan(0.5f * glm::radians(cam.GetFOV()));
-  const float aspect = cam.GetAspectRatio() > 0.0f ? cam.GetAspectRatio() : 1.0f;
-  const float tanHalfLimit = tanHalfV * std::min(1.0f, aspect);
-  const float distance =
-      std::max(1.05f * radius / std::max(tanHalfLimit, 0.05f), 1.0f);
-  cam.SetTarget(center);
-  cam.SetMaxDistance(std::max(20.0f * distance, 1000.0f));  // let it zoom out
-  cam.SetDistance(distance);
+void FitCameraToSelection(AppState& state) {
+  if (!state.camera)
+    return;
+  glm::vec3 min(FLT_MAX), max(-FLT_MAX);
+  bool any = false;
+  const auto addBox = [&](const glm::vec3& bmin, const glm::vec3& bmax,
+                          const glm::mat4& xf) {
+    for (int c = 0; c < 8; c++) { // transform all 8 corners
+      const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
+                             (c & 2) ? bmax.y : bmin.y,
+                             (c & 4) ? bmax.z : bmin.z);
+      const glm::vec3 w = glm::vec3(xf * glm::vec4(corner, 1.0f));
+      min = glm::min(min, w);
+      max = glm::max(max, w);
+      any = true;
+    }
+  };
+  // A feature's or body's geometry: the document bodies it created.
+  const auto addBodiesOf = [&](uint64_t createdBy) {
+    if (!state.document)
+      return;
+    for (const auto& body : state.document->GetBodies()) {
+      if (body.createdBy != createdBy)
+        continue;
+      glm::vec3 bmin, bmax;
+      body.shape.GetBoundingBox(bmin, bmax);
+      addBox(bmin, bmax, glm::mat4(1.0f));
+    }
+  };
+  for (const SelectionItem& it : state.selection.items) {
+    switch (it.kind) {
+      case SelectionItem::Kind::Face:
+      case SelectionItem::Kind::Edge: {
+        // Assembly picks carry their occurrence in `id` (0 = part context):
+        // resolve against the part's bodies, place by the display transform.
+        const std::vector<Body>* bodies = nullptr;
+        glm::mat4 xf(1.0f);
+        if (it.id != 0 && state.assembly) {
+          const Occurrence* occ = state.assembly->FindById(it.id);
+          Document* part = occ ? PartDocById(state, occ->partId) : nullptr;
+          if (!part)
+            break;
+          bodies = &part->GetBodies();
+          xf = DisplayMatrix(state, *occ);
+        } else if (state.document) {
+          bodies = &state.document->GetBodies();
+        }
+        if (bodies == nullptr)
+          break;
+        if (const auto b = Measure::ElementBounds(*bodies, it.element))
+          addBox(b->min, b->max, xf);
+        break;
+      }
+      case SelectionItem::Kind::Body:
+      case SelectionItem::Kind::Feature:
+        addBodiesOf(it.id);
+        break;
+      case SelectionItem::Kind::Occurrence: {
+        if (!state.assembly)
+          break;
+        const Occurrence* occ = state.assembly->FindById(it.id);
+        Document* part = occ ? PartDocById(state, occ->partId) : nullptr;
+        if (!part)
+          break;
+        const glm::mat4 xf = DisplayMatrix(state, *occ);
+        for (const auto& body : part->GetBodies()) {
+          glm::vec3 bmin, bmax;
+          body.shape.GetBoundingBox(bmin, bmax);
+          addBox(bmin, bmax, xf);
+        }
+        break;
+      }
+      default:
+        break; // mates/regions have no zoomable extent
+    }
+  }
+  // Nothing selected (or nothing resolved): fit the whole document instead —
+  // the natural meaning of "zoom to selection" with an empty selection.
+  if (!any) {
+    FitCameraToDocument(state);
+    return;
+  }
+  FitCameraToBox(state, min, max);
 }
 
 // Muted, theme-matched palette cycled per body so bodies/parts read apart.

@@ -320,6 +320,10 @@ std::string WindowTitle(AppState& state);
 
 // Frames the camera on the document's combined bounding box.
 void FitCameraToDocument(AppState& state);
+// Frames the camera on the selection's combined bounding box (faces/edges/
+// bodies/features by their geometry; occurrences by their placed part).
+// Falls back to the whole document when nothing is selected/resolvable.
+void FitCameraToSelection(AppState& state);
 
 // Mirrors document bodies into the renderers when the document version
 // changed (edit, undo, redo). Call once per frame before drawing.

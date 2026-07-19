@@ -139,6 +139,9 @@ void HandleViewportInput(AppState& state) {
   if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt) {
     if (!io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F))
       FitCameraToDocument(state);
+    // Shift+F: frame just the selection (falls back to fit when empty).
+    if (io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F))
+      FitCameraToSelection(state);
 
     const bool modelCtx = !state.sketchEdit.IsEditing();
     if (modelCtx && !io.KeyShift && !state.sketchEdit.pickingPlane &&
