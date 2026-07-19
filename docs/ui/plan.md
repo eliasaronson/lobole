@@ -168,26 +168,26 @@ owns those contexts) — extend when the sketch toolbar consolidates.
 
 Collected 2026-07-18 (user ask: "what are we missing vs other CAD?").
 Feature-tree context menu (rename/suppress/delete/rollback/re-pick) and the
-draggable rollback bar shipped with U4. Still missing, roughly by value:
+draggable rollback bar shipped with U4. Shipped 2026-07-19 (small-wins
+batch): **hide/show bodies** (glyph = eye toggle; context menu kept),
+**double-click a feature row** → Properties editor (sketch/datum keep their
+special double-clicks), **zoom to selection** (Shift+F / View menu /
+palette; occurrence-aware via Measure::ElementBounds), **window title =
+project name + dirty marker** (all tabs' saved versions stamped on save —
+assemblies/stashed tabs read clean now). Still missing, roughly by value:
 
 - **Direct manipulation in previews** — drag an arrow handle to set extrude
   distance / fillet radius in the viewport (Onshape/SW). Natural U3 follow-on
   (the dialog and the handle edit the same param). 
 - **Feature reordering by drag in the tree** (with a dependency check and a
   clear failure message). Standard in SW/FreeCAD; needs care with refs.
-- **Hide/show bodies** — per-body eye toggle in the tree (parts have no body
-  visibility today; assemblies already have occurrence visibility). Small.
-- **Double-click a feature row** → open its editor (today only datum planes
-  double-click, into sketch). Small, pairs with U3.
 - **Per-body appearance/material from the tree** (right-click > Material) —
   material exists on features; surface it where users look for it.
-- **Zoom to selection** (frame the selected face/body/feature). Small.
 - **Quick toolbar at cursor** (SolidWorks "S key") — the mouse-side sibling
   of U6's Ctrl+K palette; same command enumeration feeds both.
 - **Dimension-first sketching** — type the length/radius while drawing
   (Onshape). Sketcher-side; bigger, belongs to a sketching follow-on.
 - **Unit display/entry in dimension fields** (deferred from variables C2).
-- **Window title = project name + dirty marker**. Trivial.
 
 ## Tests
 
