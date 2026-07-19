@@ -418,6 +418,7 @@ void DrawUI(AppState& state) {
       DrawDatumLabels(state);
       DrawElementNameOverlay(state); // toponaming debug: hovered face's name
       DrawDimensions(state);
+      DrawDimensionOnCreate(state); // typed-number field for the last entity
       DrawConstraintGlyphs(state);
       DrawToolPrompt(state);
       DrawInContextBanner(state);

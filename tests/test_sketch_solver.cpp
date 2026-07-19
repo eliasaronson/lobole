@@ -737,6 +737,55 @@ TEST_CASE("Under-defined entities are identified after a solve",
   CHECK(s2.UnderDefinedEntities().empty());
 }
 
+TEST_CASE("Symmetric about a POINT mirrors the pair through it",
+          "[solver][symmetric]") {
+  SketchFeature s = MakeSketch();
+  const uint32_t p0 = s.AddEntity(sketch::Point{{1, 1}});
+  const uint32_t p1 = s.AddEntity(sketch::Point{{-0.6f, -0.8f}});
+  const uint32_t pc = s.AddEntity(sketch::Point{{0, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {pc, 0}, {}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {p0, 0}, {}});
+  sketch::Constraint sym{sketch::ConstraintKind::Symmetric, {p0, 0}, {p1, 0}};
+  sym.c = {pc, 0};
+  s.constraints.push_back(sym);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  const glm::vec2 mirrored = std::get<sketch::Point>(out[1]).p;
+  CHECK_THAT(mirrored.x, WithinAbs(-1.0f, 1e-4f));
+  CHECK_THAT(mirrored.y, WithinAbs(-1.0f, 1e-4f));
+}
+
+TEST_CASE("Centered rectangle stays anchored to its centre point",
+          "[solver][rectangle]") {
+  SketchFeature s = MakeSketch();
+  const auto ids = s.AddRectangleCentered({1.0f, 0.5f}, {2.0f, 1.0f}); // 2x1
+  REQUIRE(s.entities.size() == 5); // 4 sides + the centre point
+  // Pin the centre, then dimension the width: the rectangle must grow
+  // symmetrically about the centre instead of dragging it along.
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {ids[4], 0}, {}});
+  sketch::Constraint width{sketch::ConstraintKind::Distance,
+                           {ids[0], 0},
+                           {ids[0], 1}};
+  width.value = 3.0;
+  s.constraints.push_back(width);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  const auto& bottom = std::get<sketch::Line>(out[0]);
+  CHECK_THAT(glm::length(bottom.b - bottom.a), WithinAbs(3.0f, 1e-3f));
+  CHECK_THAT(0.5f * (bottom.a.x + bottom.b.x), WithinAbs(1.0f, 1e-3f));
+  const glm::vec2 center = std::get<sketch::Point>(out[4]).p;
+  CHECK_THAT(center.x, WithinAbs(1.0f, 1e-4f)); // the anchor never moved
+  CHECK_THAT(center.y, WithinAbs(0.5f, 1e-4f));
+}
+
 TEST_CASE("DistancePL holds a point at a perpendicular line distance",
           "[solver][dimension]") {
   SketchFeature s = MakeSketch();

@@ -131,9 +131,18 @@ SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
                             glm::vec2 mousePos, float tolPx);
 
 // Adds a constraint from the current selection, solves, and commits one
-// ModifyFeatureCommand. Returns false if the selection isn't valid.
+// ModifyFeatureCommand. Returns false if the selection isn't valid. A
+// non-empty `valueExpr` is stored as the driving expression (`value` must
+// already be its evaluation — regeneration re-evaluates it).
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
-                           double value);
+                           double value, const std::string& valueExpr = {});
+
+// Dimension-on-create: while a draw tool is live, typing a digit opens a
+// small value field near the cursor; Enter applies it as a driving dimension
+// on the entity just drawn (line length / circle-arc radius / rectangle
+// width then height). Esc dismisses without touching the tool's staged
+// state. Call once per frame from the UI pass (after DrawDimensions).
+void DrawDimensionOnCreate(AppState& state);
 
 // Toggles the construction flag on the selected entities (one undoable edit).
 // Returns false if nothing is selected.

@@ -162,6 +162,32 @@ TEST_CASE("DistancePL dimension and its expression round-trip",
   fs::remove(path);
 }
 
+TEST_CASE("Centered rectangle's symmetric-about-point anchor round-trips",
+          "[serialization][sketch]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const auto ids = sk->AddRectangleCentered({1.0f, 0.5f}, {2.0f, 1.0f});
+  doc.AddFeature(std::move(sk));
+
+  fs::path path = TempFile("designer_test_center_rect.json");
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE((loaded != nullptr && error.empty()));
+
+  auto* lsk = dynamic_cast<SketchFeature*>(loaded->GetFeature(0));
+  REQUIRE(lsk != nullptr);
+  REQUIRE(lsk->entities.size() == 5); // 4 sides + the centre point
+  bool anchored = false;
+  for (const auto& c : lsk->constraints)
+    if (c.kind == sketch::ConstraintKind::Symmetric && c.c.entity == ids[4] &&
+        c.a.entity == ids[0] && c.b.entity == ids[2])
+      anchored = true;
+  CHECK(anchored); // the point-centre third ref survived the round trip
+
+  fs::remove(path);
+}
+
 TEST_CASE("Loading rejects non-document JSON", "[serialization]") {
   fs::path path = TempFile("designer_test_bad.json");
   {

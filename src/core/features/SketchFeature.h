@@ -444,6 +444,12 @@ public:
   // editable and trimmable.
   std::array<uint32_t, 4> AddRectangle(glm::vec2 c1, glm::vec2 c2);
 
+  // Centre + corner rectangle: AddRectangle's four sides PLUS a centre Point
+  // entity anchored midway between the diagonal corners (Symmetric-about-a-
+  // point). Returns {bottom, right, top, left, centre point}.
+  std::array<uint32_t, 5> AddRectangleCentered(glm::vec2 center,
+                                               glm::vec2 corner);
+
   // Splits the line `id` at point P (assumed on the segment). Piece 1 keeps
   // `id` (its far endpoint becomes P); piece 2 is a new line P -> original-end.
   // Constraints transfer per the FreeCAD lines-only policy: the far-endpoint

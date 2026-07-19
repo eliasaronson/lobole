@@ -64,7 +64,8 @@ enum class SketchTool {
   Fillet,        // round the clicked corner where two lines meet
   Pattern,       // linear/circular array of the current selection
   Offset,        // offset the selected closed loop by a distance
-  Dimension      // clicks accumulate targets; the tool infers the dim kind
+  Dimension,     // clicks accumulate targets; the tool infers the dim kind
+  RectangleCenter // 2-click rectangle: centre, then a corner
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -128,6 +129,15 @@ struct SketchEditState {
   // Dimension tool: parallel to `selected` while it is armed — true when the
   // accumulated target was picked as a whole line (body), false for a point.
   std::vector<bool> dimPickBody;
+
+  // Dimension-on-create: the entities the last draw-tool commit produced (a
+  // rectangle keeps its 4 sides, everything else one id). Typing a digit
+  // while the tool is live opens a value field that applies a driving
+  // dimension to them; rectangles take two numbers (stage 0 = width next,
+  // 1 = height). Cleared on tool switch.
+  std::vector<uint32_t> lastDrawn;
+  int lastDrawnStage = 0;
+  bool dimOnCreateOpen = false; // the value field is up
 
   // What the cursor is over in the Select tool (for hover highlighting),
   // refreshed each frame. `hoveredBody` distinguishes an entity body from a

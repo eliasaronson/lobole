@@ -157,6 +157,12 @@ void CommitEntity(AppState& state, SketchFeature& sketch, size_t index,
   state.commands->Execute(
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
+  // Dimension-on-create target: circles/arcs take a typed radius.
+  state.sketchEdit.lastDrawnStage = 0;
+  state.sketchEdit.lastDrawn.clear();
+  if (std::holds_alternative<sketch::Circle>(entity) ||
+      std::holds_alternative<sketch::Arc>(entity))
+    state.sketchEdit.lastDrawn = {id};
 }
 
 // Commits a line a->b with auto-constraint inference: snaps each endpoint to
@@ -168,24 +174,28 @@ void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
   glm::vec2 pa = a, pb = b;
   std::vector<sketch::Constraint> candidates;
+  uint32_t id = 0;
   if (infer) {
     const float ppu = PixelsPerUV(state, sketch.plane, b);
     sketch::Snap sa = sketch::InferPoint(sketch.entities, a, std::nullopt, 0, ppu);
     sketch::Snap sb = sketch::InferPoint(sketch.entities, b, sa.uv, 0, ppu);
     pa = sa.uv;
     pb = sb.uv;
-    const uint32_t id = sketch.AddEntity(sketch::Line{pa, pb});
+    id = sketch.AddEntity(sketch::Line{pa, pb});
     SnapPointConstraints(sa, id, 0, candidates);
     SnapPointConstraints(sb, id, 1, candidates);
     SnapSegmentConstraints(sb, id, candidates);
     ApplyInferred(sketch, candidates);
   } else {
-    sketch.AddEntity(sketch::Line{pa, pb});
+    id = sketch.AddEntity(sketch::Line{pa, pb});
   }
   nlohmann::json after = DocumentIO::FeatureToJson(sketch);
   state.commands->Execute(
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
+  // Dimension-on-create target: a typed number becomes the line's length.
+  state.sketchEdit.lastDrawn = {id};
+  state.sketchEdit.lastDrawnStage = 0;
 }
 
 // Commits a rectangle (4 lines + corner/H/V constraints) as one undo record,
@@ -220,6 +230,44 @@ void CommitRectangle(AppState& state, SketchFeature& sketch, size_t index,
   state.commands->Execute(
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
+  // Dimension-on-create targets: typed numbers become width, then height.
+  state.sketchEdit.lastDrawn = {ids[0], ids[1], ids[2], ids[3]};
+  state.sketchEdit.lastDrawnStage = 0;
+}
+
+// Commits a centre + corner rectangle (AddRectangleCentered: 4 lines + the
+// anchored centre point) as one undo record. With `infer`, the CENTRE point
+// and the clicked corner are inferred against the pre-existing geometry.
+void CommitCenterRectangle(AppState& state, SketchFeature& sketch, size_t index,
+                           glm::vec2 center, glm::vec2 corner, bool infer) {
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  std::optional<sketch::Snap> s1, s2;
+  if (infer) {
+    s1 = sketch::InferPoint(sketch.entities, center, std::nullopt, 0,
+                            PixelsPerUV(state, sketch.plane, center));
+    s2 = sketch::InferPoint(sketch.entities, corner, std::nullopt, 0,
+                            PixelsPerUV(state, sketch.plane, corner));
+    center = s1->uv;
+    corner = s2->uv;
+  }
+  const auto ids = sketch.AddRectangleCentered(center, corner);
+  if (infer) {
+    std::vector<sketch::Constraint> candidates;
+    SnapPointConstraints(*s1, ids[4], 0, candidates); // the centre point
+    SnapPointConstraints(*s2, ids[2], 0, candidates); // the clicked corner
+    ApplyInferred(sketch, candidates);
+  }
+  sketch::Solver solver;
+  solver.Load(sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch.entities);
+  sketch.RegenerateDerived();
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  state.sketchEdit.lastDrawn = {ids[0], ids[1], ids[2], ids[3]};
+  state.sketchEdit.lastDrawnStage = 0;
 }
 
 Ray ScreenRay(AppState& state, const glm::vec2& mousePos) {
@@ -608,6 +656,8 @@ static void HandleSketchKeys(AppState& state) {
     edit.hasPendingPoint = edit.hasPendingPoint2 = false;
     edit.mirrorAxisPhase = false;
     edit.dimPickBody.clear();
+    edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
+    edit.dimOnCreateOpen = false;
     if (t == SketchTool::Dimension)
       edit.selected.clear(); // dimension targets accumulate from scratch
     edit.actionMsg.clear();
@@ -622,6 +672,8 @@ static void HandleSketchKeys(AppState& state) {
       BeginSketchExtrude(state); // Shift+E: extrude the sketch
     else if (ImGui::IsKeyPressed(ImGuiKey_R))
       BeginSketchRevolve(state); // Shift+R: revolve the sketch
+    else if (ImGui::IsKeyPressed(ImGuiKey_G))
+      setTool(SketchTool::RectangleCenter); // Shift+G: centre rectangle
     return;
   }
 
@@ -958,8 +1010,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     // Back out one level per press: close the inline dimension editor →
     // cancel an in-progress action → return to the Select tool → clear the
     // selection → leave sketch edit.
-    if (edit.editingDim >= 0) {
-      // The inline editor (DrawDimensions, later this frame) consumes it.
+    if (edit.editingDim >= 0 || edit.dimOnCreateOpen) {
+      // The inline editor / dimension-on-create field (drawn later this
+      // frame) consumes it.
     } else if (edit.hasPendingPoint || edit.hasPendingPoint2 || edit.boxActive) {
       edit.hasPendingPoint = false;
       edit.hasPendingPoint2 = false;
@@ -1009,6 +1062,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   const bool drawTool =
       edit.tool == SketchTool::Point || edit.tool == SketchTool::Line ||
       edit.tool == SketchTool::Circle || edit.tool == SketchTool::Rectangle ||
+      edit.tool == SketchTool::RectangleCenter ||
       edit.tool == SketchTool::Arc || edit.tool == SketchTool::ArcThreePoint ||
       edit.tool == SketchTool::Ellipse;
   const bool infer = drawTool && edit.autoConstrain && !ImGui::GetIO().KeyCtrl;
@@ -1350,6 +1404,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       case SketchTool::Rectangle:
         CommitRectangle(state, *sketch, index, a, uv, infer);
         break;
+      case SketchTool::RectangleCenter:
+        CommitCenterRectangle(state, *sketch, index, a, uv, infer);
+        break;
       default:
         break;
       }
@@ -1470,6 +1527,12 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
     // Rectangles aren't an entity anymore; draw the outline directly.
     poly = {a, {b.x, a.y}, b, {a.x, b.y}, a};
     break;
+  case SketchTool::RectangleCenter: {
+    // Centre placed: ghost the rectangle mirrored about it, cursor = corner.
+    const glm::vec2 c1 = 2.0f * a - b;
+    poly = {c1, {b.x, c1.y}, b, {c1.x, b.y}, c1};
+    break;
+  }
   case SketchTool::Arc:
     if (!edit.hasPendingPoint2) // center placed: preview the radius ring
       poly = sketch::TessellateEntity(sketch::Circle{a, glm::length(b - a)});
@@ -1630,6 +1693,10 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
         edit.hasPendingPoint ? "click the opposite corner"
                              : "click the first corner");
     break;
+  case T::RectangleCenter:
+    set("Center Rectangle", edit.hasPendingPoint ? 2 : 1, 2,
+        edit.hasPendingPoint ? "click a corner" : "click the centre");
+    break;
   case T::Arc:
     set("Arc", click3, 3,
         click3 == 1 ? "click the centre"
@@ -1724,6 +1791,42 @@ std::optional<glm::vec2> RefUV(const SketchFeature& sk,
   if (idx == SIZE_MAX)
     return std::nullopt;
   return sketch::EntityPointUV(sk.entities[idx], r.which);
+}
+
+// Constrains a dragged dimension-label offset to the dimension's own axis
+// (Phase 3.5) so the indicator stays aligned with what it measures: distance
+// dims keep only the component that moves the dimension line AWAY from the
+// span (the along-span slide shears the line past its extension lines);
+// angle dims are handled radially at the drag site; radius/diameter leaders
+// stay free (the leader legitimately follows the label anywhere).
+glm::vec2 ConstrainLabelOffset(const SketchFeature& sk,
+                               const sketch::Constraint& con, glm::vec2 off) {
+  using K = sketch::ConstraintKind;
+  switch (con.kind) {
+  case K::Distance: {
+    const auto a = RefUV(sk, con.a), b = RefUV(sk, con.b);
+    if (!a || !b || glm::length(*b - *a) < 1e-6f)
+      return off;
+    const glm::vec2 d = glm::normalize(*b - *a);
+    return off - d * glm::dot(off, d); // perpendicular-to-span only
+  }
+  case K::DistancePL: {
+    // The measured span runs point → foot, perpendicular to the line; the
+    // allowed offset is therefore along the LINE's direction.
+    const auto la = RefUV(sk, {con.b.entity, 0});
+    const auto lb = RefUV(sk, {con.b.entity, 1});
+    if (!la || !lb || glm::length(*lb - *la) < 1e-6f)
+      return off;
+    const glm::vec2 d = glm::normalize(*lb - *la);
+    return d * glm::dot(off, d);
+  }
+  case K::DistanceX:
+    return {0.0f, off.y}; // the dimension line only moves vertically
+  case K::DistanceY:
+    return {off.x, 0.0f};
+  default:
+    return off;
+  }
 }
 
 // A filled arrowhead at `tip` pointing along `dir` (screen space).
@@ -2038,7 +2141,20 @@ void DrawDimensions(AppState& state) {
     if (dragging) {
       if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         if (std::abs(io.MouseDelta.x) + std::abs(io.MouseDelta.y) > 0.0f) {
-          con.labelOffset += uvDelta(io.MouseDelta, glm::vec2(0.0f));
+          const glm::vec2 prev = con.labelOffset;
+          glm::vec2 next = prev + uvDelta(io.MouseDelta, glm::vec2(0.0f));
+          if (con.kind == K::Angle) {
+            // Radial only: the label slides along its current direction
+            // (changing the arc radius), never around the vertex.
+            const float len = glm::length(prev);
+            if (len > 1e-4f) {
+              const glm::vec2 dir = prev / len;
+              next = dir * std::max(glm::dot(next, dir), 0.15f);
+            }
+          } else {
+            next = ConstrainLabelOffset(*sketch, con, next);
+          }
+          con.labelOffset = next;
           s_dragMoved = true;
         }
       } else {
@@ -2121,6 +2237,137 @@ void DrawDimensions(AppState& state) {
         lastEditing = -1;
       }
     }
+  }
+}
+
+void DrawDimensionOnCreate(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  if (!edit.IsEditing())
+    return;
+  using T = SketchTool;
+  const bool drawTool =
+      edit.tool == T::Line || edit.tool == T::Circle ||
+      edit.tool == T::Rectangle || edit.tool == T::RectangleCenter ||
+      edit.tool == T::Arc || edit.tool == T::ArcThreePoint;
+  if (!drawTool || edit.lastDrawn.empty()) {
+    edit.dimOnCreateOpen = false;
+    return;
+  }
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (!sketch)
+    return;
+  for (uint32_t id : edit.lastDrawn) {
+    if (sketch->IndexOfEntity(id) == SIZE_MAX) { // undone or deleted
+      edit.lastDrawn.clear();
+      edit.dimOnCreateOpen = false;
+      return;
+    }
+  }
+
+  // What the next typed number dimensions.
+  const bool rect = edit.lastDrawn.size() == 4;
+  if (rect && edit.lastDrawnStage >= 2) {
+    edit.dimOnCreateOpen = false; // width and height both applied
+    return;
+  }
+  sketch::ConstraintKind kind = sketch::ConstraintKind::Distance;
+  std::vector<sketch::PointRef> refs;
+  const char* what = "Length";
+  if (rect) {
+    // lastDrawn = {bottom, right, top, left}: width first, then height.
+    const uint32_t side = edit.lastDrawn[edit.lastDrawnStage == 0 ? 0 : 1];
+    refs = {{side, 0}, {side, 1}};
+    what = edit.lastDrawnStage == 0 ? "Width" : "Height";
+  } else {
+    const uint32_t id = edit.lastDrawn[0];
+    const size_t ei = sketch->IndexOfEntity(id);
+    if (std::holds_alternative<sketch::Line>(sketch->entities[ei])) {
+      refs = {{id, 0}, {id, 1}};
+    } else { // circle / arc (the only other kinds recorded)
+      kind = sketch::ConstraintKind::Radius;
+      refs = {{id, 0}};
+      what = "Radius";
+    }
+  }
+
+  ImGuiIO& io = ImGui::GetIO();
+  static char buf[64];
+  static ImVec2 s_pos;
+  static std::string editError;
+  if (!edit.dimOnCreateOpen) {
+    if (io.WantTextInput)
+      return; // another field (e.g. the inline dim editor) owns typing
+    // A typed digit (or '.') opens the field, seeded with it.
+    std::string seed;
+    for (int i = 0; i < io.InputQueueCharacters.Size; i++) {
+      const ImWchar c = io.InputQueueCharacters[i];
+      if ((c >= '0' && c <= '9') || c == '.')
+        seed += static_cast<char>(c);
+    }
+    if (seed.empty())
+      return;
+    snprintf(buf, sizeof(buf), "%s", seed.c_str());
+    s_pos = ImVec2(io.MousePos.x + 14.0f, io.MousePos.y + 14.0f);
+    editError.clear();
+    edit.dimOnCreateOpen = true;
+    return; // draw + focus from the next frame
+  }
+
+  ImGui::SetNextWindowPos(s_pos);
+  ImGui::SetNextWindowBgAlpha(0.95f);
+  ImGui::Begin("##dimoncreate", nullptr,
+               ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize |
+                   ImGuiWindowFlags_NoSavedSettings);
+  ImGui::TextUnformatted(what);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(110);
+  ImGui::SetKeyboardFocusHere();
+  bool commit = ImGui::InputText("##docv", buf, sizeof(buf),
+                                 ImGuiInputTextFlags_EnterReturnsTrue);
+  if (!editError.empty())
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
+                       editError.c_str());
+  ImGui::End();
+
+  if (commit) {
+    // A plain number stays a literal; anything else is an expression over
+    // the document's variables (the inline dim editor's convention).
+    char* end = nullptr;
+    double v = std::strtod(buf, &end);
+    while (end != nullptr && *end == ' ')
+      end++;
+    const bool isNumber = end != buf && end != nullptr && *end == '\0';
+    std::string expr;
+    if (!isNumber) {
+      ExprError err;
+      const auto evaluated = ExpressionEngine::Default().EvaluateText(
+          buf, state.document->Symbols(), &err);
+      if (!evaluated.has_value()) {
+        editError = err.message;
+        commit = false; // stay open, show the error
+      } else {
+        v = *evaluated;
+        expr = buf;
+      }
+    }
+    if (commit) {
+      edit.dimOnCreateOpen = false;
+      editError.clear();
+      edit.selected = refs;
+      // Replaces the sketch feature through the command system — the local
+      // pointer is dead after this call.
+      ApplySketchConstraint(state, kind, v, expr);
+      if (rect)
+        edit.lastDrawnStage++; // width applied → height next (then done)
+      else
+        edit.lastDrawn.clear(); // one dimension per entity
+    }
+  } else if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    // Dismiss without a dimension; the draw tool's staged state is untouched
+    // (the viewport Escape cascade defers to this field while it is open).
+    edit.dimOnCreateOpen = false;
+    editError.clear();
   }
 }
 
@@ -2387,7 +2634,7 @@ glm::vec2 SeedLabelOffset(const SketchFeature& sk,
 } // namespace
 
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
-                           double value) {
+                           double value, const std::string& valueExpr) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (!sketch)
@@ -2398,6 +2645,7 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   sketch::Constraint c;
   c.kind = kind;
   c.value = value;
+  c.valueExpr = valueExpr;
 
   // Validate the selection for the constraint kind. Refs carry entity ids, so
   // resolve to the current index first (skip if the entity is gone).

@@ -209,6 +209,8 @@ void DrawSketchModeToolbar(AppState& state) {
       edit.hasPendingPoint = edit.hasPendingPoint2 = false;
       edit.mirrorAxisPhase = false;
       edit.dimPickBody.clear();
+      edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
+      edit.dimOnCreateOpen = false;
       if (t == SketchTool::Dimension)
         edit.selected.clear(); // dimension targets accumulate from scratch
       edit.actionMsg.clear();
@@ -222,6 +224,8 @@ void DrawSketchModeToolbar(AppState& state) {
   toolBtn(ICON_FA_SLASH, "Line (L)", SketchTool::Line);
   toolBtn(ICON_FA_CIRCLE_NOTCH, "Circle (C)", SketchTool::Circle);
   toolBtn(ICON_FA_VECTOR_SQUARE, "Rectangle (G)", SketchTool::Rectangle);
+  toolBtn(ICON_FA_EXPAND, "Center Rectangle (Shift+G)",
+          SketchTool::RectangleCenter);
   toolBtn(ICON_FA_BEZIER_CURVE, "3-Point Arc (A)", SketchTool::ArcThreePoint);
   toolBtn(ICON_FA_EGG, "Ellipse", SketchTool::Ellipse);
   toolBtn(ICON_FA_CIRCLE_DOT, "Point", SketchTool::Point);

@@ -1990,7 +1990,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MouseMoveToPos(ImVec2(labelScr.x, labelScr.y));
     ctx->Yield(2); // dimHot latches for the canvas gate
     ctx->MouseDown(ImGuiMouseButton_Left);
-    ctx->MouseMoveToPos(ImVec2(labelScr.x + 45.0f, labelScr.y - 30.0f));
+    // Diagonal drag: only the perpendicular (vertical, for this horizontal
+    // line) component may take effect — the axis constraint (Phase 3.5).
+    ctx->MouseMoveToPos(ImVec2(labelScr.x + 45.0f, labelScr.y - 45.0f));
     ctx->MouseUp(ImGuiMouseButton_Left);
     ctx->Yield();
 
@@ -1999,6 +2001,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(sk->entities.size(), (size_t)1);    // nothing drawn through
     const glm::vec2 dragged = sk->constraints[0].labelOffset;
     IM_CHECK_GT(glm::length(dragged - seeded), 0.1f); // the label moved
+    // The along-span (x) component was killed: the label slid on its axis.
+    IM_CHECK_LE(std::abs(dragged.x - seeded.x), 1e-3f);
     const auto lineAfter = std::get<sketch::Line>(sk->entities[0]);
     IM_CHECK_LE(glm::length(lineAfter.a - lineBefore.a), 1e-5f);
     IM_CHECK_LE(glm::length(lineAfter.b - lineBefore.b), 1e-5f);
@@ -2170,6 +2174,206 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     ctx->KeyPress(ImGuiKey_Escape); // clear selection state / leave edit
     ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
+  // Dimension-on-create (Phase 3.4): typing a number while a draw tool is
+  // live opens a value field that applies a driving dimension to the entity
+  // just drawn — circle radius, line length, rectangle width then height
+  // (expressions accepted). Esc dismisses without touching the tool's state;
+  // digits with no fresh entity (Select tool) do nothing.
+  t = IM_REGISTER_TEST(engine, "dims", "dimension_on_create");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.autoConstrain = false;
+
+    auto clickUV = [&](glm::vec2 uv) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+
+    // Circle + typed "2" = a radius dimension driving r to 2.
+    ctx->KeyPress(ImGuiKey_C);
+    clickUV({0, 1.5f});
+    clickUV({0.6f, 1.5f});
+    ctx->KeyChars("2");
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.dimOnCreateOpen);
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(!s_App->sketchEdit.dimOnCreateOpen);
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
+    IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::Radius);
+    IM_CHECK_LE(std::abs(sk->constraints[0].value - 2.0), 1e-6);
+    IM_CHECK_LE(
+        std::abs(std::get<sketch::Circle>(sk->entities[0]).radius - 2.0), 1e-3);
+
+    // Line: Esc dismisses the field without a dimension and keeps the
+    // tool's chained pending point; a second try applies the length.
+    ctx->KeyPress(ImGuiKey_L);
+    clickUV({-1, -1});
+    clickUV({1, -1});
+    IM_CHECK(s_App->sketchEdit.hasPendingPoint); // the line tool chains
+    ctx->KeyChars("9");
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.dimOnCreateOpen);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(!s_App->sketchEdit.dimOnCreateOpen);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Line);
+    IM_CHECK(s_App->sketchEdit.hasPendingPoint); // staged state untouched
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1); // no dimension created
+    ctx->KeyChars("4");
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)2);
+    IM_CHECK(sk->constraints[1].kind == sketch::ConstraintKind::Distance);
+    IM_CHECK_LE(std::abs(sk->constraints[1].value - 4.0), 1e-6);
+    {
+      const auto& ln = std::get<sketch::Line>(sk->entities[1]);
+      IM_CHECK_LE(std::abs(glm::length(ln.b - ln.a) - 4.0f), 1e-3f);
+    }
+
+    // Rectangle: first number = width, typing again = height (as an
+    // expression, which stores valueExpr).
+    ctx->KeyPress(ImGuiKey_G);
+    clickUV({-1, -0.5f});
+    clickUV({0.5f, 0.5f});
+    ctx->KeyChars("4");
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const uint32_t l0 = sketch::EntityId(sk->entities[2]); // bottom side
+    const uint32_t l1 = sketch::EntityId(sk->entities[3]); // right side
+    IM_CHECK(sk->constraints.back().kind == sketch::ConstraintKind::Distance);
+    IM_CHECK_EQ(sk->constraints.back().a.entity, l0);
+    IM_CHECK_LE(std::abs(sk->constraints.back().value - 4.0), 1e-6);
+    ctx->KeyChars("1");
+    ctx->Yield(2);
+    ctx->KeyPress(ImGuiKey_End); // collapse any select-all, cursor to end
+    ctx->KeyChars("+1");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk->constraints.back().kind == sketch::ConstraintKind::Distance);
+    IM_CHECK_EQ(sk->constraints.back().a.entity, l1);
+    IM_CHECK_LE(std::abs(sk->constraints.back().value - 2.0), 1e-6);
+    IM_CHECK(sk->constraints.back().valueExpr == "1+1");
+    {
+      const auto& bottom = std::get<sketch::Line>(sk->entities[2]);
+      const auto& right = std::get<sketch::Line>(sk->entities[3]);
+      IM_CHECK_LE(std::abs(glm::length(bottom.b - bottom.a) - 4.0f), 1e-3f);
+      IM_CHECK_LE(std::abs(glm::length(right.b - right.a) - 2.0f), 1e-3f);
+    }
+
+    // Digits while NOT in a draw tool do nothing.
+    const size_t nCons = sk->constraints.size();
+    ctx->KeyPress(ImGuiKey_Escape); // Rectangle → Select
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+    ctx->KeyChars("7");
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(!s_App->sketchEdit.dimOnCreateOpen);
+    IM_CHECK_EQ(sk->constraints.size(), nCons);
+
+    s_App->sketchEdit.autoConstrain = true; // restore the default
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+  };
+
+  // Center rectangle (Phase 3.6): Shift+G arms it; centre + corner clicks
+  // build 4 lines plus a centre point anchored by a symmetric-about-point
+  // constraint — dimensioning the width grows the rectangle symmetrically.
+  t = IM_REGISTER_TEST(engine, "sketch", "center_rectangle");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.autoConstrain = false;
+
+    ctx->KeyPress(ImGuiMod_Shift | ImGuiKey_G);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::RectangleCenter);
+
+    auto clickUV = [&](glm::vec2 uv) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    clickUV({0.5f, 0.25f}); // centre
+    clickUV({1.5f, 0.75f}); // corner
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->entities.size(), (size_t)5); // 4 sides + centre point
+    // Clicks quantize to pixels (~0.005 UV here): loose bound on placement,
+    // then exact bounds against the ACTUAL centre below.
+    const glm::vec2 c0 = std::get<sketch::Point>(sk->entities[4]).p;
+    IM_CHECK_LE(glm::length(c0 - glm::vec2(0.5f, 0.25f)), 0.05f);
+    // The diagonal corners sit symmetric about the centre.
+    const auto& bottom0 = std::get<sketch::Line>(sk->entities[0]);
+    const auto& top0 = std::get<sketch::Line>(sk->entities[2]);
+    IM_CHECK_LE(glm::length(0.5f * (bottom0.a + top0.a) - c0), 1e-3f);
+    const uint32_t pointId = sketch::EntityId(sk->entities[4]);
+    const uint32_t l0 = sketch::EntityId(sk->entities[0]);
+    bool anchored = false;
+    for (const auto& c : sk->constraints)
+      if (c.kind == sketch::ConstraintKind::Symmetric &&
+          c.c.entity == pointId)
+        anchored = true;
+    IM_CHECK(anchored);
+
+    // Pin the centre, dimension the width: symmetric growth about it.
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    s_App->sketchEdit.selected = {{pointId, 0}};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Fixed,
+                                       0.0));
+    ctx->Yield();
+    s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App,
+                                       sketch::ConstraintKind::Distance, 3.0));
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const auto& bottom = std::get<sketch::Line>(sk->entities[0]);
+    IM_CHECK_LE(std::abs(glm::length(bottom.b - bottom.a) - 3.0f), 1e-3f);
+    IM_CHECK_LE(std::abs(0.5f * (bottom.a.x + bottom.b.x) - c0.x), 1e-3f);
+    const auto& centerAfter = std::get<sketch::Point>(sk->entities[4]);
+    IM_CHECK_LE(glm::length(centerAfter.p - c0), 1e-4f); // centre stayed put
+
+    s_App->sketchEdit.autoConstrain = true;
+    ctx->KeyPress(ImGuiKey_Escape); // clear selection
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
     ctx->Yield();
   };
 

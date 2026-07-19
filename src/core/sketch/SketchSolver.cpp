@@ -354,10 +354,16 @@ void Solver::Load(const SketchFeature& sketch) {
                                        tag++);
       break;
     case ConstraintKind::Symmetric:
-      // a, b are points symmetric about the line c.entity.
-      if (a && b && im.lineOf.count(con.c.entity))
+      // a, b are points symmetric about the line c.entity — or about a POINT
+      // when c resolves to one (the centre-rectangle anchor). The line check
+      // runs first: a line ref {id, 0} would also resolve as its endpoint.
+      if (a && b && im.lineOf.count(con.c.entity)) {
         im.sys.addConstraintP2PSymmetric(
             *a, *b, im.lines[im.lineOf[con.c.entity]], tag++);
+      } else if (a && b) {
+        if (GCS::Point* cp = im.Resolve(con.c))
+          im.sys.addConstraintP2PSymmetric(*a, *b, *cp, tag++);
+      }
       break;
     case ConstraintKind::Midpoint:
       // a is the midpoint of line b: b's endpoints are symmetric about a.

@@ -110,6 +110,20 @@ std::array<uint32_t, 4> SketchFeature::AddRectangle(glm::vec2 c1, glm::vec2 c2) 
   return {l0, l1, l2, l3};
 }
 
+std::array<uint32_t, 5> SketchFeature::AddRectangleCentered(glm::vec2 center,
+                                                            glm::vec2 corner) {
+  using K = sketch::ConstraintKind;
+  const auto ids = AddRectangle(2.0f * center - corner, corner);
+  // Anchor: a centre point held midway between the diagonal corners —
+  // Symmetric about a POINT (the solver's P2PSymmetric point overload), so
+  // the rectangle stays centred on it when dimensioned or dragged.
+  const uint32_t p = AddEntity(sketch::Point{center});
+  sketch::Constraint sym{K::Symmetric, {ids[0], 0}, {ids[2], 0}};
+  sym.c = {p, 0};
+  constraints.push_back(sym);
+  return {ids[0], ids[1], ids[2], ids[3], p};
+}
+
 namespace {
 // Does constraint kind `k` read its second ref (`b`)? Horizontal/Vertical/
 // Radius are whole-entity on `a` only; the rest use both.
@@ -154,7 +168,8 @@ size_t SketchFeature::DeleteEntity(uint32_t id) {
   kept.reserve(constraints.size());
   for (const auto& c : constraints) {
     const bool hit =
-        c.a.entity == id || (UsesSecondRef(c.kind) && c.b.entity == id);
+        c.a.entity == id || (UsesSecondRef(c.kind) && c.b.entity == id) ||
+        (c.kind == K::Symmetric && c.c.entity == id); // the symmetry line/point
     if (hit) {
       if (!IsTrivial(c.kind))
         droppedNonTrivial++;
