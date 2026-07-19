@@ -2131,20 +2131,93 @@ void Arrow(ImDrawList* dl, ImVec2 tip, glm::vec2 dir, ImU32 col) {
                         ImVec2(base.x - n.x * w, base.y - n.y * w), col);
 }
 
+// Reflects a DistancePL constraint's point across its line, so the next
+// solve's side pin (derived from geometry at Load) lands on the OPPOSITE
+// side. Supports point / line-endpoint / circle-centre refs; arcs and datum
+// refs return false (no flip).
+bool ReflectPLPoint(SketchFeature& sk, const sketch::Constraint& con) {
+  const auto p = RefUV(sk, con.a);
+  const auto la = RefUV(sk, {con.b.entity, 0});
+  const auto lb = RefUV(sk, {con.b.entity, 1});
+  if (!p || !la || !lb)
+    return false;
+  const glm::vec2 dv = *lb - *la;
+  const float len = glm::length(dv);
+  if (len < 1e-6f)
+    return false;
+  const glm::vec2 d = dv / len;
+  const glm::vec2 n(-d.y, d.x);
+  const glm::vec2 target = *p - 2.0f * n * glm::dot(*p - *la, n);
+  const size_t idx = sk.IndexOfEntity(con.a.entity);
+  if (idx == SIZE_MAX)
+    return false; // datum refs can't move
+  sketch::Entity& e = sk.entities[idx];
+  if (auto* pt = std::get_if<sketch::Point>(&e))
+    pt->p = target;
+  else if (auto* l = std::get_if<sketch::Line>(&e))
+    (con.a.which != 0 ? l->b : l->a) = target;
+  else if (auto* c = std::get_if<sketch::Circle>(&e))
+    c->center = target;
+  else
+    return false; // arc points imply angles — flip unsupported there
+  return true;
+}
+
 // Commits an edited dimension value: sets it (plus the optional driving
 // expression, empty = literal), re-solves, one undo record.
+//
+// A NEGATIVE value flips the dimension's direction (the SolidWorks/Onshape
+// convention) instead of being stored: signed kinds (DistanceX/Y, Angle)
+// swap their refs for literals — the stored value stays positive — while a
+// negative-EVALUATING expression keeps its raw signed value, because
+// regeneration re-evaluates it (a ref swap would flip back every regen; the
+// sign itself must carry the direction, and the displays show |v|).
+// DistancePL's side pin re-derives from geometry each solve, so the flip
+// seeds the solve on the other side by reflecting the point. Unsigned kinds
+// (Distance, Radius, Diameter) have no direction: |v|, silently.
 void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
                         int dimIdx, double value,
                         const std::string& expr = {}) {
   if (dimIdx < 0 || dimIdx >= (int)sketch.constraints.size())
     return;
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
-  sketch.constraints[dimIdx].value = value;
-  sketch.constraints[dimIdx].valueExpr = expr;
+  sketch::Constraint& con = sketch.constraints[dimIdx];
+  using K = sketch::ConstraintKind;
+  std::vector<sketch::Entity> preSolve; // reflection seed rollback (below)
+  bool reflected = false;
+  if (value < 0.0) {
+    switch (con.kind) {
+    case K::DistanceX:
+    case K::DistanceY:
+    case K::Angle:
+      if (expr.empty()) {
+        std::swap(con.a, con.b); // the other side / the mirrored wedge
+        value = -value;          // keep the positive-value invariant
+      }
+      break; // expression: raw signed value (see above)
+    case K::DistancePL:
+      preSolve = sketch.entities;
+      reflected = ReflectPLPoint(sketch, con);
+      if (expr.empty())
+        value = -value; // GCS abs()es the magnitude; store it positive
+      break;
+    default:
+      if (expr.empty())
+        value = -value; // unsigned kinds: |v|, no direction to flip
+      break; // expression: raw value; the solver clamps unsigned kinds
+    }
+  }
+  con.value = value;
+  con.valueExpr = expr;
   sketch::Solver solver;
   solver.Load(sketch);
-  if (solver.Solve().ok)
+  if (solver.Solve().ok) {
     solver.WriteBack(sketch.entities);
+  } else if (reflected) {
+    // The flip couldn't solve (over-constrained): drop the reflection seed
+    // so the geometry isn't left at the hand-placed mirror position.
+    sketch.entities = std::move(preSolve);
+  }
   sketch.RegenerateDerived();
   state.document->Regenerate();
   nlohmann::json after = DocumentIO::FeatureToJson(sketch);
@@ -2283,11 +2356,14 @@ void DrawDimensions(AppState& state) {
       const glm::vec2 lead(rimS.x - labS.x, rimS.y - labS.y);
       if (glm::length(lead) > 1e-3f)
         Arrow(dl, rimS, glm::normalize(lead), col);
+      // |value|: a negative-evaluating expr means a flip, never a "-R".
       snprintf(label, sizeof(label),
-               con.kind == K::Diameter ? "\xC3\x98%.3g" : "R%.3g", con.value);
+               con.kind == K::Diameter ? "\xC3\x98%.3g" : "R%.3g",
+               std::abs(con.value));
       labelPos = labS;
     } else if (con.kind == K::Angle) {
-      snprintf(label, sizeof(label), "%.1f\xC2\xB0", con.value * 57.2957795f);
+      snprintf(label, sizeof(label), "%.1f\xC2\xB0",
+               std::abs(con.value) * 57.2957795f);
       const auto a0 = RefUV(*sketch, {con.a.entity, 0});
       const auto a1 = RefUV(*sketch, {con.a.entity, 1});
       const auto b0 = RefUV(*sketch, {con.b.entity, 0});
@@ -2326,7 +2402,7 @@ void DrawDimensions(AppState& state) {
                                      ? glm::dot(glm::normalize(mid), offDir)
                                      : 0.0f;
             const float score =
-                std::abs(ang - (float)con.value) * 4.0f - midDot;
+                std::abs(ang - std::abs((float)con.value)) * 4.0f - midDot;
             if (score < bestScore) {
               bestScore = score;
               bu = cu;
@@ -2649,11 +2725,11 @@ void DrawDimensionOnCreate(AppState& state) {
   if (!edit.dimOnCreateOpen) {
     if (io.WantTextInput)
       return; // another field (e.g. the inline dim editor) owns typing
-    // A typed digit (or '.') opens the field, seeded with it.
+    // A typed digit (or '.' / '-') opens the field, seeded with it.
     std::string seed;
     for (int i = 0; i < io.InputQueueCharacters.Size; i++) {
       const ImWchar c = io.InputQueueCharacters[i];
-      if ((c >= '0' && c <= '9') || c == '.')
+      if ((c >= '0' && c <= '9') || c == '.' || c == '-')
         seed += static_cast<char>(c);
     }
     if (seed.empty())
@@ -2684,12 +2760,18 @@ void DrawDimensionOnCreate(AppState& state) {
 
   if (commit) {
     // A plain number stays a literal; anything else is an expression over
-    // the document's variables (the inline dim editor's convention).
+    // the document's variables (the inline dim editor's convention). The
+    // kinds created here (Distance, Radius) are unsigned — a negative
+    // input silently means its magnitude (the flip convention has no
+    // direction to act on); negative-evaluating exprs keep their raw value
+    // (the solver clamps unsigned kinds).
     char* end = nullptr;
     double v = std::strtod(buf, &end);
     while (end != nullptr && *end == ' ')
       end++;
     const bool isNumber = end != buf && end != nullptr && *end == '\0';
+    if (isNumber)
+      v = std::abs(v);
     std::string expr;
     if (!isNumber) {
       ExprError err;

@@ -289,18 +289,21 @@ void Solver::Load(const SketchFeature& sketch) {
       break;
     }
     case ConstraintKind::Distance:
+      // Unsigned kinds take |value|: a negative-evaluating driving
+      // expression means "flipped direction", which distances/radii don't
+      // have — the magnitude still solves.
       if (a && b) {
-        im.params.push_back(con.value); // dimension value (driving, fixed)
+        im.params.push_back(std::abs(con.value)); // driving value, fixed
         im.sys.addConstraintP2PDistance(*a, *b, &im.params.back(), tag++);
       }
       break;
     case ConstraintKind::Radius:
       if (im.circleOf.count(con.a.entity)) {
-        im.params.push_back(con.value);
+        im.params.push_back(std::abs(con.value));
         im.sys.addConstraintCircleRadius(im.circles[im.circleOf[con.a.entity]],
                                          &im.params.back(), tag++);
       } else if (im.arcOf.count(con.a.entity)) {
-        im.params.push_back(con.value);
+        im.params.push_back(std::abs(con.value));
         im.sys.addConstraintArcRadius(im.arcs[im.arcOf[con.a.entity]],
                                       &im.params.back(), tag++);
       }
@@ -416,11 +419,11 @@ void Solver::Load(const SketchFeature& sketch) {
       break;
     case ConstraintKind::Diameter:
       if (im.circleOf.count(con.a.entity)) {
-        im.params.push_back(con.value * 0.5); // radius = diameter / 2
+        im.params.push_back(std::abs(con.value) * 0.5); // radius = d / 2
         im.sys.addConstraintCircleRadius(im.circles[im.circleOf[con.a.entity]],
                                          &im.params.back(), tag++);
       } else if (im.arcOf.count(con.a.entity)) {
-        im.params.push_back(con.value * 0.5);
+        im.params.push_back(std::abs(con.value) * 0.5);
         im.sys.addConstraintArcRadius(im.arcs[im.arcOf[con.a.entity]],
                                       &im.params.back(), tag++);
       }

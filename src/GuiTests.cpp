@@ -2378,6 +2378,176 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
   };
 
+  // Negative dimension values flip the dimension's direction (the SW/
+  // Onshape convention): signed kinds (DistanceX/Y, Angle) move the free
+  // geometry to the other side/wedge and store |v| (literals swap refs;
+  // negative-evaluating exprs keep the raw signed value so regeneration
+  // stays stable); DistancePL flips its side pin; unsigned kinds (aligned
+  // Distance, Radius) silently use |v| with no flip.
+  t = IM_REGISTER_TEST(engine, "dims", "negative_flip");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.autoConstrain = false;
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t p0 = sk->AddEntity(sketch::Point{{-1, -0.6f}});
+    uint32_t p1 = sk->AddEntity(sketch::Point{{1, 0.6f}});
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-2, 1.6f}, {0, 1.6f}});
+    uint32_t pp = sk->AddEntity(sketch::Point{{-1, 0.9f}});
+    uint32_t lA = sk->AddEntity(sketch::Line{{-2, -1.5f}, {-0.5f, -1.5f}});
+    uint32_t lB = sk->AddEntity(sketch::Line{{-2, -1.5f}, {-0.65f, -0.825f}});
+    uint32_t lD = sk->AddEntity(sketch::Line{{2.4f, -1.5f}, {2.4f, 1.5f}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    using CK = sketch::ConstraintKind;
+    auto addCon = [&](std::vector<sketch::PointRef> refs, CK kind, double v) {
+      s_App->sketchEdit.selected = std::move(refs);
+      IM_CHECK(ui::ApplySketchConstraint(*s_App, kind, v));
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    };
+    addCon({{p0, 0}}, CK::Fixed, 0.0);                       // [0]
+    addCon({{p0, 0}, {p1, 0}}, CK::DistanceX, 2.0);          // [1]
+    addCon({{l0, 0}}, CK::Fixed, 0.0);                       // [2]
+    addCon({{l0, 1}}, CK::Fixed, 0.0);                       // [3]
+    addCon({{pp, 0}, {l0, 0}}, CK::DistancePL, 0.7);         // [4]
+    addCon({{lA, 0}}, CK::Fixed, 0.0);                       // [5]
+    addCon({{lA, 1}}, CK::Fixed, 0.0);                       // [6]
+    addCon({{lB, 0}}, CK::Fixed, 0.0);                       // [7]
+    addCon({{lA, 0}, {lB, 0}}, CK::Angle, 0.46364761);       // [8]
+    addCon({{lD, 0}, {lD, 1}}, CK::Distance, 3.0);           // [9]
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)10);
+
+    auto editDim = [&](int idx, const char* text) {
+      s_App->sketchEdit.editingDim = idx;
+      ctx->Yield(2);
+      for (int i = 0; i < 12; i++)
+        ctx->KeyPress(ImGuiKey_Backspace);
+      ctx->KeyChars(text);
+      ctx->KeyPress(ImGuiKey_Enter);
+      ctx->Yield(2);
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1); // committed cleanly
+    };
+    auto pointAt = [&](uint32_t id) {
+      return std::get<sketch::Point>(sk->entities[sk->IndexOfEntity(id)]).p;
+    };
+
+    // DistanceX, literal "-2": refs swap (stored value stays +2), the free
+    // point solves to the OTHER side of the fixed one. Undo restores both.
+    editDim(1, "-2");
+    IM_CHECK_LE(std::abs(sk->constraints[1].value - 2.0), 1e-6);
+    IM_CHECK_EQ(sk->constraints[1].a.entity, p1); // swapped
+    IM_CHECK_EQ(sk->constraints[1].b.entity, p0);
+    IM_CHECK_LE(std::abs(pointAt(p1).x - (-3.0f)), 1e-3f);
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints[1].a.entity, p0); // refs restored
+    IM_CHECK_LE(std::abs(pointAt(p1).x - 1.0f), 1e-3f);
+
+    // DistanceX, expression "-4/2": refs stay, the RAW signed value drives
+    // (regen re-evaluates the expr, so the sign must carry the direction).
+    editDim(1, "-4/2");
+    IM_CHECK_LE(std::abs(sk->constraints[1].value - (-2.0)), 1e-6);
+    IM_CHECK(sk->constraints[1].valueExpr == "-4/2");
+    IM_CHECK_EQ(sk->constraints[1].a.entity, p0); // NOT swapped
+    IM_CHECK_LE(std::abs(pointAt(p1).x - (-3.0f)), 1e-3f); // other side
+
+    // DistancePL, literal "-0.7": the side pin flips — the point crosses to
+    // the other side of the line; stored value +0.7.
+    editDim(4, "-0.7");
+    IM_CHECK_LE(std::abs(sk->constraints[4].value - 0.7), 1e-6);
+    IM_CHECK_LE(std::abs(pointAt(pp).y - 2.3f), 1e-3f); // was 0.9 (below)
+    // ... and a negative-evaluating expression flips again, keeping the raw
+    // value + the expression as typed.
+    editDim(4, "0.7-1.4");
+    IM_CHECK(sk->constraints[4].valueExpr == "0.7-1.4");
+    IM_CHECK_LE(std::abs(sk->constraints[4].value - (-0.7)), 1e-6);
+    IM_CHECK_LE(std::abs(pointAt(pp).y - 0.9f), 1e-3f); // back below
+
+    // Angle, literal negative degrees: the mirrored wedge — lB rotates to
+    // the other side of lA; stored value stays positive.
+    editDim(8, "-26.565051");
+    IM_CHECK_LE(std::abs(sk->constraints[8].value - 0.46364761), 1e-4);
+    IM_CHECK_EQ(sk->constraints[8].a.entity, lB); // swapped
+    {
+      const auto& lb = std::get<sketch::Line>(
+          sk->entities[sk->IndexOfEntity(lB)]);
+      const float dir = std::atan2(lb.b.y - lb.a.y, lb.b.x - lb.a.x);
+      IM_CHECK_LE(std::abs(dir - (-0.46364761f)), 2e-2f); // below lA now
+    }
+
+    // Aligned Distance: no direction — a negative input is just |v|.
+    editDim(9, "-2");
+    IM_CHECK_LE(std::abs(sk->constraints[9].value - 2.0), 1e-6);
+    IM_CHECK_EQ(sk->constraints[9].a.entity, lD); // untouched refs
+    IM_CHECK_EQ((int)sk->constraints[9].a.which, 0);
+    IM_CHECK_EQ((int)sk->constraints[9].b.which, 1);
+    {
+      const auto& ld = std::get<sketch::Line>(
+          sk->entities[sk->IndexOfEntity(lD)]);
+      IM_CHECK_LE(std::abs(glm::length(ld.b - ld.a) - 2.0f), 1e-3f);
+    }
+
+    // Dimension-on-create with a negative typed value: same rule — the
+    // created radius is |v|.
+    ctx->KeyPress(ImGuiKey_C);
+    ctx->Yield();
+    {
+      glm::vec2 c = ui::SketchUVToScreen(*s_App, sk->plane,
+                                         glm::vec2(0.3f, -0.4f));
+      glm::vec2 r = ui::SketchUVToScreen(*s_App, sk->plane,
+                                         glm::vec2(0.6f, -0.4f));
+      ctx->MouseMoveToPos(ImVec2(c.x, c.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->MouseMoveToPos(ImVec2(r.x, r.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    }
+    ctx->KeyChars("5");
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.dimOnCreateOpen);
+    for (int i = 0; i < 4; i++)
+      ctx->KeyPress(ImGuiKey_Backspace);
+    ctx->KeyChars("-2");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk->constraints.back().kind == CK::Radius);
+    IM_CHECK_LE(std::abs(sk->constraints.back().value - 2.0), 1e-6);
+    {
+      int circles = 0;
+      double rad = 0.0;
+      for (const auto& e : sk->entities)
+        if (const auto* c = std::get_if<sketch::Circle>(&e)) {
+          circles++;
+          rad = c->radius;
+        }
+      IM_CHECK_EQ(circles, 1);
+      IM_CHECK_LE(std::abs(rad - 2.0), 1e-3);
+    }
+
+    s_App->sketchEdit.autoConstrain = true;
+    ctx->KeyPress(ImGuiKey_Escape); // Circle → Select
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+  };
+
   // Inline dimension editor accepts full expressions: "3*4" stores
   // valueExpr and drives value 12; a later plain number clears the expr.
   t = IM_REGISTER_TEST(engine, "dims", "inline_editor_expression");
