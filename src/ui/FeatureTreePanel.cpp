@@ -139,13 +139,12 @@ void DrawFeatureTreePanel(AppState& state) {
       const std::string label =
           feature->GetName() + "##" + std::to_string(i);
       // Datum planes double-click into a new sketch on them; sketches
-      // double-click into EDIT mode (the Properties Edit Sketch button).
+      // double-click into EDIT mode (the Properties Edit Sketch button);
+      // every other feature double-clicks into its editor — the Properties
+      // panel's parameter widgets.
       auto* datum = dynamic_cast<DatumPlaneFeature*>(feature);
       auto* sketchFeat = dynamic_cast<SketchFeature*>(feature);
-      const ImGuiSelectableFlags flags =
-          (datum != nullptr || sketchFeat != nullptr)
-              ? ImGuiSelectableFlags_AllowDoubleClick
-              : 0;
+      const ImGuiSelectableFlags flags = ImGuiSelectableFlags_AllowDoubleClick;
       // Features that failed to regenerate show red, with the reason on
       // hover; suppressed and rolled-past features show dimmed.
       const bool suppressed = feature->IsSuppressed();
@@ -174,6 +173,8 @@ void DrawFeatureTreePanel(AppState& state) {
           if (state.camera)
             state.camera->AlignToFace(sketchFeat->plane.GetOrigin(),
                                       sketchFeat->plane.GetNormal());
+        } else if (ImGui::IsMouseDoubleClicked(0)) {
+          ImGui::SetWindowFocus("Properties");
         }
       }
       if (errored) {
@@ -287,7 +288,18 @@ void DrawFeatureTreePanel(AppState& state) {
       const uint64_t createdBy = doc->GetBodies()[bi].createdBy;
       ImGui::PushID(static_cast<int>(bi));
       const bool hidden = state.hiddenBodies.count(createdBy) != 0;
+      // The glyph doubles as the visibility toggle (the eye every CAD tree
+      // has); the context menu's Hide/Show stays as the discoverable path.
       ImGui::TextUnformatted(hidden ? ICON_FA_EYE_SLASH : ICON_FA_CUBES);
+      if (ImGui::IsItemClicked()) {
+        if (hidden)
+          state.hiddenBodies.erase(createdBy);
+        else
+          state.hiddenBodies.insert(createdBy);
+        state.syncedDocumentVersion = UINT64_MAX; // force renderer resync
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip(hidden ? "Show body" : "Hide body");
       ImGui::SameLine(ImGui::GetFontSize() * 1.8f);
       if (hidden)
         ImGui::PushStyleColor(ImGuiCol_Text,
