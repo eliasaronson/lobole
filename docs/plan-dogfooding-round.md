@@ -1,6 +1,11 @@
 # Dogfooding-round execution plan
 
-Status: DRAFT — awaiting sign-off. No implementation before approval.
+Status: APPROVED 2026-07-19 (Elias). Decisions: dimension tool = full
+traditional inference (Decision 1A); parametric sketch geometry = `*_expr`
+fields on sketch entities, format bump (Decision 2A — supersedes the
+constraint-helper option; 4.6 below updated). GATE: implementation starts
+only after the in-flight STEP import/export work lands and the tree is
+green.
 
 Scope: everything in [backlog-dogfooding-2026-07-19.md](backlog-dogfooding-2026-07-19.md),
 sequenced into six phases by risk and value. Effort in sessions (a session ≈
@@ -97,10 +102,14 @@ Each lands with GUI tests; 1–3 first since they compound.
 4. `export_stl` watertightness report (shells + free-edge count in reply).
 5. Workflow-prompt additions (cad-skill adoptions): FDM minimums, research
    real dims first, phased delivery + parameter-table closing.
-6. Stretch: expression-driven sketch entities over RPC (`*_expr` on
-   center/radius/endpoints, evaluated at regen like feature exprs — small
-   format bump) — the biggest parametric win, kept last because it touches
-   the sketch schema.
+6. **Expression-driven sketch entities (Decision 2A — committed, not
+   stretch)**: `*_expr` on entity fields (line endpoints, circle/arc
+   center+radius, ellipse radii), evaluated during regeneration against the
+   symbol table exactly like feature exprs (must be hash-visible via the
+   VisitExprs pattern so the regen cache invalidates). Format bump (v37 at
+   time of writing) + golden corpus entry per policy; GUI shows expr-driven
+   values read-only in the sketch editor v1; RPC/MCP accept the fields on
+   add_feature/modify_feature.
 
 ## Phase 5 — Headless preview (stretch, ~1 session)
 
@@ -114,6 +123,6 @@ dev-watch covers the interactive case today.
 ## Suggested approval shape
 
 Phases 0–2 are low-controversy (chore + bug fixes + already-signed-off S3).
-Phase 3 changes daily-driver UX — the dimension-tool inference rules above
-are the design decision to bless. Phase 4.6 (sketch-entity exprs) is the only
-format-touching item. Approve phases individually or the lot.
+All phases approved 2026-07-19. Remaining in-flight choices are
+implementation-level (center-rectangle activation, headless-preview backend)
+and will be decided in place.
