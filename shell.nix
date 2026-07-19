@@ -34,7 +34,8 @@ pkgs.mkShell {
     boost # PlaneGCS (headers only)
     netgen # FEM tet mesher (nglib + OCC interface, LGPL); gated HAVE_NETGEN
     spectra # sparse eigensolver for FEM modal analysis (header-only); HAVE_SPECTRA
-    gtk3 # nativefiledialog
+    dbus # nativefiledialog-extended portal backend (xdg-desktop-portal)
+    systemd # libsystemd.pc — dbus-1.pc's Requires.private needs it resolvable
     libx11 # non-blocking XMapWindow path (see main.cpp)
     catch2_3 # unit tests (FetchContent fallback needs network otherwise)
   ];

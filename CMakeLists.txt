@@ -105,49 +105,23 @@ if(OPENCASCADE_FOUND)
     add_definitions(-DHAVE_OPENCASCADE)
 endif()
 
-# nativefiledialog - build from submodule
-set(NFD_DIR deps/nativefiledialog)
-if(EXISTS ${CMAKE_SOURCE_DIR}/${NFD_DIR}/src/include/nfd.h)
-    message(STATUS "Building nativefiledialog from submodule")
-    
-    # Include nativefiledialog headers
-    include_directories(${NFD_DIR}/src/include)
+# nativefiledialog-extended - native dialogs via the XDG desktop portal on
+# Linux (D-Bus, out-of-process — the old in-process GTK chooser ABORTED the
+# whole app when GSettings schemas weren't installed). If no portal service
+# runs at runtime, FileDialogs falls back to the ImGui browser.
+set(NFDE_DIR deps/nativefiledialog-extended)
+if(EXISTS ${CMAKE_SOURCE_DIR}/${NFDE_DIR}/CMakeLists.txt)
+    message(STATUS "Building nativefiledialog-extended from submodule (portal)")
+    if(UNIX AND NOT APPLE)
+        set(NFD_PORTAL ON CACHE BOOL "xdg-desktop-portal dialogs" FORCE)
+    endif()
+    set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${NFDE_DIR})
     add_definitions(-DHAVE_NATIVEFILEDIALOG)
-    
-    # Platform-specific source files
-    if(WIN32)
-        set(NFD_SOURCES ${NFD_DIR}/src/nfd_common.c ${NFD_DIR}/src/nfd_win.cpp)
-        set(NFD_LIBS "")
-    elseif(APPLE)
-        set(NFD_SOURCES ${NFD_DIR}/src/nfd_common.c ${NFD_DIR}/src/nfd_cocoa.m)
-        set(NFD_LIBS "-framework Cocoa")
-    else()
-        # Linux - check for GTK3 or fall back to Zenity
-        find_package(PkgConfig)
-        if(PkgConfig_FOUND)
-            pkg_check_modules(GTK3 gtk+-3.0)
-        endif()
-        
-        if(GTK3_FOUND)
-            set(NFD_SOURCES ${NFD_DIR}/src/nfd_common.c ${NFD_DIR}/src/nfd_gtk.c)
-            set(NFD_LIBS ${GTK3_LIBRARIES})
-            include_directories(${GTK3_INCLUDE_DIRS})
-            link_directories(${GTK3_LIBRARY_DIRS})
-            add_definitions(${GTK3_CFLAGS_OTHER})
-            message(STATUS "Using GTK3 for nativefiledialog")
-        else()
-            set(NFD_SOURCES ${NFD_DIR}/src/nfd_common.c ${NFD_DIR}/src/nfd_zenity.c)
-            set(NFD_LIBS "")
-            message(STATUS "Using Zenity fallback for nativefiledialog")
-        endif()
-    endif()
-    # Vendored third-party C: don't warn on its (harmless) format-truncation.
-    if(NFD_SOURCES)
-        set_source_files_properties(${NFD_SOURCES} PROPERTIES
-            COMPILE_OPTIONS "-w")
-    endif()
+    set(NFD_SOURCES "")
+    set(NFD_LIBS nfd)
 else()
-    message(WARNING "nativefiledialog submodule not found - will use ImGui file browser fallback")
+    message(WARNING "nativefiledialog-extended submodule not found - will use ImGui file browser fallback")
     set(NFD_SOURCES "")
     set(NFD_LIBS "")
 endif()

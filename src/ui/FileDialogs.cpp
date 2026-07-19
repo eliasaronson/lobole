@@ -19,37 +19,14 @@
 
 namespace ui {
 
-#ifdef HAVE_NATIVEFILEDIALOG
-
-void OpenStepFileDialog(AppState& state) {
-  nfdchar_t* outPath = nullptr;
-  const nfdchar_t* filterList = "step,STEP,stp,iges,igs";
-
-  nfdresult_t result = NFD_OpenDialog(filterList, nullptr, &outPath);
-  if (result == NFD_OKAY) {
-    std::string filePath(outPath);
-    free(outPath);
-    LOG_INFO("Selected file: {}", filePath);
-    LoadSTEPFile(state, filePath);
-  } else if (result == NFD_CANCEL) {
-    LOG_DEBUG("User cancelled file dialog");
-  } else {
-    LOG_ERROR("Error opening file dialog: {}", NFD_GetError());
-  }
-}
-
-void OpenStepAssemblyFileDialog(AppState& state) {
-  nfdchar_t* outPath = nullptr;
-  if (NFD_OpenDialog("step,STEP,stp", nullptr, &outPath) == NFD_OKAY) {
-    std::string filePath(outPath);
-    free(outPath);
-    std::string error;
-    if (!ImportStepAsAssembly(state, filePath, &error))
-      LOG_ERROR("Assembly import failed: {}", error);
-  }
-}
-
 namespace {
+
+// ---------------------------------------------------------------------------
+// Shared pieces, compiled in every build: the recovery modal and the ImGui
+// fallback browser. The NFD build ALSO needs the browser — on a system
+// without GSettings schemas (bare NixOS env), GLib calls abort() the moment
+// a GTK file chooser opens, so native dialogs must be probed before use.
+// ---------------------------------------------------------------------------
 
 // Load `path` (a project or a recovery sidecar) into the app.
 void OpenProjectFile(AppState& state, const std::string& path) {
@@ -62,13 +39,264 @@ void OpenProjectFile(AppState& state, const std::string& path) {
   }
 }
 
+void UpdateDirectoryContents(AppState& state) {
+  state.directoryContents.clear();
+
+  try {
+    if (std::filesystem::exists(state.currentPath) &&
+        std::filesystem::is_directory(state.currentPath)) {
+      if (state.currentPath != "." && state.currentPath != "/" &&
+          state.currentPath.find("..") == std::string::npos) {
+        state.directoryContents.push_back("..");
+      }
+
+      for (const auto& entry :
+           std::filesystem::directory_iterator(state.currentPath)) {
+        std::string filename = entry.path().filename().string();
+
+        if (entry.is_directory()) {
+          state.directoryContents.push_back("[DIR] " + filename);
+        } else {
+          std::string ext = entry.path().extension().string();
+          std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+          if (ext == ".step" || ext == ".stp" || ext == ".iges" ||
+              ext == ".igs") {
+            state.directoryContents.push_back("[CAD] " + filename);
+          } else {
+            state.directoryContents.push_back(filename);
+          }
+        }
+      }
+    }
+  } catch (const std::exception& e) {
+    LOG_ERROR("Error reading directory '{}': {}", state.currentPath, e.what());
+    state.directoryContents.push_back("Error reading directory");
+  }
+
+  std::sort(state.directoryContents.begin(), state.directoryContents.end());
+}
+
+void OpenBrowserFallback(AppState& state, bool assemblyMode) {
+  state.fileBrowserAssemblyMode = assemblyMode;
+  state.showFileBrowser = true;
+  if (state.currentPath.empty() ||
+      !std::filesystem::is_directory(state.currentPath)) {
+    state.currentPath = std::filesystem::current_path().string();
+  }
+  UpdateDirectoryContents(state);
+}
+
+// Crash-recovery prompt: OpenProjectDialog found an autosave newer than the
+// picked project file.
+void DrawRecoveryModal(AppState& state) {
+  if (state.recoveryOffer.empty())
+    return;
+  if (!ImGui::IsPopupOpen("Recover autosave?"))
+    ImGui::OpenPopup("Recover autosave?");
+  if (ImGui::BeginPopupModal("Recover autosave?", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextWrapped(
+        "An autosave newer than\n%s\nexists (probably from a crash). "
+        "Recover the autosaved changes?",
+        state.recoveryOffer.c_str());
+    if (ImGui::Button("Recover autosave")) {
+      OpenProjectFile(state, Autosaver::SidecarPath(state.recoveryOffer));
+      MarkProjectRecovered(state, state.recoveryOffer);
+      state.recoveryOffer.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Open saved file")) {
+      OpenProjectFile(state, state.recoveryOffer);
+      MarkProjectOpened(state, state.recoveryOffer);
+      Autosaver::Clear(state.recoveryOffer); // explicit discard
+      state.recoveryOffer.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
+
+void DrawBrowserWindow(AppState& state) {
+  if (!state.showFileBrowser)
+    return;
+
+  const char* title = state.fileBrowserAssemblyMode
+                          ? "Import STEP as Assembly"
+                          : "Open STEP File";
+  ImGui::Begin(title, &state.showFileBrowser,
+               ImGuiWindowFlags_AlwaysAutoResize);
+
+  ImGui::Text("Current Path: %s", state.currentPath.c_str());
+  ImGui::Separator();
+
+  if (ImGui::Button("Refresh")) {
+    UpdateDirectoryContents(state);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel")) {
+    state.showFileBrowser = false;
+  }
+
+  // Assembly import extracts part geometry into the project folder — the
+  // browser can't run a save dialog, so it needs the project saved first.
+  const bool needSave =
+      state.fileBrowserAssemblyMode && state.projectPath.empty();
+  if (needSave) {
+    ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                       "Save the project first (File > Save Project)");
+  }
+
+  ImGui::Separator();
+
+  if (ImGui::BeginListBox("##files", ImVec2(400, 300))) {
+    for (const auto& item : state.directoryContents) {
+      if (ImGui::Selectable(item.c_str(), false,
+                            ImGuiSelectableFlags_AllowDoubleClick)) {
+        if (ImGui::IsMouseDoubleClicked(0)) {
+          if (item == "..") {
+            try {
+              std::filesystem::path parentPath =
+                  std::filesystem::path(state.currentPath).parent_path();
+              state.currentPath =
+                  parentPath.empty()
+                      ? "."
+                      : std::filesystem::weakly_canonical(parentPath).string();
+              UpdateDirectoryContents(state);
+            } catch (const std::exception& e) {
+              LOG_ERROR("Error navigating to parent directory: {}", e.what());
+            }
+          } else if (item.starts_with("[DIR]")) {
+            try {
+              std::filesystem::path newPath =
+                  std::filesystem::path(state.currentPath) / item.substr(6);
+              state.currentPath =
+                  std::filesystem::weakly_canonical(newPath).string();
+              UpdateDirectoryContents(state);
+            } catch (const std::exception& e) {
+              LOG_ERROR("Error entering directory: {}", e.what());
+            }
+          } else if (item.starts_with("[CAD]") && !needSave) {
+            std::string fullPath =
+                (std::filesystem::path(state.currentPath) / item.substr(6))
+                    .string();
+            LOG_INFO("Loading selected file: {}", fullPath);
+            if (state.fileBrowserAssemblyMode) {
+              std::string error;
+              if (!ImportStepAsAssembly(state, fullPath, &error))
+                LOG_ERROR("Assembly import failed: {}", error);
+            } else {
+              LoadSTEPFile(state, fullPath);
+            }
+            state.showFileBrowser = false;
+          }
+        }
+      }
+    }
+    ImGui::EndListBox();
+  }
+
+  ImGui::Text("Double-click directories to enter, CAD files to load");
+
+  ImGui::End();
+}
+
+#ifdef HAVE_NATIVEFILEDIALOG
+// Whether native dialogs are usable. nativefiledialog-extended talks to the
+// XDG desktop portal over D-Bus on Linux (out-of-process — the old
+// in-process GTK chooser aborted the app on bare environments); NFD_Init
+// failing means no usable backend, so callers fall back to the ImGui
+// browser instead.
+bool NativeDialogsSafe() {
+  static const bool ok = [] {
+    if (NFD_Init() == NFD_OKAY)
+      return true;
+    LOG_WARN("Native file dialogs unavailable ({}); using the built-in "
+             "browser where possible.",
+             NFD_GetError() ? NFD_GetError() : "no backend");
+    return false;
+  }();
+  return ok;
+}
+#endif
+
 } // namespace
 
+void DrawFileBrowser(AppState& state) {
+  DrawRecoveryModal(state);
+  DrawBrowserWindow(state);
+}
+
+#ifdef HAVE_NATIVEFILEDIALOG
+
+void OpenStepFileDialog(AppState& state) {
+  if (!NativeDialogsSafe()) {
+    OpenBrowserFallback(state, /*assemblyMode=*/false);
+    return;
+  }
+  nfdu8char_t* outPath = nullptr;
+  const nfdu8filteritem_t filters[] = {{"CAD files", "step,stp,iges,igs"}};
+
+  nfdresult_t result = NFD_OpenDialogU8(&outPath, filters, 1, nullptr);
+  if (result == NFD_OKAY) {
+    std::string filePath(outPath);
+    NFD_FreePathU8(outPath);
+    LOG_INFO("Selected file: {}", filePath);
+    LoadSTEPFile(state, filePath);
+  } else if (result == NFD_CANCEL) {
+    LOG_DEBUG("User cancelled file dialog");
+  } else {
+    LOG_ERROR("Error opening file dialog: {}", NFD_GetError());
+    OpenBrowserFallback(state, /*assemblyMode=*/false);
+  }
+}
+
+void OpenStepAssemblyFileDialog(AppState& state) {
+  if (!NativeDialogsSafe()) {
+    OpenBrowserFallback(state, /*assemblyMode=*/true);
+    return;
+  }
+  // A fresh unsaved project: ask where to save it first — the import
+  // extracts per-part geometry into the project folder.
+  if (state.projectPath.empty()) {
+    nfdu8char_t* out = nullptr;
+    const nfdu8filteritem_t projFilter[] = {{"Designer project", "dsgn"}};
+    if (NFD_SaveDialogU8(&out, projFilter, 1, nullptr, "project.dsgn") !=
+        NFD_OKAY) {
+      return;
+    }
+    std::string path(out);
+    NFD_FreePathU8(out);
+    if (std::filesystem::path(path).extension().empty())
+      path += ".dsgn"; // directory format (F3)
+    std::string error;
+    if (!SaveProject(state, path, &error)) {
+      LOG_ERROR("Failed to save project before import: {}", error);
+      return;
+    }
+    MarkProjectSaved(state, path);
+  }
+
+  nfdu8char_t* outPath = nullptr;
+  const nfdu8filteritem_t filters[] = {{"STEP", "step,stp"}};
+  if (NFD_OpenDialogU8(&outPath, filters, 1, nullptr) == NFD_OKAY) {
+    std::string filePath(outPath);
+    NFD_FreePathU8(outPath);
+    std::string error;
+    if (!ImportStepAsAssembly(state, filePath, &error))
+      LOG_ERROR("Assembly import failed: {}", error);
+  }
+}
+
 void OpenProjectDialog(AppState& state) {
-  nfdchar_t* outPath = nullptr;
-  if (NFD_OpenDialog("json,dsgn", nullptr, &outPath) == NFD_OKAY) {
+  if (!NativeDialogsSafe())
+    return;
+  nfdu8char_t* outPath = nullptr;
+  const nfdu8filteritem_t filters[] = {{"Designer project", "dsgn,json"}};
+  if (NFD_OpenDialogU8(&outPath, filters, 1, nullptr) == NFD_OKAY) {
     std::string path(outPath);
-    free(outPath);
+    NFD_FreePathU8(outPath);
     if (Autosaver::HasNewerAutosave(path)) {
       // Defer to the recovery modal (DrawFileBrowser) — the user picks
       // between the saved file and the newer autosave.
@@ -83,10 +311,14 @@ void OpenProjectDialog(AppState& state) {
 void SaveProjectDialog(AppState& state) {
   if (!state.document)
     return;
-  nfdchar_t* outPath = nullptr;
-  if (NFD_SaveDialog("dsgn,json", nullptr, &outPath) == NFD_OKAY) {
+  if (!NativeDialogsSafe())
+    return;
+  nfdu8char_t* outPath = nullptr;
+  const nfdu8filteritem_t filters[] = {{"Designer project", "dsgn,json"}};
+  if (NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "project.dsgn") ==
+      NFD_OKAY) {
     std::string path(outPath);
-    free(outPath);
+    NFD_FreePathU8(outPath);
     if (std::filesystem::path(path).extension().empty()) {
       path += ".dsgn"; // directory format is the default for new saves (F3)
     }
@@ -100,16 +332,21 @@ void SaveProjectDialog(AppState& state) {
 }
 
 void ExportDialog(AppState& state) {
+  if (!NativeDialogsSafe())
+    return;
   // A drawing tab exports to vector sheet formats (SVG / PDF), not the mesh /
   // B-Rep writers below.
   if (state.drawing) {
     if (state.drawing->GetViews().empty())
       return;  // nothing projected to export yet
-    nfdchar_t* out = nullptr;
-    if (NFD_SaveDialog("svg,pdf", nullptr, &out) != NFD_OKAY)
+    nfdu8char_t* out = nullptr;
+    const nfdu8filteritem_t sheetFilters[] = {{"SVG", "svg"}, {"PDF", "pdf"}};
+    if (NFD_SaveDialogU8(&out, sheetFilters, 2, nullptr, "sheet.pdf") !=
+        NFD_OKAY) {
       return;
+    }
     std::string path(out);
-    free(out);
+    NFD_FreePathU8(out);
     std::string ext = std::filesystem::path(path).extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     if (ext != ".svg" && ext != ".pdf") path += ".pdf";  // default
@@ -129,13 +366,18 @@ void ExportDialog(AppState& state) {
     return;
   // Assemblies export only through the visual (tessellation) writers; a part
   // additionally offers the B-Rep CAD formats.
-  const char* filter = haveAssembly ? "glb,gltf,obj,ply"
-                                     : "step,stp,stl,brep,glb,gltf,obj,ply";
-  nfdchar_t* outPath = nullptr;
-  if (NFD_SaveDialog(filter, nullptr, &outPath) != NFD_OKAY)
+  const nfdu8filteritem_t asmFilters[] = {
+      {"Visual mesh", "glb,gltf,obj,ply"}};
+  const nfdu8filteritem_t partFilters[] = {
+      {"CAD / mesh", "step,stp,stl,brep,glb,gltf,obj,ply"}};
+  nfdu8char_t* outPath = nullptr;
+  if (NFD_SaveDialogU8(&outPath, haveAssembly ? asmFilters : partFilters, 1,
+                       nullptr, haveAssembly ? "assembly.glb" : "part.step") !=
+      NFD_OKAY) {
     return;
+  }
   std::string path(outPath);
-  free(outPath);
+  NFD_FreePathU8(outPath);
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
   if (ext.empty()) {
@@ -186,11 +428,14 @@ void ExportDialog(AppState& state) {
 void ExportBomDialog(AppState& state) {
   if (!state.assembly)
     return;
-  nfdchar_t* outPath = nullptr;
-  if (NFD_SaveDialog("csv", nullptr, &outPath) != NFD_OKAY)
+  if (!NativeDialogsSafe())
+    return;
+  nfdu8char_t* outPath = nullptr;
+  const nfdu8filteritem_t filters[] = {{"CSV", "csv"}};
+  if (NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "bom.csv") != NFD_OKAY)
     return;
   std::string path(outPath);
-  free(outPath);
+  NFD_FreePathU8(outPath);
   if (!path.ends_with(".csv"))
     path += ".csv";
   std::ofstream out(path);
@@ -202,84 +447,14 @@ void ExportBomDialog(AppState& state) {
   LOG_INFO("BOM exported to {}", path);
 }
 
-void DrawFileBrowser(AppState& state) {
-  // Crash-recovery prompt: OpenProjectDialog found an autosave newer than
-  // the picked project file.
-  if (state.recoveryOffer.empty())
-    return;
-  if (!ImGui::IsPopupOpen("Recover autosave?"))
-    ImGui::OpenPopup("Recover autosave?");
-  if (ImGui::BeginPopupModal("Recover autosave?", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextWrapped(
-        "An autosave newer than\n%s\nexists (probably from a crash). "
-        "Recover the autosaved changes?",
-        state.recoveryOffer.c_str());
-    if (ImGui::Button("Recover autosave")) {
-      OpenProjectFile(state, Autosaver::SidecarPath(state.recoveryOffer));
-      MarkProjectRecovered(state, state.recoveryOffer);
-      state.recoveryOffer.clear();
-      ImGui::CloseCurrentPopup();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Open saved file")) {
-      OpenProjectFile(state, state.recoveryOffer);
-      MarkProjectOpened(state, state.recoveryOffer);
-      Autosaver::Clear(state.recoveryOffer); // explicit discard
-      state.recoveryOffer.clear();
-      ImGui::CloseCurrentPopup();
-    }
-    ImGui::EndPopup();
-  }
-}
-
-#else // fallback ImGui browser
-
-static void UpdateDirectoryContents(AppState& state) {
-  state.directoryContents.clear();
-
-  try {
-    if (std::filesystem::exists(state.currentPath) &&
-        std::filesystem::is_directory(state.currentPath)) {
-      if (state.currentPath != "." && state.currentPath != "/" &&
-          state.currentPath.find("..") == std::string::npos) {
-        state.directoryContents.push_back("..");
-      }
-
-      for (const auto& entry :
-           std::filesystem::directory_iterator(state.currentPath)) {
-        std::string filename = entry.path().filename().string();
-
-        if (entry.is_directory()) {
-          state.directoryContents.push_back("[DIR] " + filename);
-        } else {
-          std::string ext = entry.path().extension().string();
-          std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-
-          if (ext == ".step" || ext == ".stp" || ext == ".iges" ||
-              ext == ".igs") {
-            state.directoryContents.push_back("[CAD] " + filename);
-          } else {
-            state.directoryContents.push_back(filename);
-          }
-        }
-      }
-    }
-  } catch (const std::exception& e) {
-    LOG_ERROR("Error reading directory '{}': {}", state.currentPath, e.what());
-    state.directoryContents.push_back("Error reading directory");
-  }
-
-  std::sort(state.directoryContents.begin(), state.directoryContents.end());
-}
+#else // no nativefiledialog: the ImGui browser is the only picker
 
 void OpenStepFileDialog(AppState& state) {
-  state.showFileBrowser = true;
-  UpdateDirectoryContents(state);
+  OpenBrowserFallback(state, /*assemblyMode=*/false);
 }
 
-void OpenStepAssemblyFileDialog(AppState&) {
-  LOG_WARN("Import as Assembly requires nativefiledialog");
+void OpenStepAssemblyFileDialog(AppState& state) {
+  OpenBrowserFallback(state, /*assemblyMode=*/true);
 }
 
 void OpenProjectDialog(AppState&) {
@@ -296,72 +471,6 @@ void ExportDialog(AppState&) {
 
 void ExportBomDialog(AppState&) {
   LOG_WARN("BOM export requires nativefiledialog");
-}
-
-void DrawFileBrowser(AppState& state) {
-  if (!state.showFileBrowser)
-    return;
-
-  ImGui::Begin("Open STEP File", &state.showFileBrowser,
-               ImGuiWindowFlags_AlwaysAutoResize);
-
-  ImGui::Text("Current Path: %s", state.currentPath.c_str());
-  ImGui::Separator();
-
-  if (ImGui::Button("Refresh")) {
-    UpdateDirectoryContents(state);
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Cancel")) {
-    state.showFileBrowser = false;
-  }
-
-  ImGui::Separator();
-
-  if (ImGui::BeginListBox("##files", ImVec2(400, 300))) {
-    for (const auto& item : state.directoryContents) {
-      if (ImGui::Selectable(item.c_str(), false,
-                            ImGuiSelectableFlags_AllowDoubleClick)) {
-        if (ImGui::IsMouseDoubleClicked(0)) {
-          if (item == "..") {
-            try {
-              std::filesystem::path parentPath =
-                  std::filesystem::path(state.currentPath).parent_path();
-              state.currentPath =
-                  parentPath.empty()
-                      ? "."
-                      : std::filesystem::weakly_canonical(parentPath).string();
-              UpdateDirectoryContents(state);
-            } catch (const std::exception& e) {
-              LOG_ERROR("Error navigating to parent directory: {}", e.what());
-            }
-          } else if (item.starts_with("[DIR]")) {
-            try {
-              std::filesystem::path newPath =
-                  std::filesystem::path(state.currentPath) / item.substr(6);
-              state.currentPath =
-                  std::filesystem::weakly_canonical(newPath).string();
-              UpdateDirectoryContents(state);
-            } catch (const std::exception& e) {
-              LOG_ERROR("Error entering directory: {}", e.what());
-            }
-          } else if (item.starts_with("[CAD]")) {
-            std::string fullPath =
-                (std::filesystem::path(state.currentPath) / item.substr(6))
-                    .string();
-            LOG_INFO("Loading selected file: {}", fullPath);
-            LoadSTEPFile(state, fullPath);
-            state.showFileBrowser = false;
-          }
-        }
-      }
-    }
-    ImGui::EndListBox();
-  }
-
-  ImGui::Text("Double-click directories to enter, CAD files to load");
-
-  ImGui::End();
 }
 
 #endif
