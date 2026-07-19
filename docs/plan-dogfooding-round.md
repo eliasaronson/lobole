@@ -1,11 +1,12 @@
 # Dogfooding-round execution plan
 
-Status: APPROVED 2026-07-19 (Elias). Decisions: dimension tool = full
-traditional inference (Decision 1A); parametric sketch geometry = `*_expr`
-fields on sketch entities, format bump (Decision 2A — supersedes the
-constraint-helper option; 4.6 below updated). GATE: implementation starts
-only after the in-flight STEP import/export work lands and the tree is
-green.
+Status: PHASES 0–4 EXECUTED 2026-07-19 (same day as approval; commits
+cd81d31, e792b51, 934e76b, b76c891, 18e3310, f700f62, eadf0c6). Format now
+v38. Phase 5 (headless preview) remains the open stretch item; the
+circular-pattern segfault stayed unreproduced (regression-netted, next
+occurrence self-diagnoses via the crash handler). Decisions honored:
+dimension tool = full traditional inference (1A); sketch-entity `*_expr`
+fields with format bump (2A).
 
 Scope: everything in [backlog-dogfooding-2026-07-19.md](backlog-dogfooding-2026-07-19.md),
 sequenced into six phases by risk and value. Effort in sessions (a session ≈
