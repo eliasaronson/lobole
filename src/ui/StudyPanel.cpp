@@ -1,3 +1,4 @@
+#include "Camera.h"
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "core/Command.h"
@@ -550,7 +551,11 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
     normal = state.faceSelector->GetFaceNormal(mesh, index);
     return true;
   };
-  const float len = 1.2f; // glyph scale, model units
+  // Glyph scale tracks the view (like the peak marker): a fixed 1.2 model-mm
+  // arrow vanished entirely on a 90 mm part.
+  const float len =
+      state.camera ? std::max(0.055f * state.camera->GetDistance(), 1.2f)
+                   : 1.2f;
 
   for (const fem::Load& load : s->loads) {
     glm::vec3 c(0.0f), n(0.0f);
