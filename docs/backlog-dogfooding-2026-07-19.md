@@ -73,6 +73,9 @@ against [flowful-ai/cad-skill](https://github.com/flowful-ai/cad-skill)
   (cad-skill renders 6-view orthographic PNGs from the STL headlessly).
 - **Watertightness/manifold check on export_stl** (cheap with OCC; report
   shells/free-edges count in the reply).
+- **Cross-part element queries**: while assembling, resolving the spinner's
+  face names required set_active_part round-trips (list_elements only reads
+  the active tab). Let list_elements/measure take an optional part name/id.
 
 ## Workflow prompt (tools/designer_mcp.py WORKFLOW) — cad-skill adoptions
 
