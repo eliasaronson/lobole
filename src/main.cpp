@@ -7,6 +7,7 @@
 #include "IBL.h"
 #include "IBLTextures.h"
 #include "Logger.h"
+#include "CrashHandler.h"
 #include "Screenshot.h"
 #include "HeadlessMain.h"
 #include "core/io/Autosaver.h"
@@ -917,6 +918,7 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+  InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
   g_DisableVSync = args.runGuiTests;
 

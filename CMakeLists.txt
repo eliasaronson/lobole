@@ -324,6 +324,7 @@ target_precompile_headers(designer_core PRIVATE
 # Application: windowing, rendering, UI.
 set(app_sources
     src/main.cpp
+    src/CrashHandler.cpp
     src/HeadlessMain.cpp
     src/IBLTextures.cpp
     src/MeshRenderer.cpp
