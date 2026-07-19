@@ -16,7 +16,9 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopoDS_Shape.hxx>
+#include <gp_Trsf.hxx>
 
 namespace Measure {
 
@@ -181,12 +183,34 @@ std::optional<double> Distance(const std::vector<Body>& bodies,
 std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
                                                const ElementRef& a,
                                                const ElementRef& b) {
+  return DistanceDetailed(bodies, a, glm::mat4(1.0f), bodies, b,
+                          glm::mat4(1.0f));
+}
+
+namespace {
+// A rigid glm placement (rotation + translation, as occurrence transforms
+// are) as an OCC gp_Trsf. glm is column-major: m[col][row].
+gp_Trsf ToTrsf(const glm::mat4& m) {
+  gp_Trsf t;
+  t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0],  //
+              m[0][1], m[1][1], m[2][1], m[3][1],  //
+              m[0][2], m[1][2], m[2][2], m[3][2]);
+  return t;
+}
+} // namespace
+
+std::optional<DistanceResult> DistanceDetailed(
+    const std::vector<Body>& bodiesA, const ElementRef& a, const glm::mat4& xfA,
+    const std::vector<Body>& bodiesB, const ElementRef& b,
+    const glm::mat4& xfB) {
   std::string ka, kb;
-  const TopoDS_Shape sa = ResolveShape(bodies, a, ka);
-  const TopoDS_Shape sb = ResolveShape(bodies, b, kb);
+  TopoDS_Shape sa = ResolveShape(bodiesA, a, ka);
+  TopoDS_Shape sb = ResolveShape(bodiesB, b, kb);
   if (sa.IsNull() || sb.IsNull())
     return std::nullopt;
   try {
+    sa = sa.Moved(TopLoc_Location(ToTrsf(xfA)));
+    sb = sb.Moved(TopLoc_Location(ToTrsf(xfB)));
     BRepExtrema_DistShapeShape dist(sa, sb);
     if (!dist.IsDone() || dist.NbSolution() < 1)
       return std::nullopt;

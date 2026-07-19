@@ -61,7 +61,7 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
   add("Create: Chamfer", nullptr, idle && hasBody,
       [](AppState& s) { CreateChamfer(s); });
 
-  add("Tool: Measure", nullptr, part,
+  add("Tool: Measure", nullptr, part || state.assembly != nullptr,
       [](AppState& s) { s.measure = MeasureState{}; s.measure.active = true; });
   add("Tool: Simulation", nullptr, hasBody,
       [](AppState& s) { EnterSimulation(s); });

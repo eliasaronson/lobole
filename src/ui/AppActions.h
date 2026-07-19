@@ -379,9 +379,11 @@ std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
 
 // Measure tool (C3): toggles the clicked element in the measured set —
 // one element reads out its own measure, two their distance; measured
-// elements stay highlighted until re-clicked / removed / Escape.
+// elements stay highlighted until re-clicked / removed / Escape. On an
+// assembly tab `occurrenceId` names the occurrence the element was picked
+// on (0 = part context) — part of the element's identity.
 void MeasureElementClicked(AppState& state, const ElementRef& ref,
-                           bool isEdge);
+                           bool isEdge, uint64_t occurrenceId = 0);
 // Recomputes the readout after the picked set changes (panel removals).
 void UpdateMeasureReadout(AppState& state);
 

@@ -2075,24 +2075,61 @@ std::string FormatElement(const Measure::Element& e) {
 }
 } // namespace
 
+namespace {
+// The bodies + rigid world transform (+ a display prefix) one measured
+// element resolves against: the active part's bodies at identity, or — on an
+// assembly tab — the occurrence's part bodies at the SOLVED occurrence
+// transform (real geometry, not the exploded display offset).
+struct MeasureSource {
+  const std::vector<Body>* bodies = nullptr;
+  glm::mat4 xf{1.0f};
+  std::string prefix; // "OccurrenceName: " on assemblies, "" on parts
+};
+std::optional<MeasureSource> ResolveMeasureSource(
+    AppState& state, const MeasureState::Element& e) {
+  if (e.occurrenceId == 0) {
+    if (!state.document)
+      return std::nullopt;
+    return MeasureSource{&state.document->GetBodies(), glm::mat4(1.0f), ""};
+  }
+  if (!state.assembly)
+    return std::nullopt;
+  const Occurrence* occ = state.assembly->FindById(e.occurrenceId);
+  if (!occ)
+    return std::nullopt;
+  Document* part = PartDocById(state, occ->partId);
+  if (!part)
+    return std::nullopt;
+  return MeasureSource{&part->GetBodies(), OccurrenceMatrix(*occ),
+                       occ->name + ": "};
+}
+} // namespace
+
 void UpdateMeasureReadout(AppState& state) {
   auto& m = state.measure;
   m.hasDistanceLine = false;
-  if (!state.document || m.picked.empty()) {
+  if ((!state.document && !state.assembly) || m.picked.empty()) {
     m.readout.clear();
     return;
   }
-  const auto& bodies = state.document->GetBodies();
   if (m.picked.size() == 1) {
-    if (const auto e = Measure::Describe(bodies, m.picked[0].ref))
-      m.readout = FormatElement(*e);
-    else
-      m.readout = "Could not measure that element.";
+    const auto src = ResolveMeasureSource(state, m.picked[0]);
+    if (src) {
+      if (const auto e = Measure::Describe(*src->bodies, m.picked[0].ref)) {
+        m.readout = src->prefix + FormatElement(*e);
+        return;
+      }
+    }
+    m.readout = "Could not measure that element.";
     return;
   }
   if (m.picked.size() == 2) {
-    const auto d = Measure::DistanceDetailed(bodies, m.picked[0].ref,
-                                             m.picked[1].ref);
+    const auto srcA = ResolveMeasureSource(state, m.picked[0]);
+    const auto srcB = ResolveMeasureSource(state, m.picked[1]);
+    std::optional<Measure::DistanceResult> d;
+    if (srcA && srcB)
+      d = Measure::DistanceDetailed(*srcA->bodies, m.picked[0].ref, srcA->xf,
+                                    *srcB->bodies, m.picked[1].ref, srcB->xf);
     char buf[192];
     if (d) {
       const glm::vec3 delta = d->pointB - d->pointA;
@@ -2114,19 +2151,20 @@ void UpdateMeasureReadout(AppState& state) {
 }
 
 void MeasureElementClicked(AppState& state, const ElementRef& ref,
-                           bool isEdge) {
-  if (!state.measure.active || !state.document)
+                           bool isEdge, uint64_t occurrenceId) {
+  if (!state.measure.active || (!state.document && !state.assembly))
     return;
   auto& picked = state.measure.picked;
   const auto it = std::find_if(picked.begin(), picked.end(),
                                [&](const MeasureState::Element& e) {
                                  return e.ref.featureId == ref.featureId &&
-                                        e.ref.name == ref.name;
+                                        e.ref.name == ref.name &&
+                                        e.occurrenceId == occurrenceId;
                                });
   if (it != picked.end())
     picked.erase(it); // clicking a measured element again deselects it
   else
-    picked.push_back({ref, isEdge});
+    picked.push_back({ref, isEdge, occurrenceId});
   UpdateMeasureReadout(state);
 }
 

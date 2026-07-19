@@ -323,6 +323,21 @@ void DrawAssemblyToolbar(AppState& state) {
   Divider();
   if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)"))
     FitCameraToDocument(state);
+
+  // Measure across the assembly: same tool as the part tab — picks carry
+  // their occurrence, so distances span occurrences in world space.
+  if (state.measure.active)
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  if (ToolButton(ICON_FA_RULER, "Measure (pick 1-2 faces/edges; Esc to exit)",
+                 state.assembly->OccurrenceCount() > 0)) {
+    const bool wasActive = state.measure.active;
+    state.measure = MeasureState{}; // clear any in-progress measurement
+    state.measure.active = !wasActive; // toggle
+  }
+  if (state.measure.active)
+    ImGui::PopStyleColor();
+
   if (state.mateTool.active && !state.mateTool.message.empty()) {
     ImGui::SameLine();
     ImGui::TextDisabled("%s", state.mateTool.message.c_str());

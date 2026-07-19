@@ -276,8 +276,9 @@ void HandleViewportInput(AppState& state) {
 
     // Double-click enters in context: the first click of the pair already
     // selected the occurrence via the pipeline; consume the second so it
-    // doesn't also cycle.
-    if (overViewport && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+    // doesn't also cycle. Not while measuring — those clicks are picks.
+    if (overViewport && !state.measure.active &&
+        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
       if (const uint64_t occId = SelectedOccurrenceId(state))
         EnterInContextEdit(state, occId);
       return;

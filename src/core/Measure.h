@@ -42,6 +42,15 @@ std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
                                                const ElementRef& a,
                                                const ElementRef& b);
 
+// Assembly variant: each element resolves against its own part's bodies and
+// is placed by that occurrence's rigid world transform before the extrema —
+// distance and closest points come back in world space. The part-tab path is
+// the identity-transform special case of this.
+std::optional<DistanceResult> DistanceDetailed(
+    const std::vector<Body>& bodiesA, const ElementRef& a, const glm::mat4& xfA,
+    const std::vector<Body>& bodiesB, const ElementRef& b,
+    const glm::mat4& xfB);
+
 // Total cross-section area where the plane (through `origin`, unit `normal`)
 // cuts through all bodies (inspection I3): the sum over bodies of the area of
 // their intersection with the plane. 0 when the plane misses everything;

@@ -1,5 +1,6 @@
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
+#include "ui/PropertiesPanel.h" // DrawMeasureSection (shared readout)
 
 #include "imgui.h"
 
@@ -447,6 +448,7 @@ void DrawOccurrencePanel(AppState& state) {
     }
   }
 
+  DrawMeasureSection(state);
   DrawMatesSection(state);
   DrawConfigsSection(state);
   DrawExplodedSection(state);

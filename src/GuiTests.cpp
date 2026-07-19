@@ -5,6 +5,7 @@
 #include "core/BooleanFeature.h"
 #include "core/Document.h"
 #include "core/ExtrudeFeature.h"
+#include "core/Occurrence.h"
 #include "core/Feature.h"
 #include "core/FilletFeature.h"
 #include "core/Serialization.h"
@@ -1499,5 +1500,79 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+  };
+
+  // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
+  // a top face on each reads the 8mm gap in world space; re-clicking one
+  // deselects it (occurrence is part of the element's identity).
+  t = IM_REGISTER_TEST(engine, "measure", "assembly_distance");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box"); // 2x2x2 at the origin
+    glm::vec3 min, max;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const uint64_t partSlotId = s_App->parts[0].id;
+
+    ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    IM_CHECK(s_App->assembly != nullptr);
+    Occurrence o1;
+    o1.partId = partSlotId;
+    o1.fixed = true;
+    const uint64_t occ1 = s_App->assembly->AddOccurrence(o1);
+    Occurrence o2;
+    o2.partId = partSlotId;
+    o2.position = glm::vec3(10.0f, 0.0f, 0.0f);
+    const uint64_t occ2 = s_App->assembly->AddOccurrence(o2);
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3); // resync builds the occurrence meshes
+
+    // Slightly-elevated view centered between the boxes; top faces clear.
+    const glm::vec3 cA = (min + max) * 0.5f;
+    const glm::vec3 mid = cA + glm::vec3(5.0f, 0.0f, 0.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(mid +
+                               glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) *
+                                   glm::length(max - min) * 6.0f);
+    ctx->Yield();
+
+    s_App->measure = ui::MeasureState{};
+    s_App->measure.active = true;
+    ctx->Yield();
+
+    // Top-face centers of each occurrence (world space).
+    const glm::vec3 topA(cA.x, max.y, cA.z);
+    const glm::vec3 topB = topA + glm::vec3(10.0f, 0.0f, 0.0f);
+    ctx->MouseMoveToPos(WorldToWindow(topA));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)1);
+    IM_CHECK_EQ(s_App->measure.picked[0].occurrenceId, occ1);
+
+    ctx->MouseMoveToPos(WorldToWindow(topB));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->measure.picked[1].occurrenceId, occ2);
+    IM_CHECK(s_App->measure.hasDistanceLine);
+    const float gap =
+        glm::length(s_App->measure.distB - s_App->measure.distA);
+    IM_CHECK_LE(std::abs(gap - (10.0f - (max.x - min.x))), 1e-3f);
+
+    // Same face, same occurrence → toggles OFF (identity includes the
+    // occurrence, so this must not add a third element).
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)1);
+
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK(!s_App->measure.active);
   };
 }

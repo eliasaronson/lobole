@@ -5,6 +5,8 @@
 #include "core/Feature.h"
 #include "core/Measure.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <algorithm>
 #include <vector>
 
@@ -85,6 +87,52 @@ TEST_CASE("Measure distance between two boxes' faces", "[measure]") {
       best = std::min(best, *d);
     }
   CHECK_THAT(best, WithinAbs(4.0, 1e-6));
+}
+
+TEST_CASE("Transformed distance measures occurrences in world space",
+          "[measure][assembly]") {
+  // One part, a unit box at the origin — measured as two "occurrences", the
+  // second translated (10,0,0): the facing named faces are 9 apart in world.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1, 1, 1));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const auto& bodies = doc.GetBodies();
+
+  const glm::mat4 xfA(1.0f);
+  const glm::mat4 xfB = glm::translate(glm::mat4(1.0f), glm::vec3(10, 0, 0));
+  double best = 1e30;
+  glm::vec3 bestA{0}, bestB{0};
+  for (const std::string& na : FaceNames(bodies[0]))
+    for (const std::string& nb : FaceNames(bodies[0])) {
+      auto d = Measure::DistanceDetailed(bodies, ElementRef{id, na}, xfA,
+                                         bodies, ElementRef{id, nb}, xfB);
+      REQUIRE(d.has_value());
+      if (d->distance < best) {
+        best = d->distance;
+        bestA = d->pointA;
+        bestB = d->pointB;
+      }
+    }
+  CHECK_THAT(best, WithinAbs(9.0, 1e-6));
+  // Closest points land on the facing sides, in WORLD coordinates.
+  CHECK_THAT(bestA.x, WithinAbs(1.0, 1e-6));
+  CHECK_THAT(bestB.x, WithinAbs(10.0, 1e-6));
+
+  // A rotated occurrence: spin the second box 90° about Z, then place at
+  // x=10. Local (x,y) -> world (10-y, x), so it occupies x[9,10] and the
+  // nearest gap to box A (x[0,1]) is 8 — catches transform-order mistakes.
+  const glm::mat4 xfR =
+      glm::translate(glm::mat4(1.0f), glm::vec3(10, 0, 0)) *
+      glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 0, 1));
+  best = 1e30;
+  for (const std::string& na : FaceNames(bodies[0]))
+    for (const std::string& nb : FaceNames(bodies[0])) {
+      auto d = Measure::DistanceDetailed(bodies, ElementRef{id, na}, xfA,
+                                         bodies, ElementRef{id, nb}, xfR);
+      REQUIRE(d.has_value());
+      best = std::min(best, d->distance);
+    }
+  CHECK_THAT(best, WithinAbs(8.0, 1e-6));
 }
 
 TEST_CASE("Measure of a dangling ref returns nullopt", "[measure]") {

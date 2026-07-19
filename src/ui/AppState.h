@@ -210,6 +210,10 @@ struct MeasureState {
   struct Element {
     ElementRef ref;
     bool isEdge = false;
+    // Assembly tabs: the occurrence the element was picked on (0 = part
+    // context). Part of the element's identity — the same face on two
+    // occurrences of one part is two distinct measurables.
+    uint64_t occurrenceId = 0;
   };
   std::vector<Element> picked;
   std::string readout; // formatted result ("" = nothing measured yet)

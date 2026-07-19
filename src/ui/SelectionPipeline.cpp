@@ -3,11 +3,13 @@
 #include "Camera.h"
 #include "FaceSelector.h"
 #include "MeshRenderer.h"
-#include "ui/AppActions.h"        // EdgeElementRef, AppendPrimLine
-#include "ui/FeatureEditor.h"     // SlotPickClicked (U3)
-#include "ui/SketchInteraction.h" // FaceElementRef
+#include "ui/AppActions.h"         // EdgeElementRef, AppendPrimLine
+#include "ui/AppActionsInternal.h" // PartDocById, DisplayMatrix (assembly)
+#include "ui/FeatureEditor.h"      // SlotPickClicked (U3)
+#include "ui/SketchInteraction.h"  // FaceElementRef
 
 #include "core/ExtrudeFeature.h"
+#include "core/Occurrence.h" // AssemblyDocument, Occurrence
 #include "core/RevolveFeature.h"
 #include "core/SketchFeature.h"
 #include "core/SketchProfile.h"
@@ -27,6 +29,42 @@ constexpr uint32_t KindBit(SelectionItem::Kind k) {
 constexpr uint32_t kDefaultKinds = KindBit(SelectionItem::Kind::Edge) |
                                    KindBit(SelectionItem::Kind::Face) |
                                    KindBit(SelectionItem::Kind::Body);
+
+// Assembly tabs: a picked mesh face/edge → the part-local ElementRef plus
+// the owning occurrence (the identity assembly measure needs). Null when the
+// mesh isn't an occurrence's or the element has no stable name.
+struct AssemblyElementHit {
+  uint64_t occurrenceId = 0;
+  ElementRef ref;
+};
+std::optional<AssemblyElementHit> AssemblyElementAt(AppState& state,
+                                                    uint32_t meshId,
+                                                    uint32_t index,
+                                                    bool edge) {
+  if (!state.assembly)
+    return std::nullopt;
+  for (const DocumentRenderMesh& m : state.documentMeshes) {
+    if (m.meshId != meshId)
+      continue;
+    if (m.occurrenceId == 0)
+      return std::nullopt;
+    const Occurrence* occ = state.assembly->FindById(m.occurrenceId);
+    if (!occ)
+      return std::nullopt;
+    Document* part = PartDocById(state, occ->partId);
+    if (!part || m.bodyIndex >= part->GetBodies().size())
+      return std::nullopt;
+    const Body& body = part->GetBodies()[m.bodyIndex];
+    const std::string* name =
+        edge ? body.elementMap.EdgeNameOf(static_cast<int>(index))
+             : body.elementMap.NameOf(static_cast<int>(index));
+    if (!name)
+      return std::nullopt;
+    return AssemblyElementHit{m.occurrenceId,
+                              ElementRef{body.createdBy, *name}};
+  }
+  return std::nullopt;
+}
 
 // The body a render mesh mirrors, or null (assembly meshes, stale index).
 const Body* BodyOfMesh(const AppState& state, uint32_t meshId) {
@@ -76,9 +114,18 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
   if (kinds & KindBit(SelectionItem::Kind::Edge)) {
     const EdgeHit edge = state.faceSelector->PickEdge(ray);
     if (edge.hit) {
-      if (auto ref = EdgeElementRef(state, edge.meshId, edge.edgeIndex))
+      if (state.assembly) {
+        // Assembly tab (measure): the item carries the occurrence in `id`.
+        if (auto ae = AssemblyElementAt(state, edge.meshId, edge.edgeIndex,
+                                        /*edge=*/true))
+          out.push_back({{SelectionItem::Kind::Edge, ae->occurrenceId,
+                          ae->ref},
+                         edge.meshId, edge.edgeIndex});
+      } else if (auto ref =
+                     EdgeElementRef(state, edge.meshId, edge.edgeIndex)) {
         out.push_back({{SelectionItem::Kind::Edge, 0, *ref}, edge.meshId,
                        edge.edgeIndex});
+      }
     }
   }
   if (kinds & (KindBit(SelectionItem::Kind::Face) |
@@ -86,9 +133,17 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
     const RayHit face = state.faceSelector->PickFace(ray);
     if (face.hit) {
       if (kinds & KindBit(SelectionItem::Kind::Face)) {
-        if (auto ref = FaceElementRef(state, face.meshId, face.faceIndex))
+        if (state.assembly) {
+          if (auto af = AssemblyElementAt(state, face.meshId, face.faceIndex,
+                                          /*edge=*/false))
+            out.push_back({{SelectionItem::Kind::Face, af->occurrenceId,
+                            af->ref},
+                           face.meshId, face.faceIndex});
+        } else if (auto ref =
+                       FaceElementRef(state, face.meshId, face.faceIndex)) {
           out.push_back({{SelectionItem::Kind::Face, 0, *ref}, face.meshId,
                          face.faceIndex});
+        }
       }
       if (kinds & KindBit(SelectionItem::Kind::Body)) {
         if (const Body* body = BodyOfMesh(state, face.meshId))
@@ -177,8 +232,10 @@ void ConsumeSlotPick(AppState& state, const Candidate& c) {
   SlotPickClicked(state, c.item);
 }
 void ConsumeMeasure(AppState& state, const Candidate& c) {
+  // On assemblies the Face/Edge item's id is the owning occurrence (0 on
+  // part tabs) — part of the measured element's identity.
   MeasureElementClicked(state, c.item.element,
-                        c.item.kind == SelectionItem::Kind::Edge);
+                        c.item.kind == SelectionItem::Kind::Edge, c.item.id);
 }
 void ConsumeSimFace(AppState& state, const Candidate& c) {
   SimulationApplyToFace(state, c.item.element);
@@ -223,44 +280,55 @@ void ClearHoverPreviews(AppState& state) {
 
 } // namespace
 
-bool ResolveFaceItem(const AppState& state, const SelectionItem& item,
-                     uint32_t& meshId, uint32_t& faceIndex) {
-  if (item.kind != SelectionItem::Kind::Face || !state.document)
+namespace {
+// Shared resolve for Face/Edge items: part tabs match the active document's
+// bodies; assembly items (id = occurrenceId) match that occurrence's meshes
+// against its part's bodies.
+bool ResolveElementItem(const AppState& state, const SelectionItem& item,
+                        bool edge, uint32_t& meshId, uint32_t& index) {
+  const std::vector<Body>* bodies = nullptr;
+  if (item.id != 0 && state.assembly) {
+    const Occurrence* occ = state.assembly->FindById(item.id);
+    Document* part =
+        occ ? PartDocById(const_cast<AppState&>(state), occ->partId) : nullptr;
+    if (!part)
+      return false;
+    bodies = &part->GetBodies();
+  } else if (state.document) {
+    bodies = &state.document->GetBodies();
+  } else {
     return false;
-  const auto& bodies = state.document->GetBodies();
+  }
   for (const DocumentRenderMesh& m : state.documentMeshes) {
-    if (m.bodyIndex >= bodies.size())
+    if (m.occurrenceId != item.id || m.bodyIndex >= bodies->size())
       continue;
-    const Body& body = bodies[m.bodyIndex];
+    const Body& body = (*bodies)[m.bodyIndex];
     if (body.createdBy != item.element.featureId)
       continue;
-    if (const auto idx = body.elementMap.Resolve(item.element.name)) {
+    const auto idx = edge ? body.elementMap.ResolveEdge(item.element.name)
+                          : body.elementMap.Resolve(item.element.name);
+    if (idx) {
       meshId = m.meshId;
-      faceIndex = static_cast<uint32_t>(*idx);
+      index = static_cast<uint32_t>(*idx);
       return true;
     }
   }
   return false;
 }
+} // namespace
+
+bool ResolveFaceItem(const AppState& state, const SelectionItem& item,
+                     uint32_t& meshId, uint32_t& faceIndex) {
+  if (item.kind != SelectionItem::Kind::Face)
+    return false;
+  return ResolveElementItem(state, item, /*edge=*/false, meshId, faceIndex);
+}
 
 bool ResolveEdgeItem(const AppState& state, const SelectionItem& item,
                      uint32_t& meshId, uint32_t& edgeIndex) {
-  if (item.kind != SelectionItem::Kind::Edge || !state.document)
+  if (item.kind != SelectionItem::Kind::Edge)
     return false;
-  const auto& bodies = state.document->GetBodies();
-  for (const DocumentRenderMesh& m : state.documentMeshes) {
-    if (m.bodyIndex >= bodies.size())
-      continue;
-    const Body& body = bodies[m.bodyIndex];
-    if (body.createdBy != item.element.featureId)
-      continue;
-    if (const auto idx = body.elementMap.ResolveEdge(item.element.name)) {
-      meshId = m.meshId;
-      edgeIndex = static_cast<uint32_t>(*idx);
-      return true;
-    }
-  }
-  return false;
+  return ResolveElementItem(state, item, /*edge=*/true, meshId, edgeIndex);
 }
 
 const char* ArmedPrompt(AppState& state) {
@@ -401,6 +469,20 @@ void SyncSelectionHighlights(AppState& state) {
         if (m.occurrenceId == it.id)
           state.meshRenderer->HighlightInstance(m.meshId);
     }
+    // Measured faces highlight on their occurrence's instance while the
+    // tool is armed (the element's id carries the occurrence).
+    if (state.measure.active) {
+      for (const MeasureState::Element& e : state.measure.picked) {
+        if (e.isEdge)
+          continue;
+        uint32_t mesh = 0, index = 0, first = 0, count = 0;
+        if (ResolveFaceItem(state,
+                            {SelectionItem::Kind::Face, e.occurrenceId, e.ref},
+                            mesh, index) &&
+            state.faceSelector->GetFaceVertexRange(mesh, index, first, count))
+          state.meshRenderer->SetFaceHighlight(mesh, first, count);
+      }
+    }
     return;
   }
   // Every Face item highlights — one range per INSTANCE (renderer slot), so
@@ -428,7 +510,7 @@ void SyncSelectionHighlights(AppState& state) {
 }
 
 void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
-  if (!state.document || state.edgePick.Active() ||
+  if ((!state.document && !state.assembly) || state.edgePick.Active() ||
       state.sketchEdit.IsEditing()) {
     return; // blend edge-pick / sketch mode own the overlay channel
   }
@@ -443,8 +525,19 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
       if (edgeIndex >= m.edgePolylines.size())
         return;
       const auto& poly = m.edgePolylines[edgeIndex];
+      // Part meshes cache world-space polylines; occurrence meshes cache the
+      // part's LOCAL ones — place those at the occurrence's display transform.
+      glm::mat4 xf(1.0f);
+      if (m.occurrenceId != 0 && state.assembly) {
+        const Occurrence* occ = state.assembly->FindById(m.occurrenceId);
+        if (!occ)
+          return;
+        xf = DisplayMatrix(state, *occ);
+      }
       for (size_t i = 0; i + 1 < poly.size(); i++)
-        AppendPrimLine(poly[i], poly[i + 1], 2.6f, color, out);
+        AppendPrimLine(glm::vec3(xf * glm::vec4(poly[i], 1.0f)),
+                       glm::vec3(xf * glm::vec4(poly[i + 1], 1.0f)), 2.6f,
+                       color, out);
       return;
     }
   };
@@ -463,8 +556,9 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
       if (!e.isEdge)
         continue;
       uint32_t mesh = 0, index = 0;
-      if (ResolveEdgeItem(state, {SelectionItem::Kind::Edge, 0, e.ref}, mesh,
-                          index))
+      if (ResolveEdgeItem(state,
+                          {SelectionItem::Kind::Edge, e.occurrenceId, e.ref},
+                          mesh, index))
         drawEdge(mesh, index, kSelected);
     }
     if (state.measure.hasDistanceLine) {
