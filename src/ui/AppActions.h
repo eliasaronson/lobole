@@ -311,6 +311,13 @@ void MarkProjectOpened(AppState& state, const std::string& path);
 // and a save prompt is meaningful.
 void MarkProjectRecovered(AppState& state, const std::string& path);
 
+// True when any document in the project (every tab, not just the active one)
+// has edits since its last clean save/open.
+bool ProjectDirty(AppState& state);
+// Window title: "<project name>[*] - Designer", * = ProjectDirty. The name is
+// the project path's stem; "Untitled" before the first save.
+std::string WindowTitle(AppState& state);
+
 // Frames the camera on the document's combined bounding box.
 void FitCameraToDocument(AppState& state);
 

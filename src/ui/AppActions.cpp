@@ -958,10 +958,56 @@ bool OpenProject(AppState& state, const std::string& path,
   }
 }
 
+namespace {
+// The version a slot's dirty check compares against: whichever document kind
+// the slot holds. 0 for an empty slot.
+uint64_t SlotVersion(AppState& state, size_t i) {
+  if (Document* d = SlotDoc(state, i)) return d->Version();
+  if (AssemblyDocument* a = SlotAssembly(state, i)) return a->Version();
+  if (DrawingDocument* dr = SlotDrawing(state, i)) return dr->Version();
+  return 0;
+}
+// SaveProject writes every slot, so a clean save stamps every slot — the
+// active one through state.lastSavedVersion (its slot copy is stale while
+// active; StashActive writes it back on tab switch).
+void StampAllSaved(AppState& state) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    const uint64_t v = SlotVersion(state, i);
+    if (static_cast<int>(i) == state.activePart)
+      state.lastSavedVersion = v;
+    else
+      state.parts[i].lastSavedVersion = v;
+  }
+  if (state.parts.empty())
+    state.lastSavedVersion = state.document ? state.document->Version() : 0;
+}
+} // namespace
+
+bool ProjectDirty(AppState& state) {
+  if (state.parts.empty())
+    return state.document &&
+           state.document->Version() != state.lastSavedVersion;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    const uint64_t saved = static_cast<int>(i) == state.activePart
+                               ? state.lastSavedVersion
+                               : state.parts[i].lastSavedVersion;
+    if (SlotVersion(state, i) != saved)
+      return true;
+  }
+  return false;
+}
+
+std::string WindowTitle(AppState& state) {
+  std::string name = "Untitled";
+  if (!state.projectPath.empty())
+    name = std::filesystem::path(state.projectPath).stem().string();
+  return name + (ProjectDirty(state) ? "*" : "") + " - Designer";
+}
+
 void MarkProjectSaved(AppState& state, const std::string& path,
                       const std::string& message) {
   state.projectPath = path;
-  state.lastSavedVersion = state.document ? state.document->Version() : 0;
+  StampAllSaved(state);
   // The save supersedes both possible sidecars: this project's, and the
   // unsaved slot if the document lived there before its first save.
   Autosaver::Clear(path);
@@ -981,7 +1027,7 @@ void MarkProjectSaved(AppState& state, const std::string& path,
 
 void MarkProjectOpened(AppState& state, const std::string& path) {
   state.projectPath = path;
-  state.lastSavedVersion = state.document ? state.document->Version() : 0;
+  StampAllSaved(state);
 }
 
 void MarkProjectRecovered(AppState& state, const std::string& path) {

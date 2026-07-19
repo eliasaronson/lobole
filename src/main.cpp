@@ -1256,6 +1256,16 @@ int main(int argc, char **argv) {
                           g_App.lastSavedVersion, glfwGetTime());
     }
 
+    // Window title tracks the project name + a dirty marker.
+    {
+      static std::string lastTitle;
+      const std::string title = ui::WindowTitle(g_App);
+      if (title != lastTitle) {
+        glfwSetWindowTitle(window, title.c_str());
+        lastTitle = title;
+      }
+    }
+
     // Mirror document changes (edits, undo, redo) into the renderers
     ui::SyncDocumentRenderers(g_App);
     // Rebuild the FEM field overlay (and hide/show bodies) when the study or
