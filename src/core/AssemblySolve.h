@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 
 class Document;
 
@@ -32,10 +33,15 @@ struct SolveReport {
 // The connector's local frame in its part's coordinates (columns X, Y, Z,
 // origin). nullopt if the occurrence is missing, its part isn't loaded, or a
 // face anchor's ElementRef no longer resolves. Exposed for the GUI (draw the
-// connector triad, preview a mate) as well as the solve.
+// connector triad, preview a mate) as well as the solve. When `whyNot` is
+// non-null a failure fills it with a user-facing diagnosis — including
+// near-miss face names when the referenced name is a stale prefix of a
+// current one (the modified-by-a-later-feature case, e.g. "6/g1;M6" ->
+// "6/g1;M6;M7").
 std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
                                              const AssemblyDocument& asmDoc,
-                                             const PartResolver& partById);
+                                             const PartResolver& partById,
+                                             std::string* whyNot = nullptr);
 
 // Re-places every mated, non-`fixed` occurrence and writes the result back to
 // its transform (position + orientation). `fixed` occurrences and occurrences

@@ -6,6 +6,7 @@
 #include "core/io/Checkpoints.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "core/io/GitVault.h"
 #include "core/io/Serialization.h"
@@ -159,6 +160,17 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
       ok = m == "export_stl"
                ? kernel.SaveSTL(path, shape, p.value("deflection", 0.1))
                : kernel.SaveBREP(path, shape);
+      if (ok && m == "export_stl") {
+        // Watertightness report on the SOURCE B-Rep (not the mesh): a
+        // non-watertight input still exports — the report tells the caller
+        // whether the STL can be trusted for printing/slicing.
+        const Measure::ShellReport r = Measure::AnalyzeWatertight(shape);
+        return json{{"path", path},
+                    {"bodies", only < 0 ? bodies.size() : size_t{1}},
+                    {"watertight", r.watertight},
+                    {"shells", r.shells},
+                    {"free_edges", r.freeEdges}};
+      }
     }
     if (!ok) throw std::runtime_error("export failed (see log)");
     return json{{"path", path},

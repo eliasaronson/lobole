@@ -2111,6 +2111,15 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     if (op.kind == sketch::DerivedKind::LinkedCopy)
       for (const auto& inst : op.instances)
         linkedIds.insert(inst.genId);
+  // Expression-driven entities (Decision 2A) share the violet solver-fixed
+  // convention: their driven coordinates are owned by the parameter table,
+  // not the mouse (v1: no in-canvas editing of the expressions).
+  for (const auto& [eid, fields] : sk->entityExprs)
+    for (const auto& [field, expr] : fields)
+      if (!expr.empty()) {
+        linkedIds.insert(eid);
+        break;
+      }
 
   // Entities touched by a conflicting/redundant constraint, flagged red.
   std::set<uint32_t> conflictIds;

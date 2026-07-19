@@ -333,3 +333,48 @@ TEST_CASE("Ball mate rotates freely without translating", "[assembly][solve]") {
   // ...but it's rotated by the ball DOF.
   CHECK(std::abs(glm::dot(arm->orientation, glm::quat(1, 0, 0, 0))) < 0.999f);
 }
+
+TEST_CASE("Unresolvable connector names its side and suggests near misses",
+          "[assembly][solve]") {
+  uint64_t ext = 0;
+  auto box = BuildBox(3.0, ext);
+  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+
+  AssemblyDocument asmDoc;
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, /*fixed=*/true)); // id 1
+  asmDoc.AddOccurrence(MakeOcc(1, {10, 0, 0}));                // id 2
+  asmDoc.FindById(2)->name = "LobeBearing1";
+
+  // Connector B references a STALE face name that is a strict prefix of the
+  // current names ("<ext>/cap" vs "<ext>/cap0"/"<ext>/cap1") — the
+  // modified-by-a-later-feature shape of failure.
+  Mate m;
+  m.type = MateType::Fastened;
+  m.a.occurrenceId = 1;
+  m.a.anchor.origin = true;
+  m.b.occurrenceId = 2;
+  m.b.anchor.face = ElementRef{ext, std::to_string(ext) + "/cap"};
+  asmDoc.AddMate(m);
+
+  const assembly::SolveReport rep = assembly::Solve(asmDoc, resolve);
+  CHECK(rep.erroredMates == 1);
+  const std::string& err = asmDoc.GetMates()[0].error;
+  INFO(err);
+  // Names WHICH side failed, with the occurrence and the failing face ref.
+  CHECK(err.find("connector B (LobeBearing1)") != std::string::npos);
+  CHECK(err.find("face '" + std::to_string(ext) + "/cap' not found") !=
+        std::string::npos);
+  // ...and only that side: connector A resolved fine.
+  CHECK(err.find("connector A") == std::string::npos);
+  // Suggests the current names sharing the stale name as a prefix.
+  CHECK(err.find("similar:") != std::string::npos);
+  CHECK(err.find(std::to_string(ext) + "/cap1") != std::string::npos);
+
+  // A name with no near miss reports without a suggestion list.
+  asmDoc.GetMates()[0].b.anchor.face = ElementRef{ext, "zzz/nope"};
+  assembly::Solve(asmDoc, resolve);
+  const std::string& err2 = asmDoc.GetMates()[0].error;
+  INFO(err2);
+  CHECK(err2.find("connector B (LobeBearing1)") != std::string::npos);
+  CHECK(err2.find("similar:") == std::string::npos);
+}

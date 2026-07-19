@@ -25,6 +25,43 @@ struct Element {
 std::optional<Element> Describe(const std::vector<Body>& bodies,
                                 const ElementRef& ref);
 
+// Per-element classification (list_elements enrichment): resolve a face /
+// edge by its ElementMap index — the same index conventions ResolveShape and
+// the element maps key on (faces = TopExp_Explorer order, edges = MapShapes
+// order, both 0-based) — and classify the underlying surface / curve.
+struct FaceInfo {
+  std::string kind; // "plane" | "cylinder" | "cone" | "sphere" | "other"
+  double area = 0.0;
+};
+struct EdgeInfo {
+  std::string kind; // "line" | "circle" | "arc" | "other"
+  double length = 0.0;
+  double radius = 0.0; // circular edges ("circle" / "arc") only
+  bool hasRadius = false;
+};
+std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex);
+std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex);
+
+// Total pairwise intersection volume between two rigidly placed body sets
+// (I4 clash, assembly form): every body of A (placed by xfA) is intersected
+// with every body of B (placed by xfB) and the volumes summed. The part-tab
+// check is the identity-transform special case. nullopt on an OCC failure.
+std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
+                                         const glm::mat4& xfA,
+                                         const std::vector<Body>& bodiesB,
+                                         const glm::mat4& xfB);
+
+// Watertightness report for mesh export: shell count and free (naked) edge
+// count of a shape about to be tessellated. A shape is watertight when it has
+// at least one shell and no non-degenerate edge is used by fewer than two
+// faces. Purely diagnostic — export proceeds either way.
+struct ShellReport {
+  bool watertight = false;
+  int shells = 0;
+  int freeEdges = 0;
+};
+ShellReport AnalyzeWatertight(const CADShape& shape);
+
 // Minimum distance between two elements (either kind). nullopt when a ref
 // doesn't resolve or the extrema computation fails.
 std::optional<double> Distance(const std::vector<Body>& bodies,

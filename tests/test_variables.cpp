@@ -140,6 +140,64 @@ TEST_CASE("Expression-driven sketch dimension re-solves during regeneration",
 }
 #endif
 
+TEST_CASE("Expression-driven entity coordinates follow a parameter through "
+          "regeneration",
+          "[variables][exprs]") {
+  // Decision 2A: a circle whose radius (and center) are *entity* expressions,
+  // consumed by an extrude — the parameter edit must ripple through the
+  // sketch geometry into the downstream solid, which requires the exprs to
+  // be hash-visible to the regen cache (a cache hit on the stale sketch
+  // would freeze the volume).
+  Document doc;
+  doc.SetParameter("bore", "6");
+  doc.SetParameter("off", "bore + 4");
+
+  auto skOwned = std::make_unique<SketchFeature>("Sketch1", kXY);
+  const uint32_t circleId =
+      skOwned->AddEntity(sketch::Circle{{0, 0}, 1.0});
+  skOwned->entityExprs[circleId] = {{"r", "bore / 2"}, {"cx", "off"}};
+  doc.AddFeature(std::move(skOwned));
+  const uint64_t sketchId = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", sketchId, 2.0,
+                                                  ExtrudeMode::NewBody));
+  doc.Regenerate();
+
+  auto* sk = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
+  REQUIRE(sk != nullptr);
+  const auto circle = [&] {
+    return std::get<sketch::Circle>(sk->entities[sk->IndexOfEntity(circleId)]);
+  };
+  CHECK_THAT(circle().radius, WithinRel(3.0, 1e-9));
+  CHECK_THAT(static_cast<double>(circle().center.x), WithinRel(10.0, 1e-6));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const double pi = 3.14159265358979323846;
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(pi * 9.0 * 2.0, 1e-4));
+
+  // The ripple: edit the parameter, the coordinate AND the solid follow —
+  // through the incremental-regeneration cache.
+  doc.SetParameter("bore", "10");
+  CHECK_THAT(circle().radius, WithinRel(5.0, 1e-9));
+  CHECK_THAT(circle().center.x, WithinRel(14.0f, 1e-6f));
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(pi * 25.0 * 2.0, 1e-4));
+
+  // A no-change regeneration is stable (cache hit keeps the same geometry).
+  doc.Regenerate();
+  CHECK_THAT(circle().radius, WithinRel(5.0, 1e-9));
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(pi * 25.0 * 2.0, 1e-4));
+
+  // Entity exprs are visible to reference tracking (also via VisitExprs):
+  // deleting a referenced parameter is refused, renaming rewrites the expr.
+  std::vector<std::string> refs;
+  CHECK_FALSE(doc.RemoveParameter("off", &refs));
+  CHECK_FALSE(refs.empty());
+  REQUIRE(doc.RenameParameter("off", "lobe_off"));
+  CHECK(sk->entityExprs[circleId]["cx"] == "lobe_off");
+  CHECK_THAT(circle().center.x, WithinRel(14.0f, 1e-6f));
+}
+
 // --- Commands -----------------------------------------------------------------
 
 TEST_CASE("Set/delete/rename variable commands undo and redo", "[variables]") {

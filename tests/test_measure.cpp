@@ -201,6 +201,130 @@ TEST_CASE("Cross-section area of a box", "[measure][section]") {
   CHECK_THAT(*miss, Catch::Matchers::WithinAbs(0.0, 1e-6));
 }
 
+TEST_CASE("DescribeFaceAt/DescribeEdgeAt classify a box", "[measure]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 3, 4));
+  const Body& body = doc.GetBodies()[0];
+
+  // Every named face is a plane with one of the box's three areas.
+  for (const auto& [idx, name] : body.elementMap.names) {
+    (void)name;
+    const auto f = Measure::DescribeFaceAt(body, idx);
+    REQUIRE(f.has_value());
+    CHECK(f->kind == "plane");
+    CHECK((std::abs(f->area - 6.0) < 1e-6 || std::abs(f->area - 8.0) < 1e-6 ||
+           std::abs(f->area - 12.0) < 1e-6));
+  }
+  // Every named edge is a straight line of length 2, 3, or 4 — no radius.
+  for (const auto& [idx, name] : body.elementMap.edgeNames) {
+    (void)name;
+    const auto e = Measure::DescribeEdgeAt(body, idx);
+    REQUIRE(e.has_value());
+    CHECK(e->kind == "line");
+    CHECK_FALSE(e->hasRadius);
+    CHECK((std::abs(e->length - 2.0) < 1e-6 ||
+           std::abs(e->length - 3.0) < 1e-6 ||
+           std::abs(e->length - 4.0) < 1e-6));
+  }
+  // Out-of-range indices report nullopt, not garbage.
+  CHECK_FALSE(Measure::DescribeFaceAt(body, 99).has_value());
+  CHECK_FALSE(Measure::DescribeEdgeAt(body, 99).has_value());
+}
+
+TEST_CASE("DescribeFaceAt/DescribeEdgeAt classify a cylinder", "[measure]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "C", glm::vec3(0), glm::vec3(0, 0, 1), /*radius=*/2.0, /*height=*/5.0));
+  const Body& body = doc.GetBodies()[0];
+
+  int planes = 0, cylinders = 0, circles = 0;
+  for (const auto& [idx, name] : body.elementMap.names) {
+    (void)name;
+    const auto f = Measure::DescribeFaceAt(body, idx);
+    REQUIRE(f.has_value());
+    if (f->kind == "plane") {
+      planes++;
+      CHECK_THAT(f->area, WithinRel(4.0 * M_PI, 1e-6)); // pi r^2, r=2
+    } else if (f->kind == "cylinder") {
+      cylinders++;
+      CHECK_THAT(f->area, WithinRel(2.0 * M_PI * 2.0 * 5.0, 1e-6));
+    }
+  }
+  CHECK(planes == 2);   // the two caps
+  CHECK(cylinders == 1); // the barrel
+  for (const auto& [idx, name] : body.elementMap.edgeNames) {
+    (void)name;
+    const auto e = Measure::DescribeEdgeAt(body, idx);
+    REQUIRE(e.has_value());
+    if (e->kind == "circle") {
+      circles++;
+      REQUIRE(e->hasRadius);
+      CHECK_THAT(e->radius, WithinRel(2.0, 1e-6));
+      CHECK_THAT(e->length, WithinRel(4.0 * M_PI, 1e-6)); // 2 pi r
+    }
+  }
+  CHECK(circles >= 2); // both rims classify as full circles
+}
+
+TEST_CASE("InterferenceVolume over transformed body sets",
+          "[measure][assembly]") {
+  // One unit-box part measured as two placements: overlapping by half a box
+  // -> volume 0.5; fully apart -> 0.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1, 1, 1));
+  const auto& bodies = doc.GetBodies();
+
+  const glm::mat4 xfA(1.0f);
+  const glm::mat4 half =
+      glm::translate(glm::mat4(1.0f), glm::vec3(0.5f, 0.0f, 0.0f));
+  auto v = Measure::InterferenceVolume(bodies, xfA, bodies, half);
+  REQUIRE(v.has_value());
+  CHECK_THAT(*v, WithinRel(0.5, 1e-6));
+
+  const glm::mat4 apart =
+      glm::translate(glm::mat4(1.0f), glm::vec3(5.0f, 0.0f, 0.0f));
+  v = Measure::InterferenceVolume(bodies, xfA, bodies, apart);
+  REQUIRE(v.has_value());
+  CHECK_THAT(*v, WithinAbs(0.0, 1e-9));
+
+  // Rotation matters: a box spun 45 deg about Z at x=1.2 clips the corner of
+  // the unit box; unrotated at the same spot it wouldn't.
+  const glm::mat4 spun =
+      glm::translate(glm::mat4(1.0f), glm::vec3(1.2f, 0.5f, 0.0f)) *
+      glm::rotate(glm::mat4(1.0f), glm::radians(45.0f), glm::vec3(0, 0, 1));
+  v = Measure::InterferenceVolume(bodies, xfA, bodies, spun);
+  REQUIRE(v.has_value());
+  CHECK(*v > 1e-6);
+  v = Measure::InterferenceVolume(
+      bodies, xfA, bodies,
+      glm::translate(glm::mat4(1.0f), glm::vec3(1.2f, 0.5f, 0.0f)));
+  REQUIRE(v.has_value());
+  CHECK_THAT(*v, WithinAbs(0.0, 1e-9));
+}
+
+TEST_CASE("AnalyzeWatertight reports closed solids and open faces",
+          "[measure]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1, 1, 1));
+  const auto r = Measure::AnalyzeWatertight(doc.GetBodies()[0].shape);
+  CHECK(r.watertight);
+  CHECK(r.shells == 1);
+  CHECK(r.freeEdges == 0);
+
+  // A cylinder's seam edge must not count as free.
+  Document doc2;
+  doc2.AddFeature(std::make_unique<CylinderFeature>(
+      "C", glm::vec3(0), glm::vec3(0, 0, 1), 1.0, 2.0));
+  const auto rc = Measure::AnalyzeWatertight(doc2.GetBodies()[0].shape);
+  CHECK(rc.watertight);
+  CHECK(rc.freeEdges == 0);
+
+  // A null shape is not watertight (and doesn't crash).
+  const auto rn = Measure::AnalyzeWatertight(CADShape{});
+  CHECK_FALSE(rn.watertight);
+  CHECK(rn.shells == 0);
+}
+
 TEST_CASE("Section caps fill the cut face (C4)", "[measure][section]") {
   using Catch::Matchers::WithinRel;
   Document doc;

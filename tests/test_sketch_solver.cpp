@@ -830,4 +830,42 @@ TEST_CASE("DistancePL dimensions the gap between parallel lines",
   CHECK_THAT(LineB(out[1]).y, WithinAbs(2.0f, 1e-4f)); // stayed parallel
 }
 
+TEST_CASE("Expression-driven entity fields are pinned during the solve",
+          "[solver][exprs]") {
+  // Radius: an Equal constraint against an expr-driven circle must move the
+  // OTHER circle's radius — the driven one is solver-fixed (Decision 2A).
+  SketchFeature s = MakeSketch();
+  const uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 3.0});
+  const uint32_t c1 = s.AddEntity(sketch::Circle{{10, 0}, 1.0});
+  s.entityExprs[c0]["r"] = "bore / 2"; // the solver only cares it is non-empty
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Equal, {c0, 0}, {c1, 0}});
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  CHECK_THAT(std::get<sketch::Circle>(out[0]).radius, WithinAbs(3.0, 1e-6));
+  CHECK_THAT(std::get<sketch::Circle>(out[1]).radius, WithinAbs(3.0, 1e-5));
+
+  // Line endpoint: a Distance dimension stretches only the free end; the
+  // expr-driven `a` endpoint stays put.
+  SketchFeature s2 = MakeSketch();
+  const uint32_t l0 = s2.AddEntity(sketch::Line{{1, 2}, {4, 2}});
+  s2.entityExprs[l0]["ax"] = "x0";
+  s2.entityExprs[l0]["ay"] = "y0";
+  sketch::Constraint dim{sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}};
+  dim.value = 10.0;
+  s2.constraints.push_back(dim);
+  sketch::Solver solver2;
+  solver2.Load(s2);
+  REQUIRE(solver2.Solve().ok);
+  std::vector<sketch::Entity> out2;
+  solver2.WriteBack(out2);
+  CHECK_THAT(LineA(out2[0]).x, WithinAbs(1.0f, 1e-5f));
+  CHECK_THAT(LineA(out2[0]).y, WithinAbs(2.0f, 1e-5f));
+  CHECK_THAT(glm::length(LineB(out2[0]) - LineA(out2[0])),
+             WithinAbs(10.0f, 1e-4f));
+}
+
 #endif // HAVE_PLANEGCS

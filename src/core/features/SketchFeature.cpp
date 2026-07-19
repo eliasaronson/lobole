@@ -69,6 +69,76 @@ bool AngleInArc(double ang, const sketch::Arc& arc) {
 }
 } // namespace
 
+namespace sketch {
+
+std::vector<std::string> EntityExprFields(const Entity& e) {
+  return std::visit(
+      [](const auto& g) -> std::vector<std::string> {
+        using T = std::decay_t<decltype(g)>;
+        if constexpr (std::is_same_v<T, Point>)
+          return {"x", "y"};
+        else if constexpr (std::is_same_v<T, Line>)
+          return {"ax", "ay", "bx", "by"};
+        else if constexpr (std::is_same_v<T, Circle>)
+          return {"cx", "cy", "r"};
+        else if constexpr (std::is_same_v<T, Arc>)
+          return {"cx", "cy", "r"};
+        else // Ellipse: rigid in the solver, no expr fields in v1
+          return {};
+      },
+      e);
+}
+
+std::optional<double> GetEntityField(const Entity& e,
+                                     const std::string& field) {
+  return std::visit(
+      [&](const auto& g) -> std::optional<double> {
+        using T = std::decay_t<decltype(g)>;
+        if constexpr (std::is_same_v<T, Point>) {
+          if (field == "x") return g.p.x;
+          if (field == "y") return g.p.y;
+        } else if constexpr (std::is_same_v<T, Line>) {
+          if (field == "ax") return g.a.x;
+          if (field == "ay") return g.a.y;
+          if (field == "bx") return g.b.x;
+          if (field == "by") return g.b.y;
+        } else if constexpr (std::is_same_v<T, Circle> ||
+                             std::is_same_v<T, Arc>) {
+          if (field == "cx") return g.center.x;
+          if (field == "cy") return g.center.y;
+          if (field == "r") return g.radius;
+        }
+        return std::nullopt;
+      },
+      e);
+}
+
+bool SetEntityField(Entity& e, const std::string& field, double value) {
+  const float f = static_cast<float>(value);
+  return std::visit(
+      [&](auto& g) -> bool {
+        using T = std::decay_t<decltype(g)>;
+        if constexpr (std::is_same_v<T, Point>) {
+          if (field == "x") { g.p.x = f; return true; }
+          if (field == "y") { g.p.y = f; return true; }
+        } else if constexpr (std::is_same_v<T, Line>) {
+          if (field == "ax") { g.a.x = f; return true; }
+          if (field == "ay") { g.a.y = f; return true; }
+          if (field == "bx") { g.b.x = f; return true; }
+          if (field == "by") { g.b.y = f; return true; }
+        } else if constexpr (std::is_same_v<T, Circle> ||
+                             std::is_same_v<T, Arc>) {
+          if (field == "cx") { g.center.x = f; return true; }
+          if (field == "cy") { g.center.y = f; return true; }
+          if (field == "r") { g.radius = value; return true; }
+        }
+        return false;
+      },
+      e);
+}
+
+} // namespace sketch
+
 SketchFeature::SketchFeature(const std::string& name, const SketchPlane& p)
     : plane(p) {
   m_name = name;
@@ -187,6 +257,7 @@ size_t SketchFeature::DeleteEntity(uint32_t id) {
 
   constraints = std::move(kept);
   entities.erase(entities.begin() + idx);
+  entityExprs.erase(id); // any coordinate expressions die with the entity
   return droppedNonTrivial;
 }
 
@@ -686,12 +757,18 @@ bool SketchFeature::Execute(RegenContext& ctx) {
       std::any_of(constraints.begin(), constraints.end(),
                   [](const sketch::Constraint& c) {
                     return sketch::IsDimension(c.kind) && !c.valueExpr.empty();
-                  });
+                  }) ||
+      std::any_of(entityExprs.begin(), entityExprs.end(), [](const auto& kv) {
+        return std::any_of(kv.second.begin(), kv.second.end(),
+                           [](const auto& fe) { return !fe.second.empty(); });
+      });
   if (!exprDriven) {
     return true;
   }
-  // Dimension values were already refreshed from the parameter table by
-  // Document::Regenerate (via VisitExprs); apply them to the geometry.
+  // Dimension values and expression-driven entity coordinates were already
+  // refreshed from the parameter table by Document::Regenerate (via
+  // VisitExprs); re-solve so the rest of the sketch follows (the driven
+  // coordinates themselves are solver-fixed and cannot move).
   sketch::Solver solver;
   solver.Load(*this);
   const sketch::SolveResult result = solver.Solve();
@@ -722,6 +799,26 @@ void SketchFeature::VisitExprs(const ExprVisitor& visit) {
       c.value = glm::radians(degrees);
     } else {
       visit(c.valueExpr, c.value);
+    }
+  }
+  // Expression-driven entity coordinates (Decision 2A): surface each
+  // (expression, current value) pair and write the evaluated value back into
+  // the entity geometry. Because Document::Regenerate runs this refresh
+  // before hashing, the updated coordinates are baked into the feature JSON
+  // the regen cache keys on — a variable edit invalidates the sketch.
+  for (auto& [id, fields] : entityExprs) {
+    const size_t idx = IndexOfEntity(id);
+    if (idx == std::numeric_limits<size_t>::max()) {
+      continue; // stale id (entity deleted out-of-band); harmless
+    }
+    for (auto& [field, expr] : fields) {
+      const auto current = sketch::GetEntityField(entities[idx], field);
+      if (!current) {
+        continue; // field doesn't apply to this entity kind
+      }
+      double value = *current;
+      visit(expr, value);
+      sketch::SetEntityField(entities[idx], field, value);
     }
   }
 }

@@ -81,25 +81,52 @@ constexpr float kConsistencyTol = 1e-3f;
 
 std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
                                              const AssemblyDocument& asmDoc,
-                                             const PartResolver& partById) {
+                                             const PartResolver& partById,
+                                             std::string* whyNot) {
+  const auto fail = [&](std::string why) {
+    if (whyNot) *whyNot = std::move(why);
+    return std::nullopt;
+  };
   const Occurrence* occ = asmDoc.FindById(c.occurrenceId);
-  if (!occ) return std::nullopt;
+  if (!occ) return fail("its occurrence no longer exists");
 
   if (c.anchor.origin) return glm::mat4(1.0f); // the part's coordinate origin
 
   const Document* part = partById(occ->partId);
-  if (!part) return std::nullopt;
+  if (!part) return fail("the part document is not loaded");
 
   const ElementRef& ref = c.anchor.face;
   for (const Body& body : part->GetBodies()) {
     if (body.createdBy != ref.featureId) continue;
     const auto faceIdx = body.elementMap.Resolve(ref.name);
-    if (!faceIdx) return std::nullopt; // owner found, name no longer resolves
+    if (!faceIdx) {
+      // Owner found, name no longer resolves. The usual cause: a feature
+      // added AFTER the mate modified the face, extending its history name
+      // ("6/g1;M6" -> "6/g1;M6;M7") — suggest current names that keep the
+      // failing name as a prefix.
+      std::string similar;
+      for (const auto& [idx, name] : body.elementMap.names) {
+        (void)idx;
+        if (name.size() > ref.name.size() &&
+            name.compare(0, ref.name.size(), ref.name) == 0) {
+          if (!similar.empty()) similar += ", ";
+          similar += name;
+        }
+      }
+      std::string why = "face '" + ref.name + "' not found on its part";
+      if (!similar.empty())
+        why += "; similar: " + similar +
+               " (the face was modified by a later feature — update the "
+               "connector to the new name)";
+      return fail(std::move(why));
+    }
 
     glm::vec3 origin, primary, xHint;
     bool ok = body.shape.FacePlane(*faceIdx, origin, primary, xHint) ||
               body.shape.FaceAxis(*faceIdx, origin, primary, xHint);
-    if (!ok) return std::nullopt; // a face we can't derive a frame from
+    if (!ok)
+      return fail("face '" + ref.name +
+                  "' is neither planar nor cylindrical — no connector frame");
 
     // Inference snap (A2.5 phase 4): override the origin with the snapped edge's
     // characteristic point (a hole center, etc.), keeping the face's Z normal.
@@ -111,7 +138,8 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
     }
     return FrameMatrix(origin, xHint, /*z=*/primary);
   }
-  return std::nullopt; // no body from the referenced feature
+  return fail("no body created by feature " + std::to_string(ref.featureId) +
+              " on its part (feature deleted or contributing nothing?)");
 }
 
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
@@ -131,10 +159,26 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
   for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
     Mate& mate = asmDoc.GetMates()[i];
     mate.error.clear();
-    const auto fa = ConnectorLocalFrame(mate.a, asmDoc, partById);
-    const auto fb = ConnectorLocalFrame(mate.b, asmDoc, partById);
+    std::string whyA, whyB;
+    const auto fa = ConnectorLocalFrame(mate.a, asmDoc, partById, &whyA);
+    const auto fb = ConnectorLocalFrame(mate.b, asmDoc, partById, &whyB);
     if (!fa || !fb) {
-      mate.error = "connector reference could not be resolved";
+      // Name WHICH side failed (occurrence + why), so a stale toponame is
+      // fixable without probing both connectors.
+      const auto side = [&](const char* letter, const Connector& c,
+                            const std::string& why) {
+        const Occurrence* occ = asmDoc.FindById(c.occurrenceId);
+        std::string s = std::string("connector ") + letter;
+        if (occ) s += " (" + occ->name + ")";
+        return s + ": " + why;
+      };
+      std::string err;
+      if (!fa) err = side("A", mate.a, whyA);
+      if (!fb) {
+        if (!err.empty()) err += "; ";
+        err += side("B", mate.b, whyB);
+      }
+      mate.error = err;
       report.erroredMates++;
       continue;
     }

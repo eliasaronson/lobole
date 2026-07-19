@@ -1,0 +1,23 @@
+{
+  "format": "designer-document",
+  "version": 38,
+  "parameters": [
+    {"name": "bore", "expression": "6", "comment": "circle diameter"},
+    {"name": "off", "expression": "bore + 4"}
+  ],
+  "features": [
+    {"type": "Sketch", "name": "Profile", "id": 1, "next_entity_id": 4,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "circle", "id": 1, "center": [0, 0], "radius": 1.0,
+        "r_expr": "bore / 2", "cx_expr": "off"},
+       {"type": "point", "id": 2, "p": [1, 1], "x_expr": "off",
+        "y_expr": "bore"},
+       {"type": "line", "id": 3, "a": [0, 0], "b": [1, 0],
+        "bx_expr": "bore", "construction": true}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 2.0, "mode": "new_body", "reversed": false}
+  ]
+}

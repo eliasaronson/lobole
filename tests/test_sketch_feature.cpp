@@ -321,6 +321,35 @@ TEST_CASE("v1 documents without ids load and get ids assigned", "[ids][io]") {
   fs::remove(path);
 }
 
+TEST_CASE("Entity coordinate expressions round-trip through JSON (v38)",
+          "[sketch][exprs]") {
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const uint32_t p = sk->AddEntity(sketch::Point{{1.0f, 2.0f}});
+  const uint32_t l = sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {4.0f, 0.0f}});
+  const uint32_t c = sk->AddEntity(sketch::Circle{{2.0f, 1.0f}, 0.5});
+  const uint32_t a = sk->AddEntity(sketch::Arc{{1.0f, 1.0f}, 2.0, 0.25, 1.75});
+  sk->entityExprs[p] = {{"x", "w / 2"}, {"y", "h"}};
+  sk->entityExprs[l] = {{"bx", "w"}};
+  sk->entityExprs[c] = {{"r", "bore / 2"}};
+  sk->entityExprs[a] = {{"cx", "w"}, {"cy", "h"}, {"r", "fil"}};
+  sk->SetId(9);
+
+  const auto j = DocumentIO::FeatureToJson(*sk);
+  auto restored = DocumentIO::FeatureFromJson(j);
+  auto* rsk = dynamic_cast<SketchFeature*>(restored.get());
+  REQUIRE(rsk != nullptr);
+  CHECK(rsk->entityExprs == sk->entityExprs);
+  // Idempotent: writing the restored feature reproduces the same JSON.
+  CHECK(DocumentIO::FeatureToJson(*rsk) == j);
+  // The expr keys ride on the entity objects ("<field>_expr").
+  CHECK(j.at("entities")[2].at("r_expr") == "bore / 2");
+  // An entity without exprs carries no *_expr keys (compact JSON).
+  auto sk2 = std::make_unique<SketchFeature>("S2", SketchPlane(PlaneType::XY));
+  sk2->AddEntity(sketch::Circle{{0.0f, 0.0f}, 1.0});
+  const auto j2 = DocumentIO::FeatureToJson(*sk2);
+  CHECK_FALSE(j2.at("entities")[0].contains("r_expr"));
+}
+
 TEST_CASE("SketchFeature JSON round-trip with all entity types", "[sketch]") {
   SketchPlane plane(glm::vec3(1, 2, 3), glm::vec3(0, 1, 1),
                     glm::vec3(1, 0, 0));

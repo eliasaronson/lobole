@@ -58,6 +58,15 @@ bool DeletePart(AppState& state, size_t index);
 // Occurrences reference parts by this stable id, never by name.
 uint64_t PartIdByName(const AppState& state, const std::string& name);
 
+// The part document an occurrence (or a cross-part query) references, by
+// stable id — active or stashed; never switches the active tab. Null when the
+// id names no part slot.
+Document* PartDocById(AppState& state, uint64_t partId);
+
+// An occurrence's solved placement as a model matrix (translate ∘ rotate) —
+// the transform assembly measure / interference place part bodies with.
+glm::mat4 OccurrenceMatrix(const Occurrence& o);
+
 // Assembly occurrence-edit undo (snapshot-based; A2 phase 3). Call
 // SnapshotAssembly *before* mutating the active assembly's occurrences; Undo/
 // Redo restore a snapshot and force a renderer resync. No-ops without an active

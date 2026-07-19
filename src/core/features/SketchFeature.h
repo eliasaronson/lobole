@@ -6,7 +6,9 @@
 #include <glm/glm.hpp>
 #include <array>
 #include <cmath>
+#include <map>
 #include <optional>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -280,6 +282,21 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
       e);
 }
 
+// --- Expression-driven entity coordinates (Decision 2A) --------------------
+// The scalar fields of an entity that may carry a driving expression:
+//   Line   "ax" "ay" "bx" "by"   (endpoint coordinates)
+//   Circle "cx" "cy" "r"         (center + radius)
+//   Arc    "cx" "cy" "r"         (center + radius; angles deliberately not)
+//   Point  "x" "y"
+// Ellipse fields are not expression-drivable in v1 (the solver treats
+// ellipses as rigid anyway). Serialized as "<field>_expr" keys on the entity
+// JSON; stored on SketchFeature::entityExprs.
+std::vector<std::string> EntityExprFields(const Entity& e);
+// Read / write one such field (radius stays double; vec2 coords go through
+// float). nullopt / false when the field doesn't apply to the entity kind.
+std::optional<double> GetEntityField(const Entity& e, const std::string& field);
+bool SetEntityField(Entity& e, const std::string& field, double value);
+
 // A reference to a point on an entity. `entity` is the entity's stable **id**
 // (not its index in the list — that shifts on insert/delete). `which` selects
 // which point: Line 0 = a, 1 = b; Circle 0 = center; Arc 0 = center, 1 = start,
@@ -421,7 +438,11 @@ public:
   // good entity positions rather than failing the history.
   bool Execute(RegenContext&) override;
 
-  // Dimensional-constraint (value, expression) pairs; see Feature::VisitExprs.
+  // Dimensional-constraint (value, expression) pairs PLUS the
+  // expression-driven entity coordinate fields (entityExprs); see
+  // Feature::VisitExprs. Visiting the entity fields is what makes entity
+  // expressions hash-visible: the refreshed coordinates land in the entity
+  // JSON the regen cache keys on.
   void VisitExprs(const ExprVisitor& visit) override;
 
   // Appends `e` with a freshly stamped stable id and returns that id.
@@ -551,6 +572,17 @@ public:
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;
   std::vector<sketch::DerivedOp> derived; // linked generative ops (replayed)
+  // Expression-driven entity coordinates (Decision 2A, v38): entity stable
+  // id -> {field -> expression}, fields per sketch::EntityExprFields. The
+  // expressions are evaluated into the entity geometry by VisitExprs during
+  // Document::Regenerate's pre-hash refresh (so they are hash-visible to the
+  // regen cache), and the driven parameters are pinned solver-FIXED during
+  // the sketch solve (the linked-copy-output mechanism). A parallel map —
+  // not fields on the entity variant — because entities are copied and
+  // transformed wholesale by mirrors/patterns/derived-op replay, which must
+  // not silently duplicate driving expressions, and the aggregate entity
+  // structs (and every brace-init of them) stay untouched.
+  std::map<uint32_t, std::map<std::string, std::string>> entityExprs;
   uint32_t nextEntityId = 1; // next stable id to hand out (1-based; 0 = none)
 
 private:

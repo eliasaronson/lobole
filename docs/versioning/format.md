@@ -100,6 +100,8 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 28 | (C2) | Unit-suffixed expression literals (`10mm`, `1in`, `45deg`) |
 | … | | (v29–v33: FEM studies, drawings, configurations, modal/gravity, topology studies — see golden corpus) |
 | 34 | (U2) | Extrude/Revolve `regions` (selected profile loops by boundary entity-id sets; absent = whole sketch) |
+| … | | (v35–v37: linked copies, thread/rib, point-line distance dims — see golden corpus) |
+| 38 | (2A) | Sketch entity coordinate expressions (`<field>_expr` keys on entity JSON: line `ax/ay/bx/by`, circle+arc `cx/cy/r`, point `x/y`) |
 
 ## The directory format (F3, default for new saves)
 

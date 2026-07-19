@@ -142,6 +142,22 @@ def main():
         els = d.call("list_elements")["bodies"][0]
         expect(els["created_by"] == pad["id"], "created_by is the pad")
         expect(len(els["edges"]) > 0, "edges are named")
+
+        # list_elements enrichment: every face carries kind+area, every edge
+        # kind+length; the bracket's sketch fillet extrudes to a cylindrical
+        # face and radius-4 arc edges.
+        expect(all("kind" in f and f["area"] > 0 for f in els["faces"]),
+               "faces carry kind and area")
+        expect(all("kind" in e and e["length"] > 0 for e in els["edges"]),
+               "edges carry kind and length")
+        fkinds = {f["kind"] for f in els["faces"]}
+        expect("plane" in fkinds and "cylinder" in fkinds,
+               f"bracket faces classify plane + cylinder: {fkinds}")
+        arcs = [e for e in els["edges"] if e["kind"] == "arc"]
+        expect(arcs and all(abs(e["radius"] - 4.0) < 1e-6 for e in arcs),
+               "fillet arc edges report radius 4")
+        expect(any(e["kind"] == "line" for e in els["edges"]),
+               "straight edges classify as line")
         before = d.call("get_state")["bodies"][0]["volume"]
         d.call("add_feature", feature={
             "type": "Chamfer", "name": "Break", "radius": 0.5,
@@ -362,6 +378,131 @@ def main():
         expect(not d.call("interference", a=0, b=1)["clash"],
                "disjoint boxes do not clash")
 
+        # Assembly interference + cross-part queries: two occurrences of one
+        # cube part — overlapping placements clash; a flipped fastened mate
+        # seats them flush (contact only) and the clash clears.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Cube", "position": [0, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        cube = d.call("list_elements")["bodies"][0]
+        d.call("add_assembly", name="asm")  # active tab is now the assembly
+        o1 = d.call("add_occurrence", part="Part 1", fixed=True)["id"]
+        o2 = d.call("add_occurrence", part="Part 1",
+                    transform={"position": [1, 1, 1],
+                               "orientation": [0, 0, 0, 1]})["id"]
+        clash = d.call("interference", a=o1, b=o2)
+        expect(clash["clash"] and abs(clash["volume"] - 1.0) < 1e-3,
+               f"overlapping occurrences clash with volume 1: {clash}")
+        # Occurrence names resolve too (rename first: two occurrences of one
+        # part share a default name).
+        d.call("rename_occurrence", id=o2, name="CubeB")
+        occs = d.call("list_occurrences")["occurrences"]
+        names = {o["id"]: o["name"] for o in occs}
+        by_name = d.call("interference", a=names[o1], b="CubeB")
+        expect(by_name["clash"], "occurrence-name interference works")
+
+        # Cross-part list_elements/measure from the ASSEMBLY tab (no
+        # set_active_part round-trip): same names, enriched fields.
+        pels = d.call("list_elements", part="Part 1")["bodies"][0]
+        expect([f["name"] for f in pels["faces"]] ==
+               [f["name"] for f in cube["faces"]],
+               "cross-part list_elements matches the part's own listing")
+        face = pels["faces"][0]
+        m = d.call("measure", part="Part 1",
+                   a={"feature_id": pels["created_by"],
+                      "element": face["name"]})
+        expect(abs(m["area"] - face["area"]) < 1e-9 and
+               abs(m["area"] - 4.0) < 1e-6,
+               "cross-part measure: cube face area 4")
+        expect_error(d, "measure", "not found", part="Nope",
+                     a={"feature_id": pels["created_by"],
+                        "element": face["name"]})
+
+        # Mate the two cubes face-to-face (flipped=True: flush, opposing
+        # normals) — mated-apart occurrences no longer clash.
+        planar = next(f["name"] for f in pels["faces"]
+                      if f["kind"] == "plane")
+        mate = d.call("add_mate", type="fastened", name="seat",
+                      a={"occurrence": o1,
+                         "face": {"feature_id": pels["created_by"],
+                                  "element": planar}},
+                      b={"occurrence": o2,
+                         "face": {"feature_id": pels["created_by"],
+                                  "element": planar}},
+                      flipped=True)
+        expect(mate.get("errored_mates", 0) == 0, f"seat mate solved: {mate}")
+        seated = d.call("interference", a=o1, b=o2)
+        expect(not seated["clash"] and seated["volume"] < 1e-6,
+               f"mated-apart occurrences do not clash: {seated}")
+
+        # Mate-connector diagnostics: a stale name that is a prefix of the
+        # current names is called out per side, with suggestions.
+        bad = d.call("add_mate", type="fastened", name="stale",
+                     a={"occurrence": o1,
+                        "face": {"feature_id": pels["created_by"],
+                                 "element": planar + ";M9"}},
+                     b={"occurrence": o2, "origin": True})
+        err = bad.get("error", "")
+        if not err:  # error may surface on the mate record instead
+            lm = d.call("list_mates")["mates"]
+            err = next(mm.get("error", "") for mm in lm
+                       if mm.get("name") == "stale")
+        expect("connector A" in err and names[o1] in err,
+               f"error names the failing side + occurrence: {err}")
+        expect(planar + ";M9" in err, f"error names the failing face: {err}")
+        d.call("remove_mate", id=bad["id"])
+        # A stale PREFIX (the real modified-by-later-feature case) suggests
+        # the current names. Cube face names share the "<id>/g0f" style
+        # prefix; use the planar name minus its last char.
+        bad2 = d.call("add_mate", type="fastened", name="stale2",
+                      a={"occurrence": o1,
+                         "face": {"feature_id": pels["created_by"],
+                                  "element": planar[:-1]}},
+                      b={"occurrence": o2, "origin": True})
+        err2 = bad2.get("error", "")
+        expect("similar:" in err2 and planar in err2,
+               f"stale-prefix error suggests current names: {err2}")
+        d.call("remove_mate", id=bad2["id"])
+
+        # Expression-driven sketch entities (Decision 2A, v38): a variable
+        # drives a circle radius directly; the edit ripples through the
+        # sketch into the extrude volume, and survives save/load.
+        d.call("new_project")
+        d.call("set_variable", name="bore", expression="6")
+        esk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Lobe",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [0, 0], "radius": 1,
+                          "r_expr": "bore / 2"}]})
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Pad", "sketch_id": esk["id"],
+            "distance": 2.0, "mode": "new_body"})
+        st = d.call("get_state")
+        expect(not any("error" in f for f in st["features"]),
+               "expr-entity model regenerated clean")
+        expect(abs(st["bodies"][0]["volume"] - math.pi * 9 * 2) < 1e-2,
+               "circle radius follows bore/2 = 3")
+        ent = st["features"][0]["entities"][0]
+        expect(ent.get("r_expr") == "bore / 2",
+               f"entity expr surfaces in get_state: {ent}")
+        d.call("set_variable", name="bore", expression="10")
+        st = d.call("get_state")
+        expect(abs(st["bodies"][0]["volume"] - math.pi * 25 * 2) < 1e-2,
+               "set_variable ripples the entity expr into the volume")
+        eproj = os.path.join(tmp, "exprs.json")
+        d.call("save_project", path=eproj)
+        d.call("new_project")
+        d.call("open_project", path=eproj)
+        st = d.call("get_state")
+        expect(abs(st["bodies"][0]["volume"] - math.pi * 25 * 2) < 1e-2,
+               "entity exprs survive save/load")
+        d.call("set_variable", name="bore", expression="4")
+        st = d.call("get_state")
+        expect(abs(st["bodies"][0]["volume"] - math.pi * 4 * 2) < 1e-2,
+               "reloaded entity expr still drives the geometry")
+
         # Sweep (M8): circle along a straight path = a cylinder
         d.call("new_project")
         pf = d.call("add_feature", feature={
@@ -436,7 +577,10 @@ def main():
         stl = os.path.join(tmp, "part.stl")
         brep = os.path.join(tmp, "part.brep")
         expect(d.call("export_step", path=step)["bodies"] == 1, "export step")
-        d.call("export_stl", path=stl, deflection=0.05)
+        stl_rep = d.call("export_stl", path=stl, deflection=0.05)
+        expect(stl_rep["watertight"] is True and stl_rep["shells"] == 1 and
+               stl_rep["free_edges"] == 0,
+               f"exported solid reports watertight: {stl_rep}")
         d.call("export_brep", path=brep)
         for f in (step, stl, brep):
             expect(os.path.getsize(f) > 100, f"{f} written")

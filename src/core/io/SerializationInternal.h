@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 37;  // v37: point-line distance dim (v36: rib)
+inline constexpr int kVersion = 38;  // v38: entity coord exprs (v37: dist-pl)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

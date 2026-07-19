@@ -291,6 +291,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
       // export_visual works on a part OR an assembly (occurrence walk).
       "export_visual",
+      // interference runs on occurrence pairs on an assembly tab;
+      // list_elements/measure work there when given an explicit `part`.
+      "interference", "list_elements", "measure",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
@@ -433,8 +436,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (doc) {
     if (auto r = remote::HandleModelingRpc(state, *doc, m, p)) return *r;
     if (auto r = remote::HandleSimulationRpc(state, *doc, m, p)) return *r;
-    if (auto r = remote::HandleInspectionRpc(state, *doc, m, p)) return *r;
   }
+  // Inspection takes a nullable doc: interference works on assembly
+  // occurrence pairs, list_elements/measure on any part via `part`.
+  if (auto r = remote::HandleInspectionRpc(state, doc, m, p)) return *r;
   if (m == "undo") {
     if (state.assembly) { // assembly tab: snapshot-based occurrence undo
       ui::UndoAssembly(state);

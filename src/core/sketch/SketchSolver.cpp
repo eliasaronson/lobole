@@ -468,6 +468,40 @@ void Solver::Load(const SketchFeature& sketch) {
       }
     }
   }
+
+  // Expression-driven entity fields (Decision 2A) are solver-FIXED: their
+  // value is owned by the document parameter table (applied in VisitExprs
+  // before the solve), so the solver may reference but never move them —
+  // the same mechanism as linked-copy outputs, but per scalar field.
+  for (const auto& [id, fields] : sketch.entityExprs) {
+    const auto fixCoord = [&](uint8_t which, bool xAxis) {
+      const auto it = im.pointIndex.find(Impl::Key(id, which));
+      if (it == im.pointIndex.end())
+        return;
+      const GCS::Point& gp = im.gcsPoints[static_cast<size_t>(it->second)];
+      im.fixedParams.insert(xAxis ? gp.x : gp.y);
+    };
+    for (const auto& [field, expr] : fields) {
+      if (expr.empty())
+        continue;
+      if (field == "x" || field == "ax" || field == "cx")
+        fixCoord(0, /*xAxis=*/true);
+      else if (field == "y" || field == "ay" || field == "cy")
+        fixCoord(0, /*xAxis=*/false);
+      else if (field == "bx")
+        fixCoord(1, /*xAxis=*/true);
+      else if (field == "by")
+        fixCoord(1, /*xAxis=*/false);
+      else if (field == "r") {
+        if (im.circleOf.count(id) != 0)
+          im.fixedParams.insert(
+              im.circles[static_cast<size_t>(im.circleOf[id])].rad);
+        else if (im.arcOf.count(id) != 0)
+          im.fixedParams.insert(
+              im.arcs[static_cast<size_t>(im.arcOf[id])].rad);
+      }
+    }
+  }
 }
 
 SolveResult Solver::Solve() {

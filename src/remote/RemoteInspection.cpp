@@ -3,8 +3,10 @@
 #include "core/Document.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/Occurrence.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
+#include "ui/AppActions.h"
 #include "ui/AppState.h"
 
 #include <glm/glm.hpp>
@@ -16,11 +18,52 @@ using nlohmann::json;
 
 namespace remote {
 
+namespace {
+
+// Resolve an optional `part` RPC param (slot name, or stable PartSlot id as a
+// number or numeric string) to that part's document WITHOUT switching the
+// active tab — kills the set_active_part round-trips for cross-part queries.
+Document* ResolvePartParam(ui::AppState& state, const json& part) {
+  ui::EnsureParts(state);
+  uint64_t id = 0;
+  if (part.is_number_unsigned() || part.is_number_integer()) {
+    id = part.get<uint64_t>();
+  } else if (part.is_string()) {
+    const std::string s = part.get<std::string>();
+    id = ui::PartIdByName(state, s);
+    if (id == 0) { // allow a stable id passed as a string
+      try {
+        id = std::stoull(s);
+      } catch (...) {
+        id = 0;
+      }
+    }
+  }
+  Document* d = id != 0 ? ui::PartDocById(state, id) : nullptr;
+  if (d == nullptr)
+    throw std::runtime_error("part '" + part.dump() +
+                             "' not found — pass a part name or stable id "
+                             "(see list_parts)");
+  return d;
+}
+
+// The active part document, required by the part-tab-only inspection RPCs.
+Document& RequirePartDoc(Document* doc, const char* what) {
+  if (doc == nullptr)
+    throw std::runtime_error(std::string(what) +
+                             ": no active part document (on an assembly tab, "
+                             "pass `part` or occurrence refs)");
+  return *doc;
+}
+
+} // namespace
+
 // Inspection RPCs (section clip, interference, mass properties, measure,
-// element listing) carved out of RemoteServer::HandleSemantic.
-std::optional<json> HandleInspectionRpc(ui::AppState& state, Document& document,
+// element listing) carved out of RemoteServer::HandleSemantic. `docIn` is
+// null on an assembly/drawing tab.
+std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                         const std::string& m, const json& p) {
-  Document* doc = &document;
+  Document* doc = docIn;
   if (m == "set_section") {
     // Toggle/position the viewport section clip plane (I3 raster). params:
     // {enabled, base_plane: "xy"|"xz"|"yz", offset?} or {enabled, origin,
@@ -64,15 +107,50 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document& document,
       normal = {nrm[0].get<float>(), nrm[1].get<float>(),
                 nrm[2].get<float>()};
     }
-    const auto area = Measure::CrossSectionArea(doc->GetBodies(), origin,
-                                                normal);
+    const auto area = Measure::CrossSectionArea(
+        RequirePartDoc(doc, "section").GetBodies(), origin, normal);
     if (!area) throw std::runtime_error("section failed");
     return json{{"area", *area}};
   }
   if (m == "interference") {
-    // Clash detection (inspection I4): two bodies interfere when their
-    // intersection has volume. params: {a: index, b: index}
-    const auto& bodies = doc->GetBodies();
+    // Clash detection (inspection I4). Part tab: two bodies interfere when
+    // their intersection has volume — params: {a: index, b: index}. Active
+    // ASSEMBLY tab: a/b are occurrence ids (numbers) or names (strings); each
+    // occurrence's part bodies are placed by its solved occurrence transform
+    // and the same check runs in world space. Headless-safe (pure geometry).
+    if (doc == nullptr && state.assembly) {
+      auto occOf = [&](const json& v) -> const Occurrence& {
+        if (v.is_string()) {
+          const std::string name = v.get<std::string>();
+          for (const Occurrence& o : state.assembly->GetOccurrences())
+            if (o.name == name) return o;
+          throw std::runtime_error("occurrence '" + name +
+                                   "' not found (see list_occurrences)");
+        }
+        const Occurrence* o = state.assembly->FindById(v.get<uint64_t>());
+        if (o == nullptr)
+          throw std::runtime_error("occurrence id " + v.dump() +
+                                   " not found (see list_occurrences)");
+        return *o;
+      };
+      const Occurrence& oa = occOf(p.at("a"));
+      const Occurrence& ob = occOf(p.at("b"));
+      if (oa.id == ob.id)
+        throw std::runtime_error("pick two different occurrences");
+      Document* pa = ui::PartDocById(state, oa.partId);
+      Document* pb = ui::PartDocById(state, ob.partId);
+      if (pa == nullptr || pb == nullptr)
+        throw std::runtime_error("an occurrence's part document is missing");
+      const auto v = Measure::InterferenceVolume(
+          pa->GetBodies(), ui::OccurrenceMatrix(oa), pb->GetBodies(),
+          ui::OccurrenceMatrix(ob));
+      if (!v) throw std::runtime_error("interference check failed (see log)");
+      return json{{"clash", *v > 1e-9},
+                  {"volume", *v},
+                  {"a", oa.name},
+                  {"b", ob.name}};
+    }
+    const auto& bodies = RequirePartDoc(doc, "interference").GetBodies();
     const int ia = p.at("a").get<int>();
     const int ib = p.at("b").get<int>();
     if (ia < 0 || ib < 0 || ia >= static_cast<int>(bodies.size()) ||
@@ -88,7 +166,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document& document,
     // grams = density[kg/m^3] * volume[mm^3] * 1e-6; bodies without an
     // assigned material report mass null (density unknown), and so does the
     // total if any contributor is unknown. params: {body?: index}
-    const auto& bodies = doc->GetBodies();
+    const auto& bodies = RequirePartDoc(doc, "mass_properties").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
@@ -132,15 +210,20 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document& document,
   }
   if (m == "measure") {
     // Geometry queries over stable element names (I1). params:
-    // {a: {feature_id, element}, b?: {feature_id, element}}.
+    // {a: {feature_id, element}, b?: {feature_id, element}, part?}.
     // With `b`: minimum distance between the two elements. Without: the
-    // element's own measure (face area / edge length).
+    // element's own measure (face area / edge length). `part` (name or stable
+    // id) resolves the elements against that part's bodies without switching
+    // the active tab.
     auto refOf = [](const json& r) {
       return ElementRef{r.at("feature_id").get<uint64_t>(),
                         r.at("element").get<std::string>()};
     };
     const ElementRef a = refOf(p.at("a"));
-    const auto& bodies = doc->GetBodies();
+    const auto& bodies =
+        p.contains("part")
+            ? ResolvePartParam(state, p.at("part"))->GetBodies()
+            : RequirePartDoc(doc, "measure").GetBodies();
     if (p.contains("b")) {
       const auto d = Measure::Distance(bodies, a, refOf(p.at("b")));
       if (!d) throw std::runtime_error("measure: an element did not resolve");
@@ -160,9 +243,16 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document& document,
   if (m == "list_elements") {
     // Stable element names (topological naming) for each body's faces and
     // edges — what Fillet/Chamfer edge refs {feature_id, element} point at
-    // (feature_id = the body's created_by). Document-only: works headless.
-    // params: {body?: index}
-    const auto& bodies = doc->GetBodies();
+    // (feature_id = the body's created_by). Each face carries its surface
+    // kind + area, each edge its curve kind + length (+ radius when
+    // circular), so agents can identify bore rims / seams without
+    // measure-probing every name. Document-only: works headless.
+    // params: {body?: index, part?: name|stable-id (cross-part, no tab
+    // switch)}
+    const auto& bodies =
+        p.contains("part")
+            ? ResolvePartParam(state, p.at("part"))->GetBodies()
+            : RequirePartDoc(doc, "list_elements").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
@@ -170,10 +260,23 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document& document,
     for (size_t i = 0; i < bodies.size(); i++) {
       if (only >= 0 && i != static_cast<size_t>(only)) continue;
       json faces = json::array(), edges = json::array();
-      for (const auto& [idx, name] : bodies[i].elementMap.names)
-        faces.push_back({{"index", idx}, {"name", name}});
-      for (const auto& [idx, name] : bodies[i].elementMap.edgeNames)
-        edges.push_back({{"index", idx}, {"name", name}});
+      for (const auto& [idx, name] : bodies[i].elementMap.names) {
+        json f = {{"index", idx}, {"name", name}};
+        if (const auto fi = Measure::DescribeFaceAt(bodies[i], idx)) {
+          f["kind"] = fi->kind;
+          f["area"] = fi->area;
+        }
+        faces.push_back(f);
+      }
+      for (const auto& [idx, name] : bodies[i].elementMap.edgeNames) {
+        json e = {{"index", idx}, {"name", name}};
+        if (const auto ei = Measure::DescribeEdgeAt(bodies[i], idx)) {
+          e["kind"] = ei->kind;
+          e["length"] = ei->length;
+          if (ei->hasRadius) e["radius"] = ei->radius;
+        }
+        edges.push_back(e);
+      }
       out.push_back({{"body", i},
                      {"name", bodies[i].name},
                      {"created_by", bodies[i].createdBy},

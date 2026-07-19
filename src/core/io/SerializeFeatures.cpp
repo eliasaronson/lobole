@@ -375,7 +375,17 @@ json FeatureToJson(const Feature& feature) {
     j["next_entity_id"] = sk->nextEntityId;
     j["entities"] = json::array();
     for (const auto& entity : sk->entities) {
-      j["entities"].push_back(EntityToJson(entity));
+      json ej = EntityToJson(entity);
+      // v38: expression-driven coordinate fields ride on the entity as
+      // "<field>_expr" keys (omitted when absent, like constraint "expr").
+      const auto it = sk->entityExprs.find(sketch::EntityId(entity));
+      if (it != sk->entityExprs.end()) {
+        for (const auto& [field, expr] : it->second) {
+          if (!expr.empty())
+            ej[field + "_expr"] = expr;
+        }
+      }
+      j["entities"].push_back(std::move(ej));
     }
     j["constraints"] = json::array();
     for (const auto& c : sk->constraints) {
@@ -615,6 +625,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     // pre-v4 index migration stays correct); their corners are remembered.
     std::vector<std::pair<glm::vec2, glm::vec2>> legacyRects;
     std::vector<size_t> rectSlots; // placeholder positions in sk->entities
+    // v38 entity coordinate expressions, collected POSITIONALLY: RPC-sent
+    // entities carry no id yet (the pre-v4 migration below stamps them), so
+    // the exprs are re-keyed by the final stable id after that migration.
+    std::vector<std::pair<size_t, std::map<std::string, std::string>>>
+        pendingEntityExprs;
     for (const auto& ej : j.value("entities", json::array())) {
       if (ej.value("type", "") == "rect") {
         glm::vec2 c1 = Vec2FromJson(ej.at("c1"));
@@ -625,7 +640,17 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         sk->entities.push_back(ph);
         legacyRects.emplace_back(c1, c2);
       } else {
-        sk->entities.push_back(EntityFromJson(ej));
+        sketch::Entity ent = EntityFromJson(ej);
+        std::map<std::string, std::string> exprs;
+        for (const std::string& field : sketch::EntityExprFields(ent)) {
+          const std::string expr = ej.value(field + "_expr", std::string{});
+          if (!expr.empty())
+            exprs[field] = expr;
+        }
+        if (!exprs.empty())
+          pendingEntityExprs.emplace_back(sk->entities.size(),
+                                          std::move(exprs));
+        sk->entities.push_back(std::move(ent));
       }
     }
     for (const auto& cj : j.value("constraints", json::array())) {
@@ -651,6 +676,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         maxId = std::max(maxId, sketch::EntityId(e));
       sk->nextEntityId = std::max<uint32_t>(
           {sk->nextEntityId, maxId + 1, j.value("next_entity_id", uint32_t{0})});
+    }
+    // Re-key the collected entity exprs by final stable id (positions are
+    // still valid — the rect expansion below is what reorders).
+    for (auto& [slot, exprs] : pendingEntityExprs) {
+      const uint32_t id = sketch::EntityId(sk->entities[slot]);
+      if (id != 0)
+        sk->entityExprs[id] = std::move(exprs);
     }
     // Now expand the placeholder rects into real lines (nextEntityId is final,
     // so the new lines get fresh non-colliding ids). Drop any constraint that

@@ -47,6 +47,15 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
     {{"type": "ellipse", "center": [u,v], "r_major": num, "r_minor": num,
       "rotation": rad}}
   Any entity may set "construction": true (reference geometry, not profiled).
+  Entity coordinates can be EXPRESSION-DRIVEN via "<field>_expr" keys
+  evaluated against document variables on every regeneration: line "ax_expr"/
+  "ay_expr"/"bx_expr"/"by_expr", circle+arc "cx_expr"/"cy_expr"/"r_expr",
+  point "x_expr"/"y_expr" (e.g. {{"type": "circle", "center": [0, 0],
+  "radius": 5, "r_expr": "bore / 2"}}). Driven coordinates are pinned during
+  the sketch solve (shown violet, like linked copies) — don't also dimension
+  them. Often a distance/radius constraint with "expr" is the better tool;
+  entity exprs shine for direct analytic placement (lobe centers, cam
+  profiles).
   Do NOT send entity ids — the app assigns them; add_feature returns
   "entity_ids" in list order. Use those ids for constraints and ops.
 - Extrude: {{"type": "Extrude", "name": str, "sketch_id": <feature id>,
@@ -183,6 +192,30 @@ The loop that works — follow it every time:
    feature's "error", fix or suppress_feature it. set_rollback lets you
    inspect intermediate history states. When done: save_project, and
    render_still for a presentation shot.
+
+RESEARCH REAL DIMENSIONS FIRST. When the part interfaces with a real product
+(bearings, inserts, screws, connectors, rails), web-search the datasheet
+numbers BEFORE sketching — bore/OD/width for bearings, thread pitch and
+tap/clearance drill for screws, pin pitch for connectors. Never guess a real
+dimension; put each researched number in a named variable with a comment
+citing the source.
+
+MANUFACTURING (FDM defaults — apply unless told otherwise):
+- Walls >= 1.2 mm; any freestanding feature >= 0.4 mm (one nozzle width).
+- Holes mating with hardware: add 0.2-0.3 mm diametral clearance (printed
+  holes shrink); press-fits get 0.0-0.1 mm.
+- Note the intended print orientation in your final answer (which face on the
+  bed, where supports land, strength direction — layer bonds are the weak
+  axis).
+- Close with a one-line print recipe: material / layer height / walls /
+  infill + one clause of why (e.g. "PETG, 0.2 mm, 4 walls, 40% gyroid —
+  outdoor bracket under sustained load").
+
+DELIVERY CADENCE. Do not disappear into a long build: model the base shape,
+show the user (screenshot/render) before detailing; add features, show again;
+then finish (chamfers/fillets) and deliver. Close every job with the exported
+STL path, a parameter table (variable, value, what it drives) so the user can
+see every knob, and an explicit offer to adjust any of them.
 """
 
 # ---------------------------------------------------------------------------
@@ -267,10 +300,13 @@ def section(base_plane: str = "xy", offset: float = 0.0,
     return _call("section", base_plane=base_plane, offset=offset)
 
 
-@mcp.tool(description="Interference (clash) check between two bodies by "
-          "index: returns {clash: bool, volume} — the volume of their "
-          "overlap. Use before committing an assembly-like layout.")
-def interference(a: int, b: int) -> dict:
+@mcp.tool(description="Interference (clash) check: returns {clash: bool, "
+          "volume} — the volume of the overlap. On a PART tab a/b are body "
+          "indices. On an active ASSEMBLY tab a/b are occurrence ids (int) "
+          "or occurrence names (str); each occurrence's part bodies are "
+          "placed by its solved transform and checked in world space. Run it "
+          "after mating — clash checks matter most in assemblies.")
+def interference(a: int | str, b: int | str) -> dict:
     return _call("interference", a=a, b=b)
 
 
@@ -288,23 +324,39 @@ def mass_properties(body: int = -1) -> dict:
           "list_elements). With `a` only: that element's own measure — a "
           "face's area or an edge's length. With `a` and `b`: the minimum "
           "distance between the two elements (faces or edges). Each ref is "
-          "{feature_id, element}. Verify dimensions with this instead of "
-          "trusting your inputs.")
-def measure(a: dict, b: dict | None = None) -> dict:
+          "{feature_id, element}. Optional `part` (slot name or stable id) "
+          "measures against that part WITHOUT switching the active tab — "
+          "works from an assembly tab too. Verify dimensions with this "
+          "instead of trusting your inputs.")
+def measure(a: dict, b: dict | None = None,
+            part: str | int | None = None) -> dict:
     params = {"a": a}
     if b is not None:
         params["b"] = b
+    if part is not None:
+        params["part"] = part
     return _call("measure", **params)
 
 
 @mcp.tool(description="Stable element names (topological naming) for each "
           "body's faces and edges, plus the body's created_by feature id. "
-          "This is how Fillet/Chamfer edge refs are built: edges: "
+          "Every face carries kind ('plane'|'cylinder'|'cone'|'sphere'|"
+          "'other') and area; every edge carries kind ('line'|'circle'|'arc'|"
+          "'other'), length, and radius when circular — identify bore rims / "
+          "seams directly instead of measure-probing names. This is how "
+          "Fillet/Chamfer edge refs are built: edges: "
           "[{feature_id: <created_by>, element: <edge name>}]. Names survive "
           "upstream edits; re-query after changing the feature history. "
-          "Optional body index restricts to one body.")
-def list_elements(body: int = -1) -> dict:
-    return _call("list_elements", **({"body": body} if body >= 0 else {}))
+          "Optional body index restricts to one body; optional `part` (slot "
+          "name or stable id) reads another part WITHOUT switching the "
+          "active tab — works from an assembly tab too.")
+def list_elements(body: int = -1, part: str | int | None = None) -> dict:
+    params = {}
+    if body >= 0:
+        params["body"] = body
+    if part is not None:
+        params["part"] = part
+    return _call("list_elements", **params)
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +603,10 @@ def export_step(path: str, body: int = -1) -> dict:
 
 @mcp.tool(description="Export to binary STL (re-meshed at `deflection`, "
           "smaller = finer). Whole document fuses to one solid, or one body "
-          "by index. STL is how a part gets 3D-printed.")
+          "by index. STL is how a part gets 3D-printed. The reply reports "
+          "the source shape's watertightness ({watertight, shells, "
+          "free_edges}); a non-watertight source still exports, but flag it "
+          "before anyone slices the file.")
 def export_stl(path: str, body: int = -1, deflection: float = 0.1) -> dict:
     return _call("export_stl", path=path, deflection=deflection,
                  **({"body": body} if body >= 0 else {}))
