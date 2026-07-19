@@ -12,6 +12,7 @@
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
 #include "core/AssemblySolve.h"
+#include "core/io/ImportAssembly.h"
 #include "ui/DragMath.h"
 #include "core/io/Autosaver.h"
 #include "core/MassProps.h"
@@ -799,7 +800,9 @@ void SyncAssemblyRenderers(AppState& state) {
         sb.indices = cadMesh.indices;
         sb.triangleFaces = cadMesh.triangleFaces;
         sb.edges = body.shape.GenerateEdgePolylines(0.1);
-        sb.palette = kBodyPalette[palette++ % std::size(kBodyPalette)];
+        sb.palette = body.hasDisplayColor
+                         ? body.displayColor
+                         : kBodyPalette[palette++ % std::size(kBodyPalette)];
         sb.assetId = state.meshRenderer->CreateAsset(sb.vertices, sb.indices);
         if (!body.material.empty()) {
           const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
@@ -997,6 +1000,57 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
     }
   }
   return items;
+}
+
+bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
+                          std::string* error) {
+  const auto fail = [&](const std::string& msg) {
+    if (error) *error = msg;
+    LOG_WARN("Assembly import: {}", msg);
+    return false;
+  };
+  // Part geometry extracts into the project directory (self-contained,
+  // versionable) — so the project must have one.
+  if (state.projectPath.empty())
+    return fail("save the project first - assembly import extracts part "
+                "geometry into the project folder");
+
+  const std::string destDir =
+      (std::filesystem::path(state.projectPath) / "imported").string();
+  const interchange::AssemblyImportPlan plan =
+      interchange::BuildAssemblyImportPlan(stepPath, destDir);
+  if (!plan.error.empty())
+    return fail(plan.error);
+
+  // Materialize: one part tab per product (an ImportFeature on the extracted
+  // sidecar), then the assembly with every occurrence placed. Deliberately
+  // not undoable — it creates documents, like File > Open.
+  std::vector<uint64_t> partIds;
+  for (const interchange::PlannedPart& p : plan.parts) {
+    AddPart(state, p.name);
+    auto feature = std::make_unique<ImportFeature>(p.name, p.brepPath);
+    feature->hasColor = p.hasColor;
+    feature->color = p.color;
+    state.document->AddFeature(std::move(feature));
+    partIds.push_back(state.parts[static_cast<size_t>(state.activePart)].id);
+  }
+
+  AddAssembly(state, std::filesystem::path(stepPath).stem().string());
+  bool first = true;
+  for (const interchange::PlannedOccurrence& o : plan.occurrences) {
+    Occurrence occ;
+    occ.partId = partIds[o.part];
+    occ.name = o.name;
+    occ.position = o.position;
+    occ.orientation = o.orientation;
+    occ.fixed = first; // the first occurrence anchors, as insert-part does
+    first = false;
+    state.assembly->AddOccurrence(occ);
+  }
+  state.assembly->BumpVersion();
+  LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", stepPath,
+           plan.parts.size(), plan.occurrences.size());
+  return true;
 }
 
 } // namespace ui

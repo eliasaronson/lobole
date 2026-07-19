@@ -38,6 +38,19 @@ void OpenStepFileDialog(AppState& state) {
   }
 }
 
+void OpenStepAssemblyFileDialog(AppState& state) {
+  nfdchar_t* outPath = nullptr;
+  if (NFD_OpenDialog("step,STEP,stp", nullptr, &outPath) == NFD_OKAY) {
+    std::string filePath(outPath);
+    free(outPath);
+    std::string error;
+    if (ImportStepAsAssembly(state, filePath, &error))
+      FitCameraToDocument(state);
+    else
+      LOG_ERROR("Assembly import failed: {}", error);
+  }
+}
+
 namespace {
 
 // Load `path` (a project or a recovery sidecar) into the app.
@@ -265,6 +278,10 @@ static void UpdateDirectoryContents(AppState& state) {
 void OpenStepFileDialog(AppState& state) {
   state.showFileBrowser = true;
   UpdateDirectoryContents(state);
+}
+
+void OpenStepAssemblyFileDialog(AppState&) {
+  LOG_WARN("Import as Assembly requires nativefiledialog");
 }
 
 void OpenProjectDialog(AppState&) {

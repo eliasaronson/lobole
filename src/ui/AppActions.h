@@ -358,6 +358,13 @@ void PumpRenderJob(AppState& state);
 // Imports a STEP file as an undoable ImportFeature and fits the camera.
 void LoadSTEPFile(AppState& state, const std::string& filename);
 
+// Imports an assembly STEP as parts + an assembly (interchange I2): one part
+// tab per unique product (geometry extracted as .brep into
+// <project>/imported), occurrences placed from the file's instance tree.
+// Requires a saved project; not undoable (creates documents, like Open).
+bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
+                          std::string* error);
+
 // Shared feature-creation actions (menu + toolbar call these). Each starts a
 // preview the user accepts/cancels (see PreviewFeature).
 void CreateBox(AppState& state);

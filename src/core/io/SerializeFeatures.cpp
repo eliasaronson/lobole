@@ -431,6 +431,8 @@ json FeatureToJson(const Feature& feature) {
     j["height"] = cyl->height;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
+    if (import->hasColor) // only when set: pre-I2 files stay byte-identical
+      j["color"] = Vec3ToJson(import->color);
   } else if (auto* dp = dynamic_cast<const DatumPlaneFeature*>(&feature)) {
     j["kind"] = DatumPlaneKindToString(dp->kind);
     // Parent (Offset/Angled): earlier datum by id, or a base plane.
@@ -730,8 +732,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, Vec3FromJson(j.at("center")), Vec3FromJson(j.at("direction")),
         j.at("radius").get<double>(), j.at("height").get<double>());
   } else if (type == "Import") {
-    out = std::make_unique<ImportFeature>(name,
-                                          j.at("path").get<std::string>());
+    auto imp = std::make_unique<ImportFeature>(name,
+                                               j.at("path").get<std::string>());
+    if (j.contains("color")) {
+      imp->hasColor = true;
+      imp->color = Vec3FromJson(j.at("color"));
+    }
+    out = std::move(imp);
   } else if (type == "DatumPlane") {
     auto dp = std::make_unique<DatumPlaneFeature>(
         name, DatumPlaneKindFromString(j.at("kind").get<std::string>()));

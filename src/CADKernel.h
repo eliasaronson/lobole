@@ -40,6 +40,10 @@ public:
     CADShape Difference(const CADShape& other) const;
     
     // Transformation
+    // A copy placed by a rigid transform (rotation + translation; uniform
+    // scale tolerated). A sheared matrix returns the shape unmoved — OCC
+    // locations are similarity-only.
+    CADShape Transformed(const glm::mat4& m) const;
     void Translate(const glm::vec3& offset);
     void Rotate(const glm::vec3& axis, double angle);
     // Rotates `angle` radians about the axis through `point` along `dir`
@@ -133,6 +137,37 @@ public:
     
     // File I/O
     bool LoadSTEP(const std::string& filename, std::vector<CADShape>& shapes);
+
+    // Structured STEP import (XCAF): what the file actually carries beyond
+    // bare geometry — product names, colors, and the assembly's instance
+    // tree, flattened to leaf products with composed rigid transforms.
+    // A flat part file yields one product + one identity instance per free
+    // shape, so callers can always iterate `instances`.
+    struct ImportedShape {
+        CADShape shape;          // the product's geometry, at identity
+        std::string name;        // XCAF label name ("" when unnamed)
+        bool hasColor = false;
+        glm::vec3 color{0.0f};   // XCAF surface/generic color when hasColor
+    };
+    struct ImportedInstance {
+        size_t product = 0;      // index into ImportedModel::products
+        glm::mat4 transform{1.0f}; // composed placement (world of the file)
+        std::string name;        // instance label name ("" when unnamed)
+    };
+    struct ImportedModel {
+        std::vector<ImportedShape> products;   // deduped unique geometry
+        std::vector<ImportedInstance> instances;
+    };
+    bool LoadSTEPStructured(const std::string& filename, ImportedModel& out);
+    // The write half: products (named, colored) + one flat assembly of
+    // placed instances → a STEP with real product structure. Used by the
+    // assembly-import round-trip tests; the seed of assembly STEP export.
+    bool SaveSTEPStructured(const std::string& filename,
+                            const ImportedModel& model,
+                            const std::string& assemblyName = "Assembly");
+    // Native OCC BREP text — the exact-geometry sidecar format assembly
+    // import extracts per-part geometry into.
+    bool LoadBREP(const std::string& filename, CADShape& shape);
     bool SaveSTEP(const std::string& filename, const std::vector<CADShape>& shapes);
     
     bool LoadSTL(const std::string& filename, CADShape& shape);

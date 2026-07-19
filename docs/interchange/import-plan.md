@@ -1,6 +1,7 @@
 # Import workstream — plan
 
-Status: DRAFT — awaiting sign-off.
+Status: SIGNED OFF 2026-07-19 — I1+I2 approved to build now; I3 follows
+after a real-world STEP checkpoint.
 Scope: moving existing work INTO Designer. Three milestones: structured STEP
 for parts (I1), assembly STEP (I2), and a parametric Onshape importer (I3).
 Companion to docs/interchange/plan.md (export, v1 complete).

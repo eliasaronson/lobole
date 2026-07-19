@@ -6,6 +6,7 @@
 #include "core/io/Checkpoints.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Occurrence.h"
 #include "core/io/GitVault.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
@@ -179,6 +180,19 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
     return json{{"path", path}, {"items", items.size()}};
   }
   if (m == "import_step") {
+    if (p.value("as_assembly", false)) {
+      // Product structure → part tabs + an assembly (interchange I2).
+      std::string error;
+      if (!ui::ImportStepAsAssembly(state, p.at("path").get<std::string>(),
+                                    &error)) {
+        throw std::runtime_error(error);
+      }
+      json occs = json::array();
+      for (const Occurrence& o : state.assembly->GetOccurrences())
+        occs.push_back({{"id", o.id}, {"name", o.name}});
+      return json{{"assembly_index", state.activePart},
+                  {"occurrences", occs}};
+    }
     const size_t before = doc->GetBodies().size();
     ui::LoadSTEPFile(state, p.at("path").get<std::string>());
     if (doc->GetBodies().size() <= before)

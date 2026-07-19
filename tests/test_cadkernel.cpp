@@ -199,3 +199,245 @@ TEST_CASE("Mass properties of an invalid shape fail cleanly",
   CADShape::MassProps mp;
   CHECK_FALSE(CADShape().ComputeMassProps(mp));
 }
+
+// ---------------------------------------------------------------------------
+// Structured STEP import (I1): names, colors, and the flattened instance tree
+// read through XCAF. The fixture is authored with XCAF + STEPCAFControl so the
+// test needs no binary files: an assembly "Rig" holding a red "Widget" box
+// twice (second instance rotated 90° about Z then moved to x=10) and an
+// unnamed-color "Pin" cylinder at y=10.
+// ---------------------------------------------------------------------------
+
+#include <BRep_Builder.hxx>
+#include <Quantity_Color.hxx>
+#include <STEPCAFControl_Writer.hxx>
+#include <TDF_Label.hxx>
+#include <TDataStd_Name.hxx>
+#include <TDocStd_Document.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopoDS_Compound.hxx>
+#include <XCAFApp_Application.hxx>
+#include <XCAFDoc_ColorTool.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_Trsf.hxx>
+
+#include "core/Document.h"
+#include "core/Feature.h"
+
+namespace {
+std::filesystem::path WriteRigStep() {
+    CADKernel& k = CADKernel::Instance();
+    CADShape box = k.CreateBox(2.0, 2.0, 2.0);
+    CADShape cyl = k.CreateCylinder(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1),
+                                    0.5, 3.0);
+
+    Handle(TDocStd_Document) doc;
+    XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
+    Handle(XCAFDoc_ShapeTool) st = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+    Handle(XCAFDoc_ColorTool) ct = XCAFDoc_DocumentTool::ColorTool(doc->Main());
+
+    gp_Trsf rot;
+    rot.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 1.5707963267949);
+    gp_Trsf toX10;
+    toX10.SetTranslation(gp_Vec(10, 0, 0));
+    gp_Trsf toY10;
+    toY10.SetTranslation(gp_Vec(0, 10, 0));
+
+    TopoDS_Compound comp;
+    BRep_Builder builder;
+    builder.MakeCompound(comp);
+    builder.Add(comp, box.GetShape());
+    builder.Add(comp, box.GetShape().Moved(TopLoc_Location(toX10 * rot)));
+    builder.Add(comp, cyl.GetShape().Moved(TopLoc_Location(toY10)));
+    TDF_Label asmLabel = st->AddShape(comp, Standard_True);
+    TDataStd_Name::Set(asmLabel, "Rig");
+
+    TDF_Label boxLabel, cylLabel;
+    REQUIRE(st->FindShape(box.GetShape(), boxLabel));
+    REQUIRE(st->FindShape(cyl.GetShape(), cylLabel));
+    TDataStd_Name::Set(boxLabel, "Widget");
+    ct->SetColor(boxLabel, Quantity_Color(0.9, 0.1, 0.1, Quantity_TOC_RGB),
+                 XCAFDoc_ColorSurf);
+    TDataStd_Name::Set(cylLabel, "Pin");
+
+    std::filesystem::path path =
+        std::filesystem::temp_directory_path() / "designer_test_rig.step";
+    STEPCAFControl_Writer writer;
+    REQUIRE(writer.Transfer(doc, STEPControl_AsIs));
+    REQUIRE(writer.Write(path.string().c_str()) == IFSelect_RetDone);
+    return path;
+}
+} // namespace
+
+TEST_CASE("Structured STEP import reads names, colors, and instances",
+          "[kernel][import]") {
+    const auto path = WriteRigStep();
+
+    CADKernel::ImportedModel model;
+    REQUIRE(CADKernel::Instance().LoadSTEPStructured(path.string(), model));
+    REQUIRE(model.products.size() == 2);
+    REQUIRE(model.instances.size() == 3);
+
+    const auto widget = std::find_if(
+        model.products.begin(), model.products.end(),
+        [](const auto& p) { return p.name == "Widget"; });
+    const auto pin = std::find_if(
+        model.products.begin(), model.products.end(),
+        [](const auto& p) { return p.name == "Pin"; });
+    REQUIRE(widget != model.products.end());
+    REQUIRE(pin != model.products.end());
+    CHECK_THAT(widget->shape.Volume(), WithinRel(8.0, 1e-4));
+    CHECK(widget->hasColor);
+    CHECK_THAT(widget->color.r, WithinAbs(0.9f, 0.05f));
+    CHECK_THAT(widget->color.g, WithinAbs(0.1f, 0.05f));
+
+    // Two Widget instances: one at identity, one rotated 90° about Z at
+    // x=10 (rotation maps +X to +Y — read the transform's first column).
+    const size_t widgetIdx = (size_t)(widget - model.products.begin());
+    std::vector<glm::mat4> widgetXf;
+    glm::mat4 pinXf(0.0f);
+    for (const auto& inst : model.instances) {
+        if (inst.product == widgetIdx)
+            widgetXf.push_back(inst.transform);
+        else
+            pinXf = inst.transform;
+    }
+    REQUIRE(widgetXf.size() == 2);
+    if (glm::length(glm::vec3(widgetXf[0][3])) >
+        glm::length(glm::vec3(widgetXf[1][3])))
+        std::swap(widgetXf[0], widgetXf[1]);
+    CHECK_THAT(glm::length(glm::vec3(widgetXf[0][3])), WithinAbs(0.0f, 1e-4f));
+    CHECK_THAT(widgetXf[1][3].x, WithinAbs(10.0f, 1e-4f));
+    CHECK_THAT(widgetXf[1][0].y, WithinAbs(1.0f, 1e-4f)); // +X -> +Y
+    CHECK_THAT(pinXf[3].y, WithinAbs(10.0f, 1e-4f));
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("ImportFeature carries names and colors onto bodies",
+          "[feature][import]") {
+    const auto path = WriteRigStep();
+
+    Document doc;
+    doc.AddFeature(std::make_unique<ImportFeature>("rig", path.string()));
+    const auto& bodies = doc.GetBodies();
+    REQUIRE(bodies.size() == 3);
+
+    int widgets = 0, pins = 0;
+    for (const auto& b : bodies) {
+        if (b.name == "Widget") {
+            widgets++;
+            CHECK(b.hasDisplayColor);
+            CHECK_THAT(b.displayColor.r, WithinAbs(0.9f, 0.05f));
+        } else if (b.name == "Pin") {
+            pins++;
+            CHECK_FALSE(b.hasDisplayColor);
+        }
+    }
+    CHECK(widgets == 2);
+    CHECK(pins == 1);
+
+    // Instances keep their relative placement, centered as one unit. The box
+    // is corner-at-origin, so the 90°-rotation puts instance B's center at
+    // (-1,1,1)+x10 = (9,1,1) vs A's (1,1,1): centers 8 apart.
+    glm::vec3 minA, maxA, minB, maxB;
+    const Body* w[2] = {nullptr, nullptr};
+    for (const auto& b : bodies)
+        if (b.name == "Widget") (w[0] ? w[1] : w[0]) = &b;
+    REQUIRE(w[1] != nullptr);
+    w[0]->shape.GetBoundingBox(minA, maxA);
+    w[1]->shape.GetBoundingBox(minB, maxB);
+    const glm::vec3 cA = (minA + maxA) * 0.5f, cB = (minB + maxB) * 0.5f;
+    CHECK_THAT(glm::length(cB - cA), WithinAbs(8.0f, 0.01f));
+
+    std::filesystem::remove(path);
+}
+
+// ---------------------------------------------------------------------------
+// Assembly import plan (I2): SaveSTEPStructured → BuildAssemblyImportPlan
+// round-trip. Parts come out centered with the offset moved into the
+// occurrence, so materialized occurrences land exactly where the file put
+// them.
+// ---------------------------------------------------------------------------
+
+#include "core/io/ImportAssembly.h"
+
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+
+TEST_CASE("Assembly import plan extracts centered parts + placed occurrences",
+          "[kernel][import][assembly]") {
+    CADKernel& k = CADKernel::Instance();
+
+    // Author with the write half: a red "Widget" box (corner at origin, so
+    // centering is non-trivial) twice — identity and rotated-90°-at-x10 —
+    // plus a "Pin" cylinder at y=10.
+    CADKernel::ImportedModel model;
+    model.products.push_back(
+        {k.CreateBox(2.0, 2.0, 2.0), "Widget", true, glm::vec3(0.9f, 0.1f, 0.1f)});
+    model.products.push_back(
+        {k.CreateCylinder(glm::vec3(0), glm::vec3(0, 0, 1), 0.5, 3.0), "Pin",
+         false, glm::vec3(0.0f)});
+    const glm::mat4 xfB =
+        glm::translate(glm::mat4(1.0f), glm::vec3(10, 0, 0)) *
+        glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0, 0, 1));
+    model.instances.push_back({0, glm::mat4(1.0f), "W1"});
+    model.instances.push_back({0, xfB, "W2"});
+    model.instances.push_back(
+        {1, glm::translate(glm::mat4(1.0f), glm::vec3(0, 10, 0)), "P1"});
+
+    const auto stepPath =
+        std::filesystem::temp_directory_path() / "designer_test_asm.step";
+    REQUIRE(k.SaveSTEPStructured(stepPath.string(), model, "Rig"));
+
+    const auto destDir =
+        std::filesystem::temp_directory_path() / "designer_test_asm_out";
+    std::filesystem::remove_all(destDir);
+    const auto plan = interchange::BuildAssemblyImportPlan(stepPath.string(),
+                                                           destDir.string());
+    REQUIRE(plan.error.empty());
+    REQUIRE(plan.parts.size() == 2);
+    REQUIRE(plan.occurrences.size() == 3);
+
+    // Parts: named, colored, geometry centered at the part origin.
+    const auto widget =
+        std::find_if(plan.parts.begin(), plan.parts.end(),
+                     [](const auto& p) { return p.name == "Widget"; });
+    REQUIRE(widget != plan.parts.end());
+    CHECK(widget->hasColor);
+    CHECK_THAT(widget->color.r, WithinAbs(0.9f, 0.05f));
+    CADShape widgetShape;
+    REQUIRE(k.LoadBREP(widget->brepPath, widgetShape));
+    glm::vec3 min, max;
+    widgetShape.GetBoundingBox(min, max);
+    CHECK_THAT(glm::length((min + max) * 0.5f), WithinAbs(0.0f, 1e-4f));
+    CHECK_THAT(widgetShape.Volume(), WithinRel(8.0, 1e-4));
+
+    // Occurrences: centered part + placement composes back to the file's
+    // world positions. Box corner at origin → center (1,1,1); W2 is that
+    // center pushed through xfB.
+    const size_t wi = (size_t)(widget - plan.parts.begin());
+    std::vector<const interchange::PlannedOccurrence*> ws;
+    const interchange::PlannedOccurrence* pin = nullptr;
+    for (const auto& o : plan.occurrences)
+        (o.part == wi ? (void)ws.push_back(&o) : (void)(pin = &o));
+    REQUIRE(ws.size() == 2);
+    REQUIRE(pin != nullptr);
+    if (glm::length(ws[0]->position) > glm::length(ws[1]->position))
+        std::swap(ws[0], ws[1]);
+    CHECK_THAT(glm::length(ws[0]->position - glm::vec3(1, 1, 1)),
+               WithinAbs(0.0f, 1e-3f));
+    const glm::vec3 expectB = glm::vec3(xfB * glm::vec4(1, 1, 1, 1));
+    CHECK_THAT(glm::length(ws[1]->position - expectB), WithinAbs(0.0f, 1e-3f));
+    // W2's orientation is the 90°-about-Z rotation.
+    const glm::vec3 xAxis = ws[1]->orientation * glm::vec3(1, 0, 0);
+    CHECK_THAT(xAxis.y, WithinAbs(1.0f, 1e-3f));
+    // Pin: cylinder is axis-centered in XY, z spans [0,3] → center (0,0,1.5).
+    CHECK_THAT(glm::length(pin->position - glm::vec3(0, 10, 1.5f)),
+               WithinAbs(0.0f, 1e-3f));
+
+    std::filesystem::remove(stepPath);
+    std::filesystem::remove_all(destDir);
+}

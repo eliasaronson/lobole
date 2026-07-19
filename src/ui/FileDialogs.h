@@ -7,6 +7,8 @@ namespace ui {
 // Native (NFD) dialogs when available; STEP import falls back to an ImGui
 // browser window otherwise (project open/save require NFD for now).
 void OpenStepFileDialog(AppState& state);
+// Import a STEP's product structure as parts + an assembly (interchange I2).
+void OpenStepAssemblyFileDialog(AppState& state);
 void OpenProjectDialog(AppState& state);
 void SaveProjectDialog(AppState& state);
 // Export the whole document; format chosen by the chosen file's extension

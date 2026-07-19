@@ -1700,7 +1700,9 @@ void SyncDocumentRenderers(AppState& state) {
     // Albedo is per-instance state (not baked into vertices): palette color
     // by default; a body with an assigned material overrides it with the
     // material's base color and real PBR params.
-    glm::vec3 albedo = kBodyPalette[palette++ % std::size(kBodyPalette)];
+    glm::vec3 albedo = body.hasDisplayColor
+                           ? body.displayColor
+                           : kBodyPalette[palette++ % std::size(kBodyPalette)];
     state.meshRenderer->SetMeshColor(meshId, albedo);
     if (!body.material.empty()) {
       const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(

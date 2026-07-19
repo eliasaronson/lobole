@@ -28,6 +28,14 @@ struct Body {
   // rebuilt each regeneration. Empty when the producing feature doesn't name
   // its output yet (only extrude NewBody does so far).
   ElementMap elementMap;
+
+  // Optional display color carried in from interchange (XCAF import) — a
+  // viewport appearance, NOT a physical material (FEM still requires an
+  // explicit material). Transient like the shape; the importing feature
+  // stamps it every regeneration. Renderers prefer material > this > palette.
+  // Last on purpose: existing aggregate inits stop at createdBy.
+  bool hasDisplayColor = false;
+  glm::vec3 displayColor{0.0f};
 };
 
 class Feature;
@@ -159,5 +167,11 @@ public:
   std::string TypeName() const override { return "Import"; }
   bool Execute(RegenContext& ctx) override;
 
-  std::string path;
+  std::string path; // .step/.stp (structured) or .brep (exact sidecar)
+  // Display color for the imported bodies. Assembly import (I2) extracts
+  // per-part .brep sidecars, which carry no color — the import plan passes
+  // the product's STEP color through here instead. Per-product colors in a
+  // directly-imported STEP don't need this (they ride the XCAF read).
+  bool hasColor = false;
+  glm::vec3 color{0.0f};
 };

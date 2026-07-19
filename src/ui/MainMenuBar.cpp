@@ -75,6 +75,17 @@ void DrawFileMenu(AppState& state) {
   if (ImGui::MenuItem("Import STEP...", "Ctrl+I")) {
     OpenStepFileDialog(state);
   }
+  // Assembly import extracts per-part geometry into the project folder, so
+  // it needs a saved project. (From SolidWorks: Save As > STEP AP242 first.)
+  if (ImGui::MenuItem("Import STEP as Assembly...", nullptr, false,
+                      !state.projectPath.empty())) {
+    OpenStepAssemblyFileDialog(state);
+  }
+  if (state.projectPath.empty() && ImGui::IsItemHovered(
+                                       ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Save the project first - part geometry is extracted "
+                      "into the project folder");
+  }
   // Enabled for a part with bodies, an assembly (visual export walks its
   // occurrences), or a drawing with views (SVG/PDF sheet export).
   const bool canExport =

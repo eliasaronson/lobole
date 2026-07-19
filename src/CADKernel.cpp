@@ -1,5 +1,7 @@
 #include <cmath>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include "CADKernel.h"
 
 #ifdef HAVE_OPENCASCADE
@@ -45,6 +47,21 @@
 #include <Standard_Handle.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
+#include <BRep_Builder.hxx>
+#include <Quantity_Color.hxx>
+#include <STEPCAFControl_Reader.hxx>
+#include <STEPCAFControl_Writer.hxx>
+#include <TopLoc_Location.hxx>
+#include <TCollection_AsciiString.hxx>
+#include <TDF_Label.hxx>
+#include <TDF_LabelSequence.hxx>
+#include <TDF_Tool.hxx>
+#include <TDataStd_Name.hxx>
+#include <TDocStd_Document.hxx>
+#include <XCAFApp_Application.hxx>
+#include <XCAFDoc_ColorTool.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 #include <StlAPI_Reader.hxx>
 #include <StlAPI_Writer.hxx>
 #include <BRepTools.hxx>
@@ -146,6 +163,20 @@ CADShape CADShape::Difference(const CADShape& other) const {
         return CADShape(cut.Shape());
     }
     return CADShape();
+}
+
+CADShape CADShape::Transformed(const glm::mat4& m) const {
+    if (m_shape.IsNull()) return CADShape();
+    gp_Trsf t;
+    try {
+        // glm is column-major (m[col][row]); SetValues wants row-major 3x4.
+        t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0],
+                    m[0][1], m[1][1], m[2][1], m[3][1],
+                    m[0][2], m[1][2], m[2][2], m[3][2]);
+    } catch (const Standard_Failure&) {
+        return CADShape(m_shape); // sheared matrix: OCC can't represent it
+    }
+    return CADShape(m_shape.Moved(TopLoc_Location(t)));
 }
 
 void CADShape::Translate(const glm::vec3& offset) {
@@ -651,6 +682,120 @@ bool CADKernel::LoadSTEP(const std::string& filename, std::vector<CADShape>& sha
     return !shapes.empty();
 }
 
+namespace {
+
+std::string XcafLabelName(const TDF_Label& label) {
+    Handle(TDataStd_Name) name;
+    if (!label.IsNull() && label.FindAttribute(TDataStd_Name::GetID(), name)) {
+        const TCollection_ExtendedString& ext = name->Get();
+        TCollection_AsciiString ascii(ext);
+        return std::string(ascii.ToCString());
+    }
+    return {};
+}
+
+// A rigid gp_Trsf as a glm placement. glm is column-major: m[col][row];
+// gp_Trsf::Value is 1-based (row, col) with col 4 = translation.
+glm::mat4 TrsfToMat4(const gp_Trsf& t) {
+    glm::mat4 m(1.0f);
+    for (int row = 0; row < 3; row++)
+        for (int col = 0; col < 4; col++)
+            m[col][row] = static_cast<float>(t.Value(row + 1, col + 1));
+    return m;
+}
+
+} // namespace
+
+bool CADKernel::LoadSTEPStructured(const std::string& filename,
+                                   ImportedModel& out) {
+    out = {};
+    if (!std::filesystem::exists(filename)) return false;
+
+    Handle(TDocStd_Document) doc;
+    XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
+    STEPCAFControl_Reader reader;
+    reader.SetNameMode(Standard_True);
+    reader.SetColorMode(Standard_True);
+    if (reader.ReadFile(filename.c_str()) != IFSelect_RetDone) return false;
+    try {
+        if (!reader.Transfer(doc)) return false;
+    } catch (const Standard_Failure&) {
+        return false;
+    }
+
+    Handle(XCAFDoc_ShapeTool) shapes =
+        XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+    Handle(XCAFDoc_ColorTool) colors =
+        XCAFDoc_DocumentTool::ColorTool(doc->Main());
+
+    // One product entry per unique definition label, keyed by its entry
+    // string — 100 identical screws stay 1 product + 100 instances.
+    std::map<std::string, size_t> productIndex;
+    auto productOf = [&](const TDF_Label& def) -> size_t {
+        TCollection_AsciiString entry;
+        TDF_Tool::Entry(def, entry);
+        const std::string key(entry.ToCString());
+        auto it = productIndex.find(key);
+        if (it != productIndex.end()) return it->second;
+
+        ImportedShape p;
+        p.shape = CADShape(shapes->GetShape(def));
+        p.name = XcafLabelName(def);
+        Quantity_Color qc;
+        if (colors->GetColor(def, XCAFDoc_ColorSurf, qc) ||
+            colors->GetColor(def, XCAFDoc_ColorGen, qc) ||
+            colors->GetColor(shapes->GetShape(def), XCAFDoc_ColorSurf, qc) ||
+            colors->GetColor(shapes->GetShape(def), XCAFDoc_ColorGen, qc)) {
+            p.hasColor = true;
+            p.color = glm::vec3(static_cast<float>(qc.Red()),
+                                static_cast<float>(qc.Green()),
+                                static_cast<float>(qc.Blue()));
+        }
+        productIndex.emplace(key, out.products.size());
+        out.products.push_back(std::move(p));
+        return out.products.size() - 1;
+    };
+
+    // Walk the instance tree, composing locations down to leaf products.
+    std::function<void(const TDF_Label&, const gp_Trsf&, const std::string&)>
+        visit = [&](const TDF_Label& label, const gp_Trsf& parent,
+                    const std::string& instName) {
+            TDF_Label def = label;
+            XCAFDoc_ShapeTool::GetReferredShape(label, def); // no-op if plain
+            const gp_Trsf here =
+                parent * XCAFDoc_ShapeTool::GetLocation(label).Transformation();
+            if (XCAFDoc_ShapeTool::IsAssembly(def)) {
+                TDF_LabelSequence comps;
+                XCAFDoc_ShapeTool::GetComponents(def, comps);
+                for (Standard_Integer i = 1; i <= comps.Length(); i++) {
+                    std::string childName = XcafLabelName(comps.Value(i));
+                    if (childName.empty()) {
+                        TDF_Label childDef = comps.Value(i);
+                        XCAFDoc_ShapeTool::GetReferredShape(comps.Value(i),
+                                                            childDef);
+                        childName = XcafLabelName(childDef);
+                    }
+                    visit(comps.Value(i), here, childName);
+                }
+            } else {
+                ImportedInstance inst;
+                inst.product = productOf(def);
+                inst.transform = TrsfToMat4(here);
+                inst.name = !instName.empty()
+                                ? instName
+                                : out.products[inst.product].name;
+                out.instances.push_back(std::move(inst));
+            }
+        };
+
+    TDF_LabelSequence roots;
+    shapes->GetFreeShapes(roots);
+    for (Standard_Integer i = 1; i <= roots.Length(); i++)
+        visit(roots.Value(i), gp_Trsf(), XcafLabelName(roots.Value(i)));
+
+    return !out.instances.empty();
+}
+
 bool CADKernel::SaveSTEP(const std::string& filename, const std::vector<CADShape>& shapes) {
     if (shapes.empty()) return false;
     
@@ -694,6 +839,75 @@ bool CADKernel::SaveSTL(const std::string& filename, const CADShape& shape,
 bool CADKernel::SaveBREP(const std::string& filename, const CADShape& shape) {
     if (!shape.IsValid()) return false;
     return BRepTools::Write(shape.GetShape(), filename.c_str());
+}
+
+bool CADKernel::LoadBREP(const std::string& filename, CADShape& shape) {
+    if (!std::filesystem::exists(filename)) return false;
+    TopoDS_Shape s;
+    BRep_Builder builder;
+    if (!BRepTools::Read(s, filename.c_str(), builder) || s.IsNull())
+        return false;
+    shape = CADShape(s);
+    return true;
+}
+
+bool CADKernel::SaveSTEPStructured(const std::string& filename,
+                                   const ImportedModel& model,
+                                   const std::string& assemblyName) {
+    if (model.products.empty() || model.instances.empty()) return false;
+
+    Handle(TDocStd_Document) doc;
+    XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
+    Handle(XCAFDoc_ShapeTool) shapes =
+        XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+    Handle(XCAFDoc_ColorTool) colors =
+        XCAFDoc_DocumentTool::ColorTool(doc->Main());
+
+    std::vector<TDF_Label> productLabels;
+    for (const auto& p : model.products) {
+        if (!p.shape.IsValid()) return false;
+        TDF_Label label = shapes->AddShape(p.shape.GetShape(),
+                                           /*makeAssembly=*/Standard_False);
+        if (!p.name.empty())
+            TDataStd_Name::Set(label, p.name.c_str());
+        if (p.hasColor) {
+            colors->SetColor(label,
+                             Quantity_Color(p.color.r, p.color.g, p.color.b,
+                                            Quantity_TOC_RGB),
+                             XCAFDoc_ColorSurf);
+        }
+        productLabels.push_back(label);
+    }
+
+    TDF_Label assembly = shapes->NewShape();
+    if (!assemblyName.empty())
+        TDataStd_Name::Set(assembly, assemblyName.c_str());
+    for (const auto& inst : model.instances) {
+        if (inst.product >= productLabels.size()) return false;
+        gp_Trsf t;
+        try {
+            const glm::mat4& m = inst.transform;
+            t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0],
+                        m[0][1], m[1][1], m[2][1], m[3][1],
+                        m[0][2], m[1][2], m[2][2], m[3][2]);
+        } catch (const Standard_Failure&) {
+            return false; // sheared transform: not representable in STEP
+        }
+        TDF_Label comp = shapes->AddComponent(assembly,
+                                              productLabels[inst.product],
+                                              TopLoc_Location(t));
+        if (!inst.name.empty())
+            TDataStd_Name::Set(comp, inst.name.c_str());
+    }
+    shapes->UpdateAssemblies();
+
+    STEPCAFControl_Writer writer;
+    try {
+        if (!writer.Transfer(doc, STEPControl_AsIs)) return false;
+        return writer.Write(filename.c_str()) == IFSelect_RetDone;
+    } catch (const Standard_Failure&) {
+        return false;
+    }
 }
 
 // Helper functions
