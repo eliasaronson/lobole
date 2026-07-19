@@ -618,10 +618,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 }
 
 bool RemoteServer::IsUiAction(const std::string& method) {
-  static const char* kActions[] = {"menu_click",     "item_click",
-                                   "item_input",     "viewport_click",
-                                   "viewport_drag",  "key_press",
-                                   "scroll"};
+  static const char* kActions[] = {"menu_click",        "item_click",
+                                   "item_double_click", "item_input",
+                                   "viewport_click",    "viewport_drag",
+                                   "key_press",         "scroll"};
   for (const char* a : kActions)
     if (method == a)
       return true;
@@ -641,6 +641,10 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     m_uiAction = [p](ImGuiTestContext* ctx) {
       ctx->ItemClick(p.at("ref").get<std::string>().c_str(),
                      p.value("button", 0)); // 1 = right-click (context menus)
+    };
+  } else if (m == "item_double_click") {
+    m_uiAction = [p](ImGuiTestContext* ctx) {
+      ctx->ItemDoubleClick(p.at("ref").get<std::string>().c_str());
     };
   } else if (m == "item_input") {
     m_uiAction = [p](ImGuiTestContext* ctx) {

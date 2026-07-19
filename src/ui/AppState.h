@@ -141,6 +141,13 @@ struct SketchEditState {
 
   // Index of the dimension constraint being edited inline (-1 = none).
   int editingDim = -1;
+  // Dimension-label interaction (CAD-style placement): the pill the cursor
+  // is over (refreshed each frame by DrawDimensions, read by the canvas
+  // input handler one frame behind) and the one being dragged. While either
+  // is live the sketch canvas ignores the mouse, so moving a label never
+  // draws or selects through it.
+  int dimHot = -1;
+  int dimDrag = -1;
 
   // Solver status of the active sketch, refreshed each frame: remaining DOF
   // (0 = fully constrained, -1 = failed) and the constraint indices flagged as

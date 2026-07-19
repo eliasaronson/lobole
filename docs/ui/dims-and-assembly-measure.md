@@ -1,7 +1,12 @@
 # Dimension visuals + assembly measure
 
-Status: SIGNED OFF 2026-07-19 (both parts, B-then-A order). Part B (assembly
-measure) SHIPPED; Part A (dimension visuals) in progress.
+Status: SIGNED OFF 2026-07-19 (both parts, B-then-A order). BOTH SHIPPED
+2026-07-19. Notes vs plan: A6 placement-on-create seeds through
+ApplySketchConstraint (GUI paths); RPC-created dims stay at offset 0 and get
+the same defaults at render time, materialized into the file on first drag.
+Fixed alongside: ApplyDimensionEdit's ReplaceFeature dangling pointer
+(PushApplied), and the RPC add_constraint angle unit bug (wire speaks
+degrees, model stores radians — the literal path never converted).
 Scope: the two remaining items from the July request batch — CAD-style sketch
 dimension indicators (item 1) and measuring inside assemblies (item 11).
 

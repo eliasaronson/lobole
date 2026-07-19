@@ -177,6 +177,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (it == kinds.end()) throw std::runtime_error("unknown constraint kind");
     c.kind = it->second;
     c.value = p.value("value", 0.0);
+    // The wire speaks degrees for angles (like the UI); the model stores
+    // radians. The expr path below already converts — the literal must too.
+    if (c.kind == sketch::ConstraintKind::Angle)
+      c.value = glm::radians(c.value);
     // Optional expression driving the value, evaluated against the document's
     // variables on every regeneration (angles in degrees, like the UI).
     c.valueExpr = p.value("expr", std::string{});

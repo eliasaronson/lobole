@@ -1206,14 +1206,15 @@ def list_drawing_dims() -> dict:
 # Escape hatch: raw UI events (for driving/testing the Designer GUI itself)
 # ---------------------------------------------------------------------------
 
-_UI_ACTIONS = ("menu_click", "item_click", "item_input", "viewport_click",
-               "viewport_drag", "key_press", "scroll")
+_UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
+               "viewport_click", "viewport_drag", "key_press", "scroll")
 
 
 @mcp.tool(description="Raw GUI event, for driving or testing the Designer "
           "GUI itself — for modeling, use the semantic tools instead. "
           "action + params: menu_click {path: 'Edit/Undo'}; item_click "
-          "{ref}; item_input {ref, value}; viewport_click {x, y (0-1 window "
+          "{ref}; item_double_click {ref} (e.g. a tree sketch → edit mode); "
+          "item_input {ref, value}; viewport_click {x, y (0-1 window "
           "fractions), button?: 0/1/2, ctrl?}; viewport_drag {x0, y0, x1, "
           "y1, button?: 2=MMB orbit, ctrl?: pan, shift?: zoom}; key_press "
           "{chord: 'Ctrl+Z'}; scroll {x, y, amount}.")

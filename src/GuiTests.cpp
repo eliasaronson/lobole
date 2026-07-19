@@ -1502,6 +1502,71 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
   };
 
+  // Dimension visuals: a new distance dim is born with a non-zero label
+  // offset (legible placement), its pill drags to a new spot (writing the
+  // serialized labelOffset), and the drag neither moves nor draws geometry
+  // underneath (the dimHot gate).
+  t = IM_REGISTER_TEST(engine, "dims", "label_drag");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.tool = ui::SketchTool::Line;
+    s_App->sketchEdit.autoConstrain = false;
+    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane,
+                                        glm::vec2(-1.5f, -0.5f));
+    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane,
+                                        glm::vec2(1.5f, -0.5f));
+    ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);
+    const uint32_t lineId = sketch::EntityId(sk->entities[0]);
+
+    // Dimension the two endpoints; the seed pushes the label off the line.
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    s_App->sketchEdit.selected = {{lineId, 0}, {lineId, 1}};
+    IM_CHECK(ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Distance, 3.0));
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0)); // replaced
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
+    const glm::vec2 seeded = sk->constraints[0].labelOffset;
+    IM_CHECK_GT(glm::length(seeded), 0.1f);
+
+    // The label pill sits at the dimension line's midpoint: mid + offset.
+    const glm::vec2 labelUV = glm::vec2(0.0f, -0.5f) + seeded;
+    const glm::vec2 labelScr =
+        ui::SketchUVToScreen(*s_App, sk->plane, labelUV);
+    const auto lineBefore = std::get<sketch::Line>(sk->entities[0]);
+    ctx->MouseMoveToPos(ImVec2(labelScr.x, labelScr.y));
+    ctx->Yield(2); // dimHot latches for the canvas gate
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(labelScr.x + 45.0f, labelScr.y - 30.0f));
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1); // still just the dim
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);    // nothing drawn through
+    const glm::vec2 dragged = sk->constraints[0].labelOffset;
+    IM_CHECK_GT(glm::length(dragged - seeded), 0.1f); // the label moved
+    const auto lineAfter = std::get<sketch::Line>(sk->entities[0]);
+    IM_CHECK_LE(glm::length(lineAfter.a - lineBefore.a), 1e-5f);
+    IM_CHECK_LE(glm::length(lineAfter.b - lineBefore.b), 1e-5f);
+
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit cleanly
+    ctx->Yield();
+  };
+
   // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
   // a top face on each reads the 8mm gap in world space; re-clicking one
   // deselects it (occurrence is part of the element's identity).
