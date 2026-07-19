@@ -1024,6 +1024,65 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ((int)pick.ref.which, 1); // endpoint b
   };
 
+  // Selection precision: a click near a line's endpoint picks the POINT (not
+  // the line body, even though it is just as close); a repeated click at the
+  // same spot cycles to the line body (the U1 same-spot convention).
+  t = IM_REGISTER_TEST(engine, "pick", "endpoint_cycles_to_line");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    // Off the datum axes so they are not pick candidates at the endpoint.
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-2, 0.5f}, {2, 0.5f}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    // Pin the camera: the zoom left by earlier tests changes what falls
+    // inside the pixel pick tolerances (e.g. the X axis 0.5 UV away).
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+
+    // Click at endpoint b: the point wins over the line body under it.
+    glm::vec2 end = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2, 0.5f));
+    ctx->MouseMoveToPos(ImVec2(end.x, end.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+    IM_CHECK_EQ(s_App->sketchEdit.selected[0].entity, l0);
+    IM_CHECK_EQ((int)s_App->sketchEdit.selected[0].which, 1);
+    IM_CHECK(s_App->sketchDrag.mode == ui::SketchDragSession::Mode::Point);
+
+    // Same spot again: cycles to the line body.
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+    IM_CHECK_EQ(s_App->sketchEdit.selected[0].entity, l0);
+    IM_CHECK_EQ((int)s_App->sketchEdit.selected[0].which, 0);
+    IM_CHECK(s_App->sketchDrag.mode == ui::SketchDragSession::Mode::LineBody);
+
+    // Once more wraps back to the endpoint.
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ((int)s_App->sketchEdit.selected[0].which, 1);
+    IM_CHECK(s_App->sketchDrag.mode == ui::SketchDragSession::Mode::Point);
+
+    ctx->KeyPress(ImGuiKey_Escape); // clear selection
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+  };
+
   // Trim tool: clicking the middle span of a crossed line removes just that
   // piece, end to end through the viewport handler.
   t = IM_REGISTER_TEST(engine, "trim", "removes_middle_span");
@@ -1390,6 +1449,14 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
+    // Pin the camera: at an inherited far-out zoom, the geometry line's
+    // endpoint falls within the (screen-px) point tolerance of the axis
+    // click below and would be picked as the mirror axis.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     const size_t n0 = sk->entities.size(); // 2
     s_App->sketchEdit.tool = ui::SketchTool::Mirror;
@@ -1937,6 +2004,172 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_LE(glm::length(lineAfter.b - lineBefore.b), 1e-5f);
 
     ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit cleanly
+    ctx->Yield();
+  };
+
+  // The Dimension tool (Decision 1A): D arms it; clicks accumulate targets
+  // and the tool infers the dimension kind — two parallel lines = the
+  // perpendicular distance, two non-parallel = angle, a circle = radius, a
+  // line + empty click = its length. Each creation opens the inline editor.
+  t = IM_REGISTER_TEST(engine, "dims", "dimension_tool_infers");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t lA = sk->AddEntity(sketch::Line{{-1.5f, -1}, {1.5f, -1}});
+    uint32_t lB = sk->AddEntity(sketch::Line{{-1.5f, 1}, {1.5f, 1}});
+    uint32_t lC = sk->AddEntity(sketch::Line{{-1.5f, 0}, {1.5f, 0.8f}});
+    uint32_t ci = sk->AddEntity(sketch::Circle{{0.8f, 1.8f}, 0.5});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    // Pin the camera (zoom from earlier tests changes the pick tolerances).
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+
+    ctx->KeyPress(ImGuiKey_D); // arm the tool
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Dimension);
+
+    auto clickUV = [&](glm::vec2 uv) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    auto closeEditor = [&](size_t expectDims) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      IM_CHECK_EQ(sk->constraints.size(), expectDims);
+      IM_CHECK_EQ(s_App->sketchEdit.editingDim, (int)expectDims - 1);
+      ctx->KeyPress(ImGuiKey_Escape); // closes the inline editor only
+      ctx->Yield(2);
+      IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1);
+      IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Dimension);
+    };
+
+    // Two parallel lines → perpendicular distance (DistancePL), value = gap.
+    clickUV({0, -1});
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+    clickUV({0, 1});
+    closeEditor(1);
+    IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::DistancePL);
+    IM_CHECK_EQ(sk->constraints[0].a.entity, lA);
+    IM_CHECK_EQ(sk->constraints[0].b.entity, lB);
+    IM_CHECK_LE(std::abs(sk->constraints[0].value - 2.0), 1e-3);
+
+    // Two non-parallel lines → angle, pinned at the current wedge.
+    clickUV({0, -1});
+    clickUV({0, 0.4f});
+    closeEditor(2);
+    IM_CHECK(sk->constraints[1].kind == sketch::ConstraintKind::Angle);
+    IM_CHECK_LE(std::abs(sk->constraints[1].value - std::atan2(0.8, 3.0)),
+                2e-2);
+    {
+      const uint32_t ea = sk->constraints[1].a.entity;
+      const uint32_t eb = sk->constraints[1].b.entity;
+      IM_CHECK((ea == lA && eb == lC) || (ea == lC && eb == lA));
+    }
+
+    // A circle rim → radius, immediately.
+    clickUV({1.3f, 1.8f});
+    closeEditor(3);
+    IM_CHECK(sk->constraints[2].kind == sketch::ConstraintKind::Radius);
+    IM_CHECK_EQ(sk->constraints[2].a.entity, ci);
+    IM_CHECK_LE(std::abs(sk->constraints[2].value - 0.5), 1e-3);
+
+    // One line + a click in empty space → its LENGTH (endpoint distance).
+    // (x off 0 — a click ON the Y axis would dimension against the axis.)
+    clickUV({0.5f, -1});
+    clickUV({0.7f, -1.8f});
+    closeEditor(4);
+    IM_CHECK(sk->constraints[3].kind == sketch::ConstraintKind::Distance);
+    IM_CHECK_EQ(sk->constraints[3].a.entity, lA);
+    IM_CHECK_EQ(sk->constraints[3].b.entity, lA);
+    IM_CHECK_LE(std::abs(sk->constraints[3].value - 3.0), 1e-3);
+
+    // No geometry moved (every dimension pinned its current value).
+    const auto& la = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(lA)]);
+    IM_CHECK_LE(std::abs(la.a.y + 1.0f), 1e-3f);
+
+    // Esc with no accumulated targets disarms the tool (staged).
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+  };
+
+  // Inline dimension editor accepts full expressions: "3*4" stores
+  // valueExpr and drives value 12; a later plain number clears the expr.
+  t = IM_REGISTER_TEST(engine, "dims", "inline_editor_expression");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-1.5f, -0.5f}, {1.5f, -0.5f}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
+    IM_CHECK(ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Distance, 3.0));
+    ctx->Yield();
+    s_App->sketchEdit.editingDim = 0; // open the inline editor
+    ctx->Yield(2);
+
+    // The editor's InputText is auto-focused; replace the value. (Backspace
+    // clearing — Ctrl+A select-all is unreliable on a just-refocused field.)
+    for (int i = 0; i < 12; i++)
+      ctx->KeyPress(ImGuiKey_Backspace);
+    ctx->KeyChars("3*4");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
+    IM_CHECK_LE(std::abs(sk->constraints[0].value - 12.0), 1e-6);
+    IM_CHECK(sk->constraints[0].valueExpr == "3*4");
+    IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1);
+    // The dimension drove the geometry: the line is now 12 long.
+    {
+      const auto& ln = std::get<sketch::Line>(sk->entities[0]);
+      IM_CHECK_LE(std::abs(glm::length(ln.b - ln.a) - 12.0f), 1e-2f);
+    }
+
+    // A plain number reverts to a literal (expr cleared).
+    s_App->sketchEdit.editingDim = 0;
+    ctx->Yield(2);
+    for (int i = 0; i < 12; i++)
+      ctx->KeyPress(ImGuiKey_Backspace);
+    ctx->KeyChars("5");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_LE(std::abs(sk->constraints[0].value - 5.0), 1e-6);
+    IM_CHECK(sk->constraints[0].valueExpr.empty());
+
+    ctx->KeyPress(ImGuiKey_Escape); // clear selection state / leave edit
+    ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
   };
 

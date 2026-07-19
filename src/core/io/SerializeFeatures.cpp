@@ -113,6 +113,7 @@ const char* ConstraintKindToString(sketch::ConstraintKind k) {
   case K::DistanceX: return "distance_x";
   case K::DistanceY: return "distance_y";
   case K::Diameter: return "diameter";
+  case K::DistancePL: return "distance_pl";
   }
   return "coincident";
 }
@@ -138,6 +139,7 @@ sketch::ConstraintKind ConstraintKindFromString(const std::string& s) {
   if (s == "distance_x") return K::DistanceX;
   if (s == "distance_y") return K::DistanceY;
   if (s == "diameter") return K::Diameter;
+  if (s == "distance_pl") return K::DistancePL;
   throw std::runtime_error("Unknown constraint kind: " + s);
 }
 

@@ -172,7 +172,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         {"collinear", sketch::ConstraintKind::Collinear},
         {"distance_x", sketch::ConstraintKind::DistanceX},
         {"distance_y", sketch::ConstraintKind::DistanceY},
-        {"diameter", sketch::ConstraintKind::Diameter}};
+        {"diameter", sketch::ConstraintKind::Diameter},
+        {"distance_pl", sketch::ConstraintKind::DistancePL}};
     auto it = kinds.find(p.at("kind").get<std::string>());
     if (it == kinds.end()) throw std::runtime_error("unknown constraint kind");
     c.kind = it->second;

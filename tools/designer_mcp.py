@@ -136,7 +136,7 @@ DATUM_AXIS_Y = 0xFFFFFF02  # sketch Y axis (the +V direction)
 CONSTRAINT_FORMATS = f"""Constraint kinds: coincident, horizontal, vertical,
 parallel, perpendicular, equal, distance, radius, angle, tangent,
 point_on_line, symmetric, midpoint, fixed, concentric, collinear,
-distance_x, distance_y, diameter.
+distance_x, distance_y, diameter, distance_pl.
 
 refs is a list of [entity_id, which] pairs. `which` picks a point on the
 entity: line 0=a 1=b; circle 0=center; arc 0=center 1=start 2=end. For
@@ -147,9 +147,11 @@ Datum references (usable as entity_id): {DATUM_ORIGIN} = sketch origin,
 {DATUM_AXIS_X} = X axis, {DATUM_AXIS_Y} = Y axis. E.g. anchor a corner:
 {{"kind": "coincident", "refs": [[<line id>, 0], [{DATUM_ORIGIN}, 0]]}}.
 
-Dimensional kinds (distance, radius, angle, distance_x, distance_y, diameter)
-take value (angle in degrees) or expr (expression over document variables —
-prefer it: "width" beats 40)."""
+Dimensional kinds (distance, radius, angle, distance_x, distance_y, diameter,
+distance_pl) take value (angle in degrees) or expr (expression over document
+variables — prefer it: "width" beats 40). distance_pl is the perpendicular
+point-to-line distance: refs = [[point entity, which], [line entity, 0]] —
+also the parallel-lines distance (use an endpoint of the first line)."""
 
 MATERIAL_SLUGS = ("aluminum, steel, stainless_steel, brass, bronze, copper, "
                   "chrome, gold, silver, titanium, plastic_white, "

@@ -1,0 +1,29 @@
+{
+  "format": "designer-document",
+  "version": 37,
+  "features": [
+    {"type": "Sketch", "name": "Profile", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 3]},
+       {"type": "line", "id": 3, "a": [4, 3], "b": [0, 3]},
+       {"type": "line", "id": 4, "a": [0, 3], "b": [0, 0]}
+     ],
+     "constraints": [
+       {"kind": "coincident", "a": [1, 1], "b": [2, 0], "value": 0},
+       {"kind": "coincident", "a": [2, 1], "b": [3, 0], "value": 0},
+       {"kind": "coincident", "a": [3, 1], "b": [4, 0], "value": 0},
+       {"kind": "coincident", "a": [4, 1], "b": [1, 0], "value": 0},
+       {"kind": "fixed", "a": [1, 0], "b": [0, 0], "value": 0},
+       {"kind": "horizontal", "a": [1, 0], "b": [0, 0], "value": 0},
+       {"kind": "vertical", "a": [2, 0], "b": [0, 0], "value": 0},
+       {"kind": "horizontal", "a": [3, 0], "b": [0, 0], "value": 0},
+       {"kind": "distance", "a": [1, 0], "b": [1, 1], "value": 4},
+       {"kind": "distance_pl", "a": [1, 0], "b": [3, 0], "value": 3,
+        "expr": "6/2"}
+     ]},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 2.0, "mode": "new_body", "reversed": false}
+  ]
+}

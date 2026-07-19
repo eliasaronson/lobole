@@ -339,6 +339,9 @@ enum class ConstraintKind {
   DistanceX,     // a, b are points: b.x - a.x = value (driving dimension)
   DistanceY,     // a, b are points: b.y - a.y = value (driving dimension)
   Diameter,      // a.entity is a circle: diameter = value (radius = value/2)
+  DistancePL,    // a is a point, b.entity a line: perpendicular distance =
+                 // value (driving; also the parallel-lines distance, with a =
+                 // an endpoint of the first line)
 };
 
 // Which kinds are driving dimensions (carry an editable numeric value + a
@@ -346,7 +349,8 @@ enum class ConstraintKind {
 inline bool IsDimension(ConstraintKind k) {
   return k == ConstraintKind::Distance || k == ConstraintKind::DistanceX ||
          k == ConstraintKind::DistanceY || k == ConstraintKind::Radius ||
-         k == ConstraintKind::Diameter || k == ConstraintKind::Angle;
+         k == ConstraintKind::Diameter || k == ConstraintKind::Angle ||
+         k == ConstraintKind::DistancePL;
 }
 
 struct Constraint {

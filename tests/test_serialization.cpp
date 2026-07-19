@@ -3,6 +3,7 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
 #include "CADKernel.h"
@@ -120,6 +121,43 @@ TEST_CASE("Feature material round-trips and stamps its body", "[serialization]")
   // And the material survives regeneration onto the rebuilt body.
   CHECK(loaded->GetBodies()[0].material == "steel");
   CHECK(loaded->GetBodies()[1].material.empty());
+
+  fs::remove(path);
+}
+
+TEST_CASE("DistancePL dimension and its expression round-trip",
+          "[serialization][sketch]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const uint32_t l0 = sk->AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  const uint32_t p0 = sk->AddEntity(sketch::Point{{1, 2}});
+  sketch::Constraint dim{sketch::ConstraintKind::DistancePL, {p0, 0}, {l0, 0}};
+  dim.value = 2.0;
+  dim.valueExpr = "4/2";
+  dim.labelOffset = {0.5f, 0.0f};
+  sk->constraints.push_back(dim);
+  doc.AddFeature(std::move(sk));
+
+  fs::path path = TempFile("designer_test_distance_pl.json");
+  std::string error;
+  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE((loaded != nullptr && error.empty()));
+
+  auto* lsk = dynamic_cast<SketchFeature*>(loaded->GetFeature(0));
+  REQUIRE(lsk != nullptr);
+  REQUIRE(lsk->constraints.size() == 1);
+  const sketch::Constraint& c = lsk->constraints[0];
+  CHECK(c.kind == sketch::ConstraintKind::DistancePL);
+  CHECK(c.a.entity == p0);
+  CHECK(c.b.entity == l0);
+  CHECK_THAT(c.value, WithinAbs(2.0, 1e-9));
+  CHECK(c.valueExpr == "4/2");
+  CHECK_THAT(c.labelOffset.x, WithinAbs(0.5f, 1e-6f));
+  // The expression re-evaluated + solved on load keeps the point 2 off the
+  // line (it already was — regeneration must not move it).
+  const glm::vec2 p = std::get<sketch::Point>(lsk->entities[1]).p;
+  CHECK_THAT(p.y, WithinAbs(2.0f, 1e-3f));
 
   fs::remove(path);
 }

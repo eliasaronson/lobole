@@ -63,7 +63,8 @@ enum class SketchTool {
   Mirror,        // reflect the current selection across a clicked axis line
   Fillet,        // round the clicked corner where two lines meet
   Pattern,       // linear/circular array of the current selection
-  Offset         // offset the selected closed loop by a distance
+  Offset,        // offset the selected closed loop by a distance
+  Dimension      // clicks accumulate targets; the tool infers the dim kind
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -117,6 +118,16 @@ struct SketchEditState {
 
   // Sketch-entity selection (for adding constraints), ordered.
   std::vector<sketch::PointRef> selected;
+
+  // Same-spot click cycling in the Select tool (the U1 model-space
+  // convention): the last click position (screen px) and the candidate index
+  // a repeated click at that spot advances.
+  glm::vec2 lastClickPos{-1e9f, -1e9f};
+  int pickCycle = 0;
+
+  // Dimension tool: parallel to `selected` while it is armed — true when the
+  // accumulated target was picked as a whole line (body), false for a point.
+  std::vector<bool> dimPickBody;
 
   // What the cursor is over in the Select tool (for hover highlighting),
   // refreshed each frame. `hoveredBody` distinguishes an entity body from a

@@ -419,6 +419,19 @@ void Solver::Load(const SketchFeature& sketch) {
                                       &im.params.back(), tag++);
       }
       break;
+    case ConstraintKind::DistancePL:
+      // Perpendicular point-to-line distance. P2LDistance is SIGNED, so pick
+      // the side the point is already on and keep it there (the Tangent
+      // recipe) rather than let the solve flip it across the line.
+      if (a && im.lineOf.count(con.b.entity)) {
+        GCS::Line& l = im.lines[im.lineOf[con.b.entity]];
+        const double dx = *l.p2.x - *l.p1.x, dy = *l.p2.y - *l.p1.y;
+        const double rx = *a->x - *l.p1.x, ry = *a->y - *l.p1.y;
+        const bool ccw = (dx * ry - dy * rx) > 0.0;
+        im.params.push_back(con.value);
+        im.sys.addConstraintP2LDistance(*a, l, &im.params.back(), ccw, tag++);
+      }
+      break;
     }
   }
   im.constraintFirstTag.back() = tag; // upper bound for the last constraint

@@ -116,9 +116,17 @@ struct SketchPick {
 SketchPick PickSketchPoint(AppState& state, const SketchFeature& sketch,
                            glm::vec2 mousePos, float tolPx);
 
-// Endpoint-first pick: returns an endpoint hit if the cursor is within `tolPx`
-// of one, else the nearest line segment / circle circumference within `tolPx`
-// as a whole-entity hit (`body = true`).
+// All pick candidates under the cursor, best first: endpoints within a
+// slightly larger tolerance than `tolPx` (points outrank entity bodies even
+// when the body is closer), then bodies within `tolPx` (nearest first), then
+// the datum axes. Same-spot click cycling in the Select tool walks this list.
+std::vector<SketchPick> PickSketchCandidates(AppState& state,
+                                             const SketchFeature& sketch,
+                                             glm::vec2 mousePos, float tolPx);
+
+// Endpoint-first pick: the best candidate — an endpoint hit if the cursor is
+// near one, else the nearest line segment / circle circumference within
+// `tolPx` as a whole-entity hit (`body = true`).
 SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
                             glm::vec2 mousePos, float tolPx);
 

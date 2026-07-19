@@ -208,6 +208,9 @@ void DrawSketchModeToolbar(AppState& state) {
       edit.tool = t;
       edit.hasPendingPoint = edit.hasPendingPoint2 = false;
       edit.mirrorAxisPhase = false;
+      edit.dimPickBody.clear();
+      if (t == SketchTool::Dimension)
+        edit.selected.clear(); // dimension targets accumulate from scratch
       edit.actionMsg.clear();
     }
     if (active)
@@ -223,6 +226,7 @@ void DrawSketchModeToolbar(AppState& state) {
   toolBtn(ICON_FA_EGG, "Ellipse", SketchTool::Ellipse);
   toolBtn(ICON_FA_CIRCLE_DOT, "Point", SketchTool::Point);
   toolBtn(ICON_FA_SCISSORS, "Trim (M)", SketchTool::Trim);
+  toolBtn(ICON_FA_RULER_COMBINED, "Dimension (D)", SketchTool::Dimension);
   Divider();
   toolBtn(ICON_FA_LEFT_RIGHT, "Mirror", SketchTool::Mirror);
   toolBtn(ICON_FA_DRAW_POLYGON, "Fillet (Shift+F)", SketchTool::Fillet);

@@ -39,6 +39,7 @@ const char* ConstraintKindName(sketch::ConstraintKind k) {
   case K::DistanceX: return "distance-x";
   case K::DistanceY: return "distance-y";
   case K::Diameter: return "diameter";
+  case K::DistancePL: return "distance-pl";
   }
   return "?";
 }

@@ -412,8 +412,9 @@ def main():
         aid = ska["entity_ids"]
         d.call("add_constraint", sketch_id=ska["id"], kind="coincident",
                refs=[[aid[1], 0], [aid[0], 0]])
+        # The wire speaks degrees for angles (the UI convention, 1ec93fe).
         d.call("add_constraint", sketch_id=ska["id"], kind="angle",
-               refs=[[aid[0], 0], [aid[1], 0]], value=0.7853981634)
+               refs=[[aid[0], 0], [aid[1], 0]], value=45.0)
         ea = d.call("get_state")["features"][0]["entities"]
         d0 = [ea[0]["b"][0] - ea[0]["a"][0], ea[0]["b"][1] - ea[0]["a"][1]]
         d1 = [ea[1]["b"][0] - ea[1]["a"][0], ea[1]["b"][1] - ea[1]["a"][1]]

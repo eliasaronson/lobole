@@ -737,4 +737,48 @@ TEST_CASE("Under-defined entities are identified after a solve",
   CHECK(s2.UnderDefinedEntities().empty());
 }
 
+TEST_CASE("DistancePL holds a point at a perpendicular line distance",
+          "[solver][dimension]") {
+  SketchFeature s = MakeSketch();
+  const uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  const uint32_t p0 = s.AddEntity(sketch::Point{{1, 2}});
+  // Pin the line; only the point may move to satisfy the dimension.
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 0}, {}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 1}, {}});
+  sketch::Constraint dim{sketch::ConstraintKind::DistancePL, {p0, 0}, {l0, 0}};
+  dim.value = 1.5;
+  s.constraints.push_back(dim);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  const glm::vec2 p = std::get<sketch::Point>(out[1]).p;
+  // Distance holds AND the point stayed on its original (+Y) side.
+  CHECK_THAT(p.y, WithinAbs(1.5f, 1e-4f));
+}
+
+TEST_CASE("DistancePL dimensions the gap between parallel lines",
+          "[solver][dimension]") {
+  SketchFeature s = MakeSketch();
+  const uint32_t la = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  const uint32_t lb = s.AddEntity(sketch::Line{{0, 2.2f}, {4, 2.2f}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {la, 0}, {}});
+  s.constraints.push_back({sketch::ConstraintKind::Fixed, {la, 1}, {}});
+  s.constraints.push_back({sketch::ConstraintKind::Parallel, {la, 0}, {lb, 0}});
+  // The parallel-lines dimension: an endpoint of B held off line A.
+  sketch::Constraint dim{sketch::ConstraintKind::DistancePL, {lb, 0}, {la, 0}};
+  dim.value = 2.0;
+  s.constraints.push_back(dim);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  CHECK_THAT(LineA(out[1]).y, WithinAbs(2.0f, 1e-4f));
+  CHECK_THAT(LineB(out[1]).y, WithinAbs(2.0f, 1e-4f)); // stayed parallel
+}
+
 #endif // HAVE_PLANEGCS

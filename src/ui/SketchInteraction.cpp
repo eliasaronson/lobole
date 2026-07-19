@@ -17,6 +17,7 @@
 
 #include "imgui.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <map>
 #include <optional>
@@ -27,6 +28,10 @@ namespace ui {
 namespace {
 
 constexpr glm::vec3 kPreviewColor{0.95f, 0.85f, 0.35f};
+
+// Body hit tolerance for the interactive sketch tools (endpoints get +4 px on
+// top — see PickSketchCandidates). Was 12; lines were hard to hit.
+constexpr float kSketchBodyTolPx = 14.0f;
 
 LineVertex3D LineVertex(const glm::vec3& p) {
   LineVertex3D v;
@@ -602,6 +607,9 @@ static void HandleSketchKeys(AppState& state) {
     edit.tool = t;
     edit.hasPendingPoint = edit.hasPendingPoint2 = false;
     edit.mirrorAxisPhase = false;
+    edit.dimPickBody.clear();
+    if (t == SketchTool::Dimension)
+      edit.selected.clear(); // dimension targets accumulate from scratch
     edit.actionMsg.clear();
   };
 
@@ -624,6 +632,7 @@ static void HandleSketchKeys(AppState& state) {
   if (ImGui::IsKeyPressed(ImGuiKey_A)) return setTool(SketchTool::ArcThreePoint);
   if (ImGui::IsKeyPressed(ImGuiKey_M)) return setTool(SketchTool::Trim);
   if (ImGui::IsKeyPressed(ImGuiKey_O)) return setTool(SketchTool::Offset);
+  if (ImGui::IsKeyPressed(ImGuiKey_D)) return setTool(SketchTool::Dimension);
 
   if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
     edit.selected.clear();
@@ -644,22 +653,196 @@ static void HandleSketchKeys(AppState& state) {
   if (ImGui::IsKeyPressed(ImGuiKey_B)) return (void)ApplySketchConstraint(state, K::Parallel, 0.0);
   if (ImGui::IsKeyPressed(ImGuiKey_T)) return (void)ApplySketchConstraint(state, K::Tangent, 0.0);
   if (ImGui::IsKeyPressed(ImGuiKey_E)) return (void)ApplySketchConstraint(state, K::Equal, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_D) && edit.selected.size() >= 2) {
-    // Dimension: pin the current distance between the two selected points
-    // (double-click the label to edit the value — Phase G).
-    SketchFeature* sk = ResolveActiveSketch(state);
-    double v = 1.0;
-    if (sk) {
-      const size_t ia = sk->IndexOfEntity(edit.selected[0].entity);
-      const size_t ib = sk->IndexOfEntity(edit.selected[1].entity);
-      if (ia != SIZE_MAX && ib != SIZE_MAX)
-        v = glm::length(
-            sketch::EntityPointUV(sk->entities[ib], edit.selected[1].which) -
-            sketch::EntityPointUV(sk->entities[ia], edit.selected[0].which));
-    }
-    ApplySketchConstraint(state, K::Distance, v);
-  }
 }
+
+namespace {
+
+// UV of a point ref against the live sketch (datum origin/axes included).
+std::optional<glm::vec2> TargetUV(const SketchFeature& sk,
+                                  const sketch::PointRef& r) {
+  if (sketch::IsDatum(r.entity))
+    return sketch::DatumPointUV(r.entity, r.which);
+  const size_t idx = sk.IndexOfEntity(r.entity);
+  if (idx == SIZE_MAX)
+    return std::nullopt;
+  return sketch::EntityPointUV(sk.entities[idx], r.which);
+}
+
+// Direction of a line entity or datum axis (unnormalized), nullopt otherwise.
+std::optional<glm::vec2> LineDirOf(const SketchFeature& sk, uint32_t id) {
+  if (sketch::IsDatum(id)) {
+    const auto ep = sketch::DatumAxisEndpoints(id);
+    return ep.second - ep.first;
+  }
+  const size_t idx = sk.IndexOfEntity(id);
+  if (idx == SIZE_MAX)
+    return std::nullopt;
+  if (const auto* l = std::get_if<sketch::Line>(&sk.entities[idx]))
+    return l->b - l->a;
+  return std::nullopt;
+}
+
+// Perpendicular distance from p to the INFINITE line through entity `lineId`.
+double PointToLineDistance(const SketchFeature& sk, glm::vec2 p,
+                           uint32_t lineId) {
+  const auto a = TargetUV(sk, {lineId, 0});
+  const auto dir = LineDirOf(sk, lineId);
+  if (!a || !dir || glm::length(*dir) < 1e-9f)
+    return 0.0;
+  const glm::vec2 d = glm::normalize(*dir);
+  const glm::vec2 r = p - *a;
+  return std::abs(d.x * r.y - d.y * r.x);
+}
+
+// Creates the inferred dimension from the ordered targets, then opens the
+// inline value editor on it so the user can type the value immediately (the
+// Dimension tool's commit tail). Clears the accumulated targets either way.
+void CommitInferredDimension(AppState& state, sketch::ConstraintKind kind,
+                             double value,
+                             std::vector<sketch::PointRef> refs) {
+  SketchEditState& edit = state.sketchEdit;
+  edit.selected = std::move(refs);
+  const bool ok = ApplySketchConstraint(state, kind, value);
+  edit.selected.clear(); // ApplySketchConstraint clears on success; ensure
+  edit.dimPickBody.clear();
+  if (!ok)
+    return;
+  edit.actionMsg.clear();
+  if (SketchFeature* sk = ResolveActiveSketch(state))
+    edit.editingDim = static_cast<int>(sk->constraints.size()) - 1;
+}
+
+// One Dimension-tool click: accumulate the pick and, as soon as the set
+// matches a rule, create the DRIVING dimension (Decision 1A inference):
+//   circle/arc → radius;  line + empty click (or the same line again) →
+//   length;  two parallel lines → perpendicular distance (P2L from an
+//   endpoint of the first — no parallel constraint implied);  two
+//   non-parallel lines → angle;  point + line → perpendicular distance;
+//   two points → distance.
+// May REPLACE the sketch feature through the command system; callers must
+// drop their SketchFeature pointer afterwards.
+void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
+                          const SketchPick& pick) {
+  SketchEditState& edit = state.sketchEdit;
+  using K = sketch::ConstraintKind;
+  if (edit.dimPickBody.size() != edit.selected.size()) {
+    // Selection changed under the tool (panel click etc.) — start over.
+    edit.selected.clear();
+    edit.dimPickBody.clear();
+  }
+  const auto entityOf = [&](uint32_t id) -> const sketch::Entity* {
+    const size_t idx = sketch.IndexOfEntity(id);
+    return idx == SIZE_MAX ? nullptr : &sketch.entities[idx];
+  };
+  const auto lineLength = [&](uint32_t id) {
+    const auto a = TargetUV(sketch, {id, 0}), b = TargetUV(sketch, {id, 1});
+    return (a && b) ? static_cast<double>(glm::length(*b - *a)) : 0.0;
+  };
+  const auto commitLength = [&](uint32_t id) {
+    CommitInferredDimension(state, K::Distance, lineLength(id),
+                            {{id, 0}, {id, 1}});
+  };
+
+  if (!pick.hit) {
+    // Empty space finishes a single picked line as its LENGTH.
+    if (edit.selected.size() == 1 && edit.dimPickBody[0] &&
+        !sketch::IsDatum(edit.selected[0].entity))
+      commitLength(edit.selected[0].entity);
+    return;
+  }
+
+  const sketch::Entity* e = entityOf(pick.ref.entity);
+  const bool isAxis = sketch::IsDatum(pick.ref.entity);
+
+  // A circle/arc body dimensions its radius immediately.
+  if (pick.body && e != nullptr &&
+      (std::holds_alternative<sketch::Circle>(*e) ||
+       std::holds_alternative<sketch::Arc>(*e))) {
+    const double r = std::holds_alternative<sketch::Circle>(*e)
+                         ? std::get<sketch::Circle>(*e).radius
+                         : std::get<sketch::Arc>(*e).radius;
+    CommitInferredDimension(state, K::Radius, r, {{pick.ref.entity, 0}});
+    return;
+  }
+
+  const bool lineTarget =
+      pick.body &&
+      (isAxis || (e != nullptr && std::holds_alternative<sketch::Line>(*e)));
+
+  // Clicking the picked line a second time = its length (the "double-click
+  // the line" rule).
+  if (lineTarget && edit.selected.size() == 1 && edit.dimPickBody[0] &&
+      edit.selected[0].entity == pick.ref.entity) {
+    if (!isAxis)
+      commitLength(pick.ref.entity);
+    return;
+  }
+  // Re-clicking an accumulated point is a no-op.
+  if (!lineTarget && edit.selected.size() == 1 && !edit.dimPickBody[0] &&
+      edit.selected[0].entity == pick.ref.entity &&
+      edit.selected[0].which == pick.ref.which)
+    return;
+
+  edit.selected.push_back(lineTarget ? sketch::PointRef{pick.ref.entity, 0}
+                                     : pick.ref);
+  edit.dimPickBody.push_back(lineTarget);
+  if (edit.selected.size() < 2)
+    return;
+
+  const sketch::PointRef A = edit.selected[0], B = edit.selected[1];
+  const bool aLine = edit.dimPickBody[0], bLine = edit.dimPickBody[1];
+
+  if (aLine && bLine) {
+    const auto da = LineDirOf(sketch, A.entity);
+    const auto db = LineDirOf(sketch, B.entity);
+    if (!da || !db) {
+      edit.selected.clear();
+      edit.dimPickBody.clear();
+      return;
+    }
+    const glm::vec2 u = glm::normalize(*da), v = glm::normalize(*db);
+    const float cross = u.x * v.y - u.y * v.x;
+    if (std::abs(cross) < 0.01f) {
+      // Parallel (within tolerance): the perpendicular distance, dimensioned
+      // from an endpoint of the first line to the second (the SolidWorks
+      // parallel-distance recipe — no parallel constraint is implied).
+      const auto p = TargetUV(sketch, {A.entity, 0});
+      const double dist = p ? PointToLineDistance(sketch, *p, B.entity) : 0.0;
+      CommitInferredDimension(state, K::DistancePL, dist,
+                              {{A.entity, 0}, {B.entity, 0}});
+    } else {
+      // Angle. GCS's line-line angle is signed (l1 → l2): order the pair so
+      // the current wedge is positive and pin exactly it.
+      const double ang = std::atan2(std::abs(cross), glm::dot(u, v));
+      sketch::PointRef refA = A, refB = B;
+      if (cross < 0.0f)
+        std::swap(refA, refB);
+      CommitInferredDimension(state, K::Angle, ang, {refA, refB});
+    }
+    return;
+  }
+  if (aLine != bLine) {
+    const sketch::PointRef pt = aLine ? B : A;
+    const sketch::PointRef ln = aLine ? A : B;
+    if (pt.entity == ln.entity) {
+      edit.actionMsg = "Dimension: pick a point off its own line.";
+      edit.selected.pop_back();
+      edit.dimPickBody.pop_back();
+      return;
+    }
+    const auto p = TargetUV(sketch, pt);
+    const double dist = p ? PointToLineDistance(sketch, *p, ln.entity) : 0.0;
+    CommitInferredDimension(state, K::DistancePL, dist, {pt, {ln.entity, 0}});
+    return;
+  }
+  // Two points.
+  const auto pa = TargetUV(sketch, A), pb = TargetUV(sketch, B);
+  const double dist =
+      (pa && pb) ? static_cast<double>(glm::length(*pb - *pa)) : 0.0;
+  CommitInferredDimension(state, K::Distance, dist, {A, B});
+}
+
+} // namespace
 
 bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
                           bool overViewport) {
@@ -772,14 +955,21 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   edit.hasCurrentSnap = false;
 
   if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-    // Back out one level per press: cancel an in-progress action → return to the
-    // Select tool → clear the selection → leave sketch edit.
-    if (edit.hasPendingPoint || edit.hasPendingPoint2 || edit.boxActive) {
+    // Back out one level per press: close the inline dimension editor →
+    // cancel an in-progress action → return to the Select tool → clear the
+    // selection → leave sketch edit.
+    if (edit.editingDim >= 0) {
+      // The inline editor (DrawDimensions, later this frame) consumes it.
+    } else if (edit.hasPendingPoint || edit.hasPendingPoint2 || edit.boxActive) {
       edit.hasPendingPoint = false;
       edit.hasPendingPoint2 = false;
       edit.boxActive = false;
     } else if (edit.tool == SketchTool::Mirror && edit.mirrorAxisPhase) {
       edit.mirrorAxisPhase = false; // axis-pick → back to collecting geometry
+    } else if (edit.tool == SketchTool::Dimension && !edit.selected.empty()) {
+      // Clear the accumulated targets first; a second Esc disarms the tool.
+      edit.selected.clear();
+      edit.dimPickBody.clear();
     } else if (edit.tool != SketchTool::Select) {
       edit.tool = SketchTool::Select;
       edit.mirrorAxisPhase = false;
@@ -845,7 +1035,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     // Track what the cursor is over for hover highlighting (endpoint-first,
     // then entity body).
     SketchPick hover = PickSketchEntity(
-        state, *sketch, glm::vec2(mousePos.x, mousePos.y), 12.0f);
+        state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
     edit.hasHover = hover.hit;
     edit.hoveredBody = hover.body;
     edit.hoveredRef = hover.ref;
@@ -880,15 +1070,25 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     // moves that point, a line body translates the whole line, a circle rim
     // resizes it. Empty click clears the selection.
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-      SketchPick pick =
-          PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y),
-                           12.0f);
-      if (pick.hit) {
+      const glm::vec2 pos(mousePos.x, mousePos.y);
+      const std::vector<SketchPick> candidates =
+          PickSketchCandidates(state, *sketch, pos, kSketchBodyTolPx);
+      const bool samePos = glm::length(pos - edit.lastClickPos) < 6.0f;
+      edit.lastClickPos = pos;
+      if (!candidates.empty()) {
+        // Same-spot repeat cycles the stacked candidates (endpoint → line
+        // body → …, the U1 model-space convention); a fresh spot takes the
+        // best one — points outrank bodies.
+        edit.pickCycle =
+            samePos ? (edit.pickCycle + 1) % static_cast<int>(candidates.size())
+                    : 0;
+        const SketchPick pick = candidates[static_cast<size_t>(edit.pickCycle)];
         if (!ImGui::GetIO().KeyCtrl)
           edit.selected.clear();
         edit.selected.push_back(pick.ref);
         BeginDragSession(state, *sketch, index, pick, uv);
       } else {
+        edit.pickCycle = 0;
         // Missed geometry: start a rubber-band box (don't clear yet — a plain
         // click clears on release).
         edit.boxActive = true;
@@ -928,7 +1128,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     // its crossings). Preview highlights just that sub-segment (not the whole
     // line) so it's clear what the click deletes.
     SketchPick hover = PickSketchEntity(
-        state, *sketch, glm::vec2(mousePos.x, mousePos.y), 12.0f);
+        state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
     edit.hasHover = false; // whole-entity highlight suppressed in Trim
     edit.hasTrimPreview = false;
     if (hover.hit) {
@@ -980,7 +1180,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 
   if (edit.tool == SketchTool::Mirror) {
     SketchPick hover =
-        PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y), 12.0f);
+        PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y),
+                         kSketchBodyTolPx);
     edit.hasHover = hover.hit;
     if (hover.hit)
       edit.hoveredRef = hover.ref;
@@ -1072,6 +1273,22 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           edit.actionMsg = "Fillet: click a corner where two lines meet.";
         }
       }
+    }
+    return true;
+  }
+
+  if (edit.tool == SketchTool::Dimension) {
+    SketchPick hover = PickSketchEntity(
+        state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
+    edit.hasHover = hover.hit;
+    if (hover.hit) {
+      edit.hoveredBody = hover.body;
+      edit.hoveredRef = hover.ref;
+    }
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      // May replace the sketch feature through the command system — the
+      // local pointer is dead after this call.
+      HandleDimensionClick(state, *sketch, hover);
     }
     return true;
   }
@@ -1452,6 +1669,12 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
         edit.selected.empty() ? "select a closed loop (its edges)"
                               : "set the distance in the panel, then Apply");
     break;
+  case T::Dimension:
+    set("Dimension", edit.selected.empty() ? 1 : 2, 2,
+        edit.selected.empty()
+            ? "pick a point, line, or circle"
+            : "pick a second target, or click empty space for length");
+    break;
   }
   return p;
 }
@@ -1492,9 +1715,11 @@ void DrawToolPrompt(AppState& state) {
 }
 
 namespace {
-// UV position of a point ref (line endpoint / point / circle centre).
+// UV position of a point ref (line endpoint / point / circle centre / datum).
 std::optional<glm::vec2> RefUV(const SketchFeature& sk,
                                const sketch::PointRef& r) {
+  if (sketch::IsDatum(r.entity))
+    return sketch::DatumPointUV(r.entity, r.which);
   size_t idx = sk.IndexOfEntity(r.entity);
   if (idx == SIZE_MAX)
     return std::nullopt;
@@ -1709,8 +1934,21 @@ void DrawDimensions(AppState& state) {
         labelPos =
             scr(inter + glm::vec2(std::cos(aMid), std::sin(aMid)) * rUV);
       }
-    } else { // Distance / DistanceX / DistanceY (points a, b)
+    } else { // Distance / DistanceX / DistanceY / DistancePL (points a, b)
       auto a = RefUV(*sketch, con.a), b = RefUV(*sketch, con.b);
+      if (con.kind == K::DistancePL && a) {
+        // Renders like a distance dim between the point and its FOOT on the
+        // line (the perpendicular projection onto the infinite line).
+        const auto la = RefUV(*sketch, {con.b.entity, 0});
+        const auto lb = RefUV(*sketch, {con.b.entity, 1});
+        b = std::nullopt;
+        if (la && lb) {
+          const glm::vec2 d = *lb - *la;
+          const float len2 = glm::dot(d, d);
+          if (len2 > 1e-12f)
+            b = *la + d * (glm::dot(*a - *la, d) / len2);
+        }
+      }
       if (!a || !b)
         continue;
       if (glm::length(effOff) < 1e-4f)
@@ -1762,7 +2000,12 @@ void DrawDimensions(AppState& state) {
 
     // Value pill: rounded, highlighted under the cursor — the affordance for
     // dragging the label into place and double-click editing the value.
-    const ImVec2 tsz = ImGui::CalcTextSize(label);
+    // Expression-driven dims show the formula next to the value ("h/2 = 11")
+    // so a driving expression is visible at a glance.
+    std::string shown = label;
+    if (!con.valueExpr.empty())
+      shown = con.valueExpr + " = " + shown;
+    const ImVec2 tsz = ImGui::CalcTextSize(shown.c_str());
     ImVec2 tp(labelPos.x - tsz.x * 0.5f, labelPos.y - tsz.y * 0.5f);
     const ImVec2 pmin(tp.x - 5.0f, tp.y - 2.0f);
     const ImVec2 pmax(tp.x + tsz.x + 5.0f, tp.y + tsz.y + 2.0f);
@@ -1779,7 +2022,7 @@ void DrawDimensions(AppState& state) {
                       rounding);
     dl->AddRect(pmin, pmax, hot ? colHot : IM_COL32(96, 150, 200, 150),
                 rounding, 0, 1.2f);
-    dl->AddText(tp, hot ? IM_COL32(255, 240, 200, 255) : col, label);
+    dl->AddText(tp, hot ? IM_COL32(255, 240, 200, 255) : col, shown.c_str());
 
     // Drag places the label (writes the serialized labelOffset; one undo
     // record on release). The pre-drag json lives across frames.
@@ -1993,16 +2236,26 @@ float DistToSegment(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
 }
 } // namespace
 
-SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
-                            glm::vec2 mousePos, float tolPx) {
-  // Endpoints win first, so coincident/distance/drag are unaffected.
-  SketchPick pick = PickSketchPoint(state, sketch, mousePos, tolPx);
-  if (pick.hit)
-    return pick;
+std::vector<SketchPick> PickSketchCandidates(AppState& state,
+                                             const SketchFeature& sketch,
+                                             glm::vec2 mousePos, float tolPx) {
+  using Ranked = std::pair<float, SketchPick>;
+  std::vector<Ranked> points, bodies, axes;
 
-  // Otherwise fall back to the nearest entity body (line segment / circle rim).
-  SketchPick best;
-  float bestDist = tolPx;
+  // Endpoints, within a slightly LARGER tolerance than bodies so a point is
+  // never shadowed by the line it terminates.
+  const float pointTolPx = tolPx + 4.0f;
+  for (uint32_t i = 0; i < sketch.entities.size(); i++) {
+    const uint32_t id = sketch::EntityId(sketch.entities[i]);
+    for (auto& [which, uv] : EntityPoints(sketch.entities[i])) {
+      const float d =
+          glm::length(SketchUVToScreen(state, sketch.plane, uv) - mousePos);
+      if (d < pointTolPx)
+        points.push_back({d, SketchPick{true, false, {id, which}}});
+    }
+  }
+
+  // Entity bodies (line segment / circle rim / arc polyline).
   for (const auto& e : sketch.entities) {
     const uint32_t id = sketch::EntityId(e);
     float d = 1e30f;
@@ -2026,32 +2279,47 @@ SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
                             SketchUVToScreen(state, sketch.plane, uv[k]),
                             SketchUVToScreen(state, sketch.plane, uv[k + 1])));
     }
-    if (d < bestDist) {
-      bestDist = d;
-      best.hit = true;
-      best.body = true;
-      best.ref = {id, 0};
-    }
+    if (d < tolPx)
+      bodies.push_back({d, SketchPick{true, true, {id, 0}}});
   }
-  // Datum axes are pickable (e.g. as a mirror axis) but lower priority than real
-  // geometry, so only when nothing user-drawn was closer.
-  if (!best.hit) {
-    for (uint32_t axisId : {sketch::kAxisX, sketch::kAxisY}) {
-      const auto ep = sketch::DatumAxisEndpoints(axisId);
-      const glm::vec2 dir = ep.second - ep.first;
-      const glm::vec2 a = ep.first - dir * 100.0f, b = ep.first + dir * 100.0f;
-      const float d =
-          DistToSegment(mousePos, SketchUVToScreen(state, sketch.plane, a),
-                        SketchUVToScreen(state, sketch.plane, b));
-      if (d < bestDist) {
-        bestDist = d;
-        best.hit = true;
-        best.body = true;
-        best.ref = {axisId, 0};
-      }
-    }
+
+  // Datum axes are pickable (e.g. as a mirror axis) but rank below real
+  // geometry, so a click only takes one when nothing user-drawn is in range
+  // (or cycling walked past everything else).
+  for (uint32_t axisId : {sketch::kAxisX, sketch::kAxisY}) {
+    const auto ep = sketch::DatumAxisEndpoints(axisId);
+    const glm::vec2 dir = ep.second - ep.first;
+    const glm::vec2 a = ep.first - dir * 100.0f, b = ep.first + dir * 100.0f;
+    const float d =
+        DistToSegment(mousePos, SketchUVToScreen(state, sketch.plane, a),
+                      SketchUVToScreen(state, sketch.plane, b));
+    if (d < tolPx)
+      axes.push_back({d, SketchPick{true, true, {axisId, 0}}});
   }
-  return best;
+
+  const auto byDist = [](const Ranked& x, const Ranked& y) {
+    return x.first < y.first;
+  };
+  std::sort(points.begin(), points.end(), byDist);
+  std::sort(bodies.begin(), bodies.end(), byDist);
+  std::sort(axes.begin(), axes.end(), byDist);
+
+  std::vector<SketchPick> out;
+  out.reserve(points.size() + bodies.size() + axes.size());
+  for (const auto& [d, p] : points)
+    out.push_back(p);
+  for (const auto& [d, p] : bodies)
+    out.push_back(p);
+  for (const auto& [d, p] : axes)
+    out.push_back(p);
+  return out;
+}
+
+SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
+                            glm::vec2 mousePos, float tolPx) {
+  const std::vector<SketchPick> candidates =
+      PickSketchCandidates(state, sketch, mousePos, tolPx);
+  return candidates.empty() ? SketchPick{} : candidates.front();
 }
 
 namespace {
@@ -2073,6 +2341,14 @@ glm::vec2 SeedLabelOffset(const SketchFeature& sk,
     return {0.0f, -0.8f}; // dimension line below the pair
   case K::DistanceY:
     return {-0.8f, 0.0f}; // dimension line left of the pair
+  case K::DistancePL: {
+    // Along the measured line's direction so the dim line (point → foot,
+    // perpendicular to it) slides clear of both.
+    const auto a = RefUV(sk, {c.b.entity, 0}), b = RefUV(sk, {c.b.entity, 1});
+    if (!a || !b || glm::length(*b - *a) < 1e-6f)
+      return {0.0f, 0.8f};
+    return glm::normalize(*b - *a) * 0.8f;
+  }
   case K::Radius:
   case K::Diameter: {
     // Along the renderer's leader direction, clear of the rim.
@@ -2133,6 +2409,11 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     const auto* e = entityOf(r);
     return e && std::holds_alternative<sketch::Line>(*e);
   };
+  // The datum X/Y axes act as lines for the dimensional kinds (angle-to-axis,
+  // distance-to-axis) — the solver registers them as fixed lines.
+  auto isLineOrAxis = [&](const sketch::PointRef& r) {
+    return isLine(r) || r.entity == sketch::kAxisX || r.entity == sketch::kAxisY;
+  };
   auto isCircle = [&](const sketch::PointRef& r) {
     const auto* e = entityOf(r);
     return e && std::holds_alternative<sketch::Circle>(*e);
@@ -2176,10 +2457,32 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     c.a = {sel[0].entity, 0};
     break;
   case K::Angle:
-    if (sel.size() < 2 || !isLine(sel[0]) || !isLine(sel[1])) return false;
+    if (sel.size() < 2 || !isLineOrAxis(sel[0]) || !isLineOrAxis(sel[1]))
+      return false;
     c.a = {sel[0].entity, 0};
     c.b = {sel[1].entity, 0};
     break;
+  case K::DistancePL: {
+    // A point (or line endpoint) + a line: perpendicular distance. Two lines
+    // = the parallel-lines distance (an endpoint of the first onto the
+    // second); the first ref supplies the point, like PointOnLine.
+    if (sel.size() < 2) return false;
+    const sketch::PointRef* pt = nullptr;
+    const sketch::PointRef* line = nullptr;
+    if (isLineOrAxis(sel[1])) {
+      pt = &sel[0];
+      line = &sel[1];
+    } else if (isLineOrAxis(sel[0])) {
+      pt = &sel[1];
+      line = &sel[0];
+    } else {
+      return false;
+    }
+    if (pt->entity == line->entity) return false; // point is on its own line
+    c.a = *pt;
+    c.b = {line->entity, 0};
+    break;
+  }
   case K::Tangent: {
     // One line + one circle/arc, either order; normalize to a=line, b=curve.
     if (sel.size() < 2) return false;
