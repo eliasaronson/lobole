@@ -17,7 +17,9 @@ Camera::Camera()
     , m_panSensitivity(0.01f)
     , m_zoomSensitivity(0.1f)
     , m_minDistance(0.5f)
-    , m_maxDistance(100.0f) {
+    // Zoom-out clamp must exceed room scale — metre-scale parts fit at
+    // several thousand mm of distance.
+    , m_maxDistance(100000.0f) {
 
     // Establish the default iso view (camera at (5,5,5) looking at the origin):
     // sets m_distance and m_orientation from the look-at.
@@ -103,6 +105,18 @@ void Camera::UpdateViewMatrix() {
     // Derived position/up are always orthonormal to the forward axis, so lookAt
     // is never degenerate here.
     m_viewMatrix = glm::lookAt(GetPosition(), m_pivot, GetUp());
+
+    // Clip planes track the viewing distance: the old fixed 0.1..1000 range
+    // clipped metre-scale parts entirely (an imported 1 m speaker wall
+    // vanished at its own fit distance). Scaling near with distance keeps
+    // depth precision at both desk and room scale.
+    const float wantFar = std::max(2000.0f, m_distance * 50.0f);
+    const float wantNear = std::clamp(m_distance * 0.001f, 0.01f, 5.0f);
+    if (wantFar != m_farPlane || wantNear != m_nearPlane) {
+        m_farPlane = wantFar;
+        m_nearPlane = wantNear;
+        UpdateProjectionMatrix();
+    }
 }
 
 void Camera::UpdateProjectionMatrix() {
