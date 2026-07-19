@@ -1,6 +1,8 @@
 # SSAO + key-light soft shadows
 
-Status: DRAFT — awaiting sign-off.
+Status: S1 SHIPPED (5f4ac15, key-light PCF shadows) + S2 SHIPPED (03c5db6,
+SSAO). S3 remains: View-menu quality settings + bias/strength tuning via a
+dev-watch screenshot loop (all knobs single-site; see the commit messages).
 
 Scope: the two raster-polish items left open by the showcase arc
 ([plan.md](plan.md) items 3 and the soft-shadow half of 5). Per
