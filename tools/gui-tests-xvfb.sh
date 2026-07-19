@@ -16,6 +16,15 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT/build"
 
+# One GPU suite at a time, machine-wide: concurrent runs (parallel agents /
+# worktrees) contend for the GPU and flake. A solo run acquires the lock in
+# microseconds; a contended one waits its turn instead of corrupting both.
+LOCK=/tmp/designer-gui-gpu.lock
+if [ "${DESIGNER_GUI_LOCKED:-}" != "1" ]; then
+  export DESIGNER_GUI_LOCKED=1
+  exec flock "$LOCK" "$ROOT/tools/gui-tests-xvfb.sh" "$@"
+fi
+
 if command -v xvfb-run >/dev/null; then
   XVFB_RUN=xvfb-run
 else
