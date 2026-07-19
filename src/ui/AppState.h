@@ -526,6 +526,9 @@ struct AppState {
   // must not leak into picking.
   bool viewportDragLeft = false;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
+  // Key-light shadow map (S1) — View > Shadows; session state only (no file
+  // format / golden impact).
+  bool showShadows = true;
   // Section view (I3): a world-space clip plane {xyz=normal, w=dist};
   // fragments past it are discarded. Zero = disabled.
   glm::vec4 sectionPlane = glm::vec4(0.0f);

@@ -15,6 +15,8 @@ layout(location = 8) in Light fragRimLight;
 layout(location = 10) in vec3 fragAmbientColor;
 layout(location = 11) in float fragHighlight;
 layout(location = 12) in float fragClipDist;
+layout(location = 13) in vec4 fragShadowCoord;
+layout(location = 14) in vec4 fragShadowParams;
 
 layout(location = 0) out vec4 outColor;
 
@@ -29,6 +31,9 @@ layout(push_constant) uniform PushConstants {
 layout(set = 0, binding = 1) uniform sampler2D uIrradiance;  // diffuse env
 layout(set = 0, binding = 2) uniform sampler2D uPrefilter;   // specular mips
 layout(set = 0, binding = 3) uniform sampler2D uBrdfLut;     // env BRDF (RG)
+// Key-light shadow map (ShadowRenderer, S1): compare sampler with a white
+// border, so anything outside the light frustum reads unshadowed.
+layout(set = 0, binding = 4) uniform sampler2DShadow uShadowMap;
 
 const float PI = 3.14159265359;
 // Must match IBL.cpp DirToEquirectUV exactly.
@@ -48,6 +53,24 @@ vec3 ACESFilm(vec3 x) {
     const float d = 0.59;
     const float e = 0.14;
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// Shadow factor for the primary light: 1 = fully lit, 1 - strength = fully
+// shadowed. 3x3 PCF on top of the sampler's hardware 2x2 compare gives the
+// soft penumbra; the normal-offset bias is applied in the vertex stage.
+float primaryShadow() {
+    if (fragShadowParams.w < 0.5) return 1.0;
+    vec3 sc = fragShadowCoord.xyz; // ortho projection: w == 1
+    if (sc.z <= 0.0 || sc.z >= 1.0) return 1.0; // outside the light's depth range
+    vec2 uv = sc.xy * 0.5 + 0.5;
+    float texel = fragShadowParams.z;
+    float lit = 0.0;
+    for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+            lit += texture(uShadowMap, vec3(uv + vec2(x, y) * texel, sc.z));
+        }
+    }
+    return 1.0 - fragShadowParams.x * (1.0 - lit / 9.0);
 }
 
 // Enhanced PBR lighting calculation
@@ -124,8 +147,11 @@ void main() {
     vec3 rimLighting = calculateLight(fragRimLight, normal, viewDir, albedo, metallic, roughness, specularScale, reflectance);
 
     // Combine IBL ambient + direct lights (direct scaled down to avoid
-    // double-lighting now that IBL carries the environment).
-    vec3 finalColor = ambient + 0.5 * (primaryLighting + fillLighting + rimLighting);
+    // double-lighting now that IBL carries the environment). Only the primary
+    // (key) light is shadowed; fill/rim/IBL are the soft fill that keeps
+    // shadows from going black.
+    vec3 finalColor = ambient + 0.5 * (primaryShadow() * primaryLighting +
+                                       fillLighting + rimLighting);
     
     // ACES filmic tone mapping, then gamma to sRGB.
     finalColor = ACESFilm(finalColor);

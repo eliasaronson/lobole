@@ -328,6 +328,7 @@ set(app_sources
     src/IBLTextures.cpp
     src/MeshRenderer.cpp
     src/OutlineRenderer.cpp
+    src/ShadowRenderer.cpp
     src/RayTracingRenderer.cpp
     src/SketchRenderer.cpp
     src/FieldRenderer.cpp
@@ -576,6 +577,16 @@ set(SKETCH_PRIM_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/sketch_prim.
 set(SKETCH_PRIM_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/sketch_prim_frag.spv")
 compile_shader(sketch_prim_frag_shader ${SKETCH_PRIM_FRAG_SHADER_SOURCE} ${SKETCH_PRIM_FRAG_SHADER_OUTPUT})
 
+# Key-light shadow map shaders (depth-only pass; S1). Outputs are
+# shadow_vert/shadow_frag — distinct from shadow.spv (the RT miss shader).
+set(SHADOWMAP_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/shadow.vert")
+set(SHADOWMAP_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/shadow_vert.spv")
+compile_shader(shadowmap_vert_shader ${SHADOWMAP_VERT_SHADER_SOURCE} ${SHADOWMAP_VERT_SHADER_OUTPUT})
+
+set(SHADOWMAP_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/shadow.frag")
+set(SHADOWMAP_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/shadow_frag.spv")
+compile_shader(shadowmap_frag_shader ${SHADOWMAP_FRAG_SHADER_SOURCE} ${SHADOWMAP_FRAG_SHADER_OUTPUT})
+
 # FEM result field shaders (deform warp + Turbo colormap)
 set(FIELD_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/field.vert")
 set(FIELD_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/field_vert.spv")
@@ -586,7 +597,7 @@ set(FIELD_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/field_frag.spv")
 compile_shader(field_frag_shader ${FIELD_FRAG_SHADER_SOURCE} ${FIELD_FRAG_SHADER_OUTPUT})
 
 # Create a target for all shaders
-add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader field_vert_shader field_frag_shader)
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader shadowmap_vert_shader shadowmap_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader field_vert_shader field_frag_shader)
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)

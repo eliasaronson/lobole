@@ -39,6 +39,19 @@ struct UniformBufferObject {
     Light rimLight;        // Rim light (side lighting)
     glm::vec4 ambientColor; // rgb = ambient color, a = intensity
     glm::vec4 clipPlane;   // section clip (world): xyz = normal, w = dist; 0 = off
+    glm::mat4 lightViewProj; // world -> key-light clip space (ShadowRenderer)
+    // Key-light shadow params (S1): x = strength, y = normal-offset world
+    // distance, z = shadow-map texel size (UV), w = enable (0/1).
+    glm::vec4 shadowParams;
+};
+
+// One opaque instance's draw data for the shadow pass (ShadowRenderer): the
+// exact set the main pass's opaque loop draws, ghosts excluded.
+struct ShadowCaster {
+    VkBuffer vertexBuffer;
+    VkBuffer indexBuffer;
+    uint32_t indexCount;
+    glm::mat4 transform;
 };
 
 // One tessellation, uploaded once and shared by any number of instances.
@@ -51,6 +64,11 @@ public:
     VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
+
+    // Local-space bounds, cached at (re)upload so the per-frame shadow
+    // frustum fit only transforms 8 corners per instance.
+    glm::vec3 bboxMin = glm::vec3(0.0f);
+    glm::vec3 bboxMax = glm::vec3(0.0f);
 
     uint32_t refCount = 0;  // live instances referencing this asset
 };
@@ -156,6 +174,31 @@ public:
         m_iblLutSampler = lutSampler;
     }
 
+    // Key-light shadow map (S1, ShadowRenderer). Like SetIBL, must be set
+    // BEFORE Initialize() — the descriptor sets bind it at creation.
+    void SetShadowMap(VkImageView shadowMap, VkSampler shadowSampler) {
+        m_shadowMapView = shadowMap;
+        m_shadowSampler = shadowSampler;
+    }
+    // View > Shadows toggle; off zeroes shadowParams.w so the shader skips
+    // the lookup (the map itself may then hold stale contents — harmless).
+    void SetShadowsEnabled(bool enabled) { m_shadowsEnabled = enabled; }
+    // Per-frame light fit from ShadowRenderer::RecordShadowPass: the world ->
+    // light-clip matrix plus the map's texel size in world units (drives the
+    // normal-offset bias) and in UV (drives the PCF kernel step).
+    void SetShadowState(const glm::mat4& lightViewProj, float texelWorldSize,
+                        float texelUVSize) {
+        m_lightViewProj = lightViewProj;
+        m_shadowTexelWorld = texelWorldSize;
+        m_shadowTexelUV = texelUVSize;
+    }
+
+    // Shadow-pass draw list: every visible, non-ghost instance (ghosts don't
+    // write depth in the main pass and must not cast), plus the combined
+    // world-space bbox for the light frustum fit. Returns false when empty.
+    bool GetShadowCasters(std::vector<ShadowCaster>& out, glm::vec3& bbMin,
+                          glm::vec3& bbMax);
+
 private:
     glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
     VkDevice m_device = VK_NULL_HANDLE;
@@ -194,6 +237,14 @@ private:
     VkImageView m_iblBrdf = VK_NULL_HANDLE;
     VkSampler m_iblEnvSampler = VK_NULL_HANDLE;
     VkSampler m_iblLutSampler = VK_NULL_HANDLE;
+
+    // Key-light shadow map (owned by ShadowRenderer; bound like the IBL maps).
+    VkImageView m_shadowMapView = VK_NULL_HANDLE;
+    VkSampler m_shadowSampler = VK_NULL_HANDLE;
+    bool m_shadowsEnabled = true;
+    glm::mat4 m_lightViewProj = glm::mat4(1.0f);
+    float m_shadowTexelWorld = 0.0f;
+    float m_shadowTexelUV = 0.0f;
 
     // Camera
     glm::mat4 m_viewMatrix = glm::mat4(1.0f);

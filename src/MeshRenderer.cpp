@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <unistd.h>
 #include <limits.h>
 
@@ -268,6 +269,15 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     // the shared UBO rather than per-draw push constants.
     ubo.clipPlane = m_clipPlane;
 
+    // Key-light shadow map (S1): per-frame light fit from the ShadowRenderer
+    // (via SetShadowState). Strength 0.75 and a ~1.5-texel normal-offset bias
+    // are the screenshot-tuned defaults; only the primary light is attenuated
+    // in the shader — fill/rim/IBL stay unshadowed (they are the soft fill).
+    ubo.lightViewProj = m_lightViewProj;
+    ubo.shadowParams =
+        glm::vec4(0.75f, 1.5f * m_shadowTexelWorld, m_shadowTexelUV,
+                  m_shadowsEnabled ? 1.0f : 0.0f);
+
     // Set viewport to the central region (excludes the side panels)
     VkViewport viewport{};
     viewport.x = static_cast<float>(m_viewportX);
@@ -380,16 +390,44 @@ void MeshRenderer::SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t he
     m_viewportHeight = height;
 }
 
+bool MeshRenderer::GetShadowCasters(std::vector<ShadowCaster>& out,
+                                    glm::vec3& bbMin, glm::vec3& bbMax) {
+    out.clear();
+    bbMin = glm::vec3(std::numeric_limits<float>::max());
+    bbMax = -bbMin;
+    for (const auto& instance : m_instances) {
+        // Exactly the main pass's opaque set: visible, non-ghost.
+        if (!instance || !instance->visible || instance->ghost) continue;
+        MeshAsset* asset = GetAsset(instance->assetId);
+        if (!asset || asset->vertices.empty()) continue;
+
+        out.push_back({asset->vertexBuffer, asset->indexBuffer,
+                       static_cast<uint32_t>(asset->indices.size()),
+                       instance->transform});
+        for (int c = 0; c < 8; c++) {
+            const glm::vec3 corner((c & 1) ? asset->bboxMax.x : asset->bboxMin.x,
+                                   (c & 2) ? asset->bboxMax.y : asset->bboxMin.y,
+                                   (c & 4) ? asset->bboxMax.z : asset->bboxMin.z);
+            const glm::vec3 wp =
+                glm::vec3(instance->transform * glm::vec4(corner, 1.0f));
+            bbMin = glm::min(bbMin, wp);
+            bbMax = glm::max(bbMax, wp);
+        }
+    }
+    return !out.empty();
+}
+
 // Private helper functions
 bool MeshRenderer::CreateDescriptorSetLayout() {
     // 0: camera+lights UBO (vertex). 1-3: IBL maps (fragment) — irradiance,
-    // prefiltered specular, BRDF LUT.
-    VkDescriptorSetLayoutBinding bindings[4]{};
+    // prefiltered specular, BRDF LUT. 4: key-light shadow map (fragment,
+    // compare sampler).
+    VkDescriptorSetLayoutBinding bindings[5]{};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount = 1;
     bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    for (int i = 1; i <= 3; i++) {
+    for (int i = 1; i <= 4; i++) {
         bindings[i].binding = static_cast<uint32_t>(i);
         bindings[i].descriptorType =
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -399,7 +437,7 @@ bool MeshRenderer::CreateDescriptorSetLayout() {
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 4;
+    layoutInfo.bindingCount = 5;
     layoutInfo.pBindings = bindings;
 
     if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
@@ -615,9 +653,9 @@ bool MeshRenderer::CreateDescriptorPool() {
     VkDescriptorPoolSize poolSizes[2]{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-    // 3 IBL samplers per frame.
+    // 3 IBL samplers + 1 shadow map per frame.
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 3;
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 4;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -653,15 +691,19 @@ bool MeshRenderer::CreateDescriptorSets() {
         bufferInfo.offset = 0;
         bufferInfo.range = sizeof(UniformBufferObject);
 
-        // IBL image infos (bindings 1-3). Handles come from SetIBL().
+        // IBL image infos (bindings 1-3, from SetIBL) + shadow map (binding
+        // 4, from SetShadowMap; layout matches the shadow pass's final
+        // SHADER_READ_ONLY layout).
         VkDescriptorImageInfo irr{m_iblEnvSampler, m_iblIrradiance,
                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo pref{m_iblEnvSampler, m_iblPrefilter,
                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo brdf{m_iblLutSampler, m_iblBrdf,
                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo shadow{m_shadowSampler, m_shadowMapView,
+                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-        VkWriteDescriptorSet writes[4]{};
+        VkWriteDescriptorSet writes[5]{};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = m_descriptorSets[i];
         writes[0].dstBinding = 0;
@@ -669,8 +711,8 @@ bool MeshRenderer::CreateDescriptorSets() {
         writes[0].descriptorCount = 1;
         writes[0].pBufferInfo = &bufferInfo;
 
-        const VkDescriptorImageInfo* imgs[3] = {&irr, &pref, &brdf};
-        for (int b = 1; b <= 3; b++) {
+        const VkDescriptorImageInfo* imgs[4] = {&irr, &pref, &brdf, &shadow};
+        for (int b = 1; b <= 4; b++) {
             writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[b].dstSet = m_descriptorSets[i];
             writes[b].dstBinding = static_cast<uint32_t>(b);
@@ -680,7 +722,7 @@ bool MeshRenderer::CreateDescriptorSets() {
             writes[b].pImageInfo = imgs[b - 1];
         }
 
-        vkUpdateDescriptorSets(m_device, 4, writes, 0, nullptr);
+        vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
     }
 
     return true;
@@ -796,6 +838,13 @@ void MeshRenderer::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSi
 
 bool MeshRenderer::CreateAssetBuffers(MeshAsset* asset) {
     if (!asset || asset->vertices.empty()) return false;
+
+    // Local-space bounds for the shadow frustum fit (see GetShadowCasters).
+    asset->bboxMin = asset->bboxMax = asset->vertices[0].position;
+    for (const Vertex3D& v : asset->vertices) {
+        asset->bboxMin = glm::min(asset->bboxMin, v.position);
+        asset->bboxMax = glm::max(asset->bboxMax, v.position);
+    }
 
     VkDeviceSize vertexBufferSize = sizeof(asset->vertices[0]) * asset->vertices.size();
     VkDeviceSize indexBufferSize = sizeof(asset->indices[0]) * asset->indices.size();

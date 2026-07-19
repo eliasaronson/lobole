@@ -754,6 +754,28 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!ui::EffectivePlaneVisibility(*s_App)); // has a body → hidden
   };
 
+  // S1 shadows: toggling the map off/on and sectioning while it renders is
+  // exactly where barrier/layout bugs crash the device — assert we survive
+  // several frames of each with a body in the scene.
+  t = IM_REGISTER_TEST(engine, "view", "shadow_toggle_survives_section");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    s_App->showShadows = false;
+    ctx->Yield(3);
+    s_App->showShadows = true;
+    ctx->Yield(3);
+    s_App->sectionPlane = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f); // cut on XY
+    ctx->Yield(5);
+    s_App->sectionPlane = glm::vec4(0.0f);
+    ctx->Yield(3);
+    IM_CHECK(s_App->showShadows);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // app + body survived
+  };
+
   t = IM_REGISTER_TEST(engine, "constraints", "coincident_merges_points");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

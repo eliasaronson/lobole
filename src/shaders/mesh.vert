@@ -17,6 +17,12 @@ layout(binding = 0) uniform UniformBufferObject {
     // the frame, so it lives here rather than in per-draw push constants.
     // Disabled when xyz == 0 (fragClipDist is then 0 and nothing is clipped).
     vec4 clipPlane;
+    // Key-light shadow map (S1): world -> light clip space, and params
+    // x = strength, y = normal-offset world distance, z = texel size (UV),
+    // w = enable. Forwarded to the fragment stage as varyings (this UBO is
+    // bound to the vertex stage only).
+    mat4 lightViewProj;
+    vec4 shadowParams;
 } ubo;
 
 layout(push_constant) uniform PushConstants {
@@ -42,6 +48,8 @@ layout(location = 8) out Light fragRimLight;
 layout(location = 10) out vec3 fragAmbientColor;
 layout(location = 11) out float fragHighlight;
 layout(location = 12) out float fragClipDist;
+layout(location = 13) out vec4 fragShadowCoord;
+layout(location = 14) out vec4 fragShadowParams;
 
 void main() {
     // Transform position to world space
@@ -64,6 +72,12 @@ void main() {
     // Signed distance past the section plane (linear in world pos, so the
     // interpolated value is exact); frag discards where it is > 0.
     fragClipDist = dot(ubo.clipPlane.xyz, worldPos.xyz) - ubo.clipPlane.w;
+
+    // Key-light shadow lookup position, offset along the normal to fight
+    // acne (normal-offset bias, ~1.5 shadow texels in world units).
+    fragShadowCoord = ubo.lightViewProj *
+                      vec4(worldPos.xyz + fragNormal * ubo.shadowParams.y, 1.0);
+    fragShadowParams = ubo.shadowParams;
 
     // Albedo from the per-instance push constant, plus camera position
     fragColor = pc.baseColor.rgb;

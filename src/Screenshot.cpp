@@ -32,7 +32,8 @@ bool CaptureScreenshot(
     uint32_t width, uint32_t height, const VkClearValue& clearValue,
     const std::function<void(VkCommandBuffer)>& recordScene,
     const std::string& outputPath, std::string* error,
-    VkSampleCountFlagBits samples) {
+    VkSampleCountFlagBits samples,
+    const std::function<void(VkCommandBuffer)>& recordPrepass) {
   auto fail = [&](const char* what) {
     if (error) *error = what;
     LOG_ERROR("Screenshot failed: {}", what);
@@ -196,6 +197,9 @@ bool CaptureScreenshot(
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(cb, &begin);
+
+  // Scene prepasses (shadow map) go before the render pass, as on-screen.
+  if (recordPrepass) recordPrepass(cb);
 
   VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
   rp.renderPass = renderPass;

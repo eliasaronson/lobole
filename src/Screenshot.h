@@ -13,10 +13,14 @@
 // `samples` must match the render pass; when >1 the offscreen target is
 // multisampled and resolved into the readback image, matching the on-screen
 // MSAA pass so screenshots look like the viewport.
+// `recordPrepass` (optional) records scene prepasses — e.g. the shadow map —
+// into the same command buffer BEFORE the render pass begins, mirroring
+// FrameRender's pass order so screenshots show identical shadows.
 bool CaptureScreenshot(
     VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue,
     VkCommandPool commandPool, VkRenderPass renderPass, VkFormat format,
     uint32_t width, uint32_t height, const VkClearValue& clearValue,
     const std::function<void(VkCommandBuffer)>& recordScene,
     const std::string& outputPath, std::string* error = nullptr,
-    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
+    VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
+    const std::function<void(VkCommandBuffer)>& recordPrepass = {});

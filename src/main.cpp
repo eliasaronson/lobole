@@ -16,6 +16,7 @@
 #include "OutlineRenderer.h"
 #include "RayTracingRenderer.h"
 #include "Scene.h"
+#include "ShadowRenderer.h"
 #include "SketchRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
@@ -94,6 +95,7 @@ static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<SketchRenderer> g_SketchRenderer;
 static std::unique_ptr<FieldRenderer> g_FieldRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
+static std::unique_ptr<ShadowRenderer> g_ShadowRenderer;
 static std::unique_ptr<FaceSelector> g_FaceSelector;
 static std::unique_ptr<IBLTextures> g_IBLTextures;
 
@@ -658,6 +660,24 @@ static void CleanupVulkanWindow() {
   g_DepthRenderPass = VK_NULL_HANDLE;
 }
 
+// Scene prepasses recorded before the main render pass begins (S1 key-light
+// shadow map for now; SSAO's prepasses join here). Shared by FrameRender and
+// CaptureScreenshot so remote screenshots show identical shadows. The shadow
+// pass's own subpass dependencies order depth-write vs. fragment-sample, so
+// no explicit barrier is needed here.
+static void RecordScenePrepasses(VkCommandBuffer cb) {
+  if (!g_ShadowRenderer || !g_MeshRenderer)
+    return;
+  g_MeshRenderer->SetShadowsEnabled(g_App.showShadows);
+  if (!g_App.showShadows)
+    return; // shader won't sample the (stale) map; layout stays read-only
+  g_ShadowRenderer->SetClipPlane(g_App.sectionPlane);
+  g_ShadowRenderer->RecordShadowPass(cb, *g_MeshRenderer);
+  g_MeshRenderer->SetShadowState(g_ShadowRenderer->LightViewProj(),
+                                 g_ShadowRenderer->TexelWorldSize(),
+                                 g_ShadowRenderer->TexelUVSize());
+}
+
 static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
   VkSemaphore image_acquired_semaphore =
       wd->FrameSemaphores[wd->SemaphoreIndex].ImageAcquiredSemaphore;
@@ -689,6 +709,9 @@ static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
     err = vkBeginCommandBuffer(fd->CommandBuffer, &info);
     check_vk_result(err);
   }
+
+  RecordScenePrepasses(fd->CommandBuffer);
+
   {
     VkRenderPassBeginInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1034,6 +1057,16 @@ int main(int argc, char **argv) {
     }
   }
 
+  // Key-light shadow map (S1): initialized before the mesh renderer, whose
+  // descriptor sets bind the shadow map at creation (like the IBL maps).
+  g_ShadowRenderer = std::make_unique<ShadowRenderer>();
+  if (!g_ShadowRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
+                                    g_QueueFamily, g_CommandPool)) {
+    LOG_ERROR("ShadowRenderer initialization failed");
+  } else {
+    LOG_INFO("ShadowRenderer initialized successfully");
+  }
+
   // Initialize MeshRenderer with Vulkan context
   g_MeshRenderer = std::make_unique<MeshRenderer>();
   g_MeshRenderer->SetIBL(g_IBLTextures->IrradianceView(),
@@ -1041,6 +1074,8 @@ int main(int argc, char **argv) {
                          g_IBLTextures->BrdfLutView(),
                          g_IBLTextures->EnvSampler(),
                          g_IBLTextures->LutSampler());
+  g_MeshRenderer->SetShadowMap(g_ShadowRenderer->ShadowMapView(),
+                               g_ShadowRenderer->ShadowSampler());
   bool meshRendererInitialized =
       g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
                                  g_Queue, g_QueueFamily, g_CommandPool,
@@ -1362,7 +1397,8 @@ int main(int argc, char **argv) {
                 g_SketchRenderer->Render(cb, wd->FrameIndex);
               ImGui_ImplVulkan_RenderDrawData(draw_data, cb);
             },
-            shotPath, &shotError, g_MSAASamples);
+            shotPath, &shotError, g_MSAASamples,
+            [](VkCommandBuffer cb) { RecordScenePrepasses(cb); });
         remoteServer.ScreenshotDone(ok, shotError);
       }
     }
@@ -1403,6 +1439,7 @@ int main(int argc, char **argv) {
   g_FieldRenderer.reset();
   g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
+  g_ShadowRenderer.reset();
   g_FaceSelector.reset();
   if (g_IBLTextures) {
     g_IBLTextures->Shutdown(g_Device);
