@@ -797,6 +797,32 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(Doc()->GetBodies().size() >= (size_t)1);
   };
 
+  // A linear pattern's default spacing must clear the source body — copies
+  // of a wide body used to overlap-fuse into one blob ("pattern did
+  // nothing"). 3 separated copies = 3x the volume and a wider bbox.
+  t = IM_REGISTER_TEST(engine, "pattern", "linear_default_spacing_separates");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(std::make_unique<BoxFeature>("Wide", glm::vec3(0), 10.0,
+                                                   4.0, 4.0));
+    ctx->Yield();
+    const double v0 = Doc()->GetBodies()[0].shape.Volume();
+
+    ctx->MenuClick("Create/Pattern");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    // Three clear copies: total volume 3x the source (fused copies would be
+    // barely more than 1x), spread over ~2*spacing + width along X.
+    double total = 0.0;
+    for (const Body& b : Doc()->GetBodies())
+      total += b.shape.Volume();
+    IM_CHECK(std::abs(total - 3.0 * v0) < 1e-3);
+  };
+
   t = IM_REGISTER_TEST(engine, "view", "planes_autohide_with_geometry");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

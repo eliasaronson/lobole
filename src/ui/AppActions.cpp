@@ -417,7 +417,18 @@ void CreatePattern(AppState& state) {
                                               producers.back().first);
   pat->axis.kind = AxisRef::Kind::X;
   pat->count = 3;
-  pat->spacing = 3.0; // scene scale
+  // Default spacing clears the source body along the axis — a fixed constant
+  // made copies of anything wider than it overlap and fuse into one blob,
+  // which read as "the pattern did nothing".
+  pat->spacing = 3.0;
+  for (const Body& b : state.document->GetBodies()) {
+    if (b.createdBy != pat->sourceId)
+      continue;
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    pat->spacing = std::max(3.0, (bmax.x - bmin.x) * 1.5);
+    break;
+  }
   BeginPreviewFeature(state, std::move(pat));
 }
 
