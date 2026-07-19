@@ -883,9 +883,67 @@ void StartDimensionPlacement(AppState& state, bool pair,
   edit.dimPlaceA = a;
   edit.dimPlaceB = b;
   edit.dimPlaceValue = value;
+  edit.dimPlaceFromLine = 0; // the single-line entry points set it after
   // An open inline editor would commit with the ghost transiently in the
   // constraint list (see DrawDimensions) — close it first.
   edit.editingDim = -1;
+}
+
+// A placement click that lands ON another target while placing a single
+// line's LENGTH refines the dimension instead of placing it (B): a parallel
+// line or a point → DistancePL placement; a non-parallel line → angle
+// (immediate, as ever). Returns false when the click should place instead
+// (the measured line itself; circle/arc combos are out of scope).
+bool RefineLinePlacement(AppState& state, const SketchFeature& sketch,
+                         const SketchPick& pick) {
+  SketchEditState& edit = state.sketchEdit;
+  using K = sketch::ConstraintKind;
+  const uint32_t lineId = edit.dimPlaceFromLine;
+  if (pick.ref.entity == lineId)
+    return false; // clicking the measured line again just places
+  const size_t idx = sketch.IndexOfEntity(pick.ref.entity);
+  const sketch::Entity* e = idx == SIZE_MAX ? nullptr : &sketch.entities[idx];
+  const bool isAxis = sketch::IsDatum(pick.ref.entity);
+  const bool otherLine =
+      pick.body &&
+      (isAxis || (e != nullptr && std::holds_alternative<sketch::Line>(*e)));
+
+  if (otherLine) {
+    const auto da = LineDirOf(sketch, lineId);
+    const auto db = LineDirOf(sketch, pick.ref.entity);
+    if (!da || !db)
+      return false;
+    const glm::vec2 u = glm::normalize(*da), v = glm::normalize(*db);
+    const float cross = u.x * v.y - u.y * v.x;
+    // Keep the accumulation in sync so an Esc drops back to the two targets.
+    edit.selected = {{lineId, 0}, {pick.ref.entity, 0}};
+    edit.dimPickBody = {true, true};
+    if (std::abs(cross) < 0.01f) {
+      const auto p = TargetUV(sketch, {lineId, 0});
+      const double dist =
+          p ? PointToLineDistance(sketch, *p, pick.ref.entity) : 0.0;
+      StartDimensionPlacement(state, /*pair=*/false, K::DistancePL,
+                              {lineId, 0}, {pick.ref.entity, 0}, dist);
+    } else {
+      edit.dimPlacing = false; // angle commits immediately (as ever)
+      const double ang = std::atan2(std::abs(cross), glm::dot(u, v));
+      sketch::PointRef refA{lineId, 0}, refB{pick.ref.entity, 0};
+      if (cross < 0.0f)
+        std::swap(refA, refB);
+      CommitInferredDimension(state, K::Angle, ang, {refA, refB});
+    }
+    return true;
+  }
+  if (!pick.body) { // a point target → perpendicular point-line distance
+    const auto p = TargetUV(sketch, pick.ref);
+    const double dist = p ? PointToLineDistance(sketch, *p, lineId) : 0.0;
+    edit.selected = {pick.ref, {lineId, 0}};
+    edit.dimPickBody = {false, true};
+    StartDimensionPlacement(state, /*pair=*/false, K::DistancePL, pick.ref,
+                            {lineId, 0}, dist);
+    return true;
+  }
+  return false; // circle/arc body: combos out of scope (deferred)
 }
 
 // The placement click: derive kind/order/value/label from the cursor and
@@ -1003,8 +1061,11 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
   const auto startLengthPlacement = [&](uint32_t id) {
     // A line's length is an endpoint pair — full kind-switching placement
     // (a sloped line can be dimensioned by its horizontal/vertical extent).
+    // Marked as single-line so a placement click on another target REFINES
+    // the kind instead of placing (B).
     StartDimensionPlacement(state, /*pair=*/true, K::Distance, {id, 0},
                             {id, 1}, 0.0);
+    edit.dimPlaceFromLine = id;
   };
 
   if (!pick.hit) {
@@ -1053,8 +1114,14 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
   edit.selected.push_back(lineTarget ? sketch::PointRef{pick.ref.entity, 0}
                                      : pick.ref);
   edit.dimPickBody.push_back(lineTarget);
-  if (edit.selected.size() < 2)
+  if (edit.selected.size() < 2) {
+    // A single LINE goes straight to length placement (B): the ghost is up
+    // immediately; a click on another line/point refines instead of placing.
+    // (Axes have no length — they wait for a second target.)
+    if (lineTarget && !isAxis)
+      startLengthPlacement(pick.ref.entity);
     return;
+  }
   ResolveAccumulatedTargets(state, sketch);
 }
 
@@ -1193,6 +1260,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.tool = SketchTool::Select;
       edit.mirrorAxisPhase = false;
       edit.actionMsg.clear();
+    } else if (edit.selectedConstraint >= 0) {
+      edit.selectedConstraint = -1; // deselect the constraint first
     } else if (!edit.selected.empty()) {
       edit.selected.clear();
     } else {
@@ -1246,6 +1315,21 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   }
   edit.hoverPoint = uv;
 
+  // A click-selected constraint (dimension pill / glyph) takes Delete
+  // priority over entities — selection is mutually exclusive, so this is
+  // unambiguous. Handled BEFORE the pill-hover gate below (the cursor is
+  // usually still on the pill that was just clicked). Guarded against text
+  // fields (Backspace edits text, not the sketch).
+  if ((ImGui::IsKeyPressed(ImGuiKey_Delete) ||
+       ImGui::IsKeyPressed(ImGuiKey_Backspace)) &&
+      !ImGui::GetIO().WantTextInput && edit.selectedConstraint >= 0) {
+    const size_t ci = static_cast<size_t>(edit.selectedConstraint);
+    edit.selectedConstraint = -1;
+    edit.editingDim = -1; // indices shift; don't leave the editor dangling
+    DeleteConstraint(state, ci); // replaces the sketch feature
+    return true;
+  }
+
   // A dimension pill under the cursor (or mid-drag) owns the mouse —
   // DrawDimensions runs the drag/inline-edit; don't also draw/select under it.
   if (edit.dimHot >= 0 || edit.dimDrag >= 0)
@@ -1260,8 +1344,20 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     edit.hoveredBody = hover.body;
     edit.hoveredRef = hover.ref;
 
+    // A constraint glyph under the cursor owns clicks within its rect (it
+    // may overlap an entity — the glyph wins there).
+    if (edit.glyphHot >= 0) {
+      edit.hasHover = false;
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        edit.selectedConstraint = edit.glyphHot;
+        edit.selected.clear(); // constraint vs entity Delete stays unambiguous
+      }
+      return true;
+    }
+
     // Delete removes the selected entities (and cleans up their constraints).
-    if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !edit.selected.empty()) {
+    if (ImGui::IsKeyPressed(ImGuiKey_Delete) &&
+        !ImGui::GetIO().WantTextInput && !edit.selected.empty()) {
       nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
       size_t dropped = 0;
       std::vector<uint32_t> ids;
@@ -1305,6 +1401,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         const SketchPick pick = candidates[static_cast<size_t>(edit.pickCycle)];
         if (!ImGui::GetIO().KeyCtrl)
           edit.selected.clear();
+        edit.selectedConstraint = -1; // entity selection replaces it
         edit.selected.push_back(pick.ref);
         BeginDragSession(state, *sketch, index, pick, uv);
       } else {
@@ -1320,8 +1417,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     if (edit.boxActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
       const bool add = ImGui::GetIO().KeyCtrl;
       if (glm::length(edit.boxEnd - edit.boxStart) < 4.0f) {
-        if (!add)
+        if (!add) {
           edit.selected.clear(); // tiny box == a plain empty click
+          edit.selectedConstraint = -1;
+        }
       } else {
         const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
         auto project = [&](glm::vec2 p) {
@@ -1500,9 +1599,18 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   if (edit.tool == SketchTool::Dimension) {
     if (edit.dimPlacing) {
       // Placement stage: the ghost (DrawDimensions) follows the cursor; a
-      // click commits the kind + label position. No entity hover — the
-      // click places, it doesn't pick.
+      // click commits the kind + label position. Single-line length
+      // placement first offers the click to refinement (B): landing on
+      // another line/point switches the dimension kind instead of placing.
       if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (edit.dimPlaceFromLine != 0) {
+          const SketchPick pick =
+              PickSketchEntity(state, *sketch,
+                               glm::vec2(mousePos.x, mousePos.y),
+                               kSketchBodyTolPx);
+          if (pick.hit && RefineLinePlacement(state, *sketch, pick))
+            return true;
+        }
         // May replace the sketch feature — the local pointer dies here.
         CommitPlacedDimension(state, *sketch, uv);
       }
@@ -1915,10 +2023,12 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
   case T::Dimension:
     if (edit.dimPlacing)
       set("Dimension", 3, 3,
-          edit.dimPlacePair
-              ? "place the dimension — position picks horizontal/vertical/"
-                "aligned"
-              : "click to place the label");
+          !edit.dimPlacePair ? "click to place the label"
+          : edit.dimPlaceFromLine != 0
+              ? "place the dimension (position picks horizontal/vertical/"
+                "aligned), or pick a second target"
+              : "place the dimension — position picks horizontal/vertical/"
+                "aligned");
     else
       set("Dimension", edit.selected.empty() ? 1 : 2, 3,
           edit.selected.empty()
@@ -2081,6 +2191,8 @@ void DrawDimensions(AppState& state) {
   };
 
   edit.dimHot = -1; // refreshed below; the canvas reads it next frame
+  if (edit.selectedConstraint >= (int)sketch->constraints.size())
+    edit.selectedConstraint = -1; // the list changed under it (undo etc.)
 
   // Placement ghost (Phase 3.7): while the Dimension tool is placing, a
   // transient constraint rides the list for THIS draw only — rendered like
@@ -2343,14 +2455,19 @@ void DrawDimensions(AppState& state) {
     if (interactive && (overLabel || dragging))
       edit.dimHot = i;
     const bool hot = interactive && (overLabel || dragging);
+    // Selected pill: accent fill + a heavier ring, distinct from hover.
+    const bool selCon = edit.selectedConstraint == i;
     const float rounding = (pmax.y - pmin.y) * 0.5f;
     dl->AddRectFilled(pmin, pmax,
-                      hot ? IM_COL32(45, 62, 82, 245)
-                          : IM_COL32(20, 24, 30, 220),
+                      selCon ? IM_COL32(84, 66, 26, 250)
+                      : hot  ? IM_COL32(45, 62, 82, 245)
+                             : IM_COL32(20, 24, 30, 220),
                       rounding);
-    dl->AddRect(pmin, pmax, hot ? colHot : IM_COL32(96, 150, 200, 150),
-                rounding, 0, 1.2f);
-    dl->AddText(tp, hot ? IM_COL32(255, 240, 200, 255) : col, shown.c_str());
+    dl->AddRect(pmin, pmax,
+                (hot || selCon) ? colHot : IM_COL32(96, 150, 200, 150),
+                rounding, 0, selCon ? 2.2f : 1.2f);
+    dl->AddText(tp, (hot || selCon) ? IM_COL32(255, 240, 200, 255) : col,
+                shown.c_str());
 
     // Drag places the label (writes the serialized labelOffset; one undo
     // record on release). The pre-drag json lives across frames.
@@ -2389,6 +2506,12 @@ void DrawDimensions(AppState& state) {
           if (after != s_dragBefore)
             state.commands->PushApplied(std::make_unique<ModifyFeatureCommand>(
                 index, s_dragBefore, after));
+        } else {
+          // Released without moving: the click SELECTS the dimension
+          // (Delete/Backspace removes it); entity selection clears so
+          // Delete stays unambiguous.
+          edit.selectedConstraint = i;
+          edit.selected.clear();
         }
       }
     }
@@ -2602,6 +2725,7 @@ void DrawDimensionOnCreate(AppState& state) {
 
 void DrawConstraintGlyphs(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
+  edit.glyphHot = -1; // refreshed below; the canvas reads it next frame
   if (!edit.IsEditing() || !edit.showConstraintGlyphs)
     return;
   size_t index = 0;
@@ -2609,12 +2733,17 @@ void DrawConstraintGlyphs(AppState& state) {
   if (!sketch)
     return;
   ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImGuiIO& io = ImGui::GetIO();
   const ImU32 col = IM_COL32(150, 210, 170, 220);
+  const ImU32 colSel = IM_COL32(255, 220, 130, 255);
   using K = sketch::ConstraintKind;
 
-  // Fan out multiple badges on the same entity so they don't overlap.
+  // Fan out multiple badges on the same entity so they don't overlap. A
+  // badge hit-tests its rect: hovering latches glyphHot (the canvas selects
+  // on click, one frame behind — the dimHot convention), the selected
+  // constraint's badges show the accent.
   std::map<uint32_t, int> stack;
-  auto badge = [&](uint32_t entity, const char* text) {
+  auto badge = [&](int ci, uint32_t entity, const char* text) {
     auto uv = RefUV(*sketch, {entity, 0});
     if (!uv)
       return;
@@ -2622,26 +2751,48 @@ void DrawConstraintGlyphs(AppState& state) {
     float dx = 10.0f + 13.0f * stack[entity]++;
     ImVec2 p(s.x + dx, s.y - 16.0f);
     ImVec2 sz = ImGui::CalcTextSize(text);
-    dl->AddRectFilled(ImVec2(p.x - 2, p.y - 1), ImVec2(p.x + sz.x + 2, p.y + sz.y + 1),
-                      IM_COL32(25, 32, 28, 200), 2.0f);
-    dl->AddText(p, col, text);
+    const ImVec2 rmin(p.x - 2, p.y - 1);
+    const ImVec2 rmax(p.x + sz.x + 2, p.y + sz.y + 1);
+    const bool over = io.MousePos.x >= rmin.x && io.MousePos.x <= rmax.x &&
+                      io.MousePos.y >= rmin.y && io.MousePos.y <= rmax.y;
+    if (over)
+      edit.glyphHot = ci;
+    const bool selCon = edit.selectedConstraint == ci;
+    dl->AddRectFilled(rmin, rmax,
+                      selCon ? IM_COL32(84, 66, 26, 250)
+                      : over ? IM_COL32(45, 62, 52, 235)
+                             : IM_COL32(25, 32, 28, 200),
+                      2.0f);
+    if (selCon)
+      dl->AddRect(rmin, rmax, colSel, 2.0f);
+    dl->AddText(p, selCon ? colSel : col, text);
   };
 
-  for (const auto& c : sketch->constraints) {
+  for (int i = 0; i < (int)sketch->constraints.size(); i++) {
+    const auto& c = sketch->constraints[i];
     switch (c.kind) {
-    case K::Horizontal: badge(c.a.entity, "H"); break;
-    case K::Vertical: badge(c.a.entity, "V"); break;
-    case K::Parallel: badge(c.a.entity, "//"); badge(c.b.entity, "//"); break;
-    case K::Perpendicular: badge(c.a.entity, "|_"); break;
-    case K::Equal: badge(c.a.entity, "="); badge(c.b.entity, "="); break;
-    case K::Coincident: badge(c.a.entity, "co"); break;
-    case K::PointOnLine: badge(c.b.entity, "on"); break;
-    case K::Tangent: badge(c.a.entity, "T"); break;
-    case K::Symmetric: badge(c.c.entity, "sym"); break;
-    case K::Midpoint: badge(c.b.entity, "mid"); break;
-    case K::Fixed: badge(c.a.entity, "fix"); break;
-    case K::Concentric: badge(c.a.entity, "con"); break;
-    case K::Collinear: badge(c.a.entity, "L"); badge(c.b.entity, "L"); break;
+    case K::Horizontal: badge(i, c.a.entity, "H"); break;
+    case K::Vertical: badge(i, c.a.entity, "V"); break;
+    case K::Parallel:
+      badge(i, c.a.entity, "//");
+      badge(i, c.b.entity, "//");
+      break;
+    case K::Perpendicular: badge(i, c.a.entity, "|_"); break;
+    case K::Equal:
+      badge(i, c.a.entity, "=");
+      badge(i, c.b.entity, "=");
+      break;
+    case K::Coincident: badge(i, c.a.entity, "co"); break;
+    case K::PointOnLine: badge(i, c.b.entity, "on"); break;
+    case K::Tangent: badge(i, c.a.entity, "T"); break;
+    case K::Symmetric: badge(i, c.c.entity, "sym"); break;
+    case K::Midpoint: badge(i, c.b.entity, "mid"); break;
+    case K::Fixed: badge(i, c.a.entity, "fix"); break;
+    case K::Concentric: badge(i, c.a.entity, "con"); break;
+    case K::Collinear:
+      badge(i, c.a.entity, "L");
+      badge(i, c.b.entity, "L");
+      break;
     default: break; // dimensions render via DrawDimensions
     }
   }

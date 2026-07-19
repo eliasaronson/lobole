@@ -2063,13 +2063,16 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Dimension);
     };
 
-    // Two parallel lines → perpendicular distance (DistancePL), value = gap.
-    // (3.7: targets resolve into a label-placement stage; a click places.)
+    // A single line enters LENGTH placement immediately (B); a placement
+    // click landing on a PARALLEL line refines it to the perpendicular
+    // distance (DistancePL) placement, value = gap.
     clickUV({0, -1});
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
-    clickUV({0, 1});
+    IM_CHECK(s_App->sketchEdit.dimPlacing); // length ghost is up right away
+    IM_CHECK(s_App->sketchEdit.dimPlacePair);
+    clickUV({0, 1}); // lands on lB → refine, not place
     IM_CHECK(s_App->sketchEdit.dimPlacing);
-    IM_CHECK(!s_App->sketchEdit.dimPlacePair); // fixed kind: label only
+    IM_CHECK(!s_App->sketchEdit.dimPlacePair); // now fixed kind: label only
     clickUV({-0.5f, 0}); // place the label
     closeEditor(1);
     IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::DistancePL);
@@ -2077,10 +2080,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(sk->constraints[0].b.entity, lB);
     IM_CHECK_LE(std::abs(sk->constraints[0].value - 2.0), 1e-3);
 
-    // Two non-parallel lines → angle, pinned at the current wedge
-    // (immediate — angle placement is deferred).
+    // A placement click on a NON-parallel line refines to angle, pinned at
+    // the current wedge (immediate — angle placement is deferred).
     clickUV({0, -1});
-    clickUV({0, 0.4f});
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({0, 0.4f}); // lands on lC → angle
     IM_CHECK(!s_App->sketchEdit.dimPlacing);
     closeEditor(2);
     IM_CHECK(sk->constraints[1].kind == sketch::ConstraintKind::Angle);
@@ -2101,19 +2105,32 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(sk->constraints[2].a.entity, ci);
     IM_CHECK_LE(std::abs(sk->constraints[2].value - 0.5), 1e-3);
 
-    // One line + a click in empty space → LENGTH placement. The span is
-    // axis-parallel, so every placement zone yields the aligned kind.
-    // (x off 0 — a click ON the Y axis would dimension against the axis.)
+    // A line click → immediate LENGTH placement; an empty-space click
+    // PLACES it (the span is axis-parallel, so every zone is aligned).
+    // (x off 0 — a click ON the Y axis would refine against the axis.)
     clickUV({0.5f, -1});
-    clickUV({0.7f, -1.8f});
     IM_CHECK(s_App->sketchEdit.dimPlacing);
     IM_CHECK(s_App->sketchEdit.dimPlacePair);
-    clickUV({0.7f, -1.8f}); // place (below the line)
+    clickUV({0.7f, -1.8f}); // empty space: place below the line
     closeEditor(4);
     IM_CHECK(sk->constraints[3].kind == sketch::ConstraintKind::Distance);
     IM_CHECK_EQ(sk->constraints[3].a.entity, lA);
     IM_CHECK_EQ(sk->constraints[3].b.entity, lA);
     IM_CHECK_LE(std::abs(sk->constraints[3].value - 3.0), 1e-3);
+
+    // A placement click on a POINT (the circle's centre) refines to the
+    // perpendicular point-line distance.
+    clickUV({0.5f, -1}); // lA → length placement again
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({0.8f, 1.8f}); // the circle centre → refine to DistancePL
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    IM_CHECK(!s_App->sketchEdit.dimPlacePair);
+    clickUV({2.0f, -0.2f}); // place the label
+    closeEditor(5);
+    IM_CHECK(sk->constraints[4].kind == sketch::ConstraintKind::DistancePL);
+    IM_CHECK_EQ(sk->constraints[4].a.entity, ci); // the centre point
+    IM_CHECK_EQ(sk->constraints[4].b.entity, lA);
+    IM_CHECK_LE(std::abs(sk->constraints[4].value - 2.8), 1e-3);
 
     // No geometry moved (every dimension pinned its current value).
     const auto& la = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(lA)]);
@@ -2239,6 +2256,124 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_LE(glm::length(off - n * 1.2f), 0.05f); // lands where clicked
 
     ctx->KeyPress(ImGuiKey_Escape); // disarm
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
+  };
+
+  // Click-select + Delete for dimensions and constraint glyphs: a single
+  // click on a pill (or glyph) selects that constraint — mutually exclusive
+  // with entity selection so Delete is never ambiguous — and Delete/
+  // Backspace removes it (one undoable edit). Esc deselects first.
+  t = IM_REGISTER_TEST(engine, "dims", "select_delete");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t l0 = sk->AddEntity(sketch::Line{{-1.5f, -0.5f}, {1.5f, -0.5f}});
+    uint32_t l1 = sk->AddEntity(sketch::Line{{1.5f, -0.5f}, {1.5f, 1}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    // [0] a distance dim (pinned at the current length), [1] a coincident.
+    s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
+    IM_CHECK(ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Distance, 3.0));
+    s_App->sketchEdit.selected = {{l0, 1}, {l1, 0}};
+    IM_CHECK(ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Coincident, 0.0));
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)2);
+    const glm::vec2 seeded = sk->constraints[0].labelOffset; // (0, ±0.8)
+
+    // Single-click the dimension pill: SELECTS (entity selection cleared).
+    const glm::vec2 pillUV = glm::vec2(0.0f, -0.5f) + seeded;
+    auto clickPill = [&]() {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, pillUV);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->Yield(2); // dimHot latches for the canvas gate
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    clickPill();
+    IM_CHECK_EQ(s_App->sketchEdit.selectedConstraint, 0);
+    IM_CHECK(s_App->sketchEdit.selected.empty());
+
+    // Esc deselects first (the ladder), still editing the sketch.
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.selectedConstraint, -1);
+    IM_CHECK(s_App->sketchEdit.IsEditing());
+
+    // Re-select, Delete removes the dimension; undo restores it.
+    clickPill();
+    IM_CHECK_EQ(s_App->sketchEdit.selectedConstraint, 0);
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1); // the coincident remains
+    IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::Coincident);
+    IM_CHECK_EQ(sk->entities.size(), (size_t)2); // entities untouched
+    IM_CHECK_EQ(s_App->sketchEdit.selectedConstraint, -1);
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)2);
+
+    // The coincident's GLYPH ("co", anchored at l0's first point + a small
+    // offset): clicking inside its rect selects the constraint — the glyph
+    // wins over the endpoint underneath. Backspace removes it.
+    {
+      glm::vec2 s =
+          ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -0.5f));
+      // Badge rect starts at (s.x + 10, s.y - 16); aim mid-glyph.
+      ctx->MouseMoveToPos(ImVec2(s.x + 17.0f, s.y - 10.0f));
+      ctx->Yield(2); // glyphHot latches for the canvas gate
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    }
+    IM_CHECK_EQ(s_App->sketchEdit.selectedConstraint, 1);
+    IM_CHECK(s_App->sketchEdit.selected.empty()); // no entity grabbed
+    ctx->KeyPress(ImGuiKey_Backspace);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
+    IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::Distance);
+    IM_CHECK_EQ(sk->entities.size(), (size_t)2);
+
+    // Entity click clears the constraint selection; Delete then removes the
+    // ENTITY (and its dependent dimension), not a constraint by index.
+    {
+      glm::vec2 mid =
+          ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, -0.5f));
+      ctx->MouseMoveToPos(ImVec2(mid.x, mid.y));
+      ctx->Yield(2);
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    }
+    IM_CHECK_EQ(s_App->sketchEdit.selectedConstraint, -1);
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+    ctx->KeyPress(ImGuiKey_Delete);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1); // l0 gone
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)0); // its dim dropped with it
+
     ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
     ctx->Yield();
   };

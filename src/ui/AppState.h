@@ -140,6 +140,19 @@ struct SketchEditState {
   sketch::ConstraintKind dimPlaceKind = sketch::ConstraintKind::Distance;
   sketch::PointRef dimPlaceA, dimPlaceB;
   double dimPlaceValue = 0.0; // fixed-kind value (pairs recompute at commit)
+  // Non-zero: the placement was entered from a SINGLE line (its length) —
+  // a placement click on another line/point REFINES the kind instead of
+  // placing (parallel line → DistancePL, non-parallel → angle, point → PL).
+  uint32_t dimPlaceFromLine = 0;
+
+  // Click-selected constraint (dimension pill or constraint glyph; -1 =
+  // none). Delete/Backspace removes it. Selecting a constraint clears the
+  // entity selection and vice versa, so Delete is never ambiguous.
+  int selectedConstraint = -1;
+  // Constraint glyph under the cursor (constraint index, -1 = none),
+  // refreshed each frame by DrawConstraintGlyphs and read by the canvas one
+  // frame behind (the dimHot convention). The glyph owns clicks in its rect.
+  int glyphHot = -1;
 
   // Dimension-on-create: the entities the last draw-tool commit produced (a
   // rectangle keeps its 4 sides, everything else one id). Typing a digit
