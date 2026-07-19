@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "core/SketchFeature.h"
-#include "core/SketchSelection.h"
+#include "core/features/SketchFeature.h"
+#include "core/sketch/SketchSelection.h"
 
 #include <algorithm>
 

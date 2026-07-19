@@ -8,11 +8,11 @@
 #include "ui/FeatureEditor.h"      // SlotPickClicked (U3)
 #include "ui/SketchInteraction.h"  // FaceElementRef
 
-#include "core/ExtrudeFeature.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/Occurrence.h" // AssemblyDocument, Occurrence
-#include "core/RevolveFeature.h"
-#include "core/SketchFeature.h"
-#include "core/SketchProfile.h"
+#include "core/features/RevolveFeature.h"
+#include "core/features/SketchFeature.h"
+#include "core/sketch/SketchProfile.h"
 
 #include "imgui.h"
 

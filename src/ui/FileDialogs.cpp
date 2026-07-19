@@ -2,8 +2,8 @@
 
 #include "Logger.h"
 #include "CADKernel.h"
-#include "core/Autosaver.h"
-#include "core/Serialization.h"
+#include "core/io/Autosaver.h"
+#include "core/io/Serialization.h"
 #include "ui/AppActions.h"
 
 #include "imgui.h"

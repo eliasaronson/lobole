@@ -2,9 +2,9 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "core/Document.h"
-#include "core/DraftFeature.h"
+#include "core/features/DraftFeature.h"
 #include "core/Feature.h"
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 
 #include <algorithm>
 #include <cmath>

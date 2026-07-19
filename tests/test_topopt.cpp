@@ -5,11 +5,11 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Feature.h"
-#include "core/FemMesher.h"
-#include "core/FemSolver.h"
-#include "core/FemStudy.h"
-#include "core/FemTopo.h"
-#include "core/Serialization.h"
+#include "core/fem/FemMesher.h"
+#include "core/fem/FemSolver.h"
+#include "core/fem/FemStudy.h"
+#include "core/fem/FemTopo.h"
+#include "core/io/Serialization.h"
 #include "topo_testmesh.h"
 
 #include <nlohmann/json.hpp>
@@ -78,7 +78,7 @@ void MaybeDumpStl(const fem::FemMesh& m, const std::vector<double>& density, dou
 
 #ifdef HAVE_FEM_SOLVER
 
-#include "core/FemSolverInternal.h"  // element math for the seam-test solver
+#include "core/fem/FemSolverInternal.h"  // element math for the seam-test solver
 
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>

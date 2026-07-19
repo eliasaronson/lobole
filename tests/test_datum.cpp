@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "core/DatumAxisFeature.h"
-#include "core/DatumPlaneFeature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/Document.h"
-#include "core/ExtrudeFeature.h"
-#include "core/Serialization.h"
-#include "core/SketchFeature.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/io/Serialization.h"
+#include "core/features/SketchFeature.h"
 
 #include <filesystem>
 

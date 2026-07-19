@@ -2,7 +2,7 @@
 
 #include "MeshExport.h"      // MeshExport::Item
 #include "SketchRenderer.h" // Vertex3D, PrimVertex
-#include "core/DrawingDimension.h" // drawing::ResolvedDim
+#include "core/drawing/DrawingDimension.h" // drawing::ResolvedDim
 #include "core/ElementMap.h" // ElementRef
 #include "ui/AppState.h"
 

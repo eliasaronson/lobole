@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "core/SketchFeature.h"
-#include "core/SketchProfile.h"
-#include "core/SketchSolver.h"
+#include "core/features/SketchFeature.h"
+#include "core/sketch/SketchProfile.h"
+#include "core/sketch/SketchSolver.h"
 
 #include <cmath>
 

@@ -3,7 +3,7 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 
 #include <nlohmann/json.hpp>
 

@@ -174,49 +174,49 @@ set(core_sources
     src/Sketch.cpp
     src/SketchManager.cpp
     src/FaceSelector.cpp
-    src/core/Autosaver.cpp
-    src/core/Checkpoints.cpp
-    src/core/GitVault.cpp
+    src/core/io/Autosaver.cpp
+    src/core/io/Checkpoints.cpp
+    src/core/io/GitVault.cpp
     src/core/Measure.cpp
     src/core/MassProps.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
     src/core/Occurrence.cpp
     src/core/AssemblySolve.cpp
-    src/core/DrawingProjection.cpp
-    src/core/DrawingDocument.cpp
-    src/core/DrawingExport.cpp
-    src/core/DrawingDimension.cpp
-    src/core/Format.cpp
+    src/core/drawing/DrawingProjection.cpp
+    src/core/drawing/DrawingDocument.cpp
+    src/core/drawing/DrawingExport.cpp
+    src/core/drawing/DrawingDimension.cpp
+    src/core/io/Format.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
-    src/core/Serialization.cpp
-    src/core/SerializeFeatures.cpp
-    src/core/SerializeStudies.cpp
-    src/core/SerializeConfigurations.cpp
-    src/core/SerializeAssembly.cpp
-    src/core/SketchFeature.cpp
-    src/core/SketchProfile.cpp
-    src/core/SketchInference.cpp
-    src/core/SketchSelection.cpp
-    src/core/ExtrudeFeature.cpp
-    src/core/DatumPlaneFeature.cpp
+    src/core/io/Serialization.cpp
+    src/core/io/SerializeFeatures.cpp
+    src/core/io/SerializeStudies.cpp
+    src/core/io/SerializeConfigurations.cpp
+    src/core/io/SerializeAssembly.cpp
+    src/core/features/SketchFeature.cpp
+    src/core/sketch/SketchProfile.cpp
+    src/core/sketch/SketchInference.cpp
+    src/core/sketch/SketchSelection.cpp
+    src/core/features/ExtrudeFeature.cpp
+    src/core/features/DatumPlaneFeature.cpp
     src/core/BodyMode.cpp
-    src/core/RevolveFeature.cpp
-    src/core/ShellFeature.cpp
-    src/core/LoftFeature.cpp
-    src/core/SweepFeature.cpp
-    src/core/HoleFeature.cpp
-    src/core/DraftFeature.cpp
-    src/core/DatumAxisFeature.cpp
-    src/core/BooleanFeature.cpp
+    src/core/features/RevolveFeature.cpp
+    src/core/features/ShellFeature.cpp
+    src/core/features/LoftFeature.cpp
+    src/core/features/SweepFeature.cpp
+    src/core/features/HoleFeature.cpp
+    src/core/features/DraftFeature.cpp
+    src/core/features/DatumAxisFeature.cpp
+    src/core/features/BooleanFeature.cpp
     src/core/ElementHistory.cpp
-    src/core/FilletFeature.cpp
-    src/core/PatternFeature.cpp
-    src/core/SketchSolver.cpp
-    src/core/FemStudy.cpp
-    src/core/FemSolver.cpp
-    src/core/FemTopo.cpp
+    src/core/features/FilletFeature.cpp
+    src/core/features/PatternFeature.cpp
+    src/core/sketch/SketchSolver.cpp
+    src/core/fem/FemStudy.cpp
+    src/core/fem/FemSolver.cpp
+    src/core/fem/FemTopo.cpp
 )
 
 find_package(nlohmann_json 3 REQUIRED)
@@ -249,7 +249,7 @@ endif()
 # with, which must match or the process heap-corrupts — proven in the FEM0
 # spike) stay contained to FemMesher.cpp and never leak into the rest of core.
 find_package(Netgen CONFIG QUIET)
-add_library(fem_mesher STATIC src/core/FemMesher.cpp)
+add_library(fem_mesher STATIC src/core/fem/FemMesher.cpp)
 target_include_directories(fem_mesher PRIVATE src)
 target_link_libraries(fem_mesher PRIVATE glm::glm)
 target_compile_definitions(fem_mesher PRIVATE GLM_FORCE_DEPTH_ZERO_TO_ONE)

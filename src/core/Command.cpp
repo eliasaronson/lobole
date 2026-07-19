@@ -1,6 +1,6 @@
 #include "core/Command.h"
 
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 
 AddFeatureCommand::AddFeatureCommand(std::unique_ptr<Feature> feature)
     : m_feature(std::move(feature)) {

@@ -21,7 +21,7 @@ from designer_remote import Designer  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Format reference, embedded into tool descriptions. Source of truth:
-# src/core/Serialization.cpp (FeatureFromJson / EntityToJson) and
+# src/core/io/Serialization.cpp (FeatureFromJson / EntityToJson) and
 # src/remote/RemoteServer.cpp (add_constraint). Transcribed for OCCT-side v12.
 # ---------------------------------------------------------------------------
 

@@ -9,7 +9,7 @@
 #include "Logger.h"
 #include "Screenshot.h"
 #include "HeadlessMain.h"
-#include "core/Autosaver.h"
+#include "core/io/Autosaver.h"
 #include "remote/RemoteServer.h"
 #include "FieldRenderer.h"
 #include "MeshRenderer.h"

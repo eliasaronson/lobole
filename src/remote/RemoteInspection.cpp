@@ -3,7 +3,7 @@
 #include "core/Document.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "ui/AppState.h"
 

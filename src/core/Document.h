@@ -3,8 +3,8 @@
 #include "core/Configuration.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
-#include "core/FemSolver.h"
-#include "core/FemStudy.h"
+#include "core/fem/FemSolver.h"
+#include "core/fem/FemStudy.h"
 
 #include <cstdint>
 #include <map>

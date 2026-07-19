@@ -7,7 +7,7 @@
 // atomics + a single join on the main thread (see SimulationActions:
 // Start/Poll/Cancel TopologyRun). Owned by AppState (one run at a time).
 
-#include "core/FemTopo.h"
+#include "core/fem/FemTopo.h"
 
 #include <atomic>
 #include <chrono>

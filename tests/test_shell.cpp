@@ -3,8 +3,8 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
-#include "core/Serialization.h"
-#include "core/ShellFeature.h"
+#include "core/io/Serialization.h"
+#include "core/features/ShellFeature.h"
 
 #include <filesystem>
 #include <vector>

@@ -2,7 +2,7 @@
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "core/Command.h"
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)

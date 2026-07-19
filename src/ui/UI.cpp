@@ -5,7 +5,7 @@
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
-#include "core/SketchFeature.h"
+#include "core/features/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/DockLayout.h"
 #include "ui/FeatureTreePanel.h"

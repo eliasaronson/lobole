@@ -8,7 +8,7 @@
 // and hexes via an edge map, giving a conforming tet10 mesh; boundary tri6
 // facets on the six box planes are tagged faceIndex 0..5.
 
-#include "core/FemMesher.h"
+#include "core/fem/FemMesher.h"
 
 #include <algorithm>
 #include <array>

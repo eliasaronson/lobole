@@ -3,9 +3,9 @@
 
 #include "CADKernel.h"
 #include "core/Document.h"
-#include "core/DrawingProjection.h"
+#include "core/drawing/DrawingProjection.h"
 #include "core/Feature.h"
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <TopExp.hxx>

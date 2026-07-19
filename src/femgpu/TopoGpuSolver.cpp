@@ -1,6 +1,6 @@
 #include "femgpu/TopoGpuSolver.h"
 
-#include "core/FemSolverInternal.h"  // element math for packing Ke (Eigen)
+#include "core/fem/FemSolverInternal.h"  // element math for packing Ke (Eigen)
 #include "femgpu/ComputeContext.h"
 #include "femgpu/TopoCgSolver.h"
 #include "femgpu/TopoMultigrid.h"

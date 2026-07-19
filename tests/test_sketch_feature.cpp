@@ -3,10 +3,10 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
-#include "core/Serialization.h"
-#include "core/SketchFeature.h"
-#include "core/SketchProfile.h"
-#include "core/SketchSolver.h"
+#include "core/io/Serialization.h"
+#include "core/features/SketchFeature.h"
+#include "core/sketch/SketchProfile.h"
+#include "core/sketch/SketchSolver.h"
 
 #include <nlohmann/json.hpp>
 

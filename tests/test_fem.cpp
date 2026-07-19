@@ -4,10 +4,10 @@
 #include "CADKernel.h"
 #include "core/Command.h"
 #include "core/Document.h"
-#include "core/FemMesher.h"
-#include "core/FemSolver.h"
-#include "core/FemStudy.h"
-#include "core/Serialization.h"
+#include "core/fem/FemMesher.h"
+#include "core/fem/FemSolver.h"
+#include "core/fem/FemStudy.h"
+#include "core/io/Serialization.h"
 
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>

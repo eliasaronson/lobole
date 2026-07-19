@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
-#include "core/DrawingDimension.h"
-#include "core/DrawingDocument.h"
-#include "core/DrawingExport.h"
-#include "core/DrawingRender.h"
-#include "core/Format.h"
-#include "core/Serialization.h"
+#include "core/drawing/DrawingDimension.h"
+#include "core/drawing/DrawingDocument.h"
+#include "core/drawing/DrawingExport.h"
+#include "core/drawing/DrawingRender.h"
+#include "core/io/Format.h"
+#include "core/io/Serialization.h"
 
 #include <filesystem>
 #include <fstream>

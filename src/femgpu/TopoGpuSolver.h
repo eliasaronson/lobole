@@ -9,7 +9,7 @@
 // shared element math to pack Ke); absent a usable GPU, Create returns null
 // and callers stay on the CPU path.
 
-#include "core/FemTopo.h"
+#include "core/fem/FemTopo.h"
 
 #include <memory>
 #include <string>

@@ -3,11 +3,11 @@
 #include "CADMaterials.h"
 #include "Camera.h"
 #include "core/Command.h"
-#include "core/DatumPlaneFeature.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/Feature.h"
-#include "core/FilletFeature.h"
-#include "core/Serialization.h"
-#include "core/SketchFeature.h"
+#include "core/features/FilletFeature.h"
+#include "core/io/Serialization.h"
+#include "core/features/SketchFeature.h"
 #include "ui/AppActions.h" // SelectFeature / SelectedFeatureId
 #include "ui/SketchInteraction.h"
 

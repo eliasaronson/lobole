@@ -2,7 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "core/Occurrence.h"
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 
 #include <glm/gtc/quaternion.hpp>
 

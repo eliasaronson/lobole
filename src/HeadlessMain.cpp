@@ -2,7 +2,7 @@
 
 #include "Camera.h"
 #include "Logger.h"
-#include "core/Autosaver.h"
+#include "core/io/Autosaver.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "remote/RemoteServer.h"

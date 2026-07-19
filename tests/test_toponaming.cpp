@@ -1,13 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "core/BooleanFeature.h"
+#include "core/features/BooleanFeature.h"
 #include "core/Document.h"
-#include "core/ExtrudeFeature.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/Feature.h"
-#include "core/RevolveFeature.h"
-#include "core/SketchFeature.h"
-#include "core/Serialization.h"
+#include "core/features/RevolveFeature.h"
+#include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 
 #include <algorithm>
 #include <array>

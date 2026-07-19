@@ -1,7 +1,7 @@
 #include "core/Document.h"
 
 #include "Logger.h"
-#include "core/Serialization.h" // FeatureToJson: the regen-cache hash input
+#include "core/io/Serialization.h" // FeatureToJson: the regen-cache hash input
 
 #include <algorithm>
 #include <functional>

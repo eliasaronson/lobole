@@ -2,7 +2,7 @@
 
 #include "Logger.h"
 #include "RayTracingRenderer.h"
-#include "core/SketchFeature.h"
+#include "core/features/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"

@@ -4,7 +4,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Feature.h"
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 
 using Catch::Matchers::WithinRel;
 

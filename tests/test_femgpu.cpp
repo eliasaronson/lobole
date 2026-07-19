@@ -78,7 +78,7 @@ TEST_CASE("femgpu: sanity kernel round-trips through the compute pipeline",
 
 #ifdef HAVE_FEM_SOLVER
 
-#include "core/FemSolverInternal.h"
+#include "core/fem/FemSolverInternal.h"
 
 namespace {
 
@@ -212,7 +212,7 @@ TEST_CASE("femgpu: matrix-free SpMV matches the CPU assembly (GATE)",
 
 #ifdef HAVE_NETGEN
 #include "CADKernel.h"
-#include "core/FemMesher.h"
+#include "core/fem/FemMesher.h"
 
 TEST_CASE("femgpu: SpMV matches the CPU on a real Netgen mesh",
           "[femgpu][gate]") {
@@ -237,7 +237,7 @@ TEST_CASE("femgpu: SpMV matches the CPU on a real Netgen mesh",
 
 // ---- GPU1: the on-device CG solver ----------------------------------------
 
-#include "core/FemTopo.h"
+#include "core/fem/FemTopo.h"
 #include "femgpu/TopoCgSolver.h"
 #include "femgpu/TopoGpuSolver.h"
 #include "femgpu/TopoMultigrid.h"

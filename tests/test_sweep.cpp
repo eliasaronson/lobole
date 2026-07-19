@@ -3,8 +3,8 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
-#include "core/SketchFeature.h"
-#include "core/SweepFeature.h"
+#include "core/features/SketchFeature.h"
+#include "core/features/SweepFeature.h"
 
 #include <vector>
 

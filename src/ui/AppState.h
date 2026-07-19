@@ -2,12 +2,12 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
-#include "core/DrawingDocument.h"
-#include "core/DrawingRender.h"
+#include "core/drawing/DrawingDocument.h"
+#include "core/drawing/DrawingRender.h"
 #include "core/Occurrence.h"
-#include "core/SketchFeature.h"
-#include "core/SketchInference.h"
-#include "core/SketchSolver.h"
+#include "core/features/SketchFeature.h"
+#include "core/sketch/SketchInference.h"
+#include "core/sketch/SketchSolver.h"
 #include "ui/TopoJob.h"
 
 #include <glm/glm.hpp>

@@ -3,9 +3,9 @@
 
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
-#include "core/ExtrudeFeature.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/Occurrence.h"
-#include "core/SketchFeature.h"
+#include "core/features/SketchFeature.h"
 
 #include <glm/gtc/quaternion.hpp>
 

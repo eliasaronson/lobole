@@ -2,8 +2,8 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
-#include "core/DrawingExport.h"
-#include "core/Serialization.h"
+#include "core/drawing/DrawingExport.h"
+#include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"

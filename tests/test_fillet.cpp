@@ -3,10 +3,10 @@
 
 #include "core/Document.h"
 #include "core/ElementHistory.h"
-#include "core/ExtrudeFeature.h"
-#include "core/FilletFeature.h"
-#include "core/Serialization.h"
-#include "core/SketchFeature.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/FilletFeature.h"
+#include "core/io/Serialization.h"
+#include "core/features/SketchFeature.h"
 
 #include <array>
 #include <filesystem>

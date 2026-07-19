@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "core/Autosaver.h"
+#include "core/io/Autosaver.h"
 #include "core/Document.h"
 #include "core/Feature.h"
-#include "core/Serialization.h"
+#include "core/io/Serialization.h"
 
 #include <cstdlib>
 #include <filesystem>

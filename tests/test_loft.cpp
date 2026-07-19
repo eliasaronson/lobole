@@ -3,9 +3,9 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
-#include "core/LoftFeature.h"
-#include "core/Serialization.h"
-#include "core/SketchFeature.h"
+#include "core/features/LoftFeature.h"
+#include "core/io/Serialization.h"
+#include "core/features/SketchFeature.h"
 
 #include <filesystem>
 #include <vector>

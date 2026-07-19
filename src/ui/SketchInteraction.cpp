@@ -6,14 +6,14 @@
 #include "FaceSelector.h"
 #include "Logger.h"
 #include "MeshRenderer.h" // LineVertex3D
-#include "core/DatumPlaneFeature.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/Expression.h"
-#include "core/Serialization.h"
-#include "core/SketchFeature.h"
-#include "core/SketchInference.h"
-#include "core/SketchProfile.h"
-#include "core/SketchSelection.h"
-#include "core/SketchSolver.h"
+#include "core/io/Serialization.h"
+#include "core/features/SketchFeature.h"
+#include "core/sketch/SketchInference.h"
+#include "core/sketch/SketchProfile.h"
+#include "core/sketch/SketchSelection.h"
+#include "core/sketch/SketchSolver.h"
 
 #include "imgui.h"
 

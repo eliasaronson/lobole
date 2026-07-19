@@ -1,11 +1,11 @@
 #include "ui/SketchToolbar.h"
 
-#include "core/ExtrudeFeature.h"
-#include "core/RevolveFeature.h"
-#include "core/SketchFeature.h"
-#include "core/SketchProfile.h"
-#include "core/Serialization.h" // DocumentIO (break-link commit)
-#include "core/SketchSolver.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/RevolveFeature.h"
+#include "core/features/SketchFeature.h"
+#include "core/sketch/SketchProfile.h"
+#include "core/io/Serialization.h" // DocumentIO (break-link commit)
+#include "core/sketch/SketchSolver.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
 
