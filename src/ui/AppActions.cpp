@@ -951,10 +951,13 @@ bool SaveProject(AppState& state, const std::string& path,
           break;
       }
       if (!ok) return false;
-      index["documents"].push_back({{"id", slot.id},
-                                    {"name", slot.name},
-                                    {"dir", std::string(sub) + slot.name},
-                                    {"type", type}});
+      nlohmann::json entry = {{"id", slot.id},
+                              {"name", slot.name},
+                              {"dir", std::string(sub) + slot.name},
+                              {"type", type}};
+      if (!slot.folder.empty()) // display grouping; omit at top level
+        entry["folder"] = slot.folder;
+      index["documents"].push_back(std::move(entry));
     }
     std::ofstream out(dir / "project.json");
     if (!out) {
@@ -1014,6 +1017,7 @@ bool OpenProject(AppState& state, const std::string& path,
       PartSlot slot;
       slot.id = docs[i].value("id", static_cast<uint64_t>(i + 1)); // v1: 1..n
       slot.name = name;
+      slot.folder = docs[i].value("folder", std::string{});
       if (type == "assembly") {
         slot.kind = DocKind::Assembly;
         slot.assembly = DocumentIO::LoadAssembly(dir, error);

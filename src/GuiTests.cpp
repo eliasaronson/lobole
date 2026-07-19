@@ -2377,6 +2377,49 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
   };
 
+  // Tab-bar folders: foldered parts collapse to one flyout button (assembly
+  // import drops 100+ parts in one), the flyout switches tabs, and the
+  // folder persists through project save/load.
+  t = IM_REGISTER_TEST(engine, "tabs", "folder_flyout");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ui::AddPart(*s_App, "Bolt");
+    s_App->parts.back().folder = "Imported";
+    ui::AddPart(*s_App, "Nut");
+    s_App->parts.back().folder = "Imported";
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+
+    // One flyout button for the folder; clicking lists the parts.
+    ctx->ItemClick("//##PartTabs/Imported (2)##folderImported");
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/Nut##fpart2");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->activePart, 2);
+    IM_CHECK_EQ(s_App->parts[2].name, "Nut");
+
+    // The folder survives a save/load round-trip.
+    const std::string dir =
+        (std::filesystem::temp_directory_path() / "designer_test_folders")
+            .string();
+    std::filesystem::remove_all(dir);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir, &err));
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK(ui::OpenProject(*s_App, dir, &err));
+    ctx->Yield();
+    int foldered = 0;
+    for (const auto& s : s_App->parts)
+      if (s.folder == "Imported")
+        foldered++;
+    IM_CHECK_EQ(foldered, 2);
+    std::filesystem::remove_all(dir);
+  };
+
   // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
   // a top face on each reads the 8mm gap in world space; re-clicking one
   // deselects it (occurrence is part of the element's identity).

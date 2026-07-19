@@ -44,9 +44,7 @@ void OpenStepAssemblyFileDialog(AppState& state) {
     std::string filePath(outPath);
     free(outPath);
     std::string error;
-    if (ImportStepAsAssembly(state, filePath, &error))
-      FitCameraToDocument(state);
-    else
+    if (!ImportStepAsAssembly(state, filePath, &error))
       LOG_ERROR("Assembly import failed: {}", error);
   }
 }

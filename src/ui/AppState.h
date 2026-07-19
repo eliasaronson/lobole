@@ -346,6 +346,11 @@ struct DrawingHistory {
 struct PartSlot {
   uint64_t id = 0;   // stable per-document id (A2): what occurrences reference
   std::string name;
+  // Display grouping for the bottom tab bar ("" = top level). Assembly
+  // import puts its extracted parts in a folder named after the assembly so
+  // a 100-part import is one flyout, not 100 tabs. Cosmetic only — storage
+  // stays flat, ids/references are unaffected.
+  std::string folder;
   DocKind kind = DocKind::Part;
   std::unique_ptr<Document> doc;          // part: null while this tab is active
   std::unique_ptr<AssemblyDocument> assembly; // assembly: null while active

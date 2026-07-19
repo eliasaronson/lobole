@@ -472,10 +472,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       const char* type = state.parts[i].kind == ui::DocKind::Assembly ? "assembly"
                          : state.parts[i].kind == ui::DocKind::Drawing ? "drawing"
                                                                        : "part";
-      arr.push_back({{"name", state.parts[i].name},
-                     {"index", i},
-                     {"id", state.parts[i].id},
-                     {"type", type}});
+      json entry = {{"name", state.parts[i].name},
+                    {"index", i},
+                    {"id", state.parts[i].id},
+                    {"type", type}};
+      if (!state.parts[i].folder.empty())
+        entry["folder"] = state.parts[i].folder;
+      arr.push_back(std::move(entry));
     }
     return {{"parts", arr}, {"active", state.activePart}};
   }

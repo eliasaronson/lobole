@@ -1024,18 +1024,23 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
 
   // Materialize: one part tab per product (an ImportFeature on the extracted
   // sidecar), then the assembly with every occurrence placed. Deliberately
-  // not undoable — it creates documents, like File > Open.
+  // not undoable — it creates documents, like File > Open. The parts land in
+  // a tab-bar folder named after the assembly so a 100-part import is one
+  // flyout, not 100 tabs.
+  const std::string asmName = std::filesystem::path(stepPath).stem().string();
   std::vector<uint64_t> partIds;
   for (const interchange::PlannedPart& p : plan.parts) {
     AddPart(state, p.name);
+    PartSlot& slot = state.parts[static_cast<size_t>(state.activePart)];
+    slot.folder = asmName;
     auto feature = std::make_unique<ImportFeature>(p.name, p.brepPath);
     feature->hasColor = p.hasColor;
     feature->color = p.color;
     state.document->AddFeature(std::move(feature));
-    partIds.push_back(state.parts[static_cast<size_t>(state.activePart)].id);
+    partIds.push_back(slot.id);
   }
 
-  AddAssembly(state, std::filesystem::path(stepPath).stem().string());
+  AddAssembly(state, asmName);
   bool first = true;
   for (const interchange::PlannedOccurrence& o : plan.occurrences) {
     Occurrence occ;
@@ -1048,6 +1053,7 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
     state.assembly->AddOccurrence(occ);
   }
   state.assembly->BumpVersion();
+  FitCameraToDocument(state);
   LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", stepPath,
            plan.parts.size(), plan.occurrences.size());
   return true;

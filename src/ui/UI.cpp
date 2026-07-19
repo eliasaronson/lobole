@@ -27,6 +27,9 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <cfloat> // FLT_MAX (folder flyout size constraint)
+#include <string>
+#include <vector>
 
 namespace ui {
 
@@ -265,9 +268,19 @@ void DrawPartTabs(AppState& state) {
                            ImGuiWindowFlags_NoSavedSettings |
                            ImGuiWindowFlags_NoDocking;
   if (ImGui::Begin("##PartTabs", nullptr, flags)) {
-    for (size_t i = 0; i < state.parts.size(); i++) {
-      if (i > 0)
+    // Top-level tabs first, one button each; foldered documents (assembly
+    // import drops its parts in a folder) collapse to one flyout per folder
+    // so a 100-part import doesn't flood the bar.
+    bool any = false;
+    const auto sameLine = [&] {
+      if (any)
         ImGui::SameLine();
+      any = true;
+    };
+    for (size_t i = 0; i < state.parts.size(); i++) {
+      if (!state.parts[i].folder.empty())
+        continue;
+      sameLine();
       const bool active = static_cast<int>(i) == state.activePart;
       if (active)
         ImGui::PushStyleColor(ImGuiCol_Button,
@@ -290,7 +303,49 @@ void DrawPartTabs(AppState& state) {
         ImGui::EndPopup();
       }
     }
-    ImGui::SameLine();
+    // Folder flyouts, in order of first appearance.
+    std::vector<std::string> folders;
+    for (const PartSlot& s : state.parts)
+      if (!s.folder.empty() &&
+          std::find(folders.begin(), folders.end(), s.folder) == folders.end())
+        folders.push_back(s.folder);
+    for (const std::string& folder : folders) {
+      size_t count = 0;
+      bool activeInside = false;
+      for (size_t i = 0; i < state.parts.size(); i++) {
+        if (state.parts[i].folder != folder)
+          continue;
+        count++;
+        activeInside |= static_cast<int>(i) == state.activePart;
+      }
+      sameLine();
+      if (activeInside)
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+      const std::string label =
+          folder + " (" + std::to_string(count) + ")##folder" + folder;
+      if (ImGui::Button(label.c_str()))
+        ImGui::OpenPopup(("##folderpop" + folder).c_str());
+      if (activeInside)
+        ImGui::PopStyleColor();
+      // Tall folders scroll instead of running off screen.
+      ImGui::SetNextWindowSizeConstraints(
+          ImVec2(0, 0), ImVec2(FLT_MAX, vp->WorkSize.y * 0.6f));
+      if (ImGui::BeginPopup(("##folderpop" + folder).c_str())) {
+        for (size_t i = 0; i < state.parts.size(); i++) {
+          if (state.parts[i].folder != folder)
+            continue;
+          const bool active = static_cast<int>(i) == state.activePart;
+          if (ImGui::Selectable(
+                  (state.parts[i].name + "##fpart" + std::to_string(i)).c_str(),
+                  active)) {
+            SetActivePart(state, i);
+          }
+        }
+        ImGui::EndPopup();
+      }
+    }
+    sameLine();
     if (ImGui::Button("+Part##addpart"))
       AddPart(state, "Part " + std::to_string(state.parts.size() + 1));
     ImGui::SameLine();
