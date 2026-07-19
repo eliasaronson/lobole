@@ -107,6 +107,15 @@ mates → solve → save → per-part STL export). Findings:
 - add_mate flipped=true default seats a bearing in a bore flush and
   coaxial — good default, worked first try once names were fresh.
 
+## Toolchain
+
+- **C++23 bump** (from C++20): flip CMAKE_CXX_STANDARD, link stdc++exp (GCC),
+  swap the glibc crash-handler backtrace for std::stacktrace (symbolized
+  frames, no addr2line step). Also unlocks std::expected (feature-error/RPC
+  result plumbing), std::print, deducing this, std::mdspan (FEM matrices).
+  Compiler ready (nixpkgs GCC >= 13); risk = OCC/ImGui/spdlog headers under
+  -std=c++23 — verify with a full build + both suites, one chore commit.
+
 ## Crash-debugging infrastructure (added this session)
 
 - Fatal-signal backtraces (3284986): SIGSEGV/SIGABRT now print a stack to
