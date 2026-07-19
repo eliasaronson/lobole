@@ -239,15 +239,22 @@ void SyncFieldRenderer(AppState& state) {
     sim.topoIsoKey = 0;
   };
   // Hide the studied bodies' normal render so the overlay stands in for them.
-  // Idempotent: a no-op once already hidden this session.
+  // Recomputed EVERY sync: mesh ids change on every regeneration (e.g. a
+  // study edit between runs bumps the document version), so an "already
+  // hidden" early-out can hold only stale ids while the regenerated body
+  // renders fully visible over the overlay — the raw-block-instead-of-result
+  // bug. Stale ids drop out with the rebuild (their instances are gone).
   auto hideBodies = [&](const fem::StudyRuntime* rt) {
-    if (!sim.hiddenMeshes.empty()) return;
+    std::vector<uint32_t> want;
     for (const fem::StudyBodyResult& b : rt->bodies)
       for (const DocumentRenderMesh& m : state.documentMeshes)
-        if (static_cast<int>(m.bodyIndex) == b.bodyIndex) {
-          state.meshRenderer->SetInstanceVisible(m.meshId, false);
-          sim.hiddenMeshes.push_back(m.meshId);
-        }
+        if (static_cast<int>(m.bodyIndex) == b.bodyIndex)
+          want.push_back(m.meshId);
+    for (uint32_t id : want)
+      if (std::find(sim.hiddenMeshes.begin(), sim.hiddenMeshes.end(), id) ==
+          sim.hiddenMeshes.end())
+        state.meshRenderer->SetInstanceVisible(id, false);
+    sim.hiddenMeshes = std::move(want);
   };
 
   const fem::StudyRuntime* rt =
