@@ -100,12 +100,17 @@ void DrawPreviewDialog(AppState& state) {
 
   // Enter accepts, Escape cancels (when not typing in a field). While a
   // handle drag is live, Escape belongs to the drag (aborts it, preview
-  // survives — ViewportInput's ladder).
-  if (!ImGui::IsAnyItemActive() && !state.handleDrag.active) {
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter) ||
-        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))
+  // survives — ViewportInput's ladder). The SAME physical keypress that
+  // confirms/cancels a value field must not also fire here: the field
+  // deactivates that frame, so require a full idle frame in between, and
+  // ignore key REPEAT (a held Enter from the field would re-fire otherwise).
+  static int idleFrames = 0;
+  idleFrames = ImGui::IsAnyItemActive() ? 0 : idleFrames + 1;
+  if (idleFrames > 1 && !state.handleDrag.active) {
+    if (ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
+        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false))
       accept = true;
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false))
       cancel = true;
   }
 

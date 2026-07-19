@@ -8,6 +8,7 @@
 #include "core/Occurrence.h"
 #include "core/Feature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/PatternFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/Measure.h"
 #include "core/io/Serialization.h"
@@ -741,6 +742,59 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+  };
+
+  // Repro for the reported circular-pattern segfault (dogfooding backlog):
+  // preview a pattern on a body, switch it to Circular, and work the axis/
+  // count/angle widgets across frames — the crash lived in this flow.
+  t = IM_REGISTER_TEST(engine, "pattern", "circular_preview_param_edits_survive");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    ctx->Yield();
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Create/Pattern");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+
+    ctx->SetRef("//Pattern###PreviewDialog");
+    ctx->ComboClick("##Type/Circular");
+    ctx->Yield(2);
+    {
+      auto* pat =
+          dynamic_cast<PatternFeature*>(ui::ResolvePendingFeature(*s_App));
+      IM_CHECK(pat != nullptr);
+      IM_CHECK_EQ((int)pat->kind, (int)PatternKind::Circular);
+    }
+    ctx->ComboClick("##Axis/Z");
+    ctx->Yield(2);
+    // Type into count/angle, then mouse-DRAG both (the per-frame regen path
+    // the crash log showed: one resync per frame).
+    ctx->ItemInputValue("Count/##count", 6);
+    ctx->Yield(2);
+    // Sustained param editing — the reported crash came after hundreds of
+    // per-frame regens (outline mesh ids in the 500s). Mutate + Regenerate
+    // per frame is byte-identical to what the dialog's angle DragScalar does
+    // (HandleEdit with commit=false); 400 frames of it storms the resync +
+    // silhouette-rebuild path the crash log pointed at.
+    for (int i = 0; i < 400; i++) {
+      auto* pat =
+          dynamic_cast<PatternFeature*>(ui::ResolvePendingFeature(*s_App));
+      IM_CHECK(pat != nullptr);
+      pat->angleDeg = 30.0 + (i % 33) * 10.0;
+      pat->count = 3 + (i / 40) % 5;
+      Doc()->Regenerate();
+      ctx->Yield();
+    }
+
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    IM_CHECK(Doc()->GetFeature(1)->GetError().empty());
+    IM_CHECK(Doc()->GetBodies().size() >= (size_t)1);
   };
 
   t = IM_REGISTER_TEST(engine, "view", "planes_autohide_with_geometry");
