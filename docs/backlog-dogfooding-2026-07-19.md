@@ -86,8 +86,29 @@ against [flowful-ai/cad-skill](https://github.com/flowful-ai/cad-skill)
   finish (chamfers/fillets) → deliver STL + parameter table + "want me to
   adjust anything?" closing offer.
 
-## Assemblies
+## Assemblies (full-path exercise: spinner + 4 bearings, fastened mates)
 
-- (was on the session list) Full path spinner + bearing parts + mates +
-  interference + export — exercised this session; findings appended below
-  when done.
+The path WORKS end-to-end (part → assembly → occurrences → face-connector
+mates → solve → save → per-part STL export). Findings:
+
+- **Assembly-level interference is missing**: the `interference` RPC (and the
+  underlying I4 check) is part-tab only — "the active document is an
+  assembly" error. Clash checks matter MOST in assemblies; extend it to
+  occurrence pairs (transform the part bodies like assembly measure does).
+- **Stale-toponame trap on mates**: bore faces listed BEFORE a chamfer kept
+  their old names ("6/g1;M6"); after the chamfer they are "6/g1;M6;M7", and
+  the mate errored "connector reference could not be resolved". Correct
+  behavior (the history really changed the face), but the error should name
+  WHICH connector and ideally suggest near-miss names ("6/g1;M6;M7 exists —
+  face was modified by feature 7").
+- add_mate flipped=true default seats a bearing in a bore flush and
+  coaxial — good default, worked first try once names were fresh.
+
+## Crash-debugging infrastructure (added this session)
+
+- Fatal-signal backtraces (3284986): SIGSEGV/SIGABRT now print a stack to
+  stderr → dev-watch log. glibc backtrace now; std::stacktrace when C++23.
+- Circular-pattern segfault: headless param sweep (count 0..100, angle
+  -90..720, per-frame modify) does NOT reproduce — core exonerated, crash is
+  GUI/render-side (log shows per-frame resyncs then SIGSEGV). Next GUI repro
+  will carry a backtrace.
