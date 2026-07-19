@@ -875,6 +875,10 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
       }
     } else if (arg == "--headless") {
       args.headless = true;
+    } else if (arg == "--crash-test") {
+      // Hidden: exercise the fatal-signal backtrace end-to-end (Phase 0
+      // sanity). Installed handler prints the stack, then core-dumps.
+      CrashHandlerSelfTest();
     } else if (arg == "--hidden") {
       args.hidden = true;
     } else if (arg == "--record") {

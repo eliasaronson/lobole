@@ -10,7 +10,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
+# std::stacktrace (CrashHandler) lives in libstdc++'s experimental archive
+# until GCC ships it in the main library; harmless on compilers that don't
+# need it (checked below).
 # Export compile_commands.json for clang-tidy / clangd / editor tooling.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DVK_PROTOTYPES")
@@ -152,6 +155,9 @@ endif()
 # Libraries
 find_package(Vulkan REQUIRED)
 set(LIBRARIES "glfw;Vulkan::Vulkan;spdlog::spdlog;${NFD_LIBS}")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    list(APPEND LIBRARIES stdc++exp) # std::stacktrace backend
+endif()
 
 # Add OpenCASCADE libraries if available
 if(OPENCASCADE_FOUND)
