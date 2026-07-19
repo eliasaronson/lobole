@@ -529,6 +529,8 @@ struct AppState {
   // Key-light shadow map (S1) — View > Shadows; session state only (no file
   // format / golden impact).
   bool showShadows = true;
+  // SSAO (S2) — View > Ambient Occlusion; session state only, like shadows.
+  bool showAmbientOcclusion = true;
   // Section view (I3): a world-space clip plane {xyz=normal, w=dist};
   // fragments past it are discarded. Zero = disabled.
   glm::vec4 sectionPlane = glm::vec4(0.0f);

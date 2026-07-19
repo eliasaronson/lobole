@@ -23,6 +23,9 @@ layout(binding = 0) uniform UniformBufferObject {
     // bound to the vertex stage only).
     mat4 lightViewProj;
     vec4 shadowParams;
+    // SSAO (S2): xy = 1 / framebuffer size (gl_FragCoord -> AO uv),
+    // z = enable, w = unused. Forwarded as a varying like shadowParams.
+    vec4 aoParams;
 } ubo;
 
 layout(push_constant) uniform PushConstants {
@@ -50,6 +53,7 @@ layout(location = 11) out float fragHighlight;
 layout(location = 12) out float fragClipDist;
 layout(location = 13) out vec4 fragShadowCoord;
 layout(location = 14) out vec4 fragShadowParams;
+layout(location = 15) out vec4 fragAOParams;
 
 void main() {
     // Transform position to world space
@@ -78,6 +82,7 @@ void main() {
     fragShadowCoord = ubo.lightViewProj *
                       vec4(worldPos.xyz + fragNormal * ubo.shadowParams.y, 1.0);
     fragShadowParams = ubo.shadowParams;
+    fragAOParams = ubo.aoParams;
 
     // Albedo from the per-instance push constant, plus camera position
     fragColor = pc.baseColor.rgb;

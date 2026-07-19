@@ -278,6 +278,11 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
         glm::vec4(0.75f, 1.5f * m_shadowTexelWorld, m_shadowTexelUV,
                   m_shadowsEnabled ? 1.0f : 0.0f);
 
+    // SSAO (S2): the blurred AO map multiplies only the ambient/IBL term in
+    // the shader — direct light is handled by the shadow map, not AO.
+    ubo.aoParams =
+        glm::vec4(m_aoInvSize, m_aoEnabled ? 1.0f : 0.0f, 0.0f);
+
     // Set viewport to the central region (excludes the side panels)
     VkViewport viewport{};
     viewport.x = static_cast<float>(m_viewportX);
@@ -417,17 +422,34 @@ bool MeshRenderer::GetShadowCasters(std::vector<ShadowCaster>& out,
     return !out.empty();
 }
 
+void MeshRenderer::RebindAOMap(VkImageView aoMap) {
+    m_aoMapView = aoMap;
+    if (m_descriptorSets.empty()) return;
+    for (size_t i = 0; i < m_descriptorSets.size(); i++) {
+        VkDescriptorImageInfo info{m_aoSampler, m_aoMapView,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_descriptorSets[i];
+        write.dstBinding = 5;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.descriptorCount = 1;
+        write.pImageInfo = &info;
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+    }
+}
+
 // Private helper functions
 bool MeshRenderer::CreateDescriptorSetLayout() {
     // 0: camera+lights UBO (vertex). 1-3: IBL maps (fragment) — irradiance,
     // prefiltered specular, BRDF LUT. 4: key-light shadow map (fragment,
-    // compare sampler).
-    VkDescriptorSetLayoutBinding bindings[5]{};
+    // compare sampler). 5: blurred SSAO map (fragment).
+    VkDescriptorSetLayoutBinding bindings[6]{};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount = 1;
     bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    for (int i = 1; i <= 4; i++) {
+    for (int i = 1; i <= 5; i++) {
         bindings[i].binding = static_cast<uint32_t>(i);
         bindings[i].descriptorType =
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -437,7 +459,7 @@ bool MeshRenderer::CreateDescriptorSetLayout() {
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 5;
+    layoutInfo.bindingCount = 6;
     layoutInfo.pBindings = bindings;
 
     if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
@@ -653,9 +675,9 @@ bool MeshRenderer::CreateDescriptorPool() {
     VkDescriptorPoolSize poolSizes[2]{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-    // 3 IBL samplers + 1 shadow map per frame.
+    // 3 IBL samplers + shadow map + AO map per frame.
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 4;
+    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 5;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -692,8 +714,8 @@ bool MeshRenderer::CreateDescriptorSets() {
         bufferInfo.range = sizeof(UniformBufferObject);
 
         // IBL image infos (bindings 1-3, from SetIBL) + shadow map (binding
-        // 4, from SetShadowMap; layout matches the shadow pass's final
-        // SHADER_READ_ONLY layout).
+        // 4, from SetShadowMap) + blurred AO (binding 5, from SetAOMap);
+        // layouts match the prepasses' final SHADER_READ_ONLY layout.
         VkDescriptorImageInfo irr{m_iblEnvSampler, m_iblIrradiance,
                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo pref{m_iblEnvSampler, m_iblPrefilter,
@@ -702,8 +724,10 @@ bool MeshRenderer::CreateDescriptorSets() {
                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo shadow{m_shadowSampler, m_shadowMapView,
                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo ao{m_aoSampler, m_aoMapView,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-        VkWriteDescriptorSet writes[5]{};
+        VkWriteDescriptorSet writes[6]{};
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = m_descriptorSets[i];
         writes[0].dstBinding = 0;
@@ -711,8 +735,9 @@ bool MeshRenderer::CreateDescriptorSets() {
         writes[0].descriptorCount = 1;
         writes[0].pBufferInfo = &bufferInfo;
 
-        const VkDescriptorImageInfo* imgs[4] = {&irr, &pref, &brdf, &shadow};
-        for (int b = 1; b <= 4; b++) {
+        const VkDescriptorImageInfo* imgs[5] = {&irr, &pref, &brdf, &shadow,
+                                                &ao};
+        for (int b = 1; b <= 5; b++) {
             writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[b].dstSet = m_descriptorSets[i];
             writes[b].dstBinding = static_cast<uint32_t>(b);
@@ -722,7 +747,7 @@ bool MeshRenderer::CreateDescriptorSets() {
             writes[b].pImageInfo = imgs[b - 1];
         }
 
-        vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
+        vkUpdateDescriptorSets(m_device, 6, writes, 0, nullptr);
     }
 
     return true;

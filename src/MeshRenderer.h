@@ -43,6 +43,9 @@ struct UniformBufferObject {
     // Key-light shadow params (S1): x = strength, y = normal-offset world
     // distance, z = shadow-map texel size (UV), w = enable (0/1).
     glm::vec4 shadowParams;
+    // SSAO params (S2): xy = 1 / framebuffer size (gl_FragCoord -> AO uv),
+    // z = enable (0/1), w = unused.
+    glm::vec4 aoParams;
 };
 
 // One opaque instance's draw data for the shadow pass (ShadowRenderer): the
@@ -193,9 +196,33 @@ public:
         m_shadowTexelUV = texelUVSize;
     }
 
+    // Blurred SSAO map (S2, SSAORenderer). Like SetIBL/SetShadowMap, must be
+    // set BEFORE Initialize() — the descriptor sets bind it at creation.
+    void SetAOMap(VkImageView aoMap, VkSampler aoSampler) {
+        m_aoMapView = aoMap;
+        m_aoSampler = aoSampler;
+    }
+    // Rebinds the AO map after the SSAO targets were recreated on resize.
+    // Call behind wait-idle only (the descriptor sets must not be in flight).
+    void RebindAOMap(VkImageView aoMap);
+    // View > Ambient Occlusion toggle; off zeroes aoParams.z so the shader
+    // skips the lookup (the map may then hold stale contents — harmless).
+    void SetAOEnabled(bool enabled) { m_aoEnabled = enabled; }
+    // Per-frame from SSAORenderer: 1 / full framebuffer size, mapping
+    // gl_FragCoord to the (half-res, normalized-uv) AO texture.
+    void SetAOState(const glm::vec2& invFullResolution) {
+        m_aoInvSize = invFullResolution;
+    }
+
+    // Camera matrices as last set by UpdateCamera — the prepasses read them
+    // here so they are guaranteed identical to what the main pass uses.
+    const glm::mat4& ViewMatrix() const { return m_viewMatrix; }
+    const glm::mat4& ProjectionMatrix() const { return m_projectionMatrix; }
+
     // Shadow-pass draw list: every visible, non-ghost instance (ghosts don't
     // write depth in the main pass and must not cast), plus the combined
     // world-space bbox for the light frustum fit. Returns false when empty.
+    // Also serves the SSAO depth+normal prepass, which draws the same set.
     bool GetShadowCasters(std::vector<ShadowCaster>& out, glm::vec3& bbMin,
                           glm::vec3& bbMax);
 
@@ -245,6 +272,12 @@ private:
     glm::mat4 m_lightViewProj = glm::mat4(1.0f);
     float m_shadowTexelWorld = 0.0f;
     float m_shadowTexelUV = 0.0f;
+
+    // Blurred SSAO map (owned by SSAORenderer; rebound on resize).
+    VkImageView m_aoMapView = VK_NULL_HANDLE;
+    VkSampler m_aoSampler = VK_NULL_HANDLE;
+    bool m_aoEnabled = true;
+    glm::vec2 m_aoInvSize = glm::vec2(0.0f);
 
     // Camera
     glm::mat4 m_viewMatrix = glm::mat4(1.0f);

@@ -233,6 +233,7 @@ void DrawViewMenu(AppState& state) {
   }
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
   ImGui::MenuItem("Shadows", nullptr, &state.showShadows);
+  ImGui::MenuItem("Ambient Occlusion", nullptr, &state.showAmbientOcclusion);
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
   ImGui::MenuItem("Viewport Controls", nullptr, &state.showControlsHelp);
   if (state.topoGhostStudyId != 0 &&

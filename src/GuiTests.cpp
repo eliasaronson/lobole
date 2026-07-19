@@ -776,6 +776,27 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // app + body survived
   };
 
+  // S2 SSAO: same barrier/layout stress as the shadow test — the prepass +
+  // AO + blur chain toggled off/on while sectioned, over several frames.
+  t = IM_REGISTER_TEST(engine, "view", "ssao_toggle_survives_section");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    s_App->showAmbientOcclusion = false;
+    ctx->Yield(3);
+    s_App->sectionPlane = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f); // cut on XY
+    ctx->Yield(3);
+    s_App->showAmbientOcclusion = true;
+    ctx->Yield(5);
+    s_App->sectionPlane = glm::vec4(0.0f);
+    ctx->Yield(3);
+    IM_CHECK(s_App->showAmbientOcclusion);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // app + body survived
+  };
+
   t = IM_REGISTER_TEST(engine, "constraints", "coincident_merges_points");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

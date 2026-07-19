@@ -17,6 +17,7 @@ layout(location = 11) in float fragHighlight;
 layout(location = 12) in float fragClipDist;
 layout(location = 13) in vec4 fragShadowCoord;
 layout(location = 14) in vec4 fragShadowParams;
+layout(location = 15) in vec4 fragAOParams;
 
 layout(location = 0) out vec4 outColor;
 
@@ -34,6 +35,8 @@ layout(set = 0, binding = 3) uniform sampler2D uBrdfLut;     // env BRDF (RG)
 // Key-light shadow map (ShadowRenderer, S1): compare sampler with a white
 // border, so anything outside the light frustum reads unshadowed.
 layout(set = 0, binding = 4) uniform sampler2DShadow uShadowMap;
+// Blurred SSAO (SSAORenderer, S2): half-res, sampled by framebuffer position.
+layout(set = 0, binding = 5) uniform sampler2D uAO;
 
 const float PI = 3.14159265359;
 // Must match IBL.cpp DirToEquirectUV exactly.
@@ -139,6 +142,14 @@ void main() {
     vec3 specularIBL = prefiltered * (F * envBRDF.x + envBRDF.y);
 
     vec3 ambient = kD * diffuseIBL + specularIBL;
+
+    // SSAO attenuates only the ambient/IBL term — direct light occlusion is
+    // the shadow map's job. gl_FragCoord * (1/framebufferSize) lands on the
+    // matching texel of the (normalized-uv) AO target; the MSAA fragments of
+    // one pixel share the single 1x AO value (accepted by design).
+    if (fragAOParams.z > 0.5) {
+        ambient *= texture(uAO, gl_FragCoord.xy * fragAOParams.xy).r;
+    }
 
     // Direct analytic lights add crisp key/fill/rim highlights on top of IBL.
     // Dialed back since IBL now supplies the environment fill.
