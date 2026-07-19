@@ -98,8 +98,10 @@ void DrawPreviewDialog(AppState& state) {
     cancel = true;
   ImGui::PopStyleColor(2);
 
-  // Enter accepts, Escape cancels (when not typing in a field)
-  if (!ImGui::IsAnyItemActive()) {
+  // Enter accepts, Escape cancels (when not typing in a field). While a
+  // handle drag is live, Escape belongs to the drag (aborts it, preview
+  // survives — ViewportInput's ladder).
+  if (!ImGui::IsAnyItemActive() && !state.handleDrag.active) {
     if (ImGui::IsKeyPressed(ImGuiKey_Enter) ||
         ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))
       accept = true;

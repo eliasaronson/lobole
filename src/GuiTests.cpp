@@ -8,6 +8,7 @@
 #include "core/Occurrence.h"
 #include "core/Feature.h"
 #include "core/features/FilletFeature.h"
+#include "core/Measure.h"
 #include "core/io/Serialization.h"
 #include "core/features/SketchFeature.h"
 #include "ui/AppActions.h"
@@ -511,6 +512,168 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     IM_CHECK(!ui::HasPendingFeature(*s_App));
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
+  };
+
+  // Direct-manipulation preview handles (docs/ui/direct-manipulation.md):
+  // drag the viewport arrow to set the pending extrude's distance.
+  t = IM_REGISTER_TEST(engine, "handles", "extrude_arrow_drag_sets_distance");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+    sketch->AddRectangle({0, 0}, {4, 2});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    ctx->SetRef("//Sketch");
+    ctx->ItemClick("Extrude...");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    auto* ext =
+        dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(ext->distanceExpr.empty());
+
+    // Frame deterministically from an iso direction so the extrude axis is
+    // draggable on screen (facing the plane it would be view-parallel). The
+    // target sits below the profile so the handle projects in the upper half
+    // of the viewport, clear of the bottom-center preview dialog.
+    sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const glm::vec3 N = glm::normalize(sketch->plane.GetNormal());
+    const glm::vec3 C = sketch->plane.PlaneToWorld(glm::vec2(2.0f, 1.0f));
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(C + glm::vec3(0.0f, -3.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(C + glm::vec3(0.0f, -3.0f, 0.0f) +
+                               glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * 12.0f);
+    ctx->Yield(2);
+
+    // Grab the arrow mid-shaft and pull one world unit further out.
+    const double d0 = ext->distance;
+    const float L =
+        0.9f * std::max(0.13f * s_App->camera->GetDistance(), 0.1f);
+    const glm::vec3 anchor = C + N * static_cast<float>(d0);
+    const glm::vec3 grab = anchor + N * (0.45f * L);
+    ctx->MouseMoveToPos(WorldToWindow(grab));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(WorldToWindow(grab + N * 1.0f));
+    ctx->Yield();
+    IM_CHECK(s_App->handleDrag.active); // the click grabbed the handle
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(std::abs(ext->distance - (d0 + 1.0)) < 0.05);
+    IM_CHECK(ui::HasPendingFeature(*s_App)); // still previewing
+
+    // Esc mid-drag restores the grab-time value and keeps the preview.
+    const double d1 = ext->distance;
+    const glm::vec3 anchor1 = C + N * static_cast<float>(d1);
+    ctx->MouseMoveToPos(WorldToWindow(anchor1 + N * (0.45f * L)));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(WorldToWindow(anchor1 + N * (0.45f * L + 1.0f)));
+    ctx->Yield();
+    IM_CHECK(s_App->handleDrag.active);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(std::abs(ext->distance - d1) < 1e-6);
+    IM_CHECK(ui::HasPendingFeature(*s_App)); // Esc consumed by the drag only
+
+    // A click away from the handle falls through to picking: no value change,
+    // preview still pending.
+    ctx->MouseMoveToPos(ImVec2(s_App->viewportPos.x + 30.0f,
+                               s_App->viewportPos.y + 30.0f));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(std::abs(ext->distance - d1) < 1e-6);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+
+    // Accept commits the dragged value as one undoable feature.
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    IM_CHECK(s_App->commands->CanUndo());
+  };
+
+  t = IM_REGISTER_TEST(engine, "handles", "fillet_marker_drag_sets_radius");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    ctx->Yield();
+
+    // Preview a fillet on a known edge (the picking flow is covered by the
+    // fillet tests; this one is about the handle).
+    const Body& body = Doc()->GetBodies()[0];
+    IM_CHECK(!body.elementMap.edgeNames.empty());
+    const ElementRef ref{body.createdBy,
+                         body.elementMap.edgeNames.begin()->second};
+    ui::BeginPreviewFeature(
+        *s_App, std::make_unique<FilletFeature>("Fillet",
+                                                std::vector<ElementRef>{ref},
+                                                0.4));
+    ctx->Yield(2);
+    auto* fil =
+        dynamic_cast<FilletFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(fil != nullptr);
+
+    // Recompute the handle's anchor/direction the way PreviewHandles does:
+    // the picked edge resolved on the blend's INPUT body (the displayed body
+    // is already blended and renames its edges), pulled away from the body
+    // center ⟂ to the edge.
+    const std::vector<Body>* input = Doc()->CachedBodiesAfter(0);
+    IM_CHECK(input != nullptr);
+    const auto eb = Measure::ElementBounds(*input, ref);
+    IM_CHECK(eb.has_value());
+    const glm::vec3 P = (eb->min + eb->max) * 0.5f;
+    const glm::vec3 T = glm::normalize(eb->max - eb->min);
+    glm::vec3 bmin, bmax;
+    (*input)[0].shape.GetBoundingBox(bmin, bmax);
+    const glm::vec3 bodyCenter = (bmin + bmax) * 0.5f;
+    glm::vec3 out = P - bodyCenter;
+    out -= glm::dot(out, T) * T;
+    IM_CHECK(glm::length(out) > 1e-4f);
+    out = glm::normalize(out);
+
+    // Frame from iso, target below the body so the handle clears the dialog.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(bodyCenter + glm::vec3(0.0f, -2.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(
+        bodyCenter + glm::vec3(0.0f, -2.0f, 0.0f) +
+        glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) *
+            (glm::length(bmax - bmin) * 2.5f));
+    ctx->Yield(2);
+
+    const float L =
+        0.9f * std::max(0.13f * s_App->camera->GetDistance(), 0.1f);
+    const double r0 = fil->radius;
+    ctx->MouseMoveToPos(WorldToWindow(P + out * (0.45f * L)));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(WorldToWindow(P + out * (0.45f * L + 0.3f)));
+    ctx->Yield();
+    IM_CHECK(s_App->handleDrag.active);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    fil = dynamic_cast<FilletFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(fil != nullptr);
+    IM_CHECK(std::abs(fil->radius - (r0 + 0.3)) < 0.05);
+
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
   };
 
   t = IM_REGISTER_TEST(engine, "view", "planes_autohide_with_geometry");

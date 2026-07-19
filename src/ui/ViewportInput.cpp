@@ -5,6 +5,8 @@
 #include "Logger.h"
 #include "MeshRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/PreviewFeature.h"
+#include "ui/PreviewHandles.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
 
@@ -203,7 +205,11 @@ void HandleViewportInput(AppState& state) {
   bool escUsed = false;
   const bool esc =
       !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Escape);
-  if (state.edgePick.Active() && state.document) {
+  if (state.handleDrag.active && esc) {
+    // Escape aborts a handle drag only — the preview itself survives.
+    AbortPreviewHandleDrag(state);
+    escUsed = true;
+  } else if (state.edgePick.Active() && state.document) {
     auto* fil = state.document->FindFeatureById(state.edgePick.filletId);
     if (fil == nullptr) {
       state.edgePick = {}; // the mode ends with its feature
@@ -289,6 +295,26 @@ void HandleViewportInput(AppState& state) {
 
     HandleSelectionInput(state, overViewport, /*allowEscapeClear=*/!escUsed);
     return;
+  }
+
+  // Direct-manipulation handle on the pending preview feature: first shot at
+  // clicks, exactly like the assembly gizmo above — a live drag continues
+  // even off-viewport, a hit consumes the click, and a miss falls through to
+  // the pipeline so armed slots / picking are untouched.
+  if (HasPendingFeature(state)) {
+    const bool clicked =
+        overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    const bool down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    const bool released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+    if (state.handleDrag.active || clicked) {
+      Ray ray = state.faceSelector->ScreenToWorldRay(
+          io.MousePos.x - state.viewportPos.x,
+          io.MousePos.y - state.viewportPos.y,
+          static_cast<int>(state.viewportSize.x),
+          static_cast<int>(state.viewportSize.y), *state.camera);
+      if (HandlePreviewHandleInput(state, ray, clicked, down, released))
+        return;
+    }
   }
 
   // The unified pick pipeline (U1b/U1c): default selection — edges/faces/

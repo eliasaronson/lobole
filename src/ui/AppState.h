@@ -466,6 +466,20 @@ struct AppState {
     glm::vec3 startOffset{0};
   };
 
+  // Direct-manipulation handle on the pending preview feature (docs/ui/
+  // direct-manipulation.md): drags the feature's headline scalar (extrude
+  // distance / blend radius / revolve angle) along a grab-time axis. Preview
+  // only, so no undo bookkeeping — accept commits the whole feature.
+  struct HandleDrag {
+    bool active = false;
+    uint64_t featureId = 0;   // the pending feature at grab (undo-safe check)
+    bool rotate = false;      // revolve arc vs linear arrow
+    glm::vec3 axisOrigin{0};  // drag line / arc-plane center at grab
+    glm::vec3 axisDir{0, 0, 1};
+    double startValue = 0.0;  // the parameter at grab (Esc restores this)
+    float startParam = 0.0f;  // axis coordinate / arc angle at grab
+  };
+
   // In-context editing (A4): non-zero while a part tab is being edited with
   // its context assembly ghosted around it. The part renders at identity;
   // every other occurrence renders at OccMatrix(edited)⁻¹·OccMatrix(other)
@@ -502,6 +516,7 @@ struct AppState {
   PickState pick;
   MateToolState mateTool;
   GizmoDrag gizmoDrag;
+  HandleDrag handleDrag;
   // Feature being previewed (in the document + rendered, but NOT on the undo
   // stack until accepted). 0 = none. See PreviewFeature.
   uint64_t pendingFeatureId = 0;

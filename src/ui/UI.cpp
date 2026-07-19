@@ -12,6 +12,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/MainMenuBar.h"
 #include "ui/PreviewFeature.h"
+#include "ui/PreviewHandles.h"
 #include "ui/PropertiesPanel.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
@@ -380,9 +381,11 @@ void DrawUI(AppState& state) {
     BuildMateToolOverlay(state, overlay); // A3 mate connector triads (assembly)
 
     // The occurrence drag gizmo goes to its own no-depth channel so its handles
-    // stay visible/grabbable through geometry (A2.5).
+    // stay visible/grabbable through geometry (A2.5). The preview-feature
+    // handles share the channel (part tabs, where the gizmo is empty).
     std::vector<LineVertex3D> gizmo;
     BuildGizmoOverlay(state, gizmo);
+    BuildPreviewHandleOverlay(state, gizmo);
     AppendCogMarker(state, gizmo); // mass-props CoG cross (no-depth channel)
     AppendStudyMarker(state, gizmo); // FEM peak-field cross (no-depth channel)
 
