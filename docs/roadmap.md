@@ -78,7 +78,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | Workstream | Plan | Status |
 |---|---|---|
 | 1. Sketching | [sketching/plan.md](sketching/plan.md) | **Complete** (B-splines deferred) |
-| 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **In progress** (M1–M8: primitives, extrude/revolve/loft/sweep, datums, booleans, patterns, toponaming, fillet/chamfer, shell, hole wizard, draft; thread/rib remain) |
+| 2. 3D modeling | [modeling/plan.md](modeling/plan.md) | **Complete** (M1–M8 + rib + cosmetic thread, format v36 — see [modeling/thread-rib.md](modeling/thread-rib.md); modeled helical thread = the design’s stretch flag) |
 | 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | **Complete** (T1–T5; consumers: sketch-on-face, fillet/chamfer, up-to-face extrude) |
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Complete** (V1–V3 + C2 unit-suffixed literals, format v28; dimensional analysis + unit display deferred) |
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | **Complete** (S1 MCP, S2 headless+CI, S3 python client, S4 record/replay) |

@@ -1,6 +1,7 @@
 # Thread + Rib — the last two modeling features
 
-Status: DRAFT — awaiting sign-off.
+Status: SHIPPED 2026-07-19 (rib 098b4d7, cosmetic thread 9cb1167; modeled
+thread remains the opt-in stretch flag below).
 
 Scope: the two items keeping workstream 2 from complete ([plan.md](plan.md) M8
 tail: "thread wizards, rib"). Both are ordinary features in the M8 mold —

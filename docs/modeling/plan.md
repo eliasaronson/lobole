@@ -151,7 +151,9 @@ open path sketch (MakePipeShell, RoundCorner so sharp corners sweep fully).
 Shell is a toponaming consumer (faces by ElementRef); all give their results
 fresh primitive-style names. **Hole wizard shipped** (HoleFeature: simple/counterbore/countersink
 holes at a sketch's points, cut into the bodies below — a bolt pattern is
-one feature). *Still to do:* thread wizards, rib, draft on selected faces.
+one feature). *Shipped 2026-07-19:* rib + cosmetic thread (v36, thread-rib.md;
+modeled helical thread deferred as its opt-in flag). Draft on selected faces
+shipped earlier (M8 draft). Workstream complete.
 
 ## Cross-cutting
 
