@@ -26,13 +26,19 @@ struct SSAOParamsUBO {
     glm::vec4 params2; // xy = noise tiling scale, zw = unused
 };
 
-// S3-tunable defaults, all single-site: AO radius as a fraction of the scene
-// bbox diagonal, depth bias as a fraction of the radius, occlusion strength,
-// and the bilateral blur's depth-weight falloff (per unit raw depth delta).
+// S3-tuned defaults, all single-site. AO radius scales with the scene bbox
+// diagonal but is CAPPED absolutely: uncapped it grew with assemblies until
+// samples reached across whole neighboring bodies, ghosting their
+// silhouettes onto flat faces (the dogfooding halo bug). 2.5 model units
+// keeps the kernel at crevice scale. Strength was raised (0.6 -> 0.9) so
+// real creases read now that the tight range window discards the fake
+// occlusion that used to contribute. Blur depth-sharpness was raised
+// (400 -> 2000) so the bilateral blur rejects cross-silhouette smearing.
 constexpr float kRadiusFraction = 0.04f;
+constexpr float kRadiusMax = 2.5f;
 constexpr float kBiasFraction = 0.02f;
-constexpr float kStrength = 0.6f;
-constexpr float kBlurDepthSharpness = 400.0f;
+constexpr float kStrength = 0.9f;
+constexpr float kBlurDepthSharpness = 2000.0f;
 
 } // namespace
 
@@ -131,13 +137,28 @@ bool SSAORenderer::Resize(uint32_t width, uint32_t height) {
     return true;
 }
 
+bool SSAORenderer::SetFullResolution(bool fullRes) {
+    if (fullRes == m_fullRes) return false;
+    m_fullRes = fullRes;
+    // Same recreation dance as Resize, at the current window size.
+    vkDeviceWaitIdle(m_device);
+    DestroyTargets();
+    if (!CreateTargets(m_width, m_height)) {
+        std::cerr << "SSAORenderer: SetFullResolution failed to recreate targets"
+                  << std::endl;
+    }
+    WriteTargetDescriptors();
+    TransitionTargetsToRead();
+    return true;
+}
+
 void SSAORenderer::RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
                                     MeshRenderer& scene) {
     glm::vec3 bbMin, bbMax;
     const bool haveGeometry = scene.GetShadowCasters(m_casters, bbMin, bbMax);
     const float diag =
         haveGeometry ? std::max(glm::length(bbMax - bbMin), 1e-3f) : 1.0f;
-    const float radius = kRadiusFraction * diag;
+    const float radius = std::min(kRadiusFraction * diag, kRadiusMax);
 
     const uint32_t frame = currentFrame % MAX_FRAMES_IN_FLIGHT;
     const glm::mat4& view = scene.ViewMatrix();
@@ -287,8 +308,9 @@ bool SSAORenderer::CreateTargetImage(uint32_t width, uint32_t height,
 bool SSAORenderer::CreateTargets(uint32_t width, uint32_t height) {
     m_width = std::max(width, 1u);
     m_height = std::max(height, 1u);
-    m_aoWidth = std::max(m_width / 2, 1u);
-    m_aoHeight = std::max(m_height / 2, 1u);
+    const uint32_t divisor = m_fullRes ? 1 : 2;
+    m_aoWidth = std::max(m_width / divisor, 1u);
+    m_aoHeight = std::max(m_height / divisor, 1u);
 
     if (!CreateTargetImage(m_width, m_height, VK_FORMAT_D32_SFLOAT,
                            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |

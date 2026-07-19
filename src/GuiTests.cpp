@@ -877,6 +877,26 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // app + body survived
   };
 
+  // S3 render-quality switches: each change makes the main loop recreate
+  // GPU targets behind wait-idle and rebind descriptors — the crash surface
+  // is exactly that recreation, so flip everything with frames in between.
+  t = IM_REGISTER_TEST(engine, "view", "render_quality_switches_survive");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    MenuCreateAccept(ctx, "Create/Box");
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+    s_App->ssaoFullRes = true; // half -> full AO targets
+    ctx->Yield(3);
+    s_App->shadowMapSize = 1024; // shadow map recreation
+    ctx->Yield(3);
+    s_App->ssaoFullRes = false; // back to defaults, both paths again
+    s_App->shadowMapSize = 2048;
+    ctx->Yield(3);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // app + body survived
+  };
+
   t = IM_REGISTER_TEST(engine, "constraints", "coincident_merges_points");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

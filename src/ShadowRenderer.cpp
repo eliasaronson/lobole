@@ -28,20 +28,46 @@ bool ShadowRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice
     if (!CreateShadowTarget()) return false;
     if (!CreateRenderPass()) return false;
     if (!CreatePipeline()) return false;
+    if (!CreateFramebuffer()) return false;
 
-    // Framebuffer (one, fixed-size: the map is window-resolution-independent).
+    return true;
+}
+
+bool ShadowRenderer::CreateFramebuffer() {
+    // One framebuffer, window-resolution-independent (only SetResolution
+    // recreates it).
     VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
     fb.renderPass = m_renderPass;
     fb.attachmentCount = 1;
     fb.pAttachments = &m_shadowView;
-    fb.width = kResolution;
-    fb.height = kResolution;
+    fb.width = m_resolution;
+    fb.height = m_resolution;
     fb.layers = 1;
     if (vkCreateFramebuffer(m_device, &fb, nullptr, &m_framebuffer) != VK_SUCCESS) {
         std::cerr << "ShadowRenderer: failed to create framebuffer" << std::endl;
         return false;
     }
+    return true;
+}
 
+bool ShadowRenderer::SetResolution(uint32_t resolution) {
+    if (resolution == m_resolution) return false;
+    m_resolution = resolution;
+    // The old map may be sampled by an in-flight frame: recreate behind
+    // wait-idle; the caller rebinds the new view (RebindShadowMap).
+    vkDeviceWaitIdle(m_device);
+    if (m_framebuffer) vkDestroyFramebuffer(m_device, m_framebuffer, nullptr);
+    if (m_shadowView) vkDestroyImageView(m_device, m_shadowView, nullptr);
+    if (m_shadowImage) vkDestroyImage(m_device, m_shadowImage, nullptr);
+    if (m_shadowMemory) vkFreeMemory(m_device, m_shadowMemory, nullptr);
+    m_framebuffer = VK_NULL_HANDLE;
+    m_shadowView = VK_NULL_HANDLE;
+    m_shadowImage = VK_NULL_HANDLE;
+    m_shadowMemory = VK_NULL_HANDLE;
+    if (!CreateShadowTarget() || !CreateFramebuffer()) {
+        std::cerr << "ShadowRenderer: SetResolution(" << resolution
+                  << ") failed to recreate the shadow target" << std::endl;
+    }
     return true;
 }
 
@@ -103,7 +129,7 @@ void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene) {
         // is [0,1] (GLM_FORCE_DEPTH_ZERO_TO_ONE, public on designer_core).
         m_lightViewProj =
             glm::ortho(mn.x, mx.x, mn.y, mx.y, -mx.z, -mn.z) * view;
-        m_texelWorld = std::max(mx.x - mn.x, mx.y - mn.y) / kResolution;
+        m_texelWorld = std::max(mx.x - mn.x, mx.y - mn.y) / m_resolution;
     }
 
     // Always run the pass: a cleared map means "nothing casts" and keeps the
@@ -113,12 +139,17 @@ void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene) {
     VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     rp.renderPass = m_renderPass;
     rp.framebuffer = m_framebuffer;
-    rp.renderArea.extent = {kResolution, kResolution};
+    rp.renderArea.extent = {m_resolution, m_resolution};
     rp.clearValueCount = 1;
     rp.pClearValues = &clear;
     vkCmdBeginRenderPass(cb, &rp, VK_SUBPASS_CONTENTS_INLINE);
 
     if (haveCasters) {
+        VkViewport vp{0.0f, 0.0f, (float)m_resolution, (float)m_resolution,
+                      0.0f, 1.0f};
+        VkRect2D sc{{0, 0}, {m_resolution, m_resolution}};
+        vkCmdSetViewport(cb, 0, 1, &vp);
+        vkCmdSetScissor(cb, 0, 1, &sc);
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
 
         // World section plane as vec4 P with signed dist = dot(P, (wp, 1)):
@@ -156,7 +187,7 @@ bool ShadowRenderer::CreateShadowTarget() {
     VkImageCreateInfo img{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     img.imageType = VK_IMAGE_TYPE_2D;
     img.format = VK_FORMAT_D32_SFLOAT;
-    img.extent = {kResolution, kResolution, 1};
+    img.extent = {m_resolution, m_resolution, 1};
     img.mipLevels = 1;
     img.arrayLayers = 1;
     img.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -192,20 +223,23 @@ bool ShadowRenderer::CreateShadowTarget() {
 
     // Compare sampler (sampler2DShadow): LINEAR gives 2x2 hardware PCF per
     // tap; the 3x3 loop in mesh.frag widens the penumbra. White border =
-    // unshadowed outside the frustum.
-    VkSamplerCreateInfo smp{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    smp.magFilter = VK_FILTER_LINEAR;
-    smp.minFilter = VK_FILTER_LINEAR;
-    smp.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    smp.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    smp.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    smp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    smp.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-    smp.compareEnable = VK_TRUE;
-    smp.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    if (vkCreateSampler(m_device, &smp, nullptr, &m_sampler) != VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to create sampler" << std::endl;
-        return false;
+    // unshadowed outside the frustum. Resolution-independent — created once
+    // and kept across SetResolution recreations.
+    if (!m_sampler) {
+        VkSamplerCreateInfo smp{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        smp.magFilter = VK_FILTER_LINEAR;
+        smp.minFilter = VK_FILTER_LINEAR;
+        smp.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        smp.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        smp.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        smp.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        smp.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        smp.compareEnable = VK_TRUE;
+        smp.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        if (vkCreateSampler(m_device, &smp, nullptr, &m_sampler) != VK_SUCCESS) {
+            std::cerr << "ShadowRenderer: failed to create sampler" << std::endl;
+            return false;
+        }
     }
 
     // One-time UNDEFINED -> SHADER_READ_ONLY transition so the mesh pass can
@@ -337,16 +371,18 @@ bool ShadowRenderer::CreatePipeline() {
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    // Fixed-size target: static viewport/scissor, no dynamic state.
-    VkViewport viewport{0.0f, 0.0f, (float)kResolution, (float)kResolution,
-                        0.0f, 1.0f};
-    VkRect2D scissor{{0, 0}, {kResolution, kResolution}};
+    // Dynamic viewport/scissor: the map size is switchable (SetResolution)
+    // without pipeline recreation.
     VkPipelineViewportStateCreateInfo viewportState{
         VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
     viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
     viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
+    VkDynamicState dynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                       VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dynamicState{
+        VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+    dynamicState.dynamicStateCount = 2;
+    dynamicState.pDynamicStates = dynamicStates;
 
     // No culling: robust for meshes left open by the section clip, and it
     // avoids depending on winding under the light's (un-flipped) projection.
@@ -405,6 +441,7 @@ bool ShadowRenderer::CreatePipeline() {
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = m_pipelineLayout;
     pipelineInfo.renderPass = m_renderPass;
     pipelineInfo.subpass = 0;

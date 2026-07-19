@@ -1344,6 +1344,19 @@ int main(int argc, char **argv) {
     // result changes; cheap no-op otherwise.
     ui::SyncFieldRenderer(g_App);
 
+    // S3 render-quality settings (View > Render Quality / set_render_options
+    // RPC): recreate the GPU targets when they change. Both helpers wait for
+    // idle internally; the mesh renderer's descriptor sets must then re-point
+    // at the recreated views.
+    if (g_ShadowRenderer && g_MeshRenderer &&
+        g_ShadowRenderer->SetResolution((uint32_t)g_App.shadowMapSize)) {
+      g_MeshRenderer->RebindShadowMap(g_ShadowRenderer->ShadowMapView());
+    }
+    if (g_SSAORenderer && g_MeshRenderer &&
+        g_SSAORenderer->SetFullResolution(g_App.ssaoFullRes)) {
+      g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
+    }
+
     // Section view (I3): push the clip plane to the renderers each frame.
     if (g_MeshRenderer)
       g_MeshRenderer->SetClipPlane(g_App.sectionPlane);

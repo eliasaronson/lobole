@@ -245,6 +245,32 @@ void DrawViewMenu(AppState& state) {
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
   ImGui::MenuItem("Shadows", nullptr, &state.showShadows);
   ImGui::MenuItem("Ambient Occlusion", nullptr, &state.showAmbientOcclusion);
+  // S3 quality settings; session state, mirrored by set_render_options.
+  // The main loop recreates the GPU targets when these change.
+  if (ImGui::BeginMenu("Render Quality")) {
+    if (ImGui::BeginMenu("Shadow Map")) {
+      if (ImGui::MenuItem("1024", nullptr, state.shadowMapSize == 1024))
+        state.shadowMapSize = 1024;
+      if (ImGui::MenuItem("2048", nullptr, state.shadowMapSize == 2048))
+        state.shadowMapSize = 2048;
+      ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("SSAO")) {
+      const bool on = state.showAmbientOcclusion;
+      if (ImGui::MenuItem("Off", nullptr, !on))
+        state.showAmbientOcclusion = false;
+      if (ImGui::MenuItem("Half Resolution", nullptr, on && !state.ssaoFullRes)) {
+        state.showAmbientOcclusion = true;
+        state.ssaoFullRes = false;
+      }
+      if (ImGui::MenuItem("Full Resolution", nullptr, on && state.ssaoFullRes)) {
+        state.showAmbientOcclusion = true;
+        state.ssaoFullRes = true;
+      }
+      ImGui::EndMenu();
+    }
+    ImGui::EndMenu();
+  }
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
   ImGui::MenuItem("Viewport Controls", nullptr, &state.showControlsHelp);
   if (state.topoGhostStudyId != 0 &&

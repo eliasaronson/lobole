@@ -531,6 +531,11 @@ struct AppState {
   bool showShadows = true;
   // SSAO (S2) — View > Ambient Occlusion; session state only, like shadows.
   bool showAmbientOcclusion = true;
+  // S3 quality settings (View > Render Quality, set_render_options RPC).
+  // The main loop applies changes: target recreation behind wait-idle +
+  // descriptor rebind.
+  bool ssaoFullRes = false; // full-res AO target instead of half-res
+  int shadowMapSize = 2048; // key-light shadow map texels (1024 | 2048)
   // Section view (I3): a world-space clip plane {xyz=normal, w=dist};
   // fragments past it are discarded. Zero = disabled.
   glm::vec4 sectionPlane = glm::vec4(0.0f);

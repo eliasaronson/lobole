@@ -139,17 +139,28 @@ void main() {
     vec3 prefiltered =
         textureLod(uPrefilter, dirToUV(R), roughness * kMaxReflectionLod).rgb;
     vec2 envBRDF = texture(uBrdfLut, vec2(NdotV, roughness)).rg;
-    vec3 specularIBL = prefiltered * (F * envBRDF.x + envBRDF.y);
+    // Split-sum reconstruction uses F0, NOT the grazing-boosted F: the LUT's
+    // B term already integrates the Fresnel-grazing response, so multiplying
+    // by F double-counted it — rough dark dielectrics (plastic_black) washed
+    // out to near-palette grey from the inflated, albedo-independent env
+    // specular (S3 dark-dielectric fix). F stays correct for the kD split.
+    vec3 specularIBL = prefiltered * (F0 * envBRDF.x + envBRDF.y);
 
-    vec3 ambient = kD * diffuseIBL + specularIBL;
-
-    // SSAO attenuates only the ambient/IBL term — direct light occlusion is
+    // SSAO attenuates only the ambient/IBL terms — direct light occlusion is
     // the shadow map's job. gl_FragCoord * (1/framebufferSize) lands on the
     // matching texel of the (normalized-uv) AO target; the MSAA fragments of
     // one pixel share the single 1x AO value (accepted by design).
+    float ao = 1.0;
     if (fragAOParams.z > 0.5) {
-        ambient *= texture(uAO, gl_FragCoord.xy * fragAOParams.xy).r;
+        ao = texture(uAO, gl_FragCoord.xy * fragAOParams.xy).r;
     }
+    // Specular occlusion (Lagarde/Frostbite): rough surfaces lose ambient
+    // specular in occluded areas faster than smooth ones; identity when
+    // ao == 1, so AO-off behavior is unchanged.
+    float so = clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao,
+                     0.0, 1.0);
+
+    vec3 ambient = ao * kD * diffuseIBL + so * specularIBL;
 
     // Direct analytic lights add crisp key/fill/rim highlights on top of IBL.
     // Dialed back since IBL now supplies the environment fill.

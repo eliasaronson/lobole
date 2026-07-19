@@ -851,6 +851,24 @@ def fit_view() -> dict:
     return _call("fit_view")
 
 
+@mcp.tool(description="Viewport render-quality options; all fields optional, "
+          "returns the resulting state (call with no arguments to just "
+          "read). shadows: key-light shadow map on/off. ssao: 'off'|'half'|"
+          "'full' — ambient occlusion off, half-res (default) or full-res. "
+          "shadow_map: 1024|2048 texels. Useful for A/B-ing renders via "
+          "screenshot. Needs a GUI instance (errors under --headless).")
+def set_render_options(shadows: bool | None = None, ssao: str | None = None,
+                       shadow_map: int | None = None) -> dict:
+    params = {}
+    if shadows is not None:
+        params["shadows"] = shadows
+    if ssao is not None:
+        params["ssao"] = ssao
+    if shadow_map is not None:
+        params["shadow_map"] = shadow_map
+    return _call("set_render_options", **params)
+
+
 @mcp.tool(description="Select a B-Rep face. Preferred: by STABLE element name "
           "(list_elements), e.g. element='2/g4' — survives regeneration. "
           "Legacy: by render mesh id + face index (get_state bodies[].mesh; "

@@ -295,7 +295,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
       // work on an assembly tab too.
-      "view",         "fit_view",         "screenshot"};
+      "view",         "fit_view",         "screenshot",
+      "set_render_options"};
   // UI actions (item_click, viewport_click, …) fall through to QueueUiAction,
   // not HandleSemantic, so don't guard them here — they drive the assembly tab.
   if (!doc && !kNoPartDoc.count(m) && !IsUiAction(m)) {
@@ -515,6 +516,37 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"position", Vec3ToJson(state.camera->GetPosition())},
             {"target", Vec3ToJson(state.camera->GetTarget())},
             {"distance", state.camera->GetDistance()}};
+  }
+  if (m == "set_render_options") {
+    // Viewport render quality (S3): shadows on/off, SSAO off|half|full,
+    // shadow-map size. Session state; the main loop applies target
+    // recreation. With no params this just reads the current state.
+    if (!state.meshRenderer)
+      throw std::runtime_error(
+          "render options need a renderer — unavailable in --headless");
+    if (p.contains("shadows")) state.showShadows = p.at("shadows").get<bool>();
+    if (p.contains("shadow_map")) {
+      const int size = p.at("shadow_map").get<int>();
+      if (size != 1024 && size != 2048)
+        throw std::runtime_error("shadow_map must be 1024 or 2048");
+      state.shadowMapSize = size;
+    }
+    if (p.contains("ssao")) {
+      const std::string q = p.at("ssao").get<std::string>();
+      if (q == "off") {
+        state.showAmbientOcclusion = false;
+      } else if (q == "half" || q == "full") {
+        state.showAmbientOcclusion = true;
+        state.ssaoFullRes = (q == "full");
+      } else {
+        throw std::runtime_error("ssao must be off, half or full");
+      }
+    }
+    return {{"shadows", state.showShadows},
+            {"ssao", !state.showAmbientOcclusion
+                         ? "off"
+                         : (state.ssaoFullRes ? "full" : "half")},
+            {"shadow_map", state.shadowMapSize}};
   }
   if (m == "select_face") {
     if (!state.faceSelector || !state.meshRenderer)

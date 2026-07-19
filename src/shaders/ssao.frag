@@ -71,9 +71,12 @@ void main() {
         float sceneZ = viewPosAt(uv, texture(uDepth, uv).r).z;
         // View space looks down -Z: nearer surfaces have GREATER z, so the
         // sample is occluded when the scene surface is in front of it. The
-        // range check fades contributions from far-away (unrelated) geometry.
+        // range window zeroes anything more than 2 radii away: an occluder
+        // that far in front is a separate surface (a neighboring body's
+        // silhouette), not a crevice wall — the old 1/distance falloff let
+        // those bleed dark arcs onto flat faces behind them (S3 halo fix).
         float rangeCheck =
-            smoothstep(0.0, 1.0, radius / abs(origin.z - sceneZ));
+            1.0 - smoothstep(radius, 2.0 * radius, abs(origin.z - sceneZ));
         occlusion += (sceneZ >= samplePos.z + bias ? 1.0 : 0.0) * rangeCheck;
     }
     outAO = 1.0 - ubo.params.z * (occlusion / 16.0);

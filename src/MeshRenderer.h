@@ -205,6 +205,8 @@ public:
     // Rebinds the AO map after the SSAO targets were recreated on resize.
     // Call behind wait-idle only (the descriptor sets must not be in flight).
     void RebindAOMap(VkImageView aoMap);
+    // Same for the shadow map after ShadowRenderer::SetResolution.
+    void RebindShadowMap(VkImageView shadowMap);
     // View > Ambient Occlusion toggle; off zeroes aoParams.z so the shader
     // skips the lookup (the map may then hold stale contents — harmless).
     void SetAOEnabled(bool enabled) { m_aoEnabled = enabled; }

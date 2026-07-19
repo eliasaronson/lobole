@@ -422,6 +422,23 @@ bool MeshRenderer::GetShadowCasters(std::vector<ShadowCaster>& out,
     return !out.empty();
 }
 
+void MeshRenderer::RebindShadowMap(VkImageView shadowMap) {
+    m_shadowMapView = shadowMap;
+    if (m_descriptorSets.empty()) return;
+    for (size_t i = 0; i < m_descriptorSets.size(); i++) {
+        VkDescriptorImageInfo info{m_shadowSampler, m_shadowMapView,
+                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_descriptorSets[i];
+        write.dstBinding = 4;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.descriptorCount = 1;
+        write.pImageInfo = &info;
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+    }
+}
+
 void MeshRenderer::RebindAOMap(VkImageView aoMap) {
     m_aoMapView = aoMap;
     if (m_descriptorSets.empty()) return;

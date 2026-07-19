@@ -34,6 +34,13 @@ public:
     // for idle; rebind AOView() into MeshRenderer afterwards.
     bool Resize(uint32_t width, uint32_t height);
 
+    // AO target resolution (View > Render Quality / set_render_options RPC):
+    // full-res skips the half-res downscale. Recreates the targets behind
+    // wait-idle when the mode changes; returns true when recreated — the
+    // caller must rebind AOView() like after Resize.
+    bool SetFullResolution(bool fullRes);
+    bool FullResolution() const { return m_fullRes; }
+
     // Section clip plane (world): matches MeshRenderer::SetClipPlane —
     // sectioned-away material must not occlude.
     void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
@@ -89,7 +96,8 @@ private:
 
     // Resolution-dependent targets (Resize recreates).
     uint32_t m_width = 0, m_height = 0;   // full res (prepass)
-    uint32_t m_aoWidth = 0, m_aoHeight = 0; // half res (AO + blur)
+    uint32_t m_aoWidth = 0, m_aoHeight = 0; // AO + blur (half res by default)
+    bool m_fullRes = false; // full-res AO targets (quality setting)
     Target m_prepassDepth;  // D32
     Target m_prepassNormal; // RGBA8, view-space normal
     Target m_aoRaw;         // R8

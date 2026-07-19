@@ -43,12 +43,20 @@ public:
 
     const glm::mat4& LightViewProj() const { return m_lightViewProj; }
     float TexelWorldSize() const { return m_texelWorld; }
-    float TexelUVSize() const { return 1.0f / kResolution; }
+    float TexelUVSize() const { return 1.0f / m_resolution; }
 
-    static constexpr uint32_t kResolution = 2048;
+    // Shadow-map size (View > Render Quality / set_render_options RPC,
+    // 1024 or 2048): recreates the depth target behind wait-idle when it
+    // changes. Returns true when recreated — the caller must rebind the new
+    // ShadowMapView() into the mesh renderer's descriptor sets.
+    bool SetResolution(uint32_t resolution);
+    uint32_t Resolution() const { return m_resolution; }
+
+    static constexpr uint32_t kDefaultResolution = 2048;
 
 private:
     bool CreateShadowTarget();
+    bool CreateFramebuffer();
     bool CreateRenderPass();
     bool CreatePipeline();
     uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
@@ -73,6 +81,7 @@ private:
     glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
     glm::mat4 m_lightViewProj = glm::mat4(1.0f);
     float m_texelWorld = 0.0f; // world size of one shadow-map texel
+    uint32_t m_resolution = kDefaultResolution;
 
     // Scratch reused across frames (avoids per-frame allocations).
     std::vector<ShadowCaster> m_casters;
