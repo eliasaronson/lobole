@@ -4,6 +4,8 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -84,6 +86,24 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
       out.hasRadius = true;
     }
   }
+  return out;
+}
+
+std::optional<Bounds> ElementBounds(const std::vector<Body>& bodies,
+                                    const ElementRef& ref) {
+  std::string kind;
+  const TopoDS_Shape shape = ResolveShape(bodies, ref, kind);
+  if (shape.IsNull())
+    return std::nullopt;
+  Bnd_Box box;
+  BRepBndLib::Add(shape, box);
+  if (box.IsVoid())
+    return std::nullopt;
+  Standard_Real x0, y0, z0, x1, y1, z1;
+  box.Get(x0, y0, z0, x1, y1, z1);
+  Bounds out;
+  out.min = glm::vec3(x0, y0, z0);
+  out.max = glm::vec3(x1, y1, z1);
   return out;
 }
 

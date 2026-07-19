@@ -51,6 +51,16 @@ std::optional<DistanceResult> DistanceDetailed(
     const std::vector<Body>& bodiesB, const ElementRef& b,
     const glm::mat4& xfB);
 
+// Axis-aligned bounding box of one resolved element (face or edge), in the
+// bodies' own (part-local) space — feeds zoom-to-selection. nullopt when the
+// ref no longer resolves.
+struct Bounds {
+  glm::vec3 min{0.0f};
+  glm::vec3 max{0.0f};
+};
+std::optional<Bounds> ElementBounds(const std::vector<Body>& bodies,
+                                    const ElementRef& ref);
+
 // Total cross-section area where the plane (through `origin`, unit `normal`)
 // cuts through all bodies (inspection I3): the sum over bodies of the area of
 // their intersection with the plane. 0 when the plane misses everything;

@@ -8,6 +8,8 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <vector>
 
 using Catch::Matchers::WithinRel;
@@ -133,6 +135,38 @@ TEST_CASE("Transformed distance measures occurrences in world space",
       best = std::min(best, d->distance);
     }
   CHECK_THAT(best, WithinAbs(8.0, 1e-6));
+}
+
+TEST_CASE("Element bounds of a box's faces", "[measure]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2.0, 3.0,
+                                              4.0));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const Body& body = doc.GetBodies()[0];
+  glm::vec3 bmin, bmax;
+  body.shape.GetBoundingBox(bmin, bmax);
+
+  glm::vec3 unionMin(std::numeric_limits<float>::max());
+  glm::vec3 unionMax(-std::numeric_limits<float>::max());
+  for (const std::string& name : FaceNames(body)) {
+    auto b = Measure::ElementBounds(doc.GetBodies(), ElementRef{id, name});
+    REQUIRE(b.has_value());
+    // A box face is axis-aligned: exactly one degenerate axis.
+    int flat = 0;
+    for (int a = 0; a < 3; a++)
+      if (std::abs(b->max[a] - b->min[a]) < 1e-6)
+        flat++;
+    CHECK(flat == 1);
+    unionMin = glm::min(unionMin, b->min);
+    unionMax = glm::max(unionMax, b->max);
+  }
+  // The six faces together span exactly the body's own bounding box.
+  for (int a = 0; a < 3; a++) {
+    CHECK_THAT(unionMin[a], WithinAbs(bmin[a], 1e-3));
+    CHECK_THAT(unionMax[a], WithinAbs(bmax[a], 1e-3));
+  }
+  CHECK_FALSE(Measure::ElementBounds(doc.GetBodies(), ElementRef{id, "nope"})
+                  .has_value());
 }
 
 TEST_CASE("Measure of a dangling ref returns nullopt", "[measure]") {
