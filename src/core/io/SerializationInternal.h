@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 35;  // v35: linked sketch copies (v34: regions)
+inline constexpr int kVersion = 36;  // v36: rib (v35: linked sketch copies)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

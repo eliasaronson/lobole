@@ -35,6 +35,7 @@
 #include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/RibFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
@@ -441,6 +442,29 @@ void CreateFillet(AppState& state) {
 
 void CreateChamfer(AppState& state) {
   CreateEdgeBlend(state, EdgeBlendOp::Chamfer);
+}
+
+void CreateRib(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  // The profile: the selected sketch if it has an open chain, else the most
+  // recent sketch that does.
+  const auto openSketch = [&](Feature* f) -> SketchFeature* {
+    auto* sk = dynamic_cast<SketchFeature*>(f);
+    if (sk == nullptr)
+      return nullptr;
+    return sketch::BuildOpenPathWire(sk->plane, sk->entities).IsNull() ? nullptr
+                                                                       : sk;
+  };
+  SketchFeature* profile = openSketch(SelectedFeature(state));
+  for (size_t i = state.document->FeatureCount(); profile == nullptr && i > 0;
+       i--)
+    profile = openSketch(state.document->GetFeature(i - 1));
+  if (profile == nullptr)
+    return; // no open profile anywhere: nothing to rib (menu gates this)
+  BeginPreviewFeature(state, std::make_unique<RibFeature>(
+                                 NextName(state, "Rib"), profile->GetId(),
+                                 1.0));
 }
 
 void StartNewSketch(AppState& state) {

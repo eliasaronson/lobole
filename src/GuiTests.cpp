@@ -676,6 +676,33 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
   };
 
+  t = IM_REGISTER_TEST(engine, "rib", "menu_rib_previews_and_adds_volume");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // Box + an open-line profile above its top (the test_rib.cpp setup).
+    Doc()->AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0), 10.0,
+                                                   10.0, 10.0));
+    auto sk = std::make_unique<SketchFeature>(
+        "P", SketchPlane(glm::vec3(5, 5, 15), glm::vec3(0, 0, -1),
+                         glm::vec3(1, 0, 0)));
+    sk->AddEntity(sketch::Line{{-3, 0}, {3, 0}});
+    Doc()->AddFeature(std::move(sk));
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    const double v0 = Doc()->GetBodies()[0].shape.Volume();
+
+    ctx->MenuClick("Create/Rib");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    IM_CHECK(ui::ResolvePendingFeature(*s_App)->TypeName() == "Rib");
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)3);
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() > v0 + 1.0);
+  };
+
   t = IM_REGISTER_TEST(engine, "view", "planes_autohide_with_geometry");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

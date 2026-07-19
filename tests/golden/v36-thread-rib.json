@@ -1,0 +1,16 @@
+{
+  "format": "designer-document",
+  "version": 36,
+  "features": [
+    {"type": "Box", "name": "Base", "id": 1, "position": [0, 0, 0],
+     "width": 10, "height": 10, "depth": 10},
+    {"type": "Sketch", "name": "RibProfile", "id": 2, "next_entity_id": 2,
+     "plane": {"origin": [5, 5, 15], "normal": [0, 0, -1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [-3, 0], "b": [3, 0]}
+     ],
+     "constraints": []},
+    {"type": "Rib", "name": "Rib", "id": 3, "sketch_id": 2,
+     "thickness": 1.0}
+  ]
+}

@@ -151,6 +151,8 @@ void DrawCreateMenu(AppState& state) {
     CreateFillet(state);
   if (ImGui::MenuItem("Chamfer", nullptr, false, idle && hasBody))
     CreateChamfer(state);
+  if (ImGui::MenuItem("Rib", nullptr, false, idle && hasBody))
+    CreateRib(state); // needs an open sketch profile too; no-op without one
   ImGui::Separator();
 
   SketchEditState& edit = state.sketchEdit;

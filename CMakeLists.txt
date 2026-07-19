@@ -205,6 +205,7 @@ set(core_sources
     src/core/features/RevolveFeature.cpp
     src/core/features/ShellFeature.cpp
     src/core/features/LoftFeature.cpp
+    src/core/features/RibFeature.cpp
     src/core/features/SweepFeature.cpp
     src/core/features/HoleFeature.cpp
     src/core/features/DraftFeature.cpp

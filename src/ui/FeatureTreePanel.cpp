@@ -37,6 +37,7 @@ const char* FeatureIcon(const std::string& type) {
   if (type == "DatumAxis") return ICON_FA_ARROWS_UP_DOWN;
   if (type == "Fillet") return ICON_FA_BORDER_TOP_LEFT;
   if (type == "Chamfer") return ICON_FA_CROP_SIMPLE;
+  if (type == "Rib") return ICON_FA_BARS_STAGGERED;
   if (type == "Hole") return ICON_FA_CIRCLE_DOT;
   if (type == "Shell") return ICON_FA_BOX_OPEN;
   if (type == "Draft") return ICON_FA_ANGLES_RIGHT;

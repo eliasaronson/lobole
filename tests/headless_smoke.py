@@ -196,6 +196,25 @@ def main():
         expect(not r["ok"] and "not available" in r["error"],
                "render_still reports unavailable")
 
+        # Rib (v36): an open profile above a box grows a stiffener down to it
+        # — the generic add_feature path carries the new type.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Base", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 10})
+        rib_sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "RibProfile",
+            "plane": {"origin": [5, 5, 15], "normal": [0, 0, -1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [-3, 0], "b": [3, 0]}]})
+        d.call("add_feature", feature={
+            "type": "Rib", "name": "Stiffener", "sketch_id": rib_sk["id"],
+            "thickness": 1.0})
+        state = d.call("get_state")
+        expect(not any("error" in f for f in state["features"]),
+               "rib regenerated clean")
+        expect(state["bodies"][0]["volume"] > 1000.0 + 1.0, "rib added volume")
+
         # Draft (M8): taper a box's side faces; volume drops
         d.call("new_project")
         d.call("add_feature", feature={

@@ -13,6 +13,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/SweepFeature.h"
+#include "core/features/RibFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
@@ -702,6 +703,13 @@ void SlotPickClicked(AppState& state, const SelectionItem& item) {
       changed = true;
     }
     break;
+  case PickSlot::RibBody:
+    if (auto* rb = dynamic_cast<RibFeature*>(f);
+        rb != nullptr && item.kind == SelectionItem::Kind::Body) {
+      rb->bodyId = item.id;
+      changed = true;
+    }
+    break;
   case PickSlot::ShellOpenFaces:
     if (auto* sh = dynamic_cast<ShellFeature*>(f);
         sh != nullptr && item.kind == SelectionItem::Kind::Face) {
@@ -996,6 +1004,15 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ImGui::BulletText("%s", src ? src->GetName().c_str() : "(missing)");
     }
     ImGui::TextDisabled("Add sections via add_feature / the RPC");
+  } else if (auto* rb = dynamic_cast<RibFeature*>(&feature)) {
+    ExprDim(state, feature, index, commit, "Thickness", rb->thicknessExpr,
+            rb->thickness);
+    HandleEdit(state, feature, ImGui::Checkbox("Flip", &rb->flipDirection),
+               index, commit);
+    PickSlotRow(state, feature, PickSlot::RibBody, "Body",
+                rb->bodyId == 0 ? "(nearest)" : BodyRefLabel(state, rb->bodyId),
+                SlotKind(SelectionItem::Kind::Body), /*multi=*/false,
+                "Pick the body the rib attaches to");
   } else if (auto* sh = dynamic_cast<ShellFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Thickness", sh->thicknessExpr,
             sh->thickness);

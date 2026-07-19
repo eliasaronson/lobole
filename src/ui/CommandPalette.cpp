@@ -60,6 +60,8 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
       [](AppState& s) { CreateFillet(s); });
   add("Create: Chamfer", nullptr, idle && hasBody,
       [](AppState& s) { CreateChamfer(s); });
+  add("Create: Rib", nullptr, idle && hasBody,
+      [](AppState& s) { CreateRib(s); });
 
   add("Tool: Measure", nullptr, part || state.assembly != nullptr,
       [](AppState& s) { s.measure = MeasureState{}; s.measure.active = true; });

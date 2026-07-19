@@ -14,6 +14,7 @@
 #include "core/features/RevolveFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/RibFeature.h"
 #include "core/features/SweepFeature.h"
 
 #include <nlohmann/json.hpp>
@@ -515,6 +516,15 @@ json FeatureToJson(const Feature& feature) {
     j["profile_id"] = sw->profileSketchId;
     j["path_id"] = sw->pathSketchId;
     j["mode"] = ExtrudeModeToString(sw->mode);
+  } else if (auto* rb = dynamic_cast<const RibFeature*>(&feature)) {
+    j["sketch_id"] = rb->sketchId;
+    j["thickness"] = rb->thickness;
+    if (!rb->thicknessExpr.empty())
+      j["thickness_expr"] = rb->thicknessExpr;
+    if (rb->flipDirection)
+      j["flip"] = true;
+    if (rb->bodyId != 0)
+      j["body_id"] = rb->bodyId;
   } else if (auto* ho = dynamic_cast<const HoleFeature*>(&feature)) {
     j["sketch_id"] = ho->sketchId;
     j["hole_kind"] = ho->kind == HoleKind::Counterbore ? "counterbore"
@@ -804,6 +814,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, j.at("profile_id").get<uint64_t>(),
         j.at("path_id").get<uint64_t>(),
         ExtrudeModeFromString(j.value("mode", "new_body")));
+  } else if (type == "Rib") { // v36
+    auto rb = std::make_unique<RibFeature>(
+        name, j.at("sketch_id").get<uint64_t>(), j.value("thickness", 1.0),
+        j.value("flip", false), j.value("body_id", uint64_t{0}));
+    rb->thicknessExpr = j.value("thickness_expr", std::string{});
+    out = std::move(rb);
   } else if (type == "Hole") { // v21
     const std::string k = j.value("hole_kind", "simple");
     HoleKind kind = k == "counterbore"  ? HoleKind::Counterbore

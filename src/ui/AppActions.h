@@ -377,6 +377,7 @@ void CreatePattern(AppState& state);
 // toggle B-Rep edges on the pending feature (M7).
 void CreateFillet(AppState& state);
 void CreateChamfer(AppState& state);
+void CreateRib(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);
 
