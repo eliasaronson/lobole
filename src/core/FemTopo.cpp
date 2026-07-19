@@ -120,6 +120,60 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
       emit(ac, bd, bc);
     }
   }
+
+  // ---- Boundary caps ------------------------------------------------------
+  // The marching-tet interface above exists only where the density crosses
+  // the threshold INSIDE the volume. Solid regions touching the domain
+  // boundary have no crossing there, so without caps they render (and STL-
+  // export) as OPEN shells — a wall-hugging plate becomes a one-sided
+  // membrane. March the boundary triangles too, emitting the solid
+  // sub-region of each facet. Cap rim edges use the same nodal interpolation
+  // as the interior surface, so the two meet watertight. Winding follows the
+  // facet's stored orientation (outward for both mesh sources — the same
+  // convention the pressure loads rely on).
+  auto emitCap = [&](const glm::vec3& a, const glm::vec3& b,
+                     const glm::vec3& c) {
+    glm::vec3 n = glm::cross(b - a, c - a);
+    const float len = glm::length(n);
+    if (len < 1e-12f) return;
+    n /= len;
+    const uint32_t base = static_cast<uint32_t>(positions.size());
+    positions.push_back(a);
+    positions.push_back(b);
+    positions.push_back(c);
+    normals.push_back(n);
+    normals.push_back(n);
+    normals.push_back(n);
+    indices.push_back(base);
+    indices.push_back(base + 1);
+    indices.push_back(base + 2);
+  };
+  for (const FemMesh::BoundaryTri& bt : mesh.boundary) {
+    const int c0 = bt.nodes[0], c1 = bt.nodes[1], c2 = bt.nodes[2];
+    const int nin = (nd[c0] >= t) + (nd[c1] >= t) + (nd[c2] >= t);
+    if (nin == 0) continue;
+    auto P = [&](int n) { return glm::vec3(mesh.nodes[n]); };
+    if (nin == 3) {
+      emitCap(P(c0), P(c1), P(c2));
+      continue;
+    }
+    // Rotate to a canonical corner so the sub-polygon keeps the facet's
+    // cyclic order (and so its outward orientation).
+    const int cyc[3] = {c0, c1, c2};
+    for (int k = 0; k < 3; ++k) {
+      const int i0 = cyc[k], i1 = cyc[(k + 1) % 3], i2 = cyc[(k + 2) % 3];
+      const bool b0 = nd[i0] >= t, b1 = nd[i1] >= t, b2 = nd[i2] >= t;
+      if (nin == 1 && b0 && !b1 && !b2) {  // one solid corner
+        emitCap(P(i0), interp(i0, i1), interp(i0, i2));
+        break;
+      }
+      if (nin == 2 && b0 && b1 && !b2) {  // one void corner -> quad
+        emitCap(P(i0), P(i1), interp(i1, i2));
+        emitCap(P(i0), interp(i1, i2), interp(i0, i2));
+        break;
+      }
+    }
+  }
 }
 
 double AutoIsoThreshold(const FemMesh& mesh, const std::vector<double>& density,

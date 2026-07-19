@@ -658,6 +658,82 @@ std::vector<double> RampDensityX(const fem::FemMesh& m, double Lx) {
 }
 }  // namespace
 
+namespace {
+
+// Edge-multiplicity check on a welded triangle soup: a CLOSED surface has
+// every edge shared by exactly two triangles.
+bool SurfaceIsClosed(const std::vector<glm::vec3>& pos,
+                     const std::vector<uint32_t>& idx) {
+  auto key = [](const glm::vec3& p) {
+    auto q = [](float v) { return llround(static_cast<double>(v) * 1e5); };
+    return std::make_tuple(q(p.x), q(p.y), q(p.z));
+  };
+  std::map<std::tuple<long long, long long, long long>, uint32_t> weld;
+  std::vector<uint32_t> remap(pos.size());
+  for (size_t i = 0; i < pos.size(); ++i) {
+    auto k = key(pos[i]);
+    auto it = weld.find(k);
+    if (it == weld.end()) {
+      weld[k] = static_cast<uint32_t>(weld.size());
+      remap[i] = static_cast<uint32_t>(weld.size() - 1);
+    } else {
+      remap[i] = it->second;
+    }
+  }
+  std::map<std::pair<uint32_t, uint32_t>, int> edges;
+  for (size_t k = 0; k + 2 < idx.size(); k += 3) {
+    const uint32_t v[3] = {remap[idx[k]], remap[idx[k + 1]], remap[idx[k + 2]]};
+    if (v[0] == v[1] || v[1] == v[2] || v[0] == v[2]) continue;  // degenerate
+    for (int e = 0; e < 3; ++e) {
+      const uint32_t a = v[e], b = v[(e + 1) % 3];
+      edges[{std::min(a, b), std::max(a, b)}]++;
+    }
+  }
+  for (const auto& [e, count] : edges)
+    if (count != 2) return false;
+  return !edges.empty();
+}
+
+}  // namespace
+
+TEST_CASE("Iso-surface is closed — capped at the domain boundary",
+          "[topopt][iso]") {
+  // A solid region touching the domain boundary must render as a CLOSED
+  // solid, not an open shell (the boundary-cap half of the extraction; the
+  // marching-tet interface alone leaves every domain face open).
+  fem::FemMesh mesh = GenerateBoxMesh(4, 3, 3, 40, 30, 30);
+
+  SECTION("uniform solid: the surface is the closed domain boundary") {
+    std::vector<double> density(mesh.tets.size(), 1.0);
+    std::vector<glm::vec3> pos, nrm;
+    std::vector<uint32_t> idx;
+    fem::ExtractIsoSurface(mesh, density, 0.5, pos, nrm, idx);
+    REQUIRE_FALSE(pos.empty());
+    CHECK(SurfaceIsClosed(pos, idx));
+    // Outward normals: every facet's normal points away from the box center.
+    const glm::vec3 center(20.0f, 15.0f, 15.0f);
+    for (size_t k = 0; k + 2 < idx.size(); k += 3) {
+      const glm::vec3 ctr =
+          (pos[idx[k]] + pos[idx[k + 1]] + pos[idx[k + 2]]) / 3.0f;
+      CHECK(glm::dot(nrm[idx[k]], ctr - center) > 0.0f);
+    }
+  }
+
+  SECTION("half-solid field: interface + caps close each other") {
+    std::vector<double> density(mesh.tets.size());
+    for (size_t e = 0; e < mesh.tets.size(); ++e) {
+      glm::dvec3 c(0.0);
+      for (int i = 0; i < 4; ++i) c += mesh.nodes[mesh.tets[e][i]];
+      density[e] = (c.x / 4.0) < 20.0 ? 1.0 : 0.0;
+    }
+    std::vector<glm::vec3> pos, nrm;
+    std::vector<uint32_t> idx;
+    fem::ExtractIsoSurface(mesh, density, 0.5, pos, nrm, idx);
+    REQUIRE_FALSE(pos.empty());
+    CHECK(SurfaceIsClosed(pos, idx));
+  }
+}
+
 TEST_CASE("AutoIsoThreshold volume-matches the target fraction", "[topopt][iso]") {
   const double Lx = 80;
   fem::FemMesh mesh = GenerateBoxMesh(8, 4, 4, Lx, 40, 40);
@@ -692,18 +768,39 @@ TEST_CASE("ExtractIsoSurface produces an oriented surface at a crossing",
   }
   for (const glm::vec3& n : nrm) CHECK_THAT(glm::length(n), WithinAbs(1.0f, 1e-4f));
   // The ramp increases with x, so the solid (density>=t) is the +x half and
-  // the surface faces roughly -x (outward, toward the void). Average normal.x < 0.
+  // the INTERFACE faces roughly -x (outward, toward the void). Boundary caps
+  // (which close the solid against the domain faces) point every which way,
+  // so average only facets strictly inside the domain.
   glm::vec3 avg(0);
-  for (const glm::vec3& n : nrm) avg += n;
-  avg /= float(nrm.size());
+  int nInterior = 0;
+  auto onBoundary = [&](const glm::vec3& c) {
+    const float e = 1e-3f;
+    return c.x < e || c.x > Lx - e || c.y < e || c.y > Ly - e || c.z < e ||
+           c.z > Lz - e;
+  };
+  for (size_t k = 0; k + 2 < idx.size(); k += 3) {
+    const glm::vec3 c = (pos[idx[k]] + pos[idx[k + 1]] + pos[idx[k + 2]]) / 3.0f;
+    if (onBoundary(c)) continue;
+    avg += nrm[idx[k]];
+    ++nInterior;
+  }
+  REQUIRE(nInterior > 0);
+  avg /= float(nInterior);
   CHECK(avg.x < 0.0f);
 
-  // A uniform field above the threshold has no crossing -> empty surface.
+  // A uniform field ABOVE the threshold is everywhere-solid: since the
+  // boundary caps landed, that extracts the closed domain boundary (it used
+  // to be empty — the open-shell era). A field BELOW the threshold is empty.
   std::vector<glm::vec3> p2, n2;
   std::vector<uint32_t> i2;
   fem::ExtractIsoSurface(mesh, std::vector<double>(mesh.tets.size(), 0.9), 0.5,
                          p2, n2, i2);
-  CHECK(i2.empty());
+  CHECK_FALSE(i2.empty());
+  std::vector<glm::vec3> p3, n3;
+  std::vector<uint32_t> i3;
+  fem::ExtractIsoSurface(mesh, std::vector<double>(mesh.tets.size(), 0.1), 0.5,
+                         p3, n3, i3);
+  CHECK(i3.empty());
 }
 
 TEST_CASE("ExportTopoStl writes a well-formed binary STL", "[topopt][iso]") {
@@ -730,9 +827,14 @@ TEST_CASE("ExportTopoStl writes a well-formed binary STL", "[topopt][iso]") {
   const auto size = fs::file_size(path);
   CHECK(size == 84u + std::size_t(nTri) * 50u);
 
-  // An empty surface (uniform field) is an export error, not an empty file.
+  // An all-solid field now exports the closed domain block (boundary caps);
+  // a truly EMPTY surface — everything below threshold — is an export error,
+  // not an empty file.
+  std::string errSolid;
+  CHECK(fem::ExportTopoStl(mesh, std::vector<double>(mesh.tets.size(), 0.9),
+                           0.5, 3, path.string(), &errSolid));
   std::string err2;
-  CHECK_FALSE(fem::ExportTopoStl(mesh, std::vector<double>(mesh.tets.size(), 0.9),
+  CHECK_FALSE(fem::ExportTopoStl(mesh, std::vector<double>(mesh.tets.size(), 0.1),
                                  0.5, 3, path.string(), &err2));
   fs::remove(path);
 }
