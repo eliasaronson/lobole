@@ -378,6 +378,7 @@ void DrawUI(AppState& state) {
       }
     }
     AppendOriginGizmo(overlay); // world origin + axes: parts and assemblies
+    AppendThreadOverlays(state, overlay); // cosmetic threads (part tabs)
     BuildMateToolOverlay(state, overlay); // A3 mate connector triads (assembly)
 
     // The occurrence drag gizmo goes to its own no-depth channel so its handles

@@ -11,6 +11,11 @@
      ],
      "constraints": []},
     {"type": "Rib", "name": "Rib", "id": 3, "sketch_id": 2,
-     "thickness": 1.0}
+     "thickness": 1.0},
+    {"type": "Cylinder", "name": "Boss", "id": 4, "center": [30, 0, 0],
+     "direction": [0, 0, 1], "radius": 4.0, "height": 20.0},
+    {"type": "Thread", "name": "M8", "id": 5,
+     "face": {"feature_id": 4, "element": "4/face0"},
+     "designation": "M8", "pitch": 1.25, "length": 8.0}
   ]
 }

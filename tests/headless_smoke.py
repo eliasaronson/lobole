@@ -215,6 +215,28 @@ def main():
                "rib regenerated clean")
         expect(state["bodies"][0]["volume"] > 1000.0 + 1.0, "rib added volume")
 
+        # Cosmetic thread (v36): annotates a cylindrical face, geometry
+        # untouched.
+        cyl = d.call("add_feature", feature={
+            "type": "Cylinder", "name": "Boss", "center": [30, 0, 0],
+            "direction": [0, 0, 1], "radius": 4.0, "height": 20.0})
+        els = next(b for b in d.call("list_elements")["bodies"]
+                   if b["created_by"] == cyl["id"])
+        boss_before = next(b for b in d.call("get_state")["bodies"]
+                           if abs(b["volume"] - math.pi * 16 * 20) < 1e-3)
+        d.call("add_feature", feature={
+            "type": "Thread", "name": "M8", "designation": "M8",
+            "pitch": 1.25,
+            "face": {"feature_id": cyl["id"],
+                     "element": els["faces"][0]["name"]}})
+        state = d.call("get_state")
+        expect(not any("error" in f for f in state["features"]),
+               "thread regenerated clean")
+        boss_after = next(b for b in state["bodies"]
+                          if abs(b["volume"] - math.pi * 16 * 20) < 1e-3)
+        expect(abs(boss_after["volume"] - boss_before["volume"]) < 1e-9,
+               "cosmetic thread left the volume untouched")
+
         # Draft (M8): taper a box's side faces; volume drops
         d.call("new_project")
         d.call("add_feature", feature={

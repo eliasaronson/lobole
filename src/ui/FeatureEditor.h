@@ -27,6 +27,7 @@ enum class PickSlot : int {
   ExtrudeRegions,   // U2: sketch regions, multi
   RevolveRegions,   // U2: sketch regions, multi
   RibBody,          // Body (0 = nearest overlapping)
+  ThreadFace,       // a cylindrical Face
 };
 
 // The selection pipeline routes a resolved pick to the armed slot here:

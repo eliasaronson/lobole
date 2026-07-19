@@ -378,6 +378,7 @@ void CreatePattern(AppState& state);
 void CreateFillet(AppState& state);
 void CreateChamfer(AppState& state);
 void CreateRib(AppState& state);
+void CreateThread(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);
 
@@ -425,6 +426,10 @@ std::vector<std::pair<uint64_t, std::string>> BodyProducers(
 // is brightened. Visible while picking a plane, or when showPlanes is on
 // (datums are user reference geometry, so they don't auto-hide behind bodies).
 void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads);
+// Cosmetic thread overlays (M8 thread): dashed thread-depth circles at both
+// ends of each threaded span + dashed crest lines — the drafting convention,
+// drawn from the session overlay each ThreadFeature computes at regen.
+void AppendThreadOverlays(AppState& state, std::vector<LineVertex3D>& lines);
 
 // Appends a line segment for every DatumAxisFeature (same visibility rule as
 // the datum planes), tinted distinctly; selected/pending is brightened.

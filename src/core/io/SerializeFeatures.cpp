@@ -16,6 +16,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/SweepFeature.h"
+#include "core/features/ThreadFeature.h"
 
 #include <nlohmann/json.hpp>
 
@@ -525,6 +526,19 @@ json FeatureToJson(const Feature& feature) {
       j["flip"] = true;
     if (rb->bodyId != 0)
       j["body_id"] = rb->bodyId;
+  } else if (auto* th = dynamic_cast<const ThreadFeature*>(&feature)) {
+    j["face"] = {{"feature_id", th->face.featureId},
+                 {"element", th->face.name}};
+    j["designation"] = th->designation;
+    j["pitch"] = th->pitch;
+    if (!th->threadClass.empty())
+      j["thread_class"] = th->threadClass;
+    if (th->length > 0.0)
+      j["length"] = th->length;
+    if (!th->lengthExpr.empty())
+      j["length_expr"] = th->lengthExpr;
+    if (th->modeled)
+      j["modeled"] = true;
   } else if (auto* ho = dynamic_cast<const HoleFeature*>(&feature)) {
     j["sketch_id"] = ho->sketchId;
     j["hole_kind"] = ho->kind == HoleKind::Counterbore ? "counterbore"
@@ -820,6 +834,18 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.value("flip", false), j.value("body_id", uint64_t{0}));
     rb->thicknessExpr = j.value("thickness_expr", std::string{});
     out = std::move(rb);
+  } else if (type == "Thread") { // v36
+    const json& fj = j.at("face");
+    auto th = std::make_unique<ThreadFeature>(
+        name,
+        ElementRef{fj.at("feature_id").get<uint64_t>(),
+                   fj.at("element").get<std::string>()},
+        j.value("designation", std::string{}), j.value("pitch", 1.25));
+    th->threadClass = j.value("thread_class", std::string{});
+    th->length = j.value("length", 0.0);
+    th->lengthExpr = j.value("length_expr", std::string{});
+    th->modeled = j.value("modeled", false);
+    out = std::move(th);
   } else if (type == "Hole") { // v21
     const std::string k = j.value("hole_kind", "simple");
     HoleKind kind = k == "counterbore"  ? HoleKind::Counterbore

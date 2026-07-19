@@ -178,6 +178,7 @@ set(core_sources
     src/core/io/Checkpoints.cpp
     src/core/io/GitVault.cpp
     src/core/Measure.cpp
+    src/core/ThreadStandards.cpp
     src/core/MassProps.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
@@ -206,6 +207,7 @@ set(core_sources
     src/core/features/ShellFeature.cpp
     src/core/features/LoftFeature.cpp
     src/core/features/RibFeature.cpp
+    src/core/features/ThreadFeature.cpp
     src/core/features/SweepFeature.cpp
     src/core/features/HoleFeature.cpp
     src/core/features/DraftFeature.cpp

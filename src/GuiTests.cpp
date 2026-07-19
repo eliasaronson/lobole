@@ -8,6 +8,7 @@
 #include "core/Occurrence.h"
 #include "core/Feature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/ThreadFeature.h"
 #include "core/Measure.h"
 #include "core/io/Serialization.h"
 #include "core/features/SketchFeature.h"
@@ -701,6 +702,45 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)3);
     IM_CHECK(Doc()->GetBodies()[0].shape.Volume() > v0 + 1.0);
+  };
+
+  t = IM_REGISTER_TEST(engine, "thread", "face_pick_fills_the_slot");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Boss", glm::vec3(0), glm::vec3(0, 0, 1), 4.0, 20.0));
+    ctx->Yield();
+
+    ctx->MenuClick("Create/Thread");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    IM_CHECK(s_App->slotPick.Active()); // the face slot armed itself
+
+    // Click the boss's camera-facing flank: the slot routes the face pick.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0, 0, 10));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0, 0, 10) +
+                               glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) *
+                                   40.0f);
+    ctx->Yield(2);
+    const glm::vec3 flank =
+        glm::normalize(glm::vec3(1, 1, 0)) * 4.0f + glm::vec3(0, 0, 10);
+    ctx->MouseMoveToPos(WorldToWindow(flank));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+
+    auto* th =
+        dynamic_cast<ThreadFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(th != nullptr);
+    IM_CHECK(!th->face.name.empty());
+    IM_CHECK(th->GetError().empty()); // resolved + cylindrical + M8 fits r=4
+    IM_CHECK(th->overlay.valid);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
   };
 
   t = IM_REGISTER_TEST(engine, "view", "planes_autohide_with_geometry");

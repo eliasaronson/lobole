@@ -13,7 +13,9 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/SweepFeature.h"
+#include "core/ThreadStandards.h"
 #include "core/features/RibFeature.h"
+#include "core/features/ThreadFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
@@ -710,6 +712,13 @@ void SlotPickClicked(AppState& state, const SelectionItem& item) {
       changed = true;
     }
     break;
+  case PickSlot::ThreadFace:
+    if (auto* th = dynamic_cast<ThreadFeature*>(f);
+        th != nullptr && item.kind == SelectionItem::Kind::Face) {
+      th->face = item.element;
+      changed = true;
+    }
+    break;
   case PickSlot::ShellOpenFaces:
     if (auto* sh = dynamic_cast<ShellFeature*>(f);
         sh != nullptr && item.kind == SelectionItem::Kind::Face) {
@@ -1004,6 +1013,49 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ImGui::BulletText("%s", src ? src->GetName().c_str() : "(missing)");
     }
     ImGui::TextDisabled("Add sections via add_feature / the RPC");
+  } else if (auto* th = dynamic_cast<ThreadFeature*>(&feature)) {
+    // Designation combo: the ISO series + Custom (manual pitch).
+    const auto& series = threads::All();
+    const bool known = threads::Lookup(th->designation).has_value();
+    LeftLabel("Thread");
+    if (ImGui::BeginCombo("##Thread",
+                          known ? th->designation.c_str() : "Custom")) {
+      for (const auto& s : series) {
+        if (ImGui::Selectable(s.designation.c_str(),
+                              th->designation == s.designation)) {
+          nlohmann::json before = DocumentIO::FeatureToJson(*th);
+          th->designation = s.designation;
+          th->pitch = s.pitch;
+          CommitDiscrete(state, feature, before, index, commit);
+        }
+      }
+      if (ImGui::Selectable("Custom", !known)) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*th);
+        th->designation = "custom";
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+      ImGui::EndCombo();
+    }
+    if (known) {
+      LeftLabel("Pitch");
+      ImGui::Text("%.3g (from table)", th->pitch);
+    } else {
+      HandleEdit(state, feature, DragDim("Pitch", &th->pitch), index, commit);
+    }
+    {
+      LeftLabel("Length");
+      static const double lmin = 0.0, lmax = 1e6;
+      HandleEdit(state, feature,
+                 ImGui::DragScalar("##Length", ImGuiDataType_Double,
+                                   &th->length, 0.05f, &lmin, &lmax,
+                                   th->length <= 0.0 ? "full face" : "%.3f",
+                                   ImGuiSliderFlags_AlwaysClamp),
+                 index, commit);
+    }
+    PickSlotRow(state, feature, PickSlot::ThreadFace, "Face",
+                th->face.name.empty() ? "" : th->face.name,
+                SlotKind(SelectionItem::Kind::Face), /*multi=*/false,
+                "Pick the cylindrical face to thread");
   } else if (auto* rb = dynamic_cast<RibFeature*>(&feature)) {
     ExprDim(state, feature, index, commit, "Thickness", rb->thicknessExpr,
             rb->thickness);

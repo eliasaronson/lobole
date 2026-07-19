@@ -36,7 +36,9 @@
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/RibFeature.h"
+#include "core/features/ThreadFeature.h"
 #include "core/sketch/SketchProfile.h"
+#include "ui/FeatureEditor.h" // PickSlot (thread face slot)
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
 
@@ -442,6 +444,62 @@ void CreateFillet(AppState& state) {
 
 void CreateChamfer(AppState& state) {
   CreateEdgeBlend(state, EdgeBlendOp::Chamfer);
+}
+
+void CreateThread(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state,
+                      std::make_unique<ThreadFeature>(
+                          NextName(state, "Thread"), ElementRef{}, "M8", 1.25));
+  // Arm the face slot right away so the first viewport click fills it.
+  state.slotPick = {state.pendingFeatureId,
+                    static_cast<int>(PickSlot::ThreadFace),
+                    1u << static_cast<int>(SelectionItem::Kind::Face),
+                    /*multi=*/false, "Pick the cylindrical face to thread"};
+}
+
+void AppendThreadOverlays(AppState& state, std::vector<LineVertex3D>& lines) {
+  if (!state.document)
+    return;
+  const glm::vec3 col(0.82f, 0.74f, 0.45f); // muted brass, drafting-thin
+  for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+    auto* th = dynamic_cast<ThreadFeature*>(state.document->GetFeature(i));
+    if (th == nullptr || !th->overlay.valid || th->IsSuppressed())
+      continue;
+    const auto& ov = th->overlay;
+    const glm::vec3 ref =
+        std::abs(ov.dir.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+    const glm::vec3 b1 = glm::normalize(glm::cross(ov.dir, ref));
+    const glm::vec3 b2 = glm::cross(ov.dir, b1);
+    // Dashed thread-depth circle at each end of the span: 36 segments,
+    // two drawn + one skipped.
+    for (const float v : {ov.v0, ov.v1}) {
+      const glm::vec3 c = ov.origin + ov.dir * v;
+      for (int s = 0; s < 36; s++) {
+        if (s % 3 == 2)
+          continue;
+        const float a0 = (float)s / 36.0f * glm::two_pi<float>();
+        const float a1 = (float)(s + 1) / 36.0f * glm::two_pi<float>();
+        lines.push_back(LineVertex(
+            c + (std::cos(a0) * b1 + std::sin(a0) * b2) * ov.radius, col));
+        lines.push_back(LineVertex(
+            c + (std::cos(a1) * b1 + std::sin(a1) * b2) * ov.radius, col));
+      }
+    }
+    // Two dashed crest lines along the span (±b1), thread-depth radius.
+    const float span = ov.v1 - ov.v0;
+    const int dashes = std::max(2, (int)(span / (1.5f * 1.0f)));
+    for (const float side : {1.0f, -1.0f}) {
+      const glm::vec3 off = b1 * (side * ov.radius);
+      for (int dsh = 0; dsh < dashes; dsh++) {
+        const float t0 = ov.v0 + span * (dsh + 0.15f) / dashes;
+        const float t1 = ov.v0 + span * (dsh + 0.85f) / dashes;
+        lines.push_back(LineVertex(ov.origin + ov.dir * t0 + off, col));
+        lines.push_back(LineVertex(ov.origin + ov.dir * t1 + off, col));
+      }
+    }
+  }
 }
 
 void CreateRib(AppState& state) {

@@ -153,6 +153,8 @@ void DrawCreateMenu(AppState& state) {
     CreateChamfer(state);
   if (ImGui::MenuItem("Rib", nullptr, false, idle && hasBody))
     CreateRib(state); // needs an open sketch profile too; no-op without one
+  if (ImGui::MenuItem("Thread", nullptr, false, idle && hasBody))
+    CreateThread(state); // cosmetic; arms the cylindrical-face pick
   ImGui::Separator();
 
   SketchEditState& edit = state.sketchEdit;
