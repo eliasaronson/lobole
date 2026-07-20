@@ -35,6 +35,7 @@ add_executable(designer_tests
     test_datum.cpp
     test_revolve.cpp
     test_boolean.cpp
+    test_split.cpp
     test_pattern.cpp
     test_toponaming.cpp
     test_fillet.cpp

@@ -1,0 +1,10 @@
+{
+  "format": "designer-document",
+  "version": 39,
+  "features": [
+    {"type": "Box", "name": "Slab", "id": 1, "position": [0, 0, 0],
+     "width": 2, "height": 2, "depth": 2},
+    {"type": "Split", "name": "Halve", "id": 2, "body_id": 1,
+     "knife": "plane", "base_plane": "xy", "offset": 1.0}
+  ]
+}

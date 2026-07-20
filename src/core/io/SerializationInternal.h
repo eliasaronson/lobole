@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 38;  // v38: entity coord exprs (v37: dist-pl)
+inline constexpr int kVersion = 39;  // v39: Split feature (v38: entity coord exprs)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

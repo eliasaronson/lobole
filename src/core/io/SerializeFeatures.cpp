@@ -14,6 +14,7 @@
 #include "core/features/RevolveFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/SplitFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
@@ -505,6 +506,23 @@ json FeatureToJson(const Feature& feature) {
     j["target_id"] = boo->targetId;
     j["tool_id"] = boo->toolId;
     j["op"] = BooleanOpToString(boo->op);
+  } else if (auto* sp = dynamic_cast<const SplitFeature*>(&feature)) {
+    j["body_id"] = sp->bodyId;
+    if (sp->knife == SplitKnifeKind::Face) {
+      j["knife"] = "face";
+      j["face"] = {{"feature_id", sp->face.featureId},
+                   {"element", sp->face.name}};
+    } else {
+      j["knife"] = "plane";
+      if (sp->datumId != 0)
+        j["datum_id"] = sp->datumId;
+      else
+        j["base_plane"] = PlaneTypeToString(sp->basePlane);
+      if (sp->offset != 0.0)
+        j["offset"] = sp->offset;
+      if (!sp->offsetExpr.empty())
+        j["offset_expr"] = sp->offsetExpr;
+    }
   } else if (auto* fil = dynamic_cast<const FilletFeature*>(&feature)) {
     // type is "Fillet"/"Chamfer" (TypeName encodes the op); v17.
     j["radius"] = fil->radius;
@@ -836,6 +854,24 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, j.at("target_id").get<uint64_t>(),
         j.at("tool_id").get<uint64_t>(),
         BooleanOpFromString(j.value("op", "union")));
+  } else if (type == "Split") { // v39
+    auto sp = std::make_unique<SplitFeature>(
+        name, j.at("body_id").get<uint64_t>());
+    if (j.value("knife", "plane") == "face") {
+      sp->knife = SplitKnifeKind::Face;
+      const json& fj = j.at("face");
+      sp->face = ElementRef{fj.at("feature_id").get<uint64_t>(),
+                            fj.at("element").get<std::string>()};
+    } else {
+      sp->knife = SplitKnifeKind::Plane;
+      sp->datumId = j.value("datum_id", uint64_t{0});
+      if (j.contains("base_plane"))
+        sp->basePlane =
+            PlaneTypeFromString(j.at("base_plane").get<std::string>());
+      sp->offset = j.value("offset", 0.0);
+      sp->offsetExpr = j.value("offset_expr", std::string{});
+    }
+    out = std::move(sp);
   } else if (type == "Fillet" || type == "Chamfer") { // v17
     std::vector<ElementRef> refs;
     for (const auto& ej : j.value("edges", json::array())) {

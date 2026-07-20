@@ -194,6 +194,7 @@ set(core_sources
     src/core/features/DraftFeature.cpp
     src/core/features/DatumAxisFeature.cpp
     src/core/features/BooleanFeature.cpp
+    src/core/features/SplitFeature.cpp
     src/core/ElementHistory.cpp
     src/core/features/FilletFeature.cpp
     src/core/features/PatternFeature.cpp

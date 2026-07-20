@@ -484,7 +484,11 @@ gimbal-lock fix shipped alongside on fix/sketch-usability.
 
 **B-splines** remain a separate milestone — planned in phase-l.md
 (variable poles/knots, control-point UX, OCC `Geom_BSplineCurve`); build after
-review.
+review. Now scoped alongside the Split feature and 3D fit-splines (all three
+surfaced by the Onshape importer) in
+[../interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md) —
+recommendation there is a **rigid-net v1** (poles are movable solver points,
+curve shape rigid, exactly the Ellipse treatment) before fully-solved poles.
 
 ## Phase M — Interaction & keyboard: select-default, Escape, shortcuts, box-select (~1.5 days) — SHIPPED
 

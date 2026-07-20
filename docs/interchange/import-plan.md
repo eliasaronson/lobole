@@ -150,12 +150,14 @@ out of scope v1 (import the active one).
 These are genuine Designer feature gaps — not importer work — that real
 Onshape documents lean on. Until built, the importer reports each as a
 skip (the rest of the model still comes across). Each is its own small
-workstream:
+workstream — **full build plan in [feature-gaps-plan.md](feature-gaps-plan.md)**:
 
-- **Split feature** — divide one body into several with a plane / face /
-  sketch as the knife, keeping all pieces as separate bodies. Onshape:
-  `splitPart`. Designer has Boolean (subtract) but nothing that keeps both
-  sides. New `SplitFeature` (OCC `BRepAlgoAPI_Splitter` / section + build).
+- **Split feature** — ✅ **v1 SHIPPED (format v39)**: `SplitFeature`
+  (OCC `BRepAlgoAPI_Splitter` + `SplitSolids`), knife = a base/datum plane or
+  a planar face of the body, keeping all pieces. Sketch-as-knife and the
+  robust downstream body-identity tier are deferred — see
+  [feature-gaps-plan.md](feature-gaps-plan.md). The importer's `splitPart`
+  skip can now replay a Split.
 - **Splines** — sketch B-splines (fit / control-polygon) and 3D fit
   splines. Onshape: spline sketch entities + `fitSpline`. Designer's sketch
   entity set is Point/Line/Circle/Arc/Ellipse only; a spline is a new
