@@ -193,6 +193,12 @@ The loop that works — follow it every time:
    inspect intermediate history states. When done: save_project, and
    render_still for a presentation shot.
 
+No display session of your own? screenshot needs a rendering instance:
+launch `tools/headless-preview.sh <scratch-port>` (real renderer offscreen
+under Xvfb) and point DESIGNER_PORT / --port at it — it drives and
+screenshots exactly like a windowed instance. Leave port 8799 for the human's
+dev-watch (the build they review).
+
 RESEARCH REAL DIMENSIONS FIRST. When the part interfaces with a real product
 (bearings, inserts, screws, connectors, rails), web-search the datasheet
 numbers BEFORE sketching — bore/OD/width for bearings, thread pitch and
