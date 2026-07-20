@@ -51,3 +51,7 @@ __pycache__/
 build-*/
 .cache/
 tests/golden/*.autosave
+
+# Onshape importer working dumps (large real projects; small fixtures live in tests/fixtures/onshape)
+/tools/onshape_dumps/
+*.onshape-dump.json
