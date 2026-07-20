@@ -26,6 +26,7 @@ CLI:
 import base64
 import json
 import os
+import time
 import re
 import sys
 import urllib.error
@@ -129,6 +130,54 @@ class Client:
         return self.get(
             f"/partstudios/d/{ref.did}/{ref.wvm}/{ref.wvmid}/e/{eid}/massproperties")
 
+    def _eval_fs(self, ref, eid, script, rollback):
+        url = (f"/partstudios/d/{ref.did}/{ref.wvm}/{ref.wvmid}/e/{eid}"
+               f"/featurescript?"
+               + urllib.parse.urlencode({"rollbackBarIndex": rollback}))
+        # FeatureScript eval is rate-limited; back off and retry on 429 / the
+        # HTML throttle page rather than losing the edge geometry.
+        for attempt in range(4):
+            req = urllib.request.Request(
+                BASE + url, data=json.dumps({"script": script}).encode(),
+                method="POST", headers={
+                    "Authorization": self._auth,
+                    "Content-Type": "application/json",
+                    "Accept": "application/json;charset=UTF-8; qs=0.09"})
+            try:
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                    return json.load(resp)
+            except urllib.error.HTTPError as e:
+                if e.code in (429, 503) and attempt < 3:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise SystemExit(f"FeatureScript eval failed: "
+                                 f"{e.read().decode(errors='replace')[:200]}")
+            except (json.JSONDecodeError, urllib.error.URLError):
+                if attempt < 3:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise SystemExit("FeatureScript eval failed (throttled)")
+
+    _EDGE_MIDS_FS = """function(context is Context, queries){
+      var res = [];
+      for (var e in evaluateQuery(context, qEverything(EntityType.EDGE))){
+        var mp = evEdgeTangentLine(context, {"edge": e, "parameter": 0.5}).origin;
+        res = append(res, [mp[0].value * 1000, mp[1].value * 1000,
+                           mp[2].value * 1000]);
+      }
+      return res;
+    }"""
+
+    def all_edge_midpoints(self, ref, eid, rollback):
+        """Every edge's midpoint (mm, world) at a rollback state. Two of
+        these (before/after a fillet) diff to the consumed = filleted edges,
+        sidestepping Onshape's fragile topology-query resolution."""
+        res = self._eval_fs(ref, eid, self._EDGE_MIDS_FS, rollback)
+        out = []
+        for item in res.get("result", {}).get("value", []):
+            out.append([v.get("value") for v in item.get("value", [])])
+        return out
+
     def sketch_world_points(self, ref, eid=None):
         """{sketch featureId: {geom point id: [x,y,z] (meters)}} — the 3D
         side of the 2D↔3D correspondences the plane fit consumes."""
@@ -178,6 +227,37 @@ def cmd_features(client, ref):
         print(f"  {f.get('featureType', '?'):<22} {f.get('name', '?')}{sup}")
 
 
+def _diff_edges(pre, post, tol=0.5):
+    """Midpoints present in `pre` but absent (moved) in `post` — the edges
+    a fillet/chamfer consumed (tangent-propagated ones included)."""
+    def near(m):
+        return any(abs(m[0] - q[0]) < tol and abs(m[1] - q[1]) < tol
+                   and abs(m[2] - q[2]) < tol for q in post)
+    return [m for m in pre if not near(m)]
+
+
+FILLET_TYPES = ("fillet", "chamfer")
+
+
+def consumed_edges_for(client, ref, eid, features):
+    """{feature index: [consumed midpoint mm, ...]} for each fillet/chamfer,
+    from a before/after edge-midpoint diff (2 FS calls per feature)."""
+    feats = features.get("features", [])
+    out = {}
+    for i, f in enumerate(feats):
+        if f.get("featureType") not in FILLET_TYPES or f.get("suppressed"):
+            continue
+        try:
+            pre = client.all_edge_midpoints(ref, eid, i)
+            post = client.all_edge_midpoints(ref, eid, i + 1)
+        except SystemExit as e:
+            print(f"  warning: no edges for {f.get('name')}: {e}",
+                  file=sys.stderr)
+            continue
+        out[str(i)] = _diff_edges(pre, post)
+    return out
+
+
 def cmd_dump(client, ref, out_path):
     """Record everything the importer will consume — the fixture format
     offline tests AND `replay-dump` consume, so iterating on the mapping
@@ -190,11 +270,16 @@ def cmd_dump(client, ref, out_path):
         eid, kind = el.get("id"), el.get("elementType")
         try:
             if kind == "PARTSTUDIO":
+                feats = client.features(ref, eid)
                 dump["partstudios"][eid] = {
                     "name": el.get("name"),
-                    "features": client.features(ref, eid),
+                    "features": feats,
                     "sketches": client.sketch_world_points(ref, eid),
                     "massproperties": client.mass_properties(ref, eid),
+                    # Consumed-edge midpoints per fillet/chamfer (2 FS calls
+                    # each) so replay-dump resolves edges offline.
+                    "consumed_edges": consumed_edges_for(client, ref, eid,
+                                                         feats),
                 }
             elif kind == "ASSEMBLY":
                 dump["assemblies"][eid] = {
@@ -249,6 +334,10 @@ class DumpSource:
                              "re-dump once with the current tool")
         return ps["sketches"]
 
+    def consumed_edges(self, feature_index, eid=None):
+        ps = self.dump["partstudios"][eid or self.eid]
+        return ps.get("consumed_edges", {}).get(str(feature_index))
+
 
 class LiveSource:
     """The same interface over the live API (~5 calls per part studio)."""
@@ -270,6 +359,17 @@ class LiveSource:
 
     def sketch_world_points(self, eid=None):
         return self.client.sketch_world_points(self.ref, eid or self.eid)
+
+    def consumed_edges(self, feature_index, eid=None):
+        # Live: compute the before/after edge diff on demand (2 FS calls).
+        try:
+            pre = self.client.all_edge_midpoints(self.ref, eid or self.eid,
+                                                 feature_index)
+            post = self.client.all_edge_midpoints(self.ref, eid or self.eid,
+                                                  feature_index + 1)
+        except SystemExit:
+            return None
+        return _diff_edges(pre, post)
 
 
 # ===========================================================================
@@ -1017,7 +1117,7 @@ class Replayer:
         self.sketch_entities[feature["featureId"]] = {
             oid: designer_ids[info["idx"]] for oid, info in id_map.items()}
 
-        applied = failed = 0
+        payloads, kinds = [], []
         for con in feature.get("constraints", []):
             payload, note = map_constraint(con, id_map, entities)
             if payload is None:
@@ -1025,14 +1125,26 @@ class Replayer:
                 continue
             payload["refs"] = [[designer_ids[idx], which]
                                for idx, which in payload["refs"]]
-            try:
-                self.designer.call("add_constraint",
-                                   sketch_id=resp["id"], **payload)
-                applied += 1
-            except Exception as e:
-                failed += 1
-                notes.append(f"{con.get('constraintType')}: "
-                             f"{str(e).splitlines()[0][:60]}")
+            payloads.append(payload)
+            kinds.append(con.get("constraintType"))
+        # Fast path: apply every constraint in ONE call (one solve + regen
+        # instead of one per constraint). Fall back to per-constraint only
+        # when the batch fails, to isolate and report the offender.
+        applied = failed = 0
+        try:
+            if payloads:
+                self.designer.call("add_constraints", sketch_id=resp["id"],
+                                   constraints=payloads)
+            applied = len(payloads)
+        except Exception:
+            for payload, kind in zip(payloads, kinds):
+                try:
+                    self.designer.call("add_constraint",
+                                       sketch_id=resp["id"], **payload)
+                    applied += 1
+                except Exception as e:
+                    failed += 1
+                    notes.append(f"{kind}: {str(e).splitlines()[0][:60]}")
 
         # Drift check (local RPC): Onshape handed us SOLVED geometry, so a
         # partial constraint set must not move anything. Movement = a
@@ -1339,6 +1451,115 @@ class Replayer:
             self.report.add(name, "skipped", "; ".join(sorted(set(skipped))[:3])
                             or "no mirrored features resolved")
 
+    def import_fillet(self, feature, feature_index):
+        """Fillet/chamfer: resolve the consumed (blended) edges by geometric
+        diff (Onshape queries don't resolve reliably), match them to the
+        current Designer body's edges by midpoint, and apply the blend."""
+        name = feature.get("name", feature.get("featureType", "Fillet"))
+        ftype = feature.get("featureType")
+        p = _params_by_id(feature)
+        mids = self.src.consumed_edges(feature_index)
+        if not mids:
+            self.report.add(name, "skipped",
+                            "could not resolve the blended edges "
+                            "(no edge geometry)")
+            return
+        # Designer body edges, world mm — match each consumed midpoint.
+        try:
+            bodies = self.designer.call("list_elements").get("bodies", [])
+        except Exception as e:
+            self.report.add(name, "skipped", str(e).splitlines()[0][:60])
+            return
+        # Collect (created_by, edge name) per body for the nearest edge to
+        # each consumed midpoint; keep the body that matched the most.
+        by_body = {}
+        for m in mids:
+            best = None
+            for b in bodies:
+                for e in b.get("edges", []):
+                    q = e.get("midpoint")
+                    if not q:
+                        continue
+                    d = ((m[0] - q[0]) ** 2 + (m[1] - q[1]) ** 2
+                         + (m[2] - q[2]) ** 2) ** 0.5
+                    if best is None or d < best[0]:
+                        best = (d, b.get("created_by"), e.get("name"))
+            if best and best[0] < 0.5:  # within 0.5 mm
+                by_body.setdefault(best[1], []).append(best[2])
+        if not by_body:
+            self.report.add(name, "skipped",
+                            f"none of {len(mids)} blended edges matched a "
+                            "Designer edge")
+            return
+        created_by, edge_names = max(by_body.items(), key=lambda kv: len(kv[1]))
+        edge_names = sorted(set(edge_names))
+
+        # Radius / chamfer distance: chamfers here are 45deg (width), fillets
+        # a radius. Expression preferred so a variable keeps driving it.
+        rad_param = p.get("width") if ftype == "chamfer" else p.get("radius")
+        out = {"type": "Chamfer" if ftype == "chamfer" else "Fillet",
+               "name": name,
+               "edges": [{"feature_id": created_by, "element": e}
+                         for e in edge_names]}
+        expr = translate_expression((rad_param or {}).get("expression"))
+        if expr is not None:
+            out["radius_expr"] = expr
+            out["radius"] = 1.0
+        else:
+            out["radius"] = (rad_param or {}).get("value", 0.001) * MM
+        notes = []
+        if len(edge_names) < len(mids):
+            notes.append(f"{len(edge_names)}/{len(mids)} edges matched")
+        if ftype == "chamfer" and p.get("chamferType", {}).get(
+                "value") not in (None, "OFFSET_ANGLE", "EQUAL_OFFSETS"):
+            notes.append(f"chamfer type {p['chamferType']['value']} "
+                         "approximated as 45deg")
+
+        err = self._add_and_check(out)
+        if err is None:
+            self.report.add(name, "partial" if notes else "mapped",
+                            "; ".join(notes) or f"{len(edge_names)} edges")
+            return
+        self.designer.call("undo")  # remove the failed all-edges blend
+        # OCC rejects the whole blend if ONE edge is too tight for the radius
+        # (Onshape's kernel is more tolerant). Keep the edges that take the
+        # blend individually — a partial blend beats a failed feature.
+        good = []
+        for en in edge_names:
+            probe = dict(out)
+            probe["edges"] = [{"feature_id": created_by, "element": en}]
+            probe["name"] = f"{name} probe"
+            probe_err = self._add_and_check(probe)
+            self.designer.call("undo")  # revert the probe either way
+            if probe_err is None:
+                good.append(en)
+        if not good:
+            self.report.add(name, "skipped",
+                            "no edge accepted the blend (" +
+                            err.splitlines()[0][:50] + ")")
+            return
+        out["edges"] = [{"feature_id": created_by, "element": e} for e in good]
+        final_err = self._add_and_check(out)
+        if final_err is None:
+            self.report.add(name, "partial",
+                            f"{len(good)}/{len(edge_names)} edges took the "
+                            "blend (rest too tight for the radius)")
+        else:
+            self.report.add(name, "skipped", final_err.splitlines()[0][:60])
+
+    def _add_and_check(self, feature):
+        """add_feature + return the feature's regen error string, or None on
+        success (add_feature succeeds even when the feature errors)."""
+        try:
+            resp = self.designer.call("add_feature", feature=feature)
+        except Exception as e:
+            return str(e).splitlines()[0][:80]
+        fid = resp.get("id")
+        st = self.designer.call("get_state")
+        f = next((x for x in st.get("features", []) if x.get("id") == fid),
+                 None)
+        return (f or {}).get("error") or None
+
     def import_boolean(self, feature):
         name = feature.get("name", "Boolean")
         p = _params_by_id(feature)
@@ -1386,7 +1607,7 @@ class Replayer:
         feats = self.src.features().get("features", [])
         world = self.src.sketch_world_points()
         sketches = [f for f in feats if f.get("featureType") == "newSketch"]
-        for f in feats:
+        for fi, f in enumerate(feats):
             ftype, name = f.get("featureType"), f.get("name", "?")
             if f.get("suppressed"):
                 self.report.add(name, "skipped", "suppressed in Onshape")
@@ -1404,6 +1625,8 @@ class Replayer:
                 self.import_boolean(f)
             elif ftype == "mirror":
                 self.import_mirror(f)
+            elif ftype in ("fillet", "chamfer"):
+                self.import_fillet(f, fi)
             elif ftype == "cPlane":
                 self.report.add(name, "mapped",
                                 "construction plane (baked into sketch planes)")
