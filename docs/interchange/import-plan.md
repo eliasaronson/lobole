@@ -145,6 +145,28 @@ features (fallback path is load-bearing, not an edge case); in-context /
 multi-part studios with booleans across parts need care; configurations are
 out of scope v1 (import the active one).
 
+## Future modeling features (surfaced by the Onshape importer)
+
+These are genuine Designer feature gaps — not importer work — that real
+Onshape documents lean on. Until built, the importer reports each as a
+skip (the rest of the model still comes across). Each is its own small
+workstream:
+
+- **Split feature** — divide one body into several with a plane / face /
+  sketch as the knife, keeping all pieces as separate bodies. Onshape:
+  `splitPart`. Designer has Boolean (subtract) but nothing that keeps both
+  sides. New `SplitFeature` (OCC `BRepAlgoAPI_Splitter` / section + build).
+- **Splines** — sketch B-splines (fit / control-polygon) and 3D fit
+  splines. Onshape: spline sketch entities + `fitSpline`. Designer's sketch
+  entity set is Point/Line/Circle/Arc/Ellipse only; a spline is a new
+  entity type (solver params, OCC `Geom_BSplineCurve`, rendering) — the
+  largest of the three. 3D fit-spline additionally needs a non-sketch
+  curve object.
+
+(**up-to-face extrude bounds are already supported** — `ExtrudeEnd::UpToFace`
+— and are mapped by the importer; listed here only to note they are NOT a
+gap.)
+
 ## Out of scope (documented, deliberate)
 
 - **Native SolidWorks files** — see Why. The user-facing answer, in docs and

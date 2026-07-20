@@ -168,6 +168,21 @@ class Client:
       return res;
     }"""
 
+    def feature_vertices(self, ref, eid, feature_id, rollback):
+        """World-mm vertices created by a feature (qCreatedBy), at a rollback
+        state. Projected onto the sketch normal, their span gives an
+        up-to/through extrude's true depth without resolving a target query."""
+        script = (
+            'function(context is Context, queries){ var vs = evaluateQuery('
+            'context, qCreatedBy(makeId("' + feature_id + '"), '
+            'EntityType.VERTEX)); var res = []; for (var v in vs){ var p = '
+            'evVertexPoint(context, {"vertex": v}); res = append(res, '
+            '[p[0].value*1000, p[1].value*1000, p[2].value*1000]); } '
+            'return res; }')
+        res = self._eval_fs(ref, eid, script, rollback)
+        return [[v.get("value") for v in item.get("value", [])]
+                for item in res.get("result", {}).get("value", [])]
+
     def all_edge_midpoints(self, ref, eid, rollback):
         """Every edge's midpoint (mm, world) at a rollback state. Two of
         these (before/after a fillet) diff to the consumed = filleted edges,
@@ -258,6 +273,35 @@ def consumed_edges_for(client, ref, eid, features):
     return out
 
 
+def _param_val(feature, pid):
+    for p in feature.get("parameters", []):
+        if p.get("parameterId") == pid:
+            return p.get("value")
+    return None
+
+
+def up_to_verts_for(client, ref, eid, features):
+    """{feature index: [created vertex mm, ...]} for each up-to/through
+    extrude (1 FS call each). The span of these along the sketch normal is
+    the extrude's true depth — Onshape's target-face queries don't resolve
+    at rollback, so measure the result instead."""
+    feats = features.get("features", [])
+    out = {}
+    for i, f in enumerate(feats):
+        if f.get("featureType") != "extrude" or f.get("suppressed"):
+            continue
+        bound = _param_val(f, "endBound")
+        if bound in (None, "BLIND", "SYMMETRIC"):
+            continue
+        try:
+            out[str(i)] = client.feature_vertices(ref, eid, f["featureId"],
+                                                  i + 1)
+        except SystemExit as e:
+            print(f"  warning: no verts for {f.get('name')}: {e}",
+                  file=sys.stderr)
+    return out
+
+
 def cmd_dump(client, ref, out_path):
     """Record everything the importer will consume — the fixture format
     offline tests AND `replay-dump` consume, so iterating on the mapping
@@ -280,6 +324,8 @@ def cmd_dump(client, ref, out_path):
                     # each) so replay-dump resolves edges offline.
                     "consumed_edges": consumed_edges_for(client, ref, eid,
                                                          feats),
+                    # Created vertices per up-to/through extrude → true depth.
+                    "up_to_verts": up_to_verts_for(client, ref, eid, feats),
                 }
             elif kind == "ASSEMBLY":
                 dump["assemblies"][eid] = {
@@ -338,6 +384,10 @@ class DumpSource:
         ps = self.dump["partstudios"][eid or self.eid]
         return ps.get("consumed_edges", {}).get(str(feature_index))
 
+    def up_to_verts(self, feature_index, eid=None):
+        ps = self.dump["partstudios"][eid or self.eid]
+        return ps.get("up_to_verts", {}).get(str(feature_index))
+
 
 class LiveSource:
     """The same interface over the live API (~5 calls per part studio)."""
@@ -370,6 +420,17 @@ class LiveSource:
         except SystemExit:
             return None
         return _diff_edges(pre, post)
+
+    def up_to_verts(self, feature_index, eid=None):
+        feats = self.features().get("features", [])
+        if feature_index >= len(feats):
+            return None
+        try:
+            return self.client.feature_vertices(
+                self.ref, eid or self.eid, feats[feature_index]["featureId"],
+                feature_index + 1)
+        except SystemExit:
+            return None
 
 
 # ===========================================================================
@@ -1190,7 +1251,7 @@ class Replayer:
                         "; ".join(notes))
         return resp.get("id")
 
-    def import_extrude(self, feature, sketch_features):
+    def import_extrude(self, feature, sketch_features, feature_index=None):
         name = feature.get("name", "Extrude")
         p = _params_by_id(feature)
         op = p.get("operationType", {}).get("value", "NEW")
@@ -1217,15 +1278,39 @@ class Replayer:
         else:
             out["distance"] = depth.get("value", 0.0) * MM
         bound = p.get("endBound", {}).get("value", "BLIND")
+        plane = self.sketch_planes.get(matches[0]["featureId"])
         if bound == "SYMMETRIC" or p.get("midplane", {}).get("value"):
             out["end_mode"] = "symmetric"
         elif bound != "BLIND":
-            if out.get("distance", 0) <= 0 and "distance_expr" not in out:
+            # Up-to / through: Onshape's target-face query doesn't resolve at
+            # rollback, so measure the true depth from the vertices the
+            # extrude created (span along the sketch normal). A blind extrude
+            # of that depth reproduces the geometry (loses only the
+            # parametric follows-the-target link).
+            span = self._up_to_depth(feature_index, plane)
+            if span is not None:
+                out.pop("distance_expr", None)
+                out["distance"] = span["depth"]
+                out["reversed"] = span["reversed"]
+                notes.append(f"{bound.lower().replace('_','-')} measured as "
+                             f"{span['depth']:.1f}mm blind")
+            elif mode == "cut":
+                # A cut creates no new vertices to measure, but an over-long
+                # blind cut only removes the material it actually overlaps —
+                # correct for through-all, and up-to-next where the profile
+                # cuts through one panel (the common case). Reported.
+                out.pop("distance_expr", None)
+                out["distance"] = 10000.0
+                if p.get("oppositeDirection", {}).get("value"):
+                    out["reversed"] = True
+                notes.append(f"{bound.lower().replace('_','-')} cut "
+                             "approximated as through-all")
+            else:
                 self.report.add(name, "skipped",
-                                f"end bound {bound} has no usable depth")
+                                f"end bound {bound}: could not measure depth")
                 return
-            notes.append(f"end bound {bound} approximated as blind")
-        if p.get("oppositeDirection", {}).get("value"):
+        if bound in ("BLIND", "SYMMETRIC") and p.get(
+                "oppositeDirection", {}).get("value"):
             out["reversed"] = True
         if p.get("hasSecondDirection", {}).get("value"):
             notes.append("second direction dropped")
@@ -1242,6 +1327,26 @@ class Replayer:
                 "reversed": out.get("reversed", False),
                 "extrude": out,             # designer Extrude dict (sans sketch)
                 "sketch_feature": matches[0]}  # onshape sketch feature
+
+    def _up_to_depth(self, feature_index, plane):
+        """Depth (mm) + reversed flag of an up-to/through extrude, from the
+        span of its created vertices along the sketch normal. None when no
+        vertices are available."""
+        if feature_index is None or plane is None:
+            return None
+        verts = self.src.up_to_verts(feature_index)
+        if not verts:
+            return None
+        o, n = plane["origin"], plane["normal"]
+        dists = [(v[0] - o[0]) * n[0] + (v[1] - o[1]) * n[1]
+                 + (v[2] - o[2]) * n[2] for v in verts]
+        lo, hi = min(dists), max(dists)
+        # The profile sits at ~0; the extrude reaches to lo or hi. Take the
+        # larger magnitude as the depth, its sign as the direction.
+        far = hi if abs(hi) >= abs(lo) else lo
+        if abs(far) < 1e-6:
+            return None
+        return {"depth": abs(far), "reversed": far < 0}
 
     def import_revolve(self, feature, sketch_features):
         name = feature.get("name", "Revolve")
@@ -1614,7 +1719,7 @@ class Replayer:
             elif ftype == "newSketch":
                 self.import_sketch(f, world)
             elif ftype == "extrude":
-                self.import_extrude(f, sketches)
+                self.import_extrude(f, sketches, fi)
             elif ftype == "revolve":
                 self.import_revolve(f, sketches)
             elif ftype == "loft":
