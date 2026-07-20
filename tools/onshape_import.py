@@ -211,6 +211,27 @@ class Client:
         return [[v.get("value") for v in item.get("value", [])]
                 for item in res.get("result", {}).get("value", [])]
 
+    _FACE_FS = """function(context is Context, queries){
+      var res = [];
+      for (var f in evaluateQuery(context, qEverything(EntityType.FACE))){
+        try silent {
+          var pl = evPlane(context, {"face": f});
+          var c = evApproximateCentroid(context, {"entities": f});
+          res = append(res, [c[0].value*1000, c[1].value*1000, c[2].value*1000,
+                             pl.normal[0], pl.normal[1], pl.normal[2]]);
+        }
+      }
+      return res;
+    }"""
+
+    def all_faces(self, ref, eid, rollback):
+        """Every planar face's [centroid(mm) x3, normal x3] at a rollback —
+        before/after diffs resolve shell openings (gone after) and draft
+        faces (tilted after), sidestepping Onshape's face-query fragility."""
+        res = self._eval_fs(ref, eid, self._FACE_FS, rollback)
+        return [[v.get("value") for v in item.get("value", [])]
+                for item in res.get("result", {}).get("value", [])]
+
     def all_edge_midpoints(self, ref, eid, rollback):
         """Every edge's midpoint (mm, world) at a rollback state. Two of
         these (before/after a fillet) diff to the consumed = filleted edges,

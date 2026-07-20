@@ -265,6 +265,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         if (const auto fi = Measure::DescribeFaceAt(bodies[i], idx)) {
           f["kind"] = fi->kind;
           f["area"] = fi->area;
+          // Centroid: lets an importer match a specific face geometrically
+          // (Onshape shell/draft face queries -> our stable face names).
+          f["centroid"] = {fi->centroid.x, fi->centroid.y, fi->centroid.z};
         }
         faces.push_back(f);
       }

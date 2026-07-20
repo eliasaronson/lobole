@@ -102,6 +102,8 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
   GProp_GProps props;
   BRepGProp::SurfaceProperties(f, props);
   out.area = props.Mass();
+  const gp_Pnt c = props.CentreOfMass();
+  out.centroid = glm::vec3(c.X(), c.Y(), c.Z());
   switch (BRepAdaptor_Surface(TopoDS::Face(f)).GetType()) {
   case GeomAbs_Plane:    out.kind = "plane"; break;
   case GeomAbs_Cylinder: out.kind = "cylinder"; break;

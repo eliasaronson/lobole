@@ -32,6 +32,7 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
 struct FaceInfo {
   std::string kind; // "plane" | "cylinder" | "cone" | "sphere" | "other"
   double area = 0.0;
+  glm::vec3 centroid{0.0f}; // face center of mass, world space
 };
 struct EdgeInfo {
   std::string kind; // "line" | "circle" | "arc" | "other"
