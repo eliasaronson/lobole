@@ -1117,7 +1117,9 @@ class Replayer:
             self.extrudes[feature["featureId"]] = {
                 "plane": self.sketch_planes.get(matches[0]["featureId"]),
                 "distance": dist,
-                "reversed": out.get("reversed", False)}
+                "reversed": out.get("reversed", False),
+                "extrude": out,             # designer Extrude dict (sans sketch)
+                "sketch_feature": matches[0]}  # onshape sketch feature
 
     def import_revolve(self, feature, sketch_features):
         name = feature.get("name", "Revolve")
@@ -1218,6 +1220,115 @@ class Replayer:
         if did is not None:
             self.solid_ids[feature["featureId"]] = did
 
+    # ---- mirror (feature replay) ---------------------------------------
+
+    BASE_PLANES = {  # query token -> (point mm, unit normal)
+        "Frontplane": ((0, 0, 0), (0, 0, 1)),
+        "Topplane": ((0, 0, 0), (0, 1, 0)),
+        "Rightplane": ((0, 0, 0), (1, 0, 0)),
+    }
+
+    def mirror_plane_geom(self, param):
+        """The mirror plane as (point mm, unit normal). Base planes only for
+        now; a datum/face mirror plane returns None (reported)."""
+        text = self.query_text(param)
+        for token, geom in self.BASE_PLANES.items():
+            if token in text:
+                return geom
+        return None
+
+    @staticmethod
+    def _reflect(v, p0, n, is_point):
+        base = [v[i] - p0[i] for i in range(3)] if is_point else list(v)
+        d = 2 * (base[0] * n[0] + base[1] * n[1] + base[2] * n[2])
+        r = [base[i] - d * n[i] for i in range(3)]
+        return [r[i] + (p0[i] if is_point else 0) for i in range(3)]
+
+    def reflected_plane(self, plane, p0, n):
+        return {"origin": self._reflect(plane["origin"], p0, n, True),
+                "normal": self._reflect(plane["normal"], p0, n, False),
+                "uAxis": self._reflect(plane["uAxis"], p0, n, False)}
+
+    @staticmethod
+    def reflect_entities_v(entities):
+        """Reflection negates the sketch V axis (V = N x U flips under a
+        reflection), so the SAME 2D coords on the reflected plane land at the
+        mirrored world point once every v is negated. Arcs additionally
+        reverse winding (angles negate, start/end swap)."""
+        import copy
+        out = []
+        for e in entities:
+            e = copy.deepcopy(e)
+            for key in ("a", "b", "p", "center"):
+                if key in e:
+                    e[key] = [e[key][0], -e[key][1]]
+            if e.get("type") == "arc":
+                s, en = -e["start_angle"], -e["end_angle"]
+                e["start_angle"], e["end_angle"] = en, s  # swap: winding flips
+            out.append(e)
+        return out
+
+    def import_mirror(self, feature):
+        name = feature.get("name", "Mirror")
+        p = _params_by_id(feature)
+        if p.get("patternType", {}).get("value") != "FEATURE":
+            self.report.add(name, "skipped", "only feature-mirror supported")
+            return
+        geom = self.mirror_plane_geom(p.get("mirrorPlane"))
+        if geom is None:
+            self.report.add(name, "skipped",
+                            "mirror plane is not a base plane (datum/face "
+                            "mirror needs datum tracking)")
+            return
+        p0, n = geom
+        inst = next((pp for pp in feature["parameters"]
+                     if pp.get("parameterId") == "instanceFunction"), {})
+        fids = inst.get("featureIds", [])
+        done = notes = 0
+        skipped = []
+        for fid in fids:
+            spec = self.extrudes.get(fid)
+            if spec is None:
+                skipped.append("a mirrored feature was not an imported "
+                               "extrude")
+                continue
+            # Reflect the source sketch and re-apply the same extrude op.
+            plane = self.reflected_plane(spec["plane"], p0, n)
+            src_feat = spec["sketch_feature"]
+            ents, id_map, pts2d, point_lookup, _ = \
+                map_sketch_entities(src_feat)
+            world = self.src.sketch_world_points().get(
+                src_feat["featureId"], {})
+            # Snap to truth on the ORIGINAL plane, then reflect the coords.
+            snap_to_world(ents, point_lookup, world, spec["plane"])
+            ents = self.reflect_entities_v(ents)
+            close_open_profiles(ents, id_map)
+            try:
+                sk = self.designer.call("add_feature", feature={
+                    "type": "Sketch", "name": f"{name}: {src_feat.get('name')}",
+                    "plane": plane, "entities": ents})
+            except Exception as e:
+                skipped.append(str(e).splitlines()[0][:50])
+                continue
+            ex = dict(spec["extrude"])
+            ex.pop("_sketch", None)
+            ex["name"] = f"{name}: {src_feat.get('name')}"
+            ex["sketch_id"] = sk["id"]
+            try:
+                self.designer.call("add_feature", feature=ex)
+                done += 1
+            except Exception as e:
+                skipped.append(str(e).splitlines()[0][:50])
+        if done and not skipped:
+            self.report.add(name, "mapped", f"replayed {done} mirrored "
+                            f"feature(s) across the plane")
+        elif done:
+            self.report.add(name, "partial",
+                            f"replayed {done}; " + "; ".join(sorted(set(skipped))[:3]))
+        else:
+            self.report.add(name, "skipped", "; ".join(sorted(set(skipped))[:3])
+                            or "no mirrored features resolved")
+
     def import_boolean(self, feature):
         name = feature.get("name", "Boolean")
         p = _params_by_id(feature)
@@ -1281,6 +1392,8 @@ class Replayer:
                 self.import_sweep(f, sketches)
             elif ftype == "booleanBodies":
                 self.import_boolean(f)
+            elif ftype == "mirror":
+                self.import_mirror(f)
             elif ftype == "cPlane":
                 self.report.add(name, "mapped",
                                 "construction plane (baked into sketch planes)")
