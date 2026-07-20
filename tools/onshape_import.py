@@ -168,6 +168,34 @@ class Client:
       return res;
     }"""
 
+    def sketch_planes(self, ref, eid, sketch_fids, rollback):
+        """{sketch featureId: {origin(mm), normal, xAxis}} — the sketch's
+        TRUE plane frame from Onshape (evOwnerSketchPlane). Ground truth,
+        so a face-attached sketch's normal direction is unambiguous (a
+        least-squares fit can't tell a normal from its flip, which sent
+        face cuts the wrong way). One FS call for the whole studio;
+        `rollback` = the studio's feature count (final state)."""
+        ids = ",".join('"%s"' % f for f in sketch_fids)
+        script = (
+            'function(context is Context, queries){ var out = {}; '
+            'for (var fid in [' + ids + ']){ '
+            'var es = qCreatedBy(makeId(fid), EntityType.EDGE); '
+            'if (size(evaluateQuery(context, es)) == 0){ continue; } '
+            'var pl = evOwnerSketchPlane(context, '
+            '{"entity": qNthElement(es, 0)}); '
+            'out[fid] = [pl.origin[0].value*1000, pl.origin[1].value*1000, '
+            'pl.origin[2].value*1000, pl.normal[0], pl.normal[1], '
+            'pl.normal[2], pl.x[0], pl.x[1], pl.x[2]]; } return out; }')
+        res = self._eval_fs(ref, eid, script, rollback)
+        out = {}
+        for entry in res.get("result", {}).get("value", []):
+            key = entry.get("key", {}).get("value")
+            nums = [x.get("value") for x in entry.get("value", {}).get("value", [])]
+            if key and len(nums) == 9:
+                out[key] = {"origin": nums[0:3], "normal": nums[3:6],
+                            "xAxis": nums[6:9]}
+        return out
+
     def feature_vertices(self, ref, eid, feature_id, rollback):
         """World-mm vertices created by a feature (qCreatedBy), at a rollback
         state. Projected onto the sketch normal, their span gives an
@@ -273,6 +301,20 @@ def consumed_edges_for(client, ref, eid, features):
     return out
 
 
+def true_planes_for(client, ref, eid, features):
+    """{sketch featureId: {origin, normal, xAxis}} — one FS call per studio."""
+    feats = features.get("features", [])
+    fids = [f["featureId"] for f in feats
+            if f.get("featureType") == "newSketch" and not f.get("suppressed")]
+    if not fids:
+        return {}
+    try:
+        return client.sketch_planes(ref, eid, fids, len(feats))
+    except SystemExit as e:
+        print(f"  warning: no sketch planes: {e}", file=sys.stderr)
+        return {}
+
+
 def _param_val(feature, pid):
     for p in feature.get("parameters", []):
         if p.get("parameterId") == pid:
@@ -326,6 +368,8 @@ def cmd_dump(client, ref, out_path):
                                                          feats),
                     # Created vertices per up-to/through extrude → true depth.
                     "up_to_verts": up_to_verts_for(client, ref, eid, feats),
+                    # Ground-truth sketch plane frames (unambiguous normals).
+                    "true_planes": true_planes_for(client, ref, eid, feats),
                 }
             elif kind == "ASSEMBLY":
                 dump["assemblies"][eid] = {
@@ -388,6 +432,10 @@ class DumpSource:
         ps = self.dump["partstudios"][eid or self.eid]
         return ps.get("up_to_verts", {}).get(str(feature_index))
 
+    def true_plane(self, sketch_fid, eid=None):
+        ps = self.dump["partstudios"][eid or self.eid]
+        return ps.get("true_planes", {}).get(sketch_fid)
+
 
 class LiveSource:
     """The same interface over the live API (~5 calls per part studio)."""
@@ -431,6 +479,18 @@ class LiveSource:
                 feature_index + 1)
         except SystemExit:
             return None
+
+    def true_plane(self, sketch_fid, eid=None):
+        if not hasattr(self, "_planes"):
+            feats = self.features().get("features", [])
+            fids = [f["featureId"] for f in feats
+                    if f.get("featureType") == "newSketch"]
+            try:
+                self._planes = self.client.sketch_planes(
+                    self.ref, eid or self.eid, fids, len(feats))
+            except SystemExit:
+                self._planes = {}
+        return self._planes.get(sketch_fid)
 
 
 # ===========================================================================
@@ -1152,18 +1212,28 @@ class Replayer:
         world = world_points.get(feature["featureId"], {})
         plane = fit_plane(pts2d, world)
         if plane is None:
-            plane = self.face_plane(feature)
-            if plane is None:
-                self.report.add(name, "skipped", "sketch plane unresolved "
-                                "(too few 2D-3D correspondences)")
-                return
-            plane, pairs = align_plane_frame(entities, point_lookup,
-                                             world, plane)
-            if plane is None:
-                self.report.add(name, "skipped",
-                                "sketch frame could not be aligned")
-                return
-            notes.append(f"plane from host face, aligned by {pairs} point(s)")
+            # Few 2D-3D correspondences (a face-attached hole sketch): use
+            # Onshape's GROUND-TRUTH plane frame — its normal direction is
+            # unambiguous, so face cuts go the right way (a least-squares
+            # fit or a host-face guess can't tell a normal from its flip).
+            tp = self.src.true_plane(feature["featureId"])
+            if tp is not None:
+                plane = {"origin": tp["origin"], "normal": tp["normal"],
+                         "uAxis": tp["xAxis"]}
+                notes.append("plane from Onshape sketch frame")
+            else:
+                plane = self.face_plane(feature)
+                if plane is None:
+                    self.report.add(name, "skipped", "sketch plane unresolved "
+                                    "(too few 2D-3D correspondences)")
+                    return
+                plane, pairs = align_plane_frame(entities, point_lookup,
+                                                 world, plane)
+                if plane is None:
+                    self.report.add(name, "skipped",
+                                    "sketch frame could not be aligned")
+                    return
+                notes.append(f"plane from host face, aligned by {pairs} pt(s)")
         snapped = snap_to_world(entities, point_lookup, world, plane)
         if snapped > 0.05:
             notes.append(f"stored sketch lagged current values by "
@@ -1295,14 +1365,14 @@ class Replayer:
                 notes.append(f"{bound.lower().replace('_','-')} measured as "
                              f"{span['depth']:.1f}mm blind")
             elif mode == "cut":
-                # A cut creates no new vertices to measure, but an over-long
-                # blind cut only removes the material it actually overlaps —
-                # correct for through-all, and up-to-next where the profile
-                # cuts through one panel (the common case). Reported.
+                # A cut creates no new vertices to measure. A SYMMETRIC
+                # over-long cut removes only the material it overlaps and
+                # can't miss the panel by going the wrong way (a one-sided
+                # blind cut does, when the sketch normal is ambiguous) —
+                # correct for through-all and the common up-to-next panel.
                 out.pop("distance_expr", None)
                 out["distance"] = 10000.0
-                if p.get("oppositeDirection", {}).get("value"):
-                    out["reversed"] = True
+                out["end_mode"] = "symmetric"
                 notes.append(f"{bound.lower().replace('_','-')} cut "
                              "approximated as through-all")
             else:
