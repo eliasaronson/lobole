@@ -1000,7 +1000,15 @@ def map_constraint(con, id_map, entities=None):
             if out is not None and "expr" in out and \
                     not re.search(r"[A-Za-z_]", out["expr"]):
                 out.pop("expr")
-            if out is not None and "expr" not in out and entities is not None:
+            # Onshape's angle value (its convention + the supplementary forms
+            # it stores, e.g. "180 - feet_angle") does NOT equal PlaneGCS's
+            # signed line1->line2 angle, and the relationship isn't a simple
+            # sign flip — a mistranslated angle rotates the line into a
+            # bowtie. The geometry is already at truth (snapped), so MEASURE
+            # the exact signed angle our solver wants and use it as a literal.
+            # (Trade-off: that one angle stops tracking its variable; correct
+            # geometry beats a parametric angle that solves wrong.)
+            if out is not None and entities is not None:
                 import math
                 e1 = entities[out["refs"][0][0]]
                 e2 = entities[out["refs"][1][0]]
@@ -1009,6 +1017,7 @@ def map_constraint(con, id_map, entities=None):
                     d2 = (e2["b"][0] - e2["a"][0], e2["b"][1] - e2["a"][1])
                     cross = d1[0] * d2[1] - d1[1] * d2[0]
                     dot = d1[0] * d2[0] + d1[1] * d2[1]
+                    out.pop("expr", None)
                     out["value"] = math.degrees(math.atan2(cross, dot))
             return out, note
         return None, "ANGLE (unsupported form) skipped"
