@@ -144,15 +144,17 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     }
     return json::object();
   }
-  if (m == "add_constraint") {
-    // Append a constraint to a sketch (by id), solve, and commit one edit.
-    // params: {sketch_id, kind, refs: [[entity,which],...], value?}
+  if (m == "add_constraint" || m == "add_constraints") {
+    // Append one constraint (add_constraint: {sketch_id, kind, refs, value?/
+    // expr?}) or MANY (add_constraints: {sketch_id, constraints: [{kind,
+    // refs, value?/expr?}, ...]}) to a sketch, then solve + regen + commit
+    // ONCE. The plural form is the fast path for importers: dozens of
+    // constraints without a full regeneration per constraint.
     size_t index = 0;
     Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
     if (!sk) throw std::runtime_error("no such sketch");
 
-    sketch::Constraint c;
     static const std::map<std::string, sketch::ConstraintKind> kinds = {
         {"coincident", sketch::ConstraintKind::Coincident},
         {"horizontal", sketch::ConstraintKind::Horizontal},
@@ -174,39 +176,45 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         {"distance_y", sketch::ConstraintKind::DistanceY},
         {"diameter", sketch::ConstraintKind::Diameter},
         {"distance_pl", sketch::ConstraintKind::DistancePL}};
-    auto it = kinds.find(p.at("kind").get<std::string>());
-    if (it == kinds.end()) throw std::runtime_error("unknown constraint kind");
-    c.kind = it->second;
-    c.value = p.value("value", 0.0);
-    // The wire speaks degrees for angles (like the UI); the model stores
-    // radians. The expr path below already converts — the literal must too.
-    if (c.kind == sketch::ConstraintKind::Angle)
-      c.value = glm::radians(c.value);
-    // Optional expression driving the value, evaluated against the document's
-    // variables on every regeneration (angles in degrees, like the UI).
-    c.valueExpr = p.value("expr", std::string{});
-    if (!c.valueExpr.empty()) {
-      // Evaluate now too: the immediate solve below runs before
-      // Document::Regenerate refreshes dimension values (VisitExprs), and
-      // solving with the default 0 collapses the geometry irrecoverably.
-      ExprError err;
-      const auto v = ExpressionEngine::Default().EvaluateText(
-          c.valueExpr, doc->Symbols(), &err);
-      if (!v) throw std::runtime_error("bad expr: " + err.message);
-      c.value = (c.kind == sketch::ConstraintKind::Angle)
-                    ? glm::radians(*v)
-                    : *v;
-    }
-    const json& refs = p.at("refs");
-    if (refs.size() > 0)
-      c.a = {refs[0][0].get<uint32_t>(), refs[0][1].get<uint8_t>()};
-    if (refs.size() > 1)
-      c.b = {refs[1][0].get<uint32_t>(), refs[1][1].get<uint8_t>()};
-    if (refs.size() > 2) // Symmetric's third ref (the symmetry line)
-      c.c = {refs[2][0].get<uint32_t>(), refs[2][1].get<uint8_t>()};
+
+    // Build one Constraint from a spec object. Throws on a bad kind/expr.
+    const auto build = [&](const json& spec) -> sketch::Constraint {
+      sketch::Constraint c;
+      auto it = kinds.find(spec.at("kind").get<std::string>());
+      if (it == kinds.end())
+        throw std::runtime_error("unknown constraint kind");
+      c.kind = it->second;
+      c.value = spec.value("value", 0.0);
+      if (c.kind == sketch::ConstraintKind::Angle)
+        c.value = glm::radians(c.value); // wire=degrees, model=radians
+      c.valueExpr = spec.value("expr", std::string{});
+      if (!c.valueExpr.empty()) {
+        ExprError err;
+        const auto v = ExpressionEngine::Default().EvaluateText(
+            c.valueExpr, doc->Symbols(), &err);
+        if (!v) throw std::runtime_error("bad expr: " + err.message);
+        c.value = (c.kind == sketch::ConstraintKind::Angle) ? glm::radians(*v)
+                                                            : *v;
+      }
+      const json& refs = spec.at("refs");
+      if (refs.size() > 0)
+        c.a = {refs[0][0].get<uint32_t>(), refs[0][1].get<uint8_t>()};
+      if (refs.size() > 1)
+        c.b = {refs[1][0].get<uint32_t>(), refs[1][1].get<uint8_t>()};
+      if (refs.size() > 2)
+        c.c = {refs[2][0].get<uint32_t>(), refs[2][1].get<uint8_t>()};
+      return c;
+    };
 
     json before = DocumentIO::FeatureToJson(*sk);
-    sk->constraints.push_back(c);
+    size_t added = 0;
+    if (m == "add_constraints") {
+      for (const json& spec : p.at("constraints"))
+        sk->constraints.push_back(build(spec)), added++;
+    } else {
+      sk->constraints.push_back(build(p));
+      added = 1;
+    }
     sketch::Solver solver;
     solver.Load(*sk);
     if (solver.Solve().ok)
@@ -216,7 +224,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     json after = DocumentIO::FeatureToJson(*sk);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
-    return json::object();
+    return json{{"added", added}};
   }
   if (m == "mirror" || m == "fillet" || m == "pattern" || m == "offset") {
     // Generative op on a sketch (by id), solve, and commit one edit.

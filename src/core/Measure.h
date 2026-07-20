@@ -38,6 +38,7 @@ struct EdgeInfo {
   double length = 0.0;
   double radius = 0.0; // circular edges ("circle" / "arc") only
   bool hasRadius = false;
+  glm::vec3 midpoint{0.0f}; // curve midpoint (parametric mid), world space
 };
 std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex);
 std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex);

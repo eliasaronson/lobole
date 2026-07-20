@@ -274,6 +274,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           e["kind"] = ei->kind;
           e["length"] = ei->length;
           if (ei->hasRadius) e["radius"] = ei->radius;
+          // Midpoint: lets an importer match a specific edge geometrically
+          // (Onshape fillet/chamfer edge queries → our stable edge names).
+          e["midpoint"] = {ei->midpoint.x, ei->midpoint.y, ei->midpoint.z};
         }
         edges.push_back(e);
       }

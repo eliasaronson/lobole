@@ -123,6 +123,10 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex) {
   BRepGProp::LinearProperties(e, props);
   out.length = props.Mass();
   BRepAdaptor_Curve curve(TopoDS::Edge(e));
+  const double midParam =
+      0.5 * (curve.FirstParameter() + curve.LastParameter());
+  const gp_Pnt mid = curve.Value(midParam);
+  out.midpoint = glm::vec3(mid.X(), mid.Y(), mid.Z());
   switch (curve.GetType()) {
   case GeomAbs_Line:
     out.kind = "line";
