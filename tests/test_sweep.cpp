@@ -66,3 +66,20 @@ TEST_CASE("Sweep follows a bent path (all segments, rounded corner)",
   CHECK(v > 7.5); // well past the single-segment 4.7
   CHECK(v < 9.0);
 }
+
+TEST_CASE("Sweep on a degenerate path errors instead of aborting", "[sweep]") {
+  // A path sketch whose only segment is zero-length made OCC throw
+  // StdFail_NotDone from BRepBuilderAPI_MakeEdge::Edge(), which uncaught
+  // aborted the whole process (surfaced by an Onshape import). It must fail
+  // the feature cleanly now.
+  Document doc;
+  const uint64_t prof = AddSketch(
+      doc, SketchPlane(glm::vec3(0), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)),
+      "Prof", {sketch::Circle{{0, 0}, 0.5}});
+  const uint64_t path = AddSketch(
+      doc, SketchPlane(glm::vec3(0), glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)),
+      "Path", {sketch::Line{{2, 3}, {2, 3}}}); // coincident endpoints
+  doc.AddFeature(std::make_unique<SweepFeature>("Bad", prof, path));
+  CHECK_FALSE(doc.Regenerate());
+  CHECK(!doc.GetFeature(2)->GetError().empty());
+}

@@ -550,21 +550,31 @@ TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
     const glm::vec3 w = plane.PlaneToWorld(uv);
     return gp_Pnt(w.x, w.y, w.z);
   };
-  BRepBuilderAPI_MakeWire wire;
-  for (const LoopEdge& e : chain) {
-    if (e.arc) {
-      gp_Ax2 axis(toPnt(e.center), normal, gp_Dir(uAxis.x, uAxis.y, uAxis.z));
-      gp_Circ circ(axis, e.radius);
-      const gp_Pnt s = toPnt(OnCircle(e.center, e.radius, e.angStart));
-      const gp_Pnt en = toPnt(OnCircle(e.center, e.radius, e.angEnd));
-      wire.Add(BRepBuilderAPI_MakeEdge(circ, s, en).Edge());
-    } else {
-      wire.Add(BRepBuilderAPI_MakeEdge(toPnt(e.a), toPnt(e.b)).Edge());
+  // A degenerate segment (coincident endpoints, zero-radius arc) makes
+  // MakeEdge fail; calling .Edge() on a failed maker THROWS StdFail_NotDone,
+  // which uncaught aborts the whole app. Check IsDone() before Edge(), and
+  // catch any OCC failure — a bad path is a rejected feature, not a crash.
+  try {
+    BRepBuilderAPI_MakeWire wire;
+    for (const LoopEdge& e : chain) {
+      BRepBuilderAPI_MakeEdge mk =
+          e.arc ? BRepBuilderAPI_MakeEdge(
+                      gp_Circ(gp_Ax2(toPnt(e.center), normal,
+                                     gp_Dir(uAxis.x, uAxis.y, uAxis.z)),
+                              e.radius),
+                      toPnt(OnCircle(e.center, e.radius, e.angStart)),
+                      toPnt(OnCircle(e.center, e.radius, e.angEnd)))
+                : BRepBuilderAPI_MakeEdge(toPnt(e.a), toPnt(e.b));
+      if (!mk.IsDone())
+        return TopoDS_Wire(); // degenerate edge → reject the path
+      wire.Add(mk.Edge());
+      if (wire.Error() != BRepBuilderAPI_WireDone)
+        return TopoDS_Wire();
     }
-    if (wire.Error() != BRepBuilderAPI_WireDone)
-      return TopoDS_Wire();
+    return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
+  } catch (const Standard_Failure&) {
+    return TopoDS_Wire();
   }
-  return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
 }
 
 CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
