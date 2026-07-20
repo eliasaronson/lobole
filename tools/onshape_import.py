@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
 """Onshape → Designer parametric importer (interchange I3).
 
-O1: authenticated API client + fetchers. API keys come from
-~/.config/designer/onshape.env (ONSHAPE_ACCESS_KEY / ONSHAPE_SECRET_KEY;
-real environment variables win when set) and are sent as HTTP Basic auth —
-the personal-use path, no OAuth dance. Onshape wire units are METERS;
-conversion to Designer's mm happens in the mapping layer, not here.
+Rebuilds an Onshape part studio's feature history in a running Designer over
+the JSON-RPC remote, so the model arrives EDITABLE (variables drive
+dimensions, sketches keep their constraints) rather than as frozen geometry.
 
-CLI (read-only plumbing for now):
-    onshape_import.py info     <document-url>
-    onshape_import.py elements <document-url>
-    onshape_import.py features <document-url>            # part studio features
-    onshape_import.py dump     <document-url> <out.json> # fixture recorder
+Credentials: ~/.config/designer/onshape.env (ONSHAPE_ACCESS_KEY /
+ONSHAPE_SECRET_KEY; real environment variables win), sent as HTTP Basic —
+the personal-use path, no OAuth. Onshape wire units are METERS; conversion
+to mm happens in the mapping layer.
+
+Maps today: variables, sketches (lines/circles/arcs/points + most
+constraints), extrude / revolve / loft / sweep / boolean, feature mirror
+(replayed), face-attached sketches (plane from the host cap face). Every
+unmapped feature (fillet, chamfer, split, fitSpline, patterns) and every
+skipped constraint is REPORTED with a reason, never silently dropped.
+
+CLI:
+    onshape_import.py info        <document-url>
+    onshape_import.py features    <document-url>          # list a studio's features
+    onshape_import.py dump        <document-url> <out.json>  # offline fixture
+    onshape_import.py replay      <part-studio-url> [port]   # live rebuild (~5 calls)
+    onshape_import.py replay-dump <dump.json> <studio> [port] # rebuild offline, 0 calls
 """
 import base64
 import json
