@@ -516,11 +516,18 @@ def translate_expression(expr):
     def unit_repl(m):
         return repr(float(m.group(1)) * UNIT_TO_MM[m.group(2)])
 
+    # A number directly before a unit folds into its value ("145.4 mm").
     s = re.sub(r"(\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(mm|cm|m|in|inch)\b",
                unit_repl, s)
     s = re.sub(r"(\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(?:deg|degree|degrees)\b",
                r"\1", s)
-    # Units as bare multiplicative tokens ("2.5 * mm", "#r * cm").
+    # A unit after ")" or an identifier is an IMPLICIT MULTIPLY, e.g.
+    # "(145.4+1) mm" — needs an explicit "*" or it's a syntax error (the bug
+    # that collapsed a driver-hole diameter variable to 0).
+    s = re.sub(r"([\)\w])\s+(mm|cm|m|in|inch)\b",
+               lambda m: "%s * %s" % (m.group(1), UNIT_TO_MM[m.group(2)]), s)
+    s = re.sub(r"([\)\w])\s+(?:deg|degree|degrees)\b", r"\1 * 1.0", s)
+    # Any remaining bare unit token ("2.5 * mm").
     s = re.sub(r"\b(mm|cm|m|in|inch)\b",
                lambda m: repr(UNIT_TO_MM[m.group(1)]), s)
     s = re.sub(r"\b(?:deg|degree|degrees)\b", "1.0", s)
