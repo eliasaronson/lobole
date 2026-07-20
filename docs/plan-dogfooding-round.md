@@ -112,12 +112,19 @@ Each lands with GUI tests; 1–3 first since they compound.
    values read-only in the sketch editor v1; RPC/MCP accept the fields on
    add_feature/modify_feature.
 
-## Phase 5 — Headless preview (stretch, ~1 session)
+## Phase 5 — Headless preview — TIER 1 DONE (1438ee2)
 
-Offscreen render fallback so screenshot works without a GUI instance
-(llvmpipe/lavapipe swiftshader-style device, or a minimal STL rasterizer like
-cad-skill's). Unblocks agent/CI visual verification; sized last because
-dev-watch covers the interactive case today.
+Realized the valuable 80% is nearly free: the real renderer already draws
+offscreen with `--hidden`; it only needs *a* display server for its invisible
+window. `tools/headless-preview.sh` runs it under Xvfb on a scratch port —
+agents/CI/worktrees drive + screenshot their own instance at full fidelity
+(materials/shadows/SSAO), no new renderer, no main.cpp Vulkan surgery.
+Verified: one-shot `--render` of the spinner assembly with DISPLAY unset.
+Convention: dev-watch 8799 = main, headless-preview = scratch ports.
+
+Tier 2 (true no-X-server headless via Vulkan headless surfaces) and Tier 3
+(software rasterizer) deferred — they need the gated main.cpp Vulkan-init
+decouple and only matter for a GPU/X-less CI box, which is not our case.
 
 ---
 
