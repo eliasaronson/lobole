@@ -130,13 +130,20 @@ class Client:
         return self.get(
             f"/partstudios/d/{ref.did}/{ref.wvm}/{ref.wvmid}/e/{eid}/massproperties")
 
+    _last_fs = [0.0]  # wall-clock of the last FS call (proactive throttle)
+
     def _eval_fs(self, ref, eid, script, rollback):
         url = (f"/partstudios/d/{ref.did}/{ref.wvm}/{ref.wvmid}/e/{eid}"
                f"/featurescript?"
                + urllib.parse.urlencode({"rollbackBarIndex": rollback}))
-        # FeatureScript eval is rate-limited; back off and retry on 429 / the
-        # HTML throttle page rather than losing the edge geometry.
-        for attempt in range(4):
+        # Onshape's FS-eval rate limit is strict; keep >=4s between calls so
+        # a whole dump stays under it, then back off further on a 429.
+        gap = time.time() - self._last_fs[0]
+        if gap < 4.0:
+            time.sleep(4.0 - gap)
+        # Back off and retry on 429 / the HTML throttle page rather than
+        # losing the geometry.
+        for attempt in range(6):
             req = urllib.request.Request(
                 BASE + url, data=json.dumps({"script": script}).encode(),
                 method="POST", headers={
@@ -145,18 +152,21 @@ class Client:
                     "Accept": "application/json;charset=UTF-8; qs=0.09"})
             try:
                 with urllib.request.urlopen(req, timeout=90) as resp:
+                    self._last_fs[0] = time.time()
                     return json.load(resp)
             except urllib.error.HTTPError as e:
-                if e.code in (429, 503) and attempt < 3:
-                    time.sleep(2 ** attempt)
+                if e.code in (429, 503) and attempt < 5:
+                    time.sleep(10 * (attempt + 1))  # 10,20,30,40,50s
                     continue
                 raise SystemExit(f"FeatureScript eval failed: "
                                  f"{e.read().decode(errors='replace')[:200]}")
             except (json.JSONDecodeError, urllib.error.URLError):
-                if attempt < 3:
-                    time.sleep(2 ** attempt)
+                if attempt < 5:
+                    time.sleep(10 * (attempt + 1))
                     continue
                 raise SystemExit("FeatureScript eval failed (throttled)")
+            finally:
+                self._last_fs[0] = time.time()
 
     _EDGE_MIDS_FS = """function(context is Context, queries){
       var res = [];
@@ -215,19 +225,24 @@ class Client:
       var res = [];
       for (var f in evaluateQuery(context, qEverything(EntityType.FACE))){
         try silent {
-          var pl = evPlane(context, {"face": f});
           var c = evApproximateCentroid(context, {"entities": f});
+          var ar = evArea(context, {"entities": f}).value;
+          var nrm = [0, 0, 0];
+          try silent { var pl = evPlane(context, {"face": f});
+                       nrm = [pl.normal[0], pl.normal[1], pl.normal[2]]; }
           res = append(res, [c[0].value*1000, c[1].value*1000, c[2].value*1000,
-                             pl.normal[0], pl.normal[1], pl.normal[2]]);
+                             nrm[0], nrm[1], nrm[2], ar*1e6]);
         }
       }
       return res;
     }"""
 
     def all_faces(self, ref, eid, rollback):
-        """Every planar face's [centroid(mm) x3, normal x3] at a rollback —
-        before/after diffs resolve shell openings (gone after) and draft
-        faces (tilted after), sidestepping Onshape's face-query fragility."""
+        """Every face's [centroid(mm) x3, normal x3, area mm2] at a rollback
+        — before/after diffs resolve shell openings (a big face becomes a
+        thin rim: same centroid, area collapses) and draft faces (same
+        centroid, normal tilts), sidestepping Onshape's face-query
+        fragility. Non-planar faces report a zero normal."""
         res = self._eval_fs(ref, eid, self._FACE_FS, rollback)
         return [[v.get("value") for v in item.get("value", [])]
                 for item in res.get("result", {}).get("value", [])]
@@ -343,6 +358,65 @@ def _param_val(feature, pid):
     return None
 
 
+def _face_c_match(m, pts, ct=0.6):
+    """True if any face in `pts` shares m's centroid AND area (a face that
+    only moved/tilted still matches; one that opened or vanished doesn't)."""
+    for q in pts:
+        if (abs(m[0] - q[0]) < ct and abs(m[1] - q[1]) < ct
+                and abs(m[2] - q[2]) < ct
+                and abs(m[6] - q[6]) < max(1.0, 0.05 * m[6])):
+            return True
+    return False
+
+
+def _nearest_face(m, pts, ct=0.6):
+    best = None
+    for q in pts:
+        d = ((m[0] - q[0]) ** 2 + (m[1] - q[1]) ** 2 + (m[2] - q[2]) ** 2) ** 0.5
+        if d < ct and (best is None or d < best[0]):
+            best = (d, q)
+    return best[1] if best else None
+
+
+FACE_FEATURE_TYPES = ("shell", "draft", "externalThread")
+
+
+def face_diffs_for(client, ref, eid, features):
+    """Per shell/draft/thread feature: the affected face centroids (mm), by
+    a before/after face diff (2 FS calls each). Shell = faces that opened
+    (centroid+area no longer match); draft = faces whose normal tilted;
+    thread = the cylindrical face it split (normal went to 0 / area changed
+    at the same centroid — a thread splits the cylinder)."""
+    feats = features.get("features", [])
+    out = {}
+    for i, f in enumerate(feats):
+        t = f.get("featureType")
+        if t not in FACE_FEATURE_TYPES or f.get("suppressed"):
+            continue
+        try:
+            pre = client.all_faces(ref, eid, i)
+            post = client.all_faces(ref, eid, i + 1)
+        except SystemExit as e:
+            print(f"  warning: no faces for {f.get('name')}: {e}",
+                  file=sys.stderr)
+            continue
+        if t == "shell":
+            out[str(i)] = [m[:3] for m in pre if not _face_c_match(m, post)]
+        elif t == "draft":
+            drafted = []
+            for m in pre:
+                q = _nearest_face(m, post)
+                if q is None:
+                    continue
+                dot = m[3] * q[3] + m[4] * q[4] + m[5] * q[5]
+                if dot < 0.9995:  # normal tilted -> this face was drafted
+                    drafted.append(m[:3])
+            out[str(i)] = drafted
+        else:  # externalThread: the cylindrical face it acted on
+            out[str(i)] = [m[:3] for m in pre if not _face_c_match(m, post)]
+    return out
+
+
 def up_to_verts_for(client, ref, eid, features):
     """{feature index: [created vertex mm, ...]} for each up-to/through
     extrude (1 FS call each). The span of these along the sketch normal is
@@ -391,6 +465,8 @@ def cmd_dump(client, ref, out_path):
                     "up_to_verts": up_to_verts_for(client, ref, eid, feats),
                     # Ground-truth sketch plane frames (unambiguous normals).
                     "true_planes": true_planes_for(client, ref, eid, feats),
+                    # Affected face centroids per shell/draft/thread.
+                    "face_diffs": face_diffs_for(client, ref, eid, feats),
                 }
             elif kind == "ASSEMBLY":
                 dump["assemblies"][eid] = {
@@ -457,6 +533,10 @@ class DumpSource:
         ps = self.dump["partstudios"][eid or self.eid]
         return ps.get("true_planes", {}).get(sketch_fid)
 
+    def face_diff(self, feature_index, eid=None):
+        ps = self.dump["partstudios"][eid or self.eid]
+        return ps.get("face_diffs", {}).get(str(feature_index))
+
 
 class LiveSource:
     """The same interface over the live API (~5 calls per part studio)."""
@@ -512,6 +592,27 @@ class LiveSource:
             except SystemExit:
                 self._planes = {}
         return self._planes.get(sketch_fid)
+
+    def face_diff(self, feature_index, eid=None):
+        feats = self.features().get("features", [])
+        if feature_index >= len(feats):
+            return None
+        try:
+            pre = self.client.all_faces(self.ref, eid or self.eid,
+                                        feature_index)
+            post = self.client.all_faces(self.ref, eid or self.eid,
+                                         feature_index + 1)
+        except SystemExit:
+            return None
+        t = feats[feature_index].get("featureType")
+        if t == "draft":
+            out = []
+            for m in pre:
+                q = _nearest_face(m, post)
+                if q and (m[3] * q[3] + m[4] * q[4] + m[5] * q[5]) < 0.9995:
+                    out.append(m[:3])
+            return out
+        return [m[:3] for m in pre if not _face_c_match(m, post)]
 
 
 # ===========================================================================
@@ -1663,6 +1764,149 @@ class Replayer:
             self.report.add(name, "skipped", "; ".join(sorted(set(skipped))[:3])
                             or "no mirrored features resolved")
 
+    def _match_faces(self, centroids, tol=1.0):
+        """Match Onshape face centroids (mm) to the current Designer body's
+        faces by centroid. Returns {created_by: [face name, ...]} for the
+        best-matching body (faces must be on one body for shell/draft)."""
+        try:
+            bodies = self.designer.call("list_elements").get("bodies", [])
+        except Exception:
+            return {}
+        by_body = {}
+        for m in centroids:
+            best = None
+            for b in bodies:
+                for f in b.get("faces", []):
+                    q = f.get("centroid")
+                    if not q:
+                        continue
+                    d = ((m[0] - q[0]) ** 2 + (m[1] - q[1]) ** 2
+                         + (m[2] - q[2]) ** 2) ** 0.5
+                    if best is None or d < best[0]:
+                        best = (d, b.get("created_by"), f.get("name"))
+            if best and best[0] < tol:
+                by_body.setdefault(best[1], []).append(best[2])
+        return by_body
+
+    def import_shell(self, feature, feature_index):
+        """Shell: the opened faces (present before, collapsed to a rim after)
+        matched to the Designer body they're on, applied as a Shell with
+        those open faces + the wall thickness."""
+        name = feature.get("name", "Shell")
+        p = _params_by_id(feature)
+        cents = self.src.face_diff(feature_index)
+        if not cents:
+            self.report.add(name, "skipped",
+                            "could not resolve the opened faces")
+            return
+        by_body = self._match_faces(cents)
+        if not by_body:
+            self.report.add(name, "skipped",
+                            f"none of {len(cents)} opened faces matched")
+            return
+        created_by, names = max(by_body.items(), key=lambda kv: len(kv[1]))
+        out = {"type": "Shell", "name": name, "body_id": created_by,
+               "open_faces": [{"feature_id": created_by, "element": n}
+                              for n in sorted(set(names))]}
+        thick = p.get("thickness", {})
+        expr = translate_expression(thick.get("expression"))
+        if expr is not None:
+            out["thickness_expr"] = expr
+            out["thickness"] = 1.0
+        else:
+            out["thickness"] = thick.get("value", 0.001) * MM
+        err = self._add_and_check(out)
+        if err is None:
+            self.report.add(name, "mapped",
+                            f"{len(out['open_faces'])} open face(s)")
+        else:
+            self.report.add(name, "skipped", err.splitlines()[0][:70])
+
+    NEUTRAL_PLANES = {  # unit normal -> Designer base plane
+        (0, 0, 1): "xy", (0, 0, -1): "xy", (0, 1, 0): "xz", (0, -1, 0): "xz",
+        (1, 0, 0): "yz", (-1, 0, 0): "yz"}
+
+    def import_draft(self, feature, feature_index):
+        """Draft: the tapered faces (normal tilts after) matched to their
+        Designer body, applied with the neutral base plane + angle."""
+        name = feature.get("name", "Draft")
+        p = _params_by_id(feature)
+        cents = self.src.face_diff(feature_index)
+        if not cents:
+            self.report.add(name, "skipped",
+                            "could not resolve the drafted faces")
+            return
+        by_body = self._match_faces(cents)
+        if not by_body:
+            self.report.add(name, "skipped", "no drafted face matched")
+            return
+        created_by, names = max(by_body.items(), key=lambda kv: len(kv[1]))
+        # Neutral plane: resolve its normal to a base plane. The query
+        # doesn't resolve at rollback, so read it from the true-plane FS via
+        # the neutralPlane's own face; fall back to xy.
+        base = "xy"
+        npn = self.src.neutral_normal(feature_index) \
+            if hasattr(self.src, "neutral_normal") else None
+        if npn:
+            key = tuple(round(x) for x in npn)
+            base = self.NEUTRAL_PLANES.get(key, "xy")
+        out = {"type": "Draft", "name": name, "body_id": created_by,
+               "neutral_plane": base,
+               "faces": [{"feature_id": created_by, "element": n}
+                         for n in sorted(set(names))]}
+        ang = p.get("angle", {})
+        expr = translate_expression(ang.get("expression"))
+        if expr is not None:
+            out["angle_expr"] = expr
+            out["angle_deg"] = 5.0
+        else:
+            import math
+            out["angle_deg"] = math.degrees(ang.get("value", 0.0))
+        notes = []
+        if npn is None:
+            notes.append("neutral plane assumed xy")
+        err = self._add_and_check(out)
+        if err is None:
+            self.report.add(name, "partial" if notes else "mapped",
+                            "; ".join(notes) or f"{len(out['faces'])} face(s)")
+        else:
+            self.report.add(name, "skipped", err.splitlines()[0][:70])
+
+    def import_thread(self, feature, feature_index):
+        """External thread: the cylindrical face it split, matched to the
+        Designer body, applied as a modeled Thread of the given depth."""
+        name = feature.get("name", "Thread")
+        p = _params_by_id(feature)
+        cents = self.src.face_diff(feature_index)
+        if not cents:
+            self.report.add(name, "skipped",
+                            "could not resolve the threaded face")
+            return
+        by_body = self._match_faces(cents)
+        if not by_body:
+            self.report.add(name, "skipped", "threaded face did not match")
+            return
+        created_by, names = max(by_body.items(), key=lambda kv: len(kv[1]))
+        # One cylindrical face; pick the first match. Designer only does
+        # COSMETIC threads (no cut geometry), so record it as such — the
+        # thread grooves the modeled Onshape thread carries are dropped.
+        out = {"type": "Thread", "name": name,
+               "face": {"feature_id": created_by, "element": names[0]},
+               "modeled": False, "pitch": 1.25}
+        depth = p.get("threadDepth", {})
+        expr = translate_expression(depth.get("expression"))
+        if expr is not None:
+            out["length_expr"] = expr
+            out["length"] = 10.0
+        else:
+            out["length"] = depth.get("value", 0.0) * MM
+        err = self._add_and_check(out)
+        if err is None:
+            self.report.add(name, "partial",
+                            "cosmetic thread (Designer has no modeled thread)")
+        else:
+            self.report.add(name, "skipped", err.splitlines()[0][:60])
+
     def import_fillet(self, feature, feature_index):
         """Fillet/chamfer: resolve the consumed (blended) edges by geometric
         diff (Onshape queries don't resolve reliably), match them to the
@@ -1839,6 +2083,12 @@ class Replayer:
                 self.import_mirror(f)
             elif ftype in ("fillet", "chamfer"):
                 self.import_fillet(f, fi)
+            elif ftype == "shell":
+                self.import_shell(f, fi)
+            elif ftype == "draft":
+                self.import_draft(f, fi)
+            elif ftype == "externalThread":
+                self.import_thread(f, fi)
             elif ftype == "cPlane":
                 self.report.add(name, "mapped",
                                 "construction plane (baked into sketch planes)")
