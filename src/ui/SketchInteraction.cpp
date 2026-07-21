@@ -1299,8 +1299,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   // Auto-constraint inference for the drawing tools: snap the cursor to nearby
   // geometry so the preview and the click both use the snapped point, and stash
   // the result for the ghost-glyph overlay. Ctrl or the toggle suppresses it.
-  // Segment-level snaps (H/V/parallel/perp against the pending other end) only
-  // apply to the Line tool; the other tools snap point-by-point.
+  // Segment-level snaps (H/V/parallel/perp against the previous point) apply to
+  // the Line tool and to Spline pole placement (relative to the last pole); the
+  // other tools snap point-by-point.
   const bool drawTool =
       edit.tool == SketchTool::Point || edit.tool == SketchTool::Line ||
       edit.tool == SketchTool::Circle || edit.tool == SketchTool::Rectangle ||
@@ -1310,10 +1311,13 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   const bool infer = drawTool && edit.autoConstrain && !ImGui::GetIO().KeyCtrl;
   if (infer) {
     const float ppu = PixelsPerUV(state, sketch->plane, uv);
-    std::optional<glm::vec2> other =
-        (edit.tool == SketchTool::Line && edit.hasPendingPoint)
-            ? std::optional<glm::vec2>(edit.pendingPoint)
-            : std::nullopt;
+    // The fixed "other end" for segment-level H/V/parallel/perp snapping: the
+    // pending Line start, or the last placed Spline pole.
+    std::optional<glm::vec2> other;
+    if (edit.tool == SketchTool::Line && edit.hasPendingPoint)
+      other = edit.pendingPoint;
+    else if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty())
+      other = edit.splinePoles.back();
     sketch::Snap snap =
         sketch::InferPoint(sketch->entities, uv, other, 0, ppu);
     uv = snap.uv;
