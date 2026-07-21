@@ -290,6 +290,9 @@ void DrawSketchModeToolbar(AppState& state) {
   toolBtn(ICON_FA_DRAW_POLYGON, "Fillet (Shift+F)", SketchTool::Fillet);
   toolBtn(ICON_FA_GRIP, "Pattern", SketchTool::Pattern);
   toolBtn(ICON_FA_CLONE, "Offset (O)", SketchTool::Offset);
+  toolBtn(ICON_FA_DIAGRAM_PROJECT,
+          "Project geometry (X) — click a body edge/face -> live reference",
+          SketchTool::Project);
   Divider();
 
   // Constraints act on the current selection (validated in

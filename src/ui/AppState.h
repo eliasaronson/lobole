@@ -66,7 +66,8 @@ enum class SketchTool {
   Pattern,       // linear/circular array of the current selection
   Offset,        // offset the selected closed loop by a distance
   Dimension,     // clicks accumulate targets; the tool infers the dim kind
-  RectangleCenter // 2-click rectangle: centre, then a corner
+  RectangleCenter, // 2-click rectangle: centre, then a corner
+  Project        // click a body edge/face -> live projected construction geom
 };
 
 // Transient state for the active sketch-editing session. The sketch itself

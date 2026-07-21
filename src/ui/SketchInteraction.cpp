@@ -658,6 +658,7 @@ static void HandleSketchKeys(AppState& state) {
   if (ImGui::IsKeyPressed(ImGuiKey_G)) return setTool(SketchTool::Rectangle);
   if (ImGui::IsKeyPressed(ImGuiKey_A)) return setTool(SketchTool::ArcThreePoint);
   if (ImGui::IsKeyPressed(ImGuiKey_S)) return setTool(SketchTool::Spline);
+  if (ImGui::IsKeyPressed(ImGuiKey_X)) return setTool(SketchTool::Project);
   if (ImGui::IsKeyPressed(ImGuiKey_M)) return setTool(SketchTool::Trim);
   if (ImGui::IsKeyPressed(ImGuiKey_O)) return setTool(SketchTool::Offset);
   if (ImGui::IsKeyPressed(ImGuiKey_D)) return setTool(SketchTool::Dimension);
@@ -1100,6 +1101,59 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
   ResolveAccumulatedTargets(state, sketch);
 }
 
+// Project tool: click a body's edge or face to add it as LIVE external
+// (projected) construction geometry — it tracks the source when it moves.
+// Prefers an edge under the cursor, else the face. Returns true (the viewport
+// click is consumed).
+bool HandleProjectTool(AppState& state, SketchFeature& sketch, size_t index,
+                       const Ray& ray) {
+  SketchEditState& edit = state.sketchEdit;
+  const EdgeHit edge = state.faceSelector->PickEdge(ray);
+  const RayHit face = state.faceSelector->PickFace(ray);
+  // Hover feedback: what a click would project.
+  edit.actionMsg = edge.hit  ? "Project: click to project this edge"
+                   : face.hit ? "Project: click to project this face"
+                              : "Project: hover a body edge or face";
+  if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+    return true;
+
+  std::optional<ElementRef> ref;
+  sketch::ExternalKind kind = sketch::ExternalKind::Edge;
+  if (edge.hit)
+    ref = EdgeElementRef(state, edge.meshId, edge.edgeIndex);
+  if (!ref && face.hit) {
+    ref = FaceElementRef(state, face.meshId, face.faceIndex);
+    kind = sketch::ExternalKind::Face;
+  }
+  if (!ref) {
+    edit.actionMsg = "Project: that element has no stable name — try its face";
+    return true;
+  }
+  for (const auto& e : sketch.external) // skip an already-projected ref
+    if (e.kind == kind && e.ref.featureId == ref->featureId &&
+        e.ref.name == ref->name) {
+      edit.actionMsg = "already projected";
+      return true;
+    }
+
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  sketch.AddExternalGeometry(*ref, kind);
+  state.document->Regenerate();
+  if (!sketch.GetError().empty()) { // shouldn't happen for a live pick
+    sketch.RemoveExternalGeometry(sketch.external.size() - 1);
+    state.document->Regenerate();
+    edit.actionMsg = "Project: could not project that element";
+    return true;
+  }
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  edit.actionMsg = kind == sketch::ExternalKind::Edge ? "projected an edge"
+                                                      : "projected a face";
+  return true;
+}
+
 } // namespace
 
 bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
@@ -1261,6 +1315,11 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     return true;
 
   Ray ray = ScreenRay(state, mousePos);
+
+  // Project tool picks MODEL geometry (a body edge/face), not a plane point.
+  if (edit.tool == SketchTool::Project)
+    return HandleProjectTool(state, *sketch, index, ray);
+
   auto uvOpt = RayToPlaneUV(ray, sketch->plane);
   if (!uvOpt)
     return true;
@@ -2087,6 +2146,9 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
           edit.selected.empty()
               ? "pick a point, line, or circle"
               : "pick a second target, or click empty space for length");
+    break;
+  case T::Project:
+    set("Project", 0, 0, "click a body edge or face to project it");
     break;
   }
   return p;
