@@ -8,6 +8,10 @@
 
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <Standard_Failure.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS_Wire.hxx>
+
+#include <vector>
 
 LoftFeature::LoftFeature(const std::string& name,
                          std::vector<uint64_t> sketchIds, ExtrudeMode mode)
@@ -21,8 +25,9 @@ bool LoftFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  BRepOffsetAPI_ThruSections thru(/*isSolid=*/Standard_True);
-  int sections = 0;
+  // Build every section wire first so we can pick the skinning mode from their
+  // topology (below), then feed them to a freshly-configured ThruSections.
+  std::vector<TopoDS_Wire> wires;
   for (uint64_t id : sketchIds) {
     const auto* sk =
         dynamic_cast<const SketchFeature*>(ctx.FindById(id));
@@ -37,9 +42,38 @@ bool LoftFeature::Execute(RegenContext& ctx) {
                "' has no single closed profile");
       return false;
     }
-    thru.AddWire(wire);
-    sections++;
+    wires.push_back(wire);
   }
+
+  // Smooth vs. ruled skinning. A smoothed loft fits ONE BSpline surface through
+  // ALL sections at once, so OCC must find a single consistent vertex/seam
+  // correspondence across them. When the sections share topology (e.g. every
+  // section a circle, or every section a 4-line rectangle) that correspondence
+  // is unambiguous and the smooth skin is exact — two coaxial circles loft to a
+  // true cylinder. But when vertex counts differ (a 4-vertex square paired with
+  // a 1-seam circle), the correspondence is arbitrary: OCC lands the square's
+  // corners ~45deg off the circle's seam and the resulting twist propagates
+  // along the WHOLE surface, pinching even the circle->circle span into an
+  // hourglass (the reported bug: square->r5->r5 came out below the r5 cylinder).
+  // Ruled skinning sidesteps this by fitting an INDEPENDENT patch between each
+  // consecutive pair, so a twist in one span can't bleed into another and each
+  // matched pair (circle->circle) stays exact. So: smooth when all sections have
+  // equal edge counts, ruled when they differ.
+  auto edgeCount = [](const TopoDS_Wire& w) {
+    int n = 0;
+    for (TopExp_Explorer e(w, TopAbs_EDGE); e.More(); e.Next()) n++;
+    return n;
+  };
+  bool sameTopology = true;
+  const int firstCount = edgeCount(wires.front());
+  for (const TopoDS_Wire& w : wires)
+    if (edgeCount(w) != firstCount) sameTopology = false;
+
+  BRepOffsetAPI_ThruSections thru(/*isSolid=*/Standard_True,
+                                  /*ruled=*/sameTopology ? Standard_False
+                                                         : Standard_True);
+  for (const TopoDS_Wire& w : wires)
+    thru.AddWire(w);
 
   try {
     thru.Build();

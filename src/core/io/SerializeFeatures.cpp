@@ -751,8 +751,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     out = std::move(sk);
   } else if (type == "Extrude") {
+    // `distance` is optional when a `distance_expr` drives it (mirrors Revolve's
+    // `angle`/`angle_expr`): the literal is just the last-good value the expr
+    // overwrites on regen, so an extrude authored with only `distance_expr`
+    // still builds a body instead of erroring on a missing key.
     auto ext = std::make_unique<ExtrudeFeature>(
-        name, j.at("sketch_id").get<uint64_t>(), j.at("distance").get<double>(),
+        name, j.at("sketch_id").get<uint64_t>(), j.value("distance", 1.0),
         ExtrudeModeFromString(j.value("mode", "new_body")),
         j.value("reversed", false));
     ext->distanceExpr =

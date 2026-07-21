@@ -98,3 +98,24 @@ TEST_CASE("Hole errors and round-trips (v21)", "[hole]") {
   CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(v, 1e-9));
   std::filesystem::remove(path);
 }
+
+// Fail-loud (dogfooding #3): a hole whose `diameterExpr` references a variable
+// that resolves in no scope must stamp a feature error, NOT silently fall back
+// to the literal twin and quietly drill the 1 mm default. Phase V's expression
+// refresh surfaces the unresolved reference; this pins that the hole path is
+// covered so a bad bore can never pass unnoticed again.
+TEST_CASE("Hole with an unresolved diameter_expr errors", "[hole]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10, 10, 10));
+  const uint64_t sk = PointSketch(doc, 10.0, {{5, 5}});
+  // No `bore` variable is defined anywhere -> the expr can't resolve.
+  auto ho = std::make_unique<HoleFeature>("H", sk, HoleKind::Simple, 1.0, 5.0);
+  ho->diameterExpr = "bore";
+  doc.AddFeature(std::move(ho));
+
+  CHECK_FALSE(doc.Regenerate());
+  const Feature* hole = doc.GetFeature(2);
+  REQUIRE(hole->TypeName() == "Hole");
+  CHECK_FALSE(hole->GetError().empty());
+  CHECK(hole->GetError().find("bore") != std::string::npos);
+}

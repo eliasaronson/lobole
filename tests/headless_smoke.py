@@ -362,11 +362,15 @@ def main():
             "type": "Sketch", "name": "S1",
             "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
                       "uAxis": [1, 0, 0]}, "entities": rect(4, 2)})
-        d.call("add_feature", feature={
+        # #4: no literal `distance` key at all — only `distance_expr`. The
+        # deserializer must default the literal (like Revolve's `angle`) so the
+        # expr alone builds a body instead of erroring on a missing key.
+        p1 = d.call("add_feature", feature={
             "type": "Extrude", "name": "P1", "sketch_id": sk1["id"],
-            "distance": 1.0, "distance_expr": "bore", "mode": "new_body"})
+            "distance_expr": "bore", "mode": "new_body"})
+        expect("error" not in p1, f"extrude with only distance_expr built: {p1}")
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 6) < 1e-3,
-               "part 1 driven by the project variable")
+               "part 1 driven by the project variable (distance_expr only)")
         d.call("add_part", name="Two")
         sk2 = d.call("add_feature", feature={
             "type": "Sketch", "name": "S2",
