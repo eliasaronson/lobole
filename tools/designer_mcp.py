@@ -684,6 +684,14 @@ def delete_part(index: int) -> dict:
     return _call("delete_part", index=index)
 
 
+@mcp.tool(description="Rename an existing part/assembly/drawing tab so the "
+          "default 'Part 1' isn't permanent (it feeds BOM + add_occurrence). "
+          "`part` is a name, stable id, or slot index (from list_parts). "
+          "Occurrences reference parts by stable id, so the rename is safe.")
+def rename_part(part, new_name: str) -> dict:
+    return _call("rename_part", part=part, new_name=new_name)
+
+
 # ---------------------------------------------------------------------------
 # Assemblies (A2): an assembly tab holds occurrences — placed instances of
 # parts. list_parts reports each tab's type ("part"/"assembly") and stable id.
@@ -848,9 +856,11 @@ def set_explode_step(view: int, occurrence: int, offset: list) -> dict:
 
 @mcp.tool(description="Seed an exploded view radially: every occurrence "
           "pushed away from the assembly centroid, scaled by assembly size. "
-          "A starting point to refine with set_explode_step.")
-def auto_explode(view: int) -> dict:
-    return _call("auto_explode", view=view)
+          "A starting point to refine with set_explode_step. Omit `view` (or "
+          "pass 0) to auto-create a fresh exploded view; the returned `view` "
+          "is its id.")
+def auto_explode(view: int = 0) -> dict:
+    return _call("auto_explode", **({"view": view} if view else {}))
 
 
 @mcp.tool(description="Apply an exploded view to the display (transient, "

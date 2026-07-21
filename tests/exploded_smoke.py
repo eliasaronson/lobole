@@ -115,6 +115,17 @@ def main():
         d.call("remove_exploded_view", id=vid)
         expect(d.call("list_exploded_views")["views"] == [], "view removed")
 
+        # #7: auto_explode with NO view no longer faults on a missing view — it
+        # auto-creates a fresh exploded view, seeds it, and returns its id.
+        expect(d.call("list_exploded_views")["views"] == [], "no views yet")
+        auto = d.call("auto_explode")  # note: no `view` param
+        expect("view" in auto and auto["view"] > 0,
+               f"auto_explode auto-created a view: {auto}")
+        expect(len(auto["steps"]) == 2, "auto-created view seeded both")
+        views = d.call("list_exploded_views")["views"]
+        expect(len(views) == 1 and views[0]["id"] == auto["view"],
+               "auto_explode with no view added exactly one view")
+
         print("exploded_smoke: OK")
     finally:
         app.terminate()

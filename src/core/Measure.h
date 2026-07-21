@@ -33,6 +33,7 @@ struct FaceInfo {
   std::string kind; // "plane" | "cylinder" | "cone" | "sphere" | "other"
   double area = 0.0;
   glm::vec3 centroid{0.0f}; // face center of mass, world space
+  glm::vec3 normal{0.0f};   // outward unit surface normal at the centroid UV
 };
 struct EdgeInfo {
   std::string kind; // "line" | "circle" | "arc" | "other"

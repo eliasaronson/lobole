@@ -206,7 +206,22 @@ TEST_CASE("DescribeFaceAt/DescribeEdgeAt classify a box", "[measure]") {
   doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 3, 4));
   const Body& body = doc.GetBodies()[0];
 
-  // Every named face is a plane with one of the box's three areas.
+  // Box center = mean of the face centroids (robust to the corner-origin
+  // convention). Used below to check each normal points OUTWARD.
+  glm::vec3 center(0.0f);
+  int nFaces = 0;
+  for (const auto& [idx, name] : body.elementMap.names) {
+    (void)name;
+    if (const auto f = Measure::DescribeFaceAt(body, idx)) {
+      center += f->centroid;
+      nFaces++;
+    }
+  }
+  center /= static_cast<float>(nFaces);
+
+  // Every named face is a plane with one of the box's three areas, and reports
+  // an outward unit normal aligned to one of the box's six axis directions.
+  int outwardNormals = 0;
   for (const auto& [idx, name] : body.elementMap.names) {
     (void)name;
     const auto f = Measure::DescribeFaceAt(body, idx);
@@ -214,7 +229,11 @@ TEST_CASE("DescribeFaceAt/DescribeEdgeAt classify a box", "[measure]") {
     CHECK(f->kind == "plane");
     CHECK((std::abs(f->area - 6.0) < 1e-6 || std::abs(f->area - 8.0) < 1e-6 ||
            std::abs(f->area - 12.0) < 1e-6));
+    CHECK_THAT(glm::length(f->normal), WithinRel(1.0f, 1e-4f));
+    if (glm::dot(f->normal, f->centroid - center) > 1e-4f)
+      outwardNormals++;
   }
+  CHECK(outwardNormals == 6); // all six faces point outward
   // Every named edge is a straight line of length 2, 3, or 4 — no radius.
   for (const auto& [idx, name] : body.elementMap.edgeNames) {
     (void)name;
@@ -242,12 +261,18 @@ TEST_CASE("DescribeFaceAt/DescribeEdgeAt classify a cylinder", "[measure]") {
     (void)name;
     const auto f = Measure::DescribeFaceAt(body, idx);
     REQUIRE(f.has_value());
+    CHECK_THAT(glm::length(f->normal), WithinRel(1.0f, 1e-4f));
     if (f->kind == "plane") {
       planes++;
       CHECK_THAT(f->area, WithinRel(4.0 * M_PI, 1e-6)); // pi r^2, r=2
+      // The caps face along the cylinder axis (+/-Z).
+      CHECK_THAT(std::abs(f->normal.z), WithinRel(1.0f, 1e-4f));
     } else if (f->kind == "cylinder") {
       cylinders++;
       CHECK_THAT(f->area, WithinRel(2.0 * M_PI * 2.0 * 5.0, 1e-6));
+      // The barrel normal is radial: perpendicular to the axis (its centroid
+      // sits ON the axis, so only perpendicularity is well-defined here).
+      CHECK(std::abs(f->normal.z) < 1e-4f);
     }
   }
   CHECK(planes == 2);   // the two caps

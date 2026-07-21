@@ -256,6 +256,29 @@ ImVec2 FractionToPos(const json& params) {
                 params.value("y", 0.5f) * size.y);
 }
 
+// Snap the camera to a named standard view (optionally fitting first). Shared
+// by the `view` RPC and the raw `screenshot` handler so a raw screenshot(view=)
+// orients the same way the MCP wrapper does. Returns false for an unknown name.
+// Directions follow the default planes (Front = XY, normal +Z, Y up); top/bottom
+// pick the up the camera reaches by tilting over from front.
+bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit) {
+  static const std::map<std::string, std::pair<glm::vec3, glm::vec3>> kViews = {
+      {"front", {{0, 0, 1}, {0, 1, 0}}},
+      {"back", {{0, 0, -1}, {0, 1, 0}}},
+      {"right", {{1, 0, 0}, {0, 1, 0}}},
+      {"left", {{-1, 0, 0}, {0, 1, 0}}},
+      {"top", {{0, 1, 0}, {0, 0, -1}}},
+      {"bottom", {{0, -1, 0}, {0, 0, 1}}},
+      {"iso", {glm::normalize(glm::vec3(1, 1, 1)), {0, 1, 0}}}};
+  auto it = kViews.find(name);
+  if (it == kViews.end()) return false;
+  // Fit runs first: it re-aims at the document center (SetTarget), so the snap
+  // must set the orientation last.
+  if (fit) ui::FitCameraToDocument(state);
+  state.camera->SnapToView(it->second.first, it->second.second);
+  return true;
+}
+
 } // namespace
 
 json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
@@ -271,7 +294,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // than dereferencing null.
   static const std::set<std::string> kNoPartDoc = {
       "ping",         "list_parts",       "add_part",
-      "add_assembly", "set_active_part",  "delete_part",
+      "add_assembly", "set_active_part",  "delete_part", "rename_part",
       // Configuration RPCs target the active tab: part-doc handling above,
       // assembly handling below. Listed here so they are allowed on an
       // assembly tab (where doc is null).
@@ -481,6 +504,44 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const size_t idx = ui::AddAssembly(state, name);
     return {{"index", idx}, {"name", name}, {"id", state.parts[idx].id}};
   }
+  if (m == "rename_part") {
+    // Rename an existing tab (part/assembly/drawing) so the default "Part 1"
+    // isn't permanent — it feeds BOM + add_occurrence. Occurrences reference
+    // parts by stable id, so a name change never breaks a reference. `part`
+    // resolves by name, stable id, or slot index. params: {part, new_name}
+    ui::EnsureParts(state);
+    const json& sel = p.at("part");
+    int slot = -1;
+    if (sel.is_number_integer() || sel.is_number_unsigned()) {
+      const uint64_t v = sel.get<uint64_t>();
+      for (size_t i = 0; i < state.parts.size(); i++)
+        if (state.parts[i].id == v) { slot = static_cast<int>(i); break; }
+      if (slot < 0 && v < state.parts.size()) slot = static_cast<int>(v);
+    } else if (sel.is_string()) {
+      const std::string s = sel.get<std::string>();
+      for (size_t i = 0; i < state.parts.size(); i++)
+        if (state.parts[i].name == s) { slot = static_cast<int>(i); break; }
+      if (slot < 0) {
+        try { // numeric string: stable id, then slot index
+          const uint64_t v = std::stoull(s);
+          for (size_t i = 0; i < state.parts.size(); i++)
+            if (state.parts[i].id == v) { slot = static_cast<int>(i); break; }
+          if (slot < 0 && v < state.parts.size()) slot = static_cast<int>(v);
+        } catch (...) {
+        }
+      }
+    }
+    if (slot < 0)
+      throw std::runtime_error("no part '" + sel.dump() +
+                               "' — pass a part name, stable id or slot index "
+                               "(see list_parts)");
+    const std::string newName = p.at("new_name").get<std::string>();
+    if (newName.empty()) throw std::runtime_error("new_name must be non-empty");
+    state.parts[slot].name = newName;
+    return {{"index", slot},
+            {"name", newName},
+            {"id", state.parts[slot].id}};
+  }
   if (auto r = remote::HandleDrawingRpc(state, m, p)) return *r;
   if (auto r = remote::HandleAssemblyRpc(state, m, p)) return *r;
   if (auto r = remote::HandleProjectRpc(state, m, p)) return *r;
@@ -490,24 +551,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   }
   if (m == "view") {
     // Standard view, snapped instantly (no animation) so the very next
-    // screenshot captures the final framing. Fit runs first: it re-aims at the
-    // document center (SetTarget), so the snap must set the orientation last.
+    // screenshot captures the final framing.
     // params: {name: front|back|left|right|top|bottom|iso, fit?: true}
-    // Directions follow the default planes (Front = XY, normal +Z, Y up);
-    // top/bottom pick the up the camera would reach by tilting over from front.
-    static const std::map<std::string, std::pair<glm::vec3, glm::vec3>> kViews =
-        {{"front", {{0, 0, 1}, {0, 1, 0}}},
-         {"back", {{0, 0, -1}, {0, 1, 0}}},
-         {"right", {{1, 0, 0}, {0, 1, 0}}},
-         {"left", {{-1, 0, 0}, {0, 1, 0}}},
-         {"top", {{0, 1, 0}, {0, 0, -1}}},
-         {"bottom", {{0, -1, 0}, {0, 0, 1}}},
-         {"iso", {glm::normalize(glm::vec3(1, 1, 1)), {0, 1, 0}}}};
     const std::string name = p.at("name").get<std::string>();
-    auto it = kViews.find(name);
-    if (it == kViews.end()) throw std::runtime_error("unknown view: " + name);
-    if (p.value("fit", true)) ui::FitCameraToDocument(state);
-    state.camera->SnapToView(it->second.first, it->second.second);
+    if (!ApplyStandardView(state, name, p.value("fit", true)))
+      throw std::runtime_error("unknown view: " + name);
     return {{"position", Vec3ToJson(state.camera->GetPosition())},
             {"target", Vec3ToJson(state.camera->GetTarget())},
             {"distance", state.camera->GetDistance()}};
@@ -785,6 +833,16 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
                        "screenshot requires the GUI — start "
                        "designer without --headless");
           continue;
+        }
+        // Optional `view` reorients + fits before the capture, matching the
+        // MCP wrapper so raw callers get the oriented shot too.
+        if (request.params.contains("view")) {
+          const std::string view =
+              request.params.at("view").get<std::string>();
+          if (!ApplyStandardView(state, view, request.params.value("fit", true))) {
+            RespondError(request.client, request.id, "unknown view: " + view);
+            continue;
+          }
         }
         m_screenshotId = request.id;
         m_screenshotClient = request.client;

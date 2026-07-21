@@ -111,6 +111,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     json after = DocumentIO::FeatureToJson(*f);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    // A material change touches PBR/albedo but not geometry, so the body meshes
+    // are unchanged and SyncDocumentRenderers would skip the re-push. Force a
+    // resync so the shaded body recolors immediately (no other edit needed).
+    state.syncedDocumentVersion = UINT64_MAX;
     return json::object();
   }
   if (m == "set_rollback") {

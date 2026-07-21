@@ -280,15 +280,31 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     return DocumentIO::ExplodedViewToJson(*v);
   }
   if (m == "auto_explode") {
-    // params: {view} — radial seed from the assembly centroid (snapshots).
+    // params: {view?} — radial seed from the assembly centroid (snapshots).
+    // With no `view` (or view 0), create a fresh exploded view first so the
+    // common "just explode this" call doesn't fault on a missing view.
     if (!state.assembly)
       throw std::runtime_error("the active document is not an assembly");
-    const uint64_t id = p.at("view").get<uint64_t>();
-    if (!ui::AutoExplode(state, id))
+    uint64_t id = p.value("view", uint64_t{0});
+    const bool created = id == 0;
+    if (created) {
+      ui::SnapshotAssembly(state);
+      ExplodedView v;
+      v.name = "Exploded";
+      id = state.assembly->AddExplodedView(std::move(v));
+    }
+    if (!ui::AutoExplode(state, id)) {
+      if (created) state.assembly->RemoveExplodedView(id); // don't leak it
       throw std::runtime_error(
-          "no such exploded view (or fewer than two placed occurrences)");
-    return DocumentIO::ExplodedViewToJson(
+          created ? "auto_explode needs at least two placed occurrences"
+                  : "no such exploded view (or fewer than two placed "
+                    "occurrences) — call add_exploded_view first, or omit "
+                    "`view` to auto-create one");
+    }
+    json out = DocumentIO::ExplodedViewToJson(
         *state.assembly->FindExplodedViewById(id));
+    out["view"] = id; // the (possibly just-created) view id
+    return out;
   }
   if (m == "set_explode") {
     // Display state (transient, never saved): which view is applied and how

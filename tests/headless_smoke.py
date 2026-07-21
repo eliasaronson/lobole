@@ -338,6 +338,20 @@ def main():
         d.call("set_active_part", index=1)
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 27) < 1e-6,
                "reloaded part 2 geometry")
+        # #10: rename an existing part (the default "Part 1" isn't permanent).
+        # Resolvable by name; occurrences reference parts by stable id, so the
+        # rename never breaks a reference.
+        pid0 = next(p for p in parts if p["name"] == "Part 1")["id"]
+        d.call("rename_part", part="Part 1", new_name="Wheel")
+        renamed = d.call("list_parts")["parts"]
+        expect(renamed[0]["name"] == "Wheel" and renamed[0]["id"] == pid0,
+               "rename_part renames the slot, keeps its stable id")
+        # Also resolvable by slot index; bogus part errors.
+        d.call("rename_part", part=0, new_name="Hub")
+        expect(d.call("list_parts")["parts"][0]["name"] == "Hub",
+               "rename_part resolves a part by slot index")
+        expect_error(d, "rename_part", "no part", part="ghost", new_name="X")
+        d.call("rename_part", part="Hub", new_name="Part 1")  # restore
         # Delete a part; can't delete the last.
         d.call("delete_part", index=1)
         expect(len(d.call("list_parts")["parts"]) == 1, "part deleted")
@@ -472,6 +486,17 @@ def main():
             "width": 2, "height": 2, "depth": 2})
         d.call("set_material", feature_id=boxf["id"], material="aluminum")
         cube = d.call("list_elements")["bodies"][0]
+        # #8: every face reports its outward unit surface normal. A box's six
+        # planar faces point along ±X/±Y/±Z; check magnitude ~1 and that the
+        # full axis-aligned set is present (not the old all-zero placeholder).
+        cnorms = [f["normal"] for f in cube["faces"]]
+        expect(all(abs((n[0]**2 + n[1]**2 + n[2]**2) ** 0.5 - 1.0) < 1e-4
+                   for n in cnorms), "box face normals are unit length")
+        def _has(ax):
+            return any(abs(n[ax] - 1) < 1e-4 for n in cnorms) and \
+                   any(abs(n[ax] + 1) < 1e-4 for n in cnorms)
+        expect(_has(0) and _has(1) and _has(2),
+               f"box reports +/-X,Y,Z face normals: {cnorms}")
         d.call("add_assembly", name="asm")  # active tab is now the assembly
         o1 = d.call("add_occurrence", part="Part 1", fixed=True)["id"]
         o2 = d.call("add_occurrence", part="Part 1",
@@ -553,7 +578,23 @@ def main():
         expect(abs(m["area"] - face["area"]) < 1e-9 and
                abs(m["area"] - 4.0) < 1e-6,
                "cross-part measure: cube face area 4")
-        expect_error(d, "measure", "not found", part="Nope",
+        expect_error(d, "measure", "no part with id or index", part="Nope",
+                     a={"feature_id": pels["created_by"],
+                        "element": face["name"]})
+        # #9: `part=<int>` accepts EITHER the stable id OR the slot index, and a
+        # bogus number errors (no silent fall-through to the active part).
+        pinfo = next(p for p in d.call("list_parts")["parts"]
+                     if p["name"] == "Part 1")
+        m_by_index = d.call("measure", part=pinfo["index"],
+                            a={"feature_id": pels["created_by"],
+                               "element": face["name"]})
+        m_by_id = d.call("measure", part=pinfo["id"],
+                         a={"feature_id": pels["created_by"],
+                            "element": face["name"]})
+        expect(abs(m_by_index["area"] - 4.0) < 1e-6 and
+               abs(m_by_id["area"] - 4.0) < 1e-6,
+               "measure resolves a part by slot index AND by stable id")
+        expect_error(d, "measure", "no part with id or index", part=99999,
                      a={"feature_id": pels["created_by"],
                         "element": face["name"]})
 

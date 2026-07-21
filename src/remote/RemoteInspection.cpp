@@ -27,23 +27,33 @@ namespace {
 Document* ResolvePartParam(ui::AppState& state, const json& part) {
   ui::EnsureParts(state);
   uint64_t id = 0;
+  // A numeric `part` is tried as a STABLE id first (what occurrences reference);
+  // if no part carries that id it falls back to the slot INDEX from list_parts,
+  // so passing the visible 0..N index no longer silently returns another part.
+  std::optional<int> indexFallback;
   if (part.is_number_unsigned() || part.is_number_integer()) {
     id = part.get<uint64_t>();
+    indexFallback = part.get<int>();
   } else if (part.is_string()) {
     const std::string s = part.get<std::string>();
     id = ui::PartIdByName(state, s);
-    if (id == 0) { // allow a stable id passed as a string
+    if (id == 0) { // allow a stable id / index passed as a string
       try {
         id = std::stoull(s);
+        indexFallback = std::stoi(s);
       } catch (...) {
         id = 0;
       }
     }
   }
   Document* d = id != 0 ? ui::PartDocById(state, id) : nullptr;
+  if (d == nullptr && indexFallback && *indexFallback >= 0 &&
+      *indexFallback < static_cast<int>(state.parts.size())) {
+    d = ui::PartDocById(state, state.parts[*indexFallback].id);
+  }
   if (d == nullptr)
-    throw std::runtime_error("part '" + part.dump() +
-                             "' not found — pass a part name or stable id "
+    throw std::runtime_error("no part with id or index " + part.dump() +
+                             " — pass a part name, stable id or slot index "
                              "(see list_parts)");
   return d;
 }
@@ -302,6 +312,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           // Centroid: lets an importer match a specific face geometrically
           // (Onshape shell/draft face queries -> our stable face names).
           f["centroid"] = {fi->centroid.x, fi->centroid.y, fi->centroid.z};
+          // Outward unit surface normal at the centroid: lets an agent tell a
+          // +X wall from a -X wall without a separate select_face round-trip.
+          f["normal"] = {fi->normal.x, fi->normal.y, fi->normal.z};
         }
         faces.push_back(f);
       }

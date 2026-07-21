@@ -12,8 +12,12 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
+#include <BRepTools.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <GeomAbs_SurfaceType.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <Geom_Surface.hxx>
 #include <GProp_GProps.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -104,6 +108,29 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
   out.area = props.Mass();
   const gp_Pnt c = props.CentreOfMass();
   out.centroid = glm::vec3(c.X(), c.Y(), c.Z());
+  // Outward surface normal at a representative point. Project the centroid onto
+  // the surface for its (u,v) — falls back to the UV-bounds midpoint if the
+  // projection can't converge — then take the geometric normal there, flipping
+  // it when the face is reversed so it points OUT of the solid.
+  {
+    const TopoDS_Face face = TopoDS::Face(f);
+    Standard_Real u0, u1, v0, v1;
+    BRepTools::UVBounds(face, u0, u1, v0, v1);
+    Standard_Real u = 0.5 * (u0 + u1), v = 0.5 * (v0 + v1);
+    const Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+    if (!surf.IsNull()) {
+      GeomAPI_ProjectPointOnSurf proj(c, surf, u0, u1, v0, v1);
+      if (proj.IsDone() && proj.NbPoints() > 0)
+        proj.LowerDistanceParameters(u, v);
+      GeomLProp_SLProps sl(surf, u, v, 1, 1e-7);
+      if (sl.IsNormalDefined()) {
+        gp_Dir n = sl.Normal();
+        if (face.Orientation() == TopAbs_REVERSED)
+          n.Reverse();
+        out.normal = glm::vec3(n.X(), n.Y(), n.Z());
+      }
+    }
+  }
   switch (BRepAdaptor_Surface(TopoDS::Face(f)).GetType()) {
   case GeomAbs_Plane:    out.kind = "plane"; break;
   case GeomAbs_Cylinder: out.kind = "cylinder"; break;
