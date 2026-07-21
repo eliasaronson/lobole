@@ -11,7 +11,9 @@
 #include "core/features/FilletFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/HoleFeature.h"
+#include "core/features/CurveFeature.h"
 #include "core/features/LoftFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/ThreadStandards.h"
 #include "core/features/RibFeature.h"
@@ -398,6 +400,59 @@ void DrawAxisRefCombo(AppState& state, Feature& owner, AxisRef& axis,
                    static_cast<int>(cstrs.size()))) {
     nlohmann::json before = DocumentIO::FeatureToJson(owner);
     axis = refs[static_cast<size_t>(sel)];
+    CommitDiscrete(state, owner, before, index, commit);
+  }
+}
+
+bool AcceptSketch(const Feature* f) {
+  return dynamic_cast<const SketchFeature*>(f) != nullptr;
+}
+// A sketch (open chain) or a Curve3D — anything usable as a sweep/loft path or
+// guide (mirrors SweepFeature's ResolveSweepPathWire).
+bool AcceptPathLike(const Feature* f) {
+  return dynamic_cast<const SketchFeature*>(f) != nullptr ||
+         dynamic_cast<const CurveFeature*>(f) != nullptr;
+}
+
+// A combo over earlier features (index-filtered, i.e. only what this feature is
+// allowed to reference) whose type passes `accept`, optionally led by a
+// "(none)" = 0 entry. Reads/writes *target and commits like a discrete combo.
+// The curve/sketch reference picker — the DrawAxisRefCombo of Curve3D-driven
+// features.
+void DrawFeatureRefCombo(AppState& state, Feature& owner, const char* label,
+                         uint64_t* target, size_t index, bool commit,
+                         bool allowNone, bool (*accept)(const Feature*)) {
+  std::vector<std::string> labels;
+  std::vector<uint64_t> ids;
+  if (allowNone) {
+    labels.emplace_back("(none)");
+    ids.push_back(0);
+  }
+  for (size_t i = 0; i < index; i++) {
+    Feature* f = state.document->GetFeature(i);
+    if (accept(f)) {
+      labels.push_back(f->GetName());
+      ids.push_back(f->GetId());
+    }
+  }
+  if (ids.empty()) {
+    LeftLabel(label);
+    ImGui::TextDisabled("(no candidates)");
+    return;
+  }
+  int sel = 0;
+  for (size_t i = 0; i < ids.size(); i++)
+    if (ids[i] == *target) {
+      sel = static_cast<int>(i);
+      break;
+    }
+  std::vector<const char*> cstrs;
+  cstrs.reserve(labels.size());
+  for (const auto& s : labels)
+    cstrs.push_back(s.c_str());
+  if (LabeledCombo(label, &sel, cstrs.data(), static_cast<int>(cstrs.size()))) {
+    nlohmann::json before = DocumentIO::FeatureToJson(owner);
+    *target = ids[static_cast<size_t>(sel)];
     CommitDiscrete(state, owner, before, index, commit);
   }
 }
@@ -1001,18 +1056,136 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ImGui::Text("Points: %s", src->GetName().c_str());
     else
       ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Points: missing");
-  } else if (auto* sw = dynamic_cast<SweepFeature*>(&feature)) {
-    Feature* pf = state.document->FindFeatureById(sw->profileSketchId);
-    Feature* pa = state.document->FindFeatureById(sw->pathSketchId);
-    ImGui::Text("Profile: %s", pf ? pf->GetName().c_str() : "(missing)");
-    ImGui::Text("Path: %s", pa ? pa->GetName().c_str() : "(missing)");
-  } else if (auto* lo = dynamic_cast<LoftFeature*>(&feature)) {
-    ImGui::Text("Sections: %zu", lo->sketchIds.size());
-    for (uint64_t sid : lo->sketchIds) {
-      Feature* src = state.document->FindFeatureById(sid);
-      ImGui::BulletText("%s", src ? src->GetName().c_str() : "(missing)");
+  } else if (auto* cv = dynamic_cast<CurveFeature*>(&feature)) {
+    const char* kinds[] = {"Fit spline", "Helix", "Control poly"};
+    int k = static_cast<int>(cv->kind);
+    if (LabeledCombo("Kind", &k, kinds, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*cv);
+      cv->kind = static_cast<Curve3DKind>(k);
+      CommitDiscrete(state, feature, before, index, commit);
     }
-    ImGui::TextDisabled("Add sections via add_feature / the RPC");
+    if (cv->kind == Curve3DKind::Helix) {
+      HandleEdit(state, feature, DragFloat3Row("Origin", &cv->axisOrigin.x),
+                 index, commit);
+      HandleEdit(state, feature, DragFloat3Row("Axis", &cv->axisDir.x), index,
+                 commit);
+      ExprDim(state, feature, index, commit, "Radius", cv->radiusExpr,
+              cv->radius);
+      ExprDim(state, feature, index, commit, "Pitch", cv->pitchExpr, cv->pitch);
+      ExprDim(state, feature, index, commit, "Turns", cv->turnsExpr, cv->turns);
+      HandleEdit(state, feature,
+                 ImGui::Checkbox("Right-handed", &cv->rightHanded), index,
+                 commit);
+    } else {
+      if (cv->kind == Curve3DKind::ControlPoly) {
+        LeftLabel("Degree");
+        HandleEdit(state, feature, ImGui::InputInt("##Degree", &cv->degree),
+                   index, commit);
+        if (cv->degree < 1)
+          cv->degree = 1;
+      }
+      HandleEdit(state, feature, ImGui::Checkbox("Closed", &cv->closed), index,
+                 commit);
+      // The 3D point list — each row a drag + remove, plus an append button.
+      ImGui::Text("Points: %zu", cv->points.size());
+      for (size_t p = 0; p < cv->points.size(); p++) {
+        ImGui::PushID(static_cast<int>(p));
+        if (ImGui::SmallButton("x")) {
+          nlohmann::json before = DocumentIO::FeatureToJson(*cv);
+          cv->points.erase(cv->points.begin() + static_cast<long>(p));
+          CommitDiscrete(state, feature, before, index, commit);
+          ImGui::PopID();
+          break;
+        }
+        ImGui::SameLine();
+        HandleEdit(state, feature,
+                   ImGui::DragFloat3("##pt", &cv->points[p].x, 0.05f), index,
+                   commit);
+        ImGui::PopID();
+      }
+      if (ImGui::Button("Add point")) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*cv);
+        const glm::vec3 last =
+            cv->points.empty() ? glm::vec3(0.0f) : cv->points.back();
+        cv->points.push_back(last + glm::vec3(1.0f, 0.0f, 0.0f));
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+    }
+  } else if (auto* pi = dynamic_cast<PipeFeature*>(&feature)) {
+    DrawFeatureRefCombo(state, feature, "Path", &pi->pathId, index, commit,
+                        /*allowNone=*/false, AcceptPathLike);
+    ExprDim(state, feature, index, commit, "Outer dia", pi->outerDiameterExpr,
+            pi->outerDiameter);
+    // Wall allows 0 (a solid rod), so a plain drag (ExprDim's DragDim clamps to
+    // >= 0.01).
+    LeftLabel("Wall");
+    static const double wmin = 0.0, wmax = 1e6;
+    HandleEdit(state, feature,
+               ImGui::DragScalar("##Wall", ImGuiDataType_Double,
+                                 &pi->wallThickness, 0.02f, &wmin, &wmax,
+                                 pi->wallThickness <= 0.0 ? "solid" : "%.3f",
+                                 ImGuiSliderFlags_AlwaysClamp),
+               index, commit);
+  } else if (auto* sw = dynamic_cast<SweepFeature*>(&feature)) {
+    DrawFeatureRefCombo(state, feature, "Profile", &sw->profileSketchId, index,
+                        commit, /*allowNone=*/false, AcceptSketch);
+    DrawFeatureRefCombo(state, feature, "Path", &sw->pathSketchId, index, commit,
+                        /*allowNone=*/false, AcceptPathLike);
+    DrawFeatureRefCombo(state, feature, "Guide", &sw->guideId, index, commit,
+                        /*allowNone=*/true, AcceptPathLike);
+    const char* frames[] = {"Corrected Frenet", "Frenet", "Fixed"};
+    int fr = static_cast<int>(sw->frame);
+    if (LabeledCombo("Frame", &fr, frames, 3)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*sw);
+      sw->frame = static_cast<SweepFrame>(fr);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+  } else if (auto* lo = dynamic_cast<LoftFeature*>(&feature)) {
+    // Sections (ordered), each removable.
+    ImGui::Text("Sections: %zu", lo->sketchIds.size());
+    for (size_t s = 0; s < lo->sketchIds.size(); s++) {
+      ImGui::PushID(static_cast<int>(s));
+      if (ImGui::SmallButton("x")) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*lo);
+        lo->sketchIds.erase(lo->sketchIds.begin() + static_cast<long>(s));
+        CommitDiscrete(state, feature, before, index, commit);
+        ImGui::PopID();
+        break;
+      }
+      ImGui::SameLine();
+      Feature* src = state.document->FindFeatureById(lo->sketchIds[s]);
+      ImGui::TextUnformatted(src ? src->GetName().c_str() : "(missing)");
+      ImGui::PopID();
+    }
+    // Append a section: a combo of earlier sketches that resets each frame.
+    {
+      std::vector<std::string> labels = {"+ Add section"};
+      std::vector<uint64_t> ids = {0};
+      for (size_t i = 0; i < index; i++) {
+        Feature* f = state.document->GetFeature(i);
+        if (dynamic_cast<SketchFeature*>(f)) {
+          labels.push_back(f->GetName());
+          ids.push_back(f->GetId());
+        }
+      }
+      std::vector<const char*> cstrs;
+      for (const auto& s : labels)
+        cstrs.push_back(s.c_str());
+      int sel = 0;
+      if (cstrs.size() > 1 &&
+          LabeledCombo("Add", &sel, cstrs.data(),
+                       static_cast<int>(cstrs.size())) &&
+          ids[static_cast<size_t>(sel)] != 0) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*lo);
+        lo->sketchIds.push_back(ids[static_cast<size_t>(sel)]);
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+    }
+    // Optional spine + guide turn this into a guided loft (MakePipeShell).
+    DrawFeatureRefCombo(state, feature, "Path", &lo->pathId, index, commit,
+                        /*allowNone=*/true, AcceptPathLike);
+    DrawFeatureRefCombo(state, feature, "Guide", &lo->guideId, index, commit,
+                        /*allowNone=*/true, AcceptPathLike);
   } else if (auto* th = dynamic_cast<ThreadFeature*>(&feature)) {
     // Designation combo: the ISO series + Custom (manual pitch).
     const auto& series = threads::All();

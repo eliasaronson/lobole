@@ -64,6 +64,18 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
       [](AppState& s) { CreateRib(s); });
   add("Create: Thread", nullptr, idle && hasBody,
       [](AppState& s) { CreateThread(s); });
+  const size_t sketches =
+      state.document ? SketchFeatureCount(*state.document) : 0;
+  const bool hasPathLike =
+      state.document && HasCurveOrSketch(*state.document);
+  add("Create: 3D Curve", nullptr, idle,
+      [](AppState& s) { CreateCurve3D(s); });
+  add("Create: Pipe", nullptr, idle && hasPathLike,
+      [](AppState& s) { CreatePipe(s); });
+  add("Create: Sweep", nullptr, idle && sketches >= 1,
+      [](AppState& s) { CreateSweep(s); });
+  add("Create: Loft", nullptr, idle && sketches >= 2,
+      [](AppState& s) { CreateLoft(s); });
 
   add("Tool: Measure", nullptr, part || state.assembly != nullptr,
       [](AppState& s) { s.measure = MeasureState{}; s.measure.active = true; });

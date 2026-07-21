@@ -2,8 +2,13 @@
 
 **Status (2026-07-21):** Phases 0–3 **SHIPPED + tested** — 3D curves, curve
 sweep paths, Pipe, guided sweep, **and guided loft** (single guide, FreeCAD's
-MakePipeShell recipe). Full non-GUI suite green. Only demand-gated follow-ups
-remain (multi-guide surface-fit; `BRepFill_Contact` on guided *sweep*).
+MakePipeShell recipe). **GUI tools SHIPPED** — Create menu + command-palette
+entries for 3D Curve / Pipe / Sweep / Loft, full property-panel editors
+(curve kind + helix params + point list; pipe path/dia/wall; sweep & loft
+profile/path/guide/frame combos), feature-tree icons, GUI smoke tests. Full
+non-GUI + GUI suites green. Only demand-gated follow-ups remain (multi-guide
+surface-fit; `BRepFill_Contact` on guided *sweep*; in-viewport 3D point
+picking for fit/control curves — today points are typed/dragged in the panel).
 Supersedes [interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md)
 §3 ("3D fit-spline"), widening it from an import driver into a modeling
 workstream. Scope signed off 2026-07-21: **build through Phase 3** (guided

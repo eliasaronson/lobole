@@ -421,6 +421,15 @@ void CreateCylinder(AppState& state);
 void CreateDatumPlane(AppState& state);
 // Starts a preview of a two-point datum axis (along X by default).
 void CreateDatumAxis(AppState& state);
+
+void CreateCurve3D(AppState& state); // 3D curve (helix / fit-spline / poly)
+void CreatePipe(AppState& state);    // pipe/tube along a path
+void CreateSweep(AppState& state);   // sweep a profile along a path
+void CreateLoft(AppState& state);    // loft through sections (optional guide)
+
+// Menu/palette gating queries for the curve-driven tools.
+size_t SketchFeatureCount(const Document& doc);
+bool HasCurveOrSketch(const Document& doc);
 // Starts a preview of a boolean combining the two most-recent body producers.
 void CreateBoolean(AppState& state);
 // Starts a preview of a mirror / linear pattern of the most-recent body.

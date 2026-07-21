@@ -34,10 +34,13 @@
 #include "core/io/Serialization.h"
 
 #include <nlohmann/json.hpp>
+#include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/RibFeature.h"
+#include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/FeatureEditor.h" // PickSlot (thread face slot)
@@ -343,6 +346,66 @@ void CreateDatumAxis(AppState& state) {
 }
 
 namespace {
+// Ids of earlier features usable as a sweep/loft profile or section (closed
+// sketches) resp. as a path/guide (a sketch chain or a Curve3D). Used to seed
+// Create* defaults; the editors offer the full combo.
+uint64_t LastSketchId(const AppState& state) {
+  if (!state.document)
+    return 0;
+  for (size_t i = state.document->FeatureCount(); i-- > 0;)
+    if (dynamic_cast<SketchFeature*>(state.document->GetFeature(i)))
+      return state.document->GetFeature(i)->GetId();
+  return 0;
+}
+uint64_t LastPathId(const AppState& state) {
+  if (!state.document)
+    return 0;
+  for (size_t i = state.document->FeatureCount(); i-- > 0;) {
+    Feature* f = state.document->GetFeature(i);
+    if (dynamic_cast<CurveFeature*>(f) || dynamic_cast<SketchFeature*>(f))
+      return f->GetId();
+  }
+  return 0;
+}
+} // namespace
+
+void CreateCurve3D(AppState& state) {
+  // Default to a helix: it needs no references and is valid immediately, so the
+  // preview shows a real curve. The editor switches kind / edits points.
+  auto cv = std::make_unique<CurveFeature>(NextName(state, "Curve"),
+                                           Curve3DKind::Helix);
+  cv->radius = 3.0;
+  cv->pitch = 2.0;
+  cv->turns = 4.0;
+  BeginPreviewFeature(state, std::move(cv));
+}
+
+void CreatePipe(AppState& state) {
+  // Seed the path with the most recent curve/sketch (if any); the editor's
+  // path combo lets the user change it.
+  auto pi = std::make_unique<PipeFeature>(NextName(state, "Pipe"),
+                                          LastPathId(state), 2.0);
+  BeginPreviewFeature(state, std::move(pi));
+}
+
+void CreateSweep(AppState& state) {
+  // Profile defaults to the latest sketch, path to the latest curve/sketch;
+  // both are editable in the properties panel via combos.
+  const uint64_t sketch = LastSketchId(state);
+  BeginPreviewFeature(state, std::make_unique<SweepFeature>(
+                                 NextName(state, "Sweep"), sketch,
+                                 LastPathId(state)));
+}
+
+void CreateLoft(AppState& state) {
+  // Start empty; the editor's "Add section" combo collects 2+ profiles (and an
+  // optional path + guide for a guided loft).
+  BeginPreviewFeature(state, std::make_unique<LoftFeature>(
+                                 NextName(state, "Loft"),
+                                 std::vector<uint64_t>{}));
+}
+
+namespace {
 // Does this feature create a body (vs. modify or produce none)?
 bool ProducesBody(const Feature& f) {
   if (dynamic_cast<const BoxFeature*>(&f) ||
@@ -361,6 +424,22 @@ bool ProducesBody(const Feature& f) {
   return false;
 }
 } // namespace
+
+size_t SketchFeatureCount(const Document& doc) {
+  size_t n = 0;
+  for (const auto& f : doc.GetFeatures())
+    if (dynamic_cast<const SketchFeature*>(f.get()))
+      n++;
+  return n;
+}
+
+bool HasCurveOrSketch(const Document& doc) {
+  for (const auto& f : doc.GetFeatures())
+    if (dynamic_cast<const SketchFeature*>(f.get()) ||
+        dynamic_cast<const CurveFeature*>(f.get()))
+      return true;
+  return false;
+}
 
 std::vector<std::pair<uint64_t, std::string>> BodyProducers(const Document& doc,
                                                             size_t beforeIndex) {

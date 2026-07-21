@@ -155,6 +155,21 @@ void DrawCreateMenu(AppState& state) {
     CreateRib(state); // needs an open sketch profile too; no-op without one
   if (ImGui::MenuItem("Thread", nullptr, false, idle && hasBody))
     CreateThread(state); // cosmetic; arms the cylindrical-face pick
+
+  // Curve-driven tools (curves-3d): a 3D curve, and the sweep/pipe/loft that
+  // consume it. Gated on the references each needs.
+  const size_t sketches =
+      state.document ? SketchFeatureCount(*state.document) : 0;
+  const bool hasPathLike =
+      state.document && HasCurveOrSketch(*state.document);
+  if (ImGui::MenuItem("3D Curve", nullptr, false, idle))
+    CreateCurve3D(state);
+  if (ImGui::MenuItem("Pipe", nullptr, false, idle && hasPathLike))
+    CreatePipe(state);
+  if (ImGui::MenuItem("Sweep", nullptr, false, idle && sketches >= 1))
+    CreateSweep(state);
+  if (ImGui::MenuItem("Loft", nullptr, false, idle && sketches >= 2))
+    CreateLoft(state);
   ImGui::Separator();
 
   SketchEditState& edit = state.sketchEdit;

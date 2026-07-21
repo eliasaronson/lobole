@@ -3,8 +3,10 @@
 #include "Camera.h"
 #include "FaceSelector.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CurveFeature.h"
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/Occurrence.h"
 #include "core/Feature.h"
 #include "core/features/FilletFeature.h"
@@ -100,6 +102,35 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MenuClick("Edit/Undo");
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), before);
+  };
+
+  t = IM_REGISTER_TEST(engine, "curves", "create_helix_from_menu");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const size_t before = Doc()->FeatureCount();
+    MenuCreateAccept(ctx, "Create/3D Curve");
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    auto* cv = dynamic_cast<CurveFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(cv != nullptr);
+    IM_CHECK(cv->kind == Curve3DKind::Helix);
+    IM_CHECK(cv->Polyline().size() >= 2); // a real curve was built
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), before);
+  };
+
+  t = IM_REGISTER_TEST(engine, "curves", "pipe_along_helix_makes_body");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // A helix (now the most recent curve), then a pipe that defaults its path
+    // to it. Body count is checked as a delta, so prior state doesn't matter.
+    MenuCreateAccept(ctx, "Create/3D Curve");
+    const size_t bodiesBefore = Doc()->GetBodies().size();
+    MenuCreateAccept(ctx, "Create/Pipe");
+    auto* pi = dynamic_cast<PipeFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(pi != nullptr);
+    IM_CHECK(pi->pathId != 0);                    // seeded from the helix
+    IM_CHECK_EQ(Doc()->GetBodies().size(), bodiesBefore + 1); // a tube body
   };
 
   t = IM_REGISTER_TEST(engine, "document", "new_project_clears_features");
