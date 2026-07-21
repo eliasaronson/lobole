@@ -35,6 +35,8 @@ const char* FeatureIcon(const std::string& type) {
   if (type == "Pattern") return ICON_FA_GRIP;
   if (type == "DatumPlane") return ICON_FA_TABLE_CELLS_LARGE;
   if (type == "DatumAxis") return ICON_FA_ARROWS_UP_DOWN;
+  if (type == "Curve3D") return ICON_FA_BEZIER_CURVE;
+  if (type == "Pipe") return ICON_FA_ROAD;
   if (type == "Fillet") return ICON_FA_BORDER_TOP_LEFT;
   if (type == "Chamfer") return ICON_FA_CROP_SIMPLE;
   if (type == "Rib") return ICON_FA_BARS_STAGGERED;

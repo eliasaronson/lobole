@@ -1,0 +1,19 @@
+{
+  "format": "designer-document",
+  "version": 43,
+  "parameters": [],
+  "features": [
+    {"type": "Sketch", "name": "Path", "id": 1, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "uAxis": [1, 0, 0]},
+     "entities": [{"type": "line", "id": 1, "a": [0, 0], "b": [0, 10]}],
+     "constraints": []},
+    {"type": "Sketch", "name": "Prof", "id": 2, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [{"type": "circle", "id": 1, "center": [0, 0], "radius": 0.5}],
+     "constraints": []},
+    {"type": "Sweep", "name": "Coil", "id": 3,
+     "profile_id": 2, "path_id": 1, "mode": "new_body", "frame": "frenet"},
+    {"type": "Pipe", "name": "Rod", "id": 4, "path_id": 1,
+     "outer_diameter": 3.0, "mode": "new_body"}
+  ]
+}

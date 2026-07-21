@@ -558,6 +558,17 @@ TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
         en += 2.0 * M_PI;
       edges.push_back({true, ArcPointUV(*a, 1), ArcPointUV(*a, 2), a->center,
                        a->radius, s, en, a->id});
+    } else if (const auto* bs = std::get_if<BSpline>(&entity)) {
+      // A spline can be a path edge (curves-3d Phase 1 companion). Endpoints
+      // are the first/last poles; the curve geometry rides in `spline`.
+      if (bs->poles.size() < 2)
+        continue;
+      LoopEdge e;
+      e.a = bs->poles.front();
+      e.b = bs->poles.back();
+      e.entityId = bs->id;
+      e.spline = *bs;
+      edges.push_back(e);
     }
   }
   if (edges.empty())
@@ -628,6 +639,20 @@ TopoDS_Wire BuildOpenPathWire(const SketchPlane& plane,
   try {
     BRepBuilderAPI_MakeWire wire;
     for (const LoopEdge& e : chain) {
+      if (e.spline) {
+        // Orient the poles to the walked a->b direction (the chain walker may
+        // have swapped endpoints to connect the chain without reversing poles).
+        BSpline s = *e.spline;
+        if (!Near(s.poles.front(), e.a))
+          std::reverse(s.poles.begin(), s.poles.end());
+        BRepBuilderAPI_MakeEdge mk(MakeBSplineCurve(plane, s));
+        if (!mk.IsDone())
+          return TopoDS_Wire();
+        wire.Add(mk.Edge());
+        if (wire.Error() != BRepBuilderAPI_WireDone)
+          return TopoDS_Wire();
+        continue;
+      }
       BRepBuilderAPI_MakeEdge mk =
           e.arc ? BRepBuilderAPI_MakeEdge(
                       gp_Circ(gp_Ax2(toPnt(e.center), normal,

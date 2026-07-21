@@ -1,0 +1,33 @@
+#pragma once
+
+#include "core/BodyMode.h" // ExtrudeMode
+#include "core/Feature.h"
+
+#include <cstdint>
+#include <string>
+
+// Sweeps a circular, optionally hollow, profile along a path — the common
+// "pipe / tube" convenience over Sweep (curves-3d Phase 2). The path
+// (`pathId`) is a sketch OR a Curve3D (fit-spline / helix / control-poly), via
+// the same ResolveSweepPathWire as Sweep. A circle of `outerDiameter` is built
+// normal to the path at its start and skinned down the spine; when
+// `wallThickness` > 0 an inner pipe is subtracted to make a tube. Reuses
+// SweepProfileAlongSpine — no duplicate sweep code. Modes reuse ApplyBodyMode.
+// Regeneration fails per-feature when the path is missing/unusable, the wall is
+// thicker than the radius, or OCC rejects the sweep.
+class PipeFeature : public Feature {
+public:
+  PipeFeature(const std::string& name, uint64_t pathId, double outerDiameter,
+              double wallThickness = 0.0,
+              ExtrudeMode mode = ExtrudeMode::NewBody);
+
+  std::string TypeName() const override { return "Pipe"; }
+  bool Execute(RegenContext& ctx) override;
+  void VisitExprs(const ExprVisitor& visit) override;
+
+  uint64_t pathId = 0;         // a sketch OR a Curve3D
+  double outerDiameter = 2.0;
+  double wallThickness = 0.0;  // 0 = solid rod
+  std::string outerDiameterExpr, wallThicknessExpr;
+  ExtrudeMode mode = ExtrudeMode::NewBody;
+};

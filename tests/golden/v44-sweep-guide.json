@@ -1,0 +1,19 @@
+{
+  "format": "designer-document",
+  "version": 44,
+  "parameters": [],
+  "features": [
+    {"type": "Sketch", "name": "Path", "id": 1, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "uAxis": [1, 0, 0]},
+     "entities": [{"type": "line", "id": 1, "a": [0, 0], "b": [0, 10]}],
+     "constraints": []},
+    {"type": "Sketch", "name": "Prof", "id": 2, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [{"type": "circle", "id": 1, "center": [0, 0], "radius": 0.5}],
+     "constraints": []},
+    {"type": "Curve3D", "name": "Guide", "id": 3, "kind": "fit_spline",
+     "points": [[2, 0, 0], [2, 0, 5], [2, 0, 10]]},
+    {"type": "Sweep", "name": "Coil", "id": 4,
+     "profile_id": 2, "path_id": 1, "guide_id": 3, "mode": "new_body"}
+  ]
+}

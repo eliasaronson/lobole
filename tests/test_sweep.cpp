@@ -3,9 +3,11 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/features/CurveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/SweepFeature.h"
 
+#include <cmath>
 #include <vector>
 
 using Catch::Matchers::WithinRel;
@@ -37,6 +39,88 @@ TEST_CASE("Sweep a circle along a straight vertical path is a cylinder",
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
              WithinRel(M_PI * 1.0 * 1.0 * 10.0, 1e-2));
+}
+
+TEST_CASE("Sweep a circle along a 3D fit-spline path (curves-3d P1)",
+          "[sweep][curve3d]") {
+  Document doc;
+  // Profile: small circle r=0.5 on XY at the spline's start point.
+  const uint64_t prof = AddSketch(
+      doc, SketchPlane(glm::vec3(0), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)),
+      "Prof", {sketch::Circle{{0, 0}, 0.5}});
+  auto cv = std::make_unique<CurveFeature>("Path", Curve3DKind::FitSpline);
+  cv->points = {{0, 0, 0}, {2, 1, 3}, {5, 0, 6}};
+  doc.AddFeature(std::move(cv));
+  const uint64_t path = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+
+  doc.AddFeature(std::make_unique<SweepFeature>("Tube", prof, path));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  // Tube ~ pi*0.5^2 * (spline length). Spline runs at least the chord ~8.5,
+  // so volume is comfortably positive.
+  CHECK(doc.GetBodies()[0].shape.Volume() > 5.0);
+}
+
+TEST_CASE("Sweep a circle along a helix is a coil (curves-3d P1)",
+          "[sweep][curve3d]") {
+  Document doc;
+  const uint64_t prof = AddSketch(
+      doc, SketchPlane(glm::vec3(2, 0, 0), glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)),
+      "Prof", {sketch::Circle{{0, 0}, 0.2}});
+  auto cv = std::make_unique<CurveFeature>("Helix", Curve3DKind::Helix);
+  cv->radius = 2.0;
+  cv->pitch = 1.0;
+  cv->turns = 3.0;
+  doc.AddFeature(std::move(cv));
+  const uint64_t path = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+
+  doc.AddFeature(std::make_unique<SweepFeature>("Coil", prof, path));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  // Coil volume ~ pi*0.2^2 * helixLength. helixLength = 3*sqrt((2pi*2)^2+1).
+  const double len = 3.0 * std::sqrt(std::pow(2.0 * M_PI * 2.0, 2) + 1.0);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(M_PI * 0.04 * len, 0.1));
+}
+
+TEST_CASE("Guided sweep uses a second curve to orient the section (P3)",
+          "[sweep][curve3d]") {
+  Document doc;
+  // Profile: circle r=0.4 on XY at origin.
+  const uint64_t prof = AddSketch(
+      doc, SketchPlane(glm::vec3(0), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)),
+      "Prof", {sketch::Circle{{0, 0}, 0.4}});
+  // Spine: straight up +Z by 8 (line on XZ plane).
+  const uint64_t path = AddSketch(
+      doc, SketchPlane(glm::vec3(0), glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)),
+      "Path", {sketch::Line{{0, 0}, {0, 8}}});
+  // Guide: a 3D curve running alongside the spine but curving out in +X.
+  auto g = std::make_unique<CurveFeature>("Guide", Curve3DKind::FitSpline);
+  g->points = {{1, 0, 0}, {2, 0, 4}, {1, 0, 8}};
+  doc.AddFeature(std::move(g));
+  const uint64_t guide = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+
+  auto sw = std::make_unique<SweepFeature>("Guided", prof, path);
+  sw->guideId = guide;
+  doc.AddFeature(std::move(sw));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK(doc.GetBodies()[0].shape.Volume() > 0.0);
+}
+
+TEST_CASE("Sweep errors on a missing guide", "[sweep]") {
+  Document doc;
+  const uint64_t prof = AddSketch(
+      doc, SketchPlane(glm::vec3(0), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)),
+      "Prof", {sketch::Circle{{0, 0}, 0.4}});
+  const uint64_t path = AddSketch(
+      doc, SketchPlane(glm::vec3(0), glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)),
+      "Path", {sketch::Line{{0, 0}, {0, 8}}});
+  auto sw = std::make_unique<SweepFeature>("Bad", prof, path);
+  sw->guideId = 99999; // nonexistent
+  doc.AddFeature(std::move(sw));
+  CHECK_FALSE(doc.Regenerate());
+  CHECK(!doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
 }
 
 TEST_CASE("Sweep errors on a missing sketch", "[sweep]") {

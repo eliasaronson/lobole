@@ -26,6 +26,8 @@ add_executable(designer_tests
     test_rib.cpp
     test_thread.cpp
     test_sweep.cpp
+    test_curve3d.cpp
+    test_pipe.cpp
     test_hole.cpp
     test_draft.cpp
     test_autosaver.cpp

@@ -190,9 +190,11 @@ set(core_sources
     src/core/features/RibFeature.cpp
     src/core/features/ThreadFeature.cpp
     src/core/features/SweepFeature.cpp
+    src/core/features/PipeFeature.cpp
     src/core/features/HoleFeature.cpp
     src/core/features/DraftFeature.cpp
     src/core/features/DatumAxisFeature.cpp
+    src/core/features/CurveFeature.cpp
     src/core/features/BooleanFeature.cpp
     src/core/features/SplitFeature.cpp
     src/core/ElementHistory.cpp

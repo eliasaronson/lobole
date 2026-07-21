@@ -487,6 +487,8 @@ void AppendThreadOverlays(AppState& state, std::vector<LineVertex3D>& lines);
 // Appends a line segment for every DatumAxisFeature (same visibility rule as
 // the datum planes), tinted distinctly; selected/pending is brightened.
 void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines);
+// Draws every Curve3D feature's tessellated polyline (curves-3d Phase 0).
+void AppendCurve3DLines(AppState& state, std::vector<LineVertex3D>& lines);
 
 // Draws each visible datum plane's and datum axis's name as a 2D label
 // (foreground draw list). Call inside the ImGui frame, near DrawDimensions.

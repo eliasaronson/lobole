@@ -2,6 +2,7 @@
 #include "core/io/SerializationInternal.h"
 
 #include "core/features/BooleanFeature.h"
+#include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/DraftFeature.h"
@@ -11,6 +12,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
@@ -306,6 +308,22 @@ DatumAxisKind DatumAxisKindFromString(const std::string& s) {
   throw std::runtime_error("Unknown datum axis kind: " + s);
 }
 
+const char* Curve3DKindToString(Curve3DKind kind) {
+  switch (kind) {
+  case Curve3DKind::FitSpline: return "fit_spline";
+  case Curve3DKind::Helix: return "helix";
+  case Curve3DKind::ControlPoly: return "control_poly";
+  }
+  return "fit_spline";
+}
+
+Curve3DKind Curve3DKindFromString(const std::string& s) {
+  if (s == "fit_spline") return Curve3DKind::FitSpline;
+  if (s == "helix") return Curve3DKind::Helix;
+  if (s == "control_poly") return Curve3DKind::ControlPoly;
+  throw std::runtime_error("Unknown curve3d kind: " + s);
+}
+
 const char* PlaneTypeToString(PlaneType type) {
   switch (type) {
   case PlaneType::XY: return "xy";
@@ -514,6 +532,33 @@ json FeatureToJson(const Feature& feature) {
     case DatumAxisKind::GlobalZ:
       break; // kind string is sufficient
     }
+  } else if (auto* cv = dynamic_cast<const CurveFeature*>(&feature)) { // v42
+    j["kind"] = Curve3DKindToString(cv->kind);
+    switch (cv->kind) {
+    case Curve3DKind::FitSpline:
+    case Curve3DKind::ControlPoly: {
+      json pts = json::array();
+      for (const glm::vec3& p : cv->points)
+        pts.push_back(Vec3ToJson(p));
+      j["points"] = std::move(pts);
+      if (cv->kind == Curve3DKind::ControlPoly)
+        j["degree"] = cv->degree;
+      if (cv->closed)
+        j["closed"] = true;
+      break;
+    }
+    case Curve3DKind::Helix:
+      j["origin"] = Vec3ToJson(cv->axisOrigin);
+      j["axis"] = Vec3ToJson(cv->axisDir);
+      j["radius"] = cv->radius;
+      if (!cv->radiusExpr.empty()) j["radius_expr"] = cv->radiusExpr;
+      j["pitch"] = cv->pitch;
+      if (!cv->pitchExpr.empty()) j["pitch_expr"] = cv->pitchExpr;
+      j["turns"] = cv->turns;
+      if (!cv->turnsExpr.empty()) j["turns_expr"] = cv->turnsExpr;
+      if (!cv->rightHanded) j["left_handed"] = true;
+      break;
+    }
   } else if (auto* boo = dynamic_cast<const BooleanFeature*>(&feature)) {
     j["target_id"] = boo->targetId;
     j["tool_id"] = boo->toolId;
@@ -560,7 +605,21 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* sw = dynamic_cast<const SweepFeature*>(&feature)) {
     j["profile_id"] = sw->profileSketchId;
     j["path_id"] = sw->pathSketchId;
+    if (sw->guideId != 0) // v44; omit when there's no guide
+      j["guide_id"] = sw->guideId;
     j["mode"] = ExtrudeModeToString(sw->mode);
+    if (sw->frame != SweepFrame::CorrectedFrenet) // v43; omit the default
+      j["frame"] = sw->frame == SweepFrame::Frenet ? "frenet" : "fixed";
+  } else if (auto* pi = dynamic_cast<const PipeFeature*>(&feature)) { // v43
+    j["path_id"] = pi->pathId;
+    j["outer_diameter"] = pi->outerDiameter;
+    if (!pi->outerDiameterExpr.empty())
+      j["outer_diameter_expr"] = pi->outerDiameterExpr;
+    if (pi->wallThickness != 0.0)
+      j["wall_thickness"] = pi->wallThickness;
+    if (!pi->wallThicknessExpr.empty())
+      j["wall_thickness_expr"] = pi->wallThicknessExpr;
+    j["mode"] = ExtrudeModeToString(pi->mode);
   } else if (auto* rb = dynamic_cast<const RibFeature*>(&feature)) {
     j["sketch_id"] = rb->sketchId;
     j["thickness"] = rb->thickness;
@@ -865,6 +924,30 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       break;
     }
     out = std::move(da);
+  } else if (type == "Curve3D") { // v42
+    auto cv = std::make_unique<CurveFeature>(
+        name, Curve3DKindFromString(j.at("kind").get<std::string>()));
+    switch (cv->kind) {
+    case Curve3DKind::FitSpline:
+    case Curve3DKind::ControlPoly:
+      for (const auto& pj : j.value("points", json::array()))
+        cv->points.push_back(Vec3FromJson(pj));
+      cv->degree = j.value("degree", 3);
+      cv->closed = j.value("closed", false);
+      break;
+    case Curve3DKind::Helix:
+      cv->axisOrigin = Vec3FromJson(j.at("origin"));
+      cv->axisDir = Vec3FromJson(j.at("axis"));
+      cv->radius = j.value("radius", 1.0);
+      cv->radiusExpr = j.value("radius_expr", std::string{});
+      cv->pitch = j.value("pitch", 1.0);
+      cv->pitchExpr = j.value("pitch_expr", std::string{});
+      cv->turns = j.value("turns", 1.0);
+      cv->turnsExpr = j.value("turns_expr", std::string{});
+      cv->rightHanded = !j.value("left_handed", false);
+      break;
+    }
+    out = std::move(cv);
   } else if (type == "Boolean") {
     out = std::make_unique<BooleanFeature>(
         name, j.at("target_id").get<uint64_t>(),
@@ -917,10 +1000,24 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, std::move(ids), ExtrudeModeFromString(j.value("mode",
                                                             "new_body")));
   } else if (type == "Sweep") { // v20
-    out = std::make_unique<SweepFeature>(
+    auto sw = std::make_unique<SweepFeature>(
         name, j.at("profile_id").get<uint64_t>(),
         j.at("path_id").get<uint64_t>(),
         ExtrudeModeFromString(j.value("mode", "new_body")));
+    sw->guideId = j.value("guide_id", uint64_t{0}); // v44
+    const std::string fr = j.value("frame", "corrected_frenet"); // v43
+    sw->frame = fr == "frenet"  ? SweepFrame::Frenet
+                : fr == "fixed" ? SweepFrame::Fixed
+                                : SweepFrame::CorrectedFrenet;
+    out = std::move(sw);
+  } else if (type == "Pipe") { // v43
+    auto pi = std::make_unique<PipeFeature>(
+        name, j.at("path_id").get<uint64_t>(),
+        j.value("outer_diameter", 2.0), j.value("wall_thickness", 0.0),
+        ExtrudeModeFromString(j.value("mode", "new_body")));
+    pi->outerDiameterExpr = j.value("outer_diameter_expr", std::string{});
+    pi->wallThicknessExpr = j.value("wall_thickness_expr", std::string{});
+    out = std::move(pi);
   } else if (type == "Rib") { // v36
     auto rb = std::make_unique<RibFeature>(
         name, j.at("sketch_id").get<uint64_t>(), j.value("thickness", 1.0),

@@ -1,0 +1,16 @@
+{
+  "format": "designer-document",
+  "version": 42,
+  "parameters": [],
+  "features": [
+    {"type": "Box", "name": "Block", "id": 1,
+     "position": [0, 0, 0], "width": 2, "height": 3, "depth": 4},
+    {"type": "Curve3D", "name": "Coil", "id": 2, "kind": "helix",
+     "origin": [0, 0, 0], "axis": [0, 0, 1],
+     "radius": 1.0, "pitch": 1.0, "turns": 2.0, "left_handed": true},
+    {"type": "Curve3D", "name": "Path", "id": 3, "kind": "fit_spline",
+     "points": [[0, 0, 0], [1, 2, 0], [2, 0, 3]], "closed": false},
+    {"type": "Curve3D", "name": "Ctrl", "id": 4, "kind": "control_poly",
+     "degree": 3, "points": [[0, 0, 0], [1, 3, 0], [4, 3, 2], [5, 0, 2]]}
+  ]
+}

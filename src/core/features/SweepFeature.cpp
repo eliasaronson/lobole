@@ -3,14 +3,74 @@
 #include "Logger.h"
 #include "core/BodyMode.h"
 #include "core/ElementHistory.h"
+#include "core/features/CurveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h"
 
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepFill_TypeOfContact.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
 #include <Standard_Failure.hxx>
+
+TopoDS_Wire ResolveSweepPathWire(const RegenContext& ctx, uint64_t pathId) {
+  const Feature* f = ctx.FindById(pathId);
+  if (!f)
+    return TopoDS_Wire();
+  if (const auto* sk = dynamic_cast<const SketchFeature*>(f))
+    return sketch::BuildOpenPathWire(sk->plane, sk->entities);
+  if (const auto* cv = dynamic_cast<const CurveFeature*>(f)) {
+    const TopoDS_Shape& shape = cv->EdgeShape().GetShape();
+    if (shape.IsNull() || shape.ShapeType() != TopAbs_EDGE)
+      return TopoDS_Wire();
+    BRepBuilderAPI_MakeWire wire(TopoDS::Edge(shape));
+    return wire.IsDone() ? wire.Wire() : TopoDS_Wire();
+  }
+  return TopoDS_Wire();
+}
+
+CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
+                                const TopoDS_Wire& spine, SweepFrame frame,
+                                const TopoDS_Wire& guide) {
+  if (profile.IsNull() || spine.IsNull())
+    return CADShape();
+  try {
+    // MakePipeShell (not MakePipe) so sharp path corners are handled: a plain
+    // MakePipe truncates the sweep at the first corner. RoundCorner rounds the
+    // spine's corners; the trihedron mode controls how the section is carried.
+    BRepOffsetAPI_MakePipeShell shell(spine);
+    shell.SetTransitionMode(BRepBuilderAPI_RoundCorner);
+    if (!guide.IsNull()) {
+      // A guide curve (auxiliary spine) supersedes the frame: the section is
+      // oriented by the guide as it travels — the "two directions" sweep.
+      shell.SetMode(guide, /*CurvilinearEquivalence=*/Standard_True,
+                    BRepFill_NoContact);
+    } else {
+      switch (frame) {
+      case SweepFrame::Frenet:
+        shell.SetMode(/*IsFrenet=*/Standard_True);
+        break;
+      case SweepFrame::CorrectedFrenet:
+        shell.SetMode(/*IsFrenet=*/Standard_False);
+        break;
+      case SweepFrame::Fixed:
+        break; // leave OCC's default discrete trihedron
+      }
+    }
+    shell.Add(profile);
+    shell.Build();
+    if (!shell.IsDone() || !shell.MakeSolid())
+      return CADShape();
+    return CADShape(shell.Shape());
+  } catch (const Standard_Failure&) {
+    return CADShape();
+  }
+}
 
 SweepFeature::SweepFeature(const std::string& name, uint64_t profileSketchId,
                            uint64_t pathSketchId, ExtrudeMode mode)
@@ -22,11 +82,8 @@ SweepFeature::SweepFeature(const std::string& name, uint64_t profileSketchId,
 bool SweepFeature::Execute(RegenContext& ctx) {
   const auto* prof =
       dynamic_cast<const SketchFeature*>(ctx.FindById(profileSketchId));
-  const auto* path =
-      dynamic_cast<const SketchFeature*>(ctx.FindById(pathSketchId));
-  if (!prof || !path) {
-    SetError("sweep needs a profile and a path sketch (missing or "
-             "suppressed)");
+  if (!prof) {
+    SetError("sweep needs a profile sketch (missing or suppressed)");
     return false;
   }
 
@@ -37,38 +94,31 @@ bool SweepFeature::Execute(RegenContext& ctx) {
     SetError("sweep profile has no single closed loop");
     return false;
   }
-  const TopoDS_Wire spine =
-      sketch::BuildOpenPathWire(path->plane, path->entities);
+  // The path can be a sketch (lines/arcs/splines) or a Curve3D (fit-spline,
+  // helix, control-poly) — curves-3d Phase 1.
+  const TopoDS_Wire spine = ResolveSweepPathWire(ctx, pathSketchId);
   if (spine.IsNull()) {
-    SetError("sweep path must be one open chain of lines/arcs");
+    SetError("sweep path must be an open sketch chain or a 3D curve");
     return false;
+  }
+  // Optional guide curve ("two directions", curves-3d Phase 3): a second
+  // sketch/Curve3D that orients the section along the sweep.
+  TopoDS_Wire guide;
+  if (guideId != 0) {
+    guide = ResolveSweepPathWire(ctx, guideId);
+    if (guide.IsNull()) {
+      SetError("sweep guide must be an open sketch chain or a 3D curve");
+      return false;
+    }
   }
 
-  try {
-    // MakePipeShell (not MakePipe) so sharp path corners are handled: a plain
-    // MakePipe truncates the sweep at the first corner. RoundCorner rounds the
-    // spine's corners; the profile is swept keeping its orientation to the
-    // spine, then closed into a solid.
-    BRepOffsetAPI_MakePipeShell shell(spine);
-    shell.SetTransitionMode(BRepBuilderAPI_RoundCorner);
-    shell.Add(profileWire);
-    shell.Build();
-    if (!shell.IsDone() || !shell.MakeSolid()) {
-      SetError("sweep failed (profile not perpendicular to the path start?)");
-      return false;
-    }
-    CADShape result(shell.Shape());
-    if (!result.IsValid() || result.Volume() < 1e-9) {
-      SetError("sweep produced an invalid solid");
-      return false;
-    }
-    ElementMap map;
-    topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
-    return ApplyBodyMode(ctx.bodies, std::move(result), std::move(map), mode,
-                         m_name, m_material, GetId());
-  } catch (const Standard_Failure& e) {
-    SetError(std::string("sweep failed: ") + e.GetMessageString());
-    LOG_ERROR("SweepFeature '{}': {}", m_name, GetError());
+  CADShape result = SweepProfileAlongSpine(profileWire, spine, frame, guide);
+  if (!result.IsValid() || result.Volume() < 1e-9) {
+    SetError("sweep failed (profile not perpendicular to the path start?)");
     return false;
   }
+  ElementMap map;
+  topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
+  return ApplyBodyMode(ctx.bodies, std::move(result), std::move(map), mode,
+                       m_name, m_material, GetId());
 }

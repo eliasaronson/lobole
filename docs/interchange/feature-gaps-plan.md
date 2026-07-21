@@ -217,6 +217,13 @@ follow-up.
 
 ## 3. 3D fit-spline (non-sketch curve object)
 
+> **Superseded & widened** by
+> [../modeling/curves-3d-plan.md](../modeling/curves-3d-plan.md) — the 3D
+> curve grew from an import driver into a full modeling workstream
+> (fit-spline + helix + control-poly, then sweep-along-curve, pipe, and guide
+> curves). Build there. The design notes below remain accurate context.
+
+
 Onshape's `fitSpline` can also produce a **3D** curve through points not
 lying on any one sketch plane. Designer has no 3D free curve object today —
 every curve lives inside a `SketchFeature` on a plane. This is the largest of

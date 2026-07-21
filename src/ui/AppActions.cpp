@@ -17,6 +17,7 @@
 #include "core/Measure.h"
 #include "core/io/GitVault.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/CurveFeature.h"
 #include "core/Command.h"
 #include "core/Expression.h"
 #include "core/features/DatumAxisFeature.h"
@@ -583,6 +584,27 @@ void AppendDatumAxisLines(AppState& state, std::vector<LineVertex3D>& lines) {
     const glm::vec3 d = da->Direction();
     lines.push_back(LineVertex(o - d * half, c));
     lines.push_back(LineVertex(o + d * half, c));
+  }
+}
+
+void AppendCurve3DLines(AppState& state, std::vector<LineVertex3D>& lines) {
+  if (!state.document)
+    return;
+  const glm::vec3 kCurveTint(0.45f, 0.85f, 1.0f); // cyan, distinct from datums
+  for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+    auto* cv = dynamic_cast<CurveFeature*>(state.document->GetFeature(i));
+    if (!cv)
+      continue;
+    const auto& poly = cv->Polyline();
+    if (poly.size() < 2)
+      continue;
+    const bool emphasized = cv->GetId() == state.pendingFeatureId ||
+                            cv->GetId() == SelectedFeatureId(state);
+    const glm::vec3 c = kCurveTint * (emphasized ? 1.3f : 1.0f);
+    for (size_t k = 1; k < poly.size(); k++) {
+      lines.push_back(LineVertex(poly[k - 1], c));
+      lines.push_back(LineVertex(poly[k], c));
+    }
   }
 }
 
