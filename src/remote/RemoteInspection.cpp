@@ -252,6 +252,31 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               {"center_of_mass", {com.x, com.y, com.z}},
               {"mass_g", mass->massKnown ? json(mass->massG) : json(nullptr)}}}};
   }
+  if (m == "check_geometry") {
+    // B-Rep validity per body (OCC BRepCheck_Analyzer) — flags invalid faces/
+    // edges/wires and the distinct reasons. Read-only; useful on imported STEP
+    // and after booleans. params: {body?: index} (all bodies when omitted).
+    const auto& bodies = RequirePartDoc(doc, "check_geometry").GetBodies();
+    const int only = p.value("body", -1);
+    if (only >= static_cast<int>(bodies.size()))
+      throw std::runtime_error("body index out of range");
+    json rows = json::array();
+    bool allValid = true;
+    for (size_t i = 0; i < bodies.size(); i++) {
+      if (only >= 0 && static_cast<int>(i) != only)
+        continue;
+      const Measure::GeometryReport r = Measure::CheckGeometry(bodies[i].shape);
+      allValid = allValid && r.valid;
+      rows.push_back({{"body", i},
+                      {"name", bodies[i].name},
+                      {"valid", r.valid},
+                      {"bad_faces", r.badFaces},
+                      {"bad_edges", r.badEdges},
+                      {"bad_wires", r.badWires},
+                      {"reasons", r.reasons}});
+    }
+    return json{{"valid", allValid}, {"bodies", rows}};
+  }
   if (m == "measure") {
     // Geometry queries over stable element names (I1). params:
     // {a: {feature_id, element}, b?: {feature_id, element}, part?}.

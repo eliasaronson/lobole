@@ -197,6 +197,7 @@ set(core_sources
     src/core/features/CurveFeature.cpp
     src/core/features/BooleanFeature.cpp
     src/core/features/SplitFeature.cpp
+    src/core/features/RefineFeature.cpp
     src/core/ElementHistory.cpp
     src/core/features/FilletFeature.cpp
     src/core/features/PatternFeature.cpp

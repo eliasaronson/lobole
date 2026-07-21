@@ -65,6 +65,20 @@ struct ShellReport {
 };
 ShellReport AnalyzeWatertight(const CADShape& shape);
 
+// B-Rep validity (OCC BRepCheck_Analyzer): whether the shape is a well-formed
+// solid and, if not, how many faces/edges fail and the distinct failure
+// reasons (e.g. "self-intersecting wire", "invalid curve on surface"). Useful
+// on imported STEP and after booleans. Purely diagnostic. `valid` is the
+// whole-shape verdict; the counts/reasons enumerate the offending sub-shapes.
+struct GeometryReport {
+  bool valid = false;
+  int badFaces = 0;
+  int badEdges = 0;
+  int badWires = 0;
+  std::vector<std::string> reasons; // distinct human-readable failure statuses
+};
+GeometryReport CheckGeometry(const CADShape& shape);
+
 // Minimum distance between two elements (either kind). nullopt when a ref
 // doesn't resolve or the extrema computation fails.
 std::optional<double> Distance(const std::vector<Body>& bodies,

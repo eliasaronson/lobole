@@ -1,0 +1,13 @@
+{
+  "format": "designer-document",
+  "version": 47,
+  "features": [
+    {"type": "Box", "name": "A", "id": 1, "position": [0, 0, 0],
+     "width": 2, "height": 2, "depth": 2},
+    {"type": "Box", "name": "B", "id": 2, "position": [2, 0, 0],
+     "width": 2, "height": 2, "depth": 2},
+    {"type": "Boolean", "name": "U", "id": 3,
+     "target_id": 1, "tool_id": 2, "op": "union"},
+    {"type": "Refine", "name": "Clean", "id": 4, "body_id": 3}
+  ]
+}

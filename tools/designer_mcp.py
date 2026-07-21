@@ -337,6 +337,16 @@ def mass_properties(body: int = -1) -> dict:
     return _call("mass_properties", **({"body": body} if body >= 0 else {}))
 
 
+@mcp.tool(description="B-Rep validity check per body (OCC BRepCheck_Analyzer): "
+          "returns {valid, bodies:[{body, name, valid, bad_faces, bad_edges, "
+          "bad_wires, reasons}]}. Flags invalid faces/edges/self-intersecting "
+          "wires and the distinct reasons. Read-only — run it on imported STEP "
+          "or after booleans to confirm the solid is well-formed. Optional body "
+          "index restricts to one body.")
+def check_geometry(body: int = -1) -> dict:
+    return _call("check_geometry", **({"body": body} if body >= 0 else {}))
+
+
 @mcp.tool(description="Measure geometry over stable element names (from "
           "list_elements). With `a` only: that element's own measure — a "
           "face's area or an edge's length. With `a` and `b`: the minimum "

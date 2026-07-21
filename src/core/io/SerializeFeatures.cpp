@@ -17,6 +17,7 @@
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
+#include "core/features/RefineFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
@@ -595,6 +596,8 @@ json FeatureToJson(const Feature& feature) {
       if (!sp->offsetExpr.empty())
         j["offset_expr"] = sp->offsetExpr;
     }
+  } else if (auto* rf = dynamic_cast<const RefineFeature*>(&feature)) {
+    j["body_id"] = rf->bodyId;
   } else if (auto* fil = dynamic_cast<const FilletFeature*>(&feature)) {
     // type is "Fillet"/"Chamfer" (TypeName encodes the op); v17.
     j["radius"] = fil->radius;
@@ -990,6 +993,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sp->offsetExpr = j.value("offset_expr", std::string{});
     }
     out = std::move(sp);
+  } else if (type == "Refine") { // v47
+    out = std::make_unique<RefineFeature>(name,
+                                          j.at("body_id").get<uint64_t>());
   } else if (type == "Fillet" || type == "Chamfer") { // v17
     std::vector<ElementRef> refs;
     for (const auto& ej : j.value("edges", json::array())) {

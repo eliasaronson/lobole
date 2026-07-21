@@ -4,6 +4,8 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepCheck_Result.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
@@ -31,6 +33,7 @@
 #include <gp_Trsf.hxx>
 
 #include <cmath>
+#include <set>
 
 namespace Measure {
 
@@ -226,6 +229,83 @@ ShellReport AnalyzeWatertight(const CADShape& shape) {
       out.freeEdges++;
   }
   out.watertight = out.shells > 0 && out.freeEdges == 0;
+  return out;
+}
+
+namespace {
+const char* CheckStatusStr(BRepCheck_Status s) {
+  switch (s) {
+  case BRepCheck_InvalidPointOnCurve:
+  case BRepCheck_InvalidPointOnCurveOnSurface:
+  case BRepCheck_InvalidPointOnSurface: return "vertex not on its curve/surface";
+  case BRepCheck_No3DCurve: return "edge has no 3D curve";
+  case BRepCheck_Multiple3DCurve: return "edge has multiple 3D curves";
+  case BRepCheck_Invalid3DCurve: return "invalid 3D curve";
+  case BRepCheck_NoCurveOnSurface:
+  case BRepCheck_InvalidCurveOnSurface:
+  case BRepCheck_InvalidCurveOnClosedSurface: return "invalid curve on surface";
+  case BRepCheck_InvalidSameRangeFlag:
+  case BRepCheck_InvalidSameParameterFlag: return "bad same-range/parameter flag";
+  case BRepCheck_InvalidDegeneratedFlag: return "bad degenerated flag";
+  case BRepCheck_FreeEdge: return "free edge (used by one face)";
+  case BRepCheck_InvalidMultiConnexity: return "invalid multi-connexity";
+  case BRepCheck_InvalidRange: return "invalid parameter range";
+  case BRepCheck_EmptyWire: return "empty wire";
+  case BRepCheck_RedundantEdge: return "redundant edge";
+  case BRepCheck_SelfIntersectingWire: return "self-intersecting wire";
+  case BRepCheck_NoSurface: return "face has no surface";
+  case BRepCheck_InvalidWire:
+  case BRepCheck_RedundantWire: return "invalid/redundant wire";
+  case BRepCheck_IntersectingWires: return "intersecting wires";
+  case BRepCheck_InvalidImbricationOfWires: return "bad wire nesting";
+  case BRepCheck_EmptyShell: return "empty shell";
+  case BRepCheck_RedundantFace: return "redundant face";
+  case BRepCheck_InvalidImbricationOfShells: return "bad shell nesting";
+  case BRepCheck_UnorientableShape: return "unorientable shape";
+  case BRepCheck_NotClosed: return "shell/solid not closed";
+  case BRepCheck_NotConnected: return "not connected";
+  case BRepCheck_BadOrientation:
+  case BRepCheck_BadOrientationOfSubshape: return "bad orientation";
+  case BRepCheck_InvalidToleranceValue: return "invalid tolerance";
+  case BRepCheck_CheckFail: return "check failed (fatal)";
+  default: return "invalid geometry";
+  }
+}
+} // namespace
+
+GeometryReport CheckGeometry(const CADShape& shape) {
+  GeometryReport out;
+  const TopoDS_Shape& s = shape.GetShape();
+  if (s.IsNull()) {
+    out.reasons.push_back("null shape");
+    return out;
+  }
+  BRepCheck_Analyzer ana(s);
+  out.valid = ana.IsValid();
+  if (out.valid)
+    return out;
+
+  std::set<std::string> reasons;
+  const auto collect = [&](const TopoDS_Shape& sub) {
+    Handle(BRepCheck_Result) res = ana.Result(sub);
+    if (res.IsNull())
+      return;
+    for (const BRepCheck_Status st : res->Status())
+      if (st != BRepCheck_NoError)
+        reasons.insert(CheckStatusStr(st));
+  };
+  const auto scan = [&](TopAbs_ShapeEnum type, int& counter) {
+    for (TopExp_Explorer ex(s, type); ex.More(); ex.Next()) {
+      if (ana.IsValid(ex.Current()))
+        continue;
+      counter++;
+      collect(ex.Current());
+    }
+  };
+  scan(TopAbs_FACE, out.badFaces);
+  scan(TopAbs_WIRE, out.badWires);
+  scan(TopAbs_EDGE, out.badEdges);
+  out.reasons.assign(reasons.begin(), reasons.end());
   return out;
 }
 
