@@ -1318,8 +1318,26 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       other = edit.pendingPoint;
     else if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty())
       other = edit.splinePoles.back();
-    sketch::Snap snap =
-        sketch::InferPoint(sketch->entities, uv, other, 0, ppu);
+    // While placing a spline, the poles dropped so far this session aren't in
+    // the sketch yet, so InferPoint can't see them. Expose them as Point
+    // snap-targets so a new pole can go coincident with / H/V-aligned to an
+    // earlier pole (and snap onto the first pole to close the loop). Synthetic
+    // ids in a reserved range below kDatumBase; never committed as refs (the
+    // spline commits with inference off).
+    sketch::Snap snap;
+    if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty()) {
+      std::vector<sketch::Entity> withPoles = sketch->entities;
+      uint32_t synthId = 0xFFF00000u;
+      for (const glm::vec2& pole : edit.splinePoles) {
+        sketch::Point pt;
+        pt.p = pole;
+        pt.id = synthId++;
+        withPoles.push_back(pt);
+      }
+      snap = sketch::InferPoint(withPoles, uv, other, 0, ppu);
+    } else {
+      snap = sketch::InferPoint(sketch->entities, uv, other, 0, ppu);
+    }
     uv = snap.uv;
     edit.currentSnap = snap;
     edit.hasCurrentSnap = !snap.glyphs.empty();
