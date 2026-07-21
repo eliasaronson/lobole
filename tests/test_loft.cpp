@@ -3,11 +3,14 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/features/CurveFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/io/Serialization.h"
 #include "core/features/SketchFeature.h"
 
+#include <cmath>
 #include <filesystem>
+#include <memory>
 #include <vector>
 
 using Catch::Matchers::WithinRel;
@@ -56,6 +59,67 @@ uint64_t CircleAt(Document& doc, double z, double r, const char* name) {
   return doc.GetFeature(doc.FeatureCount() - 1)->GetId();
 }
 } // namespace
+
+TEST_CASE("Guided loft skins sections along an explicit spine (P3)",
+          "[loft][curve3d]") {
+  Document doc;
+  // Two equal circles r=1 at z=0 and z=10; spine straight up +Z by 10.
+  const uint64_t a = CircleAt(doc, 0.0, 1.0, "Bot");
+  const uint64_t b = CircleAt(doc, 10.0, 1.0, "Top");
+  auto path = std::make_unique<CurveFeature>("Spine", Curve3DKind::FitSpline);
+  path->points = {{0, 0, 0}, {0, 0, 5}, {0, 0, 10}};
+  doc.AddFeature(std::move(path));
+  const uint64_t spine = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+
+  auto lo = std::make_unique<LoftFeature>("Along",
+                                          std::vector<uint64_t>{a, b});
+  lo->pathId = spine;
+  doc.AddFeature(std::move(lo));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+  // Equal circles skinned along a straight spine ~ a cylinder.
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(M_PI * 1.0 * 1.0 * 10.0, 0.1));
+}
+
+TEST_CASE("Guided loft with a guide curve builds a valid solid (P3)",
+          "[loft][curve3d]") {
+  Document doc;
+  const uint64_t a = CircleAt(doc, 0.0, 1.0, "Bot");
+  const uint64_t b = CircleAt(doc, 10.0, 1.0, "Top");
+  auto path = std::make_unique<CurveFeature>("Spine", Curve3DKind::FitSpline);
+  path->points = {{0, 0, 0}, {0, 0, 10}};
+  doc.AddFeature(std::move(path));
+  const uint64_t spine = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  // Guide runs along the section border (radius 1 in +X) and flares outward.
+  auto g = std::make_unique<CurveFeature>("Guide", Curve3DKind::FitSpline);
+  g->points = {{1, 0, 0}, {1.5, 0, 5}, {2, 0, 10}};
+  doc.AddFeature(std::move(g));
+  const uint64_t guide = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+
+  auto lo = std::make_unique<LoftFeature>("Guided",
+                                          std::vector<uint64_t>{a, b});
+  lo->pathId = spine;
+  lo->guideId = guide;
+  doc.AddFeature(std::move(lo));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetFeature(doc.FeatureCount() - 1)->GetError().empty());
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK(doc.GetBodies()[0].shape.Volume() > 0.0);
+}
+
+TEST_CASE("Guided loft round-trips path and guide ids", "[loft]") {
+  auto lo = std::make_unique<LoftFeature>("L",
+                                          std::vector<uint64_t>{7, 8, 9});
+  lo->pathId = 42;
+  lo->guideId = 43;
+  auto back = DocumentIO::FeatureFromJson(DocumentIO::FeatureToJson(*lo));
+  auto* r = dynamic_cast<LoftFeature*>(back.get());
+  REQUIRE(r);
+  CHECK(r->sketchIds == std::vector<uint64_t>{7, 8, 9});
+  CHECK(r->pathId == 42);
+  CHECK(r->guideId == 43);
+}
 
 // Regression for the "hourglass" bug (dogfooding #2): a smoothed loft fits ONE
 // BSpline surface through all sections, so a 4-vertex square paired with a

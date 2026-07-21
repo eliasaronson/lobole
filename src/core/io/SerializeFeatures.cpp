@@ -601,6 +601,10 @@ json FeatureToJson(const Feature& feature) {
     j["open_faces"] = std::move(arr);
   } else if (auto* lo = dynamic_cast<const LoftFeature*>(&feature)) {
     j["sketch_ids"] = lo->sketchIds;
+    if (lo->pathId != 0) // v45; omit for a classic (guideless) loft
+      j["path_id"] = lo->pathId;
+    if (lo->guideId != 0)
+      j["guide_id"] = lo->guideId;
     j["mode"] = ExtrudeModeToString(lo->mode);
   } else if (auto* sw = dynamic_cast<const SweepFeature*>(&feature)) {
     j["profile_id"] = sw->profileSketchId;
@@ -996,9 +1000,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     std::vector<uint64_t> ids;
     for (const auto& idj : j.value("sketch_ids", json::array()))
       ids.push_back(idj.get<uint64_t>());
-    out = std::make_unique<LoftFeature>(
+    auto lo = std::make_unique<LoftFeature>(
         name, std::move(ids), ExtrudeModeFromString(j.value("mode",
                                                             "new_body")));
+    lo->pathId = j.value("path_id", uint64_t{0});   // v45
+    lo->guideId = j.value("guide_id", uint64_t{0}); // v45
+    out = std::move(lo);
   } else if (type == "Sweep") { // v20
     auto sw = std::make_unique<SweepFeature>(
         name, j.at("profile_id").get<uint64_t>(),

@@ -1,7 +1,9 @@
 # 3D curves — plan (fit-spline, helix, control-poly) + the features they unlock
 
-**Status (2026-07-21):** Phases 0–2 **SHIPPED + tested**; Phase 3 **guided
-sweep SHIPPED**, **guided loft = the remaining spike** (go/no-go, see below).
+**Status (2026-07-21):** Phases 0–3 **SHIPPED + tested** — 3D curves, curve
+sweep paths, Pipe, guided sweep, **and guided loft** (single guide, FreeCAD's
+MakePipeShell recipe). Full non-GUI suite green. Only demand-gated follow-ups
+remain (multi-guide surface-fit; `BRepFill_Contact` on guided *sweep*).
 Supersedes [interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md)
 §3 ("3D fit-spline"), widening it from an import driver into a modeling
 workstream. Scope signed off 2026-07-21: **build through Phase 3** (guided
@@ -26,11 +28,22 @@ sweeps/lofts), curve kinds **fit-spline + helix + 3D control-poly**.
   `test_sweep.cpp`. **Graded follow-up:** `BRepFill_Contact` guide (section
   *scales* to touch the guide) — deferred; NoContact orientation guide is the
   robust v1.
-- **P3 remaining — guided LOFT (SPIKE, not yet built):** OCC `ThruSections`
-  has no guide support. Needs surface fitting
-  (`GeomAPI_PointsToBSplineSurface` / `GeomFill`) or a multi-section
-  `MakePipeShell`. Prototype first, confirm a real model needs it, then commit
-  — the one genuine unknown in the workstream.
+- **P3 guided LOFT ✅ (format v45)** — built exactly the FreeCAD way (verified
+  in `src/Mod/PartDesign/App/FeaturePipe.cpp:357,619`): NOT `ThruSections`
+  (no guide support) but **`BRepOffsetAPI_MakePipeShell` with multiple
+  sections** (`shell.Add(profile_i)` for 2+) skinned along an explicit spine,
+  the guide as auxiliary spine
+  (`SetMode(guideWire, /*curvilinear=*/true, BRepFill_ContactOnBorder)` — the
+  sections *scale* to keep contact). Implemented as an extension of
+  `LoftFeature`: `pathId` (spine sketch/Curve3D) + optional `guideId`; 0 =
+  classic ThruSections loft. Engine generalized to
+  `SweepSectionsAlongSpine(profiles, spine, frame, guide, scaleToGuide)`
+  (single-profile `SweepProfileAlongSpine` now calls it). Golden
+  `v45-guided-loft`; tests in `tests/test_loft.cpp`.
+  **Demand-gated follow-ups:** multiple guides (OCC allows one aux spine;
+  needs `GeomAPI_PointsToBSplineSurface` — FreeCAD doesn't do this either);
+  end-cap sewing via `Simulate(2, ends)` for sections MakeSolid can't close;
+  `BRepFill_Contact` (scale) on guided *sweep* (currently `NoContact`).
 
 ## Why
 

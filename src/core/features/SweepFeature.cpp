@@ -34,22 +34,25 @@ TopoDS_Wire ResolveSweepPathWire(const RegenContext& ctx, uint64_t pathId) {
   return TopoDS_Wire();
 }
 
-CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
-                                const TopoDS_Wire& spine, SweepFrame frame,
-                                const TopoDS_Wire& guide) {
-  if (profile.IsNull() || spine.IsNull())
+CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
+                                 const TopoDS_Wire& spine, SweepFrame frame,
+                                 const TopoDS_Wire& guide, bool scaleToGuide) {
+  if (profiles.empty() || spine.IsNull())
     return CADShape();
   try {
     // MakePipeShell (not MakePipe) so sharp path corners are handled: a plain
     // MakePipe truncates the sweep at the first corner. RoundCorner rounds the
     // spine's corners; the trihedron mode controls how the section is carried.
+    // Multiple profiles skin a solid through all sections along the spine (the
+    // guided-loft path, mirroring FreeCAD's PartDesign Pipe).
     BRepOffsetAPI_MakePipeShell shell(spine);
     shell.SetTransitionMode(BRepBuilderAPI_RoundCorner);
     if (!guide.IsNull()) {
-      // A guide curve (auxiliary spine) supersedes the frame: the section is
-      // oriented by the guide as it travels — the "two directions" sweep.
+      // A guide curve (auxiliary spine) supersedes the frame: it carries the
+      // sections as they travel — the "two directions" sweep/loft. ContactOnBorder
+      // makes them scale to touch the guide; NoContact only reorients them.
       shell.SetMode(guide, /*CurvilinearEquivalence=*/Standard_True,
-                    BRepFill_NoContact);
+                    scaleToGuide ? BRepFill_ContactOnBorder : BRepFill_NoContact);
     } else {
       switch (frame) {
       case SweepFrame::Frenet:
@@ -62,7 +65,11 @@ CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
         break; // leave OCC's default discrete trihedron
       }
     }
-    shell.Add(profile);
+    for (const TopoDS_Wire& p : profiles) {
+      if (p.IsNull())
+        return CADShape();
+      shell.Add(p);
+    }
     shell.Build();
     if (!shell.IsDone() || !shell.MakeSolid())
       return CADShape();
@@ -70,6 +77,13 @@ CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
   } catch (const Standard_Failure&) {
     return CADShape();
   }
+}
+
+CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
+                                const TopoDS_Wire& spine, SweepFrame frame,
+                                const TopoDS_Wire& guide) {
+  return SweepSectionsAlongSpine(std::vector<TopoDS_Wire>{profile}, spine, frame,
+                                 guide, /*scaleToGuide=*/false);
 }
 
 SweepFeature::SweepFeature(const std::string& name, uint64_t profileSketchId,

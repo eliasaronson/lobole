@@ -14,6 +14,12 @@
 // listed. Modes reuse ApplyBodyMode (new-body / fuse / cut), shared with
 // extrude and revolve. Regeneration fails per-feature when a referenced
 // sketch is missing/empty or the sections don't skin a valid solid.
+//
+// Guided loft (curves-3d Phase 3): when `pathId` names a spine (a sketch or a
+// Curve3D), the sections are skinned along that path with MakePipeShell instead
+// of ThruSections, and an optional `guideId` guide curve shapes them as they
+// travel (sections scale to keep contact with the guide) — mirrors FreeCAD's
+// PartDesign Pipe, which is how guide curves reach OCC (ThruSections has none).
 class LoftFeature : public Feature {
 public:
   LoftFeature(const std::string& name, std::vector<uint64_t> sketchIds,
@@ -23,5 +29,7 @@ public:
   bool Execute(RegenContext& ctx) override;
 
   std::vector<uint64_t> sketchIds; // >= 2 sections, in order
+  uint64_t pathId = 0;  // optional spine (sketch/Curve3D); 0 = classic loft (v45)
+  uint64_t guideId = 0; // optional guide curve; requires pathId (v45)
   ExtrudeMode mode = ExtrudeMode::NewBody;
 };

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // How the swept profile is carried along the spine (OCC MakePipeShell trihedron
 // mode). CorrectedFrenet is the robust default — the section stays normal to
@@ -19,12 +20,21 @@ enum class SweepFrame { CorrectedFrenet, Frenet, Fixed };
 // Shared by SweepFeature and PipeFeature (curves-3d Phase 1/2).
 TopoDS_Wire ResolveSweepPathWire(const RegenContext& ctx, uint64_t pathId);
 
-// Sweeps a closed profile wire along an open spine into a solid (MakePipeShell,
-// rounded corners, the given frame). When `guide` is non-null it becomes an
-// auxiliary spine that orients the section as it travels — a second curve
-// shaping the sweep ("two directions", curves-3d Phase 3); the frame is then
-// ignored. Null CADShape on failure. Throws no OCC exception — failures come
-// back as a null shape. Shared by SweepFeature and PipeFeature.
+// Skins one or more closed profile sections along an open spine into a solid
+// (MakePipeShell, rounded corners). With one section it's a plain sweep; with
+// several it's a multi-section "loft along a path". An optional `guide`
+// (auxiliary spine) shapes the sections as they travel — a second curve giving
+// the "two directions" sweep/loft: when `scaleToGuide` the sections grow/shrink
+// to keep contact with the guide (BRepFill_ContactOnBorder), else the guide
+// only reorients them (BRepFill_NoContact). `frame` applies only when there is
+// no guide. Null CADShape on failure; throws no OCC exception. Shared by
+// SweepFeature, PipeFeature, and LoftFeature (curves-3d Phase 2/3).
+CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
+                                 const TopoDS_Wire& spine, SweepFrame frame,
+                                 const TopoDS_Wire& guide = TopoDS_Wire(),
+                                 bool scaleToGuide = false);
+
+// Single-profile convenience over SweepSectionsAlongSpine (orient-only guide).
 CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
                                 const TopoDS_Wire& spine, SweepFrame frame,
                                 const TopoDS_Wire& guide = TopoDS_Wire());

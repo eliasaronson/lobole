@@ -4,6 +4,7 @@
 #include "core/BodyMode.h"
 #include "core/ElementHistory.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/SweepFeature.h" // ResolveSweepPathWire, SweepSectionsAlongSpine
 #include "core/sketch/SketchProfile.h"
 
 #include <BRepOffsetAPI_ThruSections.hxx>
@@ -43,6 +44,35 @@ bool LoftFeature::Execute(RegenContext& ctx) {
       return false;
     }
     wires.push_back(wire);
+  }
+
+  // Guided loft: skin the sections along an explicit spine with MakePipeShell
+  // (ThruSections can't take a guide). An optional guide curve shapes the
+  // sections as they travel — the "two directions" loft.
+  if (pathId != 0) {
+    const TopoDS_Wire spine = ResolveSweepPathWire(ctx, pathId);
+    if (spine.IsNull()) {
+      SetError("loft path must be an open sketch chain or a 3D curve");
+      return false;
+    }
+    TopoDS_Wire guide;
+    if (guideId != 0) {
+      guide = ResolveSweepPathWire(ctx, guideId);
+      if (guide.IsNull()) {
+        SetError("loft guide must be an open sketch chain or a 3D curve");
+        return false;
+      }
+    }
+    CADShape result = SweepSectionsAlongSpine(
+        wires, spine, SweepFrame::CorrectedFrenet, guide, /*scaleToGuide=*/true);
+    if (!result.IsValid() || result.Volume() < 1e-9) {
+      SetError("guided loft failed to skin the sections along the path");
+      return false;
+    }
+    ElementMap map;
+    topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
+    return ApplyBodyMode(ctx.bodies, std::move(result), std::move(map), mode,
+                         m_name, m_material, GetId());
   }
 
   // Smooth vs. ruled skinning. A smoothed loft fits ONE BSpline surface through
