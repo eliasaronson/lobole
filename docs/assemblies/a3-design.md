@@ -123,6 +123,37 @@ T_b = Wa * Adjust * Fb⁻¹
 position + quaternion. No solver, no iteration, no residuals; a revolute
 "solve" is the same formula with `rotation` free to be updated by UI/RPC.
 
+### Posing notes (caster-round findings #6)
+
+`Adjust` composes `T(dx,dy,offset)` on the **left** (`MateAdjust`,
+`src/core/AssemblySolve.cpp`), so the translation always lands in **a's
+connector frame**: `T_b`'s origin = `Wa.origin + dx·Wa.X + dy·Wa.Y +
+offset·Wa.Z`. Two consequences worth stating because a dogfooding round tripped
+over both:
+
+- **Offset sign** is *not* inverted: a **positive `offset` moves b along +Z of
+  a's connector frame** — a's *outward* face normal. The "−16 → +16 world"
+  observation was the convention working against a reference face whose normal
+  pointed into the assembly (so +Z of a's frame was −Z world). No solve or
+  display bug; the sign is asserted by `test_assembly_solve.cpp`
+  ("A positive offset moves b along +Z of a's connector frame").
+- **Revolute takes an axial `offset`** just like slider/cylindrical (it shares
+  `MateAdjust` — `offset` was always a fixed parameter for revolute, see the
+  table above). Use it to seat a part up/down the shaft instead of collapsing
+  onto the connector origin. This was a *discoverability* gap — the MCP schema
+  read "offset = slider/cylindrical" — not a missing feature; the RPC and solve
+  already applied it.
+- **Lateral centering** (finding #6b) is *not* a separate mechanism, and none
+  was added — it falls out of the connector choice. A **cylindrical**-face
+  connector anchors its origin **on the axis** (`FaceAxis`), so two cylindrical
+  faces mate **coaxially** (centered) for free; a **hole-center snap-edge**
+  (A2.5 phase 4) does the same for a bolt into a bore. A **planar**-face
+  connector anchors at the face **centroid**, so two planar faces coincide
+  *centroids only* — which is why a wheel mated by planar faces landed off a
+  fork leg. The fix is to mate on a cylindrical face / hole center (coaxial by
+  construction) plus an axial `offset`, not to bolt a centering option onto
+  centroid mates.
+
 ## The placement pass (the "solve")
 
 Direct frame alignment over the mate graph — sequential, deterministic, and

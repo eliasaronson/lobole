@@ -8,6 +8,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 class Document;
 
@@ -49,5 +50,42 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
 // transient error. Does NOT bump the assembly version — the caller does that
 // to trigger a renderer resync (so a no-op solve doesn't churn the renderer).
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById);
+
+// ---- Assembly mass aggregation (finding #5) -------------------------------
+// One placed occurrence's mass contribution, in WORLD space. Volume and mass
+// are rigid-transform invariant (occurrence transforms are translate+rotate,
+// never scaled); the center of mass is the part-local CoM carried through the
+// occurrence matrix.
+struct OccurrenceMass {
+  uint64_t occurrenceId = 0;
+  std::string name;
+  uint64_t partId = 0;
+  double volume = 0.0;          // mm^3
+  glm::dvec3 centerOfMass{0.0}; // world space
+  bool massKnown = false;       // false when the part has a density-less body
+  double massG = 0.0;           // valid when massKnown
+};
+
+// Combined mass properties of an assembly: the total plus a per-occurrence
+// breakdown, all in world space. Suppressed (by the active configuration) and
+// invisible occurrences are skipped — the BOM convention. `massKnown` is false
+// (and `massG` left 0) when any contributing occurrence's mass is unknown, but
+// volume and the world center of mass are always aggregated. An occurrence
+// whose part is missing or fails its mass computation is skipped and named in
+// `skipped`.
+struct AssemblyMass {
+  std::vector<OccurrenceMass> occurrences;
+  double volume = 0.0;
+  glm::dvec3 centerOfMass{0.0}; // world, volume-weighted
+  bool massKnown = true;
+  double massG = 0.0;
+  std::vector<std::string> skipped; // occurrences that could not be measured
+};
+
+// Aggregate every visible, non-suppressed occurrence's part mass into world
+// space. Reuses Measure::MassOfBodies per part, then transforms each CoM by the
+// occurrence matrix. Does not touch the document (a pure read).
+AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
+                            const PartResolver& partById);
 
 } // namespace assembly

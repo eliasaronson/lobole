@@ -33,6 +33,22 @@ std::unique_ptr<Document> BuildBox(double height, uint64_t& extrudeId) {
   return doc;
 }
 
+// Same box, but the pad stamps a steel material so MassOfBodies reports a
+// known mass (density 7850 kg/m^3). Volume is height * 16 mm^3.
+std::unique_ptr<Document> BuildSteelBox(double height) {
+  auto doc = std::make_unique<Document>();
+  auto sk = std::make_unique<SketchFeature>("Sketch", kXY);
+  sk->AddRectangle({0, 0}, {4, 4});
+  doc->AddFeature(std::move(sk));
+  const uint64_t sketchId = doc->GetFeature(0)->GetId();
+  auto pad = std::make_unique<ExtrudeFeature>("Pad", sketchId, height,
+                                              ExtrudeMode::NewBody);
+  pad->SetMaterial("steel");
+  doc->AddFeature(std::move(pad));
+  doc->Regenerate();
+  return doc;
+}
+
 Occurrence MakeOcc(uint64_t partId, glm::vec3 pos, bool fixed = false) {
   Occurrence o;
   o.partId = partId;
@@ -102,6 +118,105 @@ TEST_CASE("Slider offset slides the placement along the connector axis", "[assem
   asmDoc.FindMateById(3)->offset = 9.0f;
   assembly::Solve(asmDoc, resolve);
   CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(12.0f, 1e-4f));
+}
+
+TEST_CASE("Revolute mate seats the part axially by its offset (finding #6a)",
+          "[assembly][solve]") {
+  // A revolute mate must slide b along the shared axis by `offset` (the seat
+  // depth up the shaft), not merely coincide origins — otherwise stacks
+  // collapse. rotation stays the free DOF on top of that fixed seat.
+  uint64_t ext = 0;
+  auto box = BuildBox(3.0, ext);
+  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+
+  AssemblyDocument asmDoc;
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
+  Mate m;
+  m.type = MateType::Revolute;
+  m.a.occurrenceId = 1;
+  m.a.anchor.face = ElementRef{ext, std::to_string(ext) + "/cap1"};
+  m.b.occurrenceId = 2;
+  m.b.anchor.origin = true;
+  m.flipped = false;
+  m.offset = 5.0f; // seat 5 up the axis (cap at z=3 → z=8)
+  asmDoc.AddMate(m);
+
+  assembly::Solve(asmDoc, resolve);
+  CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(8.0f, 1e-4f));
+
+  // Spinning the free DOF keeps the axial seat fixed.
+  asmDoc.FindMateById(3)->rotation = glm::radians(90.0f);
+  assembly::Solve(asmDoc, resolve);
+  const Occurrence* arm = asmDoc.FindById(2);
+  CHECK_THAT(arm->position.z, WithinAbs(8.0f, 1e-4f)); // seat unchanged
+  CHECK(std::abs(glm::dot(arm->orientation, glm::quat(1, 0, 0, 0))) < 0.999f);
+}
+
+TEST_CASE("A positive offset moves b along +Z of a's connector frame (finding #6c)",
+          "[assembly][solve]") {
+  // The sign convention: a POSITIVE offset moves b in the +Z direction of a's
+  // connector frame (a's outward face normal). The top cap's normal is world
+  // +Z, so +offset lifts b and -offset lowers it — no inversion. Guards every
+  // offset-using mate type (slider/cylindrical/revolute share MateAdjust).
+  uint64_t ext = 0;
+  auto box = BuildBox(3.0, ext); // top cap "cap1" at z=3, normal +Z
+  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+
+  auto placeWithOffset = [&](float offset) {
+    AssemblyDocument asmDoc;
+    asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
+    asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
+    Mate m;
+    m.type = MateType::Slider;
+    m.a.occurrenceId = 1;
+    m.a.anchor.face = ElementRef{ext, std::to_string(ext) + "/cap1"};
+    m.b.occurrenceId = 2;
+    m.b.anchor.origin = true;
+    m.flipped = false;
+    m.offset = offset;
+    asmDoc.AddMate(m);
+    assembly::Solve(asmDoc, resolve);
+    return asmDoc.FindById(2)->position.z;
+  };
+
+  CHECK_THAT(placeWithOffset(5.0f), WithinAbs(8.0f, 1e-4f));  // 3 + (+5)
+  CHECK_THAT(placeWithOffset(-5.0f), WithinAbs(-2.0f, 1e-4f)); // 3 + (-5)
+  CHECK_THAT(placeWithOffset(0.0f), WithinAbs(3.0f, 1e-4f));   // on the cap
+}
+
+TEST_CASE("Assembly mass properties aggregate occurrences in world space (finding #5)",
+          "[assembly][solve]") {
+  auto box = BuildSteelBox(3.0); // 4x4x3 steel box: vol 48 mm^3
+  const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
+
+  AssemblyDocument asmDoc;
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true)); // local CoM (2,2,1.5)
+  asmDoc.AddOccurrence(MakeOcc(1, {10, 0, 0}));      // shifted → (12,2,1.5)
+
+  const assembly::AssemblyMass am = assembly::MassProperties(asmDoc, resolve);
+
+  REQUIRE(am.occurrences.size() == 2);
+  CHECK(am.skipped.empty());
+  // Total volume is the sum; mass is known (steel) and doubles.
+  CHECK_THAT(am.volume, WithinAbs(96.0, 1e-6));
+  REQUIRE(am.massKnown);
+  const double oneMass = 7850.0 * 48.0 * 1e-6; // density * volume(mm^3) * 1e-6
+  CHECK_THAT(am.massG, WithinAbs(2.0 * oneMass, 1e-9));
+  // World CoM sits at the midpoint between the two placed boxes.
+  CHECK_THAT(am.centerOfMass.x, WithinAbs(7.0, 1e-5));
+  CHECK_THAT(am.centerOfMass.y, WithinAbs(2.0, 1e-5));
+  CHECK_THAT(am.centerOfMass.z, WithinAbs(1.5, 1e-5));
+
+  // Per-occurrence rows carry their own WORLD CoM (the shifted box at x=12).
+  CHECK_THAT(am.occurrences[1].centerOfMass.x, WithinAbs(12.0, 1e-5));
+
+  // An invisible occurrence drops out of the aggregate (BOM convention).
+  asmDoc.FindById(2)->visible = false;
+  const assembly::AssemblyMass hidden = assembly::MassProperties(asmDoc, resolve);
+  REQUIRE(hidden.occurrences.size() == 1);
+  CHECK_THAT(hidden.volume, WithinAbs(48.0, 1e-6));
+  CHECK_THAT(hidden.centerOfMass.x, WithinAbs(2.0, 1e-5));
 }
 
 TEST_CASE("Revolute rotation spins without translating an origin connector", "[assembly][solve]") {

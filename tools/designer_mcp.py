@@ -328,7 +328,11 @@ def interference(a: int | str, b: int | str) -> dict:
           "CoM), density and mass_g (grams, assuming model units are mm; "
           "null when the body has no material assigned). The geometry "
           "oracle — verify against the brief with this, not just volume. "
-          "Optional body index restricts to one body.")
+          "Optional body index restricts to one body. On an ASSEMBLY tab "
+          "(no body arg) it aggregates every visible, non-suppressed "
+          "occurrence in WORLD space: `occurrences` lists per-part rows "
+          "(volume, world center_of_mass, mass_g) and `total` is the combined "
+          "mass/volume/world CoM.")
 def mass_properties(body: int = -1) -> dict:
     return _call("mass_properties", **({"body": body} if body >= 0 else {}))
 
@@ -752,7 +756,11 @@ def list_occurrences() -> dict:
           "{feature_id, element}} for a named face (see list_elements). `b`'s "
           "occurrence is placed relative to `a`. flipped opposes the two Z "
           "axes (default true, so touching faces mate); rotation/offset/dx/dy "
-          "and ball_rotation ([x,y,z,w]) set the DOF pose. Solves immediately.")
+          "and ball_rotation ([x,y,z,w]) set the DOF pose. offset slides `b` "
+          "along +Z of `a`'s connector frame (a's outward face normal) — for "
+          "revolute it's the axial seat depth (slide up/down the shaft), for "
+          "slider/cylindrical the DOF, for planar the plane gap; POSITIVE = "
+          "along a's normal. Solves immediately.")
 def add_mate(type: str, a: dict, b: dict, name: str = "",
              flipped: bool = True, rotation: float = 0.0, offset: float = 0.0,
              dx: float = 0.0, dy: float = 0.0,
@@ -772,9 +780,12 @@ def add_mate(type: str, a: dict, b: dict, name: str = "",
 
 @mcp.tool(description="Adjust a mate (by id) and re-solve — how you MOVE a "
           "mechanism numerically. rotation (revolute/cylindrical angle, "
-          "radians), offset (slider/cylindrical distance), dx/dy (planar "
-          "in-plane slide), ball_rotation ([x,y,z,w] for a ball), flipped, or "
-          "name. e.g. set a revolute's rotation to swing a hinge.")
+          "radians), offset (slide along +Z of a's connector normal: "
+          "slider/cylindrical DOF, revolute axial seat depth, planar gap; "
+          "POSITIVE = along a's outward normal), dx/dy (planar in-plane "
+          "slide), ball_rotation ([x,y,z,w] for a ball), flipped, or name. "
+          "e.g. set a revolute's rotation to swing a hinge, or its offset to "
+          "seat the part along the shaft.")
 def set_mate(id: int, rotation: float | None = None, offset: float | None = None,
              dx: float | None = None, dy: float | None = None,
              ball_rotation: list | None = None,

@@ -2,6 +2,7 @@
 
 #include "CADKernel.h"
 #include "core/Document.h"
+#include "core/MassProps.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -265,6 +266,54 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
   }
 
   return report;
+}
+
+AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
+                            const PartResolver& partById) {
+  AssemblyMass out;
+  glm::dvec3 weightedCom(0.0);
+  for (const Occurrence& o : asmDoc.GetOccurrences()) {
+    if (!o.visible || asmDoc.OccurrenceSuppressed(o.id))
+      continue; // BOM convention: hidden/suppressed occurrences don't count
+    const Document* part = partById(o.partId);
+    if (!part) {
+      out.skipped.push_back(o.name + " (part not loaded)");
+      out.massKnown = false;
+      continue;
+    }
+    std::string err;
+    const auto mass = Measure::MassOfBodies(part->GetBodies(), &err);
+    if (!mass) {
+      out.skipped.push_back(o.name + " (" + err + ")");
+      out.massKnown = false;
+      continue;
+    }
+    // World placement of this occurrence (translate + orientation, no scale).
+    const glm::dmat4 xf = glm::dmat4(OccMatrix(o));
+    const glm::dvec3 worldCom =
+        glm::dvec3(xf * glm::dvec4(mass->centerOfMass, 1.0));
+
+    OccurrenceMass om;
+    om.occurrenceId = o.id;
+    om.name = o.name;
+    om.partId = o.partId;
+    om.volume = mass->volume;       // volume is rigid-transform invariant
+    om.centerOfMass = worldCom;
+    om.massKnown = mass->massKnown; // mass is rigid-transform invariant
+    om.massG = mass->massG;
+    out.occurrences.push_back(om);
+
+    out.volume += mass->volume;
+    weightedCom += worldCom * mass->volume;
+    if (mass->massKnown)
+      out.massG += mass->massG;
+    else
+      out.massKnown = false;
+  }
+  out.centerOfMass =
+      out.volume > 0.0 ? weightedCom / out.volume : glm::dvec3(0.0);
+  if (!out.massKnown) out.massG = 0.0;
+  return out;
 }
 
 } // namespace assembly

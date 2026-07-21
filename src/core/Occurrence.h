@@ -58,7 +58,10 @@ struct Connector {
 // form* a constraint stack would converge to.
 enum class MateType {
   Fastened,    // nothing free
-  Revolute,    // rotation about Z free (`rotation` is the DOF value)
+  Revolute,    // rotation about Z free (`rotation` is the DOF value); `offset`
+               //   is a fixed axial slide along Z (the pose parameter that
+               //   places B up/down the shaft — a hinge pin's seat depth), not
+               //   a free DOF
   Slider,      // translation along Z free (`offset` is the DOF value)
   Cylindrical, // rotation about Z AND translation along Z free (both DOF)
   Planar,      // faces coincident; free to slide in-plane (`dx`,`dy`) + spin
@@ -83,8 +86,11 @@ struct Mate {
   bool flipped = true;   // reverse b's Z against a's Z (two touching planar
                          // faces have opposing normals, hence default true)
   float rotation = 0.0f; // twist about Z, radians (revolute/cylindrical DOF)
-  float offset = 0.0f;   // translation along Z (slider/cylindrical DOF; planar
-                         // plane gap)
+  float offset = 0.0f;   // translation along +Z of a's connector frame (a's
+                         // outward face normal): slider/cylindrical DOF, the
+                         // revolute axial seat, the planar plane gap. A
+                         // POSITIVE offset moves b along a's +Z — see the
+                         // MateAdjust composition (T is applied in a's frame).
   float dx = 0.0f;       // in-plane X translation (planar DOF)
   float dy = 0.0f;       // in-plane Y translation (planar DOF)
   glm::quat ballRotation{1.0f, 0.0f, 0.0f, 0.0f}; // free rotation (ball DOF)

@@ -292,8 +292,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // export_visual works on a part OR an assembly (occurrence walk).
       "export_visual",
       // interference runs on occurrence pairs on an assembly tab;
-      // list_elements/measure work there when given an explicit `part`.
-      "interference", "list_elements", "measure",
+      // list_elements/measure work there when given an explicit `part`;
+      // mass_properties aggregates occurrence masses in world space.
+      "interference", "list_elements", "measure", "mass_properties",
       // undo/redo route to the assembly's snapshot history on an assembly tab.
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they

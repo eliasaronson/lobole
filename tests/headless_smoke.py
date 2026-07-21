@@ -467,9 +467,10 @@ def main():
         # cube part — overlapping placements clash; a flipped fastened mate
         # seats them flush (contact only) and the clash clears.
         d.call("new_project")
-        d.call("add_feature", feature={
+        boxf = d.call("add_feature", feature={
             "type": "Box", "name": "Cube", "position": [0, 0, 0],
             "width": 2, "height": 2, "depth": 2})
+        d.call("set_material", feature_id=boxf["id"], material="aluminum")
         cube = d.call("list_elements")["bodies"][0]
         d.call("add_assembly", name="asm")  # active tab is now the assembly
         o1 = d.call("add_occurrence", part="Part 1", fixed=True)["id"]
@@ -486,6 +487,58 @@ def main():
         names = {o["id"]: o["name"] for o in occs}
         by_name = d.call("interference", a=names[o1], b="CubeB")
         expect(by_name["clash"], "occurrence-name interference works")
+
+        # Assembly mass_properties (finding #5): aggregate both occurrences in
+        # WORLD space. o1 (aluminum 2^3 cube) sits at the origin — local CoM
+        # (1,1,1); CubeB is shifted +(1,1,1) — world CoM (2,2,2). The total
+        # volume/mass are the sum, the world CoM the volume-weighted midpoint.
+        amp = d.call("mass_properties")  # active tab is the assembly
+        expect(len(amp["occurrences"]) == 2, f"two occurrence rows: {amp}")
+        expect(abs(amp["total"]["volume"] - 16.0) < 1e-3,
+               f"assembly total volume 16: {amp['total']}")
+        one_mass = 2700 * 8 * 1e-6  # aluminum, 8 mm^3
+        expect(abs(amp["total"]["mass_g"] - 2 * one_mass) < 1e-6,
+               f"assembly total mass = 2x the part: {amp['total']}")
+        com = amp["total"]["center_of_mass"]
+        expect(all(abs(c - 1.5) < 1e-4 for c in com),
+               f"world CoM at the midpoint (1.5,1.5,1.5): {com}")
+        shifted = next(o for o in amp["occurrences"] if o["name"] == "CubeB")
+        expect(all(abs(c - 2.0) < 1e-4 for c in shifted["center_of_mass"]),
+               f"shifted occurrence world CoM at (2,2,2): {shifted}")
+        # Hiding an occurrence drops it from the aggregate (BOM convention).
+        d.call("set_occurrence_visible", id=o2, visible=False)
+        amp2 = d.call("mass_properties")
+        expect(len(amp2["occurrences"]) == 1 and
+               abs(amp2["total"]["volume"] - 8.0) < 1e-3,
+               f"hidden occurrence excluded: {amp2['total']}")
+        d.call("set_occurrence_visible", id=o2, visible=True)
+
+        # Revolute axial offset (finding #6a) + sign (finding #6c): a positive
+        # offset seats CubeB along +Z of a's connector normal (a's outward face
+        # normal), not merely coinciding origins. The 2-cube's top face sits at
+        # z=2 with a +Z normal, so a +5 offset places CubeB's origin at z=7 —
+        # positive = along the normal, no inversion.
+        top_face = max((f for f in cube["faces"] if f["kind"] == "plane"),
+                       key=lambda f: f["centroid"][2])
+        rev = d.call("add_mate", type="revolute", name="pivot",
+                     a={"occurrence": o1,
+                        "face": {"feature_id": cube["created_by"],
+                                 "element": top_face["name"]}},
+                     b={"occurrence": o2, "origin": True},
+                     flipped=False, offset=5.0)
+        expect(rev.get("errored_mates", 0) == 0,
+               f"revolute+offset mate solved: {rev}")
+        o2occ = next(o for o in d.call("list_occurrences")["occurrences"]
+                     if o["id"] == o2)
+        expect(abs(o2occ["transform"]["position"][2] - 7.0) < 1e-3,
+               f"positive offset seats CubeB at +Z (z=7): {o2occ}")
+        # A negative offset seats it the other way (below the face): z = 2 - 5.
+        d.call("set_mate", id=rev["id"], offset=-5.0)
+        o2occ = next(o for o in d.call("list_occurrences")["occurrences"]
+                     if o["id"] == o2)
+        expect(abs(o2occ["transform"]["position"][2] - (-3.0)) < 1e-3,
+               f"negative offset seats CubeB at -Z (z=-3): {o2occ}")
+        d.call("remove_mate", id=rev["id"])
 
         # Cross-part list_elements/measure from the ASSEMBLY tab (no
         # set_active_part round-trip): same names, enriched fields.

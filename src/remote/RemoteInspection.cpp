@@ -1,5 +1,6 @@
 #include "remote/RemoteInspection.h"
 
+#include "core/AssemblySolve.h"
 #include "core/Document.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
@@ -166,6 +167,39 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // grams = density[kg/m^3] * volume[mm^3] * 1e-6; bodies without an
     // assigned material report mass null (density unknown), and so does the
     // total if any contributor is unknown. params: {body?: index}
+    //
+    // On an ASSEMBLY tab there is no part doc: aggregate every visible,
+    // non-suppressed occurrence's part mass in WORLD space (each part's CoM
+    // carried through its solved occurrence transform — the same placement the
+    // interference/BOM paths use). The reply's `bodies` array carries one row
+    // per occurrence; `total` is the combined world mass/volume/CoM.
+    if (doc == nullptr && state.assembly) {
+      const assembly::PartResolver resolve = [&](uint64_t id) {
+        return ui::PartDocById(state, id);
+      };
+      const assembly::AssemblyMass am =
+          assembly::MassProperties(*state.assembly, resolve);
+      json rows = json::array();
+      for (const assembly::OccurrenceMass& om : am.occurrences) {
+        json entry = {{"occurrence", om.occurrenceId},
+                      {"name", om.name},
+                      {"part_id", om.partId},
+                      {"volume", om.volume},
+                      {"center_of_mass",
+                       {om.centerOfMass.x, om.centerOfMass.y,
+                        om.centerOfMass.z}}};
+        entry["mass_g"] = om.massKnown ? json(om.massG) : json(nullptr);
+        rows.push_back(entry);
+      }
+      const glm::dvec3& com = am.centerOfMass;
+      json out = {{"occurrences", rows},
+                  {"total",
+                   {{"volume", am.volume},
+                    {"center_of_mass", {com.x, com.y, com.z}},
+                    {"mass_g", am.massKnown ? json(am.massG) : json(nullptr)}}}};
+      if (!am.skipped.empty()) out["skipped"] = am.skipped;
+      return out;
+    }
     const auto& bodies = RequirePartDoc(doc, "mass_properties").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
