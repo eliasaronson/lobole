@@ -1,8 +1,9 @@
 # Caster-round backlog — execution plan
 
-Status: DRAFT — awaiting sign-off. Anchor decision made by Elias 2026-07-20:
-**project-wide variables** (shared symbol table, not explicit per-variable
-linking). Source: [backlog-dogfooding-2026-07-20-caster.md](backlog-dogfooding-2026-07-20-caster.md).
+Status: ALL PHASES EXECUTED 2026-07-21. V (project-wide vars, v41, 691991d),
+G1 (loft twist / extrude / hole, eae1a36), A1 (assembly mass_properties + mate
+docs, ca24d15), E1 (ergonomics batch, 2707394). Suites ended 475 headless +
+68/68 GUI. Details below.
 
 Sequenced by value. Phase V (variables) is the anchor and lands first —
 it's the highest-value fix and its fail-loud half makes every later
