@@ -482,13 +482,14 @@ to π·a·b·h), render/pick (centre dot + tessellated body-hit), and a 3-click
 `ICON_FA_EGG` toolbar button. Trim/circle-line-break bug and the trackball
 gimbal-lock fix shipped alongside on fix/sketch-usability.
 
-**B-splines** remain a separate milestone — planned in phase-l.md
-(variable poles/knots, control-point UX, OCC `Geom_BSplineCurve`); build after
-review. Now scoped alongside the Split feature and 3D fit-splines (all three
-surfaced by the Onshape importer) in
-[../interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md) —
-recommendation there is a **rigid-net v1** (poles are movable solver points,
-curve shape rigid, exactly the Ellipse treatment) before fully-solved poles.
+**B-splines** — ✅ **v1 SHIPPED (format v40)**: `sketch::BSpline{poles,
+degree}` (non-rational, clamped, uniform) through the full pipeline; rigid-
+net solver (each pole a free solver point), OCC `Geom_BSplineCurve` profile
+edge matching a header de Boor evaluator, `SketchTool::Spline` (key `S`,
+`ICON_FA_PEN_NIB`), `tests/test_spline.cpp` + v40 golden. Fully-solved poles
+(point-on-spline / tangent-at-knot via `GCS::BSpline`), expression-driven
+poles, and 3D fit-splines are deferred — see phase-l.md and
+[../interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md).
 
 ## Phase M — Interaction & keyboard: select-default, Escape, shortcuts, box-select (~1.5 days) — SHIPPED
 
@@ -574,8 +575,8 @@ exposes params the model already stores or restructures ImGui panels. See
 Things intentionally NOT done in a given phase, with where they get picked up.
 Keep this list honest — a deferred item is a known gap, not a silent one.
 
-- **B-splines** → Phase L (own milestone; poles/knots/weights UX + OCC B-spline
-  edge are each substantial).
+- **B-splines** → ✅ SHIPPED in Phase L (format v40; rigid-net v1). Fully-
+  solved poles (point-on-spline/tangent-at-knot) + 3D fit-splines deferred.
 - **Circle & arc trim** → SHIPPED in Phase J (`TrimCurveAt`): a trimmed circle
   becomes the complementary arc, a trimmed arc splits into sub-arcs.
 - **Whole-entity body dragging** (drag a line/circle by its interior; rim-drag
@@ -634,7 +635,7 @@ Keep this list honest — a deferred item is a known gap, not a silent one.
 ## Recommended order
 
 A ✓ → B ✓ → C ✓ → D ✓ → E ✓ → F ✓ → G ✓ → H ✓ → I ✓ → J ✓ → K ✓ →
-L ✓ (ellipses; B-splines deferred) → M ✓ → **N ✓**.
+L ✓ (ellipses + B-splines, v40) → M ✓ → **N ✓**.
 
 **A–N all shipped** — the sketcher is **feature-complete for v1** (geometry:
 lines/rects/arcs/ellipses; constraints: the full standard set + dimensions +
@@ -642,10 +643,12 @@ construction + status/conflict management; generative: mirror/fillet/pattern/
 offset; interaction: select-default/Escape/box-select + Onshape keymap + icon
 toolbar; plus Phase N's UI staging, generative-op editing, and point-alignment
 inference — see line above, `08428cd`…, "Phase N and all its follow-ups are
-complete"). **The one recorded deferral:**
-- **B-splines** — Phase L's second half ([phase-l.md](phase-l.md)); a large
-  own-milestone (poles/knots/weights UX + the OCC B-spline edge). Not needed
-  for v1.
+complete"). **B-splines shipped after v1** (Phase L second half, format v40,
+rigid-net; [phase-l.md](phase-l.md)). Remaining deferrals:
+- **Fully-solved spline poles** — point-on-spline / tangent-at-knot via
+  `GCS::BSpline`; the shipped v1 keeps poles as free solver points.
+- **3D fit-splines** — a non-sketch curve object; see
+  [../interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md) #3.
 
 Nice-to-have follow-ups (see Deferred, all unscheduled): ellipse full
 constrainability, offset as a regenerating DerivedOp, extend/transform tools,

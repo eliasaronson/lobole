@@ -143,6 +143,8 @@ void Solver::Load(const SketchFeature& sketch) {
     else if (std::holds_alternative<Circle>(e)) nParams += 3;
     else if (std::holds_alternative<Arc>(e)) nParams += 6; // 3 pts + rad + 2 ang
     else if (std::holds_alternative<Ellipse>(e)) nParams += 2; // centre only
+    else if (auto* bs = std::get_if<BSpline>(&e))
+      nParams += 2 * bs->poles.size(); // one solver point per pole
   }
   (void)nParams; // deque addresses are stable; no reservation needed
 
@@ -226,6 +228,14 @@ void Solver::Load(const SketchFeature& sketch) {
       // rotation are rigid — see docs/sketching/phase-l.md for the full-rules TODO.
       (void)el;
       addPoint(id, 0, el->center);
+    } else if (auto* bs = std::get_if<BSpline>(&e)) {
+      // v1 "rigid net": each pole is its own free solver point (addressed by
+      // which = pole index), so Coincident/Distance/Fixed on a pole work and
+      // dragging a pole reshapes the curve. No inter-pole rules; the curve
+      // shape is defined by the poles. which is uint8_t → cap at 255 poles.
+      const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
+      for (size_t k = 0; k < nPoles; k++)
+        addPoint(id, static_cast<uint8_t>(k), bs->poles[k]);
     }
     // Rectangle: rigid in v1, not added to the solver.
   }
@@ -634,6 +644,11 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
         ar.endAngle += 2.0 * M_PI;
     } else if (std::holds_alternative<Ellipse>(e)) {
       std::get<Ellipse>(e).center = pointAt(0); // radii/rotation rigid
+    } else if (std::holds_alternative<BSpline>(e)) {
+      auto& bs = std::get<BSpline>(e);
+      const size_t nPoles = std::min<size_t>(bs.poles.size(), 256);
+      for (size_t k = 0; k < nPoles; k++)
+        bs.poles[k] = pointAt(static_cast<uint8_t>(k));
     }
   }
 }

@@ -47,12 +47,18 @@ json EntityToJson(const sketch::Entity& entity) {
                   {"radius", e.radius},
                   {"start_angle", e.startAngle},
                   {"end_angle", e.endAngle}};
-        } else {
+        } else if constexpr (std::is_same_v<T, sketch::Ellipse>) {
           return {{"type", "ellipse"},
                   {"center", Vec2ToJson(e.center)},
                   {"r_major", e.rMajor},
                   {"r_minor", e.rMinor},
                   {"rotation", e.rotation}};
+        } else { // BSpline
+          json poles = json::array();
+          for (const glm::vec2& p : e.poles)
+            poles.push_back(Vec2ToJson(p));
+          return {{"type", "spline"}, {"poles", std::move(poles)},
+                  {"degree", e.degree}};
         }
       },
       entity);
@@ -82,6 +88,12 @@ sketch::Entity EntityFromJson(const json& j) {
                         j.at("r_major").get<double>(),
                         j.at("r_minor").get<double>(),
                         j.at("rotation").get<double>()};
+  } else if (type == "spline") { // v40
+    sketch::BSpline bs;
+    for (const auto& pj : j.at("poles"))
+      bs.poles.push_back(Vec2FromJson(pj));
+    bs.degree = j.value("degree", 3);
+    e = std::move(bs);
   } else {
     // "rect" is intercepted and expanded in FeatureFromJson (pre-v5 rigid
     // rectangles become four lines); anything else is unknown.

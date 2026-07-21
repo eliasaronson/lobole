@@ -31,6 +31,11 @@ void ForEachVertex(const Entity& e, F fn) {
     fn(uint8_t{2}, ArcPointUV(*a, 2));
   } else if (auto* el = std::get_if<Ellipse>(&e))
     fn(uint8_t{0}, el->center);
+  else if (auto* bs = std::get_if<BSpline>(&e)) {
+    const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
+    for (size_t k = 0; k < nPoles; k++)
+      fn(static_cast<uint8_t>(k), bs->poles[k]);
+  }
 }
 
 // Distance from p to segment [a,b], plus the closest point on it.

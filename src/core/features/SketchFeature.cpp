@@ -83,7 +83,7 @@ std::vector<std::string> EntityExprFields(const Entity& e) {
           return {"cx", "cy", "r"};
         else if constexpr (std::is_same_v<T, Arc>)
           return {"cx", "cy", "r"};
-        else // Ellipse: rigid in the solver, no expr fields in v1
+        else // Ellipse / BSpline: no expr-driven scalar fields in v1
           return {};
       },
       e);

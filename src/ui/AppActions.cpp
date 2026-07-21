@@ -2018,6 +2018,13 @@ EntityDots(const sketch::Entity& e) {
             {2, sketch::ArcPointUV(*a, 2)}};
   if (auto* el = std::get_if<sketch::Ellipse>(&e))
     return {{0, el->center}};
+  if (auto* bs = std::get_if<sketch::BSpline>(&e)) {
+    std::vector<std::pair<uint8_t, glm::vec2>> dots;
+    const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
+    for (size_t k = 0; k < nPoles; k++)
+      dots.push_back({static_cast<uint8_t>(k), bs->poles[k]});
+    return dots;
+  }
   return {};
 }
 

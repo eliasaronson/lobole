@@ -60,6 +60,7 @@ enum class SketchTool {
   Arc,           // 3-click center → start → end
   ArcThreePoint, // 3-click start → end → through-point
   Ellipse,       // 3-click center → major-axis end → minor radius
+  Spline,        // click to add control poles; Enter/double-click finishes
   Mirror,        // reflect the current selection across a clicked axis line
   Fillet,        // round the clicked corner where two lines meet
   Pattern,       // linear/circular array of the current selection
@@ -81,6 +82,9 @@ struct SketchEditState {
   bool hasPendingPoint2 = false; // second click of a 3-click tool (arcs)
   glm::vec2 pendingPoint2{0.0f};
   glm::vec2 hoverPoint{0.0f};
+  // Spline tool: control poles placed so far. Committed as a BSpline on Enter
+  // or a double-click (>= 2 poles); Escape or a tool switch clears them.
+  std::vector<glm::vec2> splinePoles;
 
   // Box (rubber-band) selection in progress (Select tool). Screen px; the
   // window/crossing sense is boxEnd.x < boxStart.x (right→left = crossing).

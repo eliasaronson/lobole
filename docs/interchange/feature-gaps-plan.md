@@ -14,7 +14,7 @@ effort:
 | # | Feature | Onshape source | Effort | Dominant risk |
 |---|---------|----------------|--------|---------------|
 | 1 | Split feature | `splitPart` | ✅ **v1 SHIPPED** (robust tier deferred) | body-identity (`createdBy`) collision |
-| 2 | 2D sketch B-spline | spline sketch entities | ~1–1.5 sessions | OCC watertight profile edge |
+| 2 | 2D sketch B-spline | spline sketch entities | ✅ **v1 SHIPPED** (rigid net; solved poles deferred) | OCC watertight profile edge |
 | 3 | 3D fit-spline | `fitSpline` | ~1 session | new non-sketch curve object type |
 
 Grounding facts (verified 2026-07-20): format `kVersion = 38`
@@ -123,7 +123,34 @@ skipping.
 
 ---
 
-## 2. 2D sketch B-spline entity
+## 2. 2D sketch B-spline entity — ✅ v1 SHIPPED
+
+**Shipped (format v40):** `BSpline` is now a sketch `Entity` variant — a
+non-rational, clamped, uniform B-spline through its control `poles` (degree
+cubic, reduced to poles-1 when few; weights/knots are the clamped-uniform
+defaults, not stored). A header de Boor evaluator (`BSplineEvalUV` /
+`BSplineSampleUV`) drives tessellation/render/pick; the OCC profile edge
+(`Geom_BSplineCurve` in `SketchProfile.cpp`) uses the identical knot vector
+so the two agree (watertight). **Rigid-net solver:** each pole is a free
+solver point addressed by `which`, so Coincident/Distance/Fixed on a pole
+work and dragging a pole reshapes the curve (poles capped at 255 — `which`
+is `uint8_t`). Profiles: a self-closed spline is its own loop; an open
+spline chains with lines/arcs (endpoints = first/last pole; poles reversed
+on chain-swap). A `SketchTool::Spline` (click poles, Enter/double-click to
+finish, Esc cancels) + toolbar (`ICON_FA_PEN_NIB`, key `S`) + pole
+dots/control-polygon preview. Drawing projection already samples B-spline
+edges via its generic path — no change. Serialize + v40 golden
+(`tests/golden/v40-spline.*`) + `tests/test_spline.cpp` (14 cases:
+de Boor endpoints/hull, translate/reflect, JSON round-trip, pole-as-solver-
+point, closed + spline-plus-line extrude volume-vs-area). Verified live over
+headless RPC (spline sketch → extrude → 31.2 mm³ → save/reload identical).
+**Deferred:** fully-solved poles (`GCS::BSpline` + point-on-spline/tangent-
+at-knot constraints), expression-driven poles, >255-pole splines, and
+splines in sweep *paths* (`BuildOpenPathWire` ignores them). The drawing
+*tool* itself was not visually driven (assistant can't launch windowed
+Vulkan); its click logic is thin glue over the unit-tested core.
+
+Historical scope notes below (kept for the deferred follow-ups):
 
 Add `BSpline` as a sketch `Entity` variant (current set is
 Point/Line/Circle/Arc/Ellipse). This is the second half of sketching

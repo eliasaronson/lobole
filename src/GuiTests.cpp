@@ -1429,6 +1429,12 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     el.hasPendingPoint2 = true;
     IM_CHECK_EQ(ui::SketchToolPrompt(el).step, 3);     // third click
     IM_CHECK_EQ(ui::SketchToolPrompt(el).stepCount, 3);
+
+    ui::SketchEditState sp;
+    sp.tool = ui::SketchTool::Spline;
+    IM_CHECK(!ui::SketchToolPrompt(sp).text.empty());  // prompts before any pole
+    sp.splinePoles = {{0, 0}, {1, 1}};
+    IM_CHECK(ui::SketchToolPrompt(sp).text.find("finish") != std::string::npos);
   };
 
   // Guided mirror (N2): select geometry in-tool, Enter, then click the axis.

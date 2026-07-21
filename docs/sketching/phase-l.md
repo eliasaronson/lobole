@@ -40,6 +40,23 @@ centre/rMajor/rMinor/rotation ⇄ focus1 (`c = √(a²−b²)` along the rotatio
 radmin, add the alignment/rules, and expose Equal/Radius/Tangent to ellipses in
 the constraint validators. Sizeable; do when ellipse constraints are wanted.
 
+## B-spline — ✅ v1 SHIPPED (format v40)
+
+Built as the rigid-net v1: `sketch::BSpline{poles, degree}` threaded through
+the full pipeline (model → serialize → solver → profile → render → pick →
+tool). Non-rational, clamped, uniform; weights/explicit knots are the
+defaults (not stored). Header de Boor evaluator agrees with the OCC
+`Geom_BSplineCurve` profile edge (same knot vector → watertight). Each pole
+is a free solver point (Coincident/Distance/Fixed work; drag reshapes);
+poles capped at 255 (`PointRef::which` is `uint8_t`). `SketchTool::Spline`
+(click poles, Enter/double-click finish), toolbar `ICON_FA_PEN_NIB`, key
+`S`. Tests in `tests/test_spline.cpp` + v40 golden. See the shipped summary
+in [../interchange/feature-gaps-plan.md](../interchange/feature-gaps-plan.md).
+**Deferred:** fully-solved poles (`GCS::BSpline` + point-on-spline/tangent-
+at-knot), expression-driven poles, splines in sweep paths, 3D fit-splines.
+
+The original build plan (retained for the deferred items):
+
 ## B-spline (planned — larger, review before building)
 
 - **Model**: `struct BSpline { std::vector<glm::vec2> poles; std::vector<double>

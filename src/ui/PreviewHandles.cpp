@@ -64,8 +64,12 @@ glm::vec2 ProfileCenterUV(const SketchFeature& sk,
             const glm::vec2 r(static_cast<float>(g.radius));
             add(g.center - r);
             add(g.center + r);
-          } else { // Arc / Ellipse: the center is close enough for an anchor
-            add(g.center);
+          } else if constexpr (std::is_same_v<T, sketch::Arc> ||
+                               std::is_same_v<T, sketch::Ellipse>) {
+            add(g.center); // the center is close enough for an anchor
+          } else { // BSpline: every pole
+            for (const glm::vec2& pole : g.poles)
+              add(pole);
           }
         },
         e);

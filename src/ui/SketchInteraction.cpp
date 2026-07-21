@@ -548,6 +548,9 @@ static void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
                                std::is_same_v<T, sketch::Arc> ||
                                std::is_same_v<T, sketch::Ellipse>) {
             ent.center += d;
+          } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
+            for (glm::vec2& pole : ent.poles)
+              pole += d;
           }
         },
         e);
@@ -654,6 +657,7 @@ static void HandleSketchKeys(AppState& state) {
   auto setTool = [&](SketchTool t) {
     edit.tool = t;
     edit.hasPendingPoint = edit.hasPendingPoint2 = false;
+    edit.splinePoles.clear();
     edit.mirrorAxisPhase = false;
     edit.dimPickBody.clear();
     edit.dimPlacing = false;
@@ -683,6 +687,7 @@ static void HandleSketchKeys(AppState& state) {
   if (ImGui::IsKeyPressed(ImGuiKey_C)) return setTool(SketchTool::Circle);
   if (ImGui::IsKeyPressed(ImGuiKey_G)) return setTool(SketchTool::Rectangle);
   if (ImGui::IsKeyPressed(ImGuiKey_A)) return setTool(SketchTool::ArcThreePoint);
+  if (ImGui::IsKeyPressed(ImGuiKey_S)) return setTool(SketchTool::Spline);
   if (ImGui::IsKeyPressed(ImGuiKey_M)) return setTool(SketchTool::Trim);
   if (ImGui::IsKeyPressed(ImGuiKey_O)) return setTool(SketchTool::Offset);
   if (ImGui::IsKeyPressed(ImGuiKey_D)) return setTool(SketchTool::Dimension);
@@ -1246,6 +1251,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       // frame) consumes it.
     } else if (edit.tool == SketchTool::Dimension && edit.dimPlacing) {
       edit.dimPlacing = false; // back to target accumulation (targets kept)
+    } else if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty()) {
+      edit.splinePoles.clear(); // cancel the in-progress spline
     } else if (edit.hasPendingPoint || edit.hasPendingPoint2 || edit.boxActive) {
       edit.hasPendingPoint = false;
       edit.hasPendingPoint2 = false;
@@ -1299,7 +1306,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.tool == SketchTool::Circle || edit.tool == SketchTool::Rectangle ||
       edit.tool == SketchTool::RectangleCenter ||
       edit.tool == SketchTool::Arc || edit.tool == SketchTool::ArcThreePoint ||
-      edit.tool == SketchTool::Ellipse;
+      edit.tool == SketchTool::Ellipse || edit.tool == SketchTool::Spline;
   const bool infer = drawTool && edit.autoConstrain && !ImGui::GetIO().KeyCtrl;
   if (infer) {
     const float ppu = PixelsPerUV(state, sketch->plane, uv);
@@ -1631,8 +1638,31 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     return true;
   }
 
+  // Spline: commit the accumulated poles as a BSpline (>= 2 needed). May
+  // replace the sketch feature, so the local pointer dies — return after.
+  auto finishSpline = [&]() {
+    if (edit.splinePoles.size() >= 2) {
+      sketch::BSpline bs;
+      bs.poles = edit.splinePoles;
+      CommitEntity(state, *sketch, index, bs, false);
+    }
+    edit.splinePoles.clear();
+  };
+  if (edit.tool == SketchTool::Spline && ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+    finishSpline();
+    return true;
+  }
+
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-    if (edit.tool == SketchTool::Point) {
+    if (edit.tool == SketchTool::Spline) {
+      // A double-click finishes; a single click adds another pole. On the
+      // double-click frame the first click already placed its pole, so just
+      // finish without appending a duplicate.
+      if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        finishSpline();
+      else
+        edit.splinePoles.push_back(uv);
+    } else if (edit.tool == SketchTool::Point) {
       CommitEntity(state, *sketch, index, sketch::Point{uv}, infer);
     } else if (edit.tool == SketchTool::Arc ||
                edit.tool == SketchTool::ArcThreePoint) {
@@ -1791,6 +1821,18 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
     for (const auto& e : sketch::OffsetLoop(sketch->plane, chain,
                                             edit.offsetDistance, edit.offsetJoinArc))
       emitPoly(sketch::TessellateEntity(e));
+    return;
+  }
+
+  // Spline preview: the curve through the placed poles plus the cursor (the
+  // pole the next click would add), and the straight control polygon.
+  if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty()) {
+    sketch::BSpline bs;
+    bs.poles = edit.splinePoles;
+    bs.poles.push_back(edit.hoverPoint);
+    if (bs.poles.size() >= 2)
+      emitPoly(sketch::BSplineSampleUV(bs));
+    emitPoly(bs.poles); // control polygon
     return;
   }
 
@@ -1997,6 +2039,12 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
         click3 == 1 ? "click the centre"
                     : click3 == 2 ? "click the major-axis end"
                                   : "click to set the minor radius");
+    break;
+  case T::Spline:
+    set("Spline", 0, 0,
+        edit.splinePoles.empty()
+            ? "click to place control poles"
+            : "click for more poles (Enter or double-click to finish)");
     break;
   case T::Trim:
     set("Trim", 0, 0, "click a segment to remove it");
@@ -2910,6 +2958,10 @@ std::vector<std::pair<uint8_t, glm::vec2>> EntityPoints(const sketch::Entity& e)
            {2, sketch::ArcPointUV(*a, 2)}};
   } else if (auto* el = std::get_if<sketch::Ellipse>(&e)) {
     pts = {{0, el->center}};
+  } else if (auto* bs = std::get_if<sketch::BSpline>(&e)) {
+    const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
+    for (size_t k = 0; k < nPoles; k++)
+      pts.push_back({static_cast<uint8_t>(k), bs->poles[k]});
   }
   return pts;
 }

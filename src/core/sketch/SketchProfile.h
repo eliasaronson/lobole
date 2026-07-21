@@ -25,6 +25,11 @@ struct LoopEdge {
   double radius = 0.0;
   double angStart = 0.0, angEnd = 0.0; // CCW span (arc only)
   uint32_t entityId = 0;               // stable id of the generating sketch entity
+  // Set when this edge is a B-spline: its control poles in traversal order
+  // (a = poles.front(), b = poles.back()). Kept last so existing positional
+  // brace-inits of line/arc edges stay valid. When BuildLoops reverses the
+  // edge to fit the walk, the poles are reversed too.
+  std::optional<BSpline> spline;
 };
 
 // One closed loop of a sketch profile, in plane UV space.

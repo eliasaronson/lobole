@@ -60,11 +60,106 @@ struct Ellipse {
   uint32_t id = 0;
   bool construction = false;
 };
+// A non-rational, clamped, uniform B-spline through its control `poles`
+// (Onshape's spline entities / fitSpline; sketch phase L). `which` addresses
+// pole k, so each pole is a movable solver point (Coincident/Distance/Fixed on
+// a pole work) — the v1 "rigid net" treatment, mirroring the Ellipse centre.
+// The curve interpolates its first and last poles (clamped). `degree` is
+// cubic, reduced to poles-1 when there are too few poles. Weights and an
+// explicit knot vector are not stored in v1 — they are the clamped-uniform
+// defaults (see BSplineKnots), keeping serialization small and every pole
+// addressable by `PointRef::which` (uint8_t; poles capped at 255).
+struct BSpline {
+  std::vector<glm::vec2> poles;
+  int degree = 3;
+  uint32_t id = 0;
+  bool construction = false;
+};
 
 // Rectangles are not a primitive: they decompose into four Lines with shared
 // corners (see SketchFeature::AddRectangle) so every side is editable and
 // trimmable. Legacy files with a rigid "rect" entity are migrated on load.
-using Entity = std::variant<Point, Line, Circle, Arc, Ellipse>;
+using Entity = std::variant<Point, Line, Circle, Arc, Ellipse, BSpline>;
+
+// Effective degree of a spline: cubic by default, reduced so a spline with few
+// poles stays valid (degree <= poles-1). 0 for a degenerate (<2 poles) spline.
+inline int BSplineDegree(const BSpline& s) {
+  const int n = static_cast<int>(s.poles.size());
+  if (n < 2)
+    return 0;
+  return std::min(s.degree > 0 ? s.degree : 3, n - 1);
+}
+
+// The clamped-uniform knot vector for `n` poles of degree `p` (length n+p+1):
+// p+1 zeros, interior knots 1..(n-p-1), then p+1 copies of (n-p). The curve's
+// parameter domain is [0, n-p]. This is exactly the knot vector OCC builds for
+// a clamped BSpline with the same poles/degree, so the header evaluator below
+// and the OCC profile edge agree.
+inline std::vector<double> BSplineKnots(int n, int p) {
+  std::vector<double> U;
+  U.reserve(n + p + 1);
+  for (int i = 0; i <= p; i++)
+    U.push_back(0.0);
+  const int interior = n - p - 1;
+  for (int i = 1; i <= interior; i++)
+    U.push_back(static_cast<double>(i));
+  const double last = static_cast<double>(interior + 1);
+  for (int i = 0; i <= p; i++)
+    U.push_back(last);
+  return U;
+}
+
+// Evaluate the clamped B-spline at global parameter u in [0, n-p] (de Boor).
+inline glm::vec2 BSplineEvalUV(const BSpline& s, double u) {
+  const int n = static_cast<int>(s.poles.size());
+  if (n == 0)
+    return glm::vec2(0.0f);
+  const int p = BSplineDegree(s);
+  if (p == 0)
+    return s.poles[0];
+  const std::vector<double> U = BSplineKnots(n, p);
+  const double umax = U[n]; // = n - p
+  if (u <= 0.0)
+    return s.poles.front();
+  if (u >= umax)
+    return s.poles.back();
+  // Knot span k in [p, n-1] with U[k] <= u < U[k+1].
+  int k = p;
+  while (k < n - 1 && U[k + 1] <= u)
+    k++;
+  std::vector<glm::vec2> d(p + 1);
+  for (int j = 0; j <= p; j++)
+    d[j] = s.poles[j + k - p];
+  for (int r = 1; r <= p; r++) {
+    for (int j = p; j >= r; j--) {
+      const double denom = U[j + 1 + k - r] - U[j + k - p];
+      const float a =
+          denom > 1e-12 ? static_cast<float>((u - U[j + k - p]) / denom) : 0.0f;
+      d[j] = (1.0f - a) * d[j - 1] + a * d[j];
+    }
+  }
+  return d[p];
+}
+
+// Samples the spline into a polyline (`segsPerSpan` segments per knot span).
+inline std::vector<glm::vec2> BSplineSampleUV(const BSpline& s,
+                                              int segsPerSpan = 16) {
+  std::vector<glm::vec2> pts;
+  const int n = static_cast<int>(s.poles.size());
+  if (n == 0)
+    return pts;
+  const int p = BSplineDegree(s);
+  if (p == 0) {
+    pts = s.poles;
+    return pts;
+  }
+  const double umax = static_cast<double>(n - p);
+  const int total = std::max(2, segsPerSpan * (n - p));
+  pts.reserve(total + 1);
+  for (int i = 0; i <= total; i++)
+    pts.push_back(BSplineEvalUV(s, umax * i / total));
+  return pts;
+}
 
 // Builds an ellipse from three clicks: centre, a point on the major axis (sets
 // rMajor + rotation), and a third point whose perpendicular distance to the
@@ -195,11 +290,17 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
           while (a1 <= a0)
             a1 += 2.0 * M_PI; // CCW-always
           return Arc{c, g.radius, a0, a1};
-        } else { // Ellipse: reflect the centre and the major-axis direction
+        } else if constexpr (std::is_same_v<T, Ellipse>) {
+          // Ellipse: reflect the centre and the major-axis direction.
           glm::vec2 c = ReflectPoint(g.center, a, b);
           glm::vec2 maj = ReflectPoint(EllipsePointUV(g, 0.0), a, b);
           return Ellipse{c, g.rMajor, g.rMinor,
                          std::atan2(maj.y - c.y, maj.x - c.x)};
+        } else { // BSpline: reflect every pole
+          BSpline bs = g;
+          for (glm::vec2& pole : bs.poles)
+            pole = ReflectPoint(pole, a, b);
+          return bs;
         }
       },
       e);
@@ -221,8 +322,14 @@ inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
           return Circle{g.center + t, g.radius};
         else if constexpr (std::is_same_v<T, Arc>)
           return Arc{g.center + t, g.radius, g.startAngle, g.endAngle};
-        else // Ellipse
+        else if constexpr (std::is_same_v<T, Ellipse>)
           return Ellipse{g.center + t, g.rMajor, g.rMinor, g.rotation};
+        else { // BSpline: translate every pole
+          BSpline bs = g;
+          for (glm::vec2& pole : bs.poles)
+            pole += t;
+          return bs;
+        }
       },
       e);
   SetEntityId(out, 0);
@@ -252,8 +359,14 @@ inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
         else if constexpr (std::is_same_v<T, Arc>)
           return Arc{rot(g.center), g.radius, g.startAngle + ang,
                      g.endAngle + ang};
-        else // Ellipse
+        else if constexpr (std::is_same_v<T, Ellipse>)
           return Ellipse{rot(g.center), g.rMajor, g.rMinor, g.rotation + ang};
+        else { // BSpline: rotate every pole
+          BSpline bs = g;
+          for (glm::vec2& pole : bs.poles)
+            pole = rot(pole);
+          return bs;
+        }
       },
       e);
   SetEntityId(out, 0);
@@ -276,8 +389,13 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
           return g.center;
         else if constexpr (std::is_same_v<T, Arc>)
           return ArcPointUV(g, which);
-        else // Ellipse: only the centre (which 0)
-          return g.center;
+        else if constexpr (std::is_same_v<T, Ellipse>)
+          return g.center; // only the centre (which 0)
+        else { // BSpline: which addresses pole k
+          if (g.poles.empty())
+            return glm::vec2(0.0f);
+          return which < g.poles.size() ? g.poles[which] : g.poles.back();
+        }
       },
       e);
 }

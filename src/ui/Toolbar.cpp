@@ -229,6 +229,7 @@ void DrawSketchModeToolbar(AppState& state) {
           SketchTool::RectangleCenter);
   toolBtn(ICON_FA_BEZIER_CURVE, "3-Point Arc (A)", SketchTool::ArcThreePoint);
   toolBtn(ICON_FA_EGG, "Ellipse", SketchTool::Ellipse);
+  toolBtn(ICON_FA_PEN_NIB, "Spline (S)", SketchTool::Spline);
   toolBtn(ICON_FA_CIRCLE_DOT, "Point", SketchTool::Point);
   toolBtn(ICON_FA_SCISSORS, "Trim (M)", SketchTool::Trim);
   toolBtn(ICON_FA_RULER_COMBINED, "Dimension (D)", SketchTool::Dimension);

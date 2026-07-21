@@ -14,8 +14,12 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepOffsetAPI_MakeOffset.hxx>
 #include <GC_MakeSegment.hxx>
+#include <Geom_BSplineCurve.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <ShapeFix_Wire.hxx>
+#include <TColStd_Array1OfInteger.hxx>
+#include <TColStd_Array1OfReal.hxx>
+#include <TColgp_Array1OfPnt.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -64,6 +68,8 @@ glm::vec2 OnCircle(const glm::vec2& c, double r, double ang) {
 // is its two endpoints; an arc is sampled along its CCW span, then oriented so
 // the first point matches `a`.
 std::vector<glm::vec2> TessellateLoopEdge(const LoopEdge& e) {
+  if (e.spline)
+    return BSplineSampleUV(*e.spline); // poles pre-oriented a → b
   if (!e.arc)
     return {e.a, e.b};
   const double sweep = e.angEnd - e.angStart; // normalized positive
@@ -136,6 +142,22 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
               en += 2.0 * M_PI; // CCW-always
             freeEdges.push_back({true, ArcPointUV(e, 1), ArcPointUV(e, 2),
                                  e.center, e.radius, s, en, e.id});
+          } else if constexpr (std::is_same_v<T, BSpline>) {
+            if (e.poles.size() < 2)
+              return; // degenerate: contributes nothing
+            LoopEdge se;
+            se.a = e.poles.front();
+            se.b = e.poles.back();
+            se.entityId = e.id;
+            se.spline = e;
+            if (e.poles.size() >= 3 && Near(se.a, se.b)) {
+              // A self-closed spline is its own loop (like a circle).
+              Loop loop;
+              loop.edges.push_back(std::move(se));
+              loops.push_back(std::move(loop));
+            } else {
+              freeEdges.push_back(std::move(se)); // chains with lines/arcs
+            }
           }
           // Point contributes nothing to a profile
         },
@@ -165,6 +187,8 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
           // already oriented a → b
         } else if (Near(cand.b, tail)) {
           std::swap(cand.a, cand.b); // traverse it backwards
+          if (cand.spline) // keep poles in traversal order a → b
+            std::reverse(cand.spline->poles.begin(), cand.spline->poles.end());
         } else {
           continue;
         }
@@ -191,6 +215,32 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
 }
 
 namespace {
+
+// Builds an OCC clamped, uniform, non-rational B-spline curve on the plane
+// from UV control poles. The knot vector matches the header's BSplineKnots
+// (distinct knots 0..(n-p) with clamped end multiplicities), so the OCC edge
+// and the UV tessellation (de Boor) trace the same curve — the property that
+// keeps a spline profile watertight against its rendered/area polyline.
+Handle(Geom_BSplineCurve) MakeBSplineCurve(const SketchPlane& plane,
+                                           const BSpline& s) {
+  const int n = static_cast<int>(s.poles.size());
+  const int p = BSplineDegree(s);
+  TColgp_Array1OfPnt poles(1, n);
+  for (int i = 0; i < n; i++) {
+    const glm::vec3 w = plane.PlaneToWorld(s.poles[i]);
+    poles.SetValue(i + 1, gp_Pnt(w.x, w.y, w.z));
+  }
+  const int nDistinct = n - p + 1;
+  TColStd_Array1OfReal knots(1, nDistinct);
+  TColStd_Array1OfInteger mults(1, nDistinct);
+  for (int i = 0; i < nDistinct; i++) {
+    knots.SetValue(i + 1, static_cast<double>(i));
+    mults.SetValue(i + 1, 1);
+  }
+  mults.SetValue(1, p + 1);
+  mults.SetValue(nDistinct, p + 1);
+  return new Geom_BSplineCurve(poles, knots, mults, p);
+}
 
 // Builds an OCCT wire for one loop in world space on the given plane. Every
 // wire is passed through ShapeFix_Wire (reorder / reconnect / close) so greedy
@@ -231,6 +281,23 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
     // tolerances — keep them as tight as the geometry allows).
     const size_t n = loop.edges.size();
 
+    // A lone closed spline is its own loop: build the closed curve directly,
+    // no shared-vertex chaining (like a circle/ellipse loop).
+    if (n == 1 && loop.edges[0].spline) {
+      Handle(Geom_BSplineCurve) curve =
+          MakeBSplineCurve(plane, *loop.edges[0].spline);
+      wire.Add(BRepBuilderAPI_MakeEdge(curve).Edge());
+      if (!wire.IsDone())
+        return TopoDS_Wire();
+      ShapeFix_Wire fix;
+      fix.Load(wire.Wire());
+      fix.SetPrecision(1e-4);
+      fix.FixReorder();
+      fix.FixConnected();
+      fix.FixClosed();
+      return fix.Wire();
+    }
+
     // Whether edge i is traversed along its canonical CCW span (BuildLoops
     // may have swapped a/b to fit the walk; the span itself is untouched).
     std::vector<bool> forward(n, true);
@@ -258,10 +325,10 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
       const glm::vec2 mid = (loop.edges[i].b + loop.edges[next].a) * 0.5f;
       const gp_Pnt p = toPnt(mid);
       double tol = Precision::Confusion();
-      if (loop.edges[i].arc)
+      if (loop.edges[i].arc || loop.edges[i].spline)
         tol = std::max(tol, p.Distance(endPointWorld(i, true)) +
                                 Precision::Confusion());
-      if (loop.edges[next].arc)
+      if (loop.edges[next].arc || loop.edges[next].spline)
         tol = std::max(tol, p.Distance(endPointWorld(next, false)) +
                                 Precision::Confusion());
       builder.MakeVertex(joints[i], p, tol);
@@ -271,7 +338,11 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
       const LoopEdge& e = loop.edges[i];
       const TopoDS_Vertex& from = joints[(i + n - 1) % n];
       const TopoDS_Vertex& to = joints[i];
-      if (e.arc) {
+      if (e.spline) {
+        // Poles are pre-oriented a → b, so the curve runs from `from` to `to`.
+        Handle(Geom_BSplineCurve) curve = MakeBSplineCurve(plane, *e.spline);
+        wire.Add(BRepBuilderAPI_MakeEdge(curve, from, to).Edge());
+      } else if (e.arc) {
         // Trim the gp_Circ by the shared vertices, ordered to match the
         // canonical CCW span; ShapeFix_Wire fixes up the in-loop orientation.
         glm::vec3 u = plane.GetUAxis();
@@ -719,6 +790,8 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity) {
           for (int i = 0; i <= kCircleSegments; i++)
             points.push_back(
                 EllipsePointUV(e, 2.0 * M_PI * i / kCircleSegments));
+        } else if constexpr (std::is_same_v<T, BSpline>) {
+          points = BSplineSampleUV(e);
         }
         // Point: no polyline
       },
