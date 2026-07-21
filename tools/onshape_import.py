@@ -10,11 +10,13 @@ ONSHAPE_SECRET_KEY; real environment variables win), sent as HTTP Basic —
 the personal-use path, no OAuth. Onshape wire units are METERS; conversion
 to mm happens in the mapping layer.
 
-Maps today: variables, sketches (lines/circles/arcs/points + most
+Maps today: variables, sketches (lines/circles/arcs/points/splines + most
 constraints), extrude / revolve / loft / sweep / boolean, feature mirror
-(replayed), face-attached sketches (plane from the host cap face). Every
-unmapped feature (fillet, chamfer, split, fitSpline, patterns) and every
-skipped constraint is REPORTED with a reason, never silently dropped.
+(replayed), face-attached sketches (plane from the host cap face). Sketch
+B-splines import (Onshape interpolates its points; we solve for the control
+poles whose Designer curve passes through them). Every unmapped feature
+(fillet, chamfer, splitPart, 3D fitSpline, patterns) and every skipped
+constraint is REPORTED with a reason, never silently dropped.
 
 CLI:
     onshape_import.py info        <document-url>
@@ -668,6 +670,75 @@ def _line_pts(geom, sp, ep):
     return (ax, ay), (bx, by)
 
 
+# ---- B-spline interpolation ------------------------------------------------
+# Onshape's spline INTERPOLATES its points; Designer's BSpline is control-POLE
+# based (passes through only its endpoints). Solve for the poles P whose
+# Designer curve, evaluated at the Greville abscissae, equals the data points:
+#   M . P = D,  M[i][j] = N_{j,p}(greville_i).
+# The knot vector + degree must match Designer's BSplineKnots / BSplineDegree
+# so the reconstructed curve is exactly what Designer draws (verified to
+# machine precision against the header de Boor evaluator).
+
+def _bspline_degree(n, degree=3):
+    return 0 if n < 2 else min(degree, n - 1)
+
+
+def _bspline_knots(n, p):
+    interior = n - p - 1
+    return ([0.0] * (p + 1) + [float(i) for i in range(1, interior + 1)] +
+            [float(interior + 1)] * (p + 1))
+
+
+def _bspline_basis(j, p, t, U):
+    if p == 0:
+        if U[j] <= t < U[j + 1]:
+            return 1.0
+        return 1.0 if (t == U[-1] and U[j] < U[j + 1] == U[-1]) else 0.0
+    a = b = 0.0
+    d1 = U[j + p] - U[j]
+    if d1 > 1e-12:
+        a = (t - U[j]) / d1 * _bspline_basis(j, p - 1, t, U)
+    d2 = U[j + p + 1] - U[j + 1]
+    if d2 > 1e-12:
+        b = (U[j + p + 1] - t) / d2 * _bspline_basis(j + 1, p - 1, t, U)
+    return a + b
+
+
+def _solve_linear(M, rhs):
+    """Gaussian elimination with partial pivoting; M is n x n, rhs n x k."""
+    n = len(M)
+    A = [M[i][:] + rhs[i][:] for i in range(n)]
+    k = len(rhs[0])
+    for col in range(n):
+        piv = max(range(col, n), key=lambda r: abs(A[r][col]))
+        A[col], A[piv] = A[piv], A[col]
+        pv = A[col][col]
+        if abs(pv) < 1e-12:
+            raise ValueError("singular collocation matrix")
+        A[col] = [x / pv for x in A[col]]
+        for r in range(n):
+            if r != col and abs(A[r][col]) > 1e-15:
+                f = A[r][col]
+                A[r] = [x - f * y for x, y in zip(A[r], A[col])]
+    return [A[r][n:n + k] for r in range(n)]
+
+
+def bspline_interp_poles(points, degree=3):
+    """points: [(x, y), ...] the curve must pass through. Returns control
+    poles [(x, y), ...] for Designer's clamped B-spline (same count as points).
+    """
+    n = len(points)
+    if n < 3:
+        return [list(p) for p in points]  # 2 pts -> a line; poles == points
+    p = _bspline_degree(n, degree)
+    U = _bspline_knots(n, p)
+    tau = [sum(U[i + 1:i + p + 1]) / p for i in range(n)]  # Greville abscissae
+    M = [[_bspline_basis(j, p, tau[i], U) for j in range(n)] for i in range(n)]
+    rhs = [[points[i][0], points[i][1]] for i in range(n)]
+    sol = _solve_linear(M, rhs)
+    return [[sol[i][0], sol[i][1]] for i in range(n)]
+
+
 def map_sketch_entities(feature):
     """One Onshape sketch's entities → (designer entity list, id map,
     2D point table for the plane fit, notes). The id map goes from Onshape
@@ -733,9 +804,45 @@ def map_sketch_entities(feature):
                            "end_idx": None}
             entities.append({"type": "point", "p": [p[0] * MM, p[1] * MM],
                              "construction": construction})
+        elif gt == "BTCurveGeometryInterpolatedSpline-116":
+            ip = geom.get("interpolationPoints", [])
+            pts = [(ip[k], ip[k + 1]) for k in range(0, len(ip) - 1, 2)]
+            if geom.get("isPeriodic") and len(pts) >= 2:
+                pts = pts + [pts[0]]  # close the loop -> self-closed spline
+            if len(pts) < 2:
+                notes.append("spline with <2 points skipped")
+                continue
+            # Onshape interpolates its points; convert to the control poles
+            # whose Designer curve passes through them.
+            poles = bspline_interp_poles(pts)
+            pts2d[f"{oid}.start"], pts2d[f"{oid}.end"] = pts[0], pts[-1]
+            point_lookup[f"{oid}.start"] = (len(entities), "spole0")
+            point_lookup[f"{oid}.end"] = \
+                (len(entities), f"spole{len(poles) - 1}")
+            id_map[oid] = {"idx": len(entities), "kind": "spline",
+                           "end_idx": None}
+            entities.append({"type": "spline",
+                             "poles": [[p[0] * MM, p[1] * MM] for p in poles],
+                             "degree": 3,
+                             "construction": construction})
         else:
             notes.append(f"entity {gt or e.get('btType')} skipped")
     return entities, id_map, pts2d, point_lookup, notes
+
+
+def _entity_coord(e, key, value=None):
+    """Read (value=None) or write a point on an entity by point_lookup key.
+    Splines address a pole by "spole<k>"; everything else is a named field."""
+    if e["type"] == "spline" and key.startswith("spole"):
+        k = int(key[5:])
+        if value is None:
+            return e["poles"][k]
+        e["poles"][k] = value
+        return value
+    if value is None:
+        return e[key]
+    e[key] = value
+    return value
 
 
 def project_to_plane(world_mm, plane):
@@ -765,7 +872,7 @@ def align_plane_frame(entities, point_lookup, world_pts, plane):
             if w is None or len(w) != 3 or key in ("start", "end"):
                 continue
             uv = project_to_plane([c * MM for c in w], pl)
-            pairs.append((entities[idx][key], uv))
+            pairs.append((_entity_coord(entities[idx], key), uv))
         if not pairs:
             return None, 0.0, 0
         if len(pairs) == 1:
@@ -837,10 +944,10 @@ def snap_to_world(entities, point_lookup, world_pts, plane):
                 moved = max(moved, d)
                 e["center"] = uv
             continue
-        old = e[key]
+        old = _entity_coord(e, key)
         d = ((old[0] - uv[0]) ** 2 + (old[1] - uv[1]) ** 2) ** 0.5
         moved = max(moved, d)
-        e[key] = uv
+        _entity_coord(e, key, uv)
     # Circles: snap radii from the world data (stale stored radii pull
     # concentric geometry when a diameter variable changed).
     for pid, w in world_pts.items():
@@ -2092,6 +2199,18 @@ class Replayer:
             elif ftype == "cPlane":
                 self.report.add(name, "mapped",
                                 "construction plane (baked into sketch planes)")
+            elif ftype == "splitPart":
+                # Designer has a Split feature, but Onshape's knife is a query
+                # (a face/plane) that doesn't resolve at rollback — needs the
+                # geometric measure-the-cut approach (like fillets). Deferred.
+                self.report.add(name, "skipped",
+                                "splitPart: knife query unresolved (Designer "
+                                "Split exists; geometric knife mapping TODO)")
+            elif ftype == "fitSpline":
+                # A 3D fit-spline feature (a free curve object). Designer has no
+                # 3D curve type yet (gap #3); 2D sketch splines DO import.
+                self.report.add(name, "skipped",
+                                "fitSpline: 3D curve object not in Designer yet")
             else:
                 self.report.add(name, "skipped",
                                 f"feature type '{ftype}' not mapped yet")

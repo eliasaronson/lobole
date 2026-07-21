@@ -99,6 +99,57 @@ def test_sketch_entities():
     print(f"  ({total_circles} circles checked)")
 
 
+# --- spline interpolation (pure) -------------------------------------------
+
+def test_spline_interp():
+    print("bspline_interp_poles:")
+    cases = [
+        [(0, 0), (1, 2), (3, 2), (4, 0)],           # open bulge
+        [(0, 0), (1, 1), (2, 2), (3, 3), (4, 4)],   # collinear
+        [(0, 0), (2, 4)],                           # 2 pts -> a line
+        # the smart_speakers interpolated spline (meters)
+        [(-0.0609, 0.061), (-0.0613, 0.0593), (-0.0617, 0.0566),
+         (-0.0619, 0.0535), (-0.0621, 0.0481)],
+    ]
+    for pts in cases:
+        poles = oi.bspline_interp_poles(pts)
+        check(len(poles) == len(pts),
+              f"{len(pts)} points -> {len(pts)} poles")
+        # Evaluate the Designer curve (via the importer's own basis) at the
+        # Greville abscissae; it must pass through the input points.
+        n = len(poles)
+        p = oi._bspline_degree(n)
+        U = oi._bspline_knots(n, p)
+        tau = [sum(U[i + 1:i + p + 1]) / p for i in range(n)] if p else \
+            list(range(n))
+        worst = 0.0
+        for i, t in enumerate(tau):
+            x = sum(oi._bspline_basis(j, p, t, U) * poles[j][0]
+                    for j in range(n)) if p else poles[i][0]
+            y = sum(oi._bspline_basis(j, p, t, U) * poles[j][1]
+                    for j in range(n)) if p else poles[i][1]
+            worst = max(worst, ((x - pts[i][0]) ** 2 +
+                                (y - pts[i][1]) ** 2) ** 0.5)
+        check(worst < 1e-9,
+              f"curve passes through {len(pts)} points (err {worst:.1e})")
+
+
+def test_spline_mapping():
+    print("map_sketch_entities (spline):")
+    feat = {"featureType": "newSketch", "name": "S", "entities": [{
+        "entityId": "sp",
+        "geometry": {"btType": "BTCurveGeometryInterpolatedSpline-116",
+                     "isPeriodic": False,
+                     "interpolationPoints": [0, 0, 1, 2, 3, 2, 4, 0]}}]}
+    ents, id_map, pts2d, point_lookup, notes = oi.map_sketch_entities(feat)
+    sp = [e for e in ents if e["type"] == "spline"]
+    check(len(sp) == 1, "one spline entity mapped")
+    check(sp and len(sp[0]["poles"]) == 4, "4 control poles")
+    check("sp.start" in point_lookup and "sp.end" in point_lookup,
+          "spline endpoints registered for constraints/plane-fit")
+    check(id_map.get("sp", {}).get("kind") == "spline", "id_map kind=spline")
+
+
 # --- constraints ------------------------------------------------------------
 
 def test_constraints():
@@ -130,6 +181,8 @@ def main():
         return 1
     test_expressions()
     test_sketch_entities()
+    test_spline_interp()
+    test_spline_mapping()
     test_constraints()
     if failures:
         print(f"\n{len(failures)} failure(s)")
