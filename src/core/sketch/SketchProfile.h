@@ -30,6 +30,11 @@ struct LoopEdge {
   // brace-inits of line/arc edges stay valid. When BuildLoops reverses the
   // edge to fit the walk, the poles are reversed too.
   std::optional<BSpline> spline;
+  // Set when this edge is an elliptical arc. Like circular arcs it keeps its
+  // canonical (startParam→endParam) sweep; traversal direction is resolved by
+  // the forward[] test in MakeLoopWire, so a/b may be swapped without touching
+  // the params.
+  std::optional<EllipseArc> ellipseArc;
 };
 
 // One closed loop of a sketch profile, in plane UV space.

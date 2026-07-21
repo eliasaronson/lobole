@@ -39,6 +39,7 @@ add_executable(designer_tests
     test_boolean.cpp
     test_split.cpp
     test_spline.cpp
+    test_ellipse_arc.cpp
     test_pattern.cpp
     test_toponaming.cpp
     test_fillet.cpp

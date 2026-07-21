@@ -70,6 +70,13 @@ glm::vec2 OnCircle(const glm::vec2& c, double r, double ang) {
 std::vector<glm::vec2> TessellateLoopEdge(const LoopEdge& e) {
   if (e.spline)
     return BSplineSampleUV(*e.spline); // poles pre-oriented a → b
+  if (e.ellipseArc) {
+    std::vector<glm::vec2> pts = EllipseArcSampleUV(*e.ellipseArc); // canonical
+    if (!pts.empty() && glm::length(pts.front() - e.a) >
+                            glm::length(pts.back() - e.a))
+      std::reverse(pts.begin(), pts.end()); // orient to traversal a → b
+    return pts;
+  }
   if (!e.arc)
     return {e.a, e.b};
   const double sweep = e.angEnd - e.angStart; // normalized positive
@@ -142,6 +149,13 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
               en += 2.0 * M_PI; // CCW-always
             freeEdges.push_back({true, ArcPointUV(e, 1), ArcPointUV(e, 2),
                                  e.center, e.radius, s, en, e.id});
+          } else if constexpr (std::is_same_v<T, EllipseArc>) {
+            LoopEdge ee;
+            ee.a = EllipseArcPointUV(e, 1);
+            ee.b = EllipseArcPointUV(e, 2);
+            ee.entityId = e.id;
+            ee.ellipseArc = e; // canonical sweep; forward[] orients it
+            freeEdges.push_back(std::move(ee));
           } else if constexpr (std::is_same_v<T, BSpline>) {
             if (e.poles.size() < 2)
               return; // degenerate: contributes nothing
@@ -303,19 +317,27 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
     std::vector<bool> forward(n, true);
     for (size_t i = 0; i < n; i++) {
       const LoopEdge& e = loop.edges[i];
-      if (!e.arc)
+      glm::vec2 canonStart;
+      if (e.arc)
+        canonStart = OnCircle(e.center, e.radius, e.angStart);
+      else if (e.ellipseArc)
+        canonStart = EllipseArcPointUV(*e.ellipseArc, 1);
+      else
         continue;
-      const glm::vec2 canonStart = OnCircle(e.center, e.radius, e.angStart);
       forward[i] =
           glm::length(e.a - canonStart) <= glm::length(e.b - canonStart);
     }
     // World-space point where edge i's traversal starts (atB=false) or ends.
     auto endPointWorld = [&](size_t i, bool atB) {
       const LoopEdge& e = loop.edges[i];
-      if (!e.arc)
-        return toPnt(atB ? e.b : e.a);
-      const double ang = (atB == forward[i]) ? e.angEnd : e.angStart;
-      return toPnt(OnCircle(e.center, e.radius, ang));
+      if (e.arc) {
+        const double ang = (atB == forward[i]) ? e.angEnd : e.angStart;
+        return toPnt(OnCircle(e.center, e.radius, ang));
+      }
+      if (e.ellipseArc)
+        return toPnt(EllipseArcPointUV(*e.ellipseArc,
+                                       (atB == forward[i]) ? 2 : 1));
+      return toPnt(atB ? e.b : e.a);
     };
 
     BRep_Builder builder;
@@ -325,10 +347,11 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
       const glm::vec2 mid = (loop.edges[i].b + loop.edges[next].a) * 0.5f;
       const gp_Pnt p = toPnt(mid);
       double tol = Precision::Confusion();
-      if (loop.edges[i].arc || loop.edges[i].spline)
+      if (loop.edges[i].arc || loop.edges[i].spline || loop.edges[i].ellipseArc)
         tol = std::max(tol, p.Distance(endPointWorld(i, true)) +
                                 Precision::Confusion());
-      if (loop.edges[next].arc || loop.edges[next].spline)
+      if (loop.edges[next].arc || loop.edges[next].spline ||
+          loop.edges[next].ellipseArc)
         tol = std::max(tol, p.Distance(endPointWorld(next, false)) +
                                 Precision::Confusion());
       builder.MakeVertex(joints[i], p, tol);
@@ -350,6 +373,18 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
         gp_Circ circ(axis, e.radius);
         wire.Add(forward[i] ? BRepBuilderAPI_MakeEdge(circ, from, to).Edge()
                             : BRepBuilderAPI_MakeEdge(circ, to, from).Edge());
+      } else if (e.ellipseArc) {
+        // Trim a gp_Elips built on the major-axis frame (its parametrisation
+        // matches EllipseArc's), ordered to the canonical sweep like the arc.
+        const EllipseArc& ea = *e.ellipseArc;
+        glm::vec3 u = plane.GetUAxis(), v = plane.GetVAxis();
+        const double cr = std::cos(ea.rotation), sr = std::sin(ea.rotation);
+        glm::vec3 major =
+            u * static_cast<float>(cr) + v * static_cast<float>(sr);
+        gp_Ax2 axis(toPnt(ea.center), normal, gp_Dir(major.x, major.y, major.z));
+        gp_Elips ell(axis, ea.rMajor, ea.rMinor);
+        wire.Add(forward[i] ? BRepBuilderAPI_MakeEdge(ell, from, to).Edge()
+                            : BRepBuilderAPI_MakeEdge(ell, to, from).Edge());
       } else {
         const gp_Pnt p0 = BRep_Tool::Pnt(from), p1 = BRep_Tool::Pnt(to);
         if (p0.Distance(p1) < Precision::Confusion())
@@ -815,6 +850,8 @@ std::vector<glm::vec2> TessellateEntity(const Entity& entity) {
           for (int i = 0; i <= kCircleSegments; i++)
             points.push_back(
                 EllipsePointUV(e, 2.0 * M_PI * i / kCircleSegments));
+        } else if constexpr (std::is_same_v<T, EllipseArc>) {
+          points = EllipseArcSampleUV(e);
         } else if constexpr (std::is_same_v<T, BSpline>) {
           points = BSplineSampleUV(e);
         }

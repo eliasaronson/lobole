@@ -150,6 +150,39 @@ def test_spline_mapping():
     check(id_map.get("sp", {}).get("kind") == "spline", "id_map kind=spline")
 
 
+# --- ellipses ---------------------------------------------------------------
+
+def test_ellipse_mapping():
+    print("map_sketch_entities (ellipse / ellipse_arc):")
+    import math
+    geom = {"btType": "BTCurveGeometryEllipse-1189", "radius": 0.02,
+            "minorRadius": 0.01, "xCenter": 0.05, "yCenter": -0.03,
+            "xDir": 0.0, "yDir": 1.0}  # major along +Y -> rotation = pi/2
+    # Full ellipse (BTMSketchCurve-4).
+    full = {"featureType": "newSketch", "name": "E", "entities": [{
+        "btType": "BTMSketchCurve-4", "entityId": "el",
+        "geometry": dict(geom)}]}
+    ents, idm, _, _, _ = oi.map_sketch_entities(full)
+    check(len(ents) == 1 and ents[0]["type"] == "ellipse", "full ellipse mapped")
+    e = ents[0]
+    check(approx(e["r_major"], 0.02 * oi.MM) and approx(e["r_minor"],
+          0.01 * oi.MM), "ellipse radii in mm")
+    check(approx(e["rotation"], math.pi / 2), "ellipse rotation from xDir/yDir")
+
+    # Elliptical arc segment, clockwise -> swept params swap into CCW order.
+    arc = {"featureType": "newSketch", "name": "A", "entities": [{
+        "btType": "BTMSketchCurveSegment-155", "entityId": "ea",
+        "startParam": 4.0, "endParam": 5.0,
+        "geometry": dict(geom, clockwise=True)}]}
+    ents, idm, _, _, _ = oi.map_sketch_entities(arc)
+    check(len(ents) == 1 and ents[0]["type"] == "ellipse_arc",
+          "elliptical arc mapped")
+    a = ents[0]
+    check(a["start_param"] == 5.0, "clockwise arc: start_param = onshape end")
+    check(a["end_param"] > a["start_param"], "arc end_param normalized > start")
+    check(idm.get("ea", {}).get("kind") == "ellipse_arc", "id_map kind")
+
+
 # --- constraints ------------------------------------------------------------
 
 def test_constraints():
@@ -183,6 +216,7 @@ def main():
     test_sketch_entities()
     test_spline_interp()
     test_spline_mapping()
+    test_ellipse_mapping()
     test_constraints()
     if failures:
         print(f"\n{len(failures)} failure(s)")

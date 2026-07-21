@@ -65,7 +65,8 @@ glm::vec2 ProfileCenterUV(const SketchFeature& sk,
             add(g.center - r);
             add(g.center + r);
           } else if constexpr (std::is_same_v<T, sketch::Arc> ||
-                               std::is_same_v<T, sketch::Ellipse>) {
+                               std::is_same_v<T, sketch::Ellipse> ||
+                               std::is_same_v<T, sketch::EllipseArc>) {
             add(g.center); // the center is close enough for an anchor
           } else { // BSpline: every pole
             for (const glm::vec2& pole : g.poles)

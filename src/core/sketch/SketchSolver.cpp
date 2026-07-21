@@ -143,6 +143,7 @@ void Solver::Load(const SketchFeature& sketch) {
     else if (std::holds_alternative<Circle>(e)) nParams += 3;
     else if (std::holds_alternative<Arc>(e)) nParams += 6; // 3 pts + rad + 2 ang
     else if (std::holds_alternative<Ellipse>(e)) nParams += 2; // centre only
+    else if (std::holds_alternative<EllipseArc>(e)) nParams += 2; // centre only
     else if (auto* bs = std::get_if<BSpline>(&e))
       nParams += 2 * bs->poles.size(); // one solver point per pole
   }
@@ -228,6 +229,11 @@ void Solver::Load(const SketchFeature& sketch) {
       // rotation are rigid — see docs/sketching/phase-l.md for the full-rules TODO.
       (void)el;
       addPoint(id, 0, el->center);
+    } else if (auto* ea = std::get_if<EllipseArc>(&e)) {
+      // v1: centre-only rigid, like Ellipse. The endpoints are pickable
+      // (which 1/2) but not solver points, so constraints on them are skipped;
+      // the arc rides its imported/placed position.
+      addPoint(id, 0, ea->center);
     } else if (auto* bs = std::get_if<BSpline>(&e)) {
       // v1 "rigid net": each pole is its own free solver point (addressed by
       // which = pole index), so Coincident/Distance/Fixed on a pole work and
@@ -642,6 +648,8 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
       // Keep the CCW-always invariant: sweep in (0, 2π].
       while (ar.endAngle <= ar.startAngle)
         ar.endAngle += 2.0 * M_PI;
+    } else if (std::holds_alternative<EllipseArc>(e)) {
+      std::get<EllipseArc>(e).center = pointAt(0); // radii/rotation/params rigid
     } else if (std::holds_alternative<Ellipse>(e)) {
       std::get<Ellipse>(e).center = pointAt(0); // radii/rotation rigid
     } else if (std::holds_alternative<BSpline>(e)) {

@@ -2423,6 +2423,10 @@ EntityDots(const sketch::Entity& e) {
             {2, sketch::ArcPointUV(*a, 2)}};
   if (auto* el = std::get_if<sketch::Ellipse>(&e))
     return {{0, el->center}};
+  if (auto* ea = std::get_if<sketch::EllipseArc>(&e))
+    return {{0, ea->center},
+            {1, sketch::EllipseArcPointUV(*ea, 1)},
+            {2, sketch::EllipseArcPointUV(*ea, 2)}};
   if (auto* bs = std::get_if<sketch::BSpline>(&e)) {
     std::vector<std::pair<uint8_t, glm::vec2>> dots;
     const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);

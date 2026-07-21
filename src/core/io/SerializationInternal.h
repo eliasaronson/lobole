@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 45;  // v45: guided loft (spine path + guide curve)
+inline constexpr int kVersion = 46;  // v46: elliptical-arc sketch entity (v45: guided loft)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

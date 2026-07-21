@@ -55,6 +55,14 @@ json EntityToJson(const sketch::Entity& entity) {
                   {"r_major", e.rMajor},
                   {"r_minor", e.rMinor},
                   {"rotation", e.rotation}};
+        } else if constexpr (std::is_same_v<T, sketch::EllipseArc>) {
+          return {{"type", "ellipse_arc"},
+                  {"center", Vec2ToJson(e.center)},
+                  {"r_major", e.rMajor},
+                  {"r_minor", e.rMinor},
+                  {"rotation", e.rotation},
+                  {"start_param", e.startParam},
+                  {"end_param", e.endParam}};
         } else { // BSpline
           json poles = json::array();
           for (const glm::vec2& p : e.poles)
@@ -90,6 +98,13 @@ sketch::Entity EntityFromJson(const json& j) {
                         j.at("r_major").get<double>(),
                         j.at("r_minor").get<double>(),
                         j.at("rotation").get<double>()};
+  } else if (type == "ellipse_arc") { // v46
+    e = sketch::EllipseArc{Vec2FromJson(j.at("center")),
+                           j.at("r_major").get<double>(),
+                           j.at("r_minor").get<double>(),
+                           j.at("rotation").get<double>(),
+                           j.at("start_param").get<double>(),
+                           j.at("end_param").get<double>()};
   } else if (type == "spline") { // v40
     sketch::BSpline bs;
     for (const auto& pj : j.at("poles"))

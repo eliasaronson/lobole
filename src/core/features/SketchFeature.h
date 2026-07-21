@@ -60,6 +60,23 @@ struct Ellipse {
   uint32_t id = 0;
   bool construction = false;
 };
+// An elliptical arc: the ellipse (center, rMajor, rMinor, rotation) swept CCW
+// from `startParam` to `endParam` (the ellipse parameter t of the point
+// C + rMajor·cos t·û + rMinor·sin t·v̂, radians). Like Arc it is CCW-always —
+// `endParam` is normalized so the sweep (endParam − startParam) lies in
+// (0, 2π]. `which` 0 = centre, 1 = start point, 2 = end point. This is to
+// Ellipse what Arc is to Circle (Onshape elliptical arcs; Designer has no full
+// draw tool for it in v1 — it exists for import + profile use).
+struct EllipseArc {
+  glm::vec2 center;
+  double rMajor;
+  double rMinor;
+  double rotation;
+  double startParam;
+  double endParam;
+  uint32_t id = 0;
+  bool construction = false;
+};
 // A non-rational, clamped, uniform B-spline through its control `poles`
 // (Onshape's spline entities / fitSpline; sketch phase L). `which` addresses
 // pole k, so each pole is a movable solver point (Coincident/Distance/Fixed on
@@ -79,7 +96,8 @@ struct BSpline {
 // Rectangles are not a primitive: they decompose into four Lines with shared
 // corners (see SketchFeature::AddRectangle) so every side is editable and
 // trimmable. Legacy files with a rigid "rect" entity are migrated on load.
-using Entity = std::variant<Point, Line, Circle, Arc, Ellipse, BSpline>;
+using Entity =
+    std::variant<Point, Line, Circle, Arc, Ellipse, EllipseArc, BSpline>;
 
 // Effective degree of a spline: cubic by default, reduced so a spline with few
 // poles stays valid (degree <= poles-1). 0 for a degenerate (<2 poles) spline.
@@ -181,6 +199,53 @@ inline glm::vec2 EllipsePointUV(const Ellipse& e, double t) {
   const double c = std::cos(e.rotation), s = std::sin(e.rotation);
   return e.center + glm::vec2(static_cast<float>(c * x - s * y),
                               static_cast<float>(s * x + c * y));
+}
+
+// UV of a point on the elliptical arc at ellipse parameter `t`.
+inline glm::vec2 EllipseArcEvalUV(const EllipseArc& e, double t) {
+  const double x = e.rMajor * std::cos(t), y = e.rMinor * std::sin(t);
+  const double c = std::cos(e.rotation), s = std::sin(e.rotation);
+  return e.center + glm::vec2(static_cast<float>(c * x - s * y),
+                              static_cast<float>(s * x + c * y));
+}
+
+// The ellipse parameter t of a point p on the ellipse (center/rMajor/rMinor/
+// rotation) — the inverse of EllipseArcEvalUV. Used when a reflection has to
+// re-derive the swept params of the mirrored arc.
+inline double EllipseParamOfPoint(glm::vec2 center, double rMajor, double rMinor,
+                                  double rotation, glm::vec2 p) {
+  const double c = std::cos(rotation), s = std::sin(rotation);
+  const glm::vec2 d = p - center;
+  const double lx = c * d.x + s * d.y;  // component along the major axis
+  const double ly = -s * d.x + c * d.y; // along the minor axis
+  return std::atan2(ly / rMinor, lx / rMajor);
+}
+
+// UV of one of an elliptical arc's referenced points: 0 = center, 1 = start,
+// 2 = end (matching the CCW startParam/endParam). Mirrors ArcPointUV.
+inline glm::vec2 EllipseArcPointUV(const EllipseArc& e, uint8_t which) {
+  if (which == 1)
+    return EllipseArcEvalUV(e, e.startParam);
+  if (which == 2)
+    return EllipseArcEvalUV(e, e.endParam);
+  return e.center;
+}
+
+// Samples the elliptical arc into a polyline along its CCW sweep. `segs` <= 0
+// picks a count proportional to the swept angle (like Arc's tessellation).
+inline std::vector<glm::vec2> EllipseArcSampleUV(const EllipseArc& e,
+                                                 int segs = 0) {
+  double s = e.startParam, en = e.endParam;
+  while (en <= s)
+    en += 2.0 * M_PI; // CCW-always
+  const double sweep = en - s;
+  if (segs <= 0)
+    segs = std::max(2, static_cast<int>(std::lround(32 * sweep / (2.0 * M_PI))));
+  std::vector<glm::vec2> pts;
+  pts.reserve(segs + 1);
+  for (int i = 0; i <= segs; i++)
+    pts.push_back(EllipseArcEvalUV(e, s + sweep * i / segs));
+  return pts;
 }
 
 // UV of one of an arc's referenced points: which 0 = center, 1 = start, 2 = end
@@ -296,6 +361,19 @@ inline Entity ReflectEntity(const Entity& e, glm::vec2 a, glm::vec2 b) {
           glm::vec2 maj = ReflectPoint(EllipsePointUV(g, 0.0), a, b);
           return Ellipse{c, g.rMajor, g.rMinor,
                          std::atan2(maj.y - c.y, maj.x - c.x)};
+        } else if constexpr (std::is_same_v<T, EllipseArc>) {
+          // Reflect centre + major axis; winding flips, so the reflected old
+          // end becomes the new start and the params are re-derived.
+          glm::vec2 c = ReflectPoint(g.center, a, b);
+          glm::vec2 majTip = ReflectPoint(EllipseArcEvalUV(g, 0.0), a, b);
+          double rot2 = std::atan2(majTip.y - c.y, majTip.x - c.x);
+          glm::vec2 s2 = ReflectPoint(EllipseArcPointUV(g, 1), a, b);
+          glm::vec2 e2 = ReflectPoint(EllipseArcPointUV(g, 2), a, b);
+          double p0 = EllipseParamOfPoint(c, g.rMajor, g.rMinor, rot2, e2);
+          double p1 = EllipseParamOfPoint(c, g.rMajor, g.rMinor, rot2, s2);
+          while (p1 <= p0)
+            p1 += 2.0 * M_PI; // CCW-always
+          return EllipseArc{c, g.rMajor, g.rMinor, rot2, p0, p1};
         } else { // BSpline: reflect every pole
           BSpline bs = g;
           for (glm::vec2& pole : bs.poles)
@@ -324,6 +402,9 @@ inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
           return Arc{g.center + t, g.radius, g.startAngle, g.endAngle};
         else if constexpr (std::is_same_v<T, Ellipse>)
           return Ellipse{g.center + t, g.rMajor, g.rMinor, g.rotation};
+        else if constexpr (std::is_same_v<T, EllipseArc>)
+          return EllipseArc{g.center + t, g.rMajor, g.rMinor, g.rotation,
+                            g.startParam, g.endParam};
         else { // BSpline: translate every pole
           BSpline bs = g;
           for (glm::vec2& pole : bs.poles)
@@ -361,6 +442,9 @@ inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
                      g.endAngle + ang};
         else if constexpr (std::is_same_v<T, Ellipse>)
           return Ellipse{rot(g.center), g.rMajor, g.rMinor, g.rotation + ang};
+        else if constexpr (std::is_same_v<T, EllipseArc>)
+          return EllipseArc{rot(g.center), g.rMajor, g.rMinor, g.rotation + ang,
+                            g.startParam, g.endParam};
         else { // BSpline: rotate every pole
           BSpline bs = g;
           for (glm::vec2& pole : bs.poles)
@@ -391,6 +475,8 @@ inline glm::vec2 EntityPointUV(const Entity& e, uint8_t which) {
           return ArcPointUV(g, which);
         else if constexpr (std::is_same_v<T, Ellipse>)
           return g.center; // only the centre (which 0)
+        else if constexpr (std::is_same_v<T, EllipseArc>)
+          return EllipseArcPointUV(g, which);
         else { // BSpline: which addresses pole k
           if (g.poles.empty())
             return glm::vec2(0.0f);

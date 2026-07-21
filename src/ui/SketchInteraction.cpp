@@ -546,7 +546,8 @@ static void PasteSketchClipboard(AppState& state, SketchFeature& sketch,
             ent.b += d;
           } else if constexpr (std::is_same_v<T, sketch::Circle> ||
                                std::is_same_v<T, sketch::Arc> ||
-                               std::is_same_v<T, sketch::Ellipse>) {
+                               std::is_same_v<T, sketch::Ellipse> ||
+                               std::is_same_v<T, sketch::EllipseArc>) {
             ent.center += d;
           } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
             for (glm::vec2& pole : ent.poles)
@@ -2993,6 +2994,10 @@ std::vector<std::pair<uint8_t, glm::vec2>> EntityPoints(const sketch::Entity& e)
            {2, sketch::ArcPointUV(*a, 2)}};
   } else if (auto* el = std::get_if<sketch::Ellipse>(&e)) {
     pts = {{0, el->center}};
+  } else if (auto* ea = std::get_if<sketch::EllipseArc>(&e)) {
+    pts = {{0, ea->center},
+           {1, sketch::EllipseArcPointUV(*ea, 1)},
+           {2, sketch::EllipseArcPointUV(*ea, 2)}};
   } else if (auto* bs = std::get_if<sketch::BSpline>(&e)) {
     const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
     for (size_t k = 0; k < nPoles; k++)

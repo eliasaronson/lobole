@@ -796,6 +796,41 @@ def map_sketch_entities(feature):
                              "radius": geom["radius"] * MM,
                              "start_angle": start, "end_angle": end,
                              "construction": construction})
+        elif (gt == "BTCurveGeometryEllipse-1189" and
+              e.get("btType") == "BTMSketchCurve-4"):
+            import math
+            c = (geom["xCenter"], geom["yCenter"])
+            rot = math.atan2(geom.get("yDir", 0.0), geom.get("xDir", 1.0))
+            pts2d[f"{oid}.center"] = c
+            point_lookup[f"{oid}.center"] = (len(entities), "center")
+            id_map[oid] = {"idx": len(entities), "kind": "ellipse",
+                           "end_idx": None}
+            entities.append({"type": "ellipse",
+                             "center": [c[0] * MM, c[1] * MM],
+                             "r_major": geom["radius"] * MM,
+                             "r_minor": geom["minorRadius"] * MM,
+                             "rotation": rot, "construction": construction})
+        elif gt == "BTCurveGeometryEllipse-1189":  # segment = elliptical arc
+            import math
+            c = (geom["xCenter"], geom["yCenter"])
+            rot = math.atan2(geom.get("yDir", 0.0), geom.get("xDir", 1.0))
+            sp, ep = e["startParam"], e["endParam"]
+            # The ellipse parameter matches Designer's EllipseArcEvalUV (verified
+            # against sketch connectivity); `clockwise` only reverses the sweep,
+            # so a CW arc sp->ep is the CCW arc ep->sp in our CCW-always model.
+            start_p, end_p = (ep, sp) if geom.get("clockwise") else (sp, ep)
+            while end_p <= start_p:
+                end_p += 2.0 * math.pi
+            pts2d[f"{oid}.center"] = c
+            point_lookup[f"{oid}.center"] = (len(entities), "center")
+            id_map[oid] = {"idx": len(entities), "kind": "ellipse_arc",
+                           "end_idx": None}
+            entities.append({"type": "ellipse_arc",
+                             "center": [c[0] * MM, c[1] * MM],
+                             "r_major": geom["radius"] * MM,
+                             "r_minor": geom["minorRadius"] * MM,
+                             "rotation": rot, "start_param": start_p,
+                             "end_param": end_p, "construction": construction})
         elif e.get("btType") == "BTMSketchPoint-158":
             p = (e["x"], e["y"])
             pts2d[oid] = p
