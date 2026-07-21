@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <set>
 #include <vector>
 
 namespace {
@@ -700,6 +701,11 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
 
   const uint32_t arcId = AddEntity(arc);
 
+  // Everything from here is added by THIS fillet call — the only constraints
+  // the prune below is allowed to touch (pre-existing user constraints are
+  // never removed).
+  const size_t addedFrom = constraints.size();
+
   // Join the trimmed line ends to the arc endpoints; tangency does the rest.
   const uint32_t startLine = startIsT1 ? lineId1 : lineId2;
   const uint8_t startWhich = startIsT1 ? w1 : w2;
@@ -713,6 +719,60 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   // Each line stays collinear with the fixed corner point → direction locked.
   constraints.push_back({K::PointOnLine, {pId, 0}, {lineId1, 0}, 0.0});
   constraints.push_back({K::PointOnLine, {pId, 0}, {lineId2, 0}, 0.0});
+
+  // Add-then-prune: in a richly-constrained corner the fillet's own web (arc
+  // tangency + endpoint coincidents + the point-on-line direction locks)
+  // over-determines the corner, so ONE fillet-added constraint becomes
+  // REDUNDANT (dependent on the rest — here typically a tangent, implied once
+  // both lines are collinear-locked to the fixed corner point and their
+  // endpoints sit on the arc). PlaneGCS reports redundants as "conflicting",
+  // a spurious red flag on a sketch that is geometrically fine.
+  //
+  // Solve and drop exactly one flagged constraint that WE added this call —
+  // never a pre-existing user constraint — keeping the removal only when it
+  // leaves the sketch clean AT THE SAME DEGREES OF FREEDOM. A genuinely-
+  // redundant constraint can't change the solution (DOF unchanged), so the
+  // geometry and every direction lock are preserved; a load-bearing one would
+  // free a DOF and is restored. Try the auxiliary point-on-line locks before
+  // the geometric tangency/coincidence. Skip if the base solve fails.
+  auto flaggedSet = [](const sketch::SolveResult& r) {
+    std::set<size_t> f(r.conflictingConstraints.begin(),
+                       r.conflictingConstraints.end());
+    f.insert(r.redundantConstraints.begin(), r.redundantConstraints.end());
+    return f;
+  };
+  sketch::Solver base;
+  base.Load(*this);
+  const sketch::SolveResult r0 = base.Solve();
+  const std::set<size_t> flagged0 = flaggedSet(r0);
+  if (r0.ok && !flagged0.empty()) {
+    const int baseDof = r0.dof;
+    // Removal preference: auxiliary point-on-line first, then tangent, then
+    // coincidence (drop the least structural constraint that resolves it).
+    auto rank = [&](size_t i) {
+      switch (constraints[i].kind) {
+      case K::PointOnLine: return 0;
+      case K::Tangent: return 1;
+      default: return 2; // Coincident
+      }
+    };
+    std::vector<size_t> cands;
+    for (size_t i : flagged0)
+      if (i >= addedFrom)
+        cands.push_back(i);
+    std::sort(cands.begin(), cands.end(),
+              [&](size_t a, size_t b) { return rank(a) < rank(b); });
+    for (size_t idx : cands) {
+      const sketch::Constraint saved = constraints[idx];
+      constraints.erase(constraints.begin() + idx);
+      sketch::Solver t;
+      t.Load(*this);
+      const sketch::SolveResult r1 = t.Solve();
+      if (r1.ok && flaggedSet(r1).empty() && r1.dof == baseDof)
+        break; // redundant constraint dropped; the sketch reads clean
+      constraints.insert(constraints.begin() + idx, saved); // keep it
+    }
+  }
   return arcId;
 }
 

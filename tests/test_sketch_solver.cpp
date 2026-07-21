@@ -930,6 +930,63 @@ TEST_CASE("Fillet preserves implicit line directions in a staircase",
   CHECK_THAT(A(L4), WithinAbs(b4, 0.1));
 }
 
+TEST_CASE("Fillet in a fully-built corner prunes the redundant lock",
+          "[solver][arc][fillet]") {
+  // The owner's live post-fix sketch (dump): same staircase, but the corner
+  // is pinned to the origin by a COINCIDENT (fully, 2 DOF) rather than a
+  // single vertical — so the arc tangency + endpoint coincidents already
+  // fix enough that ONE of the two point-on-line direction locks the fillet
+  // adds becomes REDUNDANT. PlaneGCS reports redundants as "conflicting"; the
+  // add-then-prune in FilletCorner must drop that lock so the sketch reads
+  // clean (both redundant AND conflicting empty) while every line keeps its
+  // direction.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const uint32_t L1 = s.AddEntity(sketch::Line{{-1.8f, -1.14f}, {-1.8f, 0}});
+  const uint32_t L2 = s.AddEntity(sketch::Line{{-1.8f, 0}, {0, 0}});   // horiz
+  const uint32_t L3 = s.AddEntity(sketch::Line{{0, 0}, {0, 2.19f}});   // vert
+  const uint32_t L4 = s.AddEntity(sketch::Line{{0, 2.19f}, {1.44f, 2.19f}});
+  s.constraints.push_back({K::Coincident, {L1, 1}, {L2, 0}});
+  s.constraints.push_back({K::Coincident, {L2, 1}, {L3, 0}}); // the fillet corner
+  s.constraints.push_back({K::Coincident, {L3, 1}, {L4, 0}});
+  s.constraints.push_back({K::Vertical, {L1, 0}, {0, 0}});        // whole-line V
+  s.constraints.push_back({K::Horizontal, {L1, 1}, {sketch::kOrigin, 0}});
+  s.constraints.push_back({K::Coincident, {L2, 1}, {sketch::kOrigin, 0}}); // corner
+  s.constraints.push_back({K::Vertical, {L3, 1}, {L2, 1}});   // L3 implicit V
+  s.constraints.push_back({K::Horizontal, {L4, 1}, {L3, 1}}); // L4 implicit H
+
+  {
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.Solve().ok);
+    solver.WriteBack(s.entities);
+  }
+  auto A = [&](uint32_t id) { return AngleDeg(s.entities[s.IndexOfEntity(id)]); };
+
+  REQUIRE(s.FilletCorner(L2, L3, 0.5) != 0);
+  sketch::Solver solver;
+  solver.Load(s);
+  const sketch::SolveResult r = solver.Solve();
+  REQUIRE(r.ok);
+  solver.WriteBack(s.entities);
+  // The spurious flag is gone — no conflicting AND no redundant constraints
+  // (the fillet pruned the one constraint of its own web the solver flagged).
+  CHECK(r.conflictingConstraints.empty());
+  CHECK(r.redundantConstraints.empty());
+  CHECK(r.dof == 6); // the free DOF is unchanged — no lock was lost
+  // Both direction locks survive; the arc is still there and tangent.
+  int arcs = 0;
+  for (const auto& e : s.entities)
+    if (std::holds_alternative<sketch::Arc>(e))
+      arcs++;
+  CHECK(arcs == 1);
+  // Both verticals still 90, both horizontals still 0.
+  CHECK_THAT(std::abs(A(L1)), WithinAbs(90.0, 0.1));
+  CHECK_THAT(A(L2), WithinAbs(0.0, 0.1));
+  CHECK_THAT(std::abs(A(L3)), WithinAbs(90.0, 0.1));
+  CHECK_THAT(A(L4), WithinAbs(0.0, 0.1));
+}
+
 TEST_CASE("Fillet preserves a free corner's line directions",
           "[solver][arc][fillet]") {
   // No direction constraints at all — the re-anchoring must leave these alone.
