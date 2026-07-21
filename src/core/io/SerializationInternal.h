@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 40;  // v40: sketch B-spline entity (v39: Split)
+inline constexpr int kVersion = 41;  // v41: project-scope variables (Phase V)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

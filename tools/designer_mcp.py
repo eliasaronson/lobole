@@ -133,9 +133,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
 
 {AXIS_REF}
 
-Every *_expr field is an expression over document variables (see
-set_variable), e.g. "width / 2 + 1"; the literal twin is used when absent.
-Angles in *_deg fields and expressions are degrees."""
+Every *_expr field is an expression over PROJECT variables (project-wide by
+default — see set_variable; shared across every part), e.g. "width / 2 + 1".
+A variable that does not resolve is a FEATURE ERROR (visible in get_state), not
+a silent fallback to the literal twin — define the variable before referencing
+it. Angles in *_deg fields and expressions are degrees."""
 
 # Datum references usable anywhere a constraint ref names an entity.
 DATUM_ORIGIN = 0xFFFFFF00  # sketch origin point (0,0)
@@ -171,7 +173,9 @@ WORKFLOW = """You are modeling in Designer, a parametric B-Rep CAD app
 
 The loop that works — follow it every time:
 1. Restate the brief as named dimensions, then set_variable for each driving
-   dimension (design intent in the name: "flange_width", not "w"). Prefer
+   dimension (design intent in the name: "flange_width", not "w"). Variables
+   are PROJECT-WIDE by default — one 'bore' drives every part of an assembly;
+   use scope='part' only for a dimension private to one document. Prefer
    expressions over literals everywhere a *_expr or expr field exists.
 2. Sketch on a plane (or a DatumPlane feature). Draw entities, then constrain
    until the geometry cannot wiggle: anchor to the sketch origin/axes datum
@@ -273,8 +277,11 @@ def get_state() -> dict:
     return _call("get_state")
 
 
-@mcp.tool(description="List document variables: name, expression, evaluated "
-          "value, comment, and error if the expression fails to evaluate.")
+@mcp.tool(description="List variables: name, expression, evaluated value, "
+          "scope ('project' = shared by every part, or 'part' = the active "
+          "document's local scope, which shadows a same-named project var), "
+          "comment, and error if the expression fails to evaluate. Project "
+          "variables come first.")
 def list_variables() -> dict:
     return _call("list_variables")
 
@@ -467,28 +474,43 @@ def offset(sketch_id: int, chain: list, distance: float,
 # Variables
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Create or redefine a document variable. expression is "
-          "a string over numbers and other variables ('40', 'width / 2'). "
-          "Redefining regenerates every expression-driven feature; one undo "
-          "step. Returns the evaluated value (and error if it fails). Name "
-          "every driving dimension of the design — parameters first.")
-def set_variable(name: str, expression: str, comment: str = "") -> dict:
-    params = {"name": name, "expression": expression}
+@mcp.tool(description="Create or redefine a variable. expression is a string "
+          "over numbers and other variables ('40', 'width / 2'). scope defaults "
+          "to 'project' — a PROJECT-WIDE variable shared by every part, so one "
+          "'bore' drives axle + wheel + fork together; pass scope='part' to "
+          "write the active document's local scope instead (it shadows a "
+          "same-named project var). Redefining regenerates every "
+          "expression-driven feature in every part; one undo step. Returns the "
+          "evaluated value + scope (and error if it fails). Name every driving "
+          "dimension of the design — parameters first.")
+def set_variable(name: str, expression: str, comment: str = "",
+                 scope: str = "project") -> dict:
+    params = {"name": name, "expression": expression, "scope": scope}
     if comment:
         params["comment"] = comment
     return _call("set_variable", **params)
 
 
 @mcp.tool(description="Rename a variable and rewrite every expression that "
-          "references it.")
-def rename_variable(name: str, new_name: str) -> dict:
-    return _call("rename_variable", name=name, new_name=new_name)
+          "references it (a project variable's references span all parts). "
+          "scope auto-detects (project first, then the active part's local) "
+          "when omitted.")
+def rename_variable(name: str, new_name: str, scope: str = "") -> dict:
+    params = {"name": name, "new_name": new_name}
+    if scope:
+        params["scope"] = scope
+    return _call("rename_variable", **params)
 
 
-@mcp.tool(description="Delete a variable. Refused (with the referencing "
-          "fields listed) while anything still uses it.")
-def delete_variable(name: str) -> dict:
-    return _call("delete_variable", name=name)
+@mcp.tool(description="Delete a variable. Refused (with the referencing fields "
+          "listed) while anything still uses it — a project variable checks "
+          "every part. scope auto-detects (project first, then the active "
+          "part's local) when omitted.")
+def delete_variable(name: str, scope: str = "") -> dict:
+    params = {"name": name}
+    if scope:
+        params["scope"] = scope
+    return _call("delete_variable", **params)
 
 
 # ---------------------------------------------------------------------------

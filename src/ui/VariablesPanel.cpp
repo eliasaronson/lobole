@@ -2,6 +2,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "ui/AppActions.h"
 
 #include "imgui.h"
 
@@ -23,13 +24,22 @@ struct CellEdit {
   char buf[256] = {};
 };
 
-// A name no existing parameter uses (var1, var2, ...).
-std::string FreshName(const Document& doc) {
+// One editable row: a parameter plus which scope it lives in (Phase V). Project
+// variables are shared by every part; part variables are the active document's
+// local scope and shadow a same-named project var.
+struct VarRow {
+  Parameter param;
+  bool isProject = true;
+};
+
+// A name no project OR active-part variable uses (var1, var2, ...).
+std::string FreshName(const AppState& state) {
   for (int i = 1;; i++) {
     std::string name = "var" + std::to_string(i);
-    if (doc.FindParameter(name) == nullptr) {
-      return name;
-    }
+    const bool taken = FindProjectParameter(state, name) != nullptr ||
+                       (state.document &&
+                        state.document->FindParameter(name) != nullptr);
+    if (!taken) return name;
   }
 }
 
@@ -47,9 +57,9 @@ void DrawVariablesPanel(AppState& state) {
   // Rename/delete refusals; shown under the table until the next action.
   static std::string actionError;
 
+  // Add defaults to PROJECT scope (VD2: define a driving dimension once).
   if (ImGui::Button("+ Add variable")) {
-    state.commands->Execute(
-        std::make_unique<SetVariableCommand>(FreshName(doc), "0"), doc);
+    SetProjectVariable(state, FreshName(state), "0", "");
     actionError.clear();
   }
 
@@ -74,10 +84,23 @@ void DrawVariablesPanel(AppState& state) {
     return nullptr;
   };
 
-  if (ImGui::BeginTable("##variables", 5,
+  // Redefine a variable in its scope (project or part-local).
+  const auto setVar = [&](const VarRow& r, const std::string& expr,
+                          const std::string& comment) {
+    if (r.isProject) {
+      SetProjectVariable(state, r.param.name, expr, comment);
+    } else {
+      state.commands->Execute(
+          std::make_unique<SetVariableCommand>(r.param.name, expr, comment),
+          doc);
+    }
+  };
+
+  if (ImGui::BeginTable("##variables", 6,
                         ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg |
                             ImGuiTableFlags_BordersInnerV |
                             ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn("Scope", ImGuiTableColumnFlags_WidthFixed, 56.0f);
     ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.8f);
     ImGui::TableSetupColumn("Expression", ImGuiTableColumnFlags_WidthStretch,
                             1.4f);
@@ -87,21 +110,35 @@ void DrawVariablesPanel(AppState& state) {
     ImGui::TableSetupColumn("##del", ImGuiTableColumnFlags_WidthFixed, 22.0f);
     ImGui::TableHeadersRow();
 
-    // Copy: command execution below mutates the table mid-loop.
-    const std::vector<Parameter> parameters = doc.GetParameters();
-    for (int i = 0; i < static_cast<int>(parameters.size()); i++) {
-      const Parameter& p = parameters[i];
+    // Copy: command execution below mutates the tables mid-loop. Project
+    // variables first (the default scope), then the active part's local ones.
+    std::vector<VarRow> rows;
+    for (const Parameter& p : state.projectParameters)
+      rows.push_back({p, true});
+    for (const Parameter& p : doc.GetParameters()) rows.push_back({p, false});
+
+    for (int i = 0; i < static_cast<int>(rows.size()); i++) {
+      const VarRow& r = rows[i];
+      const Parameter& p = r.param;
       ImGui::TableNextRow();
       ImGui::PushID(i);
 
-      // Name — commits a rename (rewrites referencing expressions).
+      // Scope — Project (shared) vs Part (this document, shadows project).
       ImGui::TableSetColumnIndex(0);
-      if (const char* text = cellInput(i, 0, "##name", p.name)) {
+      ImGui::TextUnformatted(r.isProject ? "Project" : "Part");
+
+      // Name — commits a rename (rewrites referencing expressions).
+      ImGui::TableSetColumnIndex(1);
+      if (const char* text = cellInput(i, 1, "##name", p.name)) {
         const std::string newName = text;
         if (!newName.empty() && newName != p.name) {
-          if (state.commands->Execute(
-                  std::make_unique<RenameVariableCommand>(p.name, newName),
-                  doc)) {
+          const bool ok =
+              r.isProject
+                  ? RenameProjectVariable(state, p.name, newName)
+                  : state.commands->Execute(
+                        std::make_unique<RenameVariableCommand>(p.name, newName),
+                        doc);
+          if (ok) {
             actionError.clear();
           } else {
             actionError = "Cannot rename '" + p.name + "' to '" + newName +
@@ -111,16 +148,14 @@ void DrawVariablesPanel(AppState& state) {
       }
 
       // Expression — commits a redefinition.
-      ImGui::TableSetColumnIndex(1);
+      ImGui::TableSetColumnIndex(2);
       const bool hasError = !p.error.empty();
       if (hasError) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
       }
-      if (const char* text = cellInput(i, 1, "##expr", p.expression)) {
+      if (const char* text = cellInput(i, 2, "##expr", p.expression)) {
         if (p.expression != text) {
-          state.commands->Execute(
-              std::make_unique<SetVariableCommand>(p.name, text, p.comment),
-              doc);
+          setVar(r, text, p.comment);
           actionError.clear();
         }
       }
@@ -132,7 +167,7 @@ void DrawVariablesPanel(AppState& state) {
       }
 
       // Value — read-only result of the last evaluation.
-      ImGui::TableSetColumnIndex(2);
+      ImGui::TableSetColumnIndex(3);
       if (hasError) {
         ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
                            p.error.c_str());
@@ -141,30 +176,29 @@ void DrawVariablesPanel(AppState& state) {
       }
 
       // Comment
-      ImGui::TableSetColumnIndex(3);
-      if (const char* text = cellInput(i, 3, "##comment", p.comment)) {
-        if (p.comment != text) {
-          state.commands->Execute(
-              std::make_unique<SetVariableCommand>(p.name, p.expression, text),
-              doc);
-        }
+      ImGui::TableSetColumnIndex(4);
+      if (const char* text = cellInput(i, 4, "##comment", p.comment)) {
+        if (p.comment != text) setVar(r, p.expression, text);
       }
 
       // Delete — refused (with the referencing list) while referenced.
-      ImGui::TableSetColumnIndex(4);
+      ImGui::TableSetColumnIndex(5);
       if (ImGui::SmallButton("x")) {
-        const std::vector<std::string> refs =
-            doc.FindParameterReferences(p.name);
-        if (refs.empty()) {
-          state.commands->Execute(
-              std::make_unique<DeleteVariableCommand>(p.name), doc);
+        std::vector<std::string> refs;
+        const bool ok = r.isProject
+                            ? RemoveProjectVariable(state, p.name, &refs)
+                            : (refs = doc.FindParameterReferences(p.name),
+                               refs.empty() &&
+                                   state.commands->Execute(
+                                       std::make_unique<DeleteVariableCommand>(
+                                           p.name),
+                                       doc));
+        if (ok) {
           actionError.clear();
         } else {
           actionError = "Cannot delete '" + p.name + "' — referenced by";
-          for (const std::string& r : refs) {
-            actionError += " " + r + ",";
-          }
-          actionError.back() = '.';
+          for (const std::string& r2 : refs) actionError += " " + r2 + ",";
+          if (!refs.empty()) actionError.back() = '.';
         }
       }
 

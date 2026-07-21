@@ -31,7 +31,15 @@ BIN="$ROOT/build/designer"
 if command -v xvfb-run >/dev/null; then
   XVFB_RUN=xvfb-run
 else
-  XVFB_RUN="$(nix-shell -p xvfb-run --run 'which xvfb-run' | tail -1)"
+  # Fall back to nixpkgs. gui-tests-xvfb.sh does the same; the nested nix-shell
+  # can fail (e.g. a GC'd/HOME-less env) and yield an empty string, so guard it
+  # instead of exec'ing nothing ("exec: : not found").
+  XVFB_RUN="$(nix-shell -p xvfb-run --run 'command -v xvfb-run' 2>/dev/null | tail -1)"
+  if [ -z "$XVFB_RUN" ] || ! command -v "$XVFB_RUN" >/dev/null 2>&1; then
+    echo "headless-preview: xvfb-run not found (not on PATH, and the nixpkgs" >&2
+    echo "  fallback failed). Install it or run inside 'nix-shell -p xvfb-run'." >&2
+    exit 1
+  fi
 fi
 
 # Block until the remote answers ping, so callers know it's drivable.

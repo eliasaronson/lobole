@@ -398,8 +398,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
              {{"position", Vec3ToJson(state.camera->GetPosition())},
               {"target", Vec3ToJson(state.camera->GetTarget())},
               {"distance", state.camera->GetDistance()}}},
-            {"can_undo", state.commands->CanUndo()},
-            {"can_redo", state.commands->CanRedo()},
+            {"can_undo", ui::CanGlobalUndo(state)},
+            {"can_redo", ui::CanGlobalRedo(state)},
             {"rollback", doc->Rollback()},
             {"regen",
              {{"executed", doc->LastRegenStats().executed},
@@ -441,28 +441,14 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // occurrence pairs, list_elements/measure on any part via `part`.
   if (auto r = remote::HandleInspectionRpc(state, doc, m, p)) return *r;
   if (m == "undo") {
-    if (state.assembly) { // assembly tab: snapshot-based occurrence undo
-      ui::UndoAssembly(state);
-      return {{"can_undo", !state.assemblyHistory.undo.empty()}};
-    }
-    if (state.drawing) { // drawing tab: snapshot-based sheet/view/dim undo
-      ui::UndoDrawing(state);
-      return {{"can_undo", !state.drawingHistory.undo.empty()}};
-    }
-    state.commands->Undo(*doc);
-    return {{"can_undo", state.commands->CanUndo()}};
+    // Global undo (Phase V): the active tab's stack OR the cross-tab
+    // project-variable stack, whichever was most recently mutated.
+    ui::GlobalUndo(state);
+    return {{"can_undo", ui::CanGlobalUndo(state)}};
   }
   if (m == "redo") {
-    if (state.assembly) {
-      ui::RedoAssembly(state);
-      return {{"can_redo", !state.assemblyHistory.redo.empty()}};
-    }
-    if (state.drawing) {
-      ui::RedoDrawing(state);
-      return {{"can_redo", !state.drawingHistory.redo.empty()}};
-    }
-    state.commands->Redo(*doc);
-    return {{"can_redo", state.commands->CanRedo()}};
+    ui::GlobalRedo(state);
+    return {{"can_redo", ui::CanGlobalRedo(state)}};
   }
   if (m == "list_parts") {
     // Multi-document project (assemblies A1/A2): the tabs and which is active.

@@ -347,6 +347,87 @@ def main():
         except RuntimeError:
             pass
 
+        # Project-wide variables (Phase V): ONE variable drives geometry in two
+        # parts; editing it changes both; a part-scoped var shadows it locally;
+        # an undefined variable is a loud feature error (not a silent literal).
+        def rect(w, h):
+            return [{"type": "line", "a": [0, 0], "b": [w, 0]},
+                    {"type": "line", "a": [w, 0], "b": [w, h]},
+                    {"type": "line", "a": [w, h], "b": [0, h]},
+                    {"type": "line", "a": [0, h], "b": [0, 0]}]
+        d.call("new_project")
+        r = d.call("set_variable", name="bore", expression="6")  # default: project
+        expect(r["scope"] == "project", "set_variable defaults to project scope")
+        sk1 = d.call("add_feature", feature={
+            "type": "Sketch", "name": "S1",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]}, "entities": rect(4, 2)})
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "P1", "sketch_id": sk1["id"],
+            "distance": 1.0, "distance_expr": "bore", "mode": "new_body"})
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 6) < 1e-3,
+               "part 1 driven by the project variable")
+        d.call("add_part", name="Two")
+        sk2 = d.call("add_feature", feature={
+            "type": "Sketch", "name": "S2",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]}, "entities": rect(5, 2)})
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "P2", "sketch_id": sk2["id"],
+            "distance": 1.0, "distance_expr": "bore * 2", "mode": "new_body"})
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 10 * 12) < 1e-3,
+               "part 2 driven by the SAME project variable")
+        lv = d.call("list_variables")["variables"]
+        expect(any(v["name"] == "bore" and v["scope"] == "project" for v in lv),
+               "list_variables tags bore as project scope")
+        # Edit the project variable: BOTH parts' geometry follows.
+        d.call("set_variable", name="bore", expression="10")
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 10 * 20) < 1e-3,
+               "part 2 followed the project-variable edit")
+        d.call("set_active_part", index=0)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 10) < 1e-3,
+               "part 1 followed the project-variable edit too")
+        # Project-variable edits are undoable across tabs (their own undo stack,
+        # routed by the global most-recent-action rule).
+        d.call("undo")
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 6) < 1e-3,
+               "undo reverted the project-variable edit")
+        d.call("redo")
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 10) < 1e-3,
+               "redo re-applied the project-variable edit")
+        # Save + reload preserves the project scope and both geometries.
+        pvproj = os.path.join(tmp, "projvars.dsgn")
+        d.call("save_project", path=pvproj)
+        d.call("new_project")
+        d.call("open_project", path=pvproj)
+        lv = d.call("list_variables")["variables"]
+        expect(any(v["name"] == "bore" and v["scope"] == "project"
+                   and abs(v["value"] - 10) < 1e-9 for v in lv),
+               "project variable reloaded at project scope")
+        d.call("set_active_part", index=1)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 10 * 20) < 1e-3,
+               "part 2 geometry survived the reload")
+        # A part-scoped variable of the same name shadows the project one here.
+        r = d.call("set_variable", name="bore", expression="1", scope="part")
+        expect(r["scope"] == "part", "scope='part' honored")
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 10 * 2) < 1e-3,
+               "part-local bore shadows the project bore in THIS part")
+        d.call("set_active_part", index=0)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 10) < 1e-3,
+               "the other part still resolves the project bore")
+        # Fail-loud: an expression over an undefined variable errors the feature.
+        badsk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "S3",
+            "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]}, "entities": rect(2, 2)})
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Bad", "sketch_id": badsk["id"],
+            "distance": 1.0, "distance_expr": "no_such_var", "mode": "new_body"})
+        st = d.call("get_state")
+        expect(any("error" in f and "unknown variable" in f["error"]
+                   for f in st["features"]),
+               f"undefined variable is a loud feature error: {st['features']}")
+
         # Section (I3): cross-section area of a plate at a mid-cut
         d.call("new_project")
         d.call("add_feature", feature={

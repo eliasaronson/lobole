@@ -361,6 +361,10 @@ enum class DocKind { Part, Assembly, Drawing };
 struct AssemblyHistory {
   std::vector<AssemblyDocument> undo;
   std::vector<AssemblyDocument> redo;
+  // Action-clock stamps parallel to undo/redo (Phase V), so the global Undo
+  // can compare this tab's most recent edit against a project-variable edit.
+  std::vector<uint64_t> undoStamps;
+  std::vector<uint64_t> redoStamps;
 };
 
 // Snapshot-based undo for a drawing tab (the AssemblyHistory pattern): a
@@ -369,6 +373,28 @@ struct AssemblyHistory {
 struct DrawingHistory {
   std::vector<DrawingDocument> undo;
   std::vector<DrawingDocument> redo;
+  std::vector<uint64_t> undoStamps;  // action-clock stamps (Phase V)
+  std::vector<uint64_t> redoStamps;
+};
+
+// Project-wide variable undo (Phase V). A project-variable edit spans every
+// tab (it re-evaluates the shared project symbols and regenerates all parts),
+// so it can't live on any one document's CommandStack. Each entry snapshots the
+// project parameter table to restore when applied, plus — for a rename, which
+// also rewrote expressions inside every part — the reference rewrite to replay
+// across all documents. Stamped from the shared action clock so the global
+// Undo picks the most recent mutation. See AppActions project-var helpers.
+struct ProjectVarSnapshot {
+  std::vector<Parameter> params;  // the project table to restore when applied
+  uint64_t stamp = 0;
+  // When set, applying this entry first rewrites `docRefFrom` -> `docRefTo` in
+  // every part's feature/parameter expressions (a project-var rename's ref
+  // rewrite; empty for set/delete).
+  std::string docRefFrom, docRefTo;
+};
+struct ProjectVarHistory {
+  std::vector<ProjectVarSnapshot> undo;
+  std::vector<ProjectVarSnapshot> redo;
 };
 
 struct PartSlot {
@@ -467,6 +493,17 @@ struct AppState {
   std::vector<PartSlot> parts;
   int activePart = 0;
   uint64_t nextPartId = 1; // stable document-id allocator (A2)
+
+  // Project-wide variables (Phase V, docs/plan-caster-backlog.md). THE project
+  // scope: an ordered parameter table shared by every part, and its evaluated
+  // symbols. Every slot's Document borrows &projectSymbols
+  // (SetProjectSymbols); a feature expression resolves local-first then here.
+  // set_variable defaults to this scope. Persisted in project.json (multi-part)
+  // or the lone part file (single-part = the whole project). projectSymbols is
+  // derived — re-evaluated by ui::SyncProjectScope on every project-var edit.
+  std::vector<Parameter> projectParameters;
+  SymbolTable projectSymbols;
+  ProjectVarHistory projectVarHistory; // cross-tab undo for project-var edits
 
   // Non-owning
   Scene* scene = nullptr;

@@ -18,6 +18,7 @@
 #include "core/io/GitVault.h"
 #include "core/features/BooleanFeature.h"
 #include "core/Command.h"
+#include "core/Expression.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/ElementHistory.h" // topo::ResolveEdgeOnBody (blend edge picks)
 #include "core/features/DatumPlaneFeature.h"
@@ -666,6 +667,17 @@ bool EffectivePlaneVisibility(const AppState& state) {
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();
+  // Phase V: a wholesale replacement (File > New, Open flat, checkpoint/history
+  // restore) collapses the project to this single part, so ITS parameters
+  // become the project scope (one part = the whole project). The project-var
+  // undo history belonged to the old model — discard it, then regenerate the
+  // document against the (now project) scope.
+  state.projectParameters = state.document->TakeParameters();
+  state.projectVarHistory = {};
+  state.document->SetProjectSymbols(&state.projectSymbols);
+  EvaluateParameterTable(state.projectParameters, state.projectSymbols, nullptr,
+                         {});
+  state.document->Regenerate();
   state.selection.Clear();
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};
@@ -752,6 +764,9 @@ size_t AddPart(AppState& state, const std::string& name) {
   StashActive(state);
   // Create and activate the new part.
   state.document = std::make_unique<Document>();
+  // Phase V: the new part shares the project scope (its features can reference
+  // project variables immediately).
+  state.document->SetProjectSymbols(&state.projectSymbols);
   state.assembly = nullptr;
   state.drawing = nullptr;
   state.commands = std::make_unique<CommandStack>();
@@ -812,12 +827,17 @@ size_t AddDrawing(AppState& state, const std::string& name) {
 void SnapshotDrawing(AppState& state) {
   if (!state.drawing) return;
   state.drawingHistory.undo.push_back(*state.drawing); // full-state copy
+  state.drawingHistory.undoStamps.push_back(NextActionStamp());
   state.drawingHistory.redo.clear();
+  state.drawingHistory.redoStamps.clear();
 }
 
 bool UndoDrawing(AppState& state) {
   if (!state.drawing || state.drawingHistory.undo.empty()) return false;
   state.drawingHistory.redo.push_back(*state.drawing);
+  state.drawingHistory.redoStamps.push_back(
+      state.drawingHistory.undoStamps.back());
+  state.drawingHistory.undoStamps.pop_back();
   *state.drawing = std::move(state.drawingHistory.undo.back());
   state.drawingHistory.undo.pop_back();
   state.syncedDocumentVersion = UINT64_MAX;
@@ -827,6 +847,9 @@ bool UndoDrawing(AppState& state) {
 bool RedoDrawing(AppState& state) {
   if (!state.drawing || state.drawingHistory.redo.empty()) return false;
   state.drawingHistory.undo.push_back(*state.drawing);
+  state.drawingHistory.undoStamps.push_back(
+      state.drawingHistory.redoStamps.back());
+  state.drawingHistory.redoStamps.pop_back();
   *state.drawing = std::move(state.drawingHistory.redo.back());
   state.drawingHistory.redo.pop_back();
   state.syncedDocumentVersion = UINT64_MAX;
@@ -909,14 +932,271 @@ DrawingDocument* SlotDrawing(AppState& state, size_t i) {
 }
 } // namespace
 
+// ---- Project-wide variables (Phase V) -------------------------------------
+
+void SyncProjectScope(AppState& state) {
+  // Re-evaluate the project table (project vars may reference each other — the
+  // shared topo-sort orders them), then regenerate every part against it. A
+  // changed project value bakes into each part's feature JSON, so dependent
+  // features across all tabs invalidate through the regen cache naturally.
+  EvaluateParameterTable(state.projectParameters, state.projectSymbols, nullptr,
+                         {});
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (Document* d = SlotDoc(state, i)) {
+      d->SetProjectSymbols(&state.projectSymbols);
+      d->Regenerate();
+    }
+  }
+  state.syncedDocumentVersion = UINT64_MAX; // a cross-tab edit; force resync
+}
+
+const Parameter* FindProjectParameter(const AppState& state,
+                                      const std::string& name) {
+  for (const Parameter& p : state.projectParameters)
+    if (p.name == name) return &p;
+  return nullptr;
+}
+
+std::vector<std::string> ProjectVarReferences(AppState& state,
+                                              const std::string& name) {
+  const auto& engine = ExpressionEngine::Default();
+  const auto references = [&](const std::string& text) {
+    if (text.empty()) return false;
+    const auto compiled = engine.Compile(text, nullptr);
+    return compiled != nullptr && compiled->Dependencies().contains(name);
+  };
+  std::vector<std::string> refs;
+  for (const Parameter& p : state.projectParameters)
+    if (p.name != name && references(p.expression))
+      refs.push_back("project variable '" + p.name + "'");
+  // A project variable's references span every part (walk all slots, not just
+  // the active doc); a part with a same-named LOCAL variable shadows it, so its
+  // references belong to the local one and don't block the project delete.
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    Document* d = SlotDoc(state, i);
+    if (d == nullptr || d->FindParameter(name) != nullptr) continue;
+    for (const std::string& r : d->FindParameterReferences(name))
+      refs.push_back(state.parts[i].name + ": " + r);
+  }
+  return refs;
+}
+
+namespace {
+// Applies a project-var undo/redo snapshot: replay the cross-part reference
+// rewrite (rename only), restore the table, regenerate all.
+void ApplyProjectVarSnapshot(AppState& state, const ProjectVarSnapshot& s) {
+  if (!s.docRefFrom.empty()) {
+    for (size_t i = 0; i < state.parts.size(); i++)
+      if (Document* d = SlotDoc(state, i))
+        d->RewriteProjectVarRefs(s.docRefFrom, s.docRefTo);
+  }
+  state.projectParameters = s.params;
+  SyncProjectScope(state);
+}
+// Pushes a project-var undo entry capturing the PRE-edit table (restored on
+// undo) plus the reference rewrite undo must replay across parts (empty for
+// set/delete; the reverse rename for a rename). Clears the redo stack.
+void PushProjectVarUndo(AppState& state, std::vector<Parameter> preEdit,
+                        std::string undoRefFrom, std::string undoRefTo) {
+  ProjectVarSnapshot s;
+  s.params = std::move(preEdit);
+  s.stamp = NextActionStamp();
+  s.docRefFrom = std::move(undoRefFrom);
+  s.docRefTo = std::move(undoRefTo);
+  state.projectVarHistory.undo.push_back(std::move(s));
+  state.projectVarHistory.redo.clear();
+}
+} // namespace
+
+bool SetProjectVariable(AppState& state, const std::string& name,
+                        const std::string& expression,
+                        const std::string& comment) {
+  if (!ExpressionEngine::Default().IsValidParameterName(name)) return false;
+  PushProjectVarUndo(state, state.projectParameters, {}, {});
+  const auto it = std::find_if(
+      state.projectParameters.begin(), state.projectParameters.end(),
+      [&](const Parameter& p) { return p.name == name; });
+  if (it != state.projectParameters.end()) {
+    it->expression = expression;
+    it->comment = comment;
+  } else {
+    state.projectParameters.push_back({name, expression, comment, 0.0, {}});
+  }
+  SyncProjectScope(state);
+  return true;
+}
+
+bool RemoveProjectVariable(AppState& state, const std::string& name,
+                           std::vector<std::string>* outRefs) {
+  const auto it = std::find_if(
+      state.projectParameters.begin(), state.projectParameters.end(),
+      [&](const Parameter& p) { return p.name == name; });
+  if (it == state.projectParameters.end()) return false;
+  std::vector<std::string> refs = ProjectVarReferences(state, name);
+  if (!refs.empty()) {
+    if (outRefs != nullptr) *outRefs = std::move(refs);
+    return false;
+  }
+  PushProjectVarUndo(state, state.projectParameters, {}, {});
+  state.projectParameters.erase(std::find_if(
+      state.projectParameters.begin(), state.projectParameters.end(),
+      [&](const Parameter& p) { return p.name == name; }));
+  SyncProjectScope(state);
+  return true;
+}
+
+bool RenameProjectVariable(AppState& state, const std::string& oldName,
+                           const std::string& newName) {
+  if (FindProjectParameter(state, oldName) == nullptr ||
+      FindProjectParameter(state, newName) != nullptr ||
+      !ExpressionEngine::Default().IsValidParameterName(newName)) {
+    return false;
+  }
+  // Undo restores the pre-edit table AND reverses the ref rewrite (newName ->
+  // oldName) across every part.
+  PushProjectVarUndo(state, state.projectParameters, newName, oldName);
+  const auto& engine = ExpressionEngine::Default();
+  for (Parameter& p : state.projectParameters) {
+    if (p.name == oldName) p.name = newName;
+    p.expression = engine.RenameIdentifier(p.expression, oldName, newName);
+  }
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (Document* d = SlotDoc(state, i))
+      d->RewriteProjectVarRefs(oldName, newName);
+  SyncProjectScope(state);
+  return true;
+}
+
+bool UndoProjectVars(AppState& state) {
+  if (state.projectVarHistory.undo.empty()) return false;
+  ProjectVarSnapshot entry = std::move(state.projectVarHistory.undo.back());
+  state.projectVarHistory.undo.pop_back();
+  // Build the redo entry from the CURRENT (post-edit) state before restoring;
+  // its ref rewrite is the inverse of the undo entry's.
+  ProjectVarSnapshot redoEntry;
+  redoEntry.params = state.projectParameters;
+  redoEntry.stamp = entry.stamp;
+  redoEntry.docRefFrom = entry.docRefTo;
+  redoEntry.docRefTo = entry.docRefFrom;
+  state.projectVarHistory.redo.push_back(std::move(redoEntry));
+  ApplyProjectVarSnapshot(state, entry);
+  return true;
+}
+
+bool RedoProjectVars(AppState& state) {
+  if (state.projectVarHistory.redo.empty()) return false;
+  ProjectVarSnapshot entry = std::move(state.projectVarHistory.redo.back());
+  state.projectVarHistory.redo.pop_back();
+  ProjectVarSnapshot undoEntry;
+  undoEntry.params = state.projectParameters;
+  undoEntry.stamp = entry.stamp;
+  undoEntry.docRefFrom = entry.docRefTo;
+  undoEntry.docRefTo = entry.docRefFrom;
+  state.projectVarHistory.undo.push_back(std::move(undoEntry));
+  ApplyProjectVarSnapshot(state, entry);
+  return true;
+}
+
+// ---- Global undo routing (Phase V) ----------------------------------------
+// A project-variable edit spans every tab, so it can't ride any one document's
+// CommandStack. Rather than merge the (separate, per-tab) stacks, every
+// undoable action is stamped from one monotonic action clock (NextActionStamp);
+// the global Undo/Redo route to whichever source holds the most recent stamp.
+// This keeps each per-tab stack intact and correct while making Ctrl+Z undo the
+// user's genuinely-last action even when it crossed into project scope.
+
+namespace {
+uint64_t ActiveTabTopUndoStamp(const AppState& state) {
+  if (state.assembly)
+    return state.assemblyHistory.undoStamps.empty()
+               ? 0
+               : state.assemblyHistory.undoStamps.back();
+  if (state.drawing)
+    return state.drawingHistory.undoStamps.empty()
+               ? 0
+               : state.drawingHistory.undoStamps.back();
+  return state.commands ? state.commands->TopUndoStamp() : 0;
+}
+uint64_t ActiveTabTopRedoStamp(const AppState& state) {
+  if (state.assembly)
+    return state.assemblyHistory.redoStamps.empty()
+               ? 0
+               : state.assemblyHistory.redoStamps.back();
+  if (state.drawing)
+    return state.drawingHistory.redoStamps.empty()
+               ? 0
+               : state.drawingHistory.redoStamps.back();
+  return state.commands ? state.commands->TopRedoStamp() : 0;
+}
+void ActiveTabUndo(AppState& state) {
+  if (state.assembly)
+    UndoAssembly(state);
+  else if (state.drawing)
+    UndoDrawing(state);
+  else if (state.commands && state.commands->CanUndo())
+    state.commands->Undo(*state.document);
+}
+void ActiveTabRedo(AppState& state) {
+  if (state.assembly)
+    RedoAssembly(state);
+  else if (state.drawing)
+    RedoDrawing(state);
+  else if (state.commands && state.commands->CanRedo())
+    state.commands->Redo(*state.document);
+}
+} // namespace
+
+bool CanGlobalUndo(const AppState& state) {
+  return !state.projectVarHistory.undo.empty() ||
+         ActiveTabTopUndoStamp(state) != 0;
+}
+bool CanGlobalRedo(const AppState& state) {
+  return !state.projectVarHistory.redo.empty() ||
+         ActiveTabTopRedoStamp(state) != 0;
+}
+void GlobalUndo(AppState& state) {
+  const uint64_t proj = state.projectVarHistory.undo.empty()
+                            ? 0
+                            : state.projectVarHistory.undo.back().stamp;
+  // Undo the most recent action: the larger stamp wins (stamps are unique).
+  if (proj != 0 && proj > ActiveTabTopUndoStamp(state))
+    UndoProjectVars(state);
+  else
+    ActiveTabUndo(state);
+}
+void GlobalRedo(AppState& state) {
+  uint64_t proj = state.projectVarHistory.redo.empty()
+                      ? UINT64_MAX
+                      : state.projectVarHistory.redo.back().stamp;
+  uint64_t tab = ActiveTabTopRedoStamp(state);
+  if (tab == 0) tab = UINT64_MAX;
+  if (proj == UINT64_MAX && tab == UINT64_MAX) return;
+  // Redo the action undone most recently: the SMALLER redo-top stamp wins.
+  if (proj < tab)
+    RedoProjectVars(state);
+  else
+    ActiveTabRedo(state);
+}
+
 bool SaveProject(AppState& state, const std::string& path,
                  std::string* error) {
   namespace fs = std::filesystem;
   EnsureParts(state);
   // A single part keeps the flat .dsgn form (backward compatible). A lone
   // assembly, or any multi-document project, uses the project container.
-  if (state.parts.size() == 1 && state.parts[0].kind == DocKind::Part) {
-    return DocumentIO::Save(*state.document, path, error);
+  // Phase V: a single part IS the whole project, so its file carries the
+  // PROJECT-scope variables. We fall back to the container form only when the
+  // part also holds part-local variables (both scopes then need distinct homes
+  // — flat has room for one `parameters` list).
+  if (state.parts.size() == 1 && state.parts[0].kind == DocKind::Part &&
+      state.document->GetParameters().empty()) {
+    // Fold the project scope into the doc for the write (they reload as project
+    // scope), then restore the (empty) local table.
+    std::vector<Parameter> localBackup = state.document->TakeParameters();
+    state.document->SetParametersRaw(state.projectParameters);
+    const bool ok = DocumentIO::Save(*state.document, path, error);
+    state.document->SetParametersRaw(std::move(localBackup));
+    return ok;
   }
   // Multi-document: project.json (v2) + parts/<name>/ and assemblies/<name>/.
   try {
@@ -925,6 +1205,17 @@ bool SaveProject(AppState& state, const std::string& path,
     index["format"] = "designer-project";
     index["version"] = 2;
     index["active"] = state.activePart;
+    // Phase V: project-scope variables live in the project envelope, beside
+    // active/documents. Per-part index.json `parameters` are that part's LOCAL
+    // scope (usually empty now that set_variable defaults to project).
+    if (!state.projectParameters.empty()) {
+      index["parameters"] = nlohmann::json::array();
+      for (const Parameter& pv : state.projectParameters) {
+        nlohmann::json pj = {{"name", pv.name}, {"expression", pv.expression}};
+        if (!pv.comment.empty()) pj["comment"] = pv.comment;
+        index["parameters"].push_back(std::move(pj));
+      }
+    }
     index["documents"] = nlohmann::json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
       const PartSlot& slot = state.parts[i];
@@ -1041,6 +1332,19 @@ bool OpenProject(AppState& state, const std::string& path,
     if (wantActive >= state.parts.size()) wantActive = 0;
     ActivateSlot(state, wantActive);
     ResetActiveTabUiState(state);
+
+    // Phase V: load the project-scope variables from the envelope, wire every
+    // part's Document to them, and regenerate all (Load regenerated each part
+    // WITHOUT the project scope, so a feature referencing a project var errored
+    // — SyncProjectScope re-evaluates it correctly).
+    state.projectParameters.clear();
+    state.projectVarHistory = {};
+    for (const auto& pj : index.value("parameters", nlohmann::json::array()))
+      state.projectParameters.push_back(
+          {pj.at("name").get<std::string>(),
+           pj.at("expression").get<std::string>(),
+           pj.value("comment", std::string{}), 0.0, {}});
+    SyncProjectScope(state);
     // A4: an assembly active on open solves immediately (no stamps yet), so
     // mates re-solve on load — the format's stated contract.
     if (state.assembly && AssemblyPartsStale(state))

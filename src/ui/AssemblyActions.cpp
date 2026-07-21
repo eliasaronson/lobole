@@ -60,12 +60,17 @@ namespace ui {
 void SnapshotAssembly(AppState& state) {
   if (!state.assembly) return;
   state.assemblyHistory.undo.push_back(*state.assembly); // full-state copy
+  state.assemblyHistory.undoStamps.push_back(NextActionStamp());
   state.assemblyHistory.redo.clear();
+  state.assemblyHistory.redoStamps.clear();
 }
 
 bool UndoAssembly(AppState& state) {
   if (!state.assembly || state.assemblyHistory.undo.empty()) return false;
   state.assemblyHistory.redo.push_back(*state.assembly);
+  state.assemblyHistory.redoStamps.push_back(
+      state.assemblyHistory.undoStamps.back());
+  state.assemblyHistory.undoStamps.pop_back();
   *state.assembly = std::move(state.assemblyHistory.undo.back());
   state.assemblyHistory.undo.pop_back();
   state.syncedDocumentVersion = UINT64_MAX; // restored state may share a version
@@ -75,6 +80,9 @@ bool UndoAssembly(AppState& state) {
 bool RedoAssembly(AppState& state) {
   if (!state.assembly || state.assemblyHistory.redo.empty()) return false;
   state.assemblyHistory.undo.push_back(*state.assembly);
+  state.assemblyHistory.undoStamps.push_back(
+      state.assemblyHistory.redoStamps.back());
+  state.assemblyHistory.redoStamps.pop_back();
   *state.assembly = std::move(state.assemblyHistory.redo.back());
   state.assemblyHistory.redo.pop_back();
   state.syncedDocumentVersion = UINT64_MAX;

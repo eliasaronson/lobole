@@ -198,6 +198,105 @@ TEST_CASE("Expression-driven entity coordinates follow a parameter through "
   CHECK_THAT(circle().center.x, WithinRel(14.0f, 1e-6f));
 }
 
+// --- Project-wide variables (Phase V) ----------------------------------------
+
+TEST_CASE("A project symbol table drives features in two documents",
+          "[variables][project]") {
+  // Simulates AppState's project scope: one SymbolTable injected into two
+  // Documents. A part-local variable of the same name shadows the project one.
+  SymbolTable project;
+  project["bore"] = 6.0;
+
+  Document axle;
+  axle.SetProjectSymbols(&project);
+  ExtrudeFeature* axleExt = MakeExtrudedRect(axle, 1.0);
+  axleExt->distanceExpr = "bore"; // resolves from the project scope
+  axle.Regenerate();
+  CHECK_THAT(axleExt->distance, WithinRel(6.0));
+  CHECK(axleExt->GetError().empty());
+
+  Document wheel;
+  wheel.SetProjectSymbols(&project);
+  ExtrudeFeature* wheelExt = MakeExtrudedRect(wheel, 1.0);
+  wheelExt->distanceExpr = "bore * 2";
+  wheel.Regenerate();
+  CHECK_THAT(wheelExt->distance, WithinRel(12.0));
+
+  // A part-local variable named `bore` shadows the project value in THAT doc.
+  wheel.SetParameter("bore", "100");
+  CHECK_THAT(wheelExt->distance, WithinRel(200.0));
+  // The other document, sharing only the project scope, is unaffected.
+  axle.Regenerate();
+  CHECK_THAT(axleExt->distance, WithinRel(6.0));
+
+  // Editing the project value ripples into every non-shadowing document on its
+  // next regenerate (the regen cache invalidates: the baked value changed).
+  project["bore"] = 10.0;
+  axle.Regenerate();
+  CHECK_THAT(axleExt->distance, WithinRel(10.0));
+  wheel.Regenerate();
+  CHECK_THAT(wheelExt->distance, WithinRel(200.0)); // still shadowed
+}
+
+TEST_CASE("An unknown variable is a loud feature error, not a silent literal",
+          "[variables][project]") {
+  // Fail-loud: a feature expression whose variable resolves in NEITHER scope
+  // must error, not silently keep drilling the literal twin (the 1 mm hole).
+  Document doc;
+  ExtrudeFeature* ext = MakeExtrudedRect(doc, 5.0);
+  ext->distanceExpr = "bore"; // never defined anywhere
+  doc.Regenerate();
+
+  // The literal is kept as the RENDERED fallback (5.0), but the error is set.
+  CHECK_THAT(ext->distance, WithinRel(5.0));
+  REQUIRE_FALSE(ext->GetError().empty());
+  CHECK(ext->GetError().find("unknown variable") != std::string::npos);
+  CHECK(ext->GetError().find("bore") != std::string::npos);
+
+  // Defining it (as a project var) clears the error and drives the geometry.
+  SymbolTable project;
+  project["bore"] = 3.0;
+  doc.SetProjectSymbols(&project);
+  doc.Regenerate();
+  CHECK(ext->GetError().empty());
+  CHECK_THAT(ext->distance, WithinRel(3.0));
+}
+
+TEST_CASE("A project-value change invalidates the regen cache across a part",
+          "[variables][project]") {
+  SymbolTable project;
+  project["h"] = 2.0;
+  Document doc;
+  doc.SetProjectSymbols(&project);
+  ExtrudeFeature* ext = MakeExtrudedRect(doc, 1.0);
+  ext->distanceExpr = "h";
+  doc.Regenerate();
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0 * 2.0, 1e-6));
+
+  // No local edit, only the shared project value moved: the extrude must
+  // re-execute (its baked distance changed), not serve a stale cached body.
+  project["h"] = 7.0;
+  doc.Regenerate();
+  CHECK_THAT(ext->distance, WithinRel(7.0));
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0 * 7.0, 1e-6));
+}
+
+TEST_CASE("EvaluateParameterTable overlays a base scope, shadowed by locals",
+          "[variables][project]") {
+  SymbolTable project;
+  project["a"] = 3.0;
+  project["b"] = 4.0;
+
+  std::vector<Parameter> local = {{"c", "a + b", "", 0.0, {}},
+                                  {"a", "10", "", 0.0, {}}}; // shadows project a
+  SymbolTable out;
+  EvaluateParameterTable(local, out, &project, {});
+
+  CHECK_THAT(out.at("a"), WithinRel(10.0));      // local shadow wins
+  CHECK_THAT(out.at("b"), WithinRel(4.0));       // inherited from project
+  CHECK_THAT(out.at("c"), WithinRel(14.0));      // 10 (local a) + 4 (project b)
+}
+
 // --- Commands -----------------------------------------------------------------
 
 TEST_CASE("Set/delete/rename variable commands undo and redo", "[variables]") {

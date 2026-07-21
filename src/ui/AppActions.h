@@ -310,6 +310,43 @@ void ApplyExplodeTransforms(AppState& state);
 bool SaveProject(AppState& state, const std::string& path, std::string* error);
 bool OpenProject(AppState& state, const std::string& path, std::string* error);
 
+// ---- Project-wide variables (Phase V, docs/plan-caster-backlog.md) ---------
+// The project parameter table lives in AppState and is shared by every part via
+// Document::SetProjectSymbols; set_variable defaults to this scope.
+
+// Re-evaluate the project table into state.projectSymbols and regenerate every
+// part against it (wiring each slot's Document to the project symbols first).
+// Call after any project-var edit or structural change (open/new/add part).
+void SyncProjectScope(AppState& state);
+
+// Project-variable edits, undoable across tabs (projectVarHistory + regen-all).
+// Set returns false only for an invalid name. Remove is refused (returns false,
+// fills outRefs) while any part references it. Rename rewrites references in
+// every part; false if newName is invalid/taken or oldName is absent.
+bool SetProjectVariable(AppState& state, const std::string& name,
+                        const std::string& expression,
+                        const std::string& comment);
+bool RemoveProjectVariable(AppState& state, const std::string& name,
+                           std::vector<std::string>* outRefs);
+bool RenameProjectVariable(AppState& state, const std::string& oldName,
+                           const std::string& newName);
+// Human-readable references to a project variable across ALL parts (+ project
+// params), for delete-refusal messages.
+std::vector<std::string> ProjectVarReferences(AppState& state,
+                                              const std::string& name);
+const Parameter* FindProjectParameter(const AppState& state,
+                                      const std::string& name);
+bool UndoProjectVars(AppState& state);
+bool RedoProjectVars(AppState& state);
+
+// Global Undo/Redo: route Ctrl+Z / Edit>Undo to whichever source — the active
+// tab's stack or the cross-tab project-var stack — was most recently mutated.
+// Use these at the dispatch sites instead of the per-tab stacks directly.
+bool CanGlobalUndo(const AppState& state);
+bool CanGlobalRedo(const AppState& state);
+void GlobalUndo(AppState& state);
+void GlobalRedo(AppState& state);
+
 // Track the on-disk identity for dirty-state + autosave: call after every
 // clean save (also clears the autosave sidecar) / open / new. "" = unsaved.
 void MarkProjectSaved(AppState& state, const std::string& path,

@@ -70,22 +70,8 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
   add("Tool: Simulation", nullptr, hasBody,
       [](AppState& s) { EnterSimulation(s); });
 
-  add("Edit: Undo", "Ctrl+Z", true, [](AppState& s) {
-    if (s.assembly)
-      UndoAssembly(s);
-    else if (s.drawing)
-      UndoDrawing(s);
-    else if (s.commands && s.commands->CanUndo())
-      s.commands->Undo(*s.document);
-  });
-  add("Edit: Redo", "Ctrl+Y", true, [](AppState& s) {
-    if (s.assembly)
-      RedoAssembly(s);
-    else if (s.drawing)
-      RedoDrawing(s);
-    else if (s.commands && s.commands->CanRedo())
-      s.commands->Redo(*s.document);
-  });
+  add("Edit: Undo", "Ctrl+Z", true, [](AppState& s) { GlobalUndo(s); });
+  add("Edit: Redo", "Ctrl+Y", true, [](AppState& s) { GlobalRedo(s); });
 
   add("View: Fit", "F", true, [](AppState& s) { FitCameraToDocument(s); });
   add("View: Zoom to Selection", "Shift+F", true,

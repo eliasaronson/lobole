@@ -106,25 +106,15 @@ void DrawEditMenu(AppState& state) {
     return;
 
   const bool pending = HasPendingFeature(state);
-  // An assembly or drawing tab undoes through its snapshot history; a part tab
-  // through its CommandStack.
-  const bool canUndo =
-      !pending && (state.assembly ? !state.assemblyHistory.undo.empty()
-                   : state.drawing ? !state.drawingHistory.undo.empty()
-                                   : (state.commands && state.commands->CanUndo()));
-  const bool canRedo =
-      !pending && (state.assembly ? !state.assemblyHistory.redo.empty()
-                   : state.drawing ? !state.drawingHistory.redo.empty()
-                                   : (state.commands && state.commands->CanRedo()));
+  // Global undo (Phase V): the active tab's stack OR the cross-tab project-var
+  // stack, whichever was most recently mutated (see GlobalUndo).
+  const bool canUndo = !pending && CanGlobalUndo(state);
+  const bool canRedo = !pending && CanGlobalRedo(state);
   if (ImGui::MenuItem("Undo", "Ctrl+Z", false, canUndo)) {
-    if (state.assembly) UndoAssembly(state);
-    else if (state.drawing) UndoDrawing(state);
-    else state.commands->Undo(*state.document);
+    GlobalUndo(state);
   }
   if (ImGui::MenuItem("Redo", "Ctrl+Y", false, canRedo)) {
-    if (state.assembly) RedoAssembly(state);
-    else if (state.drawing) RedoDrawing(state);
-    else state.commands->Redo(*state.document);
+    GlobalRedo(state);
   }
   ImGui::EndMenu();
 }
@@ -396,21 +386,11 @@ void HandleShortcuts(AppState& state) {
   }
 
   if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, route)) {
-    if (state.assembly)
-      UndoAssembly(state);
-    else if (state.drawing)
-      UndoDrawing(state);
-    else if (state.commands && state.commands->CanUndo())
-      state.commands->Undo(*state.document);
+    GlobalUndo(state);
   }
   if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, route) ||
       ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, route)) {
-    if (state.assembly)
-      RedoAssembly(state);
-    else if (state.drawing)
-      RedoDrawing(state);
-    else if (state.commands && state.commands->CanRedo())
-      state.commands->Redo(*state.document);
+    GlobalRedo(state);
   }
   if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_N, route)) {
     ReplaceDocument(state, std::make_unique<Document>());

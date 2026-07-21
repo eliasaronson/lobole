@@ -306,67 +306,113 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     return json{{"dropped_constraints", dropped}};
   }
   if (m == "set_variable") {
-    // Add or redefine a document variable; one undoable edit, regenerates
-    // every expression-driven field. params: {name, expression, comment?}.
-    // Returns the evaluated value (plus "error" if it didn't evaluate).
+    // Add or redefine a variable; one undoable edit, regenerates every
+    // expression-driven field. params: {name, expression, comment?,
+    // scope?}. scope defaults to "project" (Phase V: define a driving
+    // dimension once, shared by every part); "part" writes the active
+    // document's local scope, which shadows a same-named project var.
+    // Returns the evaluated value + scope (plus "error" if it didn't evaluate).
     const std::string name = p.at("name").get<std::string>();
     const json& expr = p.at("expression");
     const std::string expression =
         expr.is_string() ? expr.get<std::string>() : expr.dump();
+    const std::string scope = p.value("scope", std::string("project"));
+    if (scope != "project" && scope != "part")
+      throw std::runtime_error("scope must be \"project\" or \"part\"");
+    const bool partScope = scope == "part";
     // Omitting "comment" preserves an existing one (redefinitions usually
     // only change the expression).
     std::string comment;
     if (p.contains("comment")) {
       comment = p.at("comment").get<std::string>();
-    } else if (const Parameter* prior = doc->FindParameter(name)) {
-      comment = prior->comment;
+    } else {
+      const Parameter* prior = partScope
+                                   ? doc->FindParameter(name)
+                                   : ui::FindProjectParameter(state, name);
+      if (prior) comment = prior->comment;
     }
-    if (!state.commands->Execute(
-            std::make_unique<SetVariableCommand>(name, expression, comment),
-            *doc)) {
+    if (partScope) {
+      if (!state.commands->Execute(
+              std::make_unique<SetVariableCommand>(name, expression, comment),
+              *doc))
+        throw std::runtime_error("invalid variable name: " + name);
+    } else if (!ui::SetProjectVariable(state, name, expression, comment)) {
       throw std::runtime_error("invalid variable name: " + name);
     }
-    const Parameter* param = doc->FindParameter(name);
-    json result = {{"value", param->value}};
+    const Parameter* param =
+        partScope ? doc->FindParameter(name)
+                  : ui::FindProjectParameter(state, name);
+    json result = {{"value", param->value}, {"scope", scope}};
     if (!param->error.empty()) result["error"] = param->error;
     return result;
   }
   if (m == "delete_variable") {
-    // Refused while referenced, reporting what references it. params: {name}
+    // Refused while referenced, reporting what references it. A project
+    // variable's references span every part. params: {name, scope?}. scope
+    // auto-detects (project first, then the active part's local) when omitted.
     const std::string name = p.at("name").get<std::string>();
-    if (doc->FindParameter(name) == nullptr)
-      throw std::runtime_error("no such variable: " + name);
-    std::vector<std::string> refs = doc->FindParameterReferences(name);
-    if (!refs.empty()) {
+    const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
+    const bool haveLocal = doc != nullptr && doc->FindParameter(name) != nullptr;
+    const std::string scope =
+        p.value("scope", haveProject || !haveLocal ? "project" : "part");
+    if (scope == "part") {
+      if (!haveLocal) throw std::runtime_error("no such variable: " + name);
+      std::vector<std::string> refs = doc->FindParameterReferences(name);
+      if (!refs.empty()) {
+        std::string msg = "variable is referenced by:";
+        for (const std::string& r : refs) msg += " " + r + ";";
+        throw std::runtime_error(msg);
+      }
+      state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
+                              *doc);
+      return json::object();
+    }
+    if (!haveProject) throw std::runtime_error("no such variable: " + name);
+    std::vector<std::string> refs;
+    if (!ui::RemoveProjectVariable(state, name, &refs)) {
       std::string msg = "variable is referenced by:";
       for (const std::string& r : refs) msg += " " + r + ";";
       throw std::runtime_error(msg);
     }
-    state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
-                            *doc);
     return json::object();
   }
   if (m == "rename_variable") {
-    // Renames + rewrites every referencing expression. params: {name, new_name}
-    if (!state.commands->Execute(
-            std::make_unique<RenameVariableCommand>(
-                p.at("name").get<std::string>(),
-                p.at("new_name").get<std::string>()),
-            *doc)) {
-      throw std::runtime_error("rename failed (unknown, invalid, or taken)");
+    // Renames + rewrites every referencing expression (a project rename spans
+    // all parts). params: {name, new_name, scope?}. scope auto-detects like
+    // delete_variable.
+    const std::string name = p.at("name").get<std::string>();
+    const std::string newName = p.at("new_name").get<std::string>();
+    const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
+    const bool haveLocal = doc != nullptr && doc->FindParameter(name) != nullptr;
+    const std::string scope =
+        p.value("scope", haveProject || !haveLocal ? "project" : "part");
+    if (scope == "part") {
+      if (!state.commands->Execute(
+              std::make_unique<RenameVariableCommand>(name, newName), *doc))
+        throw std::runtime_error("rename failed (unknown, invalid, or taken)");
+      return json::object();
     }
+    if (!ui::RenameProjectVariable(state, name, newName))
+      throw std::runtime_error("rename failed (unknown, invalid, or taken)");
     return json::object();
   }
   if (m == "list_variables") {
+    // Both scopes, each tagged. Project variables first (the default scope),
+    // then the active part's local variables. params: none.
     json variables = json::array();
-    for (const Parameter& param : doc->GetParameters()) {
+    const auto emit = [&](const Parameter& param, const char* scope) {
       json entry = {{"name", param.name},
                     {"expression", param.expression},
-                    {"value", param.value}};
+                    {"value", param.value},
+                    {"scope", scope}};
       if (!param.comment.empty()) entry["comment"] = param.comment;
       if (!param.error.empty()) entry["error"] = param.error;
       variables.push_back(entry);
-    }
+    };
+    for (const Parameter& param : state.projectParameters) emit(param, "project");
+    if (state.document)
+      for (const Parameter& param : state.document->GetParameters())
+        emit(param, "part");
     return json{{"variables", variables}};
   }
 

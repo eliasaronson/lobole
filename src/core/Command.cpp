@@ -2,6 +2,11 @@
 
 #include "core/io/Serialization.h"
 
+uint64_t NextActionStamp() {
+  static uint64_t clock = 0;
+  return ++clock;
+}
+
 AddFeatureCommand::AddFeatureCommand(std::unique_ptr<Feature> feature)
     : m_feature(std::move(feature)) {
   m_description = "Add " + m_feature->TypeName() + " '" +
@@ -267,12 +272,14 @@ bool CommandStack::Execute(std::unique_ptr<Command> command, Document& doc) {
   if (!command->Execute(doc)) {
     return false;
   }
+  command->SetStamp(NextActionStamp());
   m_undo.push_back(std::move(command));
   m_redo.clear();
   return true;
 }
 
 void CommandStack::PushApplied(std::unique_ptr<Command> command) {
+  command->SetStamp(NextActionStamp());
   m_undo.push_back(std::move(command));
   m_redo.clear();
 }

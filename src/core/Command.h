@@ -8,6 +8,13 @@
 #include <string>
 #include <vector>
 
+// A process-wide monotonic "action clock". Every user-visible undoable action
+// draws a stamp from it — feature commands (below), plus the snapshot-based
+// project-variable / assembly / drawing histories in AppState. Comparing the
+// top-of-stack stamps lets the global Undo route to whichever source the user
+// most recently touched, without merging their separate stacks (Phase V).
+uint64_t NextActionStamp();
+
 // A reversible edit of the Document. Every model modification — from the
 // GUI, scripts, or an AI assistant — goes through a Command so that undo,
 // history, and replay all see the same stream of edits.
@@ -18,6 +25,14 @@ public:
   virtual std::string Description() const = 0;
   virtual bool Execute(Document& doc) = 0;
   virtual void Undo(Document& doc) = 0;
+
+  // Action-clock stamp (see NextActionStamp), assigned when the command is
+  // pushed onto a CommandStack; travels with the command through undo/redo.
+  uint64_t Stamp() const { return m_stamp; }
+  void SetStamp(uint64_t stamp) { m_stamp = stamp; }
+
+private:
+  uint64_t m_stamp = 0;
 };
 
 class AddFeatureCommand : public Command {
@@ -249,6 +264,16 @@ public:
   bool CanRedo() const { return !m_redo.empty(); }
   void Undo(Document& doc);
   void Redo(Document& doc);
+
+  // Action-clock stamp of the top undoable / redoable command (0 when empty).
+  // Backs the global Undo/Redo recency arbitration against the project-var
+  // stack (Phase V).
+  uint64_t TopUndoStamp() const {
+    return m_undo.empty() ? 0 : m_undo.back()->Stamp();
+  }
+  uint64_t TopRedoStamp() const {
+    return m_redo.empty() ? 0 : m_redo.back()->Stamp();
+  }
 
   std::string UndoDescription() const;
   std::string RedoDescription() const;

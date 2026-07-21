@@ -84,16 +84,27 @@ bool Document::Regenerate() {
   // Refresh expression-driven fields before hashing: the serialized feature
   // (with evaluated values) is exactly the state that determines outputs
   // (the F1 contract), so it is what the cache keys on. Failed evaluations
-  // keep the field's last good value.
+  // keep the field's last good value as the RENDERED fallback, but — Phase V
+  // fail-loud — surface the failure as a feature error instead of silently
+  // drilling the literal twin (the "unknown variable" 1 mm-hole bug). Applied
+  // after the execute loop below (a rebuilt feature ClearError()s first), so
+  // the message survives; it is also why it must cover cached features whose
+  // unchanged literal never re-executes.
+  std::vector<std::string> exprErr(upTo);
   for (size_t i = 0; i < upTo; i++) {
-    m_features[i]->VisitExprs([this](std::string& text, double& value) {
+    m_features[i]->VisitExprs([&, i](std::string& text, double& value) {
       if (text.empty()) {
         return;
       }
+      ExprError err;
       const auto v =
-          ExpressionEngine::Default().EvaluateText(text, m_symbols, nullptr);
+          ExpressionEngine::Default().EvaluateText(text, m_symbols, &err);
       if (v.has_value()) {
         value = *v;
+      } else if (exprErr[i].empty()) {
+        // The ExprError message distinguishes the case ("unknown variable
+        // 'bore'" vs. a parse / division error); first failure per feature wins.
+        exprErr[i] = err.message;
       }
     });
   }
@@ -156,6 +167,19 @@ bool Document::Regenerate() {
   }
   // divergence == upTo: fully cached — keep any entries beyond upTo so
   // rolling the bar forward again is instant (their hashes re-verify then).
+
+  // Fail-loud (Phase V): stamp the expression-resolution failures collected in
+  // the refresh pass. Applied here — after Execute — so a rebuilt feature's
+  // ClearError()/regen error takes precedence and this only fills in features
+  // that regenerated cleanly on their stale literal (the visible-but-rendering
+  // case). The feature error is transient (not serialized, not hashed), so it
+  // never perturbs the cache.
+  for (size_t i = 0; i < upTo; i++) {
+    if (!exprErr[i].empty() && m_features[i]->GetError().empty()) {
+      m_features[i]->SetError(exprErr[i]);
+      allOk = false;
+    }
+  }
   return allOk;
 }
 
@@ -385,36 +409,101 @@ std::vector<std::string> Document::FindParameterReferences(
 }
 
 void Document::EvaluateParameters() {
-  const auto& engine = ExpressionEngine::Default();
-  const size_t n = m_parameters.size();
+  // Project variables (Phase V) seed the table as the outer scope, shadowed by
+  // same-named local parameters.
+  const Configuration* cfg = ActiveConfig();
+  if (cfg == nullptr) {
+    EvaluateParameterTable(m_parameters, m_symbols, m_projectSymbols, {});
+    return;
+  }
+  // The active configuration overrides parameter VALUES for THIS document's
+  // regeneration only (never mutating the stored expression), so dependents
+  // propagate: overriding `width` re-evaluates `depth = width*3`. A local
+  // parameter takes the override through the callback below. An override that
+  // targets a PROJECT variable (Phase V — most variables live there now) is
+  // injected as a synthetic local parameter so it shadows the project value in
+  // this part alone, leaving the shared project scope and every other part
+  // untouched.
+  std::vector<Parameter> augmented = m_parameters;
+  for (const auto& [name, expr] : cfg->parameterOverrides) {
+    const bool isLocal =
+        std::any_of(m_parameters.begin(), m_parameters.end(),
+                    [&](const Parameter& p) { return p.name == name; });
+    const bool isProject =
+        m_projectSymbols != nullptr && m_projectSymbols->count(name) != 0;
+    if (!isLocal && isProject) augmented.push_back({name, expr, "", 0.0, {}});
+  }
+  EvaluateParameterTable(
+      augmented, m_symbols, m_projectSymbols,
+      [cfg](const std::string& name) { return cfg->OverrideFor(name); });
+  // Copy the evaluated value/error back into the real local table (the
+  // synthetic project-override entries only needed to reach m_symbols).
+  for (Parameter& p : m_parameters) {
+    for (const Parameter& a : augmented) {
+      if (a.name == p.name) {
+        p.value = a.value;
+        p.error = a.error;
+        break;
+      }
+    }
+  }
+}
 
-  // Publish every parameter's last good value up front, so parameters whose
-  // evaluation fails below still resolve for their dependents.
-  m_symbols.clear();
-  for (const Parameter& p : m_parameters) {
-    m_symbols[p.name] = p.value;
+bool Document::RewriteProjectVarRefs(const std::string& oldName,
+                                     const std::string& newName) {
+  if (!ExpressionEngine::Default().IsValidParameterName(newName)) {
+    return false;
+  }
+  // A local parameter of the same name shadows the project variable: references
+  // in this document resolve locally, so a project rename must not touch them.
+  if (FindParameter(oldName) != nullptr) {
+    return false;
+  }
+  const auto& engine = ExpressionEngine::Default();
+  for (Parameter& p : m_parameters) {
+    p.expression = engine.RenameIdentifier(p.expression, oldName, newName);
+  }
+  for (const auto& feature : m_features) {
+    feature->VisitExprs([&](std::string& text, double& value) {
+      (void)value;
+      text = engine.RenameIdentifier(text, oldName, newName);
+    });
+  }
+  return true;  // caller regenerates
+}
+
+void EvaluateParameterTable(
+    std::vector<Parameter>& params, SymbolTable& out, const SymbolTable* base,
+    const std::function<const std::string*(const std::string&)>& overrideExpr) {
+  const auto& engine = ExpressionEngine::Default();
+  const size_t n = params.size();
+
+  // Seed with the outer scope (project vars), then publish every parameter's
+  // last good value so dependents still resolve when a sibling fails; the local
+  // value shadows any same-named outer symbol.
+  out.clear();
+  if (base != nullptr) {
+    out = *base;
+  }
+  for (const Parameter& p : params) {
+    out[p.name] = p.value;
   }
 
   // Compile everything, collect dependency edges between parameters (deps on
-  // non-parameters surface later as evaluation errors).
+  // non-parameters — including outer-scope symbols — surface as constants, not
+  // edges, since they carry no in-list producer).
   std::unordered_map<std::string, size_t> indexByName;
   for (size_t i = 0; i < n; i++) {
-    indexByName[m_parameters[i].name] = i;
+    indexByName[params[i].name] = i;
   }
-  // The active configuration overrides parameters by replacing their
-  // expression for this regeneration (never mutating the stored one), so
-  // dependents propagate: overriding `width` re-evaluates `depth = width*3`.
-  // `p.value` is a transient last-good cache (not serialized), so writing the
-  // override result to it below is safe and self-corrects on the next regen.
-  const Configuration* cfg = ActiveConfig();
 
   std::vector<std::unique_ptr<CompiledExpr>> compiled(n);
   std::vector<std::vector<size_t>> dependents(n);
   std::vector<size_t> pendingDeps(n, 0);
   for (size_t i = 0; i < n; i++) {
-    Parameter& p = m_parameters[i];
-    const std::string* overrideExpr = cfg ? cfg->OverrideFor(p.name) : nullptr;
-    const std::string& expression = overrideExpr ? *overrideExpr : p.expression;
+    Parameter& p = params[i];
+    const std::string* ov = overrideExpr ? overrideExpr(p.name) : nullptr;
+    const std::string& expression = ov ? *ov : p.expression;
     ExprError err;
     compiled[i] = engine.Compile(expression, &err);
     if (compiled[i] == nullptr) {
@@ -444,13 +533,13 @@ void Document::EvaluateParameters() {
     const size_t i = ready.front();
     ready.pop_front();
     evaluated[i] = true;
-    Parameter& p = m_parameters[i];
+    Parameter& p = params[i];
     if (compiled[i] != nullptr) {
       ExprError err;
-      const auto v = compiled[i]->Evaluate(m_symbols, &err);
+      const auto v = compiled[i]->Evaluate(out, &err);
       if (v.has_value()) {
         p.value = *v;
-        m_symbols[p.name] = *v;
+        out[p.name] = *v;
         p.error.clear();
       } else {
         p.error = err.message;  // keep last good value
@@ -464,9 +553,8 @@ void Document::EvaluateParameters() {
   }
   for (size_t i = 0; i < n; i++) {
     if (!evaluated[i]) {
-      m_parameters[i].error = "circular reference";
-      LOG_ERROR("Parameter '{}' has a circular reference",
-                m_parameters[i].name);
+      params[i].error = "circular reference";
+      LOG_ERROR("Parameter '{}' has a circular reference", params[i].name);
     }
   }
 }

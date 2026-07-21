@@ -7,9 +7,11 @@
 #include "core/fem/FemStudy.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 // A named document-level value, definable as an expression over other
@@ -24,6 +26,19 @@ struct Parameter {
   double value = 0.0;
   std::string error;
 };
+
+// Evaluates an ordered parameter list into `out` (topo-sorted by inter-list
+// dependency, in table order for determinism; a parameter whose expression
+// fails — parse error, unknown name, cycle — keeps its last good `value` and
+// records the reason in `error`). `base`, when non-null, seeds `out` first so a
+// parameter can reference an OUTER scope (Phase V: a part-local expression
+// resolving a project variable); same-named local parameters then shadow it.
+// `overrideExpr`, when set, supplies a replacement expression per parameter name
+// (configuration overrides) — return nullptr to use the stored expression.
+// Shared by Document (local scope) and AppState (project scope).
+void EvaluateParameterTable(
+    std::vector<Parameter>& params, SymbolTable& out, const SymbolTable* base,
+    const std::function<const std::string*(const std::string&)>& overrideExpr);
 
 // The parametric model: an ordered feature list plus the bodies produced by
 // regenerating it. This is the single source of truth for model state — the
@@ -78,8 +93,46 @@ public:
   std::vector<std::string> FindParameterReferences(const std::string& name);
 
   // Parameter values from the last regeneration; what feature expressions
-  // (and UI previews) evaluate against.
+  // (and UI previews) evaluate against. This is the EFFECTIVE scope: the
+  // project symbols (if any) overlaid with this document's local parameters
+  // (local shadows project), so downstream reads are unchanged by Phase V.
   const SymbolTable& Symbols() const { return m_symbols; }
+
+  // Project-wide variables (Phase V, docs/plan-caster-backlog.md). A Document
+  // keeps its own m_parameters as the PART-LOCAL scope and borrows a non-owning
+  // pointer to the project scope's evaluated symbols; regeneration resolves
+  // expressions local-first, then project. AppState owns the project table and
+  // points every slot's Document here (on load, part add, activate). Headless
+  // and core tests inject the pointer directly, so the core stays self-
+  // contained. Null = no project scope (a bare Document evaluates local-only).
+  void SetProjectSymbols(const SymbolTable* projectSymbols) {
+    m_projectSymbols = projectSymbols;
+  }
+  const SymbolTable* ProjectSymbols() const { return m_projectSymbols; }
+
+  // Removes and returns the local parameter table without regenerating. Used
+  // when a single loaded part is promoted to be the whole project (its params
+  // become the project scope): the caller re-wires + regenerates.
+  std::vector<Parameter> TakeParameters() {
+    return std::exchange(m_parameters, {});
+  }
+
+  // Replaces the local parameter table without regenerating — serializer/loader
+  // scaffolding (e.g. injecting the project scope into a single-part file write,
+  // then restoring). Not for model edits; use SetParameter for those.
+  void SetParametersRaw(std::vector<Parameter> params) {
+    m_parameters = std::move(params);
+  }
+
+  // Rewrites references to `oldName` into `newName` in this document's feature
+  // expressions and local-parameter expressions, WITHOUT renaming any local
+  // parameter DECLARATION (the declaration lives in the project scope). Backs a
+  // project-variable rename, which must rewrite refs across every part. Returns
+  // false and touches nothing if a local parameter named `oldName` shadows the
+  // project variable (references then resolve locally and must not move) — or
+  // if newName is invalid. Does NOT regenerate; the caller regenerates all.
+  bool RewriteProjectVarRefs(const std::string& oldName,
+                             const std::string& newName);
 
   // ---- Studies (FEM) ----------------------------------------------------
   // Document-level analysis definitions, a sibling to the parameter table.
@@ -240,6 +293,8 @@ private:
   std::vector<Configuration> m_configurations;
   uint64_t m_activeConfiguration = 0;  // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
+  // Non-owning; owned by AppState (Phase V). Null for a bare Document.
+  const SymbolTable* m_projectSymbols = nullptr;
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;
   int m_rollback = -1;
