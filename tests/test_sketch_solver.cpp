@@ -1032,4 +1032,53 @@ TEST_CASE("Fillet on explicit H/V corner does not over-constrain",
   CHECK_THAT(A(l1), WithinAbs(0.0, 0.1));
 }
 
+TEST_CASE("Fillet does not hide a real over-constraint elsewhere",
+          "[solver][arc][fillet]") {
+  // The add-then-prune must never mask a GENUINE conflict. Here a separate
+  // line (lc) is over-constrained by two contradictory distances (3 and 5
+  // between the same endpoints) — unsatisfiable — so the solver flags it.
+  // Filleting an unrelated clean corner must leave that real conflict
+  // flagged: the prune only removes a constraint the fillet ITSELF added,
+  // and only when doing so leaves the whole sketch clean — a standing
+  // conflict blocks that, so nothing is hidden.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const uint32_t l0 = s.AddEntity(sketch::Line{{0, 3}, {0, 0}});   // fillet corner
+  const uint32_t l1 = s.AddEntity(sketch::Line{{0, 0}, {3, 0}});   // fillet corner
+  const uint32_t lc = s.AddEntity(sketch::Line{{6, 0}, {9, 1}});   // the conflict
+  s.constraints.push_back({K::Coincident, {l0, 1}, {l1, 0}});
+  s.constraints.push_back({K::Vertical, {l0, 0}, {0, 0}});
+  s.constraints.push_back({K::Horizontal, {l1, 0}, {0, 0}});
+  // lc: two contradictory endpoint distances — a real, unsatisfiable conflict.
+  s.constraints.push_back({K::Distance, {lc, 0}, {lc, 1}, 3.0});
+  s.constraints.push_back({K::Distance, {lc, 0}, {lc, 1}, 5.0});
+  const auto refsLc = [&](const sketch::Constraint& c) {
+    return c.a.entity == lc || c.b.entity == lc;
+  };
+
+  {
+    sketch::Solver solver;
+    solver.Load(s);
+    const sketch::SolveResult r = solver.Solve();
+    // The real conflict is present before the fillet.
+    REQUIRE(!r.conflictingConstraints.empty());
+    bool onLc = false;
+    for (size_t i : r.conflictingConstraints)
+      onLc |= refsLc(s.constraints[i]);
+    REQUIRE(onLc);
+  }
+
+  REQUIRE(s.FilletCorner(l0, l1, 0.3) != 0);
+
+  sketch::Solver solver;
+  solver.Load(s);
+  const sketch::SolveResult r = solver.Solve();
+  // The real conflict SURVIVES the fillet — not pruned, not hidden.
+  CHECK(!r.conflictingConstraints.empty());
+  bool stillOnLc = false;
+  for (size_t i : r.conflictingConstraints)
+    stillOnLc |= refsLc(s.constraints[i]);
+  CHECK(stillOnLc);
+}
+
 #endif // HAVE_PLANEGCS
