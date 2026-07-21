@@ -165,12 +165,43 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
+  // Datums.
+  if (ToolButton(ICON_FA_TABLE_CELLS_LARGE, "Datum Plane", hasDoc && idle))
+    CreateDatumPlane(state);
+  if (ToolButton(ICON_FA_ARROWS_UP_DOWN, "Datum Axis", hasDoc && idle))
+    CreateDatumAxis(state);
+
+  Divider();
+
+  // Body combinators (need existing bodies).
+  const size_t producers =
+      hasDoc
+          ? BodyProducers(*state.document, state.document->FeatureCount()).size()
+          : 0;
+  if (ToolButton(ICON_FA_OBJECT_GROUP, "Boolean (union / subtract / intersect)",
+                 idle && producers >= 2))
+    CreateBoolean(state);
+  if (ToolButton(ICON_FA_LEFT_RIGHT, "Mirror a body", idle && producers >= 1))
+    CreateMirror(state);
+  if (ToolButton(ICON_FA_GRIP, "Pattern (linear / circular)",
+                 idle && producers >= 1))
+    CreatePattern(state);
+
+  Divider();
+
+  // Edge / wall / detail ops on a body.
   const bool hasBody =
       hasDoc && !state.document->GetBodies().empty();
   if (ToolButton(ICON_FA_BORDER_TOP_LEFT, "Fillet edges", hasBody && idle))
     CreateFillet(state);
   if (ToolButton(ICON_FA_CROP_SIMPLE, "Chamfer edges", hasBody && idle))
     CreateChamfer(state);
+  if (ToolButton(ICON_FA_BARS_STAGGERED, "Rib (thin web from an open sketch)",
+                 hasBody && idle))
+    CreateRib(state);
+  if (ToolButton(ICON_FA_CIRCLE_NOTCH, "Thread (cosmetic; pick a cyl. face)",
+                 hasBody && idle))
+    CreateThread(state);
 
   Divider();
 
