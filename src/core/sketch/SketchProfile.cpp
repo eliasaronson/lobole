@@ -1366,55 +1366,135 @@ bool PointInLoop(const Loop& loop, const glm::vec2& p) {
   return inside;
 }
 
-std::vector<Entity> ProjectFaceBoundary(const CADShape& shape, int faceIndex,
-                                        const SketchPlane& plane) {
-  std::vector<Entity> out;
-  if (!shape.IsValid())
-    return out;
-  TopExp_Explorer faces(shape.GetShape(), TopAbs_FACE);
-  for (int i = 0; faces.More() && i < faceIndex; faces.Next(), i++) {
-  }
-  if (!faces.More())
-    return out;
+namespace {
+// Projects one B-Rep edge onto the sketch plane as a construction entity.
+// A curve whose plane is parallel to the sketch keeps its exact type
+// (line/circle/arc/ellipse/ellipse-arc); any other curve — an out-of-plane
+// shadow (a circle projects to an ellipse) or a B-spline — is sampled into a
+// B-spline. Returns nullopt for a degenerate edge.
+std::optional<Entity> ProjectEdge(const TopoDS_Edge& edge,
+                                  const SketchPlane& plane) {
+  const glm::vec3 n3 = plane.GetNormal();
+  const gp_Dir sketchN(n3.x, n3.y, n3.z);
   const auto toUV = [&](const gp_Pnt& p) {
     return plane.WorldToPlane(glm::vec3(p.X(), p.Y(), p.Z()));
   };
-  for (TopExp_Explorer edges(faces.Current(), TopAbs_EDGE); edges.More();
-       edges.Next()) {
-    const TopoDS_Edge edge = TopoDS::Edge(edges.Current());
-    BRepAdaptor_Curve curve(edge);
-    if (curve.GetType() == GeomAbs_Line) {
-      Line l;
-      l.a = toUV(curve.Value(curve.FirstParameter()));
-      l.b = toUV(curve.Value(curve.LastParameter()));
-      l.construction = true;
-      out.push_back(l);
-    } else if (curve.GetType() == GeomAbs_Circle) {
-      const gp_Circ circ = curve.Circle();
-      const glm::vec2 c = toUV(circ.Location());
-      const double sweep = curve.LastParameter() - curve.FirstParameter();
-      if (std::abs(sweep - 2.0 * M_PI) < 1e-6) {
-        Circle e;
-        e.center = c;
-        e.radius = circ.Radius();
-        e.construction = true;
-        out.push_back(e);
-      } else {
-        // Angles in plane UV: measure the endpoints around the center.
-        const glm::vec2 a = toUV(curve.Value(curve.FirstParameter()));
-        const glm::vec2 b = toUV(curve.Value(curve.LastParameter()));
-        Arc arc;
-        arc.center = c;
-        arc.radius = circ.Radius();
-        arc.startAngle = std::atan2(a.y - c.y, a.x - c.x);
-        arc.endAngle = std::atan2(b.y - c.y, b.x - c.x);
-        arc.construction = true;
-        out.push_back(arc);
-      }
-    }
-    // Other curve types (splines, ellipses on the face) are skipped in v1.
+  BRepAdaptor_Curve curve(edge);
+  const double f = curve.FirstParameter(), l = curve.LastParameter();
+  const GeomAbs_CurveType type = curve.GetType();
+
+  if (type == GeomAbs_Line) {
+    Line ln;
+    ln.a = toUV(curve.Value(f));
+    ln.b = toUV(curve.Value(l));
+    ln.construction = true;
+    if (glm::length(ln.b - ln.a) < 1e-9)
+      return std::nullopt;
+    return ln;
   }
+
+  // A conic keeps its exact 2D form only when its plane is parallel to the
+  // sketch (its axis lines up with the sketch normal); otherwise the shadow is
+  // a different curve, so fall through to sampling.
+  auto parallel = [&](const gp_Dir& d) {
+    return std::abs(d.Dot(sketchN)) > 1.0 - 1e-6;
+  };
+  const bool closed = std::abs((l - f) - 2.0 * M_PI) < 1e-6;
+  if (type == GeomAbs_Circle && parallel(curve.Circle().Axis().Direction())) {
+    const gp_Circ circ = curve.Circle();
+    const glm::vec2 c = toUV(circ.Location());
+    if (closed) {
+      Circle e;
+      e.center = c;
+      e.radius = circ.Radius();
+      e.construction = true;
+      return e;
+    }
+    const glm::vec2 a = toUV(curve.Value(f)), b = toUV(curve.Value(l));
+    Arc arc;
+    arc.center = c;
+    arc.radius = circ.Radius();
+    arc.startAngle = std::atan2(a.y - c.y, a.x - c.x);
+    arc.endAngle = std::atan2(b.y - c.y, b.x - c.x);
+    while (arc.endAngle <= arc.startAngle)
+      arc.endAngle += 2.0 * M_PI;
+    arc.construction = true;
+    return arc;
+  }
+  if (type == GeomAbs_Ellipse && parallel(curve.Ellipse().Axis().Direction())) {
+    const gp_Elips el = curve.Ellipse();
+    const glm::vec2 c = toUV(el.Location());
+    const glm::vec2 majTip = toUV(el.Location().Translated(
+        gp_Vec(el.XAxis().Direction()) * el.MajorRadius()));
+    if (closed) {
+      Ellipse e;
+      e.center = c;
+      e.rMajor = el.MajorRadius();
+      e.rMinor = el.MinorRadius();
+      e.rotation = std::atan2(majTip.y - c.y, majTip.x - c.x);
+      e.construction = true;
+      return e;
+    }
+    EllipseArc ea;
+    ea.center = c;
+    ea.rMajor = el.MajorRadius();
+    ea.rMinor = el.MinorRadius();
+    ea.rotation = std::atan2(majTip.y - c.y, majTip.x - c.x);
+    ea.startParam =
+        EllipseParamOfPoint(c, ea.rMajor, ea.rMinor, ea.rotation,
+                            toUV(curve.Value(f)));
+    ea.endParam = EllipseParamOfPoint(c, ea.rMajor, ea.rMinor, ea.rotation,
+                                      toUV(curve.Value(l)));
+    while (ea.endParam <= ea.startParam)
+      ea.endParam += 2.0 * M_PI;
+    ea.construction = true;
+    return ea;
+  }
+
+  // General fallback: sample the (projected) curve into a B-spline. Enough
+  // segments to trace conics/spline shadows smoothly.
+  BSpline bs;
+  const int segs = 24;
+  bs.poles.reserve(segs + 1);
+  for (int i = 0; i <= segs; i++)
+    bs.poles.push_back(toUV(curve.Value(f + (l - f) * i / segs)));
+  bs.construction = true;
+  if (bs.poles.size() < 2)
+    return std::nullopt;
+  return bs;
+}
+} // namespace
+
+std::vector<Entity> ProjectElement(const CADShape& shape, ExternalKind kind,
+                                   int index, const SketchPlane& plane) {
+  std::vector<Entity> out;
+  if (!shape.IsValid() || index < 0)
+    return out;
+  if (kind == ExternalKind::Edge) {
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shape.GetShape(), TopAbs_EDGE, edges);
+    if (index >= edges.Extent())
+      return out;
+    if (auto e = ProjectEdge(TopoDS::Edge(edges.FindKey(index + 1)), plane))
+      out.push_back(std::move(*e));
+    return out;
+  }
+  // Face: project each boundary edge.
+  TopExp_Explorer faces(shape.GetShape(), TopAbs_FACE);
+  for (int i = 0; faces.More() && i < index; faces.Next(), i++) {
+  }
+  if (!faces.More())
+    return out;
+  for (TopExp_Explorer edges(faces.Current(), TopAbs_EDGE); edges.More();
+       edges.Next())
+    if (auto e = ProjectEdge(TopoDS::Edge(edges.Current()), plane))
+      out.push_back(std::move(*e));
   return out;
+}
+
+std::vector<Entity> ProjectFaceBoundary(const CADShape& shape, int faceIndex,
+                                        const SketchPlane& plane) {
+  return ProjectElement(shape, ExternalKind::Face, faceIndex, plane);
 }
 
 bool FilterLoopsToRegions(std::vector<Loop>& loops,

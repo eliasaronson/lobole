@@ -620,6 +620,22 @@ struct DerivedOp {
   std::vector<Inst> instances;
 };
 
+// External (projected) geometry: a reference to a face or edge of a body
+// earlier in the history, projected onto the sketch plane as locked
+// construction geometry (FreeCAD's ExternalGeometry / ShapeBinder). Unlike
+// the old one-shot sketch-on-face bake, this is LIVE — SketchFeature::Execute
+// re-projects it every regeneration, so the projected entities track the
+// source when it moves. `genIds` are the construction entities it produced,
+// kept stable across regens (like DerivedOp::Inst) so a user's constraints to
+// them survive; the solver holds them FIXED (their position is owned by the
+// source, not the solve).
+enum class ExternalKind { Face, Edge };
+struct ExternalGeom {
+  ElementRef ref;   // face (elementMap.names) or edge (edgeNames) of a body
+  ExternalKind kind = ExternalKind::Face;
+  std::vector<uint32_t> genIds; // generated construction entity ids (in order)
+};
+
 } // namespace sketch
 
 // A 2D sketch in the parametric history. Owns its plane as a baked value —
@@ -751,6 +767,21 @@ public:
   // No-op if opIndex is out of range. Call RegenerateDerived after for the rest.
   void RemoveDerivedOp(size_t opIndex);
 
+  // Adds a live external-geometry reference (a face or edge of a body earlier
+  // in the history), projected onto this sketch's plane as locked construction
+  // geometry. The projection materialises on the next Execute; returns the
+  // index into `external`. The body/element must resolve during regeneration.
+  size_t AddExternalGeometry(const ElementRef& ref, sketch::ExternalKind kind);
+
+  // Removes external ref `extIndex` and the construction entities it generated.
+  // No-op if out of range.
+  void RemoveExternalGeometry(size_t extIndex);
+
+  // Re-projects every external reference against the current bodies, refreshing
+  // its generated construction entities in place (stable ids). Called by
+  // Execute. Returns false (and SetError) when a ref no longer resolves.
+  bool RegenerateExternal(const RegenContext& ctx);
+
   // Breaks a LinkedCopy link: removes the op record but KEEPS its output
   // entities (ids intact, so downstream refs survive) as ordinary free
   // geometry. No-op for other kinds / out-of-range.
@@ -776,6 +807,7 @@ public:
   std::vector<sketch::Entity> entities;
   std::vector<sketch::Constraint> constraints;
   std::vector<sketch::DerivedOp> derived; // linked generative ops (replayed)
+  std::vector<sketch::ExternalGeom> external; // live projected geometry
   // Expression-driven entity coordinates (Decision 2A, v38): entity stable
   // id -> {field -> expression}, fields per sketch::EntityExprFields. The
   // expressions are evaluated into the entity geometry by VisitExprs during

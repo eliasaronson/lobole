@@ -488,6 +488,29 @@ void Solver::Load(const SketchFeature& sketch) {
     }
   }
 
+  // External (projected) geometry is likewise solver-FIXED — its position is
+  // owned by the source it projects, so the solve references but never moves it.
+  for (const auto& ext : sketch.external) {
+    for (uint32_t genId : ext.genIds) {
+      for (const auto& [key, idx] : im.pointIndex) {
+        if (static_cast<uint32_t>(key >> 8) != genId)
+          continue;
+        const GCS::Point& gp = im.gcsPoints[static_cast<size_t>(idx)];
+        im.fixedParams.insert(gp.x);
+        im.fixedParams.insert(gp.y);
+      }
+      if (im.circleOf.count(genId) != 0)
+        im.fixedParams.insert(
+            im.circles[static_cast<size_t>(im.circleOf[genId])].rad);
+      if (im.arcOf.count(genId) != 0) {
+        auto& a = im.arcs[static_cast<size_t>(im.arcOf[genId])];
+        im.fixedParams.insert(a.rad);
+        im.fixedParams.insert(a.startAngle);
+        im.fixedParams.insert(a.endAngle);
+      }
+    }
+  }
+
   // Expression-driven entity fields (Decision 2A) are solver-FIXED: their
   // value is owned by the document parameter table (applied in VisitExprs
   // before the solve), so the solver may reference but never move them —

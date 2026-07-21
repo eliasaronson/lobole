@@ -148,6 +148,39 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     }
     return json::object();
   }
+  if (m == "project_geometry") {
+    // Add LIVE external (projected) geometry to a sketch: a face or edge of a
+    // body earlier in the history, projected onto the sketch plane as locked
+    // construction geometry that tracks the source when it moves. params:
+    // {sketch_id, feature_id, element, kind?: "face"|"edge"}
+    size_t index = 0;
+    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    auto* sk = dynamic_cast<SketchFeature*>(f);
+    if (!sk) throw std::runtime_error("no such sketch");
+    json before = DocumentIO::FeatureToJson(*sk);
+    const sketch::ExternalKind kind =
+        p.value("kind", std::string("face")) == "edge"
+            ? sketch::ExternalKind::Edge
+            : sketch::ExternalKind::Face;
+    const size_t ei = sk->AddExternalGeometry(
+        ElementRef{p.at("feature_id").get<uint64_t>(),
+                   p.at("element").get<std::string>()},
+        kind);
+    doc->Regenerate();
+    if (!sk->GetError().empty()) { // the ref did not resolve — roll back
+      const std::string err = sk->GetError();
+      sk->RemoveExternalGeometry(ei);
+      doc->Regenerate();
+      throw std::runtime_error(err);
+    }
+    json after = DocumentIO::FeatureToJson(*sk);
+    // Capture the reply BEFORE the command runs — Execute rebuilds the feature
+    // object from JSON, so `sk` dangles afterwards.
+    json resp = {{"external_index", ei}, {"gen_ids", sk->external[ei].genIds}};
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    return resp;
+  }
   if (m == "add_constraint" || m == "add_constraints") {
     // Append one constraint (add_constraint: {sketch_id, kind, refs, value?/
     // expr?}) or MANY (add_constraints: {sketch_id, constraints: [{kind,

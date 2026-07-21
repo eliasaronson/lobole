@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 47;  // v47: Refine feature (v46: elliptical-arc entity)
+inline constexpr int kVersion = 48;  // v48: live external/projected sketch geometry (v47: Refine)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

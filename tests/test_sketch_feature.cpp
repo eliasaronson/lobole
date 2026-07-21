@@ -854,14 +854,21 @@ TEST_CASE("ProjectFaceBoundary maps face outlines to construction geometry",
   doc.Regenerate();
   REQUIRE(doc.GetBodies().size() == 1);
   const SketchPlane xy(PlaneType::XY);
-  // Every box face projects to 4 construction lines.
-  const auto ents =
-      sketch::ProjectFaceBoundary(doc.GetBodies()[0].shape, 0, xy);
-  REQUIRE(ents.size() == 4);
-  for (const auto& e : ents) {
-    REQUIRE(std::holds_alternative<sketch::Line>(e));
-    CHECK(std::get<sketch::Line>(e).construction);
+  // A face parallel to XY (a top/bottom cap) projects to 4 construction lines;
+  // a perpendicular side face projects to a line segment (its edges normal to
+  // the plane collapse to points and are dropped). Find the parallel one.
+  int fourLineFaces = 0;
+  for (int f = 0; f < 6; f++) {
+    const auto ents =
+        sketch::ProjectFaceBoundary(doc.GetBodies()[0].shape, f, xy);
+    for (const auto& e : ents) {
+      REQUIRE(std::holds_alternative<sketch::Line>(e));
+      CHECK(std::get<sketch::Line>(e).construction);
+    }
+    if (ents.size() == 4)
+      fourLineFaces++;
   }
+  CHECK(fourLineFaces == 2); // the two XY-parallel caps
 
   Document doc2;
   doc2.AddFeature(std::make_unique<CylinderFeature>(

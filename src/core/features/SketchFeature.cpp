@@ -786,6 +786,68 @@ void SketchFeature::RemoveDerivedOp(size_t opIndex) {
   derived.erase(derived.begin() + opIndex);
 }
 
+size_t SketchFeature::AddExternalGeometry(const ElementRef& ref,
+                                          sketch::ExternalKind kind) {
+  external.push_back({ref, kind, {}}); // projected on the next Execute
+  return external.size() - 1;
+}
+
+void SketchFeature::RemoveExternalGeometry(size_t extIndex) {
+  if (extIndex >= external.size())
+    return;
+  for (uint32_t id : external[extIndex].genIds)
+    DeleteEntity(id);
+  external.erase(external.begin() + extIndex);
+}
+
+bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
+  for (auto& ext : external) {
+    const Body* body = nullptr;
+    for (const Body& b : ctx.bodies)
+      if (b.createdBy == ext.ref.featureId) {
+        body = &b;
+        break;
+      }
+    if (body == nullptr) {
+      SetError("external geometry's body no longer exists");
+      return false;
+    }
+    const std::optional<int> idx =
+        ext.kind == sketch::ExternalKind::Face
+            ? body->elementMap.Resolve(ext.ref.name)
+            : body->elementMap.ResolveEdge(ext.ref.name);
+    if (!idx) {
+      SetError("external geometry '" + ext.ref.name + "' no longer exists");
+      return false;
+    }
+    std::vector<sketch::Entity> proj =
+        sketch::ProjectElement(body->shape, ext.kind, *idx, plane);
+    // Refresh in place: reuse the existing generated ids (so a user's
+    // constraints to them survive), creating/deleting entities only when the
+    // projected count changes.
+    for (size_t i = 0; i < proj.size(); i++) {
+      sketch::SetConstruction(proj[i], true);
+      const size_t existing =
+          i < ext.genIds.size() ? IndexOfEntity(ext.genIds[i]) : SIZE_MAX;
+      if (existing != SIZE_MAX) {
+        sketch::SetEntityId(proj[i], ext.genIds[i]);
+        entities[existing] = std::move(proj[i]);
+      } else {
+        const uint32_t id = AddEntity(std::move(proj[i]));
+        if (i < ext.genIds.size())
+          ext.genIds[i] = id;
+        else
+          ext.genIds.push_back(id);
+      }
+    }
+    while (ext.genIds.size() > proj.size()) {
+      DeleteEntity(ext.genIds.back());
+      ext.genIds.pop_back();
+    }
+  }
+  return true;
+}
+
 // Resolves a face ElementRef to a work plane: find the body the referenced
 // feature produced whose element map still holds the name, then extract the
 // planar face's frame. nullopt if the name no longer resolves (deleted /
@@ -845,6 +907,11 @@ bool SketchFeature::Execute(RegenContext& ctx) {
     }
   }
 
+  // Live external geometry: re-project each reference onto the (possibly moved)
+  // plane so the projected construction entities track their source.
+  if (!external.empty() && !RegenerateExternal(ctx))
+    return false;
+
   const bool exprDriven =
       std::any_of(constraints.begin(), constraints.end(),
                   [](const sketch::Constraint& c) {
@@ -854,7 +921,9 @@ bool SketchFeature::Execute(RegenContext& ctx) {
         return std::any_of(kv.second.begin(), kv.second.end(),
                            [](const auto& fe) { return !fe.second.empty(); });
       });
-  if (!exprDriven) {
+  // With external geometry we always re-solve, so geometry constrained to the
+  // (re-projected) references follows when the source moves.
+  if (!exprDriven && external.empty()) {
     return true;
   }
   // Dimension values and expression-driven entity coordinates were already

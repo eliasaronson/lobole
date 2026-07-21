@@ -347,6 +347,20 @@ def check_geometry(body: int = -1) -> dict:
     return _call("check_geometry", **({"body": body} if body >= 0 else {}))
 
 
+@mcp.tool(description="Project external geometry into a sketch (FreeCAD's "
+          "ShapeBinder): reference a FACE or EDGE of a body earlier in the "
+          "history, projected onto the sketch plane as LOCKED construction "
+          "geometry that tracks the source when it moves. Returns "
+          "{external_index, gen_ids}. `element` is the stable element name "
+          "(from list_elements). Use it to align new geometry to existing "
+          "edges/holes. params: sketch_id, feature_id (the body's producer), "
+          "element, kind ('face' or 'edge').")
+def project_geometry(sketch_id: int, feature_id: int, element: str,
+                     kind: str = "face") -> dict:
+    return _call("project_geometry", sketch_id=sketch_id, feature_id=feature_id,
+                 element=element, kind=kind)
+
+
 @mcp.tool(description="Measure geometry over stable element names (from "
           "list_elements). With `a` only: that element's own measure — a "
           "face's area or an edge's length. With `a` and `b`: the minimum "

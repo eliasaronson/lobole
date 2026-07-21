@@ -1,0 +1,24 @@
+{
+  "format": "designer-document",
+  "version": 48,
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 4]},
+       {"type": "line", "id": 3, "a": [4, 4], "b": [0, 4]},
+       {"type": "line", "id": 4, "a": [0, 4], "b": [0, 0]}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 3.0, "mode": "new_body", "reversed": false},
+    {"type": "Sketch", "name": "Ref", "id": 3, "next_entity_id": 1,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [],
+     "constraints": [],
+     "external": [
+       {"feature_id": 2, "element": "2/cap1", "kind": "face"}
+     ]}
+  ]
+}

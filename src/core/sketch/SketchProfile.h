@@ -156,6 +156,16 @@ std::vector<glm::vec2> LoopBoundaryPolygon(const Loop& loop);
 std::vector<Entity> ProjectFaceBoundary(const CADShape& shape, int faceIndex,
                                         const SketchPlane& plane);
 
+// Projects a body FACE (its boundary edges) or a single EDGE onto the sketch
+// plane as construction entities — the geometry behind live external geometry
+// (SketchFeature::external). `index` is the 0-based face/edge index (the
+// TopExp::MapShapes order the ElementMap uses). Coplanar-parallel curves keep
+// their exact type (line/circle/arc/ellipse); anything else — an out-of-plane
+// curve whose shadow changes type, or a B-spline — is sampled into a B-spline.
+// Ids are 0; the caller assigns them.
+std::vector<Entity> ProjectElement(const CADShape& shape, ExternalKind kind,
+                                   int index, const SketchPlane& plane);
+
 // Keeps only the loops whose id set matches one of `regions`, plus every
 // loop nested inside a kept one (holes ride along with their outer). Returns
 // false — leaving `loops` untouched — when a region matches no current loop.

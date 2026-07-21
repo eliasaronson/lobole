@@ -443,6 +443,17 @@ json FeatureToJson(const Feature& feature) {
       for (const auto& op : sk->derived)
         j["derived_ops"].push_back(DerivedOpToJson(op));
     }
+    if (!sk->external.empty()) { // v48: live projected geometry
+      j["external"] = json::array();
+      for (const auto& e : sk->external) {
+        json ej = {{"feature_id", e.ref.featureId},
+                   {"element", e.ref.name},
+                   {"kind", e.kind == sketch::ExternalKind::Edge ? "edge"
+                                                                 : "face"}};
+        ej["gen_ids"] = e.genIds;
+        j["external"].push_back(std::move(ej));
+      }
+    }
   } else if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     j["sketch_id"] = ext->sketchId;
     j["distance"] = ext->distance;
@@ -824,6 +835,16 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sk->derived.push_back(DerivedOpFromJson(oj));
     if (!sk->derived.empty())
       sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
+    for (const auto& ej : j.value("external", json::array())) { // v48
+      sketch::ExternalGeom eg;
+      eg.ref = ElementRef{ej.value("feature_id", uint64_t{0}),
+                          ej.value("element", std::string{})};
+      eg.kind = ej.value("kind", std::string("face")) == "edge"
+                    ? sketch::ExternalKind::Edge
+                    : sketch::ExternalKind::Face;
+      eg.genIds = ej.value("gen_ids", std::vector<uint32_t>{});
+      sk->external.push_back(std::move(eg));
+    }
     sk->planeRef = j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
     if (j.contains("face_ref")) { // v16: attached body face
       const json& fr = j.at("face_ref");
