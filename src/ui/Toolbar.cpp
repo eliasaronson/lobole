@@ -144,6 +144,27 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
+  // Curve-driven features (curves-3d): a 3D curve, and the sweep/loft/pipe that
+  // consume it. Gated on the references each needs (a Sweep wants a profile
+  // sketch, a Loft two sections, a Pipe any curve/sketch to run along).
+  const size_t sketches =
+      hasDoc ? SketchFeatureCount(*state.document) : 0;
+  const bool hasPathLike = hasDoc && HasCurveOrSketch(*state.document);
+  if (ToolButton(ICON_FA_WAVE_SQUARE, "3D Curve (helix / fit-spline)",
+                 hasDoc && idle))
+    CreateCurve3D(state);
+  if (ToolButton(ICON_FA_ROUTE, "Sweep a profile along a path",
+                 hasDoc && idle && sketches >= 1))
+    CreateSweep(state);
+  if (ToolButton(ICON_FA_BEZIER_CURVE, "Loft through sections",
+                 hasDoc && idle && sketches >= 2))
+    CreateLoft(state);
+  if (ToolButton(ICON_FA_ROAD, "Pipe / tube along a path",
+                 hasDoc && idle && hasPathLike))
+    CreatePipe(state);
+
+  Divider();
+
   const bool hasBody =
       hasDoc && !state.document->GetBodies().empty();
   if (ToolButton(ICON_FA_BORDER_TOP_LEFT, "Fillet edges", hasBody && idle))
