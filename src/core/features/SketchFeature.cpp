@@ -654,23 +654,51 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   sketch::Arc arc = startIsT1
                         ? sketch::Arc{center, radius, aT1, aT1 + wrap(aT2 - aT1)}
                         : sketch::Arc{center, radius, aT2, aT2 + wrap(aT1 - aT2)};
-  const uint32_t arcId = AddEntity(arc);
-
-  // Remove the old corner coincident joining the two lines.
   const uint8_t w1 = static_cast<uint8_t>(c1), w2 = static_cast<uint8_t>(c2);
-  auto refIs = [](const sketch::PointRef& r, uint32_t id, uint8_t w) {
-    return r.entity == id && r.which == w;
+
+  // A fillet must NEVER rotate a line — it only trims to the tangent points.
+  // But a line's direction can be locked only *transitively through the
+  // corner* (e.g. the owner's staircase: L3 is vertical merely because its
+  // top point shares X with the shared corner, via a point-pair vertical to
+  // that corner). Trimming moves the corner endpoints off their old position,
+  // so those constraints would drag the line into a rotation.
+  //
+  // Fix (construction-point re-anchoring): drop a CONSTRUCTION point at the
+  // old corner C, re-point every existing constraint that referenced either
+  // corner endpoint onto it (so the corner's alignments now hold the fixed
+  // point instead), and add point-on-line for each line through it — keeping
+  // each line aimed exactly as before, for ANY orientation, with no H/V
+  // special-casing. NOTE: AddEntity may reallocate `entities`, invalidating
+  // l1/l2 — both are done being dereferenced (trim above), so don't touch
+  // them past here.
+  sketch::Point cornerPt{C};
+  cornerPt.construction = true;
+  const uint32_t pId = AddEntity(cornerPt);
+
+  // Re-point BEFORE adding the arc-connection constraints (which reuse the
+  // corner endpoints and must NOT be caught).
+  auto repoint = [&](sketch::PointRef& r) {
+    if ((r.entity == lineId1 && r.which == w1) ||
+        (r.entity == lineId2 && r.which == w2))
+      r = {pId, 0};
   };
+  for (auto& con : constraints) {
+    repoint(con.a);
+    repoint(con.b);
+    repoint(con.c);
+  }
+  // The old corner coincident is now P=P — drop it (plus any other degenerate
+  // self-coincident the re-point produced).
   constraints.erase(
       std::remove_if(constraints.begin(), constraints.end(),
-                     [&](const sketch::Constraint& con) {
+                     [](const sketch::Constraint& con) {
                        return con.kind == K::Coincident &&
-                              ((refIs(con.a, lineId1, w1) &&
-                                refIs(con.b, lineId2, w2)) ||
-                               (refIs(con.a, lineId2, w2) &&
-                                refIs(con.b, lineId1, w1)));
+                              con.a.entity == con.b.entity &&
+                              con.a.which == con.b.which;
                      }),
       constraints.end());
+
+  const uint32_t arcId = AddEntity(arc);
 
   // Join the trimmed line ends to the arc endpoints; tangency does the rest.
   const uint32_t startLine = startIsT1 ? lineId1 : lineId2;
@@ -681,6 +709,10 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   constraints.push_back({K::Coincident, {endLine, endWhich}, {arcId, 2}, 0.0});
   constraints.push_back({K::Tangent, {lineId1, 0}, {arcId, 0}, 0.0});
   constraints.push_back({K::Tangent, {lineId2, 0}, {arcId, 0}, 0.0});
+
+  // Each line stays collinear with the fixed corner point → direction locked.
+  constraints.push_back({K::PointOnLine, {pId, 0}, {lineId1, 0}, 0.0});
+  constraints.push_back({K::PointOnLine, {pId, 0}, {lineId2, 0}, 0.0});
   return arcId;
 }
 

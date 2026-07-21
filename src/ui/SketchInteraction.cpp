@@ -1631,6 +1631,19 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       // click commits the kind + label position. Single-line length
       // placement first offers the click to refinement (B): landing on
       // another line/point switches the dimension kind instead of placing.
+      // Highlight the pickable candidate under the cursor so the user sees
+      // what a refine click would take (same hover as first-pick).
+      if (edit.dimPlaceFromLine != 0) {
+        SketchPick hover = PickSketchEntity(
+            state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
+        // The measured line itself can't refine (it just places); don't
+        // highlight it as a target.
+        if (hover.hit && hover.ref.entity != edit.dimPlaceFromLine) {
+          edit.hasHover = true;
+          edit.hoveredBody = hover.body;
+          edit.hoveredRef = hover.ref;
+        }
+      }
       if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         if (edit.dimPlaceFromLine != 0) {
           const SketchPick pick =

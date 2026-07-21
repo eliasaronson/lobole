@@ -1214,8 +1214,85 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     for (const auto& e : sk->entities)
       if (std::holds_alternative<sketch::Arc>(e))
         arcs++;
-    IM_CHECK_EQ(sk->entities.size(), (size_t)3); // 2 lines + fillet arc
+    // 2 lines + fillet arc + the construction corner-point (direction anchor).
+    IM_CHECK_EQ(sk->entities.size(), (size_t)4);
     IM_CHECK_EQ(arcs, 1);
+  };
+
+  // A fillet must NEVER rotate a line — even one whose direction is only
+  // IMPLICITLY constrained (the owner's staircase bug): L3 is vertical only
+  // because its top shares X with the shared corner, via a cross-line
+  // point-pair vertical. Filleting the corner used to drag L3 off vertical
+  // (and non-adjacent lines too). Drive the real GUI Fillet tool.
+  t = IM_REGISTER_TEST(engine, "fillet", "staircase_preserves_directions");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 10.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    using K = sketch::ConstraintKind;
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    uint32_t L1 = sk->AddEntity(sketch::Line{{-2, -2}, {-2, 0}}); // vertical
+    uint32_t L2 = sk->AddEntity(sketch::Line{{-2, 0}, {0, 0}});   // horizontal
+    uint32_t L3 = sk->AddEntity(sketch::Line{{0, 0}, {0, 2}});    // vertical
+    uint32_t L4 = sk->AddEntity(sketch::Line{{0, 2}, {2, 2}});    // horizontal
+    sk->constraints.push_back({K::Coincident, {L1, 1}, {L2, 0}});
+    sk->constraints.push_back({K::Coincident, {L2, 1}, {L3, 0}}); // fillet here
+    sk->constraints.push_back({K::Coincident, {L3, 1}, {L4, 0}});
+    sk->constraints.push_back({K::Vertical, {L1, 0}, {0, 0}});
+    sk->constraints.push_back({K::Fixed, {L1, 0}, {}});
+    sk->constraints.push_back({K::Fixed, {L1, 1}, {}});
+    sk->constraints.push_back({K::Horizontal, {L2, 1}, {L1, 1}});
+    sk->constraints.push_back({K::Vertical, {L2, 1}, {sketch::kOrigin, 0}});
+    sk->constraints.push_back({K::Vertical, {L3, 1}, {L2, 1}}); // implicit V
+    sk->constraints.push_back({K::Horizontal, {L4, 1}, {L3, 1}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+
+    auto angDeg = [&](uint32_t id) {
+      const auto& l =
+          std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(id)]);
+      return std::atan2(l.b.y - l.a.y, l.b.x - l.a.x) * 180.0 / M_PI;
+    };
+    const double a1 = angDeg(L1), a2 = angDeg(L2), a3 = angDeg(L3),
+                 a4 = angDeg(L4);
+    IM_CHECK_LE(std::abs(std::abs(a3) - 90.0), 1e-2); // vertical before
+
+    // Fillet the L2-L3 corner via the real GUI tool.
+    s_App->sketchEdit.tool = ui::SketchTool::Fillet;
+    s_App->sketchEdit.filletRadius = 0.3f;
+    glm::vec2 corner = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0, 0));
+    ctx->MouseMoveToPos(ImVec2(corner.x, corner.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    int arcs = 0;
+    for (const auto& e : sk->entities)
+      if (std::holds_alternative<sketch::Arc>(e))
+        arcs++;
+    IM_CHECK_EQ(arcs, 1); // the fillet landed
+
+    // Adjacent AND non-adjacent lines keep their exact directions.
+    IM_CHECK_LE(std::abs(angDeg(L1) - a1), 0.1);
+    IM_CHECK_LE(std::abs(angDeg(L2) - a2), 0.1);
+    IM_CHECK_LE(std::abs(angDeg(L3) - a3), 0.1); // the bug: was ~96-106 deg
+    IM_CHECK_LE(std::abs(angDeg(L4) - a4), 0.1);
+
+    ctx->KeyPress(ImGuiKey_Escape); // Fillet -> Select
+    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->Yield();
   };
 
   // A new sketch defaults to the Select tool; letter keys switch tools (Onshape

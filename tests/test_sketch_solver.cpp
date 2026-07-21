@@ -868,4 +868,111 @@ TEST_CASE("Expression-driven entity fields are pinned during the solve",
              WithinAbs(10.0f, 1e-4f));
 }
 
+// A sketch fillet must NEVER rotate a line — it only trims to the tangent
+// points and inserts the arc. These guard the reported staircase bug: a line
+// whose direction is locked only IMPLICITLY (transitively through the shared
+// corner) used to be dragged into a rotation when the corner was trimmed. See
+// SketchFeature::FilletCorner's direction re-anchoring.
+namespace {
+double AngleDeg(const sketch::Entity& e) {
+  const auto& l = std::get<sketch::Line>(e);
+  return std::atan2(l.b.y - l.a.y, l.b.x - l.a.x) * 180.0 / M_PI;
+}
+} // namespace
+
+TEST_CASE("Fillet preserves implicit line directions in a staircase",
+          "[solver][arc][fillet]") {
+  // The owner's live-app topology: verticality of L3 is implicit — its top
+  // shares X with the (coincident) corner, via a cross-line point-pair
+  // vertical {V, [L3.b], [L2.corner]}. Filleting the L2-L3 corner trims L2's
+  // corner off the axis; the cross-line constraint then dragged L3 off
+  // vertical (observed ~96-106 deg), including non-adjacent lines.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const uint32_t L1 = s.AddEntity(sketch::Line{{-2, 0}, {-2, 2}}); // vertical
+  const uint32_t L2 = s.AddEntity(sketch::Line{{-2, 2}, {0, 2}});  // horizontal
+  const uint32_t L3 = s.AddEntity(sketch::Line{{0, 2}, {0, 4}});   // vertical
+  const uint32_t L4 = s.AddEntity(sketch::Line{{0, 4}, {2, 4}});   // horizontal
+  s.constraints.push_back({K::Coincident, {L1, 1}, {L2, 0}});
+  s.constraints.push_back({K::Coincident, {L2, 1}, {L3, 0}}); // the fillet corner
+  s.constraints.push_back({K::Coincident, {L3, 1}, {L4, 0}});
+  s.constraints.push_back({K::Vertical, {L1, 0}, {0, 0}}); // whole-line
+  s.constraints.push_back({K::Fixed, {L1, 0}, {}});
+  s.constraints.push_back({K::Fixed, {L1, 1}, {}});
+  s.constraints.push_back({K::Horizontal, {L2, 1}, {L1, 1}}); // implicit H
+  s.constraints.push_back({K::Vertical, {L2, 1}, {sketch::kOrigin, 0}});
+  s.constraints.push_back({K::Vertical, {L3, 1}, {L2, 1}});   // implicit V
+  s.constraints.push_back({K::Horizontal, {L4, 1}, {L3, 1}}); // implicit H
+
+  {
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.Solve().ok);
+    solver.WriteBack(s.entities);
+  }
+  auto A = [&](uint32_t id) { return AngleDeg(s.entities[s.IndexOfEntity(id)]); };
+  const double b1 = A(L1), b2 = A(L2), b3 = A(L3), b4 = A(L4);
+  REQUIRE(std::abs(std::abs(b3) - 90.0) < 1e-2); // vertical before
+
+  REQUIRE(s.FilletCorner(L2, L3, 0.3) != 0);
+  {
+    sketch::Solver solver;
+    solver.Load(s);
+    const sketch::SolveResult r = solver.Solve();
+    REQUIRE(r.ok);
+    CHECK(r.conflictingConstraints.empty()); // no spurious over-constraint
+    solver.WriteBack(s.entities);
+  }
+  // Every line keeps its exact pre-fillet direction (adjacent + non-adjacent).
+  CHECK_THAT(A(L1), WithinAbs(b1, 0.1));
+  CHECK_THAT(A(L2), WithinAbs(b2, 0.1));
+  CHECK_THAT(A(L3), WithinAbs(b3, 0.1));
+  CHECK_THAT(A(L4), WithinAbs(b4, 0.1));
+}
+
+TEST_CASE("Fillet preserves a free corner's line directions",
+          "[solver][arc][fillet]") {
+  // No direction constraints at all — the re-anchoring must leave these alone.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const uint32_t l0 = s.AddEntity(sketch::Line{{0, 3}, {0, 0}});
+  const uint32_t l1 = s.AddEntity(sketch::Line{{0, 0}, {3, 1}}); // oblique
+  s.constraints.push_back({K::Coincident, {l0, 1}, {l1, 0}});
+  s.constraints.push_back({K::Fixed, {l0, 0}, {}});
+  s.constraints.push_back({K::Fixed, {l1, 1}, {}});
+  auto A = [&](uint32_t id) { return AngleDeg(s.entities[s.IndexOfEntity(id)]); };
+  const double a0 = A(l0), a1 = A(l1);
+  REQUIRE(s.FilletCorner(l0, l1, 0.3) != 0);
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.Solve().ok);
+  solver.WriteBack(s.entities);
+  CHECK_THAT(A(l0), WithinAbs(a0, 0.5));
+  CHECK_THAT(A(l1), WithinAbs(a1, 0.5));
+}
+
+TEST_CASE("Fillet on explicit H/V corner does not over-constrain",
+          "[solver][arc][fillet]") {
+  // Whole-line H/V already lock the directions — re-anchoring must not fire
+  // (nothing to retarget) and must not introduce a spurious conflict.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const uint32_t l0 = s.AddEntity(sketch::Line{{0, 3}, {0, 0}});
+  const uint32_t l1 = s.AddEntity(sketch::Line{{0, 0}, {3, 0}});
+  s.constraints.push_back({K::Coincident, {l0, 1}, {l1, 0}});
+  s.constraints.push_back({K::Vertical, {l0, 0}, {0, 0}});
+  s.constraints.push_back({K::Horizontal, {l1, 0}, {0, 0}});
+  s.constraints.push_back({K::Fixed, {l0, 0}, {}});
+  auto A = [&](uint32_t id) { return AngleDeg(s.entities[s.IndexOfEntity(id)]); };
+  REQUIRE(s.FilletCorner(l0, l1, 0.3) != 0);
+  sketch::Solver solver;
+  solver.Load(s);
+  const sketch::SolveResult r = solver.Solve();
+  REQUIRE(r.ok);
+  solver.WriteBack(s.entities);
+  CHECK(r.conflictingConstraints.empty());
+  CHECK_THAT(std::abs(A(l0)), WithinAbs(90.0, 0.1));
+  CHECK_THAT(A(l1), WithinAbs(0.0, 0.1));
+}
+
 #endif // HAVE_PLANEGCS
