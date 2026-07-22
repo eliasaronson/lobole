@@ -145,7 +145,39 @@ void MaterialLibrary::InitializeMaterials() {
         0.04f,  // Low reflectance
         "Concrete"
     };
-    
+
+    // Wood & engineered wood. Base tone only here; the grain figure is applied
+    // procedurally in the shader (see the "procedural grain" block below).
+    // Colors are the light early-wood tone — the shader darkens toward the
+    // grain lines using grainContrast, so these read as the overall hue.
+    // NOTE: these are pre-darkened to survive the scene's bright lighting rig
+    // (primary intensity 1.8 + IBL + 1.1 boost + ACES tonemap wash light
+    // albedos out ~1.4x); tuned against a render, not raw perceptual targets.
+    materials[MaterialType::WOOD_OAK] = {
+        glm::vec3(0.42f, 0.28f, 0.14f),  // Warm honey brown
+        0.0f, 0.55f, 0.4f, 0.04f, "Oak"
+    };
+    materials[MaterialType::WOOD_PINE] = {
+        glm::vec3(0.60f, 0.45f, 0.25f),  // Pale yellow
+        0.0f, 0.6f, 0.35f, 0.04f, "Pine"
+    };
+    materials[MaterialType::WOOD_WALNUT] = {
+        glm::vec3(0.085f, 0.052f, 0.033f), // Dark chocolate brown
+        0.0f, 0.5f, 0.45f, 0.04f, "Walnut"
+    };
+    materials[MaterialType::PLYWOOD_BIRCH] = {
+        glm::vec3(0.60f, 0.48f, 0.30f),  // Pale cream birch face
+        0.0f, 0.55f, 0.4f, 0.04f, "Birch Plywood"
+    };
+    materials[MaterialType::PLYWOOD_PINE] = {
+        glm::vec3(0.55f, 0.41f, 0.23f),  // Softwood ply face
+        0.0f, 0.6f, 0.35f, 0.04f, "Pine Plywood"
+    };
+    materials[MaterialType::MDF] = {
+        glm::vec3(0.40f, 0.29f, 0.19f),  // Uniform tan-brown, matte
+        0.0f, 0.75f, 0.25f, 0.04f, "MDF"
+    };
+
     // Default material
     materials[MaterialType::DEFAULT] = materials[MaterialType::ALUMINUM];
 
@@ -167,6 +199,14 @@ void MaterialLibrary::InitializeMaterials() {
     materials[MaterialType::RUBBER].density = 1200.0f;
     materials[MaterialType::GLASS].density = 2500.0f;
     materials[MaterialType::CONCRETE].density = 2400.0f;
+    // Wood densities are moisture-dependent; these are typical air-dry (~12% MC)
+    // values, well-defined enough for mass properties.
+    materials[MaterialType::WOOD_OAK].density = 700.0f;
+    materials[MaterialType::WOOD_PINE].density = 500.0f;
+    materials[MaterialType::WOOD_WALNUT].density = 610.0f;
+    materials[MaterialType::PLYWOOD_BIRCH].density = 680.0f;
+    materials[MaterialType::PLYWOOD_PINE].density = 500.0f;
+    materials[MaterialType::MDF].density = 750.0f;
 
     // Linear-elastic properties for FEM (Young's modulus GPa, Poisson ratio,
     // yield strength MPa). Representative handbook values; like density they
@@ -192,6 +232,34 @@ void MaterialLibrary::InitializeMaterials() {
     elastic(MaterialType::PLASTIC_BLACK, 2.5f, 0.35f, 50.0f);
     elastic(MaterialType::GLASS, 70.0f, 0.22f, 0.0f);
     elastic(MaterialType::CONCRETE, 30.0f, 0.20f, 0.0f);
+    // Wood is strongly anisotropic (along-grain stiffness is ~15-20x the
+    // transverse), but our FEM is linear-isotropic. These are representative
+    // ALONG-GRAIN values (modulus, and modulus-of-rupture as a yield proxy);
+    // a study treats the part as isotropic, so results are approximate and
+    // conservative only when the load happens to run along the grain. Plywood
+    // is cross-laminated so its in-plane response is closer to isotropic.
+    elastic(MaterialType::WOOD_OAK, 11.0f, 0.37f, 95.0f);
+    elastic(MaterialType::WOOD_PINE, 9.0f, 0.35f, 80.0f);
+    elastic(MaterialType::WOOD_WALNUT, 11.5f, 0.38f, 100.0f);
+    elastic(MaterialType::PLYWOOD_BIRCH, 10.0f, 0.30f, 55.0f);
+    elastic(MaterialType::PLYWOOD_PINE, 8.0f, 0.30f, 45.0f);
+    elastic(MaterialType::MDF, 3.6f, 0.25f, 18.0f);
+
+    // Procedural grain: pattern id, rings/plies per local unit, late-wood
+    // contrast (0..1). Shaded in mesh.frag from local object-space position;
+    // MDF stays flat (pattern 0). Scale is in per-mm; tune against a render.
+    auto grain = [&](MaterialType t, int pattern, float scale, float contrast) {
+        materials[t].procPattern = pattern;
+        materials[t].grainScale = scale;
+        materials[t].grainContrast = contrast;
+    };
+    grain(MaterialType::WOOD_OAK, 1, 0.15f, 0.35f);
+    grain(MaterialType::WOOD_PINE, 1, 0.09f, 0.5f);   // wide rings, strong lines
+    grain(MaterialType::WOOD_WALNUT, 1, 0.22f, 0.3f); // finer, figure-rich
+    grain(MaterialType::PLYWOOD_BIRCH, 2, 0.7f, 0.3f); // plies per mm on edges
+    grain(MaterialType::PLYWOOD_PINE, 2, 0.5f, 0.35f);
+    // MDF: pattern 0 (flat) — no grain to apply.
+
     // RUBBER and DEFAULT intentionally left at 0 (near-incompressible /
     // unassigned): a linear-static study on them errors rather than guessing.
 }
@@ -277,6 +345,12 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
         {MaterialType::RUBBER, "rubber"},
         {MaterialType::GLASS, "glass"},
         {MaterialType::CONCRETE, "concrete"},
+        {MaterialType::WOOD_OAK, "wood_oak"},
+        {MaterialType::WOOD_PINE, "wood_pine"},
+        {MaterialType::WOOD_WALNUT, "wood_walnut"},
+        {MaterialType::PLYWOOD_BIRCH, "plywood_birch"},
+        {MaterialType::PLYWOOD_PINE, "plywood_pine"},
+        {MaterialType::MDF, "mdf"},
     };
     return table;
 }

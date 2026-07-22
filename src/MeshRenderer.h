@@ -91,6 +91,13 @@ struct MeshInstance {
     // predictably.
     glm::vec4 materialParams = glm::vec4(0.0f, 0.5f, 0.5f, 0.04f);
 
+    // Procedural surface pattern (wood grain / plywood), shaded in mesh.frag
+    // from local object-space position: x = pattern id (0 flat, 1 wood,
+    // 2 plywood), y = grainScale, z = grainContrast. w = grain-axis index
+    // (0/1/2), filled per-draw from the asset bbox — not stored here. Default
+    // x = 0 leaves every existing material flat (unchanged appearance).
+    glm::vec4 procParams = glm::vec4(0.0f);
+
     // Face-highlight vertex ranges [start, end): x,y = selected; z,w = hovered
     glm::uvec4 highlight = glm::uvec4(0);
 
@@ -127,6 +134,11 @@ public:
     // specular, reflectance).
     void SetInstanceMaterial(uint32_t instanceId, const glm::vec3& albedo,
                              const glm::vec4& params);
+    // Procedural surface pattern for wood/plywood: pattern (0 flat, 1 wood,
+    // 2 plywood), grainScale, grainContrast. pattern 0 restores the default
+    // flat look. The grain axis is derived per-draw from the asset's bbox.
+    void SetInstanceProcedural(uint32_t instanceId, int pattern, float grainScale,
+                               float grainContrast);
     void SetInstanceVisible(uint32_t instanceId, bool visible);
     // Marks an instance as ghosted context geometry (A4): translucent
     // (`alpha`), no depth write, drawn after all opaque instances. Unsorted
@@ -142,6 +154,10 @@ public:
     void SetMeshColor(uint32_t instanceId, const glm::vec3& color) { SetInstanceColor(instanceId, color); }
     void SetMeshMaterial(uint32_t instanceId, const glm::vec3& albedo,
                          const glm::vec4& params) { SetInstanceMaterial(instanceId, albedo, params); }
+    void SetMeshProcedural(uint32_t instanceId, int pattern, float grainScale,
+                           float grainContrast) {
+        SetInstanceProcedural(instanceId, pattern, grainScale, grainContrast);
+    }
 
     // Face highlighting (vertex ranges within the instance's asset)
     void SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex, uint32_t count);

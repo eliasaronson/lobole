@@ -36,6 +36,9 @@ layout(push_constant) uniform PushConstants {
     vec4 material;
     // Per-instance albedo (rgb); instances of one asset can differ in color
     vec4 baseColor;
+    // Procedural grain (used in frag): x=pattern(0 flat/1 wood/2 plywood),
+    // y=grainScale, z=grainContrast, w=grain-axis index (0/1/2).
+    vec4 procMaterial;
 } pc;
 
 layout(location = 0) in vec3 inPosition;
@@ -54,11 +57,16 @@ layout(location = 12) out float fragClipDist;
 layout(location = 13) out vec4 fragShadowCoord;
 layout(location = 14) out vec4 fragShadowParams;
 layout(location = 15) out vec4 fragAOParams;
+// Local (object-space) position, for procedural grain that stays glued to the
+// part under any model/assembly transform (see mesh.frag).
+layout(location = 16) out vec3 fragLocalPos;
 
 void main() {
     // Transform position to world space
     vec4 worldPos = pc.model * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
+    // Object-space position drives procedural grain in the fragment stage.
+    fragLocalPos = inPosition;
 
     // Final position
     gl_Position = ubo.proj * ubo.view * worldPos;

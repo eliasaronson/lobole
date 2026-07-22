@@ -26,7 +26,17 @@ enum class MaterialType {
     RUBBER,
     GLASS,
     CONCRETE,
-    
+
+    // Wood & engineered wood. Appearance is a procedural surface pattern shaded
+    // in mesh.frag from local object-space position (no textures / UVs); see
+    // MaterialProperties::procPattern.
+    WOOD_OAK,
+    WOOD_PINE,
+    WOOD_WALNUT,
+    PLYWOOD_BIRCH,
+    PLYWOOD_PINE,
+    MDF,
+
     // Default
     DEFAULT
 };
@@ -47,6 +57,16 @@ struct MaterialProperties {
     float youngGPa = 0.0f;  // Young's modulus, GPa
     float poisson = 0.0f;   // Poisson's ratio (dimensionless)
     float yieldMPa = 0.0f;  // yield strength, MPa (0 = no factor-of-safety)
+
+    // Procedural surface pattern, shaded in mesh.frag from local object-space
+    // position (no textures/UVs). 0 = flat (the default for every non-wood
+    // material, and for MDF, which really is near-uniform). 1 = solid-wood
+    // grain (rings + turbulence). 2 = plywood (face veneer + ply-stripe edges).
+    // grainScale is rings/plies per local unit; grainContrast is the 0..1
+    // darkening of the late-wood bands / dark plies. Both 0 when procPattern 0.
+    int procPattern = 0;
+    float grainScale = 0.0f;
+    float grainContrast = 0.0f;
 };
 
 class MaterialLibrary {

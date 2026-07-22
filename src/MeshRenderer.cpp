@@ -207,6 +207,15 @@ void MeshRenderer::SetInstanceMaterial(uint32_t instanceId, const glm::vec3& alb
     }
 }
 
+void MeshRenderer::SetInstanceProcedural(uint32_t instanceId, int pattern,
+                                         float grainScale, float grainContrast) {
+    if (MeshInstance* instance = GetInstance(instanceId)) {
+        // .w (grain axis) is filled per-draw from the asset bbox.
+        instance->procParams = glm::vec4(static_cast<float>(pattern), grainScale,
+                                         grainContrast, 0.0f);
+    }
+}
+
 void MeshRenderer::SetInstanceVisible(uint32_t instanceId, bool visible) {
     if (MeshInstance* instance = GetInstance(instanceId)) {
         instance->visible = visible;
@@ -316,6 +325,9 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
         glm::uvec4 highlight;
         glm::vec4 material;  // metallic, roughness, specular, reflectance
         glm::vec4 baseColor; // per-instance albedo (a = ghost opacity)
+        // Procedural grain: x = pattern (0 flat, 1 wood, 2 plywood),
+        // y = grainScale, z = grainContrast, w = grain-axis index (0/1/2).
+        glm::vec4 procMaterial;
     } push;
 
     for (const bool ghostPass : {false, true}) {
@@ -333,6 +345,21 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
             push.highlight = instance->highlight;
             push.material = instance->materialParams;
             push.baseColor = instance->baseColor;
+            push.procMaterial = instance->procParams;
+            if (instance->procParams.x > 0.5f) {
+                // Derive the grain axis from the asset's local bbox: solid wood
+                // (pattern 1) runs the grain along the LONGEST extent (a board's
+                // length); plywood (pattern 2) lays its plies across the
+                // THINNEST extent (the sheet thickness). Cheap enough per-draw.
+                const glm::vec3 ext = asset->bboxMax - asset->bboxMin;
+                const bool plywood = instance->procParams.x > 1.5f;
+                int axis = 0;
+                for (int a = 1; a < 3; ++a) {
+                    if (plywood ? (ext[a] < ext[axis]) : (ext[a] > ext[axis]))
+                        axis = a;
+                }
+                push.procMaterial.w = static_cast<float>(axis);
+            }
             vkCmdPushConstants(commandBuffer, m_pipelineLayout,
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                                0, sizeof(push), &push);
@@ -597,13 +624,16 @@ bool MeshRenderer::CreateGraphicsPipeline() {
 
     // Pipeline layout
     // Per-instance model matrix + highlight ranges (vertex) + PBR material +
-    // albedo (fragment) via push constants
+    // albedo + procedural-grain params (fragment) via push constants. The
+    // total is 128 bytes, exactly the Vulkan-guaranteed maxPushConstantsSize
+    // floor — adding the proc vec4 leaves no further headroom here.
     VkPushConstantRange pushConstantRange{};
     pushConstantRange.stageFlags =
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset = 0;
     pushConstantRange.size = sizeof(glm::mat4) + sizeof(glm::uvec4) +
-                             sizeof(glm::vec4) + sizeof(glm::vec4);
+                             sizeof(glm::vec4) + sizeof(glm::vec4) +
+                             sizeof(glm::vec4);
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

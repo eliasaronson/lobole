@@ -776,6 +776,10 @@ struct SharedBody {
   bool hasMaterial = false;
   glm::vec3 albedo;
   glm::vec4 pbr;
+  // Procedural wood/plywood grain: pattern, grainScale, grainContrast.
+  int procPattern = 0;
+  float grainScale = 0.0f;
+  float grainContrast = 0.0f;
 };
 } // namespace
 
@@ -819,6 +823,9 @@ void SyncAssemblyRenderers(AppState& state) {
           sb.albedo = mat.baseColor;
           sb.pbr = glm::vec4(mat.metallic, mat.roughness, mat.specular,
                              mat.reflectance);
+          sb.procPattern = mat.procPattern;
+          sb.grainScale = mat.grainScale;
+          sb.grainContrast = mat.grainContrast;
         }
         shared.push_back(std::move(sb));
       }
@@ -831,10 +838,13 @@ void SyncAssemblyRenderers(AppState& state) {
       if (sb.assetId == 0)
         continue; // empty body
       uint32_t meshId = state.meshRenderer->AddInstance(sb.assetId, xf);
-      if (sb.hasMaterial)
+      if (sb.hasMaterial) {
         state.meshRenderer->SetInstanceMaterial(meshId, sb.albedo, sb.pbr);
-      else
+        state.meshRenderer->SetInstanceProcedural(meshId, sb.procPattern,
+                                                  sb.grainScale, sb.grainContrast);
+      } else {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
+      }
       uint32_t outlineId = 0;
       if (state.outlineRenderer) {
         // Untransformed vertices + a per-mesh model matrix (A2.5): the outline

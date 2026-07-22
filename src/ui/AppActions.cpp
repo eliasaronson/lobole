@@ -2130,6 +2130,10 @@ void SyncDocumentRenderers(AppState& state) {
       state.meshRenderer->SetMeshMaterial(
           meshId, mat.baseColor,
           glm::vec4(mat.metallic, mat.roughness, mat.specular, mat.reflectance));
+      // Procedural wood/plywood grain (pattern 0 = flat, so non-wood materials
+      // pass through unchanged).
+      state.meshRenderer->SetMeshProcedural(meshId, mat.procPattern,
+                                            mat.grainScale, mat.grainContrast);
       albedo = mat.baseColor;
     }
     bodyColors[bi] = albedo; // section caps reuse the body's color
