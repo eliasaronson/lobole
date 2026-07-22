@@ -2,6 +2,8 @@
 
 #include "core/io/Serialization.h"
 
+#include <set>
+
 uint64_t NextActionStamp() {
   static uint64_t clock = 0;
   return ++clock;
@@ -44,6 +46,43 @@ bool RemoveFeatureCommand::Execute(Document& doc) {
 void RemoveFeatureCommand::Undo(Document& doc) {
   doc.InsertFeature(std::move(m_removed), m_index);
 }
+
+MoveFeatureCommand::MoveFeatureCommand(size_t from, size_t to)
+    : m_from(from), m_to(to) {}
+
+std::string MoveFeatureCommand::Description() const { return "Reorder feature"; }
+
+bool MoveFeatureCommand::Execute(Document& doc) {
+  m_broken.clear();
+  if (m_from == m_to) {
+    return false;
+  }
+  // Baseline: which features already carry an error, keyed by stable id (the
+  // move shifts indices). A pre-existing error must not block reordering
+  // features unrelated to it.
+  std::set<uint64_t> preErrored;
+  for (const auto& f : doc.GetFeatures()) {
+    if (!f->GetError().empty()) {
+      preErrored.insert(f->GetId());
+    }
+  }
+  if (!doc.MoveFeature(m_from, m_to)) {
+    return false;
+  }
+  // Trial-regen validity: any feature that was clean before but errors now
+  // means the new order dangles a reference (e.g. an extrude ahead of the
+  // sketch it consumes). Revert and reject, naming the first casualty.
+  for (const auto& f : doc.GetFeatures()) {
+    if (!f->GetError().empty() && !preErrored.contains(f->GetId())) {
+      m_broken = f->GetName();
+      doc.MoveFeature(m_to, m_from);  // restore the original order
+      return false;
+    }
+  }
+  return true;
+}
+
+void MoveFeatureCommand::Undo(Document& doc) { doc.MoveFeature(m_to, m_from); }
 
 ModifyFeatureCommand::ModifyFeatureCommand(size_t index,
                                            nlohmann::json before,

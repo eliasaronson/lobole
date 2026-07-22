@@ -93,8 +93,24 @@ void DrawFeatureTreePanel(AppState& state) {
     }
 
     ImGui::SeparatorText("Features");
+    // Transient refusal shown when a drag-reorder would dangle a reference
+    // (fades after ~5 s). Written by the deferred-move handler below.
+    static std::string moveError;
+    static double moveErrorAt = -100.0;
+    if (!moveError.empty()) {
+      if (ImGui::GetTime() - moveErrorAt < 5.0) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.45f, 0.42f, 1.0f));
+        ImGui::TextWrapped("%s", moveError.c_str());
+        ImGui::PopStyleColor();
+      } else {
+        moveError.clear();
+      }
+    }
     const int rollback = doc->Rollback();
     const size_t count = doc->FeatureCount();
+    // Drag-reorder request captured this frame, applied after the list is
+    // drawn (mutating the feature vector mid-loop invalidates iteration).
+    int moveFrom = -1, moveTo = -1;
     // Inline rename (context menu > Rename): the row becomes a text field.
     static int renaming = -1;
     static char renameBuf[128];
@@ -180,6 +196,24 @@ void DrawFeatureTreePanel(AppState& state) {
         } else if (ImGui::IsMouseDoubleClicked(0)) {
           ImGui::SetWindowFocus("Properties");
         }
+      }
+      // Drag a row onto another to reorder (validated on drop). The row being
+      // renamed `continue`s above, so it is never a drag source. Placed right
+      // after the Selectable so it, not the tooltip below, is the drag item.
+      if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+        int src = static_cast<int>(i);
+        ImGui::SetDragDropPayload("REORDER_FEATURE", &src, sizeof(int));
+        ImGui::Text("%s %s", FeatureIcon(feature->TypeName()),
+                    feature->GetName().c_str());
+        ImGui::EndDragDropSource();
+      }
+      if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* pl =
+                ImGui::AcceptDragDropPayload("REORDER_FEATURE")) {
+          moveFrom = *static_cast<const int*>(pl->Data);
+          moveTo = static_cast<int>(i);
+        }
+        ImGui::EndDragDropTarget();
       }
       if (errored) {
         ImGui::PopStyleColor();
@@ -358,6 +392,25 @@ void DrawFeatureTreePanel(AppState& state) {
       ImGui::PopID();
       if (committed)
         break; // redraw next frame against the regenerated body list
+    }
+
+    // Apply a deferred drag-reorder now that the frame's drawing is done. The
+    // command regenerates and, on a dependency violation, reverts itself and
+    // reports the casualty; the new order shows next frame. Effect is already
+    // applied by Execute(), so push (not re-Execute) it onto the undo stack.
+    if (moveFrom >= 0 && moveTo >= 0 && moveFrom != moveTo) {
+      auto cmd = std::make_unique<MoveFeatureCommand>(
+          static_cast<size_t>(moveFrom), static_cast<size_t>(moveTo));
+      if (cmd->Execute(*doc)) {
+        moveError.clear();
+        state.commands->PushApplied(std::move(cmd));
+      } else {
+        moveError = cmd->BrokenFeature().empty()
+                        ? std::string("Can't reorder the feature there.")
+                        : "Can't move here \xe2\x80\x94 it would break '" +
+                              cmd->BrokenFeature() + "'.";
+        moveErrorAt = ImGui::GetTime();
+      }
     }
   }
 

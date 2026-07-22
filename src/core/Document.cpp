@@ -55,6 +55,20 @@ std::unique_ptr<Feature> Document::RemoveFeature(size_t index) {
   return removed;
 }
 
+bool Document::MoveFeature(size_t from, size_t to) {
+  if (from >= m_features.size() || to >= m_features.size() || from == to) {
+    return false;
+  }
+  // Erase-then-insert-at-`to` gives the natural drag behavior in both
+  // directions: dragging down lands the feature after the drop target,
+  // dragging up lands it before (like ImGui's reorderable-list example).
+  std::unique_ptr<Feature> moved = std::move(m_features[from]);
+  m_features.erase(m_features.begin() + from);
+  m_features.insert(m_features.begin() + to, std::move(moved));
+  Regenerate();
+  return true;
+}
+
 bool Document::ReplaceFeature(size_t index, std::unique_ptr<Feature> feature) {
   if (index >= m_features.size() || !feature) {
     return false;

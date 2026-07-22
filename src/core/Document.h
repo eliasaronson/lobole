@@ -60,6 +60,13 @@ public:
   void InsertFeature(std::unique_ptr<Feature> feature, size_t index);
   std::unique_ptr<Feature> RemoveFeature(size_t index);
 
+  // Moves the feature at `from` so its new index becomes `to`, then
+  // regenerates once. Returns false (document unchanged) if either index is
+  // out of range or from == to. Reordering can dangle a downstream reference
+  // (an extrude dragged before its sketch); that surfaces as a per-feature
+  // regen error, which MoveFeatureCommand reads to accept or reject the move.
+  bool MoveFeature(size_t from, size_t to);
+
   // Swaps the feature at index and regenerates. Returns false (and leaves
   // the document unchanged) if index is out of range or feature is null.
   bool ReplaceFeature(size_t index, std::unique_ptr<Feature> feature);

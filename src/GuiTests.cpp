@@ -157,6 +157,33 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)0);
   };
 
+  t = IM_REGISTER_TEST(engine, "document", "feature_tree_drag_reorder");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");     // Box 1    -> index 0
+    ToolbarCreateAccept(ctx, "###tb_sphere");  // Sphere 1 -> index 1
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    const std::string a = Doc()->GetFeature(0)->GetName();
+    const std::string b = Doc()->GetFeature(1)->GetName();
+
+    // Drag the second row onto the first: two independent solids reorder
+    // freely, so the move commits.
+    ctx->ItemDragAndDrop(("//Model/" + b + "##1").c_str(),
+                         ("//Model/" + a + "##0").c_str());
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetFeature(0)->GetName(), b);
+    IM_CHECK_EQ(Doc()->GetFeature(1)->GetName(), a);
+
+    // One undoable command puts the order back.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetFeature(0)->GetName(), a);
+    IM_CHECK_EQ(Doc()->GetFeature(1)->GetName(), b);
+  };
+
   t = IM_REGISTER_TEST(engine, "properties", "edit_box_width_undo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

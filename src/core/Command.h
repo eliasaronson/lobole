@@ -65,6 +65,28 @@ private:
   std::string m_description;
 };
 
+// Reorders one feature (drag in the feature tree). Execute performs the move
+// and regenerates; if the new order dangles a reference — some feature that was
+// error-free now fails to regenerate — it reverts and returns false, naming the
+// broken feature through BrokenFeature() so the UI can explain the refusal.
+// Undo moves the feature back to its original position.
+class MoveFeatureCommand : public Command {
+public:
+  MoveFeatureCommand(size_t from, size_t to);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+  // After a rejected Execute: the name of the feature the move would break
+  // (empty when the move succeeded, or failed for a non-dependency reason).
+  const std::string& BrokenFeature() const { return m_broken; }
+
+private:
+  size_t m_from, m_to;
+  std::string m_broken;
+};
+
 // Parameter edit of one feature, snapshotted as JSON before/after. Execute
 // rebuilds the feature from the "after" snapshot, so it is idempotent: the
 // UI can mutate the feature live during a drag and still push this command
