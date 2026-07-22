@@ -325,6 +325,15 @@ void DrawSketchModeToolbar(AppState& state) {
   conBtn("T", "Tangent (T)", K::Tangent);
   conBtn(ICON_FA_EQUALS, "Equal (E)", K::Equal);
   conBtn(ICON_FA_CIRCLE, "Concentric", K::Concentric);
+  // The less-common relational constraints (formerly the Sketch panel's "More
+  // constraints" row). ApplySketchConstraint validates the selection and no-ops
+  // with a hint if it doesn't fit. Dimensional constraints are not here — the
+  // Dimension tool (D) covers distance / radius / diameter / angle.
+  conBtn("L", "Point on line (point + line)", K::PointOnLine);
+  conBtn("Sym", "Symmetric (2 points + a line)", K::Symmetric);
+  conBtn("Mid", "Midpoint (point + line)", K::Midpoint);
+  conBtn(ICON_FA_LOCK, "Fix — pin a point", K::Fixed);
+  conBtn("Col", "Collinear (2 lines)", K::Collinear);
   Divider();
 
   ImGui::BeginDisabled(!hasSel);
