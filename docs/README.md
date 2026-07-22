@@ -8,6 +8,8 @@ top-level vision + workstream index and holds the recommended sequencing.
 - **[roadmap.md](roadmap.md)** — vision (checkpoints, variables, scripting,
   git, LLM-parity), the headless-core architecture, current state, the
   workstream table, and sequencing.
+- **[known-bugs.md](known-bugs.md)** — running list of confirmed, unfixed
+  defects (symptom + root cause + likely fix); cleared as fixes land.
 - **[sketching/](sketching/plan.md)** — the 2D constraint sketcher. **Complete**
   (A–N + follow-ups; B-splines deferred). `phase-*.md` are the per-phase
   implementation plans.
