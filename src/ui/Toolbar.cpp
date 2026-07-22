@@ -338,11 +338,14 @@ void DrawSketchModeToolbar(AppState& state) {
     ImGui::SameLine();
   };
   // Which variant each group currently holds (remembered across frames).
+  static int circleVariant = 0;
   static int rectVariant = 0;
   static int arcVariant = 0;
 
   toolBtn(ICON_FA_SLASH, "Line (L)", SketchTool::Line);
-  toolBtn(ICON_FA_CIRCLE_NOTCH, "Circle (C)", SketchTool::Circle);
+  toolGroup("circlegrp", circleVariant,
+            {{ICON_FA_CIRCLE_NOTCH, "Circle (C)", SketchTool::Circle},
+             {ICON_FA_EGG, "Ellipse", SketchTool::Ellipse}});
   toolGroup("rectgrp", rectVariant,
             {{ICON_FA_VECTOR_SQUARE, "Rectangle (G)", SketchTool::Rectangle},
              {ICON_FA_EXPAND, "Center Rectangle (Shift+G)",
@@ -351,8 +354,10 @@ void DrawSketchModeToolbar(AppState& state) {
             {{ICON_FA_BEZIER_CURVE, "3-Point Arc (A)",
               SketchTool::ArcThreePoint},
              {ICON_FA_BEZIER_CURVE, "Center Arc (centre, start, end)",
-              SketchTool::Arc}});
-  toolBtn(ICON_FA_EGG, "Ellipse", SketchTool::Ellipse);
+              SketchTool::Arc},
+             {ICON_FA_BEZIER_CURVE,
+              "Elliptic Arc (centre, major, minor, start, end)",
+              SketchTool::EllipseArc}});
   toolBtn(ICON_FA_PEN_NIB, "Spline (S)", SketchTool::Spline);
   toolBtn(ICON_FA_CIRCLE_DOT, "Point", SketchTool::Point);
   toolBtn(ICON_FA_SCISSORS, "Trim (M)", SketchTool::Trim);

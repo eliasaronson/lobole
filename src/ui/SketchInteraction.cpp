@@ -627,6 +627,7 @@ static void HandleSketchKeys(AppState& state) {
   auto setTool = [&](SketchTool t) {
     edit.tool = t;
     edit.hasPendingPoint = edit.hasPendingPoint2 = false;
+    edit.hasPendingPoint3 = edit.hasPendingPoint4 = false;
     edit.splinePoles.clear();
     edit.mirrorAxisPhase = false;
     edit.dimPickBody.clear();
@@ -1277,9 +1278,13 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.dimPlacing = false; // back to target accumulation (targets kept)
     } else if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty()) {
       edit.splinePoles.clear(); // cancel the in-progress spline
-    } else if (edit.hasPendingPoint || edit.hasPendingPoint2 || edit.boxActive) {
+    } else if (edit.hasPendingPoint || edit.hasPendingPoint2 ||
+               edit.hasPendingPoint3 || edit.hasPendingPoint4 ||
+               edit.boxActive) {
       edit.hasPendingPoint = false;
       edit.hasPendingPoint2 = false;
+      edit.hasPendingPoint3 = false;
+      edit.hasPendingPoint4 = false;
       edit.boxActive = false;
     } else if (edit.tool == SketchTool::Mirror && edit.mirrorAxisPhase) {
       edit.mirrorAxisPhase = false; // axis-pick → back to collecting geometry
@@ -1336,7 +1341,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.tool == SketchTool::Circle || edit.tool == SketchTool::Rectangle ||
       edit.tool == SketchTool::RectangleCenter ||
       edit.tool == SketchTool::Arc || edit.tool == SketchTool::ArcThreePoint ||
-      edit.tool == SketchTool::Ellipse || edit.tool == SketchTool::Spline;
+      edit.tool == SketchTool::Ellipse ||
+      edit.tool == SketchTool::EllipseArc || edit.tool == SketchTool::Spline;
   const bool infer = drawTool && edit.autoConstrain && !ImGui::GetIO().KeyCtrl;
   if (infer) {
     const float ppu = PixelsPerUV(state, sketch->plane, uv);
@@ -1788,6 +1794,41 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         edit.hasPendingPoint = false;
         edit.hasPendingPoint2 = false;
       }
+    } else if (edit.tool == SketchTool::EllipseArc) {
+      // 5-click: centre → major-axis end → minor radius → start → end. The
+      // first three define the ellipse; the last two pick the swept params.
+      if (!edit.hasPendingPoint) {
+        edit.pendingPoint = uv;
+        edit.hasPendingPoint = true;
+      } else if (!edit.hasPendingPoint2) {
+        edit.pendingPoint2 = uv;
+        edit.hasPendingPoint2 = true;
+      } else if (!edit.hasPendingPoint3) {
+        edit.pendingPoint3 = uv;
+        edit.hasPendingPoint3 = true;
+      } else if (!edit.hasPendingPoint4) {
+        edit.pendingPoint4 = uv;
+        edit.hasPendingPoint4 = true;
+      } else {
+        const sketch::Ellipse el = sketch::EllipseFromClicks(
+            edit.pendingPoint, edit.pendingPoint2, edit.pendingPoint3);
+        if (el.rMajor > 1e-6 && el.rMinor > 1e-6) {
+          double sp = sketch::EllipseParamOfPoint(el.center, el.rMajor,
+                                                  el.rMinor, el.rotation,
+                                                  edit.pendingPoint4);
+          double ep = sketch::EllipseParamOfPoint(el.center, el.rMajor,
+                                                  el.rMinor, el.rotation, uv);
+          // CCW-always: keep the swept range (ep - sp) in (0, 2π].
+          while (ep <= sp)
+            ep += glm::two_pi<double>();
+          CommitEntity(state, *sketch, index,
+                       sketch::EllipseArc{el.center, el.rMajor, el.rMinor,
+                                          el.rotation, sp, ep},
+                       infer);
+        }
+        edit.hasPendingPoint = edit.hasPendingPoint2 = false;
+        edit.hasPendingPoint3 = edit.hasPendingPoint4 = false;
+      }
     } else if (!edit.hasPendingPoint) {
       edit.pendingPoint = uv;
       edit.hasPendingPoint = true;
@@ -1965,6 +2006,31 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
     else // major axis placed: live ellipse to the cursor's minor radius
       poly = sketch::TessellateEntity(
           sketch::EllipseFromClicks(a, edit.pendingPoint2, b));
+    break;
+  case SketchTool::EllipseArc:
+    if (!edit.hasPendingPoint2) {
+      poly = {a, b}; // centre placed: preview the major axis
+    } else if (!edit.hasPendingPoint3) {
+      poly = sketch::TessellateEntity( // major placed: live ellipse (minor)
+          sketch::EllipseFromClicks(a, edit.pendingPoint2, b));
+    } else {
+      // Ellipse is fixed; show the whole ellipse until the start is picked,
+      // then the live start→cursor arc.
+      const sketch::Ellipse el =
+          sketch::EllipseFromClicks(a, edit.pendingPoint2, edit.pendingPoint3);
+      if (!edit.hasPendingPoint4) {
+        poly = sketch::TessellateEntity(el);
+      } else {
+        double sp = sketch::EllipseParamOfPoint(el.center, el.rMajor, el.rMinor,
+                                                el.rotation, edit.pendingPoint4);
+        double ep = sketch::EllipseParamOfPoint(el.center, el.rMajor, el.rMinor,
+                                                el.rotation, b);
+        while (ep <= sp)
+          ep += glm::two_pi<double>();
+        poly = sketch::TessellateEntity(sketch::EllipseArc{
+            el.center, el.rMajor, el.rMinor, el.rotation, sp, ep});
+      }
+    }
     break;
   default:
     return;
@@ -2179,6 +2245,20 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
             ? "click the second point (a known distance apart)"
             : "enter the real distance in the Sketch panel, then Apply");
     break;
+  case T::EllipseArc: {
+    const int st = edit.hasPendingPoint4   ? 5
+                   : edit.hasPendingPoint3 ? 4
+                   : edit.hasPendingPoint2 ? 3
+                   : edit.hasPendingPoint  ? 2
+                                           : 1;
+    set("Elliptic Arc", st, 5,
+        st == 1   ? "click the centre"
+        : st == 2 ? "click the major-axis end"
+        : st == 3 ? "click to set the minor radius"
+        : st == 4 ? "click the arc's start point"
+                  : "click the arc's end point");
+    break;
+  }
   }
   return p;
 }

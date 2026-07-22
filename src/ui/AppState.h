@@ -69,8 +69,9 @@ enum class SketchTool {
   Dimension,     // clicks accumulate targets; the tool infers the dim kind
   RectangleCenter, // 2-click rectangle: centre, then a corner
   Project,       // click a body edge/face -> live projected construction geom
-  CalibrateImage // click two points on a reference image, then type the real
-                 // distance between them to scale the image (v49)
+  CalibrateImage, // click two points on a reference image, then type the real
+                  // distance between them to scale the image (v49)
+  EllipseArc     // 5-click: centre, major-axis end, minor radius, start, end
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -85,6 +86,12 @@ struct SketchEditState {
   glm::vec2 pendingPoint{0.0f};
   bool hasPendingPoint2 = false; // second click of a 3-click tool (arcs)
   glm::vec2 pendingPoint2{0.0f};
+  // Third/fourth clicks — only the 5-click elliptic-arc tool uses these
+  // (centre, major-axis end, minor radius, start; the 5th click commits).
+  bool hasPendingPoint3 = false;
+  glm::vec2 pendingPoint3{0.0f};
+  bool hasPendingPoint4 = false;
+  glm::vec2 pendingPoint4{0.0f};
   glm::vec2 hoverPoint{0.0f};
   // Spline tool: control poles placed so far. Committed as a BSpline on Enter
   // or a double-click (>= 2 poles); Escape or a tool switch clears them.
