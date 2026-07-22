@@ -192,6 +192,114 @@ bool WriteTextAtomic(const std::filesystem::path& target,
   return true;
 }
 
+// Binary sibling of WriteTextAtomic for reference-image pixel files (v49):
+// same temp+rename + identical-content skip, but byte-exact (no text-mode
+// translation).
+bool WriteBytesAtomic(const std::filesystem::path& target,
+                      const std::vector<unsigned char>& bytes,
+                      std::string* error) {
+  {
+    std::ifstream existing(target, std::ios::binary);
+    if (existing) {
+      std::string current((std::istreambuf_iterator<char>(existing)),
+                          std::istreambuf_iterator<char>());
+      if (current.size() == bytes.size() &&
+          std::equal(bytes.begin(), bytes.end(), current.begin()))
+        return true;
+    }
+  }
+  const std::filesystem::path tmp = target.string() + ".tmp";
+  {
+    std::ofstream out(tmp, std::ios::binary);
+    if (!out) {
+      if (error) *error = "Cannot open file for writing: " + tmp.string();
+      return false;
+    }
+    out.write(reinterpret_cast<const char*>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+  }
+  std::error_code ec;
+  std::filesystem::rename(tmp, target, ec);
+  if (ec) {
+    if (error) *error = "rename failed: " + ec.message();
+    return false;
+  }
+  return true;
+}
+
+// ---- Reference-image (v49) asset transport --------------------------------
+// Pixel bytes live outside the feature JSON so it stays small and diffable: an
+// assets/<name> file in the directory format, a base64 blob under a document-
+// root "assets" map in the single-file form. FeatureToJson/FromJson carry only
+// the metadata + `asset` name; these helpers move the bytes.
+
+std::string Base64Encode(const std::vector<unsigned char>& in) {
+  static constexpr char kTab[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  out.reserve((in.size() + 2) / 3 * 4);
+  size_t i = 0;
+  for (; i + 3 <= in.size(); i += 3) {
+    const uint32_t n = (uint32_t(in[i]) << 16) | (uint32_t(in[i + 1]) << 8) |
+                       uint32_t(in[i + 2]);
+    out.push_back(kTab[(n >> 18) & 63]);
+    out.push_back(kTab[(n >> 12) & 63]);
+    out.push_back(kTab[(n >> 6) & 63]);
+    out.push_back(kTab[n & 63]);
+  }
+  if (i + 1 == in.size()) {
+    const uint32_t n = uint32_t(in[i]) << 16;
+    out.push_back(kTab[(n >> 18) & 63]);
+    out.push_back(kTab[(n >> 12) & 63]);
+    out.push_back('=');
+    out.push_back('=');
+  } else if (i + 2 == in.size()) {
+    const uint32_t n = (uint32_t(in[i]) << 16) | (uint32_t(in[i + 1]) << 8);
+    out.push_back(kTab[(n >> 18) & 63]);
+    out.push_back(kTab[(n >> 12) & 63]);
+    out.push_back(kTab[(n >> 6) & 63]);
+    out.push_back('=');
+  }
+  return out;
+}
+
+std::vector<unsigned char> Base64Decode(const std::string& in) {
+  auto val = [](char c) -> int {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1; // '=' padding and any whitespace are skipped
+  };
+  std::vector<unsigned char> out;
+  out.reserve(in.size() / 4 * 3);
+  int buf = 0, bits = 0;
+  for (char c : in) {
+    const int v = val(c);
+    if (v < 0) continue;
+    buf = (buf << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push_back(static_cast<unsigned char>((buf >> bits) & 0xFF));
+    }
+  }
+  return out;
+}
+
+// Asset names actually referenced by a reference image somewhere in the doc —
+// so serialization persists only live assets and prunes orphans.
+std::set<std::string> ReferencedAssets(const Document& doc) {
+  std::set<std::string> names;
+  for (const auto& f : doc.GetFeatures())
+    if (auto* sk = dynamic_cast<const SketchFeature*>(f.get()))
+      for (const auto& img : sk->images)
+        if (!img.asset.empty())
+          names.insert(img.asset);
+  return names;
+}
+
 // Directory format (F3, docs/versioning/f3-directory-format.md): one file
 // per feature named by stable id, an ordered index written LAST (a torn
 // save leaves a stale-but-loadable index), document-level parameters file.
@@ -278,6 +386,26 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           fs::remove(entry.path(), ec);
       }
     }
+    // Reference-image pixel files (v49) under assets/, pruned like features/.
+    // The dir stays absent when there are no images, so a pre-v49 document
+    // re-saves byte-identically.
+    {
+      const std::set<std::string> wantedAssets = ReferencedAssets(doc);
+      if (!wantedAssets.empty()) {
+        const fs::path assetDir = dir / "assets";
+        fs::create_directories(assetDir);
+        for (const std::string& name : wantedAssets) {
+          const std::vector<unsigned char>* bytes = doc.GetAsset(name);
+          if (!bytes || bytes->empty())
+            continue;
+          if (!WriteBytesAtomic(assetDir / name, *bytes, error))
+            return false;
+        }
+        for (const auto& entry : fs::directory_iterator(assetDir, ec))
+          if (!wantedAssets.contains(entry.path().filename().string()))
+            fs::remove(entry.path(), ec);
+      }
+    }
     // Parameters live in the index envelope (small, diff-friendly there).
     if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
       return false;
@@ -341,6 +469,16 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       }
       std::ifstream fin(it->second);
       doc->AddFeature(FeatureFromJson(json::parse(fin)));
+    }
+    // Reference-image bytes (v49) from assets/ into the doc store (absent dir ⇒
+    // nothing to do). Only assets an image references are loaded.
+    for (const std::string& name : ReferencedAssets(*doc)) {
+      std::ifstream ain(fs::path(dirPath) / "assets" / name, std::ios::binary);
+      if (ain) {
+        std::string data((std::istreambuf_iterator<char>(ain)),
+                         std::istreambuf_iterator<char>());
+        doc->SetAsset(name, std::vector<unsigned char>(data.begin(), data.end()));
+      }
     }
     // Topology results (v33) loaded below but stored after the final regen.
     std::vector<std::pair<uint64_t, fem::StudyRuntime>> pendingResults;
@@ -679,6 +817,18 @@ bool Save(const Document& doc, const std::string& path, std::string* error) {
       for (const Configuration& c : doc.GetConfigurations())
         j["configurations"].push_back(ConfigurationToJson(c));
     }
+    // Reference-image bytes (v49) base64 under a document-root "assets" map so
+    // the single-file form stays self-contained. Absent when there are none.
+    {
+      json assets = json::object();
+      for (const std::string& name : ReferencedAssets(doc)) {
+        const std::vector<unsigned char>* bytes = doc.GetAsset(name);
+        if (bytes && !bytes->empty())
+          assets[name] = Base64Encode(*bytes);
+      }
+      if (!assets.empty())
+        j["assets"] = std::move(assets);
+    }
 
     std::ofstream out(path);
     if (!out) {
@@ -734,6 +884,11 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
     for (const auto& fj : j.at("features")) {
       doc->AddFeature(FeatureFromJson(fj));
     }
+    // Reference-image bytes (v49): decode the base64 "assets" map into the doc
+    // asset store.
+    if (j.contains("assets"))
+      for (const auto& [name, b64] : j.at("assets").items())
+        doc->SetAsset(name, Base64Decode(b64.get<std::string>()));
     for (const auto& sj : j.value("studies", json::array())) {  // v29
       doc->RestoreStudy(StudyFromJson(sj));
     }

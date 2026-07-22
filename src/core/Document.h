@@ -243,6 +243,24 @@ public:
 
   const std::vector<Body>& GetBodies() const { return m_bodies; }
 
+  // ---- Reference-image assets (v49) -------------------------------------
+  // Raw pixel bytes for sketch reference images (docs/sketch/reference-image-
+  // plan.md), keyed by asset name. Kept at document scope — NOT on the sketch
+  // feature — so they survive undo/redo (which rebuilds features from JSON,
+  // and JSON never carries the bytes) and so the renderer decodes each asset
+  // into a texture once no matter how many images reference it. Serialization
+  // persists only the assets an image actually references.
+  void SetAsset(const std::string& name, std::vector<unsigned char> bytes) {
+    m_assets[name] = std::move(bytes);
+  }
+  const std::vector<unsigned char>* GetAsset(const std::string& name) const {
+    auto it = m_assets.find(name);
+    return it == m_assets.end() ? nullptr : &it->second;
+  }
+  const std::map<std::string, std::vector<unsigned char>>& GetAssets() const {
+    return m_assets;
+  }
+
   // Incremented on every regeneration; lets the UI detect when to re-upload
   // render meshes without observing individual edits.
   uint64_t Version() const { return m_version; }
@@ -284,6 +302,7 @@ private:
   void EvaluateParameters();
 
   std::vector<std::unique_ptr<Feature>> m_features;
+  std::map<std::string, std::vector<unsigned char>> m_assets; // v49 image pixels
   std::vector<Body> m_bodies;
   std::vector<Parameter> m_parameters;
   std::vector<fem::Study> m_studies;

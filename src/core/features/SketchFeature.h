@@ -99,6 +99,31 @@ struct BSpline {
 using Entity =
     std::variant<Point, Line, Circle, Arc, Ellipse, EllipseArc, BSpline>;
 
+// A reference image ("underlay", v49): a raster (PNG/JPEG/BMP) placed on the
+// sketch plane to trace geometry over. It is deliberately NOT a sketch Entity —
+// it carries no curve, contributes nothing to the profile, the constraint
+// solver, or the regen geometry, and never extrudes. Placement is a rigid 2D
+// affine in plane-UV space: image pixel (px, py) maps to
+//   origin + R(rotation) * (vec2(px, py) * unitsPerPixel).
+// The raw file bytes are NOT stored here — they live on the owning Document's
+// asset store keyed by `asset` (Document::GetAsset), so they survive undo/redo
+// and the renderer can decode each asset into a texture once. Persisted out-of-
+// band — an assets/ file in the directory format, a base64 blob in the single-
+// file form — so the feature JSON stays small and diff-friendly.
+// `widthPx`/`heightPx` are cached so sizing and calibration never need an image
+// decoder (headless builds have none).
+struct ReferenceImage {
+  uint32_t id = 0;               // stable within the sketch (1-based; 0 = none)
+  std::string asset;             // Document asset key for the pixel data
+  glm::vec2 origin{0.0f, 0.0f};  // plane-UV of the image's (0,0) pixel corner
+  double rotation = 0.0;         // radians CCW about `origin`
+  double unitsPerPixel = 1.0;    // plane units per image pixel (the scale)
+  double opacity = 0.5;          // 0..1 blend over the sketch background
+  int widthPx = 0;               // cached pixel dimensions
+  int heightPx = 0;
+  bool hidden = false;
+};
+
 // Effective degree of a spline: cubic by default, reduced so a spline with few
 // poles stays valid (degree <= poles-1). 0 for a degenerate (<2 poles) spline.
 inline int BSplineDegree(const BSpline& s) {
@@ -667,6 +692,22 @@ public:
 
   // Appends `e` with a freshly stamped stable id and returns that id.
   uint32_t AddEntity(sketch::Entity e);
+
+  // Appends a reference image (v49) with a freshly stamped stable id; returns
+  // the id. If `img.asset` is empty it is assigned a stable default derived
+  // from this feature's id and the new image id (the importer may override it).
+  uint32_t AddImage(sketch::ReferenceImage img);
+  // Index of the reference image with `id`, or SIZE_MAX if none.
+  size_t IndexOfImage(uint32_t id) const;
+  // Removes the reference image with `id`; returns true if one was removed.
+  bool DeleteImage(uint32_t id);
+  // Re-scales/aligns image `id` so its two picked plane-UV points `p1`, `p2`
+  // sit `distance` plane units apart. `p1` is held fixed. When `alignAxis` is
+  // 0 (horizontal) or 1 (vertical) the image is also rotated so the p1->p2 line
+  // lands on that axis; any other value leaves the rotation unchanged. No-op
+  // (returns false) if `id` is unknown or the two points coincide.
+  bool CalibrateImage(uint32_t id, glm::vec2 p1, glm::vec2 p2, double distance,
+                      int alignAxis = -1);
   // Index of the entity with the given id, or SIZE_MAX if none. Linear scan —
   // sketches hold few entities, and this avoids a desync-prone cached map.
   size_t IndexOfEntity(uint32_t id) const;
@@ -805,6 +846,10 @@ public:
   // precedence over planeRef; mutually exclusive with it in practice.
   ElementRef faceRef;
   std::vector<sketch::Entity> entities;
+  // Reference underlays (v49). Cosmetic: excluded from the profile, the solve,
+  // and the regen geometry hash (toggling one must not rebuild downstream).
+  std::vector<sketch::ReferenceImage> images;
+  uint32_t nextImageId = 1; // next reference-image stable id (1-based)
   std::vector<sketch::Constraint> constraints;
   std::vector<sketch::DerivedOp> derived; // linked generative ops (replayed)
   std::vector<sketch::ExternalGeom> external; // live projected geometry

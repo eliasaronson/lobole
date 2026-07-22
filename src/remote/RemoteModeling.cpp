@@ -13,10 +13,15 @@
 #include "ui/AppState.h"
 #include "ui/PreviewFeature.h"
 
+#include "thirdparty/stb_image.h" // stbi_info_from_memory (impl in IBL.cpp)
+
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -316,6 +321,98 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (solver.Solve().ok)
       solver.WriteBack(sk->entities);
     sk->RegenerateDerived();
+    doc->Regenerate();
+    json after = DocumentIO::FeatureToJson(*sk);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    return result;
+  }
+  if (m == "add_reference_image" || m == "calibrate_reference_image" ||
+      m == "set_reference_image" || m == "delete_reference_image") {
+    // Sketch reference underlays (v49, docs/sketch/reference-image-plan.md).
+    // add:       {sketch_id, path, [at:[u,v]], [units_per_pixel], [opacity]}
+    // calibrate: {sketch_id, image_id, p1:[u,v], p2:[u,v], distance,
+    //             [align:"none"|"horizontal"|"vertical"]}
+    // set:       {sketch_id, image_id, [opacity]|[hidden]|[rotation]|
+    //             [units_per_pixel]|[origin:[u,v]]}
+    // delete:    {sketch_id, image_id}
+    size_t index = 0;
+    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    auto* sk = dynamic_cast<SketchFeature*>(f);
+    if (!sk) throw std::runtime_error("no such sketch");
+    json before = DocumentIO::FeatureToJson(*sk);
+    json result = json::object();
+
+    if (m == "add_reference_image") {
+      const std::string path = p.at("path").get<std::string>();
+      std::ifstream in(path, std::ios::binary);
+      if (!in) throw std::runtime_error("cannot open image: " + path);
+      std::string data((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+      if (data.empty()) throw std::runtime_error("empty image: " + path);
+      std::vector<unsigned char> bytes(data.begin(), data.end());
+
+      sketch::ReferenceImage img;
+      int w = 0, h = 0, comp = 0;
+      if (stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w,
+                                &h, &comp)) {
+        img.widthPx = w;
+        img.heightPx = h;
+      }
+      // Default scale: make the image ~4 plane units wide so it lands visible,
+      // unless the caller pins one. (Recalibrated to a real dimension next.)
+      img.unitsPerPixel =
+          p.value("units_per_pixel", w > 0 ? 4.0 / w : 0.01);
+      img.opacity = p.value("opacity", 0.5);
+      const uint32_t id = sk->AddImage(img);
+      sketch::ReferenceImage& ri = sk->images[sk->IndexOfImage(id)];
+      // Stable asset name carrying the source extension, keyed in the doc store.
+      std::string ext = std::filesystem::path(path).extension().string();
+      if (ext.empty()) ext = ".png";
+      ri.asset = std::to_string(sk->GetId()) + "-" + std::to_string(id) + ext;
+      // Centre the image on the requested point (default plane origin).
+      glm::vec2 center(0.0f, 0.0f);
+      if (p.contains("at")) {
+        const auto& a = p.at("at");
+        center = {a[0].get<float>(), a[1].get<float>()};
+      }
+      ri.origin = center - 0.5f * glm::vec2(float(ri.widthPx), float(ri.heightPx)) *
+                               float(ri.unitsPerPixel);
+      doc->SetAsset(ri.asset, std::move(bytes));
+      result = {{"image_id", id}, {"width_px", ri.widthPx},
+                {"height_px", ri.heightPx}, {"asset", ri.asset}};
+    } else if (m == "calibrate_reference_image") {
+      const auto& a = p.at("p1");
+      const auto& b = p.at("p2");
+      const std::string al = p.value("align", std::string("none"));
+      const int align = al == "horizontal" ? 0 : al == "vertical" ? 1 : -1;
+      if (!sk->CalibrateImage(p.at("image_id").get<uint32_t>(),
+                              {a[0].get<float>(), a[1].get<float>()},
+                              {b[0].get<float>(), b[1].get<float>()},
+                              p.at("distance").get<double>(), align))
+        throw std::runtime_error(
+            "calibration failed (unknown image or coincident points)");
+      result["ok"] = true;
+    } else if (m == "set_reference_image") {
+      const size_t ii = sk->IndexOfImage(p.at("image_id").get<uint32_t>());
+      if (ii == std::numeric_limits<size_t>::max())
+        throw std::runtime_error("no such image");
+      sketch::ReferenceImage& ri = sk->images[ii];
+      if (p.contains("opacity")) ri.opacity = p.at("opacity").get<double>();
+      if (p.contains("hidden")) ri.hidden = p.at("hidden").get<bool>();
+      if (p.contains("rotation")) ri.rotation = p.at("rotation").get<double>();
+      if (p.contains("units_per_pixel"))
+        ri.unitsPerPixel = p.at("units_per_pixel").get<double>();
+      if (p.contains("origin")) {
+        const auto& o = p.at("origin");
+        ri.origin = {o[0].get<float>(), o[1].get<float>()};
+      }
+      result["ok"] = true;
+    } else { // delete_reference_image
+      // Orphaned pixel bytes stay in the doc store; save-time pruning drops
+      // any asset no image references (and keeps redo working meanwhile).
+      result["ok"] = sk->DeleteImage(p.at("image_id").get<uint32_t>());
+    }
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*sk);
     state.commands->Execute(

@@ -1,0 +1,28 @@
+{
+  "format": "designer-document",
+  "version": 49,
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 2]},
+       {"type": "line", "id": 3, "a": [4, 2], "b": [0, 2]},
+       {"type": "line", "id": 4, "a": [0, 2], "b": [0, 0]}
+     ],
+     "constraints": [
+       {"kind": "horizontal", "a": [1, 0], "b": [0, 0], "value": 0.0},
+       {"kind": "distance", "a": [1, 0], "b": [1, 1], "value": 4.0}
+     ],
+     "images": [
+       {"id": 1, "asset": "1-1.png", "origin": [0, 0], "rotation": 0.0,
+        "units_per_pixel": 0.5, "opacity": 0.5, "width_px": 2, "height_px": 2}
+     ],
+     "next_image_id": 2},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 3.0, "mode": "new_body", "reversed": false}
+  ],
+  "assets": {
+    "1-1.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP4z8DwHwyBNBAw/AcAR8oI+FuapL4AAAAASUVORK5CYII="
+  }
+}

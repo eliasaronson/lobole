@@ -161,6 +161,71 @@ size_t SketchFeature::IndexOfEntity(uint32_t id) const {
   return std::numeric_limits<size_t>::max();
 }
 
+uint32_t SketchFeature::AddImage(sketch::ReferenceImage img) {
+  const uint32_t id = nextImageId++;
+  img.id = id;
+  if (img.asset.empty())
+    img.asset = std::to_string(GetId()) + "-" + std::to_string(id) + ".png";
+  images.push_back(std::move(img));
+  return id;
+}
+
+size_t SketchFeature::IndexOfImage(uint32_t id) const {
+  if (id == 0)
+    return std::numeric_limits<size_t>::max();
+  for (size_t i = 0; i < images.size(); i++)
+    if (images[i].id == id)
+      return i;
+  return std::numeric_limits<size_t>::max();
+}
+
+bool SketchFeature::DeleteImage(uint32_t id) {
+  const size_t idx = IndexOfImage(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return false;
+  images.erase(images.begin() + idx);
+  return true;
+}
+
+bool SketchFeature::CalibrateImage(uint32_t id, glm::vec2 p1, glm::vec2 p2,
+                                   double distance, int alignAxis) {
+  const size_t idx = IndexOfImage(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return false;
+  sketch::ReferenceImage& img = images[idx];
+  const glm::dvec2 d(double(p2.x) - p1.x, double(p2.y) - p1.y);
+  const double curLen = std::hypot(d.x, d.y);
+  if (curLen < 1e-9 || distance <= 0.0)
+    return false; // coincident picks or a non-positive target: nothing to do
+
+  // Recover p1's pixel coordinate under the CURRENT placement so we can hold it
+  // fixed while the scale (and maybe rotation) changes:
+  //   pix = R(-rotation) * (p - origin) / unitsPerPixel.
+  const double c = std::cos(img.rotation), s = std::sin(img.rotation);
+  const glm::dvec2 rel(double(p1.x) - img.origin.x, double(p1.y) - img.origin.y);
+  const double invScale = img.unitsPerPixel != 0.0 ? 1.0 / img.unitsPerPixel : 0.0;
+  const glm::dvec2 pix1((c * rel.x + s * rel.y) * invScale,
+                        (-s * rel.x + c * rel.y) * invScale);
+
+  // New rotation: align the p1->p2 direction onto the chosen axis, else keep it.
+  double rot = img.rotation;
+  if (alignAxis == 0 || alignAxis == 1) {
+    const double target = alignAxis == 0 ? 0.0 : M_PI / 2.0;
+    rot += target - std::atan2(d.y, d.x);
+  }
+  const double scale = img.unitsPerPixel * (distance / curLen);
+
+  // Re-anchor the origin so p1's pixel maps back to p1 under the new transform.
+  const double c2 = std::cos(rot), s2 = std::sin(rot);
+  const glm::dvec2 offset(scale * (c2 * pix1.x - s2 * pix1.y),
+                          scale * (s2 * pix1.x + c2 * pix1.y));
+  img.origin = glm::vec2(float(double(p1.x) - offset.x),
+                         float(double(p1.y) - offset.y));
+  img.rotation = rot;
+  img.unitsPerPixel = scale;
+  return true;
+}
+
 std::array<uint32_t, 4> SketchFeature::AddRectangle(glm::vec2 c1, glm::vec2 c2) {
   using K = sketch::ConstraintKind;
   const glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};

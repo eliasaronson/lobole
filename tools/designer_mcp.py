@@ -499,6 +499,71 @@ def offset(sketch_id: int, chain: list, distance: float,
 
 
 # ---------------------------------------------------------------------------
+# Reference images (sketch underlays)
+# ---------------------------------------------------------------------------
+
+@mcp.tool(description="Import a raster image (PNG/JPEG/BMP) into a sketch (by "
+          "feature id) as a reference underlay to trace geometry over. path is "
+          "read by the running app (must be reachable by it). The image is "
+          "centered on 'at' (default plane origin [0,0]) at a default scale; "
+          "recalibrate to a real dimension with calibrate_reference_image. "
+          "Returns {image_id, width_px, height_px, asset}.")
+def add_reference_image(sketch_id: int, path: str, at: list | None = None,
+                        units_per_pixel: float | None = None,
+                        opacity: float = 0.5) -> dict:
+    params = {"sketch_id": sketch_id, "path": path, "opacity": opacity}
+    if at is not None:
+        params["at"] = at
+    if units_per_pixel is not None:
+        params["units_per_pixel"] = units_per_pixel
+    return _call("add_reference_image", **params)
+
+
+@mcp.tool(description="Scale a sketch reference image so its two picked "
+          "plane-UV points p1,p2 are 'distance' plane units apart (p1 held "
+          "fixed). This is how you match an image's printed dimension: click "
+          "the two ends of a dimension line, pass its real length. "
+          "align='horizontal'|'vertical' also rotates the image so the p1->p2 "
+          "line lands on that axis; 'none' (default) keeps the orientation.")
+def calibrate_reference_image(sketch_id: int, image_id: int, p1: list,
+                              p2: list, distance: float,
+                              align: str = "none") -> dict:
+    return _call("calibrate_reference_image", sketch_id=sketch_id,
+                 image_id=image_id, p1=p1, p2=p2, distance=distance,
+                 align=align)
+
+
+@mcp.tool(description="Edit a sketch reference image (by image_id): pass any "
+          "of opacity (0..1), hidden (bool), rotation (radians), "
+          "units_per_pixel, or origin [u,v] (plane-UV of the image's (0,0) "
+          "pixel corner). Only the fields you pass change.")
+def set_reference_image(sketch_id: int, image_id: int,
+                        opacity: float | None = None,
+                        hidden: bool | None = None,
+                        rotation: float | None = None,
+                        units_per_pixel: float | None = None,
+                        origin: list | None = None) -> dict:
+    params = {"sketch_id": sketch_id, "image_id": image_id}
+    if opacity is not None:
+        params["opacity"] = opacity
+    if hidden is not None:
+        params["hidden"] = hidden
+    if rotation is not None:
+        params["rotation"] = rotation
+    if units_per_pixel is not None:
+        params["units_per_pixel"] = units_per_pixel
+    if origin is not None:
+        params["origin"] = origin
+    return _call("set_reference_image", **params)
+
+
+@mcp.tool(description="Remove a sketch reference image by image_id.")
+def delete_reference_image(sketch_id: int, image_id: int) -> dict:
+    return _call("delete_reference_image", sketch_id=sketch_id,
+                 image_id=image_id)
+
+
+# ---------------------------------------------------------------------------
 # Variables
 # ---------------------------------------------------------------------------
 

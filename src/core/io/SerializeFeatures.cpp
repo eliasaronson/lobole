@@ -454,6 +454,23 @@ json FeatureToJson(const Feature& feature) {
         j["external"].push_back(std::move(ej));
       }
     }
+    if (!sk->images.empty()) { // v49: reference underlays (bytes stored out-of-band)
+      j["images"] = json::array();
+      for (const auto& img : sk->images) {
+        json ij = {{"id", img.id},
+                   {"asset", img.asset},
+                   {"origin", Vec2ToJson(img.origin)},
+                   {"rotation", img.rotation},
+                   {"units_per_pixel", img.unitsPerPixel},
+                   {"opacity", img.opacity},
+                   {"width_px", img.widthPx},
+                   {"height_px", img.heightPx}};
+        if (img.hidden)
+          ij["hidden"] = true; // omit when visible to keep JSON compact
+        j["images"].push_back(std::move(ij));
+      }
+      j["next_image_id"] = sk->nextImageId;
+    }
   } else if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     j["sketch_id"] = ext->sketchId;
     j["distance"] = ext->distance;
@@ -844,6 +861,28 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                     : sketch::ExternalKind::Face;
       eg.genIds = ej.value("gen_ids", std::vector<uint32_t>{});
       sk->external.push_back(std::move(eg));
+    }
+    for (const auto& ij : j.value("images", json::array())) { // v49 underlays
+      sketch::ReferenceImage img;
+      img.id = ij.value("id", uint32_t{0});
+      img.asset = ij.value("asset", std::string{});
+      img.origin = Vec2FromJson(ij.at("origin"));
+      img.rotation = ij.value("rotation", 0.0);
+      img.unitsPerPixel = ij.value("units_per_pixel", 1.0);
+      img.opacity = ij.value("opacity", 0.5);
+      img.widthPx = ij.value("width_px", 0);
+      img.heightPx = ij.value("height_px", 0);
+      img.hidden = ij.value("hidden", false);
+      // `bytes` are filled in out-of-band by the loader (assets/ file or the
+      // single-file base64 blob), keyed by `asset`.
+      sk->images.push_back(std::move(img));
+    }
+    if (!sk->images.empty()) {
+      uint32_t maxImg = 0;
+      for (const auto& img : sk->images)
+        maxImg = std::max(maxImg, img.id);
+      sk->nextImageId = std::max<uint32_t>(
+          {maxImg + 1, j.value("next_image_id", uint32_t{0})});
     }
     sk->planeRef = j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
     if (j.contains("face_ref")) { // v16: attached body face

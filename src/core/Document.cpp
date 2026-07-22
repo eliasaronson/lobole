@@ -122,8 +122,14 @@ bool Document::Regenerate() {
     // suppresses feature i (without changing any field value) must still move
     // the cache divergence to i. Parameter overrides invalidate for free —
     // they change the evaluated field values already baked into the JSON.
+    // Reference images (v49) are cosmetic sketch underlays contributing no
+    // geometry — strip them from the hash input so toggling opacity / moving an
+    // image never invalidates the cache and rebuilds downstream features.
+    nlohmann::json fj = DocumentIO::FeatureToJson(*m_features[i]);
+    fj.erase("images");
+    fj.erase("next_image_id");
     chain = std::hash<std::string>{}(
-        std::to_string(chain) + DocumentIO::FeatureToJson(*m_features[i]).dump() +
+        std::to_string(chain) + fj.dump() +
         (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));
     hashes[i] = chain;
   }
