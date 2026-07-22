@@ -1618,6 +1618,28 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     return true;
   }
 
+  if (edit.tool == SketchTool::CalibrateImage) {
+    // Capture two plane-UV points on the reference image (e.g. the two ends of
+    // a printed dimension line). The Sketch panel then prompts for the real
+    // distance between them and applies the scale (stage 2). Uses the raw plane
+    // point — no entity snapping, since the target is the image, not geometry.
+    if (edit.calibImageId == 0) {
+      edit.actionMsg =
+          "Select a reference image and press Calibrate in the Sketch panel.";
+      return true;
+    }
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      if (edit.calibStage == 0) {
+        edit.calibP1 = uv;
+        edit.calibStage = 1;
+      } else if (edit.calibStage == 1) {
+        edit.calibP2 = uv;
+        edit.calibStage = 2; // the panel now shows the distance field
+      }
+    }
+    return true;
+  }
+
   if (edit.tool == SketchTool::Fillet) {
     // Click a corner: fillet the two lines sharing the nearest endpoint.
     SketchPick vtx =
@@ -2149,6 +2171,13 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     break;
   case T::Project:
     set("Project", 0, 0, "click a body edge or face to project it");
+    break;
+  case T::CalibrateImage:
+    set("Calibrate Image", edit.calibStage + 1, 3,
+        edit.calibStage == 0 ? "click the first point on the image"
+        : edit.calibStage == 1
+            ? "click the second point (a known distance apart)"
+            : "enter the real distance in the Sketch panel, then Apply");
     break;
   }
   return p;

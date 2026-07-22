@@ -68,7 +68,9 @@ enum class SketchTool {
   Offset,        // offset the selected closed loop by a distance
   Dimension,     // clicks accumulate targets; the tool infers the dim kind
   RectangleCenter, // 2-click rectangle: centre, then a corner
-  Project        // click a body edge/face -> live projected construction geom
+  Project,       // click a body edge/face -> live projected construction geom
+  CalibrateImage // click two points on a reference image, then type the real
+                 // distance between them to scale the image (v49)
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -168,6 +170,19 @@ struct SketchEditState {
   std::vector<uint32_t> lastDrawn;
   int lastDrawnStage = 0;
   bool dimOnCreateOpen = false; // the value field is up
+
+  // Reference-image tools (v49). `selectedImageId` is the image the Images
+  // panel acts on (opacity/delete/calibrate). The CalibrateImage tool captures
+  // two plane-UV points, then the panel shows a distance field:
+  //   calibStage 0 = awaiting the first point, 1 = awaiting the second,
+  //   2 = both picked, awaiting the typed distance (Apply).
+  uint32_t selectedImageId = 0;
+  uint32_t calibImageId = 0;
+  glm::vec2 calibP1{0.0f, 0.0f};
+  glm::vec2 calibP2{0.0f, 0.0f};
+  int calibStage = 0;
+  bool calibAlignAxis = false; // also rotate so p1->p2 lands on the U axis
+  float calibDistance = 10.0f; // the typed real-world distance
 
   // What the cursor is over in the Select tool (for hover highlighting),
   // refreshed each frame. `hoveredBody` distinguishes an entity body from a

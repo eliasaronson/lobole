@@ -6,8 +6,12 @@
 #include "core/sketch/SketchProfile.h"
 #include "core/io/Serialization.h" // DocumentIO (break-link commit)
 #include "core/sketch/SketchSolver.h"
+#include "ui/AppActions.h"
+#include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
+
+#include <cstdio>
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -120,6 +124,33 @@ void DrawSketchToolbar(AppState& state) {
     if (ImGui::Button("Apply##off"))
       ApplyOffset(state);
     ImGui::EndDisabled();
+  } else if (edit.tool == SketchTool::CalibrateImage) {
+    if (edit.calibStage < 2) {
+      ImGui::TextWrapped(
+          "Click two points on the image a known distance apart "
+          "(e.g. the ends of a printed dimension).");
+    } else {
+      ImGui::TextUnformatted("Real distance between the two points:");
+      ImGui::SetNextItemWidth(120);
+      ImGui::InputFloat("##calibdist", &edit.calibDistance, 0.0f, 0.0f, "%.4g");
+      ImGui::Checkbox("Align to axis", &edit.calibAlignAxis);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Also rotate the image so the two points sit on the "
+                          "horizontal axis");
+      if (ImGui::Button("Apply##calib")) {
+        CalibrateReferenceImageAction(state, edit.calibImageId, edit.calibP1,
+                                      edit.calibP2, edit.calibDistance,
+                                      edit.calibAlignAxis);
+        edit.calibStage = 0;
+        edit.calibImageId = 0;
+        edit.tool = SketchTool::Select;
+        ImGui::End(); // the ModifyFeatureCommand replaced the feature: `sketch`
+        return;       // is now dangling — bail out and redraw next frame
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Re-pick##calib"))
+        edit.calibStage = 0;
+    }
   }
   // actionMsg / staged guidance is shown in the viewport tool-prompt bar
   // (DrawToolPrompt), not duplicated here.
@@ -128,6 +159,51 @@ void DrawSketchToolbar(AppState& state) {
   if (ImGui::IsItemHovered())
     ImGui::SetTooltip("Snap and add constraints while drawing (hold Ctrl to "
                       "place freely) — Shift+S to toggle");
+
+  // Reference images (v49): import an underlay, tune it, calibrate it to a real
+  // dimension, or delete it. Opacity/hide are live cosmetic edits (not undoable);
+  // import/calibrate/delete each commit one undo step and REPLACE the sketch
+  // feature — so after any of them `sketch` dangles: End() + return immediately.
+  ImGui::SeparatorText("Reference images");
+  if (ImGui::Button("Insert image...##ref")) {
+    OpenReferenceImageDialog(state); // may add + commit (feature replaced)
+    ImGui::End();
+    return;
+  }
+  for (size_t i = 0; i < sketch->images.size(); i++) {
+    sketch::ReferenceImage& img = sketch->images[i];
+    ImGui::PushID(static_cast<int>(img.id));
+    const bool selected = edit.selectedImageId == img.id;
+    char label[80];
+    std::snprintf(label, sizeof(label), "Image %u  (%d x %d px)", img.id,
+                  img.widthPx, img.heightPx);
+    if (ImGui::Selectable(label, selected))
+      edit.selectedImageId = selected ? 0 : img.id;
+    if (edit.selectedImageId == img.id) {
+      ImGui::SetNextItemWidth(160);
+      float op = static_cast<float>(img.opacity);
+      if (ImGui::SliderFloat("Opacity##ref", &op, 0.05f, 1.0f, "%.2f"))
+        img.opacity = op; // live cosmetic edit
+      bool hidden = img.hidden;
+      if (ImGui::Checkbox("Hide##ref", &hidden))
+        img.hidden = hidden;
+      ImGui::SameLine();
+      if (ImGui::Button("Calibrate##ref")) {
+        edit.calibImageId = img.id;
+        edit.calibStage = 0;
+        edit.calibAlignAxis = false;
+        edit.tool = SketchTool::CalibrateImage;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Delete##ref")) {
+        DeleteReferenceImageAction(state, img.id); // feature replaced
+        ImGui::PopID();
+        ImGui::End();
+        return;
+      }
+    }
+    ImGui::PopID();
+  }
 
   // Less-common constraints (the common ones — H/V/coincident/parallel/
   // perpendicular/tangent/equal/concentric — are in the top toolbar).

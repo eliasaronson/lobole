@@ -252,6 +252,28 @@ void OpenStepFileDialog(AppState& state) {
   }
 }
 
+void OpenReferenceImageDialog(AppState& state) {
+  if (!NativeDialogsSafe()) {
+    state.sketchEdit.actionMsg =
+        "Native file dialog unavailable; cannot pick an image.";
+    return;
+  }
+  nfdu8char_t* outPath = nullptr;
+  const nfdu8filteritem_t filters[] = {
+      {"Images", "png,jpg,jpeg,bmp,tga,gif"}};
+  nfdresult_t result = NFD_OpenDialogU8(&outPath, filters, 1, nullptr);
+  if (result == NFD_OKAY) {
+    std::string filePath(outPath);
+    NFD_FreePathU8(outPath);
+    LOG_INFO("Reference image selected: {}", filePath);
+    AddReferenceImageToSketch(state, filePath);
+  } else if (result == NFD_CANCEL) {
+    LOG_DEBUG("User cancelled reference-image dialog");
+  } else {
+    LOG_ERROR("Error opening reference-image dialog: {}", NFD_GetError());
+  }
+}
+
 void OpenStepAssemblyFileDialog(AppState& state) {
   if (!NativeDialogsSafe()) {
     OpenBrowserFallback(state, /*assemblyMode=*/true);
@@ -455,6 +477,11 @@ void OpenStepFileDialog(AppState& state) {
 
 void OpenStepAssemblyFileDialog(AppState& state) {
   OpenBrowserFallback(state, /*assemblyMode=*/true);
+}
+
+void OpenReferenceImageDialog(AppState& state) {
+  state.sketchEdit.actionMsg =
+      "Reference-image import needs the native file dialog.";
 }
 
 void OpenProjectDialog(AppState&) {

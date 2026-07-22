@@ -47,6 +47,8 @@
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
 
+#include "thirdparty/stb_image.h" // stbi_info_from_memory (impl in IBL.cpp)
+
 #include "imgui.h"
 
 #include <glm/gtc/matrix_transform.hpp> // glm::translate
@@ -2907,6 +2909,105 @@ void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
       }
     }
   }
+}
+
+// Reference images (v49): read + decode dims, append a centered ReferenceImage
+// to `sk`, and stash the raw bytes in the document asset store. Returns the new
+// image id, or 0 on read failure. The pixel bytes live on the Document (not the
+// feature) so they survive undo/redo; see docs/sketch/reference-image-plan.md.
+static uint32_t AppendReferenceImage(AppState& state, SketchFeature* sk,
+                                     const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return 0;
+  std::string data((std::istreambuf_iterator<char>(in)),
+                   std::istreambuf_iterator<char>());
+  if (data.empty()) return 0;
+  std::vector<unsigned char> bytes(data.begin(), data.end());
+
+  sketch::ReferenceImage img;
+  int w = 0, h = 0, comp = 0;
+  if (stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h,
+                            &comp)) {
+    img.widthPx = w;
+    img.heightPx = h;
+  }
+  img.unitsPerPixel = w > 0 ? 4.0 / w : 0.01; // ~4 units wide until calibrated
+  img.opacity = 0.5;
+  const uint32_t id = sk->AddImage(img);
+  sketch::ReferenceImage& ri = sk->images[sk->IndexOfImage(id)];
+  std::string ext = std::filesystem::path(path).extension().string();
+  if (ext.empty()) ext = ".png";
+  ri.asset = std::to_string(sk->GetId()) + "-" + std::to_string(id) + ext;
+  ri.origin = -0.5f * glm::vec2(float(ri.widthPx), float(ri.heightPx)) *
+              float(ri.unitsPerPixel); // centre on the plane origin
+  state.document->SetAsset(ri.asset, std::move(bytes));
+  return id;
+}
+
+uint32_t AddReferenceImageToSketch(AppState& state, const std::string& path) {
+  if (!state.document || !state.commands)
+    return 0;
+  size_t index = 0;
+  SketchFeature* sk = ResolveActiveSketch(state, &index);
+  if (!sk) {
+    state.sketchEdit.actionMsg =
+        "Open a sketch for editing before adding a reference image.";
+    return 0;
+  }
+  nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+  const uint32_t id = AppendReferenceImage(state, sk, path);
+  if (id == 0) {
+    state.sketchEdit.actionMsg = "Could not read image: " + path;
+    return 0;
+  }
+  state.document->Regenerate();
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(
+          index, before, DocumentIO::FeatureToJson(*sk)),
+      *state.document);
+  state.sketchEdit.selectedImageId = id;
+  return id;
+}
+
+void CalibrateReferenceImageAction(AppState& state, uint32_t imageId,
+                                   glm::vec2 p1, glm::vec2 p2, double distance,
+                                   bool alignAxis) {
+  if (!state.document || !state.commands)
+    return;
+  size_t index = 0;
+  SketchFeature* sk = ResolveActiveSketch(state, &index);
+  if (!sk)
+    return;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+  if (!sk->CalibrateImage(imageId, p1, p2, distance, alignAxis ? 0 : -1)) {
+    state.sketchEdit.actionMsg =
+        "Calibration needs two distinct points and a positive distance.";
+    return;
+  }
+  state.document->Regenerate();
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(
+          index, before, DocumentIO::FeatureToJson(*sk)),
+      *state.document);
+}
+
+void DeleteReferenceImageAction(AppState& state, uint32_t imageId) {
+  if (!state.document || !state.commands)
+    return;
+  size_t index = 0;
+  SketchFeature* sk = ResolveActiveSketch(state, &index);
+  if (!sk)
+    return;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+  if (!sk->DeleteImage(imageId))
+    return;
+  state.document->Regenerate();
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(
+          index, before, DocumentIO::FeatureToJson(*sk)),
+      *state.document);
+  if (state.sketchEdit.selectedImageId == imageId)
+    state.sketchEdit.selectedImageId = 0;
 }
 
 void LoadSTEPFile(AppState& state, const std::string& filename) {

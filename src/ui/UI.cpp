@@ -539,6 +539,8 @@ void DrawUI(AppState& state) {
     setVp(state.meshRenderer);
     setVp(state.outlineRenderer);
     setVp(state.sketchRenderer);
+    setVp(state.underlayRenderer); // sketch reference images — same reason as
+                                   // fieldRenderer below (else stretched)
     setVp(state.fieldRenderer);  // FEM/topology overlay — else it renders full-
                                  // window while the camera aspect is the sub-region
     if (state.camera)

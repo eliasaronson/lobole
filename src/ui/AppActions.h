@@ -404,6 +404,16 @@ void PumpRenderJob(AppState& state);
 // Imports a STEP file as an undoable ImportFeature and fits the camera.
 void LoadSTEPFile(AppState& state, const std::string& filename);
 
+// Reference-image underlays (v49). Add reads/decodes the file and centres it on
+// the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`
+// (p1 fixed; alignAxis also rotates p1->p2 onto the U axis); Delete removes it.
+// All commit one undoable ModifyFeatureCommand. See docs/sketch/reference-image-plan.md.
+uint32_t AddReferenceImageToSketch(AppState& state, const std::string& path);
+void CalibrateReferenceImageAction(AppState& state, uint32_t imageId,
+                                   glm::vec2 p1, glm::vec2 p2, double distance,
+                                   bool alignAxis);
+void DeleteReferenceImageAction(AppState& state, uint32_t imageId);
+
 // Imports an assembly STEP as parts + an assembly (interchange I2): one part
 // tab per unique product (geometry extracted as .brep into
 // <project>/imported), occurrences placed from the file's instance tree.

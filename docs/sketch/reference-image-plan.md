@@ -21,7 +21,17 @@
 >   errors. Two bugs found & fixed in the process: the `screenshot` re-render
 >   path (main.cpp:1466) had its OWN renderer list that omitted the underlay; and
 >   the texture V needed flipping (pixel +Y down vs plane +V up).
-> - **Phase 3 (GUI), Phase 4 (polish) — TODO.**
+> - **Phase 3 (GUI) — BUILT.** Sketch panel "Reference images" section (Insert
+>   image… via native dialog, per-image opacity slider / hide / Calibrate /
+>   Delete), a `CalibrateImage` sketch tool (click two points → panel distance
+>   field + align checkbox → Apply), actions in AppActions.cpp
+>   (Add/Calibrate/Delete, each one undoable ModifyFeatureCommand). Rendering
+>   verified with the real Alpair-7 dimension JPEG (767×423) — decodes + renders
+>   upright. GUI widgets couldn't be driven end-to-end headlessly (ImGui doesn't
+>   register items in an inactive dock tab), so the panel/tool need a quick
+>   interactive check; the functions they call are unit/RPC-verified.
+> - **Phase 4 (polish) — TODO** (calibration-point overlay markers, main-menu
+>   entry, undoable opacity, tests).
 >
 > NOTE: real `kVersion` was 48 (not 46 as an old memory said); this feature is
 > **v49**. Build with `nix-shell --run 'ninja -C build <target>'` (glm comes
