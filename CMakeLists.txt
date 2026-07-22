@@ -481,27 +481,32 @@ message(STATUS "Found glslc: ${GLSLC}")
 set(SHADER_OUTPUT_DIR "${CMAKE_BINARY_DIR}/libraries/shaders")
 file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
 
-# Function to compile a shader
+# Function to compile a shader. Extra args (ARGN) are additional dependency
+# files — e.g. a shared #include'd .glsl — so editing them retriggers the build.
 function(compile_shader TARGET SHADER_SOURCE SHADER_OUTPUT)
     add_custom_command(
         OUTPUT ${SHADER_OUTPUT}
         COMMAND ${GLSLC} ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
-        DEPENDS ${SHADER_SOURCE}
+        DEPENDS ${SHADER_SOURCE} ${ARGN}
         COMMENT "Compiling shader ${SHADER_SOURCE}"
     )
     add_custom_target(${TARGET} DEPENDS ${SHADER_OUTPUT})
 endfunction()
 
-# Function to compile a ray tracing shader
+# Function to compile a ray tracing shader (ARGN = extra include dependencies).
 function(compile_rt_shader TARGET SHADER_SOURCE SHADER_OUTPUT)
     add_custom_command(
         OUTPUT ${SHADER_OUTPUT}
         COMMAND ${GLSLC} --target-env=vulkan1.2 ${SHADER_SOURCE} -o ${SHADER_OUTPUT}
-        DEPENDS ${SHADER_SOURCE}
+        DEPENDS ${SHADER_SOURCE} ${ARGN}
         COMMENT "Compiling RT shader ${SHADER_SOURCE}"
     )
     add_custom_target(${TARGET} DEPENDS ${SHADER_OUTPUT})
 endfunction()
+
+# Shared shader include (procedural grain), a dependency of every shader that
+# #includes it.
+set(GRAIN_INCLUDE "${CMAKE_SOURCE_DIR}/src/shaders/grain.glsl")
 
 # Compile vertex shader
 set(VERTEX_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/mesh.vert")
@@ -511,7 +516,7 @@ compile_shader(mesh_vert_shader ${VERTEX_SHADER_SOURCE} ${VERTEX_SHADER_OUTPUT})
 # Compile fragment shader
 set(FRAGMENT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/mesh.frag")
 set(FRAGMENT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/mesh_frag.spv")
-compile_shader(mesh_frag_shader ${FRAGMENT_SHADER_SOURCE} ${FRAGMENT_SHADER_OUTPUT})
+compile_shader(mesh_frag_shader ${FRAGMENT_SHADER_SOURCE} ${FRAGMENT_SHADER_OUTPUT} ${GRAIN_INCLUDE})
 
 # Compile ray tracing shaders
 set(RAYGEN_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/raygen.rgen")
@@ -524,7 +529,7 @@ compile_rt_shader(miss_shader ${MISS_SHADER_SOURCE} ${MISS_SHADER_OUTPUT})
 
 set(CLOSESTHIT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/closesthit.rchit")
 set(CLOSESTHIT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/closesthit.spv")
-compile_rt_shader(closesthit_shader ${CLOSESTHIT_SHADER_SOURCE} ${CLOSESTHIT_SHADER_OUTPUT})
+compile_rt_shader(closesthit_shader ${CLOSESTHIT_SHADER_SOURCE} ${CLOSESTHIT_SHADER_OUTPUT} ${GRAIN_INCLUDE})
 
 set(SHADOW_MISS_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/shadow.rmiss")
 set(SHADOW_MISS_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/shadow.spv")

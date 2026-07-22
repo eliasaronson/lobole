@@ -45,6 +45,11 @@ struct RTMaterial {
     float roughness;
     glm::vec3 specular;
     float transmission;
+    // Procedural grain (matches the closest-hit `Material`): x = pattern
+    // (0 flat/1 wood/2 plywood), y = grainScale, z = grainContrast, w = grain-
+    // axis index. std430: lands at offset 48, keeping the struct 64 bytes so
+    // the SSBO upload stays a blind memcpy of sizeof(RTMaterial).
+    glm::vec4 procParams{0.0f};
 };
 
 // Everything an offline still render needs from the app: output size, camera,

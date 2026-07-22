@@ -1,6 +1,9 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_buffer_reference2 : require
+#extension GL_GOOGLE_include_directive : require
+
+#include "grain.glsl"  // procedural wood/plywood grain, shared with mesh.frag
 
 // Radiance + RNG state (shared with raygen).
 struct RayPayload {
@@ -51,6 +54,9 @@ struct Material {
     float roughness;
     vec3 specular;
     float transmission;
+    // Procedural grain: x = pattern (0 flat/1 wood/2 plywood), y = grainScale,
+    // z = grainContrast, w = grain-axis index (0/1/2). Matches RTMaterial.
+    vec4 procParams;
 };
 layout(binding = 4, set = 0, std430) readonly buffer Materials {
     Material materials[];
@@ -194,6 +200,13 @@ void main() {
 
     Material mat = materials[g.materialIndex];
     float roughness = clamp(mat.roughness, 0.03, 1.0);
+
+    // Procedural wood/plywood grain. The still render uses identity instance
+    // transforms, so `pos`/`nrm` are already part-local (object space) — exactly
+    // what the raster path feeds as fragLocalPos. Modifies mat.baseColor +
+    // roughness in place so both the direct and IBL terms below pick it up.
+    grain_apply(mat.baseColor, roughness, mat.procParams, pos,
+                abs(dot(nrm, grain_axisUnit(int(mat.procParams.w + 0.5)))));
 
     // ---- Direct key light with a soft (area) shadow ----
     vec3 L = normalize(-ubo.lightDir.xyz);

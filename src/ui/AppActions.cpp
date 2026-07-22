@@ -2218,6 +2218,19 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
             : CADMaterials::MaterialLibrary::FromSlug(body.material);
     const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(mt);
 
+    std::vector<Vertex3D> vertices =
+        CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
+
+    // Per-body local bbox: feeds the scene bbox (ground plane) and the grain
+    // axis. RT geometry goes in untransformed, so this is object/part-local.
+    glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
+    for (const Vertex3D& v : vertices) {
+      lo = glm::min(lo, v.position);
+      hi = glm::max(hi, v.position);
+    }
+    bbMin = glm::min(bbMin, lo);
+    bbMax = glm::max(bbMax, hi);
+
     RTMaterial rtm{};
     rtm.baseColor = mat.baseColor;
     rtm.metallic = mat.metallic;
@@ -2225,14 +2238,23 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     rtm.emissive = glm::vec3(0.0f);
     rtm.specular = glm::vec3(mat.specular);
     rtm.transmission = 0.0f;
+    if (mat.procPattern > 0) {
+      // Same rule as the raster path (MeshRenderer draw loop): solid wood runs
+      // the grain along the longest extent, plywood lays plies across the
+      // thinnest. Each body gets its own material here, so the axis rides in it.
+      const glm::vec3 ext = hi - lo;
+      const bool plywood = mat.procPattern == 2;
+      int axis = 0;
+      for (int a = 1; a < 3; ++a) {
+        if (plywood ? (ext[a] < ext[axis]) : (ext[a] > ext[axis]))
+          axis = a;
+      }
+      rtm.procParams = glm::vec4(static_cast<float>(mat.procPattern),
+                                 mat.grainScale, mat.grainContrast,
+                                 static_cast<float>(axis));
+    }
     uint32_t matId = state.rayTracer->AddMaterial(rtm);
 
-    std::vector<Vertex3D> vertices =
-        CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
-    for (const Vertex3D& v : vertices) {
-      bbMin = glm::min(bbMin, v.position);
-      bbMax = glm::max(bbMax, v.position);
-    }
     state.rayTracer->AddGeometry(vertices, cadMesh.indices, matId);
   }
 

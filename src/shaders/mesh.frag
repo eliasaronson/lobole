@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "grain.glsl"  // procedural wood/plywood grain, shared with the ray tracer
 
 struct Light {
     vec4 direction;  // xyz = direction, w = intensity
@@ -107,53 +110,6 @@ vec3 calculateLight(Light light, vec3 normal, vec3 viewDir, vec3 albedo, float m
     return mix(diffuse, vec3(0.0), metallic) + specular;
 }
 
-// ---- Procedural wood / plywood grain (pc.procMaterial) ---------------------
-// Everything below is evaluated in object space (fragLocalPos) so the figure
-// stays glued to the part under any model/assembly transform. No textures/UVs.
-float ph13(vec3 p) {
-    p = fract(p * 0.1031);
-    p += dot(p, p.yzx + 33.33);
-    return fract((p.x + p.y) * p.z);
-}
-// Trilinearly-interpolated value noise on the integer lattice.
-float vnoise(vec3 p) {
-    vec3 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float n000 = ph13(i),               n100 = ph13(i + vec3(1, 0, 0));
-    float n010 = ph13(i + vec3(0,1,0)), n110 = ph13(i + vec3(1, 1, 0));
-    float n001 = ph13(i + vec3(0,0,1)), n101 = ph13(i + vec3(1, 0, 1));
-    float n011 = ph13(i + vec3(0,1,1)), n111 = ph13(i + vec3(1, 1, 1));
-    return mix(mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
-               mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y), f.z);
-}
-float fbm(vec3 p) {
-    float s = 0.0, a = 0.5;
-    for (int k = 0; k < 4; k++) { s += a * vnoise(p); p *= 2.0; a *= 0.5; }
-    return s;
-}
-// Split object-space pos into along-grain t and the cross-section plane uv.
-void grainCoords(vec3 lp, int axis, out float t, out vec2 uv) {
-    if (axis == 0)      { t = lp.x; uv = lp.yz; }
-    else if (axis == 1) { t = lp.y; uv = lp.xz; }
-    else                { t = lp.z; uv = lp.xy; }
-}
-// Solid-wood figure in [0,1]: 0 = light earlywood, 1 = dark latewood/grain line.
-float woodFigure(vec3 lp, float scale, int axis) {
-    float t; vec2 uv; grainCoords(lp, axis, t, uv);
-    // Warp the rings off perfect circles and let them drift along the grain.
-    float warp = (fbm(vec3(uv * 0.5, t * 0.1)) - 0.5) * 3.0;
-    float rings = fract((length(uv) + warp) * scale);
-    float band = smoothstep(0.5, 0.95, rings);   // one narrow dark band per ring
-    float fine = fbm(vec3(uv * 24.0, t * 1.5)) - 0.5;  // close-up axial figure
-    return clamp(band + 0.25 * fine, 0.0, 1.0);
-}
-// Plywood ply-stripe figure for cut edges: dark glue lines between light plies.
-float plyFigure(float coordAlongLayup, float scale) {
-    float layer = fract(coordAlongLayup * scale);
-    float body = smoothstep(0.0, 0.08, layer) * (1.0 - smoothstep(0.92, 1.0, layer));
-    return clamp(1.0 - body, 0.0, 1.0);          // dark at the ply boundaries
-}
-
 void main() {
     // Section view: clip fragments past the plane. The signed distance comes
     // interpolated from the vertex stage (0 everywhere when clipping is off).
@@ -173,31 +129,12 @@ void main() {
     float specularScale = pc.material.z;
     float reflectance = pc.material.w;
 
-    // Procedural wood / plywood grain: darken albedo toward the grain lines and
-    // roughen the latewood a touch, in object space so it tracks the part.
-    int pattern = int(pc.procMaterial.x + 0.5);
-    if (pattern > 0) {
-        float scale = pc.procMaterial.y;
-        float contrast = pc.procMaterial.z;
-        int axis = int(pc.procMaterial.w + 0.5);
-        float figure;
-        if (pattern == 2) {
-            // Plywood: cut edges show ply stripes, faces show a subtle veneer
-            // grain — blended by how parallel the surface is to the layup axis.
-            vec3 axisUnit = axis == 0 ? vec3(1, 0, 0)
-                          : axis == 1 ? vec3(0, 1, 0) : vec3(0, 0, 1);
-            vec3 axisWorld = normalize(mat3(pc.model) * axisUnit);
-            float facing = abs(dot(normal, axisWorld));  // ~1 on veneer face
-            float t; vec2 uv; grainCoords(fragLocalPos, axis, t, uv);
-            float faceFig = 0.5 * woodFigure(fragLocalPos, scale * 0.15, axis);
-            float edgeFig = plyFigure(t, scale);
-            figure = mix(edgeFig, faceFig, smoothstep(0.35, 0.65, facing));
-        } else {
-            figure = woodFigure(fragLocalPos, scale, axis);
-        }
-        albedo *= (1.0 - contrast * figure);
-        roughness = clamp(roughness + 0.12 * figure, 0.03, 1.0);
-    }
+    // Procedural wood / plywood grain (object space so it tracks the part;
+    // shared with the ray tracer via grain.glsl). facing = how parallel the
+    // surface is to the plywood layup axis (unused for solid wood).
+    vec3 grainAxis = grain_axisUnit(int(pc.procMaterial.w + 0.5));
+    float grainFacing = abs(dot(normal, normalize(mat3(pc.model) * grainAxis)));
+    grain_apply(albedo, roughness, pc.procMaterial, fragLocalPos, grainFacing);
 
     // Image-based ambient/environment lighting (split-sum). Replaces the flat
     // ambient term: diffuse from the irradiance map, specular from the
