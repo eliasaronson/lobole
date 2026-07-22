@@ -631,9 +631,13 @@ struct AppState {
   uint64_t pendingFeatureId = 0;
   ViewportDrag viewportDrag = ViewportDrag::None;
   // True when the drag was started with Alt+left (trackpad-friendly) rather
-  // than the middle button; the drag then owns the left button, so the click
-  // must not leak into picking.
+  // than the middle/right button; the drag then owns the left button, so the
+  // click must not leak into picking.
   bool viewportDragLeft = false;
+  // Which ImGuiMouseButton started the current viewport nav drag (so release
+  // is detected on the same button). Meaningful only while viewportDrag !=
+  // None. 0 = Left (Alt+left), 1 = Right, 2 = Middle.
+  int viewportDragButton = 2;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
   // Key-light shadow map (S1) — View > Shadows; session state only (no file
   // format / golden impact).

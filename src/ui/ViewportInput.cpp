@@ -47,34 +47,47 @@ void HandleViewportInput(AppState& state) {
     }
   }
 
-  // SolidWorks-style middle-button drags: plain = rotate, Ctrl = pan,
+  // SolidWorks-style navigation drags: plain = rotate, Ctrl = pan,
   // Shift = zoom, Alt = roll. The drag starts over the viewport and keeps
   // tracking until release even if the cursor crosses a panel; modifiers
   // are re-read every frame so pressing Ctrl mid-drag switches to pan.
-  // Trackpads without a usable middle button: Alt+left-drag navigates the
-  // same way (plain = rotate, +Ctrl = pan, +Shift = zoom; no roll). Alt is
-  // only needed to start the drag, and the click never reaches picking.
+  // Both the middle button and the (otherwise-unused-over-the-viewport)
+  // right button drive it — the right button is the no-middle-button /
+  // trackpad path (rotate with no modifier, +Ctrl pan, +Shift zoom). Left
+  // stays selection. Alt+left-drag still navigates too, for completeness;
+  // Alt is only needed to start it and the click never reaches picking.
   if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
     state.viewportDrag = ViewportDrag::Orbit; // actual mode resolved below
     state.viewportDragLeft = false;
+    state.viewportDragButton = ImGuiMouseButton_Middle;
+    state.camera->StopAnimation();
+  } else if (overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
+             state.viewportDrag == ViewportDrag::None) {
+    state.viewportDrag = ViewportDrag::Orbit;
+    state.viewportDragLeft = false;
+    state.viewportDragButton = ImGuiMouseButton_Right;
     state.camera->StopAnimation();
   } else if (overViewport && io.KeyAlt &&
              ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
              state.viewportDrag == ViewportDrag::None) {
     state.viewportDrag = ViewportDrag::Orbit;
     state.viewportDragLeft = true;
+    state.viewportDragButton = ImGuiMouseButton_Left;
     state.camera->StopAnimation();
   }
-  if (ImGui::IsMouseReleased(state.viewportDragLeft ? ImGuiMouseButton_Left
-                                                    : ImGuiMouseButton_Middle)) {
+  if (state.viewportDrag != ViewportDrag::None &&
+      ImGui::IsMouseReleased(state.viewportDragButton)) {
     state.viewportDrag = ViewportDrag::None;
   }
   if (state.viewportDrag != ViewportDrag::None) {
+    // Roll needs a modifier that neither the right nor the left path can
+    // reach without ambiguity, so it stays middle-button-only (as before).
+    const bool canRoll = state.viewportDragButton == ImGuiMouseButton_Middle;
     if (io.KeyCtrl) {
       state.viewportDrag = ViewportDrag::Pan;
     } else if (io.KeyShift) {
       state.viewportDrag = ViewportDrag::Zoom;
-    } else if (io.KeyAlt && !state.viewportDragLeft) {
+    } else if (io.KeyAlt && canRoll) {
       state.viewportDrag = ViewportDrag::Roll;
     } else {
       state.viewportDrag = ViewportDrag::Orbit;

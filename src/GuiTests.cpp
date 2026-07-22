@@ -308,6 +308,43 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->viewportDrag == ui::ViewportDrag::None); // drag ended
   };
 
+  // Right-drag navigates like the middle button (no-middle-button / trackpad
+  // path): plain orbits, +Ctrl pans. Left stays selection.
+  t = IM_REGISTER_TEST(engine, "viewport", "right_drag_orbits");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    s_App->camera->StopAnimation();
+    ctx->Yield();
+    const glm::vec3 posBefore = s_App->camera->GetPosition();
+    const float distBefore = s_App->camera->GetDistance();
+
+    ImVec2 size = ImGui::GetMainViewport()->Size;
+    ImVec2 center(size.x * 0.5f, size.y * 0.5f);
+    ctx->MouseMoveToPos(center);
+    ctx->MouseDown(ImGuiMouseButton_Right);
+    ctx->MouseMoveToPos(ImVec2(center.x + 80.0f, center.y + 50.0f));
+    ctx->MouseUp(ImGuiMouseButton_Right);
+    ctx->Yield();
+
+    // Orbit moved the eye but kept the distance (not a zoom), and the drag
+    // released cleanly on the right button.
+    IM_CHECK(glm::length(s_App->camera->GetPosition() - posBefore) > 0.1f);
+    IM_CHECK(std::abs(s_App->camera->GetDistance() - distBefore) <
+             0.05f * distBefore);
+    IM_CHECK(s_App->viewportDrag == ui::ViewportDrag::None);
+
+    // +Ctrl mid-scheme = pan: moves the orbit target, keeps distance.
+    const glm::vec3 targetBefore = s_App->camera->GetTarget();
+    ctx->MouseMoveToPos(center);
+    ctx->KeyDown(ImGuiMod_Ctrl);
+    ctx->MouseDown(ImGuiMouseButton_Right);
+    ctx->MouseMoveToPos(ImVec2(center.x + 60.0f, center.y));
+    ctx->MouseUp(ImGuiMouseButton_Right);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    IM_CHECK(glm::length(s_App->camera->GetTarget() - targetBefore) > 0.01f);
+    IM_CHECK(s_App->viewportDrag == ui::ViewportDrag::None);
+  };
+
   t = IM_REGISTER_TEST(engine, "viewport", "shift_scroll_pans");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const glm::vec3 targetBefore = s_App->camera->GetTarget();
