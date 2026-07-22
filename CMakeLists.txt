@@ -318,6 +318,7 @@ set(app_sources
     src/SSAORenderer.cpp
     src/RayTracingRenderer.cpp
     src/SketchRenderer.cpp
+    src/UnderlayRenderer.cpp
     src/FieldRenderer.cpp
     src/GuiTests.cpp
     src/ui/UI.cpp
@@ -561,6 +562,15 @@ set(SKETCH_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/sketch.frag")
 set(SKETCH_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/sketch_frag.spv")
 compile_shader(sketch_frag_shader ${SKETCH_FRAG_SHADER_SOURCE} ${SKETCH_FRAG_SHADER_OUTPUT})
 
+# Reference-image underlay (textured quad on the sketch plane)
+set(UNDERLAY_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/underlay.vert")
+set(UNDERLAY_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/underlay_vert.spv")
+compile_shader(underlay_vert_shader ${UNDERLAY_VERT_SHADER_SOURCE} ${UNDERLAY_VERT_SHADER_OUTPUT})
+
+set(UNDERLAY_FRAG_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/underlay.frag")
+set(UNDERLAY_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/underlay_frag.spv")
+compile_shader(underlay_frag_shader ${UNDERLAY_FRAG_SHADER_SOURCE} ${UNDERLAY_FRAG_SHADER_OUTPUT})
+
 set(SKETCH_PRIM_VERT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/sketch_prim.vert")
 set(SKETCH_PRIM_VERT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/sketch_prim_vert.spv")
 compile_shader(sketch_prim_vert_shader ${SKETCH_PRIM_VERT_SHADER_SOURCE} ${SKETCH_PRIM_VERT_SHADER_OUTPUT})
@@ -611,7 +621,7 @@ set(FIELD_FRAG_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/field_frag.spv")
 compile_shader(field_frag_shader ${FIELD_FRAG_SHADER_SOURCE} ${FIELD_FRAG_SHADER_OUTPUT})
 
 # Create a target for all shaders
-add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader shadowmap_vert_shader shadowmap_frag_shader ssao_prepass_vert_shader ssao_prepass_frag_shader fullscreen_vert_shader ssao_frag_shader ssao_blur_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader field_vert_shader field_frag_shader)
+add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_shader miss_shader closesthit_shader shadow_miss_shader shadowmap_vert_shader shadowmap_frag_shader ssao_prepass_vert_shader ssao_prepass_frag_shader fullscreen_vert_shader ssao_frag_shader ssao_blur_frag_shader outline_vert_shader outline_frag_shader wireframe_vert_shader wireframe_frag_shader sketch_vert_shader sketch_frag_shader sketch_prim_vert_shader sketch_prim_frag_shader underlay_vert_shader underlay_frag_shader field_vert_shader field_frag_shader)
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)

@@ -28,6 +28,7 @@ class MeshRenderer;
 class OutlineRenderer;
 class RayTracingRenderer;
 class SketchRenderer;
+class UnderlayRenderer;
 class FieldRenderer;
 class FaceSelector;
 class IBLTextures;
@@ -513,6 +514,7 @@ struct AppState {
   OutlineRenderer* outlineRenderer = nullptr;
   RayTracingRenderer* rayTracer = nullptr;
   SketchRenderer* sketchRenderer = nullptr;
+  UnderlayRenderer* underlayRenderer = nullptr; // sketch reference images (v49)
   FieldRenderer* fieldRenderer = nullptr; // FEM result overlay
   FaceSelector* faceSelector = nullptr;
   IBLTextures* ibl = nullptr;

@@ -20,6 +20,7 @@
 #include "Scene.h"
 #include "ShadowRenderer.h"
 #include "SketchRenderer.h"
+#include "UnderlayRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/Theme.h"
@@ -95,6 +96,7 @@ static std::unique_ptr<Camera> g_Camera;
 static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
 static std::unique_ptr<SketchRenderer> g_SketchRenderer;
+static std::unique_ptr<UnderlayRenderer> g_UnderlayRenderer;
 static std::unique_ptr<FieldRenderer> g_FieldRenderer;
 static std::unique_ptr<RayTracingRenderer> g_RayTracingRenderer;
 static std::unique_ptr<ShadowRenderer> g_ShadowRenderer;
@@ -752,6 +754,10 @@ static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
   if (g_OutlineRenderer) {
     g_OutlineRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
+  if (g_UnderlayRenderer) {
+    // Reference images first, so the sketch lines below draw on top.
+    g_UnderlayRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
+  }
   if (g_SketchRenderer) {
     g_SketchRenderer->Render(fd->CommandBuffer, wd->FrameIndex);
   }
@@ -1160,6 +1166,16 @@ int main(int argc, char **argv) {
     std::cout << "Warning: SketchRenderer initialization failed" << std::endl;
   }
 
+  // Initialize UnderlayRenderer (sketch reference images)
+  g_UnderlayRenderer = std::make_unique<UnderlayRenderer>();
+  if (g_UnderlayRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
+                                     g_Queue, g_QueueFamily, g_CommandPool,
+                                     g_MSAASamples)) {
+    g_UnderlayRenderer->SetViewportSize(1280, 720);
+  } else {
+    std::cout << "Warning: UnderlayRenderer initialization failed" << std::endl;
+  }
+
   // Initialize FieldRenderer (FEM result overlay)
   g_FieldRenderer = std::make_unique<FieldRenderer>();
   if (g_FieldRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
@@ -1186,6 +1202,7 @@ int main(int argc, char **argv) {
   g_App.meshRenderer = g_MeshRenderer.get();
   g_App.outlineRenderer = g_OutlineRenderer.get();
   g_App.sketchRenderer = g_SketchRenderer.get();
+  g_App.underlayRenderer = g_UnderlayRenderer.get();
   g_App.fieldRenderer = g_FieldRenderer.get();
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
@@ -1296,6 +1313,9 @@ int main(int argc, char **argv) {
       if (g_SketchRenderer) {
         g_SketchRenderer->SetViewportSize(fb_width, fb_height);
       }
+      if (g_UnderlayRenderer) {
+        g_UnderlayRenderer->SetViewportSize(fb_width, fb_height);
+      }
       if (g_FieldRenderer) {
         g_FieldRenderer->SetViewport(0, 0, fb_width, fb_height);
       }
@@ -1394,6 +1414,11 @@ int main(int argc, char **argv) {
                                      g_Camera->GetProjectionMatrix());
     }
 
+    if (g_UnderlayRenderer && g_Camera) {
+      g_UnderlayRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
+                                       g_Camera->GetProjectionMatrix());
+    }
+
     if (g_FieldRenderer && g_Camera) {
       g_FieldRenderer->UpdateCamera(g_Camera->GetViewMatrix(),
                                     g_Camera->GetProjectionMatrix());
@@ -1443,6 +1468,8 @@ int main(int argc, char **argv) {
               if (g_FieldRenderer) g_FieldRenderer->Render(cb, wd->FrameIndex);
               if (g_OutlineRenderer)
                 g_OutlineRenderer->Render(cb, wd->FrameIndex);
+              if (g_UnderlayRenderer)
+                g_UnderlayRenderer->Render(cb, wd->FrameIndex);
               if (g_SketchRenderer)
                 g_SketchRenderer->Render(cb, wd->FrameIndex);
               ImGui_ImplVulkan_RenderDrawData(draw_data, cb);

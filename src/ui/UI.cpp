@@ -5,6 +5,7 @@
 #include "MeshRenderer.h"
 #include "OutlineRenderer.h"
 #include "SketchRenderer.h"
+#include "UnderlayRenderer.h"
 #include "core/features/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/DockLayout.h"
@@ -482,6 +483,42 @@ void DrawUI(AppState& state) {
       state.sketchRenderer->SetStaticLines({});
       state.sketchRenderer->SetPrimitives({});
     }
+  }
+
+  // Sketch reference images (v49): textured underlays on the active sketch
+  // plane, shown only while editing that sketch. Each image's pixel corners
+  // map through its placement into plane-UV, then to world space.
+  if (state.underlayRenderer) {
+    std::vector<UnderlayDraw> draws;
+    if (state.document && state.sketchEdit.IsEditing()) {
+      if (SketchFeature* active = ResolveActiveSketch(state)) {
+        for (const sketch::ReferenceImage& img : active->images) {
+          if (img.hidden || img.widthPx <= 0 || img.heightPx <= 0)
+            continue;
+          const double c = std::cos(img.rotation), s = std::sin(img.rotation);
+          auto pxToWorld = [&](double px, double py) {
+            const double x = px * img.unitsPerPixel, y = py * img.unitsPerPixel;
+            const glm::vec2 uv(float(img.origin.x + c * x - s * y),
+                               float(img.origin.y + s * x + c * y));
+            return active->plane.PlaneToWorld(uv);
+          };
+          UnderlayDraw d;
+          d.asset = img.asset;
+          d.bytes = state.document->GetAsset(img.asset);
+          d.opacity = static_cast<float>(img.opacity);
+          d.corners[0] = pxToWorld(0, 0);
+          d.corners[1] = pxToWorld(img.widthPx, 0);
+          d.corners[2] = pxToWorld(img.widthPx, img.heightPx);
+          d.corners[3] = pxToWorld(0, img.heightPx);
+          draws.push_back(std::move(d));
+        }
+      }
+    }
+    // No underlays this frame (not editing / none visible): free cached
+    // textures behind a wait-idle. Cheap no-op once the cache is already empty.
+    if (draws.empty())
+      state.underlayRenderer->ReleaseTextures();
+    state.underlayRenderer->SetImages(draws);
   }
 
   // Point the renderers, camera, and picking at the central-node region so

@@ -13,7 +13,14 @@
 >   set/delete_reference_image` (RemoteModeling.cpp), MCP wrappers
 >   (designer_mcp.py). Driven end-to-end against a headless app instance:
 >   import→calibrate→set→save→reload round-trips in both formats.
-> - **Phase 2 (rendering) — NEXT.** UnderlayRenderer + shaders (needs GPU eyes).
+> - **Phase 2 (rendering) — DONE & verified.** `UnderlayRenderer` + `underlay.vert/frag`,
+>   per-asset device-local textures (decode via stb, cached, `vkDeviceWaitIdle`
+>   teardown), textured quad on the sketch plane fed from UI.cpp. Verified by
+>   screenshot on an Xvfb `--hidden` instance: image renders upright, calibrate
+>   rescales (4→30 units), opacity fades, sketch grid draws on top, no validation
+>   errors. Two bugs found & fixed in the process: the `screenshot` re-render
+>   path (main.cpp:1466) had its OWN renderer list that omitted the underlay; and
+>   the texture V needed flipping (pixel +Y down vs plane +V up).
 > - **Phase 3 (GUI), Phase 4 (polish) — TODO.**
 >
 > NOTE: real `kVersion` was 48 (not 46 as an old memory said); this feature is
@@ -134,6 +141,79 @@ small dedicated `UnderlayRenderer` (sibling of `SketchRenderer`) instead:
 
 Headless builds simply skip the renderer — the model, calibration, and
 serialization all work and are testable without a GPU (which I can't drive here).
+
+## Phase 2 — rendering (DETAILED, awaiting approval)
+
+New class **`UnderlayRenderer`** (`src/UnderlayRenderer.{h,cpp}`), a sibling of
+`SketchRenderer` — NOT bolted onto it (SketchRenderer re-uploads host-visible
+vertex buffers every frame and its descriptor set is UBO-only; a persistent
+device-local texture doesn't fit). Mirrors SketchRenderer's Initialize / helper
+shape (`FindMemoryType`, `LoadShader`, per-frame dynamic buffers, `ExecutableDir()
++ "/libraries/shaders/"`).
+
+**Descriptors / pipeline layout**
+- Set 0, binding 0: UBO `{mat4 view; mat4 proj;}` (vertex stage), per-frame host-
+  visible + mapped, exactly like `SketchRenderer::Ubo` (minus the viewport vec4).
+- Set 1, binding 0: `COMBINED_IMAGE_SAMPLER` (fragment stage) — **per texture**,
+  not per frame.
+- Push constant (fragment): `float opacity`.
+- One pipeline: `underlay.vert`/`underlay.frag`, `TRIANGLE_LIST`, alpha blend on
+  (`SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA`, same as the quad blend), depth test ON /
+  write OFF, cull NONE, drawn **before** the sketch lines so geometry sits on top.
+
+**Vertex** `UnderlayVertex { glm::vec3 pos; glm::vec2 uv; }`. Each image is a
+quad (6 verts) appended into one per-frame dynamic buffer; the renderer records
+`(firstVertex, textureSet)` per image and draws them in order.
+
+**Texture cache** keyed by asset name: `std::map<std::string, Texture>` where
+`Texture { VkImage; VkDeviceMemory; VkImageView; VkDescriptorSet set1; int w,h; }`.
+Created lazily on first sight of an asset via `stbi_load_from_memory(bytes)` →
+RGBA8 → staging buffer → `vkCmdCopyBufferToImage` → device-local image + view →
+allocate set 1 → write the sampler (one shared linear / clamp-to-edge sampler).
+Asset names are unique per (feature,image), so a replaced image gets a new key —
+no stale-texture invalidation needed.
+
+**Per-frame API** `SetImages(std::vector<UnderlayDraw>)`,
+`UnderlayDraw { std::string asset; const std::vector<unsigned char>* bytes;
+std::array<glm::vec3,4> corners; float opacity; }`. `bytes` is only read on a
+cache miss (a cheap pointer otherwise). `Render(cb, frame)` updates the UBO,
+binds the pipeline + set 0, then per image binds set 1, pushes opacity, and draws.
+
+**Texture lifetime (device-lost guard).** `ReleaseTextures()` does
+`vkDeviceWaitIdle` then destroys every cached texture; call it on sketch exit,
+document close, and document-version change. Never free a texture that a
+frame in flight may still sample — this project has crashed from exactly that
+(see [[assembly-two-extruded-devicelost]]).
+
+**Feeding** (`src/ui/UI.cpp`, beside the existing `BuildSketchOverlay` block at
+~424–483, and only when `state.sketchEdit.IsEditing()`): resolve the active
+`SketchFeature` (by `activeSketchId`) and its `SketchPlane`. For each non-hidden
+image, the four pixel corners `(0,0),(W,0),(W,H),(0,H)` map to plane-UV
+`origin + R(rotation)·(vec2(px,py)·unitsPerPixel)`, then to world via
+`SketchPlane::PlaneToWorld`; UVs are `(0,0),(1,0),(1,1),(0,1)`. `bytes` comes
+from `doc->GetAsset(image.asset)`. Build the `UnderlayDraw` list → `SetImages`.
+When not editing: `SetImages({})`, and `ReleaseTextures()` on the edit→non-edit
+transition.
+
+**main.cpp wiring** (beside `g_SketchRenderer`): global `g_UnderlayRenderer`,
+`Initialize` after it, per-frame camera push, `Render` call **before** the
+sketch renderer's (main.cpp:755), and expose `g_App.underlayRenderer`.
+
+**CMake**: two `compile_shader(...)` calls for `underlay.vert`/`underlay.frag`,
+added to the `shaders` custom target list (CMakeLists.txt:609); `UnderlayRenderer.cpp`
+into `app_sources`.
+
+**Verification (my responsibility).** Build `designer`; dev-watch relaunches the
+8799 instance. Drive it (via `designer_remote.py`): new sketch, `add_reference_image`,
+enter sketch edit, `screenshot` → confirm the image renders on the plane at the
+right size; `calibrate` then re-screenshot to confirm it rescales; `set_reference_image`
+opacity → confirm blend; delete → confirm it disappears without a validation
+error (run with `DEV_WATCH_VALIDATE=1` to catch the free-in-flight case).
+
+**Risks:** (1) device-lost on texture teardown — mitigated by the wait-idle
+guard; (2) UV/V-flip (image top row vs. plane +V) — verify against a text-bearing
+test image; (3) images behind an opaque body are depth-culled — acceptable for
+v1 (underlays live on the sketch plane).
 
 ## GUI  (`src/ui/`)
 
