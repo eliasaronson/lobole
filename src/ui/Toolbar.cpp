@@ -12,6 +12,8 @@
 #include "imgui.h"
 
 #include <cfloat>
+#include <initializer_list>
+#include <string>
 
 namespace ui {
 
@@ -260,35 +262,96 @@ void DrawSketchModeToolbar(AppState& state) {
     edit = SketchEditState{};
   Divider();
 
+  // Switch to a sketch tool, resetting the transient per-tool edit state.
+  // Shared by the single-tool buttons and the flyout groups.
+  auto activateTool = [&](SketchTool t) {
+    edit.tool = t;
+    edit.hasPendingPoint = edit.hasPendingPoint2 = false;
+    edit.mirrorAxisPhase = false;
+    edit.dimPickBody.clear();
+    edit.dimPlacing = false;
+    edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
+    edit.dimOnCreateOpen = false;
+    if (t == SketchTool::Dimension)
+      edit.selected.clear(); // dimension targets accumulate from scratch
+    edit.actionMsg.clear();
+  };
   auto toolBtn = [&](const char* icon, const char* tip, SketchTool t) {
     const bool active = edit.tool == t;
     if (active)
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(icon)) {
-      edit.tool = t;
-      edit.hasPendingPoint = edit.hasPendingPoint2 = false;
-      edit.mirrorAxisPhase = false;
-      edit.dimPickBody.clear();
-      edit.dimPlacing = false;
-      edit.lastDrawn.clear(); // dimension-on-create doesn't cross tools
-      edit.dimOnCreateOpen = false;
-      if (t == SketchTool::Dimension)
-        edit.selected.clear(); // dimension targets accumulate from scratch
-      edit.actionMsg.clear();
-    }
+    if (ImGui::Button(icon))
+      activateTool(t);
     if (active)
       ImGui::PopStyleColor();
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("%s", tip);
     ImGui::SameLine();
   };
+  // A flyout group (Onshape-style): the face shows the last-picked variant —
+  // click it to use that tool — and the caret opens a popup to switch which
+  // variant the group holds. `current` persists the pick across frames. The
+  // face reflects the active tool if it is one of the group's variants.
+  struct ToolVariant {
+    const char* icon;
+    const char* label;
+    SketchTool tool;
+  };
+  auto toolGroup = [&](const char* id, int& current,
+                       std::initializer_list<ToolVariant> variants) {
+    const ToolVariant* v = variants.begin();
+    const int n = static_cast<int>(variants.size());
+    if (current < 0 || current >= n)
+      current = 0;
+    bool groupActive = false;
+    for (int i = 0; i < n; i++)
+      if (edit.tool == v[i].tool) {
+        groupActive = true;
+        current = i;
+        break;
+      }
+    ImGui::PushID(id);
+    if (groupActive)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button(v[current].icon))
+      activateTool(v[current].tool);
+    if (groupActive)
+      ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", v[current].label);
+    ImGui::SameLine(0.0f, 1.0f);
+    if (ImGui::Button(ICON_FA_CARET_DOWN "##more"))
+      ImGui::OpenPopup("variants");
+    if (ImGui::BeginPopup("variants")) {
+      for (int i = 0; i < n; i++) {
+        const std::string item = std::string(v[i].icon) + "   " + v[i].label;
+        if (ImGui::Selectable(item.c_str(), i == current)) {
+          current = i;
+          activateTool(v[i].tool);
+        }
+      }
+      ImGui::EndPopup();
+    }
+    ImGui::PopID();
+    ImGui::SameLine();
+  };
+  // Which variant each group currently holds (remembered across frames).
+  static int rectVariant = 0;
+  static int arcVariant = 0;
+
   toolBtn(ICON_FA_SLASH, "Line (L)", SketchTool::Line);
   toolBtn(ICON_FA_CIRCLE_NOTCH, "Circle (C)", SketchTool::Circle);
-  toolBtn(ICON_FA_VECTOR_SQUARE, "Rectangle (G)", SketchTool::Rectangle);
-  toolBtn(ICON_FA_EXPAND, "Center Rectangle (Shift+G)",
-          SketchTool::RectangleCenter);
-  toolBtn(ICON_FA_BEZIER_CURVE, "3-Point Arc (A)", SketchTool::ArcThreePoint);
+  toolGroup("rectgrp", rectVariant,
+            {{ICON_FA_VECTOR_SQUARE, "Rectangle (G)", SketchTool::Rectangle},
+             {ICON_FA_EXPAND, "Center Rectangle (Shift+G)",
+              SketchTool::RectangleCenter}});
+  toolGroup("arcgrp", arcVariant,
+            {{ICON_FA_BEZIER_CURVE, "3-Point Arc (A)",
+              SketchTool::ArcThreePoint},
+             {ICON_FA_BEZIER_CURVE, "Center Arc (centre, start, end)",
+              SketchTool::Arc}});
   toolBtn(ICON_FA_EGG, "Ellipse", SketchTool::Ellipse);
   toolBtn(ICON_FA_PEN_NIB, "Spline (S)", SketchTool::Spline);
   toolBtn(ICON_FA_CIRCLE_DOT, "Point", SketchTool::Point);
@@ -317,23 +380,44 @@ void DrawSketchModeToolbar(AppState& state) {
       ImGui::SetTooltip("%s", tip);
     ImGui::SameLine();
   };
+  // The everyday constraints stay visible; the rest live in the flyout below.
   conBtn("H", "Horizontal (H)", K::Horizontal);
   conBtn("V", "Vertical (V)", K::Vertical);
   conBtn(ICON_FA_ARROWS_TO_DOT, "Coincident (N)", K::Coincident);
   conBtn(ICON_FA_ARROWS_LEFT_RIGHT, "Parallel (B)", K::Parallel);
   conBtn(ICON_FA_ANGLE_RIGHT, "Perpendicular", K::Perpendicular);
-  conBtn("T", "Tangent (T)", K::Tangent);
-  conBtn(ICON_FA_EQUALS, "Equal (E)", K::Equal);
-  conBtn(ICON_FA_CIRCLE, "Concentric", K::Concentric);
-  // The less-common relational constraints (formerly the Sketch panel's "More
-  // constraints" row). ApplySketchConstraint validates the selection and no-ops
-  // with a hint if it doesn't fit. Dimensional constraints are not here — the
-  // Dimension tool (D) covers distance / radius / diameter / angle.
-  conBtn("L", "Point on line (point + line)", K::PointOnLine);
-  conBtn("Sym", "Symmetric (2 points + a line)", K::Symmetric);
-  conBtn("Mid", "Midpoint (point + line)", K::Midpoint);
-  conBtn(ICON_FA_LOCK, "Fix — pin a point", K::Fixed);
-  conBtn("Col", "Collinear (2 lines)", K::Collinear);
+
+  // "More constraints" flyout: the less-common relational constraints, one
+  // click away. Always openable (so the menu is discoverable); each item
+  // applies to the current selection and ApplySketchConstraint no-ops with a
+  // hint if the combination doesn't fit. Dimensional constraints are NOT here —
+  // the Dimension tool (D) covers distance / radius / diameter / angle.
+  if (ImGui::Button(ICON_FA_ELLIPSIS "##morecon"))
+    ImGui::OpenPopup("more_constraints");
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("More constraints…");
+  ImGui::SameLine();
+  if (ImGui::BeginPopup("more_constraints")) {
+    auto conItem = [&](const char* label, const char* tip, K kind) {
+      if (ImGui::Selectable(label))
+        ApplySketchConstraint(state, kind, 0.0);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", tip);
+    };
+    conItem("Tangent", "Tangent (line/curve + curve) — (T)", K::Tangent);
+    conItem("Equal", "Equal size (2 curves, or 2 lines) — (E)", K::Equal);
+    conItem("Concentric", "Concentric (2 curves share a centre)",
+            K::Concentric);
+    ImGui::Separator();
+    conItem("Point on line", "Point lies on a line (point + line)",
+            K::PointOnLine);
+    conItem("Symmetric", "Symmetric (2 points + a line)", K::Symmetric);
+    conItem("Midpoint", "Point at a line's midpoint (point + line)",
+            K::Midpoint);
+    conItem("Fix / pin", "Pin a point in place", K::Fixed);
+    conItem("Collinear", "Collinear (2 lines)", K::Collinear);
+    ImGui::EndPopup();
+  }
   Divider();
 
   ImGui::BeginDisabled(!hasSel);
