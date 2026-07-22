@@ -362,9 +362,10 @@ def main():
         expect(abs(vol - math.pi * 2.0 * 1.0 * 3.0) < 0.05,
                "ellipse extrudes to pi*a*b*h")
 
-        # Preview -> accept/cancel feature flow
+        # Preview -> accept/cancel feature flow (driven from the model toolbar;
+        # the "###tb_*" ids are stable button handles under the dock host).
         d.call("new_project")
-        d.call("menu_click", path="Create/Box")
+        d.call("item_click", ref="//##DockHost/**/###tb_box")
         st = d.call("get_state")
         expect(st["pending_feature_id"] != 0, "box is a pending preview")
         expect(not st["can_undo"], "preview not yet on undo stack")
@@ -372,7 +373,7 @@ def main():
         st = d.call("get_state")
         expect(st["pending_feature_id"] == 0 and st["can_undo"],
                "accept commits one undoable action")
-        d.call("menu_click", path="Create/Sphere")
+        d.call("item_click", ref="//##DockHost/**/###tb_sphere")
         d.call("cancel_pending")
         expect(len(d.call("get_state")["features"]) == 1, "cancel discards")
 

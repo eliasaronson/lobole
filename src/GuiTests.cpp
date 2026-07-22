@@ -25,6 +25,8 @@
 
 #include <glm/glm.hpp>
 
+#include <string>
+
 // Tests run inside the live application and reach it through the AppState.
 static ui::AppState* s_App = nullptr;
 
@@ -43,12 +45,22 @@ static ImVec2 WorldToWindow(const glm::vec3& p) {
                 pos.y + (ndc.y + 1.0f) * 0.5f * size.y);
 }
 
-// Most tests want a committed feature: create via menu, then accept the
-// preview (exercises the real accept path).
-static void MenuCreateAccept(ImGuiTestContext* ctx, const char* menuPath) {
-  ctx->SetRef("//##MainMenuBar");
-  ctx->MenuClick(menuPath);
+// Click a model-toolbar icon button by its stable "###tb_*" id. The buttons
+// live in a child window under the dock host, so we descend with a "**/"
+// wildcard; the "###" id makes the match independent of the icon glyph.
+static void ToolbarClick(ImGuiTestContext* ctx, const char* tbId) {
+  ctx->SetRef("//##DockHost");
+  ctx->ItemClick((std::string("**/") + tbId).c_str());
   ctx->Yield();
+  // Leave the ref on the menu bar, matching the old Create-menu helper: several
+  // callers follow up with MenuClick("Edit/Undo") etc. and rely on that ref.
+  ctx->SetRef("//##MainMenuBar");
+}
+
+// Most tests want a committed feature: create from the toolbar, then accept the
+// preview (exercises the real accept path).
+static void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId) {
+  ToolbarClick(ctx, tbId);
   ui::AcceptPendingFeature(*s_App);
   ctx->Yield();
 }
@@ -76,7 +88,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(Doc() != nullptr);
     const size_t before = Doc()->FeatureCount();
 
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
     IM_CHECK_EQ(Doc()->GetBodies().size(), before + 1);
 
@@ -93,8 +105,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const size_t before = Doc()->FeatureCount();
 
-    MenuCreateAccept(ctx, "Create/Sphere");
-    MenuCreateAccept(ctx, "Create/Cylinder");
+    ToolbarCreateAccept(ctx, "###tb_sphere");
+    ToolbarCreateAccept(ctx, "###tb_cylinder");
     IM_CHECK_EQ(Doc()->FeatureCount(), before + 2);
     IM_CHECK_EQ(Doc()->GetBodies().size(), before + 2);
 
@@ -107,7 +119,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "curves", "create_helix_from_menu");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const size_t before = Doc()->FeatureCount();
-    MenuCreateAccept(ctx, "Create/3D Curve");
+    ToolbarCreateAccept(ctx, "###tb_curve3d");
     IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
     auto* cv = dynamic_cast<CurveFeature*>(
         Doc()->GetFeature(Doc()->FeatureCount() - 1));
@@ -123,9 +135,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     // A helix (now the most recent curve), then a pipe that defaults its path
     // to it. Body count is checked as a delta, so prior state doesn't matter.
-    MenuCreateAccept(ctx, "Create/3D Curve");
+    ToolbarCreateAccept(ctx, "###tb_curve3d");
     const size_t bodiesBefore = Doc()->GetBodies().size();
-    MenuCreateAccept(ctx, "Create/Pipe");
+    ToolbarCreateAccept(ctx, "###tb_pipe");
     auto* pi = dynamic_cast<PipeFeature*>(
         Doc()->GetFeature(Doc()->FeatureCount() - 1));
     IM_CHECK(pi != nullptr);
@@ -135,7 +147,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
   t = IM_REGISTER_TEST(engine, "document", "new_project_clears_features");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK(Doc()->FeatureCount() > 0);
 
     ctx->SetRef("//##MainMenuBar");
@@ -150,7 +162,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
 
     auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
     IM_CHECK(box != nullptr);
@@ -185,7 +197,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
 
     ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z);
@@ -202,7 +214,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
 
     const glm::vec3 posBefore = s_App->camera->GetPosition();
     const float distBefore = s_App->camera->GetDistance();
@@ -321,7 +333,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
 
     s_App->measure.active = true;
     ui::EnterSimulation(*s_App);
@@ -347,7 +359,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
     glm::vec3 min, max;
@@ -495,7 +507,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MenuClick("File/New");
     ctx->Yield();
 
-    ctx->MenuClick("Create/Box");
+    ToolbarClick(ctx, "###tb_box");
     ctx->Yield();
     // Pending: in the doc + rendered, but NOT on the undo stack yet
     IM_CHECK(ui::HasPendingFeature(*s_App));
@@ -519,7 +531,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MenuClick("File/New");
     ctx->Yield();
 
-    ctx->MenuClick("Create/Box");
+    ToolbarClick(ctx, "###tb_box");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
 
@@ -536,7 +548,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MenuClick("File/New");
     ctx->Yield();
 
-    ctx->MenuClick("Create/Box");
+    ToolbarClick(ctx, "###tb_box");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
 
@@ -645,7 +657,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
     // Preview a fillet on a known edge (the picking flow is covered by the
@@ -726,7 +738,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
     const double v0 = Doc()->GetBodies()[0].shape.Volume();
 
-    ctx->MenuClick("Create/Rib");
+    ToolbarClick(ctx, "###tb_rib");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
     IM_CHECK(ui::ResolvePendingFeature(*s_App)->TypeName() == "Rib");
@@ -745,7 +757,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         "Boss", glm::vec3(0), glm::vec3(0, 0, 1), 4.0, 20.0));
     ctx->Yield();
 
-    ctx->MenuClick("Create/Thread");
+    ToolbarClick(ctx, "###tb_thread");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
     IM_CHECK(s_App->slotPick.Active()); // the face slot armed itself
@@ -783,11 +795,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("Create/Pattern");
+    ToolbarClick(ctx, "###tb_pattern");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
 
@@ -841,7 +853,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     const double v0 = Doc()->GetBodies()[0].shape.Volume();
 
-    ctx->MenuClick("Create/Pattern");
+    ToolbarClick(ctx, "###tb_pattern");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
     ui::AcceptPendingFeature(*s_App);
@@ -861,7 +873,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     IM_CHECK(ui::EffectivePlaneVisibility(*s_App)); // empty part → planes shown
 
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK(!ui::EffectivePlaneVisibility(*s_App)); // has a body → hidden
   };
 
@@ -873,7 +885,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->showShadows = false;
     ctx->Yield(3);
@@ -894,7 +906,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->showAmbientOcclusion = false;
     ctx->Yield(3);
@@ -916,7 +928,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->ssaoFullRes = true; // half -> full AO targets
     ctx->Yield(3);
@@ -1716,7 +1728,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const double before = Doc()->GetBodies()[0].shape.Volume();
 
@@ -1735,7 +1747,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
 
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("Create/Fillet");
+    ToolbarClick(ctx, "###tb_fillet");
     ctx->Yield();
     IM_CHECK(s_App->edgePick.Active());
     auto* fil = dynamic_cast<FilletFeature*>(
@@ -1780,8 +1792,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
-    MenuCreateAccept(ctx, "Create/Sphere");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarCreateAccept(ctx, "###tb_sphere");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
 
     // Rename "Box 1" via right-click > Rename: the row becomes a focused
@@ -1815,8 +1827,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
-    MenuCreateAccept(ctx, "Create/Sphere");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarCreateAccept(ctx, "###tb_sphere");
     const uint64_t sphereId = Doc()->GetFeature(1)->GetId();
 
     ctx->ItemClick("//Model/Sphere 2##1");
@@ -1845,7 +1857,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
 
     glm::vec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
@@ -1913,9 +1925,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box");
-    MenuCreateAccept(ctx, "Create/Box");
-    MenuCreateAccept(ctx, "Create/Box");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarCreateAccept(ctx, "###tb_box");
     auto* box2 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(1));
     auto* box3 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(2));
     IM_CHECK(box2 != nullptr && box3 != nullptr);
@@ -1935,7 +1947,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
 
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("Create/Boolean");
+    ToolbarClick(ctx, "###tb_boolean");
     ctx->Yield();
     IM_CHECK(s_App->pendingFeatureId != 0);
     const uint64_t box1Id = Doc()->GetFeature(0)->GetId();
@@ -2975,7 +2987,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    MenuCreateAccept(ctx, "Create/Box"); // 2x2x2 at the origin
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
     glm::vec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
     const uint64_t partSlotId = s_App->parts[0].id;

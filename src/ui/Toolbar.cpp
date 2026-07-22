@@ -130,16 +130,19 @@ void DrawModelToolbar(AppState& state) {
   const bool hasDoc = state.document != nullptr;
   const bool idle = !HasPendingFeature(state); // no creation while previewing
 
-  if (ToolButton(ICON_FA_PENCIL, "New Sketch (S)", hasDoc && idle))
+  // Icon buttons carry a stable "###tb_*" id (hidden from the glyph label) so
+  // the GUI/remote tests can address them regardless of the icon codepoint.
+  if (ToolButton(ICON_FA_PENCIL "###tb_new_sketch", "New Sketch (S)",
+                 hasDoc && idle))
     StartNewSketch(state);
 
   Divider();
 
-  if (ToolButton(ICON_FA_CUBE, "Box", hasDoc && idle))
+  if (ToolButton(ICON_FA_CUBE "###tb_box", "Box", hasDoc && idle))
     CreateBox(state);
-  if (ToolButton(ICON_FA_CIRCLE, "Sphere", hasDoc && idle))
+  if (ToolButton(ICON_FA_CIRCLE "###tb_sphere", "Sphere", hasDoc && idle))
     CreateSphere(state);
-  if (ToolButton(ICON_FA_DATABASE, "Cylinder", hasDoc && idle))
+  if (ToolButton(ICON_FA_DATABASE "###tb_cylinder", "Cylinder", hasDoc && idle))
     CreateCylinder(state);
 
   Divider();
@@ -150,25 +153,27 @@ void DrawModelToolbar(AppState& state) {
   const size_t sketches =
       hasDoc ? SketchFeatureCount(*state.document) : 0;
   const bool hasPathLike = hasDoc && HasCurveOrSketch(*state.document);
-  if (ToolButton(ICON_FA_WAVE_SQUARE, "3D Curve (helix / fit-spline)",
-                 hasDoc && idle))
+  if (ToolButton(ICON_FA_WAVE_SQUARE "###tb_curve3d",
+                 "3D Curve (helix / fit-spline)", hasDoc && idle))
     CreateCurve3D(state);
-  if (ToolButton(ICON_FA_ROUTE, "Sweep a profile along a path",
+  if (ToolButton(ICON_FA_ROUTE "###tb_sweep", "Sweep a profile along a path",
                  hasDoc && idle && sketches >= 1))
     CreateSweep(state);
-  if (ToolButton(ICON_FA_BEZIER_CURVE, "Loft through sections",
+  if (ToolButton(ICON_FA_BEZIER_CURVE "###tb_loft", "Loft through sections",
                  hasDoc && idle && sketches >= 2))
     CreateLoft(state);
-  if (ToolButton(ICON_FA_ROAD, "Pipe / tube along a path",
+  if (ToolButton(ICON_FA_ROAD "###tb_pipe", "Pipe / tube along a path",
                  hasDoc && idle && hasPathLike))
     CreatePipe(state);
 
   Divider();
 
   // Datums.
-  if (ToolButton(ICON_FA_TABLE_CELLS_LARGE, "Datum Plane", hasDoc && idle))
+  if (ToolButton(ICON_FA_TABLE_CELLS_LARGE "###tb_datum_plane", "Datum Plane",
+                 hasDoc && idle))
     CreateDatumPlane(state);
-  if (ToolButton(ICON_FA_ARROWS_UP_DOWN, "Datum Axis", hasDoc && idle))
+  if (ToolButton(ICON_FA_ARROWS_UP_DOWN "###tb_datum_axis", "Datum Axis",
+                 hasDoc && idle))
     CreateDatumAxis(state);
 
   Divider();
@@ -178,12 +183,14 @@ void DrawModelToolbar(AppState& state) {
       hasDoc
           ? BodyProducers(*state.document, state.document->FeatureCount()).size()
           : 0;
-  if (ToolButton(ICON_FA_OBJECT_GROUP, "Boolean (union / subtract / intersect)",
+  if (ToolButton(ICON_FA_OBJECT_GROUP "###tb_boolean",
+                 "Boolean (union / subtract / intersect)",
                  idle && producers >= 2))
     CreateBoolean(state);
-  if (ToolButton(ICON_FA_LEFT_RIGHT, "Mirror a body", idle && producers >= 1))
+  if (ToolButton(ICON_FA_LEFT_RIGHT "###tb_mirror", "Mirror a body",
+                 idle && producers >= 1))
     CreateMirror(state);
-  if (ToolButton(ICON_FA_GRIP, "Pattern (linear / circular)",
+  if (ToolButton(ICON_FA_GRIP "###tb_pattern", "Pattern (linear / circular)",
                  idle && producers >= 1))
     CreatePattern(state);
 
@@ -192,15 +199,17 @@ void DrawModelToolbar(AppState& state) {
   // Edge / wall / detail ops on a body.
   const bool hasBody =
       hasDoc && !state.document->GetBodies().empty();
-  if (ToolButton(ICON_FA_BORDER_TOP_LEFT, "Fillet edges", hasBody && idle))
+  if (ToolButton(ICON_FA_BORDER_TOP_LEFT "###tb_fillet", "Fillet edges",
+                 hasBody && idle))
     CreateFillet(state);
-  if (ToolButton(ICON_FA_CROP_SIMPLE, "Chamfer edges", hasBody && idle))
+  if (ToolButton(ICON_FA_CROP_SIMPLE "###tb_chamfer", "Chamfer edges",
+                 hasBody && idle))
     CreateChamfer(state);
-  if (ToolButton(ICON_FA_BARS_STAGGERED, "Rib (thin web from an open sketch)",
-                 hasBody && idle))
+  if (ToolButton(ICON_FA_BARS_STAGGERED "###tb_rib",
+                 "Rib (thin web from an open sketch)", hasBody && idle))
     CreateRib(state);
-  if (ToolButton(ICON_FA_CIRCLE_NOTCH, "Thread (cosmetic; pick a cyl. face)",
-                 hasBody && idle))
+  if (ToolButton(ICON_FA_CIRCLE_NOTCH "###tb_thread",
+                 "Thread (cosmetic; pick a cyl. face)", hasBody && idle))
     CreateThread(state);
 
   Divider();
