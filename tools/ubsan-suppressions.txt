@@ -12,3 +12,8 @@
 # noise from 18 -> 0 with no effect on real findings.
 alignment:*opencascade*
 alignment:*/include/opencascade/*
+
+# Dear ImGui's Vulkan backend default-initializes ImGui_ImplVulkanH_Window::
+# PresentMode to (VkPresentModeKHR)~0 as an "unset" sentinel; loading it as an
+# enum (during DestroyWindow's move-assign) is a benign UBSan false positive.
+enum:*imgui_impl_vulkan*

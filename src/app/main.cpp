@@ -1539,6 +1539,11 @@ int main(int argc, char **argv) {
   g_Camera.reset();
   g_MeshRenderer.reset();
   g_SketchRenderer.reset();
+  // Must reset here (not at static-destruction time): ~UnderlayRenderer ->
+  // Shutdown() calls vkDeviceWaitIdle, so it has to run while g_Device is still
+  // alive — before CleanupVulkan below. Omitting it left the global to destruct
+  // at exit on an already-freed device -> SIGSEGV at shutdown.
+  g_UnderlayRenderer.reset();
   g_FieldRenderer.reset();
   g_OutlineRenderer.reset();
   g_RayTracingRenderer.reset();
