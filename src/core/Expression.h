@@ -1,7 +1,7 @@
 #pragma once
 
+#include <expected>
 #include <memory>
-#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -36,27 +36,27 @@ public:
   // and referenced-delete refusal; function names are not included.
   [[nodiscard]] virtual const std::set<std::string>& Dependencies() const = 0;
 
-  // Evaluates against the given symbols. On failure returns nullopt and
-  // fills outError (unknown identifier, division by zero, non-finite
-  // result, ...). Never returns NaN/inf — those become errors so bad math
-  // can't reach the geometry kernel.
-  virtual std::optional<double> Evaluate(const SymbolTable& symbols,
-                                         ExprError* outError) const = 0;
+  // Evaluates against the given symbols. On failure returns an unexpected
+  // ExprError (unknown identifier, division by zero, non-finite result, ...).
+  // Never returns NaN/inf — those become errors so bad math can't reach the
+  // geometry kernel.
+  virtual std::expected<double, ExprError> Evaluate(
+      const SymbolTable& symbols) const = 0;
 };
 
 class ExpressionEngine {
 public:
   virtual ~ExpressionEngine() = default;
 
-  // Parses text into a reusable expression. On failure returns nullptr and
-  // fills outError.
-  virtual std::unique_ptr<CompiledExpr> Compile(const std::string& text,
-                                                ExprError* outError) const = 0;
+  // Parses text into a reusable expression. On failure returns an unexpected
+  // ExprError.
+  virtual std::expected<std::unique_ptr<CompiledExpr>, ExprError> Compile(
+      const std::string& text) const = 0;
 
-  // One-shot convenience: Compile + Evaluate.
-  std::optional<double> EvaluateText(const std::string& text,
-                                     const SymbolTable& symbols,
-                                     ExprError* outError) const;
+  // One-shot convenience: Compile + Evaluate, short-circuiting on the first
+  // failure.
+  std::expected<double, ExprError> EvaluateText(
+      const std::string& text, const SymbolTable& symbols) const;
 
   // Rewrites references to oldName into newName, leaving every other byte
   // (spacing, parens, case of other identifiers) untouched so stored
@@ -83,8 +83,8 @@ public:
 // degrees, matching the dimension UI.
 class BuiltinExpressionEngine final : public ExpressionEngine {
 public:
-  std::unique_ptr<CompiledExpr> Compile(const std::string& text,
-                                        ExprError* outError) const override;
+  std::expected<std::unique_ptr<CompiledExpr>, ExprError> Compile(
+      const std::string& text) const override;
   [[nodiscard]] std::string RenameIdentifier(
       const std::string& text, const std::string& oldName,
       const std::string& newName) const override;

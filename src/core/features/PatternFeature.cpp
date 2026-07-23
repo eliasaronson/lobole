@@ -55,7 +55,7 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     int n = count;
     if (!countExpr.empty() && ctx.symbols != nullptr) {
       const auto v = ExpressionEngine::Default().EvaluateText(
-          countExpr, *ctx.symbols, nullptr);
+          countExpr, *ctx.symbols);
       if (v.has_value()) {
         n = static_cast<int>(std::lround(*v));
       }

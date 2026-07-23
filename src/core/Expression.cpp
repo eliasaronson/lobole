@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -514,11 +515,12 @@ public:
     return m_deps;
   }
 
-  std::optional<double> Evaluate(const SymbolTable& symbols,
-                                 ExprError* outError) const override {
+  std::expected<double, ExprError> Evaluate(
+      const SymbolTable& symbols) const override {
     double value = 0.0;
-    if (!EvalNode(*m_root, symbols, value, outError)) {
-      return std::nullopt;
+    ExprError error;
+    if (!EvalNode(*m_root, symbols, value, &error)) {
+      return std::unexpected(error);
     }
     return value;
   }
@@ -532,14 +534,12 @@ private:
 
 // ----------------------------------------------------------------- Engines
 
-std::optional<double> ExpressionEngine::EvaluateText(
-    const std::string& text, const SymbolTable& symbols,
-    ExprError* outError) const {
-  const auto compiled = Compile(text, outError);
-  if (!compiled) {
-    return std::nullopt;
-  }
-  return compiled->Evaluate(symbols, outError);
+std::expected<double, ExprError> ExpressionEngine::EvaluateText(
+    const std::string& text, const SymbolTable& symbols) const {
+  return Compile(text).and_then(
+      [&symbols](const std::unique_ptr<CompiledExpr>& compiled) {
+        return compiled->Evaluate(symbols);
+      });
 }
 
 const ExpressionEngine& ExpressionEngine::Default() {
@@ -547,15 +547,16 @@ const ExpressionEngine& ExpressionEngine::Default() {
   return engine;
 }
 
-std::unique_ptr<CompiledExpr> BuiltinExpressionEngine::Compile(
-    const std::string& text, ExprError* outError) const {
+std::expected<std::unique_ptr<CompiledExpr>, ExprError>
+BuiltinExpressionEngine::Compile(const std::string& text) const {
+  ExprError error;
   std::vector<Token> tokens;
-  if (!Tokenize(text, tokens, outError)) {
-    return nullptr;
+  if (!Tokenize(text, tokens, &error)) {
+    return std::unexpected(error);
   }
-  auto root = Parser(tokens, outError).Parse();
+  auto root = Parser(tokens, &error).Parse();
   if (!root) {
-    return nullptr;
+    return std::unexpected(error);
   }
   return std::make_unique<BuiltinCompiledExpr>(std::move(root));
 }

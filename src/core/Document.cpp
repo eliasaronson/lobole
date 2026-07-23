@@ -111,15 +111,14 @@ bool Document::Regenerate() {
       if (text.empty()) {
         return;
       }
-      ExprError err;
       const auto v =
-          ExpressionEngine::Default().EvaluateText(text, m_symbols, &err);
+          ExpressionEngine::Default().EvaluateText(text, m_symbols);
       if (v.has_value()) {
         value = *v;
       } else if (exprErr[i].empty()) {
         // The ExprError message distinguishes the case ("unknown variable
         // 'bore'" vs. a parse / division error); first failure per feature wins.
-        exprErr[i] = err.message;
+        exprErr[i] = v.error().message;
       }
     });
   }
@@ -407,8 +406,8 @@ std::vector<std::string> Document::FindParameterReferences(
     if (text.empty()) {
       return false;
     }
-    const auto compiled = engine.Compile(text, nullptr);
-    return compiled != nullptr && compiled->Dependencies().contains(name);
+    const auto compiled = engine.Compile(text);
+    return compiled.has_value() && (*compiled)->Dependencies().contains(name);
   };
 
   std::vector<std::string> refs;
@@ -526,12 +525,12 @@ void EvaluateParameterTable(
     Parameter& p = params[i];
     const std::string* ov = overrideExpr ? overrideExpr(p.name) : nullptr;
     const std::string& expression = ov ? *ov : p.expression;
-    ExprError err;
-    compiled[i] = engine.Compile(expression, &err);
-    if (compiled[i] == nullptr) {
-      p.error = err.message;
+    auto result = engine.Compile(expression);
+    if (!result) {
+      p.error = result.error().message;
       continue;
     }
+    compiled[i] = std::move(*result);
     p.error.clear();
     for (const std::string& dep : compiled[i]->Dependencies()) {
       const auto it = indexByName.find(dep);
@@ -557,14 +556,13 @@ void EvaluateParameterTable(
     evaluated[i] = true;
     Parameter& p = params[i];
     if (compiled[i] != nullptr) {
-      ExprError err;
-      const auto v = compiled[i]->Evaluate(out, &err);
+      const auto v = compiled[i]->Evaluate(out);
       if (v.has_value()) {
         p.value = *v;
         out[p.name] = *v;
         p.error.clear();
       } else {
-        p.error = err.message;  // keep last good value
+        p.error = v.error().message;  // keep last good value
       }
     }
     for (const size_t dep : dependents[i]) {

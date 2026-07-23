@@ -10,19 +10,17 @@ using Catch::Matchers::WithinRel;
 namespace {
 
 double Eval(const std::string& text, const SymbolTable& symbols = {}) {
-  ExprError err;
-  const auto value = ExpressionEngine::Default().EvaluateText(text, symbols, &err);
-  INFO(text << " -> " << err.message);
+  const auto value = ExpressionEngine::Default().EvaluateText(text, symbols);
+  INFO(text << " -> " << (value ? std::string{} : value.error().message));
   REQUIRE(value.has_value());
   return *value;
 }
 
 ExprError EvalError(const std::string& text, const SymbolTable& symbols = {}) {
-  ExprError err;
-  const auto value = ExpressionEngine::Default().EvaluateText(text, symbols, &err);
+  const auto value = ExpressionEngine::Default().EvaluateText(text, symbols);
   INFO(text);
   REQUIRE_FALSE(value.has_value());
-  return err;
+  return value.error();
 }
 
 }  // namespace
@@ -72,22 +70,25 @@ TEST_CASE("expression variables", "[expression]") {
 TEST_CASE("expression parse errors carry a span", "[expression]") {
   const auto& engine = ExpressionEngine::Default();
 
-  ExprError err;
-  CHECK(engine.Compile("", &err) == nullptr);
+  CHECK_FALSE(engine.Compile("").has_value());
+  CHECK_FALSE(engine.Compile("1 +").has_value());
 
-  CHECK(engine.Compile("1 +", &err) == nullptr);
+  {
+    const auto r = engine.Compile("width $ 2");
+    REQUIRE_FALSE(r.has_value());
+    CHECK(r.error().offset == 6);
+  }
+  {
+    const auto r = engine.Compile("1 + foo(2)");
+    REQUIRE_FALSE(r.has_value());
+    CHECK(r.error().message.find("unknown function") != std::string::npos);
+    CHECK(r.error().offset == 4);
+  }
 
-  CHECK(engine.Compile("width $ 2", &err) == nullptr);
-  CHECK(err.offset == 6);
-
-  CHECK(engine.Compile("1 + foo(2)", &err) == nullptr);
-  CHECK(err.message.find("unknown function") != std::string::npos);
-  CHECK(err.offset == 4);
-
-  CHECK(engine.Compile("sin(1, 2)", &err) == nullptr);
-  CHECK(engine.Compile("min(1)", &err) == nullptr);
-  CHECK(engine.Compile("(1 + 2", &err) == nullptr);
-  CHECK(engine.Compile("1 2", &err) == nullptr);
+  CHECK_FALSE(engine.Compile("sin(1, 2)").has_value());
+  CHECK_FALSE(engine.Compile("min(1)").has_value());
+  CHECK_FALSE(engine.Compile("(1 + 2").has_value());
+  CHECK_FALSE(engine.Compile("1 2").has_value());
 }
 
 TEST_CASE("expression evaluation errors", "[expression]") {
@@ -105,12 +106,11 @@ TEST_CASE("expression evaluation errors", "[expression]") {
 }
 
 TEST_CASE("expression dependencies", "[expression]") {
-  ExprError err;
   const auto compiled = ExpressionEngine::Default().Compile(
-      "width * 2 + sin(angle) - width + pi", &err);
-  REQUIRE(compiled != nullptr);
+      "width * 2 + sin(angle) - width + pi");
+  REQUIRE(compiled.has_value());
   const std::set<std::string> expected = {"width", "angle"};
-  CHECK(compiled->Dependencies() == expected);  // no functions, no pi
+  CHECK((*compiled)->Dependencies() == expected);  // no functions, no pi
 }
 
 TEST_CASE("expression rename preserves formatting", "[expression]") {
@@ -193,11 +193,10 @@ TEST_CASE("expression units win after a number, identifiers elsewhere",
 TEST_CASE("expression units are invisible to dependencies and rename",
           "[expression]") {
   const auto& engine = ExpressionEngine::Default();
-  ExprError err;
   // A unit suffix never enters the dependency set.
-  const auto compiled = engine.Compile("gap + 10mm", &err);
-  REQUIRE(compiled != nullptr);
-  CHECK(compiled->Dependencies() == std::set<std::string>{"gap"});
+  const auto compiled = engine.Compile("gap + 10mm");
+  REQUIRE(compiled.has_value());
+  CHECK((*compiled)->Dependencies() == std::set<std::string>{"gap"});
   // Rename leaves unit-bearing literals byte-for-byte untouched.
   CHECK(engine.RenameIdentifier("gap + 10mm", "gap", "g") == "g + 10mm");
   CHECK(engine.RenameIdentifier("2in * width", "width", "w") == "2in * w");

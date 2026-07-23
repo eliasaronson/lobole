@@ -1066,8 +1066,8 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
   const auto& engine = ExpressionEngine::Default();
   const auto references = [&](const std::string& text) {
     if (text.empty()) return false;
-    const auto compiled = engine.Compile(text, nullptr);
-    return compiled != nullptr && compiled->Dependencies().contains(name);
+    const auto compiled = engine.Compile(text);
+    return compiled.has_value() && (*compiled)->Dependencies().contains(name);
   };
   std::vector<std::string> refs;
   for (const Parameter& p : state.projectParameters)

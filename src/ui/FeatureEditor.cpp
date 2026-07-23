@@ -256,14 +256,13 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   }
 
   if (!exprText.empty()) {
-    ExprError err;
     const auto v =
-        ExpressionEngine::Default().EvaluateText(exprText, doc.Symbols(), &err);
+        ExpressionEngine::Default().EvaluateText(exprText, doc.Symbols());
     if (v.has_value()) {
       ImGui::TextDisabled("= %.4g", *v);
     } else {
       ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
-                         err.message.c_str());
+                         v.error().message.c_str());
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("123")) {
@@ -326,14 +325,13 @@ void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
     CommitDiscrete(state, feature, before, index, commit);
   }
 
-  ExprError err;
   const auto v =
-      ExpressionEngine::Default().EvaluateText(exprText, doc.Symbols(), &err);
+      ExpressionEngine::Default().EvaluateText(exprText, doc.Symbols());
   if (v.has_value())
     ImGui::TextDisabled("= %d", std::max(1, static_cast<int>(std::lround(*v))));
   else
     ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
-                       err.message.c_str());
+                       v.error().message.c_str());
   ImGui::SameLine();
   if (ImGui::SmallButton("123")) {
     nlohmann::json before = DocumentIO::FeatureToJson(feature);

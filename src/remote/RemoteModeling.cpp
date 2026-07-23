@@ -231,10 +231,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         c.value = glm::radians(c.value); // wire=degrees, model=radians
       c.valueExpr = spec.value("expr", std::string{});
       if (!c.valueExpr.empty()) {
-        ExprError err;
         const auto v = ExpressionEngine::Default().EvaluateText(
-            c.valueExpr, doc->Symbols(), &err);
-        if (!v) throw std::runtime_error("bad expr: " + err.message);
+            c.valueExpr, doc->Symbols());
+        if (!v) throw std::runtime_error("bad expr: " + v.error().message);
         c.value = (c.kind == sketch::ConstraintKind::Angle) ? glm::radians(*v)
                                                             : *v;
       }

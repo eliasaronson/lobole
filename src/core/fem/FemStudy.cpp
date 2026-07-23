@@ -61,13 +61,12 @@ bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols, std::string* e
   // going so every bad field is left with its last good value.
   auto eval = [&](const std::string& text, double& value, const std::string& what) {
     if (text.empty()) return;
-    ExprError err;
-    const auto v = ExpressionEngine::Default().EvaluateText(text, symbols, &err);
+    const auto v = ExpressionEngine::Default().EvaluateText(text, symbols);
     if (v.has_value()) {
       value = *v;
     } else if (ok) {
       ok = false;
-      if (error) *error = what + " expression '" + text + "': " + err.message;
+      if (error) *error = what + " expression '" + text + "': " + v.error().message;
     }
   };
 

@@ -2866,11 +2866,10 @@ void DrawDimensions(AppState& state) {
             v = glm::radians(v);
           ApplyDimensionEdit(state, *sketch, index, i, v);
         } else {
-          ExprError err;
           const auto evaluated = ExpressionEngine::Default().EvaluateText(
-              buf, state.document->Symbols(), &err);
+              buf, state.document->Symbols());
           if (!evaluated.has_value()) {
-            editError = err.message;
+            editError = evaluated.error().message;
             commit = false; // stay open, show the error
           } else {
             v = con.kind == K::Angle ? glm::radians(*evaluated) : *evaluated;
@@ -2998,11 +2997,10 @@ void DrawDimensionOnCreate(AppState& state) {
       v = std::abs(v);
     std::string expr;
     if (!isNumber) {
-      ExprError err;
       const auto evaluated = ExpressionEngine::Default().EvaluateText(
-          buf, state.document->Symbols(), &err);
+          buf, state.document->Symbols());
       if (!evaluated.has_value()) {
-        editError = err.message;
+        editError = evaluated.error().message;
         commit = false; // stay open, show the error
       } else {
         v = *evaluated;
