@@ -105,14 +105,18 @@ TEST_CASE("Thread designation must fit the face", "[thread]") {
 TEST_CASE("Thread errors on planar and dangling faces", "[thread]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("Box", glm::vec3(0), 4, 4, 4));
+  // AddFeature regenerates and move-assigns m_bodies, so a Body reference held
+  // across it dangles. Capture what the later features need by value up front.
   const Body& body = doc.GetBodies()[0];
+  const uint64_t createdBy = body.createdBy;
+  const std::string planarFace = PlanarFaceName(body);
   doc.AddFeature(std::make_unique<ThreadFeature>(
-      "Flat", ElementRef{body.createdBy, PlanarFaceName(body)}, "M8", 1.25));
+      "Flat", ElementRef{createdBy, planarFace}, "M8", 1.25));
   CHECK(doc.GetFeature(1)->GetError().find("cylindrical") !=
         std::string::npos);
 
   doc.AddFeature(std::make_unique<ThreadFeature>(
-      "Gone", ElementRef{body.createdBy, "nope"}, "M8", 1.25));
+      "Gone", ElementRef{createdBy, "nope"}, "M8", 1.25));
   CHECK(!doc.GetFeature(2)->GetError().empty());
 }
 
