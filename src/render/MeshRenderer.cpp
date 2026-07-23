@@ -308,12 +308,19 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) 
     scissor.extent = {m_viewportWidth, m_viewportHeight};
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+    // Per-frame resources are sized to MAX_FRAMES_IN_FLIGHT, but the caller
+    // passes the swapchain image index (0..ImageCount-1), which exceeds that on
+    // a >2-image swapchain — wrap it to stay in bounds (matches SSAORenderer's
+    // convention). Without this the UBO memcpy writes through an out-of-bounds
+    // (garbage) pointer: heap corruption, caught by ASan on Intel Arc.
+    const uint32_t frame = currentFrame % MAX_FRAMES_IN_FLIGHT;
+
     // Shared UBO (camera + lights + clip plane); one write serves every draw
     // this frame — everything per-instance rides in push constants
-    memcpy(m_uniformBuffersMapped[currentFrame], &ubo, sizeof(ubo));
+    memcpy(m_uniformBuffersMapped[frame], &ubo, sizeof(ubo));
 
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           m_pipelineLayout, 0, 1, &m_descriptorSets[currentFrame], 0, nullptr);
+                           m_pipelineLayout, 0, 1, &m_descriptorSets[frame], 0, nullptr);
 
     // One draw per instance; the asset's buffers are bound once per run of
     // consecutive instances sharing it. Push constants live in the command

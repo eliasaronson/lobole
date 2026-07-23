@@ -680,19 +680,25 @@ void OutlineRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFram
     if (!m_isInitialized || m_settings.mode == OutlineMode::NONE || m_meshes.empty()) {
         return;
     }
-    
+
+    // Per-frame resources are sized to MAX_FRAMES_IN_FLIGHT, but the caller
+    // passes the swapchain image index (0..ImageCount-1), which exceeds that on
+    // a >2-image swapchain. Wrap to stay in bounds (matches SSAORenderer); the
+    // raw index overruns the uniform-buffer/descriptor-set arrays otherwise.
+    const uint32_t frame = currentFrame % MAX_FRAMES_IN_FLIGHT;
+
     // Update uniform buffers for current frame
-    UpdateUniformBuffers(currentFrame);
-    
+    UpdateUniformBuffers(frame);
+
     // Render based on mode
     switch (m_settings.mode) {
         case OutlineMode::EDGES:
         case OutlineMode::SILHOUETTE:
-            RenderOutlines(commandBuffer, currentFrame);
+            RenderOutlines(commandBuffer, frame);
             break;
-            
+
         case OutlineMode::WIREFRAME:
-            RenderWireframes(commandBuffer, currentFrame);
+            RenderWireframes(commandBuffer, frame);
             break;
             
         default:
