@@ -150,8 +150,20 @@ value-delivering slices, each independently landable and testable:
   clear win.
 - **Slice C — the FEM/femgpu run stack** (`RunStudy`, `RunStudyAndCache`,
   `EvaluateStudyExprs`, `ComputeContext`/`TopoCgSolver`/`TopoMultigrid`
-  `std::string*` params). Do last; it's the largest cluster and the least about
-  composition.
+  `std::string*` params). **SKIPPED (2026-07-23) — poor risk/reward.** These are
+  all `bool f(…, StudyRuntime& rt, std::vector<double>& u, float* ec,
+  std::string* error)`: they return success/fail and write results into
+  *out-refs*, not the return value. So `expected`'s real safety win (can't read a
+  value that isn't there) doesn't apply — a minimal `expected<void, std::string>`
+  would leave the actual footgun (reading a half-written `rt`/`u`/`ec` after a
+  failed solve) fully in place; closing it means folding results into the
+  expected, a large rewrite of the solver stack's incremental-write pattern. No
+  composition to gain (imperative mesh→assemble→solve). Not faster (zero; the
+  path is minutes of compute). The only realizable gain is a non-discardable
+  error — cheaper via `[[nodiscard]] bool` if ever wanted, plus fixing the one
+  deliberate swallow at `RemoteSimulation.cpp` (`EvaluateStudyExprs(…, nullptr)`).
+  Highest-risk slice (femgpu solver internals, slow FEM/topopt tests) for the
+  thinnest benefit, so it was dropped rather than done.
 
 Error type: start with `std::expected<T, std::string>` to match today's string
 messages verbatim — no call-site rewrites beyond `.error()`. Only promote to a
@@ -232,12 +244,13 @@ Ordered so each step is independently landable and low-risk first:
 | 2 | ~~`to_underlying` (2c)~~ **DONE 25f8b71** | 19 enum casts (our enums only) | done | — |
 | 3 | ~~`std::expected` slice A — Expression~~ **DONE 27e13fc** | Compile/Evaluate/EvaluateText + ~13 callers | done | — |
 | 4 | ~~`std::expected` slice B — serialization~~ **DONE** | 6 Save/Load fns + ~15 prod callers + ~86 test sites (via tests/TestIO.h adapter) | done | test surface was ~86 sites, not "few" — used a test adapter |
-| 5 | `std::expected` slice C — FEM/femgpu | ~15 fns + call sites | ~1 day | medium — largest cluster, run under FEM tests |
+| 5 | ~~`std::expected` slice C — FEM/femgpu~~ **SKIPPED 2026-07-23** | ~15 fns + call sites | dropped | poor risk/reward — see below |
 | — | ranges views (2b) | going forward | 0 scheduled | — adopt in new code |
 | — | deducing `this` / `std::print` CLI (Part 3) | ~20 + 1 | ~1 h | cosmetic, optional |
 
-Total scheduled: **~3 days** across 1–5, none of them blocking, each shippable on
-its own commit. Items with "0 scheduled" are policy changes, not tasks.
+Landed: items 1–4 (logging, `to_underlying`, expected slices A + B). Item 5
+(FEM/femgpu) was **skipped** as poor risk/reward. The remaining rows are
+policy-only. This effectively completes the scheduled modernization.
 
 ---
 
