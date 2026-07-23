@@ -1,4 +1,5 @@
 #include "ui/FeatureEditor.h"
+#include <utility>
 
 #include "cad/CADMaterials.h"
 #include "render/Camera.h"
@@ -468,7 +469,7 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
 
   // Variant.
   const char* kinds[] = {"Offset", "Angled", "Through 3 Points"};
-  int kind = static_cast<int>(dp.kind);
+  int kind = std::to_underlying(dp.kind);
   if (LabeledCombo("Type", &kind, kinds, 3)) {
     nlohmann::json before = DocumentIO::FeatureToJson(dp);
     dp.kind = static_cast<DatumPlaneKind>(kind);
@@ -530,7 +531,7 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
                          bool commit) {
   const char* kinds[] = {"Two Points", "Sketch Line", "Global X", "Global Y",
                          "Global Z"};
-  int kind = static_cast<int>(da.kind);
+  int kind = std::to_underlying(da.kind);
   if (LabeledCombo("Type", &kind, kinds, 5)) {
     nlohmann::json before = DocumentIO::FeatureToJson(da);
     da.kind = static_cast<DatumAxisKind>(kind);
@@ -561,7 +562,7 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
 void DrawBooleanParams(AppState& state, BooleanFeature& boo, size_t index,
                        bool commit) {
   const char* ops[] = {"Union", "Subtract", "Intersect"};
-  int op = static_cast<int>(boo.op);
+  int op = std::to_underlying(boo.op);
   if (LabeledCombo("Operation", &op, ops, 3)) {
     nlohmann::json before = DocumentIO::FeatureToJson(boo);
     boo.op = static_cast<BooleanOp>(op);
@@ -668,7 +669,7 @@ void PlaneRefCombo(AppState& state, Feature& owner, uint64_t& planeId,
 void DrawPatternParams(AppState& state, PatternFeature& pat, size_t index,
                        bool commit) {
   const char* kinds[] = {"Mirror", "Linear", "Circular"};
-  int kind = static_cast<int>(pat.kind);
+  int kind = std::to_underlying(pat.kind);
   if (LabeledCombo("Type", &kind, kinds, 3)) {
     nlohmann::json before = DocumentIO::FeatureToJson(pat);
     pat.kind = static_cast<PatternKind>(kind);
@@ -905,7 +906,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     DrawDatumAxisParams(state, *da, index, commit);
   } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
     const char* ends[] = {"Blind", "Symmetric", "Two-sided", "Up to face"};
-    int end = static_cast<int>(ext->endMode);
+    int end = std::to_underlying(ext->endMode);
     if (LabeledCombo("End", &end, ends, 4)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ext);
       ext->endMode = static_cast<ExtrudeEnd>(end);
@@ -937,7 +938,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ExprDim(state, feature, index, commit, "Thickness",
               ext->thinThicknessExpr, ext->thinThickness);
       const char* sides[] = {"Outward", "Inward", "Both"};
-      int side = static_cast<int>(ext->thinSide);
+      int side = std::to_underlying(ext->thinSide);
       if (LabeledCombo("Wall side", &side, sides, 3)) {
         nlohmann::json before = DocumentIO::FeatureToJson(*ext);
         ext->thinSide = static_cast<sketch::ThinSide>(side);
@@ -946,7 +947,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
 
     const char* modes[] = {"New Body", "Add", "Cut"};
-    int mode = static_cast<int>(ext->mode);
+    int mode = std::to_underlying(ext->mode);
     if (LabeledCombo("Mode", &mode, modes, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ext);
       ext->mode = static_cast<ExtrudeMode>(mode);
@@ -975,7 +976,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                  index, commit);
 
     const char* modes[] = {"New Body", "Add", "Cut"};
-    int mode = static_cast<int>(rev->mode);
+    int mode = std::to_underlying(rev->mode);
     if (LabeledCombo("Mode", &mode, modes, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*rev);
       rev->mode = static_cast<ExtrudeMode>(mode);
@@ -1001,7 +1002,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     ExprDim(state, feature, index, commit, "Angle (deg)", dr->angleExpr,
             dr->angleDeg);
     const char* planes[] = {"XY (pull +Z)", "XZ (pull +Y)", "YZ (pull +X)"};
-    int pl = static_cast<int>(dr->neutralPlane);
+    int pl = std::to_underlying(dr->neutralPlane);
     if (LabeledCombo("Neutral", &pl, planes, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*dr);
       dr->neutralPlane = static_cast<PlaneType>(pl);
@@ -1028,7 +1029,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
   } else if (auto* ho = dynamic_cast<HoleFeature*>(&feature)) {
     const char* kinds[] = {"Simple", "Counterbore", "Countersink"};
-    int k = static_cast<int>(ho->kind);
+    int k = std::to_underlying(ho->kind);
     if (LabeledCombo("Type", &k, kinds, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ho);
       ho->kind = static_cast<HoleKind>(k);
@@ -1058,7 +1059,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Points: missing");
   } else if (auto* cv = dynamic_cast<CurveFeature*>(&feature)) {
     const char* kinds[] = {"Fit spline", "Helix", "Control poly"};
-    int k = static_cast<int>(cv->kind);
+    int k = std::to_underlying(cv->kind);
     if (LabeledCombo("Kind", &k, kinds, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*cv);
       cv->kind = static_cast<Curve3DKind>(k);
@@ -1266,7 +1267,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
   } else if (auto* fil = dynamic_cast<FilletFeature*>(&feature)) {
     const char* ops[] = {"Fillet", "Chamfer"};
-    int op = static_cast<int>(fil->op);
+    int op = std::to_underlying(fil->op);
     if (LabeledCombo("Operation", &op, ops, 2)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*fil);
       fil->op = static_cast<EdgeBlendOp>(op);

@@ -1,4 +1,5 @@
 #include "ui/MainMenuBar.h"
+#include <utility>
 
 #include "render/Camera.h"
 #include "cad/FaceSelector.h"
@@ -254,7 +255,7 @@ void DrawViewMenu(AppState& state) {
 
       const char* outlineModes[] = {"None", "Edges", "Wireframe",
                                     "Silhouette"};
-      int currentMode = static_cast<int>(settings.mode);
+      int currentMode = std::to_underlying(settings.mode);
       if (ImGui::Combo("Mode", &currentMode, outlineModes, 4)) {
         settings.mode = static_cast<OutlineMode>(currentMode);
         changed = true;

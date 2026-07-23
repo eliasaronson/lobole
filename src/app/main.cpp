@@ -2,6 +2,7 @@
 // Based on Dear ImGui GLFW+Vulkan example
 
 #include "render/Camera.h"
+#include <utility>
 #include "cad/FaceSelector.h"
 #include "app/GuiTests.h"
 #include "render/IBL.h"
@@ -1169,7 +1170,7 @@ int main(int argc, char **argv) {
 
     // Set default outline settings for visibility testing
     OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
-    LOG_DEBUG("Default outline mode: {}", static_cast<int>(settings.mode));
+    LOG_DEBUG("Default outline mode: {}", std::to_underlying(settings.mode));
     LOG_DEBUG("Default outline color: ({}, {}, {}, {})", settings.outlineColor.r,
               settings.outlineColor.g, settings.outlineColor.b,
               settings.outlineColor.a);

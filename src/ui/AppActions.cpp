@@ -1,4 +1,5 @@
 #include "ui/AppActions.h"
+#include <utility>
 
 #include "cad/CADMaterials.h"
 #include "cad/CADMeshConverter.h"
@@ -548,8 +549,8 @@ void CreateThread(AppState& state) {
                           NextName(state, "Thread"), ElementRef{}, "M8", 1.25));
   // Arm the face slot right away so the first viewport click fills it.
   state.slotPick = {state.pendingFeatureId,
-                    static_cast<int>(PickSlot::ThreadFace),
-                    1u << static_cast<int>(SelectionItem::Kind::Face),
+                    std::to_underlying(PickSlot::ThreadFace),
+                    1u << std::to_underlying(SelectionItem::Kind::Face),
                     /*multi=*/false, "Pick the cylindrical face to thread"};
 }
 

@@ -1,4 +1,5 @@
 #include "render/Camera.h"
+#include <utility>
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
 #include "core/Command.h"
@@ -299,14 +300,14 @@ void DrawResults(AppState& state, const fem::Study& s) {
   // Field overlay controls (display only; no command). Each RadioButton must
   // draw every frame, so evaluate them independently (no short-circuit).
   ImGui::SeparatorText("Display");
-  int field = static_cast<int>(sim.field);
+  int field = std::to_underlying(sim.field);
   bool changed = ImGui::RadioButton("Off", &field, 0);
   ImGui::SameLine();
   changed |= ImGui::RadioButton("von Mises", &field,
-                                static_cast<int>(SimulationState::Field::VonMises));
+                                std::to_underlying(SimulationState::Field::VonMises));
   ImGui::SameLine();
   changed |= ImGui::RadioButton(
-      "Displacement", &field, static_cast<int>(SimulationState::Field::Displacement));
+      "Displacement", &field, std::to_underlying(SimulationState::Field::Displacement));
   if (changed) sim.field = static_cast<SimulationState::Field>(field);
   ImGui::SliderFloat("Deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
 }
