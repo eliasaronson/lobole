@@ -64,6 +64,33 @@ drive the real application through
 [ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) (simulated
 mouse/keyboard on the actual UI) and need a display.
 
+## Sanitizers & static analysis
+
+Opt-in, off by default (normal builds pay nothing). Configure a separate build
+tree so it doesn't clobber your regular one:
+
+```
+cmake -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON   # ASan + UBSan
+ninja -C build-asan designer designer_tests
+
+tools/run-sanitized-tests.sh            # unit tests under the sanitizers
+tools/run-sanitized-tests.sh '[thread]' # ...filtered (Catch2 tag/name)
+tools/run-sanitized-app.sh              # the windowed app (needs a display)
+```
+
+The wrappers bake in the workarounds our prebuilt (non-instrumented)
+dependencies require: `ASAN_OPTIONS=detect_container_overflow=0` for the
+std-container/OpenCASCADE boundary, and `tools/ubsan-suppressions.txt` to silence
+benign UBSan reports from OpenCASCADE and the Dear ImGui Vulkan backend. Run them
+inside `nix-shell`. The app build catches CPU-side memory bugs in the live render
+/ UI / interaction paths that the headless tests never exercise; it does not see
+GPU memory (use the Vulkan validation layers for that).
+
+Static analysis is a separate opt-in: `cmake -DENABLE_ANALYZER=ON` adds GCC's
+`-fanalyzer` (path-sensitive; finds null-deref / use-after-free / leaks on paths
+tests never run). It's slow and noisy on C++/dependency headers, so it's an
+occasional audit build, not CI.
+
 ## Remote control
 
 Scripts and AI assistants can drive a live session over JSON-RPC
