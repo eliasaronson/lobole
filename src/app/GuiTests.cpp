@@ -26,11 +26,47 @@
 #include <glm/glm.hpp>
 
 #include <string>
+#include <unordered_map>
 
 // Tests run inside the live application and reach it through the AppState.
 static ui::AppState* s_App = nullptr;
 
 static Document* Doc() { return s_App->document.get(); }
+
+// Between-test reset. The ImGui Test Engine runs every test back to back in one
+// process, so state a test leaves behind leaks into the next one — most harmful
+// is the camera zoom: a viewport-click test that passes alone fails mid-suite
+// when a predecessor left the camera zoomed in and its UV click coordinates
+// then project off-screen. Restoring the app's initial interaction state before
+// each test makes full-suite runs behave like isolated ones. Registered as a
+// TestFunc wrapper below, so individual tests don't have to opt in.
+static void ResetAppForTest() {
+  if (s_App->camera) {
+    s_App->camera->StopAnimation();
+    s_App->camera->SetPosition(glm::vec3(8.0f, 6.0f, 8.0f)); // main.cpp defaults
+    s_App->camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+  }
+  s_App->selection.Clear();
+  s_App->sketchEdit = {};
+  s_App->sketchDrag = {};
+  s_App->edgePick = {};
+  s_App->slotPick = {};
+  s_App->measure = {};
+}
+
+// Original TestFunc for each registered test, keyed by the test; the wrapper
+// runs ResetAppForTest() then dispatches to it (TestFunc is a raw function
+// pointer in this build, so we can't capture — hence the side table).
+static std::unordered_map<ImGuiTest*, void (*)(ImGuiTestContext*)>
+    g_origTestFunc;
+
+static void RunTestWithReset(ImGuiTestContext* ctx) {
+  ResetAppForTest();
+  const auto it = g_origTestFunc.find(ctx->Test);
+  if (it != g_origTestFunc.end() && it->second)
+    it->second(ctx);
+}
 
 // Window position of a world point, mapped through the central-node viewport
 // rect (where the 3D scene actually renders), matching the picking math.
@@ -3168,4 +3204,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     IM_CHECK(!s_App->measure.active);
   };
+
+  // Wrap every registered test so ResetAppForTest() runs before it — this is
+  // what makes the suite order-independent. Done once here rather than per test.
+  ImVector<ImGuiTest*> allTests;
+  ImGuiTestEngine_GetTestList(engine, &allTests);
+  for (ImGuiTest* test : allTests) {
+    if (!test->TestFunc)
+      continue;
+    g_origTestFunc[test] = test->TestFunc;
+    test->TestFunc = &RunTestWithReset;
+  }
 }
