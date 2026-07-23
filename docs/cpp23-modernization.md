@@ -231,7 +231,7 @@ Ordered so each step is independently landable and low-risk first:
 | 1 | ~~spdlog everywhere (Part 1)~~ **DONE 12583aa** | ~100 cout/cerr + 1 printf | done | — |
 | 2 | ~~`to_underlying` (2c)~~ **DONE 25f8b71** | 19 enum casts (our enums only) | done | — |
 | 3 | ~~`std::expected` slice A — Expression~~ **DONE 27e13fc** | Compile/Evaluate/EvaluateText + ~13 callers | done | — |
-| 4 | `std::expected` slice B — serialization | `Save`/`Open`/`Load` | ~half a day | low, few sites, high traffic |
+| 4 | ~~`std::expected` slice B — serialization~~ **DONE** | 6 Save/Load fns + ~15 prod callers + ~86 test sites (via tests/TestIO.h adapter) | done | test surface was ~86 sites, not "few" — used a test adapter |
 | 5 | `std::expected` slice C — FEM/femgpu | ~15 fns + call sites | ~1 day | medium — largest cluster, run under FEM tests |
 | — | ranges views (2b) | going forward | 0 scheduled | — adopt in new code |
 | — | deducing `this` / `std::print` CLI (Part 3) | ~20 + 1 | ~1 h | cosmetic, optional |
