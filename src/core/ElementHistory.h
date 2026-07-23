@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CADKernel.h"
+#include "cad/CADKernel.h"
 #include "core/features/BooleanFeature.h" // BooleanOp
 #include "core/ElementMap.h"
 #include "core/Feature.h"       // Body

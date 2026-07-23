@@ -141,19 +141,19 @@ endif()
 # Core library: geometry, document and scene logic. Must stay free of
 # Vulkan/GLFW/ImGui so it can be unit-tested and scripted headlessly.
 set(core_sources
-    src/Camera.cpp
-    src/Logger.cpp
-    src/Scene.cpp
-    src/CADObject.cpp
-    src/CADKernel.cpp
-    src/CADMeshConverter.cpp
-    src/CADMaterials.cpp
-    src/MeshExport.cpp
-    src/IBL.cpp
-    src/SketchPlane.cpp
-    src/Sketch.cpp
-    src/SketchManager.cpp
-    src/FaceSelector.cpp
+    src/render/Camera.cpp
+    src/common/Logger.cpp
+    src/render/Scene.cpp
+    src/cad/CADObject.cpp
+    src/cad/CADKernel.cpp
+    src/cad/CADMeshConverter.cpp
+    src/cad/CADMaterials.cpp
+    src/cad/MeshExport.cpp
+    src/render/IBL.cpp
+    src/cad/SketchPlane.cpp
+    src/cad/Sketch.cpp
+    src/cad/SketchManager.cpp
+    src/cad/FaceSelector.cpp
     src/core/io/Autosaver.cpp
     src/core/io/Checkpoints.cpp
     src/core/io/GitVault.cpp
@@ -305,7 +305,7 @@ endif()
 # only (not dependents). Kept off the app target, whose ImGui sources shouldn't
 # be forced to include OCC.
 target_precompile_headers(designer_core PRIVATE
-    "${CMAKE_SOURCE_DIR}/src/CADKernel.h"
+    "${CMAKE_SOURCE_DIR}/src/cad/CADKernel.h"
     <glm/glm.hpp>
     <nlohmann/json.hpp>
     <vector> <string> <memory> <optional> <variant> <map> <array>
@@ -313,19 +313,19 @@ target_precompile_headers(designer_core PRIVATE
 
 # Application: windowing, rendering, UI.
 set(app_sources
-    src/main.cpp
-    src/CrashHandler.cpp
-    src/HeadlessMain.cpp
-    src/IBLTextures.cpp
-    src/MeshRenderer.cpp
-    src/OutlineRenderer.cpp
-    src/ShadowRenderer.cpp
-    src/SSAORenderer.cpp
-    src/RayTracingRenderer.cpp
-    src/SketchRenderer.cpp
-    src/UnderlayRenderer.cpp
-    src/FieldRenderer.cpp
-    src/GuiTests.cpp
+    src/app/main.cpp
+    src/app/CrashHandler.cpp
+    src/app/HeadlessMain.cpp
+    src/render/IBLTextures.cpp
+    src/render/MeshRenderer.cpp
+    src/render/OutlineRenderer.cpp
+    src/render/ShadowRenderer.cpp
+    src/render/SSAORenderer.cpp
+    src/render/RayTracingRenderer.cpp
+    src/render/SketchRenderer.cpp
+    src/render/UnderlayRenderer.cpp
+    src/render/FieldRenderer.cpp
+    src/app/GuiTests.cpp
     src/ui/UI.cpp
     src/ui/DockLayout.cpp
     src/ui/MainMenuBar.cpp
@@ -350,7 +350,7 @@ set(app_sources
     src/ui/CommandPalette.cpp
     src/ui/SketchInteraction.cpp
     src/ui/Toolbar.cpp
-    src/Screenshot.cpp
+    src/render/Screenshot.cpp
     src/remote/RemoteServer.cpp
     src/remote/RemoteConfigurations.cpp
     src/remote/RemoteSimulation.cpp

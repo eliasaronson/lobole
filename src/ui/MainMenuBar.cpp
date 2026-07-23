@@ -1,9 +1,9 @@
 #include "ui/MainMenuBar.h"
 
-#include "Camera.h"
-#include "FaceSelector.h"
-#include "Logger.h"
-#include "OutlineRenderer.h"
+#include "render/Camera.h"
+#include "cad/FaceSelector.h"
+#include "common/Logger.h"
+#include "render/OutlineRenderer.h"
 #include "core/io/Checkpoints.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"

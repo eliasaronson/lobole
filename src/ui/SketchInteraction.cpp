@@ -1,11 +1,11 @@
 #include "ui/SketchInteraction.h"
 
-#include "Camera.h"
+#include "render/Camera.h"
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (Shift+E/R)
 #include "ui/AppActions.h" // SelectFeature
-#include "FaceSelector.h"
-#include "Logger.h"
-#include "MeshRenderer.h" // LineVertex3D
+#include "cad/FaceSelector.h"
+#include "common/Logger.h"
+#include "render/MeshRenderer.h" // LineVertex3D
 #include "core/features/DatumPlaneFeature.h"
 #include "core/Expression.h"
 #include "core/io/Serialization.h"

@@ -1,6 +1,6 @@
 #include "core/features/ThreadFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/ThreadStandards.h"
 
 #include <BRepAdaptor_Surface.hxx>

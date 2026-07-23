@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CADKernel.h"
+#include "cad/CADKernel.h"
 #include "core/ElementMap.h"
 #include "core/Expression.h"
 

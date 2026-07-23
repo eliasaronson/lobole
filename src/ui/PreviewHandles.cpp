@@ -1,6 +1,6 @@
 #include "ui/PreviewHandles.h"
 
-#include "FaceSelector.h"
+#include "cad/FaceSelector.h"
 #include "core/AxisRef.h"
 #include "core/Document.h"
 #include "core/Measure.h"

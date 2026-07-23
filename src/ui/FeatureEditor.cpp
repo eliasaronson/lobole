@@ -1,7 +1,7 @@
 #include "ui/FeatureEditor.h"
 
-#include "CADMaterials.h"
-#include "Camera.h"
+#include "cad/CADMaterials.h"
+#include "render/Camera.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"

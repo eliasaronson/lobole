@@ -1,7 +1,7 @@
 #include "ui/FeatureTreePanel.h"
 
-#include "CADMaterials.h"
-#include "Camera.h"
+#include "cad/CADMaterials.h"
+#include "render/Camera.h"
 #include "core/Command.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/Feature.h"

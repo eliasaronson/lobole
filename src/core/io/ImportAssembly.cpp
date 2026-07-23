@@ -1,6 +1,6 @@
 #include "core/io/ImportAssembly.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>

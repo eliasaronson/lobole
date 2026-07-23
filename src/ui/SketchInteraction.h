@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SketchPlane.h"
+#include "cad/SketchPlane.h"
 #include "ui/AppState.h"
 
 #include <glm/glm.hpp>

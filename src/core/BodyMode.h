@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CADKernel.h"
+#include "cad/CADKernel.h"
 #include "core/features/ExtrudeFeature.h" // ExtrudeMode
 #include "core/Feature.h"        // Body
 

@@ -1,7 +1,7 @@
 #include "ui/PropertiesPanel.h"
 
-#include "Camera.h"
-#include "FaceSelector.h"
+#include "render/Camera.h"
+#include "cad/FaceSelector.h"
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Occurrence.h" // occurrence names in the measure rows

@@ -1,6 +1,6 @@
 #include "core/features/SweepFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/BodyMode.h"
 #include "core/ElementHistory.h"
 #include "core/features/CurveFeature.h"

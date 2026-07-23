@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "CADMaterials.h"
+#include "cad/CADMaterials.h"
 
 #include <algorithm>
 #include <set>

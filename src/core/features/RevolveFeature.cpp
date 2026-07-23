@@ -1,6 +1,6 @@
 #include "core/features/RevolveFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/BodyMode.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h"

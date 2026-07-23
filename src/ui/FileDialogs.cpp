@@ -1,7 +1,7 @@
 #include "ui/FileDialogs.h"
 
-#include "Logger.h"
-#include "CADKernel.h"
+#include "common/Logger.h"
+#include "cad/CADKernel.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"

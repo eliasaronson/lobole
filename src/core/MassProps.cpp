@@ -1,6 +1,6 @@
 #include "core/MassProps.h"
 
-#include "CADMaterials.h"
+#include "cad/CADMaterials.h"
 
 namespace Measure {
 

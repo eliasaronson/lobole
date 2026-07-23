@@ -1,6 +1,6 @@
 #include "core/features/CurveFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>

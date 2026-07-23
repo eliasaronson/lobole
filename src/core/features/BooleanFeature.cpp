@@ -1,6 +1,6 @@
 #include "core/features/BooleanFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/ElementHistory.h"
 
 #include <algorithm>

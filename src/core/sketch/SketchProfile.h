@@ -1,7 +1,7 @@
 #pragma once
 
-#include "CADKernel.h"
-#include "SketchPlane.h"
+#include "cad/CADKernel.h"
+#include "cad/SketchPlane.h"
 #include "core/ElementMap.h"
 #include "core/features/SketchFeature.h"
 

@@ -1,7 +1,7 @@
 #include "ui/Toolbar.h"
 
-#include "Logger.h"
-#include "RayTracingRenderer.h"
+#include "common/Logger.h"
+#include "render/RayTracingRenderer.h"
 #include "core/features/SketchFeature.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"

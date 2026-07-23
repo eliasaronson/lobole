@@ -1,6 +1,6 @@
 #include "ui/CommandPalette.h"
 
-#include "Camera.h"
+#include "render/Camera.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"

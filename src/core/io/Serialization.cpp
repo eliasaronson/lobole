@@ -1,7 +1,7 @@
 #include "core/io/Serialization.h"
 #include "core/io/SerializationInternal.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"

@@ -2,7 +2,7 @@
 
 #include "core/ElementMap.h"
 #include "core/Feature.h"
-#include "SketchPlane.h" // PlaneType
+#include "cad/SketchPlane.h" // PlaneType
 
 #include <cstdint>
 #include <string>

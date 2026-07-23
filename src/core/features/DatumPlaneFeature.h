@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SketchPlane.h"
+#include "cad/SketchPlane.h"
 #include "core/AxisRef.h"
 #include "core/Feature.h"
 

@@ -1,8 +1,8 @@
 #include "ui/SelectionPipeline.h"
 
-#include "Camera.h"
-#include "FaceSelector.h"
-#include "MeshRenderer.h"
+#include "render/Camera.h"
+#include "cad/FaceSelector.h"
+#include "render/MeshRenderer.h"
 #include "ui/AppActions.h"         // EdgeElementRef, AppendPrimLine
 #include "ui/AppActionsInternal.h" // PartDocById, DisplayMatrix (assembly)
 #include "ui/FeatureEditor.h"      // SlotPickClicked (U3)

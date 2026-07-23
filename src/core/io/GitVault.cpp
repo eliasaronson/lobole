@@ -1,6 +1,6 @@
 #include "core/io/GitVault.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 #include <array>
 #include <cstdio>

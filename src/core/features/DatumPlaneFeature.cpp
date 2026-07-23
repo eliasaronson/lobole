@@ -1,6 +1,6 @@
 #include "core/features/DatumPlaneFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/SketchFeature.h"
 

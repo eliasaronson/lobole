@@ -1,6 +1,6 @@
 #include "core/sketch/SketchSolver.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 #include <cmath>
 #include <deque>

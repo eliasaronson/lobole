@@ -1,6 +1,6 @@
 #include "core/features/SketchFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/sketch/SketchProfile.h" // SegmentIntersect
 #include "core/sketch/SketchSolver.h"

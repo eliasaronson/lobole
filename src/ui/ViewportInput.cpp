@@ -1,9 +1,9 @@
 #include "ui/ViewportInput.h"
 
-#include "Camera.h"
-#include "FaceSelector.h"
-#include "Logger.h"
-#include "MeshRenderer.h"
+#include "render/Camera.h"
+#include "cad/FaceSelector.h"
+#include "common/Logger.h"
+#include "render/MeshRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"

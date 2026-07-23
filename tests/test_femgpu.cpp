@@ -211,7 +211,7 @@ TEST_CASE("femgpu: matrix-free SpMV matches the CPU assembly (GATE)",
 }
 
 #ifdef HAVE_NETGEN
-#include "CADKernel.h"
+#include "cad/CADKernel.h"
 #include "core/fem/FemMesher.h"
 
 TEST_CASE("femgpu: SpMV matches the CPU on a real Netgen mesh",

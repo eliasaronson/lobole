@@ -1,6 +1,6 @@
 #include "core/ElementHistory.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 #include <BRepAlgoAPI_BooleanOperation.hxx>
 #include <BRepAlgoAPI_Common.hxx>

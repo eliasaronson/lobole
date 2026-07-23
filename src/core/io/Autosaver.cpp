@@ -1,6 +1,6 @@
 #include "core/io/Autosaver.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/Document.h"
 #include "core/io/Serialization.h"
 

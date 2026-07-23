@@ -1,6 +1,6 @@
 #include "core/AssemblySolve.h"
 
-#include "CADKernel.h"
+#include "cad/CADKernel.h"
 #include "core/Document.h"
 #include "core/MassProps.h"
 

@@ -1,6 +1,6 @@
 #include "core/features/PatternFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/BodyMode.h"
 #include "core/features/DatumPlaneFeature.h" // ResolveParentPlane
 #include "core/Expression.h"

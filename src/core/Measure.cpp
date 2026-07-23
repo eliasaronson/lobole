@@ -1,6 +1,6 @@
 #include "core/Measure.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>

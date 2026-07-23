@@ -6,7 +6,7 @@
 // split, so it lives here (inline); the heavier tab-slot accessors
 // (SlotDoc/SlotAssembly) are declared here and defined in AppActions.cpp.
 
-#include "MeshRenderer.h"  // LineVertex3D
+#include "render/MeshRenderer.h"  // LineVertex3D
 
 #include <glm/glm.hpp>
 

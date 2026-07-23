@@ -1,6 +1,6 @@
 #include "core/sketch/SketchProfile.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/ElementHistory.h"
 
 #include <BRep_Builder.hxx>

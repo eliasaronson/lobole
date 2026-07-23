@@ -1,7 +1,7 @@
 #include "remote/RemoteModeling.h"
 
-#include "CADMaterials.h"
-#include "FaceSelector.h"
+#include "cad/CADMaterials.h"
+#include "cad/FaceSelector.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Expression.h"

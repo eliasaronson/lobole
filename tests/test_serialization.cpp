@@ -6,7 +6,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
-#include "CADKernel.h"
+#include "cad/CADKernel.h"
 
 #include <filesystem>
 #include <fstream>

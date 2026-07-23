@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CADKernel.h"
+#include "cad/CADKernel.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>

@@ -1,13 +1,13 @@
 #include "ui/AppActions.h"
 
-#include "Camera.h"
-#include "FieldRenderer.h"
-#include "MeshRenderer.h"
+#include "render/Camera.h"
+#include "render/FieldRenderer.h"
+#include "render/MeshRenderer.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
-#include "Logger.h"
+#include "common/Logger.h"
 #include "ui/AppActionsInternal.h"
 #include "ui/AppState.h"
 #ifdef HAVE_FEM_GPU

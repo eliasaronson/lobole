@@ -1,7 +1,7 @@
 #include "core/features/HoleFeature.h"
 
-#include "CADKernel.h"
-#include "Logger.h"
+#include "cad/CADKernel.h"
+#include "common/Logger.h"
 #include "core/BodyMode.h"
 #include "core/ElementHistory.h"
 #include "core/features/SketchFeature.h"

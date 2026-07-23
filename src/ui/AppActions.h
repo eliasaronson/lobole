@@ -1,7 +1,7 @@
 #pragma once
 
-#include "MeshExport.h"      // MeshExport::Item
-#include "SketchRenderer.h" // Vertex3D, PrimVertex
+#include "cad/MeshExport.h"      // MeshExport::Item
+#include "render/SketchRenderer.h" // Vertex3D, PrimVertex
 #include "core/drawing/DrawingDimension.h" // drawing::ResolvedDim
 #include "core/ElementMap.h" // ElementRef
 #include "ui/AppState.h"

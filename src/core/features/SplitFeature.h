@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SketchPlane.h" // PlaneType
+#include "cad/SketchPlane.h" // PlaneType
 #include "core/ElementMap.h"
 #include "core/Feature.h"
 

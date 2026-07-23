@@ -1,6 +1,6 @@
 #include "ui/Theme.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"

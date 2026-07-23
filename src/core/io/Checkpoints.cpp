@@ -1,6 +1,6 @@
 #include "core/io/Checkpoints.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/io/Serialization.h"
 
 #include <algorithm>

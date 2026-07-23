@@ -1,6 +1,6 @@
 #include "core/features/FilletFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/ElementHistory.h"
 
 #include <algorithm>

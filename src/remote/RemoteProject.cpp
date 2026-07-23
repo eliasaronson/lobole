@@ -1,7 +1,7 @@
 #include "remote/RemoteProject.h"
 
-#include "CADKernel.h"
-#include "MeshExport.h"
+#include "cad/CADKernel.h"
+#include "cad/MeshExport.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
 #include "core/Command.h"

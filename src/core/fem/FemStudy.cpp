@@ -1,6 +1,6 @@
 #include "core/fem/FemStudy.h"
 
-#include "CADMaterials.h"
+#include "cad/CADMaterials.h"
 #include "core/Document.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemTopo.h"

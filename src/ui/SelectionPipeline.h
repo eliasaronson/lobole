@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SketchRenderer.h" // PrimVertex
+#include "render/SketchRenderer.h" // PrimVertex
 #include "ui/AppState.h"
 
 namespace ui {

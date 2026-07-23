@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SketchRenderer.h" // LineVertex3D
+#include "render/SketchRenderer.h" // LineVertex3D
 #include "ui/AppState.h"
 
 #include <vector>

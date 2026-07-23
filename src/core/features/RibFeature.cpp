@@ -1,6 +1,6 @@
 #include "core/features/RibFeature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 
 #include <BRep_Tool.hxx>
 #include <Geom_Curve.hxx>

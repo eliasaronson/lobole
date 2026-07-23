@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "CADKernel.h"
-#include "CADMeshConverter.h"
-#include "Camera.h"
-#include "FaceSelector.h"
+#include "cad/CADKernel.h"
+#include "cad/CADMeshConverter.h"
+#include "render/Camera.h"
+#include "cad/FaceSelector.h"
 
 #include <algorithm>
 #include <map>

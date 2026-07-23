@@ -1,6 +1,6 @@
 #include "core/Feature.h"
 
-#include "Logger.h"
+#include "common/Logger.h"
 #include "core/ElementHistory.h"
 
 const Feature* RegenContext::FindById(uint64_t id) const {

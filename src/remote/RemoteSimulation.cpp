@@ -1,6 +1,6 @@
 #include "remote/RemoteSimulation.h"
 
-#include "CADMaterials.h"
+#include "cad/CADMaterials.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/fem/FemSolver.h"
