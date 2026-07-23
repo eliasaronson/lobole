@@ -40,6 +40,18 @@ if(ENABLE_SANITIZERS)
   message(STATUS "Sanitizers enabled (ASan + UBSan)")
 endif()
 
+# Opt-in GCC static analyzer (cmake -DENABLE_ANALYZER=ON). Compile-time only, no
+# run needed; emits -Wanalyzer-* warnings by path-exploring each TU (null deref,
+# use-after-free, leaks on error paths, ...). Complements the sanitizers, which
+# only see executed paths. Caveats: slow (path exploration), C++/template support
+# is partial and noisy from dep headers — so it's an occasional audit build, not
+# CI, and deliberately NOT -Werror. Applies only to our targets (deps prebuilt).
+option(ENABLE_ANALYZER "Build with GCC -fanalyzer static analysis" OFF)
+if(ENABLE_ANALYZER)
+  add_compile_options(-fanalyzer)
+  message(STATUS "GCC static analyzer enabled (-fanalyzer)")
+endif()
+
 find_package(glfw3 REQUIRED)
 find_package(glm REQUIRED)
 find_package(spdlog REQUIRED)
