@@ -229,8 +229,8 @@ Ordered so each step is independently landable and low-risk first:
 | # | Task | Scope | Effort | Risk |
 |---|------|-------|--------|------|
 | 1 | ~~spdlog everywhere (Part 1)~~ **DONE 12583aa** | ~100 cout/cerr + 1 printf | done | — |
-| 2 | `to_underlying` (2c) | ~37 enum casts | 1–2 h | trivial |
-| 3 | `std::expected` slice A — Expression | ~a handful of fns | ~half a day | low, self-contained; sets the pattern |
+| 2 | ~~`to_underlying` (2c)~~ **DONE 25f8b71** | 19 enum casts (our enums only) | done | — |
+| 3 | ~~`std::expected` slice A — Expression~~ **DONE 27e13fc** | Compile/Evaluate/EvaluateText + ~13 callers | done | — |
 | 4 | `std::expected` slice B — serialization | `Save`/`Open`/`Load` | ~half a day | low, few sites, high traffic |
 | 5 | `std::expected` slice C — FEM/femgpu | ~15 fns + call sites | ~1 day | medium — largest cluster, run under FEM tests |
 | — | ranges views (2b) | going forward | 0 scheduled | — adopt in new code |
