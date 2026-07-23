@@ -82,8 +82,8 @@ bool HoleFeature::Execute(RegenContext& ctx) {
 
   ElementMap toolMap;
   topo::NamePrimitiveElements(tool, std::to_string(GetId()), toolMap);
-  if (!ApplyBodyMode(ctx.bodies, std::move(tool), std::move(toolMap),
-                     ExtrudeMode::Cut, m_name, m_material, GetId())) {
+  if (!ApplyBodyModeReporting(ctx.bodies, std::move(tool), std::move(toolMap),
+                              ExtrudeMode::Cut, *this)) {
     SetError("hole cut failed");
     return false;
   }

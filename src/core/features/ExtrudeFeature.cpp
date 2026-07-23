@@ -99,6 +99,9 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     prism.Translate(n * (sign * static_cast<float>(backOffset)));
   }
 
-  return ApplyBodyMode(ctx.bodies, std::move(prism), std::move(map), mode,
-                       m_name, m_material, GetId());
+  std::string warn;
+  const bool ok = ApplyBodyMode(ctx.bodies, std::move(prism), std::move(map),
+                                mode, m_name, m_material, GetId(), &warn);
+  if (!warn.empty()) SetWarning(warn);
+  return ok;
 }

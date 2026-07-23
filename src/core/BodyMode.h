@@ -19,10 +19,23 @@
 //            each surviving body's names propagate through its cut.
 // Returns false only on an operation that genuinely failed (a fuse/cut error,
 // or Cut with no bodies). `shape` and `shapeMap` are moved from.
+//
+// `warning` (optional out-param): set to a human-readable message when the
+// operation SUCCEEDED but did nothing useful — a Cut whose tool intersected no
+// body (total volume unchanged), or an Add whose tool lay entirely inside its
+// target. These are not errors (the result is valid), but almost always signal
+// a mis-placed sketch/plane, so callers surface them via Feature::SetWarning.
 bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
                    ElementMap shapeMap, ExtrudeMode mode,
                    const std::string& name, const std::string& material,
-                   uint64_t ownerId);
+                   uint64_t ownerId, std::string* warning = nullptr);
+
+// Convenience for the solid-producing features: run ApplyBodyMode and forward
+// any advisory onto `owner` (Feature::SetWarning), so every cut/add feature
+// reports a no-op the same way without repeating the plumbing.
+bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,
+                            ElementMap shapeMap, ExtrudeMode mode,
+                            Feature& owner);
 
 // Fuses `instanceShapes` (a pattern/mirror's seed + transformed copies), splits
 // the result back into its connected solids, erases every body created by

@@ -358,6 +358,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       if (!doc->GetFeature(i)->GetError().empty()) {
         f["error"] = doc->GetFeature(i)->GetError();
       }
+      // Non-fatal advisory (e.g. a cut that intersected nothing): the feature
+      // built a valid result, but likely not the intended one.
+      if (!doc->GetFeature(i)->GetWarning().empty()) {
+        f["warning"] = doc->GetFeature(i)->GetWarning();
+      }
       features.push_back(f);
     }
     json bodies = json::array();

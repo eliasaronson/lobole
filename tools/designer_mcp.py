@@ -184,8 +184,10 @@ The loop that works — follow it every time:
 3. Extrude/Revolve referencing the sketch by the id add_feature returned.
    Never guess ids — read them from tool results or get_state.
 4. VERIFY after every mutating step: get_state (feature list, body volumes,
-   bounding boxes, per-feature "error" fields — sanity-check against the
-   brief), mass_properties for the real oracle (CoM, mass, inertia), then
+   bounding boxes, per-feature "error" AND "warning" fields — a warning means
+   the feature built but likely did nothing intended, e.g. a cut whose profile
+   missed every body; sanity-check both against the brief), mass_properties for
+   the real oracle (CoM, mass, inertia), then
    screenshot (view="iso" default; front/top/right for dimensional checks).
    Do not batch-build blind.
 5. For 3D fillets/chamfers: list_elements to get stable edge names, then
@@ -270,7 +272,9 @@ def _call(method, **params):
 # ---------------------------------------------------------------------------
 
 @mcp.tool(description="Full document state: features (with ids and per-type "
-          "fields), bodies (name, volume, bbox_min/bbox_max, material, and "
+          "fields, plus 'error' if regeneration failed and 'warning' for a "
+          "valid-but-likely-unintended no-op such as a cut that removed no "
+          "material), bodies (name, volume, bbox_min/bbox_max, material, and "
           "the render 'mesh' id select_face needs — mesh ids change on every "
           "regeneration, always read them fresh), current selection, camera, "
           "undo/redo availability. Call after every mutating step to verify.")

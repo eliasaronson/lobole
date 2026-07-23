@@ -105,6 +105,16 @@ public:
   void SetError(const std::string& error) { m_error = error; }
   void ClearError() { m_error.clear(); }
 
+  // A non-fatal advisory from the last regeneration (empty = none). Unlike
+  // m_error, a warning does NOT mark the feature broken or count against
+  // regeneration success: the feature built a valid result, but it is likely
+  // not what the user intended — e.g. a cut whose tool profile missed every
+  // body, so it removed nothing (the exact "silent no-op cut" trap). Transient
+  // (never serialized), cleared each regen exactly like m_error.
+  [[nodiscard]] const std::string& GetWarning() const { return m_warning; }
+  void SetWarning(const std::string& warning) { m_warning = warning; }
+  void ClearWarning() { m_warning.clear(); }
+
   // Suppressed features are skipped by regeneration (contributing nothing)
   // but keep their parameters; anything referencing their outputs fails with
   // its normal missing-reference error — same rule as deletion. Serialized
@@ -117,6 +127,7 @@ protected:
   std::string m_material;
   uint64_t m_id = 0;
   std::string m_error;
+  std::string m_warning;
   bool m_suppressed = false;
 };
 

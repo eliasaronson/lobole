@@ -256,6 +256,54 @@ TEST_CASE("ExtrudeFeature Cut removes material", "[extrude][feature]") {
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(32.0 - 2 * 2 * 2, 1e-4));
 }
 
+TEST_CASE("ExtrudeFeature Cut that misses every body warns but is not an error",
+          "[extrude][feature][warning]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
+                                              2)); // footprint x,y 0..4
+  // Profile sits far outside the base footprint: the cut prism never
+  // intersects it (the "silent no-op cut" that bit the eye-bracket build).
+  uint64_t sid = AddRectSketch(doc, {10, 10}, {12, 12});
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
+
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(32.0, 1e-9)); // untouched
+  auto* cut = doc.GetFeature(doc.FeatureCount() - 1);
+  CHECK(cut->GetError().empty());         // built fine — not broken
+  CHECK_FALSE(cut->GetWarning().empty()); // ...but flagged as a no-op
+}
+
+TEST_CASE("ExtrudeFeature Cut that removes material carries no warning",
+          "[extrude][feature][warning]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
+                                              2));
+  uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // real pocket
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
+  CHECK(doc.GetFeature(doc.FeatureCount() - 1)->GetWarning().empty());
+}
+
+TEST_CASE("Fixing a no-op cut clears its warning on the next regen",
+          "[extrude][feature][warning]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
+                                              2));
+  uint64_t sid = AddRectSketch(doc, {10, 10}, {12, 12}); // misses
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
+  REQUIRE_FALSE(doc.GetFeature(doc.FeatureCount() - 1)->GetWarning().empty());
+
+  // Move the profile onto the base; the warning must not linger.
+  auto* sk = dynamic_cast<SketchFeature*>(doc.GetFeature(1));
+  REQUIRE(sk != nullptr);
+  sk->entities.clear();
+  sk->AddRectangle({1, 1}, {3, 3});
+  doc.Regenerate();
+  CHECK(doc.GetFeature(doc.FeatureCount() - 1)->GetWarning().empty());
+}
+
 TEST_CASE("Extrude referencing a missing sketch fails gracefully",
           "[extrude][feature]") {
   Document doc;

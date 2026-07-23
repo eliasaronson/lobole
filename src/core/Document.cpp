@@ -93,6 +93,7 @@ bool Document::Regenerate() {
                                      static_cast<size_t>(m_rollback));
   for (size_t i = upTo; i < m_features.size(); i++) {
     m_features[i]->ClearError();
+    m_features[i]->ClearWarning();
   }
 
   // Refresh expression-driven fields before hashing: the serialized feature
@@ -167,6 +168,7 @@ bool Document::Regenerate() {
     m_cache.resize(divergence); // stale suffix; rebuilt below
     for (size_t i = divergence; i < upTo; i++) {
       m_features[i]->ClearError();
+      m_features[i]->ClearWarning();
       if (!EffectiveSuppressed(i)) {
         RegenContext ctx{m_bodies, m_features, i, &m_symbols};
         m_lastStats.executed++;

@@ -105,6 +105,6 @@ bool PipeFeature::Execute(RegenContext& ctx) {
 
   ElementMap map;
   topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
-  return ApplyBodyMode(ctx.bodies, std::move(result), std::move(map), mode,
-                       m_name, m_material, GetId());
+  return ApplyBodyModeReporting(ctx.bodies, std::move(result), std::move(map),
+                                mode, *this);
 }

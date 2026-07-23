@@ -71,8 +71,8 @@ bool LoftFeature::Execute(RegenContext& ctx) {
     }
     ElementMap map;
     topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
-    return ApplyBodyMode(ctx.bodies, std::move(result), std::move(map), mode,
-                         m_name, m_material, GetId());
+    return ApplyBodyModeReporting(ctx.bodies, std::move(result), std::move(map),
+                                  mode, *this);
   }
 
   // Smooth vs. ruled skinning. A smoothed loft fits ONE BSpline surface through
@@ -120,8 +120,8 @@ bool LoftFeature::Execute(RegenContext& ctx) {
     // fillet references these faces).
     ElementMap map;
     topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
-    return ApplyBodyMode(ctx.bodies, std::move(result), std::move(map), mode,
-                         m_name, m_material, GetId());
+    return ApplyBodyModeReporting(ctx.bodies, std::move(result), std::move(map),
+                                  mode, *this);
   } catch (const Standard_Failure& e) {
     SetError(std::string("loft failed: ") + e.GetMessageString());
     LOG_ERROR("LoftFeature '{}': {}", m_name, GetError());

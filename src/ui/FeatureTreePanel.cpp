@@ -170,8 +170,14 @@ void DrawFeatureTreePanel(AppState& state) {
       const bool suppressed = feature->IsSuppressed();
       const bool dimmed = suppressed || rolledPast;
       const bool errored = !dimmed && !feature->GetError().empty();
+      // A warning (built, but a likely-unintended no-op) tints amber — only
+      // when the feature is neither broken nor dimmed, so error/dim win.
+      const bool warned =
+          !dimmed && !errored && !feature->GetWarning().empty();
       if (errored)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.35f, 0.35f, 1.0f));
+      else if (warned)
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.75f, 0.25f, 1.0f));
       else if (dimmed)
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -219,6 +225,10 @@ void DrawFeatureTreePanel(AppState& state) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
           ImGui::SetTooltip("%s", feature->GetError().c_str());
+      } else if (warned) {
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("%s", feature->GetWarning().c_str());
       } else if (dimmed) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())

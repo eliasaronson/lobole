@@ -4,6 +4,7 @@
 #include "core/ElementHistory.h"
 
 #include <algorithm>
+#include <cmath>
 
 BooleanFeature::BooleanFeature(const std::string& name, uint64_t targetId,
                                uint64_t toolId, BooleanOp op)
@@ -33,6 +34,7 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
 
   // Run the boolean with history kept alive so the operands' element names
   // propagate onto the result (toponaming T5).
+  const double targetVol = target->shape.Volume();
   ElementMap map;
   CADShape result = topo::BooleanNamed(op, target->shape, target->elementMap,
                                        tool->shape, tool->elementMap, GetId(),
@@ -42,6 +44,17 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
               "solid (are the bodies disjoint?)",
               m_name);
     return false;
+  }
+  // A subtract/union whose result equals the target did nothing — the operands
+  // are disjoint (or the tool is engulfed). Valid, but almost certainly a
+  // mistake, so advise without failing.
+  if ((op == BooleanOp::Subtract || op == BooleanOp::Union) &&
+      std::abs(result.Volume() - targetVol) < 1e-6 * std::max(targetVol, 1.0)) {
+    SetWarning(op == BooleanOp::Subtract
+                   ? "subtract removed no material — the tool body does not "
+                     "intersect the target"
+                   : "union added no material — the bodies are disjoint or the "
+                     "tool is inside the target");
   }
 
   // Inherit the target's material unless this feature sets its own.
