@@ -1,4 +1,5 @@
 #include "render/SSAORenderer.h"
+#include "common/Logger.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -144,8 +145,7 @@ bool SSAORenderer::SetFullResolution(bool fullRes) {
     vkDeviceWaitIdle(m_device);
     DestroyTargets();
     if (!CreateTargets(m_width, m_height)) {
-        std::cerr << "SSAORenderer: SetFullResolution failed to recreate targets"
-                  << std::endl;
+        LOG_ERROR("SSAORenderer: SetFullResolution failed to recreate targets");
     }
     WriteTargetDescriptors();
     TransitionTargetsToRead();
@@ -328,7 +328,7 @@ bool SSAORenderer::CreateTargets(uint32_t width, uint32_t height) {
                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                VK_IMAGE_USAGE_SAMPLED_BIT,
                            VK_IMAGE_ASPECT_COLOR_BIT, m_aoBlur)) {
-        std::cerr << "SSAORenderer: failed to create targets" << std::endl;
+        LOG_ERROR("SSAORenderer: failed to create targets");
         return false;
     }
 
@@ -428,7 +428,7 @@ bool SSAORenderer::CreateRenderPasses() {
         rp.dependencyCount = 2;
         rp.pDependencies = deps;
         if (vkCreateRenderPass(m_device, &rp, nullptr, &m_prepassRenderPass) != VK_SUCCESS) {
-            std::cerr << "SSAORenderer: failed to create prepass render pass" << std::endl;
+            LOG_ERROR("SSAORenderer: failed to create prepass render pass");
             return false;
         }
     }
@@ -471,7 +471,7 @@ bool SSAORenderer::CreateRenderPasses() {
         rp.dependencyCount = 2;
         rp.pDependencies = deps;
         if (vkCreateRenderPass(m_device, &rp, nullptr, &m_r8RenderPass) != VK_SUCCESS) {
-            std::cerr << "SSAORenderer: failed to create R8 render pass" << std::endl;
+            LOG_ERROR("SSAORenderer: failed to create R8 render pass");
             return false;
         }
     }
@@ -489,7 +489,7 @@ bool SSAORenderer::CreateNoiseTexture() {
     if (!CreateTargetImage(kNoiseSize, kNoiseSize, VK_FORMAT_R32G32B32A32_SFLOAT,
                            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                            VK_IMAGE_ASPECT_COLOR_BIT, m_noise)) {
-        std::cerr << "SSAORenderer: failed to create noise texture" << std::endl;
+        LOG_ERROR("SSAORenderer: failed to create noise texture");
         return false;
     }
 
@@ -790,7 +790,7 @@ bool SSAORenderer::CreatePipelines() {
     auto blurFrag = load("ssao_blur_frag.spv");
     if (prepassVert.empty() || prepassFrag.empty() || fullscreenVert.empty() ||
         ssaoFrag.empty() || blurFrag.empty()) {
-        std::cerr << "SSAORenderer: failed to load shaders from " << dir << std::endl;
+        LOG_ERROR("SSAORenderer: failed to load shaders from {}", dir);
         return false;
     }
 
@@ -904,7 +904,7 @@ bool SSAORenderer::CreatePipelines() {
         pipelineInfo.renderPass = m_prepassRenderPass;
         if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                       nullptr, &m_prepassPipeline) != VK_SUCCESS) {
-            std::cerr << "SSAORenderer: failed to create prepass pipeline" << std::endl;
+            LOG_ERROR("SSAORenderer: failed to create prepass pipeline");
             destroyModules();
             return false;
         }
@@ -938,7 +938,7 @@ bool SSAORenderer::CreatePipelines() {
         pipelineInfo.layout = m_aoPipelineLayout;
         if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                       nullptr, &m_aoPipeline) != VK_SUCCESS) {
-            std::cerr << "SSAORenderer: failed to create AO pipeline" << std::endl;
+            LOG_ERROR("SSAORenderer: failed to create AO pipeline");
             destroyModules();
             return false;
         }
@@ -968,7 +968,7 @@ bool SSAORenderer::CreatePipelines() {
         pipelineInfo.layout = m_blurPipelineLayout;
         if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
                                       nullptr, &m_blurPipeline) != VK_SUCCESS) {
-            std::cerr << "SSAORenderer: failed to create blur pipeline" << std::endl;
+            LOG_ERROR("SSAORenderer: failed to create blur pipeline");
             destroyModules();
             return false;
         }
@@ -1014,7 +1014,7 @@ uint32_t SSAORenderer::FindMemoryType(uint32_t typeFilter,
 std::vector<char> SSAORenderer::ReadFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "SSAORenderer: failed to open " << filename << std::endl;
+        LOG_ERROR("SSAORenderer: failed to open {}", filename);
         return {};
     }
     const size_t fileSize = static_cast<size_t>(file.tellg());
@@ -1030,7 +1030,7 @@ VkShaderModule SSAORenderer::CreateShaderModule(const std::vector<char>& code) {
     ci.pCode = reinterpret_cast<const uint32_t*>(code.data());
     VkShaderModule shaderModule = VK_NULL_HANDLE;
     if (vkCreateShaderModule(m_device, &ci, nullptr, &shaderModule) != VK_SUCCESS) {
-        std::cerr << "SSAORenderer: failed to create shader module" << std::endl;
+        LOG_ERROR("SSAORenderer: failed to create shader module");
         return VK_NULL_HANDLE;
     }
     return shaderModule;

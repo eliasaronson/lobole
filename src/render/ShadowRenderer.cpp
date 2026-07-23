@@ -1,4 +1,5 @@
 #include "render/ShadowRenderer.h"
+#include "common/Logger.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -44,7 +45,7 @@ bool ShadowRenderer::CreateFramebuffer() {
     fb.height = m_resolution;
     fb.layers = 1;
     if (vkCreateFramebuffer(m_device, &fb, nullptr, &m_framebuffer) != VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to create framebuffer" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to create framebuffer");
         return false;
     }
     return true;
@@ -65,8 +66,7 @@ bool ShadowRenderer::SetResolution(uint32_t resolution) {
     m_shadowImage = VK_NULL_HANDLE;
     m_shadowMemory = VK_NULL_HANDLE;
     if (!CreateShadowTarget() || !CreateFramebuffer()) {
-        std::cerr << "ShadowRenderer: SetResolution(" << resolution
-                  << ") failed to recreate the shadow target" << std::endl;
+        LOG_ERROR("ShadowRenderer: SetResolution({}) failed to recreate the shadow target", resolution);
     }
     return true;
 }
@@ -195,7 +195,7 @@ bool ShadowRenderer::CreateShadowTarget() {
     img.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
                 VK_IMAGE_USAGE_SAMPLED_BIT;
     if (vkCreateImage(m_device, &img, nullptr, &m_shadowImage) != VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to create shadow image" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to create shadow image");
         return false;
     }
 
@@ -206,7 +206,7 @@ bool ShadowRenderer::CreateShadowTarget() {
     alloc.memoryTypeIndex =
         FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (vkAllocateMemory(m_device, &alloc, nullptr, &m_shadowMemory) != VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to allocate shadow memory" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to allocate shadow memory");
         return false;
     }
     vkBindImageMemory(m_device, m_shadowImage, m_shadowMemory, 0);
@@ -217,7 +217,7 @@ bool ShadowRenderer::CreateShadowTarget() {
     view.format = VK_FORMAT_D32_SFLOAT;
     view.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
     if (vkCreateImageView(m_device, &view, nullptr, &m_shadowView) != VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to create shadow view" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to create shadow view");
         return false;
     }
 
@@ -237,7 +237,7 @@ bool ShadowRenderer::CreateShadowTarget() {
         smp.compareEnable = VK_TRUE;
         smp.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
         if (vkCreateSampler(m_device, &smp, nullptr, &m_sampler) != VK_SUCCESS) {
-            std::cerr << "ShadowRenderer: failed to create sampler" << std::endl;
+            LOG_ERROR("ShadowRenderer: failed to create sampler");
             return false;
         }
     }
@@ -320,7 +320,7 @@ bool ShadowRenderer::CreateRenderPass() {
     rp.dependencyCount = 2;
     rp.pDependencies = deps;
     if (vkCreateRenderPass(m_device, &rp, nullptr, &m_renderPass) != VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to create render pass" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to create render pass");
         return false;
     }
     return true;
@@ -331,8 +331,7 @@ bool ShadowRenderer::CreatePipeline() {
     auto vertCode = ReadFile(execDir + "/libraries/shaders/shadow_vert.spv");
     auto fragCode = ReadFile(execDir + "/libraries/shaders/shadow_frag.spv");
     if (vertCode.empty() || fragCode.empty()) {
-        std::cerr << "ShadowRenderer: failed to load shaders from " << execDir
-                  << "/libraries/shaders/" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to load shaders from {}/libraries/shaders/", execDir);
         return false;
     }
     VkShaderModule vertModule = CreateShaderModule(vertCode);
@@ -424,7 +423,7 @@ bool ShadowRenderer::CreatePipeline() {
     layoutInfo.pPushConstantRanges = &pushRange;
     if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr,
                                &m_pipelineLayout) != VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to create pipeline layout" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to create pipeline layout");
         vkDestroyShaderModule(m_device, fragModule, nullptr);
         vkDestroyShaderModule(m_device, vertModule, nullptr);
         return false;
@@ -451,7 +450,7 @@ bool ShadowRenderer::CreatePipeline() {
     vkDestroyShaderModule(m_device, fragModule, nullptr);
     vkDestroyShaderModule(m_device, vertModule, nullptr);
     if (res != VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to create pipeline" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to create pipeline");
         return false;
     }
     return true;
@@ -473,7 +472,7 @@ uint32_t ShadowRenderer::FindMemoryType(uint32_t typeFilter,
 std::vector<char> ShadowRenderer::ReadFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "ShadowRenderer: failed to open " << filename << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to open {}", filename);
         return {};
     }
     const size_t fileSize = static_cast<size_t>(file.tellg());
@@ -490,7 +489,7 @@ VkShaderModule ShadowRenderer::CreateShaderModule(const std::vector<char>& code)
     VkShaderModule shaderModule = VK_NULL_HANDLE;
     if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) !=
         VK_SUCCESS) {
-        std::cerr << "ShadowRenderer: failed to create shader module" << std::endl;
+        LOG_ERROR("ShadowRenderer: failed to create shader module");
         return VK_NULL_HANDLE;
     }
     return shaderModule;

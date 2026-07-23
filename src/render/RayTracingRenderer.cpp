@@ -1,4 +1,5 @@
 #include "render/RayTracingRenderer.h"
+#include "common/Logger.h"
 #include "render/MeshRenderer.h"
 #include "thirdparty/stb_image_write.h" // declarations only; impl lives in Screenshot.cpp
 #include <glm/gtc/matrix_transform.hpp>
@@ -46,7 +47,7 @@ bool RayTracingRenderer::IsRayTracingSupported(VkPhysicalDevice physicalDevice) 
             }
         }
         if (!found) {
-            std::cout << "Ray Tracing: Missing required extension: " << required << std::endl;
+            LOG_INFO("Ray Tracing: Missing required extension: {}", required);
             return false;
         }
     }
@@ -62,13 +63,13 @@ bool RayTracingRenderer::IsRayTracingSupported(VkPhysicalDevice physicalDevice) 
     vkGetPhysicalDeviceProperties2(physicalDevice, &deviceProperties2);
     
     if (rtProperties.maxRayRecursionDepth == 0) {
-        std::cout << "Ray Tracing: Device does not support ray recursion" << std::endl;
+        LOG_INFO("Ray Tracing: Device does not support ray recursion");
         return false;
     }
     
-    std::cout << "Ray Tracing: Support detected!" << std::endl;
-    std::cout << "  - Max ray recursion depth: " << rtProperties.maxRayRecursionDepth << std::endl;
-    std::cout << "  - Max shader group stride: " << rtProperties.shaderGroupHandleSize << std::endl;
+    LOG_INFO("Ray Tracing: Support detected!");
+    LOG_INFO(" - Max ray recursion depth: {}", rtProperties.maxRayRecursionDepth);
+    LOG_INFO(" - Max shader group stride: {}", rtProperties.shaderGroupHandleSize);
     
     return true;
 }
@@ -82,47 +83,47 @@ bool RayTracingRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDe
     m_queueFamily = queueFamily;
     m_commandPool = commandPool;
     
-    std::cout << "Initializing Ray Tracing Renderer..." << std::endl;
+    LOG_INFO("Initializing Ray Tracing Renderer...");
     
     // Verify RT support
     if (!IsRayTracingSupported(physicalDevice)) {
-        std::cout << "Ray Tracing: Hardware not supported, falling back to rasterization" << std::endl;
+        LOG_INFO("Ray Tracing: Hardware not supported, falling back to rasterization");
         m_useRayTracing = false;
         return true; // Not an error - we'll use fallback
     }
     
     // Load RT function pointers
     if (!LoadRTFunctions()) {
-        std::cerr << "Ray Tracing: Failed to load RT functions" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to load RT functions");
         return false;
     }
     
     // Get RT properties
     if (!CheckRTProperties()) {
-        std::cerr << "Ray Tracing: Failed to get RT properties" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to get RT properties");
         return false;
     }
     
     // Create RT pipeline
     if (!CreateRTPipeline()) {
-        std::cerr << "Ray Tracing: Failed to create RT pipeline" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to create RT pipeline");
         return false;
     }
     
     // Create descriptor sets
     if (!CreateRTDescriptorSets()) {
-        std::cerr << "Ray Tracing: Failed to create RT descriptor sets" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to create RT descriptor sets");
         return false;
     }
     
     // Create shader binding table
     if (!CreateShaderBindingTable()) {
-        std::cerr << "Ray Tracing: Failed to create shader binding table" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to create shader binding table");
         return false;
     }
     
     m_isInitialized = true;
-    std::cout << "Ray Tracing: Initialization successful!" << std::endl;
+    LOG_INFO("Ray Tracing: Initialization successful!");
     
     return true;
 }
@@ -227,16 +228,16 @@ bool RayTracingRenderer::CheckRTProperties() {
     
     vkGetPhysicalDeviceProperties2(m_physicalDevice, &deviceProperties2);
     
-    std::cout << "Ray Tracing Properties:" << std::endl;
-    std::cout << "  - Shader group handle size: " << m_rtProperties.shaderGroupHandleSize << std::endl;
-    std::cout << "  - Max ray recursion depth: " << m_rtProperties.maxRayRecursionDepth << std::endl;
-    std::cout << "  - Shader group base alignment: " << m_rtProperties.shaderGroupBaseAlignment << std::endl;
+    LOG_INFO("Ray Tracing Properties:");
+    LOG_INFO(" - Shader group handle size: {}", m_rtProperties.shaderGroupHandleSize);
+    LOG_INFO(" - Max ray recursion depth: {}", m_rtProperties.maxRayRecursionDepth);
+    LOG_INFO(" - Shader group base alignment: {}", m_rtProperties.shaderGroupBaseAlignment);
     
     return true;
 }
 
 bool RayTracingRenderer::CreateRTPipeline() {
-    std::cout << "Ray Tracing: Creating RT pipeline..." << std::endl;
+    LOG_INFO("Ray Tracing: Creating RT pipeline...");
     
     // Create descriptor set layout. Bindings are shared by the whole offline
     // pipeline; per-body vertex/index data is reached through buffer-reference
@@ -270,7 +271,7 @@ bool RayTracingRenderer::CreateRTPipeline() {
     layoutInfo.pBindings = bindings.data();
 
     if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_rtDescriptorSetLayout) != VK_SUCCESS) {
-        std::cerr << "Ray Tracing: Failed to create descriptor set layout" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to create descriptor set layout");
         return false;
     }
 
@@ -289,7 +290,7 @@ bool RayTracingRenderer::CreateRTPipeline() {
     pipelineLayoutInfo.pPushConstantRanges = &pushRange;
 
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_rtPipelineLayout) != VK_SUCCESS) {
-        std::cerr << "Ray Tracing: Failed to create pipeline layout" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to create pipeline layout");
         return false;
     }
     
@@ -337,7 +338,7 @@ bool RayTracingRenderer::CreateRTPipeline() {
     pipelineInfo.layout = m_rtPipelineLayout;
     
     if (m_rtFunctions.vkCreateRayTracingPipelinesKHR(m_device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_rtPipeline) != VK_SUCCESS) {
-        std::cerr << "Ray Tracing: Failed to create RT pipeline" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to create RT pipeline");
         
         // Cleanup shader modules
         vkDestroyShaderModule(m_device, raygenModule, nullptr);
@@ -353,7 +354,7 @@ bool RayTracingRenderer::CreateRTPipeline() {
     vkDestroyShaderModule(m_device, closesthitModule, nullptr);
     vkDestroyShaderModule(m_device, shadowMissModule, nullptr);
     
-    std::cout << "Ray Tracing: RT pipeline created successfully" << std::endl;
+    LOG_INFO("Ray Tracing: RT pipeline created successfully");
     return true;
 }
 
@@ -365,7 +366,7 @@ bool RayTracingRenderer::CreateRTDescriptorSets() {
 }
 
 bool RayTracingRenderer::CreateShaderBindingTable() {
-    std::cout << "Ray Tracing: Creating shader binding table..." << std::endl;
+    LOG_INFO("Ray Tracing: Creating shader binding table...");
     
     uint32_t groupCount = 4; // raygen, miss, hit, shadow miss
     uint32_t groupHandleSize = m_rtProperties.shaderGroupHandleSize;
@@ -376,7 +377,7 @@ bool RayTracingRenderer::CreateShaderBindingTable() {
     std::vector<uint8_t> shaderHandleStorage(sbtSize);
     
     if (m_rtFunctions.vkGetRayTracingShaderGroupHandlesKHR(m_device, m_rtPipeline, 0, groupCount, sbtSize, shaderHandleStorage.data()) != VK_SUCCESS) {
-        std::cerr << "Ray Tracing: Failed to get shader group handles" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to get shader group handles");
         return false;
     }
     
@@ -439,7 +440,7 @@ bool RayTracingRenderer::CreateShaderBindingTable() {
     
     m_callableSBT = {}; // Not used
     
-    std::cout << "Ray Tracing: Shader binding table created successfully" << std::endl;
+    LOG_INFO("Ray Tracing: Shader binding table created successfully");
     return true;
 }
 
@@ -528,25 +529,25 @@ bool RayTracingRenderer::BuildAccelerationStructures() {
     }
     
     if (m_geometries.empty()) {
-        std::cout << "Ray Tracing: No geometries to build acceleration structures for" << std::endl;
+        LOG_INFO("Ray Tracing: No geometries to build acceleration structures for");
         return true;
     }
     
-    std::cout << "Ray Tracing: Building acceleration structures for " << m_geometries.size() << " geometries" << std::endl;
+    LOG_INFO("Ray Tracing: Building acceleration structures for {} geometries", m_geometries.size());
     
     // Build bottom level acceleration structure
     if (!CreateBottomLevelAS()) {
-        std::cerr << "Ray Tracing: Failed to create bottom level AS" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to create bottom level AS");
         return false;
     }
     
     // Build top level acceleration structure
     if (!CreateTopLevelAS()) {
-        std::cerr << "Ray Tracing: Failed to create top level AS" << std::endl;
+        LOG_ERROR("Ray Tracing: Failed to create top level AS");
         return false;
     }
     
-    std::cout << "Ray Tracing: Acceleration structures built successfully" << std::endl;
+    LOG_INFO("Ray Tracing: Acceleration structures built successfully");
     return true;
 }
 
@@ -557,9 +558,8 @@ void RayTracingRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentF
         // Fall back to rasterization (handled by MeshRenderer)
         return;
     }
-    
-    // Placeholder for RT rendering
-    // std::cout << "Ray Tracing: Rendering frame " << currentFrame << std::endl;
+
+    // Placeholder for RT rendering (per-frame; would be LOG_TRACE if enabled).
 }
 
 // ---- Offline still render -----------------------------------------------
@@ -618,12 +618,11 @@ void RayTracingRenderer::TransitionImage(
 
 bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
     if (!m_isInitialized || !m_useRayTracing) {
-        std::cerr << "Ray Tracing: BeginStill with no RT support" << std::endl;
+        LOG_ERROR("Ray Tracing: BeginStill with no RT support");
         return false;
     }
     if (m_topLevelAS.handle == VK_NULL_HANDLE || m_geometries.empty()) {
-        std::cerr << "Ray Tracing: BeginStill with no acceleration structures"
-                  << std::endl;
+        LOG_ERROR("Ray Tracing: BeginStill with no acceleration structures");
         return false;
     }
     if (m_stillActive) EndStill();
@@ -647,7 +646,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
     imgInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imgInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     if (vkCreateImage(m_device, &imgInfo, nullptr, &m_stillImage) != VK_SUCCESS) {
-        std::cerr << "Ray Tracing: failed to create still image" << std::endl;
+        LOG_ERROR("Ray Tracing: failed to create still image");
         return false;
     }
     VkMemoryRequirements memReq{};
@@ -744,7 +743,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
     poolInfo.pPoolSizes = poolSizes.data();
     if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr,
                                &m_rtDescriptorPool) != VK_SUCCESS) {
-        std::cerr << "Ray Tracing: failed to create descriptor pool" << std::endl;
+        LOG_ERROR("Ray Tracing: failed to create descriptor pool");
         EndStill();
         return false;
     }
@@ -755,7 +754,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
     setAlloc.pSetLayouts = &m_rtDescriptorSetLayout;
     if (vkAllocateDescriptorSets(m_device, &setAlloc, &m_rtDescriptorSet) !=
         VK_SUCCESS) {
-        std::cerr << "Ray Tracing: failed to allocate descriptor set" << std::endl;
+        LOG_ERROR("Ray Tracing: failed to allocate descriptor set");
         EndStill();
         return false;
     }
@@ -836,8 +835,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
     EndSingleTimeCommands(cb);
 
     m_stillActive = true;
-    std::cout << "Ray Tracing: BeginStill " << desc.width << "x" << desc.height
-              << " over " << m_geometries.size() << " bodies" << std::endl;
+    LOG_INFO("Ray Tracing: BeginStill {}x{} over {} bodies", desc.width, desc.height, m_geometries.size());
     return true;
 }
 
@@ -942,8 +940,7 @@ bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
         if (error) *error = "stbi_write_png failed for " + pngPath;
         return false;
     }
-    std::cout << "Ray Tracing: wrote still " << pngPath << " (" << totalSamples
-              << " spp)" << std::endl;
+    LOG_INFO("Ray Tracing: wrote still {} ({} spp)", pngPath, totalSamples);
     return true;
 }
 
@@ -1176,8 +1173,7 @@ bool RayTracingRenderer::CreateBottomLevelAS() {
             m_rtFunctions.vkGetAccelerationStructureDeviceAddressKHR(m_device,
                                                                      &addrInfo);
     }
-    std::cout << "Ray Tracing: built " << m_geometries.size() << " BLAS"
-              << std::endl;
+    LOG_INFO("Ray Tracing: built {} BLAS", m_geometries.size());
     return true;
 }
 
@@ -1280,7 +1276,6 @@ bool RayTracingRenderer::CreateTopLevelAS() {
     m_topLevelAS.deviceAddress =
         m_rtFunctions.vkGetAccelerationStructureDeviceAddressKHR(m_device,
                                                                  &addrInfo);
-    std::cout << "Ray Tracing: built TLAS over " << instances.size()
-              << " instances" << std::endl;
+    LOG_INFO("Ray Tracing: built TLAS over {} instances", instances.size());
     return true;
 }

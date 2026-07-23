@@ -1,4 +1,5 @@
 #include "render/MeshRenderer.h"
+#include "common/Logger.h"
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
@@ -507,7 +508,7 @@ bool MeshRenderer::CreateDescriptorSetLayout() {
     layoutInfo.pBindings = bindings;
 
     if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
-        std::cerr << "Failed to create descriptor set layout!" << std::endl;
+        LOG_ERROR("Failed to create descriptor set layout!");
         return false;
     }
 
@@ -525,9 +526,9 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     auto fragShaderCode = ReadFile(fragShaderPath);
 
     if (vertShaderCode.empty() || fragShaderCode.empty()) {
-        std::cerr << "Failed to load shader files from: " << execDir << "/libraries/shaders/" << std::endl;
-        std::cerr << "Vertex shader path: " << vertShaderPath << std::endl;
-        std::cerr << "Fragment shader path: " << fragShaderPath << std::endl;
+        LOG_ERROR("Failed to load shader files from: {}/libraries/shaders/", execDir);
+        LOG_ERROR("Vertex shader path: {}", vertShaderPath);
+        LOG_ERROR("Fragment shader path: {}", fragShaderPath);
         return false;
     }
 
@@ -643,7 +644,7 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
     if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
-        std::cerr << "Failed to create pipeline layout!" << std::endl;
+        LOG_ERROR("Failed to create pipeline layout!");
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
         return false;
@@ -667,7 +668,7 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     pipelineInfo.subpass = 0;
 
     if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline) != VK_SUCCESS) {
-        std::cerr << "Failed to create graphics pipeline!" << std::endl;
+        LOG_ERROR("Failed to create graphics pipeline!");
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
         return false;
@@ -686,7 +687,7 @@ bool MeshRenderer::CreateGraphicsPipeline() {
     colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
     if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_ghostPipeline) != VK_SUCCESS) {
-        std::cerr << "Failed to create ghost pipeline!" << std::endl;
+        LOG_ERROR("Failed to create ghost pipeline!");
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
         return false;
@@ -733,7 +734,7 @@ bool MeshRenderer::CreateDescriptorPool() {
     poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
     if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
-        std::cerr << "Failed to create descriptor pool!" << std::endl;
+        LOG_ERROR("Failed to create descriptor pool!");
         return false;
     }
 
@@ -750,7 +751,7 @@ bool MeshRenderer::CreateDescriptorSets() {
 
     m_descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
     if (vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data()) != VK_SUCCESS) {
-        std::cerr << "Failed to allocate descriptor sets!" << std::endl;
+        LOG_ERROR("Failed to allocate descriptor sets!");
         return false;
     }
 
@@ -818,7 +819,7 @@ std::vector<char> MeshRenderer::ReadFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
-        std::cerr << "Failed to open file: " << filename << std::endl;
+        LOG_ERROR("Failed to open file: {}", filename);
         return {};
     }
 
@@ -841,7 +842,7 @@ bool MeshRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-        std::cerr << "Failed to create buffer!" << std::endl;
+        LOG_ERROR("Failed to create buffer!");
         return false;
     }
 
@@ -854,7 +855,7 @@ bool MeshRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
     allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
 
     if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-        std::cerr << "Failed to allocate buffer memory!" << std::endl;
+        LOG_ERROR("Failed to allocate buffer memory!");
         return false;
     }
 

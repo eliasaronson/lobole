@@ -1,5 +1,5 @@
 #include "cad/CADObject.h"
-#include <iostream>
+#include "common/Logger.h"
 
 CADObject::CADObject(const std::string& name, CADPrimitiveType type)
     : SceneObject(name)
@@ -40,8 +40,7 @@ std::unique_ptr<CADObject> CADObject::CreateBox(const std::string& name,
     auto object = std::make_unique<CADObject>(name, CADPrimitiveType::Box);
     
     CADShape shape = CADKernel::Instance().CreateBox(width, height, depth);
-    std::cout << "Created box shape. Valid: " << (shape.IsValid() ? "YES" : "NO") 
-              << ", Volume: " << shape.Volume() << std::endl;
+    LOG_INFO("Created box shape. Valid: {}, Volume: {}", (shape.IsValid() ? "YES" : "NO"), shape.Volume());
     object->SetShape(shape);
     
     return object;
@@ -52,8 +51,7 @@ std::unique_ptr<CADObject> CADObject::CreateSphere(const std::string& name,
     auto object = std::make_unique<CADObject>(name, CADPrimitiveType::Sphere);
     
     CADShape shape = CADKernel::Instance().CreateSphere(center, radius);
-    std::cout << "Created sphere shape. Valid: " << (shape.IsValid() ? "YES" : "NO") 
-              << ", Volume: " << shape.Volume() << std::endl;
+    LOG_INFO("Created sphere shape. Valid: {}, Volume: {}", (shape.IsValid() ? "YES" : "NO"), shape.Volume());
     object->SetShape(shape);
     
     return object;

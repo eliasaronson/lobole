@@ -284,31 +284,27 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
     if (IsExtensionAvailable(properties,
                              VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME)) {
       device_extensions.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
-      std::cout << "Ray Tracing: Added acceleration structure extension"
-                << std::endl;
+      LOG_INFO("Ray Tracing: added acceleration structure extension");
     }
     if (IsExtensionAvailable(properties,
                              VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)) {
       device_extensions.push_back(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
-      std::cout << "Ray Tracing: Added ray tracing pipeline extension"
-                << std::endl;
+      LOG_INFO("Ray Tracing: added ray tracing pipeline extension");
     }
     if (IsExtensionAvailable(properties, VK_KHR_RAY_QUERY_EXTENSION_NAME)) {
       device_extensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
-      std::cout << "Ray Tracing: Added ray query extension" << std::endl;
+      LOG_INFO("Ray Tracing: added ray query extension");
     }
     if (IsExtensionAvailable(properties,
                              VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME)) {
       device_extensions.push_back(
           VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
-      std::cout << "Ray Tracing: Added deferred host operations extension"
-                << std::endl;
+      LOG_INFO("Ray Tracing: added deferred host operations extension");
     }
     if (IsExtensionAvailable(properties,
                              VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) {
       device_extensions.push_back(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
-      std::cout << "Ray Tracing: Added buffer device address extension"
-                << std::endl;
+      LOG_INFO("Ray Tracing: added buffer device address extension");
     }
 
 #ifdef VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME
@@ -1012,7 +1008,7 @@ int main(int argc, char **argv) {
     ShowWindowNonBlocking(window);
 
   if (!glfwVulkanSupported()) {
-    printf("GLFW: Vulkan Not Supported\n");
+    LOG_ERROR("GLFW: Vulkan not supported");
     return 1;
   }
 
@@ -1166,26 +1162,23 @@ int main(int argc, char **argv) {
                                     g_Queue, g_QueueFamily, g_CommandPool,
                                     g_MSAASamples);
   if (!outlineInitialized) {
-    std::cout << "Warning: OutlineRenderer initialization failed" << std::endl;
+    LOG_WARN("OutlineRenderer initialization failed");
   } else {
-    std::cout << "OutlineRenderer initialized successfully" << std::endl;
+    LOG_INFO("OutlineRenderer initialized successfully");
     g_OutlineRenderer->SetViewportSize(1280, 720);
 
     // Set default outline settings for visibility testing
     OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
-    std::cout << "Default outline mode: " << static_cast<int>(settings.mode)
-              << std::endl;
-    std::cout << "Default outline color: (" << settings.outlineColor.r << ", "
-              << settings.outlineColor.g << ", " << settings.outlineColor.b
-              << ", " << settings.outlineColor.a << ")" << std::endl;
-    std::cout << "Default outline width: " << settings.outlineWidth
-              << std::endl;
+    LOG_DEBUG("Default outline mode: {}", static_cast<int>(settings.mode));
+    LOG_DEBUG("Default outline color: ({}, {}, {}, {})", settings.outlineColor.r,
+              settings.outlineColor.g, settings.outlineColor.b,
+              settings.outlineColor.a);
+    LOG_DEBUG("Default outline width: {}", settings.outlineWidth);
 
     // Enable wireframe rendering with subtle appearance
     settings.mode = OutlineMode::WIREFRAME;
     g_OutlineRenderer->SetOutlineSettings(settings);
-    std::cout << "Set outline mode to WIREFRAME with subtle styling"
-              << std::endl;
+    LOG_DEBUG("Set outline mode to WIREFRAME with subtle styling");
   }
 
   // Initialize SketchRenderer
@@ -1195,7 +1188,7 @@ int main(int argc, char **argv) {
                                    g_MSAASamples)) {
     g_SketchRenderer->SetViewportSize(1280, 720);
   } else {
-    std::cout << "Warning: SketchRenderer initialization failed" << std::endl;
+    LOG_WARN("SketchRenderer initialization failed");
   }
 
   // Initialize UnderlayRenderer (sketch reference images)
@@ -1205,7 +1198,7 @@ int main(int argc, char **argv) {
                                      g_MSAASamples)) {
     g_UnderlayRenderer->SetViewportSize(1280, 720);
   } else {
-    std::cout << "Warning: UnderlayRenderer initialization failed" << std::endl;
+    LOG_WARN("UnderlayRenderer initialization failed");
   }
 
   // Initialize FieldRenderer (FEM result overlay)
@@ -1215,7 +1208,7 @@ int main(int argc, char **argv) {
                                   g_MSAASamples)) {
     g_FieldRenderer->SetViewport(0, 0, 1280, 720);
   } else {
-    std::cout << "Warning: FieldRenderer initialization failed" << std::endl;
+    LOG_WARN("FieldRenderer initialization failed");
   }
 
   // Initialize RayTracingRenderer
@@ -1223,11 +1216,9 @@ int main(int argc, char **argv) {
   bool rtInitialized = g_RayTracingRenderer->Initialize(
       g_Device, g_PhysicalDevice, g_Queue, g_QueueFamily, g_CommandPool);
   if (!rtInitialized) {
-    std::cout
-        << "Ray Tracing: Initialization failed, falling back to rasterization"
-        << std::endl;
+    LOG_WARN("Ray Tracing: initialization failed, falling back to rasterization");
   } else {
-    std::cout << "Ray Tracing: Initialization successful!" << std::endl;
+    LOG_INFO("Ray Tracing: initialization successful");
   }
 
   // Hand the UI layer its pointers now that everything exists

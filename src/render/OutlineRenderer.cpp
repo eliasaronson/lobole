@@ -1,4 +1,5 @@
 #include "render/OutlineRenderer.h"
+#include "common/Logger.h"
 #include "render/MeshRenderer.h"
 #include <iostream>
 #include <fstream>
@@ -31,44 +32,44 @@ bool OutlineRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevic
     m_queueFamily = queueFamily;
     m_commandPool = commandPool;
     
-    std::cout << "OutlineRenderer: Initializing..." << std::endl;
+    LOG_INFO("OutlineRenderer: Initializing...");
     
     // Create descriptor set layout
     if (!CreateDescriptorSetLayout()) {
-        std::cerr << "OutlineRenderer: Failed to create descriptor set layout" << std::endl;
+        LOG_ERROR("OutlineRenderer: Failed to create descriptor set layout");
         return false;
     }
     
     // Create pipelines
     if (!CreateOutlinePipeline()) {
-        std::cerr << "OutlineRenderer: Failed to create outline pipeline" << std::endl;
+        LOG_ERROR("OutlineRenderer: Failed to create outline pipeline");
         return false;
     }
     
     if (!CreateWireframePipeline()) {
-        std::cerr << "OutlineRenderer: Failed to create wireframe pipeline" << std::endl;
+        LOG_ERROR("OutlineRenderer: Failed to create wireframe pipeline");
         return false;
     }
     
     // Create uniform buffers
     if (!CreateUniformBuffers()) {
-        std::cerr << "OutlineRenderer: Failed to create uniform buffers" << std::endl;
+        LOG_ERROR("OutlineRenderer: Failed to create uniform buffers");
         return false;
     }
     
     // Create descriptor pool and sets
     if (!CreateDescriptorPool()) {
-        std::cerr << "OutlineRenderer: Failed to create descriptor pool" << std::endl;
+        LOG_ERROR("OutlineRenderer: Failed to create descriptor pool");
         return false;
     }
     
     if (!CreateDescriptorSets()) {
-        std::cerr << "OutlineRenderer: Failed to create descriptor sets" << std::endl;
+        LOG_ERROR("OutlineRenderer: Failed to create descriptor sets");
         return false;
     }
     
     m_isInitialized = true;
-    std::cout << "OutlineRenderer: Initialization successful!" << std::endl;
+    LOG_INFO("OutlineRenderer: Initialization successful!");
     
     return true;
 }
@@ -567,7 +568,7 @@ bool OutlineRenderer::CreateDescriptorSets() {
 
 // Utility function implementations will be added in the next part...
 uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
-    std::cout << "OutlineRenderer: Adding mesh with " << vertices.size() << " vertices" << std::endl;
+    LOG_INFO("OutlineRenderer: Adding mesh with {} vertices", vertices.size());
     
     auto mesh = std::make_unique<OutlineMesh>();
     mesh->vertexCount = static_cast<uint32_t>(vertices.size());
@@ -645,8 +646,7 @@ uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices, const s
     uint32_t meshId = m_nextMeshId++;
     m_meshes.push_back(std::move(mesh));
     
-    std::cout << "OutlineRenderer: Created mesh " << meshId << " with " << vertices.size() 
-              << " vertices and " << edgeIndices.size() << " edge indices" << std::endl;
+    LOG_INFO("OutlineRenderer: Created mesh {} with {} vertices and {} edge indices", meshId, vertices.size(), edgeIndices.size());
     
     return meshId;
 }
