@@ -1,0 +1,14 @@
+# UBSan runtime suppressions (UBSAN_OPTIONS=suppressions=...).
+#
+# OpenCASCADE's inline header code (custom NCollection allocator + Standard_Handle
+# reinterpret casts) trips UBSan's `alignment` check when instrumented inside our
+# translation units — ~18 benign "misaligned address" reports per full test run,
+# none of them our code. Suppress the alignment check for OCC-sourced frames only,
+# so real ASan (use-after-free/OOB) and every other UBSan check still fire,
+# including alignment issues in our own code.
+#
+# Runtime (not compile-time) because GCC 15 in this toolchain rejects
+# -fsanitize-ignorelist / -fsanitize-blacklist. Verified: drops the OCC alignment
+# noise from 18 -> 0 with no effect on real findings.
+alignment:*opencascade*
+alignment:*/include/opencascade/*

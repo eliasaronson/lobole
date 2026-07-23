@@ -33,6 +33,10 @@ option(ENABLE_SANITIZERS "Build with ASan + UBSan" OFF)
 if(ENABLE_SANITIZERS)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
+  # Note: GCC 15 in this toolchain rejects -fsanitize-ignorelist/-blacklist, so
+  # the OpenCASCADE UBSan `alignment` false positives are filtered at RUNTIME via
+  # tools/ubsan-suppressions.txt (UBSAN_OPTIONS=suppressions=...) instead of a
+  # compile-time ignore-list. See tools/run-sanitized-tests.sh.
   message(STATUS "Sanitizers enabled (ASan + UBSan)")
 endif()
 
