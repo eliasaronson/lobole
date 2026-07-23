@@ -150,14 +150,22 @@ Plan:
 - [ ] `org.freedesktop.Platform`/`Sdk` runtime (pick current stable, e.g.
       24.08). KDE/GNOME layer only if we need their libs — likely not.
 - [ ] Manifest modules built from source inside the sandbox: **OpenCASCADE 7.9**
-      (the big one), **Netgen**, **Spectra**, **nativefiledialog-extended**,
-      then Designer itself as the final module. Runtime provides glibc/X11/
-      Wayland/Mesa/D-Bus.
+      + **Netgen** (crib both from FreeCAD's manifest — see de-risker below),
+      **Spectra** (header-only, trivial), **nativefiledialog-extended**, and the
+      **small deps the Freedesktop SDK does not ship** — glfw, spdlog, eigen,
+      boost, nlohmann_json, glm (mostly header-only / tiny CMake modules).
+      Then Designer itself as the final module. Runtime provides
+      glibc/X11/Wayland/Mesa/D-Bus; confirm each small dep is actually
+      SDK-provided vs. needs-a-module before writing them all.
+- [ ] Ensure **glslc is in the sandbox** (shaderc module or SDK extension) — it
+      is a hard build-time requirement; shaders are compiled to .spv at build.
 - [ ] Finish/permissions: `--device=dri` (GPU), `--socket=wayland` +
       `--socket=fallback-x11`, filesystem access for opening/saving projects
       (portal-based where possible — aligns with existing `FileDialogs`).
-- [ ] Bake SPIR-V shaders + bundle `assets/`; verify asset lookup under the
-      sandbox's read-only `/app` layout.
+- [ ] Bundle `assets/` next to the binary; **relocatability prerequisite is
+      already cleared** (assets load relative to the exe, IBL cache writes to
+      `$XDG_CACHE_HOME` — done on the flake branch), so the read-only `/app`
+      layout is no longer a blocker. Just verify it in the sandbox.
 - [ ] Confirm the renderer (SSAO, shadows, clip planes, instancing) works under
       the runtime's Mesa and, separately, with the NVIDIA extension.
 - [ ] App ID `org.<domain>.Designer`, `.desktop` file, icon, AppStream
@@ -165,15 +173,35 @@ Plan:
 - [ ] Distribution: Flathub submission (their build farm + auto-updates) or a
       self-hosted Flatpak repo to start.
 
+### The big de-risker — crib OCC + Netgen from FreeCAD
+
+FreeCAD ships on Flathub (`org.freecad.FreeCAD`) on nearly the same stack —
+OpenCASCADE + Netgen + an LGPL kernel. Its published manifest already builds
+both from source. Lift its OCC and Netgen module definitions, strip the rest,
+add our smaller deps + our app module. This turns the two biggest time sinks
+from "port a CAD stack from scratch" into "adapt a proven recipe."
+
 ### Known risk areas
-- OpenCASCADE 7.9 is new — building it in the Flatpak sandbox is the single
-  biggest time sink. Reuse the exact configure flags nixpkgs uses.
-- Netgen is LGPL — dynamic-link, keep it a separate module, note it in
-  `THIRD_PARTY.md`.
+- **Renderer on Mesa is the real unknown.** SSAO / soft shadows / SSAO prepass /
+  instancing / clip planes have only ever run on our (NVIDIA) dev rig. First
+  contact with the runtime's Mesa (llvmpipe as the floor) could be clean or
+  could eat a couple of days on a validation/format issue. This is the main
+  estimate variance. Also verify with the NVIDIA userspace extension.
+- OpenCASCADE build iteration is slow (~20–40 min from source), so the
+  manifest fiddle loop drags until `flatpak-builder`'s cache warms.
 - Portal file dialogs already fall back to the ImGui browser if no portal runs
   (see `FileDialogs`) — good, but test the portal path inside the sandbox.
-- Push-constant / shader assumptions are host-GPU-independent, but re-verify on
-  Mesa (llvmpipe as a floor) since our dev rig is likely NVIDIA.
+- Netgen is LGPL — keep it a separate module, note it in `THIRD_PARTY.md`.
+
+### Effort estimate (post-flake, prerequisites cleared)
+
+~**1 to 1.5 weeks** to a Flatpak that installs and runs locally, *cribbing
+OCC/Netgen from FreeCAD* — with the Mesa renderer verification being what pushes
+it toward the high end. From scratch (no FreeCAD reference) add ~1 week. Rough
+split: OCC ~1d, Netgen ~0.5d, small-dep modules ~1d, app module + finish args
+~0.5d, Flathub metadata (AppStream/.desktop/icon) ~1d, GPU verification 0.5–3d.
+Cheaper interim if a runnable binary is wanted sooner: `nix bundle` → AppImage
+off the flake is ~hours (weaker driver story; documented above).
 
 ---
 
