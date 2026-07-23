@@ -228,7 +228,11 @@ void DrawModelToolbar(AppState& state) {
 
   // Measure tool (C3): a viewport mode — pick a face/edge for its own measure,
   // a second element for the distance. The button reflects the armed state.
-  if (state.measure.active)
+  // Snapshot the armed state: the button toggles state.measure.active, so
+  // guarding the pop on the live value (which the click just flipped) would
+  // unbalance the style stack and trip ImGui's PopStyleColor assert.
+  const bool measureActive = state.measure.active;
+  if (measureActive)
     ImGui::PushStyleColor(ImGuiCol_Button,
                           ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
   if (ToolButton(ICON_FA_RULER, "Measure (pick 1-2 faces/edges; Esc to exit)",
@@ -237,7 +241,7 @@ void DrawModelToolbar(AppState& state) {
     state.measure = MeasureState{};       // clear any in-progress measurement
     state.measure.active = !wasActive;    // toggle
   }
-  if (state.measure.active)
+  if (measureActive)
     ImGui::PopStyleColor();
 
   Divider();
@@ -497,8 +501,11 @@ void DrawAssemblyToolbar(AppState& state) {
     FitCameraToDocument(state);
 
   // Measure across the assembly: same tool as the part tab — picks carry
-  // their occurrence, so distances span occurrences in world space.
-  if (state.measure.active)
+  // their occurrence, so distances span occurrences in world space. Snapshot
+  // the armed state so the toggling click can't unbalance the style stack (see
+  // the model-toolbar measure button).
+  const bool measureActive = state.measure.active;
+  if (measureActive)
     ImGui::PushStyleColor(ImGuiCol_Button,
                           ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
   if (ToolButton(ICON_FA_RULER, "Measure (pick 1-2 faces/edges; Esc to exit)",
@@ -507,7 +514,7 @@ void DrawAssemblyToolbar(AppState& state) {
     state.measure = MeasureState{}; // clear any in-progress measurement
     state.measure.active = !wasActive; // toggle
   }
-  if (state.measure.active)
+  if (measureActive)
     ImGui::PopStyleColor();
 
   if (state.mateTool.active && !state.mateTool.message.empty()) {
