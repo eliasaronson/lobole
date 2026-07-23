@@ -1,0 +1,81 @@
+{
+  "nodes": {
+    "imgui-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1742239109,
+        "narHash": "sha256-mQOJ6jCN+7VopgZ61yzaCnt4R1QLrW7+47xxMhFRHLQ=",
+        "owner": "ocornut",
+        "repo": "imgui",
+        "rev": "4806a1924ff6181180bf5e4b8b79ab4394118875",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ocornut",
+        "repo": "imgui",
+        "rev": "4806a1924ff6181180bf5e4b8b79ab4394118875",
+        "type": "github"
+      }
+    },
+    "imgui-test-engine-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1741891057,
+        "narHash": "sha256-oKDnT+SZtW5K5PLEMNtA0jOJwuJ3q/Jo3ecxZK/mu7o=",
+        "owner": "ocornut",
+        "repo": "imgui_test_engine",
+        "rev": "5144b462b33effcacb2890fe17b2126c861d8ab0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ocornut",
+        "repo": "imgui_test_engine",
+        "rev": "5144b462b33effcacb2890fe17b2126c861d8ab0",
+        "type": "github"
+      }
+    },
+    "nfd-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1767721323,
+        "narHash": "sha256-JrwJP7zt/4oW4OQHCEM23k+zm6j1AVglGJowwkWc29k=",
+        "owner": "btzy",
+        "repo": "nativefiledialog-extended",
+        "rev": "fc168e8605bfa51aaec22ab0c4e46b9de665a437",
+        "type": "github"
+      },
+      "original": {
+        "owner": "btzy",
+        "repo": "nativefiledialog-extended",
+        "rev": "fc168e8605bfa51aaec22ab0c4e46b9de665a437",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1784497964,
+        "narHash": "sha256-vlHUuqAcbcH2RKmHbPiuQzbv1pnzzavXnI62RD0bqCU=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "imgui-src": "imgui-src",
+        "imgui-test-engine-src": "imgui-test-engine-src",
+        "nfd-src": "nfd-src",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

@@ -35,6 +35,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <climits>
+#include <unistd.h>
+
+namespace {
+// Directory of the running executable. Assets and shaders are found relative to
+// it (the renderers use identical readlink helpers) so the app is relocatable —
+// no compile-time source path baked in. Falls back to "." on failure.
+std::string ExecutableDir() {
+  char buf[PATH_MAX];
+  ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+  if (n <= 0)
+    return ".";
+  buf[n] = '\0';
+  return std::filesystem::path(buf).parent_path().string();
+}
+
+// Writable per-user cache for precomputed IBL maps: $XDG_CACHE_HOME/designer
+// (else ~/.cache/designer, else a temp dir). The executable dir may be
+// read-only (Nix store, Flatpak /app), so the cache must live under $HOME.
+std::string IblCacheDir() {
+  namespace fs = std::filesystem;
+  const char *xdg = std::getenv("XDG_CACHE_HOME");
+  const char *home = std::getenv("HOME");
+  fs::path base = xdg && *xdg      ? fs::path(xdg)
+                  : home && *home  ? fs::path(home) / ".cache"
+                                   : fs::temp_directory_path();
+  fs::path dir = base / "designer";
+  std::error_code ec;
+  fs::create_directories(dir, ec);
+  return dir.string();
+}
+} // namespace
 #define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -1070,9 +1102,9 @@ int main(int argc, char **argv) {
   g_IBLTextures = std::make_unique<IBLTextures>();
   {
     const std::string hdr =
-        std::string(DESIGNER_SOURCE_DIR) + "/assets/hdri/brown_photostudio_02_1k.hdr";
+        ExecutableDir() + "/assets/hdri/brown_photostudio_02_1k.hdr";
     IBLPrecompute ibl;
-    if (ibl.Build(hdr, DESIGNER_SOURCE_DIR "/build")) {
+    if (ibl.Build(hdr, IblCacheDir())) {
       if (!g_IBLTextures->Upload(g_Device, g_PhysicalDevice, g_Queue,
                                  g_CommandPool, ibl))
         g_IBLTextures->MakeFallback(g_Device, g_PhysicalDevice, g_Queue,

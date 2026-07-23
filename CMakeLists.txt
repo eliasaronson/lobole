@@ -219,7 +219,12 @@ if(Eigen3_FOUND AND Boost_FOUND)
         deps/planegcs/GCS.cpp deps/planegcs/Constraints.cpp
         deps/planegcs/Geo.cpp deps/planegcs/SubSystem.cpp
         deps/planegcs/qp_eq.cpp)
-    add_library(planegcs STATIC ${PLANEGCS_SOURCES})
+    # SHARED (not STATIC): PlaneGCS is LGPL-2.1 and locally modified; a shared
+    # library satisfies LGPL's relink requirement automatically (users can swap
+    # the .so). Perf impact is nil — the designer_core->planegcs boundary is
+    # crossed once per sketch solve, and the hot inner loops (+ header-only
+    # Eigen) stay inlined inside the .so.
+    add_library(planegcs SHARED ${PLANEGCS_SOURCES})
     target_compile_features(planegcs PUBLIC cxx_std_20)
     target_include_directories(planegcs PUBLIC deps/planegcs)
     target_link_libraries(planegcs PUBLIC Eigen3::Eigen Boost::boost)
@@ -363,13 +368,17 @@ file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 
+# Studio HDRI for image-based lighting, loaded at runtime relative to the
+# executable (main.cpp ExecutableDir()) — same relocatable scheme as the fonts.
+file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr
+     DESTINATION ${CMAKE_BINARY_DIR}/assets/hdri)
+
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 
 # imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks
 target_compile_definitions(designer PRIVATE
     IMGUI_ENABLE_TEST_ENGINE
     IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
-    DESIGNER_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 target_link_libraries(designer designer_core ${LIBRARIES})

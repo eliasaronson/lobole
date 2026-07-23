@@ -1,0 +1,165 @@
+{
+  description = "Designer — parametric B-Rep CAD (Vulkan, OpenCASCADE, PlaneGCS)";
+
+  # ---------------------------------------------------------------------------
+  # Inputs
+  #
+  # nixpkgs provides opencascade-occt 7.9.3 (matches what the CMake config
+  # package expects — the TKDE* library split is handled in CMakeLists.txt).
+  #
+  # The three git submodules are pinned here as flake inputs (flake = false)
+  # rather than relying on `?submodules=1`, so `nix build` is reproducible from
+  # a plain flake ref. planegcs and deps/fonts are vendored in-tree (git-tracked)
+  # and come in with the main source. Keep these SHAs in sync with .gitmodules
+  # when the submodules are bumped (`git submodule status`).
+  # ---------------------------------------------------------------------------
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    imgui-src = {
+      url = "github:ocornut/imgui/4806a1924ff6181180bf5e4b8b79ab4394118875"; # v1.91.9b-docking
+      flake = false;
+    };
+    imgui-test-engine-src = {
+      url = "github:ocornut/imgui_test_engine/5144b462b33effcacb2890fe17b2126c861d8ab0"; # v1.91.9
+      flake = false;
+    };
+    nfd-src = {
+      url = "github:btzy/nativefiledialog-extended/fc168e8605bfa51aaec22ab0c4e46b9de665a437"; # v1.3.0
+      flake = false;
+    };
+  };
+
+  outputs = { self, nixpkgs, imgui-src, imgui-test-engine-src, nfd-src }:
+    let
+      system = "x86_64-linux";
+      pkgs = import nixpkgs { inherit system; };
+
+      # Everything the app links against at build/run time. Mirrors the
+      # `Libraries` block of shell.nix. Kept in a `let` so the package and the
+      # dev shell share one list and can't drift.
+      runtimeDeps = with pkgs; [
+        vulkan-headers
+        vulkan-loader
+        glfw
+        glm
+        spdlog
+        nlohmann_json
+        opencascade-occt # CAD kernel — find_package(OpenCASCADE)
+        eigen # PlaneGCS + FEM solver
+        boost # PlaneGCS (headers)
+        netgen # FEM tet mesher (HAVE_NETGEN), LGPL — dynamically linked
+        spectra # sparse eigensolver (HAVE_SPECTRA), header-only
+        dbus # nativefiledialog-extended xdg-desktop-portal backend
+        systemd # libsystemd.pc — dbus-1.pc Requires.private needs it resolvable
+        xorg.libX11 # non-blocking XMapWindow path (main.cpp)
+        catch2_3 # find_package(Catch2) runs at configure even for the app target
+      ];
+
+      designer = pkgs.stdenv.mkDerivation {
+        pname = "designer";
+        version = "0-unstable"; # no tagged releases yet; bump when we cut one
+
+        # The flake source is the git tree (submodule dirs arrive empty and are
+        # overlaid in postUnpack below). assets/ and deps/{planegcs,fonts} are
+        # git-tracked so they come in here directly.
+        src = self;
+
+        nativeBuildInputs = with pkgs; [
+          cmake
+          ninja
+          pkg-config
+          shaderc # glslc — hard requirement; compiles shaders at build time
+          makeWrapper
+        ];
+
+        buildInputs = runtimeDeps;
+
+        # Drop the pinned submodule inputs into deps/ where CMakeLists expects
+        # them (add_subdirectory(deps/nativefiledialog-extended), IMGUI_DIR, …).
+        # Copy (not symlink) so the tree is writable for the in-tree builds.
+        postUnpack = ''
+          for d in imgui:${imgui-src} \
+                   imgui_test_engine:${imgui-test-engine-src} \
+                   nativefiledialog-extended:${nfd-src}; do
+            name="''${d%%:*}"; path="''${d#*:}"
+            rm -rf "$sourceRoot/deps/$name"
+            cp -r --no-preserve=mode,ownership "$path" "$sourceRoot/deps/$name"
+          done
+        '';
+
+        # nixpkgs passes -DCMAKE_BUILD_TYPE=Release by default, so the
+        # `if(NOT CMAKE_BUILD_TYPE) -> Debug` fallback in CMakeLists is skipped.
+        # Build only the app target (it depends on the `shaders` target, so the
+        # .spv files get built too); skip designer_tests here.
+        ninjaFlags = [ "designer" ];
+        enableParallelBuilding = true;
+
+        # libplanegcs.so lives in the same dir as the binary (build dir now,
+        # $out/opt/designer after install). Emit its RPATH entry as $ORIGIN so
+        # there's no absolute /build path baked in (which nixpkgs' reference
+        # check forbids) and it resolves post-install with no patchelf.
+        cmakeFlags = [ "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON" ];
+
+        # No install() rules exist in-tree — the app finds shaders/assets
+        # relative to the executable (readlink /proc/self/exe). Reproduce that
+        # layout under $out/opt/designer and expose a wrapper on $out/bin.
+        # After the wrapper's `exec`, /proc/self/exe is the real binary, so
+        # ExecutableDir resolves to $out/opt/designer.
+        installPhase = ''
+          runHook preInstall
+
+          mkdir -p $out/opt/designer/libraries
+
+          # cwd is the CMake build dir here (nixpkgs cmake builds out-of-source).
+          # The build already staged assets/{fonts,hdri} next to the binary
+          # (CMake file(COPY) — Roboto + fa-solid + the studio HDR), matching
+          # the runtime exe-relative layout, so copy the tree wholesale.
+          cp designer $out/opt/designer/designer
+          cp libplanegcs.so $out/opt/designer/         # LGPL shared lib (see CMakeLists)
+          cp -r libraries/shaders $out/opt/designer/libraries/shaders
+          cp -r assets $out/opt/designer/assets
+
+          makeWrapper $out/opt/designer/designer $out/bin/designer
+
+          runHook postInstall
+        '';
+
+        # buildInputs' store paths land in the binary's RPATH automatically
+        # (OCC/netgen/etc. are linked by absolute path via CMake imported
+        # targets), so no LD_LIBRARY_PATH wrapping is needed. The Vulkan ICD is
+        # the host's responsibility — on NixOS the loader finds it via
+        # /run/opengl-driver (hardware.graphics.enable = true).
+
+        meta = with pkgs.lib; {
+          description = "Parametric B-Rep CAD (Vulkan, OpenCASCADE, PlaneGCS)";
+          platforms = [ "x86_64-linux" ];
+          mainProgram = "designer";
+          # TODO: set the project's actual license. Netgen is LGPL; see
+          # THIRD_PARTY.md for the full dependency licensing. Left unset for now
+          # (setting licenses.unfree here blocks `nix build` without --impure).
+        };
+      };
+    in
+    {
+      packages.${system} = {
+        default = designer;
+        designer = designer;
+      };
+
+      # `nix develop` == today's `nix-shell shell.nix`: build tools + libs +
+      # the test/tooling extras (validation layers, python-mcp, ccache).
+      devShells.${system}.default = pkgs.mkShell {
+        inputsFrom = [ designer ];
+        packages = with pkgs; [
+          gcc
+          ccache
+          git
+          vulkan-validation-layers
+          (python3.withPackages (ps: [ ps.mcp ]))
+        ];
+        # Let the Vulkan loader find the validation layers from the dev shell.
+        VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+      };
+    };
+}
