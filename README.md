@@ -86,3 +86,35 @@ and human-parity UI actions executed through the embedded test engine
 (`menu_click`, `item_click`, `item_input`, `viewport_click`, `viewport_drag`,
 `key_press`, `scroll`), plus `screenshot`. See `tools/designer_remote.py` and
 `tests/remote_smoke.py` for reference usage.
+
+## License
+
+Copyright © Elias Högbom Aronsson
+
+Designer is free software licensed under the **GNU Affero General Public License,
+version 3 or (at your option) any later version** (AGPL-3.0-or-later). See the
+[`LICENSE`](LICENSE) file for the full text.
+
+In short: you may use, study, modify, and redistribute it, but any distributed
+or network-hosted derivative must also be released under the AGPL with its
+source available. This copyleft governs the *software only* — files you author
+with Designer (CAD models, drawings, exports) are yours, with no obligation to
+publish them.
+
+### Additional permission (GPL/AGPL section 7): imgui_test_engine linking
+
+As an exception, and as an additional permission under section 7 of the AGPL,
+Elias Högbom Aronsson grants permission to link or combine this program with
+**Dear ImGui Test Engine** (`deps/imgui_test_engine`, © Omar Cornut / DISCO
+HELLO, distributed under its own license), and to convey the resulting work.
+You may extend this exception to a modified version of the program, but you are
+not obligated to do so. This exception does not modify any other term of the
+AGPL, and does not grant any rights in Dear ImGui Test Engine itself beyond
+those in its own license.
+
+### Third-party components
+
+Designer links LGPL libraries (OpenCASCADE, Netgen, and the vendored, modified
+PlaneGCS built as a shared library) and bundles other open-source components;
+see [`THIRD_PARTY.md`](THIRD_PARTY.md) for the full inventory and their
+licenses.

@@ -135,9 +135,10 @@
           description = "Parametric B-Rep CAD (Vulkan, OpenCASCADE, PlaneGCS)";
           platforms = [ "x86_64-linux" ];
           mainProgram = "designer";
-          # TODO: set the project's actual license. Netgen is LGPL; see
-          # THIRD_PARTY.md for the full dependency licensing. Left unset for now
-          # (setting licenses.unfree here blocks `nix build` without --impure).
+          # AGPL-3.0-or-later, with a section-7 additional permission to link
+          # Dear ImGui Test Engine (see LICENSE + README). Bundled LGPL/MPL/etc.
+          # dependencies are inventoried in THIRD_PARTY.md.
+          license = licenses.agpl3Plus;
         };
       };
     in

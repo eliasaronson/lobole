@@ -121,7 +121,10 @@ Tasks:
 - [x] Build PlaneGCS as a shared lib (`libplanegcs.so`) — done + packaged.
 - [ ] Add OpenCASCADE to `THIRD_PARTY.md`; ship a `LICENSES/` dir with full
       license texts + written offer for LGPL source in release artifacts.
-- [ ] Pick and declare the project's own license (`flake.nix` meta is unset).
+- [x] Project license chosen: **AGPL-3.0-or-later** (© Elias Högbom Aronsson),
+      with a GPL/AGPL §7 additional permission to link Dear ImGui Test Engine.
+      `LICENSE` (verbatim AGPL text), README License section, and
+      `flake.nix` `meta.license = agpl3Plus` all in place.
 
 ### Binary cache (do NOT skip)
 
