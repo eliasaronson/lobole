@@ -119,112 +119,10 @@ void DrawEditMenu(AppState& state) {
   ImGui::EndMenu();
 }
 
-void DrawCreateMenu(AppState& state) {
-  if (!ImGui::BeginMenu("Create"))
-    return;
-
-  // Creation is disabled while a feature preview is pending.
-  const bool idle = !HasPendingFeature(state);
-  if (ImGui::MenuItem("Box", nullptr, false, idle))
-    CreateBox(state);
-  if (ImGui::MenuItem("Sphere", nullptr, false, idle))
-    CreateSphere(state);
-  if (ImGui::MenuItem("Cylinder", nullptr, false, idle))
-    CreateCylinder(state);
-  if (ImGui::MenuItem("Datum Plane", nullptr, false, idle))
-    CreateDatumPlane(state);
-  if (ImGui::MenuItem("Datum Axis", nullptr, false, idle))
-    CreateDatumAxis(state);
-  const size_t producers =
-      state.document
-          ? BodyProducers(*state.document, state.document->FeatureCount()).size()
-          : 0;
-  if (ImGui::MenuItem("Boolean", nullptr, false, idle && producers >= 2))
-    CreateBoolean(state);
-  if (ImGui::MenuItem("Mirror", nullptr, false, idle && producers >= 1))
-    CreateMirror(state);
-  if (ImGui::MenuItem("Pattern", nullptr, false, idle && producers >= 1))
-    CreatePattern(state);
-  const bool hasBody =
-      state.document && !state.document->GetBodies().empty();
-  if (ImGui::MenuItem("Fillet", nullptr, false, idle && hasBody))
-    CreateFillet(state);
-  if (ImGui::MenuItem("Chamfer", nullptr, false, idle && hasBody))
-    CreateChamfer(state);
-  if (ImGui::MenuItem("Rib", nullptr, false, idle && hasBody))
-    CreateRib(state); // needs an open sketch profile too; no-op without one
-  if (ImGui::MenuItem("Thread", nullptr, false, idle && hasBody))
-    CreateThread(state); // cosmetic; arms the cylindrical-face pick
-
-  // Curve-driven tools (curves-3d): a 3D curve, and the sweep/pipe/loft that
-  // consume it. Gated on the references each needs.
-  const size_t sketches =
-      state.document ? SketchFeatureCount(*state.document) : 0;
-  const bool hasPathLike =
-      state.document && HasCurveOrSketch(*state.document);
-  if (ImGui::MenuItem("3D Curve", nullptr, false, idle))
-    CreateCurve3D(state);
-  if (ImGui::MenuItem("Pipe", nullptr, false, idle && hasPathLike))
-    CreatePipe(state);
-  if (ImGui::MenuItem("Sweep", nullptr, false, idle && sketches >= 1))
-    CreateSweep(state);
-  if (ImGui::MenuItem("Loft", nullptr, false, idle && sketches >= 2))
-    CreateLoft(state);
-  ImGui::Separator();
-
-  SketchEditState& edit = state.sketchEdit;
-  if (ImGui::BeginMenu("Sketch")) {
-    if (ImGui::MenuItem("New Sketch...")) {
-      StartNewSketch(state);
-    }
-    ImGui::Separator();
-    if (ImGui::MenuItem("Sketch on Front Plane")) {
-      const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-      BeginSketchOnPlane(state, DefaultPlane(0), "Sketch " + std::to_string(n));
-    }
-    if (ImGui::MenuItem("Sketch on Top Plane")) {
-      const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-      BeginSketchOnPlane(state, DefaultPlane(1), "Sketch " + std::to_string(n));
-    }
-    if (ImGui::MenuItem("Sketch on Right Plane")) {
-      const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-      BeginSketchOnPlane(state, DefaultPlane(2), "Sketch " + std::to_string(n));
-    }
-
-    ImGui::Separator();
-
-    const bool hasSelectedFace =
-        state.faceSelector && state.faceSelector->GetSelectedFace() != nullptr;
-    if (ImGui::MenuItem("Sketch on Selected Face", nullptr, false,
-                        hasSelectedFace && !edit.IsEditing())) {
-      const Face* face = state.faceSelector->GetSelectedFace();
-      glm::vec3 c =
-          state.faceSelector->GetFaceCenter(face->meshId, face->faceIndex);
-      glm::vec3 nrm =
-          state.faceSelector->GetFaceNormal(face->meshId, face->faceIndex);
-      glm::vec3 u =
-          std::abs(nrm.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
-      u = glm::normalize(u - glm::dot(u, nrm) * nrm);
-      const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-      const std::string name = "Sketch " + std::to_string(n);
-      const SketchPlane facePlane(c, nrm, u);
-      // Attach by the face's stable name when it has one; else bake the plane.
-      if (auto ref = FaceElementRef(state, face->meshId, face->faceIndex)) {
-        BeginSketchOnFace(state, *ref, facePlane, name);
-      } else {
-        BeginSketchOnPlane(state, facePlane, name);
-      }
-    }
-
-    if (ImGui::MenuItem("Exit Sketch", nullptr, false, edit.IsEditing())) {
-      edit = SketchEditState{};
-    }
-
-    ImGui::EndMenu();
-  }
-
-  ImGui::EndMenu();
-}
+// The Create menu was retired in favor of the model toolbar (feature buttons)
+// and the feature tree's "Default geometry" plane entries (start-a-sketch);
+// the toolbar's sketch button drives the interactive plane/face pick. See the
+// GUI tests, which enter sketches via those paths.
 
 void DrawViewMenu(AppState& state) {
   if (!ImGui::BeginMenu("View"))
@@ -433,7 +331,6 @@ void DrawMainMenuBar(AppState& state) {
 
   DrawFileMenu(state);
   DrawEditMenu(state);
-  DrawCreateMenu(state);
   DrawViewMenu(state);
 
   ImGui::EndMainMenuBar();

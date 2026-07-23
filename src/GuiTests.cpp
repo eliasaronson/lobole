@@ -65,6 +65,19 @@ static void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId) {
   ctx->Yield();
 }
 
+// Enter a sketch on a base plane (0 = front/XY, 1 = top/XZ, 2 = right/YZ) via a
+// direct edit-mode entry — the same call the feature-tree "Default geometry"
+// double-click and the retired Create/Sketch menu used. These tests exercise
+// what happens *inside* a sketch; the interactive toolbar -> viewport plane
+// pick that opens one is covered on its own by
+// sketch/toolbar_plane_pick_enters_edit.
+static void EnterSketchOnPlane(ImGuiTestContext* ctx, int planeIdx) {
+  const std::string name =
+      "Sketch " + std::to_string(Doc()->FeatureCount() + 1);
+  ui::BeginSketchOnPlane(*s_App, ui::DefaultPlane(planeIdx), name);
+  ctx->Yield();
+}
+
 void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   s_App = state;
 
@@ -408,7 +421,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     s_App->measure.active = true;
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     IM_CHECK(!s_App->measure.active);
     s_App->sketchEdit = ui::SketchEditState{}; // leave sketch edit
@@ -476,7 +489,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MenuClick("File/New");
     IM_CHECK(!s_App->sketchEdit.IsEditing());
 
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     // A SketchFeature was added and we entered sketch edit (Select is default).
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
@@ -490,11 +503,50 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->sketchEdit.IsEditing());
   };
 
+  // The primary way a user opens a sketch now that the Create menu is gone:
+  // the toolbar's sketch button arms plane-picking, then a viewport click on a
+  // base-plane quad enters edit mode. The other sketch tests take the direct
+  // EnterSketchOnPlane() shortcut, so this is the one that guards the whole
+  // interactive entry path end to end.
+  t = IM_REGISTER_TEST(engine, "sketch", "toolbar_plane_pick_enters_edit");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const size_t before = Doc()->FeatureCount();
+
+    ToolbarClick(ctx, "###tb_new_sketch");
+    IM_CHECK(s_App->sketchEdit.pickingPlane); // armed, waiting for a plane
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+
+    // Frame the front (XY) plane head-on. The doc is empty, so all three base
+    // quads pass through the origin; looking straight down +Z makes a click at
+    // world (1,1,0) land unambiguously on XY (the other two are edge-on there).
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0, 0, 0));
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    s_App->camera->SetPosition(glm::vec3(0, 0, 10));
+    ctx->Yield();
+
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(1.0f, 1.0f, 0.0f)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    IM_CHECK(!s_App->sketchEdit.pickingPlane); // pick consumed
+    IM_CHECK(s_App->sketchEdit.IsEditing());   // now editing the new sketch
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    auto* sk = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(sk != nullptr);
+    IM_CHECK(sk->TypeName() == "Sketch");
+  };
+
   t = IM_REGISTER_TEST(engine, "sketch", "draw_line_undo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Top Plane");
+    EnterSketchOnPlane(ctx, 1);
     ctx->Yield();
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sketch != nullptr);
@@ -537,7 +589,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
 
     // Inject a rectangle deterministically via a command (viewport click
@@ -629,7 +681,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sketch != nullptr);
@@ -1008,7 +1060,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1046,7 +1098,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
 
@@ -1073,7 +1125,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1109,7 +1161,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1138,7 +1190,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1196,7 +1248,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1230,7 +1282,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1264,7 +1316,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1304,7 +1356,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
@@ -1377,7 +1429,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select); // default
     ctx->KeyPress(ImGuiKey_L);
@@ -1396,7 +1448,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
@@ -1423,7 +1475,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
@@ -1450,7 +1502,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     uint32_t l = sk->AddEntity(sketch::Line{{0, 0}, {1, 0}});
@@ -1475,7 +1527,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1506,7 +1558,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1550,7 +1602,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1626,7 +1678,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1681,7 +1733,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1724,7 +1776,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -1751,7 +1803,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
@@ -2140,7 +2192,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
@@ -2209,7 +2261,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
@@ -2343,7 +2395,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
@@ -2458,7 +2510,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
@@ -2578,7 +2630,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
@@ -2744,7 +2796,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
@@ -2809,7 +2861,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
@@ -2932,7 +2984,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
-    ctx->MenuClick("Create/Sketch/Sketch on Front Plane");
+    EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
