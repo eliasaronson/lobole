@@ -73,7 +73,7 @@ Document& RequirePartDoc(Document* doc, const char* what) {
 // element listing) carved out of RemoteServer::HandleSemantic. `docIn` is
 // null on an assembly/drawing tab.
 std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
-                                        const std::string& m, const json& p) {
+                                        const std::string& m, const RpcParams& p) {
   Document* doc = docIn;
   if (m == "set_section") {
     // Toggle/position the viewport section clip plane (I3 raster). params:

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
 #include <string>
@@ -22,14 +23,14 @@ namespace remote {
 // `doc` is the active part document (the caller guarantees it is non-null).
 bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
                             const std::string& method,
-                            const nlohmann::json& params, nlohmann::json& out);
+                            const RpcParams& params, nlohmann::json& out);
 
 // The same config RPCs on an assembly tab: for an assembly a configuration's
 // override set is suppressed OCCURRENCE ids (`suppressed_occurrences`). Undo is
 // the assembly snapshot history, not the command stack.
 bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asmDoc,
                                     const std::string& method,
-                                    const nlohmann::json& params,
+                                    const RpcParams& params,
                                     nlohmann::json& out);
 
 }  // namespace remote

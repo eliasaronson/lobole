@@ -16,6 +16,7 @@
 #include "core/Measure.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/io/Serialization.h"
+#include "remote/RpcParams.h"
 #include "remote/RemoteConfigurations.h"
 #include "remote/RemoteSimulation.h"
 #include "remote/RemoteInspection.h"
@@ -217,6 +218,53 @@ namespace {
 
 json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 
+// Levenshtein distance, for the "did you mean" hint on a rejected param key.
+size_t EditDistance(const std::string& a, const std::string& b) {
+  std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
+  for (size_t j = 0; j <= b.size(); j++) prev[j] = j;
+  for (size_t i = 1; i <= a.size(); i++) {
+    cur[0] = i;
+    for (size_t j = 1; j <= b.size(); j++) {
+      const size_t cost = a[i - 1] == b[j - 1] ? 0 : 1;
+      cur[j] = std::min({prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost});
+    }
+    std::swap(prev, cur);
+  }
+  return prev[b.size()];
+}
+
+// Message for a request whose params carried keys the handler never read —
+// a silently-ignored typo under the old path. Names the offending key(s),
+// suggests the closest accepted key, and lists the method's vocabulary.
+std::string UnknownParamError(const std::string& method,
+                              const std::vector<std::string>& unknown,
+                              const std::set<std::string>& accepted) {
+  std::string msg = "unknown parameter";
+  msg += unknown.size() > 1 ? "s " : " ";
+  for (size_t i = 0; i < unknown.size(); i++) {
+    msg += (i ? ", '" : "'") + unknown[i] + "'";
+    // Closest accepted key within a small edit distance = probable typo.
+    std::string best;
+    size_t bestDist = 3; // only suggest a genuinely near miss
+    for (const std::string& k : accepted) {
+      const size_t d = EditDistance(unknown[i], k);
+      if (d < bestDist) { bestDist = d; best = k; }
+    }
+    if (!best.empty()) msg += " (did you mean '" + best + "'?)";
+  }
+  msg += " for '" + method + "'.";
+  if (!accepted.empty()) {
+    msg += " Accepted: ";
+    bool first = true;
+    for (const std::string& k : accepted) {
+      msg += (first ? "" : ", ") + k;
+      first = false;
+    }
+    msg += ".";
+  }
+  return msg;
+}
+
 ImGuiKeyChord ParseChord(const std::string& text, std::string* error) {
   ImGuiKeyChord chord = 0;
   size_t start = 0;
@@ -282,9 +330,8 @@ bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit) {
 } // namespace
 
 json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
-                                  bool& handled) {
+                                  bool& handled, remote::RpcParams& p) {
   const std::string& m = request.method;
-  const json& p = request.params;
   Document* doc = state.document.get();
   handled = true;
 
@@ -817,8 +864,23 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
 
     try {
       bool handled = false;
-      json result = HandleSemantic(request, state, handled);
+      remote::RpcParams params{request.params};
+      json result = HandleSemantic(request, state, handled, params);
       if (handled) {
+        // Strict params: a recognized method that ran without touching a key
+        // the caller sent means that key was a typo, silently ignored under
+        // the old path (the `named` vs `name` trap). Reject loudly instead.
+        // The check is post-execution (we learn a method's vocabulary by which
+        // keys it reads), so a mutating call carrying an *extra* junk key still
+        // applies before erroring — the caller sees the mistake and the change
+        // used only recognized keys; a *misspelled required* key instead throws
+        // "key not found" before any mutation.
+        if (auto unknown = params.UnknownKeys(); !unknown.empty()) {
+          RespondError(request.client, request.id,
+                       UnknownParamError(request.method, unknown,
+                                         params.SeenKeys()));
+          continue;
+        }
         // Session recording (S4): successful semantic requests only — a
         // throwing call mutates nothing, so replay equivalence holds without
         // it (UI actions/screenshots are also skipped: not headless-replayable).

@@ -57,6 +57,14 @@ def main():
         d = Designer.wait_for(port)
         expect(d.call("ping")["ok"], "ping")
 
+        # Strict params: a key no handler reads is a typo, rejected loudly
+        # instead of silently ignored (the `named` vs `name` trap). A near
+        # miss suggests the intended key; the corrected call still works.
+        expect_error(d, "get_state", "unknown parameter", bogus=1)
+        expect_error(d, "set_variable", "did you mean 'comment'",
+                     name="tw", expression="1", coment="typo")
+        d.call("set_variable", name="tw", expression="1", comment="ok")
+
         # The S1 bracket: variables -> constrained sketch -> extrude -> fillet
         d.call("new_project")
         d.call("set_variable", name="width", expression="40")

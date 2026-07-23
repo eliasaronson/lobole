@@ -33,7 +33,7 @@ namespace remote {
 // Modeling / feature-tree RPCs (select_feature..list_variables) carved out of
 // RemoteServer::HandleSemantic. All act on the active part document.
 std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
-                                      const std::string& m, const json& p) {
+                                      const std::string& m, const RpcParams& p) {
   Document* doc = &document;
   if (m == "select_feature") {
     // Select a feature by index or feature_id (-1 / 0 clears). Drives the
@@ -254,7 +254,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       for (const json& spec : p.at("constraints"))
         sk->constraints.push_back(build(spec)), added++;
     } else {
-      sk->constraints.push_back(build(p));
+      sk->constraints.push_back(build(p.raw()));
       added = 1;
     }
     sketch::Solver solver;

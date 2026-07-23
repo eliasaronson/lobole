@@ -22,7 +22,7 @@ namespace remote {
 // Assembly RPCs (add_occurrence..) carved out of RemoteServer::HandleSemantic.
 // Act on the active assembly tab / project.
 std::optional<json> HandleAssemblyRpc(ui::AppState& state,
-                                      const std::string& m, const json& p) {
+                                      const std::string& m, const RpcParams& p) {
   if (m == "add_occurrence") {
     // Places a part in the active assembly. `part` is the part's NAME (resolved
     // to its stable id); optional `transform` = {position:[x,y,z],

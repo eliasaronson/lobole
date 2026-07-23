@@ -25,7 +25,7 @@ namespace remote {
 // std::nullopt otherwise; throws std::runtime_error on error (the caller's
 // try/catch turns it into an error response).
 std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
-                                        const std::string& m, const json& p) {
+                                        const std::string& m, const RpcParams& p) {
   Document* doc = &document;  // keep the moved block's `doc->` verbatim
   if (m == "add_study") {
     auto cmd = std::make_unique<AddStudyCommand>(p.value("name", std::string{}));

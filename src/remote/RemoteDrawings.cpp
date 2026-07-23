@@ -23,7 +23,7 @@ namespace remote {
 // Drawing / sheet RPCs (create_drawing..) carved out of
 // RemoteServer::HandleSemantic. Act on the active drawing tab / project.
 std::optional<json> HandleDrawingRpc(ui::AppState& state,
-                                     const std::string& m, const json& p) {
+                                     const std::string& m, const RpcParams& p) {
   if (m == "create_drawing") {
     // Adds a drawing tab. Optional `sheet` seeds paper size / orientation /
     // title-block fields so a headless caller can set them in one call.

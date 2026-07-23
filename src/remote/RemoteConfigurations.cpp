@@ -16,7 +16,7 @@ using nlohmann::json;
 namespace remote {
 
 bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
-                            const std::string& m, const json& p, json& out) {
+                            const std::string& m, const RpcParams& p, json& out) {
   if (m == "add_configuration") {
     auto cmd =
         std::make_unique<AddConfigurationCommand>(p.value("name", std::string{}));
@@ -95,7 +95,7 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
 }
 
 bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
-                                    const std::string& m, const json& p,
+                                    const std::string& m, const RpcParams& p,
                                     json& out) {
   if (m == "add_configuration") {
     ui::SnapshotAssembly(state);

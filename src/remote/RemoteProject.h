@@ -1,5 +1,6 @@
 #pragma once
 
+#include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
 #include <optional>
@@ -16,6 +17,6 @@ namespace remote {
 
 std::optional<nlohmann::json> HandleProjectRpc(ui::AppState& state,
                                                const std::string& method,
-                                               const nlohmann::json& params);
+                                               const RpcParams& params);
 
 }  // namespace remote

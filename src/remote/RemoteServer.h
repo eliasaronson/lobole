@@ -16,6 +16,10 @@
 struct ImGuiTestEngine;
 struct ImGuiTestContext;
 
+namespace remote {
+class RpcParams;
+}
+
 // Opt-in JSON-RPC server (newline-delimited JSON over localhost TCP) that
 // exposes the application to scripts and AI assistants:
 //   - semantic commands (features as JSON, undo/redo, project I/O, camera)
@@ -66,7 +70,7 @@ private:
                     const std::string& error);
 
   nlohmann::json HandleSemantic(const Request& request, ui::AppState& state,
-                                bool& handled);
+                                bool& handled, remote::RpcParams& p);
   bool QueueUiAction(const Request& request); // returns false if unknown
   static bool IsUiAction(const std::string& method);
 

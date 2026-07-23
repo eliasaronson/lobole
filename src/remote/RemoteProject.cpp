@@ -30,7 +30,7 @@ namespace remote {
 // out of RemoteServer::HandleSemantic. `doc` is the active part document (may be
 // null on an assembly tab, matching the original un-guarded behavior).
 std::optional<json> HandleProjectRpc(ui::AppState& state,
-                                     const std::string& m, const json& p) {
+                                     const std::string& m, const RpcParams& p) {
   Document* doc = state.document.get();
   if (m == "new_project") {
     ui::ReplaceDocument(state, std::make_unique<Document>());
