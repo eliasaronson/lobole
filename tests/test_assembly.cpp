@@ -3,6 +3,7 @@
 
 #include "core/Occurrence.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -92,7 +93,7 @@ TEST_CASE("Assembly round-trips through the single-file form", "[assembly]") {
   const fs::path path =
       fs::temp_directory_path() / "designer_asm_roundtrip.json";
   std::string error;
-  REQUIRE(DocumentIO::SaveAssembly(original, path.string(), &error));
+  REQUIRE(testio::SaveAssembly(original, path.string()));
 
   // Sanity: the file declares the assembly discriminator + shared version.
   {
@@ -103,7 +104,7 @@ TEST_CASE("Assembly round-trips through the single-file form", "[assembly]") {
     CHECK(j.at("occurrences").size() == 3);
   }
 
-  auto reloaded = DocumentIO::LoadAssembly(path.string(), &error);
+  auto reloaded = testio::LoadAssembly(path.string());
   REQUIRE(reloaded != nullptr);
   ExpectSameAssembly(original, *reloaded);
   fs::remove(path);
@@ -114,14 +115,14 @@ TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
   const fs::path dir = fs::temp_directory_path() / "designer_asm_roundtrip.dsgn";
   fs::remove_all(dir);
   std::string error;
-  REQUIRE(DocumentIO::SaveAssembly(original, dir.string(), &error));
+  REQUIRE(testio::SaveAssembly(original, dir.string()));
 
   // One file per occurrence, named by stable id; index lists the order.
   CHECK(fs::exists(dir / "index.json"));
   CHECK(fs::exists(dir / "occurrences" / "1-base.json"));
   CHECK(fs::exists(dir / "occurrences" / "2-arm.json"));
 
-  auto reloaded = DocumentIO::LoadAssembly(dir.string(), &error);
+  auto reloaded = testio::LoadAssembly(dir.string());
   REQUIRE(reloaded != nullptr);
   ExpectSameAssembly(original, *reloaded);
   fs::remove_all(dir);
@@ -138,7 +139,7 @@ TEST_CASE("Frozen v23 assembly golden loads at the exact schema", "[assembly][go
                           "assembly" / "v23-assembly.json";
   REQUIRE(fs::exists(golden));
   std::string error;
-  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc != nullptr);
   REQUIRE(asmDoc->OccurrenceCount() == 3);
 
@@ -235,7 +236,7 @@ TEST_CASE("Assembly with mates round-trips (single-file + directory)", "[assembl
   SECTION("single file") {
     const fs::path path = fs::temp_directory_path() / "designer_asm_mates.json";
     std::string error;
-    REQUIRE(DocumentIO::SaveAssembly(original, path.string(), &error));
+    REQUIRE(testio::SaveAssembly(original, path.string()));
     {
       std::ifstream in(path);
       nlohmann::json j = nlohmann::json::parse(in);
@@ -245,7 +246,7 @@ TEST_CASE("Assembly with mates round-trips (single-file + directory)", "[assembl
             "4/cap1");
       CHECK(j.at("mates")[0].at("b").at("anchor").at("origin") == true);
     }
-    auto reloaded = DocumentIO::LoadAssembly(path.string(), &error);
+    auto reloaded = testio::LoadAssembly(path.string());
     REQUIRE(reloaded != nullptr);
     ExpectSameAssembly(original, *reloaded);
     ExpectSameMates(original, *reloaded);
@@ -256,9 +257,9 @@ TEST_CASE("Assembly with mates round-trips (single-file + directory)", "[assembl
     const fs::path dir = fs::temp_directory_path() / "designer_asm_mates.dsgn";
     fs::remove_all(dir);
     std::string error;
-    REQUIRE(DocumentIO::SaveAssembly(original, dir.string(), &error));
+    REQUIRE(testio::SaveAssembly(original, dir.string()));
     CHECK(fs::exists(dir / "mates" / "4-hinge.json"));
-    auto reloaded = DocumentIO::LoadAssembly(dir.string(), &error);
+    auto reloaded = testio::LoadAssembly(dir.string());
     REQUIRE(reloaded != nullptr);
     ExpectSameAssembly(original, *reloaded);
     ExpectSameMates(original, *reloaded);
@@ -273,7 +274,7 @@ TEST_CASE("A v23 assembly (no mates) still loads under v24", "[assembly]") {
   const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
                           "assembly" / "v23-assembly.json";
   std::string error;
-  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc != nullptr);
   CHECK(asmDoc->OccurrenceCount() == 3);
   CHECK(asmDoc->MateCount() == 0);
@@ -284,7 +285,7 @@ TEST_CASE("Frozen v24 assembly golden loads at the exact schema", "[assembly][go
                           "assembly" / "v24-assembly.json";
   REQUIRE(fs::exists(golden));
   std::string error;
-  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc != nullptr);
   REQUIRE(asmDoc->OccurrenceCount() == 2);
   REQUIRE(asmDoc->MateCount() == 1);
@@ -308,7 +309,7 @@ TEST_CASE("Frozen v25 golden: cylindrical/planar/ball mate schema", "[assembly][
                           "assembly" / "v25-assembly.json";
   REQUIRE(fs::exists(golden));
   std::string error;
-  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc != nullptr);
   REQUIRE(asmDoc->MateCount() == 2);
 
@@ -327,8 +328,8 @@ TEST_CASE("Frozen v25 golden: cylindrical/planar/ball mate schema", "[assembly][
 
   // Round-trips (write at v25, reload) without losing the new DOF fields.
   const fs::path tmp = fs::temp_directory_path() / "designer_v25_rt.json";
-  REQUIRE(DocumentIO::SaveAssembly(*asmDoc, tmp.string(), &error));
-  auto again = DocumentIO::LoadAssembly(tmp.string(), &error);
+  REQUIRE(testio::SaveAssembly(*asmDoc, tmp.string()));
+  auto again = testio::LoadAssembly(tmp.string());
   REQUIRE(again != nullptr);
   CHECK(again->FindMateById(3)->type == MateType::Planar);
   CHECK_THAT(again->FindMateById(3)->dx, WithinAbs(3.0f, 1e-6f));
@@ -350,14 +351,14 @@ TEST_CASE("Connector inference snap edge round-trips (v26)", "[assembly]") {
 
   const fs::path path = fs::temp_directory_path() / "designer_snap_rt.json";
   std::string error;
-  REQUIRE(DocumentIO::SaveAssembly(asmDoc, path.string(), &error));
+  REQUIRE(testio::SaveAssembly(asmDoc, path.string()));
   {
     std::ifstream in(path);
     nlohmann::json j = nlohmann::json::parse(in);
     const auto& a = j.at("mates")[0].at("a").at("anchor");
     CHECK(a.at("snap_edge").at("element") == "4/g7;M1");
   }
-  auto reloaded = DocumentIO::LoadAssembly(path.string(), &error);
+  auto reloaded = testio::LoadAssembly(path.string());
   REQUIRE(reloaded != nullptr);
   const Mate* rm = reloaded->GetMates()[0].id ? &reloaded->GetMates()[0] : nullptr;
   REQUIRE(rm != nullptr);
@@ -372,7 +373,7 @@ TEST_CASE("Frozen v26 golden: connector snap-edge schema", "[assembly][golden]")
                           "assembly" / "v26-assembly.json";
   REQUIRE(fs::exists(golden));
   std::string error;
-  auto asmDoc = DocumentIO::LoadAssembly(golden.string(), &error);
+  auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc != nullptr);
   REQUIRE(asmDoc->MateCount() == 1);
 
@@ -386,7 +387,7 @@ TEST_CASE("Frozen v26 golden: connector snap-edge schema", "[assembly][golden]")
   // Round-trips at the current version; a view-less assembly writes NO
   // `exploded` key (the v27 bump is invisible to v26 content).
   const fs::path tmp = fs::temp_directory_path() / "designer_v26_rt.json";
-  REQUIRE(DocumentIO::SaveAssembly(*asmDoc, tmp.string(), &error));
+  REQUIRE(testio::SaveAssembly(*asmDoc, tmp.string()));
   {
     std::ifstream in(tmp);
     nlohmann::json j = nlohmann::json::parse(in);
@@ -394,7 +395,7 @@ TEST_CASE("Frozen v26 golden: connector snap-edge schema", "[assembly][golden]")
     CHECK(j.at("mates")[0].at("a").at("anchor").at("snap_edge").at("element") ==
           "4/g7;M1");
   }
-  auto again = DocumentIO::LoadAssembly(tmp.string(), &error);
+  auto again = testio::LoadAssembly(tmp.string());
   REQUIRE(again != nullptr);
   CHECK(again->FindMateById(3)->a.anchor.snapEdge.name == "4/g7;M1");
   fs::remove(tmp);
@@ -414,8 +415,8 @@ TEST_CASE("Exploded views round-trip (v27, single-file + directory)",
 
   SECTION("single JSON file") {
     const fs::path path = fs::temp_directory_path() / "designer_explode_rt.json";
-    REQUIRE(DocumentIO::SaveAssembly(asmDoc, path.string(), &error));
-    auto reloaded = DocumentIO::LoadAssembly(path.string(), &error);
+    REQUIRE(testio::SaveAssembly(asmDoc, path.string()));
+    auto reloaded = testio::LoadAssembly(path.string());
     REQUIRE(reloaded != nullptr);
     REQUIRE(reloaded->GetExplodedViews().size() == 1);
     const ExplodedView* v = reloaded->FindExplodedViewById(viewId);
@@ -434,10 +435,10 @@ TEST_CASE("Exploded views round-trip (v27, single-file + directory)",
   SECTION("directory form: file-per-view under exploded/") {
     const fs::path dir = fs::temp_directory_path() / "designer_explode_rt.dsgn";
     fs::remove_all(dir);
-    REQUIRE(DocumentIO::SaveAssembly(asmDoc, dir.string(), &error));
+    REQUIRE(testio::SaveAssembly(asmDoc, dir.string()));
     CHECK(fs::exists(dir / "exploded" /
                      (std::to_string(viewId) + "-service.json")));
-    auto reloaded = DocumentIO::LoadAssembly(dir.string(), &error);
+    auto reloaded = testio::LoadAssembly(dir.string());
     REQUIRE(reloaded != nullptr);
     REQUIRE(reloaded->GetExplodedViews().size() == 1);
     CHECK(reloaded->FindExplodedViewById(viewId)->steps.size() == 2);
@@ -445,7 +446,7 @@ TEST_CASE("Exploded views round-trip (v27, single-file + directory)",
     // Removing the view removes its file on the next save (F3 discipline),
     // and the index drops the `exploded` key entirely.
     REQUIRE(reloaded->RemoveExplodedView(viewId));
-    REQUIRE(DocumentIO::SaveAssembly(*reloaded, dir.string(), &error));
+    REQUIRE(testio::SaveAssembly(*reloaded, dir.string()));
     CHECK_FALSE(fs::exists(dir / "exploded" /
                            (std::to_string(viewId) + "-service.json")));
     {
@@ -460,13 +461,11 @@ TEST_CASE("Exploded views round-trip (v27, single-file + directory)",
 TEST_CASE("A part loader rejects an assembly and vice versa", "[assembly]") {
   AssemblyDocument asmDoc = SampleAssembly();
   const fs::path path = fs::temp_directory_path() / "designer_asm_kind.json";
-  std::string error;
-  REQUIRE(DocumentIO::SaveAssembly(asmDoc, path.string(), &error));
+  REQUIRE(testio::SaveAssembly(asmDoc, path.string()));
 
   // Loading an assembly as a part must fail cleanly, not throw or misparse.
-  error.clear();
-  auto asPart = DocumentIO::Load(path.string(), &error);
-  CHECK(asPart == nullptr);
-  CHECK_FALSE(error.empty());
+  const auto asPart = DocumentIO::Load(path.string());
+  CHECK_FALSE(asPart.has_value());
+  CHECK_FALSE(asPart.error().empty());
   fs::remove(path);
 }

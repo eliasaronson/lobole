@@ -6,6 +6,7 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <filesystem>
 
@@ -89,8 +90,8 @@ TEST_CASE("Hole errors and round-trips (v21)", "[hole]") {
 
   const auto path = std::filesystem::temp_directory_path() / "hole_rt.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc2, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc2, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rt = dynamic_cast<HoleFeature*>(loaded->GetFeature(2));
   REQUIRE(rt != nullptr);

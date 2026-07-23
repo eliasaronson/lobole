@@ -6,6 +6,7 @@
 #include "core/drawing/DrawingProjection.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <TopExp.hxx>
@@ -316,7 +317,7 @@ TEST_CASE("HLR timing: real part (v17-full golden)", "[drawing][hlr][perf]") {
       fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" / "v17-full.json";
   REQUIRE(fs::exists(golden));
   std::string error;
-  auto doc = DocumentIO::Load(golden.string(), &error);
+  auto doc = testio::Load(golden.string());
   REQUIRE((doc != nullptr && error.empty()));
 
   std::vector<InputBody> bodies;

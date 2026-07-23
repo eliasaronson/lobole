@@ -5,6 +5,7 @@
 #include "core/Feature.h"
 #include "core/features/PatternFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <filesystem>
 
@@ -140,9 +141,9 @@ TEST_CASE("Pattern round-trips through JSON", "[pattern]") {
     pat->countExpr = "n";
     pat->spacing = 5.0;
     doc.AddFeature(std::move(pat));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* pat = dynamic_cast<PatternFeature*>(loaded->GetFeature(1));
   REQUIRE(pat != nullptr);

@@ -4,6 +4,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -61,7 +62,7 @@ TEST_CASE("MaybeSave fires only when dirty, changed, and due", "[autosave]") {
   CHECK(saver.MaybeSave(doc, project, v - 1, 25.0));
 
   // The sidecar is a loadable document
-  auto loaded = DocumentIO::Load(Autosaver::SidecarPath(project), &error);
+  auto loaded = testio::Load(Autosaver::SidecarPath(project));
   REQUIRE(loaded != nullptr);
   CHECK(loaded->FeatureCount() == 2);
 
@@ -85,7 +86,7 @@ TEST_CASE("HasNewerAutosave and Clear", "[autosave]") {
 
   // A project file saved after the sidecar wins (not newer anymore).
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, project, &error));
+  REQUIRE(testio::Save(doc, project));
   fs::last_write_time(Autosaver::SidecarPath(project),
                       fs::last_write_time(project) - std::chrono::hours(1));
   CHECK_FALSE(Autosaver::HasNewerAutosave(project));

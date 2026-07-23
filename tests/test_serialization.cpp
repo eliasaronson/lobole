@@ -5,6 +5,7 @@
 #include "core/Feature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include "cad/CADKernel.h"
 
@@ -78,9 +79,9 @@ TEST_CASE("Document JSON roundtrip preserves features and geometry",
 
   fs::path path = TempFile("designer_test_doc.json");
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  REQUIRE(testio::Save(doc, path.string()));
 
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
 
   REQUIRE(loaded->FeatureCount() == 3);
@@ -111,9 +112,9 @@ TEST_CASE("Feature material round-trips and stamps its body", "[serialization]")
 
   fs::path path = TempFile("designer_test_material.json");
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  REQUIRE(testio::Save(doc, path.string()));
 
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   REQUIRE(loaded->FeatureCount() == 2);
   CHECK(loaded->GetFeature(0)->GetMaterial() == "steel");
@@ -140,8 +141,8 @@ TEST_CASE("DistancePL dimension and its expression round-trip",
 
   fs::path path = TempFile("designer_test_distance_pl.json");
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE((loaded != nullptr && error.empty()));
 
   auto* lsk = dynamic_cast<SketchFeature*>(loaded->GetFeature(0));
@@ -171,8 +172,8 @@ TEST_CASE("Centered rectangle's symmetric-about-point anchor round-trips",
 
   fs::path path = TempFile("designer_test_center_rect.json");
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE((loaded != nullptr && error.empty()));
 
   auto* lsk = dynamic_cast<SketchFeature*>(loaded->GetFeature(0));
@@ -195,9 +196,9 @@ TEST_CASE("Loading rejects non-document JSON", "[serialization]") {
     out << R"({"format": "something-else", "features": []})";
   }
 
-  std::string error;
-  CHECK(DocumentIO::Load(path.string(), &error) == nullptr);
-  CHECK_FALSE(error.empty());
+  const auto r = DocumentIO::Load(path.string());
+  CHECK_FALSE(r.has_value());
+  CHECK_FALSE(r.error().empty());
 
   fs::remove(path);
 }
@@ -210,9 +211,9 @@ TEST_CASE("Loading rejects unknown feature types", "[serialization]") {
                "features": [{"type": "Warp", "name": "x"}]})";
   }
 
-  std::string error;
-  CHECK(DocumentIO::Load(path.string(), &error) == nullptr);
-  CHECK(error.find("Warp") != std::string::npos);
+  const auto r = DocumentIO::Load(path.string());
+  CHECK_FALSE(r.has_value());
+  CHECK(r.error().find("Warp") != std::string::npos);
 
   fs::remove(path);
 }
@@ -268,8 +269,8 @@ TEST_CASE("Study round-trips through the single-file format", "[serialization][f
   Document doc = DocWithStudy();
   fs::path path = TempFile("designer_test_study.json");
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   INFO(error);
   REQUIRE(loaded != nullptr);
   CheckStudyMatches(*loaded);
@@ -281,9 +282,9 @@ TEST_CASE("Study round-trips through the directory format", "[serialization][fem
   fs::path dir = fs::temp_directory_path() / "designer_test_study.dsgn";
   fs::remove_all(dir);
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, dir.string(), &error));
+  REQUIRE(testio::Save(doc, dir.string()));
   CHECK(fs::exists(dir / "studies"));
-  auto loaded = DocumentIO::Load(dir.string(), &error);
+  auto loaded = testio::Load(dir.string());
   INFO(error);
   REQUIRE(loaded != nullptr);
   CheckStudyMatches(*loaded);
@@ -304,7 +305,7 @@ TEST_CASE("A document with no studies writes no studies key or dir",
   // Single-file: no "studies" key.
   fs::path path = TempFile("designer_test_nostudy.json");
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  REQUIRE(testio::Save(doc, path.string()));
   std::ifstream in(path);
   const std::string body((std::istreambuf_iterator<char>(in)),
                          std::istreambuf_iterator<char>());
@@ -314,7 +315,7 @@ TEST_CASE("A document with no studies writes no studies key or dir",
   // Directory: no studies/ subdir.
   fs::path dir = fs::temp_directory_path() / "designer_test_nostudy.dsgn";
   fs::remove_all(dir);
-  REQUIRE(DocumentIO::Save(doc, dir.string(), &error));
+  REQUIRE(testio::Save(doc, dir.string()));
   CHECK_FALSE(fs::exists(dir / "studies"));
   fs::remove_all(dir);
 }
@@ -333,14 +334,14 @@ TEST_CASE("Modal analysis type + gravity round-trip (v32)", "[serialization][fem
 
   fs::path path = TempFile("designer_test_modal.json");
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
+  REQUIRE(testio::Save(doc, path.string()));
   // A static study with no gravity writes none of the new keys (byte-identity).
   {
     Document plain;
     plain.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 1, 1, 1));
     plain.AddStudy("S");
     fs::path p2 = TempFile("designer_test_plainstudy.json");
-    REQUIRE(DocumentIO::Save(plain, p2.string(), &error));
+    REQUIRE(testio::Save(plain, p2.string()));
     std::ifstream in(p2);
     const std::string body((std::istreambuf_iterator<char>(in)),
                            std::istreambuf_iterator<char>());
@@ -349,7 +350,7 @@ TEST_CASE("Modal analysis type + gravity round-trip (v32)", "[serialization][fem
     fs::remove(p2);
   }
 
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  auto loaded = testio::Load(path.string());
   INFO(error);
   REQUIRE(loaded != nullptr);
   REQUIRE(loaded->GetStudies().size() == 2);

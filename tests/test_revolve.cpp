@@ -6,6 +6,7 @@
 #include "core/Document.h"
 #include "core/features/RevolveFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 
 #include <cmath>
@@ -193,10 +194,10 @@ TEST_CASE("Revolve round-trips through JSON", "[revolve]") {
     rev->angleExpr = "sweep";
     rev->symmetric = true;
     doc.AddFeature(std::move(rev));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
 
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rev = dynamic_cast<RevolveFeature*>(loaded->GetFeature(1));
   REQUIRE(rev != nullptr);

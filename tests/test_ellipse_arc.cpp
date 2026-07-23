@@ -4,6 +4,7 @@
 #include "core/Document.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/sketch/SketchProfile.h"
 
 #include <cmath>
@@ -65,9 +66,9 @@ TEST_CASE("An elliptical arc round-trips through JSON", "[ellipse_arc]") {
     auto sk = std::make_unique<SketchFeature>("Sk", kXY);
     sk->AddEntity(EllipseArc{{1, 2}, 3.0, 1.5, 0.4, 0.2, 2.0});
     doc.AddFeature(std::move(sk));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* sk = dynamic_cast<SketchFeature*>(loaded->GetFeature(0));
   REQUIRE(sk != nullptr);

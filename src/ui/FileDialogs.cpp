@@ -30,12 +30,11 @@ namespace {
 
 // Load `path` (a project or a recovery sidecar) into the app.
 void OpenProjectFile(AppState& state, const std::string& path) {
-  std::string error;
-  if (auto doc = DocumentIO::Load(path, &error)) {
-    ReplaceDocument(state, std::move(doc));
+  if (auto loaded = DocumentIO::Load(path)) {
+    ReplaceDocument(state, std::move(*loaded));
     FitCameraToDocument(state);
   } else {
-    LOG_ERROR("Failed to open project: {}", error);
+    LOG_ERROR("Failed to open project: {}", loaded.error());
   }
 }
 
@@ -344,9 +343,8 @@ void SaveProjectDialog(AppState& state) {
     if (std::filesystem::path(path).extension().empty()) {
       path += ".dsgn"; // directory format is the default for new saves (F3)
     }
-    std::string error;
-    if (!DocumentIO::Save(*state.document, path, &error)) {
-      LOG_ERROR("Failed to save project: {}", error);
+    if (auto r = DocumentIO::Save(*state.document, path); !r) {
+      LOG_ERROR("Failed to save project: {}", r.error());
     } else {
       MarkProjectSaved(state, path);
     }

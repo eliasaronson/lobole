@@ -6,6 +6,7 @@
 #include "core/features/CurveFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 
 #include <cmath>
@@ -167,8 +168,8 @@ TEST_CASE("Loft round-trips through serialization", "[loft]") {
 
   const auto path = std::filesystem::temp_directory_path() / "loft_rt.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rt = dynamic_cast<LoftFeature*>(loaded->GetFeature(2));
   REQUIRE(rt != nullptr);

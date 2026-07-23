@@ -6,6 +6,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 
 #include <array>
@@ -266,9 +267,9 @@ TEST_CASE("Fillet and chamfer round-trip through JSON (v17)", "[fillet]") {
         EdgeBlendOp::Chamfer));
     REQUIRE(doc.Regenerate());
     volume = BodyVolume(doc);
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* fil = dynamic_cast<FilletFeature*>(loaded->GetFeature(2));
   REQUIRE(fil != nullptr);

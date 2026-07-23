@@ -5,6 +5,7 @@
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 
 #include <filesystem>
@@ -377,11 +378,11 @@ TEST_CASE("Parameters and expressions round-trip through save/load",
     ext->distanceExpr = "depth";
     doc.Regenerate();
     CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(8.0 * 5.0, 1e-6));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
 
   std::string error;
-  const auto loaded = DocumentIO::Load(path.string(), &error);
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   REQUIRE(loaded->GetParameters().size() == 2);
   CHECK(loaded->FindParameter("width")->comment == "overall width");
@@ -403,9 +404,9 @@ TEST_CASE("Documents without parameters load unchanged", "[variables]") {
   {
     Document doc;
     MakeExtrudedRect(doc, 2.0);
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   CHECK(loaded->GetParameters().empty());
   REQUIRE(loaded->GetBodies().size() == 1);

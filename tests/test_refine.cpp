@@ -6,6 +6,7 @@
 #include "core/features/BooleanFeature.h"
 #include "core/features/RefineFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <TopExp_Explorer.hxx>
 #include <TopoDS_Shape.hxx>
@@ -67,9 +68,9 @@ TEST_CASE("Refine round-trips through JSON", "[refine]") {
     uint64_t u;
     AddUnion(doc, u);
     doc.AddFeature(std::make_unique<RefineFeature>("R", u));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rf = dynamic_cast<RefineFeature*>(loaded->GetFeature(3));
   REQUIRE(rf != nullptr);

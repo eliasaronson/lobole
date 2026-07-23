@@ -5,6 +5,7 @@
 #include "core/Feature.h"
 #include "core/features/SplitFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <filesystem>
 
@@ -108,9 +109,9 @@ TEST_CASE("A plane-knife split round-trips through JSON", "[split]") {
     Document doc;
     const uint64_t b = AddBox(doc);
     AddPlaneSplit(doc, b, 1.0);
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* sp = dynamic_cast<SplitFeature*>(loaded->GetFeature(1));
   REQUIRE(sp != nullptr);
@@ -131,9 +132,9 @@ TEST_CASE("A face-knife split round-trips through JSON", "[split]") {
     sp->knife = SplitKnifeKind::Face;
     sp->face = ElementRef{bId, "someface"};
     doc.AddFeature(std::move(sp));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* sp = dynamic_cast<SplitFeature*>(loaded->GetFeature(1));
   REQUIRE(sp != nullptr);

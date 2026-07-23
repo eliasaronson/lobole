@@ -10,6 +10,7 @@
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "topo_testmesh.h"
 
 #include <nlohmann/json.hpp>
@@ -526,10 +527,10 @@ TEST_CASE("Topology result persists and reloads through the directory format",
   const fs::path proj =
       fs::temp_directory_path() / "topo_result_roundtrip.dsgn";
   fs::remove_all(proj);
-  REQUIRE(DocumentIO::Save(doc, proj.string(), &err));
+  REQUIRE(testio::Save(doc, proj.string()));
   CHECK(fs::exists(proj / "studies"));
 
-  auto reloaded = DocumentIO::Load(proj.string(), &err);
+  auto reloaded = testio::Load(proj.string());
   REQUIRE((reloaded != nullptr && err.empty()));
   const fem::StudyRuntime* got = reloaded->StudyResults(studyId);
   REQUIRE(got != nullptr);

@@ -5,6 +5,7 @@
 #include "core/features/DraftFeature.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <algorithm>
 #include <cmath>
@@ -82,8 +83,8 @@ TEST_CASE("Draft errors on a missing body and round-trips (v22)", "[draft]") {
 
   const auto path = std::filesystem::temp_directory_path() / "draft_rt.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc2, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc2, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rt = dynamic_cast<DraftFeature*>(loaded->GetFeature(1));
   REQUIRE(rt != nullptr);

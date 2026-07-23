@@ -58,8 +58,10 @@ bool Create(const Document& doc, const std::string& projectPath,
   std::error_code ec;
   fs::create_directories(Dir(projectPath), ec);
   const std::string target = PathOf(projectPath, name);
-  if (!DocumentIO::Save(doc, target, error))
+  if (auto r = DocumentIO::Save(doc, target); !r) {
+    if (error) *error = r.error();
     return false;
+  }
   LOG_INFO("Checkpoint '{}' created at {}", name, target);
   return true;
 }

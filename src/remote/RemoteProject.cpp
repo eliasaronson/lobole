@@ -73,7 +73,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
     // Git-backed projects (F5): a checkpoint is also a commit + tag of the
     // live state.
     if (state.projectPath.ends_with(".dsgn") && GitVault::Available()) {
-      if (DocumentIO::Save(*doc, state.projectPath, &error)) {
+      if (DocumentIO::Save(*doc, state.projectPath)) {
         ui::MarkProjectSaved(state, state.projectPath, "checkpoint: " + name);
         GitVault::Tag(state.projectPath, "cp/" + name);
       }
@@ -92,12 +92,14 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
     // deliberately dirty (the restored state is unsaved until saved).
     const std::string name = p.at("name").get<std::string>();
     const std::string path = Checkpoints::PathOf(state.projectPath, name);
-    std::string error;
-    auto loaded = path.empty() ? nullptr : DocumentIO::Load(path, &error);
+    if (path.empty())
+      throw std::runtime_error("no such checkpoint: " + name);
+    auto loaded = DocumentIO::Load(path);
     if (!loaded)
-      throw std::runtime_error(error.empty() ? "no such checkpoint: " + name
-                                             : error);
-    ui::ReplaceDocument(state, std::move(loaded));
+      throw std::runtime_error(loaded.error().empty()
+                                   ? "no such checkpoint: " + name
+                                   : loaded.error());
+    ui::ReplaceDocument(state, std::move(*loaded));
     ui::FitCameraToDocument(state);
     ui::MarkProjectRecovered(state, state.projectPath);
     return json::object();
@@ -120,9 +122,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
     std::string error;
     if (!GitVault::RestoreTo(state.projectPath, commit, &error))
       throw std::runtime_error(error);
-    auto loaded = DocumentIO::Load(state.projectPath, &error);
-    if (!loaded) throw std::runtime_error(error);
-    ui::ReplaceDocument(state, std::move(loaded));
+    auto loaded = DocumentIO::Load(state.projectPath);
+    if (!loaded) throw std::runtime_error(loaded.error());
+    ui::ReplaceDocument(state, std::move(*loaded));
     ui::FitCameraToDocument(state);
     ui::MarkProjectRecovered(state, state.projectPath);
     return json::object();

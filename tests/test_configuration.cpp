@@ -6,6 +6,7 @@
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 
 #include <filesystem>
@@ -162,8 +163,8 @@ TEST_CASE("Configurations round-trip through save/load (v31)",
   SECTION("single JSON file") {
     const fs::path tmp = fs::temp_directory_path() / "cfg_rt.json";
     std::string err;
-    REQUIRE(DocumentIO::Save(doc, tmp.string(), &err));
-    auto reloaded = DocumentIO::Load(tmp.string(), &err);
+    REQUIRE(testio::Save(doc, tmp.string()));
+    auto reloaded = testio::Load(tmp.string());
     INFO(err);
     REQUIRE(reloaded != nullptr);
     check(*reloaded);
@@ -174,9 +175,9 @@ TEST_CASE("Configurations round-trip through save/load (v31)",
     const fs::path proj = fs::temp_directory_path() / "cfg_rt.dsgn";
     fs::remove_all(proj);
     std::string err;
-    REQUIRE(DocumentIO::Save(doc, proj.string(), &err));
+    REQUIRE(testio::Save(doc, proj.string()));
     CHECK(fs::exists(proj / "configurations" / "3-tall.json"));
-    auto reloaded = DocumentIO::Load(proj.string(), &err);
+    auto reloaded = testio::Load(proj.string());
     INFO(err);
     REQUIRE(reloaded != nullptr);
     check(*reloaded);

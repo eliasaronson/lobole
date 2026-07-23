@@ -6,6 +6,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 
 #include <filesystem>
@@ -146,8 +147,8 @@ TEST_CASE("Suppressed features are skipped and round-trip", "[document][regen]")
   const auto path =
       std::filesystem::temp_directory_path() / "suppress_rt.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc2, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc2, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   CHECK(loaded->GetFeature(0)->IsSuppressed());
   CHECK_FALSE(loaded->GetFeature(1)->IsSuppressed());
@@ -173,8 +174,8 @@ TEST_CASE("Rollback bar regenerates only the prefix and round-trips",
   // Persisted with the document.
   const auto path = std::filesystem::temp_directory_path() / "rollback.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   CHECK(loaded->Rollback() == 1);
   CHECK(loaded->GetBodies().size() == 1);

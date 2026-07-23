@@ -6,6 +6,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <expected>
 #include <memory>
 #include <string>
 
@@ -14,14 +15,14 @@
 // merge well under git.
 namespace DocumentIO {
 
-// Returns false and fills *error (if given) on failure.
-bool Save(const Document& doc, const std::string& path,
-          std::string* error = nullptr);
+// On failure returns an unexpected error message.
+[[nodiscard]] std::expected<void, std::string> Save(const Document& doc,
+                                                    const std::string& path);
 
-// Returns nullptr and fills *error (if given) on failure. The returned
-// document is already regenerated.
-std::unique_ptr<Document> Load(const std::string& path,
-                               std::string* error = nullptr);
+// On failure returns an unexpected error message. The returned document is
+// already regenerated.
+[[nodiscard]] std::expected<std::unique_ptr<Document>, std::string> Load(
+    const std::string& path);
 
 // Single-feature (de)serialization; also used for parameter-edit snapshots
 // (ModifyFeatureCommand). FeatureToJson throws on unserializable types;
@@ -33,10 +34,10 @@ std::unique_ptr<Feature> FeatureFromJson(const nlohmann::json& j);
 // directory (`.dsgn`, one file per occurrence) or single JSON file, dispatched
 // on the path — discriminated by `kind: "assembly"`. Save returns false /
 // Load returns nullptr and fills *error on failure.
-bool SaveAssembly(const AssemblyDocument& asmDoc, const std::string& path,
-                  std::string* error = nullptr);
-std::unique_ptr<AssemblyDocument> LoadAssembly(const std::string& path,
-                                               std::string* error = nullptr);
+[[nodiscard]] std::expected<void, std::string> SaveAssembly(
+    const AssemblyDocument& asmDoc, const std::string& path);
+[[nodiscard]] std::expected<std::unique_ptr<AssemblyDocument>, std::string>
+LoadAssembly(const std::string& path);
 
 // Single-occurrence (de)serialization; used for snapshot commands
 // (set_occurrence_transform) the way FeatureToJson serves ModifyFeatureCommand.
@@ -78,10 +79,10 @@ Configuration ConfigurationFromJson(const nlohmann::json& j);
 // directory (one file per view/dim) or single JSON file, dispatched on the
 // path — discriminated by `kind: "drawing"`. Save returns false / Load
 // returns nullptr and fills *error on failure.
-bool SaveDrawing(const DrawingDocument& drawing, const std::string& path,
-                 std::string* error = nullptr);
-std::unique_ptr<DrawingDocument> LoadDrawing(const std::string& path,
-                                             std::string* error = nullptr);
+[[nodiscard]] std::expected<void, std::string> SaveDrawing(
+    const DrawingDocument& drawing, const std::string& path);
+[[nodiscard]] std::expected<std::unique_ptr<DrawingDocument>, std::string>
+LoadDrawing(const std::string& path);
 
 // Single-view / single-dim (de)serialization; used for the dir-format files
 // and to echo views/dims from the RPCs. Throw on malformed input.

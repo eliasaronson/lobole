@@ -7,6 +7,7 @@
 #include "core/drawing/DrawingRender.h"
 #include "core/io/Format.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <filesystem>
 #include <fstream>
@@ -134,8 +135,8 @@ TEST_CASE("Drawing round-trips through single-file and directory formats",
   SECTION("single JSON file") {
     const fs::path tmp = fs::temp_directory_path() / "dwg_rt.json";
     std::string err;
-    REQUIRE(DocumentIO::SaveDrawing(dwg, tmp.string(), &err));
-    auto reloaded = DocumentIO::LoadDrawing(tmp.string(), &err);
+    REQUIRE(testio::SaveDrawing(dwg, tmp.string()));
+    auto reloaded = testio::LoadDrawing(tmp.string());
     INFO(err);
     REQUIRE(reloaded != nullptr);
     CheckSampleFields(*reloaded);
@@ -148,11 +149,11 @@ TEST_CASE("Drawing round-trips through single-file and directory formats",
     const fs::path proj = fs::temp_directory_path() / "dwg_rt.dsgn";
     fs::remove_all(proj);
     std::string err;
-    REQUIRE(DocumentIO::SaveDrawing(dwg, proj.string(), &err));
+    REQUIRE(testio::SaveDrawing(dwg, proj.string()));
     CHECK(fs::exists(proj / "index.json"));
     CHECK(fs::exists(proj / "views" / "1-front.json"));
     CHECK(fs::exists(proj / "dims" / "3-diameter.json"));
-    auto reloaded = DocumentIO::LoadDrawing(proj.string(), &err);
+    auto reloaded = testio::LoadDrawing(proj.string());
     INFO(err);
     REQUIRE(reloaded != nullptr);
     CheckSampleFields(*reloaded);
@@ -167,7 +168,7 @@ TEST_CASE("Drawing golden loads and round-trips (v30)",
   REQUIRE(fs::exists(golden));
 
   std::string err;
-  auto dwg = DocumentIO::LoadDrawing(golden.string(), &err);
+  auto dwg = testio::LoadDrawing(golden.string());
   INFO(err);
   REQUIRE(dwg != nullptr);
   CheckSampleFields(*dwg);
@@ -175,8 +176,8 @@ TEST_CASE("Drawing golden loads and round-trips (v30)",
   // Round-trip through the current writer (both forms), re-check semantics.
   const fs::path tmp = fs::temp_directory_path() / "dwg_golden_rt.dsgn";
   fs::remove_all(tmp);
-  REQUIRE(DocumentIO::SaveDrawing(*dwg, tmp.string(), &err));
-  auto reloaded = DocumentIO::LoadDrawing(tmp.string(), &err);
+  REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
+  auto reloaded = testio::LoadDrawing(tmp.string());
   REQUIRE((reloaded != nullptr && err.empty()));
   CheckSampleFields(*reloaded);
   fs::remove_all(tmp);
@@ -400,21 +401,19 @@ TEST_CASE("Drawing loaders reject the wrong document kind",
   // vice versa — the kind discriminator is load-bearing.
   const DrawingDocument dwg = SampleDrawing();
   const fs::path tmp = fs::temp_directory_path() / "dwg_kind.json";
-  std::string err;
-  REQUIRE(DocumentIO::SaveDrawing(dwg, tmp.string(), &err));
+  REQUIRE(testio::SaveDrawing(dwg, tmp.string()));
 
-  auto asPart = DocumentIO::Load(tmp.string(), &err);
-  CHECK(asPart == nullptr);
-  CHECK(err.find("drawing") != std::string::npos);
+  const auto asPart = DocumentIO::Load(tmp.string());
+  CHECK_FALSE(asPart.has_value());
+  CHECK(asPart.error().find("drawing") != std::string::npos);
   fs::remove(tmp);
 
   // A part file is not a drawing.
   const fs::path partGolden = fs::path(DESIGNER_SOURCE_DIR) / "tests" /
                               "golden" / "v17-full.json";
   if (fs::exists(partGolden)) {
-    err.clear();
-    auto asDrawing = DocumentIO::LoadDrawing(partGolden.string(), &err);
-    CHECK(asDrawing == nullptr);
-    CHECK_FALSE(err.empty());
+    const auto asDrawing = DocumentIO::LoadDrawing(partGolden.string());
+    CHECK_FALSE(asDrawing.has_value());
+    CHECK_FALSE(asDrawing.error().empty());
   }
 }

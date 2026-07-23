@@ -793,7 +793,8 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
 
 } // namespace
 
-bool Save(const Document& doc, const std::string& path, std::string* error) {
+static bool SaveImpl(const Document& doc, const std::string& path,
+                     std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
     return SaveDir(doc, normalized, error);
@@ -845,7 +846,8 @@ bool Save(const Document& doc, const std::string& path, std::string* error) {
   }
 }
 
-std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
+static std::unique_ptr<Document> LoadImpl(const std::string& path,
+                                          std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
     return LoadDir(normalized, error);
@@ -907,8 +909,8 @@ std::unique_ptr<Document> Load(const std::string& path, std::string* error) {
   }
 }
 
-bool SaveAssembly(const AssemblyDocument& asmDoc, const std::string& path,
-                  std::string* error) {
+static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
+                             const std::string& path, std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
     return SaveAssemblyDir(asmDoc, normalized, error);
@@ -951,8 +953,8 @@ bool SaveAssembly(const AssemblyDocument& asmDoc, const std::string& path,
   }
 }
 
-std::unique_ptr<AssemblyDocument> LoadAssembly(const std::string& path,
-                                               std::string* error) {
+static std::unique_ptr<AssemblyDocument> LoadAssemblyImpl(
+    const std::string& path, std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
     return LoadAssemblyDir(normalized, error);
@@ -1241,8 +1243,8 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
 
 }  // namespace
 
-bool SaveDrawing(const DrawingDocument& dwg, const std::string& path,
-                 std::string* error) {
+static bool SaveDrawingImpl(const DrawingDocument& dwg, const std::string& path,
+                            std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
     return SaveDrawingDir(dwg, normalized, error);
@@ -1271,8 +1273,8 @@ bool SaveDrawing(const DrawingDocument& dwg, const std::string& path,
   }
 }
 
-std::unique_ptr<DrawingDocument> LoadDrawing(const std::string& path,
-                                             std::string* error) {
+static std::unique_ptr<DrawingDocument> LoadDrawingImpl(
+    const std::string& path, std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
     return LoadDrawingDir(normalized, error);
@@ -1318,6 +1320,51 @@ std::unique_ptr<DrawingDocument> LoadDrawing(const std::string& path,
     LOG_ERROR("Failed to load drawing from {}: {}", path, e.what());
     return nullptr;
   }
+}
+
+// Public boundary: adapt the internal *Impl helpers (which keep the string
+// out-param idiom) to std::expected so the error can't be discarded and a
+// caller can't read a document off the failure path.
+std::expected<void, std::string> Save(const Document& doc,
+                                      const std::string& path) {
+  std::string error;
+  if (SaveImpl(doc, path, &error)) return {};
+  return std::unexpected(error);
+}
+
+std::expected<std::unique_ptr<Document>, std::string> Load(
+    const std::string& path) {
+  std::string error;
+  if (auto doc = LoadImpl(path, &error)) return doc;
+  return std::unexpected(error);
+}
+
+std::expected<void, std::string> SaveAssembly(const AssemblyDocument& asmDoc,
+                                              const std::string& path) {
+  std::string error;
+  if (SaveAssemblyImpl(asmDoc, path, &error)) return {};
+  return std::unexpected(error);
+}
+
+std::expected<std::unique_ptr<AssemblyDocument>, std::string> LoadAssembly(
+    const std::string& path) {
+  std::string error;
+  if (auto doc = LoadAssemblyImpl(path, &error)) return doc;
+  return std::unexpected(error);
+}
+
+std::expected<void, std::string> SaveDrawing(const DrawingDocument& drawing,
+                                             const std::string& path) {
+  std::string error;
+  if (SaveDrawingImpl(drawing, path, &error)) return {};
+  return std::unexpected(error);
+}
+
+std::expected<std::unique_ptr<DrawingDocument>, std::string> LoadDrawing(
+    const std::string& path) {
+  std::string error;
+  if (auto doc = LoadDrawingImpl(path, &error)) return doc;
+  return std::unexpected(error);
 }
 
 }  // namespace DocumentIO

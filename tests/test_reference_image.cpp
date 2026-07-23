@@ -5,6 +5,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <nlohmann/json.hpp>
 
@@ -147,9 +148,9 @@ TEST_CASE("Reference image single-file round-trip preserves bytes and fields",
   auto doc = MakeDocWithImage(&imgId);
   const fs::path path = fs::temp_directory_path() / "refimg_roundtrip.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(*doc, path.string(), &error));
+  REQUIRE(testio::Save(*doc, path.string()));
 
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  auto loaded = testio::Load(path.string());
   REQUIRE((loaded != nullptr && error.empty()));
   SketchFeature* sk = FirstSketch(*loaded);
   REQUIRE(sk != nullptr);
@@ -175,12 +176,12 @@ TEST_CASE("Reference image directory-format round-trip stores an assets file",
   const fs::path proj = fs::temp_directory_path() / "refimg_roundtrip.dsgn";
   fs::remove_all(proj);
   std::string error;
-  REQUIRE(DocumentIO::Save(*doc, proj.string(), &error));
+  REQUIRE(testio::Save(*doc, proj.string()));
 
   // The pixels live in assets/, not inline in the feature JSON.
   CHECK(fs::exists(proj / "assets" / MakeImage().asset));
 
-  auto loaded = DocumentIO::Load(proj.string(), &error);
+  auto loaded = testio::Load(proj.string());
   REQUIRE((loaded != nullptr && error.empty()));
   SketchFeature* sk = FirstSketch(*loaded);
   REQUIRE(sk != nullptr);

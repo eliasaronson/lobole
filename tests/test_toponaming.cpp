@@ -8,6 +8,7 @@
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <algorithm>
 #include <array>
@@ -236,9 +237,9 @@ TEST_CASE("A face-attached sketch round-trips through JSON", "[toponaming]") {
     Document doc;
     uint64_t extA = 0;
     BuildStackedOnCap(doc, 3.0, extA);
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* skB = dynamic_cast<SketchFeature*>(loaded->GetFeature(2));
   REQUIRE(skB != nullptr);

@@ -5,6 +5,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <filesystem>
 
@@ -122,9 +123,9 @@ TEST_CASE("Boolean round-trips through JSON", "[boolean]") {
     AddTwoBoxes(doc, a, b);
     doc.AddFeature(
         std::make_unique<BooleanFeature>("Cut", a, b, BooleanOp::Subtract));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* boo = dynamic_cast<BooleanFeature*>(loaded->GetFeature(2));
   REQUIRE(boo != nullptr);

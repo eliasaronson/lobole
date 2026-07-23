@@ -4,6 +4,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <nlohmann/json.hpp>
 
@@ -63,15 +64,15 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
 
       // Load + regenerate (AddFeature regenerates during Load)
       std::string error;
-      auto doc = DocumentIO::Load(golden.string(), &error);
+      auto doc = testio::Load(golden.string());
       REQUIRE((doc != nullptr && error.empty()));
       AssertMatchesExpect(*doc, expect);
 
       // Round-trip through the CURRENT writer: migrations must compose
       const fs::path tmp = fs::temp_directory_path() /
                            ("golden_rt_" + golden.filename().string());
-      REQUIRE(DocumentIO::Save(*doc, tmp.string(), &error));
-      auto reloaded = DocumentIO::Load(tmp.string(), &error);
+      REQUIRE(testio::Save(*doc, tmp.string()));
+      auto reloaded = testio::Load(tmp.string());
       REQUIRE((reloaded != nullptr && error.empty()));
       AssertMatchesExpect(*reloaded, expect);
       fs::remove(tmp);
@@ -98,15 +99,15 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       std::ifstream(expectPath) >> expect;
 
       std::string error;
-      auto doc = DocumentIO::Load(golden.string(), &error);
+      auto doc = testio::Load(golden.string());
       REQUIRE(doc != nullptr);
 
       const fs::path proj = fs::temp_directory_path() /
                             ("golden_dir_" + golden.stem().string() + ".dsgn");
       fs::remove_all(proj);
-      REQUIRE(DocumentIO::Save(*doc, proj.string(), &error));
+      REQUIRE(testio::Save(*doc, proj.string()));
       CHECK(fs::exists(proj / "index.json"));
-      auto reloaded = DocumentIO::Load(proj.string(), &error);
+      auto reloaded = testio::Load(proj.string());
       REQUIRE((reloaded != nullptr && error.empty()));
       AssertMatchesExpect(*reloaded, expect);
       fs::remove_all(proj);
@@ -123,7 +124,7 @@ TEST_CASE("Directory format: editing one feature touches one file",
   const fs::path proj = fs::temp_directory_path() / "onefile.dsgn";
   fs::remove_all(proj);
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, proj.string(), &error));
+  REQUIRE(testio::Save(doc, proj.string()));
 
   auto mtimes = [&] {
     std::map<std::string, fs::file_time_type> m;
@@ -135,7 +136,7 @@ TEST_CASE("Directory format: editing one feature touches one file",
   const auto before = mtimes();
   dynamic_cast<BoxFeature*>(doc.GetFeature(1))->width = 3.0;
   doc.Regenerate();
-  REQUIRE(DocumentIO::Save(doc, proj.string(), &error));
+  REQUIRE(testio::Save(doc, proj.string()));
   const auto after = mtimes();
   REQUIRE(before.size() == after.size());
   int changed = 0;
@@ -148,7 +149,7 @@ TEST_CASE("Directory format: editing one feature touches one file",
 
   // Deleting a feature removes its file.
   doc.RemoveFeature(0);
-  REQUIRE(DocumentIO::Save(doc, proj.string(), &error));
+  REQUIRE(testio::Save(doc, proj.string()));
   int featureFiles = 0;
   for (const auto& e : fs::directory_iterator(proj / "features"))
     featureFiles++;
@@ -163,8 +164,8 @@ TEST_CASE("Opening the index.json inside a .dsgn opens the project",
   const fs::path proj = fs::temp_directory_path() / "viaindex.dsgn";
   fs::remove_all(proj);
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, proj.string(), &error));
-  auto loaded = DocumentIO::Load((proj / "index.json").string(), &error);
+  REQUIRE(testio::Save(doc, proj.string()));
+  auto loaded = testio::Load((proj / "index.json").string());
   REQUIRE(loaded != nullptr);
   CHECK(loaded->FeatureCount() == 1);
   fs::remove_all(proj);

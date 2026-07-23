@@ -1298,9 +1298,10 @@ bool SaveProject(AppState& state, const std::string& path,
     // scope), then restore the (empty) local table.
     std::vector<Parameter> localBackup = state.document->TakeParameters();
     state.document->SetParametersRaw(state.projectParameters);
-    const bool ok = DocumentIO::Save(*state.document, path, error);
+    auto r = DocumentIO::Save(*state.document, path);
     state.document->SetParametersRaw(std::move(localBackup));
-    return ok;
+    if (!r && error) *error = r.error();
+    return r.has_value();
   }
   // Multi-document: project.json (v2) + parts/<name>/ and assemblies/<name>/.
   try {
@@ -1331,21 +1332,23 @@ bool SaveProject(AppState& state, const std::string& path,
                                                          : "part";
       const fs::path docDir = dir / sub / slot.name;
       fs::create_directories(docDir);
-      bool ok = false;
+      std::expected<void, std::string> r;
       switch (slot.kind) {
         case DocKind::Assembly:
-          ok = DocumentIO::SaveAssembly(*SlotAssembly(state, i),
-                                        docDir.string(), error);
+          r = DocumentIO::SaveAssembly(*SlotAssembly(state, i),
+                                       docDir.string());
           break;
         case DocKind::Drawing:
-          ok = DocumentIO::SaveDrawing(*SlotDrawing(state, i), docDir.string(),
-                                       error);
+          r = DocumentIO::SaveDrawing(*SlotDrawing(state, i), docDir.string());
           break;
         case DocKind::Part:
-          ok = DocumentIO::Save(*SlotDoc(state, i), docDir.string(), error);
+          r = DocumentIO::Save(*SlotDoc(state, i), docDir.string());
           break;
       }
-      if (!ok) return false;
+      if (!r) {
+        if (error) *error = r.error();
+        return false;
+      }
       nlohmann::json entry = {{"id", slot.id},
                               {"name", slot.name},
                               {"dir", std::string(sub) + slot.name},
@@ -1373,10 +1376,12 @@ bool OpenProject(AppState& state, const std::string& path,
   const fs::path projFile = fs::path(path) / "project.json";
   if (!fs::exists(projFile)) {
     // Not a multi-document project: load as a single part.
-    auto doc = DocumentIO::Load(path, error);
-    if (!doc)
+    auto loaded = DocumentIO::Load(path);
+    if (!loaded) {
+      if (error) *error = loaded.error();
       return false;
-    ReplaceDocument(state, std::move(doc));
+    }
+    ReplaceDocument(state, std::move(*loaded));
     state.parts.clear();
     state.nextPartId = 1;
     EnsureParts(state, fs::path(path).stem().string());
@@ -1415,16 +1420,19 @@ bool OpenProject(AppState& state, const std::string& path,
       slot.folder = docs[i].value("folder", std::string{});
       if (type == "assembly") {
         slot.kind = DocKind::Assembly;
-        slot.assembly = DocumentIO::LoadAssembly(dir, error);
-        if (!slot.assembly) return false;
+        auto r = DocumentIO::LoadAssembly(dir);
+        if (!r) { if (error) *error = r.error(); return false; }
+        slot.assembly = std::move(*r);
       } else if (type == "drawing") {
         slot.kind = DocKind::Drawing;
-        slot.drawing = DocumentIO::LoadDrawing(dir, error);
-        if (!slot.drawing) return false;
+        auto r = DocumentIO::LoadDrawing(dir);
+        if (!r) { if (error) *error = r.error(); return false; }
+        slot.drawing = std::move(*r);
       } else {
         slot.kind = DocKind::Part;
-        slot.doc = DocumentIO::Load(dir, error);
-        if (!slot.doc) return false;
+        auto r = DocumentIO::Load(dir);
+        if (!r) { if (error) *error = r.error(); return false; }
+        slot.doc = std::move(*r);
         slot.commands = std::make_unique<CommandStack>();
       }
       maxId = std::max(maxId, slot.id);

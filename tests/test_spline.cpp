@@ -4,6 +4,7 @@
 #include "core/Document.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
 
@@ -77,9 +78,9 @@ TEST_CASE("A sketch B-spline round-trips through JSON", "[spline]") {
         std::make_unique<SketchFeature>("Sk", SketchPlane(PlaneType::XY));
     sk->AddEntity(BSpline{{{0, 0}, {1, 2}, {3, 2}, {4, 0}}, 3});
     doc.AddFeature(std::move(sk));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* sk = dynamic_cast<SketchFeature*>(loaded->GetFeature(0));
   REQUIRE(sk != nullptr);

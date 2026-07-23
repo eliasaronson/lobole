@@ -5,6 +5,7 @@
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 #include "core/ElementMap.h"
 #include "core/sketch/SketchProfile.h"
@@ -342,8 +343,8 @@ TEST_CASE("Extrude survives a document JSON round-trip", "[extrude][io]") {
 
   fs::path path = fs::temp_directory_path() / "designer_extrude_doc.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   REQUIRE(loaded->GetBodies().size() == 1);
   CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(vol, 1e-9));
@@ -543,8 +544,8 @@ TEST_CASE("End conditions round-trip through serialization (v18)",
 
   const auto path = std::filesystem::temp_directory_path() / "end_rt.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
   REQUIRE(rt != nullptr);
@@ -613,8 +614,8 @@ TEST_CASE("Up-to-face round-trips through serialization",
 
   const auto path = std::filesystem::temp_directory_path() / "utf_rt.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
   REQUIRE(rt != nullptr);
@@ -695,8 +696,8 @@ TEST_CASE("Thin round-trips through serialization", "[extrude][thin]") {
   doc.AddFeature(std::move(ext));
   const auto path = std::filesystem::temp_directory_path() / "thin_rt.json";
   std::string error;
-  REQUIRE(DocumentIO::Save(doc, path.string(), &error));
-  auto loaded = DocumentIO::Load(path.string(), &error);
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(1));
   REQUIRE(rt != nullptr);

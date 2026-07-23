@@ -6,6 +6,7 @@
 #include "core/features/RibFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <cmath>
 #include <filesystem>
@@ -96,9 +97,9 @@ TEST_CASE("Rib round-trips through serialization", "[rib][serialization]") {
     rib->thicknessExpr = "1.0";
     doc.AddFeature(std::move(rib));
     v0 = doc.GetBodies()[0].shape.Volume();
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* rb = dynamic_cast<RibFeature*>(loaded->GetFeature(2));
   REQUIRE(rb != nullptr);

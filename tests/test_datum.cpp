@@ -6,6 +6,7 @@
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 
 #include <filesystem>
@@ -235,11 +236,11 @@ TEST_CASE("Datum + tracked sketch + extrude round-trip through JSON",
     uint64_t sketch = AddSketchOnDatum(doc, datum, {0, 0}, {4, 2});
     doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", sketch, 2.0,
                                                     ExtrudeMode::NewBody));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
 
   std::string error;
-  const auto loaded = DocumentIO::Load(path.string(), &error);
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
 
   auto* dp = dynamic_cast<DatumPlaneFeature*>(loaded->GetFeature(0));
@@ -335,9 +336,9 @@ TEST_CASE("DatumAxis round-trips through JSON", "[datum]") {
     ax->p0 = {0, 0, 0};
     ax->p1 = {0, 0, 4};
     doc.AddFeature(std::move(ax));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* ax = dynamic_cast<DatumAxisFeature*>(loaded->GetFeature(0));
   REQUIRE(ax != nullptr);

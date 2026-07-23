@@ -59,14 +59,13 @@ void DrawFileMenu(AppState& state) {
       ImGui::Separator();
     for (const auto& info : list) {
       if (ImGui::MenuItem(("Restore " + info.name).c_str())) {
-        std::string error;
         if (auto loaded = DocumentIO::Load(
-                Checkpoints::PathOf(state.projectPath, info.name), &error)) {
-          ReplaceDocument(state, std::move(loaded));
+                Checkpoints::PathOf(state.projectPath, info.name))) {
+          ReplaceDocument(state, std::move(*loaded));
           FitCameraToDocument(state);
           MarkProjectRecovered(state, state.projectPath);
         } else {
-          LOG_ERROR("Checkpoint restore failed: {}", error);
+          LOG_ERROR("Checkpoint restore failed: {}", loaded.error());
         }
       }
     }

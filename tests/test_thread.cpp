@@ -6,6 +6,7 @@
 #include "core/ThreadStandards.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <TopExp_Explorer.hxx>
@@ -129,9 +130,9 @@ TEST_CASE("Thread round-trips through serialization", "[thread][serialization]")
     th->threadClass = "6g";
     th->length = 8.0;
     doc.AddFeature(std::move(th));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* th = dynamic_cast<ThreadFeature*>(loaded->GetFeature(1));
   REQUIRE(th != nullptr);

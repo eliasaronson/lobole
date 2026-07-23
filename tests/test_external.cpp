@@ -5,6 +5,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 
 #include <filesystem>
 #include <string>
@@ -99,9 +100,9 @@ TEST_CASE("External geometry round-trips through JSON", "[external]") {
     sk2->AddExternalGeometry(ElementRef{ext, std::to_string(ext) + "/cap1"},
                              ExternalKind::Face);
     doc.AddFeature(std::move(sk2));
-    REQUIRE(DocumentIO::Save(doc, path.string()));
+    REQUIRE(testio::Save(doc, path.string()));
   }
-  const auto loaded = DocumentIO::Load(path.string());
+  const auto loaded = testio::Load(path.string());
   REQUIRE(loaded != nullptr);
   auto* s2 = dynamic_cast<SketchFeature*>(loaded->GetFeature(2));
   REQUIRE(s2 != nullptr);

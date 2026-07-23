@@ -61,8 +61,10 @@ bool Autosaver::MaybeSave(const Document& doc, const std::string& projectPath,
   // Atomic replace: a crash between Save and rename leaves the previous
   // sidecar intact; rename on the same filesystem is atomic.
   const fs::path tmp = target.string() + ".tmp";
-  if (!DocumentIO::Save(doc, tmp.string(), error))
+  if (auto r = DocumentIO::Save(doc, tmp.string()); !r) {
+    if (error) *error = r.error();
     return false;
+  }
   fs::rename(tmp, target, ec);
   if (ec) {
     if (error) *error = "autosave rename failed: " + ec.message();

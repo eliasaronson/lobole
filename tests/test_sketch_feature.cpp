@@ -4,6 +4,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/io/Serialization.h"
+#include "TestIO.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
@@ -315,7 +316,7 @@ TEST_CASE("v1 documents without ids load and get ids assigned", "[ids][io]") {
        "width": 2, "height": 2, "depth": 2}]})";
   }
   std::string error;
-  auto doc = DocumentIO::Load(path.string(), &error);
+  auto doc = testio::Load(path.string());
   REQUIRE(doc != nullptr);
   CHECK(doc->GetFeature(0)->GetId() != 0);
   fs::remove(path);
