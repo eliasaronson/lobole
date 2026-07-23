@@ -1,8 +1,18 @@
 # C++23 modernization + spdlog-everywhere
 
-Status: DESIGN — not started. Proposed after the switch to `CMAKE_CXX_STANDARD
-23` (GCC 15.2, near-complete libstdc++ C++23 support). No `kVersion` bump, no
-file-format change — this is pure internal hygiene.
+Status: **Part 1 (spdlog everywhere) DONE (commit 12583aa, 2026-07-23).** Parts 2–3
+not started. `CMAKE_CXX_STANDARD 23` is set (GCC 15.2, near-complete libstdc++
+C++23 support). No `kVersion` bump, no file-format change — pure internal hygiene.
+
+> Note (2026-07-23): file paths below predate the `src/` reorg — the renderers
+> are now under `src/render/`, CADObject under `src/cad/`, etc. (see
+> designer-src-layout). `Application.cpp`/`Viewport.cpp` were dead code and were
+> deleted. The femgpu `printf`s the survey cited were already gone. Part 1 as
+> shipped migrated ~100 sites across RayTracing/Shadow/Mesh/SSAO/Outline
+> renderers + CADObject + main.cpp. DEVIATION from the done-check: main.cpp's
+> CLI argument-validation errors stay on `std::cerr` alongside the `--help` text
+> — both are CLI contract, not runtime diagnostics, so they must not be
+> timestamp-prefixed or silenceable by `--log-level`.
 
 Scope: three adoptions worth scheduling as deliberate work, plus two we adopt
 opportunistically and one we explicitly withdraw. Nothing here changes behavior
@@ -218,7 +228,7 @@ Ordered so each step is independently landable and low-risk first:
 
 | # | Task | Scope | Effort | Risk |
 |---|------|-------|--------|------|
-| 1 | spdlog everywhere (Part 1) | 127 cout/cerr + 11 printf | ~half a day | low — mechanical, grep-verifiable done-check |
+| 1 | ~~spdlog everywhere (Part 1)~~ **DONE 12583aa** | ~100 cout/cerr + 1 printf | done | — |
 | 2 | `to_underlying` (2c) | ~37 enum casts | 1–2 h | trivial |
 | 3 | `std::expected` slice A — Expression | ~a handful of fns | ~half a day | low, self-contained; sets the pattern |
 | 4 | `std::expected` slice B — serialization | `Save`/`Open`/`Load` | ~half a day | low, few sites, high traffic |
