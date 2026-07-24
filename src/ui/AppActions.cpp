@@ -2755,7 +2755,9 @@ std::optional<ElementRef> RefOnBlendInput(AppState& state,
   if (input == before->end())
     return picked;
 
-  // The displayed edge's polyline midpoint anchors the geometric fallback.
+  // The displayed edge's interior midpoint anchors the geometric fallback — an
+  // arc-length midpoint, NOT poly[size/2] (an endpoint for a 2-point straight
+  // edge; see PolylineArcMidpoint).
   const auto& meshes = state.documentMeshes;
   const auto mit = std::find_if(
       meshes.begin(), meshes.end(),
@@ -2765,7 +2767,8 @@ std::optional<ElementRef> RefOnBlendInput(AppState& state,
     return std::nullopt;
   }
   const auto& poly = mit->edgePolylines[edgeIndex];
-  return topo::ResolveEdgeOnBody(*input, picked.name, poly[poly.size() / 2]);
+  return topo::ResolveEdgeOnBody(*input, picked.name,
+                                 topo::PolylineArcMidpoint(poly));
 }
 
 // Adds/removes one edge ref on the blend. A pending (previewing) feature is
@@ -2945,40 +2948,50 @@ void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
   const glm::vec4 kHover{1.00f, 0.85f, 0.30f, 1.0f};
   const glm::vec4 kPicked{0.35f, 0.80f, 1.00f, 1.0f};
 
+  // The feature stores input-body refs, because its output is regenerated on
+  // every added edge. A selected edge can be entirely replaced by the bevel,
+  // so there is no output edge to colour. Draw the selected INPUT edge as an
+  // overlay; it is precisely the line the user clicked.
+  size_t filletIndex = 0;
+  const std::vector<Body>* inputBodies =
+      state.document->FindFeatureById(fil->GetId(), &filletIndex) != nullptr &&
+              filletIndex > 0
+          ? state.document->CachedBodiesAfter(filletIndex - 1)
+          : nullptr;
+
   for (const DocumentRenderMesh& m : state.documentMeshes) {
-    if (m.bodyIndex >= state.document->GetBodies().size()) {
-      continue;
-    }
-    const Body& body = state.document->GetBodies()[m.bodyIndex];
     for (size_t e = 0; e < m.edgePolylines.size(); e++) {
       const auto& poly = m.edgePolylines[e];
-      if (poly.size() < 2) {
+      if (poly.size() < 2)
         continue;
-      }
-      const std::string* name = body.elementMap.EdgeNameOf(static_cast<int>(e));
-      const bool picked =
-          name != nullptr &&
-          std::any_of(fil->edges.begin(), fil->edges.end(),
-                      [&](const ElementRef& r) {
-                        return r.featureId == body.createdBy && r.name == *name;
-                      });
       const bool hovered = state.edgePick.hasHover &&
                            state.edgePick.hoverMeshId == m.meshId &&
                            state.edgePick.hoverEdgeIndex == e;
-      glm::vec4 color = kDim;
-      float halfPx = 1.2f;
-      if (picked) {
-        color = kPicked;
-        halfPx = 2.6f;
-      }
-      if (hovered) {
-        color = kHover;
-        halfPx = 2.6f;
-      }
-      for (size_t i = 0; i + 1 < poly.size(); i++) {
+      const glm::vec4 color = hovered ? kHover : kDim;
+      const float halfPx = hovered ? 2.6f : 1.2f;
+      for (size_t i = 0; i + 1 < poly.size(); i++)
         AppendPrimLine(poly[i], poly[i + 1], halfPx, color, out);
-      }
     }
+  }
+
+  if (inputBodies == nullptr)
+    return;
+  for (const ElementRef& ref : fil->edges) {
+    const auto body = std::find_if(
+        inputBodies->begin(), inputBodies->end(),
+        [&](const Body& b) { return b.createdBy == ref.featureId; });
+    if (body == inputBodies->end())
+      continue;
+    const auto edgeIndex = body->elementMap.ResolveEdge(ref.name);
+    if (!edgeIndex)
+      continue;
+    const auto polylines = body->shape.GenerateEdgePolylines();
+    const size_t e = static_cast<size_t>(*edgeIndex);
+    if (e >= polylines.size() || polylines[e].size() < 2)
+      continue;
+    const auto& poly = polylines[e];
+    for (size_t i = 0; i + 1 < poly.size(); i++)
+      AppendPrimLine(poly[i], poly[i + 1], 2.6f, kPicked, out);
   }
 }
 

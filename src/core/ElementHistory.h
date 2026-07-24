@@ -70,13 +70,21 @@ void ApplyFallbackPasses(const CADShape& shape, ElementMap& map);
 // convention ElementMap::edgeNames uses. -1 if absent.
 int EdgeIndexOf(const TopoDS_Shape& shape, const TopoDS_Shape& edge);
 
+// An interior point of a polyline: the point at half its total arc length.
+// The geometric probe for ResolveEdgeOnBody MUST be interior, never an
+// endpoint. A straight B-Rep edge tessellates to just its two endpoints, so
+// `poly[poly.size()/2]` is an endpoint — a vertex shared by every edge meeting
+// there — which makes ResolveEdgeOnBody's point-to-polyline match resolve to an
+// arbitrary incident edge (the "second blend edge snaps to a neighbour" bug).
+glm::vec3 PolylineArcMidpoint(const std::vector<glm::vec3>& poly);
+
 // Resolve a picked edge onto another state of its body — by name when
-// `pickedName` still resolves on `input`, else geometrically: `probe` (a
-// point on the displayed edge, e.g. its polyline midpoint) must lie on the
-// input edge. Edge picking uses this to store blend refs against the blend's
-// INPUT body rather than its displayed (already blended) output, whose
-// toponames embed the blend's own tag. nullopt = no counterpart on `input`
-// (e.g. an edge the blend itself created).
+// `pickedName` still resolves on `input`, else geometrically: `probe` (an
+// INTERIOR point of the displayed edge — use PolylineArcMidpoint, not an
+// endpoint) must lie on the input edge. Edge picking uses this to store blend
+// refs against the blend's INPUT body rather than its displayed (already
+// blended) output, whose toponames embed the blend's own tag. nullopt = no
+// counterpart on `input` (e.g. an edge the blend itself created).
 std::optional<ElementRef> ResolveEdgeOnBody(const Body& input,
                                             const std::string& pickedName,
                                             const glm::vec3& probe);

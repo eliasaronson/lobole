@@ -379,6 +379,21 @@ int EdgeIndexOf(const TopoDS_Shape& shape, const TopoDS_Shape& edge) {
   return edges.FindIndex(edge) - 1;
 }
 
+glm::vec3 PolylineArcMidpoint(const std::vector<glm::vec3>& poly) {
+  float total = 0.0f;
+  for (size_t i = 0; i + 1 < poly.size(); i++)
+    total += glm::length(poly[i + 1] - poly[i]);
+  float half = total * 0.5f;
+  for (size_t i = 0; i + 1 < poly.size(); i++) {
+    const float seg = glm::length(poly[i + 1] - poly[i]);
+    if (half <= seg)
+      return poly[i] +
+             (seg > 0.0f ? half / seg : 0.0f) * (poly[i + 1] - poly[i]);
+    half -= seg;
+  }
+  return poly.empty() ? glm::vec3(0.0f) : poly.back();
+}
+
 std::optional<ElementRef> ResolveEdgeOnBody(const Body& input,
                                             const std::string& pickedName,
                                             const glm::vec3& probe) {

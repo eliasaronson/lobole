@@ -12,6 +12,7 @@
 #include <array>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <string>
 
 using Catch::Matchers::WithinAbs;
@@ -70,6 +71,67 @@ double BodyVolume(const Document& doc) {
 // A top edge of the prism: both endpoints at z == height.
 std::function<bool(const glm::vec3&)> AtZ(float z) {
   return [z](const glm::vec3& p) { return std::abs(p.z - z) < 1e-3f; };
+}
+
+// A vertical edge at sketch corner (x, y): every polyline point shares that
+// (x, y), only z varies.
+std::function<bool(const glm::vec3&)> AtCorner(float x, float y) {
+  return [x, y](const glm::vec3& p) {
+    return std::abs(p.x - x) < 1e-3f && std::abs(p.y - y) < 1e-3f;
+  };
+}
+
+// A concave "envelope" pentagon (a notch at the top) + a tall NewBody extrude.
+// Its top-corner vertices are each shared by a vertical edge AND the two
+// top/side edges meeting there — the ambiguity the blend-edge remap must break.
+void BuildPentagonPrism(Document& doc, uint64_t& extrudeId) {
+  auto sk = std::make_unique<SketchFeature>("Sketch", kXY);
+  sk->AddEntity(sketch::Line{{-1.2344f, 0.0f}, {1.4691f, 0.0f}});
+  sk->AddEntity(sketch::Line{{1.4691f, 0.0f}, {1.4691f, 2.1220f}});
+  sk->AddEntity(sketch::Line{{1.4691f, 2.1220f}, {0.0f, 1.4385f}});
+  sk->AddEntity(sketch::Line{{0.0f, 1.4385f}, {-1.2344f, 2.1220f}});
+  sk->AddEntity(sketch::Line{{-1.2344f, 2.1220f}, {-1.2344f, 0.0f}});
+  doc.AddFeature(std::move(sk));
+  const uint64_t sketchId = doc.GetFeature(0)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", sketchId, 3.425,
+                                                  ExtrudeMode::NewBody));
+  extrudeId = doc.GetFeature(1)->GetId();
+}
+
+// True when `ref`'s edge on `body` is vertical (spans z, constant x/y).
+bool RefIsVertical(const Body& body, const ElementRef& ref) {
+  const auto idx = body.elementMap.ResolveEdge(ref.name);
+  if (!idx.has_value())
+    return false;
+  const auto polys = body.shape.GenerateEdgePolylines();
+  const auto& poly = polys.at(static_cast<size_t>(*idx));
+  return poly.size() >= 2 &&
+         std::abs(poly.front().z - poly.back().z) > 1e-3f &&
+         std::abs(poly.front().x - poly.back().x) < 1e-3f &&
+         std::abs(poly.front().y - poly.back().y) < 1e-3f;
+}
+
+// How many of `body`'s edges pass within `tol` of `probe` — the number of
+// candidates ResolveEdgeOnBody's geometric fallback can't distinguish between.
+int EdgesNear(const Body& body, const glm::vec3& probe, float tol = 1e-3f) {
+  const auto distToPoly = [](const glm::vec3& p,
+                             const std::vector<glm::vec3>& poly) {
+    float d = std::numeric_limits<float>::max();
+    for (size_t i = 0; i + 1 < poly.size(); i++) {
+      const glm::vec3 a = poly[i];
+      const glm::vec3 ab = poly[i + 1] - a;
+      const float len2 = glm::dot(ab, ab);
+      const float t =
+          len2 > 0.0f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f) : 0.0f;
+      d = std::min(d, glm::length(p - (a + ab * t)));
+    }
+    return d;
+  };
+  int n = 0;
+  for (const auto& poly : body.shape.GenerateEdgePolylines())
+    if (poly.size() >= 2 && distToPoly(probe, poly) < tol)
+      n++;
+  return n;
 }
 
 } // namespace
@@ -132,8 +194,8 @@ TEST_CASE("A second edge picked after the first blend regen still fillets",
   const auto& poly = polys.at(static_cast<size_t>(*idx));
   const std::vector<Body>* before2 = doc.CachedBodiesAfter(1); // pre-blend
   REQUIRE(before2 != nullptr);
-  const auto second = topo::ResolveEdgeOnBody(before2->at(0), picked.name,
-                                              poly[poly.size() / 2]);
+  const auto second = topo::ResolveEdgeOnBody(
+      before2->at(0), picked.name, topo::PolylineArcMidpoint(poly));
   REQUIRE(second.has_value());
   fil->edges.push_back(*second);
   REQUIRE(doc.Regenerate());
@@ -141,6 +203,58 @@ TEST_CASE("A second edge picked after the first blend regen still fillets",
 
   const double removed = (1.0 - M_PI / 4.0) * 0.3 * 0.3 * 4.0 * 2.0;
   CHECK_THAT(BodyVolume(doc), WithinRel(before - removed, 1e-2));
+}
+
+TEST_CASE("A vertical second edge remaps to the vertical edge, not a neighbour",
+          "[fillet]") {
+  // Regression: chamfer one vertical edge, then pick a DIFFERENT vertical edge
+  // on the regenerated body. Its displayed toponame doesn't resolve on the
+  // pre-blend input, so ResolveEdgeOnBody falls back to geometry. Probing with
+  // poly[size/2] (an ENDPOINT for a straight edge) lands on a shared corner and
+  // snaps to the horizontal edge meeting there — the "second pick selects the
+  // bottom/top horizontal edge instead" bug. The arc-length midpoint lies in
+  // the edge interior and resolves to the vertical edge.
+  Document doc;
+  uint64_t ext = 0;
+  BuildPentagonPrism(doc, ext);
+
+  const ElementRef first = PickEdge(doc, AtCorner(-1.2344f, 0.0f));
+  doc.AddFeature(std::make_unique<FilletFeature>(
+      "Chamfer", std::vector{first}, 0.5, EdgeBlendOp::Chamfer));
+  auto* fil = dynamic_cast<FilletFeature*>(doc.GetFeature(2));
+  REQUIRE(fil != nullptr);
+  REQUIRE(doc.Regenerate());
+
+  // Second pick: the peak-left vertical edge, whose top vertex is shared with
+  // that face's top horizontal edge.
+  const ElementRef picked = PickEdge(doc, AtCorner(-1.2344f, 2.1220f));
+  const Body& displayed = doc.GetBodies().at(0);
+  CHECK(RefIsVertical(displayed, picked)); // the highlight the user sees
+  const auto polys = displayed.shape.GenerateEdgePolylines();
+  const auto idx = displayed.elementMap.ResolveEdge(picked.name);
+  REQUIRE(idx.has_value());
+  const auto& poly = polys.at(static_cast<size_t>(*idx));
+
+  const std::vector<Body>* input = doc.CachedBodiesAfter(1); // pre-blend
+  REQUIRE(input != nullptr);
+
+  // The old probe poly[size/2] is an endpoint: it sits on a shared corner, so
+  // several input edges are equidistant and the fallback's winner is a tie-
+  // break accident (this is the regression). The arc-length midpoint is on
+  // exactly one edge, so the resolve is unambiguous.
+  CHECK(EdgesNear(input->at(0), poly[poly.size() / 2]) >= 2);
+  CHECK(EdgesNear(input->at(0), topo::PolylineArcMidpoint(poly)) == 1);
+
+  // The shipped probe resolves to the vertical edge.
+  const auto midpointHit = topo::ResolveEdgeOnBody(
+      input->at(0), picked.name, topo::PolylineArcMidpoint(poly));
+  REQUIRE(midpointHit.has_value());
+  CHECK(RefIsVertical(input->at(0), *midpointHit));
+
+  // ...and chamfering it succeeds (two vertical chamfers, no dangling ref).
+  fil->edges.push_back(*midpointHit);
+  REQUIRE(doc.Regenerate());
+  CHECK(fil->GetError().empty());
 }
 
 TEST_CASE("Chamfer bevels a referenced edge", "[fillet]") {

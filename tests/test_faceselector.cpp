@@ -3,8 +3,8 @@
 
 #include "cad/CADKernel.h"
 #include "cad/CADMeshConverter.h"
-#include "render/Camera.h"
 #include "cad/FaceSelector.h"
+#include "render/Camera.h"
 
 #include <algorithm>
 #include <map>
@@ -26,9 +26,11 @@ TEST_CASE("GenerateMesh maps triangles to B-Rep faces with real normals",
 
   // 6 faces, 2 triangles each
   std::map<uint32_t, int> triangleCount;
-  for (uint32_t f : mesh.triangleFaces) triangleCount[f]++;
+  for (uint32_t f : mesh.triangleFaces)
+    triangleCount[f]++;
   REQUIRE(triangleCount.size() == 6);
-  for (const auto& [face, count] : triangleCount) CHECK(count == 2);
+  for (const auto& [face, count] : triangleCount)
+    CHECK(count == 2);
 
   // Every normal is unit length and axis-aligned (it's a box)
   for (const auto& v : mesh.vertices) {
@@ -66,7 +68,8 @@ TEST_CASE("Camera-facing triangles are CCW in framebuffer space",
   int checked = 0;
   for (size_t t = 0; t < mesh.indices.size(); t += 3) {
     const auto& v0 = mesh.vertices[mesh.indices[t]];
-    if (v0.normal.x < 0.9f) continue; // only the camera-facing face
+    if (v0.normal.x < 0.9f)
+      continue; // only the camera-facing face
     glm::vec2 a = toFb(v0.position);
     glm::vec2 b = toFb(mesh.vertices[mesh.indices[t + 1]].position);
     glm::vec2 c = toFb(mesh.vertices[mesh.indices[t + 2]].position);
@@ -87,8 +90,8 @@ TEST_CASE("Screen ray passes through the world point it was made from",
 
   FaceSelector selector;
 
-  for (const glm::vec3& p :
-       {glm::vec3(0.5f, -0.3f, 0.2f), glm::vec3(-1, 2, 0), glm::vec3(0, 0, 3)}) {
+  for (const glm::vec3& p : {glm::vec3(0.5f, -0.3f, 0.2f), glm::vec3(-1, 2, 0),
+                             glm::vec3(0, 0, 3)}) {
     // Project the point to window coordinates exactly like the GPU does
     // (Y-flipped projection: NDC y maps straight to window y, top-down)
     glm::vec4 clip =
@@ -106,8 +109,7 @@ TEST_CASE("Screen ray passes through the world point it was made from",
   }
 }
 
-TEST_CASE("AlignToFace to a horizontal face keeps a valid view",
-          "[camera]") {
+TEST_CASE("AlignToFace to a horizontal face keeps a valid view", "[camera]") {
   Camera cam;
   cam.SetPosition(glm::vec3(8, 6, 8));
   cam.SetTarget(glm::vec3(0, 0, 0));
@@ -123,7 +125,8 @@ TEST_CASE("AlignToFace to a horizontal face keeps a valid view",
   REQUIRE(std::isfinite(pos.z));
   const glm::mat4& view = cam.GetViewMatrix();
   for (int c = 0; c < 4; c++)
-    for (int r = 0; r < 4; r++) REQUIRE(std::isfinite(view[c][r]));
+    for (int r = 0; r < 4; r++)
+      REQUIRE(std::isfinite(view[c][r]));
 
   // Looks straight down at the face, zoom preserved
   CHECK_THAT(glm::dot(cam.GetForward(), glm::vec3(0, -1, 0)),
@@ -166,7 +169,8 @@ TEST_CASE("Picking a box through the screen selects the facing face",
   CHECK_THAT(c.z, WithinAbs(1.0f, 1e-3f));
 }
 
-// ---- T5: B-Rep edge polylines + edge picking ---------------------------------
+// ---- T5: B-Rep edge polylines + edge picking
+// ---------------------------------
 
 TEST_CASE("GenerateEdgePolylines covers every edge in index order",
           "[picking][edges]") {
@@ -221,10 +225,33 @@ TEST_CASE("PickEdge finds the edge under the ray and honors occlusion",
   // face is hit well before the edge, so the pick rejects it.
   Ray blocked;
   blocked.origin = glm::vec3(12.0f, 12.0f, 1.0f);
-  blocked.direction = glm::normalize(glm::vec3(0.0f, 0.0f, 1.0f) - blocked.origin);
+  blocked.direction =
+      glm::normalize(glm::vec3(0.0f, 0.0f, 1.0f) - blocked.origin);
   const EdgeHit far = selector.PickEdge(blocked);
   if (far.hit) {
     // If anything is picked it must be a near silhouette edge, not the far one.
     CHECK(glm::length(glm::vec2(far.point.x, far.point.y)) > 1.0f);
   }
+}
+
+TEST_CASE("PickEdge rejects a slightly hidden edge at normal camera distance",
+          "[picking][edges]") {
+  CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
+  CADShape::Mesh mesh = box.GenerateMesh(0.1);
+  const std::vector<Vertex3D> vertices =
+      CADMeshConverter::ConvertCADMeshToVertices(mesh);
+
+  // The +X face is hit at x=2. This vertical edge is 0.3 mm behind it but
+  // only 0.05 mm from the ray, so an angular-only picker would choose it.
+  // It must never be selectable through the visible face.
+  const std::vector<std::vector<glm::vec3>> hiddenEdges = {
+      {{1.7f, 1.05f, 0.0f}, {1.7f, 1.05f, 2.0f}}};
+  FaceSelector selector;
+  selector.AddMesh(1, vertices, mesh.indices, mesh.triangleFaces,
+                   glm::mat4(1.0f), hiddenEdges);
+
+  Ray ray;
+  ray.origin = glm::vec3(12.0f, 1.0f, 1.0f);
+  ray.direction = glm::vec3(-1.0f, 0.0f, 0.0f);
+  CHECK_FALSE(selector.PickEdge(ray).hit);
 }
