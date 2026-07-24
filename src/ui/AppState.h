@@ -2,9 +2,9 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Occurrence.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingRender.h"
-#include "core/Occurrence.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchSolver.h"
@@ -15,10 +15,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
-#include <map>
 #include <unordered_map>
 #include <vector>
 
@@ -58,20 +58,20 @@ enum class SketchTool {
   Circle,
   Rectangle,
   Trim,
-  Arc,           // 3-click center → start → end
-  ArcThreePoint, // 3-click start → end → through-point
-  Ellipse,       // 3-click center → major-axis end → minor radius
-  Spline,        // click to add control poles; Enter/double-click finishes
-  Mirror,        // reflect the current selection across a clicked axis line
-  Fillet,        // round the clicked corner where two lines meet
-  Pattern,       // linear/circular array of the current selection
-  Offset,        // offset the selected closed loop by a distance
-  Dimension,     // clicks accumulate targets; the tool infers the dim kind
+  Arc,             // 3-click center → start → end
+  ArcThreePoint,   // 3-click start → end → through-point
+  Ellipse,         // 3-click center → major-axis end → minor radius
+  Spline,          // click to add control poles; Enter/double-click finishes
+  Mirror,          // reflect the current selection across a clicked axis line
+  Fillet,          // round the clicked corner where two lines meet
+  Pattern,         // linear/circular array of the current selection
+  Offset,          // offset the selected closed loop by a distance
+  Dimension,       // clicks accumulate targets; the tool infers the dim kind
   RectangleCenter, // 2-click rectangle: centre, then a corner
-  Project,       // click a body edge/face -> live projected construction geom
-  CalibrateImage, // click two points on a reference image, then type the real
-                  // distance between them to scale the image (v49)
-  EllipseArc     // 5-click: centre, major-axis end, minor radius, start, end
+  Project,         // click a body edge/face -> live projected construction geom
+  CalibrateImage,  // click two points on a reference image, then type the real
+                   // distance between them to scale the image (v49)
+  EllipseArc       // 5-click: centre, major-axis end, minor radius, start, end
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -126,7 +126,7 @@ struct SketchEditState {
   // Transient feedback shown in the toolbar (e.g. why a fillet no-op'd), so
   // operations that can silently fail tell the user what happened.
   std::string actionMsg;
-  int hoveredPlane = -1; // 0 Front / 1 Top / 2 Right while picking
+  int hoveredPlane = -1;       // 0 Front / 1 Top / 2 Right while picking
   uint64_t hoveredDatumId = 0; // datum plane under the cursor while picking
   // When non-zero while pickingPlane: re-pick the attached face of this sketch
   // (its faceRef) instead of starting a new sketch. Set by "Reattach face…".
@@ -239,16 +239,17 @@ struct SketchEditState {
 // once on mouse-down and reused each frame. Lives here (not SketchEditState) so
 // that stays cheaply copyable.
 struct SketchDragSession {
-  enum class Mode { Point, LineBody, CircleRim };
+  enum class Mode { Point, LineBody, SketchTranslate, CircleRim };
   bool active = false;
   Mode mode = Mode::Point;
   std::unique_ptr<sketch::Solver> solver;
-  std::vector<sketch::PointRef> points; // dragged points (Point / LineBody)
-  std::vector<glm::vec2> initialPos;    // their UV positions at mouse-down
+  // Dragged points (Point / LineBody / SketchTranslate).
+  std::vector<sketch::PointRef> points;
+  std::vector<glm::vec2> initialPos; // their UV positions at mouse-down
   glm::vec2 initialCursor{0.0f};
-  uint32_t circleId = 0;                // CircleRim
-  glm::vec2 circleCenter{0.0f};         // CircleRim: radius = |cursor - centre|
-  size_t featureIndex = 0;              // sketch index for the commit
+  uint32_t circleId = 0;        // CircleRim
+  glm::vec2 circleCenter{0.0f}; // CircleRim: radius = |cursor - centre|
+  size_t featureIndex = 0;      // sketch index for the commit
 };
 
 // Edge picking for fillet/chamfer (M7): active while a blend feature is
@@ -273,7 +274,7 @@ struct SlotPickState {
   int slot = -1;          // PickSlot id (FeatureEditor.h)
   uint32_t kinds = 0;     // SelectionItem::Kind bitmask accepted
   bool multi = false;
-  std::string prompt;     // status pill while armed
+  std::string prompt; // status pill while armed
   bool Active() const { return featureId != 0; }
 };
 
@@ -349,18 +350,18 @@ struct SimulationState {
 // frame) so the Render modal can show progress and stay cancellable. main.cpp
 // owns the pump; the toolbar modal reads/writes the request + result fields.
 struct RenderJob {
-  bool active = false;        // a render is in flight
-  bool started = false;       // BeginStill has run (internal)
-  bool cancel = false;        // set by the UI to abort
+  bool active = false;  // a render is in flight
+  bool started = false; // BeginStill has run (internal)
+  bool cancel = false;  // set by the UI to abort
   uint32_t width = 1280;
   uint32_t height = 720;
   uint32_t totalSamples = 128;
-  uint32_t done = 0;          // samples traced so far
+  uint32_t done = 0; // samples traced so far
   uint32_t seed = 1;
-  bool groundPlane = true;    // shadow-catcher plane under the scene
+  bool groundPlane = true; // shadow-catcher plane under the scene
   std::string outPath;
   // Result (valid once !active after having been started)
-  bool finished = false;      // a render completed (success or failure)
+  bool finished = false; // a render completed (success or failure)
   bool success = false;
   std::string error;
   std::string resultPath;
@@ -397,7 +398,7 @@ struct AssemblyHistory {
 struct DrawingHistory {
   std::vector<DrawingDocument> undo;
   std::vector<DrawingDocument> redo;
-  std::vector<uint64_t> undoStamps;  // action-clock stamps (Phase V)
+  std::vector<uint64_t> undoStamps; // action-clock stamps (Phase V)
   std::vector<uint64_t> redoStamps;
 };
 
@@ -409,7 +410,7 @@ struct DrawingHistory {
 // across all documents. Stamped from the shared action clock so the global
 // Undo picks the most recent mutation. See AppActions project-var helpers.
 struct ProjectVarSnapshot {
-  std::vector<Parameter> params;  // the project table to restore when applied
+  std::vector<Parameter> params; // the project table to restore when applied
   uint64_t stamp = 0;
   // When set, applying this entry first rewrites `docRefFrom` -> `docRefTo` in
   // every part's feature/parameter expressions (a project-var rename's ref
@@ -422,7 +423,7 @@ struct ProjectVarHistory {
 };
 
 struct PartSlot {
-  uint64_t id = 0;   // stable per-document id (A2): what occurrences reference
+  uint64_t id = 0; // stable per-document id (A2): what occurrences reference
   std::string name;
   // Display grouping for the bottom tab bar ("" = top level). Assembly
   // import puts its extracted parts in a folder named after the assembly so
@@ -430,17 +431,17 @@ struct PartSlot {
   // stays flat, ids/references are unaffected.
   std::string folder;
   DocKind kind = DocKind::Part;
-  std::unique_ptr<Document> doc;          // part: null while this tab is active
+  std::unique_ptr<Document> doc; // part: null while this tab is active
   std::unique_ptr<AssemblyDocument> assembly; // assembly: null while active
   std::unique_ptr<DrawingDocument> drawing;   // drawing: null while active
-  std::unique_ptr<CommandStack> commands; // null while active (parts only)
-  AssemblyHistory history;                // assembly undo/redo (stashed here)
-  DrawingHistory drawingHistory;          // drawing undo/redo (stashed here)
+  std::unique_ptr<CommandStack> commands;     // null while active (parts only)
+  AssemblyHistory history;       // assembly undo/redo (stashed here)
+  DrawingHistory drawingHistory; // drawing undo/redo (stashed here)
   // Projected view geometry for a stashed drawing tab (D2). Kept across tab
   // switches so re-entering a drawing doesn't silently re-project — staleness
   // is only cleared by an explicit update (the FEM rule).
   std::map<uint64_t, drawing::SheetView> drawingRenders;
-  uint64_t lastSavedVersion = 0;      // per-document dirty tracking
+  uint64_t lastSavedVersion = 0; // per-document dirty tracking
   // Assembly tabs only (A4): referenced parts' Document::Version() at this
   // assembly's last solve, stashed while inactive. See AppState field.
   std::unordered_map<uint64_t, uint64_t> solvedPartVersions;
@@ -453,7 +454,12 @@ struct PartSlot {
 // are a per-frame projection of this set, not parallel state.
 struct SelectionItem {
   enum class Kind : uint8_t {
-    Face, Edge, Body, Feature, Occurrence, Mate,
+    Face,
+    Edge,
+    Body,
+    Feature,
+    Occurrence,
+    Mate,
     SketchRegion // U2
   };
   Kind kind = Kind::Feature;
@@ -537,7 +543,7 @@ struct AppState {
   RayTracingRenderer* rayTracer = nullptr;
   SketchRenderer* sketchRenderer = nullptr;
   UnderlayRenderer* underlayRenderer = nullptr; // sketch reference images (v49)
-  FieldRenderer* fieldRenderer = nullptr; // FEM result overlay
+  FieldRenderer* fieldRenderer = nullptr;       // FEM result overlay
   FaceSelector* faceSelector = nullptr;
   IBLTextures* ibl = nullptr;
   GLFWwindow* window = nullptr;
@@ -547,12 +553,12 @@ struct AppState {
   // mate is added + solved live for accept/cancel. See AppActions mate-tool
   // helpers + OccurrencePanel.
   struct MateToolState {
-    bool active = false;       // picking connectors for a new mate
+    bool active = false; // picking connectors for a new mate
     MateType type = MateType::Fastened;
-    bool haveFirst = false;    // the first connector is picked
-    Connector first;           // occurrence + face anchor of the first pick
+    bool haveFirst = false;     // the first connector is picked
+    Connector first;            // occurrence + face anchor of the first pick
     uint64_t previewMateId = 0; // non-zero once both picked: the live preview
-    std::string message;       // transient hint (e.g. "pick a named face")
+    std::string message;        // transient hint (e.g. "pick a named face")
   };
 
   // 3D drag gizmo for the selected occurrence (A2.5). World-aligned translate
@@ -560,11 +566,13 @@ struct AppState {
   // per-instance update, no resync) and snapshots/solves once on release.
   struct GizmoDrag {
     bool active = false;
-    int axis = -1;         // handle axis index (into the gizmo frame below)
-    bool rotate = false;   // false = translate along axis, true = rotate about it
+    int axis = -1;       // handle axis index (into the gizmo frame below)
+    bool rotate = false; // false = translate along axis, true = rotate about it
     glm::vec3 startPos{0}; // occurrence position at grab (free drag)
-    glm::quat startRot{1, 0, 0, 0}; // occurrence orientation at grab (free drag)
-    float startParam = 0.0f; // axis coordinate (translate) / angle (rotate) at grab
+    glm::quat startRot{1, 0, 0,
+                       0}; // occurrence orientation at grab (free drag)
+    float startParam =
+        0.0f; // axis coordinate (translate) / angle (rotate) at grab
     // The gizmo's frame: world axes at the occurrence origin for a free drag,
     // or the mate's connector-A world frame for a drag-within-mate (phase 3).
     glm::vec3 frameOrigin{0};
@@ -588,12 +596,12 @@ struct AppState {
   // only, so no undo bookkeeping — accept commits the whole feature.
   struct HandleDrag {
     bool active = false;
-    uint64_t featureId = 0;   // the pending feature at grab (undo-safe check)
-    bool rotate = false;      // revolve arc vs linear arrow
-    glm::vec3 axisOrigin{0};  // drag line / arc-plane center at grab
+    uint64_t featureId = 0;  // the pending feature at grab (undo-safe check)
+    bool rotate = false;     // revolve arc vs linear arrow
+    glm::vec3 axisOrigin{0}; // drag line / arc-plane center at grab
     glm::vec3 axisDir{0, 0, 1};
-    double startValue = 0.0;  // the parameter at grab (Esc restores this)
-    float startParam = 0.0f;  // axis coordinate / arc angle at grab
+    double startValue = 0.0; // the parameter at grab (Esc restores this)
+    float startParam = 0.0f; // axis coordinate / arc angle at grab
   };
 
   // In-context editing (A4): non-zero while a part tab is being edited with
@@ -620,7 +628,8 @@ struct AppState {
   // fields cache render-side handles for this frame's preview; the click
   // fields drive same-spot disambiguation cycling.
   struct PickState {
-    bool edgeHover = false; // hovered edge preview (faces hover via FaceSelector)
+    bool edgeHover =
+        false; // hovered edge preview (faces hover via FaceSelector)
     uint32_t edgeHoverMesh = 0;
     uint32_t edgeHoverIndex = 0;
     // U2: hovered sketch region while a Profiles slot is armed — the outer
@@ -720,10 +729,10 @@ struct AppState {
   struct DimTool {
     bool active = false;
     DrawingDimKind kind = DrawingDimKind::Distance;
-    uint64_t viewId = 0;        // the view the first pick fixed
-    std::vector<ProjRef> refs;  // picked so far
+    uint64_t viewId = 0;       // the view the first pick fixed
+    std::vector<ProjRef> refs; // picked so far
   } dimTool;
-  uint64_t dimDrag = 0;  // id of the dimension whose label is being dragged
+  uint64_t dimDrag = 0; // id of the dimension whose label is being dragged
 
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
@@ -752,7 +761,8 @@ struct AppState {
   // before the panel existed) left floating — see BeginDockspace.
   bool dockHomesEnforced = false;
   bool runGuiTests = false;
-  nlohmann::json editBaseline; // parameter-edit snapshot while a widget is active
+  nlohmann::json
+      editBaseline; // parameter-edit snapshot while a widget is active
 
   // Where the document lives on disk ("" = never saved) and the document
   // version at the last clean save/open — dirty = Version() != lastSaved.

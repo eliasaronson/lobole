@@ -1,13 +1,15 @@
 #include "ui/UI.h"
 
+#include "core/features/SketchFeature.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
 #include "render/MeshRenderer.h"
 #include "render/OutlineRenderer.h"
 #include "render/SketchRenderer.h"
 #include "render/UnderlayRenderer.h"
-#include "core/features/SketchFeature.h"
 #include "ui/AppActions.h"
+#include "ui/CommandPalette.h"
+#include "ui/ConfigurationsPanel.h"
 #include "ui/DockLayout.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h"
@@ -18,8 +20,6 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
-#include "ui/CommandPalette.h"
-#include "ui/ConfigurationsPanel.h"
 #include "ui/VariablesPanel.h"
 #include "ui/ViewportInput.h"
 
@@ -52,8 +52,7 @@ void DrawInContextBanner(AppState& state) {
   ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
                            ImGuiWindowFlags_AlwaysAutoResize |
                            ImGuiWindowFlags_NoSavedSettings |
-                           ImGuiWindowFlags_NoMove |
-                           ImGuiWindowFlags_NoDocking;
+                           ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking;
   if (ImGui::Begin("##InContextBanner", nullptr, flags)) {
     ImGui::Text("Editing %s in context of %s",
                 state.parts[state.activePart].name.c_str(),
@@ -179,19 +178,17 @@ void DrawViewCube(AppState& state) {
     }
     const bool hot = hoveredWidget && pointInQuad(quad, mouse);
     const float shade = 0.35f + 0.45f * n.z;
-    const ImU32 fill =
-        hot ? IM_COL32(90, 140, 210, 235)
-            : IM_COL32(static_cast<int>(70 * shade + 30),
-                       static_cast<int>(80 * shade + 34),
-                       static_cast<int>(95 * shade + 40), 220);
+    const ImU32 fill = hot ? IM_COL32(90, 140, 210, 235)
+                           : IM_COL32(static_cast<int>(70 * shade + 30),
+                                      static_cast<int>(80 * shade + 34),
+                                      static_cast<int>(95 * shade + 40), 220);
     dl->AddConvexPolyFilled(quad, 4, fill);
-    dl->AddPolyline(quad, 4, IM_COL32(150, 160, 175, 200),
-                    ImDrawFlags_Closed, 1.0f);
+    dl->AddPolyline(quad, 4, IM_COL32(150, 160, 175, 200), ImDrawFlags_Closed,
+                    1.0f);
     if (n.z > 0.45f) { // label only when facing enough to read
       const ImVec2 sz = ImGui::CalcTextSize(f.label);
       dl->AddText(ImVec2(center.x - sz.x * 0.5f, center.y - sz.y * 0.5f),
-                  hot ? IM_COL32_WHITE : IM_COL32(205, 215, 230, 230),
-                  f.label);
+                  hot ? IM_COL32_WHITE : IM_COL32(205, 215, 230, 230), f.label);
     }
     if (hot && clicked)
       state.camera->AlignToFace(glm::vec3(0.0f), f.normal);
@@ -259,15 +256,13 @@ void DrawPartTabs(AppState& state) {
   EnsureParts(state);
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const float h = ImGui::GetFrameHeightWithSpacing() + 4.0f;
-  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x, vp->WorkPos.y +
-                                                    vp->WorkSize.y - h));
+  ImGui::SetNextWindowPos(
+      ImVec2(vp->WorkPos.x, vp->WorkPos.y + vp->WorkSize.y - h));
   ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, h));
-  ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar |
-                           ImGuiWindowFlags_NoResize |
-                           ImGuiWindowFlags_NoMove |
-                           ImGuiWindowFlags_NoScrollbar |
-                           ImGuiWindowFlags_NoSavedSettings |
-                           ImGuiWindowFlags_NoDocking;
+  ImGuiWindowFlags flags =
+      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
   if (ImGui::Begin("##PartTabs", nullptr, flags)) {
     // Top-level tabs first, one button each; foldered documents (assembly
     // import drops its parts in a folder) collapse to one flyout per folder
@@ -286,19 +281,18 @@ void DrawPartTabs(AppState& state) {
       if (active)
         ImGui::PushStyleColor(ImGuiCol_Button,
                               ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-      if (ImGui::Button((state.parts[i].name + "##part" + std::to_string(i))
-                            .c_str()))
+      if (ImGui::Button(
+              (state.parts[i].name + "##part" + std::to_string(i)).c_str()))
         SetActivePart(state, i);
       if (active)
         ImGui::PopStyleColor();
       // Right-click a tab to delete it (never the last).
       if (ImGui::BeginPopupContextItem(
               ("##pctx" + std::to_string(i)).c_str())) {
-        const char* label = state.parts[i].kind == DocKind::Assembly
-                                ? "Delete assembly"
-                            : state.parts[i].kind == DocKind::Drawing
-                                ? "Delete drawing"
-                                : "Delete part";
+        const char* label =
+            state.parts[i].kind == DocKind::Assembly  ? "Delete assembly"
+            : state.parts[i].kind == DocKind::Drawing ? "Delete drawing"
+                                                      : "Delete part";
         if (ImGui::MenuItem(label, nullptr, false, state.parts.size() > 1))
           DeletePart(state, i);
         ImGui::EndPopup();
@@ -430,8 +424,8 @@ void DrawUI(AppState& state) {
       // clear what surface the sketch is on.
       if (SketchFeature* active = ResolveActiveSketch(state)) {
         AppendSketchGrid(active->plane, overlay);
-        AppendPlaneQuad(active->plane, glm::vec3(0.30f, 0.36f, 0.48f), 5.0f,
-                        quads);
+        AppendPlaneQuad(active->plane, glm::vec3(0.30f, 0.36f, 0.48f),
+                        kSketchBackgroundHalfExtent, quads);
       }
     }
     AppendOriginGizmo(overlay); // world origin + axes: parts and assemblies
@@ -444,7 +438,7 @@ void DrawUI(AppState& state) {
     std::vector<LineVertex3D> gizmo;
     BuildGizmoOverlay(state, gizmo);
     BuildPreviewHandleOverlay(state, gizmo);
-    AppendCogMarker(state, gizmo); // mass-props CoG cross (no-depth channel)
+    AppendCogMarker(state, gizmo);   // mass-props CoG cross (no-depth channel)
     AppendStudyMarker(state, gizmo); // FEM peak-field cross (no-depth channel)
 
     state.sketchRenderer->SetQuads(std::move(quads));
@@ -462,8 +456,8 @@ void DrawUI(AppState& state) {
           BuildStaticSketchLines(state, state.sketchEdit.activeSketchId));
       std::vector<PrimVertex> prims =
           BuildActiveSketchPrimitives(state, state.sketchEdit.activeSketchId);
-      AppendEdgePickPrimitives(state, prims); // fillet/chamfer edge picking
-      AppendSelectionPrimitives(state, prims); // selected/hovered edges (U1b)
+      AppendEdgePickPrimitives(state, prims);   // fillet/chamfer edge picking
+      AppendSelectionPrimitives(state, prims);  // selected/hovered edges (U1b)
       AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
       AppendSimulationBCGlyphs(state, prims);   // FEM load/fixed/keep glyphs
       state.sketchRenderer->SetPrimitives(std::move(prims));
@@ -531,18 +525,19 @@ void DrawUI(AppState& state) {
   if (fbSize.x > 0 && fbSize.y > 0) {
     auto setVp = [&](auto* r) {
       if (r)
-        r->SetViewport(static_cast<int32_t>(fbPos.x),
-                       static_cast<int32_t>(fbPos.y),
-                       static_cast<uint32_t>(fbSize.x),
-                       static_cast<uint32_t>(fbSize.y));
+        r->SetViewport(
+            static_cast<int32_t>(fbPos.x), static_cast<int32_t>(fbPos.y),
+            static_cast<uint32_t>(fbSize.x), static_cast<uint32_t>(fbSize.y));
     };
     setVp(state.meshRenderer);
     setVp(state.outlineRenderer);
     setVp(state.sketchRenderer);
     setVp(state.underlayRenderer); // sketch reference images — same reason as
                                    // fieldRenderer below (else stretched)
-    setVp(state.fieldRenderer);  // FEM/topology overlay — else it renders full-
-                                 // window while the camera aspect is the sub-region
+    setVp(
+        state
+            .fieldRenderer); // FEM/topology overlay — else it renders full-
+                             // window while the camera aspect is the sub-region
     if (state.camera)
       state.camera->SetAspectRatio(fbSize.x / fbSize.y);
   }

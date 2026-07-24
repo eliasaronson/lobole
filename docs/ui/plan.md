@@ -176,9 +176,11 @@ palette; occurrence-aware via Measure::ElementBounds), **window title =
 project name + dirty marker** (all tabs' saved versions stamped on save —
 assemblies/stashed tabs read clean now). Still missing, roughly by value:
 
-- **Direct manipulation in previews** — drag an arrow handle to set extrude
-  distance / fillet radius in the viewport (Onshape/SW). Natural U3 follow-on
-  (the dialog and the handle edit the same param). 
+- **Direct manipulation in previews — shipped** (`9479582`): drag handles set
+  pending extrude distance, fillet/chamfer radius, or revolve angle. Missed
+  handle clicks now fall through to selection and blend-edge picking; a
+  revolve-handle GUI case remains. See
+  [direct-manipulation.md](direct-manipulation.md).
 - **Feature reordering by drag in the tree** (with a dependency check and a
   clear failure message). Standard in SW/FreeCAD; needs care with refs.
 - **Per-body appearance/material from the tree** (right-click > Material) —
@@ -195,7 +197,8 @@ GUI-test the behaviors, eyeball the aesthetics: every panel docked after
 "Reset Layout" + no window overlaps the viewport rect (U4, gui_smoke);
 `region/pick_hole_loop` (U2: hover shades, click selects, extrude of one
 region of a two-region sketch); dialog slot-picking flows (U3); selection
-filter + disambiguation cycling (U1); toolbar overflow at narrow width (U4);
+filter + disambiguation cycling including stacked-face depth cycling (U1e);
+toolbar overflow at narrow width (U4);
 palette executes a command (U6). Visuals verified via dev-watch screenshots
 at 1080p and 4K-scaled.
 

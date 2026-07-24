@@ -3,8 +3,8 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
-#include "core/sketch/SketchProfile.h"
 #include "core/io/Serialization.h" // DocumentIO (break-link commit)
+#include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
@@ -24,26 +24,46 @@ namespace {
 const char* ConstraintKindName(sketch::ConstraintKind k) {
   using K = sketch::ConstraintKind;
   switch (k) {
-  case K::Coincident: return "coincident";
-  case K::Horizontal: return "horizontal";
-  case K::Vertical: return "vertical";
-  case K::Parallel: return "parallel";
-  case K::Perpendicular: return "perpendicular";
-  case K::Equal: return "equal";
-  case K::Distance: return "distance";
-  case K::Radius: return "radius";
-  case K::Angle: return "angle";
-  case K::Tangent: return "tangent";
-  case K::PointOnLine: return "point-on-line";
-  case K::Symmetric: return "symmetric";
-  case K::Midpoint: return "midpoint";
-  case K::Fixed: return "fixed";
-  case K::Concentric: return "concentric";
-  case K::Collinear: return "collinear";
-  case K::DistanceX: return "distance-x";
-  case K::DistanceY: return "distance-y";
-  case K::Diameter: return "diameter";
-  case K::DistancePL: return "distance-pl";
+  case K::Coincident:
+    return "coincident";
+  case K::Horizontal:
+    return "horizontal";
+  case K::Vertical:
+    return "vertical";
+  case K::Parallel:
+    return "parallel";
+  case K::Perpendicular:
+    return "perpendicular";
+  case K::Equal:
+    return "equal";
+  case K::Distance:
+    return "distance";
+  case K::Radius:
+    return "radius";
+  case K::Angle:
+    return "angle";
+  case K::Tangent:
+    return "tangent";
+  case K::PointOnLine:
+    return "point-on-line";
+  case K::Symmetric:
+    return "symmetric";
+  case K::Midpoint:
+    return "midpoint";
+  case K::Fixed:
+    return "fixed";
+  case K::Concentric:
+    return "concentric";
+  case K::Collinear:
+    return "collinear";
+  case K::DistanceX:
+    return "distance-x";
+  case K::DistanceY:
+    return "distance-y";
+  case K::Diameter:
+    return "diameter";
+  case K::DistancePL:
+    return "distance-pl";
   }
   return "?";
 }
@@ -114,7 +134,8 @@ void DrawSketchToolbar(AppState& state) {
       ApplyPattern(state);
     ImGui::EndDisabled();
   } else if (edit.tool == SketchTool::Offset) {
-    ImGui::TextUnformatted("Offset: select a closed loop, set distance, Apply.");
+    ImGui::TextUnformatted(
+        "Offset: select a closed loop, set distance, Apply.");
     ImGui::SetNextItemWidth(90);
     ImGui::DragFloat("Distance##off", &edit.offsetDistance, 0.02f, -1e6f, 1e6f,
                      "%.3f");
@@ -126,9 +147,8 @@ void DrawSketchToolbar(AppState& state) {
     ImGui::EndDisabled();
   } else if (edit.tool == SketchTool::CalibrateImage) {
     if (edit.calibStage < 2) {
-      ImGui::TextWrapped(
-          "Click two points on the image a known distance apart "
-          "(e.g. the ends of a printed dimension).");
+      ImGui::TextWrapped("Click two points on the image a known distance apart "
+                         "(e.g. the ends of a printed dimension).");
     } else {
       ImGui::TextUnformatted("Real distance between the two points:");
       ImGui::SetNextItemWidth(120);
@@ -161,9 +181,10 @@ void DrawSketchToolbar(AppState& state) {
                       "place freely) — Shift+S to toggle");
 
   // Reference images (v49): import an underlay, tune it, calibrate it to a real
-  // dimension, or delete it. Opacity/hide are live cosmetic edits (not undoable);
-  // import/calibrate/delete each commit one undo step and REPLACE the sketch
-  // feature — so after any of them `sketch` dangles: End() + return immediately.
+  // dimension, or delete it. Opacity/hide are live cosmetic edits (not
+  // undoable); import/calibrate/delete each commit one undo step and REPLACE
+  // the sketch feature — so after any of them `sketch` dangles: End() + return
+  // immediately.
   ImGui::SeparatorText("Reference images");
   if (ImGui::Button("Insert image...##ref")) {
     OpenReferenceImageDialog(state); // may add + commit (feature replaced)
@@ -211,7 +232,8 @@ void DrawSketchToolbar(AppState& state) {
   if (edit.dof == 0)
     ImGui::TextColored(ImVec4(0.55f, 0.95f, 0.60f, 1.0f), "Fully constrained");
   else if (edit.dof > 0)
-    ImGui::TextColored(ImVec4(0.55f, 0.80f, 1.0f, 1.0f), "%d DOF free", edit.dof);
+    ImGui::TextColored(ImVec4(0.55f, 0.80f, 1.0f, 1.0f), "%d DOF free",
+                       edit.dof);
   else
     ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Not solved");
   if (!edit.conflictingConstraints.empty())
@@ -219,8 +241,7 @@ void DrawSketchToolbar(AppState& state) {
                        edit.conflictingConstraints.size());
   ImGui::Checkbox("Show constraints", &edit.showConstraintGlyphs);
 
-  if (!sketch->constraints.empty() &&
-      ImGui::TreeNode("Constraints##list")) {
+  if (!sketch->constraints.empty() && ImGui::TreeNode("Constraints##list")) {
     std::set<size_t> bad(edit.conflictingConstraints.begin(),
                          edit.conflictingConstraints.end());
     int toDelete = -1;
@@ -237,8 +258,14 @@ void DrawSketchToolbar(AppState& state) {
       ImGui::PopID();
     }
     ImGui::TreePop();
-    if (toDelete >= 0)
+    if (toDelete >= 0) {
+      // DeleteConstraint commits a ModifyFeatureCommand, replacing the active
+      // feature. `sketch` is therefore dangling for the remainder of this
+      // frame; close the panel and redraw against the replacement next frame.
       DeleteConstraint(state, static_cast<size_t>(toDelete));
+      ImGui::End();
+      return;
+    }
   }
 
   // Linked patterns: edit the full transform live (regenerates id-stably),
@@ -372,8 +399,8 @@ void BeginSketchExtrude(AppState& state) {
   const uint64_t sketchId = edit.activeSketchId;
   edit = SketchEditState{}; // exit sketch mode so the solid + dialog show
   BeginPreviewFeature(state, std::make_unique<ExtrudeFeature>(
-                                 "Extrude " + std::to_string(n), sketchId,
-                                 1.0, DefaultBodyMode(state)));
+                                 "Extrude " + std::to_string(n), sketchId, 1.0,
+                                 DefaultBodyMode(state)));
 }
 
 void BeginSketchRevolve(AppState& state) {

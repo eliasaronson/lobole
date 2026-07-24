@@ -1,23 +1,24 @@
 #include "app/GuiTests.h"
 
-#include "render/Camera.h"
 #include "cad/FaceSelector.h"
+#include "core/Document.h"
+#include "core/Feature.h"
+#include "core/Measure.h"
+#include "core/Occurrence.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
-#include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
-#include "core/features/PipeFeature.h"
-#include "core/Occurrence.h"
-#include "core/Feature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/PatternFeature.h"
-#include "core/features/ThreadFeature.h"
-#include "core/Measure.h"
-#include "core/io/Serialization.h"
+#include "core/features/PipeFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/ThreadFeature.h"
+#include "core/io/Serialization.h"
+#include "render/Camera.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/PreviewFeature.h"
+#include "ui/PreviewHandles.h"
 #include "ui/SketchInteraction.h"
 
 #include "imgui_te_context.h"
@@ -43,7 +44,8 @@ static Document* Doc() { return s_App->document.get(); }
 static void ResetAppForTest() {
   if (s_App->camera) {
     s_App->camera->StopAnimation();
-    s_App->camera->SetPosition(glm::vec3(8.0f, 6.0f, 8.0f)); // main.cpp defaults
+    s_App->camera->SetPosition(
+        glm::vec3(8.0f, 6.0f, 8.0f)); // main.cpp defaults
     s_App->camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
   }
@@ -190,7 +192,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* pi = dynamic_cast<PipeFeature*>(
         Doc()->GetFeature(Doc()->FeatureCount() - 1));
     IM_CHECK(pi != nullptr);
-    IM_CHECK(pi->pathId != 0);                    // seeded from the helix
+    IM_CHECK(pi->pathId != 0); // seeded from the helix
     IM_CHECK_EQ(Doc()->GetBodies().size(), bodiesBefore + 1); // a tube body
   };
 
@@ -211,8 +213,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    ToolbarCreateAccept(ctx, "###tb_box");     // Box 1    -> index 0
-    ToolbarCreateAccept(ctx, "###tb_sphere");  // Sphere 1 -> index 1
+    ToolbarCreateAccept(ctx, "###tb_box");    // Box 1    -> index 0
+    ToolbarCreateAccept(ctx, "###tb_sphere"); // Sphere 1 -> index 1
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
     const std::string a = Doc()->GetFeature(0)->GetName();
     const std::string b = Doc()->GetFeature(1)->GetName();
@@ -488,8 +490,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const float radius = glm::length(max - min) * 0.5f;
     s_App->camera->SetTarget(bodyCenter);
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
-    s_App->camera->SetPosition(
-        bodyCenter + glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * radius * 5.0f);
+    s_App->camera->SetPosition(bodyCenter +
+                               glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) *
+                                   radius * 5.0f);
     ctx->Yield();
 
     // Click the +X face's center pixel: the ray hits that face's interior, a
@@ -556,15 +559,16 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->sketchEdit.IsEditing());
 
     // Frame the front (XY) plane head-on. The doc is empty, so all three base
-    // quads pass through the origin; looking straight down +Z makes a click at
-    // world (1,1,0) land unambiguously on XY (the other two are edge-on there).
+    // quads pass through the origin; looking straight down +Z makes a click
+    // near the visible outer edge, at world (7,7,0), land unambiguously on XY
+    // (the other two are edge-on there).
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(glm::vec3(0, 0, 0));
     s_App->camera->SetUp(glm::vec3(0, 1, 0));
     s_App->camera->SetPosition(glm::vec3(0, 0, 10));
     ctx->Yield();
 
-    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(1.0f, 1.0f, 0.0f)));
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(7.0f, 7.0f, 0.0f)));
     ctx->Yield();
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
@@ -587,9 +591,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sketch != nullptr);
 
-    // Entering a sketch aligns the camera to the plane over a 1s animation. Wait
-    // for it to settle before projecting click coordinates — otherwise
-    // SketchUVToScreen reads a mid-flight camera and the clicks land off target.
+    // Entering a sketch aligns the camera to the plane over a 1s animation.
+    // Wait for it to settle before projecting click coordinates — otherwise
+    // SketchUVToScreen reads a mid-flight camera and the clicks land off
+    // target.
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
       ctx->Yield();
 
@@ -748,13 +753,13 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     s_App->camera->SetTarget(C + glm::vec3(0.0f, -3.0f, 0.0f));
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
     s_App->camera->SetPosition(C + glm::vec3(0.0f, -3.0f, 0.0f) +
-                               glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * 12.0f);
+                               glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) *
+                                   12.0f);
     ctx->Yield(2);
 
     // Grab the arrow mid-shaft and pull one world unit further out.
     const double d0 = ext->distance;
-    const float L =
-        0.9f * std::max(0.13f * s_App->camera->GetDistance(), 0.1f);
+    const float L = 0.9f * std::max(0.13f * s_App->camera->GetDistance(), 0.1f);
     const glm::vec3 anchor = C + N * static_cast<float>(d0);
     const glm::vec3 grab = anchor + N * (0.45f * L);
     ctx->MouseMoveToPos(WorldToWindow(grab));
@@ -788,8 +793,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // A click away from the handle falls through to picking: no value change,
     // preview still pending.
-    ctx->MouseMoveToPos(ImVec2(s_App->viewportPos.x + 30.0f,
-                               s_App->viewportPos.y + 30.0f));
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + 30.0f, s_App->viewportPos.y + 30.0f));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
@@ -818,13 +823,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!body.elementMap.edgeNames.empty());
     const ElementRef ref{body.createdBy,
                          body.elementMap.edgeNames.begin()->second};
-    ui::BeginPreviewFeature(
-        *s_App, std::make_unique<FilletFeature>("Fillet",
-                                                std::vector<ElementRef>{ref},
-                                                0.4));
+    ui::BeginPreviewFeature(*s_App,
+                            std::make_unique<FilletFeature>(
+                                "Fillet", std::vector<ElementRef>{ref}, 0.4));
     ctx->Yield(2);
-    auto* fil =
-        dynamic_cast<FilletFeature*>(ui::ResolvePendingFeature(*s_App));
+    auto* fil = dynamic_cast<FilletFeature*>(ui::ResolvePendingFeature(*s_App));
     IM_CHECK(fil != nullptr);
 
     // Recompute the handle's anchor/direction the way PreviewHandles does:
@@ -849,14 +852,12 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(bodyCenter + glm::vec3(0.0f, -2.0f, 0.0f));
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
-    s_App->camera->SetPosition(
-        bodyCenter + glm::vec3(0.0f, -2.0f, 0.0f) +
-        glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) *
-            (glm::length(bmax - bmin) * 2.5f));
+    s_App->camera->SetPosition(bodyCenter + glm::vec3(0.0f, -2.0f, 0.0f) +
+                               glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) *
+                                   (glm::length(bmax - bmin) * 2.5f));
     ctx->Yield(2);
 
-    const float L =
-        0.9f * std::max(0.13f * s_App->camera->GetDistance(), 0.1f);
+    const float L = 0.9f * std::max(0.13f * s_App->camera->GetDistance(), 0.1f);
     const double r0 = fil->radius;
     ctx->MouseMoveToPos(WorldToWindow(P + out * (0.45f * L)));
     ctx->MouseDown(ImGuiMouseButton_Left);
@@ -879,8 +880,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MenuClick("File/New");
     ctx->Yield();
     // Box + an open-line profile above its top (the test_rib.cpp setup).
-    Doc()->AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0), 10.0,
-                                                   10.0, 10.0));
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Base", glm::vec3(0), 10.0, 10.0, 10.0));
     auto sk = std::make_unique<SketchFeature>(
         "P", SketchPlane(glm::vec3(5, 5, 15), glm::vec3(0, 0, -1),
                          glm::vec3(1, 0, 0)));
@@ -928,8 +929,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield(2);
 
-    auto* th =
-        dynamic_cast<ThreadFeature*>(ui::ResolvePendingFeature(*s_App));
+    auto* th = dynamic_cast<ThreadFeature*>(ui::ResolvePendingFeature(*s_App));
     IM_CHECK(th != nullptr);
     IM_CHECK(!th->face.name.empty());
     IM_CHECK(th->GetError().empty()); // resolved + cylindrical + M8 fits r=4
@@ -942,7 +942,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   // Repro for the reported circular-pattern segfault (dogfooding backlog):
   // preview a pattern on a body, switch it to Circular, and work the axis/
   // count/angle widgets across frames — the crash lived in this flow.
-  t = IM_REGISTER_TEST(engine, "pattern", "circular_preview_param_edits_survive");
+  t = IM_REGISTER_TEST(engine, "pattern",
+                       "circular_preview_param_edits_survive");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
@@ -1000,8 +1001,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    Doc()->AddFeature(std::make_unique<BoxFeature>("Wide", glm::vec3(0), 10.0,
-                                                   4.0, 4.0));
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Wide", glm::vec3(0), 10.0, 4.0, 4.0));
     ctx->Yield();
     const double v0 = Doc()->GetBodies()[0].shape.Volume();
 
@@ -1112,7 +1113,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Select line1.a and line0.b, apply Coincident
     s_App->sketchEdit.selected = {{l1, 0}, {l0, 1}};
-    bool ok = ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Coincident, 0.0);
+    bool ok = ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Coincident, 0.0);
     IM_CHECK(ok);
     ctx->Yield();
 
@@ -1146,8 +1148,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
 
     s_App->sketchEdit.selected = {{l0, 0}};
-    IM_CHECK(ui::ApplySketchConstraint(*s_App,
-                                       sketch::ConstraintKind::Horizontal, 0.0));
+    IM_CHECK(ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Horizontal, 0.0));
     ctx->Yield();
 
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -1172,7 +1174,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield();
-    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0)); // Execute replaced it
+    sk = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(0)); // Execute replaced it
 
     // Pick the segment midpoint (far from both endpoints) → whole-line body.
     glm::vec2 midScreen =
@@ -1184,8 +1187,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Body selection enables + applies Horizontal.
     s_App->sketchEdit.selected = {pick.ref};
-    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Horizontal,
-                                       0.0));
+    IM_CHECK(ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Horizontal, 0.0));
     ctx->Yield();
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     const auto& hln = std::get<sketch::Line>(sk->entities[0]);
@@ -1208,7 +1211,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield();
-    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0)); // Execute replaced it
+    sk = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(0)); // Execute replaced it
 
     glm::vec2 endScreen =
         ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2.0f, 0.0f));
@@ -1233,6 +1237,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
     // Off the datum axes so they are not pick candidates at the endpoint.
     uint32_t l0 = sk->AddEntity(sketch::Line{{-2, 0.5f}, {2, 0.5f}});
+    sk->constraints.push_back(
+        {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 4.0});
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
@@ -1259,13 +1265,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ((int)s_App->sketchEdit.selected[0].which, 1);
     IM_CHECK(s_App->sketchDrag.mode == ui::SketchDragSession::Mode::Point);
 
-    // Same spot again: cycles to the line body.
+    // Same spot again: cycles to the dimensioned line body, which translates
+    // the sketch rather than trying to resize the driving dimension.
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
     IM_CHECK_EQ(s_App->sketchEdit.selected[0].entity, l0);
     IM_CHECK_EQ((int)s_App->sketchEdit.selected[0].which, 0);
-    IM_CHECK(s_App->sketchDrag.mode == ui::SketchDragSession::Mode::LineBody);
+    IM_CHECK(s_App->sketchDrag.mode ==
+             ui::SketchDragSession::Mode::SketchTranslate);
 
     // Once more wraps back to the endpoint.
     ctx->MouseClick(ImGuiMouseButton_Left);
@@ -1291,8 +1299,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
     uint32_t h = sk->AddEntity(sketch::Line{{-2, 0}, {2, 0}}); // horizontal
-    sk->AddEntity(sketch::Line{{-1, -1}, {-1, 1}});            // crosses at x=-1
-    sk->AddEntity(sketch::Line{{1, -1}, {1, 1}});              // crosses at x=1
+    sk->AddEntity(sketch::Line{{-1, -1}, {-1, 1}}); // crosses at x=-1
+    sk->AddEntity(sketch::Line{{1, -1}, {1, 1}});   // crosses at x=1
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
@@ -1488,7 +1496,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-    uint32_t l = sk->AddEntity(sketch::Line{{0, 0}, {4, 0.5f}}); // slightly tilted
+    uint32_t l =
+        sk->AddEntity(sketch::Line{{0, 0}, {4, 0.5f}}); // slightly tilted
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
@@ -1615,8 +1624,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     s_App->sketchEdit.tool = ui::SketchTool::Line;
     s_App->sketchEdit.autoConstrain = true;
 
-    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -0.5f));
-    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.5f, 0.5f)); // onto the point
+    glm::vec2 p0 =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -0.5f));
+    glm::vec2 p1 = ui::SketchUVToScreen(
+        *s_App, sk->plane, glm::vec2(1.5f, 0.5f)); // onto the point
     ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
@@ -1643,7 +1654,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-    uint32_t target = sk->AddEntity(sketch::Point{{1.5f, 1.8f}}); // shares X below
+    uint32_t target =
+        sk->AddEntity(sketch::Point{{1.5f, 1.8f}}); // shares X below
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
@@ -1654,10 +1666,12 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     s_App->sketchEdit.tool = ui::SketchTool::Line;
     s_App->sketchEdit.autoConstrain = true;
 
-    // Line from (-1.5,-1) to (1.5,-1): the end shares X (1.5) with the point but
-    // is well away in Y → vertical alignment, not coincident.
-    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -1.0f));
-    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.5f, -1.0f));
+    // Line from (-1.5,-1) to (1.5,-1): the end shares X (1.5) with the point
+    // but is well away in Y → vertical alignment, not coincident.
+    glm::vec2 p0 =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -1.0f));
+    glm::vec2 p1 =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.5f, -1.0f));
     ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
@@ -1690,21 +1704,21 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     ui::SketchEditState m;
     m.tool = ui::SketchTool::Mirror;
-    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 1);      // collecting geometry
+    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 1); // collecting geometry
     IM_CHECK_EQ(ui::SketchToolPrompt(m).stepCount, 2);
     m.mirrorAxisPhase = true;
-    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 2);      // axis-pick step
+    IM_CHECK_EQ(ui::SketchToolPrompt(m).step, 2); // axis-pick step
 
     ui::SketchEditState el;
     el.tool = ui::SketchTool::Ellipse;
     el.hasPendingPoint = true;
     el.hasPendingPoint2 = true;
-    IM_CHECK_EQ(ui::SketchToolPrompt(el).step, 3);     // third click
+    IM_CHECK_EQ(ui::SketchToolPrompt(el).step, 3); // third click
     IM_CHECK_EQ(ui::SketchToolPrompt(el).stepCount, 3);
 
     ui::SketchEditState sp;
     sp.tool = ui::SketchTool::Spline;
-    IM_CHECK(!ui::SketchToolPrompt(sp).text.empty());  // prompts before any pole
+    IM_CHECK(!ui::SketchToolPrompt(sp).text.empty()); // prompts before any pole
     sp.splinePoles = {{0, 0}, {1, 1}};
     IM_CHECK(ui::SketchToolPrompt(sp).text.find("finish") != std::string::npos);
   };
@@ -1719,7 +1733,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk != nullptr);
     nlohmann::json before = DocumentIO::FeatureToJson(*sk);
-    sk->AddEntity(sketch::Line{{0.5f, 0.6f}, {1.5f, 0.6f}}); // geometry to mirror
+    sk->AddEntity(
+        sketch::Line{{0.5f, 0.6f}, {1.5f, 0.6f}}); // geometry to mirror
     sk->AddEntity(sketch::Line{{0.0f, -1.0f}, {0.0f, 1.0f}}); // vertical axis
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
@@ -1742,7 +1757,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     s_App->sketchEdit.selected.clear();
 
     // Step 1: click the geometry line's midpoint to select it.
-    glm::vec2 g = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.0f, 0.6f));
+    glm::vec2 g =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.0f, 0.6f));
     ctx->MouseMoveToPos(ImVec2(g.x, g.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
@@ -1754,7 +1770,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->sketchEdit.mirrorAxisPhase);
 
     // Step 2: click the axis line → the mirror runs and adds a copy.
-    glm::vec2 ax = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, 0.0f));
+    glm::vec2 ax =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, 0.0f));
     ctx->MouseMoveToPos(ImVec2(ax.x, ax.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
@@ -1788,13 +1805,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Select the line, Enter, then click on the Y axis (x=0, well away from the
     // line) — no entity there, so the datum axis is picked.
-    glm::vec2 g = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.0f, 0.6f));
+    glm::vec2 g =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.0f, 0.6f));
     ctx->MouseMoveToPos(ImVec2(g.x, g.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     ctx->KeyPress(ImGuiKey_Enter);
     ctx->Yield();
-    glm::vec2 ax = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, -1.2f));
+    glm::vec2 ax =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.0f, -1.2f));
     ctx->MouseMoveToPos(ImVec2(ax.x, ax.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
@@ -1802,7 +1821,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     bool symToYAxis = false;
     for (const auto& c : sk->constraints)
-      if (c.kind == sketch::ConstraintKind::Symmetric && c.c.entity == sketch::kAxisY)
+      if (c.kind == sketch::ConstraintKind::Symmetric &&
+          c.c.entity == sketch::kAxisY)
         symToYAxis = true;
     IM_CHECK(symToYAxis); // mirrored across the Y axis
   };
@@ -1848,6 +1868,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     uint32_t l1 = sk->AddEntity(sketch::Line{{2, 0}, {2, 3}}); // l1.a ~ l0.b
     sk->constraints.push_back(
         {sketch::ConstraintKind::Coincident, {l0, 1}, {l1, 0}, 0.0});
+    sk->constraints.push_back(
+        {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 4.0});
     nlohmann::json after = DocumentIO::FeatureToJson(*sk);
     s_App->commands->Execute(
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
@@ -1865,11 +1887,17 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
 
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
-    const auto& moved = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(l0)]);
-    // Both endpoints translated up ~1; the neighbour's coincident end followed.
+    const auto& moved =
+        std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(l0)]);
+    // A driving dimension makes this a whole-sketch translation: the line
+    // keeps its length and both endpoints of its neighbour move by the same
+    // delta, not merely the coincident join.
     IM_CHECK(moved.a.y > 0.5f && moved.b.y > 0.5f);
-    const auto& nbr = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(l1)]);
+    IM_CHECK(std::abs(glm::length(moved.b - moved.a) - 4.0f) < 1e-2f);
+    const auto& nbr =
+        std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(l1)]);
     IM_CHECK(glm::length(nbr.a - moved.b) < 1e-2f);
+    IM_CHECK(nbr.b.y > 3.5f);
     IM_CHECK(s_App->commands->CanUndo()); // one undoable edit
   };
 
@@ -1923,11 +1951,24 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         target = mid;
       }
     }
+
     ctx->MouseMoveToPos(WorldToWindow(target));
     ctx->Yield();
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     IM_CHECK_EQ(fil->edges.size(), (size_t)1);
+
+    // Once the first edge is present, the radius handle is visible. A missed
+    // handle hit must report false so ViewportInput falls through to the armed
+    // blend picker instead of starting a radius drag.
+    const double radiusAfterFirstEdge = fil->radius;
+    const Ray missRay = s_App->faceSelector->ScreenToWorldRay(
+        30.0f, 30.0f, static_cast<int>(s_App->viewportSize.x),
+        static_cast<int>(s_App->viewportSize.y), *s_App->camera);
+    IM_CHECK(!ui::HandlePreviewHandleInput(*s_App, missRay, /*clicked=*/true,
+                                           /*down=*/true, /*released=*/false));
+    IM_CHECK(!s_App->handleDrag.active);
+    IM_CHECK(std::abs(fil->radius - radiusAfterFirstEdge) < 1e-9);
 
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
@@ -2144,14 +2185,14 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
     ctx->Yield();
-    auto sk = std::make_unique<SketchFeature>("Profiles",
-                                              SketchPlane(PlaneType::XY));
+    auto sk =
+        std::make_unique<SketchFeature>("Profiles", SketchPlane(PlaneType::XY));
     const uint32_t c1 = sk->AddEntity(sketch::Circle{{0, 0}, 1.0});
     sk->AddEntity(sketch::Circle{{5, 0}, 1.0});
     Doc()->AddFeature(std::move(sk));
     const uint64_t skId = Doc()->GetFeature(0)->GetId();
-    Doc()->AddFeature(std::make_unique<ExtrudeFeature>(
-        "Pad", skId, 2.0, ExtrudeMode::NewBody));
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>("Pad", skId, 2.0,
+                                                       ExtrudeMode::NewBody));
     Doc()->Regenerate();
     const uint64_t extId = Doc()->GetFeature(1)->GetId();
     ui::SelectFeature(*s_App, extId);
@@ -2171,8 +2212,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
-    auto* ext =
-        dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
+    auto* ext = dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
     IM_CHECK(ext != nullptr);
     IM_CHECK_EQ(ext->regions.size(), (size_t)1);
     // NOLINT: ext is re-fetched after every committed edit below.
@@ -2236,10 +2276,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(sk != nullptr);
     s_App->sketchEdit.tool = ui::SketchTool::Line;
     s_App->sketchEdit.autoConstrain = false;
-    glm::vec2 p0 = ui::SketchUVToScreen(*s_App, sk->plane,
-                                        glm::vec2(-1.5f, -0.5f));
-    glm::vec2 p1 = ui::SketchUVToScreen(*s_App, sk->plane,
-                                        glm::vec2(1.5f, -0.5f));
+    glm::vec2 p0 =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1.5f, -0.5f));
+    glm::vec2 p1 =
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1.5f, -0.5f));
     ctx->MouseMoveToPos(ImVec2(p0.x, p0.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->MouseMoveToPos(ImVec2(p1.x, p1.y));
@@ -2252,8 +2292,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Dimension the two endpoints; the seed pushes the label off the line.
     s_App->sketchEdit.tool = ui::SketchTool::Select;
     s_App->sketchEdit.selected = {{lineId, 0}, {lineId, 1}};
-    IM_CHECK(ui::ApplySketchConstraint(
-        *s_App, sketch::ConstraintKind::Distance, 3.0));
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       3.0));
     ctx->Yield();
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0)); // replaced
     IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
@@ -2262,8 +2302,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // The label pill sits at the dimension line's midpoint: mid + offset.
     const glm::vec2 labelUV = glm::vec2(0.0f, -0.5f) + seeded;
-    const glm::vec2 labelScr =
-        ui::SketchUVToScreen(*s_App, sk->plane, labelUV);
+    const glm::vec2 labelScr = ui::SketchUVToScreen(*s_App, sk->plane, labelUV);
     const auto lineBefore = std::get<sketch::Line>(sk->entities[0]);
     ctx->MouseMoveToPos(ImVec2(labelScr.x, labelScr.y));
     ctx->Yield(2); // dimHot latches for the canvas gate
@@ -2351,7 +2390,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     clickUV({0, 1}); // lands on lB → refine, not place
     IM_CHECK(s_App->sketchEdit.dimPlacing);
     IM_CHECK(!s_App->sketchEdit.dimPlacePair); // now fixed kind: label only
-    clickUV({-0.5f, 0}); // place the label
+    clickUV({-0.5f, 0});                       // place the label
     closeEditor(1);
     IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::DistancePL);
     IM_CHECK_EQ(sk->constraints[0].a.entity, lA);
@@ -2411,7 +2450,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_LE(std::abs(sk->constraints[4].value - 2.8), 1e-3);
 
     // No geometry moved (every dimension pinned its current value).
-    const auto& la = std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(lA)]);
+    const auto& la =
+        std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(lA)]);
     IM_CHECK_LE(std::abs(la.a.y + 1.0f), 1e-3f);
 
     // Esc with no accumulated targets disarms the tool (staged).
@@ -2530,7 +2570,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_LE(std::abs(sk->constraints[2].value - glm::length(pb - pa)),
                 0.03);
     const glm::vec2 off = sk->constraints[2].labelOffset;
-    IM_CHECK_LE(std::abs(glm::dot(off, d)), 0.02f); // ⟂ to the span
+    IM_CHECK_LE(std::abs(glm::dot(off, d)), 0.02f);  // ⟂ to the span
     IM_CHECK_LE(glm::length(off - n * 1.2f), 0.05f); // lands where clicked
 
     ctx->KeyPress(ImGuiKey_Escape); // disarm
@@ -2567,8 +2607,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // [0] a distance dim (pinned at the current length), [1] a coincident.
     s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
-    IM_CHECK(ui::ApplySketchConstraint(
-        *s_App, sketch::ConstraintKind::Distance, 3.0));
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       3.0));
     s_App->sketchEdit.selected = {{l0, 1}, {l1, 0}};
     IM_CHECK(ui::ApplySketchConstraint(
         *s_App, sketch::ConstraintKind::Coincident, 0.0));
@@ -2649,7 +2689,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->KeyPress(ImGuiKey_Delete);
     ctx->Yield();
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
-    IM_CHECK_EQ(sk->entities.size(), (size_t)1); // l0 gone
+    IM_CHECK_EQ(sk->entities.size(), (size_t)1);    // l0 gone
     IM_CHECK_EQ(sk->constraints.size(), (size_t)0); // its dim dropped with it
 
     ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
@@ -2697,16 +2737,16 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       IM_CHECK(ui::ApplySketchConstraint(*s_App, kind, v));
       sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     };
-    addCon({{p0, 0}}, CK::Fixed, 0.0);                       // [0]
-    addCon({{p0, 0}, {p1, 0}}, CK::DistanceX, 2.0);          // [1]
-    addCon({{l0, 0}}, CK::Fixed, 0.0);                       // [2]
-    addCon({{l0, 1}}, CK::Fixed, 0.0);                       // [3]
-    addCon({{pp, 0}, {l0, 0}}, CK::DistancePL, 0.7);         // [4]
-    addCon({{lA, 0}}, CK::Fixed, 0.0);                       // [5]
-    addCon({{lA, 1}}, CK::Fixed, 0.0);                       // [6]
-    addCon({{lB, 0}}, CK::Fixed, 0.0);                       // [7]
-    addCon({{lA, 0}, {lB, 0}}, CK::Angle, 0.46364761);       // [8]
-    addCon({{lD, 0}, {lD, 1}}, CK::Distance, 3.0);           // [9]
+    addCon({{p0, 0}}, CK::Fixed, 0.0);                 // [0]
+    addCon({{p0, 0}, {p1, 0}}, CK::DistanceX, 2.0);    // [1]
+    addCon({{l0, 0}}, CK::Fixed, 0.0);                 // [2]
+    addCon({{l0, 1}}, CK::Fixed, 0.0);                 // [3]
+    addCon({{pp, 0}, {l0, 0}}, CK::DistancePL, 0.7);   // [4]
+    addCon({{lA, 0}}, CK::Fixed, 0.0);                 // [5]
+    addCon({{lA, 1}}, CK::Fixed, 0.0);                 // [6]
+    addCon({{lB, 0}}, CK::Fixed, 0.0);                 // [7]
+    addCon({{lA, 0}, {lB, 0}}, CK::Angle, 0.46364761); // [8]
+    addCon({{lD, 0}, {lD, 1}}, CK::Distance, 3.0);     // [9]
     IM_CHECK_EQ(sk->constraints.size(), (size_t)10);
 
     auto editDim = [&](int idx, const char* text) {
@@ -2743,7 +2783,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     editDim(1, "-4/2");
     IM_CHECK_LE(std::abs(sk->constraints[1].value - (-2.0)), 1e-6);
     IM_CHECK(sk->constraints[1].valueExpr == "-4/2");
-    IM_CHECK_EQ(sk->constraints[1].a.entity, p0); // NOT swapped
+    IM_CHECK_EQ(sk->constraints[1].a.entity, p0);          // NOT swapped
     IM_CHECK_LE(std::abs(pointAt(p1).x - (-3.0f)), 1e-3f); // other side
 
     // DistancePL, literal "-0.7": the side pin flips — the point crosses to
@@ -2764,8 +2804,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_LE(std::abs(sk->constraints[8].value - 0.46364761), 1e-4);
     IM_CHECK_EQ(sk->constraints[8].a.entity, lB); // swapped
     {
-      const auto& lb = std::get<sketch::Line>(
-          sk->entities[sk->IndexOfEntity(lB)]);
+      const auto& lb =
+          std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(lB)]);
       const float dir = std::atan2(lb.b.y - lb.a.y, lb.b.x - lb.a.x);
       IM_CHECK_LE(std::abs(dir - (-0.46364761f)), 2e-2f); // below lA now
     }
@@ -2777,8 +2817,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ((int)sk->constraints[9].a.which, 0);
     IM_CHECK_EQ((int)sk->constraints[9].b.which, 1);
     {
-      const auto& ld = std::get<sketch::Line>(
-          sk->entities[sk->IndexOfEntity(lD)]);
+      const auto& ld =
+          std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(lD)]);
       IM_CHECK_LE(std::abs(glm::length(ld.b - ld.a) - 2.0f), 1e-3f);
     }
 
@@ -2787,10 +2827,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->KeyPress(ImGuiKey_C);
     ctx->Yield();
     {
-      glm::vec2 c = ui::SketchUVToScreen(*s_App, sk->plane,
-                                         glm::vec2(0.3f, -0.4f));
-      glm::vec2 r = ui::SketchUVToScreen(*s_App, sk->plane,
-                                         glm::vec2(0.6f, -0.4f));
+      glm::vec2 c =
+          ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.3f, -0.4f));
+      glm::vec2 r =
+          ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(0.6f, -0.4f));
       ctx->MouseMoveToPos(ImVec2(c.x, c.y));
       ctx->MouseClick(ImGuiMouseButton_Left);
       ctx->MouseMoveToPos(ImVec2(r.x, r.y));
@@ -2846,8 +2886,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
 
     s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
-    IM_CHECK(ui::ApplySketchConstraint(
-        *s_App, sketch::ConstraintKind::Distance, 3.0));
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       3.0));
     ctx->Yield();
     s_App->sketchEdit.editingDim = 0; // open the inline editor
     ctx->Yield(2);
@@ -2949,7 +2989,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(!s_App->sketchEdit.dimOnCreateOpen);
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Line);
-    IM_CHECK(s_App->sketchEdit.hasPendingPoint); // staged state untouched
+    IM_CHECK(s_App->sketchEdit.hasPendingPoint);    // staged state untouched
     IM_CHECK_EQ(sk->constraints.size(), (size_t)1); // no dimension created
     ctx->KeyChars("4");
     ctx->Yield(2);
@@ -3009,7 +3049,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(sk->constraints.size(), nCons);
 
     s_App->sketchEdit.autoConstrain = true; // restore the default
-    ctx->KeyPress(ImGuiKey_Escape); // leave sketch edit
+    ctx->KeyPress(ImGuiKey_Escape);         // leave sketch edit
     ctx->Yield();
   };
 
@@ -3060,20 +3100,19 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const uint32_t l0 = sketch::EntityId(sk->entities[0]);
     bool anchored = false;
     for (const auto& c : sk->constraints)
-      if (c.kind == sketch::ConstraintKind::Symmetric &&
-          c.c.entity == pointId)
+      if (c.kind == sketch::ConstraintKind::Symmetric && c.c.entity == pointId)
         anchored = true;
     IM_CHECK(anchored);
 
     // Pin the centre, dimension the width: symmetric growth about it.
     s_App->sketchEdit.tool = ui::SketchTool::Select;
     s_App->sketchEdit.selected = {{pointId, 0}};
-    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Fixed,
-                                       0.0));
+    IM_CHECK(
+        ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Fixed, 0.0));
     ctx->Yield();
     s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
-    IM_CHECK(ui::ApplySketchConstraint(*s_App,
-                                       sketch::ConstraintKind::Distance, 3.0));
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       3.0));
     ctx->Yield();
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     const auto& bottom = std::get<sketch::Line>(sk->entities[0]);
@@ -3190,8 +3229,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(s_App->measure.picked.size(), (size_t)2);
     IM_CHECK_EQ(s_App->measure.picked[1].occurrenceId, occ2);
     IM_CHECK(s_App->measure.hasDistanceLine);
-    const float gap =
-        glm::length(s_App->measure.distB - s_App->measure.distA);
+    const float gap = glm::length(s_App->measure.distB - s_App->measure.distA);
     IM_CHECK_LE(std::abs(gap - (10.0f - (max.x - min.x))), 1e-3f);
 
     // Same face, same occurrence → toggles OFF (identity includes the
@@ -3206,7 +3244,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   };
 
   // Wrap every registered test so ResetAppForTest() runs before it — this is
-  // what makes the suite order-independent. Done once here rather than per test.
+  // what makes the suite order-independent. Done once here rather than per
+  // test.
   ImVector<ImGuiTest*> allTests;
   ImGuiTestEngine_GetTestList(engine, &allTests);
   for (ImGuiTest* test : allTests) {

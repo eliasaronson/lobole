@@ -3,50 +3,50 @@
 
 #include "cad/CADMaterials.h"
 #include "cad/CADMeshConverter.h"
-#include "render/Camera.h"
-#include "render/IBLTextures.h"
-#include "render/RayTracingRenderer.h"
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
-#include "render/FieldRenderer.h"
-#include "render/MeshRenderer.h"
-#include "render/OutlineRenderer.h"
-#include "render/SketchRenderer.h"
 #include "core/AssemblySolve.h"
-#include "core/io/Autosaver.h"
+#include "core/Command.h"
+#include "core/ElementHistory.h" // topo::ResolveEdgeOnBody (blend edge picks)
+#include "core/Expression.h"
+#include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
-#include "core/io/GitVault.h"
-#include "core/features/BooleanFeature.h"
-#include "core/features/CurveFeature.h"
-#include "core/Command.h"
-#include "core/Expression.h"
-#include "core/features/DatumAxisFeature.h"
-#include "core/ElementHistory.h" // topo::ResolveEdgeOnBody (blend edge picks)
-#include "core/features/DatumPlaneFeature.h"
-#include "core/features/ExtrudeFeature.h"
-#include "core/Feature.h"
-#include "core/fem/FemTopo.h"
-#include "core/features/FilletFeature.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
+#include "core/features/BooleanFeature.h"
+#include "core/features/CurveFeature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/FilletFeature.h"
+#include "core/fem/FemTopo.h"
+#include "core/io/Autosaver.h"
+#include "core/io/GitVault.h"
 #include "core/io/Serialization.h"
+#include "render/Camera.h"
+#include "render/FieldRenderer.h"
+#include "render/IBLTextures.h"
+#include "render/MeshRenderer.h"
+#include "render/OutlineRenderer.h"
+#include "render/RayTracingRenderer.h"
+#include "render/SketchRenderer.h"
 
-#include <nlohmann/json.hpp>
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RevolveFeature.h"
-#include "core/features/SketchFeature.h"
 #include "core/features/RibFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/FeatureEditor.h" // PickSlot (thread face slot)
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
+#include <nlohmann/json.hpp>
 
 #include "thirdparty/stb_image.h" // stbi_info_from_memory (impl in IBL.cpp)
 
@@ -57,10 +57,10 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <cmath>
 #include <set>
 #include <unordered_map>
 
@@ -115,10 +115,10 @@ namespace {
 // independent, as their pre-U1 fields were); id 0 just removes the kind.
 void ReplaceKind(Selection& sel, SelectionItem::Kind kind, uint64_t id) {
   auto& items = sel.items;
-  items.erase(std::remove_if(
-                  items.begin(), items.end(),
-                  [&](const SelectionItem& it) { return it.kind == kind; }),
-              items.end());
+  items.erase(
+      std::remove_if(items.begin(), items.end(),
+                     [&](const SelectionItem& it) { return it.kind == kind; }),
+      items.end());
   if (id != 0)
     items.push_back({kind, id, {}});
 }
@@ -197,7 +197,9 @@ std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
   if (!show)
     return quads;
 
-  const float s = 3.0f; // half-extent
+  // A new workspace starts farther out, so keep the default references large
+  // enough to be immediately usable without making the origin glyph dominant.
+  const float s = kDefaultPlaneHalfExtent;
   struct PlaneDef {
     glm::vec3 u, v;
     glm::vec3 color;
@@ -220,8 +222,8 @@ std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane) {
   return quads;
 }
 
-void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color, float half,
-                     std::vector<LineVertex3D>& quads) {
+void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color,
+                     float half, std::vector<LineVertex3D>& quads) {
   glm::vec3 o = plane.GetOrigin();
   glm::vec3 u = plane.GetUAxis() * half;
   glm::vec3 v = plane.GetVAxis() * half;
@@ -231,8 +233,9 @@ void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color, float hal
   }
 }
 
-void AppendSketchGrid(const SketchPlane& plane, std::vector<LineVertex3D>& lines) {
-  const int half = 5;      // grid extends -5..5 in plane units
+void AppendSketchGrid(const SketchPlane& plane,
+                      std::vector<LineVertex3D>& lines) {
+  const int half = static_cast<int>(kSketchBackgroundHalfExtent);
   const float step = 1.0f; // one grid cell per unit
   const glm::vec3 minor(0.30f, 0.34f, 0.42f);
   const glm::vec3 major(0.45f, 0.52f, 0.65f);
@@ -283,9 +286,8 @@ void AppendCogMarker(const AppState& state, std::vector<LineVertex3D>& lines) {
     return;
   // A small screen-stable 3-axis cross at the center of mass. Drawn in the
   // no-depth gizmo channel so it stays visible inside solid geometry.
-  const float L = state.camera
-                      ? std::max(0.05f * state.camera->GetDistance(), 0.1f)
-                      : 1.0f;
+  const float L =
+      state.camera ? std::max(0.05f * state.camera->GetDistance(), 0.1f) : 1.0f;
   const glm::vec3 c = state.cogWorld;
   const glm::vec3 col(0.98f, 0.80f, 0.20f); // amber, distinct from the axes
   const glm::vec3 ax[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
@@ -294,7 +296,6 @@ void AppendCogMarker(const AppState& state, std::vector<LineVertex3D>& lines) {
     lines.push_back(LineVertex(c + a * L, col));
   }
 }
-
 
 namespace {
 // Placement offset so successive primitives don't overlap.
@@ -311,23 +312,22 @@ std::string NextName(const AppState& state, const char* base) {
 } // namespace
 
 void CreateBox(AppState& state) {
-  BeginPreviewFeature(state, std::make_unique<BoxFeature>(
-                                 NextName(state, "Box"), NextSpot(state), 2.0,
-                                 2.0, 2.0));
+  BeginPreviewFeature(
+      state, std::make_unique<BoxFeature>(NextName(state, "Box"),
+                                          NextSpot(state), 2.0, 2.0, 2.0));
 }
 
 void CreateSphere(AppState& state) {
-  BeginPreviewFeature(state, std::make_unique<SphereFeature>(
-                                 NextName(state, "Sphere"), NextSpot(state),
-                                 1.0));
+  BeginPreviewFeature(state,
+                      std::make_unique<SphereFeature>(NextName(state, "Sphere"),
+                                                      NextSpot(state), 1.0));
 }
 
 void CreateCylinder(AppState& state) {
-  BeginPreviewFeature(
-      state, std::make_unique<CylinderFeature>(
-                 NextName(state, "Cylinder"),
-                 NextSpot(state) + glm::vec3(0.0f, -1.0f, 0.0f),
-                 glm::vec3(0.0f, 1.0f, 0.0f), 0.8, 2.0));
+  BeginPreviewFeature(state, std::make_unique<CylinderFeature>(
+                                 NextName(state, "Cylinder"),
+                                 NextSpot(state) + glm::vec3(0.0f, -1.0f, 0.0f),
+                                 glm::vec3(0.0f, 1.0f, 0.0f), 0.8, 2.0));
 }
 
 void CreateDatumPlane(AppState& state) {
@@ -395,17 +395,17 @@ void CreateSweep(AppState& state) {
   // Profile defaults to the latest sketch, path to the latest curve/sketch;
   // both are editable in the properties panel via combos.
   const uint64_t sketch = LastSketchId(state);
-  BeginPreviewFeature(state, std::make_unique<SweepFeature>(
-                                 NextName(state, "Sweep"), sketch,
-                                 LastPathId(state)));
+  BeginPreviewFeature(
+      state, std::make_unique<SweepFeature>(NextName(state, "Sweep"), sketch,
+                                            LastPathId(state)));
 }
 
 void CreateLoft(AppState& state) {
   // Start empty; the editor's "Add section" combo collects 2+ profiles (and an
   // optional path + guide for a guided loft).
-  BeginPreviewFeature(state, std::make_unique<LoftFeature>(
-                                 NextName(state, "Loft"),
-                                 std::vector<uint64_t>{}));
+  BeginPreviewFeature(state,
+                      std::make_unique<LoftFeature>(NextName(state, "Loft"),
+                                                    std::vector<uint64_t>{}));
 }
 
 namespace {
@@ -444,8 +444,8 @@ bool HasCurveOrSketch(const Document& doc) {
   return false;
 }
 
-std::vector<std::pair<uint64_t, std::string>> BodyProducers(const Document& doc,
-                                                            size_t beforeIndex) {
+std::vector<std::pair<uint64_t, std::string>>
+BodyProducers(const Document& doc, size_t beforeIndex) {
   std::vector<std::pair<uint64_t, std::string>> out;
   const auto& features = doc.GetFeatures();
   for (size_t i = 0; i < beforeIndex && i < features.size(); i++) {
@@ -460,7 +460,8 @@ void CreateBoolean(AppState& state) {
   if (!state.document) {
     return;
   }
-  auto producers = BodyProducers(*state.document, state.document->FeatureCount());
+  auto producers =
+      BodyProducers(*state.document, state.document->FeatureCount());
   if (producers.size() < 2) {
     return; // the menu gates this, but guard anyway
   }
@@ -468,22 +469,22 @@ void CreateBoolean(AppState& state) {
   // as "the earlier body minus the newer one".
   const uint64_t tool = producers.back().first;
   const uint64_t target = producers[producers.size() - 2].first;
-  BeginPreviewFeature(state, std::make_unique<BooleanFeature>(
-                                 NextName(state, "Boolean"), target, tool,
-                                 BooleanOp::Union));
+  BeginPreviewFeature(
+      state, std::make_unique<BooleanFeature>(NextName(state, "Boolean"),
+                                              target, tool, BooleanOp::Union));
 }
 
 void CreateMirror(AppState& state) {
   if (!state.document) {
     return;
   }
-  auto producers = BodyProducers(*state.document, state.document->FeatureCount());
+  auto producers =
+      BodyProducers(*state.document, state.document->FeatureCount());
   if (producers.empty()) {
     return;
   }
-  auto mir = std::make_unique<PatternFeature>(NextName(state, "Mirror"),
-                                              PatternKind::Mirror,
-                                              producers.back().first);
+  auto mir = std::make_unique<PatternFeature>(
+      NextName(state, "Mirror"), PatternKind::Mirror, producers.back().first);
   mir->basePlane = PlaneType::YZ; // reflect across x by default
   BeginPreviewFeature(state, std::move(mir));
 }
@@ -492,13 +493,13 @@ void CreatePattern(AppState& state) {
   if (!state.document) {
     return;
   }
-  auto producers = BodyProducers(*state.document, state.document->FeatureCount());
+  auto producers =
+      BodyProducers(*state.document, state.document->FeatureCount());
   if (producers.empty()) {
     return;
   }
-  auto pat = std::make_unique<PatternFeature>(NextName(state, "Pattern"),
-                                              PatternKind::Linear,
-                                              producers.back().first);
+  auto pat = std::make_unique<PatternFeature>(
+      NextName(state, "Pattern"), PatternKind::Linear, producers.back().first);
   pat->axis.kind = AxisRef::Kind::X;
   pat->count = 3;
   // Default spacing clears the source body along the axis — a fixed constant
@@ -525,9 +526,8 @@ void CreateEdgeBlend(AppState& state, EdgeBlendOp op) {
   }
   const char* base = op == EdgeBlendOp::Chamfer ? "Chamfer" : "Fillet";
   const uint64_t id = BeginPreviewFeature(
-      state, std::make_unique<FilletFeature>(NextName(state, base),
-                                             std::vector<ElementRef>{}, 0.5,
-                                             op));
+      state, std::make_unique<FilletFeature>(
+                 NextName(state, base), std::vector<ElementRef>{}, 0.5, op));
   state.edgePick = {};
   state.edgePick.filletId = id;
 }
@@ -544,9 +544,9 @@ void CreateChamfer(AppState& state) {
 void CreateThread(AppState& state) {
   if (!state.document || state.document->GetBodies().empty())
     return;
-  BeginPreviewFeature(state,
-                      std::make_unique<ThreadFeature>(
-                          NextName(state, "Thread"), ElementRef{}, "M8", 1.25));
+  BeginPreviewFeature(
+      state, std::make_unique<ThreadFeature>(NextName(state, "Thread"),
+                                             ElementRef{}, "M8", 1.25));
   // Arm the face slot right away so the first viewport click fills it.
   state.slotPick = {state.pendingFeatureId,
                     std::to_underlying(PickSlot::ThreadFace),
@@ -615,9 +615,9 @@ void CreateRib(AppState& state) {
     profile = openSketch(state.document->GetFeature(i - 1));
   if (profile == nullptr)
     return; // no open profile anywhere: nothing to rib (menu gates this)
-  BeginPreviewFeature(state, std::make_unique<RibFeature>(
-                                 NextName(state, "Rib"), profile->GetId(),
-                                 1.0));
+  BeginPreviewFeature(state,
+                      std::make_unique<RibFeature>(NextName(state, "Rib"),
+                                                   profile->GetId(), 1.0));
 }
 
 void StartNewSketch(AppState& state) {
@@ -641,10 +641,9 @@ void AppendDatumPlaneQuads(AppState& state, std::vector<LineVertex3D>& quads) {
     auto* dp = dynamic_cast<DatumPlaneFeature*>(state.document->GetFeature(i));
     if (!dp)
       continue;
-    const bool emphasized =
-        dp->GetId() == state.sketchEdit.hoveredDatumId ||
-        dp->GetId() == state.pendingFeatureId ||
-        dp->GetId() == SelectedFeatureId(state);
+    const bool emphasized = dp->GetId() == state.sketchEdit.hoveredDatumId ||
+                            dp->GetId() == state.pendingFeatureId ||
+                            dp->GetId() == SelectedFeatureId(state);
     AppendPlaneQuad(dp->OutputPlane(), kDatumTint * (emphasized ? 1.8f : 1.0f),
                     3.0f, quads);
   }
@@ -699,8 +698,8 @@ void DrawDatumLabels(AppState& state) {
     Feature* f = state.document->GetFeature(i);
     if (auto* dp = dynamic_cast<DatumPlaneFeature*>(f)) {
       // Label near a corner of the 3-unit quad.
-      glm::vec2 s = SketchUVToScreen(state, dp->OutputPlane(),
-                                     glm::vec2(2.6f, 2.6f));
+      glm::vec2 s =
+          SketchUVToScreen(state, dp->OutputPlane(), glm::vec2(2.6f, 2.6f));
       dl->AddText(ImVec2(s.x, s.y), col, dp->GetName().c_str());
     } else if (auto* da = dynamic_cast<DatumAxisFeature*>(f)) {
       const glm::vec3 end = da->Origin() + da->Direction() * 3.0f;
@@ -737,10 +736,9 @@ void DrawElementNameOverlay(AppState& state) {
 
   // Resolve the mesh back to its Body, then that face's element name.
   const auto& meshes = state.documentMeshes;
-  const auto it = std::find_if(meshes.begin(), meshes.end(),
-                               [&](const DocumentRenderMesh& m) {
-                                 return m.meshId == face->meshId;
-                               });
+  const auto it = std::find_if(
+      meshes.begin(), meshes.end(),
+      [&](const DocumentRenderMesh& m) { return m.meshId == face->meshId; });
   if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
     return;
   const Body& body = state.document->GetBodies()[it->bodyIndex];
@@ -763,8 +761,7 @@ void DrawElementNameOverlay(AppState& state) {
 bool EffectivePlaneVisibility(const AppState& state) {
   if (state.sketchEdit.pickingPlane || state.sketchEdit.IsEditing())
     return true;
-  const bool hasBodies =
-      state.document && !state.document->GetBodies().empty();
+  const bool hasBodies = state.document && !state.document->GetBodies().empty();
   return state.showPlanes && !hasBodies; // auto-hide once the part has geometry
 }
 
@@ -842,7 +839,7 @@ void ResetActiveTabUiState(AppState& state) {
   // NOTE: drawingRenders is NOT cleared here — it is stashed/restored per slot
   // (StashActive/ActivateSlot) so a drawing keeps its projected geometry across
   // tab switches and only an explicit update re-projects.
-  state.dimTool = AppState::DimTool{};  // transient dimension-pick state
+  state.dimTool = AppState::DimTool{}; // transient dimension-pick state
   state.dimDrag = 0;
   // Any tab change exits simulation mode (results themselves live on the
   // Document and survive; only the mode/display state resets).
@@ -858,7 +855,8 @@ void EnsureParts(AppState& state, const std::string& firstName) {
     slot.name = firstName;
     slot.kind = DocKind::Part;
     slot.lastSavedVersion = state.lastSavedVersion;
-    state.parts.push_back(std::move(slot)); // active: doc/commands stay in AppState
+    state.parts.push_back(
+        std::move(slot)); // active: doc/commands stay in AppState
     state.activePart = 0;
   }
 }
@@ -929,7 +927,8 @@ size_t AddDrawing(AppState& state, const std::string& name) {
 }
 
 void SnapshotDrawing(AppState& state) {
-  if (!state.drawing) return;
+  if (!state.drawing)
+    return;
   state.drawingHistory.undo.push_back(*state.drawing); // full-state copy
   state.drawingHistory.undoStamps.push_back(NextActionStamp());
   state.drawingHistory.redo.clear();
@@ -937,7 +936,8 @@ void SnapshotDrawing(AppState& state) {
 }
 
 bool UndoDrawing(AppState& state) {
-  if (!state.drawing || state.drawingHistory.undo.empty()) return false;
+  if (!state.drawing || state.drawingHistory.undo.empty())
+    return false;
   state.drawingHistory.redo.push_back(*state.drawing);
   state.drawingHistory.redoStamps.push_back(
       state.drawingHistory.undoStamps.back());
@@ -949,7 +949,8 @@ bool UndoDrawing(AppState& state) {
 }
 
 bool RedoDrawing(AppState& state) {
-  if (!state.drawing || state.drawingHistory.redo.empty()) return false;
+  if (!state.drawing || state.drawingHistory.redo.empty())
+    return false;
   state.drawingHistory.undo.push_back(*state.drawing);
   state.drawingHistory.undoStamps.push_back(
       state.drawingHistory.redoStamps.back());
@@ -962,7 +963,8 @@ bool RedoDrawing(AppState& state) {
 
 uint64_t PartIdByName(const AppState& state, const std::string& name) {
   for (const PartSlot& slot : state.parts)
-    if (slot.kind == DocKind::Part && slot.name == name) return slot.id;
+    if (slot.kind == DocKind::Part && slot.name == name)
+      return slot.id;
   return 0;
 }
 
@@ -990,15 +992,12 @@ void SetActivePart(AppState& state, size_t index) {
 
 std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId) {
   for (size_t i = 0; i < state.parts.size(); i++)
-    if (state.parts[i].id == slotId) return i;
+    if (state.parts[i].id == slotId)
+      return i;
   return std::nullopt;
 }
 
 // ---- Simulation mode (FEM) ------------------------------------------------
-
-
-
-
 
 bool DeletePart(AppState& state, size_t index) {
   EnsureParts(state);
@@ -1026,8 +1025,9 @@ Document* SlotDoc(AppState& state, size_t i) {
 }
 // An assembly slot's document, active or stashed. Null for a part slot.
 AssemblyDocument* SlotAssembly(AppState& state, size_t i) {
-  return static_cast<int>(i) == state.activePart ? state.assembly.get()
-                                                 : state.parts[i].assembly.get();
+  return static_cast<int>(i) == state.activePart
+             ? state.assembly.get()
+             : state.parts[i].assembly.get();
 }
 // A drawing slot's document, active or stashed. Null for a part/assembly slot.
 DrawingDocument* SlotDrawing(AppState& state, size_t i) {
@@ -1057,7 +1057,8 @@ void SyncProjectScope(AppState& state) {
 const Parameter* FindProjectParameter(const AppState& state,
                                       const std::string& name) {
   for (const Parameter& p : state.projectParameters)
-    if (p.name == name) return &p;
+    if (p.name == name)
+      return &p;
   return nullptr;
 }
 
@@ -1065,7 +1066,8 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
                                               const std::string& name) {
   const auto& engine = ExpressionEngine::Default();
   const auto references = [&](const std::string& text) {
-    if (text.empty()) return false;
+    if (text.empty())
+      return false;
     const auto compiled = engine.Compile(text);
     return compiled.has_value() && (*compiled)->Dependencies().contains(name);
   };
@@ -1078,7 +1080,8 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
   // references belong to the local one and don't block the project delete.
   for (size_t i = 0; i < state.parts.size(); i++) {
     Document* d = SlotDoc(state, i);
-    if (d == nullptr || d->FindParameter(name) != nullptr) continue;
+    if (d == nullptr || d->FindParameter(name) != nullptr)
+      continue;
     for (const std::string& r : d->FindParameterReferences(name))
       refs.push_back(state.parts[i].name + ": " + r);
   }
@@ -1115,7 +1118,8 @@ void PushProjectVarUndo(AppState& state, std::vector<Parameter> preEdit,
 bool SetProjectVariable(AppState& state, const std::string& name,
                         const std::string& expression,
                         const std::string& comment) {
-  if (!ExpressionEngine::Default().IsValidParameterName(name)) return false;
+  if (!ExpressionEngine::Default().IsValidParameterName(name))
+    return false;
   PushProjectVarUndo(state, state.projectParameters, {}, {});
   const auto it = std::find_if(
       state.projectParameters.begin(), state.projectParameters.end(),
@@ -1135,10 +1139,12 @@ bool RemoveProjectVariable(AppState& state, const std::string& name,
   const auto it = std::find_if(
       state.projectParameters.begin(), state.projectParameters.end(),
       [&](const Parameter& p) { return p.name == name; });
-  if (it == state.projectParameters.end()) return false;
+  if (it == state.projectParameters.end())
+    return false;
   std::vector<std::string> refs = ProjectVarReferences(state, name);
   if (!refs.empty()) {
-    if (outRefs != nullptr) *outRefs = std::move(refs);
+    if (outRefs != nullptr)
+      *outRefs = std::move(refs);
     return false;
   }
   PushProjectVarUndo(state, state.projectParameters, {}, {});
@@ -1161,7 +1167,8 @@ bool RenameProjectVariable(AppState& state, const std::string& oldName,
   PushProjectVarUndo(state, state.projectParameters, newName, oldName);
   const auto& engine = ExpressionEngine::Default();
   for (Parameter& p : state.projectParameters) {
-    if (p.name == oldName) p.name = newName;
+    if (p.name == oldName)
+      p.name = newName;
     p.expression = engine.RenameIdentifier(p.expression, oldName, newName);
   }
   for (size_t i = 0; i < state.parts.size(); i++)
@@ -1172,7 +1179,8 @@ bool RenameProjectVariable(AppState& state, const std::string& oldName,
 }
 
 bool UndoProjectVars(AppState& state) {
-  if (state.projectVarHistory.undo.empty()) return false;
+  if (state.projectVarHistory.undo.empty())
+    return false;
   ProjectVarSnapshot entry = std::move(state.projectVarHistory.undo.back());
   state.projectVarHistory.undo.pop_back();
   // Build the redo entry from the CURRENT (post-edit) state before restoring;
@@ -1188,7 +1196,8 @@ bool UndoProjectVars(AppState& state) {
 }
 
 bool RedoProjectVars(AppState& state) {
-  if (state.projectVarHistory.redo.empty()) return false;
+  if (state.projectVarHistory.redo.empty())
+    return false;
   ProjectVarSnapshot entry = std::move(state.projectVarHistory.redo.back());
   state.projectVarHistory.redo.pop_back();
   ProjectVarSnapshot undoEntry;
@@ -1273,8 +1282,10 @@ void GlobalRedo(AppState& state) {
                       ? UINT64_MAX
                       : state.projectVarHistory.redo.back().stamp;
   uint64_t tab = ActiveTabTopRedoStamp(state);
-  if (tab == 0) tab = UINT64_MAX;
-  if (proj == UINT64_MAX && tab == UINT64_MAX) return;
+  if (tab == 0)
+    tab = UINT64_MAX;
+  if (proj == UINT64_MAX && tab == UINT64_MAX)
+    return;
   // Redo the action undone most recently: the SMALLER redo-top stamp wins.
   if (proj < tab)
     RedoProjectVars(state);
@@ -1282,8 +1293,7 @@ void GlobalRedo(AppState& state) {
     ActiveTabRedo(state);
 }
 
-bool SaveProject(AppState& state, const std::string& path,
-                 std::string* error) {
+bool SaveProject(AppState& state, const std::string& path, std::string* error) {
   namespace fs = std::filesystem;
   EnsureParts(state);
   // A single part keeps the flat .dsgn form (backward compatible). A lone
@@ -1300,7 +1310,8 @@ bool SaveProject(AppState& state, const std::string& path,
     state.document->SetParametersRaw(state.projectParameters);
     auto r = DocumentIO::Save(*state.document, path);
     state.document->SetParametersRaw(std::move(localBackup));
-    if (!r && error) *error = r.error();
+    if (!r && error)
+      *error = r.error();
     return r.has_value();
   }
   // Multi-document: project.json (v2) + parts/<name>/ and assemblies/<name>/.
@@ -1317,36 +1328,37 @@ bool SaveProject(AppState& state, const std::string& path,
       index["parameters"] = nlohmann::json::array();
       for (const Parameter& pv : state.projectParameters) {
         nlohmann::json pj = {{"name", pv.name}, {"expression", pv.expression}};
-        if (!pv.comment.empty()) pj["comment"] = pv.comment;
+        if (!pv.comment.empty())
+          pj["comment"] = pv.comment;
         index["parameters"].push_back(std::move(pj));
       }
     }
     index["documents"] = nlohmann::json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
       const PartSlot& slot = state.parts[i];
-      const char* sub = slot.kind == DocKind::Assembly ? "assemblies/"
+      const char* sub = slot.kind == DocKind::Assembly  ? "assemblies/"
                         : slot.kind == DocKind::Drawing ? "drawings/"
                                                         : "parts/";
-      const char* type = slot.kind == DocKind::Assembly ? "assembly"
+      const char* type = slot.kind == DocKind::Assembly  ? "assembly"
                          : slot.kind == DocKind::Drawing ? "drawing"
                                                          : "part";
       const fs::path docDir = dir / sub / slot.name;
       fs::create_directories(docDir);
       std::expected<void, std::string> r;
       switch (slot.kind) {
-        case DocKind::Assembly:
-          r = DocumentIO::SaveAssembly(*SlotAssembly(state, i),
-                                       docDir.string());
-          break;
-        case DocKind::Drawing:
-          r = DocumentIO::SaveDrawing(*SlotDrawing(state, i), docDir.string());
-          break;
-        case DocKind::Part:
-          r = DocumentIO::Save(*SlotDoc(state, i), docDir.string());
-          break;
+      case DocKind::Assembly:
+        r = DocumentIO::SaveAssembly(*SlotAssembly(state, i), docDir.string());
+        break;
+      case DocKind::Drawing:
+        r = DocumentIO::SaveDrawing(*SlotDrawing(state, i), docDir.string());
+        break;
+      case DocKind::Part:
+        r = DocumentIO::Save(*SlotDoc(state, i), docDir.string());
+        break;
       }
       if (!r) {
-        if (error) *error = r.error();
+        if (error)
+          *error = r.error();
         return false;
       }
       nlohmann::json entry = {{"id", slot.id},
@@ -1359,26 +1371,28 @@ bool SaveProject(AppState& state, const std::string& path,
     }
     std::ofstream out(dir / "project.json");
     if (!out) {
-      if (error) *error = "cannot write project.json";
+      if (error)
+        *error = "cannot write project.json";
       return false;
     }
     out << index.dump(2) << "\n";
     return true;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     return false;
   }
 }
 
-bool OpenProject(AppState& state, const std::string& path,
-                 std::string* error) {
+bool OpenProject(AppState& state, const std::string& path, std::string* error) {
   namespace fs = std::filesystem;
   const fs::path projFile = fs::path(path) / "project.json";
   if (!fs::exists(projFile)) {
     // Not a multi-document project: load as a single part.
     auto loaded = DocumentIO::Load(path);
     if (!loaded) {
-      if (error) *error = loaded.error();
+      if (error)
+        *error = loaded.error();
       return false;
     }
     ReplaceDocument(state, std::move(*loaded));
@@ -1398,8 +1412,8 @@ bool OpenProject(AppState& state, const std::string& path,
     } else {
       docs = nlohmann::json::array();
       for (const auto& p : index.at("parts"))
-        docs.push_back({{"name", p.at("name")}, {"dir", p.at("dir")},
-                        {"type", "part"}});
+        docs.push_back(
+            {{"name", p.at("name")}, {"dir", p.at("dir")}, {"type", "part"}});
     }
 
     // Load every document into its slot; AppState holds nothing live yet.
@@ -1421,17 +1435,29 @@ bool OpenProject(AppState& state, const std::string& path,
       if (type == "assembly") {
         slot.kind = DocKind::Assembly;
         auto r = DocumentIO::LoadAssembly(dir);
-        if (!r) { if (error) *error = r.error(); return false; }
+        if (!r) {
+          if (error)
+            *error = r.error();
+          return false;
+        }
         slot.assembly = std::move(*r);
       } else if (type == "drawing") {
         slot.kind = DocKind::Drawing;
         auto r = DocumentIO::LoadDrawing(dir);
-        if (!r) { if (error) *error = r.error(); return false; }
+        if (!r) {
+          if (error)
+            *error = r.error();
+          return false;
+        }
         slot.drawing = std::move(*r);
       } else {
         slot.kind = DocKind::Part;
         auto r = DocumentIO::Load(dir);
-        if (!r) { if (error) *error = r.error(); return false; }
+        if (!r) {
+          if (error)
+            *error = r.error();
+          return false;
+        }
         slot.doc = std::move(*r);
         slot.commands = std::make_unique<CommandStack>();
       }
@@ -1441,7 +1467,8 @@ bool OpenProject(AppState& state, const std::string& path,
     state.nextPartId = maxId + 1;
 
     size_t wantActive = static_cast<size_t>(index.value("active", 0));
-    if (wantActive >= state.parts.size()) wantActive = 0;
+    if (wantActive >= state.parts.size())
+      wantActive = 0;
     ActivateSlot(state, wantActive);
     ResetActiveTabUiState(state);
 
@@ -1452,21 +1479,25 @@ bool OpenProject(AppState& state, const std::string& path,
     state.projectParameters.clear();
     state.projectVarHistory = {};
     for (const auto& pj : index.value("parameters", nlohmann::json::array()))
-      state.projectParameters.push_back(
-          {pj.at("name").get<std::string>(),
-           pj.at("expression").get<std::string>(),
-           pj.value("comment", std::string{}), 0.0, {}});
+      state.projectParameters.push_back({pj.at("name").get<std::string>(),
+                                         pj.at("expression").get<std::string>(),
+                                         pj.value("comment", std::string{}),
+                                         0.0,
+                                         {}});
     SyncProjectScope(state);
     // A4: an assembly active on open solves immediately (no stamps yet), so
     // mates re-solve on load — the format's stated contract.
     if (state.assembly && AssemblyPartsStale(state))
       SolveActiveAssembly(state);
     if (state.drawing && state.drawing->ViewCount() > 0)
-      UpdateDrawingRenders(state);  // re-project on first view of an opened drawing
-    if (state.document) FitCameraToDocument(state);
+      UpdateDrawingRenders(
+          state); // re-project on first view of an opened drawing
+    if (state.document)
+      FitCameraToDocument(state);
     return true;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     return false;
   }
 }
@@ -1475,9 +1506,12 @@ namespace {
 // The version a slot's dirty check compares against: whichever document kind
 // the slot holds. 0 for an empty slot.
 uint64_t SlotVersion(AppState& state, size_t i) {
-  if (Document* d = SlotDoc(state, i)) return d->Version();
-  if (AssemblyDocument* a = SlotAssembly(state, i)) return a->Version();
-  if (DrawingDocument* dr = SlotDrawing(state, i)) return dr->Version();
+  if (Document* d = SlotDoc(state, i))
+    return d->Version();
+  if (AssemblyDocument* a = SlotAssembly(state, i))
+    return a->Version();
+  if (DrawingDocument* dr = SlotDrawing(state, i))
+    return dr->Version();
   return 0;
 }
 // SaveProject writes every slot, so a clean save stamps every slot — the
@@ -1552,7 +1586,8 @@ void MarkProjectRecovered(AppState& state, const std::string& path) {
 
 // An occurrence's placement as a model matrix (translate ∘ rotate).
 glm::mat4 OccurrenceMatrix(const Occurrence& o) {
-  return glm::translate(glm::mat4(1.0f), o.position) * glm::mat4_cast(o.orientation);
+  return glm::translate(glm::mat4(1.0f), o.position) *
+         glm::mat4_cast(o.orientation);
 }
 
 // Exploded-view display (A4): the occurrence's factor-scaled world offset in
@@ -1566,7 +1601,8 @@ glm::vec3 ExplodeOffset(const AppState& state, uint64_t occId) {
   if (!v)
     return glm::vec3(0.0f);
   for (const ExplodeStep& s : v->steps)
-    if (s.occurrenceId == occId) return s.offset * state.explodeFactor;
+    if (s.occurrenceId == occId)
+      return s.offset * state.explodeFactor;
   return glm::vec3(0.0f);
 }
 
@@ -1686,49 +1722,49 @@ void FitCameraToSelection(AppState& state) {
   };
   for (const SelectionItem& it : state.selection.items) {
     switch (it.kind) {
-      case SelectionItem::Kind::Face:
-      case SelectionItem::Kind::Edge: {
-        // Assembly picks carry their occurrence in `id` (0 = part context):
-        // resolve against the part's bodies, place by the display transform.
-        const std::vector<Body>* bodies = nullptr;
-        glm::mat4 xf(1.0f);
-        if (it.id != 0 && state.assembly) {
-          const Occurrence* occ = state.assembly->FindById(it.id);
-          Document* part = occ ? PartDocById(state, occ->partId) : nullptr;
-          if (!part)
-            break;
-          bodies = &part->GetBodies();
-          xf = DisplayMatrix(state, *occ);
-        } else if (state.document) {
-          bodies = &state.document->GetBodies();
-        }
-        if (bodies == nullptr)
-          break;
-        if (const auto b = Measure::ElementBounds(*bodies, it.element))
-          addBox(b->min, b->max, xf);
-        break;
-      }
-      case SelectionItem::Kind::Body:
-      case SelectionItem::Kind::Feature:
-        addBodiesOf(it.id);
-        break;
-      case SelectionItem::Kind::Occurrence: {
-        if (!state.assembly)
-          break;
+    case SelectionItem::Kind::Face:
+    case SelectionItem::Kind::Edge: {
+      // Assembly picks carry their occurrence in `id` (0 = part context):
+      // resolve against the part's bodies, place by the display transform.
+      const std::vector<Body>* bodies = nullptr;
+      glm::mat4 xf(1.0f);
+      if (it.id != 0 && state.assembly) {
         const Occurrence* occ = state.assembly->FindById(it.id);
         Document* part = occ ? PartDocById(state, occ->partId) : nullptr;
         if (!part)
           break;
-        const glm::mat4 xf = DisplayMatrix(state, *occ);
-        for (const auto& body : part->GetBodies()) {
-          glm::vec3 bmin, bmax;
-          body.shape.GetBoundingBox(bmin, bmax);
-          addBox(bmin, bmax, xf);
-        }
-        break;
+        bodies = &part->GetBodies();
+        xf = DisplayMatrix(state, *occ);
+      } else if (state.document) {
+        bodies = &state.document->GetBodies();
       }
-      default:
-        break; // mates/regions have no zoomable extent
+      if (bodies == nullptr)
+        break;
+      if (const auto b = Measure::ElementBounds(*bodies, it.element))
+        addBox(b->min, b->max, xf);
+      break;
+    }
+    case SelectionItem::Kind::Body:
+    case SelectionItem::Kind::Feature:
+      addBodiesOf(it.id);
+      break;
+    case SelectionItem::Kind::Occurrence: {
+      if (!state.assembly)
+        break;
+      const Occurrence* occ = state.assembly->FindById(it.id);
+      Document* part = occ ? PartDocById(state, occ->partId) : nullptr;
+      if (!part)
+        break;
+      const glm::mat4 xf = DisplayMatrix(state, *occ);
+      for (const auto& body : part->GetBodies()) {
+        glm::vec3 bmin, bmax;
+        body.shape.GetBoundingBox(bmin, bmax);
+        addBox(bmin, bmax, xf);
+      }
+      break;
+    }
+    default:
+      break; // mates/regions have no zoomable extent
     }
   }
   // Nothing selected (or nothing resolved): fit the whole document instead —
@@ -1766,7 +1802,8 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
     return; // no active section
   const glm::vec3 n = glm::normalize(nRaw);
   const glm::vec3 planeOrigin = n * state.sectionPlane.w; // dot(origin,n)=w
-  const std::vector<CADShape> caps = Measure::SectionCaps(bodies, planeOrigin, n);
+  const std::vector<CADShape> caps =
+      Measure::SectionCaps(bodies, planeOrigin, n);
   const float eps = 1e-3f; // nudge to the kept side; invisible at mm scale
   for (size_t bi = 0; bi < caps.size(); bi++) {
     if (!caps[bi].IsValid())
@@ -1807,9 +1844,13 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
       // Order the +n copy so its geometric winding front-faces +n.
       const bool flip = glm::dot(glm::cross(p1 - p0, p2 - p0), n) < 0.0f;
       const uint32_t f1 = flip ? c : b, f2 = flip ? b : c;
-      idx.push_back(a); idx.push_back(f1); idx.push_back(f2);
+      idx.push_back(a);
+      idx.push_back(f1);
+      idx.push_back(f2);
       // The -n copy is the opposite winding, on the second vertex block.
-      idx.push_back(half + a); idx.push_back(half + f2); idx.push_back(half + f1);
+      idx.push_back(half + a);
+      idx.push_back(half + f2);
+      idx.push_back(half + f1);
     }
     const uint32_t capId = state.meshRenderer->AddMesh(vs, idx);
     state.meshRenderer->SetMeshColor(
@@ -1829,8 +1870,8 @@ namespace {
 // to — a body's createdBy for a part, or the occurrence id for an assembly.
 struct SourceBody {
   drawing::InputBody input;
-  uint64_t featureId = 0;    // the body's createdBy (owner of its element names)
-  uint64_t refId = 0;        // semantic source id -> SheetCurve.sourceId
+  uint64_t featureId = 0; // the body's createdBy (owner of its element names)
+  uint64_t refId = 0;     // semantic source id -> SheetCurve.sourceId
   const ElementMap* map = nullptr;
 };
 
@@ -1838,13 +1879,14 @@ struct SourceBody {
 void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
                   std::vector<SourceBody>& out) {
   for (const Body& body : doc.GetBodies()) {
-    if (body.shape.GetShape().IsNull()) continue;
+    if (body.shape.GetShape().IsNull())
+      continue;
     SourceBody sb;
     sb.input.shape = body.shape.GetShape();
     sb.input.transform = xf;
-    sb.input.sourceId = out.size();  // slot index: picks this entry on join
+    sb.input.sourceId = out.size(); // slot index: picks this entry on join
     sb.featureId = body.createdBy;
-    sb.refId = occId ? occId : body.createdBy;  // occurrence, else body owner
+    sb.refId = occId ? occId : body.createdBy; // occurrence, else body owner
     sb.map = &body.elementMap;
     out.push_back(std::move(sb));
   }
@@ -1858,22 +1900,31 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
                         std::vector<SourceBody>& out, uint64_t* sourceVersion,
                         std::string* error) {
   for (size_t i = 0; i < state.parts.size(); i++) {
-    if (state.parts[i].id != view.sourceDocId) continue;
+    if (state.parts[i].id != view.sourceDocId)
+      continue;
     if (state.parts[i].kind == DocKind::Part) {
       const Document* doc = SlotDoc(state, i);
-      if (!doc) { *error = "source document is empty"; return false; }
+      if (!doc) {
+        *error = "source document is empty";
+        return false;
+      }
       *sourceVersion = doc->Version();
       AppendBodies(*doc, glm::dmat4(1.0), 0, out);
       return true;
     }
     if (state.parts[i].kind == DocKind::Assembly) {
       const AssemblyDocument* asmDoc = SlotAssembly(state, i);
-      if (!asmDoc) { *error = "source assembly is empty"; return false; }
+      if (!asmDoc) {
+        *error = "source assembly is empty";
+        return false;
+      }
       *sourceVersion = asmDoc->Version();
       for (const Occurrence& occ : asmDoc->GetOccurrences()) {
-        if (!occ.visible || asmDoc->OccurrenceSuppressed(occ.id)) continue;
+        if (!occ.visible || asmDoc->OccurrenceSuppressed(occ.id))
+          continue;
         const Document* part = PartDocById(state, occ.partId);
-        if (!part) continue;  // dangling part reference — skip
+        if (!part)
+          continue; // dangling part reference — skip
         AppendBodies(*part, glm::dmat4(OccurrenceMatrix(occ)), occ.id, out);
       }
       return true;
@@ -1889,7 +1940,8 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
 // on the sheet at the view's scale + position, and joins the index-space
 // source refs to stable ElementRefs. A failure leaves `error` set and no
 // geometry (callers keep the previous SheetView so a stale view isn't blanked).
-drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) {
+drawing::SheetView ProjectDrawingView(AppState& state,
+                                      const DrawingView& view) {
   drawing::SheetView result;
   result.viewId = view.id;
 
@@ -1907,7 +1959,8 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) 
 
   std::vector<drawing::InputBody> inputs;
   inputs.reserve(bodies.size());
-  for (const SourceBody& sb : bodies) inputs.push_back(sb.input);
+  for (const SourceBody& sb : bodies)
+    inputs.push_back(sb.input);
 
   glm::dvec3 viewDir, up;
   OrientationAxes(view.orientation, viewDir, up);
@@ -1941,8 +1994,10 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) 
       const glm::dvec3 right = glm::normalize(glm::cross(vd, up));
       const glm::dvec3 bright = glm::normalize(glm::cross(bvd, bup));
       constexpr double eps = 1e-6;
-      if (glm::length(right - bright) < eps) effectivePos.x = base->position.x;
-      if (glm::length(up - bup) < eps) effectivePos.y = base->position.y;
+      if (glm::length(right - bright) < eps)
+        effectivePos.x = base->position.x;
+      if (glm::length(up - bup) < eps)
+        effectivePos.y = base->position.y;
     }
   }
 
@@ -1952,7 +2007,7 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) 
     sc.kind = pc.kind;
     sc.visible = pc.visible;
     sc.curveType = pc.curveType;
-    if (pc.conicRadius > 0.0) {  // place the conic on the sheet too
+    if (pc.conicRadius > 0.0) { // place the conic on the sheet too
       sc.conicCenter = effectivePos + s * pc.conicCenter;
       sc.conicRadius = s * pc.conicRadius;
     }
@@ -1964,7 +2019,7 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) 
       hi = glm::max(hi, sheet);
     }
     if (const SourceBody* sb = bodyOf(pc.source.sourceId)) {
-      sc.sourceId = sb->refId;  // occurrence id (assembly) or body owner (part)
+      sc.sourceId = sb->refId; // occurrence id (assembly) or body owner (part)
       if (pc.source.edgeIndex >= 0 && sb->map) {
         if (const std::string* n = sb->map->EdgeNameOf(pc.source.edgeIndex))
           sc.edge = ElementRef{sb->featureId, *n};
@@ -1989,7 +2044,7 @@ drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& view) 
 drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
   const auto it = state.drawingRenders.find(dim.viewId);
   if (it == state.drawingRenders.end()) {
-    drawing::ResolvedDim rd;  // the view isn't projected: unresolved
+    drawing::ResolvedDim rd; // the view isn't projected: unresolved
     rd.id = dim.id;
     rd.kind = dim.kind;
     return rd;
@@ -2000,14 +2055,16 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
 bool ExportActiveDrawing(AppState& state, const std::string& path,
                          std::string* error) {
   if (!state.drawing) {
-    if (error) *error = "no active drawing";
+    if (error)
+      *error = "no active drawing";
     return false;
   }
-  UpdateDrawingRenders(state);  // export reflects current geometry
+  UpdateDrawingRenders(state); // export reflects current geometry
   std::vector<drawing::SheetView> views;
   for (const DrawingView& v : state.drawing->GetViews()) {
     const auto it = state.drawingRenders.find(v.id);
-    if (it != state.drawingRenders.end()) views.push_back(it->second);
+    if (it != state.drawingRenders.end())
+      views.push_back(it->second);
   }
   std::vector<drawing::ResolvedDim> dims;
   for (const DrawingDim& dm : state.drawing->GetDims())
@@ -2018,13 +2075,15 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
     return DrawingExport::SaveSVG(*state.drawing, views, dims, path, error);
   if (ext == ".pdf")
     return DrawingExport::SavePDF(*state.drawing, views, dims, path, error);
-  if (error) *error = "unsupported drawing format '" + ext + "' (use .svg or .pdf)";
+  if (error)
+    *error = "unsupported drawing format '" + ext + "' (use .svg or .pdf)";
   return false;
 }
 
 uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId) {
   for (size_t i = 0; i < state.parts.size(); i++) {
-    if (state.parts[i].id != sourceDocId) continue;
+    if (state.parts[i].id != sourceDocId)
+      continue;
     if (state.parts[i].kind == DocKind::Part) {
       const Document* doc = SlotDoc(state, i);
       return doc ? doc->Version() : 0;
@@ -2038,7 +2097,8 @@ uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId) {
 }
 
 void UpdateDrawingRenders(AppState& state) {
-  if (!state.drawing) return;
+  if (!state.drawing)
+    return;
   std::map<uint64_t, drawing::SheetView> fresh;
   for (const DrawingView& view : state.drawing->GetViews()) {
     drawing::SheetView sv = ProjectDrawingView(state, view);
@@ -2138,9 +2198,10 @@ void SyncDocumentRenderers(AppState& state) {
     if (!body.material.empty()) {
       const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
           CADMaterials::MaterialLibrary::FromSlug(body.material));
-      state.meshRenderer->SetMeshMaterial(
-          meshId, mat.baseColor,
-          glm::vec4(mat.metallic, mat.roughness, mat.specular, mat.reflectance));
+      state.meshRenderer->SetMeshMaterial(meshId, mat.baseColor,
+                                          glm::vec4(mat.metallic, mat.roughness,
+                                                    mat.specular,
+                                                    mat.reflectance));
       // Procedural wood/plywood grain (pattern 0 = flat, so non-wood materials
       // pass through unchanged).
       state.meshRenderer->SetMeshProcedural(meshId, mat.procPattern,
@@ -2252,7 +2313,8 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     if (mat.procPattern > 0) {
       // Same rule as the raster path (MeshRenderer draw loop): solid wood runs
       // the grain along the longest extent, plywood lays plies across the
-      // thinnest. Each body gets its own material here, so the axis rides in it.
+      // thinnest. Each body gets its own material here, so the axis rides in
+      // it.
       const glm::vec3 ext = hi - lo;
       const bool plywood = mat.procPattern == 2;
       int axis = 0;
@@ -2260,9 +2322,9 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
         if (plywood ? (ext[a] < ext[axis]) : (ext[a] > ext[axis]))
           axis = a;
       }
-      rtm.procParams = glm::vec4(static_cast<float>(mat.procPattern),
-                                 mat.grainScale, mat.grainContrast,
-                                 static_cast<float>(axis));
+      rtm.procParams =
+          glm::vec4(static_cast<float>(mat.procPattern), mat.grainScale,
+                    mat.grainContrast, static_cast<float>(axis));
     }
     uint32_t matId = state.rayTracer->AddMaterial(rtm);
 
@@ -2278,8 +2340,8 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   if (groundPlane) {
     const glm::vec3 center = 0.5f * (bbMin + bbMax);
     const float diag = glm::length(bbMax - bbMin);
-    const float half = 10.0f * diag;             // covers every camera angle
-    const float y = bbMin.y - 0.001f * diag;     // just below: no coplanar fizz
+    const float half = 10.0f * diag;         // covers every camera angle
+    const float y = bbMin.y - 0.001f * diag; // just below: no coplanar fizz
     const glm::vec3 n(0.0f, 1.0f, 0.0f);
     std::vector<Vertex3D> quad = {
         {{center.x - half, y, center.z - half}, n},
@@ -2423,7 +2485,7 @@ void PumpRenderJob(AppState& state) {
 }
 
 std::vector<LineVertex3D> BuildActiveSketchOverlay(AppState& state,
-                                               uint64_t activeSketchId) {
+                                                   uint64_t activeSketchId) {
   // Entity lines and selection markers now render through the expanded
   // primitive path (BuildActiveSketchPrimitives); the caller adds the
   // rubber-band preview, grid, and gizmo to this buffer.
@@ -2447,8 +2509,7 @@ void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
 
 namespace {
 // Vertices exposed by an entity for dots (which, plane-UV).
-std::vector<std::pair<uint8_t, glm::vec2>>
-EntityDots(const sketch::Entity& e) {
+std::vector<std::pair<uint8_t, glm::vec2>> EntityDots(const sketch::Entity& e) {
   if (auto* p = std::get_if<sketch::Point>(&e))
     return {{0, p->p}};
   if (auto* l = std::get_if<sketch::Line>(&e))
@@ -2456,7 +2517,8 @@ EntityDots(const sketch::Entity& e) {
   if (auto* c = std::get_if<sketch::Circle>(&e))
     return {{0, c->center}};
   if (auto* a = std::get_if<sketch::Arc>(&e))
-    return {{0, a->center}, {1, sketch::ArcPointUV(*a, 1)},
+    return {{0, a->center},
+            {1, sketch::ArcPointUV(*a, 1)},
             {2, sketch::ArcPointUV(*a, 2)}};
   if (auto* el = std::get_if<sketch::Ellipse>(&e))
     return {{0, el->center}};
@@ -2476,7 +2538,8 @@ EntityDots(const sketch::Entity& e) {
 
 // A dashed line (world-space dashes) for construction/reference geometry.
 void AppendPrimDashedLine(glm::vec3 a, glm::vec3 b, float halfPx,
-                          const glm::vec4& color, std::vector<PrimVertex>& out) {
+                          const glm::vec4& color,
+                          std::vector<PrimVertex>& out) {
   glm::vec3 d = b - a;
   float len = glm::length(d);
   if (!std::isfinite(len) || len < 1e-6f)
@@ -2485,12 +2548,13 @@ void AppendPrimDashedLine(glm::vec3 a, glm::vec3 b, float halfPx,
   const float dash = 0.15f, gap = 0.10f, period = dash + gap;
   // Cap the dash count: an under-constrained drag can fling a point to a huge
   // coordinate, and an unbounded `t < len` loop would push billions of vertices
-  // and exhaust memory. Past the cap the (off-screen) line simply stops dashing.
+  // and exhaust memory. Past the cap the (off-screen) line simply stops
+  // dashing.
   const int n = std::min(4096, static_cast<int>(len / period) + 1);
   for (int i = 0; i < n; i++) {
     const float t = i * period;
-    AppendPrimLine(a + dir * t, a + dir * std::min(t + dash, len), halfPx, color,
-                   out);
+    AppendPrimLine(a + dir * t, a + dir * std::min(t + dash, len), halfPx,
+                   color, out);
   }
 }
 
@@ -2507,7 +2571,7 @@ void AppendPrimDot(glm::vec3 p, float radiusPx, const glm::vec4& color,
 } // namespace
 
 std::vector<LineVertex3D> BuildStaticSketchLines(AppState& state,
-                                             uint64_t activeSketchId) {
+                                                 uint64_t activeSketchId) {
   std::vector<LineVertex3D> lines;
   if (!state.document)
     return lines;
@@ -2556,11 +2620,11 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
                                        : glm::vec4(0.55f, 0.85f, 1.00f, 1.0f);
   const glm::vec4 sel(1.00f, 0.62f, 0.20f, 1.0f);
   const glm::vec4 hov(1.00f, 1.00f, 0.65f, 1.0f);
-  const glm::vec4 trim(1.00f, 0.35f, 0.28f, 1.0f);        // trim-will-remove
-  const glm::vec4 construct(0.55f, 0.60f, 0.70f, 0.85f);  // reference geometry
-  const glm::vec4 conflict(1.00f, 0.30f, 0.30f, 1.0f);    // over-defined
-  const glm::vec4 defined(0.45f, 0.90f, 0.60f, 1.0f);     // fully constrained
-  const glm::vec4 linked(0.72f, 0.55f, 0.95f, 1.0f);      // linked-copy output
+  const glm::vec4 trim(1.00f, 0.35f, 0.28f, 1.0f);       // trim-will-remove
+  const glm::vec4 construct(0.55f, 0.60f, 0.70f, 0.85f); // reference geometry
+  const glm::vec4 conflict(1.00f, 0.30f, 0.30f, 1.0f);   // over-defined
+  const glm::vec4 defined(0.45f, 0.90f, 0.60f, 1.0f);    // fully constrained
+  const glm::vec4 linked(0.72f, 0.55f, 0.95f, 1.0f);     // linked-copy output
   const std::set<uint32_t> underDef(edit.underDefined.begin(),
                                     edit.underDefined.end());
   std::set<uint32_t> linkedIds;
@@ -2599,13 +2663,13 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     const bool isLinked = linkedIds.count(id) != 0;
     const bool isDefined =
         !constr && (edit.dof == 0 || underDef.count(id) == 0);
-    const glm::vec4 col = bad ? conflict
-                        : s   ? sel
-                        : h   ? hov
-                        : isLinked ? linked
-                        : constr ? construct
-                        : isDefined ? defined
-                                    : base;
+    const glm::vec4 col = bad         ? conflict
+                          : s         ? sel
+                          : h         ? hov
+                          : isLinked  ? linked
+                          : constr    ? construct
+                          : isDefined ? defined
+                                      : base;
     const float halfPx = (s || h) ? 3.0f : (constr ? 1.3f : 1.8f);
     std::vector<glm::vec2> poly = sketch::TessellateEntity(e);
     for (size_t i = 0; i + 1 < poly.size(); i++) {
@@ -2624,7 +2688,8 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     for (auto& [which, uv] : EntityDots(e)) {
       const bool s = selectedVertex(id, which);
       const bool h = edit.hasHover && !edit.hoveredBody &&
-                     edit.hoveredRef.entity == id && edit.hoveredRef.which == which;
+                     edit.hoveredRef.entity == id &&
+                     edit.hoveredRef.which == which;
       const glm::vec4 col = s ? sel : (h ? hov : base);
       const float rPx = (s || h) ? 5.8f : 3.8f;
       AppendPrimDot(sk->plane.PlaneToWorld(uv), rPx, col, prims);
@@ -2635,7 +2700,8 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
   // a "delete" colour on top of the line so it's clear what a click deletes.
   if (edit.hasTrimPreview) {
     AppendPrimLine(sk->plane.PlaneToWorld(edit.trimPreviewA),
-                   sk->plane.PlaneToWorld(edit.trimPreviewB), 3.4f, trim, prims);
+                   sk->plane.PlaneToWorld(edit.trimPreviewB), 3.4f, trim,
+                   prims);
   }
   return prims;
 }
@@ -2718,11 +2784,10 @@ void ToggleBlendEdge(AppState& state, FilletFeature& fil,
     return;
   }
   nlohmann::json before = DocumentIO::FeatureToJson(fil);
-  const auto it = std::find_if(fil.edges.begin(), fil.edges.end(),
-                               [&](const ElementRef& e) {
-                                 return e.featureId == ref.featureId &&
-                                        e.name == ref.name;
-                               });
+  const auto it = std::find_if(
+      fil.edges.begin(), fil.edges.end(), [&](const ElementRef& e) {
+        return e.featureId == ref.featureId && e.name == ref.name;
+      });
   if (it != fil.edges.end()) {
     fil.edges.erase(it);
   } else {
@@ -2732,10 +2797,9 @@ void ToggleBlendEdge(AppState& state, FilletFeature& fil,
     state.document->Regenerate();
     return;
   }
-  state.commands->Execute(
-      std::make_unique<ModifyFeatureCommand>(index, before,
-                                             DocumentIO::FeatureToJson(fil)),
-      *state.document);
+  state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                              index, before, DocumentIO::FeatureToJson(fil)),
+                          *state.document);
 }
 
 } // namespace
@@ -2750,8 +2814,8 @@ void BlendEdgeClicked(AppState& state, const ElementRef& displayed,
     state.edgePick = {};
     return;
   }
-  if (auto mapped = RefOnBlendInput(state, *fil, displayed, meshId,
-                                    edgeIndex)) {
+  if (auto mapped =
+          RefOnBlendInput(state, *fil, displayed, meshId, edgeIndex)) {
     ToggleBlendEdge(state, *fil, *mapped);
   } else {
     state.sketchEdit.actionMsg =
@@ -2786,8 +2850,8 @@ struct MeasureSource {
   glm::mat4 xf{1.0f};
   std::string prefix; // "OccurrenceName: " on assemblies, "" on parts
 };
-std::optional<MeasureSource> ResolveMeasureSource(
-    AppState& state, const MeasureState::Element& e) {
+std::optional<MeasureSource>
+ResolveMeasureSource(AppState& state, const MeasureState::Element& e) {
   if (e.occurrenceId == 0) {
     if (!state.document)
       return std::nullopt;
@@ -2851,17 +2915,16 @@ void UpdateMeasureReadout(AppState& state) {
               " elements selected - keep two for a distance";
 }
 
-void MeasureElementClicked(AppState& state, const ElementRef& ref,
-                           bool isEdge, uint64_t occurrenceId) {
+void MeasureElementClicked(AppState& state, const ElementRef& ref, bool isEdge,
+                           uint64_t occurrenceId) {
   if (!state.measure.active || (!state.document && !state.assembly))
     return;
   auto& picked = state.measure.picked;
-  const auto it = std::find_if(picked.begin(), picked.end(),
-                               [&](const MeasureState::Element& e) {
-                                 return e.ref.featureId == ref.featureId &&
-                                        e.ref.name == ref.name &&
-                                        e.occurrenceId == occurrenceId;
-                               });
+  const auto it = std::find_if(
+      picked.begin(), picked.end(), [&](const MeasureState::Element& e) {
+        return e.ref.featureId == ref.featureId && e.ref.name == ref.name &&
+               e.occurrenceId == occurrenceId;
+      });
   if (it != picked.end())
     picked.erase(it); // clicking a measured element again deselects it
   else
@@ -2897,8 +2960,7 @@ void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
           name != nullptr &&
           std::any_of(fil->edges.begin(), fil->edges.end(),
                       [&](const ElementRef& r) {
-                        return r.featureId == body.createdBy &&
-                               r.name == *name;
+                        return r.featureId == body.createdBy && r.name == *name;
                       });
       const bool hovered = state.edgePick.hasHover &&
                            state.edgePick.hoverMeshId == m.meshId &&
@@ -2927,16 +2989,18 @@ void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
 static uint32_t AppendReferenceImage(AppState& state, SketchFeature* sk,
                                      const std::string& path) {
   std::ifstream in(path, std::ios::binary);
-  if (!in) return 0;
+  if (!in)
+    return 0;
   std::string data((std::istreambuf_iterator<char>(in)),
                    std::istreambuf_iterator<char>());
-  if (data.empty()) return 0;
+  if (data.empty())
+    return 0;
   std::vector<unsigned char> bytes(data.begin(), data.end());
 
   sketch::ReferenceImage img;
   int w = 0, h = 0, comp = 0;
-  if (stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w, &h,
-                            &comp)) {
+  if (stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w,
+                            &h, &comp)) {
     img.widthPx = w;
     img.heightPx = h;
   }
@@ -2945,7 +3009,8 @@ static uint32_t AppendReferenceImage(AppState& state, SketchFeature* sk,
   const uint32_t id = sk->AddImage(img);
   sketch::ReferenceImage& ri = sk->images[sk->IndexOfImage(id)];
   std::string ext = std::filesystem::path(path).extension().string();
-  if (ext.empty()) ext = ".png";
+  if (ext.empty())
+    ext = ".png";
   ri.asset = std::to_string(sk->GetId()) + "-" + std::to_string(id) + ext;
   ri.origin = -0.5f * glm::vec2(float(ri.widthPx), float(ri.heightPx)) *
               float(ri.unitsPerPixel); // centre on the plane origin
@@ -2970,10 +3035,9 @@ uint32_t AddReferenceImageToSketch(AppState& state, const std::string& path) {
     return 0;
   }
   state.document->Regenerate();
-  state.commands->Execute(
-      std::make_unique<ModifyFeatureCommand>(
-          index, before, DocumentIO::FeatureToJson(*sk)),
-      *state.document);
+  state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                              index, before, DocumentIO::FeatureToJson(*sk)),
+                          *state.document);
   state.sketchEdit.selectedImageId = id;
   return id;
 }
@@ -2994,10 +3058,9 @@ void CalibrateReferenceImageAction(AppState& state, uint32_t imageId,
     return;
   }
   state.document->Regenerate();
-  state.commands->Execute(
-      std::make_unique<ModifyFeatureCommand>(
-          index, before, DocumentIO::FeatureToJson(*sk)),
-      *state.document);
+  state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                              index, before, DocumentIO::FeatureToJson(*sk)),
+                          *state.document);
 }
 
 void DeleteReferenceImageAction(AppState& state, uint32_t imageId) {
@@ -3011,10 +3074,9 @@ void DeleteReferenceImageAction(AppState& state, uint32_t imageId) {
   if (!sk->DeleteImage(imageId))
     return;
   state.document->Regenerate();
-  state.commands->Execute(
-      std::make_unique<ModifyFeatureCommand>(
-          index, before, DocumentIO::FeatureToJson(*sk)),
-      *state.document);
+  state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                              index, before, DocumentIO::FeatureToJson(*sk)),
+                          *state.document);
   if (state.sketchEdit.selectedImageId == imageId)
     state.sketchEdit.selectedImageId = 0;
 }
@@ -3026,8 +3088,7 @@ void LoadSTEPFile(AppState& state, const std::string& filename) {
   const std::string name = std::filesystem::path(filename).stem().string();
   auto feature = std::make_unique<ImportFeature>(name, filename);
   state.commands->Execute(
-      std::make_unique<AddFeatureCommand>(std::move(feature)),
-      *state.document);
+      std::make_unique<AddFeatureCommand>(std::move(feature)), *state.document);
 
   if (state.document->GetBodies().empty()) {
     LOG_ERROR("Import of '{}' produced no bodies", filename);

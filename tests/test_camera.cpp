@@ -9,8 +9,10 @@ using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
 
 TEST_CASE("Orbit preserves the distance to the target", "[camera]") {
-  Camera cam; // default: position (5,5,5), target origin
+  Camera cam;
+  const glm::vec3 defaultPosition = Camera::DefaultIsometricPosition();
   const float d0 = glm::length(cam.GetPosition() - cam.GetTarget());
+  CHECK_THAT(d0, WithinAbs(glm::length(defaultPosition), 1e-4f));
   cam.Orbit(37.0, -21.0);
   CHECK_THAT(glm::length(cam.GetPosition() - cam.GetTarget()),
              WithinRel(d0, 1e-4f));
@@ -22,8 +24,8 @@ TEST_CASE("Orbit does not gimbal-lock through vertical", "[camera]") {
   const float d0 = glm::length(cam.GetPosition() - target);
 
   // Sweep vertically well past straight-up and straight-down, many times. The
-  // old spherical orbit clamped near the poles and stopped moving; the trackball
-  // keeps tumbling and stays finite with the distance preserved.
+  // old spherical orbit clamped near the poles and stopped moving; the
+  // trackball keeps tumbling and stays finite with the distance preserved.
   glm::vec3 prev = cam.GetPosition();
   bool everStuck = false;
   for (int i = 0; i < 300; i++) {
@@ -40,7 +42,8 @@ TEST_CASE("Orbit does not gimbal-lock through vertical", "[camera]") {
   CHECK_FALSE(everStuck);
 }
 
-TEST_CASE("Camera basis stays orthonormal under arbitrary tumbling", "[camera]") {
+TEST_CASE("Camera basis stays orthonormal under arbitrary tumbling",
+          "[camera]") {
   // The quaternion orientation can never drift: forward/up/right stay a unit
   // orthonormal frame no matter how the view is orbited and rolled.
   Camera cam;
@@ -64,15 +67,17 @@ TEST_CASE("Resetting the view after tumbling is never degenerate", "[camera]") {
   Camera cam;
   for (int i = 0; i < 50; i++)
     cam.Orbit(0.0, 130.0); // tumble repeatedly through the poles
-  cam.SetPosition(glm::vec3(5, 5, 5));
+  const glm::vec3 defaultPosition = Camera::DefaultIsometricPosition();
+  cam.SetPosition(defaultPosition);
   cam.SetTarget(glm::vec3(0, 0, 0));
   cam.SetUp(glm::vec3(0, 1, 0));
 
   const glm::vec3 pos = cam.GetPosition();
-  CHECK_THAT(pos.x, WithinAbs(5.0f, 1e-3f));
-  CHECK_THAT(pos.y, WithinAbs(5.0f, 1e-3f));
-  CHECK_THAT(pos.z, WithinAbs(5.0f, 1e-3f));
-  CHECK_THAT(glm::length(cam.GetRight()), WithinAbs(1.0f, 1e-3f)); // not collapsed
+  CHECK_THAT(pos.x, WithinAbs(defaultPosition.x, 1e-3f));
+  CHECK_THAT(pos.y, WithinAbs(defaultPosition.y, 1e-3f));
+  CHECK_THAT(pos.z, WithinAbs(defaultPosition.z, 1e-3f));
+  CHECK_THAT(glm::length(cam.GetRight()),
+             WithinAbs(1.0f, 1e-3f)); // not collapsed
   CHECK(std::isfinite(cam.GetViewMatrix()[0][0]));
 }
 
@@ -104,9 +109,12 @@ TEST_CASE("AlignToFace on a horizontal face resolves to a valid top-down view",
   cam.Update(2.0f); // run the 1s animation to completion in one step
 
   const glm::vec3 f = cam.GetForward();
-  CHECK_THAT(glm::dot(f, glm::vec3(0, -1, 0)), WithinAbs(1.0f, 1e-2f)); // looks down
-  CHECK_THAT(glm::length(cam.GetRight()), WithinAbs(1.0f, 1e-3f));      // valid frame
-  CHECK_THAT(cam.GetPosition().y, WithinRel(5.0f, 1e-2f)); // faceCenter + n*dist
+  CHECK_THAT(glm::dot(f, glm::vec3(0, -1, 0)),
+             WithinAbs(1.0f, 1e-2f)); // looks down
+  CHECK_THAT(glm::length(cam.GetRight()),
+             WithinAbs(1.0f, 1e-3f)); // valid frame
+  CHECK_THAT(cam.GetPosition().y,
+             WithinRel(5.0f, 1e-2f)); // faceCenter + n*dist
   CHECK(std::isfinite(cam.GetPosition().x));
 }
 
@@ -130,7 +138,8 @@ TEST_CASE("SnapToView orients instantly with no animation", "[camera]") {
   cam.SnapToView(glm::vec3(0, 1, 0), glm::vec3(0, 0, -1)); // top
   CHECK_THAT(glm::dot(cam.GetForward(), glm::vec3(0, -1, 0)),
              WithinAbs(1.0f, 1e-4f));
-  CHECK_THAT(glm::dot(cam.GetUp(), glm::vec3(0, 0, -1)), WithinAbs(1.0f, 1e-4f));
+  CHECK_THAT(glm::dot(cam.GetUp(), glm::vec3(0, 0, -1)),
+             WithinAbs(1.0f, 1e-4f));
   CHECK_THAT(glm::length(cam.GetRight()), WithinAbs(1.0f, 1e-3f));
 }
 

@@ -1,11 +1,11 @@
 #include "app/HeadlessMain.h"
 
-#include "render/Camera.h"
 #include "common/Logger.h"
-#include "core/io/Autosaver.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/io/Autosaver.h"
 #include "remote/RemoteServer.h"
+#include "render/Camera.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 
@@ -30,7 +30,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   // Same defaults as the GUI so view/fit_view/get_state.camera behave
   // identically; a GUI session opening the same project sees the same framing.
   Camera camera;
-  camera.SetPosition(glm::vec3(8.0f, 6.0f, 8.0f));
+  camera.SetPosition(Camera::DefaultIsometricPosition());
   camera.SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
   camera.SetAspectRatio(1280.0f / 720.0f);
 
@@ -80,8 +80,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   LOG_INFO("Headless: stop requested, shutting down");
   server.Stop();
   // Clean exit with nothing unsaved: drop the sidecar. Dirty exits keep it.
-  if (state.document &&
-      state.document->Version() == state.lastSavedVersion) {
+  if (state.document && state.document->Version() == state.lastSavedVersion) {
     Autosaver::Clear(state.projectPath);
   }
   return 0;

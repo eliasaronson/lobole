@@ -1,14 +1,14 @@
 #include "ui/MainMenuBar.h"
 #include <utility>
 
-#include "render/Camera.h"
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
-#include "render/OutlineRenderer.h"
-#include "core/io/Checkpoints.h"
 #include "core/Feature.h"
-#include "core/io/Serialization.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Checkpoints.h"
+#include "core/io/Serialization.h"
+#include "render/Camera.h"
+#include "render/OutlineRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
@@ -130,7 +130,7 @@ void DrawViewMenu(AppState& state) {
 
   if (ImGui::MenuItem("Reset Camera")) {
     if (state.camera) {
-      state.camera->SetPosition(glm::vec3(5.0f, 5.0f, 5.0f));
+      state.camera->SetPosition(Camera::DefaultIsometricPosition());
       state.camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
       // Trackball orbit carries the up vector as state, so it must be reset too
       // — otherwise a tumbled view leaves up near-parallel to the new forward
@@ -161,11 +161,13 @@ void DrawViewMenu(AppState& state) {
       const bool on = state.showAmbientOcclusion;
       if (ImGui::MenuItem("Off", nullptr, !on))
         state.showAmbientOcclusion = false;
-      if (ImGui::MenuItem("Half Resolution", nullptr, on && !state.ssaoFullRes)) {
+      if (ImGui::MenuItem("Half Resolution", nullptr,
+                          on && !state.ssaoFullRes)) {
         state.showAmbientOcclusion = true;
         state.ssaoFullRes = false;
       }
-      if (ImGui::MenuItem("Full Resolution", nullptr, on && state.ssaoFullRes)) {
+      if (ImGui::MenuItem("Full Resolution", nullptr,
+                          on && state.ssaoFullRes)) {
         state.showAmbientOcclusion = true;
         state.ssaoFullRes = true;
       }
@@ -175,8 +177,7 @@ void DrawViewMenu(AppState& state) {
   }
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
   ImGui::MenuItem("Viewport Controls", nullptr, &state.showControlsHelp);
-  if (state.topoGhostStudyId != 0 &&
-      ImGui::MenuItem("Hide Topology Ghost")) {
+  if (state.topoGhostStudyId != 0 && ImGui::MenuItem("Hide Topology Ghost")) {
     // The translucent optimized-shape overlay a topology study leaves for
     // re-modeling; discoverable off-switch.
     state.topoGhostStudyId = 0;
@@ -185,8 +186,7 @@ void DrawViewMenu(AppState& state) {
 
   // The Shift+1..7 views, discoverable (U5).
   if (ImGui::BeginMenu("Standard Views")) {
-    const auto view = [&](const char* name, glm::vec3 n,
-                          const char* shortcut) {
+    const auto view = [&](const char* name, glm::vec3 n, const char* shortcut) {
       if (ImGui::MenuItem(name, shortcut) && state.camera)
         state.camera->AlignToFace(glm::vec3(0.0f), n);
     };
@@ -252,8 +252,7 @@ void DrawViewMenu(AppState& state) {
       OutlineSettings settings = state.outlineRenderer->GetOutlineSettings();
       bool changed = false;
 
-      const char* outlineModes[] = {"None", "Edges", "Wireframe",
-                                    "Silhouette"};
+      const char* outlineModes[] = {"None", "Edges", "Wireframe", "Silhouette"};
       int currentMode = std::to_underlying(settings.mode);
       if (ImGui::Combo("Mode", &currentMode, outlineModes, 4)) {
         settings.mode = static_cast<OutlineMode>(currentMode);
@@ -262,14 +261,13 @@ void DrawViewMenu(AppState& state) {
 
       if (settings.mode != OutlineMode::NONE) {
         changed |= ImGui::ColorEdit3("Outline Color", &settings.outlineColor.x);
-        changed |=
-            ImGui::SliderFloat("Outline Width", &settings.outlineWidth, 0.1f,
-                               5.0f);
+        changed |= ImGui::SliderFloat("Outline Width", &settings.outlineWidth,
+                                      0.1f, 5.0f);
         if (settings.mode == OutlineMode::WIREFRAME) {
           changed |=
               ImGui::ColorEdit3("Wireframe Color", &settings.wireframeColor.x);
-          changed |= ImGui::SliderFloat("Line Width", &settings.lineWidth,
-                                        0.5f, 3.0f);
+          changed |=
+              ImGui::SliderFloat("Line Width", &settings.lineWidth, 0.5f, 3.0f);
         }
         changed |= ImGui::Checkbox("Depth Test", &settings.enableDepthTest);
         changed |= ImGui::Checkbox("Blending", &settings.enableBlending);

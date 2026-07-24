@@ -1,24 +1,27 @@
 // CAD Application with working Vulkan + ImGui setup
 // Based on Dear ImGui GLFW+Vulkan example
 
-#include "render/Camera.h"
-#include <utility>
-#include "cad/FaceSelector.h"
+#include "app/CrashHandler.h"
 #include "app/GuiTests.h"
+#include "app/HeadlessMain.h"
+#include "cad/FaceSelector.h"
+#include "common/Logger.h"
+#include "core/io/Autosaver.h"
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+#include "imgui_te_engine.h"
+#include "remote/RemoteServer.h"
+#include "render/Camera.h"
+#include "render/FieldRenderer.h"
 #include "render/IBL.h"
 #include "render/IBLTextures.h"
-#include "common/Logger.h"
-#include "app/CrashHandler.h"
-#include "render/Screenshot.h"
-#include "app/HeadlessMain.h"
-#include "core/io/Autosaver.h"
-#include "remote/RemoteServer.h"
-#include "render/FieldRenderer.h"
 #include "render/MeshRenderer.h"
 #include "render/OutlineRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/SSAORenderer.h"
 #include "render/Scene.h"
+#include "render/Screenshot.h"
 #include "render/ShadowRenderer.h"
 #include "render/SketchRenderer.h"
 #include "render/UnderlayRenderer.h"
@@ -27,17 +30,14 @@
 #include "ui/Theme.h"
 #include "ui/UI.h"
 #include <algorithm>
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "imgui_impl_vulkan.h"
-#include "imgui_te_engine.h"
+#include <climits>
 #include <filesystem>
 #include <memory>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <climits>
 #include <unistd.h>
+#include <utility>
 
 namespace {
 // Directory of the running executable. Assets and shaders are found relative to
@@ -57,11 +57,11 @@ std::string ExecutableDir() {
 // read-only (Nix store, Flatpak /app), so the cache must live under $HOME.
 std::string IblCacheDir() {
   namespace fs = std::filesystem;
-  const char *xdg = std::getenv("XDG_CACHE_HOME");
-  const char *home = std::getenv("HOME");
-  fs::path base = xdg && *xdg      ? fs::path(xdg)
-                  : home && *home  ? fs::path(home) / ".cache"
-                                   : fs::temp_directory_path();
+  const char* xdg = std::getenv("XDG_CACHE_HOME");
+  const char* home = std::getenv("HOME");
+  fs::path base = xdg && *xdg     ? fs::path(xdg)
+                  : home && *home ? fs::path(home) / ".cache"
+                                  : fs::temp_directory_path();
   fs::path dir = base / "designer";
   std::error_code ec;
   fs::create_directories(dir, ec);
@@ -81,13 +81,13 @@ std::string IblCacheDir() {
 // present targets the mapped X window. Declared extern to avoid <X11/Xlib.h>,
 // whose None/Bool/Status/Success macros clash with OCCT/PlaneGCS headers.
 extern "C" {
-void *glfwGetX11Display(void);
-unsigned long glfwGetX11Window(GLFWwindow *handle);
-int XMapWindow(void *display, unsigned long window);
-int XFlush(void *display);
+void* glfwGetX11Display(void);
+unsigned long glfwGetX11Window(GLFWwindow* handle);
+int XMapWindow(void* display, unsigned long window);
+int XFlush(void* display);
 }
-static void ShowWindowNonBlocking(GLFWwindow *window) {
-  void *dpy = glfwGetX11Display();
+static void ShowWindowNonBlocking(GLFWwindow* window) {
+  void* dpy = glfwGetX11Display();
   unsigned long xw = glfwGetX11Window(window);
   if (dpy && xw) {
     XMapWindow(dpy, xw);
@@ -97,7 +97,7 @@ static void ShowWindowNonBlocking(GLFWwindow *window) {
   }
 }
 #else
-static void ShowWindowNonBlocking(GLFWwindow *window) {
+static void ShowWindowNonBlocking(GLFWwindow* window) {
   glfwShowWindow(window);
 }
 #endif
@@ -108,7 +108,7 @@ static VkDebugReportCallbackEXT g_DebugReport = VK_NULL_HANDLE;
 #endif
 
 // Vulkan data
-static VkAllocationCallbacks *g_Allocator = nullptr;
+static VkAllocationCallbacks* g_Allocator = nullptr;
 static VkInstance g_Instance = VK_NULL_HANDLE;
 static VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
 static VkDevice g_Device = VK_NULL_HANDLE;
@@ -141,7 +141,7 @@ static std::unique_ptr<IBLTextures> g_IBLTextures;
 // non-owning pointers to the objects above once they exist)
 static ui::AppState g_App;
 
-static void glfw_error_callback(int error, const char *description) {
+static void glfw_error_callback(int error, const char* description) {
   fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
@@ -157,7 +157,7 @@ static void check_vk_result(VkResult err) {
 static VKAPI_ATTR VkBool32 VKAPI_CALL
 debug_report(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType,
              uint64_t object, size_t location, int32_t messageCode,
-             const char *pLayerPrefix, const char *pMessage, void *pUserData) {
+             const char* pLayerPrefix, const char* pMessage, void* pUserData) {
   (void)flags;
   (void)object;
   (void)location;
@@ -171,15 +171,15 @@ debug_report(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType,
 #endif
 
 static bool
-IsExtensionAvailable(const ImVector<VkExtensionProperties> &properties,
-                     const char *extension) {
-  for (const VkExtensionProperties &p : properties)
+IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties,
+                     const char* extension) {
+  for (const VkExtensionProperties& p : properties)
     if (strcmp(p.extensionName, extension) == 0)
       return true;
   return false;
 }
 
-static void SetupVulkan(ImVector<const char *> instance_extensions) {
+static void SetupVulkan(ImVector<const char*> instance_extensions) {
   VkResult err;
 
   // Create Vulkan Instance
@@ -222,7 +222,7 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
 #endif
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
-    const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
+    const char* layers[] = {"VK_LAYER_KHRONOS_validation"};
     create_info.enabledLayerCount = 1;
     create_info.ppEnabledLayerNames = layers;
     instance_extensions.push_back("VK_EXT_debug_report");
@@ -254,7 +254,8 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
 
   // Select Physical Device (GPU). ImGui prefers a discrete GPU, which on this
   // dual-GPU machine is the RT-capable RTX 4060 (not the Arc iGPU). Log it so a
-  // wrong pick (e.g. a headless llvmpipe) is obvious — RT needs the discrete GPU.
+  // wrong pick (e.g. a headless llvmpipe) is obvious — RT needs the discrete
+  // GPU.
   g_PhysicalDevice = ImGui_ImplVulkanH_SelectPhysicalDevice(g_Instance);
   IM_ASSERT(g_PhysicalDevice != VK_NULL_HANDLE);
   {
@@ -270,7 +271,7 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
 
   // Create Logical Device
   {
-    ImVector<const char *> device_extensions;
+    ImVector<const char*> device_extensions;
     device_extensions.push_back("VK_KHR_swapchain");
 
     uint32_t properties_count;
@@ -371,7 +372,7 @@ static void SetupVulkan(ImVector<const char *> instance_extensions) {
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     pool_info.maxSets = 0;
-    for (VkDescriptorPoolSize &pool_size : pool_sizes)
+    for (VkDescriptorPoolSize& pool_size : pool_sizes)
       pool_info.maxSets += pool_size.descriptorCount;
     pool_info.poolSizeCount = (uint32_t)IM_ARRAYSIZE(pool_sizes);
     pool_info.pPoolSizes = pool_sizes;
@@ -416,8 +417,10 @@ static VkSampleCountFlagBits GetMaxUsableSampleCount() {
   // Need the count supported for BOTH color and depth so one pass can use it.
   VkSampleCountFlags counts = props.limits.framebufferColorSampleCounts &
                               props.limits.framebufferDepthSampleCounts;
-  if (counts & VK_SAMPLE_COUNT_4_BIT) return VK_SAMPLE_COUNT_4_BIT;
-  if (counts & VK_SAMPLE_COUNT_2_BIT) return VK_SAMPLE_COUNT_2_BIT;
+  if (counts & VK_SAMPLE_COUNT_4_BIT)
+    return VK_SAMPLE_COUNT_4_BIT;
+  if (counts & VK_SAMPLE_COUNT_2_BIT)
+    return VK_SAMPLE_COUNT_2_BIT;
   return VK_SAMPLE_COUNT_1_BIT;
 }
 
@@ -436,16 +439,22 @@ static uint32_t FindMemoryTypeIndex(uint32_t typeFilter,
 // color-only render pass + framebuffers with color+depth ones. Must run after
 // every ImGui_ImplVulkanH_CreateOrResizeWindow (which recreates them
 // color-only) and before ImGui_ImplVulkan_Init.
-static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
-  if (g_DepthView) vkDestroyImageView(g_Device, g_DepthView, g_Allocator);
-  if (g_DepthImage) vkDestroyImage(g_Device, g_DepthImage, g_Allocator);
-  if (g_DepthMemory) vkFreeMemory(g_Device, g_DepthMemory, g_Allocator);
+static void SetupDepthBuffer(ImGui_ImplVulkanH_Window* wd) {
+  if (g_DepthView)
+    vkDestroyImageView(g_Device, g_DepthView, g_Allocator);
+  if (g_DepthImage)
+    vkDestroyImage(g_Device, g_DepthImage, g_Allocator);
+  if (g_DepthMemory)
+    vkFreeMemory(g_Device, g_DepthMemory, g_Allocator);
   g_DepthView = VK_NULL_HANDLE;
   g_DepthImage = VK_NULL_HANDLE;
   g_DepthMemory = VK_NULL_HANDLE;
-  if (g_MsaaColorView) vkDestroyImageView(g_Device, g_MsaaColorView, g_Allocator);
-  if (g_MsaaColorImage) vkDestroyImage(g_Device, g_MsaaColorImage, g_Allocator);
-  if (g_MsaaColorMemory) vkFreeMemory(g_Device, g_MsaaColorMemory, g_Allocator);
+  if (g_MsaaColorView)
+    vkDestroyImageView(g_Device, g_MsaaColorView, g_Allocator);
+  if (g_MsaaColorImage)
+    vkDestroyImage(g_Device, g_MsaaColorImage, g_Allocator);
+  if (g_MsaaColorMemory)
+    vkFreeMemory(g_Device, g_MsaaColorMemory, g_Allocator);
   g_MsaaColorView = VK_NULL_HANDLE;
   g_MsaaColorImage = VK_NULL_HANDLE;
   g_MsaaColorMemory = VK_NULL_HANDLE;
@@ -467,8 +476,8 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
   vkGetImageMemoryRequirements(g_Device, g_DepthImage, &req);
   VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
   alloc.allocationSize = req.size;
-  alloc.memoryTypeIndex =
-      FindMemoryTypeIndex(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  alloc.memoryTypeIndex = FindMemoryTypeIndex(
+      req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   vkAllocateMemory(g_Device, &alloc, g_Allocator, &g_DepthMemory);
   vkBindImageMemory(g_Device, g_DepthImage, g_DepthMemory, 0);
   VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -508,17 +517,18 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
   }
 
   // Render pass (created once, reused across resizes so ImGui's pipeline stays
-  // render-pass-compatible). Attachment order is kept stable across the MSAA and
-  // non-MSAA paths — color=0, depth=1 — so the clear values in FrameRender don't
-  // need to branch; the resolve target (backbuffer) is appended at index 2.
+  // render-pass-compatible). Attachment order is kept stable across the MSAA
+  // and non-MSAA paths — color=0, depth=1 — so the clear values in FrameRender
+  // don't need to branch; the resolve target (backbuffer) is appended at
+  // index 2.
   if (g_DepthRenderPass == VK_NULL_HANDLE) {
     VkAttachmentDescription atts[3] = {};
     // 0: color (multisampled when MSAA; the presented backbuffer otherwise)
     atts[0].format = wd->SurfaceFormat.format;
     atts[0].samples = g_MSAASamples;
     atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    atts[0].storeOp = msaa ? VK_ATTACHMENT_STORE_OP_DONT_CARE
-                           : VK_ATTACHMENT_STORE_OP_STORE;
+    atts[0].storeOp =
+        msaa ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
     atts[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     atts[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     atts[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -552,7 +562,8 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
     sub.colorAttachmentCount = 1;
     sub.pColorAttachments = &colorRef;
     sub.pDepthStencilAttachment = &depthRef;
-    if (msaa) sub.pResolveAttachments = &resolveRef;
+    if (msaa)
+      sub.pResolveAttachments = &resolveRef;
     VkSubpassDependency dep{};
     dep.srcSubpass = VK_SUBPASS_EXTERNAL;
     dep.dstSubpass = 0;
@@ -579,7 +590,7 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
     vkDestroyRenderPass(g_Device, wd->RenderPass, g_Allocator);
   wd->RenderPass = g_DepthRenderPass;
   for (uint32_t i = 0; i < wd->ImageCount; i++) {
-    ImGui_ImplVulkanH_Frame *fd = &wd->Frames[i];
+    ImGui_ImplVulkanH_Frame* fd = &wd->Frames[i];
     if (fd->Framebuffer)
       vkDestroyFramebuffer(g_Device, fd->Framebuffer, g_Allocator);
     VkImageView attach[3];
@@ -605,7 +616,7 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window *wd) {
   }
 }
 
-static void SetupVulkanWindow(ImGui_ImplVulkanH_Window *wd,
+static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
                               VkSurfaceKHR surface, int width, int height) {
   wd->Surface = surface;
 
@@ -676,15 +687,21 @@ static void CleanupVulkan() {
 }
 
 static void CleanupVulkanWindow() {
-  if (g_DepthView) vkDestroyImageView(g_Device, g_DepthView, g_Allocator);
-  if (g_DepthImage) vkDestroyImage(g_Device, g_DepthImage, g_Allocator);
-  if (g_DepthMemory) vkFreeMemory(g_Device, g_DepthMemory, g_Allocator);
+  if (g_DepthView)
+    vkDestroyImageView(g_Device, g_DepthView, g_Allocator);
+  if (g_DepthImage)
+    vkDestroyImage(g_Device, g_DepthImage, g_Allocator);
+  if (g_DepthMemory)
+    vkFreeMemory(g_Device, g_DepthMemory, g_Allocator);
   g_DepthView = VK_NULL_HANDLE;
   g_DepthImage = VK_NULL_HANDLE;
   g_DepthMemory = VK_NULL_HANDLE;
-  if (g_MsaaColorView) vkDestroyImageView(g_Device, g_MsaaColorView, g_Allocator);
-  if (g_MsaaColorImage) vkDestroyImage(g_Device, g_MsaaColorImage, g_Allocator);
-  if (g_MsaaColorMemory) vkFreeMemory(g_Device, g_MsaaColorMemory, g_Allocator);
+  if (g_MsaaColorView)
+    vkDestroyImageView(g_Device, g_MsaaColorView, g_Allocator);
+  if (g_MsaaColorImage)
+    vkDestroyImage(g_Device, g_MsaaColorImage, g_Allocator);
+  if (g_MsaaColorMemory)
+    vkFreeMemory(g_Device, g_MsaaColorMemory, g_Allocator);
   g_MsaaColorView = VK_NULL_HANDLE;
   g_MsaaColorImage = VK_NULL_HANDLE;
   g_MsaaColorMemory = VK_NULL_HANDLE;
@@ -724,7 +741,7 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame) {
   // (stale) maps and the image layouts stay read-only.
 }
 
-static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
+static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   VkSemaphore image_acquired_semaphore =
       wd->FrameSemaphores[wd->SemaphoreIndex].ImageAcquiredSemaphore;
   VkSemaphore render_complete_semaphore =
@@ -738,7 +755,7 @@ static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
   }
   check_vk_result(err);
 
-  ImGui_ImplVulkanH_Frame *fd = &wd->Frames[wd->FrameIndex];
+  ImGui_ImplVulkanH_Frame* fd = &wd->Frames[wd->FrameIndex];
   {
     err = vkWaitForFences(g_Device, 1, &fd->Fence, VK_TRUE, UINT64_MAX);
     check_vk_result(err);
@@ -814,7 +831,7 @@ static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
   }
 }
 
-static void FramePresent(ImGui_ImplVulkanH_Window *wd) {
+static void FramePresent(ImGui_ImplVulkanH_Window* wd) {
   if (g_SwapChainRebuild)
     return;
   VkSemaphore render_complete_semaphore =
@@ -835,8 +852,7 @@ static void FramePresent(ImGui_ImplVulkanH_Window *wd) {
   wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount;
 }
 
-
-void printUsage(const char *programName) {
+void printUsage(const char* programName) {
   std::cout << "Usage: " << programName << " [OPTIONS]" << std::endl;
   std::cout << "Options:" << std::endl;
   std::cout << "  -f, --file <path>    Load STEP file on startup" << std::endl;
@@ -880,7 +896,7 @@ struct CommandLineArgs {
   std::string recordPath;
 };
 
-CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
+CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
   CommandLineArgs args;
 
   for (int i = 1; i < argc; i++) {
@@ -956,7 +972,7 @@ CommandLineArgs parseCommandLineArgs(int argc, char **argv) {
   return args;
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
   InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
   g_DisableVSync = args.runGuiTests;
@@ -978,8 +994,8 @@ int main(int argc, char **argv) {
       std::cerr << "Error: --gui-tests cannot run with --headless" << std::endl;
       return 2;
     }
-    return RunHeadless(args.remotePort, args.fileToLoad,
-                       args.autosaveSeconds, args.recordPath);
+    return RunHeadless(args.remotePort, args.fileToLoad, args.autosaveSeconds,
+                       args.recordPath);
   }
 
 #ifdef HAVE_NATIVEFILEDIALOG
@@ -1003,7 +1019,7 @@ int main(int argc, char **argv) {
   // dev-watch instances invisibly render for nobody.)
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow *window = glfwCreateWindow(1280, 720, "Designer - 3D CAD Software",
+  GLFWwindow* window = glfwCreateWindow(1280, 720, "Designer - 3D CAD Software",
                                         nullptr, nullptr);
   if (window && !args.hidden)
     ShowWindowNonBlocking(window);
@@ -1013,9 +1029,9 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  ImVector<const char *> extensions;
+  ImVector<const char*> extensions;
   uint32_t extensions_count = 0;
-  const char **glfw_extensions =
+  const char** glfw_extensions =
       glfwGetRequiredInstanceExtensions(&extensions_count);
   for (uint32_t i = 0; i < extensions_count; i++)
     extensions.push_back(glfw_extensions[i]);
@@ -1028,12 +1044,12 @@ int main(int argc, char **argv) {
 
   int w, h;
   glfwGetFramebufferSize(window, &w, &h);
-  ImGui_ImplVulkanH_Window *wd = &g_MainWindowData;
+  ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
   SetupVulkanWindow(wd, surface, w, h);
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
-  ImGuiIO &io = ImGui::GetIO();
+  ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
@@ -1088,8 +1104,8 @@ int main(int argc, char **argv) {
   g_App.camera = g_Camera.get();
   g_App.window = window;
 
-  // Set up camera for good 3D view
-  g_Camera->SetPosition(glm::vec3(8.0f, 6.0f, 8.0f));
+  // Set up the shared empty-workspace isometric view.
+  g_Camera->SetPosition(Camera::DefaultIsometricPosition());
   g_Camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
   g_Camera->SetAspectRatio(1280.0f / 720.0f);
 
@@ -1132,19 +1148,17 @@ int main(int argc, char **argv) {
 
   // Initialize MeshRenderer with Vulkan context
   g_MeshRenderer = std::make_unique<MeshRenderer>();
-  g_MeshRenderer->SetIBL(g_IBLTextures->IrradianceView(),
-                         g_IBLTextures->PrefilterView(),
-                         g_IBLTextures->BrdfLutView(),
-                         g_IBLTextures->EnvSampler(),
-                         g_IBLTextures->LutSampler());
+  g_MeshRenderer->SetIBL(
+      g_IBLTextures->IrradianceView(), g_IBLTextures->PrefilterView(),
+      g_IBLTextures->BrdfLutView(), g_IBLTextures->EnvSampler(),
+      g_IBLTextures->LutSampler());
   g_MeshRenderer->SetShadowMap(g_ShadowRenderer->ShadowMapView(),
                                g_ShadowRenderer->ShadowSampler());
   g_MeshRenderer->SetAOMap(g_SSAORenderer->AOView(),
                            g_SSAORenderer->AOSampler());
-  bool meshRendererInitialized =
-      g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                 g_Queue, g_QueueFamily, g_CommandPool,
-                                 g_MSAASamples);
+  bool meshRendererInitialized = g_MeshRenderer->Initialize(
+      g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue, g_QueueFamily,
+      g_CommandPool, g_MSAASamples);
   if (!meshRendererInitialized) {
     LOG_ERROR("MeshRenderer initialization failed");
   } else {
@@ -1158,10 +1172,9 @@ int main(int argc, char **argv) {
 
   // Initialize OutlineRenderer
   g_OutlineRenderer = std::make_unique<OutlineRenderer>();
-  bool outlineInitialized =
-      g_OutlineRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                    g_Queue, g_QueueFamily, g_CommandPool,
-                                    g_MSAASamples);
+  bool outlineInitialized = g_OutlineRenderer->Initialize(
+      g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue, g_QueueFamily,
+      g_CommandPool, g_MSAASamples);
   if (!outlineInitialized) {
     LOG_WARN("OutlineRenderer initialization failed");
   } else {
@@ -1171,9 +1184,9 @@ int main(int argc, char **argv) {
     // Set default outline settings for visibility testing
     OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
     LOG_DEBUG("Default outline mode: {}", std::to_underlying(settings.mode));
-    LOG_DEBUG("Default outline color: ({}, {}, {}, {})", settings.outlineColor.r,
-              settings.outlineColor.g, settings.outlineColor.b,
-              settings.outlineColor.a);
+    LOG_DEBUG("Default outline color: ({}, {}, {}, {})",
+              settings.outlineColor.r, settings.outlineColor.g,
+              settings.outlineColor.b, settings.outlineColor.a);
     LOG_DEBUG("Default outline width: {}", settings.outlineWidth);
 
     // Enable wireframe rendering with subtle appearance
@@ -1217,7 +1230,8 @@ int main(int argc, char **argv) {
   bool rtInitialized = g_RayTracingRenderer->Initialize(
       g_Device, g_PhysicalDevice, g_Queue, g_QueueFamily, g_CommandPool);
   if (!rtInitialized) {
-    LOG_WARN("Ray Tracing: initialization failed, falling back to rasterization");
+    LOG_WARN(
+        "Ray Tracing: initialization failed, falling back to rasterization");
   } else {
     LOG_INFO("Ray Tracing: initialization successful");
   }
@@ -1243,8 +1257,8 @@ int main(int argc, char **argv) {
 
   // GUI test engine: always started so tests can also be run interactively;
   // --gui-tests queues the whole suite and exits with a pass/fail code.
-  ImGuiTestEngine *testEngine = ImGuiTestEngine_CreateContext();
-  ImGuiTestEngineIO &testEngineIO = ImGuiTestEngine_GetIO(testEngine);
+  ImGuiTestEngine* testEngine = ImGuiTestEngine_CreateContext();
+  ImGuiTestEngineIO& testEngineIO = ImGuiTestEngine_GetIO(testEngine);
   testEngineIO.ConfigVerboseLevel = ImGuiTestVerboseLevel_Info;
   testEngineIO.ConfigVerboseLevelOnError = ImGuiTestVerboseLevel_Debug;
   testEngineIO.ConfigRunSpeed = ImGuiTestRunSpeed_Fast;
@@ -1309,8 +1323,8 @@ int main(int argc, char **argv) {
          g_MainWindowData.Height != fb_height)) {
       ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
       // ImGui's swapchain recreate destroys wd->RenderPass at its top. Since we
-      // point that at our shared g_DepthRenderPass, null it first so ImGui frees
-      // only its own (throwaway) pass and ours survives; SetupDepthBuffer
+      // point that at our shared g_DepthRenderPass, null it first so ImGui
+      // frees only its own (throwaway) pass and ours survives; SetupDepthBuffer
       // reattaches it.
       g_MainWindowData.RenderPass = VK_NULL_HANDLE;
       ImGui_ImplVulkanH_CreateOrResizeWindow(
@@ -1450,7 +1464,7 @@ int main(int argc, char **argv) {
 
     // Rendering
     ImGui::Render();
-    ImDrawData *draw_data = ImGui::GetDrawData();
+    ImDrawData* draw_data = ImGui::GetDrawData();
     const bool is_minimized =
         (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
     if (!is_minimized) {
@@ -1483,13 +1497,14 @@ int main(int argc, char **argv) {
         vkQueueWaitIdle(g_Queue); // frame resources must be reusable
         std::string shotError;
         const bool ok = CaptureScreenshot(
-            g_Device, g_PhysicalDevice, g_Queue, g_CommandPool,
-            wd->RenderPass, wd->SurfaceFormat.format,
-            static_cast<uint32_t>(wd->Width), static_cast<uint32_t>(wd->Height),
-            wd->ClearValue,
+            g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, wd->RenderPass,
+            wd->SurfaceFormat.format, static_cast<uint32_t>(wd->Width),
+            static_cast<uint32_t>(wd->Height), wd->ClearValue,
             [&](VkCommandBuffer cb) {
-              if (g_MeshRenderer) g_MeshRenderer->Render(cb, wd->FrameIndex);
-              if (g_FieldRenderer) g_FieldRenderer->Render(cb, wd->FrameIndex);
+              if (g_MeshRenderer)
+                g_MeshRenderer->Render(cb, wd->FrameIndex);
+              if (g_FieldRenderer)
+                g_FieldRenderer->Render(cb, wd->FrameIndex);
               if (g_OutlineRenderer)
                 g_OutlineRenderer->Render(cb, wd->FrameIndex);
               if (g_UnderlayRenderer)

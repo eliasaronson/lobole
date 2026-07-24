@@ -68,7 +68,7 @@ glm::vec2 ProfileCenterUV(const SketchFeature& sk,
                                std::is_same_v<T, sketch::Ellipse> ||
                                std::is_same_v<T, sketch::EllipseArc>) {
             add(g.center); // the center is close enough for an anchor
-          } else { // BSpline: every pole
+          } else {         // BSpline: every pole
             for (const glm::vec2& pole : g.poles)
               add(pole);
           }
@@ -81,12 +81,12 @@ glm::vec2 ProfileCenterUV(const SketchFeature& sk,
 // What the pending feature's handle looks like this frame. Recomputed per
 // frame (cheap); a live drag keeps using its grab-time axis instead.
 struct HandleSpec {
-  bool rotate = false;   // revolve arc vs linear arrow
-  glm::vec3 anchor{0};   // arrow base / arc center
-  glm::vec3 dir{0, 0, 1};// arrow direction / arc plane normal (unit)
-  float arcRadius = 0.0f;// rotate only
-  double value = 0.0;    // the parameter's current value
-  bool degrees = false;  // readout formatting
+  bool rotate = false;    // revolve arc vs linear arrow
+  glm::vec3 anchor{0};    // arrow base / arc center
+  glm::vec3 dir{0, 0, 1}; // arrow direction / arc plane normal (unit)
+  float arcRadius = 0.0f; // rotate only
+  double value = 0.0;     // the parameter's current value
+  bool degrees = false;   // readout formatting
 };
 
 // The sketch a feature extrudes/revolves, resolved by stable id.
@@ -188,8 +188,7 @@ bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
                      doc.GetFeatures(), index};
     if (!ResolveAxis(ctx, rev->axis, origin, dir))
       return false;
-    const glm::vec3 c =
-        sk->plane.PlaneToWorld(ProfileCenterUV(*sk, {}));
+    const glm::vec3 c = sk->plane.PlaneToWorld(ProfileCenterUV(*sk, {}));
     // Arc centered on the axis at the profile's height, through the profile.
     const float along = glm::dot(c - origin, dir);
     spec.anchor = origin + dir * along;
@@ -220,9 +219,12 @@ void ApplyHandleValue(AppState& state, Feature& f, double v) {
 }
 
 double CurrentHandleValue(const Feature& f) {
-  if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&f)) return ext->distance;
-  if (auto* fil = dynamic_cast<const FilletFeature*>(&f)) return fil->radius;
-  if (auto* rev = dynamic_cast<const RevolveFeature*>(&f)) return rev->angleDeg;
+  if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&f))
+    return ext->distance;
+  if (auto* fil = dynamic_cast<const FilletFeature*>(&f))
+    return fil->radius;
+  if (auto* rev = dynamic_cast<const RevolveFeature*>(&f))
+    return rev->angleDeg;
   return 0.0;
 }
 
@@ -273,9 +275,9 @@ void BuildPreviewHandleOverlay(AppState& state,
   // Floating readout at the handle while dragging (foreground list: on top of
   // everything, viewport-space like the measure readout).
   if (state.handleDrag.active) {
-    const glm::vec3 tipWorld = spec.rotate
-                                   ? spec.anchor + PerpTo(spec.dir) * spec.arcRadius
-                                   : spec.anchor + spec.dir * L;
+    const glm::vec3 tipWorld =
+        spec.rotate ? spec.anchor + PerpTo(spec.dir) * spec.arcRadius
+                    : spec.anchor + spec.dir * L;
     const glm::vec2 s = WorldToScreen(state, tipWorld);
     char buf[32];
     if (spec.degrees)
@@ -337,7 +339,8 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
   float startParam = 0.0f;
   if (!spec.rotate) {
     const float t = std::clamp(
-        RayAxisParam(ray.origin, ray.direction, spec.anchor, spec.dir), 0.0f, L);
+        RayAxisParam(ray.origin, ray.direction, spec.anchor, spec.dir), 0.0f,
+        L);
     hit = PointRayDist(spec.anchor + spec.dir * t, ray.origin, ray.direction) <
           grab;
     if (hit)
@@ -352,8 +355,8 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
       startParam = ang;
     }
   }
-  if (!hit) {
-  }
+  if (!hit)
+    return false; // let selection and armed tools consume a missed click
 
   Feature* f = ResolvePendingFeature(state);
   h.active = true;

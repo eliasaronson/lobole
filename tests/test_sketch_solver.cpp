@@ -29,7 +29,8 @@ TEST_CASE("Coincident merges two endpoints", "[solver]") {
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
   uint32_t l1 = s.AddEntity(sketch::Line{{4.1f, 0.2f}, {4, 3}}); // near L0.b
   // Coincident: L1.a (which 0) == L0.b (which 1)
-  s.constraints.push_back({sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 1}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 1}});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -155,7 +156,8 @@ TEST_CASE("An ellipse centre is a solver point that Coincident moves",
 TEST_CASE("Horizontal levels a line's endpoints", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 1.5f}});
-  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -172,13 +174,15 @@ TEST_CASE("A redundant constraint leaves DOF unchanged (add-then-diagnose)",
   // second Horizontal to an already-horizontal line must not reduce the DOF.
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 1.5f}});
-  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
   sketch::Solver one;
   one.Load(s);
   sketch::SolveResult r1 = one.Solve();
   REQUIRE(r1.ok);
 
-  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
   sketch::Solver two;
   two.Load(s);
   sketch::SolveResult r2 = two.Solve();
@@ -199,14 +203,14 @@ TEST_CASE("Distance constraint sets endpoint separation", "[solver]") {
 
   std::vector<sketch::Entity> out;
   solver.WriteBack(out);
-  CHECK_THAT(glm::length(LineB(out[0]) - LineA(out[0])),
-             WithinRel(5.0, 1e-4));
+  CHECK_THAT(glm::length(LineB(out[0]) - LineA(out[0])), WithinRel(5.0, 1e-4));
 }
 
 TEST_CASE("Radius constraint sets a circle radius", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 1.0});
-  s.constraints.push_back({sketch::ConstraintKind::Radius, {c0, 0}, {0, 0}, 2.5});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Radius, {c0, 0}, {0, 0}, 2.5});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -223,7 +227,8 @@ TEST_CASE("Angle constraint sets the angle between two lines", "[solver]") {
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
   uint32_t l1 = s.AddEntity(sketch::Line{{0, 0}, {3.5f, 2.0f}}); // ~30 deg
   // L1.a coincident to L0.a so the vertex stays put.
-  s.constraints.push_back({sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 0}});
   s.constraints.push_back(
       {sketch::ConstraintKind::Angle, {l0, 0}, {l1, 0}, glm::radians(45.0)});
 
@@ -290,8 +295,10 @@ TEST_CASE("Deleting a line keeps a coincident neighbour's constraints",
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
   uint32_t l1 = s.AddEntity(sketch::Line{{4, 0}, {4, 3}});
-  s.constraints.push_back({sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 1}});
-  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {l1, 0}, {l0, 1}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
 
   // Deleting l1 only drops the (trivial) coincident — no warning-worthy loss.
   size_t dropped = s.DeleteEntity(l1);
@@ -324,8 +331,10 @@ TEST_CASE("Transitive coincidence survives deleting the middle point",
   uint32_t p0 = s.AddEntity(sketch::Point{{0, 0}});
   uint32_t pMid = s.AddEntity(sketch::Point{{5, 5}});
   uint32_t p2 = s.AddEntity(sketch::Point{{10, 0}});
-  s.constraints.push_back({sketch::ConstraintKind::Coincident, {p0, 0}, {pMid, 0}});
-  s.constraints.push_back({sketch::ConstraintKind::Coincident, {pMid, 0}, {p2, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {p0, 0}, {pMid, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {pMid, 0}, {p2, 0}});
 
   // Deleting the middle point should re-link p0~p2 so they stay merged.
   s.DeleteEntity(pMid);
@@ -347,8 +356,10 @@ TEST_CASE("Split keeps both pieces horizontal and the length spanning",
           "[solver][split]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {6, 0.4f}}); // slightly sloped
-  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 6.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 6.0});
 
   // Split near the middle; the transferred H (both pieces) + spanning distance
   // must still solve to a straight 6-long horizontal segment pair.
@@ -388,7 +399,8 @@ TEST_CASE("Midpoint pins a point to a line's centre", "[solver]") {
 
 TEST_CASE("Symmetric mirrors two points across a line", "[solver]") {
   SketchFeature s = MakeSketch();
-  uint32_t axis = s.AddEntity(sketch::Line{{0, 0}, {0, 4}}); // vertical axis x=0
+  uint32_t axis =
+      s.AddEntity(sketch::Line{{0, 0}, {0, 4}}); // vertical axis x=0
   uint32_t pa = s.AddEntity(sketch::Point{{-2, 1}});
   uint32_t pb = s.AddEntity(sketch::Point{{2.5f, 1.3f}}); // not yet mirrored
   // Pin the axis so symmetry is about x=0 (not a drifted axis).
@@ -416,19 +428,21 @@ TEST_CASE("Fixed pins a point under a drag", "[solver][drag]") {
 
   sketch::Solver solver;
   solver.Load(s);
-  REQUIRE(solver.BeginDrag({{l0, 0}}));       // try to drag the fixed endpoint
+  REQUIRE(solver.BeginDrag({{l0, 0}})); // try to drag the fixed endpoint
   solver.SetDragTargets({{3.0f, 3.0f}});
   REQUIRE(solver.SolveDrag().ok);
   std::vector<sketch::Entity> out;
   solver.WriteBack(out);
-  CHECK_THAT(glm::length(LineA(out[0])), WithinAbs(0.0f, 1e-4f)); // stayed at 0,0
+  CHECK_THAT(glm::length(LineA(out[0])),
+             WithinAbs(0.0f, 1e-4f)); // stayed at 0,0
 }
 
 TEST_CASE("Concentric shares two circle centres", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 1.0});
   uint32_t c1 = s.AddEntity(sketch::Circle{{2, 1}, 2.0});
-  s.constraints.push_back({sketch::ConstraintKind::Concentric, {c0, 0}, {c1, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Concentric, {c0, 0}, {c1, 0}});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -443,10 +457,14 @@ TEST_CASE("Concentric shares two circle centres", "[solver]") {
 TEST_CASE("Collinear puts two lines on one line", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {2, 0}});
-  uint32_t l1 = s.AddEntity(sketch::Line{{3, 0.5f}, {5, 0.7f}}); // offset + tilted
-  s.constraints.push_back({sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
-  s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 0}}); // pin l0 to y=0
-  s.constraints.push_back({sketch::ConstraintKind::Collinear, {l0, 0}, {l1, 0}});
+  uint32_t l1 =
+      s.AddEntity(sketch::Line{{3, 0.5f}, {5, 0.7f}}); // offset + tilted
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Horizontal, {l0, 0}, {0, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Fixed, {l0, 0}}); // pin l0 to y=0
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Collinear, {l0, 0}, {l1, 0}});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -463,8 +481,10 @@ TEST_CASE("DistanceX / DistanceY drive a coordinate gap", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {1, 1}});
   s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 0}}); // pin a
-  s.constraints.push_back({sketch::ConstraintKind::DistanceX, {l0, 0}, {l0, 1}, 3.0});
-  s.constraints.push_back({sketch::ConstraintKind::DistanceY, {l0, 0}, {l0, 1}, 2.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::DistanceX, {l0, 0}, {l0, 1}, 3.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::DistanceY, {l0, 0}, {l0, 1}, 2.0});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -479,7 +499,8 @@ TEST_CASE("DistanceX / DistanceY drive a coordinate gap", "[solver]") {
 TEST_CASE("Diameter drives radius to half its value", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 1.0});
-  s.constraints.push_back({sketch::ConstraintKind::Diameter, {c0, 0}, {0, 0}, 5.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Diameter, {c0, 0}, {0, 0}, 5.0});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -493,8 +514,10 @@ TEST_CASE("Over-constrained sketch reports without crashing", "[solver]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
   // Two conflicting distances on the same points
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -508,8 +531,10 @@ TEST_CASE("Conflicting tags map back to constraint indices", "[solver]") {
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
   s.constraints.push_back({sketch::ConstraintKind::Fixed, {l0, 0}}); // idx 0
   // Two conflicting lengths on the same line (idx 1, 2).
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -524,18 +549,22 @@ TEST_CASE("Conflicting tags map back to constraint indices", "[solver]") {
          !r.ok));
 }
 
-TEST_CASE("Dragging a whole line translates it and pulls a coincident neighbour",
-          "[solver][drag]") {
+TEST_CASE(
+    "Dragging a whole line translates it and pulls a coincident neighbour",
+    "[solver][drag]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
-  uint32_t l1 = s.AddEntity(sketch::Line{{4, 0}, {4, 3}}); // l1.a joined to l0.b
-  s.constraints.push_back({sketch::ConstraintKind::Coincident, {l0, 1}, {l1, 0}});
+  uint32_t l1 =
+      s.AddEntity(sketch::Line{{4, 0}, {4, 3}}); // l1.a joined to l0.b
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Coincident, {l0, 1}, {l1, 0}});
 
   sketch::Solver solver;
   solver.Load(s);
   REQUIRE(solver.BeginDrag({{l0, 0}, {l0, 1}})); // whole line = both endpoints
   const glm::vec2 d{2.0f, 1.0f};
-  solver.SetDragTargets({{0 + d.x, 0 + d.y}, {4 + d.x, 0 + d.y}}); // rigid delta
+  solver.SetDragTargets(
+      {{0 + d.x, 0 + d.y}, {4 + d.x, 0 + d.y}}); // rigid delta
   REQUIRE(solver.SolveDrag().ok);
 
   std::vector<sketch::Entity> out;
@@ -547,6 +576,29 @@ TEST_CASE("Dragging a whole line translates it and pulls a coincident neighbour"
   // The neighbour's coincident endpoint followed to l0's new far end.
   glm::vec2 l1a = LineA(out[s.IndexOfEntity(l1)]);
   CHECK_THAT(glm::length(l1a - b), WithinAbs(0.0f, 1e-4f));
+}
+
+TEST_CASE("Dragging a dimensioned line translates without changing its length",
+          "[solver][drag]") {
+  SketchFeature s = MakeSketch();
+  uint32_t line = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {line, 0}, {line, 1}, 4.0});
+
+  sketch::Solver solver;
+  solver.Load(s);
+  REQUIRE(solver.BeginDrag({{line, 0}, {line, 1}}));
+  const glm::vec2 delta{2.0f, 1.0f};
+  solver.SetDragTargets({delta, glm::vec2(4, 0) + delta});
+  REQUIRE(solver.SolveDrag().ok);
+
+  std::vector<sketch::Entity> out;
+  solver.WriteBack(out);
+  const auto& moved = std::get<sketch::Line>(out[s.IndexOfEntity(line)]);
+  CHECK_THAT(glm::length(moved.a - delta), WithinAbs(0.0f, 1e-3f));
+  CHECK_THAT(glm::length(moved.b - (glm::vec2(4, 0) + delta)),
+             WithinAbs(0.0f, 1e-3f));
+  CHECK_THAT(glm::length(moved.b - moved.a), WithinAbs(4.0f, 1e-4f));
 }
 
 TEST_CASE("Dragging a circle rim resizes it with the centre fixed",
@@ -567,7 +619,8 @@ TEST_CASE("Dragging a circle rim resizes it with the centre fixed",
   CHECK_THAT(glm::length(circ.center), WithinAbs(0.0f, 1e-5f)); // centre held
 }
 
-TEST_CASE("Dragging a heavily constrained sketch stays stable", "[solver][drag]") {
+TEST_CASE("Dragging a heavily constrained sketch stays stable",
+          "[solver][drag]") {
   // A rectangle (4 lines + coincidents + H/V). Drag one corner over many small
   // steps and confirm it converges without blowing up (the rescale-0.01 pull).
   SketchFeature s = MakeSketch();
@@ -587,21 +640,25 @@ TEST_CASE("Dragging a heavily constrained sketch stays stable", "[solver][drag]"
   glm::vec2 corner = LineA(out[s.IndexOfEntity(ids[0])]);
   CHECK(std::isfinite(corner.x));
   CHECK(std::isfinite(corner.y));
-  CHECK_THAT(glm::length(corner - target), WithinAbs(0.0f, 1e-1f)); // tracked it
+  CHECK_THAT(glm::length(corner - target),
+             WithinAbs(0.0f, 1e-1f)); // tracked it
 }
 
 TEST_CASE("BeginDrag refuses a conflicting sketch", "[solver][drag]") {
   SketchFeature s = MakeSketch();
   uint32_t l0 = s.AddEntity(sketch::Line{{0, 0}, {4, 0}});
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
-  s.constraints.push_back({sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 5.0});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {l0, 0}, {l0, 1}, 3.0});
 
   sketch::Solver solver;
   solver.Load(s);
   CHECK_FALSE(solver.BeginDrag({{l0, 0}})); // refuse — conflicting
 }
 
-TEST_CASE("A rectangle (4 lines + H/V) solves and extrudes", "[solver][extrude]") {
+TEST_CASE("A rectangle (4 lines + H/V) solves and extrudes",
+          "[solver][extrude]") {
   // Rectangle = 4 lines + corner coincidents + H/V; the solver settles the
   // corners and the four lines chain into one closed profile loop.
   SketchFeature s = MakeSketch();
@@ -624,7 +681,8 @@ TEST_CASE("Radius constraint sets an arc radius", "[solver][arc]") {
   SketchFeature s = MakeSketch();
   // Quarter arc, CCW from 0 to pi/2, radius 1.
   uint32_t a0 = s.AddEntity(sketch::Arc{{0, 0}, 1.0, 0.0, M_PI / 2});
-  s.constraints.push_back({sketch::ConstraintKind::Radius, {a0, 0}, {0, 0}, 2.5});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Radius, {a0, 0}, {0, 0}, 2.5});
 
   sketch::Solver solver;
   solver.Load(s);
@@ -677,7 +735,8 @@ TEST_CASE("A linked mirror follows the source through the solver",
   auto gen = s.MirrorEntities({seg}, axis, /*link=*/true);
   REQUIRE(gen.size() == 1);
 
-  // Move the source line's endpoint, then re-solve: the linked copy must mirror.
+  // Move the source line's endpoint, then re-solve: the linked copy must
+  // mirror.
   std::get<sketch::Line>(s.entities[s.IndexOfEntity(seg)]).a = {2.5f, 2.0f};
   sketch::Solver solver;
   solver.Load(s);
@@ -692,7 +751,8 @@ TEST_CASE("A linked mirror follows the source through the solver",
   CHECK_THAT(copyA.y, WithinAbs(srcA.y, 1e-3f));
 }
 
-TEST_CASE("A filleted corner solves and extrudes", "[solver][arc][generative]") {
+TEST_CASE("A filleted corner solves and extrudes",
+          "[solver][arc][generative]") {
   // A rectangle with one corner filleted still closes and extrudes.
   SketchFeature s = MakeSketch();
   auto r = s.AddRectangle({0, 0}, {4, 2});
@@ -767,9 +827,8 @@ TEST_CASE("Centered rectangle stays anchored to its centre point",
   // Pin the centre, then dimension the width: the rectangle must grow
   // symmetrically about the centre instead of dragging it along.
   s.constraints.push_back({sketch::ConstraintKind::Fixed, {ids[4], 0}, {}});
-  sketch::Constraint width{sketch::ConstraintKind::Distance,
-                           {ids[0], 0},
-                           {ids[0], 1}};
+  sketch::Constraint width{
+      sketch::ConstraintKind::Distance, {ids[0], 0}, {ids[0], 1}};
   width.value = 3.0;
   s.constraints.push_back(width);
 
@@ -838,8 +897,7 @@ TEST_CASE("Expression-driven entity fields are pinned during the solve",
   const uint32_t c0 = s.AddEntity(sketch::Circle{{0, 0}, 3.0});
   const uint32_t c1 = s.AddEntity(sketch::Circle{{10, 0}, 1.0});
   s.entityExprs[c0]["r"] = "bore / 2"; // the solver only cares it is non-empty
-  s.constraints.push_back(
-      {sketch::ConstraintKind::Equal, {c0, 0}, {c1, 0}});
+  s.constraints.push_back({sketch::ConstraintKind::Equal, {c0, 0}, {c1, 0}});
   sketch::Solver solver;
   solver.Load(s);
   REQUIRE(solver.Solve().ok);
@@ -894,7 +952,8 @@ TEST_CASE("Fillet preserves implicit line directions in a staircase",
   const uint32_t L3 = s.AddEntity(sketch::Line{{0, 2}, {0, 4}});   // vertical
   const uint32_t L4 = s.AddEntity(sketch::Line{{0, 4}, {2, 4}});   // horizontal
   s.constraints.push_back({K::Coincident, {L1, 1}, {L2, 0}});
-  s.constraints.push_back({K::Coincident, {L2, 1}, {L3, 0}}); // the fillet corner
+  s.constraints.push_back(
+      {K::Coincident, {L2, 1}, {L3, 0}}); // the fillet corner
   s.constraints.push_back({K::Coincident, {L3, 1}, {L4, 0}});
   s.constraints.push_back({K::Vertical, {L1, 0}, {0, 0}}); // whole-line
   s.constraints.push_back({K::Fixed, {L1, 0}, {}});
@@ -910,7 +969,9 @@ TEST_CASE("Fillet preserves implicit line directions in a staircase",
     REQUIRE(solver.Solve().ok);
     solver.WriteBack(s.entities);
   }
-  auto A = [&](uint32_t id) { return AngleDeg(s.entities[s.IndexOfEntity(id)]); };
+  auto A = [&](uint32_t id) {
+    return AngleDeg(s.entities[s.IndexOfEntity(id)]);
+  };
   const double b1 = A(L1), b2 = A(L2), b3 = A(L3), b4 = A(L4);
   REQUIRE(std::abs(std::abs(b3) - 90.0) < 1e-2); // vertical before
 
@@ -943,15 +1004,17 @@ TEST_CASE("Fillet in a fully-built corner prunes the redundant lock",
   SketchFeature s = MakeSketch();
   using K = sketch::ConstraintKind;
   const uint32_t L1 = s.AddEntity(sketch::Line{{-1.8f, -1.14f}, {-1.8f, 0}});
-  const uint32_t L2 = s.AddEntity(sketch::Line{{-1.8f, 0}, {0, 0}});   // horiz
-  const uint32_t L3 = s.AddEntity(sketch::Line{{0, 0}, {0, 2.19f}});   // vert
+  const uint32_t L2 = s.AddEntity(sketch::Line{{-1.8f, 0}, {0, 0}}); // horiz
+  const uint32_t L3 = s.AddEntity(sketch::Line{{0, 0}, {0, 2.19f}}); // vert
   const uint32_t L4 = s.AddEntity(sketch::Line{{0, 2.19f}, {1.44f, 2.19f}});
   s.constraints.push_back({K::Coincident, {L1, 1}, {L2, 0}});
-  s.constraints.push_back({K::Coincident, {L2, 1}, {L3, 0}}); // the fillet corner
+  s.constraints.push_back(
+      {K::Coincident, {L2, 1}, {L3, 0}}); // the fillet corner
   s.constraints.push_back({K::Coincident, {L3, 1}, {L4, 0}});
-  s.constraints.push_back({K::Vertical, {L1, 0}, {0, 0}});        // whole-line V
+  s.constraints.push_back({K::Vertical, {L1, 0}, {0, 0}}); // whole-line V
   s.constraints.push_back({K::Horizontal, {L1, 1}, {sketch::kOrigin, 0}});
-  s.constraints.push_back({K::Coincident, {L2, 1}, {sketch::kOrigin, 0}}); // corner
+  s.constraints.push_back(
+      {K::Coincident, {L2, 1}, {sketch::kOrigin, 0}});        // corner
   s.constraints.push_back({K::Vertical, {L3, 1}, {L2, 1}});   // L3 implicit V
   s.constraints.push_back({K::Horizontal, {L4, 1}, {L3, 1}}); // L4 implicit H
 
@@ -961,7 +1024,9 @@ TEST_CASE("Fillet in a fully-built corner prunes the redundant lock",
     REQUIRE(solver.Solve().ok);
     solver.WriteBack(s.entities);
   }
-  auto A = [&](uint32_t id) { return AngleDeg(s.entities[s.IndexOfEntity(id)]); };
+  auto A = [&](uint32_t id) {
+    return AngleDeg(s.entities[s.IndexOfEntity(id)]);
+  };
 
   REQUIRE(s.FilletCorner(L2, L3, 0.5) != 0);
   sketch::Solver solver;
@@ -997,7 +1062,9 @@ TEST_CASE("Fillet preserves a free corner's line directions",
   s.constraints.push_back({K::Coincident, {l0, 1}, {l1, 0}});
   s.constraints.push_back({K::Fixed, {l0, 0}, {}});
   s.constraints.push_back({K::Fixed, {l1, 1}, {}});
-  auto A = [&](uint32_t id) { return AngleDeg(s.entities[s.IndexOfEntity(id)]); };
+  auto A = [&](uint32_t id) {
+    return AngleDeg(s.entities[s.IndexOfEntity(id)]);
+  };
   const double a0 = A(l0), a1 = A(l1);
   REQUIRE(s.FilletCorner(l0, l1, 0.3) != 0);
   sketch::Solver solver;
@@ -1020,7 +1087,9 @@ TEST_CASE("Fillet on explicit H/V corner does not over-constrain",
   s.constraints.push_back({K::Vertical, {l0, 0}, {0, 0}});
   s.constraints.push_back({K::Horizontal, {l1, 0}, {0, 0}});
   s.constraints.push_back({K::Fixed, {l0, 0}, {}});
-  auto A = [&](uint32_t id) { return AngleDeg(s.entities[s.IndexOfEntity(id)]); };
+  auto A = [&](uint32_t id) {
+    return AngleDeg(s.entities[s.IndexOfEntity(id)]);
+  };
   REQUIRE(s.FilletCorner(l0, l1, 0.3) != 0);
   sketch::Solver solver;
   solver.Load(s);
@@ -1043,9 +1112,11 @@ TEST_CASE("Fillet does not hide a real over-constraint elsewhere",
   // conflict blocks that, so nothing is hidden.
   SketchFeature s = MakeSketch();
   using K = sketch::ConstraintKind;
-  const uint32_t l0 = s.AddEntity(sketch::Line{{0, 3}, {0, 0}});   // fillet corner
-  const uint32_t l1 = s.AddEntity(sketch::Line{{0, 0}, {3, 0}});   // fillet corner
-  const uint32_t lc = s.AddEntity(sketch::Line{{6, 0}, {9, 1}});   // the conflict
+  const uint32_t l0 =
+      s.AddEntity(sketch::Line{{0, 3}, {0, 0}}); // fillet corner
+  const uint32_t l1 =
+      s.AddEntity(sketch::Line{{0, 0}, {3, 0}}); // fillet corner
+  const uint32_t lc = s.AddEntity(sketch::Line{{6, 0}, {9, 1}}); // the conflict
   s.constraints.push_back({K::Coincident, {l0, 1}, {l1, 0}});
   s.constraints.push_back({K::Vertical, {l0, 0}, {0, 0}});
   s.constraints.push_back({K::Horizontal, {l1, 0}, {0, 0}});

@@ -1,6 +1,19 @@
 # Direct manipulation in previews
 
-Status: DRAFT — awaiting sign-off.
+Status: **SHIPPED 2026-07-19** (`9479582`) — preview-scoped handles are wired
+for blind/symmetric extrudes, fillets/chamfers, and revolves. The dialog and
+handle edit the same pending-feature parameter, then acceptance creates one
+undoable `AddFeatureCommand`.
+
+## Follow-up: input correctness and coverage
+
+The initial feature is complete. The former P0 input regression was fixed:
+`HandlePreviewHandleInput` now returns `false` before touching `HandleDrag`
+when hit testing misses, so `ViewportInput` falls through to selection and
+armed tools. `fillet_body_edge_via_click` asserts that contract for a live
+fillet preview.
+
+Remaining coverage: add a revolve-handle drag GUI case.
 
 Scope: the plan.md backlog item "Direct manipulation in previews" — drag an
 arrow/handle in the viewport to set a feature parameter (Onshape/SolidWorks
@@ -8,9 +21,10 @@ style), as the natural U3 follow-on. The dialog and the handle edit the same
 parameter: the handle is a second widget over the same feature field, not a
 second code path.
 
-## Where we actually are
+## Historical pre-implementation inventory
 
-Every piece of machinery exists; nothing is wired together for this yet:
+At planning time, every piece of machinery existed but nothing was wired
+together:
 
 - **Preview flow** (`PreviewFeature.cpp`): a pending feature lives in the
   document (`state.pendingFeatureId`), regenerates and renders live;
@@ -131,14 +145,23 @@ Precedent: `GuiTests.cpp` already drives raw viewport drags with
   pending, then accept → `FeatureCount()==1` and one undo step.
 - GUI: Esc mid-drag restores the grab value and the preview survives; a
   click away from the handle changes nothing (pipeline fall-through).
-- GUI: fillet preview on a box edge — drag, assert `radius` changed.
+- GUI: fillet preview on a box edge — drag, assert `radius` changed; a
+  missed-handle ray returns false without activating a drag, preserving the
+  blend-picker fall-through contract.
 - Screenshot-verified on dev-watch (not asserted): arrow/arc aesthetics,
   floating readout, snap feel, no z-fighting with the model.
 
-## Order & effort
+## Implementation record and remaining order
 
-1. Hoist DragMath + module skeleton + ViewportInput/UI wiring (~0.5 session).
-2. Extrude arrow end-to-end incl. GUI test (~0.5 session) — proves the loop.
-3. Fillet marker, revolve arc, Esc/snap polish + tests (~1 session).
+Completed in `9479582`: shared `DragMath`, preview-handle module and wiring,
+extrude arrow, fillet/chamfer marker, revolve arc, Esc/snap behavior, and GUI
+coverage for extrude and fillet.
 
-No format change, no golden bumps; assembly gizmo untouched beyond the hoist.
+Remaining order:
+
+1. Add a revolve drag GUI case.
+2. Consider the deferred two-sided-extrude and shell-thickness handles only
+   when users need them.
+
+No format change or golden bump is required; the assembly gizmo remains
+unchanged beyond the shared math extraction.

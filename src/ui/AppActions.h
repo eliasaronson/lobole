@@ -1,9 +1,9 @@
 #pragma once
 
-#include "cad/MeshExport.h"      // MeshExport::Item
-#include "render/SketchRenderer.h" // Vertex3D, PrimVertex
+#include "cad/MeshExport.h"                // MeshExport::Item
+#include "core/ElementMap.h"               // ElementRef
 #include "core/drawing/DrawingDimension.h" // drawing::ResolvedDim
-#include "core/ElementMap.h" // ElementRef
+#include "render/SketchRenderer.h"         // Vertex3D, PrimVertex
 #include "ui/AppState.h"
 
 #include <cstdint>
@@ -22,10 +22,10 @@ namespace ui {
 // Feature selection through the one Selection set (U1a). Stored by stable
 // feature id, so it survives regeneration, reordering and sibling deletes;
 // callers that need the index resolve it fresh each time.
-uint64_t SelectedFeatureId(const AppState& state);         // 0 = none
+uint64_t SelectedFeatureId(const AppState& state); // 0 = none
 Feature* SelectedFeature(AppState& state, size_t* indexOut = nullptr);
-int SelectedFeatureIndexOrMinus1(AppState& state);         // RPC back-compat
-void SelectFeature(AppState& state, uint64_t featureId);   // replaces the set
+int SelectedFeatureIndexOrMinus1(AppState& state);       // RPC back-compat
+void SelectFeature(AppState& state, uint64_t featureId); // replaces the set
 void SelectFeatureByIndex(AppState& state, size_t index);
 // Assembly-tab selection through the same set (U1d). Occurrence and mate
 // items coexist (the panel lists select independently, as the old separate
@@ -118,7 +118,8 @@ std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId);
 struct AssemblyFacePick {
   uint64_t occurrenceId = 0;
   ElementRef face;
-  ElementRef snapEdge; // inference snap: nearest circular-edge (hole) center, if any
+  ElementRef
+      snapEdge; // inference snap: nearest circular-edge (hole) center, if any
 };
 bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
 
@@ -132,17 +133,19 @@ void AcceptMateTool(AppState& state);
 void CancelMateTool(AppState& state);
 // The world frame of a connector (occurrence placement ∘ its part-local frame),
 // or nullopt if it doesn't resolve. For drawing the connector triad.
-std::optional<glm::mat4> ConnectorWorldFrame(AppState& state, const Connector& c);
+std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
+                                             const Connector& c);
 // Appends the mate tool's connector triads (picked connectors) to `lines`.
 void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
 
 // The 3D drag gizmo (A2.5). BuildGizmoOverlay appends the translate/rotate
 // handles for the selected non-fixed occurrence; HandleGizmoInput runs the drag
-// state machine (grab → live per-frame transform → release snapshots+solves) and
-// returns true when it consumed the viewport (so the caller skips pick/orbit).
+// state machine (grab → live per-frame transform → release snapshots+solves)
+// and returns true when it consumed the viewport (so the caller skips
+// pick/orbit).
 void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines);
-bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked,
-                      bool down, bool released);
+bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
+                      bool released);
 
 // The occurrence list + properties editor for an active assembly tab (drawn
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.
@@ -208,7 +211,8 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
 
 // If a run has finished (converged, capped, cancelled, or errored), joins it
 // and stores the result (or the study error). Cheap no-op otherwise — call it
-// each frame and before reporting study status. Defined in SimulationActions.cpp.
+// each frame and before reporting study status. Defined in
+// SimulationActions.cpp.
 void PollTopologyRun(AppState& state, Document& doc);
 
 // Requests cancellation of the run for `studyId` (keeps best-so-far). Returns
@@ -224,8 +228,8 @@ struct TopoRunStatus {
   double compliance = 0.0;
   double maxChange = 0.0;
   double volumeFraction = 0.0;
-  std::string solver;           // "gpu: <device>" or "cpu (<why>)"
-  double elapsedSeconds = 0.0;  // since the run started
+  std::string solver;          // "gpu: <device>" or "cpu (<why>)"
+  double elapsedSeconds = 0.0; // since the run started
 };
 TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
 
@@ -268,17 +272,17 @@ void SyncFieldRenderer(AppState& state);
 // visibility is a display state, not suppression.
 struct BomRow {
   uint64_t partId = 0;
-  std::string partName;      // "(missing part)" when the reference dangles
+  std::string partName; // "(missing part)" when the reference dangles
   int quantity = 0;
-  std::string material;      // slug; "" = none, "mixed" when bodies differ
-  double unitVolume = 0.0;   // mm^3, all bodies of the part
+  std::string material;    // slug; "" = none, "mixed" when bodies differ
+  double unitVolume = 0.0; // mm^3, all bodies of the part
   bool massKnown = false;
-  double unitMassG = 0.0;    // valid when massKnown
+  double unitMassG = 0.0; // valid when massKnown
 };
 struct BomTable {
   std::vector<BomRow> rows;
-  bool massKnown = true;     // false when any row's mass is unknown
-  double totalMassG = 0.0;   // valid when massKnown
+  bool massKnown = true;   // false when any row's mass is unknown
+  double totalMassG = 0.0; // valid when massKnown
 };
 BomTable ComputeBom(AppState& state); // empty without an active assembly
 // The table as CSV (quoted where needed); unknown masses are empty cells.
@@ -375,10 +379,11 @@ void FitCameraToSelection(AppState& state);
 // changed (edit, undo, redo). Call once per frame before drawing.
 void SyncDocumentRenderers(AppState& state);
 
-// Mirrors the current document bodies into the ray tracer (geometry + materials)
-// and (re)builds its acceleration structures. On-demand for the offline render;
-// returns false if RT is unavailable or there's no geometry. `groundPlane`
-// adds a shadow-catcher quad under the scene (offline renders only).
+// Mirrors the current document bodies into the ray tracer (geometry +
+// materials) and (re)builds its acceleration structures. On-demand for the
+// offline render; returns false if RT is unavailable or there's no geometry.
+// `groundPlane` adds a shadow-catcher quad under the scene (offline renders
+// only).
 bool SyncRayTracingScene(AppState& state, bool groundPlane = false);
 
 // Builds the offline-render descriptor from the current app state (camera +
@@ -407,7 +412,8 @@ void LoadSTEPFile(AppState& state, const std::string& filename);
 // Reference-image underlays (v49). Add reads/decodes the file and centres it on
 // the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`
 // (p1 fixed; alignAxis also rotates p1->p2 onto the U axis); Delete removes it.
-// All commit one undoable ModifyFeatureCommand. See docs/sketch/reference-image-plan.md.
+// All commit one undoable ModifyFeatureCommand. See
+// docs/sketch/reference-image-plan.md.
 uint32_t AddReferenceImageToSketch(AppState& state, const std::string& path);
 void CalibrateReferenceImageAction(AppState& state, uint32_t imageId,
                                    glm::vec2 p1, glm::vec2 p2, double distance,
@@ -467,8 +473,8 @@ std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
 // elements stay highlighted until re-clicked / removed / Escape. On an
 // assembly tab `occurrenceId` names the occurrence the element was picked
 // on (0 = part context) — part of the element's identity.
-void MeasureElementClicked(AppState& state, const ElementRef& ref,
-                           bool isEdge, uint64_t occurrenceId = 0);
+void MeasureElementClicked(AppState& state, const ElementRef& ref, bool isEdge,
+                           uint64_t occurrenceId = 0);
 // Recomputes the readout after the picked set changes (panel removals).
 void UpdateMeasureReadout(AppState& state);
 
@@ -490,8 +496,8 @@ void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
 // The features in [0, beforeIndex) that produce a body (primitives, imports,
 // extrude/revolve in NewBody mode, and earlier booleans), as {featureId,
 // name}. Backs the boolean operand combos and the "Boolean" menu gate.
-std::vector<std::pair<uint64_t, std::string>> BodyProducers(
-    const Document& doc, size_t beforeIndex);
+std::vector<std::pair<uint64_t, std::string>> BodyProducers(const Document& doc,
+                                                            size_t beforeIndex);
 
 // Appends translucent quads for every DatumPlaneFeature in the document,
 // tinted distinctly from the base planes; the hovered/selected/pending datum
@@ -529,9 +535,16 @@ std::vector<LineVertex3D> BuildPlaneQuads(bool show, int hoveredPlane);
 void AppendPlaneQuad(const SketchPlane& plane, const glm::vec3& color,
                      float half, std::vector<LineVertex3D>& quads);
 
+// The active sketch's work-plane fill and 1-unit grid extend this far from its
+// origin, covering normal part-scale sketches without a tiny visible patch.
+inline constexpr float kSketchBackgroundHalfExtent = 50.0f;
+// Half-size of the visible default-plane quads and their plane-picking area.
+inline constexpr float kDefaultPlaneHalfExtent = 8.0f;
+
 // Appends grid lines for a sketch's work plane (minor/major cells + colored
 // U/V axes), so it is clear what surface you are drawing on.
-void AppendSketchGrid(const SketchPlane& plane, std::vector<LineVertex3D>& lines);
+void AppendSketchGrid(const SketchPlane& plane,
+                      std::vector<LineVertex3D>& lines);
 
 // Appends the world-origin gizmo: three arrows (X red / Y green / Z blue).
 void AppendOriginGizmo(std::vector<LineVertex3D>& lines);
@@ -545,7 +558,7 @@ void AppendCogMarker(const AppState& state, std::vector<LineVertex3D>& lines);
 // Holds the rubber-band preview + gizmo/grid; entity lines and vertex dots go
 // through BuildActiveSketchPrimitives instead.
 std::vector<LineVertex3D> BuildActiveSketchOverlay(AppState& state,
-                                               uint64_t activeSketchId);
+                                                   uint64_t activeSketchId);
 
 // Thick anti-aliased entity lines + constant-size vertex dots for the active
 // sketch, with hover/selection emphasis. Empty if not editing a sketch.
@@ -555,6 +568,6 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
 // Base-color thin lines for every sketch except the active one (which renders
 // through BuildActiveSketchPrimitives). Rebuilt per-frame.
 std::vector<LineVertex3D> BuildStaticSketchLines(AppState& state,
-                                             uint64_t activeSketchId);
+                                                 uint64_t activeSketchId);
 
 } // namespace ui

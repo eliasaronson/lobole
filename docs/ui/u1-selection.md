@@ -4,25 +4,51 @@
 > `754d4d0`, U1c `5e3ed9a`, U1d). SW/Onshape conventions as signed off.
 > Deliberate carve-out: mate-connector picking keeps its own picker (it
 > resolves (occurrence, face-frame) pairs the generic candidates don't
-> carry). Known limits, absorbed by U5: single face-highlight slot (last
-> Face item shows), occurrence hover previews via the hit face's range.
+> carry). The single face-highlight slot and all-depth candidate enumeration
+> remain explicit U1e follow-up work below; occurrence hover still uses the hit
+> face's range.
 > Parent: [plan.md](plan.md) U1.
 > Scope: model-space selection. The 2D sketcher's entity selection is mature
 > and stays as-is; it integrates only at the prompt/filter level.
+
+## Follow-up: candidate completeness and verification
+
+The U1a–d migration is shipped, but its U1b disambiguation promise is only
+partially met. `SelectionPipeline::Candidates` currently receives only the
+nearest face/edge result from `FaceSelector`; repeat-click cycling can switch
+between that edge, face, and body, but cannot reach a face behind the first
+one. Treat this as a focused U1e follow-up, not a second selection model.
+
+1. **All-hit candidate API.** Extend the picking engine to return every eligible
+   ray hit with depth; preserve the priority rule Edge > Face at equal depth,
+   then sort by depth. Feed that list into the existing stable-item pipeline
+   and repeat-click cycle.
+2. **Projection completeness.** Make multiple selected faces on the same
+   renderer instance visible simultaneously rather than retaining only the
+   most recently synchronized face range.
+3. **Acceptance coverage.** Add GUI tests for two stacked faces cycling to the
+   hidden face, an armed blend/slot prompt and filter flow, and an
+   assembly-occurrence click/gizmo flow. Keep the existing stable-ID and
+   default part-picking tests as regression coverage.
 
 ## What exists today (audit)
 
 Selection state is scattered across seven mechanisms:
 
-| Mechanism | State | Problems |
-|---|---|---|
-| Feature selection | `AppState::selectedFeature` (**int index**) | Dangles across delete/undo — `DrawUI` clamps it every frame; RPC + tree + properties all read the raw index |
-| Face selection | `FaceSelector::m_selected*` + duplicated highlight state in `MeshRenderer` | Single face only; selection lives in the *picking engine*; three call sites keep renderer highlights in sync by hand |
-| Edge picking | `EdgePickState` (fillet/chamfer collection) | Hover + click exist **only** while a blend is collecting; edges are otherwise unselectable |
-| Measure | `MeasureState` (own element pair) | Own pick path, own click handler |
-| Occurrence / mate | `selectedOccurrence`, `selectedMate` (ids) | Assembly-tab-only, separate flows |
-| Sim BC / keep faces | `SimulationState::tool` armed-pick | Own ray + resolve + one-shot disarm |
-| Mate connector | `MateToolState` | Own ray + resolve |
+- **Feature selection:** `AppState::selectedFeature` (an **int index**) could
+  dangle across delete/undo; `DrawUI` clamped it every frame, while RPC, tree,
+  and properties all read the raw index.
+- **Face selection:** `FaceSelector::m_selected*` plus duplicated
+  `MeshRenderer` highlight state allowed one face only; the pick engine owned
+  selection and three call sites synchronized renderer highlights by hand.
+- **Edge picking:** `EdgePickState` existed only for fillet/chamfer collection;
+  edges were otherwise unselectable.
+- **Measure:** `MeasureState` owned its element pair and pick handler.
+- **Occurrence / mate:** `selectedOccurrence` and `selectedMate` were separate
+  assembly-tab flows.
+- **Simulation BC / keep faces:** `SimulationState::tool` had its own armed
+  pick path.
+- **Mate connector:** `MateToolState` had a separate ray and resolver.
 
 `ViewportInput.cpp` routes clicks through a **priority chain** of these
 handlers; each computes its own ray, resolves `documentMeshes → Body →

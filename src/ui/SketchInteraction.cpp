@@ -1,19 +1,19 @@
 #include "ui/SketchInteraction.h"
 
-#include "render/Camera.h"
-#include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (Shift+E/R)
-#include "ui/AppActions.h" // SelectFeature
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
-#include "render/MeshRenderer.h" // LineVertex3D
-#include "core/features/DatumPlaneFeature.h"
 #include "core/Expression.h"
-#include "core/io/Serialization.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSelection.h"
 #include "core/sketch/SketchSolver.h"
+#include "render/Camera.h"
+#include "render/MeshRenderer.h" // LineVertex3D
+#include "ui/AppActions.h"       // SelectFeature
+#include "ui/SketchToolbar.h"    // BeginSketchExtrude/Revolve (Shift+E/R)
 
 #include "imgui.h"
 
@@ -42,7 +42,8 @@ LineVertex3D LineVertex(const glm::vec3& p) {
 
 // Intersects a screen ray with a plane; returns UV on the plane, or nullopt
 // if parallel.
-std::optional<glm::vec2> RayToPlaneUV(const Ray& ray, const SketchPlane& plane) {
+std::optional<glm::vec2> RayToPlaneUV(const Ray& ray,
+                                      const SketchPlane& plane) {
   const glm::vec3 n = plane.GetNormal();
   const float denom = glm::dot(ray.direction, n);
   if (std::abs(denom) < 1e-6f)
@@ -107,8 +108,8 @@ void ApplyInferred(SketchFeature& sketch,
     sketch::Solver s2;
     s2.Load(sketch);
     sketch::SolveResult r2 = s2.Solve();
-    const bool keep = r2.ok && r2.conflicting.empty() &&
-                      (dof < 0 || r2.dof < dof);
+    const bool keep =
+        r2.ok && r2.conflicting.empty() && (dof < 0 || r2.dof < dof);
     if (keep) {
       dof = r2.dof;
       s2.WriteBack(sketch.entities); // settle with this constraint
@@ -177,7 +178,8 @@ void CommitLine(AppState& state, SketchFeature& sketch, size_t index,
   uint32_t id = 0;
   if (infer) {
     const float ppu = PixelsPerUV(state, sketch.plane, b);
-    sketch::Snap sa = sketch::InferPoint(sketch.entities, a, std::nullopt, 0, ppu);
+    sketch::Snap sa =
+        sketch::InferPoint(sketch.entities, a, std::nullopt, 0, ppu);
     sketch::Snap sb = sketch::InferPoint(sketch.entities, b, sa.uv, 0, ppu);
     pa = sa.uv;
     pb = sb.uv;
@@ -278,6 +280,31 @@ Ray ScreenRay(AppState& state, const glm::vec2& mousePos) {
       static_cast<int>(state.viewportSize.y), *state.camera);
 }
 
+// Defined with sketch picking below. A forward declaration lets body-drag
+// setup use the same complete set of solver points.
+std::vector<std::pair<uint8_t, glm::vec2>>
+EntityPoints(const sketch::Entity& e);
+
+bool LineHasDrivingDimension(const SketchFeature& sketch, uint32_t lineId) {
+  return std::any_of(sketch.constraints.begin(), sketch.constraints.end(),
+                     [lineId](const sketch::Constraint& c) {
+                       return sketch::IsDimension(c.kind) &&
+                              (c.a.entity == lineId || c.b.entity == lineId);
+                     });
+}
+
+void BeginSketchTranslate(SketchDragSession& drag,
+                          const SketchFeature& sketch) {
+  drag.mode = SketchDragSession::Mode::SketchTranslate;
+  for (const sketch::Entity& entity : sketch.entities) {
+    const uint32_t id = sketch::EntityId(entity);
+    for (const auto& [which, point] : EntityPoints(entity)) {
+      drag.points.push_back({id, which});
+      drag.initialPos.push_back(point);
+    }
+  }
+}
+
 // Starts a drag on mouse-down: builds the solver once, pins the dragged element
 // (endpoint / line body / circle rim) with a weak temporary constraint, and
 // captures the mouse-down baseline. Leaves the session inactive if the sketch
@@ -304,10 +331,16 @@ void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
     drag.circleCenter = std::get<sketch::Circle>(e).center;
     ok = drag.solver->BeginRadiusDrag(drag.circleId);
   } else if (pick.body && std::holds_alternative<sketch::Line>(e)) {
-    drag.mode = SketchDragSession::Mode::LineBody;
     const auto& l = std::get<sketch::Line>(e);
-    drag.points = {{pick.ref.entity, 0}, {pick.ref.entity, 1}};
-    drag.initialPos = {l.a, l.b};
+    if (LineHasDrivingDimension(sketch, pick.ref.entity)) {
+      // A driving dimension defines the line's size. Moving its body should
+      // therefore relocate the unconstrained sketch, not fight that value.
+      BeginSketchTranslate(drag, sketch);
+    } else {
+      drag.mode = SketchDragSession::Mode::LineBody;
+      drag.points = {{pick.ref.entity, 0}, {pick.ref.entity, 1}};
+      drag.initialPos = {l.a, l.b};
+    }
     ok = drag.solver->BeginDrag(drag.points);
   } else {
     drag.mode = SketchDragSession::Mode::Point;
@@ -327,7 +360,8 @@ void BeginDragSession(AppState& state, SketchFeature& sketch, size_t index,
     drag.solver.reset();
 }
 
-// Per-frame while dragging: retarget from the cursor delta, re-solve, write back.
+// Per-frame while dragging: retarget from the cursor delta, re-solve, write
+// back.
 void UpdateDragSession(AppState& state, SketchFeature& sketch,
                        glm::vec2 cursorUV) {
   SketchDragSession& drag = state.sketchDrag;
@@ -359,10 +393,9 @@ void EndDragSession(AppState& state, SketchFeature& sketch) {
   drag.solver.reset();
   nlohmann::json after = DocumentIO::FeatureToJson(sketch);
   if (after != state.editBaseline)
-    state.commands->Execute(
-        std::make_unique<ModifyFeatureCommand>(drag.featureIndex,
-                                               state.editBaseline, after),
-        *state.document);
+    state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                                drag.featureIndex, state.editBaseline, after),
+                            *state.document);
 }
 
 } // namespace
@@ -381,8 +414,8 @@ SketchPlane DefaultPlane(int index) {
 SketchFeature* ResolveActiveSketch(AppState& state, size_t* outIndex) {
   if (state.sketchEdit.activeSketchId == 0 || !state.document)
     return nullptr;
-  Feature* f =
-      state.document->FindFeatureById(state.sketchEdit.activeSketchId, outIndex);
+  Feature* f = state.document->FindFeatureById(state.sketchEdit.activeSketchId,
+                                               outIndex);
   auto* sketch = dynamic_cast<SketchFeature*>(f);
   if (!sketch) {
     // The sketch was removed (undo); leave edit mode cleanly.
@@ -435,8 +468,7 @@ std::optional<ElementRef> FaceElementRef(AppState& state, uint32_t meshId,
   if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
     return std::nullopt;
   const Body& body = state.document->GetBodies()[it->bodyIndex];
-  const std::string* name =
-      body.elementMap.NameOf(static_cast<int>(faceIndex));
+  const std::string* name = body.elementMap.NameOf(static_cast<int>(faceIndex));
   if (name == nullptr)
     return std::nullopt; // face isn't named (only extrude NewBody faces are)
   return ElementRef{body.createdBy, *name};
@@ -460,8 +492,8 @@ uint64_t BeginSketchOnFace(AppState& state, const ElementRef& ref,
 void ReattachSketchFace(AppState& state, uint64_t sketchId,
                         const ElementRef& ref) {
   size_t index = 0;
-  auto* sk =
-      dynamic_cast<SketchFeature*>(state.document->FindFeatureById(sketchId, &index));
+  auto* sk = dynamic_cast<SketchFeature*>(
+      state.document->FindFeatureById(sketchId, &index));
   if (sk == nullptr)
     return;
   nlohmann::json before = DocumentIO::FeatureToJson(*sk);
@@ -553,7 +585,8 @@ static void PasteSketchClipboardLinked(AppState& state, SketchFeature& sketch,
     source = &sketch;
   } else {
     size_t srcIndex = 0;
-    source = dynamic_cast<SketchFeature*>(doc.FindFeatureById(srcId, &srcIndex));
+    source =
+        dynamic_cast<SketchFeature*>(doc.FindFeatureById(srcId, &srcIndex));
     if (source == nullptr) {
       state.sketchEdit.actionMsg =
           "Source sketch is in another part - pasted unlinked";
@@ -654,15 +687,24 @@ static void HandleSketchKeys(AppState& state) {
   }
 
   // Bare-key tools.
-  if (ImGui::IsKeyPressed(ImGuiKey_L)) return setTool(SketchTool::Line);
-  if (ImGui::IsKeyPressed(ImGuiKey_C)) return setTool(SketchTool::Circle);
-  if (ImGui::IsKeyPressed(ImGuiKey_G)) return setTool(SketchTool::Rectangle);
-  if (ImGui::IsKeyPressed(ImGuiKey_A)) return setTool(SketchTool::ArcThreePoint);
-  if (ImGui::IsKeyPressed(ImGuiKey_S)) return setTool(SketchTool::Spline);
-  if (ImGui::IsKeyPressed(ImGuiKey_X)) return setTool(SketchTool::Project);
-  if (ImGui::IsKeyPressed(ImGuiKey_M)) return setTool(SketchTool::Trim);
-  if (ImGui::IsKeyPressed(ImGuiKey_O)) return setTool(SketchTool::Offset);
-  if (ImGui::IsKeyPressed(ImGuiKey_D)) return setTool(SketchTool::Dimension);
+  if (ImGui::IsKeyPressed(ImGuiKey_L))
+    return setTool(SketchTool::Line);
+  if (ImGui::IsKeyPressed(ImGuiKey_C))
+    return setTool(SketchTool::Circle);
+  if (ImGui::IsKeyPressed(ImGuiKey_G))
+    return setTool(SketchTool::Rectangle);
+  if (ImGui::IsKeyPressed(ImGuiKey_A))
+    return setTool(SketchTool::ArcThreePoint);
+  if (ImGui::IsKeyPressed(ImGuiKey_S))
+    return setTool(SketchTool::Spline);
+  if (ImGui::IsKeyPressed(ImGuiKey_X))
+    return setTool(SketchTool::Project);
+  if (ImGui::IsKeyPressed(ImGuiKey_M))
+    return setTool(SketchTool::Trim);
+  if (ImGui::IsKeyPressed(ImGuiKey_O))
+    return setTool(SketchTool::Offset);
+  if (ImGui::IsKeyPressed(ImGuiKey_D))
+    return setTool(SketchTool::Dimension);
 
   if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
     edit.selected.clear();
@@ -677,12 +719,18 @@ static void HandleSketchKeys(AppState& state) {
   if (edit.selected.empty())
     return;
   using K = sketch::ConstraintKind;
-  if (ImGui::IsKeyPressed(ImGuiKey_H)) return (void)ApplySketchConstraint(state, K::Horizontal, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_V)) return (void)ApplySketchConstraint(state, K::Vertical, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_N)) return (void)ApplySketchConstraint(state, K::Coincident, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_B)) return (void)ApplySketchConstraint(state, K::Parallel, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_T)) return (void)ApplySketchConstraint(state, K::Tangent, 0.0);
-  if (ImGui::IsKeyPressed(ImGuiKey_E)) return (void)ApplySketchConstraint(state, K::Equal, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_H))
+    return (void)ApplySketchConstraint(state, K::Horizontal, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_V))
+    return (void)ApplySketchConstraint(state, K::Vertical, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_N))
+    return (void)ApplySketchConstraint(state, K::Coincident, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_B))
+    return (void)ApplySketchConstraint(state, K::Parallel, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_T))
+    return (void)ApplySketchConstraint(state, K::Tangent, 0.0);
+  if (ImGui::IsKeyPressed(ImGuiKey_E))
+    return (void)ApplySketchConstraint(state, K::Equal, 0.0);
 }
 
 namespace {
@@ -899,8 +947,8 @@ bool RefineLinePlacement(AppState& state, const SketchFeature& sketch,
       const auto p = TargetUV(sketch, {lineId, 0});
       const double dist =
           p ? PointToLineDistance(sketch, *p, pick.ref.entity) : 0.0;
-      StartDimensionPlacement(state, /*pair=*/false, K::DistancePL,
-                              {lineId, 0}, {pick.ref.entity, 0}, dist);
+      StartDimensionPlacement(state, /*pair=*/false, K::DistancePL, {lineId, 0},
+                              {pick.ref.entity, 0}, dist);
     } else {
       edit.dimPlacing = false; // angle commits immediately (as ever)
       const double ang = std::atan2(std::abs(cross), glm::dot(u, v));
@@ -1040,8 +1088,8 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
     // (a sloped line can be dimensioned by its horizontal/vertical extent).
     // Marked as single-line so a placement click on another target REFINES
     // the kind instead of placing (B).
-    StartDimensionPlacement(state, /*pair=*/true, K::Distance, {id, 0},
-                            {id, 1}, 0.0);
+    StartDimensionPlacement(state, /*pair=*/true, K::Distance, {id, 0}, {id, 1},
+                            0.0);
     edit.dimPlaceFromLine = id;
   };
 
@@ -1112,7 +1160,7 @@ bool HandleProjectTool(AppState& state, SketchFeature& sketch, size_t index,
   const EdgeHit edge = state.faceSelector->PickEdge(ray);
   const RayHit face = state.faceSelector->PickFace(ray);
   // Hover feedback: what a click would project.
-  edit.actionMsg = edge.hit  ? "Project: click to project this edge"
+  edit.actionMsg = edge.hit   ? "Project: click to project this edge"
                    : face.hit ? "Project: click to project this face"
                               : "Project: hover a body edge or face";
   if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left))
@@ -1175,7 +1223,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       int plane = -1;
       uint64_t datumId = 0;
       if (!hit.hit) {
-        const float halfExtent = 3.0f; // matches BuildPlaneQuads
+        const float halfExtent = kDefaultPlaneHalfExtent;
         float bestDist = 1e30f;
         for (int i = 0; i < 3; i++) {
           SketchPlane p = DefaultPlane(i);
@@ -1227,8 +1275,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
               state.faceSelector->GetFaceCenter(hit.meshId, hit.faceIndex);
           glm::vec3 nrm =
               state.faceSelector->GetFaceNormal(hit.meshId, hit.faceIndex);
-          glm::vec3 u = std::abs(nrm.y) < 0.9f ? glm::vec3(0, 1, 0)
-                                               : glm::vec3(1, 0, 0);
+          glm::vec3 u =
+              std::abs(nrm.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
           u = glm::normalize(u - glm::dot(u, nrm) * nrm);
           const SketchPlane facePlane(c, nrm, u);
           // Attach to the face by its stable name when it has one; else bake.
@@ -1341,8 +1389,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.tool == SketchTool::Circle || edit.tool == SketchTool::Rectangle ||
       edit.tool == SketchTool::RectangleCenter ||
       edit.tool == SketchTool::Arc || edit.tool == SketchTool::ArcThreePoint ||
-      edit.tool == SketchTool::Ellipse ||
-      edit.tool == SketchTool::EllipseArc || edit.tool == SketchTool::Spline;
+      edit.tool == SketchTool::Ellipse || edit.tool == SketchTool::EllipseArc ||
+      edit.tool == SketchTool::Spline;
   const bool infer = drawTool && edit.autoConstrain && !ImGui::GetIO().KeyCtrl;
   if (infer) {
     const float ppu = PixelsPerUV(state, sketch->plane, uv);
@@ -1420,8 +1468,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     }
 
     // Delete removes the selected entities (and cleans up their constraints).
-    if (ImGui::IsKeyPressed(ImGuiKey_Delete) &&
-        !ImGui::GetIO().WantTextInput && !edit.selected.empty()) {
+    if (ImGui::IsKeyPressed(ImGuiKey_Delete) && !ImGui::GetIO().WantTextInput &&
+        !edit.selected.empty()) {
       nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
       size_t dropped = 0;
       std::vector<uint32_t> ids;
@@ -1439,9 +1487,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       state.document->Regenerate();
       nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
       if (after != before)
-        state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
-                                    index, before, after),
-                                *state.document);
+        state.commands->Execute(
+            std::make_unique<ModifyFeatureCommand>(index, before, after),
+            *state.document);
       if (dropped > 0)
         LOG_INFO("Deleted {} dependent constraint(s)", dropped);
       return true;
@@ -1501,7 +1549,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
     }
     if (state.sketchDrag.active && ImGui::IsMouseDown(ImGuiMouseButton_Left))
       UpdateDragSession(state, *sketch, uv);
-    if (state.sketchDrag.active && ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+    if (state.sketchDrag.active &&
+        ImGui::IsMouseReleased(ImGuiMouseButton_Left))
       EndDragSession(state, *sketch);
     return true;
   }
@@ -1562,9 +1611,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   };
 
   if (edit.tool == SketchTool::Mirror) {
-    SketchPick hover =
-        PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y),
-                         kSketchBodyTolPx);
+    SketchPick hover = PickSketchEntity(
+        state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
     edit.hasHover = hover.hit;
     if (hover.hit)
       edit.hoveredRef = hover.ref;
@@ -1612,7 +1660,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
                            "geometry.";
         } else {
           nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-          sketch->MirrorEntities(sources, hover.ref.entity, edit.linkGenerative);
+          sketch->MirrorEntities(sources, hover.ref.entity,
+                                 edit.linkGenerative);
           commitMutation(before);
           edit.selected.clear();
           edit.mirrorAxisPhase = false;
@@ -1648,8 +1697,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 
   if (edit.tool == SketchTool::Fillet) {
     // Click a corner: fillet the two lines sharing the nearest endpoint.
-    SketchPick vtx =
-        PickSketchPoint(state, *sketch, glm::vec2(mousePos.x, mousePos.y), 16.0f);
+    SketchPick vtx = PickSketchPoint(state, *sketch,
+                                     glm::vec2(mousePos.x, mousePos.y), 16.0f);
     edit.hasHover = vtx.hit;
     if (vtx.hit)
       edit.hoveredRef = vtx.ref;
@@ -1670,9 +1719,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
             commitMutation(before);
             edit.actionMsg.clear();
           } else {
-            edit.actionMsg =
-                "Fillet: radius " + std::to_string(edit.filletRadius) +
-                " doesn't fit this corner — try a smaller radius.";
+            edit.actionMsg = "Fillet: radius " +
+                             std::to_string(edit.filletRadius) +
+                             " doesn't fit this corner — try a smaller radius.";
           }
         } else {
           edit.actionMsg = "Fillet: click a corner where two lines meet.";
@@ -1691,8 +1740,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       // Highlight the pickable candidate under the cursor so the user sees
       // what a refine click would take (same hover as first-pick).
       if (edit.dimPlaceFromLine != 0) {
-        SketchPick hover = PickSketchEntity(
-            state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
+        SketchPick hover =
+            PickSketchEntity(state, *sketch, glm::vec2(mousePos.x, mousePos.y),
+                             kSketchBodyTolPx);
         // The measured line itself can't refine (it just places); don't
         // highlight it as a target.
         if (hover.hit && hover.ref.entity != edit.dimPlaceFromLine) {
@@ -1703,10 +1753,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       }
       if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         if (edit.dimPlaceFromLine != 0) {
-          const SketchPick pick =
-              PickSketchEntity(state, *sketch,
-                               glm::vec2(mousePos.x, mousePos.y),
-                               kSketchBodyTolPx);
+          const SketchPick pick = PickSketchEntity(
+              state, *sketch, glm::vec2(mousePos.x, mousePos.y),
+              kSketchBodyTolPx);
           if (pick.hit && RefineLinePlacement(state, *sketch, pick))
             return true;
         }
@@ -1770,9 +1819,11 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       } else {
         std::optional<sketch::Arc> arc;
         if (edit.tool == SketchTool::Arc)
-          arc = sketch::ArcCenterStartEnd(edit.pendingPoint, edit.pendingPoint2, uv);
+          arc = sketch::ArcCenterStartEnd(edit.pendingPoint, edit.pendingPoint2,
+                                          uv);
         else
-          arc = sketch::ArcFromThreePoints(edit.pendingPoint, uv, edit.pendingPoint2);
+          arc = sketch::ArcFromThreePoints(edit.pendingPoint, uv,
+                                           edit.pendingPoint2);
         if (arc)
           CommitEntity(state, *sketch, index, *arc, infer);
         edit.hasPendingPoint = false;
@@ -1787,8 +1838,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         edit.pendingPoint2 = uv;
         edit.hasPendingPoint2 = true;
       } else {
-        sketch::Ellipse el =
-            sketch::EllipseFromClicks(edit.pendingPoint, edit.pendingPoint2, uv);
+        sketch::Ellipse el = sketch::EllipseFromClicks(edit.pendingPoint,
+                                                       edit.pendingPoint2, uv);
         if (el.rMajor > 1e-6 && el.rMinor > 1e-6)
           CommitEntity(state, *sketch, index, el, infer);
         edit.hasPendingPoint = false;
@@ -1813,9 +1864,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         const sketch::Ellipse el = sketch::EllipseFromClicks(
             edit.pendingPoint, edit.pendingPoint2, edit.pendingPoint3);
         if (el.rMajor > 1e-6 && el.rMinor > 1e-6) {
-          double sp = sketch::EllipseParamOfPoint(el.center, el.rMajor,
-                                                  el.rMinor, el.rotation,
-                                                  edit.pendingPoint4);
+          double sp = sketch::EllipseParamOfPoint(
+              el.center, el.rMajor, el.rMinor, el.rotation, edit.pendingPoint4);
           double ep = sketch::EllipseParamOfPoint(el.center, el.rMajor,
                                                   el.rMinor, el.rotation, uv);
           // CCW-always: keep the swept range (ep - sp) in (0, 2π].
@@ -1876,7 +1926,8 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
 
   // Mirror preview: in the axis-pick step, ghost each selected source reflected
   // across the hovered line so the result is visible before committing.
-  if (edit.tool == SketchTool::Mirror && edit.mirrorAxisPhase && edit.hasHover) {
+  if (edit.tool == SketchTool::Mirror && edit.mirrorAxisPhase &&
+      edit.hasHover) {
     const size_t ax = sketch->IndexOfEntity(edit.hoveredRef.entity);
     if (ax != SIZE_MAX) {
       if (auto* axl = std::get_if<sketch::Line>(&sketch->entities[ax])) {
@@ -1930,7 +1981,8 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
                 ? sketch::RotateEntity(sketch->entities[si], edit.patternCenter,
                                        glm::radians(edit.patternAngleDeg) * k)
                 : sketch::TranslateEntity(sketch->entities[si],
-                                          static_cast<float>(k) * edit.patternStep);
+                                          static_cast<float>(k) *
+                                              edit.patternStep);
         emitPoly(sketch::TessellateEntity(inst));
       }
     }
@@ -1945,8 +1997,8 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
       if (si != SIZE_MAX)
         chain.push_back(sketch->entities[si]);
     }
-    for (const auto& e : sketch::OffsetLoop(sketch->plane, chain,
-                                            edit.offsetDistance, edit.offsetJoinArc))
+    for (const auto& e : sketch::OffsetLoop(
+             sketch->plane, chain, edit.offsetDistance, edit.offsetJoinArc))
       emitPoly(sketch::TessellateEntity(e));
     return;
   }
@@ -1990,7 +2042,8 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
     if (!edit.hasPendingPoint2) // center placed: preview the radius ring
       poly = sketch::TessellateEntity(sketch::Circle{a, glm::length(b - a)});
     else // center + start placed: live arc to the cursor
-      poly = sketch::TessellateEntity(sketch::ArcCenterStartEnd(a, edit.pendingPoint2, b));
+      poly = sketch::TessellateEntity(
+          sketch::ArcCenterStartEnd(a, edit.pendingPoint2, b));
     break;
   case SketchTool::ArcThreePoint:
     if (!edit.hasPendingPoint2) // start placed: preview the chord
@@ -2021,8 +2074,8 @@ void BuildSketchOverlay(AppState& state, std::vector<LineVertex3D>& out) {
       if (!edit.hasPendingPoint4) {
         poly = sketch::TessellateEntity(el);
       } else {
-        double sp = sketch::EllipseParamOfPoint(el.center, el.rMajor, el.rMinor,
-                                                el.rotation, edit.pendingPoint4);
+        double sp = sketch::EllipseParamOfPoint(
+            el.center, el.rMajor, el.rMinor, el.rotation, edit.pendingPoint4);
         double ep = sketch::EllipseParamOfPoint(el.center, el.rMajor, el.rMinor,
                                                 el.rotation, b);
         while (ep <= sp)
@@ -2053,10 +2106,10 @@ void DrawSelectionBox(AppState& state) {
                  std::min(edit.boxStart.y, edit.boxEnd.y));
   const ImVec2 b(std::max(edit.boxStart.x, edit.boxEnd.x),
                  std::max(edit.boxStart.y, edit.boxEnd.y));
-  const ImU32 edge = crossing ? IM_COL32(110, 210, 130, 230)  // crossing: green
-                              : IM_COL32(90, 160, 255, 230);   // window: blue
-  const ImU32 fill = crossing ? IM_COL32(110, 210, 130, 40)
-                              : IM_COL32(90, 160, 255, 40);
+  const ImU32 edge = crossing ? IM_COL32(110, 210, 130, 230) // crossing: green
+                              : IM_COL32(90, 160, 255, 230); // window: blue
+  const ImU32 fill =
+      crossing ? IM_COL32(110, 210, 130, 40) : IM_COL32(90, 160, 255, 40);
   dl->AddRectFilled(a, b, fill);
   if (crossing) { // dashed outline for crossing (CAD convention)
     const float dash = 6.0f;
@@ -2081,12 +2134,13 @@ void DrawSnapGlyphs(AppState& state) {
   if (!sketch)
     return;
 
-  const glm::vec2 p = SketchUVToScreen(state, sketch->plane, edit.currentSnap.uv);
+  const glm::vec2 p =
+      SketchUVToScreen(state, sketch->plane, edit.currentSnap.uv);
   ImDrawList* dl = ImGui::GetForegroundDrawList();
   const ImU32 accent = IM_COL32(255, 220, 120, 255);
 
-  // Alignment guides: a dashed inference line from the shared vertex through the
-  // snapped point, extended a little past it (Onshape-style).
+  // Alignment guides: a dashed inference line from the shared vertex through
+  // the snapped point, extended a little past it (Onshape-style).
   auto guide = [&](const std::optional<sketch::PointRef>& ref) {
     if (!ref)
       return;
@@ -2122,15 +2176,28 @@ void DrawSnapGlyphs(AppState& state) {
   for (sketch::GlyphKind k : edit.currentSnap.glyphs) {
     const char* label = "";
     switch (k) {
-    case sketch::GlyphKind::Coincident: label = "coincident"; break;
-    case sketch::GlyphKind::PointOnLine: label = "on line"; break;
-    case sketch::GlyphKind::Horizontal: label = "H"; break;
-    case sketch::GlyphKind::Vertical: label = "V"; break;
-    case sketch::GlyphKind::Parallel: label = "parallel"; break;
-    case sketch::GlyphKind::Perpendicular: label = "perpendicular"; break;
+    case sketch::GlyphKind::Coincident:
+      label = "coincident";
+      break;
+    case sketch::GlyphKind::PointOnLine:
+      label = "on line";
+      break;
+    case sketch::GlyphKind::Horizontal:
+      label = "H";
+      break;
+    case sketch::GlyphKind::Vertical:
+      label = "V";
+      break;
+    case sketch::GlyphKind::Parallel:
+      label = "parallel";
+      break;
+    case sketch::GlyphKind::Perpendicular:
+      label = "perpendicular";
+      break;
     }
     const ImVec2 sz = ImGui::CalcTextSize(label);
-    dl->AddRectFilled(ImVec2(gx - 3, gy - 1), ImVec2(gx + sz.x + 3, gy + sz.y + 1),
+    dl->AddRectFilled(ImVec2(gx - 3, gy - 1),
+                      ImVec2(gx + sz.x + 3, gy + sz.y + 1),
                       IM_COL32(25, 28, 34, 210), 3.0f);
     dl->AddText(ImVec2(gx, gy), accent, label);
     gy += sz.y + 4.0f;
@@ -2145,12 +2212,13 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     p.stepCount = count;
     p.text = name;
     if (count > 0)
-      p.text += " (Step " + std::to_string(step) + "/" + std::to_string(count) + ")";
+      p.text +=
+          " (Step " + std::to_string(step) + "/" + std::to_string(count) + ")";
     p.text += std::string(": ") + what;
   };
-  // For 3-click tools (arcs / ellipse), the current step from the pending state.
-  const int click3 =
-      edit.hasPendingPoint2 ? 3 : (edit.hasPendingPoint ? 2 : 1);
+  // For 3-click tools (arcs / ellipse), the current step from the pending
+  // state.
+  const int click3 = edit.hasPendingPoint2 ? 3 : (edit.hasPendingPoint ? 2 : 1);
   switch (edit.tool) {
   case T::Select:
     break; // default tool: no prompt
@@ -2177,20 +2245,21 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     break;
   case T::Arc:
     set("Arc", click3, 3,
-        click3 == 1 ? "click the centre"
-                    : click3 == 2 ? "click the start point" : "click the end point");
+        click3 == 1   ? "click the centre"
+        : click3 == 2 ? "click the start point"
+                      : "click the end point");
     break;
   case T::ArcThreePoint:
     set("3-Point Arc", click3, 3,
-        click3 == 1 ? "click the start point"
-                    : click3 == 2 ? "click the end point"
-                                  : "click a point on the arc");
+        click3 == 1   ? "click the start point"
+        : click3 == 2 ? "click the end point"
+                      : "click a point on the arc");
     break;
   case T::Ellipse:
     set("Ellipse", click3, 3,
-        click3 == 1 ? "click the centre"
-                    : click3 == 2 ? "click the major-axis end"
-                                  : "click to set the minor radius");
+        click3 == 1   ? "click the centre"
+        : click3 == 2 ? "click the major-axis end"
+                      : "click to set the minor radius");
     break;
   case T::Spline:
     set("Spline", 0, 0,
@@ -2203,9 +2272,8 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     break;
   case T::Mirror:
     set("Mirror", edit.mirrorAxisPhase ? 2 : 1, 2,
-        edit.mirrorAxisPhase
-            ? "click a line to mirror across"
-            : "click geometry to mirror (Enter to continue)");
+        edit.mirrorAxisPhase ? "click a line to mirror across"
+                             : "click geometry to mirror (Enter to continue)");
     break;
   case T::Fillet:
     set("Fillet", 0, 0, "click a corner where two lines meet");
@@ -2295,7 +2363,8 @@ void DrawToolPrompt(AppState& state) {
   if (!tp.text.empty())
     pill(tp.text, IM_COL32(28, 32, 40, 225), IM_COL32(226, 232, 240, 255));
   if (hasErr)
-    pill(edit.actionMsg, IM_COL32(60, 44, 24, 235), IM_COL32(255, 205, 120, 255));
+    pill(edit.actionMsg, IM_COL32(60, 44, 24, 235),
+         IM_COL32(255, 205, 120, 255));
 }
 
 namespace {
@@ -2501,9 +2570,8 @@ void DrawDimensions(AppState& state) {
   if (edit.dimPlacing) {
     std::optional<sketch::Constraint> ghost;
     if (edit.dimPlacePair) {
-      if (const auto p = ClassifyPairPlacement(*sketch, edit.dimPlaceA,
-                                               edit.dimPlaceB,
-                                               edit.hoverPoint)) {
+      if (const auto p = ClassifyPairPlacement(
+              *sketch, edit.dimPlaceA, edit.dimPlaceB, edit.hoverPoint)) {
         sketch::Constraint g;
         g.kind = p->kind;
         g.a = p->a;
@@ -2518,8 +2586,8 @@ void DrawDimensions(AppState& state) {
       g.a = edit.dimPlaceA;
       g.b = edit.dimPlaceB;
       g.value = edit.dimPlaceValue;
-      g.labelOffset = FixedPlacementLabelOffset(*sketch, g.kind, g.a, g.b,
-                                                edit.hoverPoint);
+      g.labelOffset =
+          FixedPlacementLabelOffset(*sketch, g.kind, g.a, g.b, edit.hoverPoint);
       ghost = g;
     }
     if (ghost) {
@@ -2558,7 +2626,8 @@ void DrawDimensions(AppState& state) {
       } else if (auto* arc = std::get_if<sketch::Arc>(&ent)) {
         center = arc->center;
         radius = static_cast<float>(arc->radius);
-        double mid = 0.5 * (arc->startAngle + arc->endAngle); // within the sweep
+        double mid =
+            0.5 * (arc->startAngle + arc->endAngle); // within the sweep
         dir = {static_cast<float>(std::cos(mid)),
                static_cast<float>(std::sin(mid))};
       } else {
@@ -2571,9 +2640,8 @@ void DrawDimensions(AppState& state) {
       // touching the rim from the label's side.
       glm::vec2 labelUV = center + dir * radius + effOff;
       const glm::vec2 fromCenter = labelUV - center;
-      const glm::vec2 rdir = glm::length(fromCenter) > 1e-5f
-                                 ? glm::normalize(fromCenter)
-                                 : dir;
+      const glm::vec2 rdir =
+          glm::length(fromCenter) > 1e-5f ? glm::normalize(fromCenter) : dir;
       const glm::vec2 rimUV = center + rdir * radius;
       const ImVec2 rimS = scr(rimUV), labS = scr(labelUV);
       dl->AddLine(rimS, labS, col, 1.4f);
@@ -2637,8 +2705,10 @@ void DrawDimensions(AppState& state) {
         // curve stays correct under the plane's screen projection.
         const float aStart = std::atan2(bu.y, bu.x);
         float sweep = std::atan2(bv.y, bv.x) - aStart;
-        while (sweep > glm::pi<float>()) sweep -= 2.0f * glm::pi<float>();
-        while (sweep < -glm::pi<float>()) sweep += 2.0f * glm::pi<float>();
+        while (sweep > glm::pi<float>())
+          sweep -= 2.0f * glm::pi<float>();
+        while (sweep < -glm::pi<float>())
+          sweep += 2.0f * glm::pi<float>();
         const int kSegs = 24;
         ImVec2 prev = scr(inter + bu * rUV);
         for (int s = 1; s <= kSegs; s++) {
@@ -2668,8 +2738,7 @@ void DrawDimensions(AppState& state) {
         dl->AddLine(scr(inter), scr(inter + bv * rUV * 1.08f), col, 0.8f);
         // Label on the arc's midpoint.
         const float aMid = aStart + sweep * 0.5f;
-        labelPos =
-            scr(inter + glm::vec2(std::cos(aMid), std::sin(aMid)) * rUV);
+        labelPos = scr(inter + glm::vec2(std::cos(aMid), std::sin(aMid)) * rUV);
       }
     } else { // Distance / DistanceX / DistanceY / DistancePL (points a, b)
       auto a = RefUV(*sketch, con.a), b = RefUV(*sketch, con.b);
@@ -2709,7 +2778,7 @@ void DrawDimensions(AppState& state) {
       dl->AddLine(sa, extend(sa, sda), col, 1.0f);
       dl->AddLine(sb, extend(sb, sdb), col, 1.0f);
       dl->AddLine(sda, sdb, col, 1.4f); // dimension line
-      double v = con.kind == K::DistanceX  ? std::abs(b->x - a->x)
+      double v = con.kind == K::DistanceX   ? std::abs(b->x - a->x)
                  : con.kind == K::DistanceY ? std::abs(b->y - a->y)
                                             : glm::length(*b - *a);
       snprintf(label, sizeof(label), "%.3g", v);
@@ -2842,7 +2911,8 @@ void DrawDimensions(AppState& state) {
       ImGui::SetNextWindowBgAlpha(0.95f);
       ImGui::Begin("##dimedit", nullptr,
                    ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize |
+                       ImGuiWindowFlags_NoMove |
+                       ImGuiWindowFlags_AlwaysAutoResize |
                        ImGuiWindowFlags_NoSavedSettings);
       ImGui::SetNextItemWidth(120);
       ImGui::SetKeyboardFocusHere();
@@ -2896,10 +2966,10 @@ void DrawDimensionOnCreate(AppState& state) {
   if (!edit.IsEditing())
     return;
   using T = SketchTool;
-  const bool drawTool =
-      edit.tool == T::Line || edit.tool == T::Circle ||
-      edit.tool == T::Rectangle || edit.tool == T::RectangleCenter ||
-      edit.tool == T::Arc || edit.tool == T::ArcThreePoint;
+  const bool drawTool = edit.tool == T::Line || edit.tool == T::Circle ||
+                        edit.tool == T::Rectangle ||
+                        edit.tool == T::RectangleCenter ||
+                        edit.tool == T::Arc || edit.tool == T::ArcThreePoint;
   if (!drawTool || edit.lastDrawn.empty()) {
     edit.dimOnCreateOpen = false;
     return;
@@ -3075,29 +3145,50 @@ void DrawConstraintGlyphs(AppState& state) {
   for (int i = 0; i < (int)sketch->constraints.size(); i++) {
     const auto& c = sketch->constraints[i];
     switch (c.kind) {
-    case K::Horizontal: badge(i, c.a.entity, "H"); break;
-    case K::Vertical: badge(i, c.a.entity, "V"); break;
+    case K::Horizontal:
+      badge(i, c.a.entity, "H");
+      break;
+    case K::Vertical:
+      badge(i, c.a.entity, "V");
+      break;
     case K::Parallel:
       badge(i, c.a.entity, "//");
       badge(i, c.b.entity, "//");
       break;
-    case K::Perpendicular: badge(i, c.a.entity, "|_"); break;
+    case K::Perpendicular:
+      badge(i, c.a.entity, "|_");
+      break;
     case K::Equal:
       badge(i, c.a.entity, "=");
       badge(i, c.b.entity, "=");
       break;
-    case K::Coincident: badge(i, c.a.entity, "co"); break;
-    case K::PointOnLine: badge(i, c.b.entity, "on"); break;
-    case K::Tangent: badge(i, c.a.entity, "T"); break;
-    case K::Symmetric: badge(i, c.c.entity, "sym"); break;
-    case K::Midpoint: badge(i, c.b.entity, "mid"); break;
-    case K::Fixed: badge(i, c.a.entity, "fix"); break;
-    case K::Concentric: badge(i, c.a.entity, "con"); break;
+    case K::Coincident:
+      badge(i, c.a.entity, "co");
+      break;
+    case K::PointOnLine:
+      badge(i, c.b.entity, "on");
+      break;
+    case K::Tangent:
+      badge(i, c.a.entity, "T");
+      break;
+    case K::Symmetric:
+      badge(i, c.c.entity, "sym");
+      break;
+    case K::Midpoint:
+      badge(i, c.b.entity, "mid");
+      break;
+    case K::Fixed:
+      badge(i, c.a.entity, "fix");
+      break;
+    case K::Concentric:
+      badge(i, c.a.entity, "con");
+      break;
     case K::Collinear:
       badge(i, c.a.entity, "L");
       badge(i, c.b.entity, "L");
       break;
-    default: break; // dimensions render via DrawDimensions
+    default:
+      break; // dimensions render via DrawDimensions
     }
   }
 }
@@ -3118,7 +3209,8 @@ glm::vec2 SketchUVToScreen(AppState& state, const SketchPlane& plane,
 
 namespace {
 // Endpoints exposed by an entity for picking/constraints.
-std::vector<std::pair<uint8_t, glm::vec2>> EntityPoints(const sketch::Entity& e) {
+std::vector<std::pair<uint8_t, glm::vec2>>
+EntityPoints(const sketch::Entity& e) {
   std::vector<std::pair<uint8_t, glm::vec2>> pts;
   if (auto* p = std::get_if<sketch::Point>(&e)) {
     pts = {{0, p->p}};
@@ -3169,8 +3261,8 @@ namespace {
 float DistToSegment(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
   glm::vec2 ab = b - a;
   float len2 = glm::dot(ab, ab);
-  float t = len2 > 1e-6f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f)
-                         : 0.0f;
+  float t =
+      len2 > 1e-6f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f) : 0.0f;
   return glm::length(p - (a + t * ab));
 }
 } // namespace
@@ -3213,10 +3305,10 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
       // the drawn span is hit) and works under any projection.
       std::vector<glm::vec2> uv = sketch::TessellateEntity(e);
       for (size_t k = 0; k + 1 < uv.size(); k++)
-        d = std::min(d, DistToSegment(
-                            mousePos,
-                            SketchUVToScreen(state, sketch.plane, uv[k]),
-                            SketchUVToScreen(state, sketch.plane, uv[k + 1])));
+        d = std::min(
+            d, DistToSegment(mousePos,
+                             SketchUVToScreen(state, sketch.plane, uv[k]),
+                             SketchUVToScreen(state, sketch.plane, uv[k + 1])));
     }
     if (d < tolPx)
       bodies.push_back({d, SketchPick{true, true, {id, 0}}});
@@ -3353,7 +3445,8 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   // The datum X/Y axes act as lines for the dimensional kinds (angle-to-axis,
   // distance-to-axis) — the solver registers them as fixed lines.
   auto isLineOrAxis = [&](const sketch::PointRef& r) {
-    return isLine(r) || r.entity == sketch::kAxisX || r.entity == sketch::kAxisY;
+    return isLine(r) || r.entity == sketch::kAxisX ||
+           r.entity == sketch::kAxisY;
   };
   auto isCircle = [&](const sketch::PointRef& r) {
     const auto* e = entityOf(r);
@@ -3376,25 +3469,29 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   case K::Distance:
   case K::DistanceX:
   case K::DistanceY:
-    if (sel.size() < 2) return false;
+    if (sel.size() < 2)
+      return false;
     c.a = sel[0];
     c.b = sel[1];
     break;
   case K::Horizontal:
   case K::Vertical:
-    if (sel.empty() || !isLine(sel[0])) return false;
+    if (sel.empty() || !isLine(sel[0]))
+      return false;
     c.a = {sel[0].entity, 0};
     break;
   case K::Parallel:
   case K::Perpendicular:
   case K::Equal:
-    if (sel.size() < 2) return false;
+    if (sel.size() < 2)
+      return false;
     c.a = {sel[0].entity, 0};
     c.b = {sel[1].entity, 0};
     break;
   case K::Radius:
   case K::Diameter:
-    if (sel.empty() || !isCurve(sel[0])) return false;
+    if (sel.empty() || !isCurve(sel[0]))
+      return false;
     c.a = {sel[0].entity, 0};
     break;
   case K::Angle:
@@ -3407,7 +3504,8 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     // A point (or line endpoint) + a line: perpendicular distance. Two lines
     // = the parallel-lines distance (an endpoint of the first onto the
     // second); the first ref supplies the point, like PointOnLine.
-    if (sel.size() < 2) return false;
+    if (sel.size() < 2)
+      return false;
     const sketch::PointRef* pt = nullptr;
     const sketch::PointRef* line = nullptr;
     if (isLineOrAxis(sel[1])) {
@@ -3419,14 +3517,16 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     } else {
       return false;
     }
-    if (pt->entity == line->entity) return false; // point is on its own line
+    if (pt->entity == line->entity)
+      return false; // point is on its own line
     c.a = *pt;
     c.b = {line->entity, 0};
     break;
   }
   case K::Tangent: {
     // One line + one circle/arc, either order; normalize to a=line, b=curve.
-    if (sel.size() < 2) return false;
+    if (sel.size() < 2)
+      return false;
     if (isLine(sel[0]) && isCurve(sel[1])) {
       c.a = {sel[0].entity, 0};
       c.b = {sel[1].entity, 0};
@@ -3441,7 +3541,8 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   case K::PointOnLine: {
     // One point + one line, in either order. The point is stored verbatim
     // (its `which` selects the endpoint); the line entity goes in b.
-    if (sel.size() < 2) return false;
+    if (sel.size() < 2)
+      return false;
     const sketch::PointRef* pt = nullptr;
     const sketch::PointRef* line = nullptr;
     if (isPoint(sel[0]) && isLine(sel[1])) {
@@ -3457,21 +3558,28 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     } else {
       return false;
     }
-    if (pt->entity == line->entity) return false; // point is on its own line
+    if (pt->entity == line->entity)
+      return false; // point is on its own line
     c.a = *pt;
     c.b = {line->entity, 0};
     break;
   }
   case K::Symmetric: {
     // Two points + a symmetry line (any order). Line → c, the two points → a/b.
-    if (sel.size() < 3) return false;
+    if (sel.size() < 3)
+      return false;
     int lineIdx = -1;
     for (int i = 0; i < 3; i++)
-      if (isLine(sel[i])) { lineIdx = i; break; }
-    if (lineIdx < 0) return false;
+      if (isLine(sel[i])) {
+        lineIdx = i;
+        break;
+      }
+    if (lineIdx < 0)
+      return false;
     int p0 = -1, p1 = -1;
     for (int i = 0; i < 3; i++)
-      if (i != lineIdx) (p0 < 0 ? p0 : p1) = i;
+      if (i != lineIdx)
+        (p0 < 0 ? p0 : p1) = i;
     c.a = sel[p0];
     c.b = sel[p1];
     c.c = {sel[lineIdx].entity, 0};
@@ -3479,24 +3587,29 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   }
   case K::Midpoint: {
     // A point + a line: the point sits at the line's midpoint.
-    if (sel.size() < 2) return false;
+    if (sel.size() < 2)
+      return false;
     int lineIdx = isLine(sel[1]) ? 1 : (isLine(sel[0]) ? 0 : -1);
-    if (lineIdx < 0) return false;
+    if (lineIdx < 0)
+      return false;
     c.a = sel[1 - lineIdx]; // the point (verbatim, keeps which)
     c.b = {sel[lineIdx].entity, 0};
     break;
   }
   case K::Fixed:
-    if (sel.empty()) return false;
+    if (sel.empty())
+      return false;
     c.a = sel[0]; // pin this point in place
     break;
   case K::Concentric:
-    if (sel.size() < 2 || !isCurve(sel[0]) || !isCurve(sel[1])) return false;
+    if (sel.size() < 2 || !isCurve(sel[0]) || !isCurve(sel[1]))
+      return false;
     c.a = {sel[0].entity, 0};
     c.b = {sel[1].entity, 0};
     break;
   case K::Collinear:
-    if (sel.size() < 2 || !isLine(sel[0]) || !isLine(sel[1])) return false;
+    if (sel.size() < 2 || !isLine(sel[0]) || !isLine(sel[1]))
+      return false;
     c.a = {sel[0].entity, 0};
     c.b = {sel[1].entity, 0};
     break;
@@ -3532,7 +3645,8 @@ void UpdateSketchStatus(AppState& state) {
   if (!sketch)
     return;
   sketch::Solver solver;
-  solver.Load(*sketch); // solve for status only — no WriteBack, sketch unchanged
+  solver.Load(
+      *sketch); // solve for status only — no WriteBack, sketch unchanged
   sketch::SolveResult r = solver.Solve();
   edit.dof = r.ok ? r.dof : -1;
   edit.conflictingConstraints = r.conflictingConstraints;
@@ -3627,10 +3741,10 @@ bool ApplyOffset(AppState& state) {
     return false;
   }
   nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-  auto gen = sketch->OffsetChain(chain, edit.offsetDistance, edit.offsetJoinArc);
+  auto gen =
+      sketch->OffsetChain(chain, edit.offsetDistance, edit.offsetJoinArc);
   if (gen.empty()) {
-    edit.actionMsg =
-        "Offset: the selection must form a single closed loop.";
+    edit.actionMsg = "Offset: the selection must form a single closed loop.";
     return false;
   }
   sketch::Solver solver;
