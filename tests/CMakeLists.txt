@@ -74,6 +74,12 @@ include(Catch)
 # and the golden corpus is read-only.
 catch_discover_tests(designer_tests)
 
+# Release metadata smoke: --version must exit before GLFW/Vulkan initialization,
+# so the packaged binary can be identified on a display-less machine.
+add_test(NAME version_cli COMMAND $<TARGET_FILE:designer> --version)
+set_tests_properties(version_cli PROPERTIES
+    PASS_REGULAR_EXPRESSION "^Designer ${PROJECT_VERSION}")
+
 # GPU solver tests live in their own binary so designer_tests stays free of
 # Vulkan. Each case SKIPs itself when no usable compute device is present, so
 # these are safe to run headlessly (a compute queue needs no display).

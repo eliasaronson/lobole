@@ -58,7 +58,7 @@
 
       designer = pkgs.stdenv.mkDerivation {
         pname = "designer";
-        version = "0-unstable"; # no tagged releases yet; bump when we cut one
+        version = "0.1.0"; # Keep in sync with CMake project(VERSION).
 
         # The flake source is the git tree (submodule dirs arrive empty and are
         # overlaid in postUnpack below). assets/ and deps/{planegcs,fonts} are

@@ -2,6 +2,7 @@
 #include <utility>
 
 #include "cad/FaceSelector.h"
+#include "common/DesignerVersion.h"
 #include "common/Logger.h"
 #include "core/Feature.h"
 #include "core/features/SketchFeature.h"
@@ -283,6 +284,25 @@ void DrawViewMenu(AppState& state) {
   ImGui::EndMenu();
 }
 
+void DrawHelpMenu() {
+  if (ImGui::BeginMenu("Help")) {
+    if (ImGui::MenuItem("About Designer"))
+      ImGui::OpenPopup("About Designer");
+    ImGui::EndMenu();
+  }
+
+  if (ImGui::BeginPopupModal("About Designer", nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text("Designer %s", DESIGNER_VERSION);
+    ImGui::Separator();
+    ImGui::TextUnformatted("Open-source parametric 3D CAD");
+    ImGui::TextUnformatted("Licensed under AGPL-3.0-or-later");
+    if (ImGui::Button("Close"))
+      ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+  }
+}
+
 // Global keyboard shortcuts. Registered every frame; ImGui's routing lets a
 // focused text field claim chords like Ctrl+Z for itself first.
 void HandleShortcuts(AppState& state) {
@@ -330,6 +350,7 @@ void DrawMainMenuBar(AppState& state) {
   DrawFileMenu(state);
   DrawEditMenu(state);
   DrawViewMenu(state);
+  DrawHelpMenu();
 
   ImGui::EndMainMenuBar();
 }

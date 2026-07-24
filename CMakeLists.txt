@@ -4,7 +4,7 @@
 #  cmake -g "Visual Studio 14 2015" ..
 
 cmake_minimum_required(VERSION 3.14)
-project(designer C CXX)
+project(designer VERSION 0.1.0 LANGUAGES C CXX)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
@@ -390,6 +390,7 @@ file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr
      DESTINATION ${CMAKE_BINARY_DIR}/assets/hdri)
 
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+target_compile_definitions(designer PRIVATE DESIGNER_VERSION="${PROJECT_VERSION}")
 
 # imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks
 target_compile_definitions(designer PRIVATE

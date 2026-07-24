@@ -5,6 +5,7 @@
 #include "app/GuiTests.h"
 #include "app/HeadlessMain.h"
 #include "cad/FaceSelector.h"
+#include "common/DesignerVersion.h"
 #include "common/Logger.h"
 #include "core/io/Autosaver.h"
 #include "imgui.h"
@@ -862,6 +863,7 @@ void printUsage(const char* programName) {
       << "  -vv                  Enable very verbose logging (trace level)"
       << std::endl;
   std::cout << "  -h, --help           Show this help message" << std::endl;
+  std::cout << "  --version            Show the Designer version" << std::endl;
   std::cout << "  --gui-tests          Run GUI test suite and exit"
             << std::endl;
   std::cout << "  --gui-test-filter <pattern>  Run only matching GUI tests "
@@ -904,6 +906,9 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
 
     if (arg == "-h" || arg == "--help") {
       printUsage(argv[0]);
+      exit(0);
+    } else if (arg == "--version") {
+      std::cout << "Designer " << DESIGNER_VERSION << std::endl;
       exit(0);
     } else if (arg == "-f" || arg == "--file") {
       if (i + 1 < argc) {
