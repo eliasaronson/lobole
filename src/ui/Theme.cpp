@@ -1,28 +1,17 @@
 #include "ui/Theme.h"
 
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
 #include <filesystem>
-#include <limits.h>
 #include <string>
-#include <unistd.h>
 
 namespace ui {
 
 namespace {
-
-std::string ExecutableDirectory() {
-  char result[PATH_MAX];
-  ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-  if (count != -1) {
-    result[count] = '\0';
-    return std::filesystem::path(result).parent_path().string();
-  }
-  return ".";
-}
 
 // Palette: near-black backgrounds with a single blue accent. Raised
 // surfaces get progressively lighter; interactive states brighten.
@@ -153,14 +142,14 @@ void ApplyTheme(float scale) {
   style.ScaleAllSizes(scale);
 
   ImGuiIO& io = ImGui::GetIO();
-  const std::string dir = ExecutableDirectory() + "/assets/fonts/";
-  const std::string fontPath = dir + "Roboto-Medium.ttf";
+  const std::filesystem::path dir = RuntimePaths::DataDir() / "fonts";
+  const std::string fontPath = (dir / "Roboto-Medium.ttf").string();
   if (std::filesystem::exists(fontPath)) {
     io.Fonts->Clear();
     io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f * scale);
 
     // Merge Font Awesome icons into the same atlas so ICON_FA_* works inline
-    const std::string iconPath = dir + "fa-solid-900.ttf";
+    const std::string iconPath = (dir / "fa-solid-900.ttf").string();
     if (std::filesystem::exists(iconPath)) {
       static const ImWchar kIconRange[] = {ICON_MIN_FA, ICON_MAX_16_FA, 0};
       ImFontConfig cfg;

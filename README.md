@@ -43,6 +43,13 @@ cmake --build . -j$(nproc)
 Works with OpenCASCADE 7.6 (Ubuntu packages) and 7.8+ (the STEP/STL library renaming is
 handled in CMakeLists.txt).
 
+To install the executable, shared PlaneGCS library, runtime assets, and Linux
+desktop metadata under a standard prefix:
+
+```
+cmake --install build --prefix "$HOME/.local"
+```
+
 ## Running
 
 ```

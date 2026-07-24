@@ -1,5 +1,6 @@
 #include "render/ShadowRenderer.h"
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -7,9 +8,6 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
-
-// Defined in MeshRenderer.cpp.
-std::string GetExecutableDirectory();
 
 ShadowRenderer::ShadowRenderer() {}
 
@@ -327,11 +325,11 @@ bool ShadowRenderer::CreateRenderPass() {
 }
 
 bool ShadowRenderer::CreatePipeline() {
-    const std::string execDir = GetExecutableDirectory();
-    auto vertCode = ReadFile(execDir + "/libraries/shaders/shadow_vert.spv");
-    auto fragCode = ReadFile(execDir + "/libraries/shaders/shadow_frag.spv");
+    const std::string shaderDir = RuntimePaths::ShaderDir().string();
+    auto vertCode = ReadFile(shaderDir + "/shadow_vert.spv");
+    auto fragCode = ReadFile(shaderDir + "/shadow_frag.spv");
     if (vertCode.empty() || fragCode.empty()) {
-        LOG_ERROR("ShadowRenderer: failed to load shaders from {}/libraries/shaders/", execDir);
+        LOG_ERROR("ShadowRenderer: failed to load shaders from {}", shaderDir);
         return false;
     }
     VkShaderModule vertModule = CreateShaderModule(vertCode);

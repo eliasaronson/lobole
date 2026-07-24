@@ -1,5 +1,6 @@
 #include "render/OutlineRenderer.h"
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include "render/MeshRenderer.h"
 #include <iostream>
 #include <fstream>
@@ -154,7 +155,7 @@ bool OutlineRenderer::CreateDescriptorSetLayout() {
 
 bool OutlineRenderer::CreateOutlinePipeline() {
     // Load shaders
-    std::string shaderDir = GetExecutableDirectory() + "/libraries/shaders/";
+    const std::string shaderDir = RuntimePaths::ShaderDir().string() + "/";
     auto vertShaderCode = ReadShaderFile(shaderDir + "outline_vert.spv");
     auto fragShaderCode = ReadShaderFile(shaderDir + "outline_frag.spv");
     
@@ -309,7 +310,7 @@ bool OutlineRenderer::CreateOutlinePipeline() {
 
 bool OutlineRenderer::CreateWireframePipeline() {
     // Load shaders
-    std::string shaderDir = GetExecutableDirectory() + "/libraries/shaders/";
+    const std::string shaderDir = RuntimePaths::ShaderDir().string() + "/";
     auto vertShaderCode = ReadShaderFile(shaderDir + "wireframe_vert.spv");
     auto fragShaderCode = ReadShaderFile(shaderDir + "wireframe_frag.spv");
     
@@ -1018,13 +1019,6 @@ VkShaderModule OutlineRenderer::CreateShaderModule(const std::vector<char>& code
     }
 
     return shaderModule;
-}
-
-std::string OutlineRenderer::GetExecutableDirectory() {
-    char result[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    std::string path(result, (count > 0) ? count : 0);
-    return std::filesystem::path(path).parent_path().string();
 }
 
 // Placeholder implementations for interface methods

@@ -1,5 +1,6 @@
 #include "render/SSAORenderer.h"
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -7,9 +8,6 @@
 #include <fstream>
 #include <iostream>
 #include <random>
-
-// Defined in MeshRenderer.cpp.
-std::string GetExecutableDirectory();
 
 namespace {
 
@@ -781,7 +779,7 @@ void SSAORenderer::TransitionTargetsToRead() {
 }
 
 bool SSAORenderer::CreatePipelines() {
-    const std::string dir = GetExecutableDirectory() + "/libraries/shaders/";
+    const std::string dir = RuntimePaths::ShaderDir().string() + "/";
     auto load = [&](const char* name) { return ReadFile(dir + name); };
     auto prepassVert = load("ssao_prepass_vert.spv");
     auto prepassFrag = load("ssao_prepass_frag.spv");

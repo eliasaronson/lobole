@@ -1,26 +1,11 @@
 #include "render/MeshRenderer.h"
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
 #include <cstring>
-#include <filesystem>
 #include <limits>
-#include <unistd.h>
-#include <limits.h>
-
-// Utility function to get the directory of the current executable
-std::string GetExecutableDirectory() {
-    char result[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    if (count != -1) {
-        result[count] = '\0';
-        std::filesystem::path execPath(result);
-        return execPath.parent_path().string();
-    }
-    // Fallback to current directory if readlink fails
-    return ".";
-}
 
 // Vertex3D implementation
 VkVertexInputBindingDescription Vertex3D::getBindingDescription() {
@@ -524,16 +509,16 @@ bool MeshRenderer::CreateDescriptorSetLayout() {
 
 bool MeshRenderer::CreateGraphicsPipeline() {
     // Get executable directory and construct shader paths
-    std::string execDir = GetExecutableDirectory();
-    std::string vertShaderPath = execDir + "/libraries/shaders/mesh_vert.spv";
-    std::string fragShaderPath = execDir + "/libraries/shaders/mesh_frag.spv";
+    const std::string shaderDir = RuntimePaths::ShaderDir().string();
+    std::string vertShaderPath = shaderDir + "/mesh_vert.spv";
+    std::string fragShaderPath = shaderDir + "/mesh_frag.spv";
 
     // Load shaders
     auto vertShaderCode = ReadFile(vertShaderPath);
     auto fragShaderCode = ReadFile(fragShaderPath);
 
     if (vertShaderCode.empty() || fragShaderCode.empty()) {
-        LOG_ERROR("Failed to load shader files from: {}/libraries/shaders/", execDir);
+        LOG_ERROR("Failed to load shader files from: {}", shaderDir);
         LOG_ERROR("Vertex shader path: {}", vertShaderPath);
         LOG_ERROR("Fragment shader path: {}", fragShaderPath);
         return false;

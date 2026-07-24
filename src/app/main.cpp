@@ -7,6 +7,7 @@
 #include "cad/FaceSelector.h"
 #include "common/DesignerVersion.h"
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include "core/io/Autosaver.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -31,28 +32,14 @@
 #include "ui/Theme.h"
 #include "ui/UI.h"
 #include <algorithm>
-#include <climits>
 #include <filesystem>
 #include <memory>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <unistd.h>
 #include <utility>
 
 namespace {
-// Directory of the running executable. Assets and shaders are found relative to
-// it (the renderers use identical readlink helpers) so the app is relocatable —
-// no compile-time source path baked in. Falls back to "." on failure.
-std::string ExecutableDir() {
-  char buf[PATH_MAX];
-  ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-  if (n <= 0)
-    return ".";
-  buf[n] = '\0';
-  return std::filesystem::path(buf).parent_path().string();
-}
-
 // Writable per-user cache for precomputed IBL maps: $XDG_CACHE_HOME/designer
 // (else ~/.cache/designer, else a temp dir). The executable dir may be
 // read-only (Nix store, Flatpak /app), so the cache must live under $HOME.
@@ -1120,7 +1107,7 @@ int main(int argc, char** argv) {
   g_IBLTextures = std::make_unique<IBLTextures>();
   {
     const std::string hdr =
-        ExecutableDir() + "/assets/hdri/brown_photostudio_02_1k.hdr";
+        (RuntimePaths::DataDir() / "hdri/brown_photostudio_02_1k.hdr").string();
     IBLPrecompute ibl;
     if (ibl.Build(hdr, IblCacheDir())) {
       if (!g_IBLTextures->Upload(g_Device, g_PhysicalDevice, g_Queue,

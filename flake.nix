@@ -70,7 +70,6 @@
           ninja
           pkg-config
           shaderc # glslc — hard requirement; compiles shaders at build time
-          makeWrapper
         ];
 
         buildInputs = runtimeDeps;
@@ -95,35 +94,10 @@
         ninjaFlags = [ "designer" ];
         enableParallelBuilding = true;
 
-        # libplanegcs.so lives in the same dir as the binary (build dir now,
-        # $out/opt/designer after install). Emit its RPATH entry as $ORIGIN so
-        # there's no absolute /build path baked in (which nixpkgs' reference
-        # check forbids) and it resolves post-install with no patchelf.
+        # Keep the build-tree PlaneGCS RPATH relocatable. CMake's canonical
+        # install rules place the app in bin/, PlaneGCS in lib/, and runtime
+        # data under share/designer; the app resolves data relative to itself.
         cmakeFlags = [ "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON" ];
-
-        # No install() rules exist in-tree — the app finds shaders/assets
-        # relative to the executable (readlink /proc/self/exe). Reproduce that
-        # layout under $out/opt/designer and expose a wrapper on $out/bin.
-        # After the wrapper's `exec`, /proc/self/exe is the real binary, so
-        # ExecutableDir resolves to $out/opt/designer.
-        installPhase = ''
-          runHook preInstall
-
-          mkdir -p $out/opt/designer/libraries
-
-          # cwd is the CMake build dir here (nixpkgs cmake builds out-of-source).
-          # The build already staged assets/{fonts,hdri} next to the binary
-          # (CMake file(COPY) — Roboto + fa-solid + the studio HDR), matching
-          # the runtime exe-relative layout, so copy the tree wholesale.
-          cp designer $out/opt/designer/designer
-          cp libplanegcs.so $out/opt/designer/         # LGPL shared lib (see CMakeLists)
-          cp -r libraries/shaders $out/opt/designer/libraries/shaders
-          cp -r assets $out/opt/designer/assets
-
-          makeWrapper $out/opt/designer/designer $out/bin/designer
-
-          runHook postInstall
-        '';
 
         # buildInputs' store paths land in the binary's RPATH automatically
         # (OCC/netgen/etc. are linked by absolute path via CMake imported

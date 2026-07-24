@@ -52,6 +52,7 @@ imgui_test_engine, nativefiledialog-extended, PlaneGCS. The flake must
 `worktree-build.sh` handles).
 
 Tasks:
+
 - [x] `flake.nix` with `packages.x86_64-linux.default` (+ `devShells.default`
       via `inputsFrom` mirroring `shell.nix` so `nix develop` == `nix-shell`).
       **Drafted & builds** (2026-07-23, ~50s compile on top of cached deps).
@@ -63,27 +64,33 @@ Tasks:
 - [x] Build type: nixpkgs passes `-DCMAKE_BUILD_TYPE=Release` by default, which
       skips the CMake `Debug` fallback. Only the `designer` target is built
       (`ninjaFlags`); `designer_tests` deferred to a future `checks` output.
-- [x] `nix build .#default` → runnable binary. Verified: `result/bin/designer`
-      is a wrapper; real binary + `libraries/shaders/` (25 .spv) + `assets/`
-      live in `$out/opt/designer`. Ran `--headless --remote` OK (remote server
-      up, accepts connections). GPU render path not verified here (no GPU + do
-      not launch the human's windowed instance).
-- [x] Runtime layout: exe-relative lookup (readlink `/proc/self/exe`) is
-      reproduced under `$out/opt/designer`; fonts + HDRI copied from source.
+- [x] `nix build .#default` → runnable binary. Verified:
+      `result/bin/designer` is the real executable, PlaneGCS is under `lib/`,
+      and 25 shaders plus fonts/HDRI live under `share/designer`. The packaged
+      GUI boot smoke initializes IBL, shadows, SSAO, raster, outlines, and ray
+      tracing on NVIDIA.
+- [x] Standard install layout (2026-07-24): CMake `install()` owns the
+      contract used by every packager — `bin/designer`, `lib/libplanegcs.so`,
+      runtime data under `share/designer`, and desktop/AppStream/icon metadata
+      under their standard `share/` locations. RuntimePaths prefers the staged
+      build-tree data beside the executable, then resolves an installed
+      `../share/designer`; `DESIGNER_DATA_DIR` is an explicit override. The
+      flake now runs the normal CMake install phase instead of manually copying
+      an `$out/opt/designer` tree and wrapper.
 
 - [x] **Relocatability fixed** (2026-07-23). The studio HDRI was loaded via the
       `DESIGNER_SOURCE_DIR` compile define and the IBL cache written into the
-      source tree — neither survives into a relocatable package. Now: `main.cpp`
-      resolves the HDRI relative to the executable (`ExecutableDir()`, same
-      scheme as shaders/fonts) and writes the IBL cache to
-      `$XDG_CACHE_HOME/designer` (else `~/.cache/designer`). CMake stages
-      `assets/hdri` next to the binary; the `DESIGNER_SOURCE_DIR` define is
-      gone. The flake no longer needs the `substituteInPlace` hack and copies
-      the built `assets/` wholesale. Verified: fonts (Roboto + fa-solid) + HDR
-      present in the store output, binary runs headless. **Still to verify on a
-      GPU:** that IBL now renders for real (not fallback) — check on the human's
-      dev-watch instance, not here.
-- [ ] `checks` output for `designer_tests`; verify from a clean `$HOME`.
+      source tree — neither survives into a relocatable package. Now: shared
+      `RuntimePaths` resolves HDRI/fonts/shaders from the development staging
+      tree or the installed `share/designer` directory and writes the IBL cache to
+      `$XDG_CACHE_HOME/designer` (else `~/.cache/designer`). The
+      `DESIGNER_SOURCE_DIR` define is gone. Verified from both a temporary
+      CMake prefix and `nix build`: fonts, icons, shaders, and HDR are present;
+      `designer --version` reports 0.1.0; the installed/Nix GUI boot smoke loads
+      the real IBL and all render pipelines on NVIDIA.
+- [ ] `checks` output for `designer_tests`. Clean-`$HOME` installed-package
+      verification is done: the Nix binary rebuilt its IBL cache from the
+      packaged HDRI and passed `boots_and_renders`.
 
 ---
 
@@ -118,6 +125,7 @@ open-source license:
   nftd MIT/zlib/Apache, fonts OFL/Apache) is permissive.
 
 Tasks:
+
 - [x] Build PlaneGCS as a shared lib (`libplanegcs.so`) — done + packaged.
 - [ ] Add OpenCASCADE to `THIRD_PARTY.md`; ship a `LICENSES/` dir with full
       license texts + written offer for LGPL source in release artifacts.
@@ -129,6 +137,7 @@ Tasks:
 ### Binary cache (do NOT skip)
 
 Nix builds from source by default; nobody should rebuild OpenCASCADE + Netgen.
+
 - [ ] Push artifacts to **Cachix** so `nix run github:…/designer` substitutes
       prebuilt binaries. Flake + Cachix together = the real "download & run"
       experience for Nix users.
@@ -138,6 +147,7 @@ Nix builds from source by default; nobody should rebuild OpenCASCADE + Netgen.
 `nix bundle --bundler github:ralismark/nix-appimage .#default` closure-packs the
 derivation into a self-contained AppImage. Relies on the host Vulkan ICD (no
 NVIDIA-userspace matching like Flatpak). Cheap "hand someone a file" artifact.
+
 - [ ] Wire `nix bundle` into CI as an optional release artifact once the flake
       builds.
 
@@ -150,6 +160,7 @@ will **not** consume the Nix derivation. So the manifest is separate work — bu
 the flake tells us every version/flag, which is ~80% of the effort.
 
 Plan:
+
 - [ ] `org.freedesktop.Platform`/`Sdk` runtime (pick current stable, e.g.
       24.08). KDE/GNOME layer only if we need their libs — likely not.
 - [ ] Manifest modules built from source inside the sandbox: **OpenCASCADE 7.9**
@@ -171,8 +182,10 @@ Plan:
       layout is no longer a blocker. Just verify it in the sandbox.
 - [ ] Confirm the renderer (SSAO, shadows, clip planes, instancing) works under
       the runtime's Mesa and, separately, with the NVIDIA extension.
-- [ ] App ID `org.<domain>.Designer`, `.desktop` file, icon, AppStream
-      metainfo (Flathub requires these).
+- [x] App ID `io.github.eliasaronson.Designer`, `.desktop` file, scalable SVG
+      icon, and AppStream metainfo. Both metadata files pass
+      `desktop-file-validate` / `appstreamcli validate --no-net`. Installed by
+      CMake into the standard locations; Flatpak manifest still to be written.
 - [ ] Distribution: Flathub submission (their build farm + auto-updates) or a
       self-hosted Flatpak repo to start.
 
@@ -185,6 +198,7 @@ add our smaller deps + our app module. This turns the two biggest time sinks
 from "port a CAD stack from scratch" into "adapt a proven recipe."
 
 ### Known risk areas
+
 - **Renderer on Mesa is the real unknown.** SSAO / soft shadows / SSAO prepass /
   instancing / clip planes have only ever run on our (NVIDIA) dev rig. First
   contact with the runtime's Mesa (llvmpipe as the floor) could be clean or

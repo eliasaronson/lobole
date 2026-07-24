@@ -126,7 +126,6 @@ private:
     uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
     std::vector<char> ReadShaderFile(const std::string& filename);
     VkShaderModule CreateShaderModule(const std::vector<char>& code);
-    std::string GetExecutableDirectory();
 
     // Vulkan objects
     VkDevice m_device = VK_NULL_HANDLE;

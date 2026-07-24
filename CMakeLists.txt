@@ -5,6 +5,7 @@
 
 cmake_minimum_required(VERSION 3.14)
 project(designer VERSION 0.1.0 LANGUAGES C CXX)
+include(GNUInstallDirs)
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "" FORCE)
@@ -330,6 +331,7 @@ target_precompile_headers(designer_core PRIVATE
 # Application: windowing, rendering, UI.
 set(app_sources
     src/app/main.cpp
+    src/common/RuntimePaths.cpp
     src/app/CrashHandler.cpp
     src/app/HeadlessMain.cpp
     src/render/IBLTextures.cpp
@@ -391,6 +393,8 @@ file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr
 
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 target_compile_definitions(designer PRIVATE DESIGNER_VERSION="${PROJECT_VERSION}")
+set_target_properties(designer PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 
 # imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks
 target_compile_definitions(designer PRIVATE
@@ -651,4 +655,26 @@ add_custom_target(shaders ALL DEPENDS mesh_vert_shader mesh_frag_shader raygen_s
 
 # Make sure shaders are built before the main executable
 add_dependencies(designer shaders)
+
+# Canonical installation contract used by Nix, AppImage, and Flatpak.
+install(TARGETS designer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(TARGET planegcs)
+    install(TARGETS planegcs LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()
+install(DIRECTORY "${SHADER_OUTPUT_DIR}/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/shaders")
+install(FILES
+        "${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf"
+        "${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/fonts")
+install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/hdri")
+install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.desktop"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.metainfo.xml"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+install(FILES "${CMAKE_SOURCE_DIR}/assets/icons/io.github.eliasaronson.Designer.svg"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
+install(FILES "${CMAKE_SOURCE_DIR}/LICENSE" "${CMAKE_SOURCE_DIR}/THIRD_PARTY.md"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/designer")
 

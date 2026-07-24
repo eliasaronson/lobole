@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Designer
+GenericName=Parametric CAD
+Comment=Create parametric 3D parts, assemblies, drawings, and simulations
+Exec=designer
+Icon=io.github.eliasaronson.Designer
+Terminal=false
+Categories=Graphics;Engineering;3DGraphics;
+Keywords=CAD;3D;Parametric;STEP;Modeling;
+StartupNotify=true

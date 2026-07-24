@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.eliasaronson.Designer</id>
+  <name>Designer</name>
+  <summary>Parametric B-Rep CAD for parts, assemblies, drawings, and simulation</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-or-later</project_license>
+  <developer id="io.github.eliasaronson">
+    <name>Elias Högbom Aronsson</name>
+  </developer>
+  <description>
+    <p>
+      Designer is an open-source parametric 3D CAD application built around a
+      deterministic, scriptable document model. Create constrained sketches,
+      solid features, assemblies, drawings, configurations, and FEM studies.
+    </p>
+    <p>
+      Projects use a diffable format with checkpoints and Git-backed history,
+      while the same command layer is available to the GUI, Python, and MCP
+      automation clients.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.eliasaronson.Designer.desktop</launchable>
+  <url type="homepage">https://github.com/eliasaronson/Designer</url>
+  <url type="bugtracker">https://github.com/eliasaronson/Designer/issues</url>
+  <releases>
+    <release version="0.1.0" date="2026-07-24"/>
+  </releases>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -1,5 +1,6 @@
 #include "render/RayTracingRenderer.h"
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include "render/MeshRenderer.h"
 #include "thirdparty/stb_image_write.h" // declarations only; impl lives in Screenshot.cpp
 #include <glm/gtc/matrix_transform.hpp>
@@ -295,7 +296,7 @@ bool RayTracingRenderer::CreateRTPipeline() {
     }
     
     // Load RT shaders
-    std::string shaderDir = GetExecutableDirectory() + "/libraries/shaders/";
+    const std::string shaderDir = RuntimePaths::ShaderDir().string() + "/";
     auto raygenCode = ReadShaderFile(shaderDir + "raygen.spv");
     auto missCode = ReadShaderFile(shaderDir + "miss.spv");
     auto closesthitCode = ReadShaderFile(shaderDir + "closesthit.spv");
@@ -1063,13 +1064,6 @@ VkShaderModule RayTracingRenderer::CreateShaderModule(const std::vector<char>& c
     }
 
     return shaderModule;
-}
-
-std::string RayTracingRenderer::GetExecutableDirectory() {
-    char result[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    std::string path(result, (count > 0) ? count : 0);
-    return std::filesystem::path(path).parent_path().string();
 }
 
 VkCommandBuffer RayTracingRenderer::BeginSingleTimeCommands() {

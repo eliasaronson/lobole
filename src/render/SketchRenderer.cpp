@@ -1,23 +1,12 @@
 #include "render/SketchRenderer.h"
 
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include "render/MeshRenderer.h" // LineVertex3D
 
 #include <array>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
-#include <limits.h>
-#include <unistd.h>
-
-namespace {
-std::string ExecutableDir() {
-  char result[PATH_MAX];
-  ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-  std::string path(result, (count > 0) ? count : 0);
-  return std::filesystem::path(path).parent_path().string();
-}
-} // namespace
 
 bool SketchRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
                                 VkRenderPass renderPass, VkQueue graphicsQueue,
@@ -129,7 +118,7 @@ bool SketchRenderer::CreateDescriptors() {
 }
 
 VkShaderModule SketchRenderer::LoadShader(const std::string& spvName) {
-  std::string path = ExecutableDir() + "/libraries/shaders/" + spvName;
+  const std::string path = (RuntimePaths::ShaderDir() / spvName).string();
   std::ifstream file(path, std::ios::ate | std::ios::binary);
   if (!file.is_open())
     throw std::runtime_error("SketchRenderer: cannot open " + path);
