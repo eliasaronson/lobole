@@ -144,7 +144,8 @@ HELLO, distributed under its own license), and to convey the resulting work.
 You may extend this exception to a modified version of the program, but you are
 not obligated to do so. This exception does not modify any other term of the
 AGPL, and does not grant any rights in Dear ImGui Test Engine itself beyond
-those in its own license.
+those in its own license. The distributable notice is also available as
+[`ADDITIONAL_PERMISSION.md`](ADDITIONAL_PERMISSION.md).
 
 ### Third-party components
 

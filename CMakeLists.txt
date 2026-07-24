@@ -675,6 +675,11 @@ install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.met
         DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
 install(FILES "${CMAKE_SOURCE_DIR}/assets/icons/io.github.eliasaronson.Designer.svg"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
-install(FILES "${CMAKE_SOURCE_DIR}/LICENSE" "${CMAKE_SOURCE_DIR}/THIRD_PARTY.md"
+install(FILES
+        "${CMAKE_SOURCE_DIR}/LICENSE"
+        "${CMAKE_SOURCE_DIR}/ADDITIONAL_PERMISSION.md"
+        "${CMAKE_SOURCE_DIR}/THIRD_PARTY.md"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/designer")
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/LICENSES/"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/designer/LICENSES")
 

@@ -105,12 +105,12 @@ open-source license:
   against a modified version, and give notice.
 - **Netgen** — LGPL, dynamically linked, unmodified. ✅ Correct as-is.
 - **OpenCASCADE** — LGPL-2.1 *with the OCCT exception* (more permissive than
-  plain LGPL), dynamically linked. ✅ Fine. (Add it to `THIRD_PARTY.md`.)
+  plain LGPL), dynamically linked. ✅ Inventoried with both license texts.
 - **PlaneGCS — DONE.** Was vendored in `deps/planegcs`, **modified**, and
   **statically linked** — the static link triggered LGPL §6's relink duty.
   Now built as **`libplanegcs.so`** (`CMakeLists.txt`), so relink/replacement is
-  automatic. The flake installs the `.so` next to the binary with an `$ORIGIN`
-  RUNPATH (`-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON`). No perf impact (boundary
+  automatic. CMake installs the `.so` under the standard library directory and
+  gives the executable an `$ORIGIN`-relative install RUNPATH. No perf impact (boundary
   crossed once per solve; inner loops + header-only Eigen stay inlined in the
   .so). Still owed: publish our PlaneGCS modifications under LGPL (satisfied
   while the repo is public).
@@ -122,17 +122,19 @@ open-source license:
   creates the engine unconditionally), so it powers `ui_action` GUI automation
   at runtime, not just the `--gui-tests` suite. No action needed.
 - Everything else (Eigen/Spectra MPL-2.0, Boost BSL, glfw/spdlog/json/glm/imgui/
-  nftd MIT/zlib/Apache, fonts OFL/Apache) is permissive.
+  NFD MIT/zlib/Apache, fonts OFL/Apache) is permissive and inventoried.
 
 Tasks:
 
 - [x] Build PlaneGCS as a shared lib (`libplanegcs.so`) — done + packaged.
-- [ ] Add OpenCASCADE to `THIRD_PARTY.md`; ship a `LICENSES/` dir with full
-      license texts + written offer for LGPL source in release artifacts.
+- [x] Distribution notices complete (2026-07-24): `THIRD_PARTY.md` inventories
+      direct runtime components and linkage; `LICENSES/` contains their full
+      texts, the OCCT exception, and corresponding-source/replacement notice.
+      CMake installs the bundle with every binary artifact.
 - [x] Project license chosen: **AGPL-3.0-or-later** (© Elias Högbom Aronsson),
       with a GPL/AGPL §7 additional permission to link Dear ImGui Test Engine.
-      `LICENSE` (verbatim AGPL text), README License section, and
-      `flake.nix` `meta.license = agpl3Plus` all in place.
+      `LICENSE` (verbatim AGPL text), `ADDITIONAL_PERMISSION.md`, README License
+      section, and `flake.nix` `meta.license = agpl3Plus` are all installed.
 
 ### Binary cache (do NOT skip)
 

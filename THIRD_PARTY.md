@@ -1,54 +1,111 @@
-# Vendored third-party code
+# Third-party components
 
-## deps/planegcs — PlaneGCS constraint solver
+Designer is AGPL-3.0-or-later software. Binary distributions also include or
+link the components below. Full license texts shipped with Designer are under
+[`LICENSES/`](LICENSES/README.md); exact dependency revisions for reproducible
+Nix builds are pinned by `flake.lock` and the submodule commits.
 
-Copied from FreeCAD (`src/Mod/Sketcher/App/planegcs`), licensed under the **GNU
-Lesser General Public License v2.1 or later** (LGPL-2.1-or-later). The original
-copyright headers are preserved in each file.
+## LGPL-family libraries
 
-Local changes to build it standalone (without the rest of FreeCAD):
-- `#include <FCConfig.h>` and `#include <Base/Console.h>` in `GCS.cpp` replaced
-  with `FreeCADCompat.h` (a no-op `Base::Console` shim).
-- `#include "../../SketcherGlobal.h"` replaced with `SketcherExport.h`
-  (defines the `SketcherExport` visibility macro as empty).
-- `boost_graph_adjacency_list.hpp` wrapper replaced with the real
+### PlaneGCS — constraint solver
+
+- **Location:** `deps/planegcs`
+- **License:** LGPL-2.1-or-later
+- **Linkage:** separate shared library, `libplanegcs.so`
+- **Source:** copied from FreeCAD's `src/Mod/Sketcher/App/planegcs`
+
+Designer carries local standalone-build modifications while preserving the
+original per-file copyright headers:
+
+- replaced FreeCAD configuration/console includes with `FreeCADCompat.h`;
+- replaced `SketcherGlobal.h` with the local `SketcherExport.h` visibility shim;
+- replaced FreeCAD's Boost adjacency-list wrapper with
   `<boost/graph/adjacency_list.hpp>`.
 
-Depends on Eigen (MPL2) and Boost.Graph. Built as the `planegcs` static library,
-gated by `HAVE_PLANEGCS` (the app builds without it, constraints disabled).
+It is deliberately built as a shared library so users can relink or replace it.
+The modified source is included in every Designer source release.
 
-## Spectra — sparse eigensolver (header-only, not vendored)
+### Netgen — tetrahedral mesher
 
-No Spectra source lives in this tree; it is a **header-only library** provided by
-the `spectra` package in `shell.nix` and found via `find_package(Spectra)`.
-Licensed under the **Mozilla Public License 2.0** (MPL-2.0). Used only by
-`src/core/FemSolver.cpp` for the FEM modal generalized eigenproblem
-(K φ = ω²M φ, `SymGEigsShiftSolver`), gated by `HAVE_SPECTRA` — absent it, static
-FEM works and modal solves report "built without modal support". Header-only, so
-it pulls in Eigen (already a dependency) and adds no runtime library.
+- **Version used by the current Nix build:** 6.2.2605
+- **License:** LGPL-2.1-or-later
+- **Linkage:** external, unmodified shared libraries (`nglib`, `ngcore`)
+- **Source:** <https://github.com/NGSolve/netgen>
 
-## Netgen — tetrahedral mesher (linked, not vendored)
+Netgen is used by `src/core/fem/FemMesher.cpp`. Builds without Netgen remain
+functional but cannot generate FEM meshes.
 
-No Netgen source lives in this tree; it is an **external shared library** linked
-at build time (nglib + ngcore), provided by the `netgen` package in `shell.nix`.
-Licensed under the **GNU Lesser General Public License v2.1 or later**
-(LGPL-2.1-or-later) — the same standing as PlaneGCS, and satisfied here by
-dynamic linking against the unmodified upstream library.
+### OpenCASCADE Technology — B-Rep kernel and interchange
 
-Used only by `src/core/FemMesher.cpp` for FEM tetrahedral meshing, gated by
-`HAVE_NETGEN` (the app builds and runs without it; FEM studies then report
-"built without FEM support"). Netgen meshes an OpenCASCADE `TopoDS_Shape`
-directly through its native OCC interface; the nixpkgs `netgen` is built against
-the same `opencascade-occt` this project uses, so there is a single OCC in the
-process. The wrapper is compiled as its own static library to keep Netgen's
-build requirements (the `PARALLEL`/MPI defines and `-fabi-version=17` the
-package was built with) out of the rest of the core.
+- **Version used by the current Nix build:** 7.9.3
+- **License:** LGPL-2.1 with the Open CASCADE exception
+- **Linkage:** external, unmodified shared libraries
+- **Source:** <https://github.com/Open-Cascade-SAS/OCCT>
 
-## deps/fonts/fa-solid-900.ttf — Font Awesome 6 Free (Solid)
+OpenCASCADE supplies B-Rep modeling, topology, tessellation, mass properties,
+and STEP/STL/BREP interchange. The OCCT exception is reproduced in
+`LICENSES/OpenCASCADE-exception.txt`.
 
-SIL Open Font License 1.1. The `IconsFontAwesome6.h` codepoint header is MIT
-(juliettef/IconFontCppHeaders).
+See [`LICENSES/SOURCE-OFFER.md`](LICENSES/SOURCE-OFFER.md) for exact source
+locations and LGPL library replacement information.
 
-## deps/imgui/misc/fonts/Roboto-Medium.ttf — Roboto
+## Header-only and linked dependencies
 
-Apache License 2.0 (bundled with the Dear ImGui submodule).
+| Component | Purpose | License |
+| --- | --- | --- |
+| Eigen 3.4 | linear algebra and FEM | MPL-2.0 |
+| Spectra 1.2 | sparse modal eigensolver | MPL-2.0 |
+| Boost | PlaneGCS graph support | Boost Software License 1.0 |
+| GLFW 3.4 | windowing and Vulkan surface creation | zlib license |
+| GLM 1.0 | vector/matrix math | MIT or Happy Bunny License |
+| spdlog 1.17 | logging | MIT |
+| fmt | formatting used by spdlog | MIT |
+| JSON for Modern C++ 3.12 | document/RPC JSON | MIT |
+| Vulkan Loader and headers | Vulkan API loading | Apache-2.0 and bundled notices |
+
+These are supplied by the build/distribution environment rather than vendored
+in the Designer source tree. The Nix package pins their exact revisions.
+
+## Vendored application components
+
+### Dear ImGui
+
+- **Location:** `deps/imgui` submodule
+- **Revision:** v1.91.9b-docking pin
+- **License:** MIT
+
+### Dear ImGui Test Engine
+
+- **Location:** `deps/imgui_test_engine` submodule
+- **Revision:** v1.91.9 pin
+- **License:** Dear ImGui Test Engine License v1.04
+
+The engine is included at runtime because Designer's remote `ui_action`
+automation uses it, not only the GUI test suite. Designer's AGPL grant includes
+a section-7 additional permission for this linkage; see
+`ADDITIONAL_PERMISSION.md` and the README.
+
+### nativefiledialog-extended
+
+- **Location:** `deps/nativefiledialog-extended` submodule
+- **Revision:** v1.3.0 pin
+- **License:** zlib license
+
+### stb_image and stb_image_write
+
+- **Location:** `src/thirdparty/`
+- **License:** MIT or public domain, at the recipient's choice
+
+## Fonts and generated icon declarations
+
+| Component | Location | License |
+| --- | --- | --- |
+| Font Awesome 6 Free Solid | `deps/fonts/fa-solid-900.ttf` | SIL Open Font License 1.1 |
+| IconFontCppHeaders declarations | `deps/fonts/IconsFontAwesome6.h` | zlib license |
+| Roboto Medium | `deps/imgui/misc/fonts/Roboto-Medium.ttf` | Apache-2.0 |
+
+## Build- and test-only dependencies
+
+Catch2, CMake, Ninja, shaderc/glslc, ccache, and static-analysis tools are not
+part of the installed runtime payload. Their licenses remain in their upstream
+packages and source distributions.
