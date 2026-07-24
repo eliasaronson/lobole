@@ -116,10 +116,14 @@ std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId);
 // part isn't loaded, or lands on an unnamed face (e.g. a pattern output). The
 // `ray` is in the same space FaceSelector::PickFace expects.
 struct AssemblyFacePick {
+  enum class SnapType { FaceCenter, HoleCenter, EdgeMidpoint };
+
   uint64_t occurrenceId = 0;
   ElementRef face;
-  ElementRef
-      snapEdge; // inference snap: nearest circular-edge (hole) center, if any
+  // A persistently named edge when the nearest candidate is a circular-edge
+  // center or a straight/curved edge midpoint; unset means face center.
+  ElementRef snapEdge;
+  SnapType snapType = SnapType::FaceCenter;
 };
 bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
 
@@ -128,6 +132,10 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
 // adds a live preview mate); Accept keeps the preview, Cancel removes it.
 // All no-op without an active assembly.
 void StartMateTool(AppState& state, MateType type);
+// Updates the transient pre-click connector marker. Does not mutate assembly
+// data; a click always resolves its own fresh pick.
+void UpdateMateToolHover(AppState& state, const Ray& ray);
+void ClearMateToolHover(AppState& state);
 void MateToolPick(AppState& state, const Ray& ray);
 void AcceptMateTool(AppState& state);
 void CancelMateTool(AppState& state);

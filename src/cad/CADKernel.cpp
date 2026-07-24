@@ -360,6 +360,27 @@ void CADShape::FaceCircleCenters(int faceIndex, std::vector<glm::vec3>& centers,
   }
 }
 
+void CADShape::FaceEdgeIndices(int faceIndex,
+                                  std::vector<int>& edgeIndices) const {
+  edgeIndices.clear();
+  if (!IsValid() || faceIndex < 0) return;
+  int i = 0;
+  TopoDS_Face face;
+  for (TopExp_Explorer exp(m_shape, TopAbs_FACE); exp.More(); exp.Next(), i++) {
+    if (i == faceIndex) { face = TopoDS::Face(exp.Current()); break; }
+  }
+  if (face.IsNull()) return;
+
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(m_shape, TopAbs_EDGE, edges);
+  for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(edge)) continue;
+    const int idx = edges.FindIndex(edge) - 1;
+    if (idx >= 0) edgeIndices.push_back(idx);
+  }
+}
+
 bool CADShape::EdgeSnapPoint(int edgeIndex, glm::vec3& point) const {
   if (!IsValid() || edgeIndex < 0) return false;
   TopTools_IndexedMapOfShape edges;

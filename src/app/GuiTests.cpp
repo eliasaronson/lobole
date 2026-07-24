@@ -3170,6 +3170,91 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     std::filesystem::remove_all(dir);
   };
 
+  // Mate-tool hover feedback uses the same fresh face inference as a click:
+  // before committing either connector it identifies the candidate occurrence,
+  // then clears the transient marker as soon as the live mate preview starts.
+  t = IM_REGISTER_TEST(engine, "assembly", "mate_hover_marker");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    glm::vec3 min, max;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const uint64_t partSlotId = s_App->parts[0].id;
+
+    ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    Occurrence first;
+    first.partId = partSlotId;
+    first.fixed = true;
+    const uint64_t firstId = s_App->assembly->AddOccurrence(first);
+    Occurrence second;
+    second.partId = partSlotId;
+    second.position = glm::vec3(10.0f, 0.0f, 0.0f);
+    const uint64_t secondId = s_App->assembly->AddOccurrence(second);
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+
+    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 mid = center + glm::vec3(5.0f, 0.0f, 0.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(mid +
+                               glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) *
+                                   glm::length(max - min) * 6.0f);
+    ui::StartMateTool(*s_App, MateType::Fastened);
+    ctx->Yield();
+
+    // The ray through the empty gap between occurrences clears any candidate.
+    ctx->MouseMoveToPos(WorldToWindow(mid));
+    ctx->Yield();
+    IM_CHECK(!s_App->mateTool.hasHover);
+
+    const glm::vec3 topFirst(center.x, max.y, center.z);
+    const glm::vec3 topSecond = topFirst + glm::vec3(10.0f, 0.0f, 0.0f);
+    const glm::vec3 edgeMidpoint(center.x, max.y, max.z);
+    ctx->MouseMoveToPos(WorldToWindow(edgeMidpoint));
+    ctx->Yield();
+    IM_CHECK(s_App->mateTool.hasHover);
+    IM_CHECK(s_App->mateTool.hover.anchor.snapEdge.IsSet());
+    IM_CHECK(s_App->mateTool.hoverSnapIsMidpoint);
+
+    // Moving to the middle of the face prefers its centroid over all edges.
+    ctx->MouseMoveToPos(WorldToWindow(topFirst));
+    ctx->Yield();
+    IM_CHECK(s_App->mateTool.hasHover);
+    IM_CHECK_EQ(s_App->mateTool.hover.occurrenceId, firstId);
+    IM_CHECK(!s_App->mateTool.hover.anchor.snapEdge.IsSet());
+
+    // Click the midpoint candidate and verify the connector persists the same
+    // stable edge reference that hover advertised.
+    ctx->MouseMoveToPos(WorldToWindow(edgeMidpoint));
+    ctx->Yield();
+    const ElementRef hoveredMidpoint = s_App->mateTool.hover.anchor.snapEdge;
+    IM_CHECK(hoveredMidpoint.IsSet());
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->mateTool.haveFirst);
+    IM_CHECK_EQ(s_App->mateTool.first.occurrenceId, firstId);
+    IM_CHECK_EQ(s_App->mateTool.first.anchor.snapEdge.name,
+                hoveredMidpoint.name);
+
+    ctx->MouseMoveToPos(WorldToWindow(topSecond));
+    ctx->Yield();
+    IM_CHECK(s_App->mateTool.hasHover);
+    IM_CHECK_EQ(s_App->mateTool.hover.occurrenceId, secondId);
+    IM_CHECK(!s_App->mateTool.hover.anchor.snapEdge.IsSet());
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_NE(s_App->mateTool.previewMateId, uint64_t{0});
+    IM_CHECK(!s_App->mateTool.hasHover);
+
+    ui::CancelMateTool(*s_App);
+    IM_CHECK(!s_App->mateTool.active);
+  };
+
   // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
   // a top face on each reads the 8mm gap in world space; re-clicking one
   // deselects it (occurrence is part of the element's identity).

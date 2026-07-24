@@ -285,6 +285,19 @@ void HandleViewportInput(AppState& state) {
       }
     }
 
+    if (state.mateTool.active && state.mateTool.previewMateId == 0) {
+      if (overViewport) {
+        Ray ray = state.faceSelector->ScreenToWorldRay(
+            io.MousePos.x - state.viewportPos.x,
+            io.MousePos.y - state.viewportPos.y,
+            static_cast<int>(state.viewportSize.x),
+            static_cast<int>(state.viewportSize.y), *state.camera);
+        UpdateMateToolHover(state, ray);
+      } else {
+        ClearMateToolHover(state);
+      }
+    }
+
     if (state.mateTool.active && state.mateTool.previewMateId == 0 &&
         overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
       Ray ray = state.faceSelector->ScreenToWorldRay(

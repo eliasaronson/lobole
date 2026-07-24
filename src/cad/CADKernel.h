@@ -81,6 +81,9 @@ public:
     // a hole/boss center on pick. Empty when the face has no circular edges.
     void FaceCircleCenters(int faceIndex, std::vector<glm::vec3>& centers,
                            std::vector<int>& edgeIndices) const;
+    // All non-degenerate edges bounding a face, in the same global edge-index
+    // convention as ElementMap::edgeNames. Used for midpoint snap inference.
+    void FaceEdgeIndices(int faceIndex, std::vector<int>& edgeIndices) const;
     // The characteristic point of the edge at `edgeIndex` (same order): a
     // circular edge's center, else the edge's midpoint. Returns false if out of
     // range. Used to derive a snapped connector frame origin.
@@ -218,6 +221,7 @@ public:
     bool FaceAxis(int, glm::vec3&, glm::vec3&, glm::vec3&) const { return false; }
     void FaceCircleCenters(int, std::vector<glm::vec3>&,
                            std::vector<int>&) const {}
+    void FaceEdgeIndices(int, std::vector<int>&) const {}
     bool EdgeSnapPoint(int, glm::vec3&) const { return false; }
 };
 

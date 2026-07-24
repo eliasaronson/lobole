@@ -263,27 +263,44 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
 
   out.occurrenceId = rm->occurrenceId;
   out.face = ElementRef{body.createdBy, *name};
-  out.snapEdge = ElementRef{}; // default: face centroid
+  out.snapEdge = ElementRef{};
+  out.snapType = AssemblyFacePick::SnapType::FaceCenter;
 
-  // Inference snap (A2.5 phase 4): if the face has circular edges (holes/
-  // bosses), snap the connector to the one nearest the click. Centers are in
-  // part-local space; compare in world via the occurrence transform.
-  std::vector<glm::vec3> centers;
-  std::vector<int> edgeIdx;
-  body.shape.FaceCircleCenters(static_cast<int>(hit.faceIndex), centers, edgeIdx);
-  if (!centers.empty()) {
-    const glm::mat4 xf = OccurrenceMatrix(*occ);
-    float best = FLT_MAX;
-    int bestI = -1;
-    for (size_t k = 0; k < centers.size(); k++) {
-      const glm::vec3 w = glm::vec3(xf * glm::vec4(centers[k], 1.0f));
-      const float d = glm::length(w - hit.point);
-      if (d < best) { best = d; bestI = static_cast<int>(k); }
-    }
-    if (bestI >= 0) {
-      if (const std::string* en = body.elementMap.EdgeNameOf(edgeIdx[bestI]))
-        out.snapEdge = ElementRef{body.createdBy, *en}; // named → persistable
-    }
+  // Every named boundary edge contributes its characteristic point: a circle
+  // center or another edge's midpoint. The face center competes as a candidate
+  // too, so a click in the middle of a face does not always snap to an edge.
+  std::vector<int> edgeIndices;
+  body.shape.FaceEdgeIndices(static_cast<int>(hit.faceIndex), edgeIndices);
+  std::vector<glm::vec3> circleCenters;
+  std::vector<int> circleEdges;
+  body.shape.FaceCircleCenters(static_cast<int>(hit.faceIndex), circleCenters,
+                               circleEdges);
+  const glm::mat4 xf = OccurrenceMatrix(*occ);
+  glm::vec3 faceOrigin, faceNormal, faceXAxis;
+  const bool hasFaceFrame =
+      body.shape.FacePlane(static_cast<int>(hit.faceIndex), faceOrigin,
+                           faceNormal, faceXAxis) ||
+      body.shape.FaceAxis(static_cast<int>(hit.faceIndex), faceOrigin,
+                          faceNormal, faceXAxis);
+  const glm::vec3 worldFaceOrigin =
+      glm::vec3(xf * glm::vec4(faceOrigin, 1.0f));
+  float best = hasFaceFrame ? glm::length(worldFaceOrigin - hit.point) : FLT_MAX;
+  for (const int edgeIndex : edgeIndices) {
+    const std::string* edgeName = body.elementMap.EdgeNameOf(edgeIndex);
+    glm::vec3 localPoint;
+    if (!edgeName || !body.shape.EdgeSnapPoint(edgeIndex, localPoint))
+      continue;
+    const glm::vec3 worldPoint = glm::vec3(xf * glm::vec4(localPoint, 1.0f));
+    const float distance = glm::length(worldPoint - hit.point);
+    if (distance >= best)
+      continue;
+    bool isCircular = false;
+    for (const int circleEdge : circleEdges)
+      if (circleEdge == edgeIndex) { isCircular = true; break; }
+    best = distance;
+    out.snapEdge = ElementRef{body.createdBy, *edgeName};
+    out.snapType = isCircular ? AssemblyFacePick::SnapType::HoleCenter
+                              : AssemblyFacePick::SnapType::EdgeMidpoint;
   }
   return true;
 }
@@ -316,6 +333,31 @@ void StartMateTool(AppState& state, MateType type) {
   SelectOccurrence(state, 0); // the tool owns clicks now
 }
 
+void ClearMateToolHover(AppState& state) {
+  state.mateTool.hasHover = false;
+  state.mateTool.hover = Connector{};
+  state.mateTool.hoverSnapIsMidpoint = false;
+}
+
+void UpdateMateToolHover(AppState& state, const Ray& ray) {
+  auto& tool = state.mateTool;
+  if (!tool.active || tool.previewMateId != 0) {
+    ClearMateToolHover(state);
+    return;
+  }
+  AssemblyFacePick pick;
+  if (!PickAssemblyFace(state, ray, pick)) {
+    ClearMateToolHover(state);
+    return;
+  }
+  tool.hasHover = true;
+  tool.hover.occurrenceId = pick.occurrenceId;
+  tool.hover.anchor.face = pick.face;
+  tool.hover.anchor.snapEdge = pick.snapEdge;
+  tool.hoverSnapIsMidpoint =
+      pick.snapType == AssemblyFacePick::SnapType::EdgeMidpoint;
+}
+
 void MateToolPick(AppState& state, const Ray& ray) {
   if (!state.assembly || !state.mateTool.active ||
       state.mateTool.previewMateId != 0)
@@ -332,8 +374,10 @@ void MateToolPick(AppState& state, const Ray& ray) {
     tool.first.anchor.face = pick.face;
     tool.first.anchor.snapEdge = pick.snapEdge; // hole-center snap, if any
     tool.haveFirst = true;
-    tool.message = pick.snapEdge.IsSet()
+    tool.message = pick.snapType == AssemblyFacePick::SnapType::HoleCenter
                        ? "Snapped to a hole center — pick connector B"
+                   : pick.snapType == AssemblyFacePick::SnapType::EdgeMidpoint
+                       ? "Snapped to an edge midpoint — pick connector B"
                        : "Pick the second face (connector B)";
     return;
   }
@@ -353,6 +397,7 @@ void MateToolPick(AppState& state, const Ray& ray) {
   mate.b.anchor.snapEdge = pick.snapEdge; // hole-center snap, if any
   SnapshotAssembly(state);
   tool.previewMateId = state.assembly->AddMate(mate);
+  ClearMateToolHover(state);
   const int errored = SolveActiveAssembly(state);
   tool.message = errored ? "Over-constrained — try Flip, or Cancel"
                          : "Accept, Flip, or Cancel";
@@ -379,6 +424,20 @@ void CancelMateTool(AppState& state) {
 }
 
 namespace {
+void AppendSnapMarker(std::vector<LineVertex3D>& lines, const glm::mat4& f,
+                      float scale, bool edgeSnap, bool midpoint) {
+  const glm::vec3 origin(f[3]);
+  const glm::vec3 color = midpoint ? glm::vec3(0.30f, 0.85f, 1.0f)
+                          : edgeSnap ? glm::vec3(1.0f, 0.78f, 0.22f)
+                                     : glm::vec3(0.82f, 0.82f, 0.60f);
+  const glm::vec3 u = glm::normalize(glm::vec3(f[0])) * scale;
+  const glm::vec3 v = glm::normalize(glm::vec3(f[1])) * scale;
+  lines.push_back(LineVertex(origin - u, color));
+  lines.push_back(LineVertex(origin + u, color));
+  lines.push_back(LineVertex(origin - v, color));
+  lines.push_back(LineVertex(origin + v, color));
+}
+
 void AppendFrameTriad(std::vector<LineVertex3D>& lines, const glm::mat4& f,
                       float scale) {
   const glm::vec3 o(f[3]);
@@ -396,6 +455,11 @@ void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
   if (!state.assembly || !state.mateTool.active)
     return;
   const float scale = 1.2f;
+  if (state.mateTool.hasHover && state.mateTool.previewMateId == 0)
+    if (const auto f = ConnectorWorldFrame(state, state.mateTool.hover))
+      AppendSnapMarker(lines, *f, GizmoScale(state) * 0.12f,
+                       state.mateTool.hover.anchor.snapEdge.IsSet(),
+                       state.mateTool.hoverSnapIsMidpoint);
   if (state.mateTool.haveFirst)
     if (const auto f = ConnectorWorldFrame(state, state.mateTool.first))
       AppendFrameTriad(lines, *f, scale);

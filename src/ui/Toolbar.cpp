@@ -521,6 +521,17 @@ void DrawAssemblyToolbar(AppState& state) {
     ImGui::SameLine();
     ImGui::TextDisabled("%s", state.mateTool.message.c_str());
   }
+  if (state.mateTool.active && state.mateTool.hasHover &&
+      state.mateTool.previewMateId == 0) {
+    const bool edgeSnap = state.mateTool.hover.anchor.snapEdge.IsSet();
+    ImGui::SameLine();
+    ImGui::TextColored(edgeSnap ? ImVec4(1.0f, 0.78f, 0.22f, 1.0f)
+                                : ImVec4(0.82f, 0.82f, 0.60f, 1.0f),
+                       "%s", !edgeSnap ? "Snap: face center"
+                              : state.mateTool.hoverSnapIsMidpoint
+                                  ? "Snap: edge midpoint"
+                                  : "Snap: hole center");
+  }
   ImGui::NewLine();
 }
 

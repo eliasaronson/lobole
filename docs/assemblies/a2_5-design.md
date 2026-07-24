@@ -12,6 +12,7 @@
 ## Why now, and why together
 
 The roadmap grouped these because they share infrastructure:
+
 - A **live-transform update path** — mutate a render instance's model matrix each
   frame with no geometry re-upload or resync. `MeshRenderer::SetInstanceTransform`
   already does this; the OutlineRenderer does **not** (it renders every mesh at
@@ -25,7 +26,7 @@ Build that once. The pieces phase cleanly (below).
 ## The seams (from code exploration)
 
 | Piece | State today |
-|---|---|
+| --- | --- |
 | `MeshRenderer` per-instance model | **Done** — `mat4 model` push constant, `SetInstanceTransform` mutates in place, no resync (`MeshRenderer.cpp:287-318`). The reference pattern. |
 | `OutlineRenderer` per-mesh model | **Missing** — `OutlineMesh.transform` field + `SetMeshTransform` exist but feed only the CPU silhouette calc; both pipelines have **no push constant**, `model` is a shared per-frame UBO forced to `identity` (`OutlineRenderer.cpp:1048-1087`). Shaders read `ubo.model` (binding 0). |
 | A2 stopgap | `SyncAssemblyRenderers` bakes the occurrence transform into outline vertices (`AppActions.cpp:1090-1104`). |
@@ -61,6 +62,7 @@ with `depthTestEnable=FALSE`) so handles are always visible and grabbable.
 
 **Interaction.** A new `HandleGizmoInput` early-return consumer in
 `ViewportInput`, running before the pick/orbit blocks:
+
 - On left-click, ray-test the handles (cylinder/torus proximity to the ray).
 - On grab: `SnapshotAssembly` once; record the axis + the grab point.
 - Per frame while dragging: intersect the ray with the axis line (translate) or
@@ -99,6 +101,26 @@ alongside its `ElementRef` (e.g. `{face:{…}, snap:"edge-center", edge:"<name>"
 defaulting to the centroid when absent. Reuses the hover-marker overlay + the
 edge/vertex picking (`FaceSelector::PickEdge` exists) from the same interactive
 layer. Format bump when it lands (v26).
+
+### Phase 4b — snap-marker polish — shipped (2026-07-24)
+
+While the mate tool awaits a connector, it now resolves the same transient
+candidate that a click would resolve and draws a screen-stable cross at that
+connector origin. The toolbar retains its picking instruction and additionally
+reports `Snap: hole center`, `Snap: edge midpoint`, or `Snap: face center`.
+Hole centers and edge midpoints both persist through the existing named
+`snapEdge`; the nearest candidate wins, so moving to the middle of a face still
+selects its centroid. Midpoints use a cyan marker while hole centers remain
+amber. The marker clears on a miss, leaving the viewport, or when the live mate
+preview begins; the click resolves a fresh pick and never trusts hover state.
+This remains compatible with v26 `snap_edge` serialization and needs no format
+bump.
+
+Covered by GUI test `assembly/mate_hover_marker`: it verifies miss clearing,
+face-center versus midpoint ranking, midpoint-reference persistence on click,
+and preview clearing. `FaceEdgeIndices exposes box-edge midpoint snaps` covers
+the kernel edge enumeration. Vertex/corner snapping remains deferred because
+`ElementMap` does not yet provide persistent vertex names.
 
 ## Decisions for sign-off
 

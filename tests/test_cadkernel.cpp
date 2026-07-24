@@ -79,6 +79,32 @@ TEST_CASE("FaceCircleCenters + EdgeSnapPoint find a cylinder's circle", "[kernel
   CHECK(foundCap);
 }
 
+TEST_CASE("FaceEdgeIndices exposes box-edge midpoint snaps", "[kernel]") {
+  CADShape box = CADKernel::Instance().CreateBox(2.0, 2.0, 2.0);
+  REQUIRE(box.IsValid());
+
+  bool foundFace = false;
+  for (int face = 0; face < 8 && !foundFace; ++face) {
+    glm::vec3 center, normal, uAxis;
+    if (!box.FacePlane(face, center, normal, uAxis))
+      continue;
+    std::vector<int> edges;
+    box.FaceEdgeIndices(face, edges);
+    if (edges.empty())
+      continue;
+    foundFace = true;
+    CHECK(edges.size() == 4);
+    for (const int edge : edges) {
+      glm::vec3 midpoint;
+      REQUIRE(box.EdgeSnapPoint(edge, midpoint));
+      CHECK(std::isfinite(midpoint.x));
+      CHECK(std::isfinite(midpoint.y));
+      CHECK(std::isfinite(midpoint.z));
+    }
+  }
+  CHECK(foundFace);
+}
+
 TEST_CASE("Boolean union of overlapping boxes", "[kernel][booleans]") {
     CADKernel& k = CADKernel::Instance();
     CADShape a = k.CreateBox(glm::vec3(0, 0, 0), glm::vec3(2, 2, 2));

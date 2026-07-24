@@ -558,7 +558,12 @@ struct AppState {
     bool haveFirst = false;     // the first connector is picked
     Connector first;            // occurrence + face anchor of the first pick
     uint64_t previewMateId = 0; // non-zero once both picked: the live preview
-    std::string message;        // transient hint (e.g. "pick a named face")
+    // Transient connector resolved under the cursor before a click. It uses
+    // the same face/snap inference as MateToolPick but never affects a mate.
+    bool hasHover = false;
+    Connector hover;
+    bool hoverSnapIsMidpoint = false;
+    std::string message; // transient hint (e.g. "pick a named face")
   };
 
   // 3D drag gizmo for the selected occurrence (A2.5). World-aligned translate
