@@ -2,63 +2,64 @@
 
 #include "cad/CADMaterials.h"
 #include "cad/CADMeshConverter.h"
-#include "render/Camera.h"
-#include "render/IBLTextures.h"
-#include "render/RayTracingRenderer.h"
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
-#include "render/FieldRenderer.h"
-#include "render/MeshRenderer.h"
-#include "render/OutlineRenderer.h"
-#include "render/SketchRenderer.h"
 #include "core/AssemblySolve.h"
-#include "core/io/ImportAssembly.h"
-#include "ui/DragMath.h"
-#include "core/io/Autosaver.h"
+#include "core/Command.h"
+#include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
-#include "core/io/GitVault.h"
-#include "core/features/BooleanFeature.h"
-#include "core/Command.h"
-#include "core/features/DatumAxisFeature.h"
-#include "core/features/DatumPlaneFeature.h"
-#include "core/features/ExtrudeFeature.h"
-#include "core/Feature.h"
-#include "core/features/FilletFeature.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
+#include "core/features/BooleanFeature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/FilletFeature.h"
+#include "core/io/Autosaver.h"
+#include "core/io/GitVault.h"
+#include "core/io/ImportAssembly.h"
 #include "core/io/Serialization.h"
+#include "render/Camera.h"
+#include "render/FieldRenderer.h"
+#include "render/IBLTextures.h"
+#include "render/MeshRenderer.h"
+#include "render/OutlineRenderer.h"
+#include "render/RayTracingRenderer.h"
+#include "render/SketchRenderer.h"
+#include "ui/DragMath.h"
 
-#include <nlohmann/json.hpp>
 #include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h" // SketchUVToScreen
+#include <nlohmann/json.hpp>
 
 #include "imgui.h"
 
 #include <glm/gtc/matrix_transform.hpp> // glm::translate
 #include <glm/gtc/quaternion.hpp>       // glm::mat4_cast
 
+#include "ui/AppActionsInternal.h"
+#include "ui/AppState.h"
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <cmath>
 #include <set>
 #include <unordered_map>
-#include "ui/AppActionsInternal.h"
-#include "ui/AppState.h"
 
 namespace ui {
 
 void SnapshotAssembly(AppState& state) {
-  if (!state.assembly) return;
+  if (!state.assembly)
+    return;
   state.assemblyHistory.undo.push_back(*state.assembly); // full-state copy
   state.assemblyHistory.undoStamps.push_back(NextActionStamp());
   state.assemblyHistory.redo.clear();
@@ -66,19 +67,22 @@ void SnapshotAssembly(AppState& state) {
 }
 
 bool UndoAssembly(AppState& state) {
-  if (!state.assembly || state.assemblyHistory.undo.empty()) return false;
+  if (!state.assembly || state.assemblyHistory.undo.empty())
+    return false;
   state.assemblyHistory.redo.push_back(*state.assembly);
   state.assemblyHistory.redoStamps.push_back(
       state.assemblyHistory.undoStamps.back());
   state.assemblyHistory.undoStamps.pop_back();
   *state.assembly = std::move(state.assemblyHistory.undo.back());
   state.assemblyHistory.undo.pop_back();
-  state.syncedDocumentVersion = UINT64_MAX; // restored state may share a version
+  state.syncedDocumentVersion =
+      UINT64_MAX; // restored state may share a version
   return true;
 }
 
 bool RedoAssembly(AppState& state) {
-  if (!state.assembly || state.assemblyHistory.redo.empty()) return false;
+  if (!state.assembly || state.assemblyHistory.redo.empty())
+    return false;
   state.assemblyHistory.undo.push_back(*state.assembly);
   state.assemblyHistory.undoStamps.push_back(
       state.assemblyHistory.redoStamps.back());
@@ -112,7 +116,8 @@ bool EnterInContextEdit(AppState& state, uint64_t occurrenceId) {
     return false;
   std::optional<size_t> partIndex;
   for (size_t i = 0; i < state.parts.size(); i++)
-    if (state.parts[i].kind == DocKind::Part && state.parts[i].id == occ->partId)
+    if (state.parts[i].kind == DocKind::Part &&
+        state.parts[i].id == occ->partId)
       partIndex = i;
   if (!partIndex)
     return false; // dangling part reference
@@ -161,10 +166,13 @@ BomTable ComputeBom(AppState& state) {
     return table;
   for (const Occurrence& occ : state.assembly->GetOccurrences()) {
     if (state.assembly->OccurrenceSuppressed(occ.id))
-      continue;  // suppressed by the active config: out of the BOM
+      continue; // suppressed by the active config: out of the BOM
     BomRow* row = nullptr;
     for (BomRow& r : table.rows)
-      if (r.partId == occ.partId) { row = &r; break; }
+      if (r.partId == occ.partId) {
+        row = &r;
+        break;
+      }
     if (row) {
       row->quantity++;
       continue;
@@ -206,12 +214,18 @@ BomTable ComputeBom(AppState& state) {
 
 std::string BomToCsv(const BomTable& bom) {
   auto field = [](const std::string& s) {
-    if (s.find_first_of(",\"\n") == std::string::npos) return s;
+    if (s.find_first_of(",\"\n") == std::string::npos)
+      return s;
     std::string quoted = "\"";
-    for (char c : s) { if (c == '"') quoted += '"'; quoted += c; }
+    for (char c : s) {
+      if (c == '"')
+        quoted += '"';
+      quoted += c;
+    }
     return quoted + "\"";
   };
-  std::string csv = "part,quantity,material,unit_volume_mm3,unit_mass_g,total_mass_g\n";
+  std::string csv =
+      "part,quantity,material,unit_volume_mm3,unit_mass_g,total_mass_g\n";
   char buf[64];
   auto num = [&buf](double v) {
     snprintf(buf, sizeof buf, "%.6g", v);
@@ -227,7 +241,8 @@ std::string BomToCsv(const BomTable& bom) {
     csv += "\n";
   }
   csv += "total,,,,,";
-  if (bom.massKnown) csv += num(bom.totalMassG);
+  if (bom.massKnown)
+    csv += num(bom.totalMassG);
   csv += "\n";
   return csv;
 }
@@ -243,7 +258,10 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   // on the render mesh precisely so an assembly pick can be named).
   const DocumentRenderMesh* rm = nullptr;
   for (const DocumentRenderMesh& m : state.documentMeshes)
-    if (m.meshId == hit.meshId) { rm = &m; break; }
+    if (m.meshId == hit.meshId) {
+      rm = &m;
+      break;
+    }
   if (!rm || rm->occurrenceId == 0)
     return false;
 
@@ -282,9 +300,9 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
                            faceNormal, faceXAxis) ||
       body.shape.FaceAxis(static_cast<int>(hit.faceIndex), faceOrigin,
                           faceNormal, faceXAxis);
-  const glm::vec3 worldFaceOrigin =
-      glm::vec3(xf * glm::vec4(faceOrigin, 1.0f));
-  float best = hasFaceFrame ? glm::length(worldFaceOrigin - hit.point) : FLT_MAX;
+  const glm::vec3 worldFaceOrigin = glm::vec3(xf * glm::vec4(faceOrigin, 1.0f));
+  float best =
+      hasFaceFrame ? glm::length(worldFaceOrigin - hit.point) : FLT_MAX;
   for (const int edgeIndex : edgeIndices) {
     const std::string* edgeName = body.elementMap.EdgeNameOf(edgeIndex);
     glm::vec3 localPoint;
@@ -296,7 +314,10 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
       continue;
     bool isCircular = false;
     for (const int circleEdge : circleEdges)
-      if (circleEdge == edgeIndex) { isCircular = true; break; }
+      if (circleEdge == edgeIndex) {
+        isCircular = true;
+        break;
+      }
     best = distance;
     out.snapEdge = ElementRef{body.createdBy, *edgeName};
     out.snapType = isCircular ? AssemblyFacePick::SnapType::HoleCenter
@@ -427,7 +448,7 @@ namespace {
 void AppendSnapMarker(std::vector<LineVertex3D>& lines, const glm::mat4& f,
                       float scale, bool edgeSnap, bool midpoint) {
   const glm::vec3 origin(f[3]);
-  const glm::vec3 color = midpoint ? glm::vec3(0.30f, 0.85f, 1.0f)
+  const glm::vec3 color = midpoint   ? glm::vec3(0.30f, 0.85f, 1.0f)
                           : edgeSnap ? glm::vec3(1.0f, 0.78f, 0.22f)
                                      : glm::vec3(0.82f, 0.82f, 0.60f);
   const glm::vec3 u = glm::normalize(glm::vec3(f[0])) * scale;
@@ -441,9 +462,8 @@ void AppendSnapMarker(std::vector<LineVertex3D>& lines, const glm::mat4& f,
 void AppendFrameTriad(std::vector<LineVertex3D>& lines, const glm::mat4& f,
                       float scale) {
   const glm::vec3 o(f[3]);
-  const glm::vec3 cols[3] = {{0.90f, 0.32f, 0.32f},
-                             {0.35f, 0.82f, 0.38f},
-                             {0.38f, 0.55f, 0.95f}};
+  const glm::vec3 cols[3] = {
+      {0.90f, 0.32f, 0.32f}, {0.35f, 0.82f, 0.38f}, {0.38f, 0.55f, 0.95f}};
   for (int a = 0; a < 3; a++) {
     lines.push_back(LineVertex(o, cols[a]));
     lines.push_back(LineVertex(o + glm::vec3(f[a]) * scale, cols[a]));
@@ -463,9 +483,10 @@ void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
   if (state.mateTool.haveFirst)
     if (const auto f = ConnectorWorldFrame(state, state.mateTool.first))
       AppendFrameTriad(lines, *f, scale);
-  if (const Mate* m = state.mateTool.previewMateId
-                          ? state.assembly->FindMateById(state.mateTool.previewMateId)
-                          : nullptr) {
+  if (const Mate* m =
+          state.mateTool.previewMateId
+              ? state.assembly->FindMateById(state.mateTool.previewMateId)
+              : nullptr) {
     if (const auto fb = ConnectorWorldFrame(state, m->b))
       AppendFrameTriad(lines, *fb, scale);
   }
@@ -481,16 +502,19 @@ const glm::vec3 kGizmoColor[3] = {
 // Ray/axis/plane/arc math shared with the preview handles: ui/DragMath.h
 // (GizmoScale, PerpTo, RayAxisParam, RayPlane, PointRayDist, RotateAngle).
 
-// The gizmo-anchored occurrence: selected, non-fixed, mate tool idle. null else.
+// The gizmo-anchored occurrence: selected, non-fixed, mate tool idle. null
+// else.
 Occurrence* GizmoOccurrence(AppState& state) {
   const uint64_t occId = SelectedOccurrenceId(state);
   if (!state.assembly || occId == 0 || state.mateTool.active)
     return nullptr;
   Occurrence* o = state.assembly->FindById(occId);
-  if (!o) return nullptr;
+  if (!o)
+    return nullptr;
   // Explode mode drags a view offset, not the placement — even a fixed base
   // part explodes.
-  if (state.activeExplodedView) return o;
+  if (state.activeExplodedView)
+    return o;
   return !o->fixed ? o : nullptr;
 }
 
@@ -508,7 +532,8 @@ struct GizmoSpec {
 // gizmo drives). Skips errored mates.
 Mate* MateDrivingOccurrence(AssemblyDocument& asmDoc, uint64_t occId) {
   for (Mate& m : asmDoc.GetMates())
-    if (m.b.occurrenceId == occId && m.error.empty()) return &m;
+    if (m.b.occurrenceId == occId && m.error.empty())
+      return &m;
   return nullptr;
 }
 
@@ -541,19 +566,29 @@ bool BuildGizmoSpec(AppState& state, Occurrence* occ, GizmoSpec& spec,
     return true;
   }
   const auto Wa = ConnectorWorldFrame(state, mate->a);
-  if (!Wa) return false; // dangling connector → no meaningful DOF gizmo
+  if (!Wa)
+    return false; // dangling connector → no meaningful DOF gizmo
   spec.origin = glm::vec3((*Wa)[3]);
   for (int i = 0; i < 3; i++)
     spec.axis[i] = glm::normalize(glm::vec3((*Wa)[i]));
   switch (mate->type) {
-    case MateType::Revolute: spec.rot[2] = true; break;
-    case MateType::Slider: spec.trans[2] = true; break;
-    case MateType::Cylindrical: spec.rot[2] = spec.trans[2] = true; break;
-    case MateType::Planar:
-      spec.trans[0] = spec.trans[1] = spec.rot[2] = true;
-      break;
-    case MateType::Ball: spec.rot[0] = spec.rot[1] = spec.rot[2] = true; break;
-    case MateType::Fastened: return false; // no DOF
+  case MateType::Revolute:
+    spec.rot[2] = true;
+    break;
+  case MateType::Slider:
+    spec.trans[2] = true;
+    break;
+  case MateType::Cylindrical:
+    spec.rot[2] = spec.trans[2] = true;
+    break;
+  case MateType::Planar:
+    spec.trans[0] = spec.trans[1] = spec.rot[2] = true;
+    break;
+  case MateType::Ball:
+    spec.rot[0] = spec.rot[1] = spec.rot[2] = true;
+    break;
+  case MateType::Fastened:
+    return false; // no DOF
   }
   return true;
 }
@@ -568,17 +603,28 @@ bool GizmoHitTest(const AppState& state, const GizmoSpec& spec, const Ray& ray,
   for (int i = 0; i < 3; i++) {
     const glm::vec3 A = spec.axis[i];
     if (spec.trans[i]) {
-      float t = std::clamp(
-          RayAxisParam(ray.origin, ray.direction, spec.origin, A), 0.15f * L, L);
+      float t =
+          std::clamp(RayAxisParam(ray.origin, ray.direction, spec.origin, A),
+                     0.15f * L, L);
       const float da =
           PointRayDist(spec.origin + A * t, ray.origin, ray.direction);
-      if (da < best) { best = da; axis = i; rotate = false; found = true; }
+      if (da < best) {
+        best = da;
+        axis = i;
+        rotate = false;
+        found = true;
+      }
     }
     if (spec.rot[i]) {
       glm::vec3 hit;
       if (RayPlane(ray.origin, ray.direction, spec.origin, A, hit)) {
         const float dr = std::abs(glm::length(hit - spec.origin) - R);
-        if (dr < best) { best = dr; axis = i; rotate = true; found = true; }
+        if (dr < best) {
+          best = dr;
+          axis = i;
+          rotate = true;
+          found = true;
+        }
       }
     }
   }
@@ -589,12 +635,16 @@ bool GizmoHitTest(const AppState& state, const GizmoSpec& spec, const Ray& ray,
 // version bump / resync) for every render mesh of the occurrence.
 void PushOccurrenceLive(AppState& state, uint64_t occId) {
   const Occurrence* occ = state.assembly->FindById(occId);
-  if (!occ) return;
+  if (!occ)
+    return;
   const glm::mat4 xf = DisplayMatrix(state, *occ);
   for (const DocumentRenderMesh& m : state.documentMeshes) {
-    if (m.occurrenceId != occId) continue;
-    if (state.meshRenderer) state.meshRenderer->SetInstanceTransform(m.meshId, xf);
-    if (state.outlineRenderer) state.outlineRenderer->SetMeshTransform(m.outlineId, xf);
+    if (m.occurrenceId != occId)
+      continue;
+    if (state.meshRenderer)
+      state.meshRenderer->SetInstanceTransform(m.meshId, xf);
+    if (state.outlineRenderer)
+      state.outlineRenderer->SetMeshTransform(m.outlineId, xf);
   }
 }
 
@@ -631,10 +681,12 @@ void AppendGizmoHandles(const GizmoSpec& spec, float L,
 
 void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
   Occurrence* occ = GizmoOccurrence(state);
-  if (!occ) return;
+  if (!occ)
+    return;
   GizmoSpec spec;
   Mate* mate = nullptr;
-  if (!BuildGizmoSpec(state, occ, spec, mate)) return;
+  if (!BuildGizmoSpec(state, occ, spec, mate))
+    return;
   AppendGizmoHandles(spec, GizmoScale(state), lines);
 }
 
@@ -665,13 +717,17 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       ExplodeStep* step = nullptr;
       if (view)
         for (ExplodeStep& s : view->steps)
-          if (s.occurrenceId == occ->id) { step = &s; break; }
+          if (s.occurrenceId == occ->id) {
+            step = &s;
+            break;
+          }
       if (!step) { // view or step vanished mid-drag (undo?) — abort cleanly
         g.active = false;
         return true;
       }
       const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
-      const float f = std::max(state.explodeFactor, 0.05f); // never divide by ~0
+      const float f =
+          std::max(state.explodeFactor, 0.05f); // never divide by ~0
       step->offset = g.startOffset + A * ((t - g.startParam) / f);
       PushOccurrenceLive(state, occ->id);
       return true;
@@ -679,7 +735,8 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     if (!g.mateId) {
       // Free occurrence: drag its transform directly.
       if (!g.rotate) {
-        const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+        const float t =
+            RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
         occ->position = g.startPos + A * (t - g.startParam);
       } else {
         float ang;
@@ -690,11 +747,15 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
       // Drag-within-mate: write the mate's DOF, then re-solve so the
       // occurrence follows.
       if (!g.rotate) {
-        const float t = RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
+        const float t =
+            RayAxisParam(ray.origin, ray.direction, g.frameOrigin, A);
         const float v = g.startDof + (t - g.startParam);
-        if (g.axis == 0) mate->dx = v;
-        else if (g.axis == 1) mate->dy = v;
-        else mate->offset = v;
+        if (g.axis == 0)
+          mate->dx = v;
+        else if (g.axis == 1)
+          mate->dy = v;
+        else
+          mate->offset = v;
       } else {
         float ang;
         if (RotateAngle(ray.origin, ray.direction, g.frameOrigin, A, ang)) {
@@ -713,20 +774,24 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
   }
 
   Occurrence* occ = GizmoOccurrence(state);
-  if (!occ || !clicked) return false;
+  if (!occ || !clicked)
+    return false;
   GizmoSpec spec;
   Mate* mate = nullptr;
-  if (!BuildGizmoSpec(state, occ, spec, mate)) return false;
+  if (!BuildGizmoSpec(state, occ, spec, mate))
+    return false;
   int axis = 0;
   bool rotate = false;
-  if (!GizmoHitTest(state, spec, ray, axis, rotate)) return false;
+  if (!GizmoHitTest(state, spec, ray, axis, rotate))
+    return false;
 
   SnapshotAssembly(state); // one snapshot per drag
   g.active = true;
   g.axis = axis;
   g.rotate = rotate;
   g.frameOrigin = spec.origin;
-  for (int i = 0; i < 3; i++) g.frameAxis[i] = spec.axis[i];
+  for (int i = 0; i < 3; i++)
+    g.frameAxis[i] = spec.axis[i];
   g.mateId = mate ? mate->id : 0;
   g.explodeView = state.activeExplodedView;
   if (g.explodeView) {
@@ -735,7 +800,10 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
     ExplodedView* view = state.assembly->FindExplodedViewById(g.explodeView);
     ExplodeStep* step = nullptr;
     for (ExplodeStep& s : view->steps)
-      if (s.occurrenceId == occ->id) { step = &s; break; }
+      if (s.occurrenceId == occ->id) {
+        step = &s;
+        break;
+      }
     if (!step) {
       view->steps.push_back({occ->id, glm::vec3(0.0f)});
       step = &view->steps.back();
@@ -754,8 +822,9 @@ bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
   }
   if (mate) { // capture the DOF value at grab
     g.startDof = rotate ? mate->rotation
-                        : (axis == 0 ? mate->dx : axis == 1 ? mate->dy
-                                                            : mate->offset);
+                        : (axis == 0   ? mate->dx
+                           : axis == 1 ? mate->dy
+                                       : mate->offset);
     g.startBall = mate->ballRotation;
   }
   return true; // consumed the click (don't also re-select)
@@ -769,7 +838,10 @@ bool AutoExplode(AppState& state, uint64_t viewId) {
     return false;
 
   // World-space center of every placed occurrence + the whole-assembly box.
-  struct OccCenter { uint64_t id; glm::vec3 center; };
+  struct OccCenter {
+    uint64_t id;
+    glm::vec3 center;
+  };
   std::vector<OccCenter> centers;
   glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
   for (const Occurrence& occ : state.assembly->GetOccurrences()) {
@@ -801,7 +873,8 @@ bool AutoExplode(AppState& state, uint64_t viewId) {
     return false; // nothing to spread apart
 
   glm::vec3 centroid(0.0f);
-  for (const OccCenter& c : centers) centroid += c.center;
+  for (const OccCenter& c : centers)
+    centroid += c.center;
   centroid /= static_cast<float>(centers.size());
   const float spread = 0.6f * glm::length(hi - lo);
 
@@ -850,7 +923,8 @@ struct SharedBody {
 // Renders an assembly: one asset per referenced part body, one instance per
 // occurrence. Assets are shared across occurrences of the same part.
 void SyncAssemblyRenderers(AppState& state) {
-  std::unordered_map<uint64_t, std::vector<SharedBody>> byPart; // partId -> bodies
+  std::unordered_map<uint64_t, std::vector<SharedBody>>
+      byPart; // partId -> bodies
   size_t palette = 0;
 
   for (const Occurrence& occ : state.assembly->GetOccurrences()) {
@@ -904,8 +978,8 @@ void SyncAssemblyRenderers(AppState& state) {
       uint32_t meshId = state.meshRenderer->AddInstance(sb.assetId, xf);
       if (sb.hasMaterial) {
         state.meshRenderer->SetInstanceMaterial(meshId, sb.albedo, sb.pbr);
-        state.meshRenderer->SetInstanceProcedural(meshId, sb.procPattern,
-                                                  sb.grainScale, sb.grainContrast);
+        state.meshRenderer->SetInstanceProcedural(
+            meshId, sb.procPattern, sb.grainScale, sb.grainContrast);
       } else {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
       }
@@ -920,8 +994,7 @@ void SyncAssemblyRenderers(AppState& state) {
       if (state.faceSelector)
         state.faceSelector->AddMesh(meshId, sb.vertices, sb.indices,
                                     sb.triangleFaces, xf, sb.edges);
-      state.documentMeshes.push_back(
-          {meshId, outlineId, bi, occ.id, sb.edges});
+      state.documentMeshes.push_back({meshId, outlineId, bi, occ.id, sb.edges});
     }
   }
   // (Highlights re-apply themselves: they are a per-frame projection of the
@@ -958,7 +1031,8 @@ void SyncInContextGhosts(AppState& state) {
   bool stale = false;
   for (const Occurrence& occ : asmDoc.GetOccurrences()) {
     const Document* part = PartDocById(state, occ.partId);
-    if (!part) continue;
+    if (!part)
+      continue;
     const auto it = asmSlot->solvedPartVersions.find(occ.partId);
     if (it == asmSlot->solvedPartVersions.end() ||
         it->second != part->Version()) {
@@ -1009,7 +1083,8 @@ void SyncInContextGhosts(AppState& state) {
     for (size_t bi = 0; bi < it->second.size(); bi++) {
       if (it->second[bi] == 0)
         continue; // empty body
-      const uint32_t meshId = state.meshRenderer->AddInstance(it->second[bi], xf);
+      const uint32_t meshId =
+          state.meshRenderer->AddInstance(it->second[bi], xf);
       state.meshRenderer->SetInstanceColor(meshId, kGhostTint);
       state.meshRenderer->SetInstanceGhost(meshId); // after color: sets alpha
       state.documentMeshes.push_back({meshId, /*outlineId=*/0, bi, occ.id, {}});
@@ -1058,12 +1133,9 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
           continue;
         MeshExport::Item item;
         item.shape = bodies[bi].shape;
-        const std::string label = occ.name.empty()
-                                      ? ("occ" + std::to_string(occ.id))
-                                      : occ.name;
-        item.name = bodies.size() > 1
-                        ? label + "-" + bodies[bi].name
-                        : label;
+        const std::string label =
+            occ.name.empty() ? ("occ" + std::to_string(occ.id)) : occ.name;
+        item.name = bodies.size() > 1 ? label + "-" + bodies[bi].name : label;
         item.transform = xf;
         FillItemAppearance(bodies[bi], palette++, item);
         items.push_back(std::move(item));
@@ -1087,7 +1159,8 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
 bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
                           std::string* error) {
   const auto fail = [&](const std::string& msg) {
-    if (error) *error = msg;
+    if (error)
+      *error = msg;
     LOG_WARN("Assembly import: {}", msg);
     return false;
   };

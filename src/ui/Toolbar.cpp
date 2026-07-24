@@ -1,8 +1,8 @@
 #include "ui/Toolbar.h"
 
 #include "common/Logger.h"
-#include "render/RayTracingRenderer.h"
 #include "core/features/SketchFeature.h"
+#include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
@@ -43,10 +43,9 @@ void DrawRenderModal(AppState& state) {
   RenderJob& job = state.renderJob;
 
   if (job.active) {
-    float frac = job.totalSamples
-                     ? static_cast<float>(job.done) /
-                           static_cast<float>(job.totalSamples)
-                     : 0.0f;
+    float frac = job.totalSamples ? static_cast<float>(job.done) /
+                                        static_cast<float>(job.totalSamples)
+                                  : 0.0f;
     ImGui::Text("Rendering %u x %u ...", job.width, job.height);
     ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0));
     ImGui::Text("%u / %u samples", job.done, job.totalSamples);
@@ -81,8 +80,7 @@ void DrawRenderModal(AppState& state) {
 
     const bool hasBodies =
         state.document && !state.document->GetBodies().empty();
-    const bool rtReady =
-        state.rayTracer && state.rayTracer->IsInitialized();
+    const bool rtReady = state.rayTracer && state.rayTracer->IsInitialized();
     const bool canRender = hasBodies && rtReady;
 
     ImGui::Spacing();
@@ -152,8 +150,7 @@ void DrawModelToolbar(AppState& state) {
   // Curve-driven features (curves-3d): a 3D curve, and the sweep/loft/pipe that
   // consume it. Gated on the references each needs (a Sweep wants a profile
   // sketch, a Loft two sections, a Pipe any curve/sketch to run along).
-  const size_t sketches =
-      hasDoc ? SketchFeatureCount(*state.document) : 0;
+  const size_t sketches = hasDoc ? SketchFeatureCount(*state.document) : 0;
   const bool hasPathLike = hasDoc && HasCurveOrSketch(*state.document);
   if (ToolButton(ICON_FA_WAVE_SQUARE "###tb_curve3d",
                  "3D Curve (helix / fit-spline)", hasDoc && idle))
@@ -182,9 +179,9 @@ void DrawModelToolbar(AppState& state) {
 
   // Body combinators (need existing bodies).
   const size_t producers =
-      hasDoc
-          ? BodyProducers(*state.document, state.document->FeatureCount()).size()
-          : 0;
+      hasDoc ? BodyProducers(*state.document, state.document->FeatureCount())
+                   .size()
+             : 0;
   if (ToolButton(ICON_FA_OBJECT_GROUP "###tb_boolean",
                  "Boolean (union / subtract / intersect)",
                  idle && producers >= 2))
@@ -199,8 +196,7 @@ void DrawModelToolbar(AppState& state) {
   Divider();
 
   // Edge / wall / detail ops on a body.
-  const bool hasBody =
-      hasDoc && !state.document->GetBodies().empty();
+  const bool hasBody = hasDoc && !state.document->GetBodies().empty();
   if (ToolButton(ICON_FA_BORDER_TOP_LEFT "###tb_fillet", "Fillet edges",
                  hasBody && idle))
     CreateFillet(state);
@@ -223,7 +219,8 @@ void DrawModelToolbar(AppState& state) {
     state.showPlanes = !state.showPlanes;
 
   // Enter the FEM simulation workspace (needs a body to analyze).
-  if (ToolButton(ICON_FA_GAUGE_HIGH, "Simulation (FEM stress study)", hasBody && idle))
+  if (ToolButton(ICON_FA_GAUGE_HIGH, "Simulation (FEM stress study)",
+                 hasBody && idle))
     EnterSimulation(state);
 
   // Measure tool (C3): a viewport mode — pick a face/edge for its own measure,
@@ -238,8 +235,8 @@ void DrawModelToolbar(AppState& state) {
   if (ToolButton(ICON_FA_RULER, "Measure (pick 1-2 faces/edges; Esc to exit)",
                  hasBody)) {
     const bool wasActive = state.measure.active;
-    state.measure = MeasureState{};       // clear any in-progress measurement
-    state.measure.active = !wasActive;    // toggle
+    state.measure = MeasureState{};    // clear any in-progress measurement
+    state.measure.active = !wasActive; // toggle
   }
   if (measureActive)
     ImGui::PopStyleColor();
@@ -354,14 +351,13 @@ void DrawSketchModeToolbar(AppState& state) {
             {{ICON_FA_VECTOR_SQUARE, "Rectangle (G)", SketchTool::Rectangle},
              {ICON_FA_EXPAND, "Center Rectangle (Shift+G)",
               SketchTool::RectangleCenter}});
-  toolGroup("arcgrp", arcVariant,
-            {{ICON_FA_BEZIER_CURVE, "3-Point Arc (A)",
-              SketchTool::ArcThreePoint},
-             {ICON_FA_BEZIER_CURVE, "Center Arc (centre, start, end)",
-              SketchTool::Arc},
-             {ICON_FA_BEZIER_CURVE,
-              "Elliptic Arc (centre, major, minor, start, end)",
-              SketchTool::EllipseArc}});
+  toolGroup(
+      "arcgrp", arcVariant,
+      {{ICON_FA_BEZIER_CURVE, "3-Point Arc (A)", SketchTool::ArcThreePoint},
+       {ICON_FA_BEZIER_CURVE, "Center Arc (centre, start, end)",
+        SketchTool::Arc},
+       {ICON_FA_BEZIER_CURVE, "Elliptic Arc (centre, major, minor, start, end)",
+        SketchTool::EllipseArc}});
   toolBtn(ICON_FA_PEN_NIB, "Spline (S)", SketchTool::Spline);
   toolBtn(ICON_FA_CIRCLE_DOT, "Point", SketchTool::Point);
   toolBtn(ICON_FA_SCISSORS, "Trim (M)", SketchTool::Trim);
@@ -455,14 +451,15 @@ void DrawAssemblyToolbar(AppState& state) {
     ImGui::Separator();
     bool any = false;
     for (const PartSlot& s : state.parts) {
-      if (s.kind != DocKind::Part) continue;
+      if (s.kind != DocKind::Part)
+        continue;
       any = true;
       if (ImGui::MenuItem(s.name.c_str())) {
         SnapshotAssembly(state);
         Occurrence occ;
         occ.partId = s.id;
         occ.name = s.name;
-        occ.fixed = state.assembly->OccurrenceCount() == 0;  // first = anchor
+        occ.fixed = state.assembly->OccurrenceCount() == 0; // first = anchor
         const uint64_t id = state.assembly->AddOccurrence(occ);
         SelectOccurrence(state, id);
         SolveActiveAssembly(state);
@@ -511,7 +508,7 @@ void DrawAssemblyToolbar(AppState& state) {
   if (ToolButton(ICON_FA_RULER, "Measure (pick 1-2 faces/edges; Esc to exit)",
                  state.assembly->OccurrenceCount() > 0)) {
     const bool wasActive = state.measure.active;
-    state.measure = MeasureState{}; // clear any in-progress measurement
+    state.measure = MeasureState{};    // clear any in-progress measurement
     state.measure.active = !wasActive; // toggle
   }
   if (measureActive)
@@ -527,10 +524,11 @@ void DrawAssemblyToolbar(AppState& state) {
     ImGui::SameLine();
     ImGui::TextColored(edgeSnap ? ImVec4(1.0f, 0.78f, 0.22f, 1.0f)
                                 : ImVec4(0.82f, 0.82f, 0.60f, 1.0f),
-                       "%s", !edgeSnap ? "Snap: face center"
-                              : state.mateTool.hoverSnapIsMidpoint
-                                  ? "Snap: edge midpoint"
-                                  : "Snap: hole center");
+                       "%s",
+                       !edgeSnap ? "Snap: face center"
+                       : state.mateTool.hoverSnapIsMidpoint
+                           ? "Snap: edge midpoint"
+                           : "Snap: hole center");
   }
   ImGui::NewLine();
 }
@@ -553,8 +551,10 @@ void DrawSimulationToolbar(AppState& state) {
     if (armed)
       ImGui::PopStyleColor();
   };
-  bcBtn(ICON_FA_LOCK, "Fixed support (click a face)", SimulationState::Tool::Fixed);
-  bcBtn(ICON_FA_BOLT, "Force load (click a face)", SimulationState::Tool::Force);
+  bcBtn(ICON_FA_LOCK, "Fixed support (click a face)",
+        SimulationState::Tool::Fixed);
+  bcBtn(ICON_FA_BOLT, "Force load (click a face)",
+        SimulationState::Tool::Force);
   bcBtn(ICON_FA_DOWN_LONG, "Pressure load (click a face)",
         SimulationState::Tool::Pressure);
 
@@ -574,7 +574,8 @@ void DrawSimulationToolbar(AppState& state) {
   // Hint while a BC tool is armed.
   if (sim.tool != SimulationState::Tool::None) {
     ImGui::SameLine();
-    const char* what = sim.tool == SimulationState::Tool::Fixed ? "fixed support"
+    const char* what = sim.tool == SimulationState::Tool::Fixed
+                           ? "fixed support"
                        : sim.tool == SimulationState::Tool::Force ? "force"
                                                                   : "pressure";
     ImGui::TextDisabled("click a face to place the %s", what);
@@ -596,20 +597,25 @@ void DrawDrawingToolbar(AppState& state) {
   if (ImGui::BeginPopup("add_view")) {
     ImGui::TextDisabled("Add view of");
     ImGui::Separator();
-    struct Ori { const char* label; ViewOrientation o; };
+    struct Ori {
+      const char* label;
+      ViewOrientation o;
+    };
     static const Ori orients[] = {{"Front", ViewOrientation::Front},
                                   {"Top", ViewOrientation::Top},
                                   {"Right", ViewOrientation::Right},
                                   {"Iso", ViewOrientation::Iso}};
     bool any = false;
     for (const PartSlot& s : state.parts) {
-      if (s.kind != DocKind::Part && s.kind != DocKind::Assembly) continue;
+      if (s.kind != DocKind::Part && s.kind != DocKind::Assembly)
+        continue;
       any = true;
       if (ImGui::BeginMenu(s.name.c_str())) {
         for (const Ori& ori : orients) {
           if (ImGui::MenuItem(ori.label)) {
             glm::dvec2 ext = SheetExtentMM(dwg.GetSheet().size);
-            if (dwg.GetSheet().landscape) ext = {ext.y, ext.x};
+            if (dwg.GetSheet().landscape)
+              ext = {ext.y, ext.x};
             DrawingView v;
             v.name = ori.label;
             v.sourceDocId = s.id;
@@ -662,7 +668,7 @@ void DrawDrawingToolbar(AppState& state) {
   Divider();
 
   if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit sheet (F)"))
-    state.sheetView.scale = 0.0;  // refit on next paint
+    state.sheetView.scale = 0.0; // refit on next paint
   if (ToolButton(ICON_FA_FILE_EXPORT, "Export drawing (SVG / PDF)",
                  !dwg.GetViews().empty()))
     ExportDialog(state);

@@ -1,8 +1,8 @@
 #include "ui/ViewportInput.h"
 
-#include "render/Camera.h"
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
+#include "render/Camera.h"
 #include "render/MeshRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
@@ -38,7 +38,8 @@ void HandleViewportInput(AppState& state) {
   if (overViewport && (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f)) {
     const double wheelPanPx = 30.0; // one wheel notch ≈ 30 px of drag
     if (io.KeyShift) {
-      state.camera->Pan(io.MouseWheelH * wheelPanPx, -io.MouseWheel * wheelPanPx);
+      state.camera->Pan(io.MouseWheelH * wheelPanPx,
+                        -io.MouseWheel * wheelPanPx);
     } else {
       if (io.MouseWheelH != 0.0f)
         state.camera->Pan(io.MouseWheelH * wheelPanPx, 0.0);
@@ -132,7 +133,8 @@ void HandleViewportInput(AppState& state) {
       if (io.KeyCtrl) {
         state.camera->Pan(dx * panStep, dy * panStep);
       } else if (io.KeyAlt) {
-        if (dx != 0.0) state.camera->Roll(dx * 26.0);
+        if (dx != 0.0)
+          state.camera->Roll(dx * 26.0);
       } else {
         state.camera->Orbit(dx * step, dy * step);
       }
@@ -147,10 +149,10 @@ void HandleViewportInput(AppState& state) {
     }
   }
 
-  // Onshape view/model shortcuts. Guarded only by WantTextInput (like the sketch
-  // keys) so they fire whether or not a panel has focus. `f` (zoom to fit) works
-  // in any context; the rest are model-context so they don't fight the sketch
-  // keymap (e.g. `n` = Coincident while sketching).
+  // Onshape view/model shortcuts. Guarded only by WantTextInput (like the
+  // sketch keys) so they fire whether or not a panel has focus. `f` (zoom to
+  // fit) works in any context; the rest are model-context so they don't fight
+  // the sketch keymap (e.g. `n` = Coincident while sketching).
   if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt) {
     if (!io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_F))
       FitCameraToDocument(state);
@@ -193,12 +195,18 @@ void HandleViewportInput(AppState& state) {
       auto view = [&](glm::vec3 n) {
         state.camera->AlignToFace(glm::vec3(0.0f), n);
       };
-      if (ImGui::IsKeyPressed(ImGuiKey_1)) view({0, 0, 1});        // Front
-      else if (ImGui::IsKeyPressed(ImGuiKey_2)) view({0, 0, -1});  // Back
-      else if (ImGui::IsKeyPressed(ImGuiKey_3)) view({-1, 0, 0});  // Left
-      else if (ImGui::IsKeyPressed(ImGuiKey_4)) view({1, 0, 0});   // Right
-      else if (ImGui::IsKeyPressed(ImGuiKey_5)) view({0, 1, 0});   // Top
-      else if (ImGui::IsKeyPressed(ImGuiKey_6)) view({0, -1, 0});  // Bottom
+      if (ImGui::IsKeyPressed(ImGuiKey_1))
+        view({0, 0, 1}); // Front
+      else if (ImGui::IsKeyPressed(ImGuiKey_2))
+        view({0, 0, -1}); // Back
+      else if (ImGui::IsKeyPressed(ImGuiKey_3))
+        view({-1, 0, 0}); // Left
+      else if (ImGui::IsKeyPressed(ImGuiKey_4))
+        view({1, 0, 0}); // Right
+      else if (ImGui::IsKeyPressed(ImGuiKey_5))
+        view({0, 1, 0}); // Top
+      else if (ImGui::IsKeyPressed(ImGuiKey_6))
+        view({0, -1, 0}); // Bottom
       else if (ImGui::IsKeyPressed(ImGuiKey_7))
         view(glm::normalize(glm::vec3(1, 1, 1))); // Isometric
     }
@@ -216,8 +224,7 @@ void HandleViewportInput(AppState& state) {
   // exactly one consumer (escUsed also keeps the pipeline's Escape-clears
   // from firing on the same press).
   bool escUsed = false;
-  const bool esc =
-      !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Escape);
+  const bool esc = !io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Escape);
   if (state.handleDrag.active && esc) {
     // Escape aborts a handle drag only — the preview itself survives.
     AbortPreviewHandleDrag(state);
