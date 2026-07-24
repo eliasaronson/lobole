@@ -115,12 +115,30 @@
           license = licenses.agpl3Plus;
         };
       };
+
+      designerHeadlessChecks = designer.overrideAttrs (old: {
+        pname = "designer-headless-checks";
+        nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.git pkgs.python3 ];
+        ninjaFlags = [ "designer" "designer_tests" "femgpu_tests" ];
+        doCheck = true;
+        checkPhase = ''
+          runHook preCheck
+          export HOME="$TMPDIR/home"
+          export XDG_CACHE_HOME="$HOME/.cache"
+          export DESIGNER_TOPO_GPU=0
+          mkdir -p "$XDG_CACHE_HOME"
+          ctest -LE gui -j "$NIX_BUILD_CORES" --output-on-failure
+          runHook postCheck
+        '';
+      });
     in
     {
       packages.${system} = {
         default = designer;
         designer = designer;
       };
+
+      checks.${system}.headless = designerHeadlessChecks;
 
       # `nix develop` == today's `nix-shell shell.nix`: build tools + libs +
       # the test/tooling extras (validation layers, python-mcp, ccache).

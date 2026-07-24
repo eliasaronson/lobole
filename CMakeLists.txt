@@ -393,8 +393,12 @@ file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr
 
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 target_compile_definitions(designer PRIVATE DESIGNER_VERSION="${PROJECT_VERSION}")
-set_target_properties(designer PROPERTIES
-    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+    set(DESIGNER_INSTALL_RPATH "${CMAKE_INSTALL_LIBDIR}")
+else()
+    set(DESIGNER_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+endif()
+set_target_properties(designer PROPERTIES INSTALL_RPATH "${DESIGNER_INSTALL_RPATH}")
 
 # imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks
 target_compile_definitions(designer PRIVATE

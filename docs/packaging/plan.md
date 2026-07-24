@@ -58,12 +58,12 @@ Tasks:
       **Drafted & builds** (2026-07-23, ~50s compile on top of cached deps).
 - [x] Package derivation: `nativeBuildInputs` vs `buildInputs` split; SPIR-V
       compiled at build time by `shaderc` (glslc), not shipped.
-- [x] Submodules pinned as flake inputs (imgui / imgui_test_engine / nftd) —
+- [x] Submodules pinned as flake inputs (imgui / imgui_test_engine / NFD) —
       chose this over `?submodules=1` for reproducibility. planegcs + deps/fonts
       are in-tree (git-tracked). Keep input SHAs in sync with `.gitmodules`.
 - [x] Build type: nixpkgs passes `-DCMAKE_BUILD_TYPE=Release` by default, which
-      skips the CMake `Debug` fallback. Only the `designer` target is built
-      (`ninjaFlags`); `designer_tests` deferred to a future `checks` output.
+      skips the CMake `Debug` fallback. The distributable package builds only
+      `designer`; the separate `checks` derivation builds all test binaries.
 - [x] `nix build .#default` → runnable binary. Verified:
       `result/bin/designer` is the real executable, PlaneGCS is under `lib/`,
       and 25 shaders plus fonts/HDRI live under `share/designer`. The packaged
@@ -88,9 +88,12 @@ Tasks:
       CMake prefix and `nix build`: fonts, icons, shaders, and HDR are present;
       `designer --version` reports 0.1.0; the installed/Nix GUI boot smoke loads
       the real IBL and all render pipelines on NVIDIA.
-- [ ] `checks` output for `designer_tests`. Clean-`$HOME` installed-package
-      verification is done: the Nix binary rebuilt its IBL cache from the
-      packaged HDRI and passed `boots_and_renders`.
+- [x] Nix `checks.x86_64-linux.headless` output (2026-07-24): builds
+      `designer`, `designer_tests`, and `femgpu_tests`, then runs
+      `ctest -LE gui` in a sandbox with a clean `$HOME`, Python, Git, and GPU
+      topology disabled for determinism. Verified 538/538 passing; unavailable
+      sandbox GPU cases skip normally. The installed Nix binary separately
+      rebuilt its IBL cache and passed `boots_and_renders` on a real GPU.
 
 ---
 
