@@ -59,3 +59,7 @@ tests/golden/*.autosave
 # nix build output symlink
 result
 result-*
+
+# Flatpak build state
+packaging/flatpak/.flatpak-builder/
+packaging/flatpak/.build/

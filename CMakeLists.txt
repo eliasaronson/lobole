@@ -146,8 +146,22 @@ endif()
 # Libraries
 find_package(Vulkan REQUIRED)
 set(LIBRARIES "glfw;Vulkan::Vulkan;spdlog::spdlog;${NFD_LIBS}")
+# std::stacktrace (CrashHandler) needs libstdc++'s experimental archive
+# (-lstdc++exp). Most gcc installs ship it, but some toolchains do not (e.g. the
+# Freedesktop Flatpak SDK). Probe, and only link/define when it's actually
+# available; CrashHandler falls back to glibc backtrace() when the macro is off.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    list(APPEND LIBRARIES stdc++exp) # std::stacktrace backend
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_LIBRARIES stdc++exp)
+    check_cxx_source_compiles("#include <stacktrace>
+        int main() { return static_cast<int>(std::stacktrace::current().size()); }"
+        HAVE_STDCXX_STACKTRACE)
+    unset(CMAKE_REQUIRED_LIBRARIES)
+    if(HAVE_STDCXX_STACKTRACE)
+        list(APPEND LIBRARIES stdc++exp) # std::stacktrace backend
+    else()
+        message(STATUS "libstdc++exp absent — CrashHandler uses glibc backtrace()")
+    endif()
 endif()
 
 # Add OpenCASCADE libraries if available
@@ -393,6 +407,9 @@ file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr
 
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 target_compile_definitions(designer PRIVATE DESIGNER_VERSION="${PROJECT_VERSION}")
+if(HAVE_STDCXX_STACKTRACE)
+    target_compile_definitions(designer PRIVATE HAVE_STDCXX_STACKTRACE)
+endif()
 if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
     set(DESIGNER_INSTALL_RPATH "${CMAKE_INSTALL_LIBDIR}")
 else()
@@ -501,9 +518,14 @@ if(GLSLC)
     endif()
 endif()
 
-# Tests
-enable_testing()
-add_subdirectory(tests)
+# Tests. Opt-out so packaging builds (e.g. the Flatpak) don't configure the test
+# tree — which would otherwise FetchContent Catch2 over the network, unavailable
+# in an offline build sandbox. Default ON preserves the normal dev/CI behavior.
+option(DESIGNER_BUILD_TESTS "Configure the test targets" ON)
+if(DESIGNER_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
 
 # Find glslc (Vulkan shader compiler)
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
@@ -675,10 +697,23 @@ install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/hdri")
 install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.desktop"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
-install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.metainfo.xml"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+# AppStream metainfo. Installing it triggers `appstreamcli compose` during a
+# Flatpak build; that step needs working gdk-pixbuf image loaders to read the
+# app icon, which a bare local toolchain (e.g. nix-shell) may lack, aborting the
+# build. Flathub's builders have them, so keep this ON by default and only pass
+# OFF for a local Flatpak smoke build. Off just omits catalog metadata — the
+# desktop entry and icons below still install.
+option(DESIGNER_INSTALL_METAINFO "Install AppStream metainfo" ON)
+if(DESIGNER_INSTALL_METAINFO)
+    install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.metainfo.xml"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+endif()
 install(FILES "${CMAKE_SOURCE_DIR}/assets/icons/io.github.eliasaronson.Designer.svg"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
+# A 256x256 raster alongside the scalable icon, as a fallback for desktops (and
+# icon-cache tools) that don't render SVG.
+install(FILES "${CMAKE_SOURCE_DIR}/assets/icons/io.github.eliasaronson.Designer.png"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps")
 install(FILES
         "${CMAKE_SOURCE_DIR}/LICENSE"
         "${CMAKE_SOURCE_DIR}/ADDITIONAL_PERMISSION.md"

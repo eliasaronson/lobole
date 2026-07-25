@@ -216,41 +216,70 @@ Alternatives considered and rejected as the GUI path:
 
 ---
 
-## Deliverable 2 — Flatpak
+## Deliverable 2 — Flatpak — **BUILT + GPU-TESTED (2026-07-25)**
 
-`flatpak-builder` builds in its own sandbox against the Freedesktop runtime; it
-will **not** consume the Nix derivation. So the manifest is separate work — but
-the flake tells us every version/flag, which is ~80% of the effort.
+Manifest: `packaging/flatpak/io.github.eliasaronson.Designer.yaml`. Build/install
+locally with `tools/flatpak-build.sh` — user-mode via `nix-shell`, so it needs
+**no** `services.flatpak.enable` and no root. `flatpak-builder` builds in its own
+sandbox against the Freedesktop 24.08 runtime (it does **not** consume the Nix
+derivation); the flake told us every version/flag, which was ~80% of the effort.
 
-Plan:
+**Result:** builds from source (OCC + Netgen + the math stack), installs, and —
+the headline — **runs on the real NVIDIA RTX 4060 with hardware ray tracing**
+(`--gui-tests --gui-test-filter boots_and_renders` → `1/1 passed`, GPU selected =
+"NVIDIA GeForce RTX 4060", not lavapipe). This is the exact GPU story the
+nix-bundle AppImage could not deliver — Flatpak's runtime owns the glibc↔driver
+contract, and on this NixOS host the sandbox still reached the host NVIDIA
+userspace. Headless engine + `--remote` RPC also verified reachable from the host
+(needs `--share=network`; see finish-args).
 
-- [ ] `org.freedesktop.Platform`/`Sdk` runtime (pick current stable, e.g.
-      24.08). KDE/GNOME layer only if we need their libs — likely not.
-- [ ] Manifest modules built from source inside the sandbox: **OpenCASCADE 7.9**
-      + **Netgen** (crib both from FreeCAD's manifest — see de-risker below),
-      **Spectra** (header-only, trivial), **nativefiledialog-extended**, and the
-      **small deps the Freedesktop SDK does not ship** — glfw, spdlog, eigen,
-      boost, nlohmann_json, glm (mostly header-only / tiny CMake modules).
-      Then Designer itself as the final module. Runtime provides
-      glibc/X11/Wayland/Mesa/D-Bus; confirm each small dep is actually
-      SDK-provided vs. needs-a-module before writing them all.
-- [ ] Ensure **glslc is in the sandbox** (shaderc module or SDK extension) — it
-      is a hard build-time requirement; shaders are compiled to .spv at build.
-- [ ] Finish/permissions: `--device=dri` (GPU), `--socket=wayland` +
-      `--socket=fallback-x11`, filesystem access for opening/saving projects
-      (portal-based where possible — aligns with existing `FileDialogs`).
-- [ ] Bundle `assets/` next to the binary; **relocatability prerequisite is
-      already cleared** (assets load relative to the exe, IBL cache writes to
-      `$XDG_CACHE_HOME` — done on the flake branch), so the read-only `/app`
-      layout is no longer a blocker. Just verify it in the sandbox.
-- [ ] Confirm the renderer (SSAO, shadows, clip planes, instancing) works under
-      the runtime's Mesa and, separately, with the NVIDIA extension.
-- [x] App ID `io.github.eliasaronson.Designer`, `.desktop` file, scalable SVG
-      icon, and AppStream metainfo. Both metadata files pass
-      `desktop-file-validate` / `appstreamcli validate --no-net`. Installed by
-      CMake into the standard locations; Flatpak manifest still to be written.
+Done:
+
+- [x] `org.freedesktop.Platform`/`Sdk` **24.08**. No KDE/GNOME layer needed.
+- [x] Modules from source: **OpenCASCADE `V7_9_3`** (Draw off — no `tk` in the
+      SDK; Visualization **on** because we link `TKVCAF`→`TKV3d`; RapidJSON on
+      for the `TKDEGLTF` reader we link; exceptions kept enabled), **Netgen
+      `v6.2.2605`** (OCC on; GUI/Python/**MPI** off), plus **glm, glfw
+      (X11-only), spdlog, nlohmann_json, eigen, spectra, rapidjson, boost**.
+      `nativefiledialog-extended` + imgui + PlaneGCS are in-tree (built with the
+      app module). The header-only cmake modules need `builddir: true`
+      (Eigen refuses in-source builds).
+- [x] **Boost** must be a real install (not a header copy): `find_package(Boost)`
+      is QUIET-gated and silently disables the PlaneGCS sketch solver if absent,
+      and CMake 3.30+ needs `BoostConfig.cmake` — so we `b2 install` the tiny
+      `system` lib to emit the config + the header target.
+- [x] **glslc / Vulkan headers / Mesa GL / freetype / dbus / x11 all ship in the
+      SDK** — no module needed (verified by probing the SDK). gcc is **14.3**.
+- [x] **`std::stacktrace` portability fix (CrashHandler):** the SDK's gcc ships
+      **without `libstdc++exp`**, so CMake now probes for it and defines
+      `HAVE_STDCXX_STACKTRACE` only when it links; otherwise CrashHandler falls
+      back to glibc `backtrace()`. Improves portability beyond just Flatpak.
+- [x] **`DESIGNER_BUILD_TESTS` option** (default ON) — the app module passes OFF
+      so the offline sandbox doesn't `FetchContent` Catch2 during configure.
+- [x] Finish-args: `--device=dri`, `--socket=fallback-x11` + `--socket=wayland`,
+      `--filesystem=host`, `--share=network` (keeps the `--remote` interface
+      reachable from host Python/MCP/agent clients).
+- [x] App ID / `.desktop` / icon: added a **256×256 PNG** beside the scalable
+      SVG (raster fallback). Installed by CMake into standard locations.
+
+Remaining before Flathub submission:
+
+- [ ] **Re-enable AppStream metainfo + the SVG icon.** Both are gated off for the
+      *local* build only, because a bare `nix-shell` toolchain lacks gdk-pixbuf
+      image loaders, so `appstreamcli compose` (metainfo) and
+      `flatpak build-export`'s icon validator (SVG) both fail with file-read
+      errors. Flathub's builders have the loaders. Fix: drop
+      `-DDESIGNER_INSTALL_METAINFO=OFF` and the SVG-stripping `post-install` from
+      the manifest (or set `GDK_PIXBUF_MODULE_FILE` in the build env to test the
+      full metadata path locally). The metainfo itself passes `appstreamcli
+      validate`.
+- [ ] **Pin sources for reproducibility:** switch git `tag:` refs to
+      `commit:` + `sha256` (Flathub requirement); currently tags for brevity.
+- [ ] Confirm the renderer (SSAO, shadows, clip planes, instancing) on the
+      runtime's **Mesa/llvmpipe** floor too (only NVIDIA verified so far).
+- [ ] Tighten `--filesystem=host` toward portal-only where the FileDialogs allow.
 - [ ] Distribution: Flathub submission (their build farm + auto-updates) or a
-      self-hosted Flatpak repo to start.
+      self-hosted repo to start.
 
 ### The big de-risker — crib OCC + Netgen from FreeCAD
 

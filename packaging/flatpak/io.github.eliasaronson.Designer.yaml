@@ -1,0 +1,221 @@
+# Flatpak manifest for Designer.
+#
+# Built against the Freedesktop runtime (NOT the Nix flake — flatpak-builder has
+# its own module system). The runtime/SDK 24.08 already provides gcc 14.3,
+# cmake, ninja, glslc, the Vulkan loader + headers, Mesa GL, freetype,
+# fontconfig, dbus, X11 and Wayland — so only the CAD/math stack is built from
+# source here. Versions mirror what the Nix build (flake.nix / shell.nix) pins.
+#
+# Local test builds use git tags for brevity. Flathub submission additionally
+# requires each source pinned to a commit + sha256 (and archives with sha256);
+# note this before submitting.
+#
+# Build locally with tools/flatpak-build.sh (user-mode, no NixOS system change).
+app-id: io.github.eliasaronson.Designer
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: designer
+
+finish-args:
+  - --share=ipc                 # X11/MIT-SHM
+  - --socket=fallback-x11       # GLFW is built X11-only; Xwayland covers Wayland hosts
+  - --socket=wayland
+  - --device=dri                # GPU (Vulkan via the host ICD + Mesa in the runtime)
+  - --filesystem=host           # open/save projects anywhere (portal-first; broad fs for now)
+  - --share=network             # the --remote JSON-RPC server binds 127.0.0.1; a private
+                                # netns would hide it from host Python/MCP/agent clients,
+                                # so share the host netns to keep that interface reachable
+
+cleanup:
+  - /include
+  - /share/aclocal
+  - /share/cmake
+  - /share/pkgconfig
+  - /share/man
+  - /lib/cmake
+  - /lib/pkgconfig
+  - '*.a'
+  - '*.la'
+
+modules:
+  # ---- header-only / small libraries ---------------------------------------
+  - name: glm
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DGLM_BUILD_TESTS=OFF
+      - -DBUILD_SHARED_LIBS=OFF
+    sources:
+      - type: git
+        url: https://github.com/g-truc/glm.git
+        tag: '1.0.1'
+
+  - name: glfw
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DGLFW_BUILD_DOCS=OFF
+      - -DGLFW_BUILD_TESTS=OFF
+      - -DGLFW_BUILD_EXAMPLES=OFF
+      - -DGLFW_BUILD_WAYLAND=OFF   # X11-only keeps the build dep-light; Xwayland covers Wayland
+      - -DGLFW_BUILD_X11=ON
+      - -DBUILD_SHARED_LIBS=ON
+    sources:
+      - type: git
+        url: https://github.com/glfw/glfw.git
+        tag: '3.4'
+
+  - name: spdlog
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DSPDLOG_BUILD_SHARED=ON
+      - -DSPDLOG_BUILD_EXAMPLE=OFF
+      - -DSPDLOG_BUILD_TESTS=OFF
+    sources:
+      - type: git
+        url: https://github.com/gabime/spdlog.git
+        tag: v1.15.0
+
+  - name: nlohmann-json
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DJSON_BuildTests=OFF
+    sources:
+      - type: git
+        url: https://github.com/nlohmann/json.git
+        tag: v3.11.3
+
+  - name: eigen
+    buildsystem: cmake-ninja
+    builddir: true   # Eigen refuses in-source builds
+    config-opts:
+      - -DEIGEN_BUILD_DOC=OFF
+      - -DBUILD_TESTING=OFF
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    cleanup:
+      - '*'   # header-only; drop the build/test scaffolding, keep only the installed headers+config
+    sources:
+      - type: git
+        url: https://gitlab.com/libeigen/eigen.git
+        tag: '3.4.0'
+
+  - name: spectra
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DBUILD_TESTS=OFF
+    sources:
+      - type: git
+        url: https://github.com/yixuan/spectra.git
+        tag: v1.0.1
+
+  - name: rapidjson
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DRAPIDJSON_BUILD_TESTS=OFF
+      - -DRAPIDJSON_BUILD_EXAMPLES=OFF
+      - -DRAPIDJSON_BUILD_DOC=OFF
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    cleanup:
+      - '*'   # header-only; only needed to build OCCT's glTF reader
+    sources:
+      - type: git
+        url: https://github.com/Tencent/rapidjson.git
+        commit: 24b5e7a8b27f42fa16b96fc70aade9106cf7102f  # master; no recent tag builds on gcc14
+
+  # ---- Boost (headers only, but CMake 3.30+ needs BoostConfig.cmake) --------
+  # PlaneGCS (the sketch solver) links Boost::boost. find_package(Boost) is
+  # QUIET-gated, so a missing Boost silently DISABLES the solver — it must be a
+  # real install that emits BoostConfig.cmake. Building only the tiny `system`
+  # library is enough for b2 to install the CMake config + the header target.
+  - name: boost
+    buildsystem: simple
+    build-commands:
+      - ./bootstrap.sh --prefix=/app --with-libraries=system
+      - ./b2 install -j ${FLATPAK_BUILDER_N_JOBS} --prefix=/app
+    sources:
+      - type: archive
+        url: https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.bz2
+        sha256: 1bed88e40401b2cb7a1f76d4bab499e352fa4d0c5f31c0dbae64e24d34d7513b
+
+  # ---- OpenCASCADE 7.9 (the long pole, ~20-40 min) --------------------------
+  # Draw OFF (needs tk, absent from the SDK) but Visualization ON: we link
+  # TKVCAF, which depends on TKV3d. VTK/FreeImage off; RapidJSON on so the
+  # TKDEGLTF reader builds (our OPENCASCADE_LIBS links it). Exceptions must stay
+  # enabled (OCCT disables them in Release by default, which breaks error paths).
+  - name: opencascade
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DINSTALL_DIR_LAYOUT=Unix
+      - -DBUILD_LIBRARY_TYPE=Shared
+      - -DBUILD_MODULE_Draw=OFF
+      - -DBUILD_DOC_Overview=OFF
+      - -DUSE_VTK=OFF
+      - -DUSE_FREEIMAGE=OFF
+      - -DUSE_TBB=OFF
+      - -DUSE_RAPIDJSON=ON
+      - -DUSE_FREETYPE=ON
+      - -DBUILD_RELEASE_DISABLE_EXCEPTIONS=FALSE
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+    cleanup:
+      - /bin
+    sources:
+      - type: git
+        url: https://github.com/Open-Cascade-SAS/OCCT.git
+        tag: V7_9_3
+
+  # ---- Netgen (FEM tet mesher; nglib/ngcore, LGPL) -------------------------
+  # MPI/GUI/Python all off — we only link nglib + ngcore against OCC. Matches
+  # the version the Nix build pins (6.2.2605).
+  - name: netgen
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DUSE_OCC=ON
+      - -DUSE_GUI=OFF
+      - -DUSE_PYTHON=OFF
+      - -DUSE_MPI=OFF
+      - -DUSE_SUPERBUILD=OFF
+      - -DUSE_NATIVE_ARCH=OFF
+      - -DBUILD_STUB_FILES=OFF
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+    cleanup:
+      - /include
+      - /lib/cmake
+    sources:
+      - type: git
+        url: https://github.com/NGSolve/netgen.git
+        tag: v6.2.2605
+        disable-submodules: true   # pybind11 submodule only needed for USE_PYTHON
+
+  # ---- Designer itself ------------------------------------------------------
+  - name: designer
+    buildsystem: cmake-ninja
+    builddir: true
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DDESIGNER_BUILD_TESTS=OFF   # skip the test tree (would FetchContent Catch2 offline)
+      # Local smoke builds skip AppStream metainfo: flatpak-builder's
+      # `appstreamcli compose` needs gdk-pixbuf icon loaders a bare nix-shell
+      # lacks. RE-ENABLE (drop this line) for a Flathub build, where the
+      # builders have them, so the catalog metadata ships.
+      - -DDESIGNER_INSTALL_METAINFO=OFF
+    # Same nix-shell gap: `flatpak build-export`'s icon validator can't parse
+    # SVG without those loaders, so drop the scalable icon locally and ship the
+    # 256x256 PNG. Remove this post-install for a Flathub build.
+    post-install:
+      - rm -f /app/share/icons/hicolor/scalable/apps/io.github.eliasaronson.Designer.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - build
+          - .git
+          - scratch
+          - .pi-subagents
+          - result
+          - designer-appimage
+          - packaging/flatpak/.flatpak-builder
