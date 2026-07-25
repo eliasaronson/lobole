@@ -1,11 +1,23 @@
 # Packaging & distribution plan
 
-Goal: ship Designer as installable Linux binaries. Two deliverables, in order:
+Goal: ship Designer as installable Linux binaries. The distribution is
+**layered by audience** (tested & settled 2026-07-25):
+
+| Audience | Delivery | Cost | Status |
+|---|---|---|---|
+| Nix users (NixOS + Nix-on-other-distro) | `nix run github:…/designer` + **Cachix** | near-free (flake exists) | Cachix pending |
+| Headless / CI / servers / scripting | **`nix bundle` AppImage** (CLI/engine/RPC, **no GUI**) | near-free (already builds) | ship, labeled |
+| Everyone else, **desktop GUI** | **Flatpak** → Flathub | ~1–1.5 wk | the real desktop release |
+
+The two build-effort deliverables, in order:
 
 1. **`flake.nix`** exposing `packages.x86_64-linux.default` — reproducible
    build + the source of truth for the dependency set. Serves Nix/NixOS users
    directly and becomes the reference the Flatpak manifest is written against.
-2. **Flatpak** (Flathub-targetable) — the "runs on any distro" public release.
+2. **Flatpak** (Flathub-targetable) — the "runs on any distro" public GUI
+   release. **Required, not optional**: a `nix bundle` AppImage was tested for
+   the GUI and rejected (glibc↔GPU-driver conflict — see Deliverable 1's
+   AppImage section); Flatpak's runtime is the only clean owner of that contract.
 
 We are already all-in on Nix (`shell.nix`), so the flake is a low-effort lift
 and the Flatpak reuses everything the flake pins.
@@ -17,9 +29,11 @@ Snap, macOS, Windows. See "Deferred" below for why.
 
 ## Why these two
 
-- **Flatpak** wins for a GPU-heavy Vulkan app: its runtime ships Mesa and
-  auto-pulls a matching proprietary NVIDIA userspace extension against the host
-  driver — the one thing AppImage/tarball can't solve. It also uses
+- **Flatpak** wins for a GPU-heavy Vulkan app: its runtime provides a glibc that
+  matches its Mesa + `GL.nvidia-*` driver extensions, so the app and the host
+  GPU driver share one glibc *by construction*. That is the exact wall a
+  `nix bundle` AppImage cannot clear (its bundled glibc 2.42 can neither find nor
+  co-load a host driver — tested 2026-07-25, see Deliverable 1). It also uses
   `xdg-desktop-portal`, which our `FileDialogs` already targets, and it dedups
   shared runtimes/files across apps (lowest disk cost of the bundle formats).
 - **Flake** because the build is already Nix-expressed. It gives us
@@ -147,14 +161,58 @@ Nix builds from source by default; nobody should rebuild OpenCASCADE + Netgen.
       prebuilt binaries. Flake + Cachix together = the real "download & run"
       experience for Nix users.
 
-### Nearly-free bonus — AppImage from the flake
+### AppImage from the flake — HEADLESS ONLY (GUI path tested & rejected)
 
 `nix bundle --bundler github:ralismark/nix-appimage .#default` closure-packs the
-derivation into a self-contained AppImage. Relies on the host Vulkan ICD (no
-NVIDIA-userspace matching like Flatpak). Cheap "hand someone a file" artifact.
+derivation into a self-contained AppImage (~620 MB). **Tested end-to-end
+2026-07-25.** Verdict: usable **only for the headless artifact** (CLI / document
+engine / `--remote` RPC). The **windowed GUI does not work from this AppImage on
+any distro**, and the reason is fundamental, not a config bug.
 
-- [ ] Wire `nix bundle` into CI as an optional release artifact once the flake
-      builds.
+What the test showed:
+
+- **Headless (`--headless`, `--gui-tests` engine paths, RPC): ✅ works
+  everywhere** — verified on the NixOS host and in a clean `ubuntu:24.04`
+  container. `--version`, `new_project`, OCC load all succeed.
+- **Windowed GUI on the NixOS build host: ❌** `VK_ERROR_INCOMPATIBLE_DRIVER`
+  (`VkResult -9`) at `vkCreateInstance`. `nix-appimage`'s AppRun bind-mounts the
+  bundle's `/nix/store` over the host's, which **shadows** the NixOS GPU driver
+  (`/run/opengl-driver → /nix/store/…-graphics-drivers`). The loader finds
+  `icd.d` but every ICD symlink dangles → no drivers. (The *same bundled binary*
+  run directly, without AppRun's namespace, brings up full Vulkan incl. ray
+  tracing on NVIDIA — so the build is correct; only the sandbox is at fault.)
+- **Windowed GUI on clean Ubuntu 24.04: ❌** and this is the decisive one. ICD
+  **discovery succeeds** (`/usr/share/vulkan/icd.d` is found), but every host
+  driver `.so` fails to load: with the bundle's glibc in charge, the linker only
+  searches the bundle's `/nix/store` and can't find `libvulkan_lvp.so`; forcing
+  `LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu` then pulls in the host glibc 2.39,
+  and the bundle's own libs (spdlog, netgen, planegcs, python…) require
+  `GLIBC_ABI_GNU2_TLS` from the bundled **glibc 2.42** → everything collapses.
+
+**Root cause (fundamental):** a Vulkan app and the host GPU driver must share
+one glibc in one process. `nix bundle` ships its *own* (newer) glibc, so the
+host driver can neither be found (bundle glibc in charge) nor loaded (host glibc
+in charge breaks the app's newer libs). No `LD_LIBRARY_PATH` middle ground
+exists. This is exactly the glibc↔driver contract Flatpak's runtime owns — see
+Deliverable 2. It also **refutes the earlier "nearly-free AppImage covers most
+of it" framing**: nearly-free, yes, but only for the *headless* role.
+
+Alternatives considered and rejected as the GUI path:
+- **Traditional (non-Nix) AppImage** built against an old glibc, not bundling
+  glibc (the Blender/games recipe) — works for GPU, but requires rebuilding the
+  entire OCC/Netgen/Python stack in a separate old-toolchain container. ~Flatpak
+  effort, fewer benefits (no store, no updates, own the glibc floor forever).
+- **`nix-gl-host`-wrapped bundle** (numtide) — injects the host driver the
+  correct direction while keeping the Nix glibc; can run Nix Vulkan binaries on
+  non-NixOS. But NVIDIA-centric, adds a fragile runtime probe, and still no
+  store/updates/sandbox — reimplementing what Flatpak does for free.
+- **Snap** — runtime-container like Flatpak but Ubuntu-centric, worse GPU
+  sandbox story. Strictly dominated here.
+
+- [ ] Wire `nix bundle` into CI as the **headless** release artifact (label it
+      clearly: CLI / engine / RPC, no GUI). Falls out of the flake for ~free.
+- [x] GUI-AppImage path tested and rejected (2026-07-25); Flatpak is the desktop
+      release path. See Deliverable 2.
 
 ---
 
@@ -222,22 +280,26 @@ OCC/Netgen from FreeCAD* — with the Mesa renderer verification being what push
 it toward the high end. From scratch (no FreeCAD reference) add ~1 week. Rough
 split: OCC ~1d, Netgen ~0.5d, small-dep modules ~1d, app module + finish args
 ~0.5d, Flathub metadata (AppStream/.desktop/icon) ~1d, GPU verification 0.5–3d.
-Cheaper interim if a runnable binary is wanted sooner: `nix bundle` → AppImage
-off the flake is ~hours (weaker driver story; documented above).
+A `nix bundle` AppImage is *not* a cheaper interim for the GUI — it was tested
+and cannot run the windowed app on any distro (glibc↔driver; documented above).
+It remains the near-free **headless** artifact only.
 
 ---
 
 ## Sequencing
 
-1. `flake.nix` package + `devShells` → `nix build` green.
-2. Cachix cache wired into CI.
-3. `nix bundle` AppImage artifact (falls out of step 1).
+1. `flake.nix` package + `devShells` → `nix build` green. **[done]**
+2. Cachix cache wired into CI (the "download & run" path for Nix users).
+3. `nix bundle` **headless** AppImage artifact (falls out of step 1; label it
+   CLI/engine/RPC, no GUI — the GUI path is tested-rejected).
 4. Flatpak manifest (OCC/Netgen from source) → local `flatpak run` green.
 5. Renderer verification on Mesa + NVIDIA-extension.
 6. Flathub metadata (.desktop/icon/AppStream) → submission.
 
-Steps 1–3 are the cheap Nix-native wins and unblock reproducible CI releases.
-Steps 4–6 are the deliberate public-release investment.
+Steps 1–3 are the cheap Nix-native wins and unblock reproducible CI releases
+**for Nix users and headless consumers**. Steps 4–6 are the Flatpak investment
+that delivers the desktop GUI to everyone else — no longer optional, since the
+AppImage GUI path is closed.
 
 ---
 
