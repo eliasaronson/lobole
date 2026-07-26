@@ -10,6 +10,12 @@ let
   pkgs = import <nixpkgs> { config.allowUnsupportedSystem = true; };
   cross = pkgs.pkgsCross.mingwW64;
   occ = import ./occ-cross.nix { inherit cross; };
+  # Netgen (FEM meshing) is NOT wired in: its source assumes MSVC on Windows
+  # (passes /bigobj /MP /W1 to the compiler, FARPROC→void* casts) so it won't
+  # cross-compile with mingw without upstream source patches. See netgen-cross.nix
+  # for the from-scratch derivation and blocker notes. FEM studies that need
+  # meshing are unavailable on Windows until this is patched; everything else
+  # (modeling, PlaneGCS, GPU-FEM topology solver) works.
 
   # spdlog's packaged cross-build runs its own unit tests, which don't link on
   # mingw (test_timezone needs dupenv_s). We only need the library.
@@ -66,7 +72,7 @@ cross.stdenv.mkDerivation {
     "-DCMAKE_BUILD_TYPE=Release"
     "-DDESIGNER_BUILD_TESTS=OFF"
     "-DDESIGNER_INSTALL_METAINFO=OFF"
-    "-DDESIGNER_ENABLE_FEM_GPU=OFF"
+    "-DDESIGNER_ENABLE_FEM_GPU=ON" # Vulkan-compute topology solver (shaders compile natively)
     # find_package(Vulkan) needs to see the cross loader/headers under the sysroot.
     "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH"
   ];

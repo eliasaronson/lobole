@@ -4,6 +4,9 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h> // _NSGetExecutablePath
+#include <climits>
 #else
 #include <limits.h>
 #include <unistd.h>
@@ -17,6 +20,12 @@ std::filesystem::path ExecutableDir() {
   const DWORD count = GetModuleFileNameA(nullptr, result, sizeof(result));
   if (count > 0 && count < sizeof(result))
     return std::filesystem::path(result).parent_path();
+  return std::filesystem::current_path();
+#elif defined(__APPLE__)
+  char result[PATH_MAX];
+  uint32_t size = sizeof(result);
+  if (_NSGetExecutablePath(result, &size) == 0)
+    return std::filesystem::canonical(result).parent_path();
   return std::filesystem::current_path();
 #else
   char result[PATH_MAX];
