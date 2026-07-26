@@ -22,8 +22,9 @@ The two build-effort deliverables, in order:
 We are already all-in on Nix (`shell.nix`), so the flake is a low-effort lift
 and the Flatpak reuses everything the flake pins.
 
-Deliberately **out of scope for now**: native distro packages (deb/rpm/AUR),
-Snap, macOS, Windows. See "Deferred" below for why.
+**Windows** cross-compiled from Linux since 2026-07-26 (Deliverable 3). Still
+deliberately **out of scope**: native distro packages (deb/rpm/AUR), Snap, and
+macOS. See "Deferred" below for why (and how macOS could be developed without a Mac).
 
 ---
 
@@ -315,6 +316,55 @@ It remains the near-free **headless** artifact only.
 
 ---
 
+## Deliverable 3 — Windows (cross-compiled from Linux) — **BUILT + WINE-VERIFIED (2026-07-26)**
+
+The whole Windows toolchain lives in `packaging/windows/` and runs **on Linux** via
+nixpkgs cross (`pkgsCross.mingwW64`, gcc 15.2) — no Windows machine, no MSVC.
+
+**Result (all verified from Linux):** Designer cross-compiles to a native
+`designer.exe`, and under **Wine** it runs headless (OpenCASCADE engine + PlaneGCS
+constraint solver both work — a radius constraint solves end-to-end), **renders on the
+real NVIDIA RTX 4060 with hardware ray tracing** (winevulkan passes the RT extensions
+through; `boots_and_renders` gui-test 1/1), and ships as an NSIS installer + portable
+zip. That's a stronger position than the AppImage ever reached — and, unlike the AppImage
+glibc wall, nothing here was an architectural blocker.
+
+Build:
+- App:  `nix-build packaging/windows/cross-app.nix`  (→ self-contained `bin/` + `share/`)
+- Dist: `nix-build packaging/windows/installer.nix`  (→ portable `.zip` + NSIS `setup.exe`)
+- Test: assemble `bin/`+`share/`, `DISPLAY=:0`, `wine designer.exe …` (use cached
+  `wine64` for the 64-bit app; `pkgs.wine` (32-bit) for the 32-bit installer — see below).
+
+What it took (the code was the easy part — the deps were the work):
+- **Platform shims**, ~6 files, all `#ifdef`-guarded with the Linux path unchanged
+  (native build + 538 tests + crash-test stay green): RuntimePaths→`GetModuleFileNameA`,
+  CrashHandler→`SetUnhandledExceptionFilter`, RemoteServer→Winsock (+ `ws2_32`),
+  GitVault→`nul`/`_pclose`, main.cpp→`std::this_thread::sleep_for`. Zero GNU compiler
+  extensions in the tree kept MSVC-style churn near-nil; no fork/exec.
+- **OCC cross needs derivation surgery** (`occ-cross.nix`): stock nixpkgs opencascade-occt
+  drags tcl/tk→bash (unbuildable for Windows) — disable Draw + Visualization → 48 clean
+  Windows DLLs.
+- **Boost headers only** (`BoostConfig.cmake`) — Boost's own cross-build fails on its MPI
+  component; a hand-written config exposes the `Boost::boost` interface target so PlaneGCS
+  builds.
+- Small nix-cross quirks: `config.allowUnsupportedSystem` for header libs (eigen/spectra);
+  spdlog's packaged tests don't link (turned off); imgui_test_engine needs
+  `mingw_w64_pthreads`.
+- **MVP scope, deferred (not blockers):** Netgen (FEM meshing) and FEM-GPU (Vulkan
+  compute) omitted to keep the build light.
+
+Remaining before a *polished* Windows release:
+- [ ] **Netgen** cross-build if FEM meshing is wanted on Windows.
+- [ ] **Real-hardware QA + code signing** — needs a Windows box / cloud Windows; Wine
+      proves function but isn't sign-off, and unsigned installers trip SmartScreen.
+- [ ] Trim the bundle (strip DLLs), and confirm portal-less file dialogs on Windows (NFD
+      uses the native Win32 backend — should be automatic).
+- Note: the NSIS installer is 32-bit (standard) so it needs WoW64 Wine to test
+  install→run in one prefix; verified in halves here (`pkgs.wine` runs the installer,
+  `wine64` runs the app).
+
+---
+
 ## Sequencing
 
 1. `flake.nix` package + `devShells` → `nix build` green. **[done]**
@@ -339,6 +389,27 @@ AppImage GUI path is closed.
   only for official-repo discoverability or users who refuse Flatpak.
 - **Snap** — Ubuntu-centric, single-vendor store, historically more GPU/dialog
   sandbox friction than Flatpak. Only if Snap Store presence becomes a goal.
-- **macOS / Windows** — separate ports (MoltenVK; MSVC/vcpkg for OCC+Netgen;
-  `#ifdef` out the libx11/dbus/systemd Linux integration). Real projects, not
-  "also build." Measure the Linux-specific-assumption surface first.
+- **Windows** — **DONE** (see Deliverable 3): cross-compiled from Linux, Wine-verified,
+  installer built. Only real-hardware QA + signing remain.
+- **macOS / MoltenVK** — the genuinely hard one, *because there is no Wine-for-Metal*:
+  MoltenVK translates Vulkan→Metal, and Metal only exists on Apple's GPU stack, so unlike
+  Windows (which we test end-to-end on Linux via Wine+winevulkan) the **GPU path cannot be
+  exercised off a Mac at all**. How to develop it anyway, in order of how much Mac you need:
+  1. **Port on Linux with `#ifdef` discipline** — the code is already portable (the same
+     ~6-file shim surface as Windows; `<execinfo.h>` even works on macOS, so CrashHandler
+     is nearly free there). NFD has a native Cocoa backend; OCC/Netgen build on macOS.
+  2. **`osxcross` compile-lint on Linux/CI** — cross-compile to Mach-O to catch macOS
+     build breaks fast, no Mac needed. Compile-only (can't run/Metal); the macOS SDK
+     license restricts it to Apple hardware, so it's a dev aid, not a distribution path.
+  3. **GitHub Actions macOS runners** — real Macs in CI: build + run headless/logic tests
+     on every push (catches link/runtime/MoltenVK-init regressions). GPU/Metal on hosted
+     runners is limited/headless, so this validates *everything except* real-GPU rendering.
+  4. **Periodic real-Mac QA** — a cloud Mac (EC2 mac / MacStadium / MacinCloud) or a cheap
+     Mac mini, used occasionally for the Metal render pass + notarization — the two things
+     that truly require Apple hardware. Expect RT to be **unavailable** (MoltenVK doesn't
+     bridge Vulkan ray tracing), so the offline ray-traced view is macOS's known feature
+     gap (the renderer already gates RT and falls back to raster).
+
+  Net: day-to-day macOS dev needs no Mac (Linux `#ifdef` + osxcross lint + macOS CI);
+  reserve real/cloud Mac time for the GPU-render + notarization sign-off. It's more effort
+  than Windows purely because the GPU can't be tested off-platform.
