@@ -693,7 +693,11 @@ add_dependencies(designer shaders)
 # Canonical installation contract used by Nix, AppImage, and Flatpak.
 install(TARGETS designer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(TARGET planegcs)
-    install(TARGETS planegcs LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    # LIBRARY covers the ELF .so (Linux); RUNTIME covers the Windows DLL, which
+    # must sit next to the executable.
+    install(TARGETS planegcs
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 install(DIRECTORY "${SHADER_OUTPUT_DIR}/"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/shaders")
