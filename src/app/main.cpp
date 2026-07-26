@@ -32,10 +32,12 @@
 #include "ui/Theme.h"
 #include "ui/UI.h"
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <stdio.h>
 #include <stdlib.h>
+#include <thread>
 #include <time.h>
 #include <utility>
 
@@ -1477,8 +1479,8 @@ int main(int argc, char** argv) {
         const double minFrame = 1.0 / 60.0;
         const double elapsed = now - lastFrame;
         if (elapsed < minFrame && elapsed > 0.0) {
-          struct timespec ts{0, (long)((minFrame - elapsed) * 1e9)};
-          nanosleep(&ts, nullptr);
+          std::this_thread::sleep_for(
+              std::chrono::duration<double>(minFrame - elapsed));
         }
         lastFrame = glfwGetTime();
       }

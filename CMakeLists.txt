@@ -434,6 +434,11 @@ if(UNIX AND NOT APPLE)
     endif()
 endif()
 
+# Winsock for the RemoteServer JSON-RPC socket (Windows).
+if(WIN32)
+    target_link_libraries(designer ws2_32)
+endif()
+
 # fem_gpu: headless Vulkan compute for the topology solver
 # (docs/topopt/gpu-plan.md). Deliberately a separate library — designer_core
 # must stay GPU-free. Compute shaders are compiled here (glslc is found early;
@@ -441,8 +446,11 @@ endif()
 # embedded as byte arrays so the library and its tests need no runtime shader
 # path (renderer .spv files load relative to the app executable, which test
 # binaries don't share).
+# GPU-compute FEM is opt-out so slimmer builds (e.g. the Windows cross MVP) can
+# drop the topology-solver compute stack. Default ON preserves current behavior.
+option(DESIGNER_ENABLE_FEM_GPU "Build the Vulkan-compute FEM topology solver" ON)
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
-if(GLSLC)
+if(GLSLC AND DESIGNER_ENABLE_FEM_GPU)
     set(FEMGPU_GEN_DIR "${CMAKE_BINARY_DIR}/femgpu_gen")
     file(MAKE_DIRECTORY ${FEMGPU_GEN_DIR})
     function(embed_compute_shader NAME)

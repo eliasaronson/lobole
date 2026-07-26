@@ -39,12 +39,42 @@
 #include "imgui_te_context.h"
 #include "imgui_te_engine.h"
 
+#include <cstring>
+
+// --- Sockets: BSD on Linux/mac, Winsock on Windows (loopback JSON-RPC only) ---
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+namespace {
+// Winsock needs global init; a static object brackets the process lifetime.
+struct WinsockInit {
+  WinsockInit() { WSADATA d; WSAStartup(MAKEWORD(2, 2), &d); }
+  ~WinsockInit() { WSACleanup(); }
+} g_winsockInit;
+inline int SockClose(int fd) { return ::closesocket(fd); }
+inline long SockRead(int fd, void* b, size_t n) {
+  return ::recv(fd, static_cast<char*>(b), static_cast<int>(n), 0);
+}
+inline long SockWrite(int fd, const void* b, size_t n) {
+  return ::send(fd, static_cast<const char*>(b), static_cast<int>(n), 0);
+}
+} // namespace
+#ifndef SHUT_RDWR
+#define SHUT_RDWR SD_BOTH
+#endif
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include <cstring>
+namespace {
+inline int SockClose(int fd) { return ::close(fd); }
+inline long SockRead(int fd, void* b, size_t n) { return ::read(fd, b, n); }
+inline long SockWrite(int fd, const void* b, size_t n) {
+  return ::write(fd, b, n);
+}
+} // namespace
+#endif
 
 using nlohmann::json;
 
@@ -79,7 +109,9 @@ bool RemoteServer::Start(uint16_t port, ImGuiTestEngine* engine) {
   // must exit non-zero, not serve nothing); the thread only accepts.
   m_listenFd = ::socket(AF_INET, SOCK_STREAM, 0);
   int opt = 1;
-  ::setsockopt(m_listenFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+  // Winsock's optval is const char*; POSIX takes const void* (accepts this too).
+  ::setsockopt(m_listenFd, SOL_SOCKET, SO_REUSEADDR,
+               reinterpret_cast<const char*>(&opt), sizeof(opt));
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // localhost only
@@ -88,7 +120,7 @@ bool RemoteServer::Start(uint16_t port, ImGuiTestEngine* engine) {
           0 ||
       ::listen(m_listenFd, 1) < 0) {
     LOG_ERROR("Remote control: cannot listen on port {}", port);
-    ::close(m_listenFd);
+    SockClose(m_listenFd);
     m_listenFd = -1;
     return false;
   }
@@ -120,7 +152,7 @@ void RemoteServer::Stop() {
   }
   if (m_listenFd >= 0) {
     ::shutdown(m_listenFd, SHUT_RDWR);
-    ::close(m_listenFd);
+    SockClose(m_listenFd);
     m_listenFd = -1;
   }
   if (m_thread.joinable())
@@ -138,7 +170,7 @@ void RemoteServer::ReaderThread() {
       break;
     std::lock_guard<std::mutex> lock(m_clientsMutex);
     if (m_clients.size() >= 8) {  // runaway-connection backstop
-      ::close(client);
+      SockClose(client);
       continue;
     }
     m_clients.push_back(client);
@@ -151,7 +183,7 @@ void RemoteServer::ClientThread(int client) {
   std::string buffer;
   char chunk[4096];
   while (m_running) {
-    ssize_t n = ::read(client, chunk, sizeof(chunk));
+    auto n = SockRead(client, chunk, sizeof(chunk));
     if (n <= 0)
       break;
     buffer.append(chunk, static_cast<size_t>(n));
@@ -179,7 +211,7 @@ void RemoteServer::ClientThread(int client) {
       m_requests.push_back(std::move(request));
     }
   }
-  ::close(client);
+  SockClose(client);
   {
     std::lock_guard<std::mutex> lock(m_clientsMutex);
     m_clients.erase(std::remove(m_clients.begin(), m_clients.end(), client),
@@ -195,7 +227,7 @@ void RemoteServer::Send(int client, const json& message) {
   std::lock_guard<std::mutex> lock(m_sendMutex);
   size_t sent = 0;
   while (sent < line.size()) {
-    ssize_t n = ::write(client, line.data() + sent, line.size() - sent);
+    auto n = SockWrite(client, line.data() + sent, line.size() - sent);
     if (n <= 0)
       return;
     sent += static_cast<size_t>(n);

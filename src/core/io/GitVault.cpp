@@ -7,6 +7,16 @@
 #include <cstdlib>
 #include <filesystem>
 
+#if defined(_WIN32)
+// _pclose returns the child exit code directly; cmd.exe's null device is "nul".
+#define NULDEV "nul"
+#define GIT_EXIT_STATUS(s) (s)
+#else
+#include <sys/wait.h>
+#define NULDEV "/dev/null"
+#define GIT_EXIT_STATUS(s) WEXITSTATUS(s)
+#endif
+
 namespace GitVault {
 
 namespace {
@@ -28,7 +38,7 @@ std::string Quote(const std::string& s) {
 int RunGit(const std::string& dir, const std::string& args,
            std::string* output = nullptr) {
   const std::string cmd =
-      "git -C " + Quote(dir) + " " + args + " 2>/dev/null";
+      "git -C " + Quote(dir) + " " + args + " 2>" NULDEV;
   FILE* pipe = ::popen(cmd.c_str(), "r");
   if (!pipe)
     return -1;
@@ -40,7 +50,7 @@ int RunGit(const std::string& dir, const std::string& args,
   const int status = ::pclose(pipe);
   if (output)
     *output = captured;
-  return status == -1 ? -1 : WEXITSTATUS(status);
+  return status == -1 ? -1 : GIT_EXIT_STATUS(status);
 }
 
 // Inline identity: commits must work on CI and fresh machines with no
@@ -52,7 +62,7 @@ constexpr const char* kIdentity =
 
 bool Available() {
   static const bool available = [] {
-    return std::system("git --version >/dev/null 2>&1") == 0;
+    return std::system("git --version >" NULDEV " 2>&1") == 0;
   }();
   return available;
 }

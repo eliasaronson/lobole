@@ -1,12 +1,16 @@
 #include "app/CrashHandler.h"
 
-#include <csignal>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <unistd.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#include <io.h>
+#else
+#include <csignal>
+#include <unistd.h>
 // std::stacktrace (C++23) needs libstdc++'s experimental archive (-lstdc++exp),
 // which some toolchains ship without (e.g. the Freedesktop Flatpak SDK's gcc).
 // CMake probes for it and defines HAVE_STDCXX_STACKTRACE when it links; without
@@ -16,16 +20,22 @@
 #else
 #include <execinfo.h>
 #endif
+#endif
 
 namespace {
 
-// Async-signal-safe write of a buffer to stderr.
+// Raw write to stderr (fd 2) — no stdio buffering, safe from a dying process.
 void WriteStderr(const char* s, size_t n) {
+#if defined(_WIN32)
+  _write(2, s, static_cast<unsigned>(n));
+#else
   const ssize_t r = write(STDERR_FILENO, s, n);
   (void)r;
+#endif
 }
 void WriteStderr(const char* s) { WriteStderr(s, strlen(s)); }
 
+#if !defined(_WIN32)
 void OnFatalSignal(int sig) {
   WriteStderr("\n=== fatal signal ");
   const char* name = sig == SIGSEGV   ? "SIGSEGV"
@@ -55,14 +65,32 @@ void OnFatalSignal(int sig) {
   WriteStderr("\n=== end backtrace\n");
   raise(sig); // default disposition: core dump / exit code as before
 }
+#else // _WIN32
+// Windows has no POSIX signals/execinfo. Catch unhandled SEH exceptions, print
+// the code, and continue the search so the process still crashes/dumps as
+// before. (A symbolized DbgHelp stack walk can be added later.)
+LONG WINAPI OnWindowsException(EXCEPTION_POINTERS* info) {
+  WriteStderr("\n=== fatal Windows exception (code ");
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "0x%08lx",
+                info->ExceptionRecord->ExceptionCode);
+  WriteStderr(buf);
+  WriteStderr(") ===\n");
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
 
 } // namespace
 
 void InstallCrashHandler() {
+#if defined(_WIN32)
+  SetUnhandledExceptionFilter(OnWindowsException);
+#else
   signal(SIGSEGV, OnFatalSignal);
   signal(SIGABRT, OnFatalSignal);
   signal(SIGBUS, OnFatalSignal);
   signal(SIGFPE, OnFatalSignal);
+#endif
 }
 
 void CrashHandlerSelfTest() {

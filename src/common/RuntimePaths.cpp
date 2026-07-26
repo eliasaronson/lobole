@@ -1,12 +1,24 @@
 #include "common/RuntimePaths.h"
 
 #include <cstdlib>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
 #include <limits.h>
 #include <unistd.h>
+#endif
 
 namespace RuntimePaths {
 
 std::filesystem::path ExecutableDir() {
+#if defined(_WIN32)
+  char result[MAX_PATH];
+  const DWORD count = GetModuleFileNameA(nullptr, result, sizeof(result));
+  if (count > 0 && count < sizeof(result))
+    return std::filesystem::path(result).parent_path();
+  return std::filesystem::current_path();
+#else
   char result[PATH_MAX];
   const ssize_t count = readlink("/proc/self/exe", result, sizeof(result) - 1);
   if (count > 0) {
@@ -14,6 +26,7 @@ std::filesystem::path ExecutableDir() {
     return std::filesystem::path(result).parent_path();
   }
   return std::filesystem::current_path();
+#endif
 }
 
 std::filesystem::path DataDir() {
