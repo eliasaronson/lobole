@@ -19,4 +19,4 @@ std::optional<nlohmann::json> HandleAssemblyRpc(ui::AppState& state,
                                                 const std::string& method,
                                                 const RpcParams& params);
 
-}  // namespace remote
+} // namespace remote

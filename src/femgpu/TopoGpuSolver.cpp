@@ -1,13 +1,13 @@
 #include "femgpu/TopoGpuSolver.h"
 
-#include "core/fem/FemSolverInternal.h"  // element math for packing Ke (Eigen)
+#include "core/fem/FemSolverInternal.h" // element math for packing Ke (Eigen)
 #include "femgpu/ComputeContext.h"
 #include "femgpu/TopoCgSolver.h"
 #include "femgpu/TopoMultigrid.h"
 
 #include <algorithm>
-#include <cmath>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -16,9 +16,9 @@ namespace gpu {
 
 struct TopoGpuSolver::Impl {
   std::unique_ptr<ComputeContext> ctx;
-  std::unique_ptr<TopoCgSolver> cg;  // keeps the MG hierarchy alive via opts
+  std::unique_ptr<TopoCgSolver> cg; // keeps the MG hierarchy alive via opts
   int nFree = 0;
-  std::vector<float> scaleF, fF, xF;  // fp32 staging
+  std::vector<float> scaleF, fF, xF; // fp32 staging
   bool haveWarmStart = false;
 };
 
@@ -32,7 +32,8 @@ const std::string& TopoGpuSolver::DeviceName() const {
 std::unique_ptr<TopoGpuSolver> TopoGpuSolver::Create(bool allowSoftware,
                                                      std::string* error) {
   auto ctx = ComputeContext::Create(error);
-  if (!ctx) return nullptr;
+  if (!ctx)
+    return nullptr;
   if (ctx->IsSoftwareDevice() && !allowSoftware) {
     if (error)
       *error = "only a software Vulkan device (" + ctx->DeviceName() +
@@ -61,7 +62,8 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
   sys.ke.reserve(static_cast<size_t>(sys.nElems) * 900);
   for (const auto& tet : mesh.tets) {
     for (int i = 0; i < 10; ++i)
-      for (int k = 0; k < 3; ++k) sys.dof.push_back(dofMap[3 * tet[i] + k]);
+      for (int k = 0; k < 3; ++k)
+        sys.dof.push_back(dofMap[3 * tet[i] + k]);
     Eigen::Vector3d X[10];
     for (int i = 0; i < 10; ++i) {
       const auto& p = mesh.nodes[tet[i]];
@@ -74,7 +76,8 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
       Ke += (kTetW * std::abs(detJ)) * (B.transpose() * D0 * B);
     }
     for (int r = 0; r < 30; ++r)
-      for (int c = 0; c < 30; ++c) sys.ke.push_back(static_cast<float>(Ke(r, c)));
+      for (int c = 0; c < 30; ++c)
+        sys.ke.push_back(static_cast<float>(Ke(r, c)));
   }
 
   // Preconditioner selection (measured verdicts in gpu-plan.md): MULTIGRID
@@ -84,7 +87,8 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
   // Env overrides for experiments: FEMGPU_PRECOND=mg|jacobi|cheb,
   // FEMGPU_CHEB_DEGREE=<int>, FEMGPU_CHEB_RATIO=<float>.
   std::string precond = "mg";
-  if (const char* p = std::getenv("FEMGPU_PRECOND")) precond = p;
+  if (const char* p = std::getenv("FEMGPU_PRECOND"))
+    precond = p;
   CgOptions opts;
   if (precond == "cheb") {
     opts.precond = CgOptions::Precond::Chebyshev;
@@ -99,10 +103,10 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
     std::string mgErr;
     if (auto mg = MakeMgGpuData(flat, sys, dofMap, &mgErr)) {
       opts.precond = CgOptions::Precond::Multigrid;
-      opts.chebDegree = 3;     // the SMOOTHER polynomial
-      opts.chebRatio = 15.0f;  // top-of-spectrum smoothing interval
+      opts.chebDegree = 3;    // the SMOOTHER polynomial
+      opts.chebRatio = 15.0f; // top-of-spectrum smoothing interval
       opts.mg = std::move(mg);
-    }  // else: fall through to Jacobi
+    } // else: fall through to Jacobi
   }
   if (const char* d = std::getenv("FEMGPU_CHEB_DEGREE"))
     opts.chebDegree = std::max(2, std::atoi(d));
@@ -110,7 +114,8 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
     opts.chebRatio = std::max(1.5f, static_cast<float>(std::atof(r)));
 
   im.cg = TopoCgSolver::Create(*im.ctx, sys, error, opts);
-  if (!im.cg) return false;
+  if (!im.cg)
+    return false;
   im.nFree = nFree;
   im.scaleF.resize(sys.nElems);
   im.fF.resize(nFree);
@@ -124,16 +129,20 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
                           std::string* error) {
   Impl& im = *m_impl;
   if (!im.cg) {
-    if (error) *error = "Setup was not called";
+    if (error)
+      *error = "Setup was not called";
     return false;
   }
   for (size_t e = 0; e < scale.size(); ++e)
     im.scaleF[e] = static_cast<float>(scale[e]);
-  if (!im.cg->SetScales(im.scaleF, error)) return false;
-  for (int i = 0; i < im.nFree; ++i) im.fF[i] = static_cast<float>(F[i]);
+  if (!im.cg->SetScales(im.scaleF, error))
+    return false;
+  for (int i = 0; i < im.nFree; ++i)
+    im.fF[i] = static_cast<float>(F[i]);
   // Warm start: the device-side x from the previous SIMP iteration (kept in
   // xF); the incoming `u` matches it, so either would do.
-  if (!im.haveWarmStart) std::fill(im.xF.begin(), im.xF.end(), 0.0f);
+  if (!im.haveWarmStart)
+    std::fill(im.xF.begin(), im.xF.end(), 0.0f);
 
   // 1e-5 relative residual — the fp32-realistic target (the measured MG/
   // Jacobi floor sits just under it). Asking for the CPU path's 1e-6 made
@@ -150,11 +159,11 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
   // of the whole SIMP runtime) with no effect on the design. The cold first
   // solve keeps the generous cap for its legitimate slow phases; capped
   // solves still return the best iterate found.
-  const int maxIter =
-      im.haveWarmStart ? 128 : std::min(2 * im.nFree, 20000);
+  const int maxIter = im.haveWarmStart ? 128 : std::min(2 * im.nFree, 20000);
   CgStats stats;
   const auto t0 = std::chrono::steady_clock::now();
-  if (!im.cg->Solve(im.fF, im.xF, tol, maxIter, &stats, error)) return false;
+  if (!im.cg->Solve(im.fF, im.xF, tol, maxIter, &stats, error))
+    return false;
   im.haveWarmStart = true;
   // FEMGPU_SOLVE_TRACE=1: one stderr line per SIMP linear solve.
   if (std::getenv("FEMGPU_SOLVE_TRACE"))
@@ -167,7 +176,8 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
                  stats.iterations, stats.relResidual, (int)stats.converged);
 
   u.resize(im.nFree);
-  for (int i = 0; i < im.nFree; ++i) u[i] = static_cast<double>(im.xF[i]);
+  for (int i = 0; i < im.nFree; ++i)
+    u[i] = static_cast<double>(im.xF[i]);
   return true;
 }
 
@@ -176,14 +186,17 @@ bool TopoGpuSolver::ElementEnergies(const std::vector<double>& u,
                                     std::string* error) {
   Impl& im = *m_impl;
   if (!im.cg || static_cast<int>(u.size()) != im.nFree) {
-    if (error) *error = "ElementEnergies before Setup / size mismatch";
+    if (error)
+      *error = "ElementEnergies before Setup / size mismatch";
     return false;
   }
-  for (int i = 0; i < im.nFree; ++i) im.fF[i] = static_cast<float>(u[i]);
+  for (int i = 0; i < im.nFree; ++i)
+    im.fF[i] = static_cast<float>(u[i]);
   std::vector<float> seF;
-  if (!im.cg->ElementEnergies(im.fF, seF, error)) return false;
+  if (!im.cg->ElementEnergies(im.fF, seF, error))
+    return false;
   se.assign(seF.begin(), seF.end());
   return true;
 }
 
-}  // namespace gpu
+} // namespace gpu

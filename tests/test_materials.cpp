@@ -48,7 +48,8 @@ TEST_CASE("Wood serialization tokens are stable", "[materials]") {
   CHECK(MaterialLibrary::FromSlug("wood_walnut") == MaterialType::WOOD_WALNUT);
   CHECK(MaterialLibrary::FromSlug("plywood_birch") ==
         MaterialType::PLYWOOD_BIRCH);
-  CHECK(MaterialLibrary::FromSlug("plywood_pine") == MaterialType::PLYWOOD_PINE);
+  CHECK(MaterialLibrary::FromSlug("plywood_pine") ==
+        MaterialType::PLYWOOD_PINE);
   CHECK(MaterialLibrary::FromSlug("mdf") == MaterialType::MDF);
 }
 
@@ -101,9 +102,9 @@ TEST_CASE("Wood materials are physically usable", "[materials]") {
   // Non-metallic, in-gamut base color, and a real density (so mass_properties
   // reports a mass) plus stiffness (so an FEM study runs rather than erroring).
   const MaterialType woods[] = {
-      MaterialType::WOOD_OAK,       MaterialType::WOOD_PINE,
-      MaterialType::WOOD_WALNUT,    MaterialType::PLYWOOD_BIRCH,
-      MaterialType::PLYWOOD_PINE,   MaterialType::MDF};
+      MaterialType::WOOD_OAK,     MaterialType::WOOD_PINE,
+      MaterialType::WOOD_WALNUT,  MaterialType::PLYWOOD_BIRCH,
+      MaterialType::PLYWOOD_PINE, MaterialType::MDF};
   for (MaterialType t : woods) {
     const MaterialProperties& m = MaterialLibrary::GetMaterial(t);
     CHECK(m.metallic == 0.0f);
@@ -111,9 +112,9 @@ TEST_CASE("Wood materials are physically usable", "[materials]") {
       CHECK(m.baseColor[c] >= 0.0f);
       CHECK(m.baseColor[c] <= 1.0f);
     }
-    CHECK(m.density > 0.0f);   // air-dry wood/board density
-    CHECK(m.youngGPa > 0.0f);  // representative along-grain modulus (isotropic)
+    CHECK(m.density > 0.0f);  // air-dry wood/board density
+    CHECK(m.youngGPa > 0.0f); // representative along-grain modulus (isotropic)
     CHECK(m.poisson > 0.0f);
-    CHECK(m.poisson < 0.5f);   // physically valid Poisson ratio
+    CHECK(m.poisson < 0.5f); // physically valid Poisson ratio
   }
 }

@@ -29,7 +29,9 @@ struct ElementMap {
   // faces, a raw explorer walk visits shared edges once per adjacent face.
   std::map<int, std::string> edgeNames;
 
-  [[nodiscard]] bool Empty() const { return names.empty() && edgeNames.empty(); }
+  [[nodiscard]] bool Empty() const {
+    return names.empty() && edgeNames.empty();
+  }
 
   // The name of the face at `faceIndex`, or nullptr if none.
   [[nodiscard]] const std::string* NameOf(int faceIndex) const {

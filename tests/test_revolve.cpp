@@ -2,12 +2,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "core/features/DatumAxisFeature.h"
-#include "core/Document.h"
-#include "core/features/RevolveFeature.h"
-#include "core/io/Serialization.h"
 #include "TestIO.h"
+#include "core/Document.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 
 #include <cmath>
 #include <filesystem>
@@ -38,8 +38,8 @@ static double BodyVolume(const Document& doc) {
 TEST_CASE("Full 360 revolve is a solid of revolution (Pappus)", "[revolve]") {
   Document doc;
   uint64_t sid = AddRectSketch(doc, {1, 0}, {3, 3});
-  auto rev = std::make_unique<RevolveFeature>("Rev", sid, 360.0,
-                                              ExtrudeMode::NewBody);
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 360.0, ExtrudeMode::NewBody);
   rev->axis.kind = AxisRef::Kind::Y;
   doc.AddFeature(std::move(rev));
 
@@ -51,8 +51,8 @@ TEST_CASE("Full 360 revolve is a solid of revolution (Pappus)", "[revolve]") {
 TEST_CASE("Partial-angle revolve scales volume by angle", "[revolve]") {
   Document doc;
   uint64_t sid = AddRectSketch(doc, {1, 0}, {3, 3});
-  auto rev = std::make_unique<RevolveFeature>("Rev", sid, 90.0,
-                                              ExtrudeMode::NewBody);
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 90.0, ExtrudeMode::NewBody);
   rev->axis.kind = AxisRef::Kind::Y;
   doc.AddFeature(std::move(rev));
 
@@ -83,17 +83,18 @@ TEST_CASE("Symmetric revolve matches one-directional volume but centers it",
   glm::vec3 omin, omax, smin, smax;
   one.GetBodies()[0].shape.GetBoundingBox(omin, omax);
   sym.GetBodies()[0].shape.GetBoundingBox(smin, smax);
-  CHECK_THAT(smin.z + smax.z, WithinAbs(0.0f, 1e-3f));      // centered
-  CHECK(std::abs(omin.z + omax.z) > 1.0f);                  // offset to one side
+  CHECK_THAT(smin.z + smax.z, WithinAbs(0.0f, 1e-3f)); // centered
+  CHECK(std::abs(omin.z + omax.z) > 1.0f);             // offset to one side
 }
 
 // --- Failure modes -----------------------------------------------------------
 
 TEST_CASE("A profile that crosses the axis is rejected", "[revolve]") {
   Document doc;
-  uint64_t sid = AddRectSketch(doc, {-1, 0}, {3, 3}); // straddles x=0 (the Y axis)
-  auto rev = std::make_unique<RevolveFeature>("Rev", sid, 360.0,
-                                              ExtrudeMode::NewBody);
+  uint64_t sid =
+      AddRectSketch(doc, {-1, 0}, {3, 3}); // straddles x=0 (the Y axis)
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 360.0, ExtrudeMode::NewBody);
   rev->axis.kind = AxisRef::Kind::Y;
   doc.AddFeature(std::move(rev));
   CHECK(doc.GetBodies().empty());
@@ -103,8 +104,8 @@ TEST_CASE("A profile that crosses the axis is rejected", "[revolve]") {
 TEST_CASE("An axis out of the sketch plane fails", "[revolve]") {
   Document doc;
   uint64_t sid = AddRectSketch(doc, {1, 0}, {3, 3});
-  auto rev = std::make_unique<RevolveFeature>("Rev", sid, 360.0,
-                                              ExtrudeMode::NewBody);
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 360.0, ExtrudeMode::NewBody);
   rev->axis.kind = AxisRef::Kind::Z; // Z is the XY-plane normal, not in-plane
   doc.AddFeature(std::move(rev));
   CHECK_FALSE(doc.Regenerate());
@@ -133,8 +134,8 @@ TEST_CASE("Revolve Cut subtracts from an existing body", "[revolve]") {
 
   // Cut a full-revolve washer hole (inner r=... ) — reuse a thin ring cut.
   uint64_t cutSk = AddRectSketch(doc, {0.5, 0.5}, {1.5, 2.5});
-  auto cut = std::make_unique<RevolveFeature>("Hole", cutSk, 360.0,
-                                              ExtrudeMode::Cut);
+  auto cut =
+      std::make_unique<RevolveFeature>("Hole", cutSk, 360.0, ExtrudeMode::Cut);
   cut->axis.kind = AxisRef::Kind::Y;
   doc.AddFeature(std::move(cut));
 
@@ -148,8 +149,8 @@ TEST_CASE("An expression-driven revolve angle follows a parameter edit",
   Document doc;
   doc.SetParameter("sweep", "180");
   uint64_t sid = AddRectSketch(doc, {1, 0}, {3, 3});
-  auto rev = std::make_unique<RevolveFeature>("Rev", sid, 1.0,
-                                              ExtrudeMode::NewBody);
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 1.0, ExtrudeMode::NewBody);
   rev->axis.kind = AxisRef::Kind::Y;
   rev->angleExpr = "sweep";
   doc.AddFeature(std::move(rev));
@@ -163,15 +164,16 @@ TEST_CASE("An expression-driven revolve angle follows a parameter edit",
 TEST_CASE("Revolve about a DatumAxisFeature", "[revolve]") {
   Document doc;
   // A datum axis coincident with global Y (two points along y).
-  auto ax = std::make_unique<DatumAxisFeature>("Axis", DatumAxisKind::TwoPoints);
+  auto ax =
+      std::make_unique<DatumAxisFeature>("Axis", DatumAxisKind::TwoPoints);
   ax->p0 = {0, 0, 0};
   ax->p1 = {0, 1, 0};
   doc.AddFeature(std::move(ax));
   const uint64_t axisId = doc.GetFeature(0)->GetId();
 
   uint64_t sid = AddRectSketch(doc, {1, 0}, {3, 3});
-  auto rev = std::make_unique<RevolveFeature>("Rev", sid, 360.0,
-                                              ExtrudeMode::NewBody);
+  auto rev =
+      std::make_unique<RevolveFeature>("Rev", sid, 360.0, ExtrudeMode::NewBody);
   rev->axis.kind = AxisRef::Kind::DatumAxis;
   rev->axis.datumAxisId = axisId;
   doc.AddFeature(std::move(rev));
@@ -183,13 +185,14 @@ TEST_CASE("Revolve about a DatumAxisFeature", "[revolve]") {
 // --- Serialization -----------------------------------------------------------
 
 TEST_CASE("Revolve round-trips through JSON", "[revolve]") {
-  const fs::path path = fs::temp_directory_path() / "designer_revolve_test.json";
+  const fs::path path =
+      fs::temp_directory_path() / "designer_revolve_test.json";
   {
     Document doc;
     doc.SetParameter("sweep", "270");
     uint64_t sid = AddRectSketch(doc, {1, 0}, {3, 3});
-    auto rev = std::make_unique<RevolveFeature>("Rev", sid, 1.0,
-                                                ExtrudeMode::NewBody);
+    auto rev =
+        std::make_unique<RevolveFeature>("Rev", sid, 1.0, ExtrudeMode::NewBody);
     rev->axis.kind = AxisRef::Kind::Y;
     rev->angleExpr = "sweep";
     rev->symmetric = true;

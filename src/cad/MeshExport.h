@@ -22,8 +22,8 @@ namespace MeshExport {
 struct Item {
   CADShape shape;
   std::string name;
-  glm::mat4 transform{1.0f};      // rigid placement (translate ∘ rotate)
-  glm::vec3 baseColor{0.8f};      // linear RGB
+  glm::mat4 transform{1.0f}; // rigid placement (translate ∘ rotate)
+  glm::vec3 baseColor{0.8f}; // linear RGB
   float metallic = 0.0f;
   float roughness = 0.5f;
 };
@@ -36,4 +36,4 @@ struct Item {
 bool SaveVisual(const std::string& path, const std::vector<Item>& items,
                 double deflection = 0.1, std::string* error = nullptr);
 
-}  // namespace MeshExport
+} // namespace MeshExport

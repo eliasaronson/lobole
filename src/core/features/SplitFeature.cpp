@@ -22,9 +22,9 @@ SplitFeature::SplitFeature(const std::string& name, uint64_t bodyId)
 }
 
 bool SplitFeature::Execute(RegenContext& ctx) {
-  const auto body = std::find_if(
-      ctx.bodies.begin(), ctx.bodies.end(),
-      [&](const Body& b) { return b.createdBy == bodyId; });
+  const auto body =
+      std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
+                   [&](const Body& b) { return b.createdBy == bodyId; });
   if (body == ctx.bodies.end()) {
     SetError("the body to split no longer exists");
     return false;
@@ -65,7 +65,8 @@ bool SplitFeature::Execute(RegenContext& ctx) {
   body->shape.GetBoundingBox(bmin, bmax);
   const glm::vec3 center = (bmin + bmax) * 0.5f;
   const glm::vec3 proj = center - glm::dot(center - origin, normal) * normal;
-  const double h = std::max(1e-3, static_cast<double>(glm::length(bmax - bmin)));
+  const double h =
+      std::max(1e-3, static_cast<double>(glm::length(bmax - bmin)));
 
   try {
     const gp_Pln pln(gp_Pnt(proj.x, proj.y, proj.z),

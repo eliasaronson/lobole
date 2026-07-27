@@ -28,19 +28,19 @@ static void AddSketchThenExtrude(Document& doc) {
 
 TEST_CASE("MoveFeature reorders independent features", "[document][reorder]") {
   Document doc;
-  doc.AddFeature(MakeBox("A"));  // z 0..2, disjoint from B
+  doc.AddFeature(MakeBox("A")); // z 0..2, disjoint from B
   auto b = std::make_unique<BoxFeature>("B", glm::vec3(10, 0, 0), 2, 2, 2);
   doc.AddFeature(std::move(b));
-  const double volBefore = doc.GetBodies()[0].shape.Volume() +
-                           doc.GetBodies()[1].shape.Volume();
+  const double volBefore =
+      doc.GetBodies()[0].shape.Volume() + doc.GetBodies()[1].shape.Volume();
 
-  REQUIRE(doc.MoveFeature(1, 0));  // B ahead of A
+  REQUIRE(doc.MoveFeature(1, 0)); // B ahead of A
   CHECK(doc.GetFeature(0)->GetName() == "B");
   CHECK(doc.GetFeature(1)->GetName() == "A");
   // Two independent solids: reordering changes nothing geometric.
   REQUIRE(doc.GetBodies().size() == 2);
-  const double volAfter = doc.GetBodies()[0].shape.Volume() +
-                          doc.GetBodies()[1].shape.Volume();
+  const double volAfter =
+      doc.GetBodies()[0].shape.Volume() + doc.GetBodies()[1].shape.Volume();
   CHECK_THAT(volAfter, WithinRel(volBefore, 1e-9));
 }
 
@@ -49,16 +49,16 @@ TEST_CASE("MoveFeature rejects out-of-range and no-op moves",
   Document doc;
   doc.AddFeature(MakeBox("A"));
   doc.AddFeature(MakeBox("B"));
-  CHECK_FALSE(doc.MoveFeature(0, 0));  // no-op
-  CHECK_FALSE(doc.MoveFeature(5, 0));  // from out of range
-  CHECK_FALSE(doc.MoveFeature(0, 5));  // to out of range
+  CHECK_FALSE(doc.MoveFeature(0, 0)); // no-op
+  CHECK_FALSE(doc.MoveFeature(5, 0)); // from out of range
+  CHECK_FALSE(doc.MoveFeature(0, 5)); // to out of range
   CHECK(doc.GetFeature(0)->GetName() == "A");
 }
 
 TEST_CASE("MoveFeatureCommand rejects a move that dangles a reference",
           "[document][reorder][undo]") {
   Document doc;
-  AddSketchThenExtrude(doc);  // [0]=Sketch, [1]=Pad(extrude of Sketch)
+  AddSketchThenExtrude(doc); // [0]=Sketch, [1]=Pad(extrude of Sketch)
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(24.0, 1e-6));
 
@@ -86,23 +86,25 @@ TEST_CASE("MoveFeatureCommand execute/undo/redo roundtrip",
   Document doc;
   CommandStack stack;
   doc.AddFeature(MakeBox("A"));
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(10, 0, 0), 2, 2, 2));
-  doc.AddFeature(std::make_unique<BoxFeature>("C", glm::vec3(20, 0, 0), 2, 2, 2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(10, 0, 0), 2, 2, 2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("C", glm::vec3(20, 0, 0), 2, 2, 2));
 
   // Valid move (all independent): C to the front → [C, A, B].
   auto cmd = std::make_unique<MoveFeatureCommand>(2, 0);
   REQUIRE(cmd->Execute(doc));
-  stack.PushApplied(std::move(cmd));  // effect already applied by Execute
+  stack.PushApplied(std::move(cmd)); // effect already applied by Execute
   CHECK(doc.GetFeature(0)->GetName() == "C");
   CHECK(doc.GetFeature(1)->GetName() == "A");
   CHECK(doc.GetFeature(2)->GetName() == "B");
 
-  stack.Undo(doc);  // back to [A, B, C]
+  stack.Undo(doc); // back to [A, B, C]
   CHECK(doc.GetFeature(0)->GetName() == "A");
   CHECK(doc.GetFeature(1)->GetName() == "B");
   CHECK(doc.GetFeature(2)->GetName() == "C");
 
-  stack.Redo(doc);  // [C, A, B] again
+  stack.Redo(doc); // [C, A, B] again
   CHECK(doc.GetFeature(0)->GetName() == "C");
   CHECK(doc.GetFeature(2)->GetName() == "B");
 }

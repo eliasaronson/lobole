@@ -7,7 +7,7 @@
 // the file-local helpers resolve them unqualified); the heavier file/envelope
 // helpers stay defined in Serialization.cpp.
 
-#include "core/ElementMap.h"  // ElementRef
+#include "core/ElementMap.h" // ElementRef
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 49;  // v49: sketch reference images (underlays)
+inline constexpr int kVersion = 49; // v49: sketch reference images (underlays)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});
@@ -33,7 +33,7 @@ inline nlohmann::json QuatToJson(const glm::quat& q) {
 }
 inline glm::quat QuatFromJson(const nlohmann::json& j) {
   return glm::quat(j.at(3).get<float>(), j.at(0).get<float>(),
-                   j.at(1).get<float>(), j.at(2).get<float>());  // (w,x,y,z)
+                   j.at(1).get<float>(), j.at(2).get<float>()); // (w,x,y,z)
 }
 
 inline nlohmann::json Vec2ToJson(const glm::vec2& v) {

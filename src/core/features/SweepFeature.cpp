@@ -11,12 +11,12 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepFill_TypeOfContact.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
-#include <Standard_Failure.hxx>
 
 TopoDS_Wire ResolveSweepPathWire(const RegenContext& ctx, uint64_t pathId) {
   const Feature* f = ctx.FindById(pathId);
@@ -49,10 +49,12 @@ CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
     shell.SetTransitionMode(BRepBuilderAPI_RoundCorner);
     if (!guide.IsNull()) {
       // A guide curve (auxiliary spine) supersedes the frame: it carries the
-      // sections as they travel — the "two directions" sweep/loft. ContactOnBorder
-      // makes them scale to touch the guide; NoContact only reorients them.
+      // sections as they travel — the "two directions" sweep/loft.
+      // ContactOnBorder makes them scale to touch the guide; NoContact only
+      // reorients them.
       shell.SetMode(guide, /*CurvilinearEquivalence=*/Standard_True,
-                    scaleToGuide ? BRepFill_ContactOnBorder : BRepFill_NoContact);
+                    scaleToGuide ? BRepFill_ContactOnBorder
+                                 : BRepFill_NoContact);
     } else {
       switch (frame) {
       case SweepFrame::Frenet:
@@ -82,14 +84,13 @@ CADShape SweepSectionsAlongSpine(const std::vector<TopoDS_Wire>& profiles,
 CADShape SweepProfileAlongSpine(const TopoDS_Wire& profile,
                                 const TopoDS_Wire& spine, SweepFrame frame,
                                 const TopoDS_Wire& guide) {
-  return SweepSectionsAlongSpine(std::vector<TopoDS_Wire>{profile}, spine, frame,
-                                 guide, /*scaleToGuide=*/false);
+  return SweepSectionsAlongSpine(std::vector<TopoDS_Wire>{profile}, spine,
+                                 frame, guide, /*scaleToGuide=*/false);
 }
 
 SweepFeature::SweepFeature(const std::string& name, uint64_t profileSketchId,
                            uint64_t pathSketchId, ExtrudeMode mode)
-    : profileSketchId(profileSketchId), pathSketchId(pathSketchId),
-      mode(mode) {
+    : profileSketchId(profileSketchId), pathSketchId(pathSketchId), mode(mode) {
   m_name = name;
 }
 
@@ -102,8 +103,7 @@ bool SweepFeature::Execute(RegenContext& ctx) {
   }
 
   const auto loops = sketch::BuildLoops(prof->entities);
-  const TopoDS_Wire profileWire =
-      sketch::BuildProfileWire(prof->plane, loops);
+  const TopoDS_Wire profileWire = sketch::BuildProfileWire(prof->plane, loops);
   if (profileWire.IsNull()) {
     SetError("sweep profile has no single closed loop");
     return false;

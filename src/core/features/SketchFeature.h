@@ -3,9 +3,9 @@
 #include "cad/SketchPlane.h"
 #include "core/Feature.h"
 
-#include <glm/glm.hpp>
 #include <array>
 #include <cmath>
+#include <glm/glm.hpp>
 #include <map>
 #include <optional>
 #include <string>
@@ -113,13 +113,13 @@ using Entity =
 // `widthPx`/`heightPx` are cached so sizing and calibration never need an image
 // decoder (headless builds have none).
 struct ReferenceImage {
-  uint32_t id = 0;               // stable within the sketch (1-based; 0 = none)
-  std::string asset;             // Document asset key for the pixel data
-  glm::vec2 origin{0.0f, 0.0f};  // plane-UV of the image's (0,0) pixel corner
-  double rotation = 0.0;         // radians CCW about `origin`
-  double unitsPerPixel = 1.0;    // plane units per image pixel (the scale)
-  double opacity = 0.5;          // 0..1 blend over the sketch background
-  int widthPx = 0;               // cached pixel dimensions
+  uint32_t id = 0;              // stable within the sketch (1-based; 0 = none)
+  std::string asset;            // Document asset key for the pixel data
+  glm::vec2 origin{0.0f, 0.0f}; // plane-UV of the image's (0,0) pixel corner
+  double rotation = 0.0;        // radians CCW about `origin`
+  double unitsPerPixel = 1.0;   // plane units per image pixel (the scale)
+  double opacity = 0.5;         // 0..1 blend over the sketch background
+  int widthPx = 0;              // cached pixel dimensions
   int heightPx = 0;
   bool hidden = false;
 };
@@ -237,8 +237,8 @@ inline glm::vec2 EllipseArcEvalUV(const EllipseArc& e, double t) {
 // The ellipse parameter t of a point p on the ellipse (center/rMajor/rMinor/
 // rotation) — the inverse of EllipseArcEvalUV. Used when a reflection has to
 // re-derive the swept params of the mirrored arc.
-inline double EllipseParamOfPoint(glm::vec2 center, double rMajor, double rMinor,
-                                  double rotation, glm::vec2 p) {
+inline double EllipseParamOfPoint(glm::vec2 center, double rMajor,
+                                  double rMinor, double rotation, glm::vec2 p) {
   const double c = std::cos(rotation), s = std::sin(rotation);
   const glm::vec2 d = p - center;
   const double lx = c * d.x + s * d.y;  // component along the major axis
@@ -265,7 +265,8 @@ inline std::vector<glm::vec2> EllipseArcSampleUV(const EllipseArc& e,
     en += 2.0 * M_PI; // CCW-always
   const double sweep = en - s;
   if (segs <= 0)
-    segs = std::max(2, static_cast<int>(std::lround(32 * sweep / (2.0 * M_PI))));
+    segs =
+        std::max(2, static_cast<int>(std::lround(32 * sweep / (2.0 * M_PI))));
   std::vector<glm::vec2> pts;
   pts.reserve(segs + 1);
   for (int i = 0; i <= segs; i++)
@@ -278,8 +279,8 @@ inline std::vector<glm::vec2> EllipseArcSampleUV(const EllipseArc& e,
 inline glm::vec2 ArcPointUV(const Arc& arc, uint8_t which) {
   const float r = static_cast<float>(arc.radius);
   if (which == 1)
-    return arc.center + r * glm::vec2(std::cos(arc.startAngle),
-                                      std::sin(arc.startAngle));
+    return arc.center +
+           r * glm::vec2(std::cos(arc.startAngle), std::sin(arc.startAngle));
   if (which == 2)
     return arc.center +
            r * glm::vec2(std::cos(arc.endAngle), std::sin(arc.endAngle));
@@ -324,9 +325,10 @@ inline std::optional<Arc> ArcFromThreePoints(glm::vec2 p0, glm::vec2 through,
     return std::nullopt;
   const double a2 = ax * ax + ay * ay, b2 = bx * bx + by * by,
                c2 = cx * cx + cy * cy;
-  glm::vec2 center(
-      static_cast<float>((a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d),
-      static_cast<float>((a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d));
+  glm::vec2 center(static_cast<float>(
+                       (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d),
+                   static_cast<float>(
+                       (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d));
   const double r = glm::length(p0 - center);
   auto ang = [&](glm::vec2 p) {
     return std::atan2(p.y - center.y, p.x - center.x);
@@ -350,7 +352,7 @@ inline glm::vec2 ReflectPoint(glm::vec2 p, glm::vec2 a, glm::vec2 b) {
   glm::vec2 d = b - a;
   float len2 = glm::dot(d, d);
   if (len2 < 1e-12f)
-    return p; // degenerate axis: identity
+    return p;                          // degenerate axis: identity
   float t = glm::dot(p - a, d) / len2; // projection param along the axis
   glm::vec2 foot = a + t * d;
   return foot + (foot - p); // p mirrored through its foot on the axis
@@ -428,8 +430,8 @@ inline Entity TranslateEntity(const Entity& e, glm::vec2 t) {
         else if constexpr (std::is_same_v<T, Ellipse>)
           return Ellipse{g.center + t, g.rMajor, g.rMinor, g.rotation};
         else if constexpr (std::is_same_v<T, EllipseArc>)
-          return EllipseArc{g.center + t, g.rMajor, g.rMinor, g.rotation,
-                            g.startParam, g.endParam};
+          return EllipseArc{g.center + t, g.rMajor,     g.rMinor,
+                            g.rotation,   g.startParam, g.endParam};
         else { // BSpline: translate every pole
           BSpline bs = g;
           for (glm::vec2& pole : bs.poles)
@@ -468,8 +470,8 @@ inline Entity RotateEntity(const Entity& e, glm::vec2 center, double ang) {
         else if constexpr (std::is_same_v<T, Ellipse>)
           return Ellipse{rot(g.center), g.rMajor, g.rMinor, g.rotation + ang};
         else if constexpr (std::is_same_v<T, EllipseArc>)
-          return EllipseArc{rot(g.center), g.rMajor, g.rMinor, g.rotation + ang,
-                            g.startParam, g.endParam};
+          return EllipseArc{rot(g.center),    g.rMajor,     g.rMinor,
+                            g.rotation + ang, g.startParam, g.endParam};
         else { // BSpline: rotate every pole
           BSpline bs = g;
           for (glm::vec2& pole : bs.poles)
@@ -538,13 +540,14 @@ struct PointRef {
 
 // Datum geometry: the sketch origin + X/Y axes. These are always available as
 // constraint / mirror / snap references but are NOT stored in the entity list —
-// they live in a reserved id block above any real entity id (which grow from 1).
-// `IndexOfEntity` returns SIZE_MAX for them, so every ref-by-index site must
-// check IsDatum first and use the helpers below for their (fixed) geometry.
+// they live in a reserved id block above any real entity id (which grow from
+// 1). `IndexOfEntity` returns SIZE_MAX for them, so every ref-by-index site
+// must check IsDatum first and use the helpers below for their (fixed)
+// geometry.
 constexpr uint32_t kDatumBase = 0xFFFFFF00u;
-constexpr uint32_t kOrigin = kDatumBase;     // point (0,0)
-constexpr uint32_t kAxisX = kDatumBase + 1;  // line (0,0) -> (1,0)  (+U)
-constexpr uint32_t kAxisY = kDatumBase + 2;  // line (0,0) -> (0,1)  (+V)
+constexpr uint32_t kOrigin = kDatumBase;    // point (0,0)
+constexpr uint32_t kAxisX = kDatumBase + 1; // line (0,0) -> (1,0)  (+U)
+constexpr uint32_t kAxisY = kDatumBase + 2; // line (0,0) -> (0,1)  (+V)
 
 inline bool IsDatum(uint32_t id) { return id >= kDatumBase; }
 
@@ -602,8 +605,8 @@ inline bool IsDimension(ConstraintKind k) {
 struct Constraint {
   ConstraintKind kind;
   PointRef a, b;
-  double value = 0.0;         // Distance / Radius / Angle dimension
-  PointRef c;                 // third ref (Symmetric: the symmetry line)
+  double value = 0.0;          // Distance / Radius / Angle dimension
+  PointRef c;                  // third ref (Symmetric: the symmetry line)
   glm::vec2 labelOffset{0.0f}; // dimension annotation placement (UV)
   // Optional expression driving `value` (empty = plain literal). Evaluated
   // against the document's parameter table on every regeneration; kept last
@@ -624,11 +627,11 @@ enum class DerivedKind {
   LinkedCopy,
 };
 
-// A *linked* generative op: it derives geometry from `sourceIds` and is replayed
-// by SketchFeature::RegenerateDerived when the sources change. `instances` maps
-// each (sourceId, k) to the stable id of the generated entity so refs survive a
-// count change (the sketch-local analogue of SolveSpace's remap table). Baked
-// ops leave no record.
+// A *linked* generative op: it derives geometry from `sourceIds` and is
+// replayed by SketchFeature::RegenerateDerived when the sources change.
+// `instances` maps each (sourceId, k) to the stable id of the generated entity
+// so refs survive a count change (the sketch-local analogue of SolveSpace's
+// remap table). Baked ops leave no record.
 struct DerivedOp {
   DerivedKind kind;
   std::vector<uint32_t> sourceIds;
@@ -656,7 +659,7 @@ struct DerivedOp {
 // source, not the solve).
 enum class ExternalKind { Face, Edge };
 struct ExternalGeom {
-  ElementRef ref;   // face (elementMap.names) or edge (edgeNames) of a body
+  ElementRef ref; // face (elementMap.names) or edge (edgeNames) of a body
   ExternalKind kind = ExternalKind::Face;
   std::vector<uint32_t> genIds; // generated construction entity ids (in order)
 };
@@ -768,15 +771,17 @@ public:
   // it also adds constraints tying each copy to its source so the mirror tracks
   // edits (Symmetric on line/arc endpoints, Equal+Symmetric on circle/arc
   // centres; a source point already on the axis gets a Coincident instead).
-  // `link=false` bakes an unlinked copy. No-op (empty) if the axis isn't a line.
+  // `link=false` bakes an unlinked copy. No-op (empty) if the axis isn't a
+  // line.
   std::vector<uint32_t> MirrorEntities(const std::vector<uint32_t>& sourceIds,
                                        uint32_t axisLineId, bool link);
 
-  // Rounds the corner where line `lineId1` and `lineId2` meet with a tangent arc
-  // of the given radius: trims both lines to the tangent points, inserts the
-  // arc, and adds two Tangent + two Coincident constraints (removing the old
-  // corner coincident). Returns the new arc's id, or 0 if the lines don't share
-  // a corner, are parallel, or the radius is too large for either segment.
+  // Rounds the corner where line `lineId1` and `lineId2` meet with a tangent
+  // arc of the given radius: trims both lines to the tangent points, inserts
+  // the arc, and adds two Tangent + two Coincident constraints (removing the
+  // old corner coincident). Returns the new arc's id, or 0 if the lines don't
+  // share a corner, are parallel, or the radius is too large for either
+  // segment.
   uint32_t FilletCorner(uint32_t lineId1, uint32_t lineId2, double radius);
 
   // Patterns of `sourceIds`. Linear: `count` instances (incl. the seed) each
@@ -805,7 +810,8 @@ public:
   void RegenerateDerived();
 
   // Removes a linked DerivedOp and the entities it generated (its instances).
-  // No-op if opIndex is out of range. Call RegenerateDerived after for the rest.
+  // No-op if opIndex is out of range. Call RegenerateDerived after for the
+  // rest.
   void RemoveDerivedOp(size_t opIndex);
 
   // Adds a live external-geometry reference (a face or edge of a body earlier
@@ -831,8 +837,7 @@ public:
   // Replays one cross-sketch LinkedCopy op from `source`'s entities. False
   // when any source entity id no longer exists there (the caller errors the
   // sketch with a break-link hint).
-  bool ReplayLinkedCopyFrom(sketch::DerivedOp& op,
-                            const SketchFeature& source);
+  bool ReplayLinkedCopyFrom(sketch::DerivedOp& op, const SketchFeature& source);
 
   SketchPlane plane;
   // When non-zero: the id of a DatumPlaneFeature earlier in the history;

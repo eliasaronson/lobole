@@ -12,9 +12,9 @@
 namespace Measure {
 
 struct Element {
-  std::string kind; // "face" | "edge"
-  double area = 0.0;    // faces
-  double length = 0.0;  // edges
+  std::string kind;    // "face" | "edge"
+  double area = 0.0;   // faces
+  double length = 0.0; // edges
   // A circular/arc edge additionally reports its radius (0/false otherwise).
   double radius = 0.0;
   bool hasRadius = false;
@@ -100,10 +100,10 @@ std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
 // is placed by that occurrence's rigid world transform before the extrema —
 // distance and closest points come back in world space. The part-tab path is
 // the identity-transform special case of this.
-std::optional<DistanceResult> DistanceDetailed(
-    const std::vector<Body>& bodiesA, const ElementRef& a, const glm::mat4& xfA,
-    const std::vector<Body>& bodiesB, const ElementRef& b,
-    const glm::mat4& xfB);
+std::optional<DistanceResult>
+DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
+                 const glm::mat4& xfA, const std::vector<Body>& bodiesB,
+                 const ElementRef& b, const glm::mat4& xfB);
 
 // Axis-aligned bounding box of one resolved element (face or edge), in the
 // bodies' own (part-local) space — feeds zoom-to-selection. nullopt when the

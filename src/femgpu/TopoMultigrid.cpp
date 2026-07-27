@@ -1,6 +1,6 @@
 #include "femgpu/TopoMultigrid.h"
 
-#include "femgpu/TopoCgSolver.h"  // MgGpuData
+#include "femgpu/TopoCgSolver.h" // MgGpuData
 
 #include <Eigen/SparseCholesky>
 
@@ -23,7 +23,8 @@ Eigen::SparseMatrix<double> AssembleA(const SpmvSystem& sys,
     const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
     const double s = scales[e];
     for (int a = 0; a < 30; ++a) {
-      if (dof[a] < 0) continue;
+      if (dof[a] < 0)
+        continue;
       for (int b = 0; b < 30; ++b)
         if (dof[b] >= 0)
           trip.emplace_back(dof[a], dof[b],
@@ -43,13 +44,15 @@ double PowerLambdaMax(const Eigen::SparseMatrix<double>& A,
   for (int it = 0; it < 20; ++it) {
     Eigen::VectorXd w = diag.cwiseInverse().cwiseProduct(A * v);
     const double vw = v.dot(w), vv = v.squaredNorm();
-    if (vv <= 0.0) break;
+    if (vv <= 0.0)
+      break;
     lambda = vw / vv;
     const double n = w.norm();
-    if (n <= 0.0) break;
+    if (n <= 0.0)
+      break;
     v = w / n;
   }
-  return 1.1 * lambda;  // Chebyshev must bound the spectrum from above
+  return 1.1 * lambda; // Chebyshev must bound the spectrum from above
 }
 
 // Chebyshev correction z += q(D^-1 A)(r - A z) over [lmax/ratio, lmax]
@@ -59,12 +62,12 @@ double PowerLambdaMax(const Eigen::SparseMatrix<double>& A,
 void ChebSmooth(const Eigen::SparseMatrix<double>& A,
                 const Eigen::VectorXd& invDiag, double lmax, int degree,
                 const Eigen::VectorXd& r, Eigen::VectorXd& z) {
-  constexpr double kSmoothRatio = 15.0;  // smooth the top of the spectrum
+  constexpr double kSmoothRatio = 15.0; // smooth the top of the spectrum
   const double lmin = lmax / kSmoothRatio;
   const double theta = 0.5 * (lmax + lmin), delta = 0.5 * (lmax - lmin);
   const double sigma1 = theta / delta;
 
-  Eigen::VectorXd rc = invDiag.cwiseProduct(r - A * z);  // b - A' z in D^-1 A
+  Eigen::VectorXd rc = invDiag.cwiseProduct(r - A * z); // b - A' z in D^-1 A
   Eigen::VectorXd d = rc / theta;
   z += d;
   double rhoPrev = 1.0 / sigma1;
@@ -77,17 +80,19 @@ void ChebSmooth(const Eigen::SparseMatrix<double>& A,
   }
 }
 
-}  // namespace
+} // namespace
 
 bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
                   const std::vector<int>& dofMap, MgSetup& out,
                   std::string* error) {
   auto fail = [&](const std::string& m) {
-    if (error) *error = m;
+    if (error)
+      *error = m;
     return false;
   };
   const int nNodes = static_cast<int>(nodes.size() / 3);
-  if (nNodes <= 0 || sys.nElems <= 0) return fail("empty multigrid input");
+  if (nNodes <= 0 || sys.nElems <= 0)
+    return fail("empty multigrid input");
   if (static_cast<int>(dofMap.size()) != 3 * nNodes)
     return fail("dofMap size mismatch");
 
@@ -100,7 +105,8 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
   std::vector<int> nodeOfFreeDof(sys.nFree, -1);
   for (int n = 0; n < nNodes; ++n)
     for (int k = 0; k < 3; ++k)
-      if (dofMap[3 * n + k] >= 0) nodeOfFreeDof[dofMap[3 * n + k]] = n;
+      if (dofMap[3 * n + k] >= 0)
+        nodeOfFreeDof[dofMap[3 * n + k]] = n;
 
   std::vector<std::vector<int>> elemNodes(sys.nElems);
   for (int e = 0; e < sys.nElems; ++e) {
@@ -109,7 +115,8 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
       const int32_t g = sys.dof[static_cast<size_t>(e) * 30 + slot];
       if (g >= 0) {
         const int n = nodeOfFreeDof[g];
-        if (en.empty() || en.back() != n) en.push_back(n);
+        if (en.empty() || en.back() != n)
+          en.push_back(n);
       }
     }
     std::sort(en.begin(), en.end());
@@ -137,28 +144,34 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
   out.aggOfNode.assign(nNodes, -1);
   int nAgg = 0;
   for (int seed = 0; seed < nNodes; ++seed) {
-    if (out.aggOfNode[seed] >= 0) continue;
+    if (out.aggOfNode[seed] >= 0)
+      continue;
     bool clean = true;
     for (int nb : adj[seed])
       if (out.aggOfNode[nb] >= 0) {
         clean = false;
         break;
       }
-    if (!clean) continue;
+    if (!clean)
+      continue;
     const int a = nAgg++;
     out.aggOfNode[seed] = a;
-    for (int nb : adj[seed]) out.aggOfNode[nb] = a;
+    for (int nb : adj[seed])
+      out.aggOfNode[nb] = a;
   }
   for (int n = 0; n < nNodes; ++n) {
-    if (out.aggOfNode[n] >= 0) continue;
+    if (out.aggOfNode[n] >= 0)
+      continue;
     // Most-connected neighboring aggregate.
     int best = -1, bestCount = 0;
     for (int nb : adj[n]) {
       const int a = out.aggOfNode[nb];
-      if (a < 0) continue;
+      if (a < 0)
+        continue;
       int count = 0;
       for (int nb2 : adj[n])
-        if (out.aggOfNode[nb2] == a) ++count;
+        if (out.aggOfNode[nb2] == a)
+          ++count;
       if (count > bestCount) {
         bestCount = count;
         best = a;
@@ -167,7 +180,7 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
     if (best >= 0)
       out.aggOfNode[n] = best;
     else
-      out.aggOfNode[n] = nAgg++;  // truly isolated
+      out.aggOfNode[n] = nAgg++; // truly isolated
   }
   out.nAgg = nAgg;
   out.nCoarse = 6 * nAgg;
@@ -178,12 +191,13 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
   std::vector<int> aggCount(nAgg, 0);
   for (int n = 0; n < nNodes; ++n) {
     const int a = out.aggOfNode[n];
-    centroid[a] += Eigen::Vector3d(nodes[3 * n], nodes[3 * n + 1],
-                                   nodes[3 * n + 2]);
+    centroid[a] +=
+        Eigen::Vector3d(nodes[3 * n], nodes[3 * n + 1], nodes[3 * n + 2]);
     aggCount[a]++;
   }
   for (int a = 0; a < nAgg; ++a)
-    if (aggCount[a] > 0) centroid[a] /= aggCount[a];
+    if (aggCount[a] > 0)
+      centroid[a] /= aggCount[a];
   out.aggCentroid.resize(3 * nAgg);
   for (int a = 0; a < nAgg; ++a) {
     out.aggCentroid[3 * a + 0] = centroid[a].x();
@@ -234,7 +248,7 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
     const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
     const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
     // Local coarse DOF set: aggregates of this element's nodes.
-    std::vector<int> coarse;  // global coarse dof ids
+    std::vector<int> coarse; // global coarse dof ids
     coarse.reserve(24);
     for (int n : elemNodes[e])
       for (int k = 0; k < 6; ++k) {
@@ -249,20 +263,23 @@ bool BuildMgSetup(const std::vector<double>& nodes, const SpmvSystem& sys,
     Eigen::MatrixXd Pl = Eigen::MatrixXd::Zero(30, nc);
     for (int slot = 0; slot < 30; ++slot) {
       const int32_t g = dof[slot];
-      if (g < 0) continue;
+      if (g < 0)
+        continue;
       // Row g of P has <=6 entries, all within this element's coarse set.
-      for (int c = 0; c < nc; ++c) Pl(slot, c) = out.P.coeff(g, coarse[c]);
+      for (int c = 0; c < nc; ++c)
+        Pl(slot, c) = out.P.coeff(g, coarse[c]);
     }
     Eigen::MatrixXd Ke(30, 30);
     for (int a = 0; a < 30; ++a)
-      for (int b = 0; b < 30; ++b) Ke(a, b) = static_cast<double>(ke[a * 30 + b]);
+      for (int b = 0; b < 30; ++b)
+        Ke(a, b) = static_cast<double>(ke[a * 30 + b]);
     // Zero the fixed slots (they are absent from the reduced system).
     for (int slot = 0; slot < 30; ++slot)
       if (dof[slot] < 0) {
         Ke.row(slot).setZero();
         Ke.col(slot).setZero();
       }
-    const Eigen::MatrixXd B = Pl.transpose() * Ke * Pl;  // nc x nc
+    const Eigen::MatrixXd B = Pl.transpose() * Ke * Pl; // nc x nc
     for (int r = 0; r < nc; ++r)
       for (int c = 0; c < nc; ++c)
         if (B(r, c) != 0.0) {
@@ -281,7 +298,8 @@ bool MgCoarseSolver::UpdateScales(const std::vector<float>& scales,
   ct.reserve(m_setup.blockVal.size());
   const int nElems = static_cast<int>(m_setup.elemBlockOffset.size()) - 1;
   if (static_cast<int>(scales.size()) != nElems) {
-    if (error) *error = "coarse update: scale count mismatch";
+    if (error)
+      *error = "coarse update: scale count mismatch";
     return false;
   }
   for (int e = 0; e < nElems; ++e) {
@@ -294,7 +312,8 @@ bool MgCoarseSolver::UpdateScales(const std::vector<float>& scales,
   Eigen::SparseMatrix<double> Ac(m_setup.nCoarse, m_setup.nCoarse);
   Ac.setFromTriplets(ct.begin(), ct.end());
   double tr = 0.0;
-  for (int i = 0; i < m_setup.nCoarse; ++i) tr += Ac.coeff(i, i);
+  for (int i = 0; i < m_setup.nCoarse; ++i)
+    tr += Ac.coeff(i, i);
   const double eps = 1e-10 * (tr / std::max(1, m_setup.nCoarse));
   Eigen::SparseMatrix<double> I(m_setup.nCoarse, m_setup.nCoarse);
   I.setIdentity();
@@ -305,7 +324,8 @@ bool MgCoarseSolver::UpdateScales(const std::vector<float>& scales,
   }
   m_ldlt.factorize(Ac);
   if (m_ldlt.info() != Eigen::Success) {
-    if (error) *error = "coarse factorization failed";
+    if (error)
+      *error = "coarse factorization failed";
     m_ready = false;
     return false;
   }
@@ -316,13 +336,16 @@ bool MgCoarseSolver::UpdateScales(const std::vector<float>& scales,
 bool MgCoarseSolver::Solve(const float* rc, float* ec,
                            std::string* error) const {
   if (!m_ready) {
-    if (error) *error = "coarse solver not factorized (UpdateScales first)";
+    if (error)
+      *error = "coarse solver not factorized (UpdateScales first)";
     return false;
   }
   Eigen::VectorXd r(m_setup.nCoarse);
-  for (int i = 0; i < m_setup.nCoarse; ++i) r[i] = rc[i];
+  for (int i = 0; i < m_setup.nCoarse; ++i)
+    r[i] = rc[i];
   const Eigen::VectorXd e = m_ldlt.solve(r);
-  for (int i = 0; i < m_setup.nCoarse; ++i) ec[i] = static_cast<float>(e[i]);
+  for (int i = 0; i < m_setup.nCoarse; ++i)
+    ec[i] = static_cast<float>(e[i]);
   return true;
 }
 
@@ -331,7 +354,8 @@ std::shared_ptr<MgGpuData> MakeMgGpuData(const std::vector<double>& nodes,
                                          const std::vector<int>& dofMap,
                                          std::string* error) {
   MgSetup setup;
-  if (!BuildMgSetup(nodes, sys, dofMap, setup, error)) return nullptr;
+  if (!BuildMgSetup(nodes, sys, dofMap, setup, error))
+    return nullptr;
   const int nNodes = static_cast<int>(nodes.size() / 3);
   auto mg = std::make_shared<MgGpuData>();
   mg->nNodes = nNodes;
@@ -362,10 +386,10 @@ std::shared_ptr<MgGpuData> MakeMgGpuData(const std::vector<double>& nodes,
 bool MgReferencePcg(const SpmvSystem& sys, const std::vector<float>& scales,
                     const MgSetup& mg, const Eigen::VectorXd& f,
                     Eigen::VectorXd& x, double tol, int maxIter,
-                    int smootherDegree, MgRefStats* stats,
-                    std::string* error) {
+                    int smootherDegree, MgRefStats* stats, std::string* error) {
   auto fail = [&](const std::string& m) {
-    if (error) *error = m;
+    if (error)
+      *error = m;
     return false;
   };
   if (static_cast<int>(scales.size()) != sys.nElems)
@@ -374,7 +398,8 @@ bool MgReferencePcg(const SpmvSystem& sys, const std::vector<float>& scales,
   const Eigen::SparseMatrix<double> A = AssembleA(sys, scales);
   Eigen::VectorXd diag = A.diagonal();
   for (int i = 0; i < diag.size(); ++i)
-    if (diag[i] <= 0.0) return fail("non-positive diagonal (singular system)");
+    if (diag[i] <= 0.0)
+      return fail("non-positive diagonal (singular system)");
   const Eigen::VectorXd invDiag = diag.cwiseInverse();
   const double lmax = PowerLambdaMax(A, diag);
 
@@ -390,7 +415,8 @@ bool MgReferencePcg(const SpmvSystem& sys, const std::vector<float>& scales,
   Eigen::SparseMatrix<double> Ac(mg.nCoarse, mg.nCoarse);
   Ac.setFromTriplets(ct.begin(), ct.end());
   double tr = 0.0;
-  for (int i = 0; i < mg.nCoarse; ++i) tr += Ac.coeff(i, i);
+  for (int i = 0; i < mg.nCoarse; ++i)
+    tr += Ac.coeff(i, i);
   const double eps = 1e-10 * (tr / std::max(1, mg.nCoarse));
   Eigen::SparseMatrix<double> I(mg.nCoarse, mg.nCoarse);
   I.setIdentity();
@@ -403,18 +429,20 @@ bool MgReferencePcg(const SpmvSystem& sys, const std::vector<float>& scales,
   auto applyM = [&](const Eigen::VectorXd& r) {
     Eigen::VectorXd z = Eigen::VectorXd::Zero(r.size());
     ChebSmooth(A, invDiag, lmax, smootherDegree, r, z);        // pre
-    const Eigen::VectorXd rc = mg.P.transpose() * (r - A * z);  // restrict
-    z += mg.P * coarse.solve(rc);                               // correct
+    const Eigen::VectorXd rc = mg.P.transpose() * (r - A * z); // restrict
+    z += mg.P * coarse.solve(rc);                              // correct
     ChebSmooth(A, invDiag, lmax, smootherDegree, r, z);        // post
     return z;
   };
 
   // Standard PCG (fp64).
-  if (x.size() != sys.nFree) x = Eigen::VectorXd::Zero(sys.nFree);
+  if (x.size() != sys.nFree)
+    x = Eigen::VectorXd::Zero(sys.nFree);
   const double bb = f.squaredNorm();
   if (bb <= 0.0) {
     x.setZero();
-    if (stats) *stats = {0, 0.0, true};
+    if (stats)
+      *stats = {0, 0.0, true};
     return true;
   }
   const double target = tol * tol * bb;
@@ -444,4 +472,4 @@ bool MgReferencePcg(const SpmvSystem& sys, const std::vector<float>& scales,
   return true;
 }
 
-}  // namespace gpu
+} // namespace gpu

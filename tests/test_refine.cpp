@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/RefineFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <TopExp_Explorer.hxx>
 #include <TopoDS_Shape.hxx>
@@ -26,11 +26,11 @@ static int FaceCount(const CADShape& s) {
 // Two 2x2x2 boxes face-adjacent at x=2, unioned: the coplanar side faces are
 // split by a seam edge, so the fused body has more than a clean box's 6 faces.
 static void AddUnion(Document& doc, uint64_t& unionId) {
-  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 2.0, 2.0,
-                                              2.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0, 0, 0), 2.0, 2.0, 2.0));
   const uint64_t a = doc.GetFeature(0)->GetId();
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(2, 0, 0), 2.0, 2.0,
-                                              2.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(2, 0, 0), 2.0, 2.0, 2.0));
   const uint64_t b = doc.GetFeature(1)->GetId();
   doc.AddFeature(std::make_unique<BooleanFeature>("U", a, b, BooleanOp::Union));
   unionId = doc.GetFeature(2)->GetId();
@@ -47,7 +47,7 @@ TEST_CASE("Refine merges the coplanar seams from a union", "[refine]") {
   doc.AddFeature(std::make_unique<RefineFeature>("R", u));
   REQUIRE(doc.GetBodies().size() == 1);
   const auto& body = doc.GetBodies()[0];
-  CHECK(FaceCount(body.shape) == 6);              // back to a clean box (4x2x2)
+  CHECK(FaceCount(body.shape) == 6); // back to a clean box (4x2x2)
   CHECK_THAT(body.shape.Volume(), WithinRel(16.0, 1e-6)); // volume preserved
   CHECK(body.createdBy == u); // modified in place; downstream refs survive
   CHECK(body.elementMap.names.size() == 6); // fresh names for the 6 faces

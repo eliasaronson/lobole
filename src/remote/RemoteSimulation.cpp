@@ -25,10 +25,12 @@ namespace remote {
 // std::nullopt otherwise; throws std::runtime_error on error (the caller's
 // try/catch turns it into an error response).
 std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
-                                        const std::string& m, const RpcParams& p) {
-  Document* doc = &document;  // keep the moved block's `doc->` verbatim
+                                        const std::string& m,
+                                        const RpcParams& p) {
+  Document* doc = &document; // keep the moved block's `doc->` verbatim
   if (m == "add_study") {
-    auto cmd = std::make_unique<AddStudyCommand>(p.value("name", std::string{}));
+    auto cmd =
+        std::make_unique<AddStudyCommand>(p.value("name", std::string{}));
     AddStudyCommand* raw = cmd.get();
     state.commands->Execute(std::move(cmd), *doc);
     const fem::Study* s = doc->FindStudy(raw->StudyId());
@@ -36,7 +38,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   }
   if (m == "remove_study") {
     const uint64_t id = p.at("study").get<uint64_t>();
-    if (!doc->FindStudy(id)) throw std::runtime_error("no such study");
+    if (!doc->FindStudy(id))
+      throw std::runtime_error("no such study");
     state.commands->Execute(std::make_unique<RemoveStudyCommand>(id), *doc);
     return json::object();
   }
@@ -49,11 +52,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       fem::EvaluateStudyExprs(eval, doc->Symbols(), nullptr);
       json loads = json::array();
       for (const fem::Load& l : eval.loads) {
-        json lj = {{"id", l.id},
-                   {"type", fem::LoadTypeToString(l.type)},
-                   {"face", {{"feature_id", l.face.featureId},
-                             {"element", l.face.name}}}};
-        if (l.type != fem::LoadType::Fixed) lj["magnitude"] = l.magnitude;
+        json lj = {
+            {"id", l.id},
+            {"type", fem::LoadTypeToString(l.type)},
+            {"face",
+             {{"feature_id", l.face.featureId}, {"element", l.face.name}}}};
+        if (l.type != fem::LoadType::Fixed)
+          lj["magnitude"] = l.magnitude;
         if (l.type == fem::LoadType::Force)
           lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
         loads.push_back(std::move(lj));
@@ -87,7 +92,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   auto modifyStudy = [&](uint64_t id, const std::string& desc,
                          const std::function<void(fem::Study&)>& mutate) {
     const fem::Study* cur = doc->FindStudy(id);
-    if (!cur) throw std::runtime_error("no such study");
+    if (!cur)
+      throw std::runtime_error("no such study");
     json before = DocumentIO::StudyToJson(*cur);
     fem::Study copy = *cur;
     mutate(copy);
@@ -99,11 +105,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
   if (m == "set_study") {
     const uint64_t id = p.at("study").get<uint64_t>();
     modifyStudy(id, "Edit study", [&](fem::Study& s) {
-      if (p.contains("name")) s.name = p.at("name").get<std::string>();
+      if (p.contains("name"))
+        s.name = p.at("name").get<std::string>();
       if (p.contains("mesh_size")) {
         const json& v = p.at("mesh_size");
         if (v.is_string()) {
-          s.meshSizeExpr = v.get<std::string>();  // evaluated at mesh time
+          s.meshSizeExpr = v.get<std::string>(); // evaluated at mesh time
         } else {
           s.meshSize = v.get<double>();
           s.meshSizeExpr.clear();
@@ -111,8 +118,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       }
       if (p.contains("type") &&
           !fem::AnalysisTypeFromString(p.at("type").get<std::string>(), s.type))
-        throw std::runtime_error("analysis type must be static, modal, or topology");
-      if (p.contains("num_modes")) s.numModes = p.at("num_modes").get<int>();
+        throw std::runtime_error(
+            "analysis type must be static, modal, or topology");
+      if (p.contains("num_modes"))
+        s.numModes = p.at("num_modes").get<int>();
       if (p.contains("gravity")) {
         const auto& g = p.at("gravity");
         s.gravity = glm::dvec3(g.at(0).get<double>(), g.at(1).get<double>(),
@@ -121,13 +130,21 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       // Topology parameters (expression-or-literal, like mesh size).
       if (p.contains("volume_fraction")) {
         const json& v = p.at("volume_fraction");
-        if (v.is_string()) s.volumeFractionExpr = v.get<std::string>();
-        else { s.volumeFraction = v.get<double>(); s.volumeFractionExpr.clear(); }
+        if (v.is_string())
+          s.volumeFractionExpr = v.get<std::string>();
+        else {
+          s.volumeFraction = v.get<double>();
+          s.volumeFractionExpr.clear();
+        }
       }
       if (p.contains("filter_radius")) {
         const json& v = p.at("filter_radius");
-        if (v.is_string()) s.filterRadiusExpr = v.get<std::string>();
-        else { s.filterRadius = v.get<double>(); s.filterRadiusExpr.clear(); }
+        if (v.is_string())
+          s.filterRadiusExpr = v.get<std::string>();
+        else {
+          s.filterRadius = v.get<double>();
+          s.filterRadiusExpr.clear();
+        }
       }
       if (p.contains("max_iterations"))
         s.maxIterations = p.at("max_iterations").get<int>();
@@ -144,13 +161,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                   [&](fem::Study& s) { s.keepFaces.push_back(face); });
     } else {
       modifyStudy(id, "Remove keep face", [&](fem::Study& s) {
-        s.keepFaces.erase(
-            std::remove_if(s.keepFaces.begin(), s.keepFaces.end(),
-                           [&](const ElementRef& f) {
-                             return f.featureId == face.featureId &&
-                                    f.name == face.name;
-                           }),
-            s.keepFaces.end());
+        s.keepFaces.erase(std::remove_if(s.keepFaces.begin(), s.keepFaces.end(),
+                                         [&](const ElementRef& f) {
+                                           return f.featureId ==
+                                                      face.featureId &&
+                                                  f.name == face.name;
+                                         }),
+                          s.keepFaces.end());
       });
     }
     return json::object();
@@ -160,8 +177,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     fem::Refinement r;
     r.face = studyFaceOf(p.at("face"));
     const json& v = p.at("size");
-    if (v.is_string()) r.sizeExpr = v.get<std::string>();
-    else r.size = v.get<double>();
+    if (v.is_string())
+      r.sizeExpr = v.get<std::string>();
+    else
+      r.size = v.get<double>();
     modifyStudy(id, "Add refinement",
                 [&](fem::Study& s) { s.refinements.push_back(r); });
     return json::object();
@@ -189,8 +208,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     l.face = studyFaceOf(p.at("face"));
     if (p.contains("magnitude")) {
       const json& v = p.at("magnitude");
-      if (v.is_string()) l.magnitudeExpr = v.get<std::string>();
-      else l.magnitude = v.get<double>();
+      if (v.is_string())
+        l.magnitudeExpr = v.get<std::string>();
+      else
+        l.magnitude = v.get<double>();
     }
     if (p.contains("direction")) {
       const auto& d = p.at("direction");
@@ -204,9 +225,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     const uint64_t id = p.at("study").get<uint64_t>();
     const uint64_t loadId = p.at("load").get<uint64_t>();
     modifyStudy(id, "Remove load", [&](fem::Study& s) {
-      s.loads.erase(std::remove_if(s.loads.begin(), s.loads.end(),
-                                   [&](const fem::Load& l) { return l.id == loadId; }),
-                    s.loads.end());
+      s.loads.erase(
+          std::remove_if(s.loads.begin(), s.loads.end(),
+                         [&](const fem::Load& l) { return l.id == loadId; }),
+          s.loads.end());
     });
     return json::object();
   }
@@ -215,10 +237,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // before the solver exists. params: {study}
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Study* s = doc->FindStudy(id);
-    if (!s) throw std::runtime_error("no such study");
+    if (!s)
+      throw std::runtime_error("no such study");
     std::vector<fem::StudyBodyMesh> meshes;
     std::string err;
-    if (!fem::MeshStudy(*doc, *s, meshes, &err)) throw std::runtime_error(err);
+    if (!fem::MeshStudy(*doc, *s, meshes, &err))
+      throw std::runtime_error(err);
     json bodies = json::array();
     for (const fem::StudyBodyMesh& bm : meshes) {
       bodies.push_back({{"body", bm.bodyName},
@@ -239,7 +263,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     ui::PollTopologyRun(state, *doc);
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Study* s = doc->FindStudy(id);
-    if (!s) throw std::runtime_error("no such study");
+    if (!s)
+      throw std::runtime_error("no such study");
 
     if (m == "cancel_study") {
       return json{{"cancelled", ui::CancelTopologyRun(state, id)}};
@@ -275,11 +300,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
         return json{{"started", true}, {"running", true}};
       }
       std::string err;
-      if (!ui::RunStudyAndCache(*doc, id, &err)) throw std::runtime_error(err);
+      if (!ui::RunStudyAndCache(*doc, id, &err))
+        throw std::runtime_error(err);
     }
 
     const fem::StudyRuntime* rt = doc->StudyResults(id);
-    if (!rt) throw std::runtime_error("study has not been run");
+    if (!rt)
+      throw std::runtime_error("study has not been run");
 
     // Topology studies report the optimization summary (the density field is
     // read via set_result_display / export, not echoed here).
@@ -312,14 +339,15 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
         nodes += b.mesh.stats.nodeCount;
         elements += b.mesh.stats.tetCount;
         json freqs = json::array();
-        for (const auto& mode : b.results.modes) freqs.push_back(mode.frequencyHz);
+        for (const auto& mode : b.results.modes)
+          freqs.push_back(mode.frequencyHz);
         bodies.push_back({{"body", b.bodyName}, {"frequencies_hz", freqs}});
       }
       return json{{"analysis", "modal"},
-              {"nodes", nodes},
-              {"elements", elements},
-              {"bodies", bodies},
-              {"stale", doc->StudyResultsStale(id)}};
+                  {"nodes", nodes},
+                  {"elements", elements},
+                  {"bodies", bodies},
+                  {"stale", doc->StudyResultsStale(id)}};
     }
 
     // Aggregate mesh size and a factor of safety (min over bodies with yield
@@ -339,11 +367,13 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
           b.results.maxVonMises > 0) {
         const auto mt = CADMaterials::MaterialLibrary::FromSlug(
             doc->GetBodies()[b.bodyIndex].material);
-        const float yield = CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
+        const float yield =
+            CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
         if (yield > 0) {
           const double fos = yield / b.results.maxVonMises;
           bj["factor_of_safety"] = fos;
-          if (!haveFoS || fos < minFoS) minFoS = fos;
+          if (!haveFoS || fos < minFoS)
+            minFoS = fos;
           haveFoS = true;
         }
       }
@@ -363,7 +393,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
           {"body", rt->maxDispBody}}},
         {"bodies", perBody},
         {"stale", doc->StudyResultsStale(id)}};
-    if (haveFoS) result["factor_of_safety"] = minFoS;
+    if (haveFoS)
+      result["factor_of_safety"] = minFoS;
     return result;
   }
   if (m == "set_topo_ghost") {
@@ -371,10 +402,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // translucent render of its optimized shape, to re-model against.
     // params: {study, on?: true}
     const uint64_t id = p.at("study").get<uint64_t>();
-    if (!doc->FindStudy(id)) throw std::runtime_error("no such study");
+    if (!doc->FindStudy(id))
+      throw std::runtime_error("no such study");
     const bool on = p.value("on", true);
     state.topoGhostStudyId = on ? id : 0;
-    state.syncedDocumentVersion = UINT64_MAX;  // force a renderer resync
+    state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
     return json{{"study", id}, {"on", on}};
   }
   if (m == "export_topo_stl") {
@@ -384,20 +416,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     ui::PollTopologyRun(state, *doc);
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Study* s = doc->FindStudy(id);
-    if (!s) throw std::runtime_error("no such study");
+    if (!s)
+      throw std::runtime_error("no such study");
     if (s->type != fem::AnalysisType::Topology)
       throw std::runtime_error("not a topology study");
     const fem::StudyRuntime* rt = doc->StudyResults(id);
     if (!rt || rt->bodies.empty())
       throw std::runtime_error("study has no result to export");
     const fem::StudyBodyResult& b = rt->bodies.front();
-    const double thr = p.contains("threshold") && p.at("threshold").get<double>() > 0
-                           ? p.at("threshold").get<double>()
-                           : fem::AutoIsoThreshold(b.mesh, b.density,
-                                                   rt->volumeFractionAchieved);
+    const double thr =
+        p.contains("threshold") && p.at("threshold").get<double>() > 0
+            ? p.at("threshold").get<double>()
+            : fem::AutoIsoThreshold(b.mesh, b.density,
+                                    rt->volumeFractionAchieved);
     const std::string path = p.at("path").get<std::string>();
     std::string err;
-    if (!fem::ExportTopoStl(b.mesh, b.density, thr, p.value("smooth", 3), path, &err))
+    if (!fem::ExportTopoStl(b.mesh, b.density, thr, p.value("smooth", 3), path,
+                            &err))
       throw std::runtime_error(err);
     return json{{"path", path}, {"threshold", thr}};
   }
@@ -408,11 +443,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     ui::EnterSimulation(state);
     if (p.contains("study")) {
       const uint64_t id = p.at("study").get<uint64_t>();
-      if (!doc->FindStudy(id)) throw std::runtime_error("no such study");
+      if (!doc->FindStudy(id))
+        throw std::runtime_error("no such study");
       state.simulation.activeStudyId = id;
     }
     return json{{"active", state.simulation.active},
-            {"study", state.simulation.activeStudyId}};
+                {"study", state.simulation.activeStudyId}};
   }
   if (m == "exit_simulation") {
     ui::ExitSimulation(state);
@@ -427,7 +463,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     ui::EnterSimulation(state);
     if (p.contains("study")) {
       const uint64_t id = p.at("study").get<uint64_t>();
-      if (!doc->FindStudy(id)) throw std::runtime_error("no such study");
+      if (!doc->FindStudy(id))
+        throw std::runtime_error("no such study");
       state.simulation.activeStudyId = id;
     }
     const std::string f = p.value("field", std::string("von_mises"));
@@ -438,18 +475,19 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
         : f == "none"       ? ui::SimulationState::Field::None
                             : ui::SimulationState::Field::VonMises;
     if (p.contains("deform_scale"))
-      state.simulation.deformScale = static_cast<float>(p.at("deform_scale").get<double>());
-    if (p.contains("mode"))  // modal: which mode shape to display (0-based)
+      state.simulation.deformScale =
+          static_cast<float>(p.at("deform_scale").get<double>());
+    if (p.contains("mode")) // modal: which mode shape to display (0-based)
       state.simulation.activeMode = p.at("mode").get<int>();
-    if (p.contains("threshold"))  // topology iso-surface level (0..1, 0=auto)
+    if (p.contains("threshold")) // topology iso-surface level (0..1, 0=auto)
       state.simulation.topoThreshold =
           static_cast<float>(p.at("threshold").get<double>());
     return json{{"field", f},
-            {"deform_scale", state.simulation.deformScale},
-            {"mode", state.simulation.activeMode},
-            {"threshold", state.simulation.topoThreshold}};
+                {"deform_scale", state.simulation.deformScale},
+                {"mode", state.simulation.activeMode},
+                {"threshold", state.simulation.topoThreshold}};
   }
   return std::nullopt;
 }
 
-}  // namespace remote
+} // namespace remote

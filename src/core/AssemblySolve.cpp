@@ -19,12 +19,14 @@ namespace {
 // The occurrence's own placement matrix (translation + orientation). Mirrors
 // ui::OccurrenceMatrix, kept here so the solver has no UI dependency.
 glm::mat4 OccMatrix(const Occurrence& o) {
-  return glm::translate(glm::mat4(1.0f), o.position) * glm::mat4_cast(o.orientation);
+  return glm::translate(glm::mat4(1.0f), o.position) *
+         glm::mat4_cast(o.orientation);
 }
 
 // Build a right-handed orthonormal frame matrix from an origin, an in-plane X
-// hint, and the primary Z axis (columns X, Y, Z, origin). X is re-orthogonalized
-// against Z so the frame is exactly orthonormal even if the hint drifted.
+// hint, and the primary Z axis (columns X, Y, Z, origin). X is
+// re-orthogonalized against Z so the frame is exactly orthonormal even if the
+// hint drifted.
 glm::mat4 FrameMatrix(const glm::vec3& origin, const glm::vec3& xHint,
                       const glm::vec3& zAxis) {
   const glm::vec3 z = glm::normalize(zAxis);
@@ -61,7 +63,8 @@ glm::mat4 MateAdjust(const Mate& m) {
   return a;
 }
 
-void Decompose(const glm::mat4& m, glm::vec3& position, glm::quat& orientation) {
+void Decompose(const glm::mat4& m, glm::vec3& position,
+               glm::quat& orientation) {
   position = glm::vec3(m[3]);
   orientation = glm::normalize(glm::quat_cast(glm::mat3(m)));
 }
@@ -85,20 +88,25 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
                                              const PartResolver& partById,
                                              std::string* whyNot) {
   const auto fail = [&](std::string why) {
-    if (whyNot) *whyNot = std::move(why);
+    if (whyNot)
+      *whyNot = std::move(why);
     return std::nullopt;
   };
   const Occurrence* occ = asmDoc.FindById(c.occurrenceId);
-  if (!occ) return fail("its occurrence no longer exists");
+  if (!occ)
+    return fail("its occurrence no longer exists");
 
-  if (c.anchor.origin) return glm::mat4(1.0f); // the part's coordinate origin
+  if (c.anchor.origin)
+    return glm::mat4(1.0f); // the part's coordinate origin
 
   const Document* part = partById(occ->partId);
-  if (!part) return fail("the part document is not loaded");
+  if (!part)
+    return fail("the part document is not loaded");
 
   const ElementRef& ref = c.anchor.face;
   for (const Body& body : part->GetBodies()) {
-    if (body.createdBy != ref.featureId) continue;
+    if (body.createdBy != ref.featureId)
+      continue;
     const auto faceIdx = body.elementMap.Resolve(ref.name);
     if (!faceIdx) {
       // Owner found, name no longer resolves. The usual cause: a feature
@@ -110,7 +118,8 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
         (void)idx;
         if (name.size() > ref.name.size() &&
             name.compare(0, ref.name.size(), ref.name) == 0) {
-          if (!similar.empty()) similar += ", ";
+          if (!similar.empty())
+            similar += ", ";
           similar += name;
         }
       }
@@ -129,12 +138,15 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
       return fail("face '" + ref.name +
                   "' is neither planar nor cylindrical — no connector frame");
 
-    // Inference snap (A2.5 phase 4): override the origin with the snapped edge's
-    // characteristic point (a hole center, etc.), keeping the face's Z normal.
+    // Inference snap (A2.5 phase 4): override the origin with the snapped
+    // edge's characteristic point (a hole center, etc.), keeping the face's Z
+    // normal.
     if (c.anchor.snapEdge.IsSet()) {
-      if (const auto edgeIdx = body.elementMap.ResolveEdge(c.anchor.snapEdge.name)) {
+      if (const auto edgeIdx =
+              body.elementMap.ResolveEdge(c.anchor.snapEdge.name)) {
         glm::vec3 snap;
-        if (body.shape.EdgeSnapPoint(*edgeIdx, snap)) origin = snap;
+        if (body.shape.EdgeSnapPoint(*edgeIdx, snap))
+          origin = snap;
       }
     }
     return FrameMatrix(origin, xHint, /*z=*/primary);
@@ -170,13 +182,16 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
                             const std::string& why) {
         const Occurrence* occ = asmDoc.FindById(c.occurrenceId);
         std::string s = std::string("connector ") + letter;
-        if (occ) s += " (" + occ->name + ")";
+        if (occ)
+          s += " (" + occ->name + ")";
         return s + ": " + why;
       };
       std::string err;
-      if (!fa) err = side("A", mate.a, whyA);
+      if (!fa)
+        err = side("A", mate.a, whyA);
       if (!fb) {
-        if (!err.empty()) err += "; ";
+        if (!err.empty())
+          err += "; ";
         err += side("B", mate.b, whyB);
       }
       mate.error = err;
@@ -192,7 +207,8 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
 
   // Anchors: every `fixed` occurrence starts at its stored transform.
   for (const Occurrence& o : asmDoc.GetOccurrences())
-    if (o.fixed) world[o.id] = OccMatrix(o);
+    if (o.fixed)
+      world[o.id] = OccMatrix(o);
 
   // Propagate to a fixpoint, anchoring the lowest-id occurrence of each
   // still-unplaced floating component in between.
@@ -202,7 +218,8 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
       progress = false;
       for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
         const Mate& mate = asmDoc.GetMates()[i];
-        if (!frames[i].usable) continue;
+        if (!frames[i].usable)
+          continue;
         const uint64_t aId = mate.a.occurrenceId;
         const uint64_t bId = mate.b.occurrenceId;
         const bool aP = isPlaced(aId), bP = isPlaced(bId);
@@ -219,12 +236,14 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
           progress = true;
         } else if (aP && bP) {
           // Loop / redundant mate: check consistency, don't re-place.
-          if (!mate.error.empty()) continue; // already flagged
+          if (!mate.error.empty())
+            continue; // already flagged
           const glm::mat4 wa = world[aId] * frames[i].fa;
           const glm::mat4 wbExpected = wa * adjust;
           const glm::mat4 wbActual = world[bId] * frames[i].fb;
           if (MaxDiff(wbExpected, wbActual) > kConsistencyTol) {
-            asmDoc.GetMates()[i].error = "over-constrained (mate loop conflict)";
+            asmDoc.GetMates()[i].error =
+                "over-constrained (mate loop conflict)";
             report.erroredMates++;
           }
         }
@@ -236,14 +255,16 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
     // anchor stays where the user left it), then propagate again.
     uint64_t floatingAnchor = 0;
     for (size_t i = 0; i < asmDoc.GetMates().size(); i++) {
-      if (!frames[i].usable) continue;
+      if (!frames[i].usable)
+        continue;
       for (uint64_t id : {asmDoc.GetMates()[i].a.occurrenceId,
                           asmDoc.GetMates()[i].b.occurrenceId}) {
         if (!isPlaced(id) && (floatingAnchor == 0 || id < floatingAnchor))
           floatingAnchor = id;
       }
     }
-    if (floatingAnchor == 0) break;
+    if (floatingAnchor == 0)
+      break;
     if (const Occurrence* o = asmDoc.FindById(floatingAnchor))
       world[floatingAnchor] = OccMatrix(*o);
     else
@@ -254,13 +275,16 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
   // their stored transform (their world entry equals it); unmated occurrences
   // have no world entry and are untouched.
   for (Occurrence& o : asmDoc.GetOccurrences()) {
-    if (o.fixed) continue;
+    if (o.fixed)
+      continue;
     const auto it = world.find(o.id);
-    if (it == world.end()) continue;
+    if (it == world.end())
+      continue;
     glm::vec3 pos;
     glm::quat rot;
     Decompose(it->second, pos, rot);
-    if (pos != o.position || rot != o.orientation) report.placed++;
+    if (pos != o.position || rot != o.orientation)
+      report.placed++;
     o.position = pos;
     o.orientation = rot;
   }
@@ -297,7 +321,7 @@ AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
     om.occurrenceId = o.id;
     om.name = o.name;
     om.partId = o.partId;
-    om.volume = mass->volume;       // volume is rigid-transform invariant
+    om.volume = mass->volume; // volume is rigid-transform invariant
     om.centerOfMass = worldCom;
     om.massKnown = mass->massKnown; // mass is rigid-transform invariant
     om.massG = mass->massG;
@@ -312,7 +336,8 @@ AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
   }
   out.centerOfMass =
       out.volume > 0.0 ? weightedCom / out.volume : glm::dvec3(0.0);
-  if (!out.massKnown) out.massG = 0.0;
+  if (!out.massKnown)
+    out.massG = 0.0;
   return out;
 }
 

@@ -32,9 +32,11 @@ DevicePick RankDevice(VkPhysicalDevice pd) {
       qfi = q;
       break;
     }
-  if (!hasCompute) return out;
+  if (!hasCompute)
+    return out;
 
-  // The SpMV scatter needs buffer float32 atomicAdd (VK_EXT_shader_atomic_float).
+  // The SpMV scatter needs buffer float32 atomicAdd
+  // (VK_EXT_shader_atomic_float).
   uint32_t en = 0;
   vkEnumerateDeviceExtensionProperties(pd, nullptr, &en, nullptr);
   std::vector<VkExtensionProperties> exts(en);
@@ -44,20 +46,24 @@ DevicePick RankDevice(VkPhysicalDevice pd) {
     if (std::strcmp(e.extensionName,
                     VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME) == 0)
       hasAtomicExt = true;
-  if (!hasAtomicExt) return out;
+  if (!hasAtomicExt)
+    return out;
 
   VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomics{
       VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT};
   VkPhysicalDeviceFeatures2 feats{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
   feats.pNext = &atomics;
   vkGetPhysicalDeviceFeatures2(pd, &feats);
-  if (!atomics.shaderBufferFloat32AtomicAdd) return out;
+  if (!atomics.shaderBufferFloat32AtomicAdd)
+    return out;
 
   VkPhysicalDeviceProperties props;
   vkGetPhysicalDeviceProperties(pd, &props);
   int score = 1;
-  if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) score = 2;
-  if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score = 3;
+  if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
+    score = 2;
+  if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+    score = 3;
 
   out.phys = pd;
   out.queueFamily = qfi;
@@ -68,15 +74,17 @@ DevicePick RankDevice(VkPhysicalDevice pd) {
 }
 
 bool SetError(std::string* error, const std::string& msg) {
-  if (error) *error = msg;
+  if (error)
+    *error = msg;
   return false;
 }
 
-}  // namespace
+} // namespace
 
 std::unique_ptr<ComputeContext> ComputeContext::Create(std::string* error) {
   auto fail = [&](const std::string& m) -> std::unique_ptr<ComputeContext> {
-    if (error) *error = m;
+    if (error)
+      *error = m;
     return nullptr;
   };
 
@@ -97,7 +105,8 @@ std::unique_ptr<ComputeContext> ComputeContext::Create(std::string* error) {
   DevicePick best;
   for (VkPhysicalDevice pd : pds) {
     DevicePick p = RankDevice(pd);
-    if (p.score > best.score) best = p;
+    if (p.score > best.score)
+      best = p;
   }
   if (best.score < 0)
     return fail("no Vulkan device with a compute queue and float32 buffer "
@@ -151,11 +160,14 @@ std::unique_ptr<ComputeContext> ComputeContext::Create(std::string* error) {
 ComputeContext::~ComputeContext() {
   if (m_device) {
     vkDeviceWaitIdle(m_device);
-    if (m_fence) vkDestroyFence(m_device, m_fence, nullptr);
-    if (m_cmdPool) vkDestroyCommandPool(m_device, m_cmdPool, nullptr);
+    if (m_fence)
+      vkDestroyFence(m_device, m_fence, nullptr);
+    if (m_cmdPool)
+      vkDestroyCommandPool(m_device, m_cmdPool, nullptr);
     vkDestroyDevice(m_device, nullptr);
   }
-  if (m_instance) vkDestroyInstance(m_instance, nullptr);
+  if (m_instance)
+    vkDestroyInstance(m_instance, nullptr);
 }
 
 bool ComputeContext::CreateBuffer(VkDeviceSize size, Buffer& out,
@@ -163,7 +175,7 @@ bool ComputeContext::CreateBuffer(VkDeviceSize size, Buffer& out,
   VkBufferCreateInfo bci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
   bci.size = size;
   bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-              VK_BUFFER_USAGE_TRANSFER_DST_BIT;  // vkCmdFillBuffer zeroing
+              VK_BUFFER_USAGE_TRANSFER_DST_BIT; // vkCmdFillBuffer zeroing
   bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   if (vkCreateBuffer(m_device, &bci, nullptr, &out.buffer) != VK_SUCCESS)
     return SetError(error, "vkCreateBuffer failed");
@@ -191,14 +203,16 @@ bool ComputeContext::CreateBuffer(VkDeviceSize size, Buffer& out,
       if (vkAllocateMemory(m_device, &mai, nullptr, &out.memory) == VK_SUCCESS)
         break;
     }
-    if (out.memory) break;
+    if (out.memory)
+      break;
   }
   if (!out.memory) {
     Destroy(out);
     return SetError(error, "vkAllocateMemory failed (out of GPU memory?)");
   }
   vkBindBufferMemory(m_device, out.buffer, out.memory, 0);
-  if (vkMapMemory(m_device, out.memory, 0, size, 0, &out.mapped) != VK_SUCCESS) {
+  if (vkMapMemory(m_device, out.memory, 0, size, 0, &out.mapped) !=
+      VK_SUCCESS) {
     Destroy(out);
     return SetError(error, "vkMapMemory failed");
   }
@@ -209,10 +223,12 @@ bool ComputeContext::CreateBuffer(VkDeviceSize size, Buffer& out,
 
 void ComputeContext::Destroy(Buffer& b) {
   if (b.memory) {
-    if (b.mapped) vkUnmapMemory(m_device, b.memory);
+    if (b.mapped)
+      vkUnmapMemory(m_device, b.memory);
     vkFreeMemory(m_device, b.memory, nullptr);
   }
-  if (b.buffer) vkDestroyBuffer(m_device, b.buffer, nullptr);
+  if (b.buffer)
+    vkDestroyBuffer(m_device, b.buffer, nullptr);
   b = Buffer{};
 }
 
@@ -222,7 +238,7 @@ bool ComputeContext::CreatePipeline(const unsigned char* spirv,
                                     std::string* error) {
   VkShaderModuleCreateInfo smci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
   smci.codeSize = spirvBytes;
-  smci.pCode = reinterpret_cast<const uint32_t*>(spirv);  // alignas(4) embed
+  smci.pCode = reinterpret_cast<const uint32_t*>(spirv); // alignas(4) embed
   if (vkCreateShaderModule(m_device, &smci, nullptr, &out.module) != VK_SUCCESS)
     return SetError(error, "vkCreateShaderModule failed");
 
@@ -241,7 +257,8 @@ bool ComputeContext::CreatePipeline(const unsigned char* spirv,
   }
 
   VkPushConstantRange pcr{VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes};
-  VkPipelineLayoutCreateInfo plci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  VkPipelineLayoutCreateInfo plci{
+      VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
   plci.setLayoutCount = 1;
   plci.pSetLayouts = &out.setLayout;
   plci.pushConstantRangeCount = pushBytes > 0 ? 1 : 0;
@@ -270,10 +287,14 @@ bool ComputeContext::CreatePipeline(const unsigned char* spirv,
 }
 
 void ComputeContext::Destroy(Pipeline& p) {
-  if (p.pipeline) vkDestroyPipeline(m_device, p.pipeline, nullptr);
-  if (p.layout) vkDestroyPipelineLayout(m_device, p.layout, nullptr);
-  if (p.setLayout) vkDestroyDescriptorSetLayout(m_device, p.setLayout, nullptr);
-  if (p.module) vkDestroyShaderModule(m_device, p.module, nullptr);
+  if (p.pipeline)
+    vkDestroyPipeline(m_device, p.pipeline, nullptr);
+  if (p.layout)
+    vkDestroyPipelineLayout(m_device, p.layout, nullptr);
+  if (p.setLayout)
+    vkDestroyDescriptorSetLayout(m_device, p.setLayout, nullptr);
+  if (p.module)
+    vkDestroyShaderModule(m_device, p.module, nullptr);
   p = Pipeline{};
 }
 
@@ -290,7 +311,8 @@ bool ComputeContext::Dispatch(const Pipeline& p,
   // cost is irrelevant next to the copy-in/copy-out of a GPU0 round trip. The
   // persistent-set restructure belongs to GPU1's on-device loop.
   VkDescriptorPoolSize dps{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, p.bufferCount};
-  VkDescriptorPoolCreateInfo dpci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  VkDescriptorPoolCreateInfo dpci{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   dpci.maxSets = 1;
   dpci.poolSizeCount = 1;
   dpci.pPoolSizes = &dps;
@@ -344,7 +366,8 @@ bool ComputeContext::Dispatch(const Pipeline& p,
          VK_SUCCESS;
   vkResetFences(m_device, 1, &m_fence);
   vkDestroyDescriptorPool(m_device, pool, nullptr);
-  if (!ok) return SetError(error, "compute submit/wait failed");
+  if (!ok)
+    return SetError(error, "compute submit/wait failed");
   return true;
 }
 
@@ -354,7 +377,8 @@ bool ComputeContext::CreateBoundSet(const Pipeline& p,
   if (buffers.size() != p.bufferCount)
     return SetError(error, "bound-set buffer count mismatch");
   VkDescriptorPoolSize dps{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, p.bufferCount};
-  VkDescriptorPoolCreateInfo dpci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  VkDescriptorPoolCreateInfo dpci{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   dpci.maxSets = 1;
   dpci.poolSizeCount = 1;
   dpci.pPoolSizes = &dps;
@@ -386,12 +410,14 @@ bool ComputeContext::CreateBoundSet(const Pipeline& p,
 }
 
 void ComputeContext::Destroy(BoundSet& s) {
-  if (s.pool) vkDestroyDescriptorPool(m_device, s.pool, nullptr);
+  if (s.pool)
+    vkDestroyDescriptorPool(m_device, s.pool, nullptr);
   s = BoundSet{};
 }
 
 bool ComputeContext::BeginBatch(std::string* error) {
-  if (m_batchOpen) return SetError(error, "a batch is already recording");
+  if (m_batchOpen)
+    return SetError(error, "a batch is already recording");
   vkResetCommandBuffer(m_cmd, 0);
   VkCommandBufferBeginInfo bbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   bbi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -408,8 +434,7 @@ void ComputeContext::BatchBarrier() {
     return;
   }
   VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
-  mb.srcAccessMask =
-      VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+  mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
   mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT |
                      VK_ACCESS_TRANSFER_WRITE_BIT;
   vkCmdPipelineBarrier(
@@ -439,7 +464,8 @@ void ComputeContext::BatchDispatch(const Pipeline& p, const BoundSet& set,
 }
 
 bool ComputeContext::SubmitBatch(std::string* error) {
-  if (!m_batchOpen) return SetError(error, "no batch is recording");
+  if (!m_batchOpen)
+    return SetError(error, "no batch is recording");
   m_batchOpen = false;
   vkEndCommandBuffer(m_cmd);
   VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -450,8 +476,9 @@ bool ComputeContext::SubmitBatch(std::string* error) {
     ok = vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, UINT64_MAX) ==
          VK_SUCCESS;
   vkResetFences(m_device, 1, &m_fence);
-  if (!ok) return SetError(error, "batch submit/wait failed");
+  if (!ok)
+    return SetError(error, "batch submit/wait failed");
   return true;
 }
 
-}  // namespace gpu
+} // namespace gpu

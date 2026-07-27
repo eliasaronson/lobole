@@ -2,8 +2,8 @@
 
 #include "common/Logger.h"
 #include "core/BodyMode.h"
-#include "core/features/DatumPlaneFeature.h" // ResolveParentPlane
 #include "core/Expression.h"
+#include "core/features/DatumPlaneFeature.h" // ResolveParentPlane
 
 #include <glm/gtc/constants.hpp>
 
@@ -54,8 +54,8 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     // Resolve the count (expression over the parameter table, else literal).
     int n = count;
     if (!countExpr.empty() && ctx.symbols != nullptr) {
-      const auto v = ExpressionEngine::Default().EvaluateText(
-          countExpr, *ctx.symbols);
+      const auto v =
+          ExpressionEngine::Default().EvaluateText(countExpr, *ctx.symbols);
       if (v.has_value()) {
         n = static_cast<int>(std::lround(*v));
       }
@@ -76,6 +76,6 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     }
   }
 
-  return FuseInstancesReplacingSource(ctx.bodies, sourceId, std::move(instances),
-                                      m_name, m_material, GetId());
+  return FuseInstancesReplacingSource(
+      ctx.bodies, sourceId, std::move(instances), m_name, m_material, GetId());
 }

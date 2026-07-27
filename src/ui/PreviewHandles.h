@@ -19,7 +19,8 @@ namespace ui {
 
 // Appends the handle geometry (and, mid-drag, the floating value readout) for
 // the pending feature. Same overlay channel as the assembly gizmo.
-void BuildPreviewHandleOverlay(AppState& state, std::vector<LineVertex3D>& lines);
+void BuildPreviewHandleOverlay(AppState& state,
+                               std::vector<LineVertex3D>& lines);
 
 // The gizmo input contract: a click on the handle starts a drag (consumes the
 // click), an active drag follows the mouse even off-viewport and ends on

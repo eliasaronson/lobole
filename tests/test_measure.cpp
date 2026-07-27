@@ -12,8 +12,8 @@
 #include <limits>
 #include <vector>
 
-using Catch::Matchers::WithinRel;
 using Catch::Matchers::WithinAbs;
+using Catch::Matchers::WithinRel;
 
 namespace {
 // A box owns faces "<id>/faceN"; return them sorted so tests are stable.
@@ -35,8 +35,8 @@ std::vector<std::string> EdgeNames(const Body& body) {
 
 TEST_CASE("Measure a box's face areas and edge lengths", "[measure]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2.0, 3.0,
-                                              4.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0), 2.0, 3.0, 4.0));
   const uint64_t id = doc.GetFeature(0)->GetId();
   const Body& body = doc.GetBodies()[0];
 
@@ -71,10 +71,10 @@ TEST_CASE("Measure a box's face areas and edge lengths", "[measure]") {
 
 TEST_CASE("Measure distance between two boxes' faces", "[measure]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
-                                              1.0));
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 1.0,
-                                              1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 1.0, 1.0, 1.0));
   const uint64_t idA = doc.GetFeature(0)->GetId();
   const uint64_t idB = doc.GetFeature(1)->GetId();
 
@@ -139,8 +139,8 @@ TEST_CASE("Transformed distance measures occurrences in world space",
 
 TEST_CASE("Element bounds of a box's faces", "[measure]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2.0, 3.0,
-                                              4.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0), 2.0, 3.0, 4.0));
   const uint64_t id = doc.GetFeature(0)->GetId();
   const Body& body = doc.GetBodies()[0];
   glm::vec3 bmin, bmax;
@@ -275,7 +275,7 @@ TEST_CASE("DescribeFaceAt/DescribeEdgeAt classify a cylinder", "[measure]") {
       CHECK(std::abs(f->normal.z) < 1e-4f);
     }
   }
-  CHECK(planes == 2);   // the two caps
+  CHECK(planes == 2);    // the two caps
   CHECK(cylinders == 1); // the barrel
   for (const auto& [idx, name] : body.elementMap.edgeNames) {
     (void)name;

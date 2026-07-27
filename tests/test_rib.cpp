@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <cmath>
 #include <filesystem>
@@ -27,11 +27,11 @@ uint64_t AddSketch(Document& doc, const SketchPlane& plane, const char* name,
 // Box [0,10]^3 + an open line profile on a plane at z=15 facing the box
 // (normal -Z), spanning x in [2,8] at y=5.
 uint64_t BoxAndProfile(Document& doc, const glm::vec3& normal) {
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0), 10.0,
-                                              10.0, 10.0));
-  return AddSketch(
-      doc, SketchPlane(glm::vec3(5, 5, 15), normal, glm::vec3(1, 0, 0)),
-      "RibProfile", {sketch::Line{{-3, 0}, {3, 0}}});
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0), 10.0, 10.0, 10.0));
+  return AddSketch(doc,
+                   SketchPlane(glm::vec3(5, 5, 15), normal, glm::vec3(1, 0, 0)),
+                   "RibProfile", {sketch::Line{{-3, 0}, {3, 0}}});
 }
 
 // A 6-long, `t`-thick slab contour with round (arc-joined) ends, `h` tall:

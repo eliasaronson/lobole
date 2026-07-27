@@ -30,8 +30,7 @@ bool LoftFeature::Execute(RegenContext& ctx) {
   // topology (below), then feed them to a freshly-configured ThruSections.
   std::vector<TopoDS_Wire> wires;
   for (uint64_t id : sketchIds) {
-    const auto* sk =
-        dynamic_cast<const SketchFeature*>(ctx.FindById(id));
+    const auto* sk = dynamic_cast<const SketchFeature*>(ctx.FindById(id));
     if (!sk) {
       SetError("loft profile sketch is missing (or suppressed)");
       return false;
@@ -63,8 +62,9 @@ bool LoftFeature::Execute(RegenContext& ctx) {
         return false;
       }
     }
-    CADShape result = SweepSectionsAlongSpine(
-        wires, spine, SweepFrame::CorrectedFrenet, guide, /*scaleToGuide=*/true);
+    CADShape result =
+        SweepSectionsAlongSpine(wires, spine, SweepFrame::CorrectedFrenet,
+                                guide, /*scaleToGuide=*/true);
     if (!result.IsValid() || result.Volume() < 1e-9) {
       SetError("guided loft failed to skin the sections along the path");
       return false;
@@ -84,20 +84,22 @@ bool LoftFeature::Execute(RegenContext& ctx) {
   // a 1-seam circle), the correspondence is arbitrary: OCC lands the square's
   // corners ~45deg off the circle's seam and the resulting twist propagates
   // along the WHOLE surface, pinching even the circle->circle span into an
-  // hourglass (the reported bug: square->r5->r5 came out below the r5 cylinder).
-  // Ruled skinning sidesteps this by fitting an INDEPENDENT patch between each
-  // consecutive pair, so a twist in one span can't bleed into another and each
-  // matched pair (circle->circle) stays exact. So: smooth when all sections have
-  // equal edge counts, ruled when they differ.
+  // hourglass (the reported bug: square->r5->r5 came out below the r5
+  // cylinder). Ruled skinning sidesteps this by fitting an INDEPENDENT patch
+  // between each consecutive pair, so a twist in one span can't bleed into
+  // another and each matched pair (circle->circle) stays exact. So: smooth when
+  // all sections have equal edge counts, ruled when they differ.
   auto edgeCount = [](const TopoDS_Wire& w) {
     int n = 0;
-    for (TopExp_Explorer e(w, TopAbs_EDGE); e.More(); e.Next()) n++;
+    for (TopExp_Explorer e(w, TopAbs_EDGE); e.More(); e.Next())
+      n++;
     return n;
   };
   bool sameTopology = true;
   const int firstCount = edgeCount(wires.front());
   for (const TopoDS_Wire& w : wires)
-    if (edgeCount(w) != firstCount) sameTopology = false;
+    if (edgeCount(w) != firstCount)
+      sameTopology = false;
 
   BRepOffsetAPI_ThruSections thru(/*isSolid=*/Standard_True,
                                   /*ruled=*/sameTopology ? Standard_False

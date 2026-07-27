@@ -35,13 +35,12 @@ namespace {
 // rigidity, which occurrence transforms guarantee).
 gp_Trsf ToTrsf(const glm::mat4& m) {
   gp_Trsf t;
-  t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0],
-              m[0][1], m[1][1], m[2][1], m[3][1],
-              m[0][2], m[1][2], m[2][2], m[3][2]);
+  t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1],
+              m[3][1], m[0][2], m[1][2], m[2][2], m[3][2]);
   return t;
 }
 
-}  // namespace
+} // namespace
 
 bool SaveVisual(const std::string& path, const std::vector<Item>& items,
                 double deflection, std::string* error) {
@@ -49,7 +48,8 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
   const bool isGltf = ext == ".glb" || ext == ".gltf";
   if (!isGltf && ext != ".obj" && ext != ".ply") {
-    if (error) *error = "unsupported visual-export extension: " + ext;
+    if (error)
+      *error = "unsupported visual-export extension: " + ext;
     return false;
   }
 
@@ -65,7 +65,8 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
       valid.push_back(&item);
     }
     if (valid.empty()) {
-      if (error) *error = "nothing to export";
+      if (error)
+        *error = "nothing to export";
       return false;
     }
 
@@ -84,9 +85,8 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
     BRep_Builder builder;
     builder.MakeCompound(compound);
     for (const Item* item : valid)
-      builder.Add(compound,
-                  item->shape.GetShape().Moved(TopLoc_Location(
-                      ToTrsf(item->transform))));
+      builder.Add(compound, item->shape.GetShape().Moved(
+                                TopLoc_Location(ToTrsf(item->transform))));
     // makeAssembly: the compound becomes an assembly whose components are
     // the placed shapes (shared TShapes stay shared → instancing).
     const TDF_Label root = shapes->AddShape(compound, Standard_True);
@@ -94,8 +94,7 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
     TDF_LabelSequence components;
     shapes->GetComponents(root, components);
     for (Standard_Integer i = 1;
-         i <= components.Length() && i <= Standard_Integer(valid.size());
-         i++) {
+         i <= components.Length() && i <= Standard_Integer(valid.size()); i++) {
       const Item& item = *valid[static_cast<size_t>(i - 1)];
       const TDF_Label component = components.Value(i);
       if (!item.name.empty())
@@ -132,15 +131,17 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
       RWPly_CafWriter writer(path.c_str());
       ok = writer.Perform(doc, fileInfo, progress);
     }
-    if (!ok && error) *error = "the " + ext + " writer failed (see log)";
+    if (!ok && error)
+      *error = "the " + ext + " writer failed (see log)";
     if (ok)
       LOG_INFO("Exported {} item(s) to {}", valid.size(), path);
     return ok;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Visual export failed for {}: {}", path, e.what());
     return false;
   }
 }
 
-}  // namespace MeshExport
+} // namespace MeshExport

@@ -1,13 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Command.h"
 #include "core/Document.h"
-#include "core/features/ExtrudeFeature.h"
 #include "core/Feature.h"
-#include "core/io/Serialization.h"
-#include "TestIO.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 
 #include <filesystem>
 
@@ -90,7 +90,8 @@ TEST_CASE("Failed command is not pushed onto the undo stack", "[document]") {
 TEST_CASE("Regeneration is deterministic", "[document]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1, 1, 1));
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2, 2, 2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2, 2, 2));
 
   uint64_t v1 = doc.Version();
   REQUIRE(doc.Regenerate());
@@ -103,26 +104,27 @@ TEST_CASE("Regeneration is deterministic", "[document]") {
 
 TEST_CASE("Regeneration continues past a failed feature", "[document][regen]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
-                                              1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0, 1.0));
   // Extrude referencing a nonexistent sketch: fails, contributes nothing.
   doc.AddFeature(std::make_unique<ExtrudeFeature>("Broken", 9999, 1.0,
                                                   ExtrudeMode::NewBody));
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 1.0,
-                                              1.0, 1.0));
-  CHECK_FALSE(doc.Regenerate()); // something errored...
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 1.0, 1.0, 1.0));
+  CHECK_FALSE(doc.Regenerate());        // something errored...
   REQUIRE(doc.GetBodies().size() == 2); // ...but B still regenerated
   CHECK(!doc.GetFeature(1)->GetError().empty());
   CHECK(doc.GetFeature(0)->GetError().empty());
   CHECK(doc.GetFeature(2)->GetError().empty());
 }
 
-TEST_CASE("Suppressed features are skipped and round-trip", "[document][regen]") {
+TEST_CASE("Suppressed features are skipped and round-trip",
+          "[document][regen]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
-                                              1.0));
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0,
-                                              1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0, 1.0, 1.0));
   REQUIRE(doc.GetBodies().size() == 2);
 
   doc.GetFeature(0)->SetSuppressed(true);
@@ -137,15 +139,14 @@ TEST_CASE("Suppressed features are skipped and round-trip", "[document][regen]")
   sk->SetSuppressed(true);
   doc2.AddFeature(std::move(sk));
   const uint64_t skId = doc2.GetFeature(0)->GetId();
-  doc2.AddFeature(std::make_unique<ExtrudeFeature>("Pad", skId, 3.0,
-                                                   ExtrudeMode::NewBody));
+  doc2.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", skId, 3.0, ExtrudeMode::NewBody));
   CHECK_FALSE(doc2.Regenerate());
   CHECK(doc2.GetBodies().empty());
   CHECK(!doc2.GetFeature(1)->GetError().empty());
 
   // suppressed survives save/load (v19).
-  const auto path =
-      std::filesystem::temp_directory_path() / "suppress_rt.json";
+  const auto path = std::filesystem::temp_directory_path() / "suppress_rt.json";
   std::string error;
   REQUIRE(testio::Save(doc2, path.string()));
   auto loaded = testio::Load(path.string());
@@ -158,12 +159,12 @@ TEST_CASE("Suppressed features are skipped and round-trip", "[document][regen]")
 TEST_CASE("Rollback bar regenerates only the prefix and round-trips",
           "[document][rollback]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
-                                              1.0));
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0,
-                                              1.0, 1.0));
-  doc.AddFeature(std::make_unique<BoxFeature>("C", glm::vec3(10, 0, 0), 3.0,
-                                              1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("C", glm::vec3(10, 0, 0), 3.0, 1.0, 1.0));
   REQUIRE(doc.GetBodies().size() == 3);
 
   doc.SetRollback(1); // only A
@@ -192,12 +193,12 @@ TEST_CASE("Rollback bar regenerates only the prefix and round-trips",
 TEST_CASE("Incremental regeneration re-runs only from the first change",
           "[document][regen][cache]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0,
-                                              1.0));
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0,
-                                              1.0, 1.0));
-  doc.AddFeature(std::make_unique<BoxFeature>("C", glm::vec3(10, 0, 0), 3.0,
-                                              1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("A", glm::vec3(0), 1.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("C", glm::vec3(10, 0, 0), 3.0, 1.0, 1.0));
 
   // Nothing changed: fully cached.
   REQUIRE(doc.Regenerate());
@@ -238,8 +239,8 @@ TEST_CASE("Expression edits invalidate the cache through parameters",
   sk->AddRectangle({0, 0}, {4, 2});
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(0)->GetId();
-  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 1.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Pad", skId, 1.0, ExtrudeMode::NewBody);
   ext->distanceExpr = "w";
   doc.AddFeature(std::move(ext));
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(16.0, 1e-6));

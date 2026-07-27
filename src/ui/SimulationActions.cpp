@@ -1,13 +1,13 @@
 #include "ui/AppActions.h"
 
-#include "render/Camera.h"
-#include "render/FieldRenderer.h"
-#include "render/MeshRenderer.h"
+#include "common/Logger.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
-#include "common/Logger.h"
+#include "render/Camera.h"
+#include "render/FieldRenderer.h"
+#include "render/MeshRenderer.h"
 #include "ui/AppActionsInternal.h"
 #include "ui/AppState.h"
 #ifdef HAVE_FEM_GPU
@@ -25,7 +25,8 @@
 
 namespace ui {
 
-void AppendStudyMarker(const AppState& state, std::vector<LineVertex3D>& lines) {
+void AppendStudyMarker(const AppState& state,
+                       std::vector<LineVertex3D>& lines) {
   const SimulationState& sim = state.simulation;
   // The peak marker only applies to the FEM scalar fields (max von Mises / max
   // displacement). Topology views (Shape/Density) have no such peak — and a
@@ -37,7 +38,8 @@ void AppendStudyMarker(const AppState& state, std::vector<LineVertex3D>& lines) 
       !state.document)
     return;
   const fem::StudyRuntime* rt = state.document->StudyResults(sim.activeStudyId);
-  if (!rt) return;
+  if (!rt)
+    return;
   // A magenta cross at the peak of the displayed field (max von Mises or max
   // displacement), warped by the same deform scale so it tracks the overlay.
   const bool vm = sim.field == SimulationState::Field::VonMises;
@@ -52,9 +54,8 @@ void AppendStudyMarker(const AppState& state, std::vector<LineVertex3D>& lines) 
       break;
     }
   }
-  const float L = state.camera
-                      ? std::max(0.06f * state.camera->GetDistance(), 0.1f)
-                      : 1.0f;
+  const float L =
+      state.camera ? std::max(0.06f * state.camera->GetDistance(), 0.1f) : 1.0f;
   const glm::vec3 col(1.0f, 0.1f, 0.8f); // magenta, distinct from CoG amber
   const glm::vec3 ax[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
   for (const glm::vec3& a : ax) {
@@ -65,7 +66,8 @@ void AppendStudyMarker(const AppState& state, std::vector<LineVertex3D>& lines) 
 bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
   fem::Study* s = doc.FindStudy(studyId);
   if (!s) {
-    if (error) *error = "no such study";
+    if (error)
+      *error = "no such study";
     return false;
   }
   fem::StudyRuntime rt;
@@ -74,7 +76,8 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
   const bool ok = s->type == fem::AnalysisType::Topology
                       ? fem::RunTopology(doc, *s, rt, error)
                       : fem::RunStudy(doc, *s, rt, error);
-  if (!ok) return false;
+  if (!ok)
+    return false;
   rt.solvedAtVersion = doc.Version();
   doc.StoreStudyResults(studyId, std::move(rt));
   return true;
@@ -82,22 +85,26 @@ bool RunStudyAndCache(Document& doc, uint64_t studyId, std::string* error) {
 bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
                       std::string* error) {
   if (state.topoJob) {
-    if (error) *error = "a study run is already in progress";
+    if (error)
+      *error = "a study run is already in progress";
     return false;
   }
   fem::Study* s = doc.FindStudy(studyId);
   if (!s) {
-    if (error) *error = "no such study";
+    if (error)
+      *error = "no such study";
     return false;
   }
   if (s->type != fem::AnalysisType::Topology) {
-    if (error) *error = "study is not a topology study";
+    if (error)
+      *error = "study is not a topology study";
     return false;
   }
   // Prepare the immutable snapshot on this (main) thread — meshing needs the
   // Document. Everything past this point is pure fem data.
   auto job = std::make_unique<TopoJob>();
-  if (!fem::PrepareTopology(doc, *s, job->input, error)) return false;
+  if (!fem::PrepareTopology(doc, *s, job->input, error))
+    return false;
   job->studyId = studyId;
   job->maxIterations = job->input.params.maxIterations;
 
@@ -112,8 +119,8 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
     const char* pref = std::getenv("DESIGNER_TOPO_GPU");
     if (!pref || std::string(pref) != "0") {
       std::string gerr;
-      auto gs = gpu::TopoGpuSolver::Create(pref && std::string(pref) == "1",
-                                           &gerr);
+      auto gs =
+          gpu::TopoGpuSolver::Create(pref && std::string(pref) == "1", &gerr);
       if (gs) {
         LOG_INFO("topology: GPU solver on {}", gs->DeviceName());
         job->solverName = "gpu: " + gs->DeviceName();
@@ -127,7 +134,7 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
 #endif
   job->started = std::chrono::steady_clock::now();
 
-  TopoJob* j = job.get();  // stable: the job outlives the thread (joined first)
+  TopoJob* j = job.get(); // stable: the job outlives the thread (joined first)
   job->thread = std::thread([j]() {
     std::string err;
     auto res = fem::TopologyOptimize(
@@ -155,7 +162,7 @@ void PollTopologyRun(AppState& state, Document& doc) {
   if (!state.topoJob || !state.topoJob->done.load(std::memory_order_acquire))
     return;
   TopoJob& job = *state.topoJob;
-  job.thread.join();  // finished; consume the result (single join point)
+  job.thread.join(); // finished; consume the result (single join point)
   if (job.result) {
     fem::StudyRuntime rt = fem::MakeTopoRuntime(job.input, *job.result);
     rt.solvedAtVersion = doc.Version();
@@ -171,7 +178,8 @@ void PollTopologyRun(AppState& state, Document& doc) {
 }
 
 bool CancelTopologyRun(AppState& state, uint64_t studyId) {
-  if (!state.topoJob || state.topoJob->studyId != studyId) return false;
+  if (!state.topoJob || state.topoJob->studyId != studyId)
+    return false;
   state.topoJob->cancel.store(true, std::memory_order_relaxed);
   return true;
 }
@@ -181,14 +189,14 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
   const TopoJob* job = state.topoJob.get();
   if (!job || job->studyId != studyId ||
       job->done.load(std::memory_order_acquire))
-    return st;  // running == false
+    return st; // running == false
   st.running = true;
   st.iteration = job->iteration.load(std::memory_order_relaxed);
   st.maxIterations = job->maxIterations;
   st.compliance = job->compliance.load(std::memory_order_relaxed);
   st.maxChange = job->maxChange.load(std::memory_order_relaxed);
   st.volumeFraction = job->volumeFraction.load(std::memory_order_relaxed);
-  st.solver = job->solverName;  // written before the thread launched
+  st.solver = job->solverName; // written before the thread launched
   st.elapsedSeconds = std::chrono::duration<double>(
                           std::chrono::steady_clock::now() - job->started)
                           .count();
@@ -197,7 +205,8 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
 
 void EnterSimulation(AppState& state) {
   Document* doc = state.document.get();
-  if (!doc) return; // parts only (an assembly tab has no studies)
+  if (!doc)
+    return; // parts only (an assembly tab has no studies)
   // Drop the measure tool: it owns the viewport while active, and the
   // simulation toolbar has no Measure toggle to turn it back off.
   state.measure = MeasureState{};
@@ -205,7 +214,8 @@ void EnterSimulation(AppState& state) {
   if (doc->GetStudies().empty() && state.commands)
     state.commands->Execute(std::make_unique<AddStudyCommand>(""), *doc);
   // Select a study to edit (the first, unless one is already active).
-  if (!doc->FindStudy(state.simulation.activeStudyId) && !doc->GetStudies().empty())
+  if (!doc->FindStudy(state.simulation.activeStudyId) &&
+      !doc->GetStudies().empty())
     state.simulation.activeStudyId = doc->GetStudies().front().id;
   // Drop the modeling-mode shape-guide ghost while in simulation mode.
   state.syncedDocumentVersion = UINT64_MAX;
@@ -219,12 +229,14 @@ void ExitSimulation(AppState& state) {
     if (state.simulation.topoIsoInstance)
       state.meshRenderer->RemoveMesh(state.simulation.topoIsoInstance);
   }
-  if (state.fieldRenderer) state.fieldRenderer->SetMesh({}, {});
+  if (state.fieldRenderer)
+    state.fieldRenderer->SetMesh({}, {});
   state.simulation = SimulationState{};
   state.syncedDocumentVersion = UINT64_MAX; // force a clean renderer resync
 }
 void SyncFieldRenderer(AppState& state) {
-  if (!state.fieldRenderer || !state.meshRenderer) return;
+  if (!state.fieldRenderer || !state.meshRenderer)
+    return;
   SimulationState& sim = state.simulation;
   Document* doc = state.document.get();
 
@@ -234,7 +246,8 @@ void SyncFieldRenderer(AppState& state) {
     sim.hiddenMeshes.clear();
   };
   auto removeIso = [&]() {
-    if (sim.topoIsoInstance) state.meshRenderer->RemoveMesh(sim.topoIsoInstance);
+    if (sim.topoIsoInstance)
+      state.meshRenderer->RemoveMesh(sim.topoIsoInstance);
     sim.topoIsoInstance = 0;
     sim.topoIsoKey = 0;
   };
@@ -294,7 +307,8 @@ void SyncFieldRenderer(AppState& state) {
     return;
   }
 
-  // --- Topology "Shape": the optimized iso-surface as a grey MeshRenderer body.
+  // --- Topology "Shape": the optimized iso-surface as a grey MeshRenderer
+  // body.
   if (topo && sim.field == SimulationState::Field::Shape) {
     if (sim.fieldBuiltKey != 0) {
       state.fieldRenderer->SetMesh({}, {});
@@ -304,16 +318,18 @@ void SyncFieldRenderer(AppState& state) {
     const uint64_t tq = static_cast<uint64_t>(
         std::lround(std::clamp(sim.topoThreshold, 0.0f, 1.0f) * 1000.0f));
     const uint64_t key =
-        (sim.activeStudyId * 1000003ull + doc->StudyResultsEpoch()) * 100003ull +
+        (sim.activeStudyId * 1000003ull + doc->StudyResultsEpoch()) *
+            100003ull +
         tq + 1;
     if (key != sim.topoIsoKey) {
       std::vector<glm::vec3> pos, nrm;
       std::vector<uint32_t> idx;
       for (const fem::StudyBodyResult& b : rt->bodies) {
-        const double t = sim.topoThreshold > 0.0f
-                             ? sim.topoThreshold
-                             : fem::AutoIsoThreshold(b.mesh, b.density,
-                                                     rt->volumeFractionAchieved);
+        const double t =
+            sim.topoThreshold > 0.0f
+                ? sim.topoThreshold
+                : fem::AutoIsoThreshold(b.mesh, b.density,
+                                        rt->volumeFractionAchieved);
         fem::ExtractIsoSurface(b.mesh, b.density, t, pos, nrm, idx);
       }
       std::vector<Vertex3D> verts(pos.size());
@@ -334,17 +350,23 @@ void SyncFieldRenderer(AppState& state) {
     return;
   }
 
-  // --- Scalar field via the FieldRenderer (von Mises / displacement / density).
+  // --- Scalar field via the FieldRenderer (von Mises / displacement /
+  // density).
   removeIso();
   const bool modal = study && study->type == fem::AnalysisType::Modal;
   const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
   const bool density = topo && sim.field == SimulationState::Field::Density;
 
-  const uint64_t key = ((static_cast<uint64_t>(sim.field) * 1000003ull +
-                         sim.activeStudyId) * 1000003ull +
-                        doc->StudyResultsEpoch()) * 1000003ull +
-                       (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0);
-  if (key == sim.fieldBuiltKey) { hideBodies(rt); return; }
+  const uint64_t key =
+      ((static_cast<uint64_t>(sim.field) * 1000003ull + sim.activeStudyId) *
+           1000003ull +
+       doc->StudyResultsEpoch()) *
+          1000003ull +
+      (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0);
+  if (key == sim.fieldBuiltKey) {
+    hideBodies(rt);
+    return;
+  }
 
   const double fmax = vm ? rt->maxVonMises : rt->maxDisplacement;
   const double inv = (modal || density) ? 1.0 : (fmax > 0 ? 1.0 / fmax : 0.0);
@@ -368,11 +390,13 @@ void SyncFieldRenderer(AppState& state) {
           ++cnt[n];
         }
       for (size_t n = 0; n < nodeDensity.size(); ++n)
-        if (cnt[n]) nodeDensity[n] /= cnt[n];
+        if (cnt[n])
+          nodeDensity[n] /= cnt[n];
     }
     const std::vector<glm::dvec3>* disp = &b.results.displacement;
     if (modal) {
-      if (b.results.modes.empty()) continue;
+      if (b.results.modes.empty())
+        continue;
       const int mi = std::clamp(sim.activeMode, 0,
                                 static_cast<int>(b.results.modes.size()) - 1);
       disp = &b.results.modes[mi].displacement;
@@ -407,4 +431,4 @@ void SyncFieldRenderer(AppState& state) {
   sim.fieldBuiltKey = key;
 }
 
-}  // namespace ui
+} // namespace ui

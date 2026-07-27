@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <nlohmann/json.hpp>
 
@@ -39,10 +39,12 @@ sketch::ReferenceImage MakeImage() {
 // pixels live in the document asset store.
 std::unique_ptr<Document> MakeDocWithImage(uint32_t* imageIdOut) {
   auto doc = std::make_unique<Document>();
-  auto sketch = std::make_unique<SketchFeature>("Base", SketchPlane(PlaneType::XY));
+  auto sketch =
+      std::make_unique<SketchFeature>("Base", SketchPlane(PlaneType::XY));
   sketch->AddRectangle(glm::vec2(0, 0), glm::vec2(4, 2));
   const uint32_t imgId = sketch->AddImage(MakeImage());
-  if (imageIdOut) *imageIdOut = imgId;
+  if (imageIdOut)
+    *imageIdOut = imgId;
   doc->AddFeature(std::move(sketch));
   doc->AddFeature(
       std::make_unique<ExtrudeFeature>("Pad", 1, 3.0, ExtrudeMode::NewBody));
@@ -78,7 +80,8 @@ TEST_CASE("Reference image add/index/delete", "[reference-image]") {
   CHECK(sk.AddImage(MakeImage()) == 3);
 }
 
-TEST_CASE("Reference image empty asset gets a default name", "[reference-image]") {
+TEST_CASE("Reference image empty asset gets a default name",
+          "[reference-image]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   sketch::ReferenceImage img; // asset left empty
   const uint32_t id = sk.AddImage(img);
@@ -109,7 +112,8 @@ TEST_CASE("Reference image calibrate: scale only", "[reference-image]") {
     return glm::dvec2(out.origin.x + out.unitsPerPixel * (c * px.x - s * px.y),
                       out.origin.y + out.unitsPerPixel * (s * px.x + c * px.y));
   };
-  // Old pixel coords of the two picks (old placement: origin 0, scale 1, rot 0).
+  // Old pixel coords of the two picks (old placement: origin 0, scale 1, rot
+  // 0).
   const glm::vec2 pix1(10, 5), pix2(50, 5);
   const glm::dvec2 q1 = pixToPlane(pix1), q2 = pixToPlane(pix2);
   CHECK_THAT(q1.x, WithinAbs(10.0, 1e-6)); // p1 fixed
@@ -117,7 +121,8 @@ TEST_CASE("Reference image calibrate: scale only", "[reference-image]") {
   CHECK_THAT(std::hypot(q2.x - q1.x, q2.y - q1.y), WithinAbs(10.0, 1e-6));
 }
 
-TEST_CASE("Reference image calibrate: align to horizontal", "[reference-image]") {
+TEST_CASE("Reference image calibrate: align to horizontal",
+          "[reference-image]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   sketch::ReferenceImage img = MakeImage();
   img.origin = glm::vec2(0, 0);
@@ -202,7 +207,8 @@ TEST_CASE("Reference image bytes survive a feature rebuild (undo/redo)",
   REQUIRE(sk != nullptr);
   const size_t idx = [&] {
     for (size_t i = 0; i < doc->FeatureCount(); i++)
-      if (doc->GetFeature(i) == sk) return i;
+      if (doc->GetFeature(i) == sk)
+        return i;
     return size_t{0};
   }();
 
@@ -221,7 +227,7 @@ TEST_CASE("Reference image bytes survive a feature rebuild (undo/redo)",
 TEST_CASE("Reference image edits do not invalidate the regen cache",
           "[reference-image][regen]") {
   auto doc = MakeDocWithImage(nullptr);
-  doc->Regenerate();                          // populate the cache
+  doc->Regenerate(); // populate the cache
   REQUIRE(doc->FeatureCount() == 2);
 
   // A cosmetic underlay edit must reuse every cached feature.
@@ -232,7 +238,8 @@ TEST_CASE("Reference image edits do not invalidate the regen cache",
   doc->Regenerate();
   CHECK(doc->LastRegenStats().cached == 2); // nothing downstream rebuilt
 
-  // Sanity: a real geometry edit DOES diverge, so the check above is meaningful.
+  // Sanity: a real geometry edit DOES diverge, so the check above is
+  // meaningful.
   sk->AddRectangle(glm::vec2(10, 10), glm::vec2(11, 11));
   doc->Regenerate();
   CHECK(doc->LastRegenStats().cached < 2);

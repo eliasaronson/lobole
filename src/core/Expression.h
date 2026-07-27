@@ -40,8 +40,8 @@ public:
   // ExprError (unknown identifier, division by zero, non-finite result, ...).
   // Never returns NaN/inf — those become errors so bad math can't reach the
   // geometry kernel.
-  virtual std::expected<double, ExprError> Evaluate(
-      const SymbolTable& symbols) const = 0;
+  virtual std::expected<double, ExprError>
+  Evaluate(const SymbolTable& symbols) const = 0;
 };
 
 class ExpressionEngine {
@@ -50,26 +50,26 @@ public:
 
   // Parses text into a reusable expression. On failure returns an unexpected
   // ExprError.
-  virtual std::expected<std::unique_ptr<CompiledExpr>, ExprError> Compile(
-      const std::string& text) const = 0;
+  virtual std::expected<std::unique_ptr<CompiledExpr>, ExprError>
+  Compile(const std::string& text) const = 0;
 
   // One-shot convenience: Compile + Evaluate, short-circuiting on the first
   // failure.
-  std::expected<double, ExprError> EvaluateText(
-      const std::string& text, const SymbolTable& symbols) const;
+  std::expected<double, ExprError>
+  EvaluateText(const std::string& text, const SymbolTable& symbols) const;
 
   // Rewrites references to oldName into newName, leaving every other byte
   // (spacing, parens, case of other identifiers) untouched so stored
   // expressions stay diff-friendly. Text that fails to tokenize is returned
   // unchanged. Backs parameter rename.
-  [[nodiscard]] virtual std::string RenameIdentifier(
-      const std::string& text, const std::string& oldName,
-      const std::string& newName) const = 0;
+  [[nodiscard]] virtual std::string
+  RenameIdentifier(const std::string& text, const std::string& oldName,
+                   const std::string& newName) const = 0;
 
   // True if name is usable as a parameter name for this engine: a valid
   // identifier that doesn't collide with built-in functions/constants.
-  [[nodiscard]] virtual bool IsValidParameterName(
-      const std::string& name) const = 0;
+  [[nodiscard]] virtual bool
+  IsValidParameterName(const std::string& name) const = 0;
 
   // The engine used throughout the application (currently the built-in
   // recursive-descent one). Singleton because expressions must evaluate
@@ -83,11 +83,11 @@ public:
 // degrees, matching the dimension UI.
 class BuiltinExpressionEngine final : public ExpressionEngine {
 public:
-  std::expected<std::unique_ptr<CompiledExpr>, ExprError> Compile(
-      const std::string& text) const override;
-  [[nodiscard]] std::string RenameIdentifier(
-      const std::string& text, const std::string& oldName,
-      const std::string& newName) const override;
-  [[nodiscard]] bool IsValidParameterName(
-      const std::string& name) const override;
+  std::expected<std::unique_ptr<CompiledExpr>, ExprError>
+  Compile(const std::string& text) const override;
+  [[nodiscard]] std::string
+  RenameIdentifier(const std::string& text, const std::string& oldName,
+                   const std::string& newName) const override;
+  [[nodiscard]] bool
+  IsValidParameterName(const std::string& name) const override;
 };

@@ -12,7 +12,7 @@
 // model. A doc-level object, the FEM Study sibling — not a Feature, does not
 // participate in the feature list. See docs/configurations/plan.md.
 struct Configuration {
-  uint64_t id = 0;  // doc-unique, from Document::AllocateId(); never reused
+  uint64_t id = 0; // doc-unique, from Document::AllocateId(); never reused
   std::string name;
 
   // Parameter name -> override expression (may reference other parameters, so
@@ -25,15 +25,18 @@ struct Configuration {
 
   // The override expression for `paramName`, or nullptr if this config leaves
   // it alone.
-  [[nodiscard]] const std::string* OverrideFor(const std::string& paramName) const {
+  [[nodiscard]] const std::string*
+  OverrideFor(const std::string& paramName) const {
     for (const auto& [name, expr] : parameterOverrides)
-      if (name == paramName) return &expr;
+      if (name == paramName)
+        return &expr;
     return nullptr;
   }
 
   [[nodiscard]] bool Suppresses(uint64_t featureId) const {
     for (uint64_t id : suppressedFeatures)
-      if (id == featureId) return true;
+      if (id == featureId)
+        return true;
     return false;
   }
 };

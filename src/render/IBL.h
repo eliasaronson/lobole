@@ -32,16 +32,18 @@ public:
 
   const Image& Environment() const { return m_env; } // full-res source HDR
   const Image& Irradiance() const { return m_irradiance; }
-  const std::vector<Image>& Prefilter() const { return m_prefilter; } // mip 0..N-1
+  const std::vector<Image>& Prefilter() const {
+    return m_prefilter;
+  } // mip 0..N-1
   const Image& BrdfLut() const { return m_brdf; }
   int PrefilterMipCount() const { return static_cast<int>(m_prefilter.size()); }
 
-  // Writes irradiance / each prefilter mip / BRDF to PNGs under dir (tone-mapped
-  // for HDR maps). For eyeballing the precompute in isolation.
+  // Writes irradiance / each prefilter mip / BRDF to PNGs under dir
+  // (tone-mapped for HDR maps). For eyeballing the precompute in isolation.
   void DumpDebugPNGs(const std::string& dir) const;
 
 private:
-  Image m_env;         // source equirectangular environment
+  Image m_env; // source equirectangular environment
   Image m_irradiance;
   std::vector<Image> m_prefilter;
   Image m_brdf;

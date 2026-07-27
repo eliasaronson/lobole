@@ -1,14 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "core/features/BooleanFeature.h"
+#include "TestIO.h"
 #include "core/Document.h"
-#include "core/features/ExtrudeFeature.h"
 #include "core/Feature.h"
+#include "core/features/BooleanFeature.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <algorithm>
 #include <array>
@@ -150,8 +150,8 @@ TEST_CASE("Every extrude mode carries an element map", "[toponaming]") {
   sk->AddRectangle({1, 1}, {3, 3});
   doc.AddFeature(std::move(sk));
   const uint64_t sk2 = doc.GetFeature(2)->GetId();
-  doc.AddFeature(std::make_unique<ExtrudeFeature>("Boss", sk2, 5.0,
-                                                  ExtrudeMode::Add));
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Boss", sk2, 5.0, ExtrudeMode::Add));
   REQUIRE(doc.Regenerate());
   REQUIRE(doc.GetBodies().size() == 1);
   REQUIRE_FALSE(Map(doc).Empty());
@@ -172,8 +172,8 @@ uint64_t BuildStackedOnCap(Document& doc, double distA, uint64_t& extAid) {
   skA->AddRectangle({0, 0}, {4, 4});
   doc.AddFeature(std::move(skA));
   const uint64_t skAid = doc.GetFeature(0)->GetId();
-  doc.AddFeature(
-      std::make_unique<ExtrudeFeature>("A", skAid, distA, ExtrudeMode::NewBody));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("A", skAid, distA,
+                                                  ExtrudeMode::NewBody));
   extAid = doc.GetFeature(1)->GetId();
 
   // Sketch on A's top cap (cap1 = LastShape). The constructor plane is a
@@ -232,7 +232,8 @@ TEST_CASE("A dangling face ref errors the sketch", "[toponaming]") {
 }
 
 TEST_CASE("A face-attached sketch round-trips through JSON", "[toponaming]") {
-  const fs::path path = fs::temp_directory_path() / "designer_faceref_test.json";
+  const fs::path path =
+      fs::temp_directory_path() / "designer_faceref_test.json";
   {
     Document doc;
     uint64_t extA = 0;
@@ -252,8 +253,8 @@ TEST_CASE("A face-attached sketch round-trips through JSON", "[toponaming]") {
 TEST_CASE("CADShape::FacePlane extracts planar faces and rejects curved ones",
           "[toponaming]") {
   Document box;
-  box.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 2.0, 2.0,
-                                              2.0));
+  box.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 2.0, 2.0, 2.0));
   glm::vec3 c, n, u;
   // A box's faces are all planar.
   CHECK(box.GetBodies()[0].shape.FacePlane(0, c, n, u));
@@ -281,7 +282,8 @@ TEST_CASE("A feature that fails records an error message", "[toponaming]") {
   CHECK_FALSE(doc.GetFeature(0)->GetError().empty());
 }
 
-// ---- T5: propagation through booleans, edge names ----------------------------
+// ---- T5: propagation through booleans, edge names
+// ----------------------------
 
 namespace {
 
@@ -313,10 +315,10 @@ TEST_CASE("Boolean feature propagates the operands' names", "[toponaming]") {
   Document doc;
   uint64_t extA = 0;
   auto linesA = BuildRectPrism(doc, extA); // 4x4x3 at origin
-  const uint64_t extB = AddRectExtrude(doc, {2, 2}, {6, 6}, 3.0,
-                                       ExtrudeMode::NewBody);
-  doc.AddFeature(std::make_unique<BooleanFeature>("Fuse", extA, extB,
-                                                  BooleanOp::Union));
+  const uint64_t extB =
+      AddRectExtrude(doc, {2, 2}, {6, 6}, 3.0, ExtrudeMode::NewBody);
+  doc.AddFeature(
+      std::make_unique<BooleanFeature>("Fuse", extA, extB, BooleanOp::Union));
   const uint64_t boolId = doc.GetFeature(4)->GetId();
   REQUIRE(doc.Regenerate());
   REQUIRE(doc.GetBodies().size() == 1);
@@ -360,10 +362,10 @@ TEST_CASE("Boolean-result names survive an upstream edit (T5 headline)",
   Document doc;
   uint64_t extA = 0;
   auto linesA = BuildRectPrism(doc, extA);
-  const uint64_t extB = AddRectExtrude(doc, {2, 2}, {6, 6}, 3.0,
-                                       ExtrudeMode::NewBody);
-  doc.AddFeature(std::make_unique<BooleanFeature>("Fuse", extA, extB,
-                                                  BooleanOp::Union));
+  const uint64_t extB =
+      AddRectExtrude(doc, {2, 2}, {6, 6}, 3.0, ExtrudeMode::NewBody);
+  doc.AddFeature(
+      std::make_unique<BooleanFeature>("Fuse", extA, extB, BooleanOp::Union));
   REQUIRE(doc.Regenerate());
 
   // Capture a survivor name, then change A's real geometry.
@@ -428,8 +430,8 @@ TEST_CASE("A slot cut splits a cap into disambiguated .0/.1 pieces",
   (void)slotExt;
 
   const ElementMap& map = Map(doc);
-  const std::string base = std::to_string(ext) + "/cap1;M" +
-                           std::to_string(slotExt);
+  const std::string base =
+      std::to_string(ext) + "/cap1;M" + std::to_string(slotExt);
   const auto piece0 = map.Resolve(base + ".0");
   const auto piece1 = map.Resolve(base + ".1");
   REQUIRE(piece0.has_value());
@@ -505,11 +507,11 @@ TEST_CASE("A sketch attached to a fused body's face follows base edits",
   uint64_t extA = 0;
   BuildRectPrism(doc, extA); // 4x4x3 base
   // A boss fused into the base, piercing the top cap (so cap1 -> ";M<boss>").
-  const uint64_t boss = AddRectExtrude(doc, {1, 1}, {3, 3}, 8.0,
-                                       ExtrudeMode::Add);
+  const uint64_t boss =
+      AddRectExtrude(doc, {1, 1}, {3, 3}, 8.0, ExtrudeMode::Add);
   REQUIRE(doc.Regenerate());
-  const std::string fusedCap = std::to_string(extA) + "/cap1;M" +
-                               std::to_string(boss);
+  const std::string fusedCap =
+      std::to_string(extA) + "/cap1;M" + std::to_string(boss);
   REQUIRE(Map(doc).Resolve(fusedCap).has_value());
 
   // Sketch on the (pierced) top cap of the fused body + a small pad on it.
@@ -518,8 +520,8 @@ TEST_CASE("A sketch attached to a fused body's face follows base edits",
   skC->AddRectangle({3.2f, 3.2f}, {3.8f, 3.8f});
   doc.AddFeature(std::move(skC));
   const uint64_t skCid = doc.GetFeature(4)->GetId();
-  doc.AddFeature(
-      std::make_unique<ExtrudeFeature>("Pad", skCid, 1.0, ExtrudeMode::NewBody));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", skCid, 1.0,
+                                                  ExtrudeMode::NewBody));
   const uint64_t pad = doc.GetFeature(5)->GetId();
   REQUIRE(doc.Regenerate());
   CHECK_THAT(BodyMinZ(doc, pad), WithinAbs(3.0, 1e-3));

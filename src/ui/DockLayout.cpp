@@ -43,8 +43,8 @@ void BeginDockspace(AppState& state) {
   const float toolbarH =
       ImGui::GetFrameHeight() + 12.0f +
       (toolbarOverflow ? ImGui::GetStyle().ScrollbarSize : 0.0f);
-  ImGui::BeginChild("##ToolbarRow", ImVec2(0.0f, toolbarH), ImGuiChildFlags_None,
-                    ImGuiWindowFlags_HorizontalScrollbar);
+  ImGui::BeginChild("##ToolbarRow", ImVec2(0.0f, toolbarH),
+                    ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
   DrawToolbar(state);
   toolbarOverflow = ImGui::GetScrollMaxX() > 0.0f;
   ImGui::EndChild();
@@ -113,7 +113,7 @@ void BeginDockspace(AppState& state) {
     ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f,
                                                 nullptr, &center);
     ImGui::DockBuilderDockWindow("Model", left);
-    ImGui::DockBuilderDockWindow("Variables", left); // tabbed behind Model
+    ImGui::DockBuilderDockWindow("Variables", left);      // tabbed behind Model
     ImGui::DockBuilderDockWindow("Configurations", left); // tabbed behind Model
     ImGui::DockBuilderDockWindow("Properties", right);
     ImGui::DockBuilderDockWindow("Sketch", right); // sketch options, tabbed
@@ -125,8 +125,8 @@ void BeginDockspace(AppState& state) {
   // Track the central node rect (relative to the main viewport) so the 3D
   // scene renders in the visible region between the panels.
   if (ImGuiDockNode* central = ImGui::DockBuilderGetCentralNode(dockspaceId)) {
-    state.viewportPos = glm::vec2(central->Pos.x - vp->Pos.x,
-                                  central->Pos.y - vp->Pos.y);
+    state.viewportPos =
+        glm::vec2(central->Pos.x - vp->Pos.x, central->Pos.y - vp->Pos.y);
     state.viewportSize = glm::vec2(central->Size.x, central->Size.y);
   } else {
     state.viewportPos = glm::vec2(0.0f, 0.0f);

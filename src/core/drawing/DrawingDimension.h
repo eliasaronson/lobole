@@ -22,23 +22,23 @@ struct ResolvedDim {
   uint64_t id = 0;
   DrawingDimKind kind = DrawingDimKind::Distance;
   bool resolved = false;
-  bool radial = false;     // true for radius/diameter (centre->rim leader)
-  double value = 0.0;      // millimetres, or radians for Angle
-  std::string text;        // formatted label (Ø.. / R.. / .. / ..°)
+  bool radial = false; // true for radius/diameter (centre->rim leader)
+  double value = 0.0;  // millimetres, or radians for Angle
+  std::string text;    // formatted label (Ø.. / R.. / .. / ..°)
   glm::dvec2 labelPos{0.0};
 
   // Linear dimensions (distance / distance-X / distance-Y):
-  glm::dvec2 ext1{0.0}, ext2{0.0};  // the measured points (extension-line feet)
-  glm::dvec2 dim1{0.0}, dim2{0.0};  // the dimension line, offset by labelOffset
+  glm::dvec2 ext1{0.0}, ext2{0.0}; // the measured points (extension-line feet)
+  glm::dvec2 dim1{0.0}, dim2{0.0}; // the dimension line, offset by labelOffset
 
   // Radial dimensions (radius / diameter):
   glm::dvec2 center{0.0};
   double radius = 0.0;
-  glm::dvec2 rim{0.0};  // leader endpoint on the circle, offset outward
+  glm::dvec2 rim{0.0}; // leader endpoint on the circle, offset outward
 };
 
 // Resolves `dim` against its view's projected geometry. `view` must be the
 // SheetView for dim.viewId.
 ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view);
 
-}  // namespace drawing
+} // namespace drawing

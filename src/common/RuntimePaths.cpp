@@ -5,8 +5,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #elif defined(__APPLE__)
-#include <mach-o/dyld.h> // _NSGetExecutablePath
 #include <climits>
+#include <mach-o/dyld.h> // _NSGetExecutablePath
 #else
 #include <limits.h>
 #include <unistd.h>

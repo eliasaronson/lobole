@@ -23,16 +23,15 @@ namespace gpu {
 struct SpmvSystem {
   int nFree = 0;
   int nElems = 0;
-  std::vector<int32_t> dof;  // 30 * nElems
-  std::vector<float> ke;     // 900 * nElems
+  std::vector<int32_t> dof; // 30 * nElems
+  std::vector<float> ke;    // 900 * nElems
 };
 
 class TopoSpmv {
- public:
+public:
   // Uploads the element data once. The context must outlive the TopoSpmv.
-  static std::unique_ptr<TopoSpmv> Create(ComputeContext& ctx,
-                                          const SpmvSystem& sys,
-                                          std::string* error);
+  static std::unique_ptr<TopoSpmv>
+  Create(ComputeContext& ctx, const SpmvSystem& sys, std::string* error);
   ~TopoSpmv();
 
   TopoSpmv(const TopoSpmv&) = delete;
@@ -46,7 +45,7 @@ class TopoSpmv {
   bool Apply(const std::vector<float>& p, std::vector<float>& Ap,
              std::string* error);
 
- private:
+private:
   TopoSpmv(ComputeContext& ctx) : m_ctx(ctx) {}
 
   ComputeContext& m_ctx;
@@ -56,4 +55,4 @@ class TopoSpmv {
   Buffer m_dof, m_ke, m_scale, m_p, m_ap;
 };
 
-}  // namespace gpu
+} // namespace gpu

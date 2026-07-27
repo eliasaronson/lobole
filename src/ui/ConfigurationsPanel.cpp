@@ -23,15 +23,15 @@ template <typename Mutate>
 void ModifyActiveConfig(AppState& state, const char* desc, Mutate mutate) {
   Document& doc = *state.document;
   const Configuration* cur = doc.FindConfiguration(doc.ActiveConfiguration());
-  if (!cur) return;
+  if (!cur)
+    return;
   nlohmann::json before = DocumentIO::ConfigurationToJson(*cur);
   Configuration copy = *cur;
   mutate(copy);
   nlohmann::json after = DocumentIO::ConfigurationToJson(copy);
-  state.commands->Execute(
-      std::make_unique<ModifyConfigurationCommand>(desc, std::move(before),
-                                                   std::move(after)),
-      doc);
+  state.commands->Execute(std::make_unique<ModifyConfigurationCommand>(
+                              desc, std::move(before), std::move(after)),
+                          doc);
 }
 
 // The override expression a config holds for `name`, or "" if none.
@@ -40,7 +40,7 @@ std::string OverrideOf(const Configuration& c, const std::string& name) {
   return e ? *e : std::string{};
 }
 
-}  // namespace
+} // namespace
 
 void DrawConfigurationsPanel(AppState& state) {
   ImGui::Begin("Configurations");
@@ -55,7 +55,8 @@ void DrawConfigurationsPanel(AppState& state) {
   // (regenerates), so the viewport shows the chosen variant.
   ImGui::SeparatorText("Configurations");
   if (ImGui::Selectable("Base (as authored)", active == 0))
-    state.commands->Execute(std::make_unique<SetActiveConfigurationCommand>(0), doc);
+    state.commands->Execute(std::make_unique<SetActiveConfigurationCommand>(0),
+                            doc);
   for (const Configuration& c : doc.GetConfigurations()) {
     ImGui::PushID(static_cast<int>(c.id));
     const char* label = c.name.empty() ? "(unnamed)" : c.name.c_str();
@@ -101,10 +102,10 @@ void DrawConfigurationsPanel(AppState& state) {
   }
   ImGui::SameLine();
   if (ImGui::SmallButton("Delete")) {
-    state.commands->Execute(std::make_unique<RemoveConfigurationCommand>(active),
-                            doc);
+    state.commands->Execute(
+        std::make_unique<RemoveConfigurationCommand>(active), doc);
     ImGui::End();
-    return;  // cfg is dangling now
+    return; // cfg is dangling now
   }
 
   // Parameter overrides: one row per variable, an editable override cell
@@ -137,10 +138,13 @@ void DrawConfigurationsPanel(AppState& state) {
           // Remove any existing override for this variable.
           for (auto it = c.parameterOverrides.begin();
                it != c.parameterOverrides.end();) {
-            if (it->first == name) it = c.parameterOverrides.erase(it);
-            else ++it;
+            if (it->first == name)
+              it = c.parameterOverrides.erase(it);
+            else
+              ++it;
           }
-          if (!expr.empty()) c.parameterOverrides.emplace_back(name, expr);
+          if (!expr.empty())
+            c.parameterOverrides.emplace_back(name, expr);
         });
       }
       ImGui::PopID();
@@ -162,7 +166,8 @@ void DrawConfigurationsPanel(AppState& state) {
       ModifyActiveConfig(state, "Toggle suppression", [&](Configuration& c) {
         auto& v = c.suppressedFeatures;
         v.erase(std::remove(v.begin(), v.end(), fid), v.end());
-        if (suppressed) v.push_back(fid);
+        if (suppressed)
+          v.push_back(fid);
       });
     }
     ImGui::PopID();
@@ -171,4 +176,4 @@ void DrawConfigurationsPanel(AppState& state) {
   ImGui::End();
 }
 
-}  // namespace ui
+} // namespace ui

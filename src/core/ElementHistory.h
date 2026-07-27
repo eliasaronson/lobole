@@ -1,10 +1,10 @@
 #pragma once
 
 #include "cad/CADKernel.h"
-#include "core/features/BooleanFeature.h" // BooleanOp
 #include "core/ElementMap.h"
-#include "core/Feature.h"       // Body
-#include "core/features/FilletFeature.h" // EdgeBlendOp
+#include "core/Feature.h"                 // Body
+#include "core/features/BooleanFeature.h" // BooleanOp
+#include "core/features/FilletFeature.h"  // EdgeBlendOp
 
 #include <glm/glm.hpp>
 

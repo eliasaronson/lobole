@@ -20,25 +20,35 @@ constexpr double kRadToDeg = 180.0 / kPi;
 // nullopt = not a unit name.
 std::optional<double> UnitFactor(const std::string& name) {
   static const std::unordered_map<std::string, double> kUnits = {
-      {"mm", 1.0}, {"cm", 10.0}, {"m", 1000.0}, {"in", 25.4}, {"ft", 304.8},
-      {"deg", 1.0}, {"rad", kRadToDeg},
+      {"mm", 1.0},   {"cm", 10.0}, {"m", 1000.0},      {"in", 25.4},
+      {"ft", 304.8}, {"deg", 1.0}, {"rad", kRadToDeg},
   };
   const auto it = kUnits.find(name);
-  return it == kUnits.end() ? std::nullopt
-                            : std::optional<double>(it->second);
+  return it == kUnits.end() ? std::nullopt : std::optional<double>(it->second);
 }
 
 // ---------------------------------------------------------------- Tokenizer
 
-enum class TokKind { Number, Ident, Plus, Minus, Star, Slash, Caret,
-                     LParen, RParen, Comma, End };
+enum class TokKind {
+  Number,
+  Ident,
+  Plus,
+  Minus,
+  Star,
+  Slash,
+  Caret,
+  LParen,
+  RParen,
+  Comma,
+  End
+};
 
 struct Token {
   TokKind kind = TokKind::End;
   size_t offset = 0;
   size_t length = 0;
-  double number = 0.0;  // Number only
-  std::string text;     // Ident only
+  double number = 0.0; // Number only
+  std::string text;    // Ident only
 };
 
 // Tokenizes the whole string. Returns false and fills outError on an
@@ -83,8 +93,9 @@ bool Tokenize(const std::string& src, std::vector<Token>& out,
       if (u < n && (std::isalpha(static_cast<unsigned char>(src[u])) != 0 ||
                     src[u] == '_')) {
         size_t e = u + 1;
-        while (e < n && (std::isalnum(static_cast<unsigned char>(src[e])) != 0 ||
-                         src[e] == '_')) {
+        while (e < n &&
+               (std::isalnum(static_cast<unsigned char>(src[e])) != 0 ||
+                src[e] == '_')) {
           ++e;
         }
         if (const auto factor = UnitFactor(src.substr(u, e - u))) {
@@ -109,19 +120,35 @@ bool Tokenize(const std::string& src, std::vector<Token>& out,
     }
     TokKind kind = TokKind::End;
     switch (c) {
-      case '+': kind = TokKind::Plus; break;
-      case '-': kind = TokKind::Minus; break;
-      case '*': kind = TokKind::Star; break;
-      case '/': kind = TokKind::Slash; break;
-      case '^': kind = TokKind::Caret; break;
-      case '(': kind = TokKind::LParen; break;
-      case ')': kind = TokKind::RParen; break;
-      case ',': kind = TokKind::Comma; break;
-      default:
-        if (outError != nullptr) {
-          *outError = {std::string("unexpected character '") + c + "'", i, 1};
-        }
-        return false;
+    case '+':
+      kind = TokKind::Plus;
+      break;
+    case '-':
+      kind = TokKind::Minus;
+      break;
+    case '*':
+      kind = TokKind::Star;
+      break;
+    case '/':
+      kind = TokKind::Slash;
+      break;
+    case '^':
+      kind = TokKind::Caret;
+      break;
+    case '(':
+      kind = TokKind::LParen;
+      break;
+    case ')':
+      kind = TokKind::RParen;
+      break;
+    case ',':
+      kind = TokKind::Comma;
+      break;
+    default:
+      if (outError != nullptr) {
+        *outError = {std::string("unexpected character '") + c + "'", i, 1};
+      }
+      return false;
     }
     out.push_back({kind, i, 1, 0.0, {}});
     ++i;
@@ -136,12 +163,12 @@ struct Node {
   enum class Kind { Number, Ident, Unary, Binary, Call };
 
   Kind kind = Kind::Number;
-  size_t offset = 0;  // span in the source text, for evaluation errors
+  size_t offset = 0; // span in the source text, for evaluation errors
   size_t length = 0;
-  double number = 0.0;                      // Number
-  std::string name;                         // Ident / Call
-  char op = 0;                              // Unary ('-') / Binary
-  std::vector<std::unique_ptr<Node>> args;  // Unary/Binary operands, Call args
+  double number = 0.0;                     // Number
+  std::string name;                        // Ident / Call
+  char op = 0;                             // Unary ('-') / Binary
+  std::vector<std::unique_ptr<Node>> args; // Unary/Binary operands, Call args
 };
 
 // Built-in functions: name -> {min args, max args}. Trig is in degrees to
@@ -152,8 +179,8 @@ struct FuncSig {
 };
 const std::unordered_map<std::string, FuncSig>& Functions() {
   static const std::unordered_map<std::string, FuncSig> f = {
-      {"sin", {1, 1}},  {"cos", {1, 1}},   {"tan", {1, 1}},
-      {"sqrt", {1, 1}}, {"abs", {1, 1}},   {"floor", {1, 1}},
+      {"sin", {1, 1}},  {"cos", {1, 1}},        {"tan", {1, 1}},
+      {"sqrt", {1, 1}}, {"abs", {1, 1}},        {"floor", {1, 1}},
       {"ceil", {1, 1}}, {"min", {2, SIZE_MAX}}, {"max", {2, SIZE_MAX}},
   };
   return f;
@@ -288,7 +315,7 @@ private:
     if (!Accept(TokKind::Caret)) {
       return base;
     }
-    auto exponent = ParseUnary();  // right-assoc + signed exponents
+    auto exponent = ParseUnary(); // right-assoc + signed exponents
     if (!exponent) {
       return nullptr;
     }
@@ -298,45 +325,45 @@ private:
   std::unique_ptr<Node> ParsePrimary() {
     const Token tok = Peek();
     switch (tok.kind) {
-      case TokKind::Number: {
-        Take();
-        auto node = Make(Node::Kind::Number, tok.offset, tok.length);
-        node->number = tok.number;
-        return node;
+    case TokKind::Number: {
+      Take();
+      auto node = Make(Node::Kind::Number, tok.offset, tok.length);
+      node->number = tok.number;
+      return node;
+    }
+    case TokKind::Ident: {
+      Take();
+      if (Peek().kind == TokKind::LParen) {
+        return ParseCall(tok);
       }
-      case TokKind::Ident: {
-        Take();
-        if (Peek().kind == TokKind::LParen) {
-          return ParseCall(tok);
-        }
-        auto node = Make(Node::Kind::Ident, tok.offset, tok.length);
-        node->name = tok.text;
-        return node;
-      }
-      case TokKind::LParen: {
-        Take();
-        auto inner = ParseAdditive();
-        if (!inner) {
-          return nullptr;
-        }
-        if (!Accept(TokKind::RParen)) {
-          Fail(Peek(), "expected ')'");
-          return nullptr;
-        }
-        return inner;
-      }
-      case TokKind::End:
-        Fail(tok, "unexpected end of expression");
+      auto node = Make(Node::Kind::Ident, tok.offset, tok.length);
+      node->name = tok.text;
+      return node;
+    }
+    case TokKind::LParen: {
+      Take();
+      auto inner = ParseAdditive();
+      if (!inner) {
         return nullptr;
-      default:
-        Fail(tok, "unexpected token");
+      }
+      if (!Accept(TokKind::RParen)) {
+        Fail(Peek(), "expected ')'");
         return nullptr;
+      }
+      return inner;
+    }
+    case TokKind::End:
+      Fail(tok, "unexpected end of expression");
+      return nullptr;
+    default:
+      Fail(tok, "unexpected token");
+      return nullptr;
     }
   }
 
   // Called with the identifier token taken and '(' pending.
   std::unique_ptr<Node> ParseCall(const Token& name) {
-    Take();  // '('
+    Take(); // '('
     auto call = Make(Node::Kind::Call, name.offset, name.length);
     call->name = name.text;
     while (true) {
@@ -399,63 +426,72 @@ bool EvalNode(const Node& node, const SymbolTable& symbols, double& out,
   };
 
   switch (node.kind) {
-    case Node::Kind::Number:
-      out = node.number;
-      return true;
-    case Node::Kind::Ident: {
-      if (node.name == "pi") {
-        out = kPi;
-        return true;
-      }
-      const auto it = symbols.find(node.name);
-      if (it == symbols.end()) {
-        return fail("unknown variable '" + node.name + "'");
-      }
-      out = it->second;
+  case Node::Kind::Number:
+    out = node.number;
+    return true;
+  case Node::Kind::Ident: {
+    if (node.name == "pi") {
+      out = kPi;
       return true;
     }
-    case Node::Kind::Unary: {
-      double v = 0.0;
-      if (!EvalNode(*node.args[0], symbols, v, outError)) {
-        return false;
-      }
-      out = -v;
-      return true;
+    const auto it = symbols.find(node.name);
+    if (it == symbols.end()) {
+      return fail("unknown variable '" + node.name + "'");
     }
-    case Node::Kind::Binary: {
-      double a = 0.0;
-      double b = 0.0;
-      if (!EvalNode(*node.args[0], symbols, a, outError) ||
-          !EvalNode(*node.args[1], symbols, b, outError)) {
-        return false;
+    out = it->second;
+    return true;
+  }
+  case Node::Kind::Unary: {
+    double v = 0.0;
+    if (!EvalNode(*node.args[0], symbols, v, outError)) {
+      return false;
+    }
+    out = -v;
+    return true;
+  }
+  case Node::Kind::Binary: {
+    double a = 0.0;
+    double b = 0.0;
+    if (!EvalNode(*node.args[0], symbols, a, outError) ||
+        !EvalNode(*node.args[1], symbols, b, outError)) {
+      return false;
+    }
+    switch (node.op) {
+    case '+':
+      out = a + b;
+      break;
+    case '-':
+      out = a - b;
+      break;
+    case '*':
+      out = a * b;
+      break;
+    case '/':
+      if (b == 0.0) {
+        return fail("division by zero");
       }
-      switch (node.op) {
-        case '+': out = a + b; break;
-        case '-': out = a - b; break;
-        case '*': out = a * b; break;
-        case '/':
-          if (b == 0.0) {
-            return fail("division by zero");
-          }
-          out = a / b;
-          break;
-        case '^': out = std::pow(a, b); break;
-        default: break;
-      }
+      out = a / b;
+      break;
+    case '^':
+      out = std::pow(a, b);
+      break;
+    default:
       break;
     }
-    case Node::Kind::Call: {
-      std::vector<double> args(node.args.size());
-      for (size_t i = 0; i < node.args.size(); ++i) {
-        if (!EvalNode(*node.args[i], symbols, args[i], outError)) {
-          return false;
-        }
-      }
-      if (!EvalCall(node, args, out, outError)) {
+    break;
+  }
+  case Node::Kind::Call: {
+    std::vector<double> args(node.args.size());
+    for (size_t i = 0; i < node.args.size(); ++i) {
+      if (!EvalNode(*node.args[i], symbols, args[i], outError)) {
         return false;
       }
-      break;
     }
+    if (!EvalCall(node, args, out, outError)) {
+      return false;
+    }
+    break;
+  }
   }
   if (!std::isfinite(out)) {
     return fail("result is not a finite number");
@@ -515,8 +551,8 @@ public:
     return m_deps;
   }
 
-  std::expected<double, ExprError> Evaluate(
-      const SymbolTable& symbols) const override {
+  std::expected<double, ExprError>
+  Evaluate(const SymbolTable& symbols) const override {
     double value = 0.0;
     ExprError error;
     if (!EvalNode(*m_root, symbols, value, &error)) {
@@ -530,12 +566,13 @@ private:
   std::set<std::string> m_deps;
 };
 
-}  // namespace
+} // namespace
 
 // ----------------------------------------------------------------- Engines
 
-std::expected<double, ExprError> ExpressionEngine::EvaluateText(
-    const std::string& text, const SymbolTable& symbols) const {
+std::expected<double, ExprError>
+ExpressionEngine::EvaluateText(const std::string& text,
+                               const SymbolTable& symbols) const {
   return Compile(text).and_then(
       [&symbols](const std::unique_ptr<CompiledExpr>& compiled) {
         return compiled->Evaluate(symbols);
@@ -561,9 +598,10 @@ BuiltinExpressionEngine::Compile(const std::string& text) const {
   return std::make_unique<BuiltinCompiledExpr>(std::move(root));
 }
 
-std::string BuiltinExpressionEngine::RenameIdentifier(
-    const std::string& text, const std::string& oldName,
-    const std::string& newName) const {
+std::string
+BuiltinExpressionEngine::RenameIdentifier(const std::string& text,
+                                          const std::string& oldName,
+                                          const std::string& newName) const {
   std::vector<Token> tokens;
   if (!Tokenize(text, tokens, nullptr)) {
     return text;

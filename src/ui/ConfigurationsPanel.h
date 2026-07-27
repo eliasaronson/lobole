@@ -10,4 +10,4 @@ namespace ui {
 // applied by regenerating against them (docs/configurations/plan.md).
 void DrawConfigurationsPanel(AppState& state);
 
-}  // namespace ui
+} // namespace ui

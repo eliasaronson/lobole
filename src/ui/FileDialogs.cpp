@@ -1,7 +1,7 @@
 #include "ui/FileDialogs.h"
 
-#include "common/Logger.h"
 #include "cad/CADKernel.h"
+#include "common/Logger.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
@@ -121,9 +121,8 @@ void DrawBrowserWindow(AppState& state) {
   if (!state.showFileBrowser)
     return;
 
-  const char* title = state.fileBrowserAssemblyMode
-                          ? "Import STEP as Assembly"
-                          : "Open STEP File";
+  const char* title = state.fileBrowserAssemblyMode ? "Import STEP as Assembly"
+                                                    : "Open STEP File";
   ImGui::Begin(title, &state.showFileBrowser,
                ImGuiWindowFlags_AlwaysAutoResize);
 
@@ -258,8 +257,7 @@ void OpenReferenceImageDialog(AppState& state) {
     return;
   }
   nfdu8char_t* outPath = nullptr;
-  const nfdu8filteritem_t filters[] = {
-      {"Images", "png,jpg,jpeg,bmp,tga,gif"}};
+  const nfdu8filteritem_t filters[] = {{"Images", "png,jpg,jpeg,bmp,tga,gif"}};
   nfdresult_t result = NFD_OpenDialogU8(&outPath, filters, 1, nullptr);
   if (result == NFD_OKAY) {
     std::string filePath(outPath);
@@ -358,7 +356,7 @@ void ExportDialog(AppState& state) {
   // B-Rep writers below.
   if (state.drawing) {
     if (state.drawing->GetViews().empty())
-      return;  // nothing projected to export yet
+      return; // nothing projected to export yet
     nfdu8char_t* out = nullptr;
     const nfdu8filteritem_t sheetFilters[] = {{"SVG", "svg"}, {"PDF", "pdf"}};
     if (NFD_SaveDialogU8(&out, sheetFilters, 2, nullptr, "sheet.pdf") !=
@@ -369,7 +367,8 @@ void ExportDialog(AppState& state) {
     NFD_FreePathU8(out);
     std::string ext = std::filesystem::path(path).extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-    if (ext != ".svg" && ext != ".pdf") path += ".pdf";  // default
+    if (ext != ".svg" && ext != ".pdf")
+      path += ".pdf"; // default
     std::string error;
     if (ExportActiveDrawing(state, path, &error))
       LOG_INFO("Exported drawing to {}", path);
@@ -380,14 +379,12 @@ void ExportDialog(AppState& state) {
 
   const bool haveAssembly =
       state.assembly && state.assembly->OccurrenceCount() > 0;
-  const bool havePart =
-      state.document && !state.document->GetBodies().empty();
+  const bool havePart = state.document && !state.document->GetBodies().empty();
   if (!haveAssembly && !havePart)
     return;
   // Assemblies export only through the visual (tessellation) writers; a part
   // additionally offers the B-Rep CAD formats.
-  const nfdu8filteritem_t asmFilters[] = {
-      {"Visual mesh", "glb,gltf,obj,ply"}};
+  const nfdu8filteritem_t asmFilters[] = {{"Visual mesh", "glb,gltf,obj,ply"}};
   const nfdu8filteritem_t partFilters[] = {
       {"CAD / mesh", "step,stp,stl,brep,glb,gltf,obj,ply"}};
   nfdu8char_t* outPath = nullptr;
@@ -490,9 +487,7 @@ void SaveProjectDialog(AppState&) {
   LOG_WARN("Save Project requires nativefiledialog");
 }
 
-void ExportDialog(AppState&) {
-  LOG_WARN("Export requires nativefiledialog");
-}
+void ExportDialog(AppState&) { LOG_WARN("Export requires nativefiledialog"); }
 
 void ExportBomDialog(AppState&) {
   LOG_WARN("BOM export requires nativefiledialog");

@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "cad/CADKernel.h"
 #include "core/Document.h"
-#include "core/drawing/DrawingProjection.h"
 #include "core/Feature.h"
+#include "core/drawing/DrawingProjection.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <TopExp.hxx>
@@ -34,8 +34,8 @@ namespace {
 // bored through it along Z at (50, 20) — planar and cylindrical faces.
 CADShape BlockWithHole() {
   CADShape block = CADKernel::Instance().CreateBox(100.0, 40.0, 40.0);
-  CADShape hole = CADKernel::Instance().CreateCylinder(glm::vec3(50, 20, -1),
-                                                       glm::vec3(0, 0, 1), 8.0, 42.0);
+  CADShape hole = CADKernel::Instance().CreateCylinder(
+      glm::vec3(50, 20, -1), glm::vec3(0, 0, 1), 8.0, 42.0);
   return block.Difference(hole);
 }
 
@@ -60,7 +60,8 @@ struct Box2 {
 Box2 BoundsOf(const std::vector<ProjectedCurve>& curves, bool visibleOnly) {
   Box2 b;
   for (const auto& c : curves) {
-    if (visibleOnly && !c.visible) continue;
+    if (visibleOnly && !c.visible)
+      continue;
     for (const auto& p : c.points) {
       b.min = glm::min(b.min, p);
       b.max = glm::max(b.max, p);
@@ -78,7 +79,7 @@ int CylindricalFaceIndex(const TopoDS_Shape& shape) {
   for (int i = 1; i <= faces.Extent(); ++i) {
     BRepAdaptor_Surface surf(TopoDS::Face(faces.FindKey(i)));
     if (surf.GetType() == GeomAbs_Cylinder) {
-      REQUIRE(found == -1);  // exactly one expected in these fixtures
+      REQUIRE(found == -1); // exactly one expected in these fixtures
       found = i - 1;
     }
   }
@@ -92,7 +93,7 @@ int EdgeCount(const TopoDS_Shape& shape) {
   return edges.Extent();
 }
 
-}  // namespace
+} // namespace
 
 #ifdef HAVE_OPENCASCADE
 
@@ -113,7 +114,7 @@ TEST_CASE("HLR box front view traces every curve to a source edge",
   std::set<int> visibleSourceEdges;
   for (const auto& c : result->curves) {
     CHECK(c.kind == CurveKind::Sharp);
-    CHECK(c.curveType == 0);  // GeomAbs_Line
+    CHECK(c.curveType == 0); // GeomAbs_Line
     CHECK(c.source.sourceId == 1);
     CHECK(c.source.edgeIndex >= 0);
     CHECK(c.source.edgeIndex < nEdges);
@@ -133,10 +134,11 @@ TEST_CASE("HLR box front view traces every curve to a source edge",
   CHECK_THAT(b.H(), WithinAbs(40.0, 1e-6));
 }
 
-TEST_CASE("HLR cylinder side view yields two silhouettes on the cylindrical face",
-          "[drawing][hlr]") {
-  CADShape cyl = CADKernel::Instance().CreateCylinder(glm::vec3(0, 0, 0),
-                                                      glm::vec3(0, 0, 1), 8.0, 40.0);
+TEST_CASE(
+    "HLR cylinder side view yields two silhouettes on the cylindrical face",
+    "[drawing][hlr]") {
+  CADShape cyl = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 8.0, 40.0);
   REQUIRE(cyl.IsValid());
   const int cylFace = CylindricalFaceIndex(cyl.GetShape());
 
@@ -151,8 +153,10 @@ TEST_CASE("HLR cylinder side view yields two silhouettes on the cylindrical face
   // hang on. The seam edge is Sewn (RgNLine), never an outline.
   std::vector<const ProjectedCurve*> outlines;
   for (const auto& c : result->curves) {
-    if (c.kind == CurveKind::Outline && c.visible) outlines.push_back(&c);
-    if (c.kind == CurveKind::Sewn) CHECK(c.source.edgeIndex >= 0);
+    if (c.kind == CurveKind::Outline && c.visible)
+      outlines.push_back(&c);
+    if (c.kind == CurveKind::Sewn)
+      CHECK(c.source.edgeIndex >= 0);
   }
   REQUIRE(outlines.size() == 2);
   for (const auto* c : outlines) {
@@ -172,7 +176,8 @@ TEST_CASE("HLR blind-bore hidden lines attribute to the bore face",
   REQUIRE(part.IsValid());
   const int boreFace = CylindricalFaceIndex(part.GetShape());
 
-  SECTION("front view: the bore shows as hidden lines, silhouette traced to face") {
+  SECTION(
+      "front view: the bore shows as hidden lines, silhouette traced to face") {
     std::string err;
     auto result = ProjectView(One(part), kFrontDir, kFrontUp, {}, &err);
     INFO(err);
@@ -186,10 +191,13 @@ TEST_CASE("HLR blind-bore hidden lines attribute to the bore face",
     // hidden, which is what the drawing shows.
     bool hiddenAt42 = false, hiddenAt58 = false, silhouetteOnBoreFace = false;
     for (const auto& c : result->curves) {
-      if (c.visible) continue;
+      if (c.visible)
+        continue;
       const double x = c.points.front().x;
-      if (std::abs(x - 42.0) < 1.0) hiddenAt42 = true;
-      if (std::abs(x - 58.0) < 1.0) hiddenAt58 = true;
+      if (std::abs(x - 42.0) < 1.0)
+        hiddenAt42 = true;
+      if (std::abs(x - 58.0) < 1.0)
+        hiddenAt58 = true;
       if (c.kind == CurveKind::Outline && c.source.faceIndex == boreFace)
         silhouetteOnBoreFace = true;
     }
@@ -204,7 +212,8 @@ TEST_CASE("HLR blind-bore hidden lines attribute to the bore face",
     std::string err;
     auto result = ProjectView(One(part), kFrontDir, kFrontUp, opts, &err);
     REQUIRE(result.has_value());
-    for (const auto& c : result->curves) CHECK(c.visible);
+    for (const auto& c : result->curves)
+      CHECK(c.visible);
   }
 
   SECTION("top view: the bore rim is a visible circle with symbolic radius") {
@@ -218,7 +227,7 @@ TEST_CASE("HLR blind-bore hidden lines attribute to the bore face",
       if (c.visible && c.curveType == 1 /* GeomAbs_Circle */ &&
           std::abs(c.conicRadius - 8.0) < 1e-6) {
         foundRim = true;
-        CHECK(c.source.edgeIndex >= 0);  // a real model edge, not a silhouette
+        CHECK(c.source.edgeIndex >= 0); // a real model edge, not a silhouette
       }
     }
     CHECK(foundRim);
@@ -235,9 +244,9 @@ TEST_CASE("HLR hides one instance behind another with per-instance attribution",
   // every one of its curves must come back hidden — and attributed to
   // sourceId 2 despite the shared topology.
   std::vector<InputBody> bodies = One(part, 1);
-  bodies.push_back(InputBody{part.GetShape(),
-                             glm::translate(glm::dmat4(1.0), glm::dvec3(0, 60, 0)),
-                             2});
+  bodies.push_back(
+      InputBody{part.GetShape(),
+                glm::translate(glm::dmat4(1.0), glm::dvec3(0, 60, 0)), 2});
 
   std::string err;
   auto result = ProjectView(bodies, kFrontDir, kFrontUp, {}, &err);
@@ -247,7 +256,8 @@ TEST_CASE("HLR hides one instance behind another with per-instance attribution",
 
   int fromFirst = 0, fromSecond = 0;
   for (const auto& c : result->curves) {
-    if (c.source.sourceId == 1) ++fromFirst;
+    if (c.source.sourceId == 1)
+      ++fromFirst;
     if (c.source.sourceId == 2) {
       ++fromSecond;
       CHECK(!c.visible);
@@ -268,12 +278,13 @@ TEST_CASE("HLR curve output: types and discretization (gate 3 record)",
   auto iso = ProjectView(One(part), kIsoDir, kIsoUp, {}, &err);
   REQUIRE(iso.has_value());
   std::map<int, int> histogram;
-  for (const auto& c : iso->curves) ++histogram[c.curveType];
+  for (const auto& c : iso->curves)
+    ++histogram[c.curveType];
   std::cout << "[hlr gate3] iso curve types (GeomAbs):";
   for (const auto& [type, count] : histogram)
     std::cout << " " << type << "=" << count;
   std::cout << "\n";
-  CHECK(histogram.count(0) == 1);  // lines exist
+  CHECK(histogram.count(0) == 1); // lines exist
   // An iso view of a bore yields conic or bspline images, never only lines.
   CHECK(iso->curves.size() > size_t(histogram[0]));
 
@@ -286,7 +297,8 @@ TEST_CASE("HLR curve output: types and discretization (gate 3 record)",
   REQUIRE((top1.has_value() && top2.has_value()));
   const auto pointsOf = [](const drawing::ProjectionResult& r) {
     size_t n = 0;
-    for (const auto& c : r.curves) n += c.points.size();
+    for (const auto& c : r.curves)
+      n += c.points.size();
     return n;
   };
   std::cout << "[hlr gate3] top-view points @0.05mm=" << pointsOf(*top1)
@@ -333,8 +345,9 @@ TEST_CASE("HLR timing: real part (v17-full golden)", "[drawing][hlr][perf]") {
     INFO(err);
     REQUIRE(result.has_value());
     CHECK(result->stats.unresolvedSources == 0);
-    std::cout << "[hlr perf] part " << name << ": update="
-              << result->stats.updateMs << "ms hide=" << result->stats.hideMs
+    std::cout << "[hlr perf] part " << name
+              << ": update=" << result->stats.updateMs
+              << "ms hide=" << result->stats.hideMs
               << "ms dsEdges=" << result->stats.dsEdges
               << " curves=" << result->curves.size() << "\n";
   }
@@ -363,13 +376,14 @@ void TimeGrid(const CADShape& part, int n) {
   INFO(err);
   REQUIRE(result.has_value());
   CHECK(result->stats.unresolvedSources == 0);
-  std::cout << "[hlr perf] " << n * n << "-instance grid iso: update="
-            << result->stats.updateMs << "ms hide=" << result->stats.hideMs
+  std::cout << "[hlr perf] " << n * n
+            << "-instance grid iso: update=" << result->stats.updateMs
+            << "ms hide=" << result->stats.hideMs
             << "ms dsEdges=" << result->stats.dsEdges
             << " curves=" << result->curves.size() << "\n";
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("HLR timing: 25-instance assembly grid", "[drawing][hlr][perf]") {
   CADShape part = BlockWithHole();
@@ -385,4 +399,4 @@ TEST_CASE("HLR timing: 49-instance assembly grid", "[.][hlr-perf50]") {
   TimeGrid(part, 7);
 }
 
-#endif  // HAVE_OPENCASCADE
+#endif // HAVE_OPENCASCADE

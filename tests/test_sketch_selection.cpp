@@ -14,11 +14,11 @@ TEST_CASE("BoxSelect: window selects only fully-enclosed entities",
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t a = sk.AddEntity(sketch::Line{{0, 0}, {1, 1}}); // inside [-1,2]^2
   sk.AddEntity(sketch::Line{{5, 5}, {6, 6}});              // outside
-  sk.AddEntity(sketch::Line{{-5, 0}, {5, 0}});             // spans, not enclosed
-  auto ident = [](glm::vec2 p) { return p; };             // UV == screen
+  sk.AddEntity(sketch::Line{{-5, 0}, {5, 0}}); // spans, not enclosed
+  auto ident = [](glm::vec2 p) { return p; };  // UV == screen
 
-  auto sel = sketch::BoxSelect(sk.entities, {-1, -1}, {2, 2}, /*crossing=*/false,
-                               ident);
+  auto sel = sketch::BoxSelect(sk.entities, {-1, -1}, {2, 2},
+                               /*crossing=*/false, ident);
   REQUIRE(sel.size() == 1);
   CHECK(sel[0] == a);
 }

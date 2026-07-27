@@ -1,13 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
+#include "core/Document.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
-#include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
-#include "core/io/Serialization.h"
-#include "TestIO.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 
 #include <filesystem>
 
@@ -21,7 +21,8 @@ static const SketchPlane kXY(PlaneType::XY);
 static uint64_t AddOffsetDatum(Document& doc, double offset,
                                PlaneType base = PlaneType::XY,
                                uint64_t parentId = 0) {
-  auto dp = std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
+  auto dp =
+      std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
   dp->offset = offset;
   dp->basePlane = base;
   dp->parentId = parentId;
@@ -62,9 +63,10 @@ TEST_CASE("Offset datum shifts along the parent normal", "[datum]") {
 
 TEST_CASE("Angled datum rotates the parent normal about an axis", "[datum]") {
   Document doc;
-  auto dp = std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Angled);
-  dp->basePlane = PlaneType::XY;           // normal +Z
-  dp->axis.kind = AxisRef::Kind::X;        // hinge on world X
+  auto dp =
+      std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Angled);
+  dp->basePlane = PlaneType::XY;    // normal +Z
+  dp->axis.kind = AxisRef::Kind::X; // hinge on world X
   dp->angleDeg = 90.0;
   doc.AddFeature(std::move(dp));
   auto* d = dynamic_cast<DatumPlaneFeature*>(doc.GetFeature(0));
@@ -79,7 +81,8 @@ TEST_CASE("Angled datum rotates the parent normal about an axis", "[datum]") {
 
 TEST_CASE("Angled datum with an axis parallel to the normal fails", "[datum]") {
   Document doc;
-  auto dp = std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Angled);
+  auto dp =
+      std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Angled);
   dp->basePlane = PlaneType::XY;    // normal +Z
   dp->axis.kind = AxisRef::Kind::Z; // parallel -> degenerate
   doc.AddFeature(std::move(dp));
@@ -162,7 +165,8 @@ TEST_CASE("A datum offset driven by a variable follows a parameter edit",
           "[datum]") {
   Document doc;
   doc.SetParameter("gap", "4");
-  auto dp = std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
+  auto dp =
+      std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
   dp->offsetExpr = "gap";
   doc.AddFeature(std::move(dp));
   auto* d = dynamic_cast<DatumPlaneFeature*>(doc.GetFeature(0));
@@ -181,7 +185,8 @@ TEST_CASE("Angled datum can hinge on a sketch line", "[datum]") {
   doc.AddFeature(std::move(sk));
   const uint64_t sketchId = doc.GetFeature(0)->GetId();
 
-  auto dp = std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Angled);
+  auto dp =
+      std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Angled);
   dp->axis.kind = AxisRef::Kind::SketchLine;
   dp->axis.sketchId = sketchId;
   dp->axis.entityId = lineId;
@@ -198,7 +203,8 @@ TEST_CASE("Angled datum can hinge on a sketch line", "[datum]") {
 
 TEST_CASE("A datum with a missing parent fails regeneration", "[datum]") {
   Document doc;
-  auto dp = std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
+  auto dp =
+      std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
   dp->parentId = 9999; // no such feature
   doc.AddFeature(std::move(dp));
   CHECK_FALSE(doc.Regenerate());
@@ -228,8 +234,8 @@ TEST_CASE("Datum + tracked sketch + extrude round-trip through JSON",
   {
     Document doc;
     doc.SetParameter("gap", "5");
-    auto dp = std::make_unique<DatumPlaneFeature>("Plane",
-                                                  DatumPlaneKind::Offset);
+    auto dp =
+        std::make_unique<DatumPlaneFeature>("Plane", DatumPlaneKind::Offset);
     dp->offsetExpr = "gap";
     doc.AddFeature(std::move(dp));
     const uint64_t datum = doc.GetFeature(0)->GetId();
@@ -288,8 +294,8 @@ TEST_CASE("DatumAxis global and two-point variants", "[datum]") {
   CHECK_THAT(x->Direction().x, WithinRel(1.0f, 1e-6f));
   CHECK(doc.GetBodies().empty()); // contributes no body
 
-  auto tp = std::make_unique<DatumAxisFeature>("Diag",
-                                               DatumAxisKind::TwoPoints);
+  auto tp =
+      std::make_unique<DatumAxisFeature>("Diag", DatumAxisKind::TwoPoints);
   tp->p0 = {1, 2, 3};
   tp->p1 = {1, 2, 5}; // along +z
   doc.AddFeature(std::move(tp));
@@ -301,8 +307,7 @@ TEST_CASE("DatumAxis global and two-point variants", "[datum]") {
 
 TEST_CASE("DatumAxis with coincident points fails", "[datum]") {
   Document doc;
-  auto tp = std::make_unique<DatumAxisFeature>("Bad",
-                                               DatumAxisKind::TwoPoints);
+  auto tp = std::make_unique<DatumAxisFeature>("Bad", DatumAxisKind::TwoPoints);
   tp->p0 = {1, 1, 1};
   tp->p1 = {1, 1, 1};
   doc.AddFeature(std::move(tp));
@@ -316,8 +321,8 @@ TEST_CASE("DatumAxis along a sketch line resolves to the line", "[datum]") {
   doc.AddFeature(std::move(sk));
   const uint64_t sketchId = doc.GetFeature(0)->GetId();
 
-  auto ax = std::make_unique<DatumAxisFeature>("Axis",
-                                               DatumAxisKind::SketchLine);
+  auto ax =
+      std::make_unique<DatumAxisFeature>("Axis", DatumAxisKind::SketchLine);
   ax->sketchId = sketchId;
   ax->entityId = lineId;
   doc.AddFeature(std::move(ax));
@@ -331,8 +336,8 @@ TEST_CASE("DatumAxis round-trips through JSON", "[datum]") {
   const fs::path path = fs::temp_directory_path() / "designer_axis_test.json";
   {
     Document doc;
-    auto ax = std::make_unique<DatumAxisFeature>("Axis",
-                                                 DatumAxisKind::TwoPoints);
+    auto ax =
+        std::make_unique<DatumAxisFeature>("Axis", DatumAxisKind::TwoPoints);
     ax->p0 = {0, 0, 0};
     ax->p1 = {0, 0, 4};
     doc.AddFeature(std::move(ax));

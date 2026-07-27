@@ -24,17 +24,17 @@ struct Solver::Impl {
   GCS::System sys;
   // deque: element addresses stay stable across push_back (GCS holds raw
   // pointers into these), so no reservation bookkeeping is needed.
-  std::deque<double> params;         // point coords + dimension values
-  std::deque<double> radii;          // circle + arc radii
-  std::deque<double> angles;         // arc start/end angles
-  std::vector<GCS::Point> gcsPoints; // one per (entity, which) we expose
+  std::deque<double> params;          // point coords + dimension values
+  std::deque<double> radii;           // circle + arc radii
+  std::deque<double> angles;          // arc start/end angles
+  std::vector<GCS::Point> gcsPoints;  // one per (entity, which) we expose
   std::map<uint64_t, int> pointIndex; // (entity<<8 | which) -> gcsPoints index
-  std::vector<GCS::Line> lines;      // index-aligned with line entities
-  std::map<uint32_t, int> lineOf;    // entity index -> lines index
+  std::vector<GCS::Line> lines;       // index-aligned with line entities
+  std::map<uint32_t, int> lineOf;     // entity index -> lines index
   std::vector<GCS::Circle> circles;
-  std::map<uint32_t, int> circleOf;  // entity id -> circles index
+  std::map<uint32_t, int> circleOf; // entity id -> circles index
   std::vector<GCS::Arc> arcs;
-  std::map<uint32_t, int> arcOf;     // entity id -> arcs index
+  std::map<uint32_t, int> arcOf; // entity id -> arcs index
 
   // Loaded sketch shape for write-back
   std::vector<Entity> entityShapes;
@@ -44,7 +44,7 @@ struct Solver::Impl {
   std::deque<double> dragTarget;       // 2 slots per dragged point (x, y)
   std::vector<int> dragTargetBase;     // dragTarget index base per input point
   std::deque<double> dragRadiusTarget; // 1 slot for a radius drag
-  std::set<double*> fixedParams;       // params held out of the unknowns (Fixed)
+  std::set<double*> fixedParams; // params held out of the unknowns (Fixed)
   std::vector<int> constraintFirstTag; // per-constraint first GCS tag (+ end)
 
   // Maps solver tags to the SketchFeature::constraints indices that own them.
@@ -84,7 +84,8 @@ struct Solver::Impl {
     for (auto& r : radii)
       if (!fixedParams.count(&r)) // linked-copy outputs stay put
         unknowns.push_back(&r);
-    for (auto& ang : angles) // arc start/end angles (tied to points by ArcRules)
+    for (auto& ang :
+         angles) // arc start/end angles (tied to points by ArcRules)
       if (!fixedParams.count(&ang))
         unknowns.push_back(&ang);
     if (unknowns.empty())
@@ -138,12 +139,18 @@ void Solver::Load(const SketchFeature& sketch) {
   // pointers into `params`).
   size_t nParams = 0;
   for (const auto& e : sketch.entities) {
-    if (std::holds_alternative<Point>(e)) nParams += 2;
-    else if (std::holds_alternative<Line>(e)) nParams += 4;
-    else if (std::holds_alternative<Circle>(e)) nParams += 3;
-    else if (std::holds_alternative<Arc>(e)) nParams += 6; // 3 pts + rad + 2 ang
-    else if (std::holds_alternative<Ellipse>(e)) nParams += 2; // centre only
-    else if (std::holds_alternative<EllipseArc>(e)) nParams += 2; // centre only
+    if (std::holds_alternative<Point>(e))
+      nParams += 2;
+    else if (std::holds_alternative<Line>(e))
+      nParams += 4;
+    else if (std::holds_alternative<Circle>(e))
+      nParams += 3;
+    else if (std::holds_alternative<Arc>(e))
+      nParams += 6; // 3 pts + rad + 2 ang
+    else if (std::holds_alternative<Ellipse>(e))
+      nParams += 2; // centre only
+    else if (std::holds_alternative<EllipseArc>(e))
+      nParams += 2; // centre only
     else if (auto* bs = std::get_if<BSpline>(&e))
       nParams += 2 * bs->poles.size(); // one solver point per pole
   }
@@ -226,7 +233,8 @@ void Solver::Load(const SketchFeature& sketch) {
     } else if (auto* el = std::get_if<Ellipse>(&e)) {
       // v1: only the centre is a solver point (so coincident/distance/fixed on
       // the centre work and the ellipse translates with it); the radii and
-      // rotation are rigid — see docs/sketching/phase-l.md for the full-rules TODO.
+      // rotation are rigid — see docs/sketching/phase-l.md for the full-rules
+      // TODO.
       (void)el;
       addPoint(id, 0, el->center);
     } else if (auto* ea = std::get_if<EllipseArc>(&e)) {
@@ -258,17 +266,21 @@ void Solver::Load(const SketchFeature& sketch) {
     GCS::Point* b = im.Resolve(con.b);
     switch (con.kind) {
     case ConstraintKind::Coincident:
-      if (a && b) im.sys.addConstraintP2PCoincident(*a, *b, tag++);
+      if (a && b)
+        im.sys.addConstraintP2PCoincident(*a, *b, tag++);
       break;
     case ConstraintKind::Horizontal:
-      // Two-point form (both refs resolve to points): the pair shares a Y — used
-      // for point-to-point alignment. Otherwise the whole-line form.
-      if (a && b) im.sys.addConstraintHorizontal(*a, *b, tag++);
+      // Two-point form (both refs resolve to points): the pair shares a Y —
+      // used for point-to-point alignment. Otherwise the whole-line form.
+      if (a && b)
+        im.sys.addConstraintHorizontal(*a, *b, tag++);
       else if (im.lineOf.count(con.a.entity))
-        im.sys.addConstraintHorizontal(im.lines[im.lineOf[con.a.entity]], tag++);
+        im.sys.addConstraintHorizontal(im.lines[im.lineOf[con.a.entity]],
+                                       tag++);
       break;
     case ConstraintKind::Vertical:
-      if (a && b) im.sys.addConstraintVertical(*a, *b, tag++); // pair shares an X
+      if (a && b)
+        im.sys.addConstraintVertical(*a, *b, tag++); // pair shares an X
       else if (im.lineOf.count(con.a.entity))
         im.sys.addConstraintVertical(im.lines[im.lineOf[con.a.entity]], tag++);
       break;
@@ -347,7 +359,8 @@ void Solver::Load(const SketchFeature& sketch) {
         im.sys.addConstraintTangent(im.lines[im.lineOf[con.a.entity]],
                                     im.circles[im.circleOf[con.b.entity]], ccw,
                                     tag++);
-      } else if (im.lineOf.count(con.a.entity) && im.arcOf.count(con.b.entity)) {
+      } else if (im.lineOf.count(con.a.entity) &&
+                 im.arcOf.count(con.b.entity)) {
         const auto& ln =
             std::get<Line>(im.entityShapes[im.shapeIndexOf[con.a.entity]]);
         const auto& arc =
@@ -356,7 +369,8 @@ void Solver::Load(const SketchFeature& sketch) {
         glm::vec2 r = arc.center - ln.a;
         bool ccw = (d.x * r.y - d.y * r.x) > 0.0f;
         im.sys.addConstraintTangent(im.lines[im.lineOf[con.a.entity]],
-                                    im.arcs[im.arcOf[con.b.entity]], ccw, tag++);
+                                    im.arcs[im.arcOf[con.b.entity]], ccw,
+                                    tag++);
       }
       break;
     case ConstraintKind::PointOnLine:
@@ -489,7 +503,8 @@ void Solver::Load(const SketchFeature& sketch) {
   }
 
   // External (projected) geometry is likewise solver-FIXED — its position is
-  // owned by the source it projects, so the solve references but never moves it.
+  // owned by the source it projects, so the solve references but never moves
+  // it.
   for (const auto& ext : sketch.external) {
     for (uint32_t genId : ext.genIds) {
       for (const auto& [key, idx] : im.pointIndex) {
@@ -539,8 +554,7 @@ void Solver::Load(const SketchFeature& sketch) {
           im.fixedParams.insert(
               im.circles[static_cast<size_t>(im.circleOf[id])].rad);
         else if (im.arcOf.count(id) != 0)
-          im.fixedParams.insert(
-              im.arcs[static_cast<size_t>(im.arcOf[id])].rad);
+          im.fixedParams.insert(im.arcs[static_cast<size_t>(im.arcOf[id])].rad);
       }
     }
   }
@@ -672,7 +686,8 @@ void Solver::WriteBack(std::vector<Entity>& entities) const {
       while (ar.endAngle <= ar.startAngle)
         ar.endAngle += 2.0 * M_PI;
     } else if (std::holds_alternative<EllipseArc>(e)) {
-      std::get<EllipseArc>(e).center = pointAt(0); // radii/rotation/params rigid
+      std::get<EllipseArc>(e).center =
+          pointAt(0); // radii/rotation/params rigid
     } else if (std::holds_alternative<Ellipse>(e)) {
       std::get<Ellipse>(e).center = pointAt(0); // radii/rotation rigid
     } else if (std::holds_alternative<BSpline>(e)) {

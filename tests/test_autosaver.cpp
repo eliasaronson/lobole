@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "core/io/Autosaver.h"
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/io/Autosaver.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -23,8 +23,8 @@ fs::path TempDir() {
 
 Document MakeDoc() {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1.0, 1.0,
-                                              1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0), 1.0, 1.0, 1.0));
   return doc;
 }
 
@@ -56,8 +56,8 @@ TEST_CASE("MaybeSave fires only when dirty, changed, and due", "[autosave]") {
   // Unchanged since the last autosave -> suppressed even when due
   CHECK_FALSE(saver.MaybeSave(doc, project, v - 1, 100.0));
   // Change the document -> saves again once due
-  doc.AddFeature(std::make_unique<BoxFeature>("B2", glm::vec3(5, 0, 0), 1.0,
-                                              1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B2", glm::vec3(5, 0, 0), 1.0, 1.0, 1.0));
   CHECK_FALSE(saver.MaybeSave(doc, project, v - 1, 12.0)); // not due yet
   CHECK(saver.MaybeSave(doc, project, v - 1, 25.0));
 

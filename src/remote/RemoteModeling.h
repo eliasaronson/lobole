@@ -22,4 +22,4 @@ std::optional<nlohmann::json> HandleModelingRpc(ui::AppState& state,
                                                 const std::string& method,
                                                 const RpcParams& params);
 
-}  // namespace remote
+} // namespace remote

@@ -36,7 +36,7 @@ public:
 
   std::vector<ElementRef> edges; // all share featureId (one body per feature)
   EdgeBlendOp op = EdgeBlendOp::Fillet;
-  double radius = 0.5;    // fillet radius / chamfer distance
+  double radius = 0.5; // fillet radius / chamfer distance
   // Optional expression driving `radius` (empty = plain literal), evaluated
   // against the document's parameters on every regeneration.
   std::string radiusExpr;

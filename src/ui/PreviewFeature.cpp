@@ -10,7 +10,8 @@
 
 namespace ui {
 
-uint64_t BeginPreviewFeature(AppState& state, std::unique_ptr<Feature> feature) {
+uint64_t BeginPreviewFeature(AppState& state,
+                             std::unique_ptr<Feature> feature) {
   // Added directly (not via a command) so it regenerates + renders while the
   // user decides; committed to the undo stack only on accept.
   state.document->AddFeature(std::move(feature));
@@ -75,10 +76,10 @@ void DrawPreviewDialog(AppState& state) {
   const float by = vp->WorkPos.y + vp->WorkSize.y - 24.0f;
   ImGui::SetNextWindowPos(ImVec2(cx, by), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
   ImGui::SetNextWindowBgAlpha(0.96f);
-  ImGuiWindowFlags flags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoMove |
-                           ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
-                           ImGuiWindowFlags_AlwaysAutoResize |
-                           ImGuiWindowFlags_NoSavedSettings;
+  ImGuiWindowFlags flags =
+      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
+      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
   ImGui::Begin((std::string(feature->TypeName()) + "###PreviewDialog").c_str(),
                nullptr, flags);
 
@@ -87,13 +88,15 @@ void DrawPreviewDialog(AppState& state) {
   ImGui::Separator();
   bool accept = false, cancel = false;
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.55f, 0.25f, 1.0f));
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.25f, 0.65f, 0.30f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                        ImVec4(0.25f, 0.65f, 0.30f, 1.0f));
   if (ImGui::Button(ICON_FA_CHECK " Accept"))
     accept = true;
   ImGui::PopStyleColor(2);
   ImGui::SameLine();
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.60f, 0.22f, 0.22f, 1.0f));
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.72f, 0.27f, 0.27f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                        ImVec4(0.72f, 0.27f, 0.27f, 1.0f));
   if (ImGui::Button(ICON_FA_XMARK " Cancel"))
     cancel = true;
   ImGui::PopStyleColor(2);

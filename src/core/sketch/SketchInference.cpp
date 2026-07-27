@@ -7,7 +7,8 @@ namespace sketch {
 namespace {
 constexpr float kPointTolPx = 10.0f; // coincident: cursor near a vertex
 constexpr float kEdgeTolPx = 8.0f;   // point-on-line: cursor near a segment
-constexpr float kAlignTolPx = 8.0f;  // axis alignment: cursor shares a vertex X/Y
+constexpr float kAlignTolPx =
+    8.0f; // axis alignment: cursor shares a vertex X/Y
 constexpr float kAngleTanTol = 0.0349f; // tan(2 deg): H/V slope ratio
 constexpr float kAngleSinTol = 0.0349f; // sin(2 deg): parallel/perpendicular
 
@@ -16,8 +17,7 @@ float Cross(glm::vec2 a, glm::vec2 b) { return a.x * b.y - a.y * b.x; }
 // Visits every named vertex of an entity: Point(0), Line(0,1), Circle/Ellipse
 // centre(0), Arc centre(0)/start(1)/end(2) — the coincident and alignment
 // candidate set (each is a real solver point, so constraints can bind to it).
-template <class F>
-void ForEachVertex(const Entity& e, F fn) {
+template <class F> void ForEachVertex(const Entity& e, F fn) {
   if (auto* p = std::get_if<Point>(&e))
     fn(uint8_t{0}, p->p);
   else if (auto* l = std::get_if<Line>(&e)) {
@@ -46,8 +46,8 @@ void ForEachVertex(const Entity& e, F fn) {
 float DistToSegment(glm::vec2 p, glm::vec2 a, glm::vec2 b, glm::vec2& closest) {
   glm::vec2 ab = b - a;
   float len2 = glm::dot(ab, ab);
-  float t = len2 > 1e-12f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f)
-                          : 0.0f;
+  float t =
+      len2 > 1e-12f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f) : 0.0f;
   closest = a + t * ab;
   return glm::length(p - closest);
 }
@@ -190,7 +190,8 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
     if (s.alignShareY) {
       s.uv.y = snapY;
       alignedY = true;
-      s.glyphs.push_back(GlyphKind::Horizontal); // shared Y = horizontal alignment
+      s.glyphs.push_back(
+          GlyphKind::Horizontal); // shared Y = horizontal alignment
     }
   }
 
@@ -218,7 +219,8 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
     return s;
   }
   if (alignedX || alignedY)
-    return s; // a positional snap already applied; don't also rotate the segment
+    return s; // a positional snap already applied; don't also rotate the
+              // segment
 
   // Parallel / perpendicular to the nearest matching line direction.
   float bestPar = kAngleSinTol, bestPerp = kAngleSinTol;
@@ -234,7 +236,7 @@ Snap InferPoint(const std::vector<Entity>& entities, glm::vec2 uv,
     if (ll < 1e-6f)
       continue;
     ld /= ll;
-    float par = std::abs(Cross(dir, ld));  // |sin| — 0 when parallel
+    float par = std::abs(Cross(dir, ld));     // |sin| — 0 when parallel
     float perp = std::abs(glm::dot(dir, ld)); // |cos| — 0 when perpendicular
     if (par < bestPar) {
       bestPar = par;

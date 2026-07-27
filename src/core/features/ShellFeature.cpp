@@ -4,11 +4,11 @@
 #include "core/ElementHistory.h"
 
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
-#include <Standard_Failure.hxx>
 
 #include <algorithm>
 
@@ -19,9 +19,9 @@ ShellFeature::ShellFeature(const std::string& name, uint64_t bodyId,
 }
 
 bool ShellFeature::Execute(RegenContext& ctx) {
-  const auto body = std::find_if(
-      ctx.bodies.begin(), ctx.bodies.end(),
-      [&](const Body& b) { return b.createdBy == bodyId; });
+  const auto body =
+      std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
+                   [&](const Body& b) { return b.createdBy == bodyId; });
   if (body == ctx.bodies.end()) {
     SetError("the body to shell no longer exists");
     return false;

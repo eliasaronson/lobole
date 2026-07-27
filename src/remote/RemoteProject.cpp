@@ -2,12 +2,12 @@
 
 #include "cad/CADKernel.h"
 #include "cad/MeshExport.h"
-#include "core/io/Autosaver.h"
-#include "core/io/Checkpoints.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
+#include "core/io/Autosaver.h"
+#include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
@@ -27,10 +27,10 @@ using nlohmann::json;
 namespace remote {
 
 // Project IO / checkpoint / history / export-import RPCs (new_project..) carved
-// out of RemoteServer::HandleSemantic. `doc` is the active part document (may be
-// null on an assembly tab, matching the original un-guarded behavior).
-std::optional<json> HandleProjectRpc(ui::AppState& state,
-                                     const std::string& m, const RpcParams& p) {
+// out of RemoteServer::HandleSemantic. `doc` is the active part document (may
+// be null on an assembly tab, matching the original un-guarded behavior).
+std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
+                                     const RpcParams& p) {
   Document* doc = state.document.get();
   if (m == "new_project") {
     ui::ReplaceDocument(state, std::make_unique<Document>());
@@ -61,7 +61,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
       throw std::runtime_error(error);
     ui::MarkProjectOpened(state, path);
     return json{{"autosave_available", autosaveAvailable},
-            {"autosave_path", Autosaver::SidecarPath(path)}};
+                {"autosave_path", Autosaver::SidecarPath(path)}};
   }
   if (m == "checkpoint_create") {
     // Snapshot the live document under <project>.checkpoints/<name>.json.
@@ -107,11 +107,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
   if (m == "history_log") {
     // Git history of a directory project (F5). params: {limit?: 20}
     json entries = json::array();
-    for (const auto& e :
-         GitVault::Log(state.projectPath, p.value("limit", 20)))
-      entries.push_back({{"hash", e.hash},
-                         {"subject", e.subject},
-                         {"unix", e.unixTime}});
+    for (const auto& e : GitVault::Log(state.projectPath, p.value("limit", 20)))
+      entries.push_back(
+          {{"hash", e.hash}, {"subject", e.subject}, {"unix", e.unixTime}});
     return json{{"log", entries}};
   }
   if (m == "history_restore") {
@@ -123,7 +121,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
     if (!GitVault::RestoreTo(state.projectPath, commit, &error))
       throw std::runtime_error(error);
     auto loaded = DocumentIO::Load(state.projectPath);
-    if (!loaded) throw std::runtime_error(loaded.error());
+    if (!loaded)
+      throw std::runtime_error(loaded.error());
     ui::ReplaceDocument(state, std::move(*loaded));
     ui::FitCameraToDocument(state);
     ui::MarkProjectRecovered(state, state.projectPath);
@@ -135,7 +134,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
     // {path, body?: index, deflection?: 0.1 (STL only)}
     const std::string path = p.at("path").get<std::string>();
     const auto& bodies = doc->GetBodies();
-    if (bodies.empty()) throw std::runtime_error("no bodies to export");
+    if (bodies.empty())
+      throw std::runtime_error("no bodies to export");
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
@@ -174,9 +174,10 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
                     {"free_edges", r.freeEdges}};
       }
     }
-    if (!ok) throw std::runtime_error("export failed (see log)");
+    if (!ok)
+      throw std::runtime_error("export failed (see log)");
     return json{{"path", path},
-            {"bodies", only < 0 ? bodies.size() : size_t{1}}};
+                {"bodies", only < 0 ? bodies.size() : size_t{1}}};
   }
   if (m == "export_visual") {
     // Visual-mesh export (interchange X2): glTF (.glb/.gltf), OBJ, or PLY,
@@ -204,8 +205,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
       json occs = json::array();
       for (const Occurrence& o : state.assembly->GetOccurrences())
         occs.push_back({{"id", o.id}, {"name", o.name}});
-      return json{{"assembly_index", state.activePart},
-                  {"occurrences", occs}};
+      return json{{"assembly_index", state.activePart}, {"occurrences", occs}};
     }
     const size_t before = doc->GetBodies().size();
     ui::LoadSTEPFile(state, p.at("path").get<std::string>());
@@ -216,4 +216,4 @@ std::optional<json> HandleProjectRpc(ui::AppState& state,
   return std::nullopt;
 }
 
-}  // namespace remote
+} // namespace remote

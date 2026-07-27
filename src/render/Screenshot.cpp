@@ -15,9 +15,8 @@ uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
   VkPhysicalDeviceMemoryProperties memProperties;
   vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
   for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) &&
-        (memProperties.memoryTypes[i].propertyFlags & properties) ==
-            properties) {
+    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags &
+                                    properties) == properties) {
       return i;
     }
   }
@@ -35,7 +34,8 @@ bool CaptureScreenshot(
     VkSampleCountFlagBits samples,
     const std::function<void(VkCommandBuffer)>& recordPrepass) {
   auto fail = [&](const char* what) {
-    if (error) *error = what;
+    if (error)
+      *error = what;
     LOG_ERROR("Screenshot failed: {}", what);
     return false;
   };
@@ -62,8 +62,9 @@ bool CaptureScreenshot(
   vkGetImageMemoryRequirements(device, image, &memReq);
   VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
   allocInfo.allocationSize = memReq.size;
-  allocInfo.memoryTypeIndex = FindMemoryType(
-      physicalDevice, memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  allocInfo.memoryTypeIndex =
+      FindMemoryType(physicalDevice, memReq.memoryTypeBits,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   VkDeviceMemory imageMemory = VK_NULL_HANDLE;
   if (allocInfo.memoryTypeIndex == UINT32_MAX ||
       vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) !=
@@ -97,8 +98,9 @@ bool CaptureScreenshot(
   vkGetImageMemoryRequirements(device, depthImage, &depthReq);
   VkMemoryAllocateInfo depthAlloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
   depthAlloc.allocationSize = depthReq.size;
-  depthAlloc.memoryTypeIndex = FindMemoryType(
-      physicalDevice, depthReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  depthAlloc.memoryTypeIndex =
+      FindMemoryType(physicalDevice, depthReq.memoryTypeBits,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   VkDeviceMemory depthMemory = VK_NULL_HANDLE;
   vkAllocateMemory(device, &depthAlloc, nullptr, &depthMemory);
   vkBindImageMemory(device, depthImage, depthMemory, 0);
@@ -132,8 +134,9 @@ bool CaptureScreenshot(
     vkGetImageMemoryRequirements(device, msaaColorImage, &creq);
     VkMemoryAllocateInfo calloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     calloc.allocationSize = creq.size;
-    calloc.memoryTypeIndex = FindMemoryType(physicalDevice, creq.memoryTypeBits,
-                                            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    calloc.memoryTypeIndex =
+        FindMemoryType(physicalDevice, creq.memoryTypeBits,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     vkAllocateMemory(device, &calloc, nullptr, &msaaColorMemory);
     vkBindImageMemory(device, msaaColorImage, msaaColorMemory, 0);
     VkImageViewCreateInfo cview{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -199,7 +202,8 @@ bool CaptureScreenshot(
   vkBeginCommandBuffer(cb, &begin);
 
   // Scene prepasses (shadow map) go before the render pass, as on-screen.
-  if (recordPrepass) recordPrepass(cb);
+  if (recordPrepass)
+    recordPrepass(cb);
 
   VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
   rp.renderPass = renderPass;
@@ -245,8 +249,8 @@ bool CaptureScreenshot(
   vkMapMemory(device, bufferMemory, 0, bufferSize, 0, &mapped);
   const uint8_t* src = static_cast<const uint8_t*>(mapped);
   std::vector<uint8_t> rgb(size_t(width) * height * 3);
-  const bool bgra = (format == VK_FORMAT_B8G8R8A8_UNORM ||
-                     format == VK_FORMAT_B8G8R8A8_SRGB);
+  const bool bgra =
+      (format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB);
   for (size_t i = 0; i < size_t(width) * height; i++) {
     rgb[i * 3 + 0] = src[i * 4 + (bgra ? 2 : 0)];
     rgb[i * 3 + 1] = src[i * 4 + 1];
@@ -254,8 +258,8 @@ bool CaptureScreenshot(
   }
   vkUnmapMemory(device, bufferMemory);
 
-  const bool ok = stbi_write_png(outputPath.c_str(), (int)width, (int)height,
-                                 3, rgb.data(), (int)width * 3) != 0;
+  const bool ok = stbi_write_png(outputPath.c_str(), (int)width, (int)height, 3,
+                                 rgb.data(), (int)width * 3) != 0;
 
   vkFreeCommandBuffers(device, commandPool, 1, &cb);
   vkDestroyFramebuffer(device, framebuffer, nullptr);
@@ -265,13 +269,17 @@ bool CaptureScreenshot(
   vkDestroyImageView(device, depthImageView, nullptr);
   vkDestroyImage(device, depthImage, nullptr);
   vkFreeMemory(device, depthMemory, nullptr);
-  if (msaaColorView) vkDestroyImageView(device, msaaColorView, nullptr);
-  if (msaaColorImage) vkDestroyImage(device, msaaColorImage, nullptr);
-  if (msaaColorMemory) vkFreeMemory(device, msaaColorMemory, nullptr);
+  if (msaaColorView)
+    vkDestroyImageView(device, msaaColorView, nullptr);
+  if (msaaColorImage)
+    vkDestroyImage(device, msaaColorImage, nullptr);
+  if (msaaColorMemory)
+    vkFreeMemory(device, msaaColorMemory, nullptr);
   vkDestroyBuffer(device, buffer, nullptr);
   vkFreeMemory(device, bufferMemory, nullptr);
 
-  if (!ok) return fail("PNG encode/write");
+  if (!ok)
+    return fail("PNG encode/write");
   LOG_INFO("Screenshot written to {}", outputPath);
   return true;
 }

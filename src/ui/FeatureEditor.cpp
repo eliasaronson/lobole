@@ -2,28 +2,28 @@
 #include <utility>
 
 #include "cad/CADMaterials.h"
-#include "render/Camera.h"
-#include "core/features/BooleanFeature.h"
-#include "core/features/DatumAxisFeature.h"
-#include "core/features/DatumPlaneFeature.h"
-#include "core/features/ExtrudeFeature.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
-#include "core/features/FilletFeature.h"
-#include "core/features/DraftFeature.h"
-#include "core/features/HoleFeature.h"
-#include "core/features/CurveFeature.h"
-#include "core/features/LoftFeature.h"
-#include "core/features/PipeFeature.h"
-#include "core/features/SweepFeature.h"
 #include "core/ThreadStandards.h"
-#include "core/features/RibFeature.h"
-#include "core/features/ThreadFeature.h"
-#include "core/features/ShellFeature.h"
+#include "core/features/BooleanFeature.h"
+#include "core/features/CurveFeature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
+#include "core/features/DraftFeature.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/FilletFeature.h"
+#include "core/features/HoleFeature.h"
+#include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
+#include "core/features/PipeFeature.h"
 #include "core/features/RevolveFeature.h"
-#include "core/io/Serialization.h"
+#include "core/features/RibFeature.h"
+#include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/SweepFeature.h"
+#include "core/features/ThreadFeature.h"
+#include "core/io/Serialization.h"
+#include "render/Camera.h"
 #include "ui/AppActions.h" // BodyProducers
 
 #include "imgui.h"
@@ -78,7 +78,8 @@ void LeftLabel(const char* label, float reserveRight = 0.0f) {
   // there (the window sizes to content), so use a fixed two-column layout —
   // this also keeps the dialog one row per field, not towering over the
   // viewport clicks the GUI tests make.
-  if (ImGui::GetCurrentWindowRead()->Flags & ImGuiWindowFlags_AlwaysAutoResize) {
+  if (ImGui::GetCurrentWindowRead()->Flags &
+      ImGuiWindowFlags_AlwaysAutoResize) {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
     ImGui::SameLine(std::max(ImGui::GetFontSize() * 7.0f,
@@ -150,8 +151,7 @@ void PickSlotRow(AppState& state, const Feature& feature, PickSlot slot,
       (value.empty() ? std::string(armed ? "(pick in viewport)" : "(none)")
                      : value) +
       "###slot" + std::to_string(static_cast<int>(slot));
-  if (ImGui::Button(text.c_str(),
-                    ImVec2(ImGui::CalcItemWidth(), 0.0f))) {
+  if (ImGui::Button(text.c_str(), ImVec2(ImGui::CalcItemWidth(), 0.0f))) {
     if (armed) {
       state.slotPick = {};
     } else {
@@ -209,8 +209,8 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   ImGui::PushID(label);
 
   if (exprText.empty()) {
-    HandleEdit(state, feature,
-               DragDim(label, &value, SmallButtonReserve("fx")), index, commit);
+    HandleEdit(state, feature, DragDim(label, &value, SmallButtonReserve("fx")),
+               index, commit);
     ImGui::SameLine();
     if (ImGui::SmallButton("fx")) {
       nlohmann::json before = DocumentIO::FeatureToJson(feature);
@@ -227,8 +227,7 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   // item is ever active) — same recipe as the Variables panel cells.
   static std::string activeField;
   static char buf[256];
-  const std::string key =
-      std::to_string(feature.GetId()) + "/" + label;
+  const std::string key = std::to_string(feature.GetId()) + "/" + label;
   const bool editing = activeField == key;
   char tmp[sizeof(buf)];
   snprintf(tmp, sizeof(tmp), "%s", exprText.c_str());
@@ -347,8 +346,8 @@ void ExprCount(AppState& state, Feature& feature, size_t index, bool commit,
 void DrawAxisRefCombo(AppState& state, Feature& owner, AxisRef& axis,
                       size_t index, bool commit, uint64_t sketchIdForLines) {
   std::vector<std::string> labels = {"X", "Y", "Z"};
-  std::vector<AxisRef> refs = {{AxisRef::Kind::X}, {AxisRef::Kind::Y},
-                               {AxisRef::Kind::Z}};
+  std::vector<AxisRef> refs = {
+      {AxisRef::Kind::X}, {AxisRef::Kind::Y}, {AxisRef::Kind::Z}};
 
   for (size_t i = 0; i < index; i++) {
     if (auto* da =
@@ -492,7 +491,8 @@ void DrawDatumPlaneParams(AppState& state, DatumPlaneFeature& dp, size_t index,
     int sel = 0;
     if (dp.parentId != 0) {
       for (size_t i = 3; i < ids.size(); i++)
-        if (ids[i] == dp.parentId) sel = static_cast<int>(i);
+        if (ids[i] == dp.parentId)
+          sel = static_cast<int>(i);
     } else {
       sel = static_cast<int>(dp.basePlane); // 0/1/2
     }
@@ -545,7 +545,8 @@ void DrawDatumAxisParams(AppState& state, DatumAxisFeature& da, size_t index,
     if (Feature* sk = state.document->FindFeatureById(da.sketchId)) {
       ImGui::Text("Line %u of %s", da.entityId, sk->GetName().c_str());
     } else {
-      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Sketch line: missing");
+      ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f),
+                         "Sketch line: missing");
     }
     break;
   case DatumAxisKind::GlobalX:
@@ -649,7 +650,8 @@ void PlaneRefCombo(AppState& state, Feature& owner, uint64_t& planeId,
   int sel = 0;
   if (planeId != 0) {
     for (size_t i = 3; i < ids.size(); i++)
-      if (ids[i] == planeId) sel = static_cast<int>(i);
+      if (ids[i] == planeId)
+        sel = static_cast<int>(i);
   } else {
     sel = static_cast<int>(basePlane);
   }
@@ -700,10 +702,9 @@ void DrawPatternParams(AppState& state, PatternFeature& pat, size_t index,
 
 // Toggles `r` in a face-ref list (multi slots): present → removed.
 bool ToggleRefInList(std::vector<ElementRef>& v, const ElementRef& r) {
-  const auto it =
-      std::find_if(v.begin(), v.end(), [&](const ElementRef& e) {
-        return e.featureId == r.featureId && e.name == r.name;
-      });
+  const auto it = std::find_if(v.begin(), v.end(), [&](const ElementRef& e) {
+    return e.featureId == r.featureId && e.name == r.name;
+  });
   if (it != v.end())
     v.erase(it);
   else
@@ -1006,12 +1007,11 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       dr->neutralPlane = static_cast<PlaneType>(pl);
       CommitDiscrete(state, feature, before, index, commit);
     }
-    PickSlotRow(state, feature, PickSlot::DraftFaces, "Faces",
-                dr->faces.empty()
-                    ? ""
-                    : std::to_string(dr->faces.size()) + " picked",
-                SlotKind(SelectionItem::Kind::Face), /*multi=*/true,
-                "Click side faces to taper (click again to remove)");
+    PickSlotRow(
+        state, feature, PickSlot::DraftFaces, "Faces",
+        dr->faces.empty() ? "" : std::to_string(dr->faces.size()) + " picked",
+        SlotKind(SelectionItem::Kind::Face), /*multi=*/true,
+        "Click side faces to taper (click again to remove)");
     for (size_t e = 0; e < dr->faces.size(); e++) {
       ImGui::PushID(static_cast<int>(e));
       if (ImGui::SmallButton("x")) {
@@ -1038,16 +1038,15 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     HandleEdit(state, feature, ImGui::Checkbox("Through all", &ho->through),
                index, commit);
     if (!ho->through)
-      ExprDim(state, feature, index, commit, "Depth", ho->depthExpr,
-              ho->depth);
+      ExprDim(state, feature, index, commit, "Depth", ho->depthExpr, ho->depth);
     if (ho->kind == HoleKind::Counterbore) {
-      HandleEdit(state, feature, DragDim("C'bore dia", &ho->cbDiameter),
-                 index, commit);
+      HandleEdit(state, feature, DragDim("C'bore dia", &ho->cbDiameter), index,
+                 commit);
       HandleEdit(state, feature, DragDim("C'bore depth", &ho->cbDepth), index,
                  commit);
     } else if (ho->kind == HoleKind::Countersink) {
-      HandleEdit(state, feature, DragDim("C'sink dia", &ho->csDiameter),
-                 index, commit);
+      HandleEdit(state, feature, DragDim("C'sink dia", &ho->csDiameter), index,
+                 commit);
       HandleEdit(state, feature, DragDim("C'sink depth", &ho->csDepth), index,
                  commit);
     }
@@ -1128,7 +1127,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* sw = dynamic_cast<SweepFeature*>(&feature)) {
     DrawFeatureRefCombo(state, feature, "Profile", &sw->profileSketchId, index,
                         commit, /*allowNone=*/false, AcceptSketch);
-    DrawFeatureRefCombo(state, feature, "Path", &sw->pathSketchId, index, commit,
+    DrawFeatureRefCombo(state, feature, "Path", &sw->pathSketchId, index,
+                        commit,
                         /*allowNone=*/false, AcceptPathLike);
     DrawFeatureRefCombo(state, feature, "Guide", &sw->guideId, index, commit,
                         /*allowNone=*/true, AcceptPathLike);

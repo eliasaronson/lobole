@@ -26,7 +26,7 @@ struct UnderlayDraw {
 // SketchRenderer's per-frame host-visible line buffers. Depth test on / write
 // off, like the rest of the sketch overlay.
 class UnderlayRenderer {
- public:
+public:
   UnderlayRenderer() = default;
   ~UnderlayRenderer() { Shutdown(); }
 
@@ -60,7 +60,7 @@ class UnderlayRenderer {
   void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
   bool IsInitialized() const { return m_initialized; }
 
- private:
+private:
   static constexpr int kFramesInFlight = 2;
   static constexpr uint32_t kMaxTextures = 64; // reference images per sketch
 
@@ -129,7 +129,7 @@ class UnderlayRenderer {
   DynamicBuffer m_vertexBuffers[kFramesInFlight];
 
   std::map<std::string, Texture> m_textures;
-  std::vector<Vertex> m_verts; // this frame's quad vertices
+  std::vector<Vertex> m_verts;  // this frame's quad vertices
   std::vector<DrawRec> m_draws; // this frame's per-image draws
 
   glm::mat4 m_view = glm::mat4(1.0f);

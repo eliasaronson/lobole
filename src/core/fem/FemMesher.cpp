@@ -1,7 +1,7 @@
 #include "core/fem/FemMesher.h"
 
-#include <Bnd_Box.hxx>
 #include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 
@@ -28,12 +28,13 @@ namespace {
 double AutoSize(const TopoDS_Shape& shape) {
   Bnd_Box box;
   BRepBndLib::Add(shape, box);
-  if (box.IsVoid()) return 1.0;
+  if (box.IsVoid())
+    return 1.0;
   double xmin, ymin, zmin, xmax, ymax, zmax;
   box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
-  const double diag = std::sqrt((xmax - xmin) * (xmax - xmin) +
-                                (ymax - ymin) * (ymax - ymin) +
-                                (zmax - zmin) * (zmax - zmin));
+  const double diag =
+      std::sqrt((xmax - xmin) * (xmax - xmin) + (ymax - ymin) * (ymax - ymin) +
+                (zmax - zmin) * (zmax - zmin));
   return diag > 0 ? diag / 15.0 : 1.0;
 }
 
@@ -50,24 +51,27 @@ double TetQuality(const glm::dvec3& a, const glm::dvec3& b, const glm::dvec3& c,
       const glm::dvec3 e = p[i] - p[j];
       sumSq += glm::dot(e, e);
     }
-  if (sumSq <= 0) return 0.0;
+  if (sumSq <= 0)
+    return 0.0;
   const double q = 72.0 * std::sqrt(3.0) * vol / std::pow(sumSq, 1.5);
   return q < 0 ? 0 : (q > 1 ? 1 : q);
 }
 
-}  // namespace
+} // namespace
 
 #ifdef HAVE_NETGEN
 
 bool Available() { return true; }
 
-std::optional<FemMesh> Mesh(const TopoDS_Shape& shape, const MeshSettings& settings,
-                            std::string* error) {
+std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
+                            const MeshSettings& settings, std::string* error) {
   auto fail = [&](const std::string& m) -> std::optional<FemMesh> {
-    if (error) *error = m;
+    if (error)
+      *error = m;
     return std::nullopt;
   };
-  if (shape.IsNull()) return fail("cannot mesh a null shape");
+  if (shape.IsNull())
+    return fail("cannot mesh a null shape");
 
   // OCC face index (our TopExp_Explorer 0-based order) for a netgen surfnr.
   // The FEM0 spike verified geo.fmap agrees with the explorer order, but we
@@ -92,8 +96,8 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape, const MeshSettings& setti
 
     auto ngmesh = std::make_shared<netgen::Mesh>();
     // Non-owning geometry handle: the mesh must not free our stack geometry.
-    ngmesh->SetGeometry(
-        std::shared_ptr<netgen::NetgenGeometry>(&geo, [](netgen::NetgenGeometry*) {}));
+    ngmesh->SetGeometry(std::shared_ptr<netgen::NetgenGeometry>(
+        &geo, [](netgen::NetgenGeometry*) {}));
 
     // Surface phase first, then verify every face actually meshed, then the
     // volume phase. Netgen's volume mesher walks into corrupt memory when
@@ -127,7 +131,8 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape, const MeshSettings& setti
     const int np = ngmesh->GetNP();
     const int ne = ngmesh->GetNE();
     const int nse = ngmesh->GetNSE();
-    if (np <= 0 || ne <= 0) return fail("meshing produced an empty mesh");
+    if (np <= 0 || ne <= 0)
+      return fail("meshing produced an empty mesh");
 
     FemMesh out;
     out.nodes.resize(np);
@@ -143,9 +148,11 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape, const MeshSettings& setti
     double worst = 1.0;
     for (netgen::ElementIndex ei(0); ei < ne; ++ei) {
       const netgen::Element& el = (*ngmesh)[ei];
-      if (el.GetNP() != 10) return fail("expected tet10 elements from second-order meshing");
+      if (el.GetNP() != 10)
+        return fail("expected tet10 elements from second-order meshing");
       std::array<int, 10> t;
-      for (int k = 0; k < 10; ++k) t[k] = int(el.PNum(kTetRemap[k])) - 1;
+      for (int k = 0; k < 10; ++k)
+        t[k] = int(el.PNum(kTetRemap[k])) - 1;
       out.tets.push_back(t);
       worst = std::min(worst, TetQuality(out.nodes[t[0]], out.nodes[t[1]],
                                          out.nodes[t[2]], out.nodes[t[3]]));
@@ -157,10 +164,12 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape, const MeshSettings& setti
     out.boundary.reserve(nse);
     for (netgen::SurfaceElementIndex si(0); si < nse; ++si) {
       const netgen::Element2d& se = (*ngmesh)[si];
-      if (se.GetNP() != 6) continue;  // skip any non-tri6 facets defensively
+      if (se.GetNP() != 6)
+        continue; // skip any non-tri6 facets defensively
       const int surfnr = ngmesh->GetFaceDescriptor(se.GetIndex()).SurfNr();
       FemMesh::BoundaryTri tri;
-      for (int k = 0; k < 6; ++k) tri.nodes[k] = int(se.PNum(kTriRemap[k])) - 1;
+      for (int k = 0; k < 6; ++k)
+        tri.nodes[k] = int(se.PNum(kTriRemap[k])) - 1;
       // surfnr is 1-based over the same map as our 0-based face index.
       tri.faceIndex = surfnr - 1;
       out.boundary.push_back(tri);
@@ -177,15 +186,17 @@ std::optional<FemMesh> Mesh(const TopoDS_Shape& shape, const MeshSettings& setti
   }
 }
 
-#else  // !HAVE_NETGEN
+#else // !HAVE_NETGEN
 
 bool Available() { return false; }
 
-std::optional<FemMesh> Mesh(const TopoDS_Shape&, const MeshSettings&, std::string* error) {
-  if (error) *error = "built without FEM support (Netgen not found at build time)";
+std::optional<FemMesh> Mesh(const TopoDS_Shape&, const MeshSettings&,
+                            std::string* error) {
+  if (error)
+    *error = "built without FEM support (Netgen not found at build time)";
   return std::nullopt;
 }
 
-#endif  // HAVE_NETGEN
+#endif // HAVE_NETGEN
 
-}  // namespace fem
+} // namespace fem

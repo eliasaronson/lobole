@@ -33,8 +33,8 @@ struct Parameter {
 // records the reason in `error`). `base`, when non-null, seeds `out` first so a
 // parameter can reference an OUTER scope (Phase V: a part-local expression
 // resolving a project variable); same-named local parameters then shadow it.
-// `overrideExpr`, when set, supplies a replacement expression per parameter name
-// (configuration overrides) — return nullptr to use the stored expression.
+// `overrideExpr`, when set, supplies a replacement expression per parameter
+// name (configuration overrides) — return nullptr to use the stored expression.
 // Shared by Document (local scope) and AppState (project scope).
 void EvaluateParameterTable(
     std::vector<Parameter>& params, SymbolTable& out, const SymbolTable* base,
@@ -125,8 +125,8 @@ public:
   }
 
   // Replaces the local parameter table without regenerating — serializer/loader
-  // scaffolding (e.g. injecting the project scope into a single-part file write,
-  // then restoring). Not for model edits; use SetParameter for those.
+  // scaffolding (e.g. injecting the project scope into a single-part file
+  // write, then restoring). Not for model edits; use SetParameter for those.
   void SetParametersRaw(std::vector<Parameter> params) {
     m_parameters = std::move(params);
   }
@@ -239,7 +239,8 @@ public:
   // Raises the id high-water mark on load so freshly allocated ids never
   // collide with deserialized ones.
   void EnsureNextIdAtLeast(uint64_t id) {
-    if (id > m_nextId) m_nextId = id;
+    if (id > m_nextId)
+      m_nextId = id;
   }
 
   // Rebuilds all bodies by executing the feature list in order, after
@@ -309,7 +310,8 @@ private:
   void EvaluateParameters();
 
   std::vector<std::unique_ptr<Feature>> m_features;
-  std::map<std::string, std::vector<unsigned char>> m_assets; // v49 image pixels
+  std::map<std::string, std::vector<unsigned char>>
+      m_assets; // v49 image pixels
   std::vector<Body> m_bodies;
   std::vector<Parameter> m_parameters;
   std::vector<fem::Study> m_studies;
@@ -317,7 +319,7 @@ private:
   std::map<uint64_t, fem::StudyRuntime> m_studyRuntime;
   uint64_t m_studyResultsEpoch = 0;
   std::vector<Configuration> m_configurations;
-  uint64_t m_activeConfiguration = 0;  // 0 = base; persisted like m_rollback
+  uint64_t m_activeConfiguration = 0; // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
   // Non-owning; owned by AppState (Phase V). Null for a bare Document.
   const SymbolTable* m_projectSymbols = nullptr;

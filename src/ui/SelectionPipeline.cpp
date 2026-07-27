@@ -1,15 +1,15 @@
 #include "ui/SelectionPipeline.h"
 
-#include "render/Camera.h"
 #include "cad/FaceSelector.h"
+#include "render/Camera.h"
 #include "render/MeshRenderer.h"
 #include "ui/AppActions.h"         // EdgeElementRef, AppendPrimLine
 #include "ui/AppActionsInternal.h" // PartDocById, DisplayMatrix (assembly)
 #include "ui/FeatureEditor.h"      // SlotPickClicked (U3)
 #include "ui/SketchInteraction.h"  // FaceElementRef
 
-#include "core/features/ExtrudeFeature.h"
 #include "core/Occurrence.h" // AssemblyDocument, Occurrence
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h"
@@ -37,10 +37,8 @@ struct AssemblyElementHit {
   uint64_t occurrenceId = 0;
   ElementRef ref;
 };
-std::optional<AssemblyElementHit> AssemblyElementAt(AppState& state,
-                                                    uint32_t meshId,
-                                                    uint32_t index,
-                                                    bool edge) {
+std::optional<AssemblyElementHit>
+AssemblyElementAt(AppState& state, uint32_t meshId, uint32_t index, bool edge) {
   if (!state.assembly)
     return std::nullopt;
   for (const DocumentRenderMesh& m : state.documentMeshes) {
@@ -105,7 +103,8 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
       for (const DocumentRenderMesh& m : state.documentMeshes) {
         if (m.meshId == face.meshId && m.occurrenceId != 0) {
           out.push_back({{SelectionItem::Kind::Occurrence, m.occurrenceId, {}},
-                         face.meshId, face.faceIndex});
+                         face.meshId,
+                         face.faceIndex});
           break;
         }
       }
@@ -118,12 +117,13 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
         // Assembly tab (measure): the item carries the occurrence in `id`.
         if (auto ae = AssemblyElementAt(state, edge.meshId, edge.edgeIndex,
                                         /*edge=*/true))
-          out.push_back({{SelectionItem::Kind::Edge, ae->occurrenceId,
-                          ae->ref},
-                         edge.meshId, edge.edgeIndex});
+          out.push_back({{SelectionItem::Kind::Edge, ae->occurrenceId, ae->ref},
+                         edge.meshId,
+                         edge.edgeIndex});
       } else if (auto ref =
                      EdgeElementRef(state, edge.meshId, edge.edgeIndex)) {
-        out.push_back({{SelectionItem::Kind::Edge, 0, *ref}, edge.meshId,
+        out.push_back({{SelectionItem::Kind::Edge, 0, *ref},
+                       edge.meshId,
                        edge.edgeIndex});
       }
     }
@@ -136,12 +136,14 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
         if (state.assembly) {
           if (auto af = AssemblyElementAt(state, face.meshId, face.faceIndex,
                                           /*edge=*/false))
-            out.push_back({{SelectionItem::Kind::Face, af->occurrenceId,
-                            af->ref},
-                           face.meshId, face.faceIndex});
+            out.push_back(
+                {{SelectionItem::Kind::Face, af->occurrenceId, af->ref},
+                 face.meshId,
+                 face.faceIndex});
         } else if (auto ref =
                        FaceElementRef(state, face.meshId, face.faceIndex)) {
-          out.push_back({{SelectionItem::Kind::Face, 0, *ref}, face.meshId,
+          out.push_back({{SelectionItem::Kind::Face, 0, *ref},
+                         face.meshId,
                          face.faceIndex});
         }
       }
@@ -211,8 +213,9 @@ std::optional<Candidate> RegionCandidate(AppState& state, const Ray& ray) {
   if (innermost == nullptr || containing % 2 == 0)
     return std::nullopt; // empty space or inside a hole
   Candidate c;
-  c.item = {SelectionItem::Kind::SketchRegion, 0,
-            ElementRef{sk->GetId(), JoinIds(sketch::LoopEntityIds(*innermost))}};
+  c.item = {
+      SelectionItem::Kind::SketchRegion, 0,
+      ElementRef{sk->GetId(), JoinIds(sketch::LoopEntityIds(*innermost))}};
   return c;
 }
 
@@ -427,10 +430,9 @@ void HandleSelectionInput(AppState& state, bool overViewport,
   } else {
     // Same-spot repeat cycles the stacked candidates (edge → face → body,
     // face behind face …); a fresh spot takes the best one.
-    state.pick.cycle = samePos
-                           ? (state.pick.cycle + 1) %
-                                 static_cast<int>(candidates.size())
-                           : 0;
+    state.pick.cycle =
+        samePos ? (state.pick.cycle + 1) % static_cast<int>(candidates.size())
+                : 0;
     const SelectionItem& chosen =
         candidates[static_cast<size_t>(state.pick.cycle)].item;
     if (chosen.kind == SelectionItem::Kind::Occurrence)
@@ -587,11 +589,9 @@ std::vector<uint32_t> ParseRegionIds(const std::string& joined) {
   return ids;
 }
 
-void AppendRegionPickPrimitives(AppState& state,
-                                std::vector<PrimVertex>& out) {
+void AppendRegionPickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
   if (!state.slotPick.Active() ||
-      !(state.slotPick.kinds &
-        KindBit(SelectionItem::Kind::SketchRegion))) {
+      !(state.slotPick.kinds & KindBit(SelectionItem::Kind::SketchRegion))) {
     return;
   }
   const SketchFeature* sk = SlotFeatureSketch(state);
@@ -614,8 +614,7 @@ void AppendRegionPickPrimitives(AppState& state,
     const std::vector<glm::vec2> poly = sketch::LoopBoundaryPolygon(loop);
     for (size_t i = 0; i < poly.size(); i++) {
       const glm::vec3 a = sk->plane.PlaneToWorld(poly[i]);
-      const glm::vec3 b =
-          sk->plane.PlaneToWorld(poly[(i + 1) % poly.size()]);
+      const glm::vec3 b = sk->plane.PlaneToWorld(poly[(i + 1) % poly.size()]);
       AppendPrimLine(a, b, 2.6f, color, out);
     }
   };
@@ -623,8 +622,8 @@ void AppendRegionPickPrimitives(AppState& state,
     const std::vector<uint32_t> ids = sketch::LoopEntityIds(loop);
     const bool selected =
         std::find(regions->begin(), regions->end(), ids) != regions->end();
-    const bool hovered = !state.pick.regionHoverIds.empty() &&
-                         ids == state.pick.regionHoverIds;
+    const bool hovered =
+        !state.pick.regionHoverIds.empty() && ids == state.pick.regionHoverIds;
     if (hovered)
       drawLoop(loop, kHover);
     else if (selected)

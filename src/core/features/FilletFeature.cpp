@@ -25,9 +25,9 @@ bool FilletFeature::Execute(RegenContext& ctx) {
       return false;
     }
   }
-  const auto body = std::find_if(
-      ctx.bodies.begin(), ctx.bodies.end(),
-      [&](const Body& b) { return b.createdBy == bodyFeature; });
+  const auto body =
+      std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
+                   [&](const Body& b) { return b.createdBy == bodyFeature; });
   if (body == ctx.bodies.end()) {
     SetError("the body the edges belong to no longer exists");
     return false;
@@ -55,9 +55,8 @@ bool FilletFeature::Execute(RegenContext& ctx) {
 
   ElementMap map;
   std::string error;
-  CADShape result = topo::EdgeBlendNamed(body->shape, body->elementMap,
-                                         indices, op, radius, GetId(), map,
-                                         &error);
+  CADShape result = topo::EdgeBlendNamed(body->shape, body->elementMap, indices,
+                                         op, radius, GetId(), map, &error);
   if (!result.IsValid()) {
     SetError(error.empty() ? std::string(what) +
                                  " failed (radius too large for the geometry?)"

@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/SplitFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <filesystem>
 

@@ -79,12 +79,11 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   // and Add/Cut propagate it through their boolean (T5) — a face the boolean
   // leaves alone keeps its name, a pierced one gains ";M<id>".
   ElementMap map;
-  CADShape prism =
-      thin ? sketch::BuildThinPrismNamed(sketch->plane, loops, total,
-                                         sweepReversed, thinThickness,
-                                         thinSide, GetId(), map)
-           : sketch::BuildPrismNamed(sketch->plane, loops, total,
-                                     sweepReversed, GetId(), map);
+  CADShape prism = thin ? sketch::BuildThinPrismNamed(
+                              sketch->plane, loops, total, sweepReversed,
+                              thinThickness, thinSide, GetId(), map)
+                        : sketch::BuildPrismNamed(sketch->plane, loops, total,
+                                                  sweepReversed, GetId(), map);
   if (!prism.IsValid()) {
     SetError(thin ? "thin profile could not be built (wall thicker than the "
                     "profile, or thickness <= 0?)"
@@ -102,6 +101,7 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   std::string warn;
   const bool ok = ApplyBodyMode(ctx.bodies, std::move(prism), std::move(map),
                                 mode, m_name, m_material, GetId(), &warn);
-  if (!warn.empty()) SetWarning(warn);
+  if (!warn.empty())
+    SetWarning(warn);
   return ok;
 }

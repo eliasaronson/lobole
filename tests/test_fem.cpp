@@ -25,18 +25,21 @@ namespace {
 // with both planar and cylindrical faces, the FEM0 spike geometry.
 CADShape BlockWithHole() {
   CADShape block = CADKernel::Instance().CreateBox(100.0, 40.0, 40.0);
-  CADShape hole = CADKernel::Instance().CreateCylinder(glm::vec3(50, 20, -1),
-                                                       glm::vec3(0, 0, 1), 8.0, 42.0);
+  CADShape hole = CADKernel::Instance().CreateCylinder(
+      glm::vec3(50, 20, -1), glm::vec3(0, 0, 1), 8.0, 42.0);
   return block.Difference(hole);
 }
 
-double EdgeLen(const glm::dvec3& a, const glm::dvec3& b) { return glm::length(a - b); }
+double EdgeLen(const glm::dvec3& a, const glm::dvec3& b) {
+  return glm::length(a - b);
+}
 
-}  // namespace
+} // namespace
 
 #ifdef HAVE_NETGEN
 
-TEST_CASE("FemMesher meshes a solid to tet10 with face attribution", "[fem][mesh]") {
+TEST_CASE("FemMesher meshes a solid to tet10 with face attribution",
+          "[fem][mesh]") {
   CADShape part = BlockWithHole();
   REQUIRE(part.IsValid());
 
@@ -89,7 +92,8 @@ TEST_CASE("FemMesher meshes a solid to tet10 with face attribution", "[fem][mesh
         // (generous, to allow curvature projection on the bore).
         CHECK(glm::length(mid - chordMid) <= 0.25 * EdgeLen(a, b));
       }
-      if (++checked >= 200) break;
+      if (++checked >= 200)
+        break;
     }
     CHECK(checked > 0);
   }
@@ -108,13 +112,14 @@ TEST_CASE("FemMesher per-face size refines that face", "[fem][mesh]") {
   auto trisOnFace0 = [](const fem::FemMesh& m) {
     int n = 0;
     for (const auto& t : m.boundary)
-      if (t.faceIndex == 0) ++n;
+      if (t.faceIndex == 0)
+        ++n;
     return n;
   };
   const int coarseTris = trisOnFace0(*base);
 
   fem::MeshSettings refined = coarse;
-  refined.faceSizes.push_back({0, 2.0});  // shrink face 0 to 2 mm
+  refined.faceSizes.push_back({0, 2.0}); // shrink face 0 to 2 mm
   auto fine = fem::Mesh(part.GetShape(), refined, &err);
   INFO(err);
   REQUIRE(fine.has_value());
@@ -156,7 +161,7 @@ TEST_CASE("FemMesher meshes a positioned (located) shape in world coords",
     mxx = std::max(mxx, n.x);
   }
   INFO("mesh x-range [" << mnx << ", " << mxx << "]");
-  CHECK(mnx > 50.0);   // world ~[100,102], not local ~[0,2]
+  CHECK(mnx > 50.0); // world ~[100,102], not local ~[0,2]
   CHECK(mxx < 150.0);
 }
 
@@ -167,9 +172,10 @@ TEST_CASE("FemMesher reports failure on a null shape", "[fem][mesh]") {
   CHECK_FALSE(err.empty());
 }
 
-#else  // !HAVE_NETGEN
+#else // !HAVE_NETGEN
 
-TEST_CASE("FemMesher reports a clear error when built without Netgen", "[fem][mesh]") {
+TEST_CASE("FemMesher reports a clear error when built without Netgen",
+          "[fem][mesh]") {
   CHECK_FALSE(fem::Available());
   std::string err;
   auto m = fem::Mesh(BlockWithHole().GetShape(), fem::MeshSettings(), &err);
@@ -177,7 +183,7 @@ TEST_CASE("FemMesher reports a clear error when built without Netgen", "[fem][me
   CHECK(err.find("FEM support") != std::string::npos);
 }
 
-#endif  // HAVE_NETGEN
+#endif // HAVE_NETGEN
 
 // ---- Study commands (ungated: no meshing) ---------------------------------
 
@@ -200,7 +206,7 @@ TEST_CASE("Study add/remove commands undo and redo", "[fem][study]") {
 
   REQUIRE(stack.Execute(std::make_unique<RemoveStudyCommand>(id), doc));
   CHECK(doc.GetStudies().empty());
-  stack.Undo(doc);  // restores the removed study, ids intact
+  stack.Undo(doc); // restores the removed study, ids intact
   REQUIRE(doc.GetStudies().size() == 1);
   CHECK(doc.FindStudy(id)->name == "My Study");
 }
@@ -239,13 +245,14 @@ TEST_CASE("MeshStudy meshes the loaded body and errors on a dangling ref",
           "[fem][study][mesh]") {
   // Build a bar body via an extrude so faces carry stable element names.
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0),
-                                              20.0, 4.0, 4.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 20.0, 4.0, 4.0));
   REQUIRE(doc.GetBodies().size() == 1);
   const uint64_t createdBy = doc.GetBodies()[0].createdBy;
   // Pick a real face name from the body's element map.
   REQUIRE_FALSE(doc.GetBodies()[0].elementMap.names.empty());
-  const std::string faceName = doc.GetBodies()[0].elementMap.names.begin()->second;
+  const std::string faceName =
+      doc.GetBodies()[0].elementMap.names.begin()->second;
 
   fem::Study& s = doc.AddStudy("S");
   s.meshSize = 3.0;
@@ -269,7 +276,7 @@ TEST_CASE("MeshStudy meshes the loaded body and errors on a dangling ref",
   CHECK_FALSE(s.error.empty());
 }
 
-#endif  // HAVE_NETGEN
+#endif // HAVE_NETGEN
 
 // ---- Solver analytic benchmarks (netgen-gated: need a real mesh) ----------
 #ifdef HAVE_NETGEN
@@ -284,27 +291,33 @@ struct BarProblem {
 };
 
 // Nodes whose coordinate `axis` is within tol of `value`.
-std::vector<int> NodesAtPlane(const fem::FemMesh& m, int axis, double value, double tol) {
+std::vector<int> NodesAtPlane(const fem::FemMesh& m, int axis, double value,
+                              double tol) {
   std::vector<int> out;
   for (int i = 0; i < (int)m.nodes.size(); ++i)
-    if (std::abs(m.nodes[i][axis] - value) < tol) out.push_back(i);
+    if (std::abs(m.nodes[i][axis] - value) < tol)
+      out.push_back(i);
   return out;
 }
 // Boundary tris all of whose nodes sit on the plane axis==value.
-std::vector<int> TrisAtPlane(const fem::FemMesh& m, int axis, double value, double tol) {
+std::vector<int> TrisAtPlane(const fem::FemMesh& m, int axis, double value,
+                             double tol) {
   std::vector<int> out;
   for (int t = 0; t < (int)m.boundary.size(); ++t) {
     bool on = true;
     for (int k = 0; k < 6; ++k)
-      if (std::abs(m.nodes[m.boundary[t].nodes[k]][axis] - value) >= tol) on = false;
-    if (on) out.push_back(t);
+      if (std::abs(m.nodes[m.boundary[t].nodes[k]][axis] - value) >= tol)
+        on = false;
+    if (on)
+      out.push_back(t);
   }
   return out;
 }
-}  // namespace
+} // namespace
 
-TEST_CASE("Solver: uniaxial bar matches sigma=F/A and u=FL/EA", "[fem][solver]") {
-  const double L = 100, W = 10;  // 100 x 10 x 10 mm
+TEST_CASE("Solver: uniaxial bar matches sigma=F/A and u=FL/EA",
+          "[fem][solver]") {
+  const double L = 100, W = 10; // 100 x 10 x 10 mm
   CADShape bar = CADKernel::Instance().CreateBox(L, W, W);
   fem::MeshSettings ms;
   ms.maxSize = 4.0;
@@ -313,9 +326,9 @@ TEST_CASE("Solver: uniaxial bar matches sigma=F/A and u=FL/EA", "[fem][solver]")
   INFO(err);
   REQUIRE(mesh.has_value());
 
-  fem::Material steel{200000.0, 0.3};  // 200 GPa, nu 0.3
-  const double F = 10000.0;            // N, +x
-  const double A = W * W;              // 100 mm^2
+  fem::Material steel{200000.0, 0.3}; // 200 GPa, nu 0.3
+  const double F = 10000.0;           // N, +x
+  const double A = W * W;             // 100 mm^2
 
   std::vector<int> fixed = NodesAtPlane(*mesh, 0, 0.0, 1e-6);
   REQUIRE(fixed.size() > 3);
@@ -331,24 +344,30 @@ TEST_CASE("Solver: uniaxial bar matches sigma=F/A and u=FL/EA", "[fem][solver]")
   REQUIRE(res.has_value());
 
   // Tip axial displacement u = FL/EA.
-  const double uExpected = F * L / (steel.youngMPa * A);  // 0.05 mm
+  const double uExpected = F * L / (steel.youngMPa * A); // 0.05 mm
   CHECK_THAT(res->maxDisplacement, WithinRel(uExpected, 0.03));
 
   // Uniaxial stress in the mid-region (away from clamp/load) ~ F/A.
-  const double sigmaExpected = F / A;  // 100 MPa
+  const double sigmaExpected = F / A; // 100 MPa
   int mid = -1;
   double best = 1e30;
   for (int i = 0; i < (int)mesh->nodes.size(); ++i) {
     const auto& p = mesh->nodes[i];
-    const double d = std::abs(p.x - L / 2) + std::abs(p.y - W / 2) + std::abs(p.z - W / 2);
-    if (d < best) { best = d; mid = i; }
+    const double d =
+        std::abs(p.x - L / 2) + std::abs(p.y - W / 2) + std::abs(p.z - W / 2);
+    if (d < best) {
+      best = d;
+      mid = i;
+    }
   }
   INFO("mid node vm = " << res->vonMises[mid] << " expected " << sigmaExpected);
   CHECK_THAT(res->vonMises[mid], WithinRel(sigmaExpected, 0.05));
 }
 
-TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli", "[fem][solver]") {
-  // L=100, cross-section b=10 (y) x h=10 (z). Fix x=0, transverse tip load in -z.
+TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli",
+          "[fem][solver]") {
+  // L=100, cross-section b=10 (y) x h=10 (z). Fix x=0, transverse tip load in
+  // -z.
   const double L = 100, b = 10, h = 10;
   CADShape beam = CADKernel::Instance().CreateBox(L, b, h);
   fem::MeshSettings ms;
@@ -359,7 +378,7 @@ TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli", "[fem][solve
   REQUIRE(mesh.has_value());
 
   fem::Material steel{200000.0, 0.3};
-  const double P = 1000.0;  // N in -z
+  const double P = 1000.0; // N in -z
   std::vector<int> fixed = NodesAtPlane(*mesh, 0, 0.0, 1e-6);
   fem::FaceLoad load;
   load.type = fem::LoadType::Force;
@@ -371,8 +390,9 @@ TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli", "[fem][solve
   INFO(err);
   REQUIRE(res.has_value());
 
-  const double I = b * h * h * h / 12.0;             // 833.33 mm^4
-  const double delta = P * L * L * L / (3 * steel.youngMPa * I);  // Euler-Bernoulli
+  const double I = b * h * h * h / 12.0; // 833.33 mm^4
+  const double delta =
+      P * L * L * L / (3 * steel.youngMPa * I); // Euler-Bernoulli
   // tet10 with shear + clamp effects: within ~10% of slender-beam theory.
   INFO("tip delta = " << res->maxDisplacement << " EB = " << delta);
   CHECK_THAT(res->maxDisplacement, WithinRel(delta, 0.12));
@@ -392,7 +412,7 @@ TEST_CASE("Solver: pressure on a face compresses along the inward normal",
   REQUIRE(mesh.has_value());
 
   fem::Material steel{200000.0, 0.3};
-  const double P = 50.0;  // MPa
+  const double P = 50.0; // MPa
   std::vector<int> fixed = NodesAtPlane(*mesh, 0, 0.0, 1e-6);
   fem::FaceLoad load;
   load.type = fem::LoadType::Pressure;
@@ -408,8 +428,12 @@ TEST_CASE("Solver: pressure on a face compresses along the inward normal",
   double best = 1e30;
   for (int i = 0; i < (int)mesh->nodes.size(); ++i) {
     const auto& p = mesh->nodes[i];
-    const double d = std::abs(p.x - L / 2) + std::abs(p.y - W / 2) + std::abs(p.z - W / 2);
-    if (d < best) { best = d; mid = i; }
+    const double d =
+        std::abs(p.x - L / 2) + std::abs(p.y - W / 2) + std::abs(p.z - W / 2);
+    if (d < best) {
+      best = d;
+      mid = i;
+    }
   }
   INFO("mid vm = " << res->vonMises[mid] << " expected " << P);
   CHECK_THAT(res->vonMises[mid], WithinRel(P, 0.05));
@@ -417,7 +441,10 @@ TEST_CASE("Solver: pressure on a face compresses along the inward normal",
   // The loaded face must displace inward (-x), confirming the sign.
   double sumx = 0;
   int cnt = 0;
-  for (int n : NodesAtPlane(*mesh, 0, L, 1e-6)) { sumx += res->displacement[n].x; ++cnt; }
+  for (int n : NodesAtPlane(*mesh, 0, L, 1e-6)) {
+    sumx += res->displacement[n].x;
+    ++cnt;
+  }
   CHECK(sumx / cnt < 0.0);
 }
 
@@ -429,10 +456,10 @@ TEST_CASE("Solver: Lame thick-wall cylinder von Mises on a curved surface",
   // clamped: away from the ends the mid-plane (a symmetry plane, u_z=0)
   // approaches plane strain, matching Lame with sigma_z = nu*(sigma_r+sigma_t).
   const double a = 10, b = 20, H = 60, p = 10;
-  CADShape outer =
-      CADKernel::Instance().CreateCylinder(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), b, H);
-  CADShape bore =
-      CADKernel::Instance().CreateCylinder(glm::vec3(0, 0, -1), glm::vec3(0, 0, 1), a, H + 2);
+  CADShape outer = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), b, H);
+  CADShape bore = CADKernel::Instance().CreateCylinder(
+      glm::vec3(0, 0, -1), glm::vec3(0, 0, 1), a, H + 2);
   CADShape tube = outer.Difference(bore);
   REQUIRE(tube.IsValid());
 
@@ -449,7 +476,8 @@ TEST_CASE("Solver: Lame thick-wall cylinder von Mises on a curved surface",
   // Fix both end faces fully (z=0 and z=H).
   std::vector<int> fixed;
   for (int i = 0; i < (int)mesh->nodes.size(); ++i)
-    if (std::abs(mesh->nodes[i].z) < 1e-6 || std::abs(mesh->nodes[i].z - H) < 1e-6)
+    if (std::abs(mesh->nodes[i].z) < 1e-6 ||
+        std::abs(mesh->nodes[i].z - H) < 1e-6)
       fixed.push_back(i);
   REQUIRE(fixed.size() > 6);
 
@@ -461,8 +489,10 @@ TEST_CASE("Solver: Lame thick-wall cylinder von Mises on a curved surface",
   for (int t = 0; t < (int)mesh->boundary.size(); ++t) {
     bool bore6 = true;
     for (int k = 0; k < 6; ++k)
-      if (std::abs(radius(mesh->boundary[t].nodes[k]) - a) > 0.6) bore6 = false;
-    if (bore6) load.tris.push_back(t);
+      if (std::abs(radius(mesh->boundary[t].nodes[k]) - a) > 0.6)
+        bore6 = false;
+    if (bore6)
+      load.tris.push_back(t);
   }
   REQUIRE_FALSE(load.tris.empty());
 
@@ -478,21 +508,26 @@ TEST_CASE("Solver: Lame thick-wall cylinder von Mises on a curved surface",
   const double sz = nu * (sr + st);
   const double vmExpected =
       std::sqrt(0.5 * ((sr - st) * (sr - st) + (st - sz) * (st - sz) +
-                       (sz - sr) * (sz - sr)));  // ~23.1 MPa
+                       (sz - sr) * (sz - sr))); // ~23.1 MPa
 
   // Inner-radius node nearest the mid-plane (away from the clamped ends).
   int inner = -1;
   double best = 1e30;
   for (int i = 0; i < (int)mesh->nodes.size(); ++i) {
-    const double d = std::abs(radius(i) - a) + std::abs(mesh->nodes[i].z - H / 2);
-    if (d < best) { best = d; inner = i; }
+    const double d =
+        std::abs(radius(i) - a) + std::abs(mesh->nodes[i].z - H / 2);
+    if (d < best) {
+      best = d;
+      inner = i;
+    }
   }
-  INFO("inner mid-plane vm = " << res->vonMises[inner] << " expected " << vmExpected);
+  INFO("inner mid-plane vm = " << res->vonMises[inner] << " expected "
+                               << vmExpected);
   // ~4% on a 4 mm mesh; headroom for Netgen's non-bit-stable remeshing.
   CHECK_THAT(res->vonMises[inner], WithinRel(vmExpected, 0.08));
 }
 
-#endif  // HAVE_NETGEN
+#endif // HAVE_NETGEN
 
 // ---- RunStudy orchestration + validation (netgen-gated) -------------------
 #ifdef HAVE_NETGEN
@@ -504,7 +539,7 @@ struct BarDoc {
   Document doc;
   uint64_t createdBy = 0;
 };
-}  // namespace
+} // namespace
 
 TEST_CASE("RunStudy errors when the body material has no stiffness data",
           "[fem][run]") {
@@ -512,10 +547,12 @@ TEST_CASE("RunStudy errors when the body material has no stiffness data",
   // it must fail loudly rather than guessing. (The full solve path is covered
   // by the analytic benchmarks and the headless fem loop.)
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0),
-                                              100.0, 10.0, 10.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 100.0,
+                                              10.0, 10.0));
   const uint64_t createdBy = doc.GetBodies()[0].createdBy;
-  auto faceName = [&](int i) { return std::to_string(createdBy) + "/face" + std::to_string(i); };
+  auto faceName = [&](int i) {
+    return std::to_string(createdBy) + "/face" + std::to_string(i);
+  };
 
   fem::Study& s = doc.AddStudy("S");
   s.meshSize = 6.0;
@@ -542,8 +579,8 @@ TEST_CASE("RunStudy errors when the body material has no stiffness data",
 TEST_CASE("RunStudy errors when a loaded body has no fixed support",
           "[fem][run]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0),
-                                              50.0, 10.0, 10.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 50.0,
+                                              10.0, 10.0));
   const uint64_t createdBy = doc.GetBodies()[0].createdBy;
   fem::Study& s = doc.AddStudy("S");
   s.meshSize = 6.0;
@@ -568,10 +605,12 @@ TEST_CASE("RunStudy solves multiple loaded bodies and aggregates the maxima",
   // Two disjoint steel bars in one study, loaded to different stress levels.
   // Exercises the per-body solve loop and the cross-body max aggregation.
   Document doc;
-  auto a = std::make_unique<BoxFeature>("BarA", glm::vec3(0, 0, 0), 100, 10, 10);
+  auto a =
+      std::make_unique<BoxFeature>("BarA", glm::vec3(0, 0, 0), 100, 10, 10);
   a->SetMaterial("steel");
   doc.AddFeature(std::move(a));
-  auto b = std::make_unique<BoxFeature>("BarB", glm::vec3(0, 0, 50), 100, 10, 10);
+  auto b =
+      std::make_unique<BoxFeature>("BarB", glm::vec3(0, 0, 50), 100, 10, 10);
   b->SetMaterial("steel");
   doc.AddFeature(std::move(b));
   REQUIRE(doc.GetBodies().size() == 2);
@@ -581,7 +620,9 @@ TEST_CASE("RunStudy solves multiple loaded bodies and aggregates the maxima",
   fem::Study& s = doc.AddStudy("Two bars");
   s.meshSize = 6.0;
   auto addBar = [&](uint64_t cb, double force) {
-    auto face = [&](int i) { return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)}; };
+    auto face = [&](int i) {
+      return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
+    };
     fem::Load fx;
     fx.id = doc.AllocateId();
     fx.type = fem::LoadType::Fixed;
@@ -595,8 +636,8 @@ TEST_CASE("RunStudy solves multiple loaded bodies and aggregates the maxima",
     fo.direction = glm::dvec3(1, 0, 0);
     s.loads.push_back(fo);
   };
-  addBar(cbA, 2000.0);   // low stress
-  addBar(cbB, 10000.0);  // 5x the load -> the governing body
+  addBar(cbA, 2000.0);  // low stress
+  addBar(cbB, 10000.0); // 5x the load -> the governing body
 
   fem::StudyRuntime rt;
   std::string err;
@@ -610,15 +651,17 @@ TEST_CASE("RunStudy solves multiple loaded bodies and aggregates the maxima",
   for (const fem::StudyBodyResult& br : rt.bodies) {
     CHECK(br.results.maxVonMises > 0);
     perBodyMax = std::max(perBodyMax, br.results.maxVonMises);
-    if (br.bodyName == "BarB") barBMax = br.results.maxVonMises;
-    if (br.bodyName == "BarA") barAMax = br.results.maxVonMises;
+    if (br.bodyName == "BarB")
+      barBMax = br.results.maxVonMises;
+    if (br.bodyName == "BarA")
+      barAMax = br.results.maxVonMises;
   }
-  CHECK(barBMax > barAMax);                  // heavier bar is more stressed
-  CHECK(rt.maxVmBody == "BarB");             // aggregate governed by BarB
-  CHECK_THAT(rt.maxVonMises, WithinRel(perBodyMax, 1e-9));  // = max over bodies
+  CHECK(barBMax > barAMax);      // heavier bar is more stressed
+  CHECK(rt.maxVmBody == "BarB"); // aggregate governed by BarB
+  CHECK_THAT(rt.maxVonMises, WithinRel(perBodyMax, 1e-9)); // = max over bodies
 }
 
-#endif  // HAVE_NETGEN
+#endif // HAVE_NETGEN
 
 // ---- Element-level solver unit tests (no mesher: Eigen-gated only) ---------
 // These pin the tet10 element math directly, so they run in CI whether or not
@@ -626,16 +669,23 @@ TEST_CASE("RunStudy solves multiple loaded bodies and aggregates the maxima",
 #ifdef HAVE_FEM_SOLVER
 
 namespace {
-constexpr double kE = 200000.0;  // steel, MPa
+constexpr double kE = 200000.0; // steel, MPa
 constexpr double kNu = 0.3;
 
 // A well-shaped (irregular, straight-edged) reference tet10: corners then edge
 // midpoints in the canonical order edges (0,1)(1,2)(0,2)(0,3)(1,3)(2,3).
 std::array<glm::dvec3, 10> RefTet10() {
   glm::dvec3 c0(0, 0, 0), c1(2, 0, 0), c2(0.3, 3, 0), c3(0.5, 0.7, 4);
-  return {c0, c1, c2, c3,
-          0.5 * (c0 + c1), 0.5 * (c1 + c2), 0.5 * (c0 + c2),
-          0.5 * (c0 + c3), 0.5 * (c1 + c3), 0.5 * (c2 + c3)};
+  return {c0,
+          c1,
+          c2,
+          c3,
+          0.5 * (c0 + c1),
+          0.5 * (c1 + c2),
+          0.5 * (c0 + c2),
+          0.5 * (c0 + c3),
+          0.5 * (c1 + c3),
+          0.5 * (c2 + c3)};
 }
 
 // y = Ke * u for the row-major 30x30 Ke.
@@ -643,28 +693,33 @@ std::array<double, 30> MatVec(const std::array<double, 900>& Ke,
                               const std::array<double, 30>& u) {
   std::array<double, 30> y{};
   for (int i = 0; i < 30; ++i)
-    for (int j = 0; j < 30; ++j) y[i] += Ke[i * 30 + j] * u[j];
+    for (int j = 0; j < 30; ++j)
+      y[i] += Ke[i * 30 + j] * u[j];
   return y;
 }
 double Norm(const std::array<double, 30>& v) {
   double s = 0;
-  for (double x : v) s += x * x;
+  for (double x : v)
+    s += x * x;
   return std::sqrt(s);
 }
 double FroNorm(const std::array<double, 900>& m) {
   double s = 0;
-  for (double x : m) s += x * x;
+  for (double x : m)
+    s += x * x;
   return std::sqrt(s);
 }
 // Flatten a per-node displacement field to a 30-vector.
 std::array<double, 30> Flatten(const std::array<glm::dvec3, 10>& d) {
   std::array<double, 30> u{};
   for (int i = 0; i < 10; ++i) {
-    u[3 * i + 0] = d[i].x; u[3 * i + 1] = d[i].y; u[3 * i + 2] = d[i].z;
+    u[3 * i + 0] = d[i].x;
+    u[3 * i + 1] = d[i].y;
+    u[3 * i + 2] = d[i].z;
   }
   return u;
 }
-}  // namespace
+} // namespace
 
 TEST_CASE("Element: tet10 stiffness is symmetric", "[fem][element]") {
   const auto Ke = fem::Tet10Stiffness(RefTet10(), kE, kNu);
@@ -687,8 +742,8 @@ TEST_CASE("Element: tet10 has exactly the 6 rigid-body zero-energy modes",
   for (const glm::dvec3& a : axes) {
     std::array<glm::dvec3, 10> trans, rot;
     for (int i = 0; i < 10; ++i) {
-      trans[i] = a;                        // rigid translation
-      rot[i] = glm::cross(a, nodes[i]);    // rigid rotation about the axis
+      trans[i] = a;                     // rigid translation
+      rot[i] = glm::cross(a, nodes[i]); // rigid rotation about the axis
     }
     INFO("axis " << a.x << "," << a.y << "," << a.z);
     CHECK(Norm(MatVec(Ke, Flatten(trans))) <= 1e-6 * scale);
@@ -697,24 +752,31 @@ TEST_CASE("Element: tet10 has exactly the 6 rigid-body zero-energy modes",
 
   // A genuine straining mode (uniaxial stretch in x) must store energy.
   std::array<glm::dvec3, 10> stretch;
-  for (int i = 0; i < 10; ++i) stretch[i] = glm::dvec3(nodes[i].x, 0, 0);
+  for (int i = 0; i < 10; ++i)
+    stretch[i] = glm::dvec3(nodes[i].x, 0, 0);
   const auto u = Flatten(stretch);
   const auto Ku = MatVec(Ke, u);
   double energy = 0;
-  for (int i = 0; i < 30; ++i) energy += u[i] * Ku[i];
+  for (int i = 0; i < 30; ++i)
+    energy += u[i] * Ku[i];
   CHECK(energy > 0.0);
 }
 
 TEST_CASE("Element: tet10 reproduces a constant strain state exactly "
-          "(patch test)", "[fem][element]") {
+          "(patch test)",
+          "[fem][element]") {
   const auto nodes = RefTet10();
   // A constant displacement gradient G -> constant strain everywhere. tet10
   // must reproduce this to machine precision at every point (the patch test).
   glm::dmat3 G(0.0);
-  G[0][0] = 1e-3;  G[1][1] = -4e-4; G[2][2] = 2e-4;  // normal strains
-  G[1][0] = 6e-4;  G[0][1] = 6e-4;                    // symmetric shear xy
+  G[0][0] = 1e-3;
+  G[1][1] = -4e-4;
+  G[2][2] = 2e-4; // normal strains
+  G[1][0] = 6e-4;
+  G[0][1] = 6e-4; // symmetric shear xy
   std::array<glm::dvec3, 10> disp;
-  for (int i = 0; i < 10; ++i) disp[i] = G * nodes[i];
+  for (int i = 0; i < 10; ++i)
+    disp[i] = G * nodes[i];
 
   // Expected stress from D * strain (Voigt: engineering shear = 2*eps_xy).
   const double lam = kE * kNu / ((1 + kNu) * (1 - 2 * kNu));
@@ -724,11 +786,11 @@ TEST_CASE("Element: tet10 reproduces a constant strain state exactly "
   const double sxx = lam * tr + 2 * mu * exx;
   const double syy = lam * tr + 2 * mu * eyy;
   const double szz = lam * tr + 2 * mu * ezz;
-  const double sxy = mu * (G[1][0] + G[0][1]);  // = 2*mu*eps_xy
+  const double sxy = mu * (G[1][0] + G[0][1]); // = 2*mu*eps_xy
 
   // Sample several natural points; the stress must be constant and correct.
-  const double pts[4][3] = {{0.25, 0.25, 0.25}, {0.1, 0.2, 0.6}, {0.6, 0.1, 0.1},
-                            {0.0, 0.0, 0.0}};
+  const double pts[4][3] = {
+      {0.25, 0.25, 0.25}, {0.1, 0.2, 0.6}, {0.6, 0.1, 0.1}, {0.0, 0.0, 0.0}};
   for (const auto& p : pts) {
     const auto s = fem::Tet10Stress(nodes, disp, kE, kNu, p[0], p[1], p[2]);
     INFO("at " << p[0] << "," << p[1] << "," << p[2]);
@@ -749,19 +811,25 @@ fem::FemMesh SingleTetMesh(bool withBoundary) {
   const auto nodes = RefTet10();
   m.nodes.assign(nodes.begin(), nodes.end());
   std::array<int, 10> tet;
-  for (int i = 0; i < 10; ++i) tet[i] = i;
+  for (int i = 0; i < 10; ++i)
+    tet[i] = i;
   m.tets.push_back(tet);
   m.stats.nodeCount = 10;
   m.stats.tetCount = 1;
   if (withBoundary) {
     auto edgeMid = [](int a, int b) {
       const int lo = std::min(a, b), hi = std::max(a, b);
-      if (lo == 0 && hi == 1) return 4;
-      if (lo == 1 && hi == 2) return 5;
-      if (lo == 0 && hi == 2) return 6;
-      if (lo == 0 && hi == 3) return 7;
-      if (lo == 1 && hi == 3) return 8;
-      return 9;  // (2,3)
+      if (lo == 0 && hi == 1)
+        return 4;
+      if (lo == 1 && hi == 2)
+        return 5;
+      if (lo == 0 && hi == 2)
+        return 6;
+      if (lo == 0 && hi == 3)
+        return 7;
+      if (lo == 1 && hi == 3)
+        return 8;
+      return 9; // (2,3)
     };
     const int faces[4][3] = {{1, 2, 3}, {0, 2, 3}, {0, 1, 3}, {0, 1, 2}};
     for (int f = 0; f < 4; ++f) {
@@ -774,20 +842,23 @@ fem::FemMesh SingleTetMesh(bool withBoundary) {
   }
   return m;
 }
-}  // namespace
+} // namespace
 
 TEST_CASE("Solver rejects a body with no stiffness data", "[fem][element]") {
   std::string err;
-  auto r = fem::Solve(SingleTetMesh(false), fem::Material{0.0, 0.3}, {0}, {}, &err);
+  auto r =
+      fem::Solve(SingleTetMesh(false), fem::Material{0.0, 0.3}, {0}, {}, &err);
   CHECK_FALSE(r.has_value());
   CHECK(err.find("stiffness") != std::string::npos);
 }
 
 TEST_CASE("Solver rejects a fully constrained model", "[fem][element]") {
   std::vector<int> allFixed;
-  for (int i = 0; i < 10; ++i) allFixed.push_back(i);
+  for (int i = 0; i < 10; ++i)
+    allFixed.push_back(i);
   std::string err;
-  auto r = fem::Solve(SingleTetMesh(false), fem::Material{kE, kNu}, allFixed, {}, &err);
+  auto r = fem::Solve(SingleTetMesh(false), fem::Material{kE, kNu}, allFixed,
+                      {}, &err);
   CHECK_FALSE(r.has_value());
   CHECK(err.find("constrained") != std::string::npos);
 }
@@ -809,7 +880,7 @@ TEST_CASE("Solver detects an under-constrained (singular) model",
   CHECK(err.find("constrained") != std::string::npos);
 }
 
-#endif  // HAVE_FEM_SOLVER
+#endif // HAVE_FEM_SOLVER
 
 // ---- Modal analysis (needs Netgen mesh + Spectra eigensolver) -------------
 #if defined(HAVE_NETGEN) && defined(HAVE_SPECTRA)
@@ -831,7 +902,8 @@ TEST_CASE("Modal: cantilever first bending frequency", "[fem][solver][modal]") {
 
   std::vector<int> fixed;
   for (int i = 0; i < (int)mesh->nodes.size(); ++i)
-    if (std::abs(mesh->nodes[i].x) < 1e-6) fixed.push_back(i);
+    if (std::abs(mesh->nodes[i].x) < 1e-6)
+      fixed.push_back(i);
   REQUIRE(fixed.size() > 6);
 
   auto modes = fem::SolveModal(*mesh, steel, fixed, 4, &err);
@@ -841,11 +913,12 @@ TEST_CASE("Modal: cantilever first bending frequency", "[fem][solver][modal]") {
 
   // Analytic first bending frequency.
   const double E = 200000.0, rho = 7.85e-9;
-  const double I = W * W * W * W / 12.0;  // b h^3/12, square section
+  const double I = W * W * W * W / 12.0; // b h^3/12, square section
   const double A = W * W;
   const double beta = 1.8751040687;
-  const double omega1 = beta * beta * std::sqrt(E * I / (rho * A * L * L * L * L));
-  const double f1 = omega1 / 6.283185307179586;  // ~815 Hz
+  const double omega1 =
+      beta * beta * std::sqrt(E * I / (rho * A * L * L * L * L));
+  const double f1 = omega1 / 6.283185307179586; // ~815 Hz
 
   const double got = (*modes)[0].frequencyHz;
   INFO("f1 got = " << got << " expected " << f1);
@@ -854,7 +927,8 @@ TEST_CASE("Modal: cantilever first bending frequency", "[fem][solver][modal]") {
   // Frequencies ascend and the mode shape is normalized.
   CHECK((*modes)[1].frequencyHz >= (*modes)[0].frequencyHz);
   double maxu = 0;
-  for (const auto& u : (*modes)[0].displacement) maxu = std::max(maxu, glm::length(u));
+  for (const auto& u : (*modes)[0].displacement)
+    maxu = std::max(maxu, glm::length(u));
   CHECK_THAT(maxu, WithinRel(1.0, 1e-9));
 }
 
@@ -868,23 +942,26 @@ TEST_CASE("Modal: requires a fixed support and density", "[fem][modal]") {
   REQUIRE(mesh.has_value());
 
   // No fixed support -> clear error (free-free deferred).
-  auto m1 = fem::SolveModal(*mesh, fem::Material{200000.0, 0.3, 7.85e-9}, {}, 4, &err);
+  auto m1 = fem::SolveModal(*mesh, fem::Material{200000.0, 0.3, 7.85e-9}, {}, 4,
+                            &err);
   CHECK_FALSE(m1.has_value());
   CHECK(err.find("fixed support") != std::string::npos);
 
   // No density -> no mass.
   std::vector<int> fixed = {0, 1, 2, 3, 4, 5, 6, 7};
-  auto m2 = fem::SolveModal(*mesh, fem::Material{200000.0, 0.3, 0.0}, fixed, 4, &err);
+  auto m2 =
+      fem::SolveModal(*mesh, fem::Material{200000.0, 0.3, 0.0}, fixed, 4, &err);
   CHECK_FALSE(m2.has_value());
   CHECK(err.find("density") != std::string::npos);
 }
 
-#endif  // HAVE_NETGEN && HAVE_SPECTRA
+#endif // HAVE_NETGEN && HAVE_SPECTRA
 
 // ---- Gravity / self-weight (netgen-gated) ---------------------------------
 #ifdef HAVE_NETGEN
 
-TEST_CASE("Solver: cantilever self-weight tip deflection", "[fem][solver][gravity]") {
+TEST_CASE("Solver: cantilever self-weight tip deflection",
+          "[fem][solver][gravity]") {
   // Steel cantilever under gravity (-z). Tip deflection vs distributed-load
   // beam theory delta = w L^4 / (8 E I), with w = rho*g*A (force per length).
   const double L = 100, W = 10;
@@ -900,21 +977,23 @@ TEST_CASE("Solver: cantilever self-weight tip deflection", "[fem][solver][gravit
   fem::Material steel{200000.0, 0.3, 7.85e-9};
   std::vector<int> fixed;
   for (int i = 0; i < (int)mesh->nodes.size(); ++i)
-    if (std::abs(mesh->nodes[i].x) < 1e-6) fixed.push_back(i);
+    if (std::abs(mesh->nodes[i].x) < 1e-6)
+      fixed.push_back(i);
   REQUIRE(fixed.size() > 6);
 
-  auto res = fem::Solve(*mesh, steel, fixed, {}, &err, glm::dvec3(0, 0, -9810.0));
+  auto res =
+      fem::Solve(*mesh, steel, fixed, {}, &err, glm::dvec3(0, 0, -9810.0));
   INFO(err);
   REQUIRE(res.has_value());
 
   const double E = 200000.0, rho = 7.85e-9, g = 9810.0;
   const double I = W * W * W * W / 12.0;
   const double A = W * W;
-  const double w = rho * g * A;                       // N/mm
-  const double delta = w * L * L * L * L / (8 * E * I);  // beam theory
+  const double w = rho * g * A;                         // N/mm
+  const double delta = w * L * L * L * L / (8 * E * I); // beam theory
   INFO("tip delta = " << res->maxDisplacement << " expected " << delta);
   CHECK_THAT(res->maxDisplacement, WithinRel(delta, 0.10));
-  CHECK(res->maxDisplacement > 0);  // it actually deflected (gravity applied)
+  CHECK(res->maxDisplacement > 0); // it actually deflected (gravity applied)
 }
 
-#endif  // HAVE_NETGEN
+#endif // HAVE_NETGEN

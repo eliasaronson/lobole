@@ -1,13 +1,13 @@
-#include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
 
+#include "TestIO.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/io/Format.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <filesystem>
 #include <fstream>
@@ -91,9 +91,10 @@ void CheckSampleFields(const DrawingDocument& dwg) {
   CHECK(dim.labelOffset.x == 12.0);
 }
 
-}  // namespace
+} // namespace
 
-TEST_CASE("Drawing model: ids are stable and never reused", "[drawing][model]") {
+TEST_CASE("Drawing model: ids are stable and never reused",
+          "[drawing][model]") {
   DrawingDocument dwg;
   const uint64_t v1 = dwg.AddView({});
   const uint64_t v2 = dwg.AddView({});
@@ -118,7 +119,7 @@ TEST_CASE("Drawing model: removing a view cascades to its dims",
   onView.viewId = v;
   dwg.AddDim(onView);
   DrawingDim other;
-  other.viewId = v + 100;  // some other (absent) view
+  other.viewId = v + 100; // some other (absent) view
   const uint64_t keep = dwg.AddDim(other);
 
   REQUIRE(dwg.DimCount() == 2);
@@ -220,7 +221,7 @@ drawing::SheetView DimTestView() {
   drawing::SheetCurve hole;
   hole.edge = ElementRef{2, "hole"};
   hole.sourceId = 1;
-  hole.curveType = 1;  // GeomAbs_Circle
+  hole.curveType = 1; // GeomAbs_Circle
   hole.conicCenter = {10, 10};
   hole.conicRadius = 4.0;
   hole.points = {{14, 10}, {10, 14}, {6, 10}, {10, 6}, {14, 10}};
@@ -244,7 +245,7 @@ ProjRef EdgeRef(uint64_t fid, const std::string& name) {
   return r;
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("ResolveDim measures projected geometry", "[drawing][dimension]") {
   const drawing::SheetView view = DimTestView();
@@ -262,7 +263,7 @@ TEST_CASE("ResolveDim measures projected geometry", "[drawing][dimension]") {
     auto rd = drawing::ResolveDim(
         MakeDim(DrawingDimKind::Distance, {EdgeRef(1, "L"), EdgeRef(1, "R")}),
         view);
-    REQUIRE(rd.resolved);  // both midpoints at y=10 -> pure horizontal 30
+    REQUIRE(rd.resolved); // both midpoints at y=10 -> pure horizontal 30
     CHECK(rd.value == Catch::Approx(30.0));
   }
 
@@ -273,7 +274,8 @@ TEST_CASE("ResolveDim measures projected geometry", "[drawing][dimension]") {
     CHECK(rd.radial);
     CHECK(rd.value == Catch::Approx(8.0));
     CHECK(rd.center.x == Catch::Approx(10.0));
-    CHECK(rd.text == "\xC3\x98" "8");  // Ø8
+    CHECK(rd.text == "\xC3\x98"
+                     "8"); // Ø8
   }
 
   SECTION("radius of the circular edge") {
@@ -285,10 +287,10 @@ TEST_CASE("ResolveDim measures projected geometry", "[drawing][dimension]") {
   }
 
   SECTION("a ref that matches no curve is dangling, never rebound") {
-    auto rd = drawing::ResolveDim(
-        MakeDim(DrawingDimKind::DistanceX,
-                {EdgeRef(1, "L"), EdgeRef(9, "gone")}),
-        view);
+    auto rd =
+        drawing::ResolveDim(MakeDim(DrawingDimKind::DistanceX,
+                                    {EdgeRef(1, "L"), EdgeRef(9, "gone")}),
+                            view);
     CHECK_FALSE(rd.resolved);
     CHECK(rd.value == 0.0);
   }
@@ -301,8 +303,8 @@ TEST_CASE("SVG export writes the sheet, views, and title block",
   // exercises the whole export path headlessly.
   DrawingDocument doc;
   doc.GetSheet().size = SheetSize::A4;
-  doc.GetSheet().landscape = false;  // A4 portrait -> viewBox 210 x 297
-  doc.GetSheet().titleBlock.project = "Widget & Co <v2>";  // XML-escaping
+  doc.GetSheet().landscape = false; // A4 portrait -> viewBox 210 x 297
+  doc.GetSheet().titleBlock.project = "Widget & Co <v2>"; // XML-escaping
 
   drawing::SheetView view;
   view.viewId = 1;
@@ -329,14 +331,17 @@ TEST_CASE("SVG export writes the sheet, views, and title block",
 
   auto count = [&](const std::string& needle) {
     size_t n = 0, pos = 0;
-    while ((pos = svg.find(needle, pos)) != std::string::npos) { ++n; ++pos; }
+    while ((pos = svg.find(needle, pos)) != std::string::npos) {
+      ++n;
+      ++pos;
+    }
     return n;
   };
 
   CHECK(svg.rfind("<?xml", 0) == 0);
   CHECK(svg.find("viewBox=\"0 0 210 297\"") != std::string::npos);
   CHECK(count("<polyline") == 2);
-  CHECK(svg.find("stroke-dasharray") != std::string::npos);  // the hidden curve
+  CHECK(svg.find("stroke-dasharray") != std::string::npos); // the hidden curve
   // Title-block text is XML-escaped, never raw.
   CHECK(svg.find("Widget &amp; Co &lt;v2&gt;") != std::string::npos);
   CHECK(svg.find("Widget & Co <v2>") == std::string::npos);
@@ -344,7 +349,8 @@ TEST_CASE("SVG export writes the sheet, views, and title block",
   fs::remove(out);
 }
 
-TEST_CASE("PDF export writes a valid single-page document", "[drawing][export]") {
+TEST_CASE("PDF export writes a valid single-page document",
+          "[drawing][export]") {
   DrawingDocument doc;
   doc.GetSheet().size = SheetSize::A3;
   doc.GetSheet().landscape = true;
@@ -367,7 +373,8 @@ TEST_CASE("PDF export writes a valid single-page document", "[drawing][export]")
   dim.radius = 6;
   dim.rim = {44, 39};
   dim.value = 12;
-  dim.text = "\xC3\x98" "12";  // Ø12 — exercises the WinAnsi mapping
+  dim.text = "\xC3\x98"
+             "12"; // Ø12 — exercises the WinAnsi mapping
   dim.labelPos = {48, 42};
 
   const fs::path out = fs::temp_directory_path() / "drawing_export.pdf";
@@ -389,7 +396,8 @@ TEST_CASE("PDF export writes a valid single-page document", "[drawing][export]")
   // The A3 landscape long edge is 420 mm -> ~1190.55 pt.
   CHECK(pdf.find("1190.55") != std::string::npos);
   // Ø became the WinAnsi byte 0xD8, not the raw UTF-8 pair.
-  CHECK(pdf.find("\xD8" "12") != std::string::npos);
+  CHECK(pdf.find("\xD8"
+                 "12") != std::string::npos);
   CHECK(pdf.find("\xC3\x98") == std::string::npos);
   CHECK(pdf.rfind("%%EOF") != std::string::npos);
   fs::remove(out);
@@ -409,8 +417,8 @@ TEST_CASE("Drawing loaders reject the wrong document kind",
   fs::remove(tmp);
 
   // A part file is not a drawing.
-  const fs::path partGolden = fs::path(DESIGNER_SOURCE_DIR) / "tests" /
-                              "golden" / "v17-full.json";
+  const fs::path partGolden =
+      fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" / "v17-full.json";
   if (fs::exists(partGolden)) {
     const auto asDrawing = DocumentIO::LoadDrawing(partGolden.string());
     CHECK_FALSE(asDrawing.has_value());

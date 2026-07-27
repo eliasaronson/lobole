@@ -15,8 +15,8 @@ namespace {
 
 bool ValidName(const std::string& name) {
   return !name.empty() && name.find('/') == std::string::npos &&
-         name.find('\\') == std::string::npos && name != "." &&
-         name != ".." && name.size() <= 128;
+         name.find('\\') == std::string::npos && name != "." && name != ".." &&
+         name.size() <= 128;
 }
 
 int64_t MTimeUnix(const fs::path& p) {
@@ -59,7 +59,8 @@ bool Create(const Document& doc, const std::string& projectPath,
   fs::create_directories(Dir(projectPath), ec);
   const std::string target = PathOf(projectPath, name);
   if (auto r = DocumentIO::Save(doc, target); !r) {
-    if (error) *error = r.error();
+    if (error)
+      *error = r.error();
     return false;
   }
   LOG_INFO("Checkpoint '{}' created at {}", name, target);

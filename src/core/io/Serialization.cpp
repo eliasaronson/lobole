@@ -2,21 +2,21 @@
 #include "core/io/SerializationInternal.h"
 
 #include "common/Logger.h"
+#include "core/Feature.h"
+#include "core/Occurrence.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
-#include "core/features/ExtrudeFeature.h"
-#include "core/Feature.h"
-#include "core/features/FilletFeature.h"
 #include "core/features/DraftFeature.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/FilletFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
-#include "core/features/SweepFeature.h"
-#include "core/Occurrence.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/SweepFeature.h"
 
 #include <nlohmann/json.hpp>
 
@@ -28,7 +28,6 @@
 #include <set>
 
 using nlohmann::json;
-
 
 namespace DocumentIO {
 
@@ -45,7 +44,8 @@ bool IsDirFormatPath(const std::string& path) {
 
 std::string NormalizeProjectPath(const std::string& path) {
   const std::filesystem::path p(path);
-  if (p.filename() == "index.json" && p.parent_path().string().ends_with(".dsgn"))
+  if (p.filename() == "index.json" &&
+      p.parent_path().string().ends_with(".dsgn"))
     return p.parent_path().string();
   return path;
 }
@@ -119,7 +119,8 @@ std::string LabelSlug(const std::string& label) {
     else if (!out.empty() && out.back() != '-')
       out += '-';
   }
-  while (!out.empty() && out.back() == '-') out.pop_back();
+  while (!out.empty() && out.back() == '-')
+    out.pop_back();
   return out;
 }
 
@@ -178,7 +179,8 @@ bool WriteTextAtomic(const std::filesystem::path& target,
   {
     std::ofstream out(tmp);
     if (!out) {
-      if (error) *error = "Cannot open file for writing: " + tmp.string();
+      if (error)
+        *error = "Cannot open file for writing: " + tmp.string();
       return false;
     }
     out << text;
@@ -186,7 +188,8 @@ bool WriteTextAtomic(const std::filesystem::path& target,
   std::error_code ec;
   std::filesystem::rename(tmp, target, ec);
   if (ec) {
-    if (error) *error = "rename failed: " + ec.message();
+    if (error)
+      *error = "rename failed: " + ec.message();
     return false;
   }
   return true;
@@ -212,7 +215,8 @@ bool WriteBytesAtomic(const std::filesystem::path& target,
   {
     std::ofstream out(tmp, std::ios::binary);
     if (!out) {
-      if (error) *error = "Cannot open file for writing: " + tmp.string();
+      if (error)
+        *error = "Cannot open file for writing: " + tmp.string();
       return false;
     }
     out.write(reinterpret_cast<const char*>(bytes.data()),
@@ -221,7 +225,8 @@ bool WriteBytesAtomic(const std::filesystem::path& target,
   std::error_code ec;
   std::filesystem::rename(tmp, target, ec);
   if (ec) {
-    if (error) *error = "rename failed: " + ec.message();
+    if (error)
+      *error = "rename failed: " + ec.message();
     return false;
   }
   return true;
@@ -265,11 +270,16 @@ std::string Base64Encode(const std::vector<unsigned char>& in) {
 
 std::vector<unsigned char> Base64Decode(const std::string& in) {
   auto val = [](char c) -> int {
-    if (c >= 'A' && c <= 'Z') return c - 'A';
-    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
-    if (c >= '0' && c <= '9') return c - '0' + 52;
-    if (c == '+') return 62;
-    if (c == '/') return 63;
+    if (c >= 'A' && c <= 'Z')
+      return c - 'A';
+    if (c >= 'a' && c <= 'z')
+      return c - 'a' + 26;
+    if (c >= '0' && c <= '9')
+      return c - '0' + 52;
+    if (c == '+')
+      return 62;
+    if (c == '/')
+      return 63;
     return -1; // '=' padding and any whitespace are skipped
   };
   std::vector<unsigned char> out;
@@ -277,7 +287,8 @@ std::vector<unsigned char> Base64Decode(const std::string& in) {
   int buf = 0, bits = 0;
   for (char c : in) {
     const int v = val(c);
-    if (v < 0) continue;
+    if (v < 0)
+      continue;
     buf = (buf << 6) | v;
     bits += 6;
     if (bits >= 8) {
@@ -342,7 +353,8 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
       for (const fem::Study& s : doc.GetStudies()) {
         const std::string base = std::to_string(s.id) + "-" + LabelSlug(s.name);
         const std::string file = base + ".json";
-        if (!WriteTextAtomic(studyDir / file, StudyToJson(s).dump(2) + "\n", error))
+        if (!WriteTextAtomic(studyDir / file, StudyToJson(s).dump(2) + "\n",
+                             error))
           return false;
         index["studies"].push_back(s.id);
         wantedStudies.insert(file);
@@ -352,7 +364,8 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
         json resultJson;
         if (rt && StudyResultToJson(*rt, resultJson)) {
           const std::string resultFile = base + ".result.json";
-          if (!WriteTextAtomic(studyDir / resultFile, resultJson.dump() + "\n", error))
+          if (!WriteTextAtomic(studyDir / resultFile, resultJson.dump() + "\n",
+                               error))
             return false;
           wantedStudies.insert(resultFile);
         }
@@ -374,8 +387,8 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
       for (const Configuration& c : doc.GetConfigurations()) {
         const std::string file =
             std::to_string(c.id) + "-" + LabelSlug(c.name) + ".json";
-        if (!WriteTextAtomic(cfgDir / file, ConfigurationToJson(c).dump(2) + "\n",
-                             error))
+        if (!WriteTextAtomic(cfgDir / file,
+                             ConfigurationToJson(c).dump(2) + "\n", error))
           return false;
         index["configurations"].push_back(c.id);
         wantedConfigs.insert(file);
@@ -409,11 +422,11 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
     // Parameters live in the index envelope (small, diff-friendly there).
     if (!WriteTextAtomic(dir / "index.json", index.dump(2) + "\n", error))
       return false;
-    LOG_INFO("Saved document ({} features) to {}", doc.FeatureCount(),
-             dirPath);
+    LOG_INFO("Saved document ({} features) to {}", doc.FeatureCount(), dirPath);
     return true;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     return false;
   }
 }
@@ -424,16 +437,19 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
   try {
     std::ifstream in(fs::path(dirPath) / "index.json");
     if (!in) {
-      if (error) *error = "Not a designer project directory: " + dirPath;
+      if (error)
+        *error = "Not a designer project directory: " + dirPath;
       return nullptr;
     }
     json index = json::parse(in);
     if (index.value("format", "") != kFormat) {
-      if (error) *error = "Not a designer document: " + dirPath;
+      if (error)
+        *error = "Not a designer document: " + dirPath;
       return nullptr;
     }
     if (index.value("version", 0) > kVersion) {
-      if (error) *error = "Document version is newer than this build supports";
+      if (error)
+        *error = "Document version is newer than this build supports";
       return nullptr;
     }
     if (index.value("kind", "part") != "part") {
@@ -477,7 +493,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       if (ain) {
         std::string data((std::istreambuf_iterator<char>(ain)),
                          std::istreambuf_iterator<char>());
-        doc->SetAsset(name, std::vector<unsigned char>(data.begin(), data.end()));
+        doc->SetAsset(name,
+                      std::vector<unsigned char>(data.begin(), data.end()));
       }
     }
     // Topology results (v33) loaded below but stored after the final regen.
@@ -488,8 +505,9 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       std::map<uint64_t, fs::path> studyById, resultById;
       for (const auto& entry :
            fs::directory_iterator(fs::path(dirPath) / "studies", ec)) {
-        if (entry.path().extension() != ".json") continue;
-        const std::string stem = entry.path().stem().string();  // strips ".json"
+        if (entry.path().extension() != ".json")
+          continue;
+        const std::string stem = entry.path().stem().string(); // strips ".json"
         // A topology result file is "<id>-<slug>.result.json": its stem ends
         // ".result" — route it to the result map, not the study-def map.
         if (stem.size() > 7 && stem.compare(stem.size() - 7, 7, ".result") == 0)
@@ -501,7 +519,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         const uint64_t id = idJson.get<uint64_t>();
         const auto it = studyById.find(id);
         if (it == studyById.end()) {
-          if (error) *error = "missing study file for id " + std::to_string(id);
+          if (error)
+            *error = "missing study file for id " + std::to_string(id);
           return nullptr;
         }
         std::ifstream sin(it->second);
@@ -513,7 +532,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         const auto rit = resultById.find(id);
         if (rit != resultById.end()) {
           std::ifstream rin(rit->second);
-          pendingResults.emplace_back(id, StudyResultFromJson(json::parse(rin)));
+          pendingResults.emplace_back(id,
+                                      StudyResultFromJson(json::parse(rin)));
         }
       }
     }
@@ -522,7 +542,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       std::map<uint64_t, fs::path> cfgById;
       for (const auto& entry :
            fs::directory_iterator(fs::path(dirPath) / "configurations", ec)) {
-        if (entry.path().extension() != ".json") continue;
+        if (entry.path().extension() != ".json")
+          continue;
         cfgById[std::stoull(entry.path().filename().string())] = entry.path();
       }
       for (const auto& idJson : index.value("configurations", json::array())) {
@@ -538,8 +559,10 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       }
     }
     doc->SetRollback(index.value("rollback", -1));
-    // Apply the active configuration last so the final regeneration reflects it.
-    doc->SetActiveConfiguration(index.value("active_configuration", uint64_t{0}));
+    // Apply the active configuration last so the final regeneration reflects
+    // it.
+    doc->SetActiveConfiguration(
+        index.value("active_configuration", uint64_t{0}));
     // Now that regeneration has settled, stamp the persisted topology results
     // with the final version so they read as current (v33).
     for (auto& [id, rt] : pendingResults) {
@@ -550,7 +573,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
              dirPath);
     return doc;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Failed to load project directory {}: {}", dirPath, e.what());
     return nullptr;
   }
@@ -590,7 +614,8 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     // has none — the mates/ dir simply stays empty.
     const fs::path mateDir = dir / "mates";
     index["mates"] = json::array();
-    if (!asmDoc.GetMates().empty()) fs::create_directories(mateDir);
+    if (!asmDoc.GetMates().empty())
+      fs::create_directories(mateDir);
     std::set<std::string> wantedMate;
     for (const Mate& m : asmDoc.GetMates()) {
       const std::string file =
@@ -618,8 +643,8 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     for (const ExplodedView& v : asmDoc.GetExplodedViews()) {
       const std::string file =
           std::to_string(v.id) + "-" + LabelSlug(v.name) + ".json";
-      if (!WriteTextAtomic(viewDir / file,
-                           ExplodedViewToJson(v).dump(2) + "\n", error))
+      if (!WriteTextAtomic(viewDir / file, ExplodedViewToJson(v).dump(2) + "\n",
+                           error))
         return false;
       index["exploded"].push_back(v.id);
       wantedView.insert(file);
@@ -661,7 +686,8 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
              asmDoc.OccurrenceCount(), asmDoc.MateCount(), dirPath);
     return true;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     return false;
   }
 }
@@ -672,20 +698,24 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
   try {
     std::ifstream in(fs::path(dirPath) / "index.json");
     if (!in) {
-      if (error) *error = "Not a designer project directory: " + dirPath;
+      if (error)
+        *error = "Not a designer project directory: " + dirPath;
       return nullptr;
     }
     json index = json::parse(in);
     if (index.value("format", "") != kFormat) {
-      if (error) *error = "Not a designer document: " + dirPath;
+      if (error)
+        *error = "Not a designer document: " + dirPath;
       return nullptr;
     }
     if (index.value("version", 0) > kVersion) {
-      if (error) *error = "Document version is newer than this build supports";
+      if (error)
+        *error = "Document version is newer than this build supports";
       return nullptr;
     }
     if (index.value("kind", "part") != "assembly") {
-      if (error) *error = "Not an assembly: " + dirPath;
+      if (error)
+        *error = "Not an assembly: " + dirPath;
       return nullptr;
     }
 
@@ -728,7 +758,8 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       const uint64_t id = idJson.get<uint64_t>();
       const auto it = mateById.find(id);
       if (it == mateById.end()) {
-        if (error) *error = "missing mate file for id " + std::to_string(id);
+        if (error)
+          *error = "missing mate file for id " + std::to_string(id);
         return nullptr;
       }
       std::ifstream fin(it->second);
@@ -764,7 +795,8 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       std::map<uint64_t, fs::path> cfgById;
       for (const auto& entry :
            fs::directory_iterator(fs::path(dirPath) / "configurations", ec)) {
-        if (entry.path().extension() != ".json") continue;
+        if (entry.path().extension() != ".json")
+          continue;
         cfgById[std::stoull(entry.path().filename().string())] = entry.path();
       }
       for (const auto& idJson : index.value("configurations", json::array())) {
@@ -779,13 +811,15 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         asmDoc->RestoreConfiguration(ConfigurationFromJson(json::parse(cin)));
       }
     }
-    asmDoc->SetActiveConfiguration(index.value("active_configuration", uint64_t{0}));
+    asmDoc->SetActiveConfiguration(
+        index.value("active_configuration", uint64_t{0}));
 
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), dirPath);
     return asmDoc;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Failed to load assembly directory {}: {}", dirPath, e.what());
     return nullptr;
   }
@@ -833,14 +867,16 @@ static bool SaveImpl(const Document& doc, const std::string& path,
 
     std::ofstream out(path);
     if (!out) {
-      if (error) *error = "Cannot open file for writing: " + path;
+      if (error)
+        *error = "Cannot open file for writing: " + path;
       return false;
     }
     out << j.dump(2) << "\n";
     LOG_INFO("Saved document ({} features) to {}", doc.FeatureCount(), path);
     return true;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Failed to save document to {}: {}", path, e.what());
     return false;
   }
@@ -855,13 +891,15 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
   try {
     std::ifstream in(path);
     if (!in) {
-      if (error) *error = "Cannot open file: " + path;
+      if (error)
+        *error = "Cannot open file: " + path;
       return nullptr;
     }
     json j = json::parse(in);
 
     if (j.value("format", "") != kFormat) {
-      if (error) *error = "Not a designer document: " + path;
+      if (error)
+        *error = "Not a designer document: " + path;
       return nullptr;
     }
     if (j.value("version", 0) > kVersion) {
@@ -871,7 +909,8 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     }
     if (j.value("kind", "part") != "part") {
       if (error)
-        *error = "This is a " + j.value("kind", "part") + ", not a part: " + path;
+        *error =
+            "This is a " + j.value("kind", "part") + ", not a part: " + path;
       return nullptr;
     }
 
@@ -891,10 +930,10 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     if (j.contains("assets"))
       for (const auto& [name, b64] : j.at("assets").items())
         doc->SetAsset(name, Base64Decode(b64.get<std::string>()));
-    for (const auto& sj : j.value("studies", json::array())) {  // v29
+    for (const auto& sj : j.value("studies", json::array())) { // v29
       doc->RestoreStudy(StudyFromJson(sj));
     }
-    for (const auto& cj : j.value("configurations", json::array())) {  // v31
+    for (const auto& cj : j.value("configurations", json::array())) { // v31
       doc->RestoreConfiguration(ConfigurationFromJson(cj));
     }
     doc->SetRollback(j.value("rollback", -1)); // v19; absent = end
@@ -903,7 +942,8 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
              path);
     return doc;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Failed to load document from {}: {}", path, e.what());
     return nullptr;
   }
@@ -930,7 +970,7 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
       for (const ExplodedView& v : asmDoc.GetExplodedViews())
         j["exploded"].push_back(ExplodedViewToJson(v));
     }
-    if (asmDoc.ActiveConfiguration() != 0)  // v31
+    if (asmDoc.ActiveConfiguration() != 0) // v31
       j["active_configuration"] = asmDoc.ActiveConfiguration();
     if (!asmDoc.GetConfigurations().empty()) {
       j["configurations"] = json::array();
@@ -939,7 +979,8 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
     }
     std::ofstream out(path);
     if (!out) {
-      if (error) *error = "Cannot open file for writing: " + path;
+      if (error)
+        *error = "Cannot open file for writing: " + path;
       return false;
     }
     out << j.dump(2) << "\n";
@@ -947,14 +988,15 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
              path);
     return true;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Failed to save assembly to {}: {}", path, e.what());
     return false;
   }
 }
 
-static std::unique_ptr<AssemblyDocument> LoadAssemblyImpl(
-    const std::string& path, std::string* error) {
+static std::unique_ptr<AssemblyDocument>
+LoadAssemblyImpl(const std::string& path, std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
     return LoadAssemblyDir(normalized, error);
@@ -962,37 +1004,44 @@ static std::unique_ptr<AssemblyDocument> LoadAssemblyImpl(
   try {
     std::ifstream in(path);
     if (!in) {
-      if (error) *error = "Cannot open file: " + path;
+      if (error)
+        *error = "Cannot open file: " + path;
       return nullptr;
     }
     json j = json::parse(in);
     if (j.value("format", "") != kFormat) {
-      if (error) *error = "Not a designer document: " + path;
+      if (error)
+        *error = "Not a designer document: " + path;
       return nullptr;
     }
     if (j.value("version", 0) > kVersion) {
-      if (error) *error = "Document version is newer than this build supports";
+      if (error)
+        *error = "Document version is newer than this build supports";
       return nullptr;
     }
     if (j.value("kind", "part") != "assembly") {
-      if (error) *error = "Not an assembly: " + path;
+      if (error)
+        *error = "Not an assembly: " + path;
       return nullptr;
     }
     auto asmDoc = std::make_unique<AssemblyDocument>();
-    LoadOccurrences(*asmDoc, j.value("occurrences", json::array())
-                                .get<std::vector<json>>());
+    LoadOccurrences(
+        *asmDoc,
+        j.value("occurrences", json::array()).get<std::vector<json>>());
     LoadMates(*asmDoc,
               j.value("mates", json::array()).get<std::vector<json>>());
     LoadExplodedViews(
         *asmDoc, j.value("exploded", json::array()).get<std::vector<json>>());
-    for (const auto& cj : j.value("configurations", json::array()))  // v31
+    for (const auto& cj : j.value("configurations", json::array())) // v31
       asmDoc->RestoreConfiguration(ConfigurationFromJson(cj));
-    asmDoc->SetActiveConfiguration(j.value("active_configuration", uint64_t{0}));
+    asmDoc->SetActiveConfiguration(
+        j.value("active_configuration", uint64_t{0}));
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);
     return asmDoc;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Failed to load assembly from {}: {}", path, e.what());
     return nullptr;
   }
@@ -1008,13 +1057,19 @@ namespace {
 json SheetJson(const Sheet& s) {
   json tb = json::object();
   const TitleBlock& t = s.titleBlock;
-  if (!t.project.empty()) tb["project"] = t.project;
-  if (!t.document.empty()) tb["document"] = t.document;
-  if (!t.author.empty()) tb["author"] = t.author;
-  if (!t.date.empty()) tb["date"] = t.date;
-  if (!t.notes.empty()) tb["notes"] = t.notes;
+  if (!t.project.empty())
+    tb["project"] = t.project;
+  if (!t.document.empty())
+    tb["document"] = t.document;
+  if (!t.author.empty())
+    tb["author"] = t.author;
+  if (!t.date.empty())
+    tb["date"] = t.date;
+  if (!t.notes.empty())
+    tb["notes"] = t.notes;
   json j = {{"size", SheetSizeToString(s.size)}, {"landscape", s.landscape}};
-  if (!tb.empty()) j["title_block"] = std::move(tb);
+  if (!tb.empty())
+    j["title_block"] = std::move(tb);
   return j;
 }
 
@@ -1033,9 +1088,12 @@ Sheet SheetFromJson(const json& j) {
 
 json ProjRefJson(const ProjRef& r) {
   json j = {{"view", r.viewId}, {"end", r.end}};
-  if (r.occurrenceId) j["occurrence"] = r.occurrenceId;
-  if (r.edge.IsSet()) j["edge"] = ElementRefJson(r.edge);
-  if (r.silFace.IsSet()) j["sil_face"] = ElementRefJson(r.silFace);
+  if (r.occurrenceId)
+    j["occurrence"] = r.occurrenceId;
+  if (r.edge.IsSet())
+    j["edge"] = ElementRefJson(r.edge);
+  if (r.silFace.IsSet())
+    j["sil_face"] = ElementRefJson(r.silFace);
   return j;
 }
 
@@ -1044,8 +1102,10 @@ ProjRef ProjRefFromJson(const json& j) {
   r.viewId = j.value("view", uint64_t{0});
   r.occurrenceId = j.value("occurrence", uint64_t{0});
   r.end = j.value("end", 0);
-  if (j.contains("edge")) r.edge = ElementRefFromJson(j.at("edge"));
-  if (j.contains("sil_face")) r.silFace = ElementRefFromJson(j.at("sil_face"));
+  if (j.contains("edge"))
+    r.edge = ElementRefFromJson(j.at("edge"));
+  if (j.contains("sil_face"))
+    r.silFace = ElementRefFromJson(j.at("sil_face"));
   return r;
 }
 
@@ -1057,7 +1117,7 @@ json DrawingEnvelope() {
   return j;
 }
 
-}  // namespace
+} // namespace
 
 json DrawingViewToJson(const DrawingView& v) {
   json j = {{"id", v.id},
@@ -1067,8 +1127,10 @@ json DrawingViewToJson(const DrawingView& v) {
             {"scale", v.scale},
             {"position", {v.position.x, v.position.y}},
             {"show_hidden", v.showHidden}};
-  if (v.baseViewId) j["base_view"] = v.baseViewId;
-  if (!v.scaleExpr.empty()) j["scale_expr"] = v.scaleExpr;
+  if (v.baseViewId)
+    j["base_view"] = v.baseViewId;
+  if (!v.scaleExpr.empty())
+    j["scale_expr"] = v.scaleExpr;
   return j;
 }
 
@@ -1091,7 +1153,8 @@ DrawingView DrawingViewFromJson(const json& j) {
 
 json DrawingDimToJson(const DrawingDim& d) {
   json refs = json::array();
-  for (const ProjRef& r : d.refs) refs.push_back(ProjRefJson(r));
+  for (const ProjRef& r : d.refs)
+    refs.push_back(ProjRefJson(r));
   return json{{"id", d.id},
               {"kind", DrawingDimKindToString(d.kind)},
               {"view", d.viewId},
@@ -1126,7 +1189,8 @@ bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
 
     const fs::path viewDir = dir / "views";
     index["views"] = json::array();
-    if (!dwg.GetViews().empty()) fs::create_directories(viewDir);
+    if (!dwg.GetViews().empty())
+      fs::create_directories(viewDir);
     std::set<std::string> wantedView;
     for (const DrawingView& v : dwg.GetViews()) {
       const std::string file =
@@ -1146,11 +1210,12 @@ bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
 
     const fs::path dimDir = dir / "dims";
     index["dims"] = json::array();
-    if (!dwg.GetDims().empty()) fs::create_directories(dimDir);
+    if (!dwg.GetDims().empty())
+      fs::create_directories(dimDir);
     std::set<std::string> wantedDim;
     for (const DrawingDim& d : dwg.GetDims()) {
-      const std::string file = std::to_string(d.id) + "-" +
-                               DrawingDimKindToString(d.kind) + ".json";
+      const std::string file =
+          std::to_string(d.id) + "-" + DrawingDimKindToString(d.kind) + ".json";
       if (!WriteTextAtomic(dimDir / file, DrawingDimToJson(d).dump(2) + "\n",
                            error))
         return false;
@@ -1169,7 +1234,8 @@ bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
              dwg.DimCount(), dirPath);
     return true;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     return false;
   }
 }
@@ -1180,20 +1246,24 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
   try {
     std::ifstream in(fs::path(dirPath) / "index.json");
     if (!in) {
-      if (error) *error = "Not a designer project directory: " + dirPath;
+      if (error)
+        *error = "Not a designer project directory: " + dirPath;
       return nullptr;
     }
     json index = json::parse(in);
     if (index.value("format", "") != kFormat) {
-      if (error) *error = "Not a designer document: " + dirPath;
+      if (error)
+        *error = "Not a designer document: " + dirPath;
       return nullptr;
     }
     if (index.value("version", 0) > kVersion) {
-      if (error) *error = "Document version is newer than this build supports";
+      if (error)
+        *error = "Document version is newer than this build supports";
       return nullptr;
     }
     if (index.value("kind", "part") != "drawing") {
-      if (error) *error = "Not a drawing: " + dirPath;
+      if (error)
+        *error = "Not a drawing: " + dirPath;
       return nullptr;
     }
 
@@ -1210,7 +1280,8 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
     uint64_t maxId = 0;
     for (const auto& idJson : index.value("views", json::array())) {
       const auto it = viewById.find(idJson.get<uint64_t>());
-      if (it == viewById.end()) continue;
+      if (it == viewById.end())
+        continue;
       std::ifstream vin(it->second);
       DrawingView v = DrawingViewFromJson(json::parse(vin));
       maxId = std::max(maxId, v.id);
@@ -1225,7 +1296,8 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
     }
     for (const auto& idJson : index.value("dims", json::array())) {
       const auto it = dimById.find(idJson.get<uint64_t>());
-      if (it == dimById.end()) continue;
+      if (it == dimById.end())
+        continue;
       std::ifstream din(it->second);
       DrawingDim d = DrawingDimFromJson(json::parse(din));
       maxId = std::max(maxId, d.id);
@@ -1236,12 +1308,13 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
              dwg->DimCount(), dirPath);
     return dwg;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     return nullptr;
   }
 }
 
-}  // namespace
+} // namespace
 
 static bool SaveDrawingImpl(const DrawingDocument& dwg, const std::string& path,
                             std::string* error) {
@@ -1260,21 +1333,23 @@ static bool SaveDrawingImpl(const DrawingDocument& dwg, const std::string& path,
       j["dims"].push_back(DrawingDimToJson(d));
     std::ofstream out(path);
     if (!out) {
-      if (error) *error = "Cannot open file for writing: " + path;
+      if (error)
+        *error = "Cannot open file for writing: " + path;
       return false;
     }
     out << j.dump(2) << "\n";
     LOG_INFO("Saved drawing ({} views) to {}", dwg.ViewCount(), path);
     return true;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Failed to save drawing to {}: {}", path, e.what());
     return false;
   }
 }
 
-static std::unique_ptr<DrawingDocument> LoadDrawingImpl(
-    const std::string& path, std::string* error) {
+static std::unique_ptr<DrawingDocument> LoadDrawingImpl(const std::string& path,
+                                                        std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
   if (IsDirFormatPath(normalized)) {
     return LoadDrawingDir(normalized, error);
@@ -1282,20 +1357,24 @@ static std::unique_ptr<DrawingDocument> LoadDrawingImpl(
   try {
     std::ifstream in(path);
     if (!in) {
-      if (error) *error = "Cannot open file: " + path;
+      if (error)
+        *error = "Cannot open file: " + path;
       return nullptr;
     }
     json j = json::parse(in);
     if (j.value("format", "") != kFormat) {
-      if (error) *error = "Not a designer document: " + path;
+      if (error)
+        *error = "Not a designer document: " + path;
       return nullptr;
     }
     if (j.value("version", 0) > kVersion) {
-      if (error) *error = "Document version is newer than this build supports";
+      if (error)
+        *error = "Document version is newer than this build supports";
       return nullptr;
     }
     if (j.value("kind", "part") != "drawing") {
-      if (error) *error = "Not a drawing: " + path;
+      if (error)
+        *error = "Not a drawing: " + path;
       return nullptr;
     }
     auto dwg = std::make_unique<DrawingDocument>();
@@ -1316,7 +1395,8 @@ static std::unique_ptr<DrawingDocument> LoadDrawingImpl(
              dwg->DimCount(), path);
     return dwg;
   } catch (const std::exception& e) {
-    if (error) *error = e.what();
+    if (error)
+      *error = e.what();
     LOG_ERROR("Failed to load drawing from {}: {}", path, e.what());
     return nullptr;
   }
@@ -1328,43 +1408,49 @@ static std::unique_ptr<DrawingDocument> LoadDrawingImpl(
 std::expected<void, std::string> Save(const Document& doc,
                                       const std::string& path) {
   std::string error;
-  if (SaveImpl(doc, path, &error)) return {};
+  if (SaveImpl(doc, path, &error))
+    return {};
   return std::unexpected(error);
 }
 
-std::expected<std::unique_ptr<Document>, std::string> Load(
-    const std::string& path) {
+std::expected<std::unique_ptr<Document>, std::string>
+Load(const std::string& path) {
   std::string error;
-  if (auto doc = LoadImpl(path, &error)) return doc;
+  if (auto doc = LoadImpl(path, &error))
+    return doc;
   return std::unexpected(error);
 }
 
 std::expected<void, std::string> SaveAssembly(const AssemblyDocument& asmDoc,
                                               const std::string& path) {
   std::string error;
-  if (SaveAssemblyImpl(asmDoc, path, &error)) return {};
+  if (SaveAssemblyImpl(asmDoc, path, &error))
+    return {};
   return std::unexpected(error);
 }
 
-std::expected<std::unique_ptr<AssemblyDocument>, std::string> LoadAssembly(
-    const std::string& path) {
+std::expected<std::unique_ptr<AssemblyDocument>, std::string>
+LoadAssembly(const std::string& path) {
   std::string error;
-  if (auto doc = LoadAssemblyImpl(path, &error)) return doc;
+  if (auto doc = LoadAssemblyImpl(path, &error))
+    return doc;
   return std::unexpected(error);
 }
 
 std::expected<void, std::string> SaveDrawing(const DrawingDocument& drawing,
                                              const std::string& path) {
   std::string error;
-  if (SaveDrawingImpl(drawing, path, &error)) return {};
+  if (SaveDrawingImpl(drawing, path, &error))
+    return {};
   return std::unexpected(error);
 }
 
-std::expected<std::unique_ptr<DrawingDocument>, std::string> LoadDrawing(
-    const std::string& path) {
+std::expected<std::unique_ptr<DrawingDocument>, std::string>
+LoadDrawing(const std::string& path) {
   std::string error;
-  if (auto doc = LoadDrawingImpl(path, &error)) return doc;
+  if (auto doc = LoadDrawingImpl(path, &error))
+    return doc;
   return std::unexpected(error);
 }
 
-}  // namespace DocumentIO
+} // namespace DocumentIO

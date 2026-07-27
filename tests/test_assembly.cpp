@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Occurrence.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -64,7 +64,8 @@ void ExpectSameAssembly(const AssemblyDocument& a, const AssemblyDocument& b) {
 
 } // namespace
 
-TEST_CASE("AssemblyDocument assigns stable ids and finds/removes", "[assembly]") {
+TEST_CASE("AssemblyDocument assigns stable ids and finds/removes",
+          "[assembly]") {
   AssemblyDocument asmDoc = SampleAssembly();
   REQUIRE(asmDoc.OccurrenceCount() == 3);
   // Ids grow from 1, unique.
@@ -112,7 +113,8 @@ TEST_CASE("Assembly round-trips through the single-file form", "[assembly]") {
 
 TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
   AssemblyDocument original = SampleAssembly();
-  const fs::path dir = fs::temp_directory_path() / "designer_asm_roundtrip.dsgn";
+  const fs::path dir =
+      fs::temp_directory_path() / "designer_asm_roundtrip.dsgn";
   fs::remove_all(dir);
   std::string error;
   REQUIRE(testio::SaveAssembly(original, dir.string()));
@@ -131,7 +133,8 @@ TEST_CASE("Assembly round-trips through the directory form", "[assembly]") {
 // A FROZEN golden (docs/versioning/format.md): hardcoded keys/values, never
 // regenerated. Loading it pins the exact v23 on-disk schema, so a silent key
 // rename (which a save→load round-trip would not catch) fails here.
-TEST_CASE("Frozen v23 assembly golden loads at the exact schema", "[assembly][golden]") {
+TEST_CASE("Frozen v23 assembly golden loads at the exact schema",
+          "[assembly][golden]") {
   // Assembly goldens live in a subdirectory so the part golden harness
   // (which scans tests/golden/ non-recursively for {features,bodies,volumes})
   // does not try to load them as parts.
@@ -204,13 +207,15 @@ void ExpectSameMates(const AssemblyDocument& a, const AssemblyDocument& b) {
     CHECK_THAT(ma[i].dx, WithinAbs(mb[i].dx, 1e-6f));
     CHECK_THAT(ma[i].dy, WithinAbs(mb[i].dy, 1e-6f));
     for (int k = 0; k < 4; k++)
-      CHECK_THAT(ma[i].ballRotation[k], WithinAbs(mb[i].ballRotation[k], 1e-6f));
+      CHECK_THAT(ma[i].ballRotation[k],
+                 WithinAbs(mb[i].ballRotation[k], 1e-6f));
   }
 }
 
 } // namespace
 
-TEST_CASE("Mates share the occurrence id counter and find/remove", "[assembly]") {
+TEST_CASE("Mates share the occurrence id counter and find/remove",
+          "[assembly]") {
   AssemblyDocument asmDoc = SampleAssembly(); // occurrences 1,2,3
   const uint64_t mateId = AddSampleMate(asmDoc);
   CHECK(mateId == 4); // one id space: next after occurrence 3
@@ -229,7 +234,8 @@ TEST_CASE("Mates share the occurrence id counter and find/remove", "[assembly]")
   CHECK_FALSE(asmDoc.RemoveMate(4));
 }
 
-TEST_CASE("Assembly with mates round-trips (single-file + directory)", "[assembly]") {
+TEST_CASE("Assembly with mates round-trips (single-file + directory)",
+          "[assembly]") {
   AssemblyDocument original = SampleAssembly();
   AddSampleMate(original);
 
@@ -280,7 +286,8 @@ TEST_CASE("A v23 assembly (no mates) still loads under v24", "[assembly]") {
   CHECK(asmDoc->MateCount() == 0);
 }
 
-TEST_CASE("Frozen v24 assembly golden loads at the exact schema", "[assembly][golden]") {
+TEST_CASE("Frozen v24 assembly golden loads at the exact schema",
+          "[assembly][golden]") {
   const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
                           "assembly" / "v24-assembly.json";
   REQUIRE(fs::exists(golden));
@@ -304,7 +311,8 @@ TEST_CASE("Frozen v24 assembly golden loads at the exact schema", "[assembly][go
   CHECK_THAT(hinge->rotation, WithinAbs(0.7853981f, 1e-6f));
 }
 
-TEST_CASE("Frozen v25 golden: cylindrical/planar/ball mate schema", "[assembly][golden]") {
+TEST_CASE("Frozen v25 golden: cylindrical/planar/ball mate schema",
+          "[assembly][golden]") {
   const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
                           "assembly" / "v25-assembly.json";
   REQUIRE(fs::exists(golden));
@@ -360,7 +368,8 @@ TEST_CASE("Connector inference snap edge round-trips (v26)", "[assembly]") {
   }
   auto reloaded = testio::LoadAssembly(path.string());
   REQUIRE(reloaded != nullptr);
-  const Mate* rm = reloaded->GetMates()[0].id ? &reloaded->GetMates()[0] : nullptr;
+  const Mate* rm =
+      reloaded->GetMates()[0].id ? &reloaded->GetMates()[0] : nullptr;
   REQUIRE(rm != nullptr);
   CHECK(rm->a.anchor.snapEdge.featureId == 4);
   CHECK(rm->a.anchor.snapEdge.name == "4/g7;M1");
@@ -368,7 +377,8 @@ TEST_CASE("Connector inference snap edge round-trips (v26)", "[assembly]") {
   fs::remove(path);
 }
 
-TEST_CASE("Frozen v26 golden: connector snap-edge schema", "[assembly][golden]") {
+TEST_CASE("Frozen v26 golden: connector snap-edge schema",
+          "[assembly][golden]") {
   const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
                           "assembly" / "v26-assembly.json";
   REQUIRE(fs::exists(golden));
@@ -414,7 +424,8 @@ TEST_CASE("Exploded views round-trip (v27, single-file + directory)",
   std::string error;
 
   SECTION("single JSON file") {
-    const fs::path path = fs::temp_directory_path() / "designer_explode_rt.json";
+    const fs::path path =
+        fs::temp_directory_path() / "designer_explode_rt.json";
     REQUIRE(testio::SaveAssembly(asmDoc, path.string()));
     auto reloaded = testio::LoadAssembly(path.string());
     REQUIRE(reloaded != nullptr);

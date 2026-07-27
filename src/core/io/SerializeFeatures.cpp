@@ -1,24 +1,24 @@
 #include "core/io/Serialization.h"
 #include "core/io/SerializationInternal.h"
 
+#include "core/Feature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
-#include "core/Feature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
+#include "core/features/RefineFeature.h"
 #include "core/features/RevolveFeature.h"
+#include "core/features/RibFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
-#include "core/features/RefineFeature.h"
-#include "core/features/RibFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 
@@ -31,7 +31,6 @@ using nlohmann::json;
 
 namespace {
 
-
 json EntityToJson(const sketch::Entity& entity) {
   json j = std::visit(
       [](const auto& e) -> json {
@@ -39,10 +38,11 @@ json EntityToJson(const sketch::Entity& entity) {
         if constexpr (std::is_same_v<T, sketch::Point>) {
           return {{"type", "point"}, {"p", Vec2ToJson(e.p)}};
         } else if constexpr (std::is_same_v<T, sketch::Line>) {
-          return {{"type", "line"}, {"a", Vec2ToJson(e.a)},
-                  {"b", Vec2ToJson(e.b)}};
+          return {
+              {"type", "line"}, {"a", Vec2ToJson(e.a)}, {"b", Vec2ToJson(e.b)}};
         } else if constexpr (std::is_same_v<T, sketch::Circle>) {
-          return {{"type", "circle"}, {"center", Vec2ToJson(e.center)},
+          return {{"type", "circle"},
+                  {"center", Vec2ToJson(e.center)},
                   {"radius", e.radius}};
         } else if constexpr (std::is_same_v<T, sketch::Arc>) {
           return {{"type", "arc"},
@@ -57,18 +57,16 @@ json EntityToJson(const sketch::Entity& entity) {
                   {"r_minor", e.rMinor},
                   {"rotation", e.rotation}};
         } else if constexpr (std::is_same_v<T, sketch::EllipseArc>) {
-          return {{"type", "ellipse_arc"},
-                  {"center", Vec2ToJson(e.center)},
-                  {"r_major", e.rMajor},
-                  {"r_minor", e.rMinor},
-                  {"rotation", e.rotation},
-                  {"start_param", e.startParam},
+          return {{"type", "ellipse_arc"},  {"center", Vec2ToJson(e.center)},
+                  {"r_major", e.rMajor},    {"r_minor", e.rMinor},
+                  {"rotation", e.rotation}, {"start_param", e.startParam},
                   {"end_param", e.endParam}};
         } else { // BSpline
           json poles = json::array();
           for (const glm::vec2& p : e.poles)
             poles.push_back(Vec2ToJson(p));
-          return {{"type", "spline"}, {"poles", std::move(poles)},
+          return {{"type", "spline"},
+                  {"poles", std::move(poles)},
                   {"degree", e.degree}};
         }
       },
@@ -89,23 +87,21 @@ sketch::Entity EntityFromJson(const json& j) {
   } else if (type == "line") {
     e = sketch::Line{Vec2FromJson(j.at("a")), Vec2FromJson(j.at("b"))};
   } else if (type == "circle") {
-    e = sketch::Circle{Vec2FromJson(j.at("center")), j.at("radius").get<double>()};
+    e = sketch::Circle{Vec2FromJson(j.at("center")),
+                       j.at("radius").get<double>()};
   } else if (type == "arc") {
     e = sketch::Arc{Vec2FromJson(j.at("center")), j.at("radius").get<double>(),
                     j.at("start_angle").get<double>(),
                     j.at("end_angle").get<double>()};
   } else if (type == "ellipse") {
-    e = sketch::Ellipse{Vec2FromJson(j.at("center")),
-                        j.at("r_major").get<double>(),
-                        j.at("r_minor").get<double>(),
-                        j.at("rotation").get<double>()};
+    e = sketch::Ellipse{
+        Vec2FromJson(j.at("center")), j.at("r_major").get<double>(),
+        j.at("r_minor").get<double>(), j.at("rotation").get<double>()};
   } else if (type == "ellipse_arc") { // v46
-    e = sketch::EllipseArc{Vec2FromJson(j.at("center")),
-                           j.at("r_major").get<double>(),
-                           j.at("r_minor").get<double>(),
-                           j.at("rotation").get<double>(),
-                           j.at("start_param").get<double>(),
-                           j.at("end_param").get<double>()};
+    e = sketch::EllipseArc{
+        Vec2FromJson(j.at("center")),      j.at("r_major").get<double>(),
+        j.at("r_minor").get<double>(),     j.at("rotation").get<double>(),
+        j.at("start_param").get<double>(), j.at("end_param").get<double>()};
   } else if (type == "spline") { // v40
     sketch::BSpline bs;
     for (const auto& pj : j.at("poles"))
@@ -125,52 +121,92 @@ sketch::Entity EntityFromJson(const json& j) {
 const char* ConstraintKindToString(sketch::ConstraintKind k) {
   using K = sketch::ConstraintKind;
   switch (k) {
-  case K::Coincident: return "coincident";
-  case K::Horizontal: return "horizontal";
-  case K::Vertical: return "vertical";
-  case K::Parallel: return "parallel";
-  case K::Perpendicular: return "perpendicular";
-  case K::Equal: return "equal";
-  case K::Distance: return "distance";
-  case K::Radius: return "radius";
-  case K::Angle: return "angle";
-  case K::Tangent: return "tangent";
-  case K::PointOnLine: return "point_on_line";
-  case K::Symmetric: return "symmetric";
-  case K::Midpoint: return "midpoint";
-  case K::Fixed: return "fixed";
-  case K::Concentric: return "concentric";
-  case K::Collinear: return "collinear";
-  case K::DistanceX: return "distance_x";
-  case K::DistanceY: return "distance_y";
-  case K::Diameter: return "diameter";
-  case K::DistancePL: return "distance_pl";
+  case K::Coincident:
+    return "coincident";
+  case K::Horizontal:
+    return "horizontal";
+  case K::Vertical:
+    return "vertical";
+  case K::Parallel:
+    return "parallel";
+  case K::Perpendicular:
+    return "perpendicular";
+  case K::Equal:
+    return "equal";
+  case K::Distance:
+    return "distance";
+  case K::Radius:
+    return "radius";
+  case K::Angle:
+    return "angle";
+  case K::Tangent:
+    return "tangent";
+  case K::PointOnLine:
+    return "point_on_line";
+  case K::Symmetric:
+    return "symmetric";
+  case K::Midpoint:
+    return "midpoint";
+  case K::Fixed:
+    return "fixed";
+  case K::Concentric:
+    return "concentric";
+  case K::Collinear:
+    return "collinear";
+  case K::DistanceX:
+    return "distance_x";
+  case K::DistanceY:
+    return "distance_y";
+  case K::Diameter:
+    return "diameter";
+  case K::DistancePL:
+    return "distance_pl";
   }
   return "coincident";
 }
 
 sketch::ConstraintKind ConstraintKindFromString(const std::string& s) {
   using K = sketch::ConstraintKind;
-  if (s == "coincident") return K::Coincident;
-  if (s == "horizontal") return K::Horizontal;
-  if (s == "vertical") return K::Vertical;
-  if (s == "parallel") return K::Parallel;
-  if (s == "perpendicular") return K::Perpendicular;
-  if (s == "equal") return K::Equal;
-  if (s == "distance") return K::Distance;
-  if (s == "radius") return K::Radius;
-  if (s == "angle") return K::Angle;
-  if (s == "tangent") return K::Tangent;
-  if (s == "point_on_line") return K::PointOnLine;
-  if (s == "symmetric") return K::Symmetric;
-  if (s == "midpoint") return K::Midpoint;
-  if (s == "fixed") return K::Fixed;
-  if (s == "concentric") return K::Concentric;
-  if (s == "collinear") return K::Collinear;
-  if (s == "distance_x") return K::DistanceX;
-  if (s == "distance_y") return K::DistanceY;
-  if (s == "diameter") return K::Diameter;
-  if (s == "distance_pl") return K::DistancePL;
+  if (s == "coincident")
+    return K::Coincident;
+  if (s == "horizontal")
+    return K::Horizontal;
+  if (s == "vertical")
+    return K::Vertical;
+  if (s == "parallel")
+    return K::Parallel;
+  if (s == "perpendicular")
+    return K::Perpendicular;
+  if (s == "equal")
+    return K::Equal;
+  if (s == "distance")
+    return K::Distance;
+  if (s == "radius")
+    return K::Radius;
+  if (s == "angle")
+    return K::Angle;
+  if (s == "tangent")
+    return K::Tangent;
+  if (s == "point_on_line")
+    return K::PointOnLine;
+  if (s == "symmetric")
+    return K::Symmetric;
+  if (s == "midpoint")
+    return K::Midpoint;
+  if (s == "fixed")
+    return K::Fixed;
+  if (s == "concentric")
+    return K::Concentric;
+  if (s == "collinear")
+    return K::Collinear;
+  if (s == "distance_x")
+    return K::DistanceX;
+  if (s == "distance_y")
+    return K::DistanceY;
+  if (s == "diameter")
+    return K::Diameter;
+  if (s == "distance_pl")
+    return K::DistancePL;
   throw std::runtime_error("Unknown constraint kind: " + s);
 }
 
@@ -183,7 +219,8 @@ json ConstraintToJson(const sketch::Constraint& c) {
     j["expr"] = c.valueExpr;
   if (c.kind == sketch::ConstraintKind::Symmetric) // only Symmetric uses c
     j["c"] = {c.c.entity, c.c.which};
-  if (sketch::IsDimension(c.kind) && (c.labelOffset.x != 0 || c.labelOffset.y != 0))
+  if (sketch::IsDimension(c.kind) &&
+      (c.labelOffset.x != 0 || c.labelOffset.y != 0))
     j["label"] = Vec2ToJson(c.labelOffset);
   return j;
 }
@@ -242,125 +279,174 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
 
 const char* ExtrudeModeToString(ExtrudeMode mode) {
   switch (mode) {
-  case ExtrudeMode::NewBody: return "new_body";
-  case ExtrudeMode::Add: return "add";
-  case ExtrudeMode::Cut: return "cut";
+  case ExtrudeMode::NewBody:
+    return "new_body";
+  case ExtrudeMode::Add:
+    return "add";
+  case ExtrudeMode::Cut:
+    return "cut";
   }
   return "new_body";
 }
 
 ExtrudeMode ExtrudeModeFromString(const std::string& s) {
-  if (s == "new_body") return ExtrudeMode::NewBody;
-  if (s == "add") return ExtrudeMode::Add;
-  if (s == "cut") return ExtrudeMode::Cut;
+  if (s == "new_body")
+    return ExtrudeMode::NewBody;
+  if (s == "add")
+    return ExtrudeMode::Add;
+  if (s == "cut")
+    return ExtrudeMode::Cut;
   throw std::runtime_error("Unknown extrude mode: " + s);
 }
 
 const char* BooleanOpToString(BooleanOp op) {
   switch (op) {
-  case BooleanOp::Union: return "union";
-  case BooleanOp::Subtract: return "subtract";
-  case BooleanOp::Intersect: return "intersect";
+  case BooleanOp::Union:
+    return "union";
+  case BooleanOp::Subtract:
+    return "subtract";
+  case BooleanOp::Intersect:
+    return "intersect";
   }
   return "union";
 }
 
 BooleanOp BooleanOpFromString(const std::string& s) {
-  if (s == "union") return BooleanOp::Union;
-  if (s == "subtract") return BooleanOp::Subtract;
-  if (s == "intersect") return BooleanOp::Intersect;
+  if (s == "union")
+    return BooleanOp::Union;
+  if (s == "subtract")
+    return BooleanOp::Subtract;
+  if (s == "intersect")
+    return BooleanOp::Intersect;
   throw std::runtime_error("Unknown boolean op: " + s);
 }
 
 const char* PatternKindToString(PatternKind kind) {
   switch (kind) {
-  case PatternKind::Mirror: return "mirror";
-  case PatternKind::Linear: return "linear";
-  case PatternKind::Circular: return "circular";
+  case PatternKind::Mirror:
+    return "mirror";
+  case PatternKind::Linear:
+    return "linear";
+  case PatternKind::Circular:
+    return "circular";
   }
   return "linear";
 }
 
 PatternKind PatternKindFromString(const std::string& s) {
-  if (s == "mirror") return PatternKind::Mirror;
-  if (s == "linear") return PatternKind::Linear;
-  if (s == "circular") return PatternKind::Circular;
+  if (s == "mirror")
+    return PatternKind::Mirror;
+  if (s == "linear")
+    return PatternKind::Linear;
+  if (s == "circular")
+    return PatternKind::Circular;
   throw std::runtime_error("Unknown pattern kind: " + s);
 }
 
 const char* DatumPlaneKindToString(DatumPlaneKind kind) {
   switch (kind) {
-  case DatumPlaneKind::Offset: return "offset";
-  case DatumPlaneKind::Angled: return "angled";
-  case DatumPlaneKind::ThroughPoints: return "through_points";
+  case DatumPlaneKind::Offset:
+    return "offset";
+  case DatumPlaneKind::Angled:
+    return "angled";
+  case DatumPlaneKind::ThroughPoints:
+    return "through_points";
   }
   return "offset";
 }
 
 DatumPlaneKind DatumPlaneKindFromString(const std::string& s) {
-  if (s == "offset") return DatumPlaneKind::Offset;
-  if (s == "angled") return DatumPlaneKind::Angled;
-  if (s == "through_points") return DatumPlaneKind::ThroughPoints;
+  if (s == "offset")
+    return DatumPlaneKind::Offset;
+  if (s == "angled")
+    return DatumPlaneKind::Angled;
+  if (s == "through_points")
+    return DatumPlaneKind::ThroughPoints;
   throw std::runtime_error("Unknown datum plane kind: " + s);
 }
 
 const char* DatumAxisKindToString(DatumAxisKind kind) {
   switch (kind) {
-  case DatumAxisKind::TwoPoints: return "two_points";
-  case DatumAxisKind::SketchLine: return "sketch_line";
-  case DatumAxisKind::GlobalX: return "global_x";
-  case DatumAxisKind::GlobalY: return "global_y";
-  case DatumAxisKind::GlobalZ: return "global_z";
+  case DatumAxisKind::TwoPoints:
+    return "two_points";
+  case DatumAxisKind::SketchLine:
+    return "sketch_line";
+  case DatumAxisKind::GlobalX:
+    return "global_x";
+  case DatumAxisKind::GlobalY:
+    return "global_y";
+  case DatumAxisKind::GlobalZ:
+    return "global_z";
   }
   return "two_points";
 }
 
 DatumAxisKind DatumAxisKindFromString(const std::string& s) {
-  if (s == "two_points") return DatumAxisKind::TwoPoints;
-  if (s == "sketch_line") return DatumAxisKind::SketchLine;
-  if (s == "global_x") return DatumAxisKind::GlobalX;
-  if (s == "global_y") return DatumAxisKind::GlobalY;
-  if (s == "global_z") return DatumAxisKind::GlobalZ;
+  if (s == "two_points")
+    return DatumAxisKind::TwoPoints;
+  if (s == "sketch_line")
+    return DatumAxisKind::SketchLine;
+  if (s == "global_x")
+    return DatumAxisKind::GlobalX;
+  if (s == "global_y")
+    return DatumAxisKind::GlobalY;
+  if (s == "global_z")
+    return DatumAxisKind::GlobalZ;
   throw std::runtime_error("Unknown datum axis kind: " + s);
 }
 
 const char* Curve3DKindToString(Curve3DKind kind) {
   switch (kind) {
-  case Curve3DKind::FitSpline: return "fit_spline";
-  case Curve3DKind::Helix: return "helix";
-  case Curve3DKind::ControlPoly: return "control_poly";
+  case Curve3DKind::FitSpline:
+    return "fit_spline";
+  case Curve3DKind::Helix:
+    return "helix";
+  case Curve3DKind::ControlPoly:
+    return "control_poly";
   }
   return "fit_spline";
 }
 
 Curve3DKind Curve3DKindFromString(const std::string& s) {
-  if (s == "fit_spline") return Curve3DKind::FitSpline;
-  if (s == "helix") return Curve3DKind::Helix;
-  if (s == "control_poly") return Curve3DKind::ControlPoly;
+  if (s == "fit_spline")
+    return Curve3DKind::FitSpline;
+  if (s == "helix")
+    return Curve3DKind::Helix;
+  if (s == "control_poly")
+    return Curve3DKind::ControlPoly;
   throw std::runtime_error("Unknown curve3d kind: " + s);
 }
 
 const char* PlaneTypeToString(PlaneType type) {
   switch (type) {
-  case PlaneType::XY: return "xy";
-  case PlaneType::XZ: return "xz";
-  case PlaneType::YZ: return "yz";
+  case PlaneType::XY:
+    return "xy";
+  case PlaneType::XZ:
+    return "xz";
+  case PlaneType::YZ:
+    return "yz";
   }
   return "xy";
 }
 
 PlaneType PlaneTypeFromString(const std::string& s) {
-  if (s == "xy") return PlaneType::XY;
-  if (s == "xz") return PlaneType::XZ;
-  if (s == "yz") return PlaneType::YZ;
+  if (s == "xy")
+    return PlaneType::XY;
+  if (s == "xz")
+    return PlaneType::XZ;
+  if (s == "yz")
+    return PlaneType::YZ;
   throw std::runtime_error("Unknown base plane: " + s);
 }
 
 json AxisRefToJson(const AxisRef& axis) {
   switch (axis.kind) {
-  case AxisRef::Kind::X: return {{"kind", "x"}};
-  case AxisRef::Kind::Y: return {{"kind", "y"}};
-  case AxisRef::Kind::Z: return {{"kind", "z"}};
+  case AxisRef::Kind::X:
+    return {{"kind", "x"}};
+  case AxisRef::Kind::Y:
+    return {{"kind", "y"}};
+  case AxisRef::Kind::Z:
+    return {{"kind", "z"}};
   case AxisRef::Kind::SketchLine:
     return {{"kind", "sketch_line"},
             {"sketch_id", axis.sketchId},
@@ -374,9 +460,12 @@ json AxisRefToJson(const AxisRef& axis) {
 AxisRef AxisRefFromJson(const json& j) {
   AxisRef axis;
   const std::string kind = j.at("kind").get<std::string>();
-  if (kind == "x") axis.kind = AxisRef::Kind::X;
-  else if (kind == "y") axis.kind = AxisRef::Kind::Y;
-  else if (kind == "z") axis.kind = AxisRef::Kind::Z;
+  if (kind == "x")
+    axis.kind = AxisRef::Kind::X;
+  else if (kind == "y")
+    axis.kind = AxisRef::Kind::Y;
+  else if (kind == "z")
+    axis.kind = AxisRef::Kind::Z;
   else if (kind == "sketch_line") {
     axis.kind = AxisRef::Kind::SketchLine;
     axis.sketchId = j.at("sketch_id").get<uint64_t>();
@@ -390,7 +479,7 @@ AxisRef AxisRefFromJson(const json& j) {
   return axis;
 }
 
-}  // namespace
+} // namespace
 
 namespace DocumentIO {
 
@@ -446,15 +535,16 @@ json FeatureToJson(const Feature& feature) {
     if (!sk->external.empty()) { // v48: live projected geometry
       j["external"] = json::array();
       for (const auto& e : sk->external) {
-        json ej = {{"feature_id", e.ref.featureId},
-                   {"element", e.ref.name},
-                   {"kind", e.kind == sketch::ExternalKind::Edge ? "edge"
-                                                                 : "face"}};
+        json ej = {
+            {"feature_id", e.ref.featureId},
+            {"element", e.ref.name},
+            {"kind", e.kind == sketch::ExternalKind::Edge ? "edge" : "face"}};
         ej["gen_ids"] = e.genIds;
         j["external"].push_back(std::move(ej));
       }
     }
-    if (!sk->images.empty()) { // v49: reference underlays (bytes stored out-of-band)
+    if (!sk->images
+             .empty()) { // v49: reference underlays (bytes stored out-of-band)
       j["images"] = json::array();
       for (const auto& img : sk->images) {
         json ij = {{"id", img.id},
@@ -479,9 +569,9 @@ json FeatureToJson(const Feature& feature) {
     j["reversed"] = ext->reversed;
     j["mode"] = ExtrudeModeToString(ext->mode);
     if (ext->endMode != ExtrudeEnd::Blind) { // v18; omit the default
-      j["end_mode"] = ext->endMode == ExtrudeEnd::Symmetric   ? "symmetric"
+      j["end_mode"] = ext->endMode == ExtrudeEnd::Symmetric  ? "symmetric"
                       : ext->endMode == ExtrudeEnd::TwoSided ? "two_sided"
-                                                              : "up_to_face";
+                                                             : "up_to_face";
       if (ext->endMode == ExtrudeEnd::TwoSided) {
         j["distance2"] = ext->distance2;
         if (!ext->distance2Expr.empty())
@@ -498,7 +588,7 @@ json FeatureToJson(const Feature& feature) {
       json thin = {{"thickness", ext->thinThickness},
                    {"side", ext->thinSide == sketch::ThinSide::Out  ? "out"
                             : ext->thinSide == sketch::ThinSide::In ? "in"
-                                                                     : "both"}};
+                                                                    : "both"}};
       if (!ext->thinThicknessExpr.empty())
         thin["thickness_expr"] = ext->thinThicknessExpr;
       j["thin"] = thin;
@@ -595,12 +685,16 @@ json FeatureToJson(const Feature& feature) {
       j["origin"] = Vec3ToJson(cv->axisOrigin);
       j["axis"] = Vec3ToJson(cv->axisDir);
       j["radius"] = cv->radius;
-      if (!cv->radiusExpr.empty()) j["radius_expr"] = cv->radiusExpr;
+      if (!cv->radiusExpr.empty())
+        j["radius_expr"] = cv->radiusExpr;
       j["pitch"] = cv->pitch;
-      if (!cv->pitchExpr.empty()) j["pitch_expr"] = cv->pitchExpr;
+      if (!cv->pitchExpr.empty())
+        j["pitch_expr"] = cv->pitchExpr;
       j["turns"] = cv->turns;
-      if (!cv->turnsExpr.empty()) j["turns_expr"] = cv->turnsExpr;
-      if (!cv->rightHanded) j["left_handed"] = true;
+      if (!cv->turnsExpr.empty())
+        j["turns_expr"] = cv->turnsExpr;
+      if (!cv->rightHanded)
+        j["left_handed"] = true;
       break;
     }
   } else if (auto* boo = dynamic_cast<const BooleanFeature*>(&feature)) {
@@ -694,14 +788,17 @@ json FeatureToJson(const Feature& feature) {
       j["modeled"] = true;
   } else if (auto* ho = dynamic_cast<const HoleFeature*>(&feature)) {
     j["sketch_id"] = ho->sketchId;
-    j["hole_kind"] = ho->kind == HoleKind::Counterbore ? "counterbore"
+    j["hole_kind"] = ho->kind == HoleKind::Counterbore   ? "counterbore"
                      : ho->kind == HoleKind::Countersink ? "countersink"
                                                          : "simple";
     j["diameter"] = ho->diameter;
-    if (!ho->diameterExpr.empty()) j["diameter_expr"] = ho->diameterExpr;
+    if (!ho->diameterExpr.empty())
+      j["diameter_expr"] = ho->diameterExpr;
     j["depth"] = ho->depth;
-    if (!ho->depthExpr.empty()) j["depth_expr"] = ho->depthExpr;
-    if (ho->through) j["through"] = true;
+    if (!ho->depthExpr.empty())
+      j["depth_expr"] = ho->depthExpr;
+    if (ho->through)
+      j["through"] = true;
     if (ho->kind == HoleKind::Counterbore) {
       j["cb_diameter"] = ho->cbDiameter;
       j["cb_depth"] = ho->cbDepth;
@@ -712,7 +809,8 @@ json FeatureToJson(const Feature& feature) {
   } else if (auto* dr = dynamic_cast<const DraftFeature*>(&feature)) {
     j["body_id"] = dr->bodyId;
     j["angle_deg"] = dr->angleDeg;
-    if (!dr->angleExpr.empty()) j["angle_expr"] = dr->angleExpr;
+    if (!dr->angleExpr.empty())
+      j["angle_expr"] = dr->angleExpr;
     j["neutral_plane"] = PlaneTypeToString(dr->neutralPlane);
     json arr = json::array();
     for (const auto& ref : dr->faces)
@@ -773,7 +871,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       if (ej.value("type", "") == "rect") {
         glm::vec2 c1 = Vec2FromJson(ej.at("c1"));
         glm::vec2 c2 = Vec2FromJson(ej.at("c2"));
-        sketch::Entity ph = sketch::Line{c1, c2}; // placeholder, preserves order
+        sketch::Entity ph =
+            sketch::Line{c1, c2}; // placeholder, preserves order
         sketch::SetEntityId(ph, ej.value("id", uint32_t{0}));
         rectSlots.push_back(sk->entities.size());
         sk->entities.push_back(ph);
@@ -813,8 +912,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       uint32_t maxId = 0;
       for (const auto& e : sk->entities)
         maxId = std::max(maxId, sketch::EntityId(e));
-      sk->nextEntityId = std::max<uint32_t>(
-          {sk->nextEntityId, maxId + 1, j.value("next_entity_id", uint32_t{0})});
+      sk->nextEntityId =
+          std::max<uint32_t>({sk->nextEntityId, maxId + 1,
+                              j.value("next_entity_id", uint32_t{0})});
     }
     // Re-key the collected entity exprs by final stable id (positions are
     // still valid — the rect expansion below is what reorders).
@@ -833,12 +933,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       auto isRect = [&](uint32_t id) {
         return std::find(rectIds.begin(), rectIds.end(), id) != rectIds.end();
       };
-      sk->entities.erase(
-          std::remove_if(sk->entities.begin(), sk->entities.end(),
-                         [&](const sketch::Entity& e) {
-                           return isRect(sketch::EntityId(e));
-                         }),
-          sk->entities.end());
+      sk->entities.erase(std::remove_if(sk->entities.begin(),
+                                        sk->entities.end(),
+                                        [&](const sketch::Entity& e) {
+                                          return isRect(sketch::EntityId(e));
+                                        }),
+                         sk->entities.end());
       sk->constraints.erase(
           std::remove_if(sk->constraints.begin(), sk->constraints.end(),
                          [&](const sketch::Constraint& c) {
@@ -884,18 +984,19 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sk->nextImageId = std::max<uint32_t>(
           {maxImg + 1, j.value("next_image_id", uint32_t{0})});
     }
-    sk->planeRef = j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
-    if (j.contains("face_ref")) { // v16: attached body face
+    sk->planeRef =
+        j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
+    if (j.contains("face_ref")) {          // v16: attached body face
       const json& fr = j.at("face_ref");
       sk->faceRef = ElementRef{fr.value("feature_id", uint64_t{0}),
                                fr.value("element", std::string{})};
     }
     out = std::move(sk);
   } else if (type == "Extrude") {
-    // `distance` is optional when a `distance_expr` drives it (mirrors Revolve's
-    // `angle`/`angle_expr`): the literal is just the last-good value the expr
-    // overwrites on regen, so an extrude authored with only `distance_expr`
-    // still builds a body instead of erroring on a missing key.
+    // `distance` is optional when a `distance_expr` drives it (mirrors
+    // Revolve's `angle`/`angle_expr`): the literal is just the last-good value
+    // the expr overwrites on regen, so an extrude authored with only
+    // `distance_expr` still builds a body instead of erroring on a missing key.
     auto ext = std::make_unique<ExtrudeFeature>(
         name, j.at("sketch_id").get<uint64_t>(), j.value("distance", 1.0),
         ExtrudeModeFromString(j.value("mode", "new_body")),
@@ -911,8 +1012,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ext->distance2 = j.value("distance2", 1.0);
     ext->distance2Expr = j.value("distance2_expr", std::string{});
     if (j.contains("regions")) // v34
-      ext->regions =
-          j["regions"].get<std::vector<std::vector<uint32_t>>>();
+      ext->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
     if (j.contains("end_target")) {
       ext->endTarget =
           ElementRef{j["end_target"].value("feature_id", uint64_t{0}),
@@ -941,8 +1041,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, Vec3FromJson(j.at("center")), Vec3FromJson(j.at("direction")),
         j.at("radius").get<double>(), j.at("height").get<double>());
   } else if (type == "Import") {
-    auto imp = std::make_unique<ImportFeature>(name,
-                                               j.at("path").get<std::string>());
+    auto imp =
+        std::make_unique<ImportFeature>(name, j.at("path").get<std::string>());
     if (j.contains("color")) {
       imp->hasColor = true;
       imp->color = Vec3FromJson(j.at("color"));
@@ -953,7 +1053,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, DatumPlaneKindFromString(j.at("kind").get<std::string>()));
     dp->parentId = j.value("parent_id", uint64_t{0});
     if (j.contains("base_plane"))
-      dp->basePlane = PlaneTypeFromString(j.at("base_plane").get<std::string>());
+      dp->basePlane =
+          PlaneTypeFromString(j.at("base_plane").get<std::string>());
     switch (dp->kind) {
     case DatumPlaneKind::Offset:
       dp->offset = j.value("offset", 0.0);
@@ -983,8 +1084,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     rev->angleExpr = j.value("angle_expr", std::string{});
     rev->symmetric = j.value("symmetric", false);
     if (j.contains("regions")) // v34
-      rev->regions =
-          j["regions"].get<std::vector<std::vector<uint32_t>>>();
+      rev->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
     out = std::move(rev);
   } else if (type == "DatumAxis") {
     auto da = std::make_unique<DatumAxisFeature>(
@@ -1036,8 +1136,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.at("tool_id").get<uint64_t>(),
         BooleanOpFromString(j.value("op", "union")));
   } else if (type == "Split") { // v39
-    auto sp = std::make_unique<SplitFeature>(
-        name, j.at("body_id").get<uint64_t>());
+    auto sp =
+        std::make_unique<SplitFeature>(name, j.at("body_id").get<uint64_t>());
     if (j.value("knife", "plane") == "face") {
       sp->knife = SplitKnifeKind::Face;
       const json& fj = j.at("face");
@@ -1054,8 +1154,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     out = std::move(sp);
   } else if (type == "Refine") { // v47
-    out = std::make_unique<RefineFeature>(name,
-                                          j.at("body_id").get<uint64_t>());
+    out =
+        std::make_unique<RefineFeature>(name, j.at("body_id").get<uint64_t>());
   } else if (type == "Fillet" || type == "Chamfer") { // v17
     std::vector<ElementRef> refs;
     for (const auto& ej : j.value("edges", json::array())) {
@@ -1082,8 +1182,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     for (const auto& idj : j.value("sketch_ids", json::array()))
       ids.push_back(idj.get<uint64_t>());
     auto lo = std::make_unique<LoftFeature>(
-        name, std::move(ids), ExtrudeModeFromString(j.value("mode",
-                                                            "new_body")));
+        name, std::move(ids),
+        ExtrudeModeFromString(j.value("mode", "new_body")));
     lo->pathId = j.value("path_id", uint64_t{0});   // v45
     lo->guideId = j.value("guide_id", uint64_t{0}); // v45
     out = std::move(lo);
@@ -1092,7 +1192,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         name, j.at("profile_id").get<uint64_t>(),
         j.at("path_id").get<uint64_t>(),
         ExtrudeModeFromString(j.value("mode", "new_body")));
-    sw->guideId = j.value("guide_id", uint64_t{0}); // v44
+    sw->guideId = j.value("guide_id", uint64_t{0});              // v44
     const std::string fr = j.value("frame", "corrected_frenet"); // v43
     sw->frame = fr == "frenet"  ? SweepFrame::Frenet
                 : fr == "fixed" ? SweepFrame::Fixed
@@ -1100,8 +1200,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(sw);
   } else if (type == "Pipe") { // v43
     auto pi = std::make_unique<PipeFeature>(
-        name, j.at("path_id").get<uint64_t>(),
-        j.value("outer_diameter", 2.0), j.value("wall_thickness", 0.0),
+        name, j.at("path_id").get<uint64_t>(), j.value("outer_diameter", 2.0),
+        j.value("wall_thickness", 0.0),
         ExtrudeModeFromString(j.value("mode", "new_body")));
     pi->outerDiameterExpr = j.value("outer_diameter_expr", std::string{});
     pi->wallThicknessExpr = j.value("wall_thickness_expr", std::string{});
@@ -1126,12 +1226,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(th);
   } else if (type == "Hole") { // v21
     const std::string k = j.value("hole_kind", "simple");
-    HoleKind kind = k == "counterbore"  ? HoleKind::Counterbore
+    HoleKind kind = k == "counterbore"   ? HoleKind::Counterbore
                     : k == "countersink" ? HoleKind::Countersink
                                          : HoleKind::Simple;
     auto ho = std::make_unique<HoleFeature>(
-        name, j.at("sketch_id").get<uint64_t>(), kind,
-        j.value("diameter", 1.0), j.value("depth", 1.0));
+        name, j.at("sketch_id").get<uint64_t>(), kind, j.value("diameter", 1.0),
+        j.value("depth", 1.0));
     ho->diameterExpr = j.value("diameter_expr", std::string{});
     ho->depthExpr = j.value("depth_expr", std::string{});
     ho->through = j.value("through", false);
@@ -1178,10 +1278,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   if (!out) {
     throw std::runtime_error("Unknown feature type: " + type);
   }
-  out->SetId(j.value("id", uint64_t{0})); // v1 files have no id; Document assigns
-  out->SetMaterial(j.value("material", std::string{})); // absent (pre-v10) = default
+  out->SetId(
+      j.value("id", uint64_t{0})); // v1 files have no id; Document assigns
+  out->SetMaterial(
+      j.value("material", std::string{})); // absent (pre-v10) = default
   out->SetSuppressed(j.value("suppressed", false)); // absent (pre-v19) = active
   return out;
 }
 
-}  // namespace DocumentIO
+} // namespace DocumentIO

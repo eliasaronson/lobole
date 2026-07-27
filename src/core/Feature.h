@@ -4,15 +4,15 @@
 #include "core/ElementMap.h"
 #include "core/Expression.h"
 
-#include <glm/glm.hpp>
 #include <functional>
+#include <glm/glm.hpp>
 #include <string>
 #include <vector>
 
 // A named solid produced by regenerating the feature list. `material` is a slug
-// into the render-layer material library (empty = default); it is transient like
-// the shape — the feature that creates the body stamps its own material here on
-// every regeneration.
+// into the render-layer material library (empty = default); it is transient
+// like the shape — the feature that creates the body stamps its own material
+// here on every regeneration.
 struct Body {
   std::string name;
   CADShape shape;

@@ -36,10 +36,11 @@ struct VarRow {
 std::string FreshName(const AppState& state) {
   for (int i = 1;; i++) {
     std::string name = "var" + std::to_string(i);
-    const bool taken = FindProjectParameter(state, name) != nullptr ||
-                       (state.document &&
-                        state.document->FindParameter(name) != nullptr);
-    if (!taken) return name;
+    const bool taken =
+        FindProjectParameter(state, name) != nullptr ||
+        (state.document && state.document->FindParameter(name) != nullptr);
+    if (!taken)
+      return name;
   }
 }
 
@@ -115,7 +116,8 @@ void DrawVariablesPanel(AppState& state) {
     std::vector<VarRow> rows;
     for (const Parameter& p : state.projectParameters)
       rows.push_back({p, true});
-    for (const Parameter& p : doc.GetParameters()) rows.push_back({p, false});
+    for (const Parameter& p : doc.GetParameters())
+      rows.push_back({p, false});
 
     for (int i = 0; i < static_cast<int>(rows.size()); i++) {
       const VarRow& r = rows[i];
@@ -132,12 +134,12 @@ void DrawVariablesPanel(AppState& state) {
       if (const char* text = cellInput(i, 1, "##name", p.name)) {
         const std::string newName = text;
         if (!newName.empty() && newName != p.name) {
-          const bool ok =
-              r.isProject
-                  ? RenameProjectVariable(state, p.name, newName)
-                  : state.commands->Execute(
-                        std::make_unique<RenameVariableCommand>(p.name, newName),
-                        doc);
+          const bool ok = r.isProject
+                              ? RenameProjectVariable(state, p.name, newName)
+                              : state.commands->Execute(
+                                    std::make_unique<RenameVariableCommand>(
+                                        p.name, newName),
+                                    doc);
           if (ok) {
             actionError.clear();
           } else {
@@ -178,27 +180,30 @@ void DrawVariablesPanel(AppState& state) {
       // Comment
       ImGui::TableSetColumnIndex(4);
       if (const char* text = cellInput(i, 4, "##comment", p.comment)) {
-        if (p.comment != text) setVar(r, p.expression, text);
+        if (p.comment != text)
+          setVar(r, p.expression, text);
       }
 
       // Delete — refused (with the referencing list) while referenced.
       ImGui::TableSetColumnIndex(5);
       if (ImGui::SmallButton("x")) {
         std::vector<std::string> refs;
-        const bool ok = r.isProject
-                            ? RemoveProjectVariable(state, p.name, &refs)
-                            : (refs = doc.FindParameterReferences(p.name),
-                               refs.empty() &&
-                                   state.commands->Execute(
-                                       std::make_unique<DeleteVariableCommand>(
-                                           p.name),
-                                       doc));
+        const bool ok =
+            r.isProject
+                ? RemoveProjectVariable(state, p.name, &refs)
+                : (refs = doc.FindParameterReferences(p.name),
+                   refs.empty() &&
+                       state.commands->Execute(
+                           std::make_unique<DeleteVariableCommand>(p.name),
+                           doc));
         if (ok) {
           actionError.clear();
         } else {
           actionError = "Cannot delete '" + p.name + "' — referenced by";
-          for (const std::string& r2 : refs) actionError += " " + r2 + ",";
-          if (!refs.empty()) actionError.back() = '.';
+          for (const std::string& r2 : refs)
+            actionError += " " + r2 + ",";
+          if (!refs.empty())
+            actionError.back() = '.';
         }
       }
 

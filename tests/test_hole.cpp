@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <filesystem>
 
@@ -16,8 +16,7 @@ namespace {
 // A sketch of points on a plane at height z (normal +Z).
 uint64_t PointSketch(Document& doc, double z,
                      const std::vector<glm::vec2>& pts) {
-  SketchPlane plane(glm::vec3(0, 0, z), glm::vec3(0, 0, 1),
-                    glm::vec3(1, 0, 0));
+  SketchPlane plane(glm::vec3(0, 0, z), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0));
   auto sk = std::make_unique<SketchFeature>("Holes", plane);
   for (const auto& p : pts)
     sk->AddEntity(sketch::Point{p});
@@ -42,8 +41,7 @@ TEST_CASE("Simple hole drills a bore of the expected volume", "[hole]") {
 TEST_CASE("Four holes from one sketch (a bolt pattern)", "[hole]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10, 10, 4));
-  const uint64_t sk = PointSketch(
-      doc, 4.0, {{2, 2}, {8, 2}, {8, 8}, {2, 8}});
+  const uint64_t sk = PointSketch(doc, 4.0, {{2, 2}, {8, 2}, {8, 8}, {2, 8}});
   // Through-all: each hole d=1 pierces the 4-thick plate.
   auto ho = std::make_unique<HoleFeature>("H", sk, HoleKind::Simple, 1.0, 1.0);
   ho->through = true;
@@ -57,32 +55,31 @@ TEST_CASE("Counterbore removes more than a simple hole", "[hole]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10, 10, 10));
   const uint64_t sk = PointSketch(doc, 10.0, {{5, 5}});
-  auto ho = std::make_unique<HoleFeature>("H", sk, HoleKind::Counterbore, 2.0,
-                                          6.0);
+  auto ho =
+      std::make_unique<HoleFeature>("H", sk, HoleKind::Counterbore, 2.0, 6.0);
   ho->cbDiameter = 4.0;
   ho->cbDepth = 2.0;
   doc.AddFeature(std::move(ho));
   REQUIRE(doc.GetBodies().size() == 1);
   // bore pi*1^2*6 + counterbore pi*2^2*2 (the top 2 of the bore overlaps the
   // cbore, so total removed = pi*1^2*6 + pi*2^2*2 - pi*1^2*2).
-  const double removed =
-      M_PI * 1 * 1 * 6 + M_PI * 2 * 2 * 2 - M_PI * 1 * 1 * 2;
+  const double removed = M_PI * 1 * 1 * 6 + M_PI * 2 * 2 * 2 - M_PI * 1 * 1 * 2;
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
              WithinRel(1000.0 - removed, 1e-2));
 }
 
 TEST_CASE("Hole errors and round-trips (v21)", "[hole]") {
   Document doc;
-  doc.AddFeature(std::make_unique<HoleFeature>("Bad", 999, HoleKind::Simple,
-                                               2.0, 5.0));
+  doc.AddFeature(
+      std::make_unique<HoleFeature>("Bad", 999, HoleKind::Simple, 2.0, 5.0));
   CHECK_FALSE(doc.Regenerate());
   CHECK(!doc.GetFeature(0)->GetError().empty());
 
   Document doc2;
   doc2.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 8, 8, 8));
   const uint64_t sk = PointSketch(doc2, 8.0, {{4, 4}});
-  auto ho = std::make_unique<HoleFeature>("H", sk, HoleKind::Countersink,
-                                          2.0, 4.0);
+  auto ho =
+      std::make_unique<HoleFeature>("H", sk, HoleKind::Countersink, 2.0, 4.0);
   ho->csDiameter = 4.0;
   ho->csDepth = 1.0;
   doc2.AddFeature(std::move(ho));

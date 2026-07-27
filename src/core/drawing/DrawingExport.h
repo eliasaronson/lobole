@@ -33,4 +33,4 @@ bool SavePDF(const DrawingDocument& doc,
              const std::vector<drawing::ResolvedDim>& dims,
              const std::string& path, std::string* error = nullptr);
 
-}  // namespace DrawingExport
+} // namespace DrawingExport

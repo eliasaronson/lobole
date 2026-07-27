@@ -23,7 +23,8 @@ json ConfigurationToJson(const Configuration& c) {
   if (!c.parameterOverrides.empty()) {
     j["parameter_overrides"] = json::array();
     for (const auto& [name, expr] : c.parameterOverrides)
-      j["parameter_overrides"].push_back({{"name", name}, {"expression", expr}});
+      j["parameter_overrides"].push_back(
+          {{"name", name}, {"expression", expr}});
   }
   if (!c.suppressedFeatures.empty())
     j["suppressed_features"] = c.suppressedFeatures;
@@ -42,4 +43,4 @@ Configuration ConfigurationFromJson(const json& j) {
   return c;
 }
 
-}  // namespace DocumentIO
+} // namespace DocumentIO

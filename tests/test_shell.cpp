@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
-#include "core/io/Serialization.h"
-#include "TestIO.h"
 #include "core/features/ShellFeature.h"
+#include "core/io/Serialization.h"
 
 #include <filesystem>
 #include <vector>
@@ -24,8 +24,8 @@ std::string AnyFace(const Body& b) {
 
 TEST_CASE("Shell with an open face hollows a box into a bin", "[shell]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10.0, 10.0,
-                                              10.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(0), 10.0, 10.0, 10.0));
   const uint64_t id = doc.GetFeature(0)->GetId();
   const std::string face = AnyFace(doc.GetBodies()[0]);
 

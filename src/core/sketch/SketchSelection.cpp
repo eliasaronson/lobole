@@ -39,7 +39,8 @@ bool SegmentHitsRect(glm::vec2 a, glm::vec2 b, glm::vec2 mn, glm::vec2 mx) {
 // Screen-space sample points of an entity: a Point is its single point (which
 // TessellateEntity leaves empty), everything else its tessellated polyline.
 std::vector<glm::vec2>
-SamplePoints(const Entity& e, const std::function<glm::vec2(glm::vec2)>& project) {
+SamplePoints(const Entity& e,
+             const std::function<glm::vec2(glm::vec2)>& project) {
   std::vector<glm::vec2> uv;
   if (auto* p = std::get_if<Point>(&e))
     uv = {p->p};
@@ -80,7 +81,8 @@ BoxSelect(const std::vector<Entity>& entities, glm::vec2 rectMin,
           keep = true;
           break;
         }
-      for (size_t i = 0; !keep && i + 1 < pts.size(); i++) // … or an edge crosses
+      for (size_t i = 0; !keep && i + 1 < pts.size();
+           i++) // … or an edge crosses
         if (SegmentHitsRect(pts[i], pts[i + 1], mn, mx))
           keep = true;
     }

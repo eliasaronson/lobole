@@ -16,4 +16,4 @@ std::string FormatLength(double mm);
 // (e.g. "90°", "45.5°"). UTF-8 output.
 std::string FormatAngle(double radians);
 
-}  // namespace core
+} // namespace core

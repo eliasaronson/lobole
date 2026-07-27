@@ -31,14 +31,16 @@ gpu::ComputeContext* Ctx(std::string* whyNot) {
   static std::string err;
   static std::unique_ptr<gpu::ComputeContext> ctx =
       gpu::ComputeContext::Create(&err);
-  if (!ctx && whyNot) *whyNot = err;
+  if (!ctx && whyNot)
+    *whyNot = err;
   return ctx.get();
 }
 
-#define REQUIRE_GPU()                                    \
-  std::string whyNot;                                    \
-  gpu::ComputeContext* ctx = Ctx(&whyNot);               \
-  if (!ctx) SKIP("no usable compute device: " << whyNot)
+#define REQUIRE_GPU()                                                          \
+  std::string whyNot;                                                          \
+  gpu::ComputeContext* ctx = Ctx(&whyNot);                                     \
+  if (!ctx)                                                                    \
+  SKIP("no usable compute device: " << whyNot)
 
 // Deterministic pseudo-random floats in [-1, 1] (no <random> so values are
 // identical across platforms/library versions).
@@ -48,7 +50,7 @@ float Rand01(uint32_t& state) {
 }
 float RandSym(uint32_t& state) { return 2.0f * Rand01(state) - 1.0f; }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("femgpu: sanity kernel round-trips through the compute pipeline",
           "[femgpu]") {
@@ -60,7 +62,8 @@ TEST_CASE("femgpu: sanity kernel round-trips through the compute pipeline",
   std::string err;
   REQUIRE(ctx->CreateBuffer(n * sizeof(float), buf, &err));
   float* data = static_cast<float*>(buf.mapped);
-  for (uint32_t i = 0; i < n; ++i) data[i] = static_cast<float>(i);
+  for (uint32_t i = 0; i < n; ++i)
+    data[i] = static_cast<float>(i);
 
   gpu::Pipeline pipe;
   REQUIRE(ctx->CreatePipeline(k_gpu_sanity_spv, k_gpu_sanity_spv_size, 1,
@@ -69,7 +72,8 @@ TEST_CASE("femgpu: sanity kernel round-trips through the compute pipeline",
 
   int wrong = 0;
   for (uint32_t i = 0; i < n; ++i)
-    if (data[i] != static_cast<float>(i) * 2.0f + 1.0f) ++wrong;
+    if (data[i] != static_cast<float>(i) * 2.0f + 1.0f)
+      ++wrong;
   CHECK(wrong == 0);
 
   ctx->Destroy(pipe);
@@ -89,7 +93,8 @@ gpu::SpmvSystem PackSystem(const fem::FemMesh& mesh,
                            const std::vector<int>& fixedNodes, double E0,
                            double nu) {
   using namespace fem::internal;
-  const auto dofs = BuildDofMap(static_cast<int>(mesh.nodes.size()), fixedNodes);
+  const auto dofs =
+      BuildDofMap(static_cast<int>(mesh.nodes.size()), fixedNodes);
   const auto D0 = Elasticity(E0, nu);
 
   gpu::SpmvSystem sys;
@@ -130,7 +135,8 @@ std::vector<double> CpuApply(const gpu::SpmvSystem& sys,
     const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
     const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
     for (int r = 0; r < 30; ++r) {
-      if (dof[r] < 0) continue;
+      if (dof[r] < 0)
+        continue;
       double acc = 0.0;
       for (int c = 0; c < 30; ++c)
         if (dof[c] >= 0)
@@ -143,7 +149,8 @@ std::vector<double> CpuApply(const gpu::SpmvSystem& sys,
 }
 
 // Relative infinity-norm error of the GPU result against the oracle.
-double RelInfError(const std::vector<float>& gpu, const std::vector<double>& ref) {
+double RelInfError(const std::vector<float>& gpu,
+                   const std::vector<double>& ref) {
   double maxRef = 0.0, maxErr = 0.0;
   for (size_t i = 0; i < ref.size(); ++i) {
     maxRef = std::max(maxRef, std::abs(ref[i]));
@@ -175,7 +182,8 @@ void CheckSpmvAgainstCpu(gpu::ComputeContext& ctx, const fem::FemMesh& mesh,
   REQUIRE(spmv->SetScales(scales, &err));
 
   std::vector<float> p(sys.nFree);
-  for (int i = 0; i < sys.nFree; ++i) p[i] = RandSym(state);
+  for (int i = 0; i < sys.nFree; ++i)
+    p[i] = RandSym(state);
 
   std::vector<float> Ap;
   REQUIRE(spmv->Apply(p, Ap, &err));
@@ -184,7 +192,7 @@ void CheckSpmvAgainstCpu(gpu::ComputeContext& ctx, const fem::FemMesh& mesh,
   const double relErr = RelInfError(Ap, ref);
   INFO("elements: " << sys.nElems << "  free DOFs: " << sys.nFree
                     << "  rel-inf error: " << relErr);
-  CHECK(relErr < 1e-4);  // fp32 accumulation noise; typically ~1e-6
+  CHECK(relErr < 1e-4); // fp32 accumulation noise; typically ~1e-6
 
   // Repeat with uniform full stiffness to also cover the un-scaled path (and
   // prove Apply is repeatable — the scatter zero-init works).
@@ -196,7 +204,7 @@ void CheckSpmvAgainstCpu(gpu::ComputeContext& ctx, const fem::FemMesh& mesh,
   CHECK(RelInfError(Ap2, ref2) < 1e-4);
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("femgpu: matrix-free SpMV matches the CPU assembly (GATE)",
           "[femgpu][gate]") {
@@ -233,7 +241,7 @@ TEST_CASE("femgpu: SpMV matches the CPU on a real Netgen mesh",
   REQUIRE(fixed.size() > 3);
   CheckSpmvAgainstCpu(*ctx, *mesh, fixed);
 }
-#endif  // HAVE_NETGEN
+#endif // HAVE_NETGEN
 
 // ---- GPU1: the on-device CG solver ----------------------------------------
 
@@ -274,7 +282,8 @@ std::vector<float> SimpScales(int nElems, uint32_t seed) {
 
 // fp64 relative L2 residual |f - Kx| / |f| of a GPU solution, on the same
 // fp32 element data the GPU used.
-double ResidualNorm(const gpu::SpmvSystem& sys, const std::vector<float>& scales,
+double ResidualNorm(const gpu::SpmvSystem& sys,
+                    const std::vector<float>& scales,
                     const std::vector<float>& x, const std::vector<float>& f) {
   const std::vector<double> Kx = CpuApply(sys, scales, x);
   double rr = 0.0, ff = 0.0;
@@ -286,7 +295,7 @@ double ResidualNorm(const gpu::SpmvSystem& sys, const std::vector<float>& scales
   return std::sqrt(rr / ff);
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("femgpu: element energies match the CPU oracle (GPU4 GATE)",
           "[femgpu][gate]") {
@@ -305,7 +314,8 @@ TEST_CASE("femgpu: element energies match the CPU oracle (GPU4 GATE)",
 
     uint32_t state = 4242;
     std::vector<float> u(sys.nFree);
-    for (int i = 0; i < sys.nFree; ++i) u[i] = RandSym(state);
+    for (int i = 0; i < sys.nFree; ++i)
+      u[i] = RandSym(state);
 
     std::vector<float> se;
     REQUIRE(cg->ElementEnergies(u, se, &err));
@@ -331,7 +341,7 @@ TEST_CASE("femgpu: element energies match the CPU oracle (GPU4 GATE)",
     }
     const double rel = maxRef > 0 ? maxErr / maxRef : maxErr;
     INFO("elements: " << sys.nElems << "  rel-inf error: " << rel);
-    CHECK(rel < 1e-4);  // fp32 accumulation noise; typically ~1e-6
+    CHECK(rel < 1e-4); // fp32 accumulation noise; typically ~1e-6
   };
 
   SECTION("structured tet10 box") {
@@ -387,7 +397,8 @@ TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
   // A load-like right-hand side (deterministic).
   uint32_t state = 42;
   std::vector<float> f(sys.nFree);
-  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+  for (int i = 0; i < sys.nFree; ++i)
+    f[i] = RandSym(state);
 
   SECTION("uniform stiffness, achievable tolerance") {
     // tol above the measured fp32 floor (~3e-5 on this size): the solver must
@@ -426,7 +437,7 @@ TEST_CASE("femgpu: CG solves the reduced system to tolerance", "[femgpu][cg]") {
     const double res = ResidualNorm(sys, scales, x, f);
     INFO("iterations: " << stats.iterations << "  claimed: "
                         << stats.relResidual << "  fp64-verified: " << res);
-    CHECK(res < 1e-3);  // the floor is far better than this in practice
+    CHECK(res < 1e-3); // the floor is far better than this in practice
     CHECK(res < 2.0 * static_cast<double>(stats.relResidual) + 1e-9);
   }
 }
@@ -439,7 +450,8 @@ TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
   // the OC update reacts to energies, not raw displacements).
   std::string gerr;
   auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
-  if (!solver) SKIP("no usable compute device: " << gerr);
+  if (!solver)
+    SKIP("no usable compute device: " << gerr);
   INFO("device: " << solver->DeviceName());
 
   fem::FemMesh mesh = GenerateBoxMesh(10, 4, 4, 100, 40, 40);
@@ -482,7 +494,8 @@ TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
   for (size_t e = 0; e < cpuRes->density.size(); ++e) {
     const double d = std::abs(gpuRes->density[e] - cpuRes->density[e]);
     meanDiff += d;
-    if (d > 0.5) ++flipped;  // solid on one side, void on the other
+    if (d > 0.5)
+      ++flipped; // solid on one side, void on the other
   }
   meanDiff /= cpuRes->density.size();
   const double flippedFrac = double(flipped) / cpuRes->density.size();
@@ -507,7 +520,8 @@ TEST_CASE("femgpu bench: GPU CG vs CPU CG-IC on the bulky cube",
   std::string err;
   uint32_t state = 99;
   std::vector<float> f(sys.nFree);
-  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+  for (int i = 0; i < sys.nFree; ++i)
+    f[i] = RandSym(state);
 
   using clk = std::chrono::steady_clock;
   for (const char* name : {"jacobi", "multigrid"}) {
@@ -551,7 +565,8 @@ TEST_CASE("femgpu bench: GPU CG vs CPU CG-IC on the bulky cube",
       const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
       const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
       for (int a = 0; a < 30; ++a) {
-        if (dof[a] < 0) continue;
+        if (dof[a] < 0)
+          continue;
         for (int b = 0; b < 30; ++b)
           if (dof[b] >= 0)
             trip.emplace_back(dof[a], dof[b],
@@ -562,7 +577,8 @@ TEST_CASE("femgpu bench: GPU CG vs CPU CG-IC on the bulky cube",
     Eigen::SparseMatrix<double> K(sys.nFree, sys.nFree);
     K.setFromTriplets(trip.begin(), trip.end());
     Eigen::VectorXd F(sys.nFree);
-    for (int i = 0; i < sys.nFree; ++i) F(i) = f[i];
+    for (int i = 0; i < sys.nFree; ++i)
+      F(i) = f[i];
     Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
                              Eigen::Lower | Eigen::Upper,
                              Eigen::IncompleteCholesky<double>>
@@ -591,7 +607,8 @@ int JacobiIters(const gpu::SpmvSystem& sys, const std::vector<float>& scales,
     const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
     const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
     for (int a = 0; a < 30; ++a) {
-      if (dof[a] < 0) continue;
+      if (dof[a] < 0)
+        continue;
       for (int b = 0; b < 30; ++b)
         if (dof[b] >= 0)
           trip.emplace_back(dof[a], dof[b],
@@ -603,16 +620,16 @@ int JacobiIters(const gpu::SpmvSystem& sys, const std::vector<float>& scales,
   A.setFromTriplets(trip.begin(), trip.end());
   Eigen::ConjugateGradient<Eigen::SparseMatrix<double>,
                            Eigen::Lower | Eigen::Upper>
-      cg;  // default preconditioner = Jacobi
+      cg; // default preconditioner = Jacobi
   cg.setTolerance(tol);
   cg.setMaxIterations(maxIter);
   cg.compute(A);
-  const Eigen::VectorXd x = cg.solve(f);  // assignment forces evaluation
+  const Eigen::VectorXd x = cg.solve(f); // assignment forces evaluation
   (void)x;
   return static_cast<int>(cg.iterations());
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("femgpu MG0: rigid-body coarse space accelerates PCG",
           "[femgpu][mg0]") {
@@ -630,12 +647,13 @@ TEST_CASE("femgpu MG0: rigid-body coarse space accelerates PCG",
   REQUIRE(gpu::BuildMgSetup(FlatNodes(mesh), sys, dofs.map, mg, &err));
   INFO("aggregates: " << mg.nAgg << "  coarse DOFs: " << mg.nCoarse
                       << "  fine DOFs: " << mg.nFree);
-  CHECK(mg.nCoarse < mg.nFree / 4);  // a real coarsening, not a copy
+  CHECK(mg.nCoarse < mg.nFree / 4); // a real coarsening, not a copy
 
   // P must reproduce rigid translation exactly: a coarse vector holding
   // t=(1,0,0) for every aggregate prolongs to u_x=1 on every free DOF.
   Eigen::VectorXd tc = Eigen::VectorXd::Zero(mg.nCoarse);
-  for (int a = 0; a < mg.nAgg; ++a) tc[6 * a + 0] = 1.0;
+  for (int a = 0; a < mg.nAgg; ++a)
+    tc[6 * a + 0] = 1.0;
   const Eigen::VectorXd u = mg.P * tc;
   for (int n = 0; n < static_cast<int>(mesh.nodes.size()); ++n) {
     if (dofs.map[3 * n + 0] >= 0)
@@ -649,16 +667,17 @@ TEST_CASE("femgpu MG0: rigid-body coarse space accelerates PCG",
   const std::vector<float> scales = SimpScales(sys.nElems, 777);
   uint32_t state = 42;
   Eigen::VectorXd f(sys.nFree);
-  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+  for (int i = 0; i < sys.nFree; ++i)
+    f[i] = RandSym(state);
 
   Eigen::VectorXd x;
   gpu::MgRefStats stats;
-  REQUIRE(gpu::MgReferencePcg(sys, scales, mg, f, x, 1e-6, 2000, 3, &stats,
-                              &err));
+  REQUIRE(
+      gpu::MgReferencePcg(sys, scales, mg, f, x, 1e-6, 2000, 3, &stats, &err));
   const int jac = JacobiIters(sys, scales, f, 1e-6, 40000);
   INFO("MG iters: " << stats.iterations << "  Jacobi iters: " << jac);
   CHECK(stats.converged);
-  CHECK(stats.iterations * 4 < jac);  // conservative; the gate bar is 10x
+  CHECK(stats.iterations * 4 < jac); // conservative; the gate bar is 10x
 }
 
 TEST_CASE("femgpu MG0 gate: bulky cube, uniform / harsh / real SIMP fields",
@@ -678,12 +697,13 @@ TEST_CASE("femgpu MG0 gate: bulky cube, uniform / harsh / real SIMP fields",
   gpu::MgSetup mg;
   std::string err;
   REQUIRE(gpu::BuildMgSetup(FlatNodes(mesh), sys, dofs.map, mg, &err));
-  WARN("system: " << sys.nFree << " fine DOFs -> " << mg.nCoarse
-                  << " coarse (" << mg.nAgg << " aggregates)");
+  WARN("system: " << sys.nFree << " fine DOFs -> " << mg.nCoarse << " coarse ("
+                  << mg.nAgg << " aggregates)");
 
   uint32_t state = 42;
   Eigen::VectorXd f(sys.nFree);
-  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+  for (int i = 0; i < sys.nFree; ++i)
+    f[i] = RandSym(state);
 
   auto compare = [&](const char* name, const std::vector<float>& scales) {
     Eigen::VectorXd x;
@@ -764,7 +784,8 @@ TEST_CASE("femgpu bench: multigrid scaling on a fine mesh", "[.][mgscale]") {
   }
   uint32_t state = 42;
   std::vector<float> f(sys.nFree);
-  for (int i = 0; i < sys.nFree; ++i) f[i] = RandSym(state);
+  for (int i = 0; i < sys.nFree; ++i)
+    f[i] = RandSym(state);
 
   using clk = std::chrono::steady_clock;
   for (const char* name : {"jacobi", "multigrid"}) {
@@ -808,7 +829,8 @@ TEST_CASE("femgpu bench: full SIMP loop GPU vs CPU on the bulky cube",
   // (smooth filtered fields, warm starts) rather than harsh random scales.
   std::string gerr;
   auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
-  if (!solver) SKIP("no usable compute device: " << gerr);
+  if (!solver)
+    SKIP("no usable compute device: " << gerr);
   WARN("device: " << solver->DeviceName());
 
   const double L = 80.0;
@@ -822,7 +844,7 @@ TEST_CASE("femgpu bench: full SIMP loop GPU vs CPU on the bulky cube",
   load.direction = glm::dvec3(0, 0, -1);
   fem::TopoParams params;
   params.filterRadius = 18.0;
-  params.maxIterations = 6;  // enough to see steady-state per-iteration cost
+  params.maxIterations = 6; // enough to see steady-state per-iteration cost
 
   using clk = std::chrono::steady_clock;
   std::string err;
@@ -844,4 +866,4 @@ TEST_CASE("femgpu bench: full SIMP loop GPU vs CPU on the bulky cube",
                     << cpuRes->complianceHistory.back());
 }
 
-#endif  // HAVE_FEM_SOLVER
+#endif // HAVE_FEM_SOLVER

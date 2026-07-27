@@ -14,9 +14,9 @@ RefineFeature::RefineFeature(const std::string& name, uint64_t bodyId)
 }
 
 bool RefineFeature::Execute(RegenContext& ctx) {
-  const auto body = std::find_if(
-      ctx.bodies.begin(), ctx.bodies.end(),
-      [&](const Body& b) { return b.createdBy == bodyId; });
+  const auto body =
+      std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
+                   [&](const Body& b) { return b.createdBy == bodyId; });
   if (body == ctx.bodies.end()) {
     SetError("the body to refine no longer exists");
     return false;

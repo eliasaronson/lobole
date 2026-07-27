@@ -28,8 +28,8 @@ struct TopoJob {
   std::atomic<double> compliance{0.0};
   std::atomic<double> maxChange{0.0};
   std::atomic<double> volumeFraction{0.0};
-  std::atomic<bool> cancel{false};  // main sets -> worker stops (keeps best)
-  std::atomic<bool> done{false};    // worker sets when finished/cancelled/failed
+  std::atomic<bool> cancel{false}; // main sets -> worker stops (keeps best)
+  std::atomic<bool> done{false};   // worker sets when finished/cancelled/failed
 
   // The immutable input the worker optimizes over; the result/error it writes.
   // Read by the main thread only after `done` (and the join).
@@ -42,7 +42,7 @@ struct TopoJob {
   // used only by the worker — Vulkan allows the handoff as long as a single
   // thread uses the context at a time. Null = the built-in CPU path.
   std::unique_ptr<fem::TopoLinearSolver> solver;
-  std::string solverName;  // "gpu: <device>" or "cpu (<why>)" — set pre-launch
+  std::string solverName; // "gpu: <device>" or "cpu (<why>)" — set pre-launch
   std::chrono::steady_clock::time_point started;
 
   std::thread thread;
@@ -51,8 +51,9 @@ struct TopoJob {
   // std::thread that is destroyed would std::terminate the process.
   ~TopoJob() {
     cancel.store(true);
-    if (thread.joinable()) thread.join();
+    if (thread.joinable())
+      thread.join();
   }
 };
 
-}  // namespace ui
+} // namespace ui

@@ -31,7 +31,8 @@ public:
   void Shutdown();
 
   // Replace the field geometry (indexed triangle list). Empty clears it.
-  void SetMesh(std::vector<FieldVertex> vertices, std::vector<uint32_t> indices) {
+  void SetMesh(std::vector<FieldVertex> vertices,
+               std::vector<uint32_t> indices) {
     m_vertices = std::move(vertices);
     m_indices = std::move(indices);
     m_dirty = true;
@@ -45,7 +46,10 @@ public:
   void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
   void SetDeformScale(float scale) { m_deformScale = scale; }
   void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) {
-    m_vx = x; m_vy = y; m_vw = w; m_vh = h;
+    m_vx = x;
+    m_vy = y;
+    m_vw = w;
+    m_vh = h;
   }
 
   void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
@@ -69,7 +73,8 @@ private:
   bool CreatePipeline();
   uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props);
   VkShaderModule LoadShader(const std::string& spvName);
-  void EnsureCapacity(DynamicBuffer& buf, VkDeviceSize bytes, VkBufferUsageFlags usage);
+  void EnsureCapacity(DynamicBuffer& buf, VkDeviceSize bytes,
+                      VkBufferUsageFlags usage);
   void DestroyDynamic(DynamicBuffer& buf);
 
   VkDevice m_device = VK_NULL_HANDLE;
@@ -86,7 +91,8 @@ private:
   VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
 
   DynamicBuffer m_uniformBuffers[kFramesInFlight];
-  VkDescriptorSet m_descriptorSets[kFramesInFlight] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+  VkDescriptorSet m_descriptorSets[kFramesInFlight] = {VK_NULL_HANDLE,
+                                                       VK_NULL_HANDLE};
   DynamicBuffer m_vertexBuffers[kFramesInFlight];
   DynamicBuffer m_indexBuffers[kFramesInFlight];
 

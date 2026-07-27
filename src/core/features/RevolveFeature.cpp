@@ -10,10 +10,7 @@
 
 RevolveFeature::RevolveFeature(const std::string& name, uint64_t sketchId,
                                double angleDeg, ExtrudeMode mode, bool reversed)
-    : sketchId(sketchId),
-      angleDeg(angleDeg),
-      reversed(reversed),
-      mode(mode) {
+    : sketchId(sketchId), angleDeg(angleDeg), reversed(reversed), mode(mode) {
   m_name = name;
 }
 

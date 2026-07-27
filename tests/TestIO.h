@@ -3,8 +3,8 @@
 // Test-only adapter for the DocumentIO save/load API. Production code uses the
 // std::expected<T, std::string> interface directly (the error is then non-
 // discardable); tests just need "did it work / give me the document", so these
-// thin wrappers unwrap back to the old bool / unique_ptr shape and keep the many
-// call sites terse. They still exercise the real DocumentIO functions.
+// thin wrappers unwrap back to the old bool / unique_ptr shape and keep the
+// many call sites terse. They still exercise the real DocumentIO functions.
 
 #include "core/io/Serialization.h"
 
@@ -39,4 +39,4 @@ inline bool SaveDrawing(const DrawingDocument& drawing,
   return DocumentIO::SaveDrawing(drawing, path).has_value();
 }
 
-}  // namespace testio
+} // namespace testio

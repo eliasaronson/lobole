@@ -34,7 +34,8 @@ bool Autosaver::HasNewerAutosave(const std::string& projectPath) {
     return false;
   if (projectPath.empty() || !fs::exists(projectPath, ec))
     return true;
-  return fs::last_write_time(sidecar, ec) > fs::last_write_time(projectPath, ec);
+  return fs::last_write_time(sidecar, ec) >
+         fs::last_write_time(projectPath, ec);
 }
 
 void Autosaver::Clear(const std::string& projectPath) {
@@ -62,12 +63,14 @@ bool Autosaver::MaybeSave(const Document& doc, const std::string& projectPath,
   // sidecar intact; rename on the same filesystem is atomic.
   const fs::path tmp = target.string() + ".tmp";
   if (auto r = DocumentIO::Save(doc, tmp.string()); !r) {
-    if (error) *error = r.error();
+    if (error)
+      *error = r.error();
     return false;
   }
   fs::rename(tmp, target, ec);
   if (ec) {
-    if (error) *error = "autosave rename failed: " + ec.message();
+    if (error)
+      *error = "autosave rename failed: " + ec.message();
     fs::remove(tmp, ec);
     return false;
   }

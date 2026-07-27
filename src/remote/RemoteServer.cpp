@@ -2,34 +2,34 @@
 
 #include "cad/CADKernel.h"
 #include "cad/CADMaterials.h"
-#include "render/Camera.h"
 #include "cad/FaceSelector.h"
-#include "common/Logger.h"
 #include "cad/MeshExport.h"
-#include "render/RayTracingRenderer.h"
-#include "render/MeshRenderer.h"
-#include "core/io/Autosaver.h"
-#include "core/io/Checkpoints.h"
+#include "common/Logger.h"
 #include "core/Expression.h"
-#include "core/io/GitVault.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/drawing/DrawingExport.h"
+#include "core/features/SketchFeature.h"
+#include "core/io/Autosaver.h"
+#include "core/io/Checkpoints.h"
+#include "core/io/GitVault.h"
 #include "core/io/Serialization.h"
-#include "remote/RpcParams.h"
+#include "core/sketch/SketchSolver.h"
+#include "remote/RemoteAssembly.h"
 #include "remote/RemoteConfigurations.h"
-#include "remote/RemoteSimulation.h"
+#include "remote/RemoteDrawings.h"
 #include "remote/RemoteInspection.h"
 #include "remote/RemoteModeling.h"
-#include "remote/RemoteDrawings.h"
-#include "remote/RemoteAssembly.h"
 #include "remote/RemoteProject.h"
-#include "core/features/SketchFeature.h"
-#include "core/sketch/SketchSolver.h"
+#include "remote/RemoteSimulation.h"
+#include "remote/RpcParams.h"
+#include "render/Camera.h"
+#include "render/MeshRenderer.h"
+#include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
-#include "ui/SelectionPipeline.h"  // ResolveFaceItem (U1b)
-#include "ui/SketchInteraction.h"  // FaceElementRef
+#include "ui/SelectionPipeline.h" // ResolveFaceItem (U1b)
+#include "ui/SketchInteraction.h" // FaceElementRef
 
 #include <algorithm>
 #include <fstream>
@@ -41,14 +41,18 @@
 
 #include <cstring>
 
-// --- Sockets: BSD on Linux/mac, Winsock on Windows (loopback JSON-RPC only) ---
+// --- Sockets: BSD on Linux/mac, Winsock on Windows (loopback JSON-RPC only)
+// ---
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <ws2tcpip.h>
 namespace {
 // Winsock needs global init; a static object brackets the process lifetime.
 struct WinsockInit {
-  WinsockInit() { WSADATA d; WSAStartup(MAKEWORD(2, 2), &d); }
+  WinsockInit() {
+    WSADATA d;
+    WSAStartup(MAKEWORD(2, 2), &d);
+  }
   ~WinsockInit() { WSACleanup(); }
 } g_winsockInit;
 inline int SockClose(int fd) { return ::closesocket(fd); }
@@ -109,7 +113,8 @@ bool RemoteServer::Start(uint16_t port, ImGuiTestEngine* engine) {
   // must exit non-zero, not serve nothing); the thread only accepts.
   m_listenFd = ::socket(AF_INET, SOCK_STREAM, 0);
   int opt = 1;
-  // Winsock's optval is const char*; POSIX takes const void* (accepts this too).
+  // Winsock's optval is const char*; POSIX takes const void* (accepts this
+  // too).
   ::setsockopt(m_listenFd, SOL_SOCKET, SO_REUSEADDR,
                reinterpret_cast<const char*>(&opt), sizeof(opt));
   sockaddr_in addr{};
@@ -169,7 +174,7 @@ void RemoteServer::ReaderThread() {
     if (client < 0)
       break;
     std::lock_guard<std::mutex> lock(m_clientsMutex);
-    if (m_clients.size() >= 8) {  // runaway-connection backstop
+    if (m_clients.size() >= 8) { // runaway-connection backstop
       SockClose(client);
       continue;
     }
@@ -253,7 +258,8 @@ json Vec3ToJson(const glm::vec3& v) { return json::array({v.x, v.y, v.z}); }
 // Levenshtein distance, for the "did you mean" hint on a rejected param key.
 size_t EditDistance(const std::string& a, const std::string& b) {
   std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
-  for (size_t j = 0; j <= b.size(); j++) prev[j] = j;
+  for (size_t j = 0; j <= b.size(); j++)
+    prev[j] = j;
   for (size_t i = 1; i <= a.size(); i++) {
     cur[0] = i;
     for (size_t j = 1; j <= b.size(); j++) {
@@ -280,9 +286,13 @@ std::string UnknownParamError(const std::string& method,
     size_t bestDist = 3; // only suggest a genuinely near miss
     for (const std::string& k : accepted) {
       const size_t d = EditDistance(unknown[i], k);
-      if (d < bestDist) { bestDist = d; best = k; }
+      if (d < bestDist) {
+        bestDist = d;
+        best = k;
+      }
     }
-    if (!best.empty()) msg += " (did you mean '" + best + "'?)";
+    if (!best.empty())
+      msg += " (did you mean '" + best + "'?)";
   }
   msg += " for '" + method + "'.";
   if (!accepted.empty()) {
@@ -304,27 +314,41 @@ ImGuiKeyChord ParseChord(const std::string& text, std::string* error) {
     size_t end = text.find('+', start);
     std::string token = text.substr(
         start, end == std::string::npos ? std::string::npos : end - start);
-    if (token == "Ctrl") chord |= ImGuiMod_Ctrl;
-    else if (token == "Shift") chord |= ImGuiMod_Shift;
-    else if (token == "Alt") chord |= ImGuiMod_Alt;
+    if (token == "Ctrl")
+      chord |= ImGuiMod_Ctrl;
+    else if (token == "Shift")
+      chord |= ImGuiMod_Shift;
+    else if (token == "Alt")
+      chord |= ImGuiMod_Alt;
     else if (token.size() == 1 && token[0] >= 'A' && token[0] <= 'Z')
       chord |= ImGuiKey_A + (token[0] - 'A');
     else if (token.size() == 1 && token[0] >= '0' && token[0] <= '9')
       chord |= ImGuiKey_0 + (token[0] - '0');
-    else if (token == "Enter") chord |= ImGuiKey_Enter;
-    else if (token == "Escape") chord |= ImGuiKey_Escape;
-    else if (token == "Delete") chord |= ImGuiKey_Delete;
-    else if (token == "Tab") chord |= ImGuiKey_Tab;
-    else if (token == "Space") chord |= ImGuiKey_Space;
-    else if (token == "Left") chord |= ImGuiKey_LeftArrow;
-    else if (token == "Right") chord |= ImGuiKey_RightArrow;
-    else if (token == "Up") chord |= ImGuiKey_UpArrow;
-    else if (token == "Down") chord |= ImGuiKey_DownArrow;
+    else if (token == "Enter")
+      chord |= ImGuiKey_Enter;
+    else if (token == "Escape")
+      chord |= ImGuiKey_Escape;
+    else if (token == "Delete")
+      chord |= ImGuiKey_Delete;
+    else if (token == "Tab")
+      chord |= ImGuiKey_Tab;
+    else if (token == "Space")
+      chord |= ImGuiKey_Space;
+    else if (token == "Left")
+      chord |= ImGuiKey_LeftArrow;
+    else if (token == "Right")
+      chord |= ImGuiKey_RightArrow;
+    else if (token == "Up")
+      chord |= ImGuiKey_UpArrow;
+    else if (token == "Down")
+      chord |= ImGuiKey_DownArrow;
     else {
-      if (error) *error = "unknown key token: " + token;
+      if (error)
+        *error = "unknown key token: " + token;
       return 0;
     }
-    if (end == std::string::npos) break;
+    if (end == std::string::npos)
+      break;
     start = end + 1;
   }
   return chord;
@@ -339,8 +363,8 @@ ImVec2 FractionToPos(const json& params) {
 // Snap the camera to a named standard view (optionally fitting first). Shared
 // by the `view` RPC and the raw `screenshot` handler so a raw screenshot(view=)
 // orients the same way the MCP wrapper does. Returns false for an unknown name.
-// Directions follow the default planes (Front = XY, normal +Z, Y up); top/bottom
-// pick the up the camera reaches by tilting over from front.
+// Directions follow the default planes (Front = XY, normal +Z, Y up);
+// top/bottom pick the up the camera reaches by tilting over from front.
 bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit) {
   static const std::map<std::string, std::pair<glm::vec3, glm::vec3>> kViews = {
       {"front", {{0, 0, 1}, {0, 1, 0}}},
@@ -351,10 +375,12 @@ bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit) {
       {"bottom", {{0, -1, 0}, {0, 0, 1}}},
       {"iso", {glm::normalize(glm::vec3(1, 1, 1)), {0, 1, 0}}}};
   auto it = kViews.find(name);
-  if (it == kViews.end()) return false;
+  if (it == kViews.end())
+    return false;
   // Fit runs first: it re-aims at the document center (SetTarget), so the snap
   // must set the orientation last.
-  if (fit) ui::FitCameraToDocument(state);
+  if (fit)
+    ui::FitCameraToDocument(state);
   state.camera->SnapToView(it->second.first, it->second.second);
   return true;
 }
@@ -372,25 +398,24 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // assembly tab is active, `doc` is null, so fail with a clear message rather
   // than dereferencing null.
   static const std::set<std::string> kNoPartDoc = {
-      "ping",         "list_parts",       "add_part",
-      "add_assembly", "set_active_part",  "delete_part", "rename_part",
+      "ping", "list_parts", "add_part", "add_assembly", "set_active_part",
+      "delete_part", "rename_part",
       // Configuration RPCs target the active tab: part-doc handling above,
       // assembly handling below. Listed here so they are allowed on an
       // assembly tab (where doc is null).
       "add_configuration", "remove_configuration", "list_configurations",
-      "set_configuration", "set_active_configuration",
-      "create_drawing", "list_drawings", "add_drawing_view",
-      "remove_drawing_view", "update_drawing", "list_drawing_views",
-      "export_drawing", "list_drawing_geometry", "add_drawing_dim",
-      "remove_drawing_dim", "list_drawing_dims",
-      "new_project",  "save_project",     "open_project",
+      "set_configuration", "set_active_configuration", "create_drawing",
+      "list_drawings", "add_drawing_view", "remove_drawing_view",
+      "update_drawing", "list_drawing_views", "export_drawing",
+      "list_drawing_geometry", "add_drawing_dim", "remove_drawing_dim",
+      "list_drawing_dims", "new_project", "save_project", "open_project",
       "add_occurrence", "remove_occurrence", "list_occurrences",
       "set_occurrence_transform", "set_occurrence_visible",
-      "set_occurrence_fixed", "rename_occurrence",
-      "add_mate", "set_mate", "remove_mate", "list_mates", "select_mate",
-      "select_occurrence", "solve_assembly", "bom", "export_bom",
-      "edit_in_context", "add_exploded_view", "remove_exploded_view",
-      "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
+      "set_occurrence_fixed", "rename_occurrence", "add_mate", "set_mate",
+      "remove_mate", "list_mates", "select_mate", "select_occurrence",
+      "solve_assembly", "bom", "export_bom", "edit_in_context",
+      "add_exploded_view", "remove_exploded_view", "list_exploded_views",
+      "set_explode_step", "auto_explode", "set_explode",
       // export_visual works on a part OR an assembly (occurrence walk).
       "export_visual",
       // interference runs on occurrence pairs on an assembly tab;
@@ -401,12 +426,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       "undo", "redo",
       // Camera / rendering act on the viewport, not the part document, so they
       // work on an assembly tab too.
-      "view",         "fit_view",         "screenshot",
-      "set_render_options"};
+      "view", "fit_view", "screenshot", "set_render_options"};
   // UI actions (item_click, viewport_click, …) fall through to QueueUiAction,
   // not HandleSemantic, so don't guard them here — they drive the assembly tab.
   if (!doc && !kNoPartDoc.count(m) && !IsUiAction(m)) {
-    const char* kind = state.assembly ? "an assembly"
+    const char* kind = state.assembly  ? "an assembly"
                        : state.drawing ? "a drawing"
                                        : "not a part";
     throw std::runtime_error("the active document is " + std::string(kind) +
@@ -419,8 +443,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (json cfgOut; remote::HandleConfigurationRpc(state, *doc, m, p, cfgOut))
       return cfgOut;
   } else if (state.assembly) {
-    if (json cfgOut;
-        remote::HandleAssemblyConfigurationRpc(state, *state.assembly, m, p, cfgOut))
+    if (json cfgOut; remote::HandleAssemblyConfigurationRpc(
+            state, *state.assembly, m, p, cfgOut))
       return cfgOut;
   }
 
@@ -472,23 +496,23 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         selection = {
             {"mesh", mesh},
             {"face", face},
-            {"normal", Vec3ToJson(state.faceSelector->GetFaceNormal(mesh, face))},
-            {"center", Vec3ToJson(state.faceSelector->GetFaceCenter(mesh, face))}};
+            {"normal",
+             Vec3ToJson(state.faceSelector->GetFaceNormal(mesh, face))},
+            {"center",
+             Vec3ToJson(state.faceSelector->GetFaceCenter(mesh, face))}};
       }
     }
     // The typed Selection (U1): every item, stable refs only.
     json selectionItems = json::array();
     for (const ui::SelectionItem& it : state.selection.items) {
-      const char* kind = it.kind == ui::SelectionItem::Kind::Face  ? "face"
-                         : it.kind == ui::SelectionItem::Kind::Edge ? "edge"
-                         : it.kind == ui::SelectionItem::Kind::Body ? "body"
-                         : it.kind == ui::SelectionItem::Kind::Feature
-                             ? "feature"
-                         : it.kind == ui::SelectionItem::Kind::Occurrence
-                             ? "occurrence"
-                         : it.kind == ui::SelectionItem::Kind::Mate
-                             ? "mate"
-                             : "sketch_region";
+      const char* kind =
+          it.kind == ui::SelectionItem::Kind::Face         ? "face"
+          : it.kind == ui::SelectionItem::Kind::Edge       ? "edge"
+          : it.kind == ui::SelectionItem::Kind::Body       ? "body"
+          : it.kind == ui::SelectionItem::Kind::Feature    ? "feature"
+          : it.kind == ui::SelectionItem::Kind::Occurrence ? "occurrence"
+          : it.kind == ui::SelectionItem::Kind::Mate       ? "mate"
+                                                           : "sketch_region";
       json entry = {{"kind", kind}};
       if (it.id != 0)
         entry["id"] = it.id;
@@ -537,17 +561,20 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     std::string error;
     bool ok = ui::RenderStillBlocking(state, width, height, samples, path, seed,
                                       ground, &error);
-    return {{"ok", ok},        {"path", path},   {"width", width},
+    return {{"ok", ok},         {"path", path},       {"width", width},
             {"height", height}, {"samples", samples}, {"error", error}};
   }
   // Part-document domain modules (disjoint method sets; order doesn't matter).
   if (doc) {
-    if (auto r = remote::HandleModelingRpc(state, *doc, m, p)) return *r;
-    if (auto r = remote::HandleSimulationRpc(state, *doc, m, p)) return *r;
+    if (auto r = remote::HandleModelingRpc(state, *doc, m, p))
+      return *r;
+    if (auto r = remote::HandleSimulationRpc(state, *doc, m, p))
+      return *r;
   }
   // Inspection takes a nullable doc: interference works on assembly
   // occurrence pairs, list_elements/measure on any part via `part`.
-  if (auto r = remote::HandleInspectionRpc(state, doc, m, p)) return *r;
+  if (auto r = remote::HandleInspectionRpc(state, doc, m, p))
+    return *r;
   if (m == "undo") {
     // Global undo (Phase V): the active tab's stack OR the cross-tab
     // project-variable stack, whichever was most recently mutated.
@@ -563,9 +590,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     ui::EnsureParts(state);
     json arr = json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
-      const char* type = state.parts[i].kind == ui::DocKind::Assembly ? "assembly"
-                         : state.parts[i].kind == ui::DocKind::Drawing ? "drawing"
-                                                                       : "part";
+      const char* type =
+          state.parts[i].kind == ui::DocKind::Assembly  ? "assembly"
+          : state.parts[i].kind == ui::DocKind::Drawing ? "drawing"
+                                                        : "part";
       json entry = {{"name", state.parts[i].name},
                     {"index", i},
                     {"id", state.parts[i].id},
@@ -599,18 +627,29 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (sel.is_number_integer() || sel.is_number_unsigned()) {
       const uint64_t v = sel.get<uint64_t>();
       for (size_t i = 0; i < state.parts.size(); i++)
-        if (state.parts[i].id == v) { slot = static_cast<int>(i); break; }
-      if (slot < 0 && v < state.parts.size()) slot = static_cast<int>(v);
+        if (state.parts[i].id == v) {
+          slot = static_cast<int>(i);
+          break;
+        }
+      if (slot < 0 && v < state.parts.size())
+        slot = static_cast<int>(v);
     } else if (sel.is_string()) {
       const std::string s = sel.get<std::string>();
       for (size_t i = 0; i < state.parts.size(); i++)
-        if (state.parts[i].name == s) { slot = static_cast<int>(i); break; }
+        if (state.parts[i].name == s) {
+          slot = static_cast<int>(i);
+          break;
+        }
       if (slot < 0) {
         try { // numeric string: stable id, then slot index
           const uint64_t v = std::stoull(s);
           for (size_t i = 0; i < state.parts.size(); i++)
-            if (state.parts[i].id == v) { slot = static_cast<int>(i); break; }
-          if (slot < 0 && v < state.parts.size()) slot = static_cast<int>(v);
+            if (state.parts[i].id == v) {
+              slot = static_cast<int>(i);
+              break;
+            }
+          if (slot < 0 && v < state.parts.size())
+            slot = static_cast<int>(v);
         } catch (...) {
         }
       }
@@ -620,15 +659,17 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                "' — pass a part name, stable id or slot index "
                                "(see list_parts)");
     const std::string newName = p.at("new_name").get<std::string>();
-    if (newName.empty()) throw std::runtime_error("new_name must be non-empty");
+    if (newName.empty())
+      throw std::runtime_error("new_name must be non-empty");
     state.parts[slot].name = newName;
-    return {{"index", slot},
-            {"name", newName},
-            {"id", state.parts[slot].id}};
+    return {{"index", slot}, {"name", newName}, {"id", state.parts[slot].id}};
   }
-  if (auto r = remote::HandleDrawingRpc(state, m, p)) return *r;
-  if (auto r = remote::HandleAssemblyRpc(state, m, p)) return *r;
-  if (auto r = remote::HandleProjectRpc(state, m, p)) return *r;
+  if (auto r = remote::HandleDrawingRpc(state, m, p))
+    return *r;
+  if (auto r = remote::HandleAssemblyRpc(state, m, p))
+    return *r;
+  if (auto r = remote::HandleProjectRpc(state, m, p))
+    return *r;
   if (m == "fit_view") {
     ui::FitCameraToDocument(state);
     return json::object();
@@ -651,7 +692,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!state.meshRenderer)
       throw std::runtime_error(
           "render options need a renderer — unavailable in --headless");
-    if (p.contains("shadows")) state.showShadows = p.at("shadows").get<bool>();
+    if (p.contains("shadows"))
+      state.showShadows = p.at("shadows").get<bool>();
     if (p.contains("shadow_map")) {
       const int size = p.at("shadow_map").get<int>();
       if (size != 1024 && size != 2048)
@@ -684,13 +726,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // Stable element name (list_elements), e.g. {"element": "2/g4"} — no
       // volatile mesh ids needed. Names are unique per document (prefixed by
       // the creating feature), so the body scan is unambiguous.
-      if (!state.document) throw std::runtime_error("no document");
+      if (!state.document)
+        throw std::runtime_error("no document");
       const std::string el = p.at("element").get<std::string>();
       const auto& bodies = state.document->GetBodies();
       bool found = false;
       for (size_t i = 0; i < bodies.size() && !found; ++i) {
         for (const auto& [idx, name] : bodies[i].elementMap.names) {
-          if (name != el) continue;
+          if (name != el)
+            continue;
           if (i >= state.documentMeshes.size())
             throw std::runtime_error("body has no render mesh yet");
           mesh = state.documentMeshes[i].meshId;
@@ -716,24 +760,26 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       const auto ref = ui::FaceElementRef(state, mesh, face);
       if (!ref)
         throw std::runtime_error("face has no stable name");
-      state.selection.Replace(
-          {ui::SelectionItem::Kind::Face, 0, *ref});
+      state.selection.Replace({ui::SelectionItem::Kind::Face, 0, *ref});
     }
-    return {{"normal", Vec3ToJson(state.faceSelector->GetFaceNormal(mesh, face))},
-            {"center", Vec3ToJson(state.faceSelector->GetFaceCenter(mesh, face))}};
+    return {
+        {"normal", Vec3ToJson(state.faceSelector->GetFaceNormal(mesh, face))},
+        {"center", Vec3ToJson(state.faceSelector->GetFaceCenter(mesh, face))}};
   }
   if (m == "set_camera") {
     // Direct camera control (the view/fit RPCs only snap to standard views):
     // params: {target?: [x,y,z], direction?: [x,y,z] (unit offset from target
     // toward the camera), up?: [x,y,z], distance?: mm}. Applied in that
     // order; each field optional. Works headless (camera state only).
-    if (!state.camera) throw std::runtime_error("no camera");
+    if (!state.camera)
+      throw std::runtime_error("no camera");
     Camera& cam = *state.camera;
     auto vec3 = [](const json& a) {
       return glm::vec3(a.at(0).get<float>(), a.at(1).get<float>(),
                        a.at(2).get<float>());
     };
-    if (p.contains("target")) cam.SetTarget(vec3(p["target"]));
+    if (p.contains("target"))
+      cam.SetTarget(vec3(p["target"]));
     if (p.contains("direction")) {
       const glm::vec3 dir = vec3(p["direction"]);
       if (glm::length(dir) < 1e-9f)
@@ -744,7 +790,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     }
     if (p.contains("distance")) {
       const float d = p.at("distance").get<float>();
-      if (d <= 0.0f) throw std::runtime_error("distance must be positive");
+      if (d <= 0.0f)
+        throw std::runtime_error("distance must be positive");
       cam.SetMaxDistance(std::max(20.0f * d, 1000.0f));
       cam.SetDistance(d);
     }
@@ -777,10 +824,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 }
 
 bool RemoteServer::IsUiAction(const std::string& method) {
-  static const char* kActions[] = {"menu_click",        "item_click",
-                                   "item_double_click", "item_input",
-                                   "viewport_click",    "viewport_drag",
-                                   "key_press",         "scroll"};
+  static const char* kActions[] = {
+      "menu_click",     "item_click",    "item_double_click", "item_input",
+      "viewport_click", "viewport_drag", "key_press",         "scroll"};
   for (const char* a : kActions)
     if (method == a)
       return true;
@@ -819,9 +865,11 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     m_uiAction = [p](ImGuiTestContext* ctx) {
       const bool ctrl = p.value("ctrl", false);
       ctx->MouseMoveToPos(FractionToPos(p));
-      if (ctrl) ctx->KeyDown(ImGuiMod_Ctrl);
+      if (ctrl)
+        ctx->KeyDown(ImGuiMod_Ctrl);
       ctx->MouseClick(p.value("button", 0));
-      if (ctrl) ctx->KeyUp(ImGuiMod_Ctrl);
+      if (ctrl)
+        ctx->KeyUp(ImGuiMod_Ctrl);
     };
   } else if (m == "viewport_drag") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
@@ -832,18 +880,23 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       const bool ctrl = p.value("ctrl", false);
       const bool shift = p.value("shift", false);
       ctx->MouseMoveToPos(from);
-      if (ctrl) ctx->KeyDown(ImGuiMod_Ctrl);
-      if (shift) ctx->KeyDown(ImGuiMod_Shift);
+      if (ctrl)
+        ctx->KeyDown(ImGuiMod_Ctrl);
+      if (shift)
+        ctx->KeyDown(ImGuiMod_Shift);
       ctx->MouseDown(button);
       ctx->MouseMoveToPos(to);
       ctx->MouseUp(button);
-      if (shift) ctx->KeyUp(ImGuiMod_Shift);
-      if (ctrl) ctx->KeyUp(ImGuiMod_Ctrl);
+      if (shift)
+        ctx->KeyUp(ImGuiMod_Shift);
+      if (ctrl)
+        ctx->KeyUp(ImGuiMod_Ctrl);
     };
   } else if (m == "key_press") {
     std::string error;
     ImGuiKeyChord chord = ParseChord(p.at("chord").get<std::string>(), &error);
-    if (chord == 0) return false;
+    if (chord == 0)
+      return false;
     m_uiAction = [chord](ImGuiTestContext* ctx) { ctx->KeyPress(chord); };
   } else if (m == "scroll") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
@@ -867,7 +920,8 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
 
   // Store a finished async topology run (TO2) even if the client never polls
   // study_status — this is the app's per-tick main-thread join point.
-  if (state.document) ui::PollTopologyRun(state, *state.document);
+  if (state.document)
+    ui::PollTopologyRun(state, *state.document);
 
   // Finish an in-flight UI action once the engine is done with it
   if (m_uiActionInFlight && ImGuiTestEngine_IsTestQueueEmpty(m_engine)) {
@@ -908,14 +962,15 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         // used only recognized keys; a *misspelled required* key instead throws
         // "key not found" before any mutation.
         if (auto unknown = params.UnknownKeys(); !unknown.empty()) {
-          RespondError(request.client, request.id,
-                       UnknownParamError(request.method, unknown,
-                                         params.SeenKeys()));
+          RespondError(
+              request.client, request.id,
+              UnknownParamError(request.method, unknown, params.SeenKeys()));
           continue;
         }
         // Session recording (S4): successful semantic requests only — a
         // throwing call mutates nothing, so replay equivalence holds without
-        // it (UI actions/screenshots are also skipped: not headless-replayable).
+        // it (UI actions/screenshots are also skipped: not
+        // headless-replayable).
         if (m_recording.is_open() && request.method != "ping") {
           m_recording << json{{"method", request.method},
                               {"params", request.params}}
@@ -936,9 +991,9 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         // Optional `view` reorients + fits before the capture, matching the
         // MCP wrapper so raw callers get the oriented shot too.
         if (request.params.contains("view")) {
-          const std::string view =
-              request.params.at("view").get<std::string>();
-          if (!ApplyStandardView(state, view, request.params.value("fit", true))) {
+          const std::string view = request.params.at("view").get<std::string>();
+          if (!ApplyStandardView(state, view,
+                                 request.params.value("fit", true))) {
             RespondError(request.client, request.id, "unknown view: " + view);
             continue;
           }

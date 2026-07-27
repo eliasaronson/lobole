@@ -43,7 +43,9 @@ struct SourceRef {
   uint64_t sourceId = 0;
   int edgeIndex = -1; // sharp/smooth/sewn: the generating 3D edge
   int faceIndex = -1; // outline: the silhouette's generating face
-  [[nodiscard]] bool IsResolved() const { return edgeIndex >= 0 || faceIndex >= 0; }
+  [[nodiscard]] bool IsResolved() const {
+    return edgeIndex >= 0 || faceIndex >= 0;
+  }
 };
 
 struct ProjectedCurve {
@@ -67,9 +69,9 @@ struct ProjectedCurve {
 struct ProjectionResult {
   std::vector<ProjectedCurve> curves;
   struct Stats {
-    double updateMs = 0.0; // HLRBRep Update(): outline building
-    double hideMs = 0.0;   // HLRBRep Hide(): visibility classification
-    int dsEdges = 0;       // edges in the HLR data structure
+    double updateMs = 0.0;     // HLRBRep Update(): outline building
+    double hideMs = 0.0;       // HLRBRep Hide(): visibility classification
+    int dsEdges = 0;           // edges in the HLR data structure
     int unresolvedSources = 0; // curves whose SourceRef could not be traced
   } stats;
 };
@@ -86,10 +88,9 @@ struct ProjectionOptions {
 // HLR pass across all bodies so occlusion is global. Returns std::nullopt and
 // sets *error (when non-null) on failure — HLR exceptions are caught here,
 // never propagated (per-view errors keep last-good geometry upstream).
-std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies,
-                                            const glm::dvec3& viewDir,
-                                            const glm::dvec3& up,
-                                            const ProjectionOptions& options,
-                                            std::string* error);
+std::optional<ProjectionResult>
+ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
+            const glm::dvec3& up, const ProjectionOptions& options,
+            std::string* error);
 
-}  // namespace drawing
+} // namespace drawing

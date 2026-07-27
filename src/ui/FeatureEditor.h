@@ -17,17 +17,17 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
 // armed SlotPickState fills. One global enum — slots are feature-specific
 // but ids need only be unique.
 enum class PickSlot : int {
-  ExtrudeEndFace,   // up-to-face target (Face)
-  BooleanTarget,    // Body
-  BooleanTool,      // Body
-  PatternSource,    // Body
-  ShellBody,        // Body
-  ShellOpenFaces,   // Face, multi
-  DraftFaces,       // Face, multi
-  ExtrudeRegions,   // U2: sketch regions, multi
-  RevolveRegions,   // U2: sketch regions, multi
-  RibBody,          // Body (0 = nearest overlapping)
-  ThreadFace,       // a cylindrical Face
+  ExtrudeEndFace, // up-to-face target (Face)
+  BooleanTarget,  // Body
+  BooleanTool,    // Body
+  PatternSource,  // Body
+  ShellBody,      // Body
+  ShellOpenFaces, // Face, multi
+  DraftFaces,     // Face, multi
+  ExtrudeRegions, // U2: sketch regions, multi
+  RevolveRegions, // U2: sketch regions, multi
+  RibBody,        // Body (0 = nearest overlapping)
+  ThreadFace,     // a cylindrical Face
 };
 
 // The selection pipeline routes a resolved pick to the armed slot here:

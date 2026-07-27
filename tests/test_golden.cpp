@@ -1,17 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <filesystem>
-#include <map>
 #include <fstream>
+#include <map>
 #include <vector>
 
 using Catch::Matchers::WithinRel;
@@ -47,8 +47,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
   std::vector<fs::path> goldens;
   for (const auto& entry : fs::directory_iterator(dir)) {
     const fs::path& p = entry.path();
-    if (p.extension() == ".json" &&
-        !p.stem().string().ends_with(".expect"))
+    if (p.extension() == ".json" && !p.stem().string().ends_with(".expect"))
       goldens.push_back(p);
   }
   std::sort(goldens.begin(), goldens.end());
@@ -119,8 +118,8 @@ TEST_CASE("Directory format: editing one feature touches one file",
           "[dirformat]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 1, 1, 1));
-  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2, 1,
-                                              1));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2, 1, 1));
   const fs::path proj = fs::temp_directory_path() / "onefile.dsgn";
   fs::remove_all(proj);
   std::string error;

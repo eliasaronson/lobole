@@ -1,8 +1,8 @@
 #pragma once
 
 #include "core/AxisRef.h"
-#include "core/features/ExtrudeFeature.h" // ExtrudeMode
 #include "core/Feature.h"
+#include "core/features/ExtrudeFeature.h" // ExtrudeMode
 
 #include <cstdint>
 #include <string>

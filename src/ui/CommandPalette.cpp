@@ -66,10 +66,8 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
       [](AppState& s) { CreateThread(s); });
   const size_t sketches =
       state.document ? SketchFeatureCount(*state.document) : 0;
-  const bool hasPathLike =
-      state.document && HasCurveOrSketch(*state.document);
-  add("Create: 3D Curve", nullptr, idle,
-      [](AppState& s) { CreateCurve3D(s); });
+  const bool hasPathLike = state.document && HasCurveOrSketch(*state.document);
+  add("Create: 3D Curve", nullptr, idle, [](AppState& s) { CreateCurve3D(s); });
   add("Create: Pipe", nullptr, idle && hasPathLike,
       [](AppState& s) { CreatePipe(s); });
   add("Create: Sweep", nullptr, idle && sketches >= 1,
@@ -78,7 +76,10 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
       [](AppState& s) { CreateLoft(s); });
 
   add("Tool: Measure", nullptr, part || state.assembly != nullptr,
-      [](AppState& s) { s.measure = MeasureState{}; s.measure.active = true; });
+      [](AppState& s) {
+        s.measure = MeasureState{};
+        s.measure.active = true;
+      });
   add("Tool: Simulation", nullptr, hasBody,
       [](AppState& s) { EnterSimulation(s); });
 
@@ -96,11 +97,10 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
       [](AppState& s) { s.showControlsHelp = !s.showControlsHelp; });
   const auto stdView = [&](const char* name, glm::vec3 n,
                            const char* shortcut) {
-    add(std::string("View: ") + name, shortcut, true,
-        [n](AppState& s) {
-          if (s.camera)
-            s.camera->AlignToFace(glm::vec3(0.0f), n);
-        });
+    add(std::string("View: ") + name, shortcut, true, [n](AppState& s) {
+      if (s.camera)
+        s.camera->AlignToFace(glm::vec3(0.0f), n);
+    });
   };
   stdView("Front", {0, 0, 1}, "Shift+1");
   stdView("Back", {0, 0, -1}, "Shift+2");
@@ -110,9 +110,8 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
   stdView("Bottom", {0, -1, 0}, "Shift+6");
   stdView("Isometric", glm::normalize(glm::vec3(1, 1, 1)), "Shift+7");
 
-  add("File: New", "Ctrl+N", true, [](AppState& s) {
-    ReplaceDocument(s, std::make_unique<Document>());
-  });
+  add("File: New", "Ctrl+N", true,
+      [](AppState& s) { ReplaceDocument(s, std::make_unique<Document>()); });
 #ifdef HAVE_NATIVEFILEDIALOG
   add("File: Open Project...", "Ctrl+O", true,
       [](AppState& s) { OpenProjectDialog(s); });
@@ -162,10 +161,9 @@ void DrawCommandPalette(AppState& state) {
   static int selected = 0;
 
   const ImGuiViewport* vp = ImGui::GetMainViewport();
-  ImGui::SetNextWindowPos(
-      ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
-             vp->WorkPos.y + vp->WorkSize.y * 0.22f),
-      ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
+                                 vp->WorkPos.y + vp->WorkSize.y * 0.22f),
+                          ImGuiCond_Always, ImVec2(0.5f, 0.0f));
   ImGui::SetNextWindowSize(ImVec2(460.0f, 0.0f), ImGuiCond_Always);
   const ImGuiWindowFlags flags =
       ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
@@ -200,10 +198,9 @@ void DrawCommandPalette(AppState& state) {
     if (score > 0)
       matches.push_back({score, &c});
   }
-  std::stable_sort(matches.begin(), matches.end(),
-                   [](const Ranked& a, const Ranked& b) {
-                     return a.score > b.score;
-                   });
+  std::stable_sort(
+      matches.begin(), matches.end(),
+      [](const Ranked& a, const Ranked& b) { return a.score > b.score; });
   constexpr int kMaxShown = 10;
   const int shown = std::min<int>(kMaxShown, static_cast<int>(matches.size()));
 
@@ -239,9 +236,9 @@ void DrawCommandPalette(AppState& state) {
       state.paletteOpen = false;
       c.run(state);
     }
-  } else if (escape || (!ImGui::IsWindowFocused(
-                            ImGuiFocusedFlags_RootAndChildWindows) &&
-                        !ImGui::IsWindowAppearing())) {
+  } else if (escape ||
+             (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+              !ImGui::IsWindowAppearing())) {
     state.paletteOpen = false; // Esc or click-away dismisses
   }
   ImGui::End();

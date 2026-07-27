@@ -17,7 +17,7 @@
 namespace gpu {
 
 class TopoGpuSolver : public fem::TopoLinearSolver {
- public:
+public:
   // Null + *error when no usable compute device exists. `allowSoftware`
   // admits llvmpipe-style software devices (tests); the app leaves it false —
   // a software "GPU" loses to the CPU Eigen path.
@@ -37,10 +37,10 @@ class TopoGpuSolver : public fem::TopoLinearSolver {
   bool ElementEnergies(const std::vector<double>& u, std::vector<double>& se,
                        std::string* error) override;
 
- private:
+private:
   TopoGpuSolver();
   struct Impl;
   std::unique_ptr<Impl> m_impl;
 };
 
-}  // namespace gpu
+} // namespace gpu

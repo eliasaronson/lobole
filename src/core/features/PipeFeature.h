@@ -25,9 +25,9 @@ public:
   bool Execute(RegenContext& ctx) override;
   void VisitExprs(const ExprVisitor& visit) override;
 
-  uint64_t pathId = 0;         // a sketch OR a Curve3D
+  uint64_t pathId = 0; // a sketch OR a Curve3D
   double outerDiameter = 2.0;
-  double wallThickness = 0.0;  // 0 = solid rod
+  double wallThickness = 0.0; // 0 = solid rod
   std::string outerDiameterExpr, wallThicknessExpr;
   ExtrudeMode mode = ExtrudeMode::NewBody;
 };

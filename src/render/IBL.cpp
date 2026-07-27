@@ -87,7 +87,8 @@ glm::vec3 ImportanceSampleGGX(const glm::vec2& Xi, const glm::vec3& N,
   float cosT = std::sqrt((1.0f - Xi.y) / (1.0f + (a * a - 1.0f) * Xi.y));
   float sinT = std::sqrt(1.0f - cosT * cosT);
   glm::vec3 H{std::cos(phi) * sinT, std::sin(phi) * sinT, cosT};
-  glm::vec3 up = std::abs(N.z) < 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(1, 0, 0);
+  glm::vec3 up =
+      std::abs(N.z) < 0.999f ? glm::vec3(0, 0, 1) : glm::vec3(1, 0, 0);
   glm::vec3 tangent = glm::normalize(glm::cross(up, N));
   glm::vec3 bitangent = glm::cross(N, tangent);
   return glm::normalize(tangent * H.x + bitangent * H.y + N * H.z);
@@ -112,7 +113,8 @@ template <typename Fn> void ParallelRows(int height, Fn fn) {
         fn(y);
     });
   }
-  for (auto& th : pool) th.join();
+  for (auto& th : pool)
+    th.join();
 }
 
 } // namespace
@@ -143,15 +145,16 @@ void IBLPrecompute::ComputeIrradiance() {
       float u = (x + 0.5f) / kIrradW;
       float v = (y + 0.5f) / kIrradH;
       glm::vec3 N = EquirectUVToDir(u, v);
-      glm::vec3 up = std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0)
-                                            : glm::vec3(1, 0, 0);
+      glm::vec3 up =
+          std::abs(N.y) < 0.999f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
       glm::vec3 right = glm::normalize(glm::cross(up, N));
       up = glm::cross(N, right);
 
       glm::vec3 irradiance(0.0f);
       int samples = 0;
       for (float phi = 0.0f; phi < 2.0f * kPI; phi += kIrradSampleDelta) {
-        for (float theta = 0.0f; theta < 0.5f * kPI; theta += kIrradSampleDelta) {
+        for (float theta = 0.0f; theta < 0.5f * kPI;
+             theta += kIrradSampleDelta) {
           glm::vec3 tan{std::sin(theta) * std::cos(phi),
                         std::sin(theta) * std::sin(phi), std::cos(theta)};
           glm::vec3 dir = right * tan.x + up * tan.y + N * tan.z;
@@ -161,8 +164,8 @@ void IBLPrecompute::ComputeIrradiance() {
         }
       }
       irradiance = kPI * irradiance / static_cast<float>(samples);
-      m_irradiance.pixels[static_cast<size_t>(y) * kIrradW + x] = {
-          irradiance, 1.0f};
+      m_irradiance.pixels[static_cast<size_t>(y) * kIrradW + x] = {irradiance,
+                                                                   1.0f};
     }
   });
 }
@@ -195,7 +198,8 @@ void IBLPrecompute::ComputePrefilter() {
             weight += NdotL;
           }
         }
-        glm::vec3 c = weight > 0.0f ? sum / weight : glm::vec3(Sample(m_env, N));
+        glm::vec3 c =
+            weight > 0.0f ? sum / weight : glm::vec3(Sample(m_env, N));
         out.pixels[static_cast<size_t>(y) * w + x] = {c, 1.0f};
       }
     });
@@ -246,7 +250,8 @@ static void WriteImage(std::ofstream& f, const Image& img) {
 static bool ReadImage(std::ifstream& f, Image& img) {
   int32_t wh[2] = {0, 0};
   f.read(reinterpret_cast<char*>(wh), sizeof(wh));
-  if (!f || wh[0] <= 0 || wh[1] <= 0) return false;
+  if (!f || wh[0] <= 0 || wh[1] <= 0)
+    return false;
   img.width = wh[0];
   img.height = wh[1];
   img.pixels.resize(static_cast<size_t>(wh[0]) * wh[1]);
@@ -257,31 +262,39 @@ static bool ReadImage(std::ifstream& f, Image& img) {
 
 bool IBLPrecompute::LoadCache(const std::string& path) {
   std::ifstream f(path, std::ios::binary);
-  if (!f) return false;
+  if (!f)
+    return false;
   uint32_t magic = 0, version = 0, mips = 0;
   f.read(reinterpret_cast<char*>(&magic), sizeof(magic));
   f.read(reinterpret_cast<char*>(&version), sizeof(version));
-  if (!f || magic != kCacheMagic || version != kCacheVersion) return false;
+  if (!f || magic != kCacheMagic || version != kCacheVersion)
+    return false;
   f.read(reinterpret_cast<char*>(&mips), sizeof(mips));
-  if (!f || mips != static_cast<uint32_t>(kPrefilterMips)) return false;
-  if (!ReadImage(f, m_irradiance)) return false;
+  if (!f || mips != static_cast<uint32_t>(kPrefilterMips))
+    return false;
+  if (!ReadImage(f, m_irradiance))
+    return false;
   m_prefilter.resize(mips);
   for (auto& m : m_prefilter)
-    if (!ReadImage(f, m)) return false;
-  if (!ReadImage(f, m_brdf)) return false;
+    if (!ReadImage(f, m))
+      return false;
+  if (!ReadImage(f, m_brdf))
+    return false;
   LOG_INFO("IBL: loaded precompute from cache '{}'", path);
   return true;
 }
 
 void IBLPrecompute::SaveCache(const std::string& path) const {
   std::ofstream f(path, std::ios::binary);
-  if (!f) return;
+  if (!f)
+    return;
   uint32_t mips = static_cast<uint32_t>(m_prefilter.size());
   f.write(reinterpret_cast<const char*>(&kCacheMagic), sizeof(kCacheMagic));
   f.write(reinterpret_cast<const char*>(&kCacheVersion), sizeof(kCacheVersion));
   f.write(reinterpret_cast<const char*>(&mips), sizeof(mips));
   WriteImage(f, m_irradiance);
-  for (const auto& m : m_prefilter) WriteImage(f, m);
+  for (const auto& m : m_prefilter)
+    WriteImage(f, m);
   WriteImage(f, m_brdf);
 }
 
@@ -300,14 +313,17 @@ bool IBLPrecompute::Build(const std::string& hdrPath,
   // The full-res source is needed downstream too (offline-render background /
   // sharp reflections), so load it even on a cache hit — the cache only skips
   // the convolution.
-  if (!LoadHDR(hdrPath)) return false;
-  if (!cachePath.empty() && LoadCache(cachePath)) return true;
+  if (!LoadHDR(hdrPath))
+    return false;
+  if (!cachePath.empty() && LoadCache(cachePath))
+    return true;
 
   LOG_INFO("IBL: precomputing irradiance / prefilter / BRDF (one-time)...");
   ComputeIrradiance();
   ComputePrefilter();
   ComputeBRDF();
-  if (!cachePath.empty()) SaveCache(cachePath);
+  if (!cachePath.empty())
+    SaveCache(cachePath);
   return true;
 }
 
@@ -318,7 +334,8 @@ bool IBLPrecompute::Build(const std::string& hdrPath,
 // (data, not color) is written raw with the two channels in R,G.
 static void WritePPM(const std::string& path, const Image& img, bool tonemap) {
   std::ofstream f(path, std::ios::binary);
-  if (!f) return;
+  if (!f)
+    return;
   f << "P6\n" << img.width << " " << img.height << "\n255\n";
   std::vector<uint8_t> rgb(static_cast<size_t>(img.width) * img.height * 3);
   for (size_t i = 0; i < img.pixels.size(); i++) {

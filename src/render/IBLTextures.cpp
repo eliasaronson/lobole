@@ -1,7 +1,7 @@
 #include "render/IBLTextures.h"
 
-#include "render/IBL.h"
 #include "common/Logger.h"
+#include "render/IBL.h"
 
 #include <glm/gtc/packing.hpp>
 
@@ -96,8 +96,8 @@ static bool UploadImage(VkDevice device, VkPhysicalDevice phys, VkQueue queue,
   vkGetImageMemoryRequirements(device, outImage, &req);
   VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
   alloc.allocationSize = req.size;
-  alloc.memoryTypeIndex =
-      FindMemoryType(phys, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  alloc.memoryTypeIndex = FindMemoryType(phys, req.memoryTypeBits,
+                                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   if (vkAllocateMemory(device, &alloc, nullptr, &outMemory) != VK_SUCCESS)
     return false;
   vkBindImageMemory(device, outImage, outMemory, 0);
@@ -136,7 +136,8 @@ static bool UploadImage(VkDevice device, VkPhysicalDevice phys, VkQueue queue,
                 halfMips[m].size() * sizeof(uint16_t));
   vkUnmapMemory(device, stagingMem);
 
-  // One-shot command buffer: transition all mips, copy each, transition to read.
+  // One-shot command buffer: transition all mips, copy each, transition to
+  // read.
   VkCommandBufferAllocateInfo cbi{
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
   cbi.commandPool = pool;
@@ -156,8 +157,8 @@ static bool UploadImage(VkDevice device, VkPhysicalDevice phys, VkQueue queue,
   toDst.image = outImage;
   toDst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount, 0, 1};
   vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-                       1, &toDst);
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &toDst);
 
   for (uint32_t m = 0; m < mipCount; m++) {
     VkBufferImageCopy region{};
@@ -204,18 +205,18 @@ bool IBLTextures::Upload(VkDevice device, VkPhysicalDevice physicalDevice,
   m_physicalDevice = physicalDevice;
   m_queue = queue;
   m_commandPool = commandPool;
-  if (!CreateSamplers()) return false;
+  if (!CreateSamplers())
+    return false;
 
-  std::vector<MipSrc> env = {
-      {ibl.Environment().width, ibl.Environment().height,
-       &ibl.Environment().pixels}};
+  std::vector<MipSrc> env = {{ibl.Environment().width, ibl.Environment().height,
+                              &ibl.Environment().pixels}};
   if (!UploadImage(device, physicalDevice, queue, commandPool,
                    VK_FORMAT_R16G16B16A16_SFLOAT, 4, env, m_environment.image,
                    m_environment.memory, m_environment.view))
     return false;
 
-  std::vector<MipSrc> one = {
-      {ibl.Irradiance().width, ibl.Irradiance().height, &ibl.Irradiance().pixels}};
+  std::vector<MipSrc> one = {{ibl.Irradiance().width, ibl.Irradiance().height,
+                              &ibl.Irradiance().pixels}};
   if (!UploadImage(device, physicalDevice, queue, commandPool,
                    VK_FORMAT_R16G16B16A16_SFLOAT, 4, one, m_irradiance.image,
                    m_irradiance.memory, m_irradiance.view))
@@ -248,7 +249,8 @@ bool IBLTextures::MakeFallback(VkDevice device, VkPhysicalDevice physicalDevice,
   m_physicalDevice = physicalDevice;
   m_queue = queue;
   m_commandPool = commandPool;
-  if (!CreateSamplers()) return false;
+  if (!CreateSamplers())
+    return false;
 
   // Neutral 1x1 stand-ins: dim gray ambient, identity BRDF (scale 1, bias 0).
   std::vector<glm::vec4> gray = {{0.15f, 0.15f, 0.15f, 1.0f}};
@@ -270,23 +272,29 @@ bool IBLTextures::MakeFallback(VkDevice device, VkPhysicalDevice physicalDevice,
                   VK_FORMAT_R16G16_SFLOAT, 2, l, m_brdf.image, m_brdf.memory,
                   m_brdf.view);
   m_ready = ok;
-  if (ok) LOG_WARN("IBL: using neutral fallback textures (no environment)");
+  if (ok)
+    LOG_WARN("IBL: using neutral fallback textures (no environment)");
   return ok;
 }
 
 void IBLTextures::Shutdown(VkDevice device) {
   auto drop = [&](Tex& t) {
-    if (t.view) vkDestroyImageView(device, t.view, nullptr);
-    if (t.image) vkDestroyImage(device, t.image, nullptr);
-    if (t.memory) vkFreeMemory(device, t.memory, nullptr);
+    if (t.view)
+      vkDestroyImageView(device, t.view, nullptr);
+    if (t.image)
+      vkDestroyImage(device, t.image, nullptr);
+    if (t.memory)
+      vkFreeMemory(device, t.memory, nullptr);
     t = {};
   };
   drop(m_environment);
   drop(m_irradiance);
   drop(m_prefilter);
   drop(m_brdf);
-  if (m_envSampler) vkDestroySampler(device, m_envSampler, nullptr);
-  if (m_lutSampler) vkDestroySampler(device, m_lutSampler, nullptr);
+  if (m_envSampler)
+    vkDestroySampler(device, m_envSampler, nullptr);
+  if (m_lutSampler)
+    vkDestroySampler(device, m_lutSampler, nullptr);
   m_envSampler = m_lutSampler = VK_NULL_HANDLE;
   m_ready = false;
 }

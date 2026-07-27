@@ -6,7 +6,7 @@
 // split, so it lives here (inline); the heavier tab-slot accessors
 // (SlotDoc/SlotAssembly) are declared here and defined in AppActions.cpp.
 
-#include "render/MeshRenderer.h"  // LineVertex3D
+#include "render/MeshRenderer.h" // LineVertex3D
 
 #include <glm/glm.hpp>
 
@@ -39,4 +39,4 @@ extern const glm::vec3 kBodyPalette[5];
 void SyncAssemblyRenderers(AppState& state);
 void SyncInContextGhosts(AppState& state);
 
-}  // namespace ui
+} // namespace ui

@@ -4,31 +4,31 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepCheck_Analyzer.hxx>
-#include <BRepCheck_Result.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
-#include <Bnd_Box.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepCheck_Result.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
-#include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
+#include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <GProp_GProps.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_Surface.hxx>
-#include <GProp_GProps.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
-#include <TopLoc_Location.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Trsf.hxx>
 
@@ -91,8 +91,8 @@ TopoDS_Shape ResolveShape(const std::vector<Body>& bodies,
 // are) as an OCC gp_Trsf. glm is column-major: m[col][row].
 gp_Trsf ToTrsf(const glm::mat4& m) {
   gp_Trsf t;
-  t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0],  //
-              m[0][1], m[1][1], m[2][1], m[3][1],  //
+  t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], //
+              m[0][1], m[1][1], m[2][1], m[3][1], //
               m[0][2], m[1][2], m[2][2], m[3][2]);
   return t;
 }
@@ -135,11 +135,21 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
     }
   }
   switch (BRepAdaptor_Surface(TopoDS::Face(f)).GetType()) {
-  case GeomAbs_Plane:    out.kind = "plane"; break;
-  case GeomAbs_Cylinder: out.kind = "cylinder"; break;
-  case GeomAbs_Cone:     out.kind = "cone"; break;
-  case GeomAbs_Sphere:   out.kind = "sphere"; break;
-  default:               out.kind = "other"; break;
+  case GeomAbs_Plane:
+    out.kind = "plane";
+    break;
+  case GeomAbs_Cylinder:
+    out.kind = "cylinder";
+    break;
+  case GeomAbs_Cone:
+    out.kind = "cone";
+    break;
+  case GeomAbs_Sphere:
+    out.kind = "sphere";
+    break;
+  default:
+    out.kind = "other";
+    break;
   }
   return out;
 }
@@ -166,7 +176,8 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex) {
   case GeomAbs_Circle: {
     // Full circle vs arc: the trimmed parameter span of a circular edge is
     // its swept angle.
-    const double sweep = std::abs(curve.LastParameter() - curve.FirstParameter());
+    const double sweep =
+        std::abs(curve.LastParameter() - curve.FirstParameter());
     out.kind = sweep >= 2.0 * M_PI - 1e-6 ? "circle" : "arc";
     out.radius = curve.Circle().Radius();
     out.hasRadius = true;
@@ -237,38 +248,65 @@ const char* CheckStatusStr(BRepCheck_Status s) {
   switch (s) {
   case BRepCheck_InvalidPointOnCurve:
   case BRepCheck_InvalidPointOnCurveOnSurface:
-  case BRepCheck_InvalidPointOnSurface: return "vertex not on its curve/surface";
-  case BRepCheck_No3DCurve: return "edge has no 3D curve";
-  case BRepCheck_Multiple3DCurve: return "edge has multiple 3D curves";
-  case BRepCheck_Invalid3DCurve: return "invalid 3D curve";
+  case BRepCheck_InvalidPointOnSurface:
+    return "vertex not on its curve/surface";
+  case BRepCheck_No3DCurve:
+    return "edge has no 3D curve";
+  case BRepCheck_Multiple3DCurve:
+    return "edge has multiple 3D curves";
+  case BRepCheck_Invalid3DCurve:
+    return "invalid 3D curve";
   case BRepCheck_NoCurveOnSurface:
   case BRepCheck_InvalidCurveOnSurface:
-  case BRepCheck_InvalidCurveOnClosedSurface: return "invalid curve on surface";
+  case BRepCheck_InvalidCurveOnClosedSurface:
+    return "invalid curve on surface";
   case BRepCheck_InvalidSameRangeFlag:
-  case BRepCheck_InvalidSameParameterFlag: return "bad same-range/parameter flag";
-  case BRepCheck_InvalidDegeneratedFlag: return "bad degenerated flag";
-  case BRepCheck_FreeEdge: return "free edge (used by one face)";
-  case BRepCheck_InvalidMultiConnexity: return "invalid multi-connexity";
-  case BRepCheck_InvalidRange: return "invalid parameter range";
-  case BRepCheck_EmptyWire: return "empty wire";
-  case BRepCheck_RedundantEdge: return "redundant edge";
-  case BRepCheck_SelfIntersectingWire: return "self-intersecting wire";
-  case BRepCheck_NoSurface: return "face has no surface";
+  case BRepCheck_InvalidSameParameterFlag:
+    return "bad same-range/parameter flag";
+  case BRepCheck_InvalidDegeneratedFlag:
+    return "bad degenerated flag";
+  case BRepCheck_FreeEdge:
+    return "free edge (used by one face)";
+  case BRepCheck_InvalidMultiConnexity:
+    return "invalid multi-connexity";
+  case BRepCheck_InvalidRange:
+    return "invalid parameter range";
+  case BRepCheck_EmptyWire:
+    return "empty wire";
+  case BRepCheck_RedundantEdge:
+    return "redundant edge";
+  case BRepCheck_SelfIntersectingWire:
+    return "self-intersecting wire";
+  case BRepCheck_NoSurface:
+    return "face has no surface";
   case BRepCheck_InvalidWire:
-  case BRepCheck_RedundantWire: return "invalid/redundant wire";
-  case BRepCheck_IntersectingWires: return "intersecting wires";
-  case BRepCheck_InvalidImbricationOfWires: return "bad wire nesting";
-  case BRepCheck_EmptyShell: return "empty shell";
-  case BRepCheck_RedundantFace: return "redundant face";
-  case BRepCheck_InvalidImbricationOfShells: return "bad shell nesting";
-  case BRepCheck_UnorientableShape: return "unorientable shape";
-  case BRepCheck_NotClosed: return "shell/solid not closed";
-  case BRepCheck_NotConnected: return "not connected";
+  case BRepCheck_RedundantWire:
+    return "invalid/redundant wire";
+  case BRepCheck_IntersectingWires:
+    return "intersecting wires";
+  case BRepCheck_InvalidImbricationOfWires:
+    return "bad wire nesting";
+  case BRepCheck_EmptyShell:
+    return "empty shell";
+  case BRepCheck_RedundantFace:
+    return "redundant face";
+  case BRepCheck_InvalidImbricationOfShells:
+    return "bad shell nesting";
+  case BRepCheck_UnorientableShape:
+    return "unorientable shape";
+  case BRepCheck_NotClosed:
+    return "shell/solid not closed";
+  case BRepCheck_NotConnected:
+    return "not connected";
   case BRepCheck_BadOrientation:
-  case BRepCheck_BadOrientationOfSubshape: return "bad orientation";
-  case BRepCheck_InvalidToleranceValue: return "invalid tolerance";
-  case BRepCheck_CheckFail: return "check failed (fatal)";
-  default: return "invalid geometry";
+  case BRepCheck_BadOrientationOfSubshape:
+    return "bad orientation";
+  case BRepCheck_InvalidToleranceValue:
+    return "invalid tolerance";
+  case BRepCheck_CheckFail:
+    return "check failed (fatal)";
+  default:
+    return "invalid geometry";
   }
 }
 } // namespace
@@ -455,10 +493,10 @@ std::optional<DistanceResult> DistanceDetailed(const std::vector<Body>& bodies,
                           glm::mat4(1.0f));
 }
 
-std::optional<DistanceResult> DistanceDetailed(
-    const std::vector<Body>& bodiesA, const ElementRef& a, const glm::mat4& xfA,
-    const std::vector<Body>& bodiesB, const ElementRef& b,
-    const glm::mat4& xfB) {
+std::optional<DistanceResult>
+DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
+                 const glm::mat4& xfA, const std::vector<Body>& bodiesB,
+                 const ElementRef& b, const glm::mat4& xfB) {
   std::string ka, kb;
   TopoDS_Shape sa = ResolveShape(bodiesA, a, ka);
   TopoDS_Shape sb = ResolveShape(bodiesB, b, kb);

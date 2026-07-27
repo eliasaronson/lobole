@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include "cad/CADKernel.h"
 
@@ -34,7 +34,8 @@ TEST_CASE("Sphere and cylinder features produce bodies", "[feature]") {
   CHECK_THAT(doc.GetBodies()[1].shape.Volume(), WithinRel(cylVol, 1e-4));
 }
 
-TEST_CASE("ImportFeature loads a STEP file centered at origin", "[feature][io]") {
+TEST_CASE("ImportFeature loads a STEP file centered at origin",
+          "[feature][io]") {
   // Author a box far from the origin and export it
   CADShape box = CADKernel::Instance().CreateBox(glm::vec3(10, 20, 30),
                                                  glm::vec3(12, 22, 32));
@@ -70,8 +71,8 @@ TEST_CASE("ImportFeature fails cleanly on a missing file", "[feature][io]") {
 TEST_CASE("Document JSON roundtrip preserves features and geometry",
           "[serialization]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(1, 0, -2),
-                                              2.0, 3.0, 4.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(1, 0, -2), 2.0, 3.0, 4.0));
   doc.AddFeature(
       std::make_unique<SphereFeature>("Ball", glm::vec3(5, 0, 0), 1.5));
   doc.AddFeature(std::make_unique<CylinderFeature>(
@@ -96,7 +97,8 @@ TEST_CASE("Document JSON roundtrip preserves features and geometry",
   fs::remove(path);
 }
 
-TEST_CASE("Feature material round-trips and stamps its body", "[serialization]") {
+TEST_CASE("Feature material round-trips and stamps its body",
+          "[serialization]") {
   Document doc;
   auto box = std::make_unique<BoxFeature>("Base", glm::vec3(0), 2.0, 2.0, 2.0);
   box->SetMaterial("steel");
@@ -224,13 +226,12 @@ namespace {
 Document DocWithStudy() {
   Document doc;
   doc.SetParameter("load_n", "1000");
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0),
-                                              10.0, 4.0, 4.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 10.0, 4.0, 4.0));
   fem::Study& s = doc.AddStudy("Static 1");
   s.meshSize = 5.0;
   s.meshSizeExpr = "";
-  s.refinements.push_back(
-      {ElementRef{2, "2/g1"}, 1.0, std::string{}});
+  s.refinements.push_back({ElementRef{2, "2/g1"}, 1.0, std::string{}});
   fem::Load fixed;
   fixed.id = doc.AllocateId();
   fixed.type = fem::LoadType::Fixed;
@@ -263,9 +264,10 @@ void CheckStudyMatches(const Document& loaded) {
   CHECK(s.loads[1].magnitudeExpr == "load_n");
   CHECK(s.loads[1].direction.z == -1.0);
 }
-}  // namespace
+} // namespace
 
-TEST_CASE("Study round-trips through the single-file format", "[serialization][fem]") {
+TEST_CASE("Study round-trips through the single-file format",
+          "[serialization][fem]") {
   Document doc = DocWithStudy();
   fs::path path = TempFile("designer_test_study.json");
   std::string error;
@@ -277,7 +279,8 @@ TEST_CASE("Study round-trips through the single-file format", "[serialization][f
   fs::remove(path);
 }
 
-TEST_CASE("Study round-trips through the directory format", "[serialization][fem]") {
+TEST_CASE("Study round-trips through the directory format",
+          "[serialization][fem]") {
   Document doc = DocWithStudy();
   fs::path dir = fs::temp_directory_path() / "designer_test_study.dsgn";
   fs::remove_all(dir);
@@ -292,7 +295,8 @@ TEST_CASE("Study round-trips through the directory format", "[serialization][fem
   // (the high-water mark was restored on load).
   const fem::Study& s = loaded->GetStudies()[0];
   uint64_t maxId = s.id;
-  for (const fem::Load& l : s.loads) maxId = std::max(maxId, l.id);
+  for (const fem::Load& l : s.loads)
+    maxId = std::max(maxId, l.id);
   CHECK(loaded->AllocateId() > maxId);
   fs::remove_all(dir);
 }
@@ -300,8 +304,8 @@ TEST_CASE("Study round-trips through the directory format", "[serialization][fem
 TEST_CASE("A document with no studies writes no studies key or dir",
           "[serialization][fem]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0),
-                                              1.0, 1.0, 1.0));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 1.0, 1.0, 1.0));
   // Single-file: no "studies" key.
   fs::path path = TempFile("designer_test_nostudy.json");
   std::string error;
@@ -320,10 +324,11 @@ TEST_CASE("A document with no studies writes no studies key or dir",
   fs::remove_all(dir);
 }
 
-TEST_CASE("Modal analysis type + gravity round-trip (v32)", "[serialization][fem]") {
+TEST_CASE("Modal analysis type + gravity round-trip (v32)",
+          "[serialization][fem]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0),
-                                              100.0, 10.0, 10.0));
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 100.0,
+                                              10.0, 10.0));
   fem::Study& modal = doc.AddStudy("Modes");
   modal.type = fem::AnalysisType::Modal;
   modal.numModes = 8;
@@ -338,7 +343,8 @@ TEST_CASE("Modal analysis type + gravity round-trip (v32)", "[serialization][fem
   // A static study with no gravity writes none of the new keys (byte-identity).
   {
     Document plain;
-    plain.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 1, 1, 1));
+    plain.AddFeature(
+        std::make_unique<BoxFeature>("B", glm::vec3(0, 0, 0), 1, 1, 1));
     plain.AddStudy("S");
     fs::path p2 = TempFile("designer_test_plainstudy.json");
     REQUIRE(testio::Save(plain, p2.string()));

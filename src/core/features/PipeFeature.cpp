@@ -79,8 +79,8 @@ bool PipeFeature::Execute(RegenContext& ctx) {
     SetError("pipe could not build a section at the path start");
     return false;
   }
-  CADShape result = SweepProfileAlongSpine(outerWire, spine,
-                                           SweepFrame::CorrectedFrenet);
+  CADShape result =
+      SweepProfileAlongSpine(outerWire, spine, SweepFrame::CorrectedFrenet);
   if (!result.IsValid() || result.Volume() < 1e-9) {
     SetError("pipe sweep failed");
     return false;

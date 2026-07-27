@@ -54,8 +54,8 @@ bool TessellateEdge(const TopoDS_Edge& edge, std::vector<glm::vec3>& out) {
 
 // Clamped-uniform B-spline through control poles in world space (the 3D twin of
 // SketchProfile's MakeBSplineCurve). Degree is reduced so few poles stay valid.
-Handle(Geom_BSplineCurve) ControlPolyCurve(const std::vector<glm::vec3>& poles,
-                                           int degree) {
+Handle(Geom_BSplineCurve)
+    ControlPolyCurve(const std::vector<glm::vec3>& poles, int degree) {
   const int nPoles = static_cast<int>(poles.size());
   const int p = std::clamp(degree > 0 ? degree : 3, 1, nPoles - 1);
   TColgp_Array1OfPnt occPoles(1, nPoles);
@@ -127,9 +127,8 @@ bool CurveFeature::Execute(RegenContext& ctx) {
         SetError("helix needs positive radius, pitch, and turns");
         return false;
       }
-      const glm::vec3 d = glm::length(axisDir) > 1e-9f
-                              ? glm::normalize(axisDir)
-                              : glm::vec3(0, 0, 1);
+      const glm::vec3 d = glm::length(axisDir) > 1e-9f ? glm::normalize(axisDir)
+                                                       : glm::vec3(0, 0, 1);
       gp_Ax3 axis(ToPnt(axisOrigin), gp_Dir(d.x, d.y, d.z));
       Handle(Geom_CylindricalSurface) cyl =
           new Geom_CylindricalSurface(axis, radius);
@@ -144,7 +143,8 @@ bool CurveFeature::Execute(RegenContext& ctx) {
       gp_Dir2d dir(rightHanded ? 1.0 : -1.0, k);
       Handle(Geom2d_Line) line2d = new Geom2d_Line(gp_Pnt2d(0.0, 0.0), dir);
       edge = BRepBuilderAPI_MakeEdge(line2d, cyl, 0.0, wLast).Edge();
-      BRepLib::BuildCurve3d(edge); // materialize the 3D curve for downstream use
+      BRepLib::BuildCurve3d(
+          edge); // materialize the 3D curve for downstream use
       break;
     }
     }

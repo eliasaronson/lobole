@@ -3,35 +3,35 @@
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
 
-#include <BRep_Builder.hxx>
-#include <BRep_Tool.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
-#include <BRepAdaptor_Curve.hxx>
-#include <BRepOffsetAPI_MakeOffset.hxx>
+#include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
 #include <GC_MakeSegment.hxx>
-#include <Geom_BSplineCurve.hxx>
 #include <GeomAbs_CurveType.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Precision.hxx>
 #include <ShapeFix_Wire.hxx>
+#include <Standard_Failure.hxx>
 #include <TColStd_Array1OfInteger.hxx>
 #include <TColStd_Array1OfReal.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
-#include <Precision.hxx>
-#include <TopTools_ListOfShape.hxx>
-#include <Standard_Failure.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
@@ -72,23 +72,23 @@ std::vector<glm::vec2> TessellateLoopEdge(const LoopEdge& e) {
     return BSplineSampleUV(*e.spline); // poles pre-oriented a → b
   if (e.ellipseArc) {
     std::vector<glm::vec2> pts = EllipseArcSampleUV(*e.ellipseArc); // canonical
-    if (!pts.empty() && glm::length(pts.front() - e.a) >
-                            glm::length(pts.back() - e.a))
+    if (!pts.empty() &&
+        glm::length(pts.front() - e.a) > glm::length(pts.back() - e.a))
       std::reverse(pts.begin(), pts.end()); // orient to traversal a → b
     return pts;
   }
   if (!e.arc)
     return {e.a, e.b};
   const double sweep = e.angEnd - e.angStart; // normalized positive
-  int segs = std::max(1, static_cast<int>(std::lround(kCircleSegments * sweep /
-                                                      (2.0 * M_PI))));
+  int segs = std::max(
+      1, static_cast<int>(std::lround(kCircleSegments * sweep / (2.0 * M_PI))));
   std::vector<glm::vec2> pts;
   pts.reserve(segs + 1);
   for (int i = 0; i <= segs; i++)
     pts.push_back(OnCircle(e.center, e.radius,
                            e.angStart + sweep * i / segs)); // canonical CCW
-  if (!pts.empty() && glm::length(pts.front() - e.a) >
-                          glm::length(pts.back() - e.a))
+  if (!pts.empty() &&
+      glm::length(pts.front() - e.a) > glm::length(pts.back() - e.a))
     std::reverse(pts.begin(), pts.end()); // orient to traversal a → b
   return pts;
 }
@@ -141,8 +141,7 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
             loop.ellipse = e;
             loops.push_back(loop);
           } else if constexpr (std::is_same_v<T, Line>) {
-            freeEdges.push_back(
-                {false, e.a, e.b, {}, 0.0, 0.0, 0.0, e.id});
+            freeEdges.push_back({false, e.a, e.b, {}, 0.0, 0.0, 0.0, e.id});
           } else if constexpr (std::is_same_v<T, Arc>) {
             double s = e.startAngle, en = e.endAngle;
             while (en <= s)
@@ -201,7 +200,7 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
           // already oriented a → b
         } else if (Near(cand.b, tail)) {
           std::swap(cand.a, cand.b); // traverse it backwards
-          if (cand.spline) // keep poles in traversal order a → b
+          if (cand.spline)           // keep poles in traversal order a → b
             std::reverse(cand.spline->poles.begin(), cand.spline->poles.end());
         } else {
           continue;
@@ -235,8 +234,8 @@ namespace {
 // (distinct knots 0..(n-p) with clamped end multiplicities), so the OCC edge
 // and the UV tessellation (de Boor) trace the same curve — the property that
 // keeps a spline profile watertight against its rendered/area polyline.
-Handle(Geom_BSplineCurve) MakeBSplineCurve(const SketchPlane& plane,
-                                           const BSpline& s) {
+Handle(Geom_BSplineCurve)
+    MakeBSplineCurve(const SketchPlane& plane, const BSpline& s) {
   const int n = static_cast<int>(s.poles.size());
   const int p = BSplineDegree(s);
   TColgp_Array1OfPnt poles(1, n);
@@ -335,8 +334,8 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
         return toPnt(OnCircle(e.center, e.radius, ang));
       }
       if (e.ellipseArc)
-        return toPnt(EllipseArcPointUV(*e.ellipseArc,
-                                       (atB == forward[i]) ? 2 : 1));
+        return toPnt(
+            EllipseArcPointUV(*e.ellipseArc, (atB == forward[i]) ? 2 : 1));
       return toPnt(atB ? e.b : e.a);
     };
 
@@ -381,7 +380,8 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
         const double cr = std::cos(ea.rotation), sr = std::sin(ea.rotation);
         glm::vec3 major =
             u * static_cast<float>(cr) + v * static_cast<float>(sr);
-        gp_Ax2 axis(toPnt(ea.center), normal, gp_Dir(major.x, major.y, major.z));
+        gp_Ax2 axis(toPnt(ea.center), normal,
+                    gp_Dir(major.x, major.y, major.z));
         gp_Elips ell(axis, ea.rMajor, ea.rMinor);
         wire.Add(forward[i] ? BRepBuilderAPI_MakeEdge(ell, from, to).Edge()
                             : BRepBuilderAPI_MakeEdge(ell, to, from).Edge());
@@ -414,8 +414,8 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
 std::vector<glm::vec2> LoopPolygon(const Loop& loop) {
   std::vector<glm::vec2> poly;
   if (loop.circle || loop.ellipse) {
-    const glm::vec2 c = loop.circle ? loop.circle->center
-                                    : loop.ellipse->center;
+    const glm::vec2 c =
+        loop.circle ? loop.circle->center : loop.ellipse->center;
     const double rx = loop.circle ? loop.circle->radius : loop.ellipse->rMajor;
     const double ry = loop.circle ? loop.circle->radius : loop.ellipse->rMinor;
     const double rot = loop.ellipse ? loop.ellipse->rotation : 0.0;
@@ -881,9 +881,7 @@ std::optional<Entity> EdgeToSketchEntity(const TopoDS_Edge& edge,
     const glm::vec2 c = toUV(circ.Location());
     const double r = circ.Radius();
     const glm::vec2 mid = toUV(curve.Value(0.5 * (f + l)));
-    auto ang = [&](glm::vec2 p) {
-      return std::atan2(p.y - c.y, p.x - c.x);
-    };
+    auto ang = [&](glm::vec2 p) { return std::atan2(p.y - c.y, p.x - c.x); };
     auto wrap = [](double x) {
       while (x < 0)
         x += 2.0 * M_PI;
@@ -892,8 +890,8 @@ std::optional<Entity> EdgeToSketchEntity(const TopoDS_Edge& edge,
       return x;
     };
     const double a1 = ang(uv1), a2 = ang(uv2), am = ang(mid);
-    const double sweep = wrap(a2 - a1);       // CCW a1 → a2
-    if (wrap(am - a1) <= sweep)               // midpoint lies on that span
+    const double sweep = wrap(a2 - a1); // CCW a1 → a2
+    if (wrap(am - a1) <= sweep)         // midpoint lies on that span
       return Arc{c, r, a1, a1 + sweep};
     return Arc{c, r, a2, a2 + (2.0 * M_PI - sweep)}; // the other way (CCW)
   }
@@ -902,8 +900,8 @@ std::optional<Entity> EdgeToSketchEntity(const TopoDS_Edge& edge,
 } // namespace
 
 std::vector<Entity> OffsetLoop(const SketchPlane& plane,
-                               const std::vector<Entity>& chain, double distance,
-                               bool joinArc) {
+                               const std::vector<Entity>& chain,
+                               double distance, bool joinArc) {
   std::vector<Entity> out;
   if (std::abs(distance) < 1e-9)
     return out;
@@ -914,8 +912,8 @@ std::vector<Entity> OffsetLoop(const SketchPlane& plane,
   if (wire.IsNull())
     return out;
   try {
-    BRepOffsetAPI_MakeOffset mk(
-        wire, joinArc ? GeomAbs_Arc : GeomAbs_Intersection);
+    BRepOffsetAPI_MakeOffset mk(wire,
+                                joinArc ? GeomAbs_Arc : GeomAbs_Intersection);
     mk.Perform(distance);
     if (!mk.IsDone())
       return out;
@@ -949,7 +947,8 @@ namespace {
 
 // The stable id of the sketch entity that produced `edge` (an edge of the
 // profile face), matched by geometry against the entity-id-carrying loops —
-// ShapeFix rebuilds the OCC edges, so there is no direct handle. 0 if unmatched.
+// ShapeFix rebuilds the OCC edges, so there is no direct handle. 0 if
+// unmatched.
 uint32_t MatchEntityId(const TopoDS_Edge& edge, const SketchPlane& plane,
                        const std::vector<Loop>& loops) {
   const std::optional<Entity> ent = EdgeToSketchEntity(edge, plane);
@@ -1162,8 +1161,8 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
         if (entityId == 0) {
           continue;
         }
-        const TopoDS_Shape query = xform ? xform->ModifiedShape(edge)
-                                         : TopoDS_Shape(edge);
+        const TopoDS_Shape query =
+            xform ? xform->ModifiedShape(edge) : TopoDS_Shape(edge);
         const std::string name = tag + "g" + std::to_string(entityId);
         for (const TopoDS_Shape& sideFace : revol.Generated(query)) {
           const int idx = FaceIndexOf(shape, sideFace);
@@ -1440,9 +1439,8 @@ std::optional<Entity> ProjectEdge(const TopoDS_Edge& edge,
     ea.rMajor = el.MajorRadius();
     ea.rMinor = el.MinorRadius();
     ea.rotation = std::atan2(majTip.y - c.y, majTip.x - c.x);
-    ea.startParam =
-        EllipseParamOfPoint(c, ea.rMajor, ea.rMinor, ea.rotation,
-                            toUV(curve.Value(f)));
+    ea.startParam = EllipseParamOfPoint(c, ea.rMajor, ea.rMinor, ea.rotation,
+                                        toUV(curve.Value(f)));
     ea.endParam = EllipseParamOfPoint(c, ea.rMajor, ea.rMinor, ea.rotation,
                                       toUV(curve.Value(l)));
     while (ea.endParam <= ea.startParam)
@@ -1537,4 +1535,3 @@ bool FilterLoopsToRegions(std::vector<Loop>& loops,
 }
 
 } // namespace sketch
-

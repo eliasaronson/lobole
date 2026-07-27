@@ -36,9 +36,9 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
   // propagate onto the result (toponaming T5).
   const double targetVol = target->shape.Volume();
   ElementMap map;
-  CADShape result = topo::BooleanNamed(op, target->shape, target->elementMap,
-                                       tool->shape, tool->elementMap, GetId(),
-                                       map);
+  CADShape result =
+      topo::BooleanNamed(op, target->shape, target->elementMap, tool->shape,
+                         tool->elementMap, GetId(), map);
   if (!result.IsValid() || result.Volume() < 1e-9) {
     LOG_ERROR("BooleanFeature '{}': operation produced an empty or invalid "
               "solid (are the bodies disjoint?)",
@@ -58,8 +58,8 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
   }
 
   // Inherit the target's material unless this feature sets its own.
-  const std::string material = m_material.empty() ? target->material
-                                                  : m_material;
+  const std::string material =
+      m_material.empty() ? target->material : m_material;
   // Erase both operands, then append the result. Erase the later iterator
   // first so the earlier one stays valid.
   if (target > tool)

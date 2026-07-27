@@ -1,13 +1,13 @@
 #include "app/CrashHandler.h"
 
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
 #if defined(_WIN32)
-#include <windows.h>
 #include <io.h>
+#include <windows.h>
 #else
 #include <csignal>
 #include <unistd.h>
@@ -97,6 +97,6 @@ void CrashHandlerSelfTest() {
   // --crash-test: deliberately die so the backtrace path can be inspected in
   // a real log. Never reached in normal operation.
   volatile int* p = nullptr;
-  *p = 42;  // NOLINT: intentional SIGSEGV
-  abort();  // unreachable; satisfies [[noreturn]]
+  *p = 42; // NOLINT: intentional SIGSEGV
+  abort(); // unreachable; satisfies [[noreturn]]
 }

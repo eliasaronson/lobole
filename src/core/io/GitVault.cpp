@@ -37,8 +37,7 @@ std::string Quote(const std::string& s) {
 // Runs `git -C <dir> <args>`, capturing stdout. Returns exit code.
 int RunGit(const std::string& dir, const std::string& args,
            std::string* output = nullptr) {
-  const std::string cmd =
-      "git -C " + Quote(dir) + " " + args + " 2>" NULDEV;
+  const std::string cmd = "git -C " + Quote(dir) + " " + args + " 2>" NULDEV;
   FILE* pipe = ::popen(cmd.c_str(), "r");
   if (!pipe)
     return -1;
@@ -84,20 +83,23 @@ bool Init(const std::string& dir) {
 bool CommitAll(const std::string& dir, const std::string& message,
                std::string* error) {
   if (!Available()) {
-    if (error) *error = "git is not available";
+    if (error)
+      *error = "git is not available";
     return false;
   }
   if (RunGit(dir, "add -A") != 0) {
-    if (error) *error = "git add failed";
+    if (error)
+      *error = "git add failed";
     return false;
   }
   std::string status;
   RunGit(dir, "status --porcelain", &status);
   if (status.empty())
     return true; // nothing changed — a clean save is not an error
-  if (RunGit(dir, std::string(kIdentity) + " commit -q -m " +
-                      Quote(message)) != 0) {
-    if (error) *error = "git commit failed";
+  if (RunGit(dir, std::string(kIdentity) + " commit -q -m " + Quote(message)) !=
+      0) {
+    if (error)
+      *error = "git commit failed";
     return false;
   }
   return true;
@@ -127,8 +129,7 @@ std::vector<LogEntry> Log(const std::string& dir, int limit) {
     const size_t t2 = line.find('\t', t1 + 1);
     if (t1 == std::string::npos || t2 == std::string::npos)
       continue;
-    out.push_back({line.substr(0, t1),
-                   line.substr(t2 + 1),
+    out.push_back({line.substr(0, t1), line.substr(t2 + 1),
                    std::stoll(line.substr(t1 + 1, t2 - t1 - 1))});
   }
   return out;
@@ -137,11 +138,13 @@ std::vector<LogEntry> Log(const std::string& dir, int limit) {
 bool RestoreTo(const std::string& dir, const std::string& commit,
                std::string* error) {
   if (!Available() || !IsRepo(dir)) {
-    if (error) *error = "not a git project";
+    if (error)
+      *error = "not a git project";
     return false;
   }
   if (RunGit(dir, "checkout -q " + Quote(commit) + " -- .") != 0) {
-    if (error) *error = "git checkout failed (unknown commit?)";
+    if (error)
+      *error = "git checkout failed (unknown commit?)";
     return false;
   }
   return true;

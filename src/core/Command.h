@@ -139,7 +139,7 @@ public:
 
 private:
   std::string m_name;
-  std::string m_expression, m_comment;  // captured for Undo
+  std::string m_expression, m_comment; // captured for Undo
   std::vector<std::string> m_references;
 };
 
@@ -187,7 +187,7 @@ public:
 
 private:
   uint64_t m_id;
-  nlohmann::json m_snapshot;  // StudyToJson, captured on Execute
+  nlohmann::json m_snapshot; // StudyToJson, captured on Execute
 };
 
 // One study edit (mesh size, refinement add/remove, load add/remove),

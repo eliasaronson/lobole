@@ -19,7 +19,7 @@ namespace fem {
 
 // Isotropic linear-elastic material in solver units.
 struct Material {
-  double youngMPa = 0.0;  // Young's modulus, MPa (E in GPa * 1000)
+  double youngMPa = 0.0; // Young's modulus, MPa (E in GPa * 1000)
   double poisson = 0.0;
   // Mass density in tonne/mm^3 (the consistent mm-N-t-s unit system, so
   // frequencies come out in rad/s -> Hz). Convert the library's kg/m^3 by
@@ -30,16 +30,16 @@ struct Material {
 // A traction boundary condition on one B-Rep face, given as the boundary
 // triangles (indices into FemMesh::boundary) that lie on it.
 struct FaceLoad {
-  LoadType type = LoadType::Force;  // Force or Pressure (Fixed is a constraint)
-  std::vector<int> tris;            // indices into FemMesh::boundary
-  double magnitude = 0.0;           // total N (Force) or MPa (Pressure)
-  glm::dvec3 direction{0, 0, 0};    // Force only (need not be normalized)
+  LoadType type = LoadType::Force; // Force or Pressure (Fixed is a constraint)
+  std::vector<int> tris;           // indices into FemMesh::boundary
+  double magnitude = 0.0;          // total N (Force) or MPa (Pressure)
+  glm::dvec3 direction{0, 0, 0};   // Force only (need not be normalized)
 };
 
 // Solved fields, one entry per mesh node.
 struct FemResults {
-  std::vector<glm::dvec3> displacement;  // mm
-  std::vector<double> vonMises;          // MPa
+  std::vector<glm::dvec3> displacement; // mm
+  std::vector<double> vonMises;         // MPa
 
   double maxVonMises = 0.0;
   int maxVmNode = -1;
@@ -53,7 +53,7 @@ struct FemResults {
   // mode, ascending frequency; displacement is the normalized mode shape.
   struct ModeShape {
     double frequencyHz = 0.0;
-    std::vector<glm::dvec3> displacement;  // normalized (max |u| = 1)
+    std::vector<glm::dvec3> displacement; // normalized (max |u| = 1)
   };
   std::vector<ModeShape> modes;
 };
@@ -62,18 +62,19 @@ struct FemResults {
 // from the system), face tractions, and an optional body force (gravity
 // acceleration in mm/s^2; needs material.densityTPerMM3). Returns std::nullopt
 // and sets *error on a singular system or when built without Eigen.
-std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
-                                const std::vector<int>& fixedNodes,
-                                const std::vector<FaceLoad>& loads, std::string* error,
-                                const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
+std::optional<FemResults>
+Solve(const FemMesh& mesh, const Material& material,
+      const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
+      std::string* error, const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
 
 // Solves the generalized eigenproblem K phi = omega^2 M phi for the lowest
 // `numModes` natural frequencies + mode shapes (consistent mass matrix). Needs
 // at least one fixed support (v1) and material.densityTPerMM3 > 0. Returns
 // std::nullopt and sets *error on failure or when built without Spectra.
-std::optional<std::vector<FemResults::ModeShape>> SolveModal(
-    const FemMesh& mesh, const Material& material,
-    const std::vector<int>& fixedNodes, int numModes, std::string* error);
+std::optional<std::vector<FemResults::ModeShape>>
+SolveModal(const FemMesh& mesh, const Material& material,
+           const std::vector<int>& fixedNodes, int numModes,
+           std::string* error);
 
 // True when the build links Eigen (static solver) / Spectra (modal).
 bool SolverAvailable();
@@ -107,7 +108,7 @@ struct StudyBodyResult {
   std::string bodyName;
   FemMesh mesh;
   FemResults results;
-  std::vector<double> density;  // topology only: one entry per mesh.tets
+  std::vector<double> density; // topology only: one entry per mesh.tets
 };
 
 // A study's derived mesh + results, cached on the Document. Stale when
@@ -151,14 +152,17 @@ struct StudyRuntime {
 // loaded body has a fixed support), then meshes and solves. On any failure
 // sets study.error and *error and returns false. Fills `rt` (not stamped —
 // the caller stamps solvedAtVersion and stores it in the Document cache).
-bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt, std::string* error);
+bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
+              std::string* error);
 
 // Meshes the study's single loaded body (v1) and runs SIMP topology
 // optimization on it (the study's Force/Pressure loads + fixed supports; keep
 // faces frozen solid; gravity ignored). Fills `rt` with the optimized per-tet
 // density + convergence summary (rt.topology = true); not stamped — the caller
 // sets solvedAtVersion. On any failure sets study.error and *error, returns
-// false. (Synchronous; TO2 adds the worker-thread path over an immutable snapshot.)
-bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt, std::string* error);
+// false. (Synchronous; TO2 adds the worker-thread path over an immutable
+// snapshot.)
+bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt,
+                 std::string* error);
 
-}  // namespace fem
+} // namespace fem

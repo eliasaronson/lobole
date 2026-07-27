@@ -54,7 +54,7 @@ private:
     nlohmann::json id;
     std::string method;
     nlohmann::json params;
-    int client = -1;  // fd the response goes back to
+    int client = -1; // fd the response goes back to
   };
 
   // Accept loop (listen socket bound in Start) spawning one reader per

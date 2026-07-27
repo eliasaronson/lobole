@@ -20,7 +20,8 @@ namespace {
 // from SheetExtentMM, swapped for landscape).
 glm::dvec2 SheetExtent(const Sheet& sheet) {
   glm::dvec2 ext = SheetExtentMM(sheet.size);
-  if (sheet.landscape) ext = {ext.y, ext.x};
+  if (sheet.landscape)
+    ext = {ext.y, ext.x};
   return ext;
 }
 
@@ -34,8 +35,9 @@ ImVec2 ViewportCenter(const AppState& state) {
 ImVec2 SheetToScreen(const AppState& state, glm::dvec2 mm) {
   const ImVec2 c = ViewportCenter(state);
   const double s = state.sheetView.scale;
-  return ImVec2(static_cast<float>(c.x + (mm.x - state.sheetView.offset.x) * s),
-                static_cast<float>(c.y - (mm.y - state.sheetView.offset.y) * s));
+  return ImVec2(
+      static_cast<float>(c.x + (mm.x - state.sheetView.offset.x) * s),
+      static_cast<float>(c.y - (mm.y - state.sheetView.offset.y) * s));
 }
 
 glm::dvec2 ScreenToSheet(const AppState& state, ImVec2 px) {
@@ -48,7 +50,8 @@ glm::dvec2 ScreenToSheet(const AppState& state, ImVec2 px) {
 // Centre the sheet in the viewport at ~90% fill — the scale==0 first-paint
 // state, and the "fit" button.
 void FitSheet(AppState& state) {
-  if (!state.drawing) return;
+  if (!state.drawing)
+    return;
   const glm::dvec2 ext = SheetExtent(state.drawing->GetSheet());
   const double vpW = state.viewportSize.x, vpH = state.viewportSize.y;
   if (ext.x <= 0 || ext.y <= 0 || vpW <= 0 || vpH <= 0) {
@@ -56,7 +59,7 @@ void FitSheet(AppState& state) {
   } else {
     state.sheetView.scale = 0.9 * std::min(vpW / ext.x, vpH / ext.y);
   }
-  state.sheetView.offset = ext * 0.5;  // sheet centre at the viewport centre
+  state.sheetView.offset = ext * 0.5; // sheet centre at the viewport centre
 }
 
 const char* kSizeLabels[] = {"A4", "A3", "A2", "A1", "A0", "Letter"};
@@ -73,11 +76,12 @@ void StrokePolyline(ImDrawList* dl, AppState& state,
 // zoom (the design's CPU-dashing, in sheet space).
 void StrokeDashed(ImDrawList* dl, AppState& state,
                   const std::vector<glm::dvec2>& pts, ImU32 col, float px) {
-  const double dash = 1.6, gap = 1.2;  // sheet mm
+  const double dash = 1.6, gap = 1.2; // sheet mm
   for (size_t i = 1; i < pts.size(); ++i) {
     const glm::dvec2 a = pts[i - 1], b = pts[i];
     const double len = glm::length(b - a);
-    if (len < 1e-9) continue;
+    if (len < 1e-9)
+      continue;
     const glm::dvec2 dir = (b - a) / len;
     for (double t = 0.0; t < len; t += dash + gap) {
       const double t2 = std::min(t + dash, len);
@@ -95,7 +99,8 @@ int NeededRefs(DrawingDimKind k) {
 double PointSegDist(glm::dvec2 p, glm::dvec2 a, glm::dvec2 b) {
   const glm::dvec2 ab = b - a;
   const double len2 = glm::dot(ab, ab);
-  const double t = len2 < 1e-12 ? 0.0 : glm::clamp(glm::dot(p - a, ab) / len2, 0.0, 1.0);
+  const double t =
+      len2 < 1e-12 ? 0.0 : glm::clamp(glm::dot(p - a, ab) / len2, 0.0, 1.0);
   return glm::length(p - (a + t * ab));
 }
 
@@ -107,9 +112,11 @@ const drawing::SheetCurve* PickCurve(AppState& state, glm::dvec2 cursor,
   double bestDist = maxDist;
   for (const DrawingView& view : state.drawing->GetViews()) {
     const auto it = state.drawingRenders.find(view.id);
-    if (it == state.drawingRenders.end()) continue;
+    if (it == state.drawingRenders.end())
+      continue;
     for (const drawing::SheetCurve& c : it->second.curves) {
-      if (!c.edge.IsSet() && !c.silFace.IsSet()) continue;
+      if (!c.edge.IsSet() && !c.silFace.IsSet())
+        continue;
       for (size_t i = 1; i < c.points.size(); ++i) {
         const double d = PointSegDist(cursor, c.points[i - 1], c.points[i]);
         if (d < bestDist) {
@@ -127,8 +134,10 @@ ProjRef RefOfCurve(const drawing::SheetCurve& c, uint64_t viewId) {
   ProjRef r;
   r.viewId = viewId;
   r.occurrenceId = c.sourceId;
-  if (c.edge.IsSet()) r.edge = c.edge;
-  else r.silFace = c.silFace;
+  if (c.edge.IsSet())
+    r.edge = c.edge;
+  else
+    r.silFace = c.silFace;
   return r;
 }
 
@@ -136,20 +145,24 @@ ProjRef RefOfCurve(const drawing::SheetCurve& c, uint64_t viewId) {
 // cursor, picks it on click (all refs share one view), and creates the dim once
 // enough are picked. Called from DrawSheet while the tool is armed.
 void HandleDimTool(ImDrawList* dl, AppState& state) {
-  if (!state.dimTool.active || !state.drawing) return;
+  if (!state.dimTool.active || !state.drawing)
+    return;
   ImGuiIO& io = ImGui::GetIO();
   if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     state.dimTool = AppState::DimTool{};
     return;
   }
-  if (io.WantCaptureMouse) return;  // cursor is over a panel
+  if (io.WantCaptureMouse)
+    return; // cursor is over a panel
 
   const glm::dvec2 cursor = ScreenToSheet(state, io.MousePos);
-  const double maxDist = state.sheetView.scale > 0 ? 5.0 / state.sheetView.scale : 5.0;
+  const double maxDist =
+      state.sheetView.scale > 0 ? 5.0 / state.sheetView.scale : 5.0;
   uint64_t viewId = 0;
   const drawing::SheetCurve* hit = PickCurve(state, cursor, maxDist, viewId);
   // Once the first ref fixes a view, only that view's geometry is pickable.
-  if (hit && state.dimTool.viewId && viewId != state.dimTool.viewId) hit = nullptr;
+  if (hit && state.dimTool.viewId && viewId != state.dimTool.viewId)
+    hit = nullptr;
 
   if (hit) {
     const ImU32 hl = IM_COL32(80, 170, 255, 255);
@@ -166,10 +179,10 @@ void HandleDimTool(ImDrawList* dl, AppState& state) {
         d.kind = state.dimTool.kind;
         d.viewId = state.dimTool.viewId;
         d.refs = state.dimTool.refs;
-        d.labelOffset = {0.0, -12.0};  // a sensible default; drag to move
+        d.labelOffset = {0.0, -12.0}; // a sensible default; drag to move
         SnapshotDrawing(state);
         state.drawing->AddDim(d);
-        state.dimTool = AppState::DimTool{};  // done — disarm
+        state.dimTool = AppState::DimTool{}; // done — disarm
       }
     }
   }
@@ -180,7 +193,7 @@ void HandleDimTool(ImDrawList* dl, AppState& state) {
 void SheetArrow(ImDrawList* dl, AppState& state, glm::dvec2 tip, glm::dvec2 dir,
                 ImU32 col) {
   const glm::dvec2 n(-dir.y, dir.x);
-  const double len = 2.2, w = 0.8;  // mm
+  const double len = 2.2, w = 0.8; // mm
   const glm::dvec2 base = tip - dir * len;
   dl->AddTriangleFilled(SheetToScreen(state, tip),
                         SheetToScreen(state, base + n * w),
@@ -215,9 +228,12 @@ void DrawDims(ImDrawList* dl, AppState& state) {
     } else if (d.kind == DrawingDimKind::Angle) {
       // v1 angle: value only (rendered below).
     } else {
-      dl->AddLine(SheetToScreen(state, d.ext1), SheetToScreen(state, d.dim1), ink, 0.8f);
-      dl->AddLine(SheetToScreen(state, d.ext2), SheetToScreen(state, d.dim2), ink, 0.8f);
-      dl->AddLine(SheetToScreen(state, d.dim1), SheetToScreen(state, d.dim2), ink, 1.2f);
+      dl->AddLine(SheetToScreen(state, d.ext1), SheetToScreen(state, d.dim1),
+                  ink, 0.8f);
+      dl->AddLine(SheetToScreen(state, d.ext2), SheetToScreen(state, d.dim2),
+                  ink, 0.8f);
+      dl->AddLine(SheetToScreen(state, d.dim1), SheetToScreen(state, d.dim2),
+                  ink, 1.2f);
       const double L = glm::length(d.dim2 - d.dim1);
       if (L > 1e-6) {
         const glm::dvec2 u = (d.dim2 - d.dim1) / L;
@@ -239,20 +255,21 @@ void DrawDims(ImDrawList* dl, AppState& state) {
     }
     // Label drag (only when the dimension tool isn't picking).
     if (!state.dimTool.active && !overPanel) {
-      const bool overLabel = io.MousePos.x >= org.x - 2 &&
-                             io.MousePos.x <= org.x + tsz.x + 2 &&
-                             io.MousePos.y >= org.y - 1 &&
-                             io.MousePos.y <= org.y + tsz.y + 1;
+      const bool overLabel =
+          io.MousePos.x >= org.x - 2 && io.MousePos.x <= org.x + tsz.x + 2 &&
+          io.MousePos.y >= org.y - 1 && io.MousePos.y <= org.y + tsz.y + 1;
       if (overLabel && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
           !state.sheetView.panning) {
         SnapshotDrawing(state);
         state.dimDrag = dim.id;
       }
       if (state.dimDrag == dim.id) {
-        const double s = state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
+        const double s =
+            state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
         dim.labelOffset.x += io.MouseDelta.x / s;
-        dim.labelOffset.y -= io.MouseDelta.y / s;  // screen +Y is sheet -Y
-        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) state.dimDrag = 0;
+        dim.labelOffset.y -= io.MouseDelta.y / s; // screen +Y is sheet -Y
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+          state.dimDrag = 0;
       }
     }
   }
@@ -271,11 +288,13 @@ void DrawViews(ImDrawList* dl, AppState& state) {
 
   for (const DrawingView& view : state.drawing->GetViews()) {
     const auto it = state.drawingRenders.find(view.id);
-    if (it == state.drawingRenders.end()) continue;
+    if (it == state.drawingRenders.end())
+      continue;
     const drawing::SheetView& sv = it->second;
 
     for (const drawing::SheetCurve& c : sv.curves) {
-      if (c.points.size() < 2) continue;
+      if (c.points.size() < 2)
+        continue;
       if (c.visible)
         StrokePolyline(dl, state, c.points, visible, 1.6f);
       else
@@ -303,20 +322,23 @@ void DrawViews(ImDrawList* dl, AppState& state) {
     const bool isStale =
         DrawingSourceVersion(state, view.sourceDocId) != sv.solvedSourceVersion;
     if ((isStale || !sv.error.empty()) && fontPx >= 4.0f) {
-      const glm::dvec2 at = sv.hasGeometry ? glm::dvec2(sv.bboxMin.x, sv.bboxMax.y + 12.0)
-                                           : view.position;
+      const glm::dvec2 at = sv.hasGeometry
+                                ? glm::dvec2(sv.bboxMin.x, sv.bboxMax.y + 12.0)
+                                : view.position;
       dl->AddText(font, fontPx, SheetToScreen(state, at), stale,
                   sv.error.empty() ? "stale - update" : sv.error.c_str());
     }
   }
 }
 
-}  // namespace
+} // namespace
 
 void HandleSheetInput(AppState& state) {
-  if (!state.drawing) return;
+  if (!state.drawing)
+    return;
   ImGuiIO& io = ImGui::GetIO();
-  if (state.sheetView.scale <= 0.0) FitSheet(state);  // first paint
+  if (state.sheetView.scale <= 0.0)
+    FitSheet(state); // first paint
 
   const bool overViewport = !io.WantCaptureMouse;
 
@@ -339,7 +361,8 @@ void HandleSheetInput(AppState& state) {
 
   // Middle-drag pan (no orbit camera on a sheet); Alt+left-drag for trackpads
   // without a usable middle button.
-  const bool altLeft = io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+  const bool altLeft =
+      io.KeyAlt && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   if (overViewport &&
       (ImGui::IsMouseClicked(ImGuiMouseButton_Middle) || altLeft))
     state.sheetView.panning = true;
@@ -350,13 +373,15 @@ void HandleSheetInput(AppState& state) {
       (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f)) {
     const double s = state.sheetView.scale > 0 ? state.sheetView.scale : 1.0;
     state.sheetView.offset.x -= io.MouseDelta.x / s;
-    state.sheetView.offset.y += io.MouseDelta.y / s;  // screen +Y is sheet -Y
+    state.sheetView.offset.y += io.MouseDelta.y / s; // screen +Y is sheet -Y
   }
 }
 
 void DrawSheet(AppState& state) {
-  if (!state.drawing) return;
-  if (state.sheetView.scale <= 0.0) FitSheet(state);
+  if (!state.drawing)
+    return;
+  if (state.sheetView.scale <= 0.0)
+    FitSheet(state);
   const Sheet& sheet = state.drawing->GetSheet();
   const glm::dvec2 ext = SheetExtent(sheet);
 
@@ -398,11 +423,11 @@ void DrawSheet(AppState& state) {
   const double rowH = tbH / fields.size();
   const float fontPx = static_cast<float>(3.0 * state.sheetView.scale);
   for (size_t i = 0; i < fields.size(); ++i) {
-    const double ry = y0 + tbH - (i + 1) * rowH;  // top row first
+    const double ry = y0 + tbH - (i + 1) * rowH; // top row first
     if (i > 0)
       dl->AddLine(SheetToScreen(state, {x0, ry + rowH}),
                   SheetToScreen(state, {x0 + tbW, ry + rowH}), ink, 1.0f);
-    if (fontPx >= 4.0f) {  // legible only past a zoom threshold
+    if (fontPx >= 4.0f) { // legible only past a zoom threshold
       ImFont* font = ImGui::GetFont();
       const ImVec2 labelPos = SheetToScreen(state, {x0 + 3.0, ry + rowH - 3.0});
       dl->AddText(font, fontPx, labelPos, IM_COL32(120, 120, 120, 255),
@@ -431,12 +456,14 @@ bool TitleField(AppState& state, const char* label, std::string& value) {
   char buf[256];
   std::snprintf(buf, sizeof(buf), "%s", value.c_str());
   const bool changed = ImGui::InputText(label, buf, sizeof(buf));
-  if (ImGui::IsItemActivated()) SnapshotDrawing(state);
-  if (changed) value = buf;
+  if (ImGui::IsItemActivated())
+    SnapshotDrawing(state);
+  if (changed)
+    value = buf;
   return changed;
 }
 
-const char* kOrientLabels[] = {"front", "back", "left", "right",
+const char* kOrientLabels[] = {"front", "back",   "left", "right",
                                "top",   "bottom", "iso"};
 
 // The view list + an "add view" control (source part + orientation + scale)
@@ -452,15 +479,19 @@ void DrawViewsSection(AppState& state) {
   for (const DrawingView& view : state.drawing->GetViews()) {
     const auto it = state.drawingRenders.find(view.id);
     if (it == state.drawingRenders.end() ||
-        DrawingSourceVersion(state, view.sourceDocId) != it->second.solvedSourceVersion)
+        DrawingSourceVersion(state, view.sourceDocId) !=
+            it->second.solvedSourceVersion)
       ++stale;
-    if (it != state.drawingRenders.end() && !it->second.error.empty()) ++errored;
+    if (it != state.drawingRenders.end() && !it->second.error.empty())
+      ++errored;
   }
   const bool needsUpdate = stale > 0;
-  if (needsUpdate)  // amber Update button when anything is out of date
+  if (needsUpdate) // amber Update button when anything is out of date
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.42f, 0.12f, 1.0f));
-  if (ImGui::Button("Update views")) UpdateDrawingRenders(state);
-  if (needsUpdate) ImGui::PopStyleColor();
+  if (ImGui::Button("Update views"))
+    UpdateDrawingRenders(state);
+  if (needsUpdate)
+    ImGui::PopStyleColor();
   ImGui::SameLine();
   if (needsUpdate)
     ImGui::TextColored(ImVec4(0.85f, 0.62f, 0.25f, 1.0f), "%d stale", stale);
@@ -479,7 +510,8 @@ void DrawViewsSection(AppState& state) {
   if (partSlots.empty()) {
     ImGui::TextDisabled("Add a part or assembly to project from.");
   } else {
-    if (srcIdx >= static_cast<int>(partSlots.size())) srcIdx = 0;
+    if (srcIdx >= static_cast<int>(partSlots.size()))
+      srcIdx = 0;
     if (ImGui::BeginCombo("Source", partSlots[srcIdx]->name.c_str())) {
       for (int i = 0; i < static_cast<int>(partSlots.size()); ++i)
         if (ImGui::Selectable(partSlots[i]->name.c_str(), i == srcIdx))
@@ -491,7 +523,8 @@ void DrawViewsSection(AppState& state) {
     ImGui::InputFloat("Scale", &addScale, 0.0f, 0.0f, "%.3f");
     if (ImGui::Button("Add view")) {
       glm::dvec2 ext = SheetExtentMM(state.drawing->GetSheet().size);
-      if (state.drawing->GetSheet().landscape) ext = {ext.y, ext.x};
+      if (state.drawing->GetSheet().landscape)
+        ext = {ext.y, ext.x};
       DrawingView v;
       v.name = std::string(kOrientLabels[orientIdx]);
       v.sourceDocId = partSlots[srcIdx]->id;
@@ -510,22 +543,24 @@ void DrawViewsSection(AppState& state) {
     const auto it = state.drawingRenders.find(view.id);
     const char* status = "needs update";
     if (it != state.drawingRenders.end()) {
-      if (!it->second.error.empty()) status = it->second.error.c_str();
-      else status = it->second.hasGeometry ? "ok" : "empty";
+      if (!it->second.error.empty())
+        status = it->second.error.c_str();
+      else
+        status = it->second.hasGeometry ? "ok" : "empty";
     }
-    ImGui::BulletText("%s [%s]  %zu curves - %s",
-                      view.name.empty() ? "view" : view.name.c_str(),
-                      ViewOrientationToString(view.orientation),
-                      it != state.drawingRenders.end() ? it->second.curves.size()
-                                                       : size_t{0},
-                      status);
+    ImGui::BulletText(
+        "%s [%s]  %zu curves - %s",
+        view.name.empty() ? "view" : view.name.c_str(),
+        ViewOrientationToString(view.orientation),
+        it != state.drawingRenders.end() ? it->second.curves.size() : size_t{0},
+        status);
     ImGui::SameLine();
     if (ImGui::SmallButton("x")) {
       SnapshotDrawing(state);
       state.drawing->RemoveView(view.id);
       UpdateDrawingRenders(state);
       ImGui::PopID();
-      break;  // container mutated; redraw next frame
+      break; // container mutated; redraw next frame
     }
     ImGui::PopID();
   }
@@ -543,18 +578,22 @@ void DrawDimsSection(AppState& state) {
     ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f),
                        "Pick edge %d of %d  (Esc to cancel)",
                        static_cast<int>(state.dimTool.refs.size()) + 1, need);
-    if (ImGui::Button("Cancel")) state.dimTool = AppState::DimTool{};
+    if (ImGui::Button("Cancel"))
+      state.dimTool = AppState::DimTool{};
   } else {
-    struct Tool { const char* label; DrawingDimKind kind; };
-    static const Tool tools[] = {
-        {"Distance", DrawingDimKind::Distance},
-        {"Dist X", DrawingDimKind::DistanceX},
-        {"Dist Y", DrawingDimKind::DistanceY},
-        {"Radius", DrawingDimKind::Radius},
-        {"Diameter", DrawingDimKind::Diameter},
-        {"Angle", DrawingDimKind::Angle}};
+    struct Tool {
+      const char* label;
+      DrawingDimKind kind;
+    };
+    static const Tool tools[] = {{"Distance", DrawingDimKind::Distance},
+                                 {"Dist X", DrawingDimKind::DistanceX},
+                                 {"Dist Y", DrawingDimKind::DistanceY},
+                                 {"Radius", DrawingDimKind::Radius},
+                                 {"Diameter", DrawingDimKind::Diameter},
+                                 {"Angle", DrawingDimKind::Angle}};
     for (size_t i = 0; i < std::size(tools); ++i) {
-      if (i % 3 != 0) ImGui::SameLine();
+      if (i % 3 != 0)
+        ImGui::SameLine();
       if (ImGui::Button(tools[i].label)) {
         state.dimTool = AppState::DimTool{};
         state.dimTool.active = true;
@@ -570,8 +609,8 @@ void DrawDimsSection(AppState& state) {
       ImGui::BulletText("%s = %s", DrawingDimKindToString(dim.kind),
                         rd.text.c_str());
     else
-      ImGui::TextColored(ImVec4(0.82f, 0.31f, 0.27f, 1.0f),
-                         "  %s (dangling)", DrawingDimKindToString(dim.kind));
+      ImGui::TextColored(ImVec4(0.82f, 0.31f, 0.27f, 1.0f), "  %s (dangling)",
+                         DrawingDimKindToString(dim.kind));
     ImGui::SameLine();
     if (ImGui::SmallButton("x")) {
       SnapshotDrawing(state);
@@ -583,10 +622,11 @@ void DrawDimsSection(AppState& state) {
   }
 }
 
-}  // namespace
+} // namespace
 
 void DrawSheetPanel(AppState& state) {
-  if (!state.drawing) return;
+  if (!state.drawing)
+    return;
   // Docks into the left "Model" node (the DockLayout slot the feature tree and
   // occurrence panel also use), so a drawing tab reserves the same panel space
   // instead of floating over the sheet.
@@ -602,7 +642,7 @@ void DrawSheetPanel(AppState& state) {
     SnapshotDrawing(state);
     sheet.size = static_cast<SheetSize>(sizeIdx);
     state.drawing->BumpVersion();
-    state.sheetView.scale = 0.0;  // refit for the new paper size
+    state.sheetView.scale = 0.0; // refit for the new paper size
   }
   bool landscape = sheet.landscape;
   if (ImGui::Checkbox("Landscape", &landscape)) {
@@ -620,14 +660,18 @@ void DrawSheetPanel(AppState& state) {
   edited |= TitleField(state, "Document", sheet.titleBlock.document);
   edited |= TitleField(state, "Author", sheet.titleBlock.author);
   edited |= TitleField(state, "Date", sheet.titleBlock.date);
-  if (edited) state.drawing->BumpVersion();
+  if (edited)
+    state.drawing->BumpVersion();
 
   ImGui::Spacing();
-  if (ImGui::Button("Fit")) state.sheetView.scale = 0.0;
+  if (ImGui::Button("Fit"))
+    state.sheetView.scale = 0.0;
   ImGui::SameLine();
-  if (ImGui::Button("Undo")) UndoDrawing(state);
+  if (ImGui::Button("Undo"))
+    UndoDrawing(state);
   ImGui::SameLine();
-  if (ImGui::Button("Redo")) RedoDrawing(state);
+  if (ImGui::Button("Redo"))
+    RedoDrawing(state);
 
   DrawViewsSection(state);
   DrawDimsSection(state);
@@ -635,4 +679,4 @@ void DrawSheetPanel(AppState& state) {
   ImGui::End();
 }
 
-}  // namespace ui
+} // namespace ui

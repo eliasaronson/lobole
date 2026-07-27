@@ -1,8 +1,8 @@
 #pragma once
 
 #include "core/Document.h"
-#include "core/drawing/DrawingDocument.h"
 #include "core/Occurrence.h"
+#include "core/drawing/DrawingDocument.h"
 
 #include <nlohmann/json.hpp>
 
@@ -21,8 +21,8 @@ namespace DocumentIO {
 
 // On failure returns an unexpected error message. The returned document is
 // already regenerated.
-[[nodiscard]] std::expected<std::unique_ptr<Document>, std::string> Load(
-    const std::string& path);
+[[nodiscard]] std::expected<std::unique_ptr<Document>, std::string>
+Load(const std::string& path);
 
 // Single-feature (de)serialization; also used for parameter-edit snapshots
 // (ModifyFeatureCommand). FeatureToJson throws on unserializable types;
@@ -34,8 +34,8 @@ std::unique_ptr<Feature> FeatureFromJson(const nlohmann::json& j);
 // directory (`.dsgn`, one file per occurrence) or single JSON file, dispatched
 // on the path — discriminated by `kind: "assembly"`. Save returns false /
 // Load returns nullptr and fills *error on failure.
-[[nodiscard]] std::expected<void, std::string> SaveAssembly(
-    const AssemblyDocument& asmDoc, const std::string& path);
+[[nodiscard]] std::expected<void, std::string>
+SaveAssembly(const AssemblyDocument& asmDoc, const std::string& path);
 [[nodiscard]] std::expected<std::unique_ptr<AssemblyDocument>, std::string>
 LoadAssembly(const std::string& path);
 
@@ -65,7 +65,8 @@ fem::Study StudyFromJson(const nlohmann::json& j);
 // mesh + the convergence summary. `solvedAtVersion` is NOT written — on load
 // the caller stamps the result with the reloaded document's version (a just-
 // loaded result reads as current; a subsequent edit marks it stale). Returns
-// true only for a topology runtime (topology == true). Throws on malformed input.
+// true only for a topology runtime (topology == true). Throws on malformed
+// input.
 bool StudyResultToJson(const fem::StudyRuntime& rt, nlohmann::json& out);
 fem::StudyRuntime StudyResultFromJson(const nlohmann::json& j);
 
@@ -79,8 +80,8 @@ Configuration ConfigurationFromJson(const nlohmann::json& j);
 // directory (one file per view/dim) or single JSON file, dispatched on the
 // path — discriminated by `kind: "drawing"`. Save returns false / Load
 // returns nullptr and fills *error on failure.
-[[nodiscard]] std::expected<void, std::string> SaveDrawing(
-    const DrawingDocument& drawing, const std::string& path);
+[[nodiscard]] std::expected<void, std::string>
+SaveDrawing(const DrawingDocument& drawing, const std::string& path);
 [[nodiscard]] std::expected<std::unique_ptr<DrawingDocument>, std::string>
 LoadDrawing(const std::string& path);
 
@@ -91,4 +92,4 @@ DrawingView DrawingViewFromJson(const nlohmann::json& j);
 nlohmann::json DrawingDimToJson(const DrawingDim& dim);
 DrawingDim DrawingDimFromJson(const nlohmann::json& j);
 
-}  // namespace DocumentIO
+} // namespace DocumentIO

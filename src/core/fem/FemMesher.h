@@ -62,11 +62,11 @@ struct FemMesh {
 
 // Meshes `shape` (a single solid) to second order. Returns std::nullopt and
 // sets *error (when non-null) on failure or when built without Netgen.
-std::optional<FemMesh> Mesh(const TopoDS_Shape& shape, const MeshSettings& settings,
-                            std::string* error);
+std::optional<FemMesh> Mesh(const TopoDS_Shape& shape,
+                            const MeshSettings& settings, std::string* error);
 
 // True when the build links Netgen; lets callers surface a clear message
 // instead of a generic meshing failure.
 bool Available();
 
-}  // namespace fem
+} // namespace fem

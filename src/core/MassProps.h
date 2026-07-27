@@ -17,14 +17,14 @@ namespace Measure {
 
 struct BodyMass {
   std::string name;
-  std::string material;        // slug; may be empty
-  double volume = 0.0;         // mm^3
+  std::string material; // slug; may be empty
+  double volume = 0.0;  // mm^3
   double surfaceArea = 0.0;
   glm::dvec3 centerOfMass{0.0};
-  double inertia[3][3] = {};   // unit-density, about the CoM (world axes)
-  double density = 0.0;        // kg/m^3; 0 = unknown
+  double inertia[3][3] = {}; // unit-density, about the CoM (world axes)
+  double density = 0.0;      // kg/m^3; 0 = unknown
   bool massKnown = false;
-  double massG = 0.0;          // valid when massKnown
+  double massG = 0.0; // valid when massKnown
 };
 
 struct DocumentMass {

@@ -16,10 +16,11 @@ using nlohmann::json;
 namespace remote {
 
 bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
-                            const std::string& m, const RpcParams& p, json& out) {
+                            const std::string& m, const RpcParams& p,
+                            json& out) {
   if (m == "add_configuration") {
-    auto cmd =
-        std::make_unique<AddConfigurationCommand>(p.value("name", std::string{}));
+    auto cmd = std::make_unique<AddConfigurationCommand>(
+        p.value("name", std::string{}));
     AddConfigurationCommand* raw = cmd.get();
     state.commands->Execute(std::move(cmd), doc);
     const Configuration* c = doc.FindConfiguration(raw->ConfigurationId());
@@ -30,7 +31,8 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
     const uint64_t id = p.at("id").get<uint64_t>();
     if (!doc.FindConfiguration(id))
       throw std::runtime_error("no such configuration");
-    state.commands->Execute(std::make_unique<RemoveConfigurationCommand>(id), doc);
+    state.commands->Execute(std::make_unique<RemoveConfigurationCommand>(id),
+                            doc);
     out = json::object();
     return true;
   }
@@ -54,10 +56,12 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
     // sends the desired state back (one ModifyConfigurationCommand).
     const uint64_t id = p.at("id").get<uint64_t>();
     const Configuration* cur = doc.FindConfiguration(id);
-    if (!cur) throw std::runtime_error("no such configuration");
+    if (!cur)
+      throw std::runtime_error("no such configuration");
     json before = DocumentIO::ConfigurationToJson(*cur);
     Configuration copy = *cur;
-    if (p.contains("name")) copy.name = p.at("name").get<std::string>();
+    if (p.contains("name"))
+      copy.name = p.at("name").get<std::string>();
     if (p.contains("parameter_overrides")) {
       copy.parameterOverrides.clear();
       for (const json& oj : p.at("parameter_overrides"))
@@ -70,9 +74,8 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
           p.at("suppressed_features").get<std::vector<uint64_t>>();
     json after = DocumentIO::ConfigurationToJson(copy);
     state.commands->Execute(
-        std::make_unique<ModifyConfigurationCommand>("Edit configuration",
-                                                     std::move(before),
-                                                     std::move(after)),
+        std::make_unique<ModifyConfigurationCommand>(
+            "Edit configuration", std::move(before), std::move(after)),
         doc);
     out = {{"id", id}};
     return true;
@@ -85,7 +88,8 @@ bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
                             doc);
     // Echo the resulting geometry so a headless caller sees the effect.
     json vols = json::array();
-    for (const Body& b : doc.GetBodies()) vols.push_back(b.shape.Volume());
+    for (const Body& b : doc.GetBodies())
+      vols.push_back(b.shape.Volume());
     out = {{"active", doc.ActiveConfiguration()},
            {"bodies", doc.GetBodies().size()},
            {"volumes", vols}};
@@ -99,7 +103,8 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
                                     json& out) {
   if (m == "add_configuration") {
     ui::SnapshotAssembly(state);
-    const Configuration& c = asm_.AddConfiguration(p.value("name", std::string{}));
+    const Configuration& c =
+        asm_.AddConfiguration(p.value("name", std::string{}));
     out = {{"id", c.id}, {"name", c.name}};
     return true;
   }
@@ -124,9 +129,11 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
   if (m == "set_configuration") {
     const uint64_t id = p.at("id").get<uint64_t>();
     Configuration* c = asm_.FindConfiguration(id);
-    if (!c) throw std::runtime_error("no such configuration");
+    if (!c)
+      throw std::runtime_error("no such configuration");
     ui::SnapshotAssembly(state);
-    if (p.contains("name")) c->name = p.at("name").get<std::string>();
+    if (p.contains("name"))
+      c->name = p.at("name").get<std::string>();
     if (p.contains("suppressed_occurrences"))
       c->suppressedFeatures =
           p.at("suppressed_occurrences").get<std::vector<uint64_t>>();
@@ -142,7 +149,8 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
     asm_.SetActiveConfiguration(id);
     int visible = 0;
     for (const Occurrence& o : asm_.GetOccurrences())
-      if (o.visible && !asm_.OccurrenceSuppressed(o.id)) ++visible;
+      if (o.visible && !asm_.OccurrenceSuppressed(o.id))
+        ++visible;
     out = {{"active", asm_.ActiveConfiguration()},
            {"visible_occurrences", visible}};
     return true;
@@ -150,4 +158,4 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state, AssemblyDocument& asm_,
   return false;
 }
 
-}  // namespace remote
+} // namespace remote

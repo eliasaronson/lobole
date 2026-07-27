@@ -11,7 +11,8 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
   for (const Body& body : bodies) {
     CADShape::MassProps mp;
     if (!body.shape.ComputeMassProps(mp)) {
-      if (error) *error = "mass properties failed for body " + body.name;
+      if (error)
+        *error = "mass properties failed for body " + body.name;
       return std::nullopt;
     }
     BodyMass bm;
@@ -21,11 +22,12 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
     bm.surfaceArea = mp.surfaceArea;
     bm.centerOfMass = glm::dvec3(mp.centerOfMass);
     for (int r = 0; r < 3; r++)
-      for (int c = 0; c < 3; c++) bm.inertia[r][c] = mp.inertia[r][c];
-    const float density = CADMaterials::MaterialLibrary::GetMaterial(
-                              CADMaterials::MaterialLibrary::FromSlug(
-                                  body.material))
-                              .density;
+      for (int c = 0; c < 3; c++)
+        bm.inertia[r][c] = mp.inertia[r][c];
+    const float density =
+        CADMaterials::MaterialLibrary::GetMaterial(
+            CADMaterials::MaterialLibrary::FromSlug(body.material))
+            .density;
     if (!body.material.empty() && density > 0.0f) {
       bm.density = density;
       bm.massKnown = true;
@@ -40,7 +42,8 @@ std::optional<DocumentMass> MassOfBodies(const std::vector<Body>& bodies,
   }
   out.centerOfMass =
       out.volume > 0.0 ? weightedCom / out.volume : glm::dvec3(0.0);
-  if (!out.massKnown) out.massG = 0.0;
+  if (!out.massKnown)
+    out.massG = 0.0;
   return out;
 }
 

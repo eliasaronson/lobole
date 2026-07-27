@@ -91,9 +91,9 @@ struct ToolPrompt {
 };
 ToolPrompt SketchToolPrompt(const SketchEditState& edit);
 
-// Draws the active tool's staged prompt (+ any transient actionMsg warning) as a
-// pill centred at the top of the viewport. No-op outside sketch edit / for the
-// Select tool with nothing to say. Call once per frame from the UI pass.
+// Draws the active tool's staged prompt (+ any transient actionMsg warning) as
+// a pill centred at the top of the viewport. No-op outside sketch edit / for
+// the Select tool with nothing to say. Call once per frame from the UI pass.
 void DrawToolPrompt(AppState& state);
 
 // Projects a plane-UV point to viewport screen coords (pixels), matching the

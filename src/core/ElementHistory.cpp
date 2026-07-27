@@ -82,13 +82,12 @@ void PlaceAll(const TopTools_ListOfShape& list, const std::string& base,
   }
   // Faces and edges occupy separate index spaces; keep the suffix sequence
   // deterministic across the mix by sorting on (type, index).
-  std::sort(ordered.begin(), ordered.end(),
-            [](const auto& a, const auto& b) {
-              if (a.second->ShapeType() != b.second->ShapeType()) {
-                return a.second->ShapeType() < b.second->ShapeType();
-              }
-              return a.first < b.first;
-            });
+  std::sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) {
+    if (a.second->ShapeType() != b.second->ShapeType()) {
+      return a.second->ShapeType() < b.second->ShapeType();
+    }
+    return a.first < b.first;
+  });
   for (size_t i = 0; i < ordered.size(); i++) {
     place(*ordered[i].second, base + "." + std::to_string(i));
   }
@@ -175,8 +174,7 @@ void FallbackPasses(const TopoDS_Shape& shape, ElementMap& map) {
     for (int k = 1; k <= boundary.Extent(); k++) {
       const int idx = resEdges.FindIndex(boundary(k)) - 1;
       if (idx >= 0) {
-        map.edgeNames.try_emplace(idx,
-                                  faceName + ";U" + std::to_string(k - 1));
+        map.edgeNames.try_emplace(idx, faceName + ";U" + std::to_string(k - 1));
       }
     }
   }
@@ -241,8 +239,8 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                                               tool.GetShape());
       break;
     case BooleanOp::Subtract:
-      mk = std::make_unique<BRepAlgoAPI_Cut>(target.GetShape(),
-                                             tool.GetShape());
+      mk =
+          std::make_unique<BRepAlgoAPI_Cut>(target.GetShape(), tool.GetShape());
       break;
     case BooleanOp::Intersect:
       mk = std::make_unique<BRepAlgoAPI_Common>(target.GetShape(),
@@ -260,9 +258,9 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
     AppendSubshapeArgs(tool.GetShape(), args);
     const BRepTools_History hist(args, *mk);
 
-    out = PropagateNames({{target.GetShape(), targetMap},
-                          {tool.GetShape(), toolMap}},
-                         hist, mk->SectionEdges(), result, featureTag);
+    out = PropagateNames(
+        {{target.GetShape(), targetMap}, {tool.GetShape(), toolMap}}, hist,
+        mk->SectionEdges(), result, featureTag);
     FallbackPasses(result, out);
     return CADShape(result);
   } catch (const Standard_Failure& e) {
@@ -337,8 +335,7 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
     }
     CADShape result = RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
     if (!result.IsValid() && error && mk.NbFaultyContours() > 0) {
-      *error = "the fillet failed on " +
-               std::to_string(mk.NbFaultyContours()) +
+      *error = "the fillet failed on " + std::to_string(mk.NbFaultyContours()) +
                " contour(s) (radius too large for the geometry?)";
     }
     return result;
@@ -410,9 +407,9 @@ std::optional<ElementRef> ResolveEdgeOnBody(const Body& input,
       const glm::vec3 a = poly[i];
       const glm::vec3 ab = poly[i + 1] - a;
       const float len2 = glm::dot(ab, ab);
-      const float t =
-          len2 > 0.0f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f)
-                      : 0.0f;
+      const float t = len2 > 0.0f
+                          ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f)
+                          : 0.0f;
       d = std::min(d, glm::length(p - (a + ab * t)));
     }
     return d;

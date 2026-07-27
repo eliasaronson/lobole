@@ -17,10 +17,12 @@
 #include <utility>
 #include <vector>
 
-inline fem::FemMesh GenerateBoxMesh(int nx, int ny, int nz, double Lx, double Ly,
-                                    double Lz) {
+inline fem::FemMesh GenerateBoxMesh(int nx, int ny, int nz, double Lx,
+                                    double Ly, double Lz) {
   fem::FemMesh m;
-  auto cidx = [&](int i, int j, int k) { return (i * (ny + 1) + j) * (nz + 1) + k; };
+  auto cidx = [&](int i, int j, int k) {
+    return (i * (ny + 1) + j) * (nz + 1) + k;
+  };
   for (int i = 0; i <= nx; ++i)
     for (int j = 0; j <= ny; ++j)
       for (int k = 0; k <= nz; ++k)
@@ -30,7 +32,8 @@ inline fem::FemMesh GenerateBoxMesh(int nx, int ny, int nz, double Lx, double Ly
   auto mid = [&](int a, int b) {
     auto k = std::minmax(a, b);
     auto it = midOf.find({k.first, k.second});
-    if (it != midOf.end()) return it->second;
+    if (it != midOf.end())
+      return it->second;
     const int id = static_cast<int>(m.nodes.size());
     m.nodes.push_back(0.5 * (m.nodes[a] + m.nodes[b]));
     midOf[{k.first, k.second}] = id;
@@ -54,12 +57,18 @@ inline fem::FemMesh GenerateBoxMesh(int nx, int ny, int nz, double Lx, double Ly
       return std::abs(pa[axis] - v) < tol && std::abs(pb[axis] - v) < tol &&
              std::abs(pc[axis] - v) < tol;
     };
-    if (all(0, 0)) return 0;
-    if (all(0, Lx)) return 1;
-    if (all(1, 0)) return 2;
-    if (all(1, Ly)) return 3;
-    if (all(2, 0)) return 4;
-    if (all(2, Lz)) return 5;
+    if (all(0, 0))
+      return 0;
+    if (all(0, Lx))
+      return 1;
+    if (all(1, 0))
+      return 2;
+    if (all(1, Ly))
+      return 3;
+    if (all(2, 0))
+      return 4;
+    if (all(2, Lz))
+      return 5;
     return -1;
   };
 
@@ -72,13 +81,16 @@ inline fem::FemMesh GenerateBoxMesh(int nx, int ny, int nz, double Lx, double Ly
         for (const auto& t : tets6) {
           const int cc[4] = {gc[t[0]], gc[t[1]], gc[t[2]], gc[t[3]]};
           std::array<int, 10> tn;
-          for (int i = 0; i < 4; ++i) tn[i] = cc[i];
-          for (int s = 0; s < 6; ++s) tn[4 + s] = mid(cc[te[s][0]], cc[te[s][1]]);
+          for (int i = 0; i < 4; ++i)
+            tn[i] = cc[i];
+          for (int s = 0; s < 6; ++s)
+            tn[4 + s] = mid(cc[te[s][0]], cc[te[s][1]]);
           m.tets.push_back(tn);
           for (const auto& f : tf) {
             const int a = cc[f[0]], b = cc[f[1]], c = cc[f[2]];
             const int fi = faceIndexOf(a, b, c);
-            if (fi < 0) continue;
+            if (fi < 0)
+              continue;
             fem::FemMesh::BoundaryTri bt;
             bt.faceIndex = fi;
             bt.nodes = {a, b, c, mid(a, b), mid(b, c), mid(c, a)};
@@ -88,25 +100,28 @@ inline fem::FemMesh GenerateBoxMesh(int nx, int ny, int nz, double Lx, double Ly
       }
   m.stats.nodeCount = m.nodes.size();
   m.stats.tetCount = m.tets.size();
-  m.stats.worstQuality = 0.3;  // decorative; the solver ignores it
+  m.stats.worstQuality = 0.3; // decorative; the solver ignores it
   return m;
 }
 
-inline std::vector<int> NodesAtPlane(const fem::FemMesh& m, int axis, double value,
-                                     double tol) {
+inline std::vector<int> NodesAtPlane(const fem::FemMesh& m, int axis,
+                                     double value, double tol) {
   std::vector<int> out;
   for (int i = 0; i < (int)m.nodes.size(); ++i)
-    if (std::abs(m.nodes[i][axis] - value) < tol) out.push_back(i);
+    if (std::abs(m.nodes[i][axis] - value) < tol)
+      out.push_back(i);
   return out;
 }
-inline std::vector<int> TrisAtPlane(const fem::FemMesh& m, int axis, double value,
-                                    double tol) {
+inline std::vector<int> TrisAtPlane(const fem::FemMesh& m, int axis,
+                                    double value, double tol) {
   std::vector<int> out;
   for (int t = 0; t < (int)m.boundary.size(); ++t) {
     bool on = true;
     for (int k = 0; k < 6; ++k)
-      if (std::abs(m.nodes[m.boundary[t].nodes[k]][axis] - value) >= tol) on = false;
-    if (on) out.push_back(t);
+      if (std::abs(m.nodes[m.boundary[t].nodes[k]][axis] - value) >= tol)
+        on = false;
+    if (on)
+      out.push_back(t);
   }
   return out;
 }

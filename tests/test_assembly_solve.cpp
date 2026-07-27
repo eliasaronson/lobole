@@ -3,8 +3,8 @@
 
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
-#include "core/features/ExtrudeFeature.h"
 #include "core/Occurrence.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -59,14 +59,15 @@ Occurrence MakeOcc(uint64_t partId, glm::vec3 pos, bool fixed = false) {
 
 } // namespace
 
-TEST_CASE("Fastened mate aligns an origin connector to a face frame", "[assembly][solve]") {
+TEST_CASE("Fastened mate aligns an origin connector to a face frame",
+          "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
   const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
 
   AssemblyDocument asmDoc;
-  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, /*fixed=*/true));   // id 1
-  asmDoc.AddOccurrence(MakeOcc(1, {100, 100, 100}));            // id 2
+  asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, /*fixed=*/true)); // id 1
+  asmDoc.AddOccurrence(MakeOcc(1, {100, 100, 100}));           // id 2
 
   Mate m;
   m.type = MateType::Fastened;
@@ -91,7 +92,8 @@ TEST_CASE("Fastened mate aligns an origin connector to a face frame", "[assembly
   CHECK(asmDoc.FindById(1)->position == glm::vec3(0, 0, 0));
 }
 
-TEST_CASE("Slider offset slides the placement along the connector axis", "[assembly][solve]") {
+TEST_CASE("Slider offset slides the placement along the connector axis",
+          "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
   const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
@@ -153,8 +155,9 @@ TEST_CASE("Revolute mate seats the part axially by its offset (finding #6a)",
   CHECK(std::abs(glm::dot(arm->orientation, glm::quat(1, 0, 0, 0))) < 0.999f);
 }
 
-TEST_CASE("A positive offset moves b along +Z of a's connector frame (finding #6c)",
-          "[assembly][solve]") {
+TEST_CASE(
+    "A positive offset moves b along +Z of a's connector frame (finding #6c)",
+    "[assembly][solve]") {
   // The sign convention: a POSITIVE offset moves b in the +Z direction of a's
   // connector frame (a's outward face normal). The top cap's normal is world
   // +Z, so +offset lifts b and -offset lowers it — no inversion. Guards every
@@ -180,12 +183,13 @@ TEST_CASE("A positive offset moves b along +Z of a's connector frame (finding #6
     return asmDoc.FindById(2)->position.z;
   };
 
-  CHECK_THAT(placeWithOffset(5.0f), WithinAbs(8.0f, 1e-4f));  // 3 + (+5)
+  CHECK_THAT(placeWithOffset(5.0f), WithinAbs(8.0f, 1e-4f));   // 3 + (+5)
   CHECK_THAT(placeWithOffset(-5.0f), WithinAbs(-2.0f, 1e-4f)); // 3 + (-5)
   CHECK_THAT(placeWithOffset(0.0f), WithinAbs(3.0f, 1e-4f));   // on the cap
 }
 
-TEST_CASE("Assembly mass properties aggregate occurrences in world space (finding #5)",
+TEST_CASE("Assembly mass properties aggregate occurrences in world space "
+          "(finding #5)",
           "[assembly][solve]") {
   auto box = BuildSteelBox(3.0); // 4x4x3 steel box: vol 48 mm^3
   const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
@@ -213,13 +217,15 @@ TEST_CASE("Assembly mass properties aggregate occurrences in world space (findin
 
   // An invisible occurrence drops out of the aggregate (BOM convention).
   asmDoc.FindById(2)->visible = false;
-  const assembly::AssemblyMass hidden = assembly::MassProperties(asmDoc, resolve);
+  const assembly::AssemblyMass hidden =
+      assembly::MassProperties(asmDoc, resolve);
   REQUIRE(hidden.occurrences.size() == 1);
   CHECK_THAT(hidden.volume, WithinAbs(48.0, 1e-6));
   CHECK_THAT(hidden.centerOfMass.x, WithinAbs(2.0, 1e-5));
 }
 
-TEST_CASE("Revolute rotation spins without translating an origin connector", "[assembly][solve]") {
+TEST_CASE("Revolute rotation spins without translating an origin connector",
+          "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
   const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
@@ -254,7 +260,8 @@ TEST_CASE("Revolute rotation spins without translating an origin connector", "[a
   CHECK(dot < 0.999f);
 }
 
-TEST_CASE("Payoff: editing the base part moves the mated occurrence", "[assembly][solve]") {
+TEST_CASE("Payoff: editing the base part moves the mated occurrence",
+          "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
   const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
@@ -287,13 +294,14 @@ TEST_CASE("Payoff: editing the base part moves the mated occurrence", "[assembly
   CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(7.0f, 1e-4f));
 }
 
-TEST_CASE("A floating component with no fixed anchor stays put", "[assembly][solve]") {
+TEST_CASE("A floating component with no fixed anchor stays put",
+          "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
   const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
 
   AssemblyDocument asmDoc;
-  asmDoc.AddOccurrence(MakeOcc(1, {5, 0, 0}));   // id 1, NOT fixed
+  asmDoc.AddOccurrence(MakeOcc(1, {5, 0, 0}));    // id 1, NOT fixed
   asmDoc.AddOccurrence(MakeOcc(1, {99, 99, 99})); // id 2, NOT fixed
 
   Mate m; // origin-to-origin fastened → the two origins coincide
@@ -306,14 +314,16 @@ TEST_CASE("A floating component with no fixed anchor stays put", "[assembly][sol
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
-  // Lowest-id occurrence (1) anchors at its stored transform; 2 follows onto it.
+  // Lowest-id occurrence (1) anchors at its stored transform; 2 follows onto
+  // it.
   CHECK(asmDoc.FindById(1)->position == glm::vec3(5, 0, 0));
   CHECK_THAT(asmDoc.FindById(2)->position.x, WithinAbs(5.0f, 1e-4f));
   CHECK_THAT(asmDoc.FindById(2)->position.y, WithinAbs(0.0f, 1e-4f));
   CHECK_THAT(asmDoc.FindById(2)->position.z, WithinAbs(0.0f, 1e-4f));
 }
 
-TEST_CASE("An over-constrained loop is reported, not solved", "[assembly][solve]") {
+TEST_CASE("An over-constrained loop is reported, not solved",
+          "[assembly][solve]") {
   auto box = std::unique_ptr<Document>();
   const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
 
@@ -378,7 +388,8 @@ Mate FaceMate(uint64_t ext, MateType type) {
 }
 } // namespace
 
-TEST_CASE("Cylindrical mate frees both rotation and offset", "[assembly][solve]") {
+TEST_CASE("Cylindrical mate frees both rotation and offset",
+          "[assembly][solve]") {
   uint64_t ext = 0;
   auto box = BuildBox(3.0, ext);
   const assembly::PartResolver resolve = [&](uint64_t) { return box.get(); };
@@ -387,8 +398,8 @@ TEST_CASE("Cylindrical mate frees both rotation and offset", "[assembly][solve]"
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}, true));
   asmDoc.AddOccurrence(MakeOcc(1, {0, 0, 0}));
   Mate m = FaceMate(ext, MateType::Cylindrical);
-  m.offset = 4.0f;                     // slides along the cap normal (+Z)
-  m.rotation = glm::radians(30.0f);    // and spins about it
+  m.offset = 4.0f;                  // slides along the cap normal (+Z)
+  m.rotation = glm::radians(30.0f); // and spins about it
   asmDoc.AddMate(m);
 
   assembly::Solve(asmDoc, resolve);
@@ -415,8 +426,8 @@ TEST_CASE("Planar mate slides in-plane by dx/dy", "[assembly][solve]") {
   const Occurrence* arm = asmDoc.FindById(2);
   // Base cap centroid is (2,2,3); +5 along the frame X axis.
   CHECK_THAT(arm->position.z, WithinAbs(3.0f, 1e-4f)); // stays on the plane
-  const float inPlane = glm::length(glm::vec2(arm->position.x - 2.0f,
-                                              arm->position.y - 2.0f));
+  const float inPlane =
+      glm::length(glm::vec2(arm->position.x - 2.0f, arm->position.y - 2.0f));
   CHECK_THAT(inPlane, WithinAbs(5.0f, 1e-4f)); // slid 5 units within the plane
 }
 

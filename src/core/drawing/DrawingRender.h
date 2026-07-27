@@ -1,7 +1,7 @@
 #pragma once
 
-#include "core/drawing/DrawingProjection.h"  // drawing::CurveKind
 #include "core/ElementMap.h"
+#include "core/drawing/DrawingProjection.h" // drawing::CurveKind
 
 #include <glm/glm.hpp>
 
@@ -26,11 +26,11 @@ namespace drawing {
 struct SheetCurve {
   CurveKind kind = CurveKind::Sharp;
   bool visible = true;
-  std::vector<glm::dvec2> points;  // sheet mm
-  uint64_t sourceId = 0;           // body createdBy id, or occurrence id (assembly)
-  ElementRef edge;                 // resolved source edge (sharp/smooth), or unset
-  ElementRef silFace;              // resolved silhouette face (outline), or unset
-  int curveType = -1;              // GeomAbs curve type (line/circle/…): SVG hint
+  std::vector<glm::dvec2> points; // sheet mm
+  uint64_t sourceId = 0; // body createdBy id, or occurrence id (assembly)
+  ElementRef edge;       // resolved source edge (sharp/smooth), or unset
+  ElementRef silFace;    // resolved silhouette face (outline), or unset
+  int curveType = -1;    // GeomAbs curve type (line/circle/…): SVG hint
   // For a circle/ellipse curve: its centre + radius in SHEET mm (view scale
   // applied), so radius/diameter dimensions read them without re-deriving.
   // radius <= 0 means not a symbolic conic.
@@ -42,13 +42,13 @@ struct SheetCurve {
 struct SheetView {
   uint64_t viewId = 0;
   std::vector<SheetCurve> curves;
-  glm::dvec2 bboxMin{0.0};  // sheet-mm bounds of the projected geometry
+  glm::dvec2 bboxMin{0.0}; // sheet-mm bounds of the projected geometry
   glm::dvec2 bboxMax{0.0};
   bool hasGeometry = false;
   // The source Document::Version() at projection time; a later source version
   // means this view is stale and wants an update. 0 = never projected.
   uint64_t solvedSourceVersion = 0;
-  std::string error;  // non-empty if projection failed (keeps last-good curves)
+  std::string error; // non-empty if projection failed (keeps last-good curves)
 };
 
-}  // namespace drawing
+} // namespace drawing

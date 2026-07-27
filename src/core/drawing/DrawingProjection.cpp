@@ -32,7 +32,7 @@
 #include <mutex>
 #include <unordered_map>
 
-#endif  // HAVE_OPENCASCADE
+#endif // HAVE_OPENCASCADE
 
 namespace drawing {
 
@@ -45,9 +45,8 @@ namespace {
 // block and enforces rigidity, which occurrence transforms guarantee.
 gp_Trsf ToTrsf(const glm::dmat4& m) {
   gp_Trsf t;
-  t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0],
-              m[0][1], m[1][1], m[2][1], m[3][1],
-              m[0][2], m[1][2], m[2][2], m[3][2]);
+  t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1],
+              m[3][1], m[0][2], m[1][2], m[2][2], m[3][2]);
   return t;
 }
 
@@ -98,9 +97,11 @@ const void* StoredSurfaceOf(const TopoDS_Face& face, TopLoc_Location& loc) {
 // Geometry-handle fallback lookup: same stored handle, equal location.
 bool FindByGeom(const GeomLookup& lookup, const void* geom,
                 const TopLoc_Location& loc, SourceRef& out, bool asFace) {
-  if (!geom) return false;
+  if (!geom)
+    return false;
   const auto it = lookup.find(geom);
-  if (it == lookup.end()) return false;
+  if (it == lookup.end())
+    return false;
   for (const GeomEntry& entry : it->second) {
     if (entry.loc == loc) {
       out.sourceId = entry.sourceId;
@@ -138,22 +139,23 @@ void SampleCurve(const HLRBRep_Curve& gc, double u1, double u2,
   SampleCurve(gc, um, u2, deflection, depth - 1, out);
 }
 
-}  // namespace
+} // namespace
 
-std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies,
-                                            const glm::dvec3& viewDir,
-                                            const glm::dvec3& up,
-                                            const ProjectionOptions& options,
-                                            std::string* error) {
+std::optional<ProjectionResult>
+ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
+            const glm::dvec3& up, const ProjectionOptions& options,
+            std::string* error) {
   if (bodies.empty()) {
-    if (error) *error = "nothing to project";
+    if (error)
+      *error = "nothing to project";
     return std::nullopt;
   }
   const double dirLen = glm::length(viewDir);
   const double upLen = glm::length(up);
   if (dirLen < 1e-12 || upLen < 1e-12 ||
       glm::length(glm::cross(viewDir / dirLen, up / upLen)) < 1e-9) {
-    if (error) *error = "degenerate view direction";
+    if (error)
+      *error = "degenerate view direction";
     return std::nullopt;
   }
 
@@ -172,7 +174,8 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
     maps.reserve(bodies.size());
     GeomLookup curveToEdge, surfaceToFace;
     for (const InputBody& body : bodies) {
-      if (body.shape.IsNull()) continue;
+      if (body.shape.IsNull())
+        continue;
       BodyMaps& bm = maps.emplace_back();
       bm.sourceId = body.sourceId;
       bm.moved = body.shape.Moved(TopLoc_Location(ToTrsf(body.transform)));
@@ -181,17 +184,21 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
       for (int i = 1; i <= bm.edges.Extent(); ++i) {
         TopLoc_Location loc;
         const void* key = StoredCurveOf(TopoDS::Edge(bm.edges.FindKey(i)), loc);
-        if (key) curveToEdge[key].push_back({loc, bm.sourceId, i - 1});
+        if (key)
+          curveToEdge[key].push_back({loc, bm.sourceId, i - 1});
       }
       for (int i = 1; i <= bm.faces.Extent(); ++i) {
         TopLoc_Location loc;
-        const void* key = StoredSurfaceOf(TopoDS::Face(bm.faces.FindKey(i)), loc);
-        if (key) surfaceToFace[key].push_back({loc, bm.sourceId, i - 1});
+        const void* key =
+            StoredSurfaceOf(TopoDS::Face(bm.faces.FindKey(i)), loc);
+        if (key)
+          surfaceToFace[key].push_back({loc, bm.sourceId, i - 1});
       }
       algo->Add(bm.moved);
     }
     if (maps.empty()) {
-      if (error) *error = "nothing to project";
+      if (error)
+        *error = "nothing to project";
       return std::nullopt;
     }
 
@@ -204,12 +211,15 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
     const auto t1 = Clock::now();
     algo->Hide();
     const auto t2 = Clock::now();
-    result.stats.updateMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    result.stats.hideMs = std::chrono::duration<double, std::milli>(t2 - t1).count();
+    result.stats.updateMs =
+        std::chrono::duration<double, std::milli>(t1 - t0).count();
+    result.stats.hideMs =
+        std::chrono::duration<double, std::milli>(t2 - t1).count();
 
     Handle(HLRBRep_Data) ds = algo->DataStructure();
     if (ds.IsNull()) {
-      if (error) *error = "HLR produced no data structure";
+      if (error)
+        *error = "HLR produced no data structure";
       return std::nullopt;
     }
     const int nbEdges = ds->NbEdges();
@@ -225,11 +235,14 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
     // that don't. First membership wins (silhouettes belong to one face).
     std::vector<int> genFaceOf(nbEdges + 1, 0);
     for (int f = 1; f <= ds->NbFaces(); ++f) {
-      Handle(HLRAlgo_WiresBlock) wires = ds->FDataArray().ChangeValue(f).Wires();
-      if (wires.IsNull()) continue;
+      Handle(HLRAlgo_WiresBlock) wires =
+          ds->FDataArray().ChangeValue(f).Wires();
+      if (wires.IsNull())
+        continue;
       for (int w = 1; w <= wires->NbWires(); ++w) {
         Handle(HLRAlgo_EdgesBlock) block = wires->Wire(w);
-        if (block.IsNull()) continue;
+        if (block.IsNull())
+          continue;
         for (int i = 1; i <= block->NbEdges(); ++i) {
           const int edge = block->Edge(i);
           if (edge >= 1 && edge <= nbEdges && genFaceOf[edge] == 0)
@@ -241,8 +254,10 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
     for (int e = 1; e <= nbEdges; ++e) {
       HLRBRep_EdgeData& ed = ds->EDataArray().ChangeValue(e);
       const TopoDS_Edge srcEdge = TopoDS::Edge(ds->EdgeMap().FindKey(e));
-      if (BRep_Tool::Degenerated(srcEdge)) continue;
-      if (ed.Vertical()) continue;  // parallel to the view: projects to a point
+      if (BRep_Tool::Degenerated(srcEdge))
+        continue;
+      if (ed.Vertical())
+        continue; // parallel to the view: projects to a point
 
       // Resolve as a REAL model edge first — by identity, then by shared
       // stored curve (the outliner rebuilds/splits input edges, breaking
@@ -266,7 +281,8 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
         FindByGeom(curveToEdge, curve, loc, source, /*asFace=*/false);
       }
       if (source.edgeIndex >= 0) {
-        if (ed.Rg1Line()) kind = ed.RgNLine() ? CurveKind::Sewn : CurveKind::Smooth;
+        if (ed.Rg1Line())
+          kind = ed.RgNLine() ? CurveKind::Sewn : CurveKind::Smooth;
       } else if (const int genFace = genFaceOf[e]; genFace > 0) {
         // No source model edge: a projection-generated silhouette, named by
         // the face whose horizon it is.
@@ -292,7 +308,8 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
       HLRBRep_Curve& gc = ed.ChangeGeometry();
       const GeomAbs_CurveType type = gc.GetType();
       const auto emit = [&](double u1, double u2, bool visible) {
-        if (!(u2 > u1)) return;
+        if (!(u2 > u1))
+          return;
         ProjectedCurve& curve = result.curves.emplace_back();
         curve.kind = kind;
         curve.visible = visible;
@@ -315,7 +332,8 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
           curve.conicCenter = {ellipse.Location().X(), ellipse.Location().Y()};
           curve.conicRadius = ellipse.MajorRadius();
         }
-        if (!source.IsResolved()) ++result.stats.unresolvedSources;
+        if (!source.IsResolved())
+          ++result.stats.unresolvedSources;
       };
 
       HLRAlgo_EdgeIterator it;
@@ -344,21 +362,22 @@ std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>& bodies
     }
     return std::nullopt;
   } catch (const std::exception& ex) {
-    if (error) *error = std::string("HLR projection failed: ") + ex.what();
+    if (error)
+      *error = std::string("HLR projection failed: ") + ex.what();
     return std::nullopt;
   }
 }
 
-#else  // !HAVE_OPENCASCADE
+#else // !HAVE_OPENCASCADE
 
-std::optional<ProjectionResult> ProjectView(const std::vector<InputBody>&,
-                                            const glm::dvec3&, const glm::dvec3&,
-                                            const ProjectionOptions&,
-                                            std::string* error) {
-  if (error) *error = "built without OpenCASCADE";
+std::optional<ProjectionResult>
+ProjectView(const std::vector<InputBody>&, const glm::dvec3&, const glm::dvec3&,
+            const ProjectionOptions&, std::string* error) {
+  if (error)
+    *error = "built without OpenCASCADE";
   return std::nullopt;
 }
 
-#endif  // HAVE_OPENCASCADE
+#endif // HAVE_OPENCASCADE
 
-}  // namespace drawing
+} // namespace drawing

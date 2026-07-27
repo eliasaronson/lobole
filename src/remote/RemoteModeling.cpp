@@ -5,8 +5,8 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Expression.h"
-#include "core/io/Serialization.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
 #include "ui/AppActions.h"
@@ -33,7 +33,8 @@ namespace remote {
 // Modeling / feature-tree RPCs (select_feature..list_variables) carved out of
 // RemoteServer::HandleSemantic. All act on the active part document.
 std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
-                                      const std::string& m, const RpcParams& p) {
+                                      const std::string& m,
+                                      const RpcParams& p) {
   Document* doc = &document;
   if (m == "select_feature") {
     // Select a feature by index or feature_id (-1 / 0 clears). Drives the
@@ -87,7 +88,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   if (m == "modify_feature") {
     const size_t index = p.at("index").get<size_t>();
     Feature* feature = doc->GetFeature(index);
-    if (!feature) throw std::runtime_error("no feature at index");
+    if (!feature)
+      throw std::runtime_error("no feature at index");
     json before = DocumentIO::FeatureToJson(*feature);
     if (!state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
                                      index, before, p.at("feature")),
@@ -101,8 +103,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // where material is a library slug (e.g. "steel") or "" for default.
     // Commits one undoable edit and regenerates.
     size_t index = 0;
-    Feature* f = doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
-    if (!f) throw std::runtime_error("no such feature");
+    Feature* f =
+        doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
+    if (!f)
+      throw std::runtime_error("no such feature");
     const std::string slug = p.value("material", std::string{});
     // A non-empty slug that resolves to DEFAULT is unknown (DEFAULT is never in
     // the slug table, so valid slugs always map to a specific material).
@@ -136,7 +140,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     size_t index = 0;
     Feature* f =
         doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
-    if (!f) throw std::runtime_error("no such feature");
+    if (!f)
+      throw std::runtime_error("no such feature");
     json before = DocumentIO::FeatureToJson(*f);
     f->SetSuppressed(p.at("suppressed").get<bool>());
     doc->Regenerate();
@@ -146,9 +151,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     return json::object();
   }
   if (m == "delete_feature") {
-    if (!state.commands->Execute(std::make_unique<RemoveFeatureCommand>(
-                                     p.at("index").get<size_t>()),
-                                 *doc)) {
+    if (!state.commands->Execute(
+            std::make_unique<RemoveFeatureCommand>(p.at("index").get<size_t>()),
+            *doc)) {
       throw std::runtime_error("no feature at index");
     }
     return json::object();
@@ -159,18 +164,20 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // construction geometry that tracks the source when it moves. params:
     // {sketch_id, feature_id, element, kind?: "face"|"edge"}
     size_t index = 0;
-    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    Feature* f =
+        doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
-    if (!sk) throw std::runtime_error("no such sketch");
+    if (!sk)
+      throw std::runtime_error("no such sketch");
     json before = DocumentIO::FeatureToJson(*sk);
     const sketch::ExternalKind kind =
         p.value("kind", std::string("face")) == "edge"
             ? sketch::ExternalKind::Edge
             : sketch::ExternalKind::Face;
-    const size_t ei = sk->AddExternalGeometry(
-        ElementRef{p.at("feature_id").get<uint64_t>(),
-                   p.at("element").get<std::string>()},
-        kind);
+    const size_t ei =
+        sk->AddExternalGeometry(ElementRef{p.at("feature_id").get<uint64_t>(),
+                                           p.at("element").get<std::string>()},
+                                kind);
     doc->Regenerate();
     if (!sk->GetError().empty()) { // the ref did not resolve — roll back
       const std::string err = sk->GetError();
@@ -193,9 +200,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // ONCE. The plural form is the fast path for importers: dozens of
     // constraints without a full regeneration per constraint.
     size_t index = 0;
-    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    Feature* f =
+        doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
-    if (!sk) throw std::runtime_error("no such sketch");
+    if (!sk)
+      throw std::runtime_error("no such sketch");
 
     static const std::map<std::string, sketch::ConstraintKind> kinds = {
         {"coincident", sketch::ConstraintKind::Coincident},
@@ -231,11 +240,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         c.value = glm::radians(c.value); // wire=degrees, model=radians
       c.valueExpr = spec.value("expr", std::string{});
       if (!c.valueExpr.empty()) {
-        const auto v = ExpressionEngine::Default().EvaluateText(
-            c.valueExpr, doc->Symbols());
-        if (!v) throw std::runtime_error("bad expr: " + v.error().message);
-        c.value = (c.kind == sketch::ConstraintKind::Angle) ? glm::radians(*v)
-                                                            : *v;
+        const auto v = ExpressionEngine::Default().EvaluateText(c.valueExpr,
+                                                                doc->Symbols());
+        if (!v)
+          throw std::runtime_error("bad expr: " + v.error().message);
+        c.value =
+            (c.kind == sketch::ConstraintKind::Angle) ? glm::radians(*v) : *v;
       }
       const json& refs = spec.at("refs");
       if (refs.size() > 0)
@@ -275,9 +285,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     //                  circular?, step:[dx,dy] | center:[x,y], angle}
     // offset params:  {sketch_id, chain:[id,...], distance, join_arc?}
     size_t index = 0;
-    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    Feature* f =
+        doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
-    if (!sk) throw std::runtime_error("no such sketch");
+    if (!sk)
+      throw std::runtime_error("no such sketch");
 
     json before = DocumentIO::FeatureToJson(*sk);
     json result = json::object();
@@ -310,10 +322,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       result["generated"] = sk->OffsetChain(
           chain, p.at("distance").get<double>(), p.value("join_arc", true));
     } else {
-      result["arc_id"] =
-          sk->FilletCorner(p.at("line1").get<uint32_t>(),
-                           p.at("line2").get<uint32_t>(),
-                           p.at("radius").get<double>());
+      result["arc_id"] = sk->FilletCorner(p.at("line1").get<uint32_t>(),
+                                          p.at("line2").get<uint32_t>(),
+                                          p.at("radius").get<double>());
     }
     sketch::Solver solver;
     solver.Load(*sk);
@@ -336,38 +347,43 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     //             [units_per_pixel]|[origin:[u,v]]}
     // delete:    {sketch_id, image_id}
     size_t index = 0;
-    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    Feature* f =
+        doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
-    if (!sk) throw std::runtime_error("no such sketch");
+    if (!sk)
+      throw std::runtime_error("no such sketch");
     json before = DocumentIO::FeatureToJson(*sk);
     json result = json::object();
 
     if (m == "add_reference_image") {
       const std::string path = p.at("path").get<std::string>();
       std::ifstream in(path, std::ios::binary);
-      if (!in) throw std::runtime_error("cannot open image: " + path);
+      if (!in)
+        throw std::runtime_error("cannot open image: " + path);
       std::string data((std::istreambuf_iterator<char>(in)),
                        std::istreambuf_iterator<char>());
-      if (data.empty()) throw std::runtime_error("empty image: " + path);
+      if (data.empty())
+        throw std::runtime_error("empty image: " + path);
       std::vector<unsigned char> bytes(data.begin(), data.end());
 
       sketch::ReferenceImage img;
       int w = 0, h = 0, comp = 0;
-      if (stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()), &w,
-                                &h, &comp)) {
+      if (stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                &w, &h, &comp)) {
         img.widthPx = w;
         img.heightPx = h;
       }
       // Default scale: make the image ~4 plane units wide so it lands visible,
       // unless the caller pins one. (Recalibrated to a real dimension next.)
-      img.unitsPerPixel =
-          p.value("units_per_pixel", w > 0 ? 4.0 / w : 0.01);
+      img.unitsPerPixel = p.value("units_per_pixel", w > 0 ? 4.0 / w : 0.01);
       img.opacity = p.value("opacity", 0.5);
       const uint32_t id = sk->AddImage(img);
       sketch::ReferenceImage& ri = sk->images[sk->IndexOfImage(id)];
-      // Stable asset name carrying the source extension, keyed in the doc store.
+      // Stable asset name carrying the source extension, keyed in the doc
+      // store.
       std::string ext = std::filesystem::path(path).extension().string();
-      if (ext.empty()) ext = ".png";
+      if (ext.empty())
+        ext = ".png";
       ri.asset = std::to_string(sk->GetId()) + "-" + std::to_string(id) + ext;
       // Centre the image on the requested point (default plane origin).
       glm::vec2 center(0.0f, 0.0f);
@@ -375,11 +391,14 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         const auto& a = p.at("at");
         center = {a[0].get<float>(), a[1].get<float>()};
       }
-      ri.origin = center - 0.5f * glm::vec2(float(ri.widthPx), float(ri.heightPx)) *
-                               float(ri.unitsPerPixel);
+      ri.origin =
+          center - 0.5f * glm::vec2(float(ri.widthPx), float(ri.heightPx)) *
+                       float(ri.unitsPerPixel);
       doc->SetAsset(ri.asset, std::move(bytes));
-      result = {{"image_id", id}, {"width_px", ri.widthPx},
-                {"height_px", ri.heightPx}, {"asset", ri.asset}};
+      result = {{"image_id", id},
+                {"width_px", ri.widthPx},
+                {"height_px", ri.heightPx},
+                {"asset", ri.asset}};
     } else if (m == "calibrate_reference_image") {
       const auto& a = p.at("p1");
       const auto& b = p.at("p2");
@@ -397,9 +416,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (ii == std::numeric_limits<size_t>::max())
         throw std::runtime_error("no such image");
       sketch::ReferenceImage& ri = sk->images[ii];
-      if (p.contains("opacity")) ri.opacity = p.at("opacity").get<double>();
-      if (p.contains("hidden")) ri.hidden = p.at("hidden").get<bool>();
-      if (p.contains("rotation")) ri.rotation = p.at("rotation").get<double>();
+      if (p.contains("opacity"))
+        ri.opacity = p.at("opacity").get<double>();
+      if (p.contains("hidden"))
+        ri.hidden = p.at("hidden").get<bool>();
+      if (p.contains("rotation"))
+        ri.rotation = p.at("rotation").get<double>();
       if (p.contains("units_per_pixel"))
         ri.unitsPerPixel = p.at("units_per_pixel").get<double>();
       if (p.contains("origin")) {
@@ -422,9 +444,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // Remove a sketch entity by id, cleaning up dependent constraints; commit
     // one undoable edit. params: {sketch_id, entity_id}
     size_t index = 0;
-    Feature* f = doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
+    Feature* f =
+        doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
-    if (!sk) throw std::runtime_error("no such sketch");
+    if (!sk)
+      throw std::runtime_error("no such sketch");
     json before = DocumentIO::FeatureToJson(*sk);
     const size_t dropped = sk->DeleteEntity(p.at("entity_id").get<uint32_t>());
     sketch::Solver solver;
@@ -462,7 +486,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const Parameter* prior = partScope
                                    ? doc->FindParameter(name)
                                    : ui::FindProjectParameter(state, name);
-      if (prior) comment = prior->comment;
+      if (prior)
+        comment = prior->comment;
     }
     if (partScope) {
       if (!state.commands->Execute(
@@ -472,11 +497,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     } else if (!ui::SetProjectVariable(state, name, expression, comment)) {
       throw std::runtime_error("invalid variable name: " + name);
     }
-    const Parameter* param =
-        partScope ? doc->FindParameter(name)
-                  : ui::FindProjectParameter(state, name);
+    const Parameter* param = partScope ? doc->FindParameter(name)
+                                       : ui::FindProjectParameter(state, name);
     json result = {{"value", param->value}, {"scope", scope}};
-    if (!param->error.empty()) result["error"] = param->error;
+    if (!param->error.empty())
+      result["error"] = param->error;
     return result;
   }
   if (m == "delete_variable") {
@@ -485,26 +510,31 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // auto-detects (project first, then the active part's local) when omitted.
     const std::string name = p.at("name").get<std::string>();
     const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
-    const bool haveLocal = doc != nullptr && doc->FindParameter(name) != nullptr;
+    const bool haveLocal =
+        doc != nullptr && doc->FindParameter(name) != nullptr;
     const std::string scope =
         p.value("scope", haveProject || !haveLocal ? "project" : "part");
     if (scope == "part") {
-      if (!haveLocal) throw std::runtime_error("no such variable: " + name);
+      if (!haveLocal)
+        throw std::runtime_error("no such variable: " + name);
       std::vector<std::string> refs = doc->FindParameterReferences(name);
       if (!refs.empty()) {
         std::string msg = "variable is referenced by:";
-        for (const std::string& r : refs) msg += " " + r + ";";
+        for (const std::string& r : refs)
+          msg += " " + r + ";";
         throw std::runtime_error(msg);
       }
       state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
                               *doc);
       return json::object();
     }
-    if (!haveProject) throw std::runtime_error("no such variable: " + name);
+    if (!haveProject)
+      throw std::runtime_error("no such variable: " + name);
     std::vector<std::string> refs;
     if (!ui::RemoveProjectVariable(state, name, &refs)) {
       std::string msg = "variable is referenced by:";
-      for (const std::string& r : refs) msg += " " + r + ";";
+      for (const std::string& r : refs)
+        msg += " " + r + ";";
       throw std::runtime_error(msg);
     }
     return json::object();
@@ -516,7 +546,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     const std::string name = p.at("name").get<std::string>();
     const std::string newName = p.at("new_name").get<std::string>();
     const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
-    const bool haveLocal = doc != nullptr && doc->FindParameter(name) != nullptr;
+    const bool haveLocal =
+        doc != nullptr && doc->FindParameter(name) != nullptr;
     const std::string scope =
         p.value("scope", haveProject || !haveLocal ? "project" : "part");
     if (scope == "part") {
@@ -538,11 +569,14 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                     {"expression", param.expression},
                     {"value", param.value},
                     {"scope", scope}};
-      if (!param.comment.empty()) entry["comment"] = param.comment;
-      if (!param.error.empty()) entry["error"] = param.error;
+      if (!param.comment.empty())
+        entry["comment"] = param.comment;
+      if (!param.error.empty())
+        entry["error"] = param.error;
       variables.push_back(entry);
     };
-    for (const Parameter& param : state.projectParameters) emit(param, "project");
+    for (const Parameter& param : state.projectParameters)
+      emit(param, "project");
     if (state.document)
       for (const Parameter& param : state.document->GetParameters())
         emit(param, "part");
@@ -552,4 +586,4 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   return std::nullopt;
 }
 
-}  // namespace remote
+} // namespace remote

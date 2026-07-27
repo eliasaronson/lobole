@@ -23,9 +23,9 @@ namespace fem {
 // A boundary condition applied to one face (resolved through an ElementRef, the
 // toponaming contract — a dangling ref is a study error, not a silent skip).
 enum class LoadType {
-  Fixed,     // zero all three DOF on the face's nodes
-  Force,     // a total force vector (N) spread as uniform traction
-  Pressure,  // a scalar pressure (MPa) along the outward face normal
+  Fixed,    // zero all three DOF on the face's nodes
+  Force,    // a total force vector (N) spread as uniform traction
+  Pressure, // a scalar pressure (MPa) along the outward face normal
 };
 
 // A per-face mesh size override (mm). size follows the value+expr convention:
@@ -51,9 +51,9 @@ struct Load {
 
 // What a study solves for.
 enum class AnalysisType {
-  Static,    // linear-static: stress + displacement under loads
-  Modal,     // natural frequencies + mode shapes (no external loads)
-  Topology,  // generative: SIMP compliance minimization -> a density field
+  Static,   // linear-static: stress + displacement under loads
+  Modal,    // natural frequencies + mode shapes (no external loads)
+  Topology, // generative: SIMP compliance minimization -> a density field
 };
 
 // A single-part analysis definition (linear static or modal).
@@ -106,7 +106,8 @@ bool AnalysisTypeFromString(const std::string& s, AnalysisType& out);
 // false; the value fields keep their last good values. Lazy: called at mesh/
 // solve time, not during regeneration (a Study is not visited by the feature
 // loop, and results are never auto-solved).
-bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols, std::string* error);
+bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
+                        std::string* error);
 
 // The face a load/refinement ref resolves to: a body (index into
 // doc.GetBodies()) and a face index in that body (TopExp_Explorer order).
@@ -119,8 +120,9 @@ struct ResolvedFace {
 // do (body.createdBy == ref.featureId, then elementMap.Resolve). Returns false
 // and sets *error (naming `what`) if the body or the element name is gone —
 // the toponaming contract: a dangling ref is a first-class study error.
-bool ResolveFace(const Document& doc, const ElementRef& ref, const std::string& what,
-                 ResolvedFace& out, std::string* error);
+bool ResolveFace(const Document& doc, const ElementRef& ref,
+                 const std::string& what, ResolvedFace& out,
+                 std::string* error);
 
 // One meshed body of a study.
 struct StudyBodyMesh {
@@ -134,7 +136,7 @@ struct StudyBodyMesh {
 // the global size and per-face refinement sizes. On any error (bad expression,
 // dangling ref, mesher failure) sets study.error and *error and returns false.
 // Pure meshing — no solve. Used by mesh_study (and, in FEM2, run_study).
-bool MeshStudy(const Document& doc, Study& study, std::vector<StudyBodyMesh>& out,
-               std::string* error);
+bool MeshStudy(const Document& doc, Study& study,
+               std::vector<StudyBodyMesh>& out, std::string* error);
 
-}  // namespace fem
+} // namespace fem

@@ -25,20 +25,17 @@ class RpcParams {
 public:
   explicit RpcParams(const nlohmann::json& params) : params_(params) {}
 
-  template <class K>
-  bool contains(const K& key) const {
+  template <class K> bool contains(const K& key) const {
     seen_.emplace(key);
     return params_.contains(key);
   }
 
-  template <class K>
-  const nlohmann::json& at(const K& key) const {
+  template <class K> const nlohmann::json& at(const K& key) const {
     seen_.emplace(key);
     return params_.at(key);
   }
 
-  template <class K>
-  const nlohmann::json& operator[](const K& key) const {
+  template <class K> const nlohmann::json& operator[](const K& key) const {
     seen_.emplace(key);
     return params_[key];
   }

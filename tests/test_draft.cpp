@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include "core/Document.h"
-#include "core/features/DraftFeature.h"
-#include "core/Feature.h"
-#include "core/io/Serialization.h"
 #include "TestIO.h"
+#include "core/Document.h"
+#include "core/Feature.h"
+#include "core/features/DraftFeature.h"
+#include "core/io/Serialization.h"
 
 #include <algorithm>
 #include <cmath>
@@ -38,8 +38,8 @@ TEST_CASE("Draft tapers a box's side faces (volume drops)", "[draft]") {
   for (const std::string& f : SideFaces(doc.GetBodies()[0]))
     refs.push_back(ElementRef{id, f});
   REQUIRE(refs.size() == 4);
-  doc.AddFeature(std::make_unique<DraftFeature>("Taper", id, refs, 5.0,
-                                                PlaneType::XY));
+  doc.AddFeature(
+      std::make_unique<DraftFeature>("Taper", id, refs, 5.0, PlaneType::XY));
   REQUIRE(doc.GetBodies().size() == 1);
   const double after = doc.GetBodies()[0].shape.Volume();
   CHECK(after < before);       // tapered inward going up
@@ -77,8 +77,7 @@ TEST_CASE("Draft errors on a missing body and round-trips (v22)", "[draft]") {
   const uint64_t id = doc2.GetFeature(0)->GetId();
   const std::string f = SideFaces(doc2.GetBodies()[0]).front();
   doc2.AddFeature(std::make_unique<DraftFeature>(
-      "D", id, std::vector<ElementRef>{ElementRef{id, f}}, 3.0,
-      PlaneType::XY));
+      "D", id, std::vector<ElementRef>{ElementRef{id, f}}, 3.0, PlaneType::XY));
   const double v = doc2.GetBodies()[0].shape.Volume();
 
   const auto path = std::filesystem::temp_directory_path() / "draft_rt.json";

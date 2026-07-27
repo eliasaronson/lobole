@@ -27,9 +27,10 @@ namespace {
 Document* ResolvePartParam(ui::AppState& state, const json& part) {
   ui::EnsureParts(state);
   uint64_t id = 0;
-  // A numeric `part` is tried as a STABLE id first (what occurrences reference);
-  // if no part carries that id it falls back to the slot INDEX from list_parts,
-  // so passing the visible 0..N index no longer silently returns another part.
+  // A numeric `part` is tried as a STABLE id first (what occurrences
+  // reference); if no part carries that id it falls back to the slot INDEX from
+  // list_parts, so passing the visible 0..N index no longer silently returns
+  // another part.
   std::optional<int> indexFallback;
   if (part.is_number_unsigned() || part.is_number_integer()) {
     id = part.get<uint64_t>();
@@ -73,7 +74,8 @@ Document& RequirePartDoc(Document* doc, const char* what) {
 // element listing) carved out of RemoteServer::HandleSemantic. `docIn` is
 // null on an assembly/drawing tab.
 std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
-                                        const std::string& m, const RpcParams& p) {
+                                        const std::string& m,
+                                        const RpcParams& p) {
   Document* doc = docIn;
   if (m == "set_section") {
     // Toggle/position the viewport section clip plane (I3 raster). params:
@@ -86,7 +88,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     glm::vec3 nrm(0, 0, 1), origin(0.0f);
     if (p.contains("base_plane")) {
       const std::string bp = p.at("base_plane").get<std::string>();
-      nrm = bp == "xz" ? glm::vec3(0, 1, 0)
+      nrm = bp == "xz"   ? glm::vec3(0, 1, 0)
             : bp == "yz" ? glm::vec3(1, 0, 0)
                          : glm::vec3(0, 0, 1);
       origin = nrm * static_cast<float>(p.value("offset", 0.0));
@@ -94,8 +96,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const auto& o = p.at("origin");
       const auto& n = p.at("normal");
       origin = {o[0].get<float>(), o[1].get<float>(), o[2].get<float>()};
-      nrm = glm::normalize(glm::vec3(n[0].get<float>(), n[1].get<float>(),
-                                     n[2].get<float>()));
+      nrm = glm::normalize(
+          glm::vec3(n[0].get<float>(), n[1].get<float>(), n[2].get<float>()));
     }
     state.sectionPlane = glm::vec4(nrm, glm::dot(origin, nrm));
     return json::object();
@@ -107,7 +109,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     glm::vec3 origin(0.0f), normal(0.0f, 0.0f, 1.0f);
     if (p.contains("base_plane")) {
       const std::string bp = p.at("base_plane").get<std::string>();
-      normal = bp == "xz" ? glm::vec3(0, 1, 0)
+      normal = bp == "xz"   ? glm::vec3(0, 1, 0)
                : bp == "yz" ? glm::vec3(1, 0, 0)
                             : glm::vec3(0, 0, 1);
       origin = normal * static_cast<float>(p.value("offset", 0.0));
@@ -115,12 +117,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const auto& o = p.at("origin");
       const auto& nrm = p.at("normal");
       origin = {o[0].get<float>(), o[1].get<float>(), o[2].get<float>()};
-      normal = {nrm[0].get<float>(), nrm[1].get<float>(),
-                nrm[2].get<float>()};
+      normal = {nrm[0].get<float>(), nrm[1].get<float>(), nrm[2].get<float>()};
     }
     const auto area = Measure::CrossSectionArea(
         RequirePartDoc(doc, "section").GetBodies(), origin, normal);
-    if (!area) throw std::runtime_error("section failed");
+    if (!area)
+      throw std::runtime_error("section failed");
     return json{{"area", *area}};
   }
   if (m == "interference") {
@@ -134,7 +136,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         if (v.is_string()) {
           const std::string name = v.get<std::string>();
           for (const Occurrence& o : state.assembly->GetOccurrences())
-            if (o.name == name) return o;
+            if (o.name == name)
+              return o;
           throw std::runtime_error("occurrence '" + name +
                                    "' not found (see list_occurrences)");
         }
@@ -155,11 +158,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const auto v = Measure::InterferenceVolume(
           pa->GetBodies(), ui::OccurrenceMatrix(oa), pb->GetBodies(),
           ui::OccurrenceMatrix(ob));
-      if (!v) throw std::runtime_error("interference check failed (see log)");
-      return json{{"clash", *v > 1e-9},
-                  {"volume", *v},
-                  {"a", oa.name},
-                  {"b", ob.name}};
+      if (!v)
+        throw std::runtime_error("interference check failed (see log)");
+      return json{
+          {"clash", *v > 1e-9}, {"volume", *v}, {"a", oa.name}, {"b", ob.name}};
     }
     const auto& bodies = RequirePartDoc(doc, "interference").GetBodies();
     const int ia = p.at("a").get<int>();
@@ -191,23 +193,25 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           assembly::MassProperties(*state.assembly, resolve);
       json rows = json::array();
       for (const assembly::OccurrenceMass& om : am.occurrences) {
-        json entry = {{"occurrence", om.occurrenceId},
-                      {"name", om.name},
-                      {"part_id", om.partId},
-                      {"volume", om.volume},
-                      {"center_of_mass",
-                       {om.centerOfMass.x, om.centerOfMass.y,
-                        om.centerOfMass.z}}};
+        json entry = {
+            {"occurrence", om.occurrenceId},
+            {"name", om.name},
+            {"part_id", om.partId},
+            {"volume", om.volume},
+            {"center_of_mass",
+             {om.centerOfMass.x, om.centerOfMass.y, om.centerOfMass.z}}};
         entry["mass_g"] = om.massKnown ? json(om.massG) : json(nullptr);
         rows.push_back(entry);
       }
       const glm::dvec3& com = am.centerOfMass;
-      json out = {{"occurrences", rows},
-                  {"total",
-                   {{"volume", am.volume},
-                    {"center_of_mass", {com.x, com.y, com.z}},
-                    {"mass_g", am.massKnown ? json(am.massG) : json(nullptr)}}}};
-      if (!am.skipped.empty()) out["skipped"] = am.skipped;
+      json out = {
+          {"occurrences", rows},
+          {"total",
+           {{"volume", am.volume},
+            {"center_of_mass", {com.x, com.y, com.z}},
+            {"mass_g", am.massKnown ? json(am.massG) : json(nullptr)}}}};
+      if (!am.skipped.empty())
+        out["skipped"] = am.skipped;
       return out;
     }
     const auto& bodies = RequirePartDoc(doc, "mass_properties").GetBodies();
@@ -217,18 +221,21 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // The math is shared with the BOM (A4): Measure::MassOfBodies. A single
     // body's Body copy is cheap (the shape is a refcounted OCC handle).
     std::vector<Body> subset;
-    if (only >= 0) subset.push_back(bodies[only]);
+    if (only >= 0)
+      subset.push_back(bodies[only]);
     std::string err;
     const auto mass = Measure::MassOfBodies(only >= 0 ? subset : bodies, &err);
-    if (!mass) throw std::runtime_error(err);
-    if (mass->bodies.empty()) throw std::runtime_error("no bodies");
+    if (!mass)
+      throw std::runtime_error(err);
+    if (mass->bodies.empty())
+      throw std::runtime_error("no bodies");
     json out = json::array();
     for (size_t i = 0; i < mass->bodies.size(); i++) {
       const Measure::BodyMass& bm = mass->bodies[i];
       json inertia = json::array();
       for (int r = 0; r < 3; r++)
-        inertia.push_back({bm.inertia[r][0], bm.inertia[r][1],
-                           bm.inertia[r][2]});
+        inertia.push_back(
+            {bm.inertia[r][0], bm.inertia[r][1], bm.inertia[r][2]});
       json entry = {{"body", only >= 0 ? static_cast<size_t>(only) : i},
                     {"name", bm.name},
                     {"volume", bm.volume},
@@ -246,11 +253,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       out.push_back(entry);
     }
     const glm::dvec3& com = mass->centerOfMass;
-    return json{{"bodies", out},
-            {"total",
-             {{"volume", mass->volume},
-              {"center_of_mass", {com.x, com.y, com.z}},
-              {"mass_g", mass->massKnown ? json(mass->massG) : json(nullptr)}}}};
+    return json{
+        {"bodies", out},
+        {"total",
+         {{"volume", mass->volume},
+          {"center_of_mass", {com.x, com.y, com.z}},
+          {"mass_g", mass->massKnown ? json(mass->massG) : json(nullptr)}}}};
   }
   if (m == "check_geometry") {
     // B-Rep validity per body (OCC BRepCheck_Analyzer) — flags invalid faces/
@@ -290,22 +298,24 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     };
     const ElementRef a = refOf(p.at("a"));
     const auto& bodies =
-        p.contains("part")
-            ? ResolvePartParam(state, p.at("part"))->GetBodies()
-            : RequirePartDoc(doc, "measure").GetBodies();
+        p.contains("part") ? ResolvePartParam(state, p.at("part"))->GetBodies()
+                           : RequirePartDoc(doc, "measure").GetBodies();
     if (p.contains("b")) {
       const auto d = Measure::Distance(bodies, a, refOf(p.at("b")));
-      if (!d) throw std::runtime_error("measure: an element did not resolve");
+      if (!d)
+        throw std::runtime_error("measure: an element did not resolve");
       return json{{"distance", *d}};
     }
     const auto e = Measure::Describe(bodies, a);
-    if (!e) throw std::runtime_error("measure: element did not resolve");
+    if (!e)
+      throw std::runtime_error("measure: element did not resolve");
     json out = {{"kind", e->kind}};
     if (e->kind == "face") {
       out["area"] = e->area;
     } else {
       out["length"] = e->length;
-      if (e->hasRadius) out["radius"] = e->radius; // circular/arc edges
+      if (e->hasRadius)
+        out["radius"] = e->radius; // circular/arc edges
     }
     return out;
   }
@@ -319,15 +329,15 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // params: {body?: index, part?: name|stable-id (cross-part, no tab
     // switch)}
     const auto& bodies =
-        p.contains("part")
-            ? ResolvePartParam(state, p.at("part"))->GetBodies()
-            : RequirePartDoc(doc, "list_elements").GetBodies();
+        p.contains("part") ? ResolvePartParam(state, p.at("part"))->GetBodies()
+                           : RequirePartDoc(doc, "list_elements").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
     json out = json::array();
     for (size_t i = 0; i < bodies.size(); i++) {
-      if (only >= 0 && i != static_cast<size_t>(only)) continue;
+      if (only >= 0 && i != static_cast<size_t>(only))
+        continue;
       json faces = json::array(), edges = json::array();
       for (const auto& [idx, name] : bodies[i].elementMap.names) {
         json f = {{"index", idx}, {"name", name}};
@@ -348,7 +358,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         if (const auto ei = Measure::DescribeEdgeAt(bodies[i], idx)) {
           e["kind"] = ei->kind;
           e["length"] = ei->length;
-          if (ei->hasRadius) e["radius"] = ei->radius;
+          if (ei->hasRadius)
+            e["radius"] = ei->radius;
           // Midpoint: lets an importer match a specific edge geometrically
           // (Onshape fillet/chamfer edge queries → our stable edge names).
           e["midpoint"] = {ei->midpoint.x, ei->midpoint.y, ei->midpoint.z};
@@ -366,4 +377,4 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
   return std::nullopt;
 }
 
-}  // namespace remote
+} // namespace remote

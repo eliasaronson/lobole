@@ -44,17 +44,19 @@ std::vector<double> CornerNodeDensity(const FemMesh& m,
       ++cnt[n];
     }
   for (size_t n = 0; n < sum.size(); ++n)
-    if (cnt[n]) sum[n] /= cnt[n];
+    if (cnt[n])
+      sum[n] /= cnt[n];
   return sum;
 }
 
-}  // namespace
+} // namespace
 
 void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
                        double threshold, std::vector<glm::vec3>& positions,
                        std::vector<glm::vec3>& normals,
                        std::vector<uint32_t>& indices) {
-  if (density.size() != mesh.tets.size()) return;
+  if (density.size() != mesh.tets.size())
+    return;
   const std::vector<double> nd = CornerNodeDensity(mesh, density);
   const double t = threshold;
 
@@ -75,10 +77,16 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
     int ni = 0, no = 0;
     for (int i = 0; i < 4; ++i) {
       const int n = tet[i];
-      if (nd[n] >= t) { ins[ni++] = n; meanIn += mesh.nodes[n]; ++nin; }
-      else { outs[no++] = n; }
+      if (nd[n] >= t) {
+        ins[ni++] = n;
+        meanIn += mesh.nodes[n];
+        ++nin;
+      } else {
+        outs[no++] = n;
+      }
     }
-    if (nin == 0 || nin == 4) continue;  // no crossing
+    if (nin == 0 || nin == 4)
+      continue; // no crossing
     meanIn /= nin;
 
     // Emit a triangle with an outward normal (pointing away from the solid
@@ -86,10 +94,11 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
     auto emit = [&](glm::vec3 a, glm::vec3 b, glm::vec3 c) {
       glm::vec3 n = glm::cross(b - a, c - a);
       const float len = glm::length(n);
-      if (len < 1e-12f) return;  // degenerate
+      if (len < 1e-12f)
+        return; // degenerate
       n /= len;
       const glm::vec3 ctr = (a + b + c) / 3.0f;
-      if (glm::dot(n, glm::vec3(meanIn) - ctr) > 0.0f) {  // points into solid
+      if (glm::dot(n, glm::vec3(meanIn) - ctr) > 0.0f) { // points into solid
         std::swap(b, c);
         n = -n;
       }
@@ -105,13 +114,13 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
       indices.push_back(base + 2);
     };
 
-    if (ni == 1) {  // one solid corner -> a triangle cutting its 3 edges
+    if (ni == 1) { // one solid corner -> a triangle cutting its 3 edges
       emit(interp(ins[0], outs[0]), interp(ins[0], outs[1]),
            interp(ins[0], outs[2]));
-    } else if (ni == 3) {  // one void corner -> the complementary triangle
+    } else if (ni == 3) { // one void corner -> the complementary triangle
       emit(interp(outs[0], ins[0]), interp(outs[0], ins[1]),
            interp(outs[0], ins[2]));
-    } else {  // 2 solid / 2 void -> a quad split into two triangles
+    } else { // 2 solid / 2 void -> a quad split into two triangles
       const glm::vec3 ac = interp(ins[0], outs[0]);
       const glm::vec3 ad = interp(ins[0], outs[1]);
       const glm::vec3 bc = interp(ins[1], outs[0]);
@@ -135,7 +144,8 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
                      const glm::vec3& c) {
     glm::vec3 n = glm::cross(b - a, c - a);
     const float len = glm::length(n);
-    if (len < 1e-12f) return;
+    if (len < 1e-12f)
+      return;
     n /= len;
     const uint32_t base = static_cast<uint32_t>(positions.size());
     positions.push_back(a);
@@ -151,7 +161,8 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
   for (const FemMesh::BoundaryTri& bt : mesh.boundary) {
     const int c0 = bt.nodes[0], c1 = bt.nodes[1], c2 = bt.nodes[2];
     const int nin = (nd[c0] >= t) + (nd[c1] >= t) + (nd[c2] >= t);
-    if (nin == 0) continue;
+    if (nin == 0)
+      continue;
     auto P = [&](int n) { return glm::vec3(mesh.nodes[n]); };
     if (nin == 3) {
       emitCap(P(c0), P(c1), P(c2));
@@ -163,11 +174,11 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
     for (int k = 0; k < 3; ++k) {
       const int i0 = cyc[k], i1 = cyc[(k + 1) % 3], i2 = cyc[(k + 2) % 3];
       const bool b0 = nd[i0] >= t, b1 = nd[i1] >= t, b2 = nd[i2] >= t;
-      if (nin == 1 && b0 && !b1 && !b2) {  // one solid corner
+      if (nin == 1 && b0 && !b1 && !b2) { // one solid corner
         emitCap(P(i0), interp(i0, i1), interp(i0, i2));
         break;
       }
-      if (nin == 2 && b0 && b1 && !b2) {  // one void corner -> quad
+      if (nin == 2 && b0 && b1 && !b2) { // one void corner -> quad
         emitCap(P(i0), P(i1), interp(i1, i2));
         emitCap(P(i0), interp(i1, i2), interp(i0, i2));
         break;
@@ -178,14 +189,16 @@ void ExtractIsoSurface(const FemMesh& mesh, const std::vector<double>& density,
 
 double AutoIsoThreshold(const FemMesh& mesh, const std::vector<double>& density,
                         double targetFraction) {
-  if (density.size() != mesh.tets.size() || mesh.tets.empty()) return 0.5;
+  if (density.size() != mesh.tets.size() || mesh.tets.empty())
+    return 0.5;
   std::vector<double> vol(mesh.tets.size());
   double vtot = 0.0;
   for (size_t e = 0; e < mesh.tets.size(); ++e) {
     vol[e] = CornerTetVolume(mesh, mesh.tets[e]);
     vtot += vol[e];
   }
-  if (vtot <= 0.0) return 0.5;
+  if (vtot <= 0.0)
+    return 0.5;
   const double target = std::clamp(targetFraction, 0.0, 1.0) * vtot;
   // solidVol(t) = sum vol[e] where density[e] >= t is monotone decreasing in t.
   double lo = 0.0, hi = 1.0;
@@ -193,8 +206,12 @@ double AutoIsoThreshold(const FemMesh& mesh, const std::vector<double>& density,
     const double mid = 0.5 * (lo + hi);
     double sv = 0.0;
     for (size_t e = 0; e < vol.size(); ++e)
-      if (density[e] >= mid) sv += vol[e];
-    if (sv > target) lo = mid; else hi = mid;  // too much solid -> raise t
+      if (density[e] >= mid)
+        sv += vol[e];
+    if (sv > target)
+      lo = mid;
+    else
+      hi = mid; // too much solid -> raise t
   }
   return 0.5 * (lo + hi);
 }
@@ -208,13 +225,17 @@ void WeldSurface(const std::vector<glm::vec3>& pos,
                  std::vector<glm::vec3>& outVerts,
                  std::vector<std::array<uint32_t, 3>>& outTris) {
   glm::vec3 mn(1e30f), mx(-1e30f);
-  for (const glm::vec3& p : pos) { mn = glm::min(mn, p); mx = glm::max(mx, p); }
+  for (const glm::vec3& p : pos) {
+    mn = glm::min(mn, p);
+    mx = glm::max(mx, p);
+  }
   const float diag = glm::length(mx - mn);
   const float eps = std::max(diag * 1e-6f, 1e-9f);
   auto quant = [&](const glm::vec3& p) {
-    return std::array<int64_t, 3>{static_cast<int64_t>(std::llround(p.x / eps)),
-                                  static_cast<int64_t>(std::llround(p.y / eps)),
-                                  static_cast<int64_t>(std::llround(p.z / eps))};
+    return std::array<int64_t, 3>{
+        static_cast<int64_t>(std::llround(p.x / eps)),
+        static_cast<int64_t>(std::llround(p.y / eps)),
+        static_cast<int64_t>(std::llround(p.z / eps))};
   };
   std::map<std::array<int64_t, 3>, uint32_t> lookup;
   std::vector<uint32_t> remap(pos.size());
@@ -240,7 +261,8 @@ void WeldSurface(const std::vector<glm::vec3>& pos,
 // so the surface stays on the design-domain faces it was cut against.
 void TaubinSmooth(std::vector<glm::vec3>& verts,
                   const std::vector<std::array<uint32_t, 3>>& tris, int iters) {
-  if (iters <= 0 || verts.empty()) return;
+  if (iters <= 0 || verts.empty())
+    return;
   const size_t n = verts.size();
   std::vector<std::vector<uint32_t>> nbr(n);
   std::map<std::pair<uint32_t, uint32_t>, int> edgeCount;
@@ -256,7 +278,10 @@ void TaubinSmooth(std::vector<glm::vec3>& verts,
   }
   std::vector<char> pinned(n, 0);
   for (const auto& [e, c] : edgeCount)
-    if (c == 1) { pinned[e.first] = 1; pinned[e.second] = 1; }  // open edge
+    if (c == 1) {
+      pinned[e.first] = 1;
+      pinned[e.second] = 1;
+    } // open edge
   // Dedup neighbor lists.
   for (auto& list : nbr) {
     std::sort(list.begin(), list.end());
@@ -267,18 +292,25 @@ void TaubinSmooth(std::vector<glm::vec3>& verts,
   std::vector<glm::vec3> next(n);
   auto pass = [&](float f) {
     for (size_t i = 0; i < n; ++i) {
-      if (pinned[i] || nbr[i].empty()) { next[i] = verts[i]; continue; }
+      if (pinned[i] || nbr[i].empty()) {
+        next[i] = verts[i];
+        continue;
+      }
       glm::vec3 c(0.0f);
-      for (uint32_t j : nbr[i]) c += verts[j];
+      for (uint32_t j : nbr[i])
+        c += verts[j];
       c /= static_cast<float>(nbr[i].size());
       next[i] = verts[i] + f * (c - verts[i]);
     }
     verts.swap(next);
   };
-  for (int it = 0; it < iters; ++it) { pass(lambda); pass(mu); }
+  for (int it = 0; it < iters; ++it) {
+    pass(lambda);
+    pass(mu);
+  }
 }
 
-}  // namespace
+} // namespace
 
 bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
                    double threshold, int smoothIters, const std::string& path,
@@ -287,7 +319,8 @@ bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
   std::vector<uint32_t> idx;
   ExtractIsoSurface(mesh, density, threshold, pos, nrm, idx);
   if (pos.empty()) {
-    if (error) *error = "the iso-surface is empty at this threshold";
+    if (error)
+      *error = "the iso-surface is empty at this threshold";
     return false;
   }
 
@@ -298,7 +331,8 @@ bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
 
   std::ofstream out(path, std::ios::binary);
   if (!out) {
-    if (error) *error = "cannot open '" + path + "' for writing";
+    if (error)
+      *error = "cannot open '" + path + "' for writing";
     return false;
   }
   const char header[80] = {0};
@@ -324,7 +358,8 @@ bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
     out.write(reinterpret_cast<const char*>(&attr), 2);
   }
   if (!out.good()) {
-    if (error) *error = "failed writing '" + path + "'";
+    if (error)
+      *error = "failed writing '" + path + "'";
     return false;
   }
   return true;
@@ -375,29 +410,35 @@ double ElementVolume(const FemMesh& mesh, const std::array<int, 10>& tet) {
   return vol;
 }
 
-}  // namespace
+} // namespace
 
-std::optional<TopoResult> TopologyOptimize(
-    const FemMesh& mesh, const Material& material,
-    const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,
-    const TopoParams& params, std::string* error,
-    const std::function<bool(const TopoProgress&)>& progress,
-    const std::vector<int>& keepNodes, TopoLinearSolver* solver) {
+std::optional<TopoResult>
+TopologyOptimize(const FemMesh& mesh, const Material& material,
+                 const std::vector<int>& fixedNodes,
+                 const std::vector<FaceLoad>& loads, const TopoParams& params,
+                 std::string* error,
+                 const std::function<bool(const TopoProgress&)>& progress,
+                 const std::vector<int>& keepNodes, TopoLinearSolver* solver) {
   auto fail = [&](const std::string& m) -> std::optional<TopoResult> {
-    if (error) *error = m;
+    if (error)
+      *error = m;
     return std::nullopt;
   };
   const int nNodes = static_cast<int>(mesh.nodes.size());
   const int nTets = static_cast<int>(mesh.tets.size());
-  if (nNodes == 0 || nTets == 0) return fail("empty mesh");
-  if (material.youngMPa <= 0) return fail("material has no stiffness data");
+  if (nNodes == 0 || nTets == 0)
+    return fail("empty mesh");
+  if (material.youngMPa <= 0)
+    return fail("material has no stiffness data");
   if (params.volumeFraction <= 0.0 || params.volumeFraction >= 1.0)
     return fail("volume fraction must be in (0, 1)");
-  if (fixedNodes.empty()) return fail("topology optimization needs a fixed support");
-  if (loads.empty()) return fail("topology optimization needs at least one load");
+  if (fixedNodes.empty())
+    return fail("topology optimization needs a fixed support");
+  if (loads.empty())
+    return fail("topology optimization needs at least one load");
 
   const double E0 = material.youngMPa;
-  const double Emin = 1e-6 * E0;  // ersatz void stiffness (modified SIMP)
+  const double Emin = 1e-6 * E0; // ersatz void stiffness (modified SIMP)
   const auto D0 = Elasticity(E0, material.poisson);
 
   // ---- Per-element geometry (centroid + volume), computed once ------------
@@ -407,48 +448,59 @@ std::optional<TopoResult> TopologyOptimize(
   for (int e = 0; e < nTets; ++e) {
     const auto& tet = mesh.tets[e];
     Vector3d c(0, 0, 0);
-    for (int i = 0; i < 4; ++i) {  // centroid from the 4 corner nodes
+    for (int i = 0; i < 4; ++i) { // centroid from the 4 corner nodes
       const auto& pp = mesh.nodes[tet[i]];
       c += Vector3d(pp.x, pp.y, pp.z);
     }
     centroid[e] = c / 4.0;
     volE[e] = ElementVolume(mesh, tet);
     Vtot += volE[e];
-    meanSize += std::cbrt(6.0 * volE[e]);  // ~ hex edge for a 6-tet subdivision
+    meanSize += std::cbrt(6.0 * volE[e]); // ~ hex edge for a 6-tet subdivision
   }
-  if (Vtot <= 0) return fail("mesh has zero volume");
+  if (Vtot <= 0)
+    return fail("mesh has zero volume");
   meanSize /= nTets;
 
-  const double R = params.filterRadius > 0 ? params.filterRadius : 2.5 * meanSize;
-  if (R <= 0) return fail("filter radius must be positive");
+  const double R =
+      params.filterRadius > 0 ? params.filterRadius : 2.5 * meanSize;
+  if (R <= 0)
+    return fail("filter radius must be positive");
 
   // ---- Frozen set: tets touching a fixed node or a loaded boundary tri ----
   std::vector<char> fixedNode(nNodes, 0);
   for (int n : fixedNodes)
-    if (n >= 0 && n < nNodes) fixedNode[n] = 1;
+    if (n >= 0 && n < nNodes)
+      fixedNode[n] = 1;
   std::vector<char> loadedNode(nNodes, 0);
   for (const FaceLoad& load : loads)
     for (int ti : load.tris)
       if (ti >= 0 && ti < static_cast<int>(mesh.boundary.size()))
-        for (int n : mesh.boundary[ti].nodes) loadedNode[n] = 1;
-  for (int n : keepNodes)  // user keep-faces freeze solid too
-    if (n >= 0 && n < nNodes) loadedNode[n] = 1;
+        for (int n : mesh.boundary[ti].nodes)
+          loadedNode[n] = 1;
+  for (int n : keepNodes) // user keep-faces freeze solid too
+    if (n >= 0 && n < nNodes)
+      loadedNode[n] = 1;
   std::vector<char> frozen(nTets, 0);
   for (int e = 0; e < nTets; ++e)
     for (int i = 0; i < 10; ++i) {
       const int n = mesh.tets[e][i];
-      if (fixedNode[n] || loadedNode[n]) { frozen[e] = 1; break; }
+      if (fixedNode[n] || loadedNode[n]) {
+        frozen[e] = 1;
+        break;
+      }
     }
 
   // ---- Density filter: uniform grid over centroids, cell size R -----------
   // Weight w_ej = max(0, R - |c_e - c_j|); two centroids within R lie at most
   // one cell apart, so a 3x3x3 cell scan finds every neighbor.
   Vector3d gmin(centroid[0]);
-  for (const auto& c : centroid) gmin = gmin.cwiseMin(c);
+  for (const auto& c : centroid)
+    gmin = gmin.cwiseMin(c);
   auto cellOf = [&](const Vector3d& c) {
-    return std::array<int, 3>{static_cast<int>(std::floor((c.x() - gmin.x()) / R)),
-                              static_cast<int>(std::floor((c.y() - gmin.y()) / R)),
-                              static_cast<int>(std::floor((c.z() - gmin.z()) / R))};
+    return std::array<int, 3>{
+        static_cast<int>(std::floor((c.x() - gmin.x()) / R)),
+        static_cast<int>(std::floor((c.y() - gmin.y()) / R)),
+        static_cast<int>(std::floor((c.z() - gmin.z()) / R))};
   };
   auto key = [](int x, int y, int z) {
     return (static_cast<int64_t>(x) * 2654435761LL ^
@@ -471,7 +523,8 @@ std::optional<TopoResult> TopologyOptimize(
       for (int dy = -1; dy <= 1; ++dy)
         for (int dz = -1; dz <= 1; ++dz) {
           auto it = grid.find(key(c[0] + dx, c[1] + dy, c[2] + dz));
-          if (it == grid.end()) continue;
+          if (it == grid.end())
+            continue;
           for (int j : it->second) {
             const double d = (centroid[e] - centroid[j]).norm();
             if (d < R) {
@@ -486,29 +539,35 @@ std::optional<TopoResult> TopologyOptimize(
   // Sensitivity filtering (below) leaves the physical density equal to the raw
   // design variable — nothing blurs the density field, so it goes crisply
   // black/white and the volume stays linear in x: dV/dx_e = v_e, and the frozen
-  // (support/load) skin is exactly 1. The filter regularizes the *sensitivities*
-  // instead, imposing a minimum length scale without the gray transition band a
-  // density filter would leave. (Density filter + Heaviside projection is the
-  // production-grade alternative — crisper min-member-size control — noted for
-  // the TO1 build.)
+  // (support/load) skin is exactly 1. The filter regularizes the
+  // *sensitivities* instead, imposing a minimum length scale without the gray
+  // transition band a density filter would leave. (Density filter + Heaviside
+  // projection is the production-grade alternative — crisper min-member-size
+  // control — noted for the TO1 build.)
   const double Vtarget = params.volumeFraction * Vtot;
   double Vfrozen = 0.0, sumVfree = 0.0;
-  for (int e = 0; e < nTets; ++e) (frozen[e] ? Vfrozen : sumVfree) += volE[e];
+  for (int e = 0; e < nTets; ++e)
+    (frozen[e] ? Vfrozen : sumVfree) += volE[e];
   if (Vfrozen > Vtarget)
-    return fail("volume fraction target is below the frozen support/load volume");
-  if (sumVfree <= 0) return fail("no free design region (every element is frozen)");
+    return fail(
+        "volume fraction target is below the frozen support/load volume");
+  if (sumVfree <= 0)
+    return fail("no free design region (every element is frozen)");
 
   // ---- DOF map + load vector (shared with the static solver) --------------
   const DofMap dofs = BuildDofMap(nNodes, fixedNodes);
   const std::vector<int>& dofMap = dofs.map;
   const int nFree = dofs.nFree;
-  if (nFree == 0) return fail("model is fully constrained (no free DOF)");
+  if (nFree == 0)
+    return fail("model is fully constrained (no free DOF)");
   Eigen::VectorXd F = Eigen::VectorXd::Zero(nFree);
   {
     std::string loadErr;
-    if (!AssembleFaceLoads(mesh, loads, dofMap, F, &loadErr)) return fail(loadErr);
+    if (!AssembleFaceLoads(mesh, loads, dofMap, F, &loadErr))
+      return fail(loadErr);
   }
-  if (F.norm() <= 0) return fail("loads integrate to zero force");
+  if (F.norm() <= 0)
+    return fail("loads integrate to zero force");
 
   // ---- Design variables: uniform feasible start --------------------------
   // The design variable IS the physical density (sensitivity filtering); frozen
@@ -517,7 +576,8 @@ std::optional<TopoResult> TopologyOptimize(
   const double xStart =
       std::min(1.0, std::max(0.0, (Vtarget - Vfrozen) / sumVfree));
   for (int e = 0; e < nTets; ++e)
-    if (!frozen[e]) x[e] = xStart;
+    if (!frozen[e])
+      x[e] = xStart;
 
   // Iterative solver: Conjugate Gradient (K is symmetric positive-definite),
   // diagonal-preconditioned, warm-started from the previous iteration's
@@ -532,7 +592,8 @@ std::optional<TopoResult> TopologyOptimize(
   cg.setTolerance(1e-6);
   Eigen::VectorXd uPrev = Eigen::VectorXd::Zero(nFree);
   std::vector<Eigen::Triplet<double>> trip;
-  if (!solver) trip.reserve(static_cast<size_t>(nTets) * 900);
+  if (!solver)
+    trip.reserve(static_cast<size_t>(nTets) * 900);
 
   // External solver (the GPU seam): set up once, then hand it the per-element
   // scales each iteration instead of assembling K here.
@@ -543,13 +604,13 @@ std::optional<TopoResult> TopologyOptimize(
     if (!solver->Setup(mesh, material, dofMap, nFree, &serr))
       return fail("linear solver setup failed: " + serr);
     Fext.assign(F.data(), F.data() + nFree);
-    uExt.assign(nFree, 0.0);  // carries the warm start between iterations
+    uExt.assign(nFree, 0.0); // carries the warm start between iterations
   }
 
   TopoResult result;
   result.density.assign(nTets, 0.0);
   std::vector<double> dcRaw(nTets, 0.0), dcFilt(nTets, 0.0);
-  constexpr double kGamma = 1e-3;  // sensitivity-filter divide-by-zero guard
+  constexpr double kGamma = 1e-3; // sensitivity-filter divide-by-zero guard
 
   // TOPO_PROFILE=1: per-phase wall-time accumulators, one stderr line at run
   // end — the honest attribution of where a SIMP iteration goes (the GPU4
@@ -586,8 +647,10 @@ std::optional<TopoResult> TopologyOptimize(
       std::string serr;
       if (!solver->Solve(scaleE, Fext, uExt, &serr))
         return fail("linear solve failed: " + serr);
-      for (int i = 0; i < nFree; ++i) u(i) = uExt[i];
-      if (!u.allFinite()) return fail("linear solve failed during optimization");
+      for (int i = 0; i < nFree; ++i)
+        u(i) = uExt[i];
+      if (!u.allFinite())
+        return fail("linear solve failed during optimization");
     } else {
       // Built-in path: assemble K(x) and run the Eigen CG-IC.
       trip.clear();
@@ -596,10 +659,12 @@ std::optional<TopoResult> TopologyOptimize(
         const auto& tet = mesh.tets[e];
         for (int a = 0; a < 30; ++a) {
           const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
-          if (ga < 0) continue;
+          if (ga < 0)
+            continue;
           for (int b = 0; b < 30; ++b) {
             const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
-            if (gb < 0) continue;
+            if (gb < 0)
+              continue;
             trip.emplace_back(ga, gb, scaleE[e] * Ke0(a, b));
           }
         }
@@ -614,7 +679,7 @@ std::optional<TopoResult> TopologyOptimize(
       u = cg.solveWithGuess(F, uPrev);
       if (!u.allFinite())
         return fail("linear solve failed during optimization");
-      uPrev = u;  // warm-start the next iteration
+      uPrev = u; // warm-start the next iteration
     }
 
     tSolve += lap(tp);
@@ -626,19 +691,20 @@ std::optional<TopoResult> TopologyOptimize(
     for (int n = 0; n < nNodes; ++n)
       for (int k = 0; k < 3; ++k) {
         const int g = dofMap[3 * n + k];
-        if (g >= 0) disp[n][k] = u(g);
+        if (g >= 0)
+          disp[n][k] = u(g);
       }
 
-    // Raw per-element compliance sensitivity dc/dx_e = -p x_e^(p-1)(1-Emin/E0) se
-    // with se = u_e^T Ke0 u_e (the element strain energy at full modulus).
+    // Raw per-element compliance sensitivity dc/dx_e = -p x_e^(p-1)(1-Emin/E0)
+    // se with se = u_e^T Ke0 u_e (the element strain energy at full modulus).
     // An injected solver may compute all the energies at once (GPU4 — the
     // element matrices are resident on the device); on decline, the CPU
     // loop below recomputes Ke0 per element, which stays the oracle.
     const double coef = p * (E0 - Emin) / E0;
     std::vector<double> seExt;
-    const bool haveSe =
-        solver && solver->ElementEnergies(uExt, seExt, nullptr) &&
-        static_cast<int>(seExt.size()) == nTets;
+    const bool haveSe = solver &&
+                        solver->ElementEnergies(uExt, seExt, nullptr) &&
+                        static_cast<int>(seExt.size()) == nTets;
     for (int e = 0; e < nTets; ++e) {
       double se;
       if (haveSe) {
@@ -653,22 +719,25 @@ std::optional<TopoResult> TopologyOptimize(
           ue(3 * i + 1) = d.y;
           ue(3 * i + 2) = d.z;
         }
-        se = ue.dot(Ke0 * ue);  // >= 0
+        se = ue.dot(Ke0 * ue); // >= 0
       }
-      dcRaw[e] = -coef * std::pow(x[e], p - 1.0) * se;  // <= 0
+      dcRaw[e] = -coef * std::pow(x[e], p - 1.0) * se; // <= 0
     }
     tSens += lap(tp);
     // Sensitivity filter (Sigmund): a length-scale regularizer that keeps the
-    // density crisply 0/1. dcFilt_e = (sum_j H_ej x_j dcRaw_j)/(max(g,x_e) sum_j H_ej).
+    // density crisply 0/1. dcFilt_e = (sum_j H_ej x_j dcRaw_j)/(max(g,x_e)
+    // sum_j H_ej).
     for (int e = 0; e < nTets; ++e) {
       double num = 0.0;
-      for (const auto& [j, w] : nbr[e]) num += w * x[j] * dcRaw[j];
+      for (const auto& [j, w] : nbr[e])
+        num += w * x[j] * dcRaw[j];
       dcFilt[e] = num / (std::max(kGamma, x[e]) * Hs[e]);
     }
     tFilter += lap(tp);
 
     // ---- Optimality-criteria update: bisect the volume multiplier --------
-    // Volume is linear in x, so the constraint check is O(n) per bisection step.
+    // Volume is linear in x, so the constraint check is O(n) per bisection
+    // step.
     std::vector<double> xnew(x);
     const double move = params.moveLimit;
     double l1 = 0.0, l2 = 1e12;
@@ -676,24 +745,30 @@ std::optional<TopoResult> TopologyOptimize(
       const double lmid = 0.5 * (l1 + l2);
       double Vp = Vfrozen;
       for (int e = 0; e < nTets; ++e) {
-        if (frozen[e]) continue;
-        const double be = -dcFilt[e] / (lmid * volE[e]);  // >= 0
+        if (frozen[e])
+          continue;
+        const double be = -dcFilt[e] / (lmid * volE[e]); // >= 0
         double xn = x[e] * std::pow(std::max(be, 0.0), params.damping);
         xn = std::min(x[e] + move, std::max(x[e] - move, xn));
         xn = std::min(1.0, std::max(0.0, xn));
         xnew[e] = xn;
         Vp += volE[e] * xn;
       }
-      if (Vp > Vtarget) l1 = lmid; else l2 = lmid;
+      if (Vp > Vtarget)
+        l1 = lmid;
+      else
+        l2 = lmid;
     }
 
     double maxChange = 0.0;
     for (int e = 0; e < nTets; ++e)
-      if (!frozen[e]) maxChange = std::max(maxChange, std::abs(xnew[e] - x[e]));
+      if (!frozen[e])
+        maxChange = std::max(maxChange, std::abs(xnew[e] - x[e]));
     x.swap(xnew);
 
     double Vphys = 0.0;
-    for (int e = 0; e < nTets; ++e) Vphys += volE[e] * x[e];
+    for (int e = 0; e < nTets; ++e)
+      Vphys += volE[e] * x[e];
 
     result.complianceHistory.push_back(compliance);
     result.iterations = iter + 1;
@@ -706,7 +781,7 @@ std::optional<TopoResult> TopologyOptimize(
       prog.compliance = compliance;
       prog.maxChange = maxChange;
       prog.volumeFraction = Vphys / Vtot;
-      if (!progress(prog)) {  // caller cancelled: keep best-so-far
+      if (!progress(prog)) { // caller cancelled: keep best-so-far
         result.cancelled = true;
         return result;
       }
@@ -727,19 +802,21 @@ std::optional<TopoResult> TopologyOptimize(
   return result;
 }
 
-#else  // !HAVE_FEM_SOLVER
+#else // !HAVE_FEM_SOLVER
 
 bool TopoAvailable() { return false; }
 
-std::optional<TopoResult> TopologyOptimize(
-    const FemMesh&, const Material&, const std::vector<int>&,
-    const std::vector<FaceLoad>&, const TopoParams&, std::string* error,
-    const std::function<bool(const TopoProgress&)>&, const std::vector<int>&,
-    TopoLinearSolver*) {
-  if (error) *error = "built without FEM solver support (Eigen not found)";
+std::optional<TopoResult>
+TopologyOptimize(const FemMesh&, const Material&, const std::vector<int>&,
+                 const std::vector<FaceLoad>&, const TopoParams&,
+                 std::string* error,
+                 const std::function<bool(const TopoProgress&)>&,
+                 const std::vector<int>&, TopoLinearSolver*) {
+  if (error)
+    *error = "built without FEM solver support (Eigen not found)";
   return std::nullopt;
 }
 
-#endif  // HAVE_FEM_SOLVER
+#endif // HAVE_FEM_SOLVER
 
-}  // namespace fem
+} // namespace fem

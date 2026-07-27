@@ -22,8 +22,8 @@ namespace remote {
 
 // Drawing / sheet RPCs (create_drawing..) carved out of
 // RemoteServer::HandleSemantic. Act on the active drawing tab / project.
-std::optional<json> HandleDrawingRpc(ui::AppState& state,
-                                     const std::string& m, const RpcParams& p) {
+std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
+                                     const RpcParams& p) {
   if (m == "create_drawing") {
     // Adds a drawing tab. Optional `sheet` seeds paper size / orientation /
     // title-block fields so a headless caller can set them in one call.
@@ -40,8 +40,10 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
       sheet.landscape = sj.value("landscape", sheet.landscape);
       if (sj.contains("title_block")) {
         const json& tb = sj.at("title_block");
-        sheet.titleBlock.project = tb.value("project", sheet.titleBlock.project);
-        sheet.titleBlock.document = tb.value("document", sheet.titleBlock.document);
+        sheet.titleBlock.project =
+            tb.value("project", sheet.titleBlock.project);
+        sheet.titleBlock.document =
+            tb.value("document", sheet.titleBlock.document);
         sheet.titleBlock.author = tb.value("author", sheet.titleBlock.author);
         sheet.titleBlock.date = tb.value("date", sheet.titleBlock.date);
         sheet.titleBlock.notes = tb.value("notes", sheet.titleBlock.notes);
@@ -49,20 +51,20 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
       state.drawing->BumpVersion();
     }
     return json{{"index", idx},
-            {"name", name},
-            {"id", state.parts[idx].id},
-            {"size", SheetSizeToString(state.drawing->GetSheet().size)}};
+                {"name", name},
+                {"id", state.parts[idx].id},
+                {"size", SheetSizeToString(state.drawing->GetSheet().size)}};
   }
   if (m == "list_drawings") {
     ui::EnsureParts(state);
     json arr = json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
-      if (state.parts[i].kind != ui::DocKind::Drawing) continue;
+      if (state.parts[i].kind != ui::DocKind::Drawing)
+        continue;
       // The active drawing lives in AppState; a stashed one in its slot.
-      const DrawingDocument* dwg =
-          static_cast<int>(i) == state.activePart
-              ? state.drawing.get()
-              : state.parts[i].drawing.get();
+      const DrawingDocument* dwg = static_cast<int>(i) == state.activePart
+                                       ? state.drawing.get()
+                                       : state.parts[i].drawing.get();
       arr.push_back({{"name", state.parts[i].name},
                      {"index", i},
                      {"id", state.parts[i].id},
@@ -86,7 +88,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
       }
     }
     if (sourceId == 0)
-      throw std::runtime_error("no part or assembly named '" + sourceName + "'");
+      throw std::runtime_error("no part or assembly named '" + sourceName +
+                               "'");
     DrawingView v;
     v.sourceDocId = sourceId;
     if (p.contains("orientation") &&
@@ -96,15 +99,17 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
                                p.at("orientation").get<std::string>() + "'");
     // Default the label to the orientation (front/top/iso…) — clearer on the
     // sheet than repeating the source name across every view.
-    v.name = p.value("name", std::string(ViewOrientationToString(v.orientation)));
+    v.name =
+        p.value("name", std::string(ViewOrientationToString(v.orientation)));
     v.baseViewId = p.value("base_view", uint64_t{0});
     v.scale = p.value("scale", 1.0);
     if (p.contains("position")) {
       const json& pos = p.at("position");
       v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
-    } else {  // default to the sheet centre
+    } else { // default to the sheet centre
       glm::dvec2 ext = SheetExtentMM(state.drawing->GetSheet().size);
-      if (state.drawing->GetSheet().landscape) ext = {ext.y, ext.x};
+      if (state.drawing->GetSheet().landscape)
+        ext = {ext.y, ext.x};
       v.position = ext * 0.5;
     }
     ui::SnapshotDrawing(state);
@@ -118,16 +123,17 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
       throw std::runtime_error("the active document is not a drawing");
     ui::SnapshotDrawing(state);
     if (!state.drawing->RemoveView(p.at("id").get<uint64_t>())) {
-      state.drawingHistory.undo.pop_back();  // nothing changed; drop the snapshot
+      state.drawingHistory.undo
+          .pop_back(); // nothing changed; drop the snapshot
       throw std::runtime_error("no such view");
     }
-    ui::UpdateDrawingRenders(state);  // drop the removed view's geometry
+    ui::UpdateDrawingRenders(state); // drop the removed view's geometry
     return json::object();
   }
   if (m == "update_drawing") {
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
-    ui::UpdateDrawingRenders(state);  // the explicit re-projection
+    ui::UpdateDrawingRenders(state); // the explicit re-projection
     json views = json::array();
     for (const DrawingView& view : state.drawing->GetViews()) {
       json vj = {{"id", view.id}, {"name", view.name}};
@@ -135,15 +141,20 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
       if (it != state.drawingRenders.end()) {
         int vis = 0, hid = 0, outline = 0;
         for (const drawing::SheetCurve& c : it->second.curves) {
-          if (c.visible) ++vis; else ++hid;
-          if (c.kind == drawing::CurveKind::Outline) ++outline;
+          if (c.visible)
+            ++vis;
+          else
+            ++hid;
+          if (c.kind == drawing::CurveKind::Outline)
+            ++outline;
         }
         vj["curves"] = it->second.curves.size();
         vj["visible"] = vis;
         vj["hidden"] = hid;
         vj["silhouettes"] = outline;
         vj["has_geometry"] = it->second.hasGeometry;
-        if (!it->second.error.empty()) vj["error"] = it->second.error;
+        if (!it->second.error.empty())
+          vj["error"] = it->second.error;
       }
       views.push_back(vj);
     }
@@ -168,11 +179,12 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
         vj["has_geometry"] = it->second.hasGeometry;
         vj["stale"] = ui::DrawingSourceVersion(state, view.sourceDocId) !=
                       it->second.solvedSourceVersion;
-        if (!it->second.error.empty()) vj["error"] = it->second.error;
+        if (!it->second.error.empty())
+          vj["error"] = it->second.error;
       } else {
         vj["curves"] = 0;
         vj["has_geometry"] = false;
-        vj["stale"] = true;  // never projected
+        vj["stale"] = true; // never projected
       }
       arr.push_back(vj);
     }
@@ -204,14 +216,17 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
     for (const drawing::SheetCurve& c : it->second.curves) {
       const bool isEdge = c.edge.IsSet();
       const ElementRef& ref = isEdge ? c.edge : c.silFace;
-      if (!ref.IsSet()) continue;
+      if (!ref.IsSet())
+        continue;
       const std::string key = std::to_string(c.sourceId) + "|" +
                               (isEdge ? "e|" : "s|") +
                               std::to_string(ref.featureId) + "|" + ref.name;
-      if (!seen.insert(key).second) continue;
-      json e = {{"kind", isEdge ? "edge" : "silhouette"},
-                {"source_id", c.sourceId},
-                {"ref", {{"feature_id", ref.featureId}, {"element", ref.name}}}};
+      if (!seen.insert(key).second)
+        continue;
+      json e = {
+          {"kind", isEdge ? "edge" : "silhouette"},
+          {"source_id", c.sourceId},
+          {"ref", {{"feature_id", ref.featureId}, {"element", ref.name}}}};
       if (c.conicRadius > 0.0) {
         e["type"] = "circle";
         e["center"] = {c.conicCenter.x, c.conicCenter.y};
@@ -247,8 +262,9 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
         r.edge = ElementRef{rj.at("edge").value("feature_id", uint64_t{0}),
                             rj.at("edge").value("element", std::string{})};
       if (rj.contains("sil_face"))
-        r.silFace = ElementRef{rj.at("sil_face").value("feature_id", uint64_t{0}),
-                               rj.at("sil_face").value("element", std::string{})};
+        r.silFace =
+            ElementRef{rj.at("sil_face").value("feature_id", uint64_t{0}),
+                       rj.at("sil_face").value("element", std::string{})};
       dim.refs.push_back(r);
     }
     if (p.contains("offset")) {
@@ -258,11 +274,12 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
     ui::SnapshotDrawing(state);
     const uint64_t id = state.drawing->AddDim(dim);
     // Echo the resolved value now (the view is already projected).
-    const drawing::ResolvedDim rd = ui::ResolveDrawingDim(state, *state.drawing->FindDim(id));
+    const drawing::ResolvedDim rd =
+        ui::ResolveDrawingDim(state, *state.drawing->FindDim(id));
     return json{{"id", id},
-            {"resolved", rd.resolved},
-            {"value", rd.value},
-            {"text", rd.text}};
+                {"resolved", rd.resolved},
+                {"value", rd.value},
+                {"text", rd.text}};
   }
   if (m == "remove_drawing_dim") {
     if (!state.drawing)
@@ -292,4 +309,4 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state,
   return std::nullopt;
 }
 
-}  // namespace remote
+} // namespace remote

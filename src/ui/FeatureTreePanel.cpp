@@ -1,13 +1,13 @@
 #include "ui/FeatureTreePanel.h"
 
 #include "cad/CADMaterials.h"
-#include "render/Camera.h"
 #include "core/Command.h"
-#include "core/features/DatumPlaneFeature.h"
 #include "core/Feature.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/features/FilletFeature.h"
-#include "core/io/Serialization.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
+#include "render/Camera.h"
 #include "ui/AppActions.h" // SelectFeature / SelectedFeatureId
 #include "ui/SketchInteraction.h"
 
@@ -25,28 +25,50 @@ namespace {
 
 // Per-kind glyph for the feature tree (U5) — same atlas as the toolbar.
 const char* FeatureIcon(const std::string& type) {
-  if (type == "Sketch") return ICON_FA_PENCIL;
-  if (type == "Extrude") return ICON_FA_UP_LONG;
-  if (type == "Revolve") return ICON_FA_ARROWS_SPIN;
-  if (type == "Box") return ICON_FA_CUBE;
-  if (type == "Sphere") return ICON_FA_CIRCLE;
-  if (type == "Cylinder") return ICON_FA_DATABASE;
-  if (type == "Boolean") return ICON_FA_OBJECT_GROUP;
-  if (type == "Pattern") return ICON_FA_GRIP;
-  if (type == "DatumPlane") return ICON_FA_TABLE_CELLS_LARGE;
-  if (type == "DatumAxis") return ICON_FA_ARROWS_UP_DOWN;
-  if (type == "Curve3D") return ICON_FA_WAVE_SQUARE;
-  if (type == "Pipe") return ICON_FA_ROAD;
-  if (type == "Fillet") return ICON_FA_BORDER_TOP_LEFT;
-  if (type == "Chamfer") return ICON_FA_CROP_SIMPLE;
-  if (type == "Rib") return ICON_FA_BARS_STAGGERED;
-  if (type == "Thread") return ICON_FA_CIRCLE_NOTCH;
-  if (type == "Hole") return ICON_FA_CIRCLE_DOT;
-  if (type == "Shell") return ICON_FA_BOX_OPEN;
-  if (type == "Draft") return ICON_FA_ANGLES_RIGHT;
-  if (type == "Loft") return ICON_FA_BEZIER_CURVE;
-  if (type == "Sweep") return ICON_FA_ROUTE;
-  if (type == "Import") return ICON_FA_FILE_IMPORT;
+  if (type == "Sketch")
+    return ICON_FA_PENCIL;
+  if (type == "Extrude")
+    return ICON_FA_UP_LONG;
+  if (type == "Revolve")
+    return ICON_FA_ARROWS_SPIN;
+  if (type == "Box")
+    return ICON_FA_CUBE;
+  if (type == "Sphere")
+    return ICON_FA_CIRCLE;
+  if (type == "Cylinder")
+    return ICON_FA_DATABASE;
+  if (type == "Boolean")
+    return ICON_FA_OBJECT_GROUP;
+  if (type == "Pattern")
+    return ICON_FA_GRIP;
+  if (type == "DatumPlane")
+    return ICON_FA_TABLE_CELLS_LARGE;
+  if (type == "DatumAxis")
+    return ICON_FA_ARROWS_UP_DOWN;
+  if (type == "Curve3D")
+    return ICON_FA_WAVE_SQUARE;
+  if (type == "Pipe")
+    return ICON_FA_ROAD;
+  if (type == "Fillet")
+    return ICON_FA_BORDER_TOP_LEFT;
+  if (type == "Chamfer")
+    return ICON_FA_CROP_SIMPLE;
+  if (type == "Rib")
+    return ICON_FA_BARS_STAGGERED;
+  if (type == "Thread")
+    return ICON_FA_CIRCLE_NOTCH;
+  if (type == "Hole")
+    return ICON_FA_CIRCLE_DOT;
+  if (type == "Shell")
+    return ICON_FA_BOX_OPEN;
+  if (type == "Draft")
+    return ICON_FA_ANGLES_RIGHT;
+  if (type == "Loft")
+    return ICON_FA_BEZIER_CURVE;
+  if (type == "Sweep")
+    return ICON_FA_ROUTE;
+  if (type == "Import")
+    return ICON_FA_FILE_IMPORT;
   return ICON_FA_SHAPES;
 }
 
@@ -80,7 +102,7 @@ void DrawFeatureTreePanel(AppState& state) {
     // Default geometry: the three base planes a sketch can be started on.
     ImGui::SeparatorText("Default geometry");
     static const char* kPlaneNames[3] = {"Front Plane", "Top Plane",
-                                          "Right Plane"};
+                                         "Right Plane"};
     for (int i = 0; i < 3; i++) {
       if (ImGui::Selectable(kPlaneNames[i], false,
                             ImGuiSelectableFlags_AllowDoubleClick)) {
@@ -156,8 +178,7 @@ void DrawFeatureTreePanel(AppState& state) {
       const bool rolledPast =
           rollback >= 0 && i >= static_cast<size_t>(rollback);
       // Suffix keeps IDs unique and test paths stable even if names repeat
-      const std::string label =
-          feature->GetName() + "##" + std::to_string(i);
+      const std::string label = feature->GetName() + "##" + std::to_string(i);
       // Datum planes double-click into a new sketch on them; sketches
       // double-click into EDIT mode (the Properties Edit Sketch button);
       // every other feature double-clicks into its editor — the Properties
@@ -172,8 +193,7 @@ void DrawFeatureTreePanel(AppState& state) {
       const bool errored = !dimmed && !feature->GetError().empty();
       // A warning (built, but a likely-unintended no-op) tints amber — only
       // when the feature is neither broken nor dimmed, so error/dim win.
-      const bool warned =
-          !dimmed && !errored && !feature->GetWarning().empty();
+      const bool warned = !dimmed && !errored && !feature->GetWarning().empty();
       if (errored)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.35f, 0.35f, 1.0f));
       else if (warned)
@@ -232,7 +252,8 @@ void DrawFeatureTreePanel(AppState& state) {
       } else if (dimmed) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
-          ImGui::SetTooltip(suppressed ? "Suppressed" : "After the rollback bar");
+          ImGui::SetTooltip(suppressed ? "Suppressed"
+                                       : "After the rollback bar");
       }
       if (ImGui::BeginPopupContextItem()) {
         if (ImGui::MenuItem("Rename")) {
@@ -308,12 +329,12 @@ void DrawFeatureTreePanel(AppState& state) {
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
         const ImVec2 wp = ImGui::GetWindowPos();
         const float x0 = wp.x + ImGui::GetStyle().WindowPadding.x;
-        const float x1 = wp.x + ImGui::GetWindowWidth() -
-                         ImGui::GetStyle().WindowPadding.x;
+        const float x1 =
+            wp.x + ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x;
         const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_NavCursor);
-        ImGui::GetWindowDrawList()->AddLine(
-            ImVec2(x0, gapY[best]), ImVec2(x1, gapY[best]),
-            ImGui::GetColorU32(accent), 2.0f);
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(x0, gapY[best]),
+                                            ImVec2(x1, gapY[best]),
+                                            ImGui::GetColorU32(accent), 2.0f);
       } else {
         draggingBar = false;
         doc->SetRollback(best == count ? -1 : static_cast<int>(best));

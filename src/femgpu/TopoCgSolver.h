@@ -10,7 +10,7 @@
 // validated against the CPU fp64 path by the femgpu tests.
 
 #include "femgpu/ComputeContext.h"
-#include "femgpu/TopoSpmv.h"  // SpmvSystem (the packed element data)
+#include "femgpu/TopoSpmv.h" // SpmvSystem (the packed element data)
 
 #include <functional>
 #include <memory>
@@ -20,10 +20,10 @@
 namespace gpu {
 
 struct CgStats {
-  int iterations = 0;        // outer PCG iterations (not inner SpMVs)
-  float relResidual = 0.0f;  // achieved |r|/|f|
-  bool converged = false;    // hit tol (false = maxIter or fp32 stagnation)
-  float lambdaMax = 0.0f;    // Chebyshev only: estimated lambda_max(D^-1 K)
+  int iterations = 0;       // outer PCG iterations (not inner SpMVs)
+  float relResidual = 0.0f; // achieved |r|/|f|
+  bool converged = false;   // hit tol (false = maxIter or fp32 stagnation)
+  float lambdaMax = 0.0f;   // Chebyshev only: estimated lambda_max(D^-1 K)
 };
 
 // The multigrid hierarchy handed to the GPU cycle (GPU3), packed by the
@@ -33,12 +33,12 @@ struct CgStats {
 // between submits, and the per-SIMP-iteration coarse reassembly.
 struct MgGpuData {
   int nNodes = 0;
-  int nCoarse = 0;                // 6 * nAgg
-  std::vector<int32_t> nodeAgg;   // per node (-1 = none)
-  std::vector<float> nodeOffset;  // 3/node: position - aggregate centroid
-  std::vector<int32_t> nodeDof;   // 3/node: reduced DOF ids (-1 = fixed)
+  int nCoarse = 0;               // 6 * nAgg
+  std::vector<int32_t> nodeAgg;  // per node (-1 = none)
+  std::vector<float> nodeOffset; // 3/node: position - aggregate centroid
+  std::vector<int32_t> nodeDof;  // 3/node: reduced DOF ids (-1 = fixed)
   std::function<bool(const std::vector<float>& scales, std::string*)>
-      updateScales;               // reassemble + refactor A_c
+      updateScales; // reassemble + refactor A_c
   std::function<bool(const float* rc, float* ec, std::string*)> coarseSolve;
 };
 
@@ -57,13 +57,13 @@ struct MgGpuData {
 struct CgOptions {
   enum class Precond { Jacobi, Chebyshev, Multigrid };
   Precond precond = Precond::Jacobi;
-  int chebDegree = 8;       // polynomial degree (SpMVs per application)
-  float chebRatio = 30.0f;  // targets [lambda_max/ratio, lambda_max]
-  std::shared_ptr<MgGpuData> mg;  // required for Multigrid
+  int chebDegree = 8;            // polynomial degree (SpMVs per application)
+  float chebRatio = 30.0f;       // targets [lambda_max/ratio, lambda_max]
+  std::shared_ptr<MgGpuData> mg; // required for Multigrid
 };
 
 class TopoCgSolver {
- public:
+public:
   // Uploads the element data and builds all pipelines/bindings once. The
   // context must outlive the solver.
   static std::unique_ptr<TopoCgSolver> Create(ComputeContext& ctx,
@@ -96,11 +96,11 @@ class TopoCgSolver {
   bool ElementEnergies(const std::vector<float>& u, std::vector<float>& se,
                        std::string* error);
 
- private:
+private:
   explicit TopoCgSolver(ComputeContext& ctx) : m_ctx(ctx) {}
-  void RecordPrecond(uint32_t rzSlot);  // z = M^-1 r + refresh rz/rr slots
+  void RecordPrecond(uint32_t rzSlot); // z = M^-1 r + refresh rz/rr slots
   void RecordIteration(int parity);
-  bool EstimateLambdaMax(std::string* error);  // power iteration on D^-1 K
+  bool EstimateLambdaMax(std::string* error); // power iteration on D^-1 K
   // Multigrid path (GPU3): the coarse solve is a CPU call between submits,
   // so the cycle cannot be chunk-recorded — its own per-iteration driver.
   bool SolveMg(const std::vector<float>& f, std::vector<float>& x, float tol,
@@ -111,9 +111,9 @@ class TopoCgSolver {
   ComputeContext& m_ctx;
   int m_nFree = 0;
   int m_nElems = 0;
-  uint32_t m_elemGx = 0, m_elemGy = 0;  // element-grid dispatch (spmv/diag)
-  uint32_t m_vecGroups = 0;             // ceil(nFree/256) for vector kernels
-  uint32_t m_nodeGroups = 0;            // ceil(nNodes/256) for mg kernels
+  uint32_t m_elemGx = 0, m_elemGy = 0; // element-grid dispatch (spmv/diag)
+  uint32_t m_vecGroups = 0;            // ceil(nFree/256) for vector kernels
+  uint32_t m_nodeGroups = 0;           // ceil(nNodes/256) for mg kernels
   CgOptions m_opts;
 
   // Pipelines (all embedded SPIR-V).
@@ -124,9 +124,9 @@ class TopoCgSolver {
   // chebD are the Chebyshev inner residual/direction (doubling as the power-
   // iteration work vectors). mg*: multigrid working set (fine residual r2,
   // post-smoothing correction, coarse residual/correction, node tables).
-  Buffer m_dof, m_ke, m_scale, m_diagK, m_f, m_x, m_r, m_z, m_p, m_ap,
-      m_chebR, m_chebD, m_scalars, m_mgR, m_mgZt, m_mgRc, m_mgEc, m_nodeAgg,
-      m_nodeOff, m_nodeDof, m_se;
+  Buffer m_dof, m_ke, m_scale, m_diagK, m_f, m_x, m_r, m_z, m_p, m_ap, m_chebR,
+      m_chebD, m_scalars, m_mgR, m_mgZt, m_mgRc, m_mgEc, m_nodeAgg, m_nodeOff,
+      m_nodeDof, m_se;
   // Static buffer bindings, created once.
   BoundSet m_setSpmvP, m_setSpmvX, m_setDiag, m_setResidual, m_setPrecond,
       m_setCopyZP, m_setDotFF, m_setDotPAp, m_setUpdateXr, m_setUpdateP,
@@ -136,10 +136,10 @@ class TopoCgSolver {
       m_setChebInitMg, m_setChebIterMg, m_setVecAddZt, m_setEnergy;
 
   bool m_scalesDirty = true;
-  std::vector<float> m_scalesCpu;         // for the coarse-rebuild callback
+  std::vector<float> m_scalesCpu; // for the coarse-rebuild callback
   float m_lambdaMax = 0.0f;
-  std::vector<float> m_chebC1, m_chebC2;  // per-step coefficients (host)
+  std::vector<float> m_chebC1, m_chebC2; // per-step coefficients (host)
   float m_chebInvTheta = 0.0f;
 };
 
-}  // namespace gpu
+} // namespace gpu

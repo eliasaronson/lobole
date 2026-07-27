@@ -4,9 +4,9 @@
 #include "core/io/Serialization.h" // FeatureToJson: the regen-cache hash input
 
 #include <algorithm>
+#include <deque>
 #include <functional>
 #include <string>
-#include <deque>
 #include <unordered_map>
 
 Feature* Document::GetFeature(size_t index) {
@@ -87,10 +87,10 @@ bool Document::Regenerate() {
 
   // Rollback bar: only the prefix regenerates; the tail keeps its params but
   // contributes nothing (and holds no stale errors).
-  const size_t upTo = m_rollback < 0
-                          ? m_features.size()
-                          : std::min(m_features.size(),
-                                     static_cast<size_t>(m_rollback));
+  const size_t upTo =
+      m_rollback < 0
+          ? m_features.size()
+          : std::min(m_features.size(), static_cast<size_t>(m_rollback));
   for (size_t i = upTo; i < m_features.size(); i++) {
     m_features[i]->ClearError();
     m_features[i]->ClearWarning();
@@ -111,13 +111,13 @@ bool Document::Regenerate() {
       if (text.empty()) {
         return;
       }
-      const auto v =
-          ExpressionEngine::Default().EvaluateText(text, m_symbols);
+      const auto v = ExpressionEngine::Default().EvaluateText(text, m_symbols);
       if (v.has_value()) {
         value = *v;
       } else if (exprErr[i].empty()) {
         // The ExprError message distinguishes the case ("unknown variable
-        // 'bore'" vs. a parse / division error); first failure per feature wins.
+        // 'bore'" vs. a parse / division error); first failure per feature
+        // wins.
         exprErr[i] = v.error().message;
       }
     });
@@ -215,14 +215,16 @@ const Parameter* Document::FindParameter(const std::string& name) const {
 
 const fem::Study* Document::FindStudy(uint64_t id) const {
   for (const fem::Study& s : m_studies) {
-    if (s.id == id) return &s;
+    if (s.id == id)
+      return &s;
   }
   return nullptr;
 }
 
 fem::Study* Document::FindStudy(uint64_t id) {
   for (fem::Study& s : m_studies) {
-    if (s.id == id) return &s;
+    if (s.id == id)
+      return &s;
   }
   return nullptr;
 }
@@ -230,7 +232,8 @@ fem::Study* Document::FindStudy(uint64_t id) {
 fem::Study& Document::AddStudy(const std::string& name) {
   fem::Study study;
   study.id = m_nextId++;
-  study.name = name.empty() ? ("Study " + std::to_string(m_studies.size() + 1)) : name;
+  study.name =
+      name.empty() ? ("Study " + std::to_string(m_studies.size() + 1)) : name;
   m_studies.push_back(std::move(study));
   return m_studies.back();
 }
@@ -239,7 +242,7 @@ bool Document::RemoveStudy(uint64_t id) {
   for (auto it = m_studies.begin(); it != m_studies.end(); ++it) {
     if (it->id == id) {
       m_studies.erase(it);
-      m_studyRuntime.erase(id);  // drop derived mesh/results too
+      m_studyRuntime.erase(id); // drop derived mesh/results too
       return true;
     }
   }
@@ -248,14 +251,16 @@ bool Document::RemoveStudy(uint64_t id) {
 
 void Document::RestoreStudy(fem::Study study) {
   EnsureNextIdAtLeast(study.id + 1);
-  for (const fem::Load& l : study.loads) EnsureNextIdAtLeast(l.id + 1);
+  for (const fem::Load& l : study.loads)
+    EnsureNextIdAtLeast(l.id + 1);
   m_studies.push_back(std::move(study));
 }
 
 bool Document::ReplaceStudy(fem::Study study) {
   for (fem::Study& s : m_studies) {
     if (s.id == study.id) {
-      for (const fem::Load& l : study.loads) EnsureNextIdAtLeast(l.id + 1);
+      for (const fem::Load& l : study.loads)
+        EnsureNextIdAtLeast(l.id + 1);
       s = std::move(study);
       return true;
     }
@@ -267,22 +272,25 @@ bool Document::ReplaceStudy(fem::Study study) {
 
 const Configuration* Document::FindConfiguration(uint64_t id) const {
   for (const Configuration& c : m_configurations)
-    if (c.id == id) return &c;
+    if (c.id == id)
+      return &c;
   return nullptr;
 }
 
 Configuration* Document::FindConfiguration(uint64_t id) {
   for (Configuration& c : m_configurations)
-    if (c.id == id) return &c;
+    if (c.id == id)
+      return &c;
   return nullptr;
 }
 
 Configuration& Document::AddConfiguration(const std::string& name) {
   Configuration cfg;
   cfg.id = m_nextId++;
-  cfg.name = name.empty()
-                 ? ("Configuration " + std::to_string(m_configurations.size() + 1))
-                 : name;
+  cfg.name =
+      name.empty()
+          ? ("Configuration " + std::to_string(m_configurations.size() + 1))
+          : name;
   m_configurations.push_back(std::move(cfg));
   return m_configurations.back();
 }
@@ -292,7 +300,7 @@ bool Document::RemoveConfiguration(uint64_t id) {
     if (it->id == id) {
       m_configurations.erase(it);
       if (m_activeConfiguration == id) {
-        m_activeConfiguration = 0;  // fall back to base
+        m_activeConfiguration = 0; // fall back to base
         Regenerate();
       }
       return true;
@@ -311,7 +319,8 @@ bool Document::ReplaceConfiguration(Configuration cfg) {
     if (c.id == cfg.id) {
       const bool active = m_activeConfiguration == cfg.id;
       c = std::move(cfg);
-      if (active) Regenerate();  // its overrides changed the applied model
+      if (active)
+        Regenerate(); // its overrides changed the applied model
       return true;
     }
   }
@@ -319,7 +328,8 @@ bool Document::ReplaceConfiguration(Configuration cfg) {
 }
 
 bool Document::SetActiveConfiguration(uint64_t id) {
-  if (id != 0 && FindConfiguration(id) == nullptr) return false;
+  if (id != 0 && FindConfiguration(id) == nullptr)
+    return false;
   m_activeConfiguration = id;
   Regenerate();
   return true;
@@ -331,8 +341,10 @@ const Configuration* Document::ActiveConfig() const {
 }
 
 bool Document::EffectiveSuppressed(size_t index) const {
-  if (index >= m_features.size()) return false;
-  if (m_features[index]->IsSuppressed()) return true;
+  if (index >= m_features.size())
+    return false;
+  if (m_features[index]->IsSuppressed())
+    return true;
   const Configuration* c = ActiveConfig();
   return c != nullptr && c->Suppresses(m_features[index]->GetId());
 }
@@ -399,8 +411,8 @@ bool Document::RenameParameter(const std::string& oldName,
   return true;
 }
 
-std::vector<std::string> Document::FindParameterReferences(
-    const std::string& name) {
+std::vector<std::string>
+Document::FindParameterReferences(const std::string& name) {
   const auto& engine = ExpressionEngine::Default();
   const auto references = [&](const std::string& text) {
     if (text.empty()) {
@@ -452,7 +464,8 @@ void Document::EvaluateParameters() {
                     [&](const Parameter& p) { return p.name == name; });
     const bool isProject =
         m_projectSymbols != nullptr && m_projectSymbols->count(name) != 0;
-    if (!isLocal && isProject) augmented.push_back({name, expr, "", 0.0, {}});
+    if (!isLocal && isProject)
+      augmented.push_back({name, expr, "", 0.0, {}});
   }
   EvaluateParameterTable(
       augmented, m_symbols, m_projectSymbols,
@@ -490,7 +503,7 @@ bool Document::RewriteProjectVarRefs(const std::string& oldName,
       text = engine.RenameIdentifier(text, oldName, newName);
     });
   }
-  return true;  // caller regenerates
+  return true; // caller regenerates
 }
 
 void EvaluateParameterTable(
@@ -562,7 +575,7 @@ void EvaluateParameterTable(
         out[p.name] = *v;
         p.error.clear();
       } else {
-        p.error = v.error().message;  // keep last good value
+        p.error = v.error().message; // keep last good value
       }
     }
     for (const size_t dep : dependents[i]) {

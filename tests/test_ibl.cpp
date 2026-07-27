@@ -15,8 +15,8 @@ static bool Finite(const glm::vec4& c) {
 }
 
 TEST_CASE("IBL precompute produces sane maps from the studio HDR", "[ibl]") {
-  const std::string hdr =
-      std::string(DESIGNER_SOURCE_DIR) + "/assets/hdri/brown_photostudio_02_1k.hdr";
+  const std::string hdr = std::string(DESIGNER_SOURCE_DIR) +
+                          "/assets/hdri/brown_photostudio_02_1k.hdr";
   if (!fs::exists(hdr)) {
     WARN("HDR asset missing, skipping: " << hdr);
     return;
@@ -50,7 +50,8 @@ TEST_CASE("IBL precompute produces sane maps from the studio HDR", "[ibl]") {
     CHECK(pf[i].height <= pf[i - 1].height);
   }
   for (const auto& m : pf)
-    for (const auto& p : m.pixels) REQUIRE(Finite(p));
+    for (const auto& p : m.pixels)
+      REQUIRE(Finite(p));
 
   // BRDF LUT: the split-sum integral is a pure function of (NdotV, roughness),
   // independent of the environment. Check the known corner: smooth grazing view
@@ -59,8 +60,8 @@ TEST_CASE("IBL precompute produces sane maps from the studio HDR", "[ibl]") {
   REQUIRE(brdf.width > 0);
   const auto& corner =
       brdf.pixels[size_t(0) * brdf.width + (brdf.width - 1)]; // row 0, last col
-  CHECK_THAT(corner.x, WithinAbs(1.0f, 0.05f)); // scale (A)
-  CHECK_THAT(corner.y, WithinAbs(0.0f, 0.05f)); // bias (B)
+  CHECK_THAT(corner.x, WithinAbs(1.0f, 0.05f));               // scale (A)
+  CHECK_THAT(corner.y, WithinAbs(0.0f, 0.05f));               // bias (B)
   for (const auto& p : brdf.pixels) {
     CHECK(p.x >= -0.01f);
     CHECK(p.x <= 1.01f);

@@ -96,18 +96,27 @@ std::optional<double> GetEntityField(const Entity& e,
       [&](const auto& g) -> std::optional<double> {
         using T = std::decay_t<decltype(g)>;
         if constexpr (std::is_same_v<T, Point>) {
-          if (field == "x") return g.p.x;
-          if (field == "y") return g.p.y;
+          if (field == "x")
+            return g.p.x;
+          if (field == "y")
+            return g.p.y;
         } else if constexpr (std::is_same_v<T, Line>) {
-          if (field == "ax") return g.a.x;
-          if (field == "ay") return g.a.y;
-          if (field == "bx") return g.b.x;
-          if (field == "by") return g.b.y;
+          if (field == "ax")
+            return g.a.x;
+          if (field == "ay")
+            return g.a.y;
+          if (field == "bx")
+            return g.b.x;
+          if (field == "by")
+            return g.b.y;
         } else if constexpr (std::is_same_v<T, Circle> ||
                              std::is_same_v<T, Arc>) {
-          if (field == "cx") return g.center.x;
-          if (field == "cy") return g.center.y;
-          if (field == "r") return g.radius;
+          if (field == "cx")
+            return g.center.x;
+          if (field == "cy")
+            return g.center.y;
+          if (field == "r")
+            return g.radius;
         }
         return std::nullopt;
       },
@@ -120,18 +129,45 @@ bool SetEntityField(Entity& e, const std::string& field, double value) {
       [&](auto& g) -> bool {
         using T = std::decay_t<decltype(g)>;
         if constexpr (std::is_same_v<T, Point>) {
-          if (field == "x") { g.p.x = f; return true; }
-          if (field == "y") { g.p.y = f; return true; }
+          if (field == "x") {
+            g.p.x = f;
+            return true;
+          }
+          if (field == "y") {
+            g.p.y = f;
+            return true;
+          }
         } else if constexpr (std::is_same_v<T, Line>) {
-          if (field == "ax") { g.a.x = f; return true; }
-          if (field == "ay") { g.a.y = f; return true; }
-          if (field == "bx") { g.b.x = f; return true; }
-          if (field == "by") { g.b.y = f; return true; }
+          if (field == "ax") {
+            g.a.x = f;
+            return true;
+          }
+          if (field == "ay") {
+            g.a.y = f;
+            return true;
+          }
+          if (field == "bx") {
+            g.b.x = f;
+            return true;
+          }
+          if (field == "by") {
+            g.b.y = f;
+            return true;
+          }
         } else if constexpr (std::is_same_v<T, Circle> ||
                              std::is_same_v<T, Arc>) {
-          if (field == "cx") { g.center.x = f; return true; }
-          if (field == "cy") { g.center.y = f; return true; }
-          if (field == "r") { g.radius = value; return true; }
+          if (field == "cx") {
+            g.center.x = f;
+            return true;
+          }
+          if (field == "cy") {
+            g.center.y = f;
+            return true;
+          }
+          if (field == "r") {
+            g.radius = value;
+            return true;
+          }
         }
         return false;
       },
@@ -202,12 +238,15 @@ bool SketchFeature::CalibrateImage(uint32_t id, glm::vec2 p1, glm::vec2 p2,
   // fixed while the scale (and maybe rotation) changes:
   //   pix = R(-rotation) * (p - origin) / unitsPerPixel.
   const double c = std::cos(img.rotation), s = std::sin(img.rotation);
-  const glm::dvec2 rel(double(p1.x) - img.origin.x, double(p1.y) - img.origin.y);
-  const double invScale = img.unitsPerPixel != 0.0 ? 1.0 / img.unitsPerPixel : 0.0;
+  const glm::dvec2 rel(double(p1.x) - img.origin.x,
+                       double(p1.y) - img.origin.y);
+  const double invScale =
+      img.unitsPerPixel != 0.0 ? 1.0 / img.unitsPerPixel : 0.0;
   const glm::dvec2 pix1((c * rel.x + s * rel.y) * invScale,
                         (-s * rel.x + c * rel.y) * invScale);
 
-  // New rotation: align the p1->p2 direction onto the chosen axis, else keep it.
+  // New rotation: align the p1->p2 direction onto the chosen axis, else keep
+  // it.
   double rot = img.rotation;
   if (alignAxis == 0 || alignAxis == 1) {
     const double target = alignAxis == 0 ? 0.0 : M_PI / 2.0;
@@ -219,14 +258,15 @@ bool SketchFeature::CalibrateImage(uint32_t id, glm::vec2 p1, glm::vec2 p2,
   const double c2 = std::cos(rot), s2 = std::sin(rot);
   const glm::dvec2 offset(scale * (c2 * pix1.x - s2 * pix1.y),
                           scale * (s2 * pix1.x + c2 * pix1.y));
-  img.origin = glm::vec2(float(double(p1.x) - offset.x),
-                         float(double(p1.y) - offset.y));
+  img.origin =
+      glm::vec2(float(double(p1.x) - offset.x), float(double(p1.y) - offset.y));
   img.rotation = rot;
   img.unitsPerPixel = scale;
   return true;
 }
 
-std::array<uint32_t, 4> SketchFeature::AddRectangle(glm::vec2 c1, glm::vec2 c2) {
+std::array<uint32_t, 4> SketchFeature::AddRectangle(glm::vec2 c1,
+                                                    glm::vec2 c2) {
   using K = sketch::ConstraintKind;
   const glm::vec2 a{c1.x, c1.y}, b{c2.x, c1.y}, c{c2.x, c2.y}, d{c1.x, c2.y};
   const uint32_t l0 = AddEntity(sketch::Line{a, b}); // bottom (horizontal)
@@ -268,7 +308,8 @@ bool UsesSecondRef(sketch::ConstraintKind k) {
   return k != K::Horizontal && k != K::Vertical && k != K::Radius;
 }
 // Coincident/Horizontal/Vertical are "trivial" — losing them to a delete isn't
-// worth warning the user about (matches SolveSpace's PruneRequestsAndConstraints).
+// worth warning the user about (matches SolveSpace's
+// PruneRequestsAndConstraints).
 bool IsTrivial(sketch::ConstraintKind k) {
   using K = sketch::ConstraintKind;
   return k == K::Coincident || k == K::Horizontal || k == K::Vertical;
@@ -340,7 +381,7 @@ uint32_t SketchFeature::SplitEntity(uint32_t id, glm::vec2 P) {
     return 0; // degenerate: split at an endpoint
 
   using K = sketch::ConstraintKind;
-  line->b = P;                                       // piece 1: a -> P (keeps id)
+  line->b = P; // piece 1: a -> P (keeps id)
   const uint32_t newId = AddEntity(sketch::Line{P, b}); // piece 2: P -> b
 
   // Move every reference to the original far endpoint (id, 1) onto piece 2.
@@ -415,9 +456,10 @@ bool SketchFeature::TrimBracket(uint32_t id, glm::vec2 clickUV, glm::vec2& a,
     }
   }
   std::sort(cuts.begin(), cuts.end());
-  cuts.erase(std::unique(cuts.begin(), cuts.end(),
-                         [](float x, float y) { return std::abs(x - y) < 1e-4f; }),
-             cuts.end());
+  cuts.erase(
+      std::unique(cuts.begin(), cuts.end(),
+                  [](float x, float y) { return std::abs(x - y) < 1e-4f; }),
+      cuts.end());
 
   const float tClick = glm::clamp(glm::dot(clickUV - a, ab) / len2, 0.0f, 1.0f);
   tLo = 0.0f;
@@ -495,7 +537,8 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
     return x;
   };
 
-  // Interior cut offsets, plus the window ends (a circle wraps; an arc doesn't).
+  // Interior cut offsets, plus the window ends (a circle wraps; an arc
+  // doesn't).
   std::vector<double> cuts;
   if (!isCircle) {
     cuts.push_back(0.0);
@@ -516,11 +559,13 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
     }
   }
   std::sort(cuts.begin(), cuts.end());
-  cuts.erase(std::unique(cuts.begin(), cuts.end(),
-                         [](double x, double y) { return std::abs(x - y) < 1e-4; }),
-             cuts.end());
+  cuts.erase(
+      std::unique(cuts.begin(), cuts.end(),
+                  [](double x, double y) { return std::abs(x - y) < 1e-4; }),
+      cuts.end());
 
-  const double click = rel(std::atan2(clickUV.y - center.y, clickUV.x - center.x));
+  const double click =
+      rel(std::atan2(clickUV.y - center.y, clickUV.x - center.x));
 
   const bool construction = sketch::IsConstruction(entities[idx]);
   auto makeArc = [&](double offLo, double offHi) {
@@ -576,7 +621,7 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
 
 std::vector<uint32_t>
 SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
-                             uint32_t axisLineId, bool link) {
+                              uint32_t axisLineId, bool link) {
   using K = sketch::ConstraintKind;
   std::vector<uint32_t> generated;
   // Axis geometry comes from the datum helpers for the X/Y axes, else from the
@@ -643,7 +688,7 @@ SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
           } else if constexpr (std::is_same_v<T, sketch::Circle>) {
             constraints.push_back({K::Equal, {sid, 0}, {cid, 0}, 0.0});
             symPair(0, 0); // centres
-          } else { // Arc: reflection swaps start/end (winding flips)
+          } else {         // Arc: reflection swaps start/end (winding flips)
             constraints.push_back({K::Equal, {sid, 0}, {cid, 0}, 0.0});
             symPair(0, 0); // centres
             symPair(1, 2);
@@ -698,7 +743,8 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   if (dTan > len1 - tol || dTan > len2 - tol)
     return 0; // radius too large for a segment
   const glm::vec2 bis = glm::normalize(d1 + d2);
-  const glm::vec2 center = C + bis * static_cast<float>(radius / std::sin(theta / 2.0));
+  const glm::vec2 center =
+      C + bis * static_cast<float>(radius / std::sin(theta / 2.0));
   const glm::vec2 T1 = C + d1 * static_cast<float>(dTan);
   const glm::vec2 T2 = C + d2 * static_cast<float>(dTan);
 
@@ -717,9 +763,9 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   const double aT1 = std::atan2(T1.y - center.y, T1.x - center.x);
   const double aT2 = std::atan2(T2.y - center.y, T2.x - center.x);
   const bool startIsT1 = wrap(aT2 - aT1) <= M_PI;
-  sketch::Arc arc = startIsT1
-                        ? sketch::Arc{center, radius, aT1, aT1 + wrap(aT2 - aT1)}
-                        : sketch::Arc{center, radius, aT2, aT2 + wrap(aT1 - aT2)};
+  sketch::Arc arc =
+      startIsT1 ? sketch::Arc{center, radius, aT1, aT1 + wrap(aT2 - aT1)}
+                : sketch::Arc{center, radius, aT2, aT2 + wrap(aT1 - aT2)};
   const uint8_t w1 = static_cast<uint8_t>(c1), w2 = static_cast<uint8_t>(c2);
 
   // A fillet must NEVER rotate a line — it only trims to the tangent points.
@@ -755,14 +801,13 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   }
   // The old corner coincident is now P=P — drop it (plus any other degenerate
   // self-coincident the re-point produced).
-  constraints.erase(
-      std::remove_if(constraints.begin(), constraints.end(),
-                     [](const sketch::Constraint& con) {
-                       return con.kind == K::Coincident &&
-                              con.a.entity == con.b.entity &&
-                              con.a.which == con.b.which;
-                     }),
-      constraints.end());
+  constraints.erase(std::remove_if(constraints.begin(), constraints.end(),
+                                   [](const sketch::Constraint& con) {
+                                     return con.kind == K::Coincident &&
+                                            con.a.entity == con.b.entity &&
+                                            con.a.which == con.b.which;
+                                   }),
+                    constraints.end());
 
   const uint32_t arcId = AddEntity(arc);
 
@@ -776,7 +821,8 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
   const uint8_t startWhich = startIsT1 ? w1 : w2;
   const uint32_t endLine = startIsT1 ? lineId2 : lineId1;
   const uint8_t endWhich = startIsT1 ? w2 : w1;
-  constraints.push_back({K::Coincident, {startLine, startWhich}, {arcId, 1}, 0.0});
+  constraints.push_back(
+      {K::Coincident, {startLine, startWhich}, {arcId, 1}, 0.0});
   constraints.push_back({K::Coincident, {endLine, endWhich}, {arcId, 2}, 0.0});
   constraints.push_back({K::Tangent, {lineId1, 0}, {arcId, 0}, 0.0});
   constraints.push_back({K::Tangent, {lineId2, 0}, {arcId, 0}, 0.0});
@@ -816,9 +862,12 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
     // coincidence (drop the least structural constraint that resolves it).
     auto rank = [&](size_t i) {
       switch (constraints[i].kind) {
-      case K::PointOnLine: return 0;
-      case K::Tangent: return 1;
-      default: return 2; // Coincident
+      case K::PointOnLine:
+        return 0;
+      case K::Tangent:
+        return 1;
+      default:
+        return 2; // Coincident
       }
     };
     std::vector<size_t> cands;
@@ -1108,8 +1157,7 @@ bool SketchFeature::ReplayLinkedCopyFrom(sketch::DerivedOp& op,
     const size_t si = source.IndexOfEntity(sid);
     if (si == std::numeric_limits<size_t>::max())
       return false; // the source entity vanished: the caller errors
-    sketch::Entity g =
-        sketch::TranslateEntity(source.entities[si], op.vec);
+    sketch::Entity g = sketch::TranslateEntity(source.entities[si], op.vec);
     uint32_t genId = 0;
     for (const auto& in : op.instances)
       if (in.sourceId == sid && in.k == 1) {
@@ -1147,7 +1195,7 @@ void SketchFeature::BreakLink(size_t opIndex) {
 
 std::vector<uint32_t>
 SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
-                               glm::vec2 step, int count, bool link) {
+                                glm::vec2 step, int count, bool link) {
   std::vector<uint32_t> gen;
   if (count < 2 || sourceIds.empty())
     return gen;
@@ -1177,8 +1225,8 @@ SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
 
 std::vector<uint32_t>
 SketchFeature::AddCircularPattern(const std::vector<uint32_t>& sourceIds,
-                                 glm::vec2 center, double stepAngle, int count,
-                                 bool link) {
+                                  glm::vec2 center, double stepAngle, int count,
+                                  bool link) {
   std::vector<uint32_t> gen;
   if (count < 2 || sourceIds.empty())
     return gen;

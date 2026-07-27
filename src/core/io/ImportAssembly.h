@@ -16,8 +16,8 @@
 namespace interchange {
 
 struct PlannedPart {
-  std::string name;      // unique among planned parts ("Widget", "Widget 2")
-  std::string brepPath;  // extracted geometry, CENTERED at the part origin
+  std::string name;     // unique among planned parts ("Widget", "Widget 2")
+  std::string brepPath; // extracted geometry, CENTERED at the part origin
   bool hasColor = false;
   glm::vec3 color{0.0f};
 };

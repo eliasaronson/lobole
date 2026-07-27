@@ -1,10 +1,10 @@
 #include "ui/PropertiesPanel.h"
 
-#include "render/Camera.h"
 #include "cad/FaceSelector.h"
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Occurrence.h" // occurrence names in the measure rows
+#include "render/Camera.h"
 #include "ui/AppActions.h" // SelectedFeature
 #include "ui/FeatureEditor.h"
 
@@ -34,7 +34,8 @@ void DrawMassPropertiesSection(AppState& state) {
       cachedVersion != version) {
     const auto m = Measure::MassOfBodies(state.document->GetBodies());
     cachedOk = m.has_value();
-    if (cachedOk) cache = *m;
+    if (cachedOk)
+      cache = *m;
     cachedDoc = state.document.get();
     cachedVersion = version;
   }
@@ -45,7 +46,8 @@ void DrawMassPropertiesSection(AppState& state) {
 
   ImGui::Text("Volume: %.3f mm\xc2\xb3", cache.volume);
   double area = 0.0;
-  for (const auto& b : cache.bodies) area += b.surfaceArea;
+  for (const auto& b : cache.bodies)
+    area += b.surfaceArea;
   ImGui::Text("Surface area: %.3f mm\xc2\xb2", area);
   if (cache.massKnown)
     ImGui::Text("Mass: %.3f g", cache.massG);

@@ -23,7 +23,7 @@ ExprError EvalError(const std::string& text, const SymbolTable& symbols = {}) {
   return value.error();
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("expression arithmetic and precedence", "[expression]") {
   CHECK_THAT(Eval("2"), WithinRel(2.0));
@@ -31,8 +31,8 @@ TEST_CASE("expression arithmetic and precedence", "[expression]") {
   CHECK_THAT(Eval(".5"), WithinRel(0.5));
   CHECK_THAT(Eval("1 + 2 * 3"), WithinRel(7.0));
   CHECK_THAT(Eval("(1 + 2) * 3"), WithinRel(9.0));
-  CHECK_THAT(Eval("10 - 4 - 3"), WithinRel(3.0));  // left-assoc
-  CHECK_THAT(Eval("12 / 4 / 3"), WithinRel(1.0));  // left-assoc
+  CHECK_THAT(Eval("10 - 4 - 3"), WithinRel(3.0)); // left-assoc
+  CHECK_THAT(Eval("12 / 4 / 3"), WithinRel(1.0)); // left-assoc
   CHECK_THAT(Eval("7 / 2"), WithinRel(3.5));
 }
 
@@ -110,17 +110,17 @@ TEST_CASE("expression dependencies", "[expression]") {
       "width * 2 + sin(angle) - width + pi");
   REQUIRE(compiled.has_value());
   const std::set<std::string> expected = {"width", "angle"};
-  CHECK((*compiled)->Dependencies() == expected);  // no functions, no pi
+  CHECK((*compiled)->Dependencies() == expected); // no functions, no pi
 }
 
 TEST_CASE("expression rename preserves formatting", "[expression]") {
   const auto& engine = ExpressionEngine::Default();
   CHECK(engine.RenameIdentifier("width * 2", "width", "w") == "w * 2");
   CHECK(engine.RenameIdentifier("( width+width )*width2", "width", "len") ==
-        "( len+len )*width2");  // width2 is a different identifier
+        "( len+len )*width2"); // width2 is a different identifier
   CHECK(engine.RenameIdentifier("sin(width)", "sin", "cos") ==
-        "cos(width)");  // token-level: call sites rename too (names are
-                        // reserved, so this only matters for robustness)
+        "cos(width)"); // token-level: call sites rename too (names are
+                       // reserved, so this only matters for robustness)
   CHECK(engine.RenameIdentifier("a + b", "width", "w") == "a + b");
   // Untokenizable text comes back unchanged rather than mangled.
   CHECK(engine.RenameIdentifier("width $ 2", "width", "w") == "width $ 2");

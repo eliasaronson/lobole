@@ -29,7 +29,14 @@ enum class ViewOrientation { Front, Back, Left, Right, Top, Bottom, Iso };
 
 // The driven dimension kinds — the six that carry over from sketch dimensions
 // (SketchFeature.h ConstraintKind), measured here rather than solved.
-enum class DrawingDimKind { Distance, DistanceX, DistanceY, Radius, Diameter, Angle };
+enum class DrawingDimKind {
+  Distance,
+  DistanceX,
+  DistanceY,
+  Radius,
+  Diameter,
+  Angle
+};
 
 // Title-block fields (a simple labelled table under the border). All cosmetic
 // free text; `scale`/`date` are filled by the sheet/exporter when blank.
@@ -37,7 +44,7 @@ struct TitleBlock {
   std::string project;
   std::string document;
   std::string author;
-  std::string date;  // ISO yyyy-mm-dd; blank = stamped at export
+  std::string date; // ISO yyyy-mm-dd; blank = stamped at export
   std::string notes;
 };
 
@@ -54,10 +61,11 @@ struct Sheet {
 // occurrence-qualified. `end` picks a vertex: 0 = whole curve, 1|2 = endpoints.
 struct ProjRef {
   uint64_t viewId = 0;
-  uint64_t occurrenceId = 0;  // 0 = part source; else the occurrence in an assembly
-  ElementRef edge;            // set for sharp/smooth edges
-  ElementRef silFace;         // set for silhouettes (the generating face)
-  int end = 0;                // 0 = whole edge, 1|2 = an endpoint vertex
+  uint64_t occurrenceId =
+      0;              // 0 = part source; else the occurrence in an assembly
+  ElementRef edge;    // set for sharp/smooth edges
+  ElementRef silFace; // set for silhouettes (the generating face)
+  int end = 0;        // 0 = whole edge, 1|2 = an endpoint vertex
 };
 
 // A view on the sheet: a base view of a source document in a named
@@ -65,12 +73,13 @@ struct ProjRef {
 struct DrawingView {
   uint64_t id = 0;
   std::string name;
-  uint64_t sourceDocId = 0;  // stable project-document id (part OR assembly)
+  uint64_t sourceDocId = 0; // stable project-document id (part OR assembly)
   ViewOrientation orientation = ViewOrientation::Front;
-  uint64_t baseViewId = 0;   // 0 = base view; else the base this folds from
-  double scale = 1.0;        // drawing:model ratio (1:2 -> 0.5)
-  std::string scaleExpr;     // optional expression driving `scale` (empty = literal)
-  glm::dvec2 position{0.0};  // sheet mm; a child moves only along its fold axis
+  uint64_t baseViewId = 0; // 0 = base view; else the base this folds from
+  double scale = 1.0;      // drawing:model ratio (1:2 -> 0.5)
+  std::string
+      scaleExpr; // optional expression driving `scale` (empty = literal)
+  glm::dvec2 position{0.0}; // sheet mm; a child moves only along its fold axis
   bool showHidden = true;
 };
 
@@ -81,7 +90,7 @@ struct DrawingDim {
   DrawingDimKind kind = DrawingDimKind::Distance;
   uint64_t viewId = 0;
   std::vector<ProjRef> refs;
-  glm::dvec2 labelOffset{0.0};  // sheet mm, the sketch labelOffset pattern
+  glm::dvec2 labelOffset{0.0}; // sheet mm, the sketch labelOffset pattern
 };
 
 // The document. Views and dims share one never-reused id counter (the
@@ -98,7 +107,7 @@ public:
   // Appends a view, assigning a fresh stable id (the caller-supplied id is
   // overwritten). Returns the assigned id.
   uint64_t AddView(DrawingView view);
-  bool RemoveView(uint64_t id);  // also removes dims that reference it
+  bool RemoveView(uint64_t id); // also removes dims that reference it
   DrawingView* FindView(uint64_t id);
   const DrawingView* FindView(uint64_t id) const;
 
@@ -114,7 +123,8 @@ public:
   // Loader hook: pin the id counter past the highest restored id so future
   // adds never collide. No-op if `next` is not greater than the counter.
   void EnsureNextIdAtLeast(uint64_t next) {
-    if (next > m_nextId) m_nextId = next;
+    if (next > m_nextId)
+      m_nextId = next;
   }
   uint64_t NextId() const { return m_nextId; }
 

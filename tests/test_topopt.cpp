@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "cad/CADKernel.h"
 #include "core/Command.h"
 #include "core/Document.h"
@@ -10,7 +11,6 @@
 #include "core/fem/FemStudy.h"
 #include "core/fem/FemTopo.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 #include "topo_testmesh.h"
 
 #include <nlohmann/json.hpp>
@@ -46,21 +46,26 @@ namespace {
 double Grayness(const std::vector<double>& d) {
   int gray = 0;
   for (double v : d)
-    if (v > 0.2 && v < 0.8) ++gray;
+    if (v > 0.2 && v < 0.8)
+      ++gray;
   return d.empty() ? 0.0 : double(gray) / d.size();
 }
 
 // Optional STL dump (env TOPO0_DUMP_STL=<path>) of the solid tets — the
 // "is it visibly a cantilever truss" eyeball half of the gate.
-void MaybeDumpStl(const fem::FemMesh& m, const std::vector<double>& density, double thr) {
+void MaybeDumpStl(const fem::FemMesh& m, const std::vector<double>& density,
+                  double thr) {
   const char* path = std::getenv("TOPO0_DUMP_STL");
-  if (!path) return;
+  if (!path)
+    return;
   std::FILE* f = std::fopen(path, "w");
-  if (!f) return;
+  if (!f)
+    return;
   std::fprintf(f, "solid topo\n");
   static const int fc[4][3] = {{0, 2, 1}, {0, 1, 3}, {1, 2, 3}, {0, 3, 2}};
   for (size_t e = 0; e < m.tets.size(); ++e) {
-    if (density[e] <= thr) continue;
+    if (density[e] <= thr)
+      continue;
     const auto& t = m.tets[e];
     for (const auto& tri : fc) {
       std::fprintf(f, "facet normal 0 0 0\n outer loop\n");
@@ -75,11 +80,11 @@ void MaybeDumpStl(const fem::FemMesh& m, const std::vector<double>& density, dou
   std::fclose(f);
 }
 
-}  // namespace
+} // namespace
 
 #ifdef HAVE_FEM_SOLVER
 
-#include "core/fem/FemSolverInternal.h"  // element math for the seam-test solver
+#include "core/fem/FemSolverInternal.h" // element math for the seam-test solver
 
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
@@ -95,8 +100,8 @@ TEST_CASE("Topo: SIMP cantilever converges on a structured tet10 mesh (GATE)",
   fem::FemMesh mesh = GenerateBoxMesh(nx, ny, nz, Lx, Ly, Lz);
   REQUIRE(mesh.tets.size() == size_t(nx * ny * nz * 6));
 
-  fem::Material steel{210000.0, 0.3};  // 210 GPa
-  std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);  // clamp x=0
+  fem::Material steel{210000.0, 0.3};                        // 210 GPa
+  std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6); // clamp x=0
   REQUIRE(fixed.size() > 3);
   // Downward load on the lower flange of the tip face (a patch, not the whole
   // end cap) — the classic cantilever setup. A whole-face load freezes a large
@@ -105,16 +110,18 @@ TEST_CASE("Topo: SIMP cantilever converges on a structured tet10 mesh (GATE)",
   load.type = fem::LoadType::Force;
   for (int t : TrisAtPlane(mesh, 0, Lx, 1e-6)) {
     double zc = 0;
-    for (int k = 0; k < 6; ++k) zc += mesh.nodes[mesh.boundary[t].nodes[k]].z;
-    if (zc / 6.0 <= Lz / 3.0) load.tris.push_back(t);  // lower third
+    for (int k = 0; k < 6; ++k)
+      zc += mesh.nodes[mesh.boundary[t].nodes[k]].z;
+    if (zc / 6.0 <= Lz / 3.0)
+      load.tris.push_back(t); // lower third
   }
-  load.magnitude = 2000.0;  // N, downward
+  load.magnitude = 2000.0; // N, downward
   load.direction = glm::dvec3(0, 0, -1);
   REQUIRE_FALSE(load.tris.empty());
 
   fem::TopoParams params;
   params.volumeFraction = 0.3;
-  params.filterRadius = 2.0 * (Lz / nz);  // ~2 elements (10 mm)
+  params.filterRadius = 2.0 * (Lz / nz); // ~2 elements (10 mm)
   params.maxIterations = 80;
   params.changeTol = 0.01;
 
@@ -128,14 +135,17 @@ TEST_CASE("Topo: SIMP cantilever converges on a structured tet10 mesh (GATE)",
   const double secs = std::chrono::duration<double>(t1 - t0).count();
   int nVoid = 0, nSolid = 0;
   for (double v : res->density) {
-    if (v < 0.2) ++nVoid;
-    else if (v > 0.8) ++nSolid;
+    if (v < 0.2)
+      ++nVoid;
+    else if (v > 0.8)
+      ++nSolid;
   }
   WARN("TO0 gate: " << res->iterations << " iters, " << secs << " s ("
-                    << (secs * 1000.0 / res->iterations) << " ms/iter), grayness "
-                    << Grayness(res->density) * 100 << "% (void " << nVoid
-                    << " solid " << nSolid << " of " << res->density.size()
-                    << "), Vf " << res->volumeFractionAchieved << ", compliance "
+                    << (secs * 1000.0 / res->iterations)
+                    << " ms/iter), grayness " << Grayness(res->density) * 100
+                    << "% (void " << nVoid << " solid " << nSolid << " of "
+                    << res->density.size() << "), Vf "
+                    << res->volumeFractionAchieved << ", compliance "
                     << res->complianceHistory.front() << " -> "
                     << res->complianceHistory.back()
                     << ", converged=" << res->converged);
@@ -172,8 +182,10 @@ TEST_CASE("Topo: SIMP cantilever converges on a structured tet10 mesh (GATE)",
   for (size_t e = 0; e < mesh.tets.size(); ++e) {
     bool onFixed = false;
     for (int i = 0; i < 10 && !onFixed; ++i)
-      if (std::abs(mesh.nodes[mesh.tets[e][i]].x) < 1e-6) onFixed = true;
-    if (onFixed) minFixed = std::min(minFixed, res->density[e]);
+      if (std::abs(mesh.nodes[mesh.tets[e][i]].x) < 1e-6)
+        onFixed = true;
+    if (onFixed)
+      minFixed = std::min(minFixed, res->density[e]);
   }
   CHECK_THAT(minFixed, WithinAbs(1.0, 1e-9));
 }
@@ -226,12 +238,12 @@ TEST_CASE("Topo: progress callback can cancel and keep best-so-far",
 
   int seen = 0;
   std::string err;
-  auto res = fem::TopologyOptimize(
-      mesh, steel, fixed, {load}, params, &err,
-      [&](const fem::TopoProgress& p) {
-        seen = p.iteration;
-        return p.iteration < 3;  // cancel after the 3rd iteration
-      });
+  auto res = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                   [&](const fem::TopoProgress& p) {
+                                     seen = p.iteration;
+                                     return p.iteration <
+                                            3; // cancel after the 3rd iteration
+                                   });
   INFO(err);
   REQUIRE(res.has_value());
   CHECK(res->cancelled);
@@ -323,10 +335,12 @@ struct DirectSeamSolver : fem::TopoLinearSolver {
       }
       for (int a = 0; a < 30; ++a) {
         const int ga = dofMap[3 * tet[a / 3] + (a % 3)];
-        if (ga < 0) continue;
+        if (ga < 0)
+          continue;
         for (int b = 0; b < 30; ++b) {
           const int gb = dofMap[3 * tet[b / 3] + (b % 3)];
-          if (gb >= 0) trip.emplace_back(ga, gb, scale[e] * Ke(a, b));
+          if (gb >= 0)
+            trip.emplace_back(ga, gb, scale[e] * Ke(a, b));
         }
       }
     }
@@ -334,18 +348,20 @@ struct DirectSeamSolver : fem::TopoLinearSolver {
     K.setFromTriplets(trip.begin(), trip.end());
     Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ldlt(K);
     if (ldlt.info() != Eigen::Success) {
-      if (error) *error = "factorization failed";
+      if (error)
+        *error = "factorization failed";
       return false;
     }
     Eigen::VectorXd Fv(nFree);
-    for (int i = 0; i < nFree; ++i) Fv(i) = F[i];
+    for (int i = 0; i < nFree; ++i)
+      Fv(i) = F[i];
     const Eigen::VectorXd uv = ldlt.solve(Fv);
     u.assign(uv.data(), uv.data() + nFree);
     return true;
   }
 };
 
-}  // namespace
+} // namespace
 
 TEST_CASE("TopologyOptimize drives an injected linear solver (the GPU seam)",
           "[topopt]") {
@@ -432,12 +448,14 @@ namespace {
 // down on the x=L face. Returns the document; the study is study 0.
 Document MakeTopoDoc() {
   Document doc;
-  auto box = std::make_unique<BoxFeature>("Envelope", glm::vec3(0, 0, 0),
-                                          80.0, 30.0, 30.0);
+  auto box = std::make_unique<BoxFeature>("Envelope", glm::vec3(0, 0, 0), 80.0,
+                                          30.0, 30.0);
   box->SetMaterial("steel");
   doc.AddFeature(std::move(box));
   const uint64_t cb = doc.GetBodies()[0].createdBy;
-  auto face = [&](int i) { return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)}; };
+  auto face = [&](int i) {
+    return ElementRef{cb, std::to_string(cb) + "/face" + std::to_string(i)};
+  };
 
   fem::Study& s = doc.AddStudy("Generative");
   s.type = fem::AnalysisType::Topology;
@@ -448,20 +466,21 @@ Document MakeTopoDoc() {
   fem::Load fixed;
   fixed.id = doc.AllocateId();
   fixed.type = fem::LoadType::Fixed;
-  fixed.face = face(0);  // x = 0
+  fixed.face = face(0); // x = 0
   s.loads.push_back(fixed);
   fem::Load force;
   force.id = doc.AllocateId();
   force.type = fem::LoadType::Force;
-  force.face = face(1);  // x = L
+  force.face = face(1); // x = L
   force.magnitude = 1500.0;
   force.direction = glm::dvec3(0, 0, -1);
   s.loads.push_back(force);
   return doc;
 }
-}  // namespace
+} // namespace
 
-TEST_CASE("RunTopology optimizes the loaded body end to end", "[topopt][mesh]") {
+TEST_CASE("RunTopology optimizes the loaded body end to end",
+          "[topopt][mesh]") {
   Document doc = MakeTopoDoc();
   fem::Study& s = doc.GetStudies()[0];
   fem::StudyRuntime rt;
@@ -473,7 +492,8 @@ TEST_CASE("RunTopology optimizes the loaded body end to end", "[topopt][mesh]") 
   // The density field parallels the mesh tets and is a valid fraction field.
   CHECK(rt.bodies[0].density.size() == rt.bodies[0].mesh.tets.size());
   CHECK(rt.bodies[0].density.size() > 0);
-  for (double d : rt.bodies[0].density) CHECK((d >= 0.0 && d <= 1.0 + 1e-9));
+  for (double d : rt.bodies[0].density)
+    CHECK((d >= 0.0 && d <= 1.0 + 1e-9));
   CHECK_THAT(rt.volumeFractionAchieved, WithinAbs(0.35, 0.02));
   CHECK(rt.iterations > 0);
   REQUIRE(rt.complianceHistory.size() >= 2);
@@ -520,7 +540,7 @@ TEST_CASE("Topology result persists and reloads through the directory format",
   std::string err;
   REQUIRE(fem::RunTopology(doc, doc.GetStudies()[0], rt, &err));
   rt.solvedAtVersion = doc.Version();
-  const std::vector<double> density = rt.bodies[0].density;  // copy to compare
+  const std::vector<double> density = rt.bodies[0].density; // copy to compare
   doc.StoreStudyResults(studyId, std::move(rt));
   REQUIRE_FALSE(doc.StudyResultsStale(studyId));
 
@@ -544,25 +564,27 @@ TEST_CASE("Topology result persists and reloads through the directory format",
   fs::remove_all(proj);
 }
 
-#endif  // HAVE_NETGEN
+#endif // HAVE_NETGEN
 
-#else  // !HAVE_FEM_SOLVER
+#else // !HAVE_FEM_SOLVER
 
 TEST_CASE("Topo: reports a clear error when built without the FEM solver",
           "[topopt]") {
   fem::FemMesh mesh;
   fem::Material steel{210000.0, 0.3};
   std::string err;
-  auto res = fem::TopologyOptimize(mesh, steel, {}, {}, fem::TopoParams{}, &err);
+  auto res =
+      fem::TopologyOptimize(mesh, steel, {}, {}, fem::TopoParams{}, &err);
   CHECK_FALSE(res.has_value());
   CHECK_FALSE(err.empty());
 }
 
-#endif  // HAVE_FEM_SOLVER
+#endif // HAVE_FEM_SOLVER
 
 // ---- Serialization (no solver/mesher needed) ----------------------------
 
-TEST_CASE("Topology study definition round-trips through JSON", "[topopt][serialize]") {
+TEST_CASE("Topology study definition round-trips through JSON",
+          "[topopt][serialize]") {
   fem::Study s;
   s.id = 7;
   s.name = "Gen";
@@ -637,8 +659,9 @@ TEST_CASE("Topology result round-trips through JSON", "[topopt][serialize]") {
   CHECK_THAT(r.bodies[0].density[0], WithinAbs(0.8, 1e-12));
 }
 
-TEST_CASE("StudyResultToJson declines a non-topology runtime", "[topopt][serialize]") {
-  fem::StudyRuntime rt;  // topology defaults false (a static/modal result)
+TEST_CASE("StudyResultToJson declines a non-topology runtime",
+          "[topopt][serialize]") {
+  fem::StudyRuntime rt; // topology defaults false (a static/modal result)
   nlohmann::json j;
   CHECK_FALSE(DocumentIO::StudyResultToJson(rt, j));
 }
@@ -652,12 +675,13 @@ std::vector<double> RampDensityX(const fem::FemMesh& m, double Lx) {
   std::vector<double> d(m.tets.size());
   for (size_t e = 0; e < m.tets.size(); ++e) {
     double x = 0;
-    for (int i = 0; i < 4; ++i) x += m.nodes[m.tets[e][i]].x;
+    for (int i = 0; i < 4; ++i)
+      x += m.nodes[m.tets[e][i]].x;
     d[e] = (x / 4.0) / Lx;
   }
   return d;
 }
-}  // namespace
+} // namespace
 
 namespace {
 
@@ -684,18 +708,20 @@ bool SurfaceIsClosed(const std::vector<glm::vec3>& pos,
   std::map<std::pair<uint32_t, uint32_t>, int> edges;
   for (size_t k = 0; k + 2 < idx.size(); k += 3) {
     const uint32_t v[3] = {remap[idx[k]], remap[idx[k + 1]], remap[idx[k + 2]]};
-    if (v[0] == v[1] || v[1] == v[2] || v[0] == v[2]) continue;  // degenerate
+    if (v[0] == v[1] || v[1] == v[2] || v[0] == v[2])
+      continue; // degenerate
     for (int e = 0; e < 3; ++e) {
       const uint32_t a = v[e], b = v[(e + 1) % 3];
       edges[{std::min(a, b), std::max(a, b)}]++;
     }
   }
   for (const auto& [e, count] : edges)
-    if (count != 2) return false;
+    if (count != 2)
+      return false;
   return !edges.empty();
 }
 
-}  // namespace
+} // namespace
 
 TEST_CASE("Iso-surface is closed — capped at the domain boundary",
           "[topopt][iso]") {
@@ -724,7 +750,8 @@ TEST_CASE("Iso-surface is closed — capped at the domain boundary",
     std::vector<double> density(mesh.tets.size());
     for (size_t e = 0; e < mesh.tets.size(); ++e) {
       glm::dvec3 c(0.0);
-      for (int i = 0; i < 4; ++i) c += mesh.nodes[mesh.tets[e][i]];
+      for (int i = 0; i < 4; ++i)
+        c += mesh.nodes[mesh.tets[e][i]];
       density[e] = (c.x / 4.0) < 20.0 ? 1.0 : 0.0;
     }
     std::vector<glm::vec3> pos, nrm;
@@ -735,7 +762,8 @@ TEST_CASE("Iso-surface is closed — capped at the domain boundary",
   }
 }
 
-TEST_CASE("AutoIsoThreshold volume-matches the target fraction", "[topopt][iso]") {
+TEST_CASE("AutoIsoThreshold volume-matches the target fraction",
+          "[topopt][iso]") {
   const double Lx = 80;
   fem::FemMesh mesh = GenerateBoxMesh(8, 4, 4, Lx, 40, 40);
   const std::vector<double> d = RampDensityX(mesh, Lx);
@@ -746,7 +774,7 @@ TEST_CASE("AutoIsoThreshold volume-matches the target fraction", "[topopt][iso]"
   const double t60 = fem::AutoIsoThreshold(mesh, d, 0.6);
   CHECK_THAT(t30, WithinAbs(0.7, 0.06));
   CHECK_THAT(t60, WithinAbs(0.4, 0.06));
-  CHECK(t60 < t30);  // a larger kept fraction -> a lower threshold
+  CHECK(t60 < t30); // a larger kept fraction -> a lower threshold
 }
 
 TEST_CASE("ExtractIsoSurface produces an oriented surface at a crossing",
@@ -761,13 +789,14 @@ TEST_CASE("ExtractIsoSurface produces an oriented surface at a crossing",
 
   REQUIRE(pos.size() == nrm.size());
   REQUIRE(idx.size() % 3 == 0);
-  CHECK(idx.size() > 0);  // the 0->1 ramp crosses 0.5
+  CHECK(idx.size() > 0); // the 0->1 ramp crosses 0.5
   for (const glm::vec3& p : pos) {
     CHECK((p.x >= -1e-3f && p.x <= Lx + 1e-3f));
     CHECK((p.y >= -1e-3f && p.y <= Ly + 1e-3f));
     CHECK((p.z >= -1e-3f && p.z <= Lz + 1e-3f));
   }
-  for (const glm::vec3& n : nrm) CHECK_THAT(glm::length(n), WithinAbs(1.0f, 1e-4f));
+  for (const glm::vec3& n : nrm)
+    CHECK_THAT(glm::length(n), WithinAbs(1.0f, 1e-4f));
   // The ramp increases with x, so the solid (density>=t) is the +x half and
   // the INTERFACE faces roughly -x (outward, toward the void). Boundary caps
   // (which close the solid against the domain faces) point every which way,
@@ -780,8 +809,10 @@ TEST_CASE("ExtractIsoSurface produces an oriented surface at a crossing",
            c.z > Lz - e;
   };
   for (size_t k = 0; k + 2 < idx.size(); k += 3) {
-    const glm::vec3 c = (pos[idx[k]] + pos[idx[k + 1]] + pos[idx[k + 2]]) / 3.0f;
-    if (onBoundary(c)) continue;
+    const glm::vec3 c =
+        (pos[idx[k]] + pos[idx[k + 1]] + pos[idx[k + 2]]) / 3.0f;
+    if (onBoundary(c))
+      continue;
     avg += nrm[idx[k]];
     ++nInterior;
   }
@@ -835,7 +866,8 @@ TEST_CASE("ExportTopoStl writes a well-formed binary STL", "[topopt][iso]") {
   CHECK(fem::ExportTopoStl(mesh, std::vector<double>(mesh.tets.size(), 0.9),
                            0.5, 3, path.string(), &errSolid));
   std::string err2;
-  CHECK_FALSE(fem::ExportTopoStl(mesh, std::vector<double>(mesh.tets.size(), 0.1),
+  CHECK_FALSE(fem::ExportTopoStl(mesh,
+                                 std::vector<double>(mesh.tets.size(), 0.1),
                                  0.5, 3, path.string(), &err2));
   fs::remove(path);
 }

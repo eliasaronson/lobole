@@ -1,13 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/ElementHistory.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
-#include "core/io/Serialization.h"
-#include "TestIO.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 
 #include <array>
 #include <filesystem>
@@ -105,8 +105,7 @@ bool RefIsVertical(const Body& body, const ElementRef& ref) {
     return false;
   const auto polys = body.shape.GenerateEdgePolylines();
   const auto& poly = polys.at(static_cast<size_t>(*idx));
-  return poly.size() >= 2 &&
-         std::abs(poly.front().z - poly.back().z) > 1e-3f &&
+  return poly.size() >= 2 && std::abs(poly.front().z - poly.back().z) > 1e-3f &&
          std::abs(poly.front().x - poly.back().x) < 1e-3f &&
          std::abs(poly.front().y - poly.back().y) < 1e-3f;
 }
@@ -121,8 +120,9 @@ int EdgesNear(const Body& body, const glm::vec3& probe, float tol = 1e-3f) {
       const glm::vec3 a = poly[i];
       const glm::vec3 ab = poly[i + 1] - a;
       const float len2 = glm::dot(ab, ab);
-      const float t =
-          len2 > 0.0f ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f) : 0.0f;
+      const float t = len2 > 0.0f
+                          ? glm::clamp(glm::dot(p - a, ab) / len2, 0.0f, 1.0f)
+                          : 0.0f;
       d = std::min(d, glm::length(p - (a + ab * t)));
     }
     return d;
@@ -194,8 +194,8 @@ TEST_CASE("A second edge picked after the first blend regen still fillets",
   const auto& poly = polys.at(static_cast<size_t>(*idx));
   const std::vector<Body>* before2 = doc.CachedBodiesAfter(1); // pre-blend
   REQUIRE(before2 != nullptr);
-  const auto second = topo::ResolveEdgeOnBody(
-      before2->at(0), picked.name, topo::PolylineArcMidpoint(poly));
+  const auto second = topo::ResolveEdgeOnBody(before2->at(0), picked.name,
+                                              topo::PolylineArcMidpoint(poly));
   REQUIRE(second.has_value());
   fil->edges.push_back(*second);
   REQUIRE(doc.Regenerate());
@@ -219,8 +219,8 @@ TEST_CASE("A vertical second edge remaps to the vertical edge, not a neighbour",
   BuildPentagonPrism(doc, ext);
 
   const ElementRef first = PickEdge(doc, AtCorner(-1.2344f, 0.0f));
-  doc.AddFeature(std::make_unique<FilletFeature>(
-      "Chamfer", std::vector{first}, 0.5, EdgeBlendOp::Chamfer));
+  doc.AddFeature(std::make_unique<FilletFeature>("Chamfer", std::vector{first},
+                                                 0.5, EdgeBlendOp::Chamfer));
   auto* fil = dynamic_cast<FilletFeature*>(doc.GetFeature(2));
   REQUIRE(fil != nullptr);
   REQUIRE(doc.Regenerate());
@@ -264,14 +264,13 @@ TEST_CASE("Chamfer bevels a referenced edge", "[fillet]") {
   const double before = BodyVolume(doc);
   const ElementRef edge = PickEdge(doc, AtZ(3.0f));
 
-  doc.AddFeature(std::make_unique<FilletFeature>(
-      "Chamfer", std::vector{edge}, 0.5, EdgeBlendOp::Chamfer));
+  doc.AddFeature(std::make_unique<FilletFeature>("Chamfer", std::vector{edge},
+                                                 0.5, EdgeBlendOp::Chamfer));
   const uint64_t chamferId = doc.GetFeature(2)->GetId();
   REQUIRE(doc.Regenerate());
 
   // A 45-degree chamfer removes r^2/2 * length.
-  CHECK_THAT(BodyVolume(doc),
-             WithinRel(before - 0.5 * 0.5 * 0.5 * 4.0, 1e-3));
+  CHECK_THAT(BodyVolume(doc), WithinRel(before - 0.5 * 0.5 * 0.5 * 4.0, 1e-3));
   const ElementMap& map = doc.GetBodies()[0].elementMap;
   CHECK(map.Resolve(edge.name + ";G" + std::to_string(chamferId)).has_value());
 }
@@ -373,7 +372,8 @@ TEST_CASE("Fillet and chamfer round-trip through JSON (v17)", "[fillet]") {
     BuildRectPrism(doc, ext);
     const ElementRef edge = PickEdge(doc, AtZ(3.0f));
     edgeName = edge.name;
-    auto fil = std::make_unique<FilletFeature>("Fillet", std::vector{edge}, 0.5);
+    auto fil =
+        std::make_unique<FilletFeature>("Fillet", std::vector{edge}, 0.5);
     fil->radiusExpr = "0.25 + 0.25";
     doc.AddFeature(std::move(fil));
     doc.AddFeature(std::make_unique<FilletFeature>(
@@ -395,7 +395,6 @@ TEST_CASE("Fillet and chamfer round-trip through JSON (v17)", "[fillet]") {
   REQUIRE(cha != nullptr);
   CHECK(cha->op == EdgeBlendOp::Chamfer);
   REQUIRE(loaded->Regenerate());
-  CHECK_THAT(loaded->GetBodies().at(0).shape.Volume(),
-             WithinRel(volume, 1e-6));
+  CHECK_THAT(loaded->GetBodies().at(0).shape.Volume(), WithinRel(volume, 1e-6));
   fs::remove(path);
 }

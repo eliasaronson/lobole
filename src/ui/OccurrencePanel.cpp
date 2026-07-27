@@ -16,18 +16,25 @@ namespace ui {
 namespace {
 std::string PartNameById(const AppState& state, uint64_t partId) {
   for (const PartSlot& s : state.parts)
-    if (s.kind == DocKind::Part && s.id == partId) return s.name;
+    if (s.kind == DocKind::Part && s.id == partId)
+      return s.name;
   return "(missing part)";
 }
 
 const char* MateTypeLabel(MateType t) {
   switch (t) {
-    case MateType::Fastened: return "fastened";
-    case MateType::Revolute: return "revolute";
-    case MateType::Slider: return "slider";
-    case MateType::Cylindrical: return "cylindrical";
-    case MateType::Planar: return "planar";
-    case MateType::Ball: return "ball";
+  case MateType::Fastened:
+    return "fastened";
+  case MateType::Revolute:
+    return "revolute";
+  case MateType::Slider:
+    return "slider";
+  case MateType::Cylindrical:
+    return "cylindrical";
+  case MateType::Planar:
+    return "planar";
+  case MateType::Ball:
+    return "ball";
   }
   return "?";
 }
@@ -36,7 +43,8 @@ const char* MateTypeLabel(MateType t) {
 std::string OccLabel(const AppState& state, const AssemblyDocument& asmDoc,
                      uint64_t occId) {
   const Occurrence* o = asmDoc.FindById(occId);
-  if (!o) return "(missing)";
+  if (!o)
+    return "(missing)";
   return o->name.empty() ? PartNameById(state, o->partId) : o->name;
 }
 
@@ -75,7 +83,8 @@ void DrawMatesSection(AppState& state) {
   for (const Mate& mate : asmDoc.GetMates()) {
     ImGui::PushID(static_cast<int>(mate.id));
     const std::string label =
-        (mate.name.empty() ? std::string(MateTypeLabel(mate.type)) : mate.name) +
+        (mate.name.empty() ? std::string(MateTypeLabel(mate.type))
+                           : mate.name) +
         "  [" + MateTypeLabel(mate.type) + "]";
     if (!mate.error.empty()) {
       ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s", "(!)");
@@ -89,7 +98,7 @@ void DrawMatesSection(AppState& state) {
   }
 
   Mate* sel = SelectedMateId(state) ? asmDoc.FindMateById(SelectedMateId(state))
-                                 : nullptr;
+                                    : nullptr;
   if (!sel)
     return;
 
@@ -117,45 +126,57 @@ void DrawMatesSection(AppState& state) {
   auto angleDof = [&](const char* label) {
     float deg = glm::degrees(sel->rotation);
     const bool changed = ImGui::DragFloat(label, &deg, 1.0f);
-    if (ImGui::IsItemActivated()) SnapshotAssembly(state);
-    if (changed) { sel->rotation = glm::radians(deg); SolveActiveAssembly(state); }
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state);
+    if (changed) {
+      sel->rotation = glm::radians(deg);
+      SolveActiveAssembly(state);
+    }
   };
   auto offsetDof = [&](const char* label) {
     const bool changed = ImGui::DragFloat(label, &sel->offset, 0.1f);
-    if (ImGui::IsItemActivated()) SnapshotAssembly(state);
-    if (changed) SolveActiveAssembly(state);
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state);
+    if (changed)
+      SolveActiveAssembly(state);
   };
   switch (sel->type) {
-    case MateType::Revolute:
-      angleDof("Angle (deg)");
-      break;
-    case MateType::Slider:
-      offsetDof("Offset");
-      break;
-    case MateType::Cylindrical:
-      angleDof("Angle (deg)");
-      offsetDof("Offset");
-      break;
-    case MateType::Planar: {
-      float dxy[2] = {sel->dx, sel->dy};
-      const bool changed = ImGui::DragFloat2("Slide (x,y)", dxy, 0.1f);
-      if (ImGui::IsItemActivated()) SnapshotAssembly(state);
-      if (changed) { sel->dx = dxy[0]; sel->dy = dxy[1]; SolveActiveAssembly(state); }
-      angleDof("Spin (deg)");
-      break;
+  case MateType::Revolute:
+    angleDof("Angle (deg)");
+    break;
+  case MateType::Slider:
+    offsetDof("Offset");
+    break;
+  case MateType::Cylindrical:
+    angleDof("Angle (deg)");
+    offsetDof("Offset");
+    break;
+  case MateType::Planar: {
+    float dxy[2] = {sel->dx, sel->dy};
+    const bool changed = ImGui::DragFloat2("Slide (x,y)", dxy, 0.1f);
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state);
+    if (changed) {
+      sel->dx = dxy[0];
+      sel->dy = dxy[1];
+      SolveActiveAssembly(state);
     }
-    case MateType::Ball: {
-      glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->ballRotation));
-      const bool changed = ImGui::DragFloat3("Rotation (deg)", &euler.x, 1.0f);
-      if (ImGui::IsItemActivated()) SnapshotAssembly(state);
-      if (changed) {
-        sel->ballRotation = glm::quat(glm::radians(euler));
-        SolveActiveAssembly(state);
-      }
-      break;
+    angleDof("Spin (deg)");
+    break;
+  }
+  case MateType::Ball: {
+    glm::vec3 euler = glm::degrees(glm::eulerAngles(sel->ballRotation));
+    const bool changed = ImGui::DragFloat3("Rotation (deg)", &euler.x, 1.0f);
+    if (ImGui::IsItemActivated())
+      SnapshotAssembly(state);
+    if (changed) {
+      sel->ballRotation = glm::quat(glm::radians(euler));
+      SolveActiveAssembly(state);
     }
-    case MateType::Fastened:
-      break; // no DOF
+    break;
+  }
+  case MateType::Fastened:
+    break; // no DOF
   }
 
   if (!sel->error.empty())
@@ -267,7 +288,8 @@ void DrawConfigsSection(AppState& state) {
   }
 
   Configuration* cfg = asmDoc.FindConfiguration(active);
-  if (!cfg) return;  // base
+  if (!cfg)
+    return; // base
 
   char nm[128];
   std::snprintf(nm, sizeof(nm), "%s", cfg->name.c_str());
@@ -291,7 +313,8 @@ void DrawConfigsSection(AppState& state) {
       SnapshotAssembly(state);
       auto& v = asmDoc.FindConfiguration(active)->suppressedFeatures;
       v.erase(std::remove(v.begin(), v.end(), o.id), v.end());
-      if (sup) v.push_back(o.id);
+      if (sup)
+        v.push_back(o.id);
       asmDoc.BumpVersion();
     }
     ImGui::PopID();
@@ -342,11 +365,15 @@ void DrawBomSection(AppState& state) {
       ImGui::TableNextColumn();
       ImGui::TextUnformatted(r.material.empty() ? "-" : r.material.c_str());
       ImGui::TableNextColumn();
-      if (r.massKnown) ImGui::Text("%.2f", r.unitMassG);
-      else ImGui::TextDisabled("?"); // no material/density assigned
+      if (r.massKnown)
+        ImGui::Text("%.2f", r.unitMassG);
+      else
+        ImGui::TextDisabled("?"); // no material/density assigned
       ImGui::TableNextColumn();
-      if (r.massKnown) ImGui::Text("%.2f", r.unitMassG * r.quantity);
-      else ImGui::TextDisabled("?");
+      if (r.massKnown)
+        ImGui::Text("%.2f", r.unitMassG * r.quantity);
+      else
+        ImGui::TextDisabled("?");
     }
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
@@ -355,8 +382,10 @@ void DrawBomSection(AppState& state) {
     ImGui::TableNextColumn();
     ImGui::TableNextColumn();
     ImGui::TableNextColumn();
-    if (cache.massKnown) ImGui::Text("%.2f", cache.totalMassG);
-    else ImGui::TextDisabled("?");
+    if (cache.massKnown)
+      ImGui::Text("%.2f", cache.totalMassG);
+    else
+      ImGui::TextDisabled("?");
     ImGui::EndTable();
   }
   if (ImGui::Button("Export CSV"))

@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/ThreadStandards.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <TopExp_Explorer.hxx>
@@ -112,18 +112,17 @@ TEST_CASE("Thread errors on planar and dangling faces", "[thread]") {
   const std::string planarFace = PlanarFaceName(body);
   doc.AddFeature(std::make_unique<ThreadFeature>(
       "Flat", ElementRef{createdBy, planarFace}, "M8", 1.25));
-  CHECK(doc.GetFeature(1)->GetError().find("cylindrical") !=
-        std::string::npos);
+  CHECK(doc.GetFeature(1)->GetError().find("cylindrical") != std::string::npos);
 
   doc.AddFeature(std::make_unique<ThreadFeature>(
       "Gone", ElementRef{createdBy, "nope"}, "M8", 1.25));
   CHECK(!doc.GetFeature(2)->GetError().empty());
 }
 
-TEST_CASE("Thread round-trips through serialization", "[thread][serialization]") {
+TEST_CASE("Thread round-trips through serialization",
+          "[thread][serialization]") {
   namespace fs = std::filesystem;
-  const fs::path path =
-      fs::temp_directory_path() / "designer_thread_test.json";
+  const fs::path path = fs::temp_directory_path() / "designer_thread_test.json";
   {
     Document doc;
     doc.AddFeature(std::make_unique<CylinderFeature>(

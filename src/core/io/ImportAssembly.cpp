@@ -60,9 +60,9 @@ AssemblyImportPlan BuildAssemblyImportPlan(const std::string& stepPath,
     product.shape.GetBoundingBox(min, max);
     centers[i] = (min + max) * 0.5f;
 
-    std::string base =
-        !product.name.empty() ? product.name
-                              : "Part " + std::to_string(plan.parts.size() + 1);
+    std::string base = !product.name.empty()
+                           ? product.name
+                           : "Part " + std::to_string(plan.parts.size() + 1);
     std::string name = base;
     for (int n = 2; usedNames.count(name); n++)
       name = base + " " + std::to_string(n);

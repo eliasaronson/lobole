@@ -2,12 +2,12 @@
 
 #include "common/Logger.h"
 
-#include <BRep_Tool.hxx>
-#include <Geom_Curve.hxx>
 #include "core/ElementHistory.h"
 #include "core/features/BooleanFeature.h" // BooleanOp
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h"
+#include <BRep_Tool.hxx>
+#include <Geom_Curve.hxx>
 
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
@@ -171,9 +171,9 @@ bool RibFeature::Execute(RegenContext& ctx) {
       lo = glm::min(lo, mn);
       hi = glm::max(hi, mx);
     }
-    const float L = 2.0f * (glm::length(hi - lo) +
-                            glm::length(o - (lo + hi) * 0.5f)) +
-                    static_cast<float>(thickness) + 1.0f;
+    const float L =
+        2.0f * (glm::length(hi - lo) + glm::length(o - (lo + hi) * 0.5f)) +
+        static_cast<float>(thickness) + 1.0f;
 
     BRepPrimAPI_MakePrism prism(mkFace.Face(),
                                 gp_Vec(N.x * L, N.y * L, N.z * L));

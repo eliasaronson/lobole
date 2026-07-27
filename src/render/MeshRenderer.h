@@ -1,17 +1,18 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <vector>
 #include <memory>
+#include <vector>
+#include <vulkan/vulkan.h>
 
 struct Vertex3D {
-    glm::vec3 position;
-    glm::vec3 normal;
+  glm::vec3 position;
+  glm::vec3 normal;
 
-    static VkVertexInputBindingDescription getBindingDescription();
-    static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions();
+  static VkVertexInputBindingDescription getBindingDescription();
+  static std::vector<VkVertexInputAttributeDescription>
+  getAttributeDescriptions();
 };
 
 // Vertex for unlit colored line/overlay geometry: sketch lines, gizmos, grids,
@@ -19,314 +20,330 @@ struct Vertex3D {
 // normal (the sketch pipeline is unlit). Distinct from Vertex3D, whose color
 // moved to per-instance state with the renderer instancing split.
 struct LineVertex3D {
-    glm::vec3 position;
-    glm::vec3 color;
+  glm::vec3 position;
+  glm::vec3 color;
 };
 
 struct Light {
-    glm::vec4 direction;  // xyz = direction, w = intensity
-    glm::vec4 color;      // rgb = color, a = unused
+  glm::vec4 direction; // xyz = direction, w = intensity
+  glm::vec4 color;     // rgb = color, a = unused
 };
 
 // std140-clean by construction: mat4/vec4 members only, no scalars (the
 // float-then-vec4 padding trap is documented in OutlineRenderer.h).
 struct UniformBufferObject {
-    glm::mat4 view;
-    glm::mat4 proj;
-    glm::vec4 viewPos;     // Camera position
-    Light primaryLight;    // Main directional light
-    Light fillLight;       // Fill light (opposite direction, lower intensity)
-    Light rimLight;        // Rim light (side lighting)
-    glm::vec4 ambientColor; // rgb = ambient color, a = intensity
-    glm::vec4 clipPlane;   // section clip (world): xyz = normal, w = dist; 0 = off
-    glm::mat4 lightViewProj; // world -> key-light clip space (ShadowRenderer)
-    // Key-light shadow params (S1): x = strength, y = normal-offset world
-    // distance, z = shadow-map texel size (UV), w = enable (0/1).
-    glm::vec4 shadowParams;
-    // SSAO params (S2): xy = 1 / framebuffer size (gl_FragCoord -> AO uv),
-    // z = enable (0/1), w = unused.
-    glm::vec4 aoParams;
+  glm::mat4 view;
+  glm::mat4 proj;
+  glm::vec4 viewPos;      // Camera position
+  Light primaryLight;     // Main directional light
+  Light fillLight;        // Fill light (opposite direction, lower intensity)
+  Light rimLight;         // Rim light (side lighting)
+  glm::vec4 ambientColor; // rgb = ambient color, a = intensity
+  glm::vec4 clipPlane; // section clip (world): xyz = normal, w = dist; 0 = off
+  glm::mat4 lightViewProj; // world -> key-light clip space (ShadowRenderer)
+  // Key-light shadow params (S1): x = strength, y = normal-offset world
+  // distance, z = shadow-map texel size (UV), w = enable (0/1).
+  glm::vec4 shadowParams;
+  // SSAO params (S2): xy = 1 / framebuffer size (gl_FragCoord -> AO uv),
+  // z = enable (0/1), w = unused.
+  glm::vec4 aoParams;
 };
 
 // One opaque instance's draw data for the shadow pass (ShadowRenderer): the
 // exact set the main pass's opaque loop draws, ghosts excluded.
 struct ShadowCaster {
-    VkBuffer vertexBuffer;
-    VkBuffer indexBuffer;
-    uint32_t indexCount;
-    glm::mat4 transform;
+  VkBuffer vertexBuffer;
+  VkBuffer indexBuffer;
+  uint32_t indexCount;
+  glm::mat4 transform;
 };
 
 // One tessellation, uploaded once and shared by any number of instances.
 class MeshAsset {
 public:
-    std::vector<Vertex3D> vertices;   // CPU copy kept for updates/picking
-    std::vector<uint32_t> indices;
+  std::vector<Vertex3D> vertices; // CPU copy kept for updates/picking
+  std::vector<uint32_t> indices;
 
-    VkBuffer vertexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
-    VkBuffer indexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
+  VkBuffer vertexBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
+  VkBuffer indexBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
 
-    // Local-space bounds, cached at (re)upload so the per-frame shadow
-    // frustum fit only transforms 8 corners per instance.
-    glm::vec3 bboxMin = glm::vec3(0.0f);
-    glm::vec3 bboxMax = glm::vec3(0.0f);
+  // Local-space bounds, cached at (re)upload so the per-frame shadow
+  // frustum fit only transforms 8 corners per instance.
+  glm::vec3 bboxMin = glm::vec3(0.0f);
+  glm::vec3 bboxMax = glm::vec3(0.0f);
 
-    uint32_t refCount = 0;  // live instances referencing this asset
+  uint32_t refCount = 0; // live instances referencing this asset
 };
 
 // One drawn occurrence of an asset: everything that may vary between
 // occurrences without re-uploading geometry. Rides in push constants per draw.
 struct MeshInstance {
-    uint32_t assetId = 0;
-    glm::mat4 transform = glm::mat4(1.0f);
+  uint32_t assetId = 0;
+  glm::mat4 transform = glm::mat4(1.0f);
 
-    // Albedo. Was baked into vertex colors before the asset/instance split;
-    // per-instance so occurrences of one asset can differ in material.
-    glm::vec4 baseColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+  // Albedo. Was baked into vertex colors before the asset/instance split;
+  // per-instance so occurrences of one asset can differ in material.
+  glm::vec4 baseColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
 
-    // PBR params: x = metallic, y = roughness, z = specular, w = dielectric
-    // reflectance. Default = neutral dielectric so unassigned bodies read
-    // predictably.
-    glm::vec4 materialParams = glm::vec4(0.0f, 0.5f, 0.5f, 0.04f);
+  // PBR params: x = metallic, y = roughness, z = specular, w = dielectric
+  // reflectance. Default = neutral dielectric so unassigned bodies read
+  // predictably.
+  glm::vec4 materialParams = glm::vec4(0.0f, 0.5f, 0.5f, 0.04f);
 
-    // Procedural surface pattern (wood grain / plywood), shaded in mesh.frag
-    // from local object-space position: x = pattern id (0 flat, 1 wood,
-    // 2 plywood), y = grainScale, z = grainContrast. w = grain-axis index
-    // (0/1/2), filled per-draw from the asset bbox — not stored here. Default
-    // x = 0 leaves every existing material flat (unchanged appearance).
-    glm::vec4 procParams = glm::vec4(0.0f);
+  // Procedural surface pattern (wood grain / plywood), shaded in mesh.frag
+  // from local object-space position: x = pattern id (0 flat, 1 wood,
+  // 2 plywood), y = grainScale, z = grainContrast. w = grain-axis index
+  // (0/1/2), filled per-draw from the asset bbox — not stored here. Default
+  // x = 0 leaves every existing material flat (unchanged appearance).
+  glm::vec4 procParams = glm::vec4(0.0f);
 
-    // Face-highlight vertex ranges [start, end): x,y = selected; z,w = hovered
-    glm::uvec4 highlight = glm::uvec4(0);
+  // Face-highlight vertex ranges [start, end): x,y = selected; z,w = hovered
+  glm::uvec4 highlight = glm::uvec4(0);
 
-    bool visible = true;
+  bool visible = true;
 
-    // Ghosted context geometry (A4 in-context editing): drawn by the alpha-
-    // blended, depth-write-off ghost pipeline in a second pass after all
-    // opaque instances. baseColor.a carries the opacity.
-    bool ghost = false;
+  // Ghosted context geometry (A4 in-context editing): drawn by the alpha-
+  // blended, depth-write-off ghost pipeline in a second pass after all
+  // opaque instances. baseColor.a carries the opacity.
+  bool ghost = false;
 };
 
 class MeshRenderer {
 public:
-    MeshRenderer();
-    ~MeshRenderer();
+  MeshRenderer();
+  ~MeshRenderer();
 
-    bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
-                   VkRenderPass renderPass, VkQueue graphicsQueue,
-                   uint32_t queueFamily, VkCommandPool commandPool,
-                   VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
-    void Shutdown();
+  bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
+                  VkRenderPass renderPass, VkQueue graphicsQueue,
+                  uint32_t queueFamily, VkCommandPool commandPool,
+                  VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT);
+  void Shutdown();
 
-    // Assets: shared tessellations (one GPU upload each)
-    uint32_t CreateAsset(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices);
-    void UpdateAsset(uint32_t assetId, const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices);
+  // Assets: shared tessellations (one GPU upload each)
+  uint32_t CreateAsset(const std::vector<Vertex3D>& vertices,
+                       const std::vector<uint32_t>& indices);
+  void UpdateAsset(uint32_t assetId, const std::vector<Vertex3D>& vertices,
+                   const std::vector<uint32_t>& indices);
 
-    // Instances: drawn occurrences of an asset. Removing the last instance of
-    // an asset destroys the asset's buffers too.
-    uint32_t AddInstance(uint32_t assetId, const glm::mat4& transform = glm::mat4(1.0f));
-    void RemoveInstance(uint32_t instanceId);
-    void SetInstanceTransform(uint32_t instanceId, const glm::mat4& transform);
-    void SetInstanceColor(uint32_t instanceId, const glm::vec3& albedo);
-    // Albedo + PBR params in one shot. params is (metallic, roughness,
-    // specular, reflectance).
-    void SetInstanceMaterial(uint32_t instanceId, const glm::vec3& albedo,
-                             const glm::vec4& params);
-    // Procedural surface pattern for wood/plywood: pattern (0 flat, 1 wood,
-    // 2 plywood), grainScale, grainContrast. pattern 0 restores the default
-    // flat look. The grain axis is derived per-draw from the asset's bbox.
-    void SetInstanceProcedural(uint32_t instanceId, int pattern, float grainScale,
-                               float grainContrast);
-    void SetInstanceVisible(uint32_t instanceId, bool visible);
-    // Marks an instance as ghosted context geometry (A4): translucent
-    // (`alpha`), no depth write, drawn after all opaque instances. Unsorted
-    // blending — acceptable at reference-visual alphas (~0.25).
-    void SetInstanceGhost(uint32_t instanceId, float alpha = 0.25f);
+  // Instances: drawn occurrences of an asset. Removing the last instance of
+  // an asset destroys the asset's buffers too.
+  uint32_t AddInstance(uint32_t assetId,
+                       const glm::mat4& transform = glm::mat4(1.0f));
+  void RemoveInstance(uint32_t instanceId);
+  void SetInstanceTransform(uint32_t instanceId, const glm::mat4& transform);
+  void SetInstanceColor(uint32_t instanceId, const glm::vec3& albedo);
+  // Albedo + PBR params in one shot. params is (metallic, roughness,
+  // specular, reflectance).
+  void SetInstanceMaterial(uint32_t instanceId, const glm::vec3& albedo,
+                           const glm::vec4& params);
+  // Procedural surface pattern for wood/plywood: pattern (0 flat, 1 wood,
+  // 2 plywood), grainScale, grainContrast. pattern 0 restores the default
+  // flat look. The grain axis is derived per-draw from the asset's bbox.
+  void SetInstanceProcedural(uint32_t instanceId, int pattern, float grainScale,
+                             float grainContrast);
+  void SetInstanceVisible(uint32_t instanceId, bool visible);
+  // Marks an instance as ghosted context geometry (A4): translucent
+  // (`alpha`), no depth write, drawn after all opaque instances. Unsorted
+  // blending — acceptable at reference-visual alphas (~0.25).
+  void SetInstanceGhost(uint32_t instanceId, float alpha = 0.25f);
 
-    // Transitional one-body-one-mesh API (asset + instance in one shot);
-    // call sites migrate to the split API with assemblies A2.
-    uint32_t AddMesh(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices);
-    void UpdateMesh(uint32_t instanceId, const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices);
-    void RemoveMesh(uint32_t instanceId) { RemoveInstance(instanceId); }
-    void SetMeshTransform(uint32_t instanceId, const glm::mat4& transform) { SetInstanceTransform(instanceId, transform); }
-    void SetMeshColor(uint32_t instanceId, const glm::vec3& color) { SetInstanceColor(instanceId, color); }
-    void SetMeshMaterial(uint32_t instanceId, const glm::vec3& albedo,
-                         const glm::vec4& params) { SetInstanceMaterial(instanceId, albedo, params); }
-    void SetMeshProcedural(uint32_t instanceId, int pattern, float grainScale,
-                           float grainContrast) {
-        SetInstanceProcedural(instanceId, pattern, grainScale, grainContrast);
-    }
+  // Transitional one-body-one-mesh API (asset + instance in one shot);
+  // call sites migrate to the split API with assemblies A2.
+  uint32_t AddMesh(const std::vector<Vertex3D>& vertices,
+                   const std::vector<uint32_t>& indices);
+  void UpdateMesh(uint32_t instanceId, const std::vector<Vertex3D>& vertices,
+                  const std::vector<uint32_t>& indices);
+  void RemoveMesh(uint32_t instanceId) { RemoveInstance(instanceId); }
+  void SetMeshTransform(uint32_t instanceId, const glm::mat4& transform) {
+    SetInstanceTransform(instanceId, transform);
+  }
+  void SetMeshColor(uint32_t instanceId, const glm::vec3& color) {
+    SetInstanceColor(instanceId, color);
+  }
+  void SetMeshMaterial(uint32_t instanceId, const glm::vec3& albedo,
+                       const glm::vec4& params) {
+    SetInstanceMaterial(instanceId, albedo, params);
+  }
+  void SetMeshProcedural(uint32_t instanceId, int pattern, float grainScale,
+                         float grainContrast) {
+    SetInstanceProcedural(instanceId, pattern, grainScale, grainContrast);
+  }
 
-    // Face highlighting (vertex ranges within the instance's asset)
-    void SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex, uint32_t count);
-    void SetFaceHover(uint32_t instanceId, uint32_t firstVertex, uint32_t count);
-    void ClearFaceHighlight();
-    void ClearFaceHover();
+  // Face highlighting (vertex ranges within the instance's asset)
+  void SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex,
+                        uint32_t count);
+  void SetFaceHover(uint32_t instanceId, uint32_t firstVertex, uint32_t count);
+  void ClearFaceHighlight();
+  void ClearFaceHover();
 
-    // Highlights a whole instance (its full vertex range) WITHOUT clearing
-    // others, so all instances of a selected occurrence highlight together
-    // (assemblies A2). Pair with ClearFaceHighlight to deselect.
-    void HighlightInstance(uint32_t instanceId);
+  // Highlights a whole instance (its full vertex range) WITHOUT clearing
+  // others, so all instances of a selected occurrence highlight together
+  // (assemblies A2). Pair with ClearFaceHighlight to deselect.
+  void HighlightInstance(uint32_t instanceId);
 
-    // Rendering
-    void UpdateCamera(const glm::mat4& view, const glm::mat4& projection);
-    void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
+  // Rendering
+  void UpdateCamera(const glm::mat4& view, const glm::mat4& projection);
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame);
 
-    // Viewport
-    void SetViewportSize(uint32_t width, uint32_t height) { SetViewport(0, 0, width, height); }
+  // Viewport
+  void SetViewportSize(uint32_t width, uint32_t height) {
+    SetViewport(0, 0, width, height);
+  }
 
-    // Section clip plane (world space): xyz = normal, w = distance; fragments
-    // past it are discarded. Zero vector = no clipping (the default).
-    void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
-    void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
+  // Section clip plane (world space): xyz = normal, w = distance; fragments
+  // past it are discarded. Zero vector = no clipping (the default).
+  void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
+  void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
 
-    // IBL textures for the fragment shader. Must be set BEFORE Initialize()
-    // (descriptor sets bind them at creation).
-    void SetIBL(VkImageView irradiance, VkImageView prefilter, VkImageView brdf,
-                VkSampler envSampler, VkSampler lutSampler) {
-        m_iblIrradiance = irradiance;
-        m_iblPrefilter = prefilter;
-        m_iblBrdf = brdf;
-        m_iblEnvSampler = envSampler;
-        m_iblLutSampler = lutSampler;
-    }
+  // IBL textures for the fragment shader. Must be set BEFORE Initialize()
+  // (descriptor sets bind them at creation).
+  void SetIBL(VkImageView irradiance, VkImageView prefilter, VkImageView brdf,
+              VkSampler envSampler, VkSampler lutSampler) {
+    m_iblIrradiance = irradiance;
+    m_iblPrefilter = prefilter;
+    m_iblBrdf = brdf;
+    m_iblEnvSampler = envSampler;
+    m_iblLutSampler = lutSampler;
+  }
 
-    // Key-light shadow map (S1, ShadowRenderer). Like SetIBL, must be set
-    // BEFORE Initialize() — the descriptor sets bind it at creation.
-    void SetShadowMap(VkImageView shadowMap, VkSampler shadowSampler) {
-        m_shadowMapView = shadowMap;
-        m_shadowSampler = shadowSampler;
-    }
-    // View > Shadows toggle; off zeroes shadowParams.w so the shader skips
-    // the lookup (the map itself may then hold stale contents — harmless).
-    void SetShadowsEnabled(bool enabled) { m_shadowsEnabled = enabled; }
-    // Per-frame light fit from ShadowRenderer::RecordShadowPass: the world ->
-    // light-clip matrix plus the map's texel size in world units (drives the
-    // normal-offset bias) and in UV (drives the PCF kernel step).
-    void SetShadowState(const glm::mat4& lightViewProj, float texelWorldSize,
-                        float texelUVSize) {
-        m_lightViewProj = lightViewProj;
-        m_shadowTexelWorld = texelWorldSize;
-        m_shadowTexelUV = texelUVSize;
-    }
+  // Key-light shadow map (S1, ShadowRenderer). Like SetIBL, must be set
+  // BEFORE Initialize() — the descriptor sets bind it at creation.
+  void SetShadowMap(VkImageView shadowMap, VkSampler shadowSampler) {
+    m_shadowMapView = shadowMap;
+    m_shadowSampler = shadowSampler;
+  }
+  // View > Shadows toggle; off zeroes shadowParams.w so the shader skips
+  // the lookup (the map itself may then hold stale contents — harmless).
+  void SetShadowsEnabled(bool enabled) { m_shadowsEnabled = enabled; }
+  // Per-frame light fit from ShadowRenderer::RecordShadowPass: the world ->
+  // light-clip matrix plus the map's texel size in world units (drives the
+  // normal-offset bias) and in UV (drives the PCF kernel step).
+  void SetShadowState(const glm::mat4& lightViewProj, float texelWorldSize,
+                      float texelUVSize) {
+    m_lightViewProj = lightViewProj;
+    m_shadowTexelWorld = texelWorldSize;
+    m_shadowTexelUV = texelUVSize;
+  }
 
-    // Blurred SSAO map (S2, SSAORenderer). Like SetIBL/SetShadowMap, must be
-    // set BEFORE Initialize() — the descriptor sets bind it at creation.
-    void SetAOMap(VkImageView aoMap, VkSampler aoSampler) {
-        m_aoMapView = aoMap;
-        m_aoSampler = aoSampler;
-    }
-    // Rebinds the AO map after the SSAO targets were recreated on resize.
-    // Call behind wait-idle only (the descriptor sets must not be in flight).
-    void RebindAOMap(VkImageView aoMap);
-    // Same for the shadow map after ShadowRenderer::SetResolution.
-    void RebindShadowMap(VkImageView shadowMap);
-    // View > Ambient Occlusion toggle; off zeroes aoParams.z so the shader
-    // skips the lookup (the map may then hold stale contents — harmless).
-    void SetAOEnabled(bool enabled) { m_aoEnabled = enabled; }
-    // Per-frame from SSAORenderer: 1 / full framebuffer size, mapping
-    // gl_FragCoord to the (half-res, normalized-uv) AO texture.
-    void SetAOState(const glm::vec2& invFullResolution) {
-        m_aoInvSize = invFullResolution;
-    }
+  // Blurred SSAO map (S2, SSAORenderer). Like SetIBL/SetShadowMap, must be
+  // set BEFORE Initialize() — the descriptor sets bind it at creation.
+  void SetAOMap(VkImageView aoMap, VkSampler aoSampler) {
+    m_aoMapView = aoMap;
+    m_aoSampler = aoSampler;
+  }
+  // Rebinds the AO map after the SSAO targets were recreated on resize.
+  // Call behind wait-idle only (the descriptor sets must not be in flight).
+  void RebindAOMap(VkImageView aoMap);
+  // Same for the shadow map after ShadowRenderer::SetResolution.
+  void RebindShadowMap(VkImageView shadowMap);
+  // View > Ambient Occlusion toggle; off zeroes aoParams.z so the shader
+  // skips the lookup (the map may then hold stale contents — harmless).
+  void SetAOEnabled(bool enabled) { m_aoEnabled = enabled; }
+  // Per-frame from SSAORenderer: 1 / full framebuffer size, mapping
+  // gl_FragCoord to the (half-res, normalized-uv) AO texture.
+  void SetAOState(const glm::vec2& invFullResolution) {
+    m_aoInvSize = invFullResolution;
+  }
 
-    // Camera matrices as last set by UpdateCamera — the prepasses read them
-    // here so they are guaranteed identical to what the main pass uses.
-    const glm::mat4& ViewMatrix() const { return m_viewMatrix; }
-    const glm::mat4& ProjectionMatrix() const { return m_projectionMatrix; }
+  // Camera matrices as last set by UpdateCamera — the prepasses read them
+  // here so they are guaranteed identical to what the main pass uses.
+  const glm::mat4& ViewMatrix() const { return m_viewMatrix; }
+  const glm::mat4& ProjectionMatrix() const { return m_projectionMatrix; }
 
-    // Shadow-pass draw list: every visible, non-ghost instance (ghosts don't
-    // write depth in the main pass and must not cast), plus the combined
-    // world-space bbox for the light frustum fit. Returns false when empty.
-    // Also serves the SSAO depth+normal prepass, which draws the same set.
-    bool GetShadowCasters(std::vector<ShadowCaster>& out, glm::vec3& bbMin,
-                          glm::vec3& bbMax);
+  // Shadow-pass draw list: every visible, non-ghost instance (ghosts don't
+  // write depth in the main pass and must not cast), plus the combined
+  // world-space bbox for the light frustum fit. Returns false when empty.
+  // Also serves the SSAO depth+normal prepass, which draws the same set.
+  bool GetShadowCasters(std::vector<ShadowCaster>& out, glm::vec3& bbMin,
+                        glm::vec3& bbMax);
 
 private:
-    glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
-    VkDevice m_device = VK_NULL_HANDLE;
-    VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
-    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
-    uint32_t m_queueFamily = 0;
-    VkCommandPool m_commandPool = VK_NULL_HANDLE;
+  glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
+  VkDevice m_device = VK_NULL_HANDLE;
+  VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+  VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+  uint32_t m_queueFamily = 0;
+  VkCommandPool m_commandPool = VK_NULL_HANDLE;
 
-    // Pipeline
-    VkRenderPass m_renderPass = VK_NULL_HANDLE;
-    VkSampleCountFlagBits m_msaaSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
-    VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
-    VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
-    // The renderer's first transparency (A4 ghosts): same shaders/layout,
-    // alpha blend on, depth test on / depth write off.
-    VkPipeline m_ghostPipeline = VK_NULL_HANDLE;
+  // Pipeline
+  VkRenderPass m_renderPass = VK_NULL_HANDLE;
+  VkSampleCountFlagBits m_msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+  VkDescriptorSetLayout m_descriptorSetLayout = VK_NULL_HANDLE;
+  VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
+  VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
+  // The renderer's first transparency (A4 ghosts): same shaders/layout,
+  // alpha blend on, depth test on / depth write off.
+  VkPipeline m_ghostPipeline = VK_NULL_HANDLE;
 
-    // Uniform buffers
-    std::vector<VkBuffer> m_uniformBuffers;
-    std::vector<VkDeviceMemory> m_uniformBuffersMemory;
-    std::vector<void*> m_uniformBuffersMapped;
+  // Uniform buffers
+  std::vector<VkBuffer> m_uniformBuffers;
+  std::vector<VkDeviceMemory> m_uniformBuffersMemory;
+  std::vector<void*> m_uniformBuffersMapped;
 
-    // Descriptor sets
-    VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
-    std::vector<VkDescriptorSet> m_descriptorSets;
+  // Descriptor sets
+  VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+  std::vector<VkDescriptorSet> m_descriptorSets;
 
-    // Assets + instances. Ids are 1-based slot indices; removal leaves a null
-    // hole so later ids stay stable.
-    std::vector<std::unique_ptr<MeshAsset>> m_assets;
-    std::vector<std::unique_ptr<MeshInstance>> m_instances;
+  // Assets + instances. Ids are 1-based slot indices; removal leaves a null
+  // hole so later ids stay stable.
+  std::vector<std::unique_ptr<MeshAsset>> m_assets;
+  std::vector<std::unique_ptr<MeshInstance>> m_instances;
 
-    // IBL texture handles (owned by IBLTextures; bound into descriptor sets).
-    VkImageView m_iblIrradiance = VK_NULL_HANDLE;
-    VkImageView m_iblPrefilter = VK_NULL_HANDLE;
-    VkImageView m_iblBrdf = VK_NULL_HANDLE;
-    VkSampler m_iblEnvSampler = VK_NULL_HANDLE;
-    VkSampler m_iblLutSampler = VK_NULL_HANDLE;
+  // IBL texture handles (owned by IBLTextures; bound into descriptor sets).
+  VkImageView m_iblIrradiance = VK_NULL_HANDLE;
+  VkImageView m_iblPrefilter = VK_NULL_HANDLE;
+  VkImageView m_iblBrdf = VK_NULL_HANDLE;
+  VkSampler m_iblEnvSampler = VK_NULL_HANDLE;
+  VkSampler m_iblLutSampler = VK_NULL_HANDLE;
 
-    // Key-light shadow map (owned by ShadowRenderer; bound like the IBL maps).
-    VkImageView m_shadowMapView = VK_NULL_HANDLE;
-    VkSampler m_shadowSampler = VK_NULL_HANDLE;
-    bool m_shadowsEnabled = true;
-    glm::mat4 m_lightViewProj = glm::mat4(1.0f);
-    float m_shadowTexelWorld = 0.0f;
-    float m_shadowTexelUV = 0.0f;
+  // Key-light shadow map (owned by ShadowRenderer; bound like the IBL maps).
+  VkImageView m_shadowMapView = VK_NULL_HANDLE;
+  VkSampler m_shadowSampler = VK_NULL_HANDLE;
+  bool m_shadowsEnabled = true;
+  glm::mat4 m_lightViewProj = glm::mat4(1.0f);
+  float m_shadowTexelWorld = 0.0f;
+  float m_shadowTexelUV = 0.0f;
 
-    // Blurred SSAO map (owned by SSAORenderer; rebound on resize).
-    VkImageView m_aoMapView = VK_NULL_HANDLE;
-    VkSampler m_aoSampler = VK_NULL_HANDLE;
-    bool m_aoEnabled = true;
-    glm::vec2 m_aoInvSize = glm::vec2(0.0f);
+  // Blurred SSAO map (owned by SSAORenderer; rebound on resize).
+  VkImageView m_aoMapView = VK_NULL_HANDLE;
+  VkSampler m_aoSampler = VK_NULL_HANDLE;
+  bool m_aoEnabled = true;
+  glm::vec2 m_aoInvSize = glm::vec2(0.0f);
 
-    // Camera
-    glm::mat4 m_viewMatrix = glm::mat4(1.0f);
-    glm::mat4 m_projectionMatrix = glm::mat4(1.0f);
+  // Camera
+  glm::mat4 m_viewMatrix = glm::mat4(1.0f);
+  glm::mat4 m_projectionMatrix = glm::mat4(1.0f);
 
-    // Viewport
-    int32_t m_viewportX = 0;
-    int32_t m_viewportY = 0;
-    uint32_t m_viewportWidth = 800;
-    uint32_t m_viewportHeight = 600;
+  // Viewport
+  int32_t m_viewportX = 0;
+  int32_t m_viewportY = 0;
+  uint32_t m_viewportWidth = 800;
+  uint32_t m_viewportHeight = 600;
 
-    // Constants
-    static const int MAX_FRAMES_IN_FLIGHT = 2;
+  // Constants
+  static const int MAX_FRAMES_IN_FLIGHT = 2;
 
-    // Helper functions
-    bool CreateDescriptorSetLayout();
-    bool CreateGraphicsPipeline();
-    bool CreateUniformBuffers();
-    bool CreateDescriptorPool();
-    bool CreateDescriptorSets();
+  // Helper functions
+  bool CreateDescriptorSetLayout();
+  bool CreateGraphicsPipeline();
+  bool CreateUniformBuffers();
+  bool CreateDescriptorPool();
+  bool CreateDescriptorSets();
 
-    bool CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                     VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
-    void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-    uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+  bool CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+                    VkMemoryPropertyFlags properties, VkBuffer& buffer,
+                    VkDeviceMemory& bufferMemory);
+  void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+  uint32_t FindMemoryType(uint32_t typeFilter,
+                          VkMemoryPropertyFlags properties);
 
-    MeshAsset* GetAsset(uint32_t assetId);
-    MeshInstance* GetInstance(uint32_t instanceId);
-    bool CreateAssetBuffers(MeshAsset* asset);
-    void DestroyAssetBuffers(MeshAsset* asset);
+  MeshAsset* GetAsset(uint32_t assetId);
+  MeshInstance* GetInstance(uint32_t instanceId);
+  bool CreateAssetBuffers(MeshAsset* asset);
+  void DestroyAssetBuffers(MeshAsset* asset);
 
-    VkShaderModule CreateShaderModule(const std::vector<char>& code);
-    std::vector<char> ReadFile(const std::string& filename);
+  VkShaderModule CreateShaderModule(const std::vector<char>& code);
+  std::vector<char> ReadFile(const std::string& filename);
 };

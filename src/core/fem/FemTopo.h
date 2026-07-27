@@ -14,7 +14,7 @@
 // with no Study/serialization/RPC/GUI surface yet (see docs/topopt/plan.md).
 
 #include "core/fem/FemMesher.h"
-#include "core/fem/FemSolver.h"  // Material, FaceLoad
+#include "core/fem/FemSolver.h" // Material, FaceLoad
 
 #include <functional>
 #include <optional>
@@ -27,10 +27,10 @@ namespace fem {
 // values (p=3, move limit 0.2, damping 0.5) that converge on the benchmark
 // problems; the caller overrides volumeFraction/filterRadius per study.
 struct TopoParams {
-  double volumeFraction = 0.3;   // target solid fraction of the DESIGN volume
-  double filterRadius = 0.0;     // mm; 0 = auto (2.5x the mean element size)
+  double volumeFraction = 0.3; // target solid fraction of the DESIGN volume
+  double filterRadius = 0.0;   // mm; 0 = auto (2.5x the mean element size)
   int maxIterations = 60;
-  double penalty = 3.0;          // final SIMP penalization exponent p
+  double penalty = 3.0; // final SIMP penalization exponent p
   // Penalty continuation: p ramps linearly from 1 (convex, no penalization) to
   // `penalty` over the first `penaltyRampIters` iterations, then holds. This is
   // the standard robustness device — the convex early phase finds the global
@@ -39,18 +39,18 @@ struct TopoParams {
   // ramp has finished. 0 (default) disables continuation — sensitivity
   // filtering already yields a discrete design at constant p.
   double penaltyRampIters = 0.0;
-  double moveLimit = 0.2;        // max per-iteration change in a design variable
-  double damping = 0.5;          // OC update exponent eta
-  double changeTol = 0.01;       // converge when max |dx| < this
+  double moveLimit = 0.2;  // max per-iteration change in a design variable
+  double damping = 0.5;    // OC update exponent eta
+  double changeTol = 0.01; // converge when max |dx| < this
 };
 
 // Reported once per iteration to the progress callback (and accumulated into
 // TopoResult::complianceHistory).
 struct TopoProgress {
   int iteration = 0;
-  double compliance = 0.0;       // u^T K u at this iteration (lower = stiffer)
-  double maxChange = 0.0;        // max |dx| this iteration
-  double volumeFraction = 0.0;   // achieved solid fraction this iteration
+  double compliance = 0.0;     // u^T K u at this iteration (lower = stiffer)
+  double maxChange = 0.0;      // max |dx| this iteration
+  double volumeFraction = 0.0; // achieved solid fraction this iteration
 };
 
 // The optimized density field + convergence history. `density` is the physical
@@ -59,8 +59,8 @@ struct TopoResult {
   std::vector<double> density;
   std::vector<double> complianceHistory;
   int iterations = 0;
-  bool converged = false;           // true if it hit changeTol before the cap
-  bool cancelled = false;           // true if the progress callback stopped it
+  bool converged = false; // true if it hit changeTol before the cap
+  bool cancelled = false; // true if the progress callback stopped it
   double volumeFractionAchieved = 0.0;
 };
 
@@ -72,7 +72,7 @@ struct TopoResult {
 // any GPU dependency into designer_core. Null = the built-in CPU path, which
 // remains the fallback and the correctness oracle.
 class TopoLinearSolver {
- public:
+public:
   virtual ~TopoLinearSolver() = default;
   // Called once per optimization run, before any Solve. `dofMap` is the
   // reduced-DOF map (3 per node, -1 = fixed), `material` gives E0/nu for the
@@ -187,4 +187,4 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
 // stamps it).
 StudyRuntime MakeTopoRuntime(TopoInput& input, const TopoResult& result);
 
-}  // namespace fem
+} // namespace fem

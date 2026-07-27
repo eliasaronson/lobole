@@ -1,12 +1,12 @@
-#include "render/Camera.h"
-#include <utility>
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
 #include "core/Command.h"
 #include "core/io/Serialization.h"
+#include "render/Camera.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
+#include <utility>
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -32,7 +32,8 @@ void ModifyStudy(AppState& state, uint64_t id, const std::string& desc,
                  const std::function<void(fem::Study&)>& mutate) {
   Document* doc = state.document.get();
   const fem::Study* cur = doc->FindStudy(id);
-  if (!cur || !state.commands) return;
+  if (!cur || !state.commands)
+    return;
   nlohmann::json before = DocumentIO::StudyToJson(*cur);
   fem::Study copy = *cur;
   mutate(copy);
@@ -43,9 +44,12 @@ void ModifyStudy(AppState& state, uint64_t id, const std::string& desc,
 
 const char* LoadLabel(fem::LoadType t) {
   switch (t) {
-    case fem::LoadType::Fixed: return "Fixed";
-    case fem::LoadType::Force: return "Force";
-    case fem::LoadType::Pressure: return "Pressure";
+  case fem::LoadType::Fixed:
+    return "Fixed";
+  case fem::LoadType::Force:
+    return "Force";
+  case fem::LoadType::Pressure:
+    return "Pressure";
   }
   return "?";
 }
@@ -82,7 +86,8 @@ void DrawLoads(AppState& state, const fem::Study& s) {
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     if (ImGui::Button(label))
       sim.tool = armed ? SimulationState::Tool::None : t;
-    if (armed) ImGui::PopStyleColor();
+    if (armed)
+      ImGui::PopStyleColor();
   };
   arm(ICON_FA_LOCK, ICON_FA_LOCK " Fixed", SimulationState::Tool::Fixed);
   ImGui::SameLine();
@@ -94,11 +99,13 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   // Pending magnitude/direction applied to the next placed force/pressure.
   if (sim.tool == SimulationState::Tool::Force ||
       sim.tool == SimulationState::Tool::Pressure) {
-    ImGui::InputDouble(sim.tool == SimulationState::Tool::Force ? "Magnitude (N)"
-                                                                : "Pressure (MPa)",
+    ImGui::InputDouble(sim.tool == SimulationState::Tool::Force
+                           ? "Magnitude (N)"
+                           : "Pressure (MPa)",
                        &sim.pendingMagnitude, 0.0, 0.0, "%.1f");
     if (sim.tool == SimulationState::Tool::Force) {
-      float dir[3] = {(float)sim.pendingDirection.x, (float)sim.pendingDirection.y,
+      float dir[3] = {(float)sim.pendingDirection.x,
+                      (float)sim.pendingDirection.y,
                       (float)sim.pendingDirection.z};
       if (ImGui::InputFloat3("Direction", dir))
         sim.pendingDirection = glm::dvec3(dir[0], dir[1], dir[2]);
@@ -123,9 +130,10 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     if (ImGui::SmallButton(ICON_FA_TRASH)) {
       const uint64_t loadId = l.id;
       ModifyStudy(state, s.id, "Remove load", [&](fem::Study& cs) {
-        cs.loads.erase(std::remove_if(cs.loads.begin(), cs.loads.end(),
-                                      [&](const fem::Load& x) { return x.id == loadId; }),
-                       cs.loads.end());
+        cs.loads.erase(
+            std::remove_if(cs.loads.begin(), cs.loads.end(),
+                           [&](const fem::Load& x) { return x.id == loadId; }),
+            cs.loads.end());
       });
       ImGui::PopID();
       break; // list mutated; rebuild next frame
@@ -145,18 +153,21 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   PollTopologyRun(state, *doc);
   const TopoRunStatus st = GetTopologyStatus(state, s.id);
   if (st.running) {
-    const float frac = st.maxIterations > 0
-                           ? std::clamp(static_cast<float>(st.iteration) /
-                                            st.maxIterations,
-                                        0.0f, 1.0f)
-                           : 0.0f;
+    const float frac =
+        st.maxIterations > 0
+            ? std::clamp(static_cast<float>(st.iteration) / st.maxIterations,
+                         0.0f, 1.0f)
+            : 0.0f;
     char ov[48];
-    std::snprintf(ov, sizeof(ov), "iter %d / %d", st.iteration, st.maxIterations);
+    std::snprintf(ov, sizeof(ov), "iter %d / %d", st.iteration,
+                  st.maxIterations);
     ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0), ov);
-    ImGui::Text("Compliance: %.4g   Vf: %.3f", st.compliance, st.volumeFraction);
+    ImGui::Text("Compliance: %.4g   Vf: %.3f", st.compliance,
+                st.volumeFraction);
     ImGui::TextColored(kMuted, "%s   %.0fs", st.solver.c_str(),
                        st.elapsedSeconds);
-    if (ImGui::Button(ICON_FA_STOP " Cancel")) CancelTopologyRun(state, s.id);
+    if (ImGui::Button(ICON_FA_STOP " Cancel"))
+      CancelTopologyRun(state, s.id);
     return;
   }
 
@@ -168,7 +179,8 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   if (!s.error.empty()) {
     ImGui::SameLine();
     ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", s.error.c_str());
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", s.error.c_str());
   }
 
   const fem::StudyRuntime* rt = doc->StudyResults(s.id);
@@ -187,10 +199,11 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   }
   ImGui::Text("Mesh: %zu nodes / %zu elements", nodes, elements);
   ImGui::Text("Iterations: %d%s", rt->iterations,
-              rt->converged ? " (converged)"
-                            : rt->cancelled ? " (cancelled)" : "");
+              rt->converged   ? " (converged)"
+              : rt->cancelled ? " (cancelled)"
+                              : "");
   ImGui::Text("Volume fraction: %.3f", rt->volumeFractionAchieved);
-  if (!rt->solver.empty())  // transient provenance; empty on a reloaded result
+  if (!rt->solver.empty()) // transient provenance; empty on a reloaded result
     ImGui::TextColored(kMuted, "Solver: %s (%.0f s)", rt->solver.c_str(),
                        rt->solveSeconds);
   if (!rt->complianceHistory.empty()) {
@@ -226,7 +239,7 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   bool ghost = state.topoGhostStudyId == s.id;
   if (ImGui::Checkbox("Shape guide (modeling overlay)", &ghost)) {
     state.topoGhostStudyId = ghost ? s.id : 0;
-    state.syncedDocumentVersion = UINT64_MAX;  // rebuild renderers
+    state.syncedDocumentVersion = UINT64_MAX; // rebuild renderers
   }
 }
 
@@ -248,7 +261,8 @@ void DrawResults(AppState& state, const fem::Study& s) {
   if (!s.error.empty()) {
     ImGui::SameLine();
     ImGui::TextColored(kError, ICON_FA_TRIANGLE_EXCLAMATION);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", s.error.c_str());
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", s.error.c_str());
   }
 
   const fem::StudyRuntime* rt = doc->StudyResults(s.id);
@@ -273,7 +287,10 @@ void DrawResults(AppState& state, const fem::Study& s) {
     ImGui::SeparatorText("Natural frequencies");
     const fem::StudyBodyResult* b = nullptr;
     for (const auto& br : rt->bodies)
-      if (!br.results.modes.empty()) { b = &br; break; }
+      if (!br.results.modes.empty()) {
+        b = &br;
+        break;
+      }
     if (b) {
       for (int i = 0; i < (int)b->results.modes.size(); ++i) {
         char lbl[64];
@@ -281,7 +298,7 @@ void DrawResults(AppState& state, const fem::Study& s) {
                       b->results.modes[i].frequencyHz);
         if (ImGui::Selectable(lbl, sim.activeMode == i)) {
           sim.activeMode = i;
-          sim.field = SimulationState::Field::Displacement;  // show the shape
+          sim.field = SimulationState::Field::Displacement; // show the shape
         }
       }
     }
@@ -303,16 +320,19 @@ void DrawResults(AppState& state, const fem::Study& s) {
   int field = std::to_underlying(sim.field);
   bool changed = ImGui::RadioButton("Off", &field, 0);
   ImGui::SameLine();
-  changed |= ImGui::RadioButton("von Mises", &field,
-                                std::to_underlying(SimulationState::Field::VonMises));
+  changed |=
+      ImGui::RadioButton("von Mises", &field,
+                         std::to_underlying(SimulationState::Field::VonMises));
   ImGui::SameLine();
   changed |= ImGui::RadioButton(
-      "Displacement", &field, std::to_underlying(SimulationState::Field::Displacement));
-  if (changed) sim.field = static_cast<SimulationState::Field>(field);
+      "Displacement", &field,
+      std::to_underlying(SimulationState::Field::Displacement));
+  if (changed)
+    sim.field = static_cast<SimulationState::Field>(field);
   ImGui::SliderFloat("Deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
 }
 
-}  // namespace
+} // namespace
 
 void DrawStudyPanel(AppState& state) {
   ImGui::Begin("Model");
@@ -354,7 +374,8 @@ void DrawStudyPanel(AppState& state) {
                 [&](fem::Study& cs) { cs.type = nt; });
   }
   // Numeric fields commit on deactivation (Enter OR clicking away), not only on
-  // Enter — so typing a value then clicking Run applies it instead of reverting.
+  // Enter — so typing a value then clicking Run applies it instead of
+  // reverting.
   double meshSize = s->meshSize;
   ImGui::InputDouble("Mesh size (mm, 0=auto)", &meshSize, 0.0, 0.0, "%.3g");
   if (ImGui::IsItemDeactivatedAfterEdit() && meshSize != s->meshSize)
@@ -398,9 +419,10 @@ void DrawStudyPanel(AppState& state) {
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     if (ImGui::Button(ICON_FA_LOCK " Keep face"))
-      sim.tool = arming ? SimulationState::Tool::None
-                        : SimulationState::Tool::Keep;
-    if (arming) ImGui::PopStyleColor();
+      sim.tool =
+          arming ? SimulationState::Tool::None : SimulationState::Tool::Keep;
+    if (arming)
+      ImGui::PopStyleColor();
     ImGui::SameLine();
     ImGui::TextColored(kMuted, "%zu kept", s->keepFaces.size());
     for (size_t i = 0; i < s->keepFaces.size(); ++i) {
@@ -432,7 +454,8 @@ void DrawStudyPanel(AppState& state) {
                   [&](fem::Study& cs) { cs.gravity = g; });
     }
     if (on) {
-      float g[3] = {(float)s->gravity.x, (float)s->gravity.y, (float)s->gravity.z};
+      float g[3] = {(float)s->gravity.x, (float)s->gravity.y,
+                    (float)s->gravity.z};
       if (ImGui::InputFloat3("g (m/s^2)", g, "%.2f",
                              ImGuiInputTextFlags_EnterReturnsTrue))
         ModifyStudy(state, s->id, "Set gravity", [&](fem::Study& cs) {
@@ -458,16 +481,21 @@ namespace {
 // Analytic Turbo colormap (matches field.frag) for the legend colorbar.
 ImU32 Turbo(float x) {
   x = x < 0 ? 0 : (x > 1 ? 1 : x);
-  const float r = 0.13572138f + x * (4.61539260f + x * (-42.66032258f + x * 132.13108234f)) +
+  const float r = 0.13572138f +
+                  x * (4.61539260f + x * (-42.66032258f + x * 132.13108234f)) +
                   x * x * x * x * (-152.94239396f + x * 59.28637943f);
-  const float g = 0.09140261f + x * (2.19418839f + x * (4.84296658f + x * -14.18503333f)) +
+  const float g = 0.09140261f +
+                  x * (2.19418839f + x * (4.84296658f + x * -14.18503333f)) +
                   x * x * x * x * (4.27729857f + x * 2.82956604f);
-  const float b = 0.10667330f + x * (12.64194608f + x * (-60.58204836f + x * 110.36276771f)) +
+  const float b = 0.10667330f +
+                  x * (12.64194608f + x * (-60.58204836f + x * 110.36276771f)) +
                   x * x * x * x * (-89.90310912f + x * 27.34824973f);
-  auto ch = [](float v) { return (int)(255.0f * (v < 0 ? 0 : (v > 1 ? 1 : v))); };
+  auto ch = [](float v) {
+    return (int)(255.0f * (v < 0 ? 0 : (v > 1 ? 1 : v)));
+  };
   return IM_COL32(ch(r), ch(g), ch(b), 255);
 }
-}  // namespace
+} // namespace
 
 void DrawFieldLegend(AppState& state) {
   const SimulationState& sim = state.simulation;
@@ -476,7 +504,8 @@ void DrawFieldLegend(AppState& state) {
       sim.field == SimulationState::Field::Shape || !state.document)
     return;
   const fem::StudyRuntime* rt = state.document->StudyResults(sim.activeStudyId);
-  if (!rt) return;
+  if (!rt)
+    return;
   const fem::Study* study = state.document->FindStudy(sim.activeStudyId);
   const bool modal = study && study->type == fem::AnalysisType::Modal;
   const bool density = sim.field == SimulationState::Field::Density;
@@ -486,10 +515,10 @@ void DrawFieldLegend(AppState& state) {
   const double maxVal =
       (modal || density) ? 1.0 : (vm ? rt->maxVonMises : rt->maxDisplacement);
   const char* unit = (modal || density) ? "" : (vm ? "MPa" : "mm");
-  const char* title = density  ? "density"
-                      : modal  ? "mode shape"
-                      : vm     ? "von Mises"
-                               : "displacement";
+  const char* title = density ? "density"
+                      : modal ? "mode shape"
+                      : vm    ? "von Mises"
+                              : "displacement";
 
   // A vertical Turbo colorbar anchored to the viewport's lower-left corner.
   ImDrawList* dl = ImGui::GetForegroundDrawList();
@@ -501,10 +530,12 @@ void DrawFieldLegend(AppState& state) {
   for (int i = 0; i < segs; ++i) {
     const float t0 = i / (float)segs, t1 = (i + 1) / (float)segs;
     // High value at the top.
-    dl->AddRectFilledMultiColor(ImVec2(x, y1 - t1 * barH), ImVec2(x + barW, y1 - t0 * barH),
-                                Turbo(t1), Turbo(t1), Turbo(t0), Turbo(t0));
+    dl->AddRectFilledMultiColor(ImVec2(x, y1 - t1 * barH),
+                                ImVec2(x + barW, y1 - t0 * barH), Turbo(t1),
+                                Turbo(t1), Turbo(t0), Turbo(t0));
   }
-  dl->AddRect(ImVec2(x, y0), ImVec2(x + barW, y1), IM_COL32(255, 255, 255, 160));
+  dl->AddRect(ImVec2(x, y0), ImVec2(x + barW, y1),
+              IM_COL32(255, 255, 255, 160));
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%.3g %s", maxVal, unit);
   dl->AddText(ImVec2(x + barW + 6, y0 - 6), IM_COL32_WHITE, buf);
@@ -518,14 +549,14 @@ void ArrowGlyph(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color,
                 std::vector<PrimVertex>& out) {
   ui::AppendPrimLine(a, b, 2.2f, color, out);
   const glm::vec3 dir = glm::normalize(b - a);
-  glm::vec3 side = glm::abs(dir.y) < 0.9f ? glm::vec3(0, 1, 0)
-                                          : glm::vec3(1, 0, 0);
+  glm::vec3 side =
+      glm::abs(dir.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
   side = glm::normalize(glm::cross(dir, side));
   const float headLen = glm::length(b - a) * 0.25f;
-  ui::AppendPrimLine(b, b - dir * headLen + side * headLen * 0.5f, 2.2f,
-                     color, out);
-  ui::AppendPrimLine(b, b - dir * headLen - side * headLen * 0.5f, 2.2f,
-                     color, out);
+  ui::AppendPrimLine(b, b - dir * headLen + side * headLen * 0.5f, 2.2f, color,
+                     out);
+  ui::AppendPrimLine(b, b - dir * headLen - side * headLen * 0.5f, 2.2f, color,
+                     out);
 }
 } // namespace
 
@@ -554,9 +585,9 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
   };
   // Glyph scale tracks the view (like the peak marker): a fixed 1.2 model-mm
   // arrow vanished entirely on a 90 mm part.
-  const float len =
-      state.camera ? std::max(0.055f * state.camera->GetDistance(), 1.2f)
-                   : 1.2f;
+  const float len = state.camera
+                        ? std::max(0.055f * state.camera->GetDistance(), 1.2f)
+                        : 1.2f;
 
   for (const fem::Load& load : s->loads) {
     glm::vec3 c(0.0f), n(0.0f);
@@ -565,8 +596,8 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
     switch (load.type) {
     case fem::LoadType::Fixed: {
       // Anchor hatch: short strokes fanning "into the ground" off the face.
-      glm::vec3 side = glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0)
-                                            : glm::vec3(1, 0, 0);
+      glm::vec3 side =
+          glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
       side = glm::normalize(glm::cross(n, side));
       const glm::vec3 other = glm::normalize(glm::cross(n, side));
       ui::AppendPrimLine(c - side * len * 0.4f, c + side * len * 0.4f, 2.4f,
@@ -580,9 +611,8 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       break;
     }
     case fem::LoadType::Force: {
-      const glm::vec3 dir =
-          glm::normalize(glm::vec3(load.direction.x, load.direction.y,
-                                   load.direction.z));
+      const glm::vec3 dir = glm::normalize(
+          glm::vec3(load.direction.x, load.direction.y, load.direction.z));
       ArrowGlyph(c - dir * len, c, kForce, out); // arrow INTO the face point
       break;
     }
@@ -597,8 +627,8 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
     glm::vec3 c(0.0f), n(0.0f);
     if (!faceFrame(keep, c, n))
       continue;
-    glm::vec3 side = glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0)
-                                          : glm::vec3(1, 0, 0);
+    glm::vec3 side =
+        glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
     side = glm::normalize(glm::cross(n, side));
     const glm::vec3 other = glm::normalize(glm::cross(n, side));
     const float r = len * 0.35f;
@@ -615,7 +645,8 @@ void SimulationApplyToFace(AppState& state, const ElementRef& face) {
   if (!doc || sim.tool == SimulationState::Tool::None)
     return;
   fem::Study* s = doc->FindStudy(sim.activeStudyId);
-  if (!s) return;
+  if (!s)
+    return;
 
   // Keep tool (topology): freeze the picked face solid.
   if (sim.tool == SimulationState::Tool::Keep) {
@@ -624,7 +655,8 @@ void SimulationApplyToFace(AppState& state, const ElementRef& face) {
           cs.keepFaces.begin(), cs.keepFaces.end(), [&](const ElementRef& k) {
             return k.featureId == face.featureId && k.name == face.name;
           });
-      if (!dup) cs.keepFaces.push_back(face);
+      if (!dup)
+        cs.keepFaces.push_back(face);
     });
     sim.tool = SimulationState::Tool::None;
     return;
@@ -632,16 +664,20 @@ void SimulationApplyToFace(AppState& state, const ElementRef& face) {
 
   fem::Load load;
   load.id = doc->AllocateId();
-  load.type = sim.tool == SimulationState::Tool::Fixed    ? fem::LoadType::Fixed
-              : sim.tool == SimulationState::Tool::Force   ? fem::LoadType::Force
-                                                           : fem::LoadType::Pressure;
+  load.type = sim.tool == SimulationState::Tool::Fixed ? fem::LoadType::Fixed
+              : sim.tool == SimulationState::Tool::Force
+                  ? fem::LoadType::Force
+                  : fem::LoadType::Pressure;
   load.face = face;
-  if (load.type != fem::LoadType::Fixed) load.magnitude = sim.pendingMagnitude;
-  if (load.type == fem::LoadType::Force) load.direction = sim.pendingDirection;
+  if (load.type != fem::LoadType::Fixed)
+    load.magnitude = sim.pendingMagnitude;
+  if (load.type == fem::LoadType::Force)
+    load.direction = sim.pendingDirection;
 
-  ModifyStudy(state, s->id, std::string("Add ") + LoadLabel(load.type) + " load",
+  ModifyStudy(state, s->id,
+              std::string("Add ") + LoadLabel(load.type) + " load",
               [&](fem::Study& cs) { cs.loads.push_back(load); });
   sim.tool = SimulationState::Tool::None; // one placement per arm
 }
 
-}  // namespace ui
+} // namespace ui

@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <filesystem>
 #include <string>
@@ -91,7 +91,8 @@ TEST_CASE("A missing external reference fails regeneration", "[external]") {
 }
 
 TEST_CASE("External geometry round-trips through JSON", "[external]") {
-  const fs::path path = fs::temp_directory_path() / "designer_external_test.json";
+  const fs::path path =
+      fs::temp_directory_path() / "designer_external_test.json";
   uint64_t ext = 0;
   {
     Document doc;

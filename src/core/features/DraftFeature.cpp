@@ -4,13 +4,13 @@
 #include "core/ElementHistory.h"
 
 #include <BRepOffsetAPI_DraftAngle.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
-#include <Standard_Failure.hxx>
 
 #include <algorithm>
 #include <cmath>
@@ -26,18 +26,21 @@ DraftFeature::DraftFeature(const std::string& name, uint64_t bodyId,
 namespace {
 glm::vec3 PlaneNormal(PlaneType t) {
   switch (t) {
-  case PlaneType::XY: return {0, 0, 1};
-  case PlaneType::XZ: return {0, 1, 0};
-  case PlaneType::YZ: return {1, 0, 0};
+  case PlaneType::XY:
+    return {0, 0, 1};
+  case PlaneType::XZ:
+    return {0, 1, 0};
+  case PlaneType::YZ:
+    return {1, 0, 0};
   }
   return {0, 0, 1};
 }
 } // namespace
 
 bool DraftFeature::Execute(RegenContext& ctx) {
-  const auto body = std::find_if(
-      ctx.bodies.begin(), ctx.bodies.end(),
-      [&](const Body& b) { return b.createdBy == bodyId; });
+  const auto body =
+      std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
+                   [&](const Body& b) { return b.createdBy == bodyId; });
   if (body == ctx.bodies.end()) {
     SetError("the body to draft no longer exists");
     return false;

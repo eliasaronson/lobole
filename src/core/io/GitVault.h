@@ -16,9 +16,9 @@ struct LogEntry {
   int64_t unixTime = 0;
 };
 
-bool Available();                        // `git` on PATH
-bool IsRepo(const std::string& dir);     // dir/.git exists
-bool Init(const std::string& dir);       // git init -q
+bool Available();                    // `git` on PATH
+bool IsRepo(const std::string& dir); // dir/.git exists
+bool Init(const std::string& dir);   // git init -q
 
 // Stage everything and commit (inline identity — works on CI and fresh
 // machines without git config). True when committed OR nothing changed.

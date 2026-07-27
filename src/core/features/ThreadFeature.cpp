@@ -18,8 +18,7 @@
 
 ThreadFeature::ThreadFeature(const std::string& name, ElementRef face,
                              std::string designation, double pitch)
-    : face(std::move(face)), designation(std::move(designation)),
-      pitch(pitch) {
+    : face(std::move(face)), designation(std::move(designation)), pitch(pitch) {
   m_name = name;
 }
 
@@ -32,9 +31,10 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  const auto body = std::find_if(
-      ctx.bodies.begin(), ctx.bodies.end(),
-      [&](const Body& b) { return b.createdBy == face.featureId; });
+  const auto body =
+      std::find_if(ctx.bodies.begin(), ctx.bodies.end(), [&](const Body& b) {
+        return b.createdBy == face.featureId;
+      });
   if (body == ctx.bodies.end()) {
     SetError("the threaded body no longer exists");
     return false;
@@ -111,8 +111,8 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     const double depth = 1.0825 * pitch * 0.5;
     overlay.valid = true;
     overlay.origin = glm::vec3(axisLoc.X(), axisLoc.Y(), axisLoc.Z());
-    overlay.dir = glm::normalize(
-        glm::vec3(axisDir.X(), axisDir.Y(), axisDir.Z()));
+    overlay.dir =
+        glm::normalize(glm::vec3(axisDir.X(), axisDir.Y(), axisDir.Z()));
     overlay.radius = static_cast<float>(external ? r - depth : r + depth);
     overlay.faceRadius = static_cast<float>(r);
     overlay.v0 = static_cast<float>(v0);

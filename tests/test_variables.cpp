@@ -1,12 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/features/ExtrudeFeature.h"
-#include "core/io/Serialization.h"
-#include "TestIO.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 
 #include <filesystem>
 
@@ -130,8 +130,7 @@ TEST_CASE("Expression-driven sketch dimension re-solves during regeneration",
   auto* sk = dynamic_cast<SketchFeature*>(doc.GetFeature(0));
   REQUIRE(sk != nullptr);
   const auto circleRadius = [&] {
-    return std::get<sketch::Circle>(
-               sk->entities[sk->IndexOfEntity(circleId)])
+    return std::get<sketch::Circle>(sk->entities[sk->IndexOfEntity(circleId)])
         .radius;
   };
   CHECK_THAT(circleRadius(), WithinRel(1.5, 1e-9));
@@ -154,8 +153,7 @@ TEST_CASE("Expression-driven entity coordinates follow a parameter through "
   doc.SetParameter("off", "bore + 4");
 
   auto skOwned = std::make_unique<SketchFeature>("Sketch1", kXY);
-  const uint32_t circleId =
-      skOwned->AddEntity(sketch::Circle{{0, 0}, 1.0});
+  const uint32_t circleId = skOwned->AddEntity(sketch::Circle{{0, 0}, 1.0});
   skOwned->entityExprs[circleId] = {{"r", "bore / 2"}, {"cx", "off"}};
   doc.AddFeature(std::move(skOwned));
   const uint64_t sketchId = doc.GetFeature(0)->GetId();
@@ -288,29 +286,31 @@ TEST_CASE("EvaluateParameterTable overlays a base scope, shadowed by locals",
   project["a"] = 3.0;
   project["b"] = 4.0;
 
-  std::vector<Parameter> local = {{"c", "a + b", "", 0.0, {}},
-                                  {"a", "10", "", 0.0, {}}}; // shadows project a
+  std::vector<Parameter> local = {
+      {"c", "a + b", "", 0.0, {}},
+      {"a", "10", "", 0.0, {}}}; // shadows project a
   SymbolTable out;
   EvaluateParameterTable(local, out, &project, {});
 
-  CHECK_THAT(out.at("a"), WithinRel(10.0));      // local shadow wins
-  CHECK_THAT(out.at("b"), WithinRel(4.0));       // inherited from project
-  CHECK_THAT(out.at("c"), WithinRel(14.0));      // 10 (local a) + 4 (project b)
+  CHECK_THAT(out.at("a"), WithinRel(10.0)); // local shadow wins
+  CHECK_THAT(out.at("b"), WithinRel(4.0));  // inherited from project
+  CHECK_THAT(out.at("c"), WithinRel(14.0)); // 10 (local a) + 4 (project b)
 }
 
-// --- Commands -----------------------------------------------------------------
+// --- Commands
+// -----------------------------------------------------------------
 
 TEST_CASE("Set/delete/rename variable commands undo and redo", "[variables]") {
   Document doc;
   CommandStack stack;
 
-  REQUIRE(stack.Execute(std::make_unique<SetVariableCommand>("width", "20"),
-                        doc));
+  REQUIRE(
+      stack.Execute(std::make_unique<SetVariableCommand>("width", "20"), doc));
   CHECK_THAT(doc.FindParameter("width")->value, WithinRel(20.0));
 
   // Redefine, then undo back to the first definition.
-  REQUIRE(stack.Execute(std::make_unique<SetVariableCommand>("width", "30"),
-                        doc));
+  REQUIRE(
+      stack.Execute(std::make_unique<SetVariableCommand>("width", "30"), doc));
   stack.Undo(doc);
   CHECK_THAT(doc.FindParameter("width")->value, WithinRel(20.0));
   stack.Redo(doc);
@@ -324,8 +324,8 @@ TEST_CASE("Set/delete/rename variable commands undo and redo", "[variables]") {
   // Rename rewrites referencing expressions (and undoes cleanly).
   doc.SetParameter("width", "20");
   doc.SetParameter("length", "width * 2");
-  REQUIRE(stack.Execute(
-      std::make_unique<RenameVariableCommand>("width", "w"), doc));
+  REQUIRE(stack.Execute(std::make_unique<RenameVariableCommand>("width", "w"),
+                        doc));
   CHECK(doc.FindParameter("width") == nullptr);
   CHECK(doc.FindParameter("length")->expression == "w * 2");
   stack.Undo(doc);
@@ -338,8 +338,8 @@ TEST_CASE("Set/delete/rename variable commands undo and redo", "[variables]") {
 
   // Unreferenced parameters delete fine and undo restores them.
   doc.SetParameter("orphan", "1");
-  REQUIRE(stack.Execute(std::make_unique<DeleteVariableCommand>("orphan"),
-                        doc));
+  REQUIRE(
+      stack.Execute(std::make_unique<DeleteVariableCommand>("orphan"), doc));
   CHECK(doc.FindParameter("orphan") == nullptr);
   stack.Undo(doc);
   CHECK(doc.FindParameter("orphan") != nullptr);
@@ -364,7 +364,8 @@ TEST_CASE("Rename rewrites feature expressions", "[variables]") {
   CHECK(refs[0] == "feature 'Extrude1'");
 }
 
-// --- Serialization -------------------------------------------------------------
+// --- Serialization
+// -------------------------------------------------------------
 
 TEST_CASE("Parameters and expressions round-trip through save/load",
           "[variables]") {
@@ -393,8 +394,7 @@ TEST_CASE("Parameters and expressions round-trip through save/load",
   CHECK(ext->distanceExpr == "depth");
   CHECK_THAT(ext->distance, WithinRel(5.0));
   REQUIRE(loaded->GetBodies().size() == 1);
-  CHECK_THAT(loaded->GetBodies()[0].shape.Volume(),
-             WithinRel(8.0 * 5.0, 1e-6));
+  CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(8.0 * 5.0, 1e-6));
 
   fs::remove(path);
 }

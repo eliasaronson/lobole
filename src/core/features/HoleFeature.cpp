@@ -15,8 +15,7 @@ HoleFeature::HoleFeature(const std::string& name, uint64_t sketchId,
 }
 
 bool HoleFeature::Execute(RegenContext& ctx) {
-  const auto* sk =
-      dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
+  const auto* sk = dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
   if (!sk) {
     SetError("hole needs a sketch of points (missing or suppressed)");
     return false;
@@ -61,13 +60,13 @@ bool HoleFeature::Execute(RegenContext& ctx) {
     CADShape hole = kernel.CreateCylinder(c, axis, r, boreDepth);
     if (kind == HoleKind::Counterbore && cbDiameter > diameter &&
         cbDepth > 1e-9) {
-      hole = hole.Union(kernel.CreateCylinder(c, axis, cbDiameter / 2.0,
-                                              cbDepth));
+      hole =
+          hole.Union(kernel.CreateCylinder(c, axis, cbDiameter / 2.0, cbDepth));
     } else if (kind == HoleKind::Countersink && csDiameter > diameter &&
                csDepth > 1e-9) {
       // Cone from the surface (csDiameter/2) tapering down to the bore radius.
-      hole = hole.Union(
-          kernel.CreateCone(c, axis, csDiameter / 2.0, r, csDepth));
+      hole =
+          hole.Union(kernel.CreateCone(c, axis, csDiameter / 2.0, r, csDepth));
     }
     if (!hole.IsValid()) {
       SetError("hole tool construction failed");

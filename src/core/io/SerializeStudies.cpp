@@ -21,7 +21,6 @@ namespace DocumentIO {
 // value+expr convention: the numeric field is always written, the expression
 // only when non-empty (a plain literal round-trips byte-identically).
 
-
 json StudyToJson(const fem::Study& s) {
   json j;
   j["type"] = "Study";
@@ -31,30 +30,36 @@ json StudyToJson(const fem::Study& s) {
   // v31 static studies stay byte-identical.
   if (s.type != fem::AnalysisType::Static)
     j["analysis"] = fem::AnalysisTypeToString(s.type);
-  if (s.type == fem::AnalysisType::Modal) j["num_modes"] = s.numModes;
+  if (s.type == fem::AnalysisType::Modal)
+    j["num_modes"] = s.numModes;
   if (s.gravity.x != 0 || s.gravity.y != 0 || s.gravity.z != 0)
     j["gravity"] = {s.gravity.x, s.gravity.y, s.gravity.z};
   // Topology parameters (v33) — written only for a topology study so lower
   // versions stay byte-identical.
   if (s.type == fem::AnalysisType::Topology) {
     j["volume_fraction"] = s.volumeFraction;
-    if (!s.volumeFractionExpr.empty()) j["volume_fraction_expr"] = s.volumeFractionExpr;
+    if (!s.volumeFractionExpr.empty())
+      j["volume_fraction_expr"] = s.volumeFractionExpr;
     j["filter_radius"] = s.filterRadius;
-    if (!s.filterRadiusExpr.empty()) j["filter_radius_expr"] = s.filterRadiusExpr;
+    if (!s.filterRadiusExpr.empty())
+      j["filter_radius_expr"] = s.filterRadiusExpr;
     j["max_iterations"] = s.maxIterations;
     if (!s.keepFaces.empty()) {
       j["keep_faces"] = json::array();
-      for (const ElementRef& f : s.keepFaces) j["keep_faces"].push_back(ElementRefJson(f));
+      for (const ElementRef& f : s.keepFaces)
+        j["keep_faces"].push_back(ElementRefJson(f));
     }
   }
   j["mesh_size"] = s.meshSize;
-  if (!s.meshSizeExpr.empty()) j["mesh_size_expr"] = s.meshSizeExpr;
+  if (!s.meshSizeExpr.empty())
+    j["mesh_size_expr"] = s.meshSizeExpr;
 
   if (!s.refinements.empty()) {
     j["refinements"] = json::array();
     for (const fem::Refinement& r : s.refinements) {
       json rj = {{"face", ElementRefJson(r.face)}, {"size", r.size}};
-      if (!r.sizeExpr.empty()) rj["size_expr"] = r.sizeExpr;
+      if (!r.sizeExpr.empty())
+        rj["size_expr"] = r.sizeExpr;
       j["refinements"].push_back(std::move(rj));
     }
   }
@@ -66,7 +71,8 @@ json StudyToJson(const fem::Study& s) {
                  {"type", fem::LoadTypeToString(l.type)},
                  {"face", ElementRefJson(l.face)},
                  {"magnitude", l.magnitude}};
-      if (!l.magnitudeExpr.empty()) lj["magnitude_expr"] = l.magnitudeExpr;
+      if (!l.magnitudeExpr.empty())
+        lj["magnitude_expr"] = l.magnitudeExpr;
       if (l.type == fem::LoadType::Force)
         lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
       j["loads"].push_back(std::move(lj));
@@ -79,7 +85,8 @@ fem::Study StudyFromJson(const json& j) {
   fem::Study s;
   s.id = j.at("id").get<uint64_t>();
   s.name = j.value("name", std::string{});
-  fem::AnalysisTypeFromString(j.value("analysis", std::string{"static"}), s.type);
+  fem::AnalysisTypeFromString(j.value("analysis", std::string{"static"}),
+                              s.type);
   s.numModes = j.value("num_modes", 6);
   if (j.contains("gravity")) {
     const auto& g = j.at("gravity");
@@ -126,7 +133,8 @@ fem::Study StudyFromJson(const json& j) {
 // Flat numeric arrays keep it compact; solvedAtVersion is stamped on load.
 
 bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
-  if (!rt.topology) return false;
+  if (!rt.topology)
+    return false;
   out = json::object();
   out["topology"] = {{"iterations", rt.iterations},
                      {"converged", rt.converged},
@@ -143,10 +151,12 @@ bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
     }
     json tets = json::array();
     for (const std::array<int, 10>& t : b.mesh.tets)
-      for (int v : t) tets.push_back(v);
+      for (int v : t)
+        tets.push_back(v);
     json boundary = json::array();
     for (const fem::FemMesh::BoundaryTri& tr : b.mesh.boundary) {
-      for (int v : tr.nodes) boundary.push_back(v);
+      for (int v : tr.nodes)
+        boundary.push_back(v);
       boundary.push_back(tr.faceIndex);
     }
     bodies.push_back({{"body_index", b.bodyIndex},
@@ -179,13 +189,15 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     const auto tets = bj.value("tets", std::vector<int>{});
     for (size_t i = 0; i + 10 <= tets.size(); i += 10) {
       std::array<int, 10> t;
-      for (int k = 0; k < 10; ++k) t[k] = tets[i + k];
+      for (int k = 0; k < 10; ++k)
+        t[k] = tets[i + k];
       b.mesh.tets.push_back(t);
     }
     const auto boundary = bj.value("boundary", std::vector<int>{});
     for (size_t i = 0; i + 7 <= boundary.size(); i += 7) {
       fem::FemMesh::BoundaryTri tr;
-      for (int k = 0; k < 6; ++k) tr.nodes[k] = boundary[i + k];
+      for (int k = 0; k < 6; ++k)
+        tr.nodes[k] = boundary[i + k];
       tr.faceIndex = boundary[i + 6];
       b.mesh.boundary.push_back(tr);
     }
@@ -197,4 +209,4 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
   return rt;
 }
 
-}  // namespace DocumentIO
+} // namespace DocumentIO

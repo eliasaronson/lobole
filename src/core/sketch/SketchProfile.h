@@ -24,7 +24,7 @@ struct LoopEdge {
   glm::vec2 center{0.0f};
   double radius = 0.0;
   double angStart = 0.0, angEnd = 0.0; // CCW span (arc only)
-  uint32_t entityId = 0;               // stable id of the generating sketch entity
+  uint32_t entityId = 0; // stable id of the generating sketch entity
   // Set when this edge is a B-spline: its control poles in traversal order
   // (a = poles.front(), b = poles.back()). Kept last so existing positional
   // brace-inits of line/arc edges stay valid. When BuildLoops reverses the
@@ -76,7 +76,8 @@ CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
 // "<featureTag>/g<entityId>" from the sketch entity that generated it, the two
 // caps "<featureTag>/cap0" (base) and "cap1" (top). The names key on the
 // faceIndex (TopExp_Explorer order) that GenerateMesh and picking use, so they
-// survive upstream sketch edits. `loops` must carry entity ids (see BuildLoops).
+// survive upstream sketch edits. `loops` must carry entity ids (see
+// BuildLoops).
 CADShape BuildPrismNamed(const SketchPlane& plane,
                          const std::vector<Loop>& loops, double distance,
                          bool reversed, uint64_t featureTag, ElementMap& out);
@@ -134,8 +135,8 @@ std::optional<float> SegmentIntersect(glm::vec2 a1, glm::vec2 b1, glm::vec2 a2,
 // extend/trim to the intersection). Returns the offset boundary as new sketch
 // entities in plane-UV, or empty on failure or if `chain` isn't one loop.
 std::vector<Entity> OffsetLoop(const SketchPlane& plane,
-                               const std::vector<Entity>& chain, double distance,
-                               bool joinArc);
+                               const std::vector<Entity>& chain,
+                               double distance, bool joinArc);
 
 // Region selection (U2): a region is referenced by the sorted, deduplicated
 // entity ids of its OUTER loop's boundary — stable across sketch edits that

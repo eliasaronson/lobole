@@ -21,8 +21,8 @@ namespace remote {
 
 // Assembly RPCs (add_occurrence..) carved out of RemoteServer::HandleSemantic.
 // Act on the active assembly tab / project.
-std::optional<json> HandleAssemblyRpc(ui::AppState& state,
-                                      const std::string& m, const RpcParams& p) {
+std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
+                                      const RpcParams& p) {
   if (m == "add_occurrence") {
     // Places a part in the active assembly. `part` is the part's NAME (resolved
     // to its stable id); optional `transform` = {position:[x,y,z],
@@ -53,7 +53,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
       throw std::runtime_error("the active document is not an assembly");
     ui::SnapshotAssembly(state);
     if (!state.assembly->RemoveOccurrence(p.at("id").get<uint64_t>())) {
-      state.assemblyHistory.undo.pop_back(); // nothing changed; drop the snapshot
+      state.assemblyHistory.undo
+          .pop_back(); // nothing changed; drop the snapshot
       throw std::runtime_error("no such occurrence");
     }
     return json::object();
@@ -110,11 +111,13 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
       if (c.value("origin", false))
         anchor = {{"origin", true}};
       else if (c.contains("face")) {
-        anchor = {{"face", {{"feature_id", c.at("face").at("feature_id")},
-                            {"element", c.at("face").at("element")}}}};
+        anchor = {{"face",
+                   {{"feature_id", c.at("face").at("feature_id")},
+                    {"element", c.at("face").at("element")}}}};
         if (c.contains("snap_edge")) // inference snap (hole center) — v26
-          anchor["snap_edge"] = {{"feature_id", c.at("snap_edge").at("feature_id")},
-                                 {"element", c.at("snap_edge").at("element")}};
+          anchor["snap_edge"] = {
+              {"feature_id", c.at("snap_edge").at("feature_id")},
+              {"element", c.at("snap_edge").at("element")}};
       } else
         throw std::runtime_error(
             "connector needs 'origin:true' or 'face:{feature_id,element}'");
@@ -128,9 +131,12 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
                      {"flipped", p.value("flipped", true)},
                      {"rotation", p.value("rotation", 0.0f)},
                      {"offset", p.value("offset", 0.0f)}};
-    if (p.contains("dx")) mateJson["dx"] = p.at("dx");             // planar
-    if (p.contains("dy")) mateJson["dy"] = p.at("dy");            // planar
-    if (p.contains("ball_rotation")) mateJson["ball_rotation"] = p.at("ball_rotation");
+    if (p.contains("dx"))
+      mateJson["dx"] = p.at("dx"); // planar
+    if (p.contains("dy"))
+      mateJson["dy"] = p.at("dy"); // planar
+    if (p.contains("ball_rotation"))
+      mateJson["ball_rotation"] = p.at("ball_rotation");
     Mate mate = DocumentIO::MateFromJson(mateJson);
     // Both occurrences must exist before we solve against them.
     if (!state.assembly->FindById(mate.a.occurrenceId) ||
@@ -141,7 +147,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     const int errored = ui::SolveActiveAssembly(state);
     json out = DocumentIO::MateToJson(*state.assembly->FindMateById(id));
     out["errored_mates"] = errored;
-    if (const Mate* mm = state.assembly->FindMateById(id); mm && !mm->error.empty())
+    if (const Mate* mm = state.assembly->FindMateById(id);
+        mm && !mm->error.empty())
       out["error"] = mm->error;
     return out;
   }
@@ -152,20 +159,28 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     if (!mate)
       throw std::runtime_error("no such mate");
     ui::SnapshotAssembly(state);
-    if (p.contains("rotation")) mate->rotation = p.at("rotation").get<float>();
-    if (p.contains("offset")) mate->offset = p.at("offset").get<float>();
-    if (p.contains("flipped")) mate->flipped = p.at("flipped").get<bool>();
-    if (p.contains("name")) mate->name = p.at("name").get<std::string>();
-    if (p.contains("dx")) mate->dx = p.at("dx").get<float>();       // planar
-    if (p.contains("dy")) mate->dy = p.at("dy").get<float>();       // planar
-    if (p.contains("ball_rotation")) {                              // ball [x,y,z,w]
+    if (p.contains("rotation"))
+      mate->rotation = p.at("rotation").get<float>();
+    if (p.contains("offset"))
+      mate->offset = p.at("offset").get<float>();
+    if (p.contains("flipped"))
+      mate->flipped = p.at("flipped").get<bool>();
+    if (p.contains("name"))
+      mate->name = p.at("name").get<std::string>();
+    if (p.contains("dx"))
+      mate->dx = p.at("dx").get<float>(); // planar
+    if (p.contains("dy"))
+      mate->dy = p.at("dy").get<float>(); // planar
+    if (p.contains("ball_rotation")) {    // ball [x,y,z,w]
       const json& q = p.at("ball_rotation");
-      mate->ballRotation = glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
-                                     q.at(1).get<float>(), q.at(2).get<float>());
+      mate->ballRotation =
+          glm::quat(q.at(3).get<float>(), q.at(0).get<float>(),
+                    q.at(1).get<float>(), q.at(2).get<float>());
     }
     ui::SolveActiveAssembly(state);
     json out = DocumentIO::MateToJson(*mate);
-    if (!mate->error.empty()) out["error"] = mate->error;
+    if (!mate->error.empty())
+      out["error"] = mate->error;
     return out;
   }
   if (m == "remove_mate") {
@@ -185,7 +200,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     json arr = json::array();
     for (const Mate& mate : state.assembly->GetMates()) {
       json mj = DocumentIO::MateToJson(mate);
-      if (!mate.error.empty()) mj["error"] = mate.error;
+      if (!mate.error.empty())
+        mj["error"] = mate.error;
       arr.push_back(mj);
     }
     return json{{"mates", arr}};
@@ -215,7 +231,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     json arr = json::array();
     for (const Mate& mate : state.assembly->GetMates()) {
       json mj = {{"id", mate.id}, {"name", mate.name}};
-      if (!mate.error.empty()) mj["error"] = mate.error;
+      if (!mate.error.empty())
+        mj["error"] = mate.error;
       arr.push_back(mj);
     }
     return json{{"errored_mates", errored}, {"mates", arr}};
@@ -251,8 +268,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     for (const ExplodedView& v : state.assembly->GetExplodedViews())
       views.push_back(DocumentIO::ExplodedViewToJson(v));
     return json{{"views", views},
-            {"active", state.activeExplodedView},
-            {"factor", state.explodeFactor}};
+                {"active", state.activeExplodedView},
+                {"factor", state.explodeFactor}};
   }
   if (m == "set_explode_step") {
     // params: {view, occurrence, offset: [x,y,z]} — find-or-create the step.
@@ -260,7 +277,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
       throw std::runtime_error("the active document is not an assembly");
     ExplodedView* v =
         state.assembly->FindExplodedViewById(p.at("view").get<uint64_t>());
-    if (!v) throw std::runtime_error("no such exploded view");
+    if (!v)
+      throw std::runtime_error("no such exploded view");
     const uint64_t occId = p.at("occurrence").get<uint64_t>();
     if (!state.assembly->FindById(occId))
       throw std::runtime_error("no such occurrence");
@@ -270,7 +288,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     ui::SnapshotAssembly(state);
     ExplodeStep* step = nullptr;
     for (ExplodeStep& s : v->steps)
-      if (s.occurrenceId == occId) { step = &s; break; }
+      if (s.occurrenceId == occId) {
+        step = &s;
+        break;
+      }
     if (!step) {
       v->steps.push_back({occId, offset});
     } else {
@@ -294,7 +315,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
       id = state.assembly->AddExplodedView(std::move(v));
     }
     if (!ui::AutoExplode(state, id)) {
-      if (created) state.assembly->RemoveExplodedView(id); // don't leak it
+      if (created)
+        state.assembly->RemoveExplodedView(id); // don't leak it
       throw std::runtime_error(
           created ? "auto_explode needs at least two placed occurrences"
                   : "no such exploded view (or fewer than two placed "
@@ -319,11 +341,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
       state.activeExplodedView = id;
     }
     if (p.contains("factor"))
-      state.explodeFactor =
-          std::clamp(p.at("factor").get<float>(), 0.0f, 1.0f);
+      state.explodeFactor = std::clamp(p.at("factor").get<float>(), 0.0f, 1.0f);
     state.syncedDocumentVersion = UINT64_MAX; // display change: force resync
     return json{{"active", state.activeExplodedView},
-            {"factor", state.explodeFactor}};
+                {"factor", state.explodeFactor}};
   }
   if (m == "bom") {
     // Bill of materials (A4): derived, one row per referenced part.
@@ -343,9 +364,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
           r.massKnown ? json(r.unitMassG * r.quantity) : json(nullptr);
       rows.push_back(row);
     }
-    return json{{"rows", rows},
-            {"total",
-             {{"mass_g", bom.massKnown ? json(bom.totalMassG) : json(nullptr)}}}};
+    return json{
+        {"rows", rows},
+        {"total",
+         {{"mass_g", bom.massKnown ? json(bom.totalMassG) : json(nullptr)}}}};
   }
   if (m == "export_bom") {
     // params: {path} — writes the BOM as CSV. Same rows as `bom`.
@@ -372,8 +394,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
     if (!ui::EnterInContextEdit(state, p.at("occurrence").get<uint64_t>()))
       throw std::runtime_error("no such occurrence (or its part is missing)");
     return json{{"active", state.activePart},
-            {"assembly_slot", state.inContext.assemblySlotId},
-            {"occurrence", state.inContext.occurrenceId}};
+                {"assembly_slot", state.inContext.assemblySlotId},
+                {"occurrence", state.inContext.occurrenceId}};
   }
   if (m == "delete_part") {
     if (!ui::DeletePart(state, p.at("index").get<size_t>()))
@@ -383,4 +405,4 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state,
   return std::nullopt;
 }
 
-}  // namespace remote
+} // namespace remote

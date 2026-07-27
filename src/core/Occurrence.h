@@ -17,9 +17,9 @@
 // (the literal-plus-`_expr` pattern applied to placement). See
 // docs/assemblies/a2-design.md.
 struct Occurrence {
-  uint64_t id = 0;         // stable, unique within the assembly, never reused
-  std::string name;        // display label (cosmetic)
-  uint64_t partId = 0;     // stable id of the referenced part document
+  uint64_t id = 0;     // stable, unique within the assembly, never reused
+  std::string name;    // display label (cosmetic)
+  uint64_t partId = 0; // stable id of the referenced part document
   std::optional<std::string> partVersion; // reserved: git-commit pin (F5)
 
   // Placement: translation + orientation (quaternion). Diffable, shear-free,
@@ -113,8 +113,8 @@ struct ExplodeStep {
 // corrupt placements by construction. The active view + factor are transient
 // (AppState), not stored.
 struct ExplodedView {
-  uint64_t id = 0;  // stable, shares the assembly's id counter
-  std::string name; // display label (cosmetic)
+  uint64_t id = 0;                // stable, shares the assembly's id counter
+  std::string name;               // display label (cosmetic)
   std::vector<ExplodeStep> steps; // at most one per occurrence
 };
 
@@ -179,7 +179,8 @@ public:
   // Directly set the next-id counter (used by the loader so restored ids are
   // never reissued). No-op if `next` is not greater than the current counter.
   void EnsureNextIdAtLeast(uint64_t next) {
-    if (next > m_nextId) m_nextId = next;
+    if (next > m_nextId)
+      m_nextId = next;
   }
 
   // Configurations (workstream 13, C4): named assembly variants. Reuses the
@@ -196,7 +197,7 @@ public:
   Configuration* FindConfiguration(uint64_t id);
   Configuration& AddConfiguration(const std::string& name = "");
   bool RemoveConfiguration(uint64_t id);
-  void RestoreConfiguration(Configuration cfg);  // load/undo, keeps id
+  void RestoreConfiguration(Configuration cfg); // load/undo, keeps id
 
   uint64_t ActiveConfiguration() const { return m_activeConfiguration; }
   // Sets the active id (0 = base) and bumps the version so renderers resync;

@@ -27,7 +27,7 @@ namespace assembly {
 using PartResolver = std::function<const Document*(uint64_t partId)>;
 
 struct SolveReport {
-  int placed = 0;      // occurrences positioned by a mate (excludes anchors)
+  int placed = 0;       // occurrences positioned by a mate (excludes anchors)
   int erroredMates = 0; // mates left in an error state this solve
 };
 

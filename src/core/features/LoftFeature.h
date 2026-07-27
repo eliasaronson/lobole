@@ -29,7 +29,8 @@ public:
   bool Execute(RegenContext& ctx) override;
 
   std::vector<uint64_t> sketchIds; // >= 2 sections, in order
-  uint64_t pathId = 0;  // optional spine (sketch/Curve3D); 0 = classic loft (v45)
+  uint64_t pathId =
+      0; // optional spine (sketch/Curve3D); 0 = classic loft (v45)
   uint64_t guideId = 0; // optional guide curve; requires pathId (v45)
   ExtrudeMode mode = ExtrudeMode::NewBody;
 };

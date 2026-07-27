@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 #include "core/sketch/SketchProfile.h"
 
 #include <cmath>
@@ -35,8 +35,8 @@ TEST_CASE("EllipseParamOfPoint inverts EllipseArcEvalUV", "[ellipse_arc]") {
   EllipseArc e{{1, 2}, 3.0, 1.5, 0.7, 0.0, M_PI};
   for (double t : {0.1, 1.0, 2.5}) {
     const glm::vec2 p = sketch::EllipseArcEvalUV(e, t);
-    const double got =
-        sketch::EllipseParamOfPoint(e.center, e.rMajor, e.rMinor, e.rotation, p);
+    const double got = sketch::EllipseParamOfPoint(e.center, e.rMajor, e.rMinor,
+                                                   e.rotation, p);
     CHECK_THAT(got, WithinAbs(t, 1e-5));
   }
 }

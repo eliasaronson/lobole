@@ -1,13 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Command.h"
 #include "core/Document.h"
-#include "core/features/ExtrudeFeature.h"
-#include "core/io/Serialization.h"
-#include "TestIO.h"
-#include "core/features/SketchFeature.h"
 #include "core/ElementMap.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 #include "core/sketch/SketchProfile.h"
 
 #include <algorithm>
@@ -51,7 +51,8 @@ TEST_CASE("Rectangle (as four lines) yields one loop", "[profile]") {
 
 TEST_CASE("Construction geometry is excluded from the profile", "[profile]") {
   std::vector<sketch::Entity> e = RectLines({0, 0}, {4, 2});
-  // A construction diagonal + a construction reference circle: ignored by loops.
+  // A construction diagonal + a construction reference circle: ignored by
+  // loops.
   sketch::Line diag{{0, 0}, {4, 2}};
   diag.construction = true;
   e.push_back(diag);
@@ -103,7 +104,8 @@ TEST_CASE("Circle extrudes to a cylinder volume", "[extrude]") {
   CHECK_THAT(prism.Volume(), WithinRel(M_PI * 1.5 * 1.5 * 2.0, 1e-3));
 }
 
-TEST_CASE("Ellipse extrudes to an elliptic-prism volume", "[extrude][ellipse]") {
+TEST_CASE("Ellipse extrudes to an elliptic-prism volume",
+          "[extrude][ellipse]") {
   const double a = 2.0, b = 1.0;
   auto loops = sketch::BuildLoops({sketch::Ellipse{{0, 0}, a, b, 0.0}});
   REQUIRE(loops.size() == 1);
@@ -112,7 +114,8 @@ TEST_CASE("Ellipse extrudes to an elliptic-prism volume", "[extrude][ellipse]") 
   CHECK_THAT(prism.Volume(), WithinRel(M_PI * a * b * 3.0, 1e-3));
 }
 
-TEST_CASE("A rotated ellipse extrudes to the same volume", "[extrude][ellipse]") {
+TEST_CASE("A rotated ellipse extrudes to the same volume",
+          "[extrude][ellipse]") {
   // Rotation leaves the enclosed area (π·a·b) unchanged.
   const double a = 2.0, b = 1.0;
   auto loops = sketch::BuildLoops({sketch::Ellipse{{0, 0}, a, b, 0.7}});
@@ -122,7 +125,8 @@ TEST_CASE("A rotated ellipse extrudes to the same volume", "[extrude][ellipse]")
   CHECK_THAT(prism.Volume(), WithinRel(M_PI * a * b * 3.0, 1e-3));
 }
 
-TEST_CASE("A filleted-corner profile (lines + arc) extrudes", "[extrude][arc]") {
+TEST_CASE("A filleted-corner profile (lines + arc) extrudes",
+          "[extrude][arc]") {
   // 4x2 rectangle with the top-right corner rounded by a quarter arc of r=0.5:
   // the arc runs CCW from (4,1.5) to (3.5,2), centred at (3.5,1.5).
   const double r = 0.5;
@@ -195,7 +199,7 @@ TEST_CASE("Reversed extrude sits on the opposite side of the plane",
   REQUIRE(prism.IsValid());
   glm::vec3 min, max;
   prism.GetBoundingBox(min, max);
-  CHECK(max.z <= 1e-6);       // extruded toward -Z
+  CHECK(max.z <= 1e-6); // extruded toward -Z
   CHECK(min.z <= -2.0 + 1e-6);
 }
 
@@ -225,16 +229,17 @@ static uint64_t AddRectSketch(Document& doc, const glm::vec2& c1,
 TEST_CASE("ExtrudeFeature NewBody adds a body", "[extrude][feature]") {
   Document doc;
   uint64_t sid = AddRectSketch(doc, {0, 0}, {4, 2});
-  doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", sid, 3.0,
-                                                  ExtrudeMode::NewBody));
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", sid, 3.0, ExtrudeMode::NewBody));
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(24.0, 1e-6));
 }
 
-TEST_CASE("ExtrudeFeature Add fuses into an existing body", "[extrude][feature]") {
+TEST_CASE("ExtrudeFeature Add fuses into an existing body",
+          "[extrude][feature]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
-                                              1)); // z 0..1
+                                              1));   // z 0..1
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // on XY, overlaps base top
   doc.AddFeature(
       std::make_unique<ExtrudeFeature>("Boss", sid, 2.0, ExtrudeMode::Add));
@@ -248,13 +253,14 @@ TEST_CASE("ExtrudeFeature Add fuses into an existing body", "[extrude][feature]"
 TEST_CASE("ExtrudeFeature Cut removes material", "[extrude][feature]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
-                                              2)); // z 0..2, vol 32
+                                              2));   // z 0..2, vol 32
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // 2x2 hole
   doc.AddFeature(
       std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
 
   REQUIRE(doc.GetBodies().size() == 1);
-  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(32.0 - 2 * 2 * 2, 1e-4));
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(32.0 - 2 * 2 * 2, 1e-4));
 }
 
 TEST_CASE("ExtrudeFeature Cut that misses every body warns but is not an error",
@@ -269,7 +275,8 @@ TEST_CASE("ExtrudeFeature Cut that misses every body warns but is not an error",
       std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
 
   REQUIRE(doc.GetBodies().size() == 1);
-  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(32.0, 1e-9)); // untouched
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(32.0, 1e-9)); // untouched
   auto* cut = doc.GetFeature(doc.FeatureCount() - 1);
   CHECK(cut->GetError().empty());         // built fine — not broken
   CHECK_FALSE(cut->GetWarning().empty()); // ...but flagged as a no-op
@@ -278,8 +285,8 @@ TEST_CASE("ExtrudeFeature Cut that misses every body warns but is not an error",
 TEST_CASE("ExtrudeFeature Cut that removes material carries no warning",
           "[extrude][feature][warning]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
-                                              2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
   uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // real pocket
   doc.AddFeature(
       std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
@@ -289,8 +296,8 @@ TEST_CASE("ExtrudeFeature Cut that removes material carries no warning",
 TEST_CASE("Fixing a no-op cut clears its warning on the next regen",
           "[extrude][feature][warning]") {
   Document doc;
-  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
-                                              2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
   uint64_t sid = AddRectSketch(doc, {10, 10}, {12, 12}); // misses
   doc.AddFeature(
       std::make_unique<ExtrudeFeature>("Pocket", sid, 5.0, ExtrudeMode::Cut));
@@ -319,10 +326,10 @@ TEST_CASE("Deleting a sketch a later extrude uses stops regeneration",
   Document doc;
   CommandStack stack;
   uint64_t sid = AddRectSketch(doc, {0, 0}, {2, 2});
-  stack.Execute(std::make_unique<AddFeatureCommand>(
-                    std::make_unique<ExtrudeFeature>("Pad", sid, 2.0,
-                                                     ExtrudeMode::NewBody)),
-                doc);
+  stack.Execute(
+      std::make_unique<AddFeatureCommand>(std::make_unique<ExtrudeFeature>(
+          "Pad", sid, 2.0, ExtrudeMode::NewBody)),
+      doc);
   REQUIRE(doc.GetBodies().size() == 1);
 
   // Remove the sketch (index 0): regeneration now stops at the extrude
@@ -337,8 +344,8 @@ TEST_CASE("Deleting a sketch a later extrude uses stops regeneration",
 TEST_CASE("Extrude survives a document JSON round-trip", "[extrude][io]") {
   Document doc;
   uint64_t sid = AddRectSketch(doc, {0, 0}, {4, 2});
-  doc.AddFeature(std::make_unique<ExtrudeFeature>("Pad", sid, 3.0,
-                                                  ExtrudeMode::NewBody));
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", sid, 3.0, ExtrudeMode::NewBody));
   const double vol = doc.GetBodies()[0].shape.Volume();
 
   fs::path path = fs::temp_directory_path() / "designer_extrude_doc.json";
@@ -368,8 +375,10 @@ TEST_CASE("Solver float noise at a line/arc joint does not distort the prism",
   e.push_back(sketch::Line{{40.0f, 0.0f}, {40.0f, 20.0f}});
   e.push_back(sketch::Line{{40.0f, 20.0f}, {3.999999761581421f, 20.0f}});
   e.push_back(sketch::Line{{0.0f, 16.0f}, {0.0f, 0.0f}});
-  e.push_back(sketch::Arc{{4.0f, 16.0f}, 3.9999999543595246,
-                          1.5707963501871345, 3.1415926649999117});
+  e.push_back(sketch::Arc{{4.0f, 16.0f},
+                          3.9999999543595246,
+                          1.5707963501871345,
+                          3.1415926649999117});
 
   auto loops = sketch::BuildLoops(e);
   REQUIRE(loops.size() == 1);
@@ -395,8 +404,7 @@ TEST_CASE("Disjoint profiles extrude as independent solids (multi-profile)",
   // A circle properly inside another still extrudes as a ring.
   std::vector<sketch::Entity> ring = {sketch::Circle{{0, 0}, 5},
                                       sketch::Circle{{0, 0}, 2}};
-  CADShape tube = sketch::BuildPrism(kXY, sketch::BuildLoops(ring), 2.0,
-                                     false);
+  CADShape tube = sketch::BuildPrism(kXY, sketch::BuildLoops(ring), 2.0, false);
   REQUIRE(tube.IsValid());
   CHECK_THAT(tube.Volume(), WithinRel(M_PI * (25.0 - 4.0) * 2.0, 1e-3));
 }
@@ -411,13 +419,12 @@ TEST_CASE("Four-bolt-hole cut works from ONE sketch", "[extrude][profile]") {
   std::vector<sketch::Entity> holes = {
       sketch::Circle{{22, 12}, 3}, sketch::Circle{{-22, 12}, 3},
       sketch::Circle{{-22, -12}, 3}, sketch::Circle{{22, -12}, 3}};
-  CADShape tool = sketch::BuildPrism(kXY, sketch::BuildLoops(holes), 6.0,
-                                     false);
+  CADShape tool =
+      sketch::BuildPrism(kXY, sketch::BuildLoops(holes), 6.0, false);
   REQUIRE(tool.IsValid());
   CADShape cut = body.Difference(tool);
   REQUIRE(cut.IsValid());
-  CHECK_THAT(cut.Volume(),
-             WithinRel((2400.0 - 4.0 * M_PI * 9.0) * 6.0, 1e-3));
+  CHECK_THAT(cut.Volume(), WithinRel((2400.0 - 4.0 * M_PI * 9.0) * 6.0, 1e-3));
 }
 
 TEST_CASE("Islands inside holes become solids again (3-deep nesting)",
@@ -451,9 +458,8 @@ TEST_CASE("Multi-profile revolve sums the groups", "[extrude][profile]") {
     e.push_back(le);
   auto loops = sketch::BuildLoops(e);
   REQUIRE(loops.size() == 2);
-  CADShape rings = sketch::BuildRevolve(kXY, loops, glm::vec3(0),
-                                        glm::vec3(0, 1, 0), 2.0 * M_PI,
-                                        false, false);
+  CADShape rings = sketch::BuildRevolve(
+      kXY, loops, glm::vec3(0), glm::vec3(0, 1, 0), 2.0 * M_PI, false, false);
   REQUIRE(rings.IsValid());
   const double v = 2.0 * M_PI * 2.5 * 1.0 + 2.0 * M_PI * 5.5 * 1.0;
   CHECK_THAT(rings.Volume(), WithinRel(v, 1e-3));
@@ -495,8 +501,8 @@ TEST_CASE("Symmetric extrude straddles the sketch plane", "[extrude][end]") {
   sk->AddRectangle({0, 0}, {4, 2});
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
-  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 6.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Pad", skId, 6.0, ExtrudeMode::NewBody);
   ext->endMode = ExtrudeEnd::Symmetric;
   doc.AddFeature(std::move(ext));
   REQUIRE(doc.GetBodies().size() == 1);
@@ -514,8 +520,8 @@ TEST_CASE("Two-sided extrude sweeps both ways with separate distances",
   sk->AddRectangle({0, 0}, {4, 2});
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
-  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 5.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Pad", skId, 5.0, ExtrudeMode::NewBody);
   ext->endMode = ExtrudeEnd::TwoSided;
   ext->distance2 = 2.0;
   doc.AddFeature(std::move(ext));
@@ -535,8 +541,8 @@ TEST_CASE("End conditions round-trip through serialization (v18)",
   sk->AddRectangle({0, 0}, {4, 2});
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
-  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 5.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Pad", skId, 5.0, ExtrudeMode::NewBody);
   ext->endMode = ExtrudeEnd::TwoSided;
   ext->distance2 = 1.0;
   ext->distance2Expr = "back";
@@ -592,8 +598,8 @@ TEST_CASE("Up-to-face extrude reaches the target and follows upstream edits",
 
   // Losing the target is a loud feature error, not a stale guess.
   a->distance = 6.0;
-  auto* b = dynamic_cast<ExtrudeFeature*>(
-      doc.GetFeature(doc.FeatureCount() - 1));
+  auto* b =
+      dynamic_cast<ExtrudeFeature*>(doc.GetFeature(doc.FeatureCount() - 1));
   b->endTarget.name = "nonsense";
   CHECK_FALSE(doc.Regenerate());
   CHECK(!b->GetError().empty());
@@ -606,8 +612,8 @@ TEST_CASE("Up-to-face round-trips through serialization",
   sk->AddRectangle({0, 0}, {4, 2});
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
-  auto ext = std::make_unique<ExtrudeFeature>("Pad", skId, 5.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Pad", skId, 5.0, ExtrudeMode::NewBody);
   ext->endMode = ExtrudeEnd::UpToFace;
   ext->endTarget = ElementRef{7, "7/cap1"};
   doc.AddFeature(std::move(ext));
@@ -632,8 +638,8 @@ TEST_CASE("Thin extrude walls a circle exactly", "[extrude][thin]") {
   sk->entities.push_back(c);
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
-  auto ext = std::make_unique<ExtrudeFeature>("Tube", skId, 4.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Tube", skId, 4.0, ExtrudeMode::NewBody);
   ext->thin = true;
   ext->thinThickness = 0.5;
   ext->thinSide = sketch::ThinSide::Out;
@@ -672,8 +678,8 @@ TEST_CASE("Thin extrude wall sides (rect, inward vs outward)",
   sk->AddRectangle({0, 0}, {4, 2});
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
-  auto ext = std::make_unique<ExtrudeFeature>("Wall", skId, 1.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Wall", skId, 1.0, ExtrudeMode::NewBody);
   ext->thin = true;
   ext->thinThickness = 3.0; // > half the short side
   ext->thinSide = sketch::ThinSide::In;
@@ -688,8 +694,8 @@ TEST_CASE("Thin round-trips through serialization", "[extrude][thin]") {
   sk->AddRectangle({0, 0}, {4, 2});
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
-  auto ext = std::make_unique<ExtrudeFeature>("Wall", skId, 1.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Wall", skId, 1.0, ExtrudeMode::NewBody);
   ext->thin = true;
   ext->thinThickness = 0.25;
   ext->thinSide = sketch::ThinSide::Both;
@@ -717,8 +723,8 @@ TEST_CASE("Extrude regions select one profile of a multi-region sketch",
   doc.AddFeature(std::move(sk));
   const uint64_t skId = doc.GetFeature(0)->GetId();
 
-  auto ext = std::make_unique<ExtrudeFeature>("One", skId, 2.0,
-                                              ExtrudeMode::NewBody);
+  auto ext =
+      std::make_unique<ExtrudeFeature>("One", skId, 2.0, ExtrudeMode::NewBody);
   ext->regions = {{c1}};
   doc.AddFeature(std::move(ext));
   REQUIRE(doc.Regenerate());

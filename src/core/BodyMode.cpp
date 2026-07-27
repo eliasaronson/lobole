@@ -53,16 +53,15 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       }
     }
     ElementMap fusedMap;
-    CADShape fused =
-        topo::BooleanNamed(BooleanOp::Union, bodies[target].shape,
-                           bodies[target].elementMap, shape, shapeMap, ownerId,
-                           fusedMap);
+    CADShape fused = topo::BooleanNamed(BooleanOp::Union, bodies[target].shape,
+                                        bodies[target].elementMap, shape,
+                                        shapeMap, ownerId, fusedMap);
     if (!fused.IsValid()) {
       LOG_ERROR("ApplyBodyMode '{}': fuse failed", name);
       return false;
     }
-    if (warning && VolumeUnchanged(bodies[target].shape.Volume(),
-                                   fused.Volume())) {
+    if (warning &&
+        VolumeUnchanged(bodies[target].shape.Volume(), fused.Volume())) {
       *warning = "add merged no new material — the tool lies entirely inside "
                  "the target body (check the sketch plane and profile)";
     }
@@ -82,9 +81,9 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
     }
     for (auto& body : bodies) {
       ElementMap cutMap;
-      CADShape cut = topo::BooleanNamed(BooleanOp::Subtract, body.shape,
-                                        body.elementMap, shape, shapeMap,
-                                        ownerId, cutMap);
+      CADShape cut =
+          topo::BooleanNamed(BooleanOp::Subtract, body.shape, body.elementMap,
+                             shape, shapeMap, ownerId, cutMap);
       if (cut.IsValid()) {
         body.shape = std::move(cut);
         body.elementMap = std::move(cutMap); // propagated (T5)
@@ -116,10 +115,9 @@ bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,
                             ElementMap shapeMap, ExtrudeMode mode,
                             Feature& owner) {
   std::string warning;
-  const bool ok =
-      ApplyBodyMode(bodies, std::move(shape), std::move(shapeMap), mode,
-                    owner.GetName(), owner.GetMaterial(), owner.GetId(),
-                    &warning);
+  const bool ok = ApplyBodyMode(bodies, std::move(shape), std::move(shapeMap),
+                                mode, owner.GetName(), owner.GetMaterial(),
+                                owner.GetId(), &warning);
   if (!warning.empty()) {
     owner.SetWarning(warning);
   }
@@ -156,16 +154,15 @@ bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
   std::vector<CADShape> solids = fused.SplitSolids();
 
   // Replace the seed body(ies) with the pattern's solids.
-  bodies.erase(std::remove_if(bodies.begin(), bodies.end(),
-                              [&](const Body& b) {
-                                return b.createdBy == sourceId;
-                              }),
-               bodies.end());
+  bodies.erase(
+      std::remove_if(bodies.begin(), bodies.end(),
+                     [&](const Body& b) { return b.createdBy == sourceId; }),
+      bodies.end());
   for (size_t i = 0; i < solids.size(); i++) {
     std::string bodyName =
         solids.size() > 1 ? name + " " + std::to_string(i + 1) : name;
-    bodies.push_back({std::move(bodyName), std::move(solids[i]), material,
-                      ownerId});
+    bodies.push_back(
+        {std::move(bodyName), std::move(solids[i]), material, ownerId});
   }
   return true;
 }

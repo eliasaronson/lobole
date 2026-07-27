@@ -22,21 +22,21 @@ enum class GlyphKind {
 // The referenced constraints describe "the new point": the caller fills in the
 // new entity's id once it exists (see the commit path).
 struct Snap {
-  glm::vec2 uv{0.0f};                   // the point, snapped (or unchanged)
-  std::optional<PointRef> coincident;   // snap the point coincident to this
-  std::optional<uint32_t> pointOnLine;  // else bind the point onto this line id
+  glm::vec2 uv{0.0f};                  // the point, snapped (or unchanged)
+  std::optional<PointRef> coincident;  // snap the point coincident to this
+  std::optional<uint32_t> pointOnLine; // else bind the point onto this line id
   // Axis alignment with another vertex: the new point shares that vertex's X
   // (vertical alignment → a two-point Vertical constraint) or Y (horizontal
   // alignment → a two-point Horizontal constraint). Independent per axis and of
   // the segment-level snaps below.
-  std::optional<PointRef> alignShareX;  // new point shares X with this vertex
-  std::optional<PointRef> alignShareY;  // new point shares Y with this vertex
+  std::optional<PointRef> alignShareX; // new point shares X with this vertex
+  std::optional<PointRef> alignShareY; // new point shares Y with this vertex
   // Segment-level (only when a segment's other end is known):
   bool horizontal = false;
   bool vertical = false;
   std::optional<uint32_t> parallelTo;
   std::optional<uint32_t> perpendicularTo;
-  std::vector<GlyphKind> glyphs;        // what to draw at the cursor
+  std::vector<GlyphKind> glyphs; // what to draw at the cursor
 };
 
 // Infers snaps for a point being placed at `uv`. `other` is the segment's fixed

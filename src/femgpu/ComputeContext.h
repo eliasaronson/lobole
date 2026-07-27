@@ -49,7 +49,7 @@ struct BoundSet {
 };
 
 class ComputeContext {
- public:
+public:
   // Picks the best device with a compute queue AND float32 buffer atomicAdd
   // (VK_EXT_shader_atomic_float — the SpMV scatter needs it): discrete GPU
   // first, then integrated, then anything else (llvmpipe software fallback).
@@ -104,7 +104,7 @@ class ComputeContext {
   // Submits the recorded commands and waits for completion.
   bool SubmitBatch(std::string* error);
 
- private:
+private:
   // Every batched command is preceded by a full compute/transfer memory
   // barrier — each CG kernel depends on its predecessor, so precision-scoped
   // barriers would buy nothing.
@@ -122,7 +122,7 @@ class ComputeContext {
   std::string m_deviceName;
   bool m_software = false;
   bool m_batchOpen = false;
-  bool m_batchFirst = false;  // no barrier before the batch's first command
+  bool m_batchFirst = false; // no barrier before the batch's first command
 };
 
-}  // namespace gpu
+} // namespace gpu

@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
 
@@ -45,7 +45,8 @@ TEST_CASE("A two-pole B-spline degrades to the segment between them",
   BSpline s;
   s.poles = {{0, 0}, {2, 4}};
   CHECK(sketch::BSplineDegree(s) == 1);
-  const glm::vec2 mid = sketch::BSplineEvalUV(s, 0.5 * (2 - 1)); // umax = n-p = 1
+  const glm::vec2 mid =
+      sketch::BSplineEvalUV(s, 0.5 * (2 - 1)); // umax = n-p = 1
   CHECK_THAT(mid.x, WithinAbs(1.0f, 1e-5));
   CHECK_THAT(mid.y, WithinAbs(2.0f, 1e-5));
 }
@@ -74,8 +75,7 @@ TEST_CASE("A sketch B-spline round-trips through JSON", "[spline]") {
   const fs::path path = fs::temp_directory_path() / "designer_spline_test.json";
   {
     Document doc;
-    auto sk =
-        std::make_unique<SketchFeature>("Sk", SketchPlane(PlaneType::XY));
+    auto sk = std::make_unique<SketchFeature>("Sk", SketchPlane(PlaneType::XY));
     sk->AddEntity(BSpline{{{0, 0}, {1, 2}, {3, 2}, {4, 0}}, 3});
     doc.AddFeature(std::move(sk));
     REQUIRE(testio::Save(doc, path.string()));
@@ -161,7 +161,8 @@ TEST_CASE("A B-spline pole is a solver point (Coincident moves it)",
   CHECK(bs.poles[3] == glm::vec2(4, 0)); // untouched
 }
 
-TEST_CASE("An unconstrained B-spline solves without moving", "[spline][solver]") {
+TEST_CASE("An unconstrained B-spline solves without moving",
+          "[spline][solver]") {
   SketchFeature s("S", SketchPlane(PlaneType::XY));
   s.AddEntity(BSpline{{{0, 0}, {1, 2}, {3, 2}, {4, 0}}});
   sketch::Solver solver;

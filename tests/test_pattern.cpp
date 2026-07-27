@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/features/PatternFeature.h"
 #include "core/io/Serialization.h"
-#include "TestIO.h"
 
 #include <filesystem>
 
@@ -62,7 +62,8 @@ TEST_CASE("Linear pattern of touching instances fuses into one body",
 TEST_CASE("Circular pattern arrays around an axis", "[pattern]") {
   Document doc;
   uint64_t box = AddBox(doc, "A", {2, -0.5, -0.5}, 1.0); // offset from Z, vol 1
-  auto pat = std::make_unique<PatternFeature>("Arr", PatternKind::Circular, box);
+  auto pat =
+      std::make_unique<PatternFeature>("Arr", PatternKind::Circular, box);
   pat->axis.kind = AxisRef::Kind::Z; // rotate about global Z through origin
   pat->count = 4;
   pat->angleDeg = 90.0; // 0/90/180/270 -> four disjoint instances
@@ -130,7 +131,8 @@ TEST_CASE("A pattern with a missing source fails", "[pattern]") {
 }
 
 TEST_CASE("Pattern round-trips through JSON", "[pattern]") {
-  const fs::path path = fs::temp_directory_path() / "designer_pattern_test.json";
+  const fs::path path =
+      fs::temp_directory_path() / "designer_pattern_test.json";
   {
     Document doc;
     doc.SetParameter("n", "4");

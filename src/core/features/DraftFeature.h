@@ -1,8 +1,8 @@
 #pragma once
 
+#include "cad/SketchPlane.h" // PlaneType
 #include "core/ElementMap.h"
 #include "core/Feature.h"
-#include "cad/SketchPlane.h" // PlaneType
 
 #include <cstdint>
 #include <string>
@@ -34,5 +34,6 @@ public:
   std::vector<ElementRef> faces;
   double angleDeg = 5.0;
   std::string angleExpr;
-  PlaneType neutralPlane = PlaneType::XY; // pull direction = this plane's normal
+  PlaneType neutralPlane =
+      PlaneType::XY; // pull direction = this plane's normal
 };

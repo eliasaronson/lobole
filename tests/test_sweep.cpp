@@ -65,7 +65,8 @@ TEST_CASE("Sweep a circle along a helix is a coil (curves-3d P1)",
           "[sweep][curve3d]") {
   Document doc;
   const uint64_t prof = AddSketch(
-      doc, SketchPlane(glm::vec3(2, 0, 0), glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)),
+      doc,
+      SketchPlane(glm::vec3(2, 0, 0), glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)),
       "Prof", {sketch::Circle{{0, 0}, 0.2}});
   auto cv = std::make_unique<CurveFeature>("Helix", Curve3DKind::Helix);
   cv->radius = 2.0;
@@ -130,7 +131,6 @@ TEST_CASE("Sweep errors on a missing sketch", "[sweep]") {
   CHECK(!doc.GetFeature(0)->GetError().empty());
 }
 
-
 TEST_CASE("Sweep follows a bent path (all segments, rounded corner)",
           "[sweep]") {
   Document doc;
@@ -140,8 +140,7 @@ TEST_CASE("Sweep follows a bent path (all segments, rounded corner)",
   // L-path on XZ: up 6 then over 5 (total spine 11).
   const uint64_t path = AddSketch(
       doc, SketchPlane(glm::vec3(0), glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)),
-      "Path",
-      {sketch::Line{{0, 0}, {0, 6}}, sketch::Line{{0, 6}, {5, 6}}});
+      "Path", {sketch::Line{{0, 0}, {0, 6}}, sketch::Line{{0, 6}, {5, 6}}});
   doc.AddFeature(std::make_unique<SweepFeature>("Elbow", prof, path));
   REQUIRE(doc.GetBodies().size() == 1);
   // Both segments swept (a MakePipe would stop at the corner near pi*0.25*6);
