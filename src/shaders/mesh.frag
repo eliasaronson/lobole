@@ -200,6 +200,13 @@ void main() {
     const vec3 highlightColor = vec3(1.0, 0.65, 0.15);
     finalColor = mix(finalColor, highlightColor, fragHighlight * 0.55);
 
+    // Extra multi-select sub-draws (highlight.z sentinel): the geometry was
+    // already shaded by the main draw; keep ONLY this range's tinted
+    // fragments, or the redraw's plain fragments would overwrite the other
+    // ranges' tint at equal depth.
+    if (pc.highlight.z == 0xFFFFFFFFu && fragHighlight < 0.75)
+        discard;
+
     // Per-instance alpha (ghosted in-context instances, A4). Opaque instances
     // carry 1.0 and render through a blend-disabled pipeline, so this only
     // takes effect on the ghost pass.

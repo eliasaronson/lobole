@@ -367,7 +367,11 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
         continue;
 
       push.model = instance->transform;
-      push.highlight = instance->highlight;
+      const glm::uvec2 sel0 = instance->selRanges.empty()
+                                  ? glm::uvec2(0)
+                                  : instance->selRanges.front();
+      push.highlight = glm::uvec4(sel0.x, sel0.y, instance->hoverRange.x,
+                                  instance->hoverRange.y);
       push.material = instance->materialParams;
       push.baseColor = instance->baseColor;
       push.procMaterial = instance->procParams;
@@ -402,6 +406,25 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
       vkCmdDrawIndexed(commandBuffer,
                        static_cast<uint32_t>(asset->indices.size()), 1, 0, 0,
                        0);
+
+      // Additional selected ranges (multi-select on one instance): re-draw
+      // the asset with only that range highlighted — depth LESS_OR_EQUAL
+      // lets the identical geometry pass, and the 0xFFFFFFFF hover-slot
+      // sentinel makes the fragment stage DISCARD everything outside the
+      // range (a plain redraw would overwrite the other ranges' tint).
+      // Selection counts are small, so the extra full-asset draws are cheap.
+      for (size_t r = 1; r < instance->selRanges.size(); r++) {
+        push.highlight =
+            glm::uvec4(instance->selRanges[r].x, instance->selRanges[r].y,
+                       0xFFFFFFFFu, 0xFFFFFFFFu);
+        vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+                           VK_SHADER_STAGE_VERTEX_BIT |
+                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(push), &push);
+        vkCmdDrawIndexed(commandBuffer,
+                         static_cast<uint32_t>(asset->indices.size()), 1, 0, 0,
+                         0);
+      }
     }
   }
 }
@@ -411,9 +434,9 @@ void MeshRenderer::SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex,
   MeshInstance* instance = GetInstance(instanceId);
   if (!instance)
     return;
-  ClearFaceHighlight();
-  instance->highlight.x = firstVertex;
-  instance->highlight.y = firstVertex + count;
+  // Additive: multi-select shows every face (the projection clears per
+  // frame). The old single-slot semantics kept only the LAST synced face.
+  instance->selRanges.push_back(glm::uvec2(firstVertex, firstVertex + count));
 }
 
 void MeshRenderer::SetFaceHover(uint32_t instanceId, uint32_t firstVertex,
@@ -422,8 +445,7 @@ void MeshRenderer::SetFaceHover(uint32_t instanceId, uint32_t firstVertex,
   if (!instance)
     return;
   ClearFaceHover();
-  instance->highlight.z = firstVertex;
-  instance->highlight.w = firstVertex + count;
+  instance->hoverRange = glm::uvec2(firstVertex, firstVertex + count);
 }
 
 void MeshRenderer::HighlightInstance(uint32_t instanceId) {
@@ -433,15 +455,15 @@ void MeshRenderer::HighlightInstance(uint32_t instanceId) {
   MeshAsset* asset = GetAsset(instance->assetId);
   if (!asset)
     return;
-  // Full vertex range = the whole instance; additive (no ClearFaceHighlight).
-  instance->highlight.x = 0;
-  instance->highlight.y = static_cast<uint32_t>(asset->vertices.size());
+  // Full vertex range = the whole instance; additive like face highlights.
+  instance->selRanges.push_back(
+      glm::uvec2(0, static_cast<uint32_t>(asset->vertices.size())));
 }
 
 void MeshRenderer::ClearFaceHighlight() {
   for (auto& instance : m_instances) {
     if (instance) {
-      instance->highlight.x = instance->highlight.y = 0;
+      instance->selRanges.clear();
     }
   }
 }
@@ -449,7 +471,7 @@ void MeshRenderer::ClearFaceHighlight() {
 void MeshRenderer::ClearFaceHover() {
   for (auto& instance : m_instances) {
     if (instance) {
-      instance->highlight.z = instance->highlight.w = 0;
+      instance->hoverRange = glm::uvec2(0);
     }
   }
 }
@@ -648,7 +670,9 @@ bool MeshRenderer::CreateGraphicsPipeline() {
       VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
   depthStencil.depthTestEnable = VK_TRUE;
   depthStencil.depthWriteEnable = VK_TRUE;
-  depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+  // LESS_OR_EQUAL, not LESS: multi-select highlight re-draws the same
+  // geometry at identical depth (see Render's extra selRanges sub-draws).
+  depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
   depthStencil.depthBoundsTestEnable = VK_FALSE;
   depthStencil.stencilTestEnable = VK_FALSE;
 

@@ -504,10 +504,11 @@ void SyncSelectionHighlights(AppState& state) {
     }
     return;
   }
-  // Every Face item highlights — one range per INSTANCE (renderer slot), so
-  // multi-select across bodies shows fully; several faces on one body show
-  // the most recent (renderer limitation, noted in u1-selection.md). The
-  // FaceSelector mirror carries the most recent for legacy readers.
+  // Every Face item highlights — SetFaceHighlight is additive per instance
+  // (multiple ranges draw as extra sub-draws), so multi-select shows fully
+  // both across bodies and on one body (the U1e projection-completeness
+  // item). The FaceSelector mirror carries the most recent for legacy
+  // readers.
   state.meshRenderer->ClearFaceHighlight();
   state.faceSelector->ClearSelection();
   const auto highlightFace = [&](const SelectionItem& it) {

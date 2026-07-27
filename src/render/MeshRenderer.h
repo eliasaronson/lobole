@@ -99,8 +99,12 @@ struct MeshInstance {
   // x = 0 leaves every existing material flat (unchanged appearance).
   glm::vec4 procParams = glm::vec4(0.0f);
 
-  // Face-highlight vertex ranges [start, end): x,y = selected; z,w = hovered
-  glm::uvec4 highlight = glm::uvec4(0);
+  // Face-highlight vertex ranges [start, end). Any number of selected
+  // ranges (Ctrl+multi-select, measure pairs — the first rides in the main
+  // draw's push constant, the rest are drawn as extra sub-draws); one hover
+  // range.
+  std::vector<glm::uvec2> selRanges;
+  glm::uvec2 hoverRange = glm::uvec2(0);
 
   bool visible = true;
 
@@ -171,7 +175,9 @@ public:
     SetInstanceProcedural(instanceId, pattern, grainScale, grainContrast);
   }
 
-  // Face highlighting (vertex ranges within the instance's asset)
+  // Face highlighting (vertex ranges within the instance's asset).
+  // ADDITIVE per call — the per-frame selection projection clears first
+  // (SyncSelectionHighlights), so several faces highlight together.
   void SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex,
                         uint32_t count);
   void SetFaceHover(uint32_t instanceId, uint32_t firstVertex, uint32_t count);
