@@ -505,10 +505,13 @@ void UpdateMeasureReadout(AppState& state);
 // remapping the displayed (already blended) name onto the blend's input body
 // first. meshId/edgeIndex are the displayed handles the geometric remap
 // anchors on. Commits internally (preview: mutate+regen; committed: one undo
-// step); sets an actionMsg for a blend-created edge instead.
+// step); sets an actionMsg for a blend-created edge instead. Seeding passes
+// regenerate=false: a regen between batched toggles would blend the body
+// mid-seed and strand the remaining pre-picked names (only the FIRST
+// pre-selected edge survived).
 void ApplyBlendEdgePick(AppState& state, FilletFeature& fil,
                         const ElementRef& displayed, uint32_t meshId,
-                        uint32_t edgeIndex);
+                        uint32_t edgeIndex, bool regenerate = true);
 
 // Appends edge highlight primitives while edge picking is active: every body
 // edge dimmed, the hovered edge and the blend's picked edges emphasized.

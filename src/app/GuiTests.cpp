@@ -2222,9 +2222,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 12.0) < 1e-3);
   };
 
-  // U7b select-first: a pre-selected edge seeds the fillet's edge list; the
-  // preview opens already blending it.
-  t = IM_REGISTER_TEST(engine, "slots", "fillet_seeded_from_selected_edge");
+  // U7b select-first: pre-selected edges seed the fillet's edge list — ALL
+  // of them, not just the first (a regen between batched toggles blended
+  // the body mid-seed and stranded the remaining pre-picked names).
+  t = IM_REGISTER_TEST(engine, "slots", "fillet_seeded_from_selected_edges");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuClick("File/New");
@@ -2233,10 +2234,13 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     const Body& body = Doc()->GetBodies()[0];
     const double before = body.shape.Volume();
-    const std::string* edgeName = body.elementMap.EdgeNameOf(0);
-    IM_CHECK(edgeName != nullptr);
-    s_App->selection.Replace({ui::SelectionItem::Kind::Edge, 0,
-                              ElementRef{body.createdBy, *edgeName}});
+    // Three distinct edges, Ctrl+click style (ordered toggles).
+    for (int e = 0; e < 3; e++) {
+      const std::string* edgeName = body.elementMap.EdgeNameOf(e);
+      IM_CHECK(edgeName != nullptr);
+      s_App->selection.Toggle({ui::SelectionItem::Kind::Edge, 0,
+                               ElementRef{body.createdBy, *edgeName}});
+    }
     ctx->Yield();
 
     ctx->SetRef("//##MainMenuBar");
@@ -2245,9 +2249,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     auto* fil = dynamic_cast<FilletFeature*>(
         Doc()->FindFeatureById(s_App->pendingFeatureId));
     IM_CHECK(fil != nullptr);
-    IM_CHECK_EQ(fil->edges.size(), (size_t)1);
+    IM_CHECK_EQ(fil->edges.size(), (size_t)3);
     fil->radius = 0.3;
     Doc()->Regenerate();
+    IM_CHECK(fil->GetError().empty());
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
     IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < before - 1e-6);

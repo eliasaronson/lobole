@@ -739,7 +739,8 @@ bool ToggleRefInList(std::vector<ElementRef>& v, const ElementRef& r) {
 // the pick's render handles (meshId/index) for the input-body remap; other
 // slots ignore them.
 bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
-                   const SelectionItem& item, uint32_t meshId, uint32_t index) {
+                   const SelectionItem& item, uint32_t meshId, uint32_t index,
+                   bool liveRegen = true) {
   switch (slot) {
   case PickSlot::ExtrudeEndFace:
     if (auto* ext = dynamic_cast<ExtrudeFeature*>(&f);
@@ -800,7 +801,7 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
     if (auto* fil = dynamic_cast<FilletFeature*>(&f);
         fil != nullptr && item.kind == SelectionItem::Kind::Edge) {
       // Toggles + commits internally (the remap needs its own error path).
-      ApplyBlendEdgePick(state, *fil, item.element, meshId, index);
+      ApplyBlendEdgePick(state, *fil, item.element, meshId, index, liveRegen);
       return false;
     }
     return false;
@@ -989,7 +990,12 @@ void SeedSlotsFromSelection(AppState& state, Feature& feature) {
       uint32_t mesh = 0, index = 0;
       if (item.kind == SelectionItem::Kind::Edge)
         ResolveEdgeItem(state, item, mesh, index);
-      if (ApplySlotItem(state, feature, spec.slot, item, mesh, index)) {
+      // liveRegen=false: ONE regen after the whole batch (below). A regen
+      // between blend-edge toggles would execute the blend mid-seed, and
+      // the remaining pre-picked names stop resolving on the now-blended
+      // body — only the first pre-selected edge survived.
+      if (ApplySlotItem(state, feature, spec.slot, item, mesh, index,
+                        /*liveRegen=*/false)) {
         changed = true;
         consumed[i] = true;
       } else if (item.kind == SelectionItem::Kind::Edge &&

@@ -2788,8 +2788,10 @@ std::optional<ElementRef> RefOnBlendInput(AppState& state,
 // Adds/removes one edge ref on the blend. A pending (previewing) feature is
 // edited directly — it isn't on the undo stack until accepted; an accepted
 // one goes through ModifyFeatureCommand so the change is one undo step.
-void ToggleBlendEdge(AppState& state, FilletFeature& fil,
-                     const ElementRef& ref) {
+// `regenerate=false` defers the pending-preview regen (seeding batches
+// several toggles and regenerates once at the end).
+void ToggleBlendEdge(AppState& state, FilletFeature& fil, const ElementRef& ref,
+                     bool regenerate = true) {
   if (!fil.edges.empty() && fil.edges[0].featureId != ref.featureId) {
     state.sketchEdit.actionMsg =
         "Pick edges on the same body (or accept and start another blend).";
@@ -2811,7 +2813,8 @@ void ToggleBlendEdge(AppState& state, FilletFeature& fil,
     fil.edges.push_back(ref);
   }
   if (pending) {
-    state.document->Regenerate();
+    if (regenerate)
+      state.document->Regenerate();
     return;
   }
   state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
@@ -2823,11 +2826,11 @@ void ToggleBlendEdge(AppState& state, FilletFeature& fil,
 
 void ApplyBlendEdgePick(AppState& state, FilletFeature& fil,
                         const ElementRef& displayed, uint32_t meshId,
-                        uint32_t edgeIndex) {
+                        uint32_t edgeIndex, bool regenerate) {
   if (!state.document)
     return;
   if (auto mapped = RefOnBlendInput(state, fil, displayed, meshId, edgeIndex)) {
-    ToggleBlendEdge(state, fil, *mapped);
+    ToggleBlendEdge(state, fil, *mapped, regenerate);
   } else {
     state.sketchEdit.actionMsg =
         "That edge was created by this blend - pick edges of the "
