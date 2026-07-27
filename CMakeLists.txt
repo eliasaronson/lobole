@@ -373,6 +373,7 @@ set(app_sources
     src/ui/AssemblyActions.cpp
     src/ui/SimulationActions.cpp
     src/ui/FeatureEditor.cpp
+    src/ui/ExprInput.cpp
     src/ui/PreviewFeature.cpp
     src/ui/PreviewHandles.cpp
     src/ui/Theme.cpp

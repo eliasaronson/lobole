@@ -1,4 +1,5 @@
 #include "ui/AppActions.h"
+#include "ui/ExprInput.h"     // expression-capable numeric fields
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
@@ -9,6 +10,7 @@
 #include <glm/trigonometric.hpp>  // degrees, radians
 
 #include <algorithm>
+#include <cfloat>
 #include <cstring>
 #include <string>
 
@@ -109,7 +111,8 @@ void DrawMatesSection(AppState& state) {
   // snapshots once per drag (IsItemActivated) and re-solves on change.
   auto angleDof = [&](const char* label) {
     float deg = glm::degrees(sel->rotation);
-    const bool changed = ImGui::DragFloat(label, &deg, 1.0f);
+    const bool changed =
+        ExprDragFloat(state, label, &deg, 1.0f, -FLT_MAX, FLT_MAX, "%.3f");
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed) {
@@ -118,7 +121,8 @@ void DrawMatesSection(AppState& state) {
     }
   };
   auto offsetDof = [&](const char* label) {
-    const bool changed = ImGui::DragFloat(label, &sel->offset, 0.1f);
+    const bool changed = ExprDragFloat(state, label, &sel->offset, 0.1f,
+                                       -FLT_MAX, FLT_MAX, "%.3f");
     if (ImGui::IsItemActivated())
       SnapshotAssembly(state);
     if (changed)

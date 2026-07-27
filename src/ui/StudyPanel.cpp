@@ -5,6 +5,7 @@
 #include "render/Camera.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/ExprInput.h"         // expression-capable numeric fields
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 #include <utility>
 
@@ -99,10 +100,10 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   // Pending magnitude/direction applied to the next placed force/pressure.
   if (sim.tool == SimulationState::Tool::Force ||
       sim.tool == SimulationState::Tool::Pressure) {
-    ImGui::InputDouble(sim.tool == SimulationState::Tool::Force
-                           ? "Magnitude (N)"
-                           : "Pressure (MPa)",
-                       &sim.pendingMagnitude, 0.0, 0.0, "%.1f");
+    ExprInputDouble(state,
+                    sim.tool == SimulationState::Tool::Force ? "Magnitude (N)"
+                                                             : "Pressure (MPa)",
+                    &sim.pendingMagnitude, "%.1f");
     if (sim.tool == SimulationState::Tool::Force) {
       float dir[3] = {(float)sim.pendingDirection.x,
                       (float)sim.pendingDirection.y,
@@ -377,7 +378,7 @@ void DrawStudyPanel(AppState& state) {
   // Enter — so typing a value then clicking Run applies it instead of
   // reverting.
   double meshSize = s->meshSize;
-  ImGui::InputDouble("Mesh size (mm, 0=auto)", &meshSize, 0.0, 0.0, "%.3g");
+  ExprInputDouble(state, "Mesh size (mm, 0=auto)", &meshSize, "%.3g");
   if (ImGui::IsItemDeactivatedAfterEdit() && meshSize != s->meshSize)
     ModifyStudy(state, s->id, "Set mesh size", [&](fem::Study& cs) {
       cs.meshSize = meshSize;
@@ -400,7 +401,7 @@ void DrawStudyPanel(AppState& state) {
         cs.volumeFractionExpr.clear();
       });
     double fr = s->filterRadius;
-    ImGui::InputDouble("Filter radius (mm, 0=auto)", &fr, 0.0, 0.0, "%.3g");
+    ExprInputDouble(state, "Filter radius (mm, 0=auto)", &fr, "%.3g");
     if (ImGui::IsItemDeactivatedAfterEdit() && fr != s->filterRadius)
       ModifyStudy(state, s->id, "Set filter radius", [&](fem::Study& cs) {
         cs.filterRadius = fr;

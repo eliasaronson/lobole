@@ -29,6 +29,7 @@
 #include "imgui.h"
 #include "imgui_internal.h" // GetCurrentWindowRead (LeftLabel auto-resize case)
 
+#include "ui/ExprInput.h"         // expression-capable numeric fields
 #include "ui/SelectionPipeline.h" // ParseRegionIds (U2 region slots)
 
 #include <algorithm>
@@ -106,12 +107,12 @@ float SmallButtonReserve(const char* text) {
          style.ItemSpacing.x;
 }
 
-bool DragDim(const char* label, double* value, float reserveRight = 0.0f) {
-  static const double kMin = 0.01, kMax = 1e6;
+bool DragDim(AppState& state, const char* label, double* value,
+             float reserveRight = 0.0f) {
   LeftLabel(label, reserveRight);
   const std::string id = std::string("##") + label;
-  return ImGui::DragScalar(id.c_str(), ImGuiDataType_Double, value, 0.05f,
-                           &kMin, &kMax, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+  // Expression-capable (Ctrl+click, type "width/2"): the shared widget.
+  return ExprDragDouble(state, id.c_str(), value, 0.05f, 0.01, 1e6, "%.3f");
 }
 
 // Labels-left drop-in for ImGui::Combo.
@@ -237,8 +238,9 @@ void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
   ImGui::PushID(label);
 
   if (exprText.empty()) {
-    HandleEdit(state, feature, DragDim(label, &value, SmallButtonReserve("fx")),
-               index, commit);
+    HandleEdit(state, feature,
+               DragDim(state, label, &value, SmallButtonReserve("fx")), index,
+               commit);
     ImGui::SameLine();
     if (ImGui::SmallButton("fx")) {
       nlohmann::json before = DocumentIO::FeatureToJson(feature);
@@ -1094,21 +1096,26 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   if (auto* box = dynamic_cast<BoxFeature*>(&feature)) {
     HandleEdit(state, feature, DragFloat3Row("Position", &box->position.x),
                index, commit);
-    HandleEdit(state, feature, DragDim("Width", &box->width), index, commit);
-    HandleEdit(state, feature, DragDim("Height", &box->height), index, commit);
-    HandleEdit(state, feature, DragDim("Depth", &box->depth), index, commit);
+    HandleEdit(state, feature, DragDim(state, "Width", &box->width), index,
+               commit);
+    HandleEdit(state, feature, DragDim(state, "Height", &box->height), index,
+               commit);
+    HandleEdit(state, feature, DragDim(state, "Depth", &box->depth), index,
+               commit);
   } else if (auto* sphere = dynamic_cast<SphereFeature*>(&feature)) {
     HandleEdit(state, feature, DragFloat3Row("Center", &sphere->center.x),
                index, commit);
-    HandleEdit(state, feature, DragDim("Radius", &sphere->radius), index,
+    HandleEdit(state, feature, DragDim(state, "Radius", &sphere->radius), index,
                commit);
   } else if (auto* cyl = dynamic_cast<CylinderFeature*>(&feature)) {
     HandleEdit(state, feature, DragFloat3Row("Center", &cyl->center.x), index,
                commit);
     HandleEdit(state, feature, DragFloat3Row("Direction", &cyl->direction.x),
                index, commit);
-    HandleEdit(state, feature, DragDim("Radius", &cyl->radius), index, commit);
-    HandleEdit(state, feature, DragDim("Height", &cyl->height), index, commit);
+    HandleEdit(state, feature, DragDim(state, "Radius", &cyl->radius), index,
+               commit);
+    HandleEdit(state, feature, DragDim(state, "Height", &cyl->height), index,
+               commit);
   } else if (auto* import = dynamic_cast<ImportFeature*>(&feature)) {
     ImGui::TextDisabled("File: %s", import->path.c_str());
   } else if (auto* sk = dynamic_cast<SketchFeature*>(&feature)) {
@@ -1250,15 +1257,15 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     if (!ho->through)
       ExprDim(state, feature, index, commit, "Depth", ho->depthExpr, ho->depth);
     if (ho->kind == HoleKind::Counterbore) {
-      HandleEdit(state, feature, DragDim("C'bore dia", &ho->cbDiameter), index,
-                 commit);
-      HandleEdit(state, feature, DragDim("C'bore depth", &ho->cbDepth), index,
-                 commit);
+      HandleEdit(state, feature, DragDim(state, "C'bore dia", &ho->cbDiameter),
+                 index, commit);
+      HandleEdit(state, feature, DragDim(state, "C'bore depth", &ho->cbDepth),
+                 index, commit);
     } else if (ho->kind == HoleKind::Countersink) {
-      HandleEdit(state, feature, DragDim("C'sink dia", &ho->csDiameter), index,
-                 commit);
-      HandleEdit(state, feature, DragDim("C'sink depth", &ho->csDepth), index,
-                 commit);
+      HandleEdit(state, feature, DragDim(state, "C'sink dia", &ho->csDiameter),
+                 index, commit);
+      HandleEdit(state, feature, DragDim(state, "C'sink depth", &ho->csDepth),
+                 index, commit);
     }
     if (Feature* src = state.document->FindFeatureById(ho->sketchId))
       ImGui::Text("Points: %s", src->GetName().c_str());
@@ -1422,7 +1429,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       LeftLabel("Pitch");
       ImGui::Text("%.3g (from table)", th->pitch);
     } else {
-      HandleEdit(state, feature, DragDim("Pitch", &th->pitch), index, commit);
+      HandleEdit(state, feature, DragDim(state, "Pitch", &th->pitch), index,
+                 commit);
     }
     {
       LeftLabel("Length");

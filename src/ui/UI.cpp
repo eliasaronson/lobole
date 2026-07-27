@@ -87,9 +87,14 @@ void DrawViewCube(AppState& state) {
   if (!state.camera || state.drawing)
     return;
   const float size = 108.0f;
+  // Sit ABOVE the bottom part-tabs bar (same height formula as DrawPartTabs
+  // — it overlays the viewport's bottom edge, and clicking it raised it
+  // over the cube).
+  const float tabsBarH = ImGui::GetFrameHeightWithSpacing() + 4.0f;
   ImGui::SetNextWindowPos(
       ImVec2(state.viewportPos.x + state.viewportSize.x - size - 8.0f,
-             state.viewportPos.y + state.viewportSize.y - size - 8.0f),
+             state.viewportPos.y + state.viewportSize.y - size - 8.0f -
+                 tabsBarH),
       ImGuiCond_Always);
   ImGui::SetNextWindowSize(ImVec2(size, size), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.0f);

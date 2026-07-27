@@ -1,6 +1,5 @@
 #include "ui/SketchToolbar.h"
 
-#include "core/Expression.h" // ExprDrag evaluation (v51 session fields)
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
@@ -8,6 +7,7 @@
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
 #include "ui/AppActions.h"
+#include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
@@ -16,7 +16,6 @@
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
-#include "imgui_internal.h" // TempInputIsActive/GetInputTextState (ExprDrag)
 
 #include <algorithm>
 #include <cmath>
@@ -75,55 +74,6 @@ const char* ConstraintKindName(sketch::ConstraintKind k) {
 } // namespace
 
 namespace {
-
-// A drag field with expression support: while the drag's Ctrl+click text
-// input is active, mirror its buffer; on commit, anything that isn't a
-// plain number evaluates against the document variables ("360/3",
-// "width/2") and the RESULT is written back. Session params are transient,
-// so the expression text itself isn't stored (unlike feature ExprDim).
-bool ExprDragFloat(AppState& state, const char* label, float* v, float speed,
-                   float vmin, float vmax, const char* fmt) {
-  bool changed = ImGui::DragFloat(label, v, speed, vmin, vmax, fmt);
-  const ImGuiID id = ImGui::GetItemID();
-  static ImGuiID trackId = 0;
-  static char buf[64];
-  if (ImGui::TempInputIsActive(id)) {
-    if (ImGuiInputTextState* st = ImGui::GetInputTextState(id)) {
-      // TextA is the live buffer (TextSrc is only valid inside InputText).
-      std::snprintf(buf, sizeof(buf), "%.*s", static_cast<int>(st->TextLen),
-                    st->TextA.Data);
-      trackId = id;
-    }
-  }
-  if (trackId == id && ImGui::IsItemDeactivatedAfterEdit()) {
-    trackId = 0;
-    char* end = nullptr;
-    std::strtod(buf, &end);
-    const bool plainNumber = end != nullptr && *end == '\0';
-    if (!plainNumber && state.document != nullptr) {
-      const auto r = ExpressionEngine::Default().EvaluateText(
-          buf, state.document->Symbols());
-      if (r.has_value()) {
-        *v = std::clamp(static_cast<float>(*r), vmin, vmax);
-        changed = true;
-      } else {
-        state.sketchEdit.actionMsg = r.error().message;
-      }
-    }
-  }
-  return changed;
-}
-
-bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
-                 int vmin, int vmax) {
-  float f = static_cast<float>(*v);
-  const bool changed =
-      ExprDragFloat(state, label, &f, speed, static_cast<float>(vmin),
-                    static_cast<float>(vmax), "%.0f");
-  if (changed)
-    *v = std::clamp(static_cast<int>(std::lround(f)), vmin, vmax);
-  return changed;
-}
 
 // Slot-style re-pick row for the op edit session (sources / mirror axis):
 // click arms the mode, shown in the accent color while armed.
@@ -241,18 +191,18 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   changed |= ExprDragInt(state, "Count", &count, 0.1f, 2, 1000);
   if (circular) {
     ImGui::SetNextItemWidth(140);
-    changed |= ImGui::DragFloat2("Centre", &vec.x, 0.05f);
+    changed |= ExprDragFloat2(state, "Centre", &vec.x, 0.05f);
     ImGui::SetNextItemWidth(90);
     changed |= ExprDragFloat(state, "Angle", &angleDeg, 0.5f, -360.0f, 360.0f,
                              "%.1f deg");
   } else {
     ImGui::SetNextItemWidth(140);
-    changed |= ImGui::DragFloat2("Step", &vec.x, 0.05f);
+    changed |= ExprDragFloat2(state, "Step", &vec.x, 0.05f);
     ImGui::SetNextItemWidth(90);
     changed |= ExprDragInt(state, "Rows", &count2, 0.1f, 1, 1000);
     if (count2 > 1) {
       ImGui::SetNextItemWidth(140);
-      changed |= ImGui::DragFloat2("Row step", &vec2.x, 0.05f);
+      changed |= ExprDragFloat2(state, "Row step", &vec2.x, 0.05f);
     }
   }
   if (changed) {
@@ -450,19 +400,20 @@ void DrawSketchToolWindow(AppState& state) {
     ExprDragInt(state, "Count##pat", &edit.patternCount, 0.1f, 2, 1000);
     if (!edit.patternCircular) {
       ImGui::SetNextItemWidth(140);
-      ImGui::DragFloat2("Step (dx,dy)##pat", &edit.patternStep.x, 0.05f);
+      ExprDragFloat2(state, "Step (dx,dy)##pat", &edit.patternStep.x, 0.05f);
       // Second grid direction (v50): rows = 1 keeps the pattern a row.
       ImGui::SetNextItemWidth(80);
       ExprDragInt(state, "Rows##pat", &edit.patternCount2, 0.1f, 1, 1000);
       if (edit.patternCount2 > 1) {
         ImGui::SetNextItemWidth(140);
-        ImGui::DragFloat2("Row step (dx,dy)##pat", &edit.patternStep2.x, 0.05f);
+        ExprDragFloat2(state, "Row step (dx,dy)##pat", &edit.patternStep2.x,
+                       0.05f);
       }
     } else {
       // Centre: type coordinates, or Pick a sketch point — picking an
       // entity point stores its REFERENCE so the pattern tracks it (v51).
       ImGui::SetNextItemWidth(140);
-      if (ImGui::DragFloat2("Centre##pat", &edit.patternCenter.x, 0.05f))
+      if (ExprDragFloat2(state, "Centre##pat", &edit.patternCenter.x, 0.05f))
         edit.patternCenterRef = {0, 0}; // typing detaches the reference
       ImGui::SameLine();
       if (edit.patternPickCenter)
