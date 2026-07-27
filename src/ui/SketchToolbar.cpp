@@ -426,6 +426,34 @@ static ExtrudeMode DefaultBodyMode(const AppState& state) {
              : ExtrudeMode::NewBody;
 }
 
+// U8b select-first: the loops containing any selected entity become the
+// feature's regions — select a profile, hit Extrude, only that region
+// fills. Nothing selected (or everything) = whole sketch (empty regions,
+// today's behavior).
+static std::vector<std::vector<uint32_t>>
+RegionsFromSelection(const SketchFeature& sketch,
+                     const std::vector<sketch::PointRef>& selected) {
+  if (selected.empty())
+    return {};
+  std::set<uint32_t> selIds;
+  for (const sketch::PointRef& r : selected)
+    selIds.insert(r.entity);
+  const std::vector<sketch::Loop> loops = sketch::BuildLoops(sketch.entities);
+  std::vector<std::vector<uint32_t>> regions;
+  for (const sketch::Loop& loop : loops) {
+    std::vector<uint32_t> ids = sketch::LoopEntityIds(loop);
+    for (uint32_t id : ids) {
+      if (selIds.count(id)) {
+        regions.push_back(std::move(ids));
+        break;
+      }
+    }
+  }
+  if (regions.empty() || regions.size() == loops.size())
+    return {}; // selection hit no loop / every loop: whole sketch
+  return regions;
+}
+
 void BeginSketchExtrude(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   SketchFeature* sketch = ResolveActiveSketch(state);
@@ -433,10 +461,12 @@ void BeginSketchExtrude(AppState& state) {
     return;
   const int n = static_cast<int>(state.document->FeatureCount()) + 1;
   const uint64_t sketchId = edit.activeSketchId;
+  auto regions = RegionsFromSelection(*sketch, edit.selected);
   edit = SketchEditState{}; // exit sketch mode so the solid + dialog show
-  BeginPreviewFeature(state, std::make_unique<ExtrudeFeature>(
-                                 "Extrude " + std::to_string(n), sketchId, 1.0,
-                                 DefaultBodyMode(state)));
+  auto ext = std::make_unique<ExtrudeFeature>(
+      "Extrude " + std::to_string(n), sketchId, 1.0, DefaultBodyMode(state));
+  ext->regions = std::move(regions);
+  BeginPreviewFeature(state, std::move(ext));
 }
 
 void BeginSketchRevolve(AppState& state) {
@@ -446,6 +476,7 @@ void BeginSketchRevolve(AppState& state) {
     return;
   const int n = static_cast<int>(state.document->FeatureCount()) + 1;
   const uint64_t sketchId = edit.activeSketchId;
+  auto regions = RegionsFromSelection(*sketch, edit.selected);
   // Default the axis to the sketch's sole construction line if it has
   // exactly one; else the global Y axis (changeable in the dialog).
   AxisRef axis;
@@ -468,6 +499,7 @@ void BeginSketchRevolve(AppState& state) {
   auto rev = std::make_unique<RevolveFeature>(
       "Revolve " + std::to_string(n), sketchId, 360.0, DefaultBodyMode(state));
   rev->axis = axis;
+  rev->regions = std::move(regions);
   BeginPreviewFeature(state, std::move(rev));
 }
 

@@ -711,6 +711,40 @@ void DrawDatumLabels(AppState& state) {
   }
 }
 
+void DrawPromptPill(AppState& state, float& y, const std::string& text,
+                    PromptPill style) {
+  if (text.empty())
+    return;
+  ImU32 bg = 0, fg = 0;
+  switch (style) {
+  case PromptPill::StatusGood:
+    bg = IM_COL32(24, 46, 32, 230);
+    fg = IM_COL32(140, 235, 165, 255);
+    break;
+  case PromptPill::Status:
+    bg = IM_COL32(26, 36, 52, 230);
+    fg = IM_COL32(150, 200, 255, 255);
+    break;
+  case PromptPill::Prompt:
+    bg = IM_COL32(28, 32, 40, 225);
+    fg = IM_COL32(226, 232, 240, 255);
+    break;
+  case PromptPill::Warning:
+    bg = IM_COL32(60, 44, 24, 235);
+    fg = IM_COL32(255, 205, 120, 255);
+    break;
+  }
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const float cx = state.viewportPos.x + state.viewportSize.x * 0.5f;
+  const float padX = 10.0f, padY = 5.0f;
+  const ImVec2 sz = ImGui::CalcTextSize(text.c_str());
+  const ImVec2 a(cx - sz.x * 0.5f - padX, y);
+  const ImVec2 b(cx + sz.x * 0.5f + padX, y + sz.y + 2.0f * padY);
+  dl->AddRectFilled(a, b, bg, 5.0f);
+  dl->AddText(ImVec2(cx - sz.x * 0.5f, y + padY), fg, text.c_str());
+  y = b.y + 4.0f;
+}
+
 void DrawElementNameOverlay(AppState& state) {
   if (!state.showElementNames || !state.document || !state.faceSelector)
     return;

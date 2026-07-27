@@ -2336,35 +2336,17 @@ void DrawToolPrompt(AppState& state) {
   if (!edit.IsEditing())
     return;
   const ToolPrompt tp = SketchToolPrompt(edit);
-  const bool hasErr = !edit.actionMsg.empty();
-
-  ImDrawList* dl = ImGui::GetForegroundDrawList();
-  const float cx = state.viewportPos.x + state.viewportSize.x * 0.5f;
   float y = state.viewportPos.y + 34.0f; // clear of the docked panel tab bar
-  const float padX = 10.0f, padY = 5.0f;
-  auto pill = [&](const std::string& text, ImU32 bg, ImU32 fg) {
-    if (text.empty())
-      return;
-    const ImVec2 sz = ImGui::CalcTextSize(text.c_str());
-    const ImVec2 a(cx - sz.x * 0.5f - padX, y);
-    const ImVec2 b(cx + sz.x * 0.5f + padX, y + sz.y + 2.0f * padY);
-    dl->AddRectFilled(a, b, bg, 5.0f);
-    dl->AddText(ImVec2(cx - sz.x * 0.5f, y + padY), fg, text.c_str());
-    y = b.y + 4.0f;
-  };
   // Constraint status first — always visible while sketching, the "am I
-  // done constraining?" answer at a glance.
+  // done constraining?" answer at a glance. One shared pill renderer with
+  // the model-space prompt bar (U8b).
   if (edit.dof == 0)
-    pill("Fully defined", IM_COL32(24, 46, 32, 230),
-         IM_COL32(140, 235, 165, 255));
+    DrawPromptPill(state, y, "Fully defined", PromptPill::StatusGood);
   else if (edit.dof > 0)
-    pill(std::to_string(edit.dof) + " degrees of freedom",
-         IM_COL32(26, 36, 52, 230), IM_COL32(150, 200, 255, 255));
-  if (!tp.text.empty())
-    pill(tp.text, IM_COL32(28, 32, 40, 225), IM_COL32(226, 232, 240, 255));
-  if (hasErr)
-    pill(edit.actionMsg, IM_COL32(60, 44, 24, 235),
-         IM_COL32(255, 205, 120, 255));
+    DrawPromptPill(state, y, std::to_string(edit.dof) + " degrees of freedom",
+                   PromptPill::Status);
+  DrawPromptPill(state, y, tp.text, PromptPill::Prompt);
+  DrawPromptPill(state, y, edit.actionMsg, PromptPill::Warning);
 }
 
 namespace {

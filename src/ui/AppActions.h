@@ -521,6 +521,18 @@ void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out);
 void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
                     const glm::vec4& color, std::vector<PrimVertex>& out);
 
+// One prompt-pill renderer (U8b) for the top-center stack — the sketch and
+// model prompt bars share it. Draws `text` as a rounded pill centered over
+// the viewport at stack position `y`, advancing y for the next pill.
+enum class PromptPill {
+  StatusGood, // green: "Fully defined"
+  Status,     // blue: DOF count etc.
+  Prompt,     // neutral: what the armed tool expects
+  Warning     // amber: actionMsg feedback
+};
+void DrawPromptPill(AppState& state, float& y, const std::string& text,
+                    PromptPill style);
+
 // The features in [0, beforeIndex) that produce a body (primitives, imports,
 // extrude/revolve in NewBody mode, and earlier booleans), as {featureId,
 // name}. Backs the boolean operand combos and the "Boolean" menu gate.

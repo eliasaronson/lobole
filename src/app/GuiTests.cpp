@@ -2258,6 +2258,37 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
   // U2: region picking — arm the extrude's Profiles slot and toggle one of
   // a two-region sketch's profiles by clicking inside it in the viewport.
+  // U8b select-first in sketch mode: a selected profile seeds the extrude's
+  // regions — only that loop fills.
+  t = IM_REGISTER_TEST(engine, "sketch", "selection_seeds_extrude_regions");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    const uint32_t c1 = sk->AddEntity(sketch::Circle{{0, 0}, 1.0});
+    sk->AddEntity(sketch::Circle{{5, 0}, 1.0});
+    Doc()->Regenerate();
+    ctx->Yield();
+
+    // Select circle 1, then Extrude from the sketch toolbar.
+    s_App->sketchEdit.selected.push_back({c1, 0});
+    ToolbarClick(ctx, "###tb_sk_extrude");
+    ctx->Yield();
+    auto* ext =
+        dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->regions.size(), (size_t)1);
+    IM_CHECK(ext->regions[0] == std::vector<uint32_t>{c1});
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    // One cylinder's volume, not two (r=1, default distance 1 → pi).
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - M_PI) < 1e-2);
+  };
+
   t = IM_REGISTER_TEST(engine, "region", "pick_one_of_two_regions");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
