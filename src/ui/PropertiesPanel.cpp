@@ -63,38 +63,6 @@ void DrawMassPropertiesSection(AppState& state) {
 }
 } // namespace
 
-// Measure tool readout (C3): live while the tool is armed. Measured elements
-// stay listed + highlighted; x removes one, Esc clears all. Shared by the
-// part Properties panel and the assembly Occurrence panel — on assemblies
-// each row is prefixed with the element's occurrence.
-void DrawMeasureSection(AppState& state) {
-  if (!state.measure.active)
-    return;
-  ImGui::SeparatorText("Measure");
-  ImGui::TextDisabled("Pick faces/edges - click again to deselect. Esc exits.");
-  for (size_t i = 0; i < state.measure.picked.size(); i++) {
-    const auto& e = state.measure.picked[i];
-    ImGui::PushID(static_cast<int>(i));
-    if (ImGui::SmallButton("x")) {
-      state.measure.picked.erase(state.measure.picked.begin() +
-                                 static_cast<long>(i));
-      UpdateMeasureReadout(state);
-      ImGui::PopID();
-      break;
-    }
-    ImGui::SameLine();
-    std::string where;
-    if (e.occurrenceId != 0 && state.assembly)
-      if (const Occurrence* occ = state.assembly->FindById(e.occurrenceId))
-        where = occ->name + " / ";
-    ImGui::TextWrapped("%s%s %s", where.c_str(), e.isEdge ? "Edge" : "Face",
-                       e.ref.name.c_str());
-    ImGui::PopID();
-  }
-  if (!state.measure.readout.empty())
-    ImGui::TextWrapped("%s", state.measure.readout.c_str());
-}
-
 void DrawPropertiesPanel(AppState& state) {
   ImGui::Begin("Properties");
 
@@ -131,8 +99,6 @@ void DrawPropertiesPanel(AppState& state) {
       ImGui::TextDisabled("No face selected");
     }
   }
-
-  DrawMeasureSection(state);
 
   DrawMassPropertiesSection(state);
 

@@ -574,12 +574,8 @@ void DrawDimsSection(AppState& state) {
   ImGui::Separator();
 
   if (state.dimTool.active) {
-    const int need = NeededRefs(state.dimTool.kind);
-    ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f),
-                       "Pick edge %d of %d  (Esc to cancel)",
-                       static_cast<int>(state.dimTool.refs.size()) + 1, need);
-    if (ImGui::Button("Cancel"))
-      state.dimTool = AppState::DimTool{};
+    // The in-progress session (refs list, cancel) lives in the Tool window.
+    ImGui::TextDisabled("Picking dimension refs…");
   } else {
     struct Tool {
       const char* label;

@@ -2,7 +2,6 @@
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
-#include "ui/PropertiesPanel.h" // DrawMeasureSection (shared readout)
 
 #include "imgui.h"
 
@@ -467,7 +466,6 @@ void DrawOccurrencePanel(AppState& state) {
     }
   }
 
-  DrawMeasureSection(state);
   DrawMatesSection(state);
   DrawConfigsSection(state);
   DrawExplodedSection(state);

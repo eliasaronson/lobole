@@ -144,8 +144,15 @@ dock-home enforcement and Reset Layout update accordingly.
 | Rib / Thread | Body / Face (1) |
 | Mate | Connector A (1) · Connector B (1) |
 | Measure | Elements (Face\|Edge, multi; existing toggle+readout logic) |
-| Sim loads / keep | Faces (Face, multi) + load params; accept applies |
+| Sim loads / keep | stays in the Studies panel — see U7d note |
 | Drawing dims | Refs (2D curve refs, arity from dim kind) — gains per-row x |
+
+**U7d scope call (implementation):** sim loads/keep keep their per-click
+apply flow armed from the Studies panel. Simulation is a mode workspace
+(like sketch mode): all study parameters live in that panel, and moving
+only the BC pick into the floating window would split the FEM UI across
+two surfaces. The picks already flow through the one armed pipeline
+(U1c), which was the uniformity that mattered.
 
 ## Out of scope
 
@@ -170,9 +177,9 @@ the dim tool's session. Box/lasso select.
   session; private picker + ViewportInput bypass delete; mate *edit*
   re-opens the session. *Tests: existing mate gui flows green through the
   pipeline; edit-a-mate case.*
-- **U7d — stragglers.** Measure, sim loads/keep, drawing dims become
-  sessions; their arming boilerplate deletes. *Tests: existing measure/BC/
-  dim cases green; dim ref removal case.*
+- **U7d — stragglers.** Measure and drawing dims become sessions (sim
+  stays in its workspace panel — scope call above); dims gain per-ref
+  removal. *Tests: existing measure/BC/dim cases green.*
 - **U7e — right panel removal.** Relocations per the table; dock layout
   drops the right node; committed-feature edit via double-click/context
   menu everywhere. *Tests: no-overlap layout case updated; tree

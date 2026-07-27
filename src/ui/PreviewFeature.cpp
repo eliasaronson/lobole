@@ -2,7 +2,9 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
-#include "ui/AppActions.h" // SelectFeature
+#include "core/Occurrence.h"              // occurrence names (measure rows)
+#include "core/drawing/DrawingDocument.h" // DrawingDimKind (dim session)
+#include "ui/AppActions.h"                // SelectFeature
 #include "ui/FeatureEditor.h"
 
 #include "IconsFontAwesome6.h"
@@ -85,6 +87,75 @@ void BeginToolWindowFrame(AppState& state, const std::string& title) {
   ImGui::Begin((title + "###ToolWindow").c_str(), nullptr, flags);
 }
 
+namespace {
+
+// Measure session (U7d): the picked-element list + readout, previously a
+// Properties/Occurrence panel section. Rows keep the per-item "x".
+void DrawMeasureToolWindow(AppState& state) {
+  BeginToolWindowFrame(state, "Measure");
+  ImGui::TextDisabled("Pick faces/edges - click again to deselect. Esc exits.");
+  for (size_t i = 0; i < state.measure.picked.size(); i++) {
+    const auto& e = state.measure.picked[i];
+    ImGui::PushID(static_cast<int>(i));
+    if (ImGui::SmallButton("x")) {
+      state.measure.picked.erase(state.measure.picked.begin() +
+                                 static_cast<long>(i));
+      UpdateMeasureReadout(state);
+      ImGui::PopID();
+      break;
+    }
+    ImGui::SameLine();
+    std::string where;
+    if (e.occurrenceId != 0 && state.assembly)
+      if (const Occurrence* occ = state.assembly->FindById(e.occurrenceId))
+        where = occ->name + " / ";
+    ImGui::TextWrapped("%s%s %s", where.c_str(), e.isEdge ? "Edge" : "Face",
+                       e.ref.name.c_str());
+    ImGui::PopID();
+  }
+  if (!state.measure.readout.empty())
+    ImGui::TextWrapped("%s", state.measure.readout.c_str());
+  ImGui::Separator();
+  if (ImGui::Button("Done"))
+    state.measure = MeasureState{};
+  ImGui::End();
+}
+
+// Drawing-dimension session (U7d): armed kind, the refs picked so far (each
+// removable — was accumulate-only), cancel. The 2D pick loop itself stays in
+// HandleDimTool (sheet space; the 3D pipeline doesn't run there).
+void DrawDimToolWindow(AppState& state) {
+  auto& tool = state.dimTool;
+  const int need = (tool.kind == DrawingDimKind::Radius ||
+                    tool.kind == DrawingDimKind::Diameter)
+                       ? 1
+                       : 2;
+  BeginToolWindowFrame(state, DrawingDimKindToString(tool.kind));
+  ImGui::TextDisabled("Pick edge %d of %d in one view  (Esc cancels)",
+                      static_cast<int>(tool.refs.size()) + 1, need);
+  for (size_t i = 0; i < tool.refs.size(); i++) {
+    ImGui::PushID(static_cast<int>(i));
+    if (ImGui::SmallButton("x")) {
+      tool.refs.erase(tool.refs.begin() + static_cast<long>(i));
+      if (tool.refs.empty())
+        tool.viewId = 0; // no refs left: the next pick may fix any view
+      ImGui::PopID();
+      break;
+    }
+    ImGui::SameLine();
+    const ProjRef& r = tool.refs[i];
+    ImGui::TextUnformatted(r.edge.IsSet() ? r.edge.name.c_str()
+                                          : r.silFace.name.c_str());
+    ImGui::PopID();
+  }
+  ImGui::Separator();
+  if (ImGui::Button("Cancel"))
+    tool = AppState::DimTool{};
+  ImGui::End();
+}
+
+} // namespace
+
 void DrawToolWindow(AppState& state) {
   // Mate sessions (assembly tabs) share the window; drawn by the panel
   // module that owns the mate helpers.
@@ -92,10 +163,16 @@ void DrawToolWindow(AppState& state) {
     DrawMateToolWindow(state);
     return;
   }
+  if (state.drawing && state.dimTool.active) {
+    DrawDimToolWindow(state);
+    return;
+  }
   size_t idx = 0;
   Feature* feature = ResolvePendingFeature(state, &idx);
   if (!feature) {
     state.pendingFeatureId = 0;
+    if (state.measure.active)
+      DrawMeasureToolWindow(state); // measure never coexists with a preview
     return;
   }
 
