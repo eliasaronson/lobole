@@ -639,6 +639,11 @@ struct DerivedOp {
                        // LinkedCopy: the paste offset.
   double scalar = 0.0; // Circular: step angle (radians). Linear: unused.
   int count = 2;       // total instances including the seed (count-1 generated)
+  // Linear only (v50): second grid direction. count2 = 1 keeps the pattern
+  // 1D; instances flatten row-major (k = row*count + col), so the Inst
+  // records need no new fields.
+  glm::vec2 vec2{0.0f};
+  int count2 = 1;
   uint64_t sourceSketchId = 0; // LinkedCopy: cross-sketch source (0 = here)
   struct Inst {
     uint32_t sourceId = 0;
@@ -789,8 +794,12 @@ public:
   // (radians) about `center`. `link=false` bakes unlinked copies and returns
   // their ids; `link=true` records a DerivedOp (regenerates on source edits, id
   // stable across count changes) and returns the generated ids.
+  // step2/count2 = the optional second grid direction (v50); count2 = 1
+  // keeps it a 1D row.
   std::vector<uint32_t> AddLinearPattern(const std::vector<uint32_t>& sourceIds,
-                                         glm::vec2 step, int count, bool link);
+                                         glm::vec2 step, int count, bool link,
+                                         glm::vec2 step2 = {0.0f, 0.0f},
+                                         int count2 = 1);
   std::vector<uint32_t>
   AddCircularPattern(const std::vector<uint32_t>& sourceIds, glm::vec2 center,
                      double stepAngle, int count, bool link);

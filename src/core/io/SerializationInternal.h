@@ -16,7 +16,8 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 49; // v49: sketch reference images (underlays)
+inline constexpr int kVersion = 50; // v50: 2D linear sketch patterns
+                                    // (v49: sketch reference images)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

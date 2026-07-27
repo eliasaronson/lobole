@@ -1105,18 +1105,28 @@ void SketchFeature::RegenerateDerived() {
     auto transform = [&](const sketch::Entity& src, int k) -> sketch::Entity {
       if (op.kind == sketch::DerivedKind::LinkedCopy)
         return sketch::TranslateEntity(src, op.vec);
-      if (op.kind == sketch::DerivedKind::LinearPattern)
-        return sketch::TranslateEntity(src, static_cast<float>(k) * op.vec);
+      if (op.kind == sketch::DerivedKind::LinearPattern) {
+        // 2D grid (v50): the flat instance index k unfolds row-major.
+        // count2 == 1 degenerates to the old 1D behavior (k * vec).
+        const int col = k % op.count;
+        const int row = k / op.count;
+        return sketch::TranslateEntity(src,
+                                       static_cast<float>(col) * op.vec +
+                                           static_cast<float>(row) * op.vec2);
+      }
       return sketch::RotateEntity(src, op.vec,
                                   static_cast<double>(k) * op.scalar);
     };
+    const int total = op.kind == sketch::DerivedKind::LinearPattern
+                          ? op.count * std::max(1, op.count2)
+                          : op.count;
     std::vector<sketch::DerivedOp::Inst> keep;
     for (uint32_t sid : op.sourceIds) {
       const size_t si = IndexOfEntity(sid);
       if (si == std::numeric_limits<size_t>::max())
         continue; // source removed → its instances get pruned below
       const sketch::Entity srcCopy = entities[si]; // copy before any AddEntity
-      for (int k = 1; k < op.count; k++) {
+      for (int k = 1; k < total; k++) {
         uint32_t genId = 0;
         for (const auto& in : op.instances)
           if (in.sourceId == sid && in.k == k) {
@@ -1195,8 +1205,10 @@ void SketchFeature::BreakLink(size_t opIndex) {
 
 std::vector<uint32_t>
 SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
-                                glm::vec2 step, int count, bool link) {
+                                glm::vec2 step, int count, bool link,
+                                glm::vec2 step2, int count2) {
   std::vector<uint32_t> gen;
+  count2 = std::max(1, count2);
   if (count < 2 || sourceIds.empty())
     return gen;
   if (!link) {
@@ -1205,9 +1217,15 @@ SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
       if (si == std::numeric_limits<size_t>::max())
         continue;
       const sketch::Entity srcCopy = entities[si];
-      for (int k = 1; k < count; k++)
-        gen.push_back(AddEntity(
-            sketch::TranslateEntity(srcCopy, static_cast<float>(k) * step)));
+      // Row-major grid, skipping the seed cell (0,0).
+      for (int row = 0; row < count2; row++)
+        for (int col = 0; col < count; col++) {
+          if (row == 0 && col == 0)
+            continue;
+          gen.push_back(AddEntity(sketch::TranslateEntity(
+              srcCopy, static_cast<float>(col) * step +
+                           static_cast<float>(row) * step2)));
+        }
     }
     return gen;
   }
@@ -1216,6 +1234,8 @@ SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
   op.sourceIds = sourceIds;
   op.vec = step;
   op.count = count;
+  op.vec2 = step2;
+  op.count2 = count2;
   derived.push_back(op);
   RegenerateDerived();
   for (const auto& in : derived.back().instances)

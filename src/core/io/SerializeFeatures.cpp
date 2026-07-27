@@ -253,6 +253,10 @@ json DerivedOpToJson(const sketch::DerivedOp& op) {
             {"scalar", op.scalar},
             {"count", op.count},
             {"instances", insts}};
+  if (op.count2 > 1) { // v50: 2D linear grid; omitted = 1D (back-compat)
+    j["vec2"] = Vec2ToJson(op.vec2);
+    j["count2"] = op.count2;
+  }
   if (op.sourceSketchId != 0)
     j["source_sketch_id"] = op.sourceSketchId;
   return j;
@@ -270,6 +274,9 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
   op.vec = Vec2FromJson(j.at("vec"));
   op.scalar = j.at("scalar").get<double>();
   op.count = j.at("count").get<int>();
+  if (j.contains("vec2")) // v50: 2D linear grid
+    op.vec2 = Vec2FromJson(j.at("vec2"));
+  op.count2 = j.value("count2", 1);
   for (const auto& in : j.at("instances"))
     op.instances.push_back({in.at("source").get<uint32_t>(),
                             in.at("k").get<int>(),

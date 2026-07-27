@@ -145,6 +145,40 @@ TEST_CASE("Linear pattern bakes stepped copies", "[sketch][pattern]") {
   CHECK_THAT(c2.a.x, WithinAbs(10.0f, 1e-5f));
 }
 
+TEST_CASE("2D linear pattern fills a grid (v50)", "[sketch][pattern]") {
+  // Unlinked bake: 2 x 3 grid = 5 copies beyond the seed.
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t p = sk.AddEntity(sketch::Point{{0, 0}});
+  auto gen = sk.AddLinearPattern({p}, {2, 0}, /*count=*/2, /*link=*/false,
+                                 /*step2=*/{0, 3}, /*count2=*/3);
+  REQUIRE(gen.size() == 5);
+  CHECK(sk.entities.size() == 6);
+
+  // Linked: same grid as a derived op; the k index unfolds row-major.
+  SketchFeature sk2("S2", SketchPlane(PlaneType::XY));
+  uint32_t q = sk2.AddEntity(sketch::Point{{0, 0}});
+  auto gen2 = sk2.AddLinearPattern({q}, {2, 0}, 2, /*link=*/true, {0, 3}, 3);
+  REQUIRE(gen2.size() == 5);
+  REQUIRE(sk2.derived.size() == 1);
+  CHECK(sk2.derived[0].count2 == 3);
+  // k=1 → (2,0); k=2 → row 1 col 0 → (0,3); k=3 → (2,3); k=5 → (2,6).
+  const auto at = [&](uint32_t id) {
+    return std::get<sketch::Point>(sk2.entities[sk2.IndexOfEntity(id)]).p;
+  };
+  CHECK_THAT(at(gen2[0]).x, WithinAbs(2.0f, 1e-5f));
+  CHECK_THAT(at(gen2[0]).y, WithinAbs(0.0f, 1e-5f));
+  CHECK_THAT(at(gen2[1]).x, WithinAbs(0.0f, 1e-5f));
+  CHECK_THAT(at(gen2[1]).y, WithinAbs(3.0f, 1e-5f));
+  CHECK_THAT(at(gen2[4]).x, WithinAbs(2.0f, 1e-5f));
+  CHECK_THAT(at(gen2[4]).y, WithinAbs(6.0f, 1e-5f));
+
+  // Shrinking the second direction prunes id-stably.
+  sk2.derived[0].count2 = 1;
+  sk2.RegenerateDerived();
+  CHECK(sk2.entities.size() == 2); // seed + the k=1 instance
+  CHECK(sk2.IndexOfEntity(gen2[0]) != SIZE_MAX);
+}
+
 TEST_CASE("Circular pattern bakes rotated copies", "[sketch][pattern]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t p = sk.AddEntity(sketch::Point{{1, 0}});
