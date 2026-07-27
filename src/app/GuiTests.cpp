@@ -2183,6 +2183,74 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(sawUnion);
   };
 
+  // U7b select-first: two pre-selected bodies seed Boolean's target/tool in
+  // pick order — the session opens fully satisfied (nothing armed), Accept
+  // commits without a single extra pick.
+  t = IM_REGISTER_TEST(engine, "slots", "boolean_seeded_from_preselection");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "A", glm::vec3(-1.0f, 0.0f, 0.0f), 2.0, 2.0, 2.0));
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "B", glm::vec3(0.0f, 0.0f, 0.0f), 2.0, 2.0, 2.0));
+    Doc()->Regenerate();
+    ctx->Yield();
+    const uint64_t aId = Doc()->GetFeature(0)->GetId();
+    const uint64_t bId = Doc()->GetFeature(1)->GetId();
+    // Pick order matters: A first (target), B second (tool).
+    s_App->selection.Replace({ui::SelectionItem::Kind::Body, aId, {}});
+    s_App->selection.Toggle({ui::SelectionItem::Kind::Body, bId, {}});
+    ctx->Yield();
+
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarClick(ctx, "###tb_boolean");
+    ctx->Yield();
+    auto* boo = dynamic_cast<BooleanFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(boo != nullptr);
+    IM_CHECK_EQ(boo->targetId, aId);
+    IM_CHECK_EQ(boo->toolId, bId);
+    IM_CHECK(!s_App->slotPick.Active()); // fully seeded: nothing armed
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    // Union of two 2x2x2 boxes overlapping 1x2x2: 8 + 8 - 4.
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 12.0) < 1e-3);
+  };
+
+  // U7b select-first: a pre-selected edge seeds the fillet's edge list; the
+  // preview opens already blending it.
+  t = IM_REGISTER_TEST(engine, "slots", "fillet_seeded_from_selected_edge");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const Body& body = Doc()->GetBodies()[0];
+    const double before = body.shape.Volume();
+    const std::string* edgeName = body.elementMap.EdgeNameOf(0);
+    IM_CHECK(edgeName != nullptr);
+    s_App->selection.Replace({ui::SelectionItem::Kind::Edge, 0,
+                              ElementRef{body.createdBy, *edgeName}});
+    ctx->Yield();
+
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarClick(ctx, "###tb_fillet");
+    ctx->Yield();
+    auto* fil = dynamic_cast<FilletFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(fil != nullptr);
+    IM_CHECK_EQ(fil->edges.size(), (size_t)1);
+    fil->radius = 0.3;
+    Doc()->Regenerate();
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < before - 1e-6);
+  };
+
   // U2: region picking — arm the extrude's Profiles slot and toggle one of
   // a two-region sketch's profiles by clicking inside it in the viewport.
   t = IM_REGISTER_TEST(engine, "region", "pick_one_of_two_regions");

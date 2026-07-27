@@ -838,7 +838,8 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
   if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature)) {
     std::vector<SlotSpec> specs = {
         {PickSlot::ExtrudeRegions, "Profiles", kRegion, true,
-         "Click sketch regions to extrude (again removes; none = all)"}};
+         "Click sketch regions to extrude (again removes; none = all)",
+         /*required=*/false}};
     if (ext->endMode == ExtrudeEnd::UpToFace) {
       specs.push_back({PickSlot::ExtrudeEndFace, "Target face", kFace, false,
                        "Pick the face the extrude ends at"});
@@ -847,7 +848,8 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
   }
   if (dynamic_cast<const RevolveFeature*>(&feature) != nullptr) {
     return {{PickSlot::RevolveRegions, "Profiles", kRegion, true,
-             "Click sketch regions to revolve (again removes; none = all)"}};
+             "Click sketch regions to revolve (again removes; none = all)",
+             /*required=*/false}};
   }
   if (dynamic_cast<const BooleanFeature*>(&feature) != nullptr) {
     return {
@@ -863,15 +865,16 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
     return {
         {PickSlot::ShellBody, "Body", kBody, false, "Pick the body to hollow"},
         {PickSlot::ShellOpenFaces, "Open faces", kFace, true,
-         "Click faces to open (click again to remove)"}};
+         "Click faces to open (click again to remove)", /*required=*/false}};
   }
   if (dynamic_cast<const DraftFeature*>(&feature) != nullptr) {
     return {{PickSlot::DraftFaces, "Faces", kFace, true,
              "Click side faces to taper (click again to remove)"}};
   }
   if (dynamic_cast<const RibFeature*>(&feature) != nullptr) {
+    // Optional: bodyId 0 = nearest overlapping body.
     return {{PickSlot::RibBody, "Body", kBody, false,
-             "Pick the body the rib attaches to"}};
+             "Pick the body the rib attaches to", /*required=*/false}};
   }
   if (dynamic_cast<const ThreadFeature*>(&feature) != nullptr) {
     return {{PickSlot::ThreadFace, "Face", kFace, false,
@@ -903,6 +906,105 @@ uint64_t ArmedBlendFeatureId(const AppState& state) {
              : 0;
 }
 
+bool SlotFilled(const Feature& feature, PickSlot slot) {
+  switch (slot) {
+  case PickSlot::ExtrudeEndFace: {
+    auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature);
+    return ext != nullptr && ext->endTarget.IsSet();
+  }
+  case PickSlot::BooleanTarget:
+  case PickSlot::BooleanTool: {
+    auto* boo = dynamic_cast<const BooleanFeature*>(&feature);
+    return boo != nullptr &&
+           (slot == PickSlot::BooleanTarget ? boo->targetId : boo->toolId) != 0;
+  }
+  case PickSlot::PatternSource: {
+    auto* pat = dynamic_cast<const PatternFeature*>(&feature);
+    return pat != nullptr && pat->sourceId != 0;
+  }
+  case PickSlot::ShellBody: {
+    auto* sh = dynamic_cast<const ShellFeature*>(&feature);
+    return sh != nullptr && sh->bodyId != 0;
+  }
+  case PickSlot::ShellOpenFaces: {
+    auto* sh = dynamic_cast<const ShellFeature*>(&feature);
+    return sh != nullptr && !sh->openFaces.empty();
+  }
+  case PickSlot::DraftFaces: {
+    auto* dr = dynamic_cast<const DraftFeature*>(&feature);
+    return dr != nullptr && !dr->faces.empty();
+  }
+  case PickSlot::ExtrudeRegions: {
+    auto* ext = dynamic_cast<const ExtrudeFeature*>(&feature);
+    return ext != nullptr && !ext->regions.empty();
+  }
+  case PickSlot::RevolveRegions: {
+    auto* rev = dynamic_cast<const RevolveFeature*>(&feature);
+    return rev != nullptr && !rev->regions.empty();
+  }
+  case PickSlot::RibBody: {
+    auto* rb = dynamic_cast<const RibFeature*>(&feature);
+    return rb != nullptr && rb->bodyId != 0;
+  }
+  case PickSlot::ThreadFace: {
+    auto* th = dynamic_cast<const ThreadFeature*>(&feature);
+    return th != nullptr && !th->face.name.empty();
+  }
+  case PickSlot::BlendEdges: {
+    auto* fil = dynamic_cast<const FilletFeature*>(&feature);
+    return fil != nullptr && !fil->edges.empty();
+  }
+  }
+  return false;
+}
+
+void ArmNextUnfilledSlot(AppState& state, const Feature& feature) {
+  for (const SlotSpec& spec : SlotSpecsFor(feature)) {
+    if (spec.required && !SlotFilled(feature, spec.slot)) {
+      ArmSlot(state, feature, spec.slot);
+      return;
+    }
+  }
+  // Everything required is satisfied; disarm (unless a slot of ANOTHER
+  // feature is armed — don't steal, though in practice sessions are sole).
+  if (state.slotPick.featureId == feature.GetId())
+    state.slotPick = {};
+}
+
+void SeedSlotsFromSelection(AppState& state, Feature& feature) {
+  if (state.selection.Empty())
+    return;
+  std::vector<bool> consumed(state.selection.items.size(), false);
+  bool changed = false;
+  for (const SlotSpec& spec : SlotSpecsFor(feature)) {
+    bool single = !spec.multi;
+    for (size_t i = 0; i < state.selection.items.size(); i++) {
+      if (consumed[i])
+        continue;
+      const SelectionItem& item = state.selection.items[i];
+      if ((spec.kinds & SlotKind(item.kind)) == 0)
+        continue;
+      // Resolve the item's render handles when they exist — the blend edge
+      // remap prefers anchoring on the displayed polyline.
+      uint32_t mesh = 0, index = 0;
+      if (item.kind == SelectionItem::Kind::Edge)
+        ResolveEdgeItem(state, item, mesh, index);
+      if (ApplySlotItem(state, feature, spec.slot, item, mesh, index)) {
+        changed = true;
+        consumed[i] = true;
+      } else if (item.kind == SelectionItem::Kind::Edge &&
+                 spec.slot == PickSlot::BlendEdges) {
+        consumed[i] = true; // blend edges commit internally
+        changed = true;
+      }
+      if (single)
+        break; // one item per single slot; the rest seed later slots
+    }
+  }
+  if (changed && state.document)
+    state.document->Regenerate();
+}
+
 void SlotPickClicked(AppState& state, const SelectionItem& item,
                      uint32_t meshId, uint32_t index) {
   if (!state.slotPick.Active() || !state.document)
@@ -920,8 +1022,11 @@ void SlotPickClicked(AppState& state, const SelectionItem& item,
                     meshId, index)) {
     CommitDiscrete(state, *f, before, featureIndex, commit);
   }
+  // Auto-advance (U7b): a filled single slot hands off to the next unfilled
+  // required one (boolean: target pick arms tool — pick, pick, done); multi
+  // slots stay armed until the user moves on.
   if (!state.slotPick.multi)
-    state.slotPick = {};
+    ArmNextUnfilledSlot(state, *f);
 }
 
 void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,

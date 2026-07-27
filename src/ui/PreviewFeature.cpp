@@ -18,7 +18,13 @@ uint64_t BeginPreviewFeature(AppState& state,
   const size_t idx = state.document->FeatureCount() - 1;
   Feature* added = state.document->GetFeature(idx);
   state.pendingFeatureId = added->GetId();
+  // Select-first (U7b): whatever was selected seeds the new tool's slots
+  // before SelectFeature replaces the selection with the feature itself;
+  // then the first unfilled required slot arms for the next viewport click
+  // (nothing arms when the seed satisfied everything — Enter commits).
+  SeedSlotsFromSelection(state, *added);
   SelectFeature(state, added->GetId());
+  ArmNextUnfilledSlot(state, *added);
   return state.pendingFeatureId;
 }
 

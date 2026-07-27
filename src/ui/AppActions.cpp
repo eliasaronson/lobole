@@ -525,11 +525,10 @@ void CreateEdgeBlend(AppState& state, EdgeBlendOp op) {
     return; // the menu gates this, but guard anyway
   }
   const char* base = op == EdgeBlendOp::Chamfer ? "Chamfer" : "Fillet";
-  const uint64_t id = BeginPreviewFeature(
+  // BeginPreviewFeature seeds pre-selected edges and arms the edge slot.
+  BeginPreviewFeature(
       state, std::make_unique<FilletFeature>(
                  NextName(state, base), std::vector<ElementRef>{}, 0.5, op));
-  if (Feature* f = state.document->FindFeatureById(id))
-    ArmSlot(state, *f, PickSlot::BlendEdges);
 }
 } // namespace
 
@@ -544,12 +543,10 @@ void CreateChamfer(AppState& state) {
 void CreateThread(AppState& state) {
   if (!state.document || state.document->GetBodies().empty())
     return;
+  // BeginPreviewFeature seeds a pre-selected face and arms the face slot.
   BeginPreviewFeature(
       state, std::make_unique<ThreadFeature>(NextName(state, "Thread"),
                                              ElementRef{}, "M8", 1.25));
-  // Arm the face slot right away so the first viewport click fills it.
-  if (Feature* f = state.document->FindFeatureById(state.pendingFeatureId))
-    ArmSlot(state, *f, PickSlot::ThreadFace);
 }
 
 void AppendThreadOverlays(AppState& state, std::vector<LineVertex3D>& lines) {

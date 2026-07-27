@@ -41,6 +41,10 @@ struct SlotSpec {
   uint32_t kinds;     // SelectionItem::Kind bitmask accepted
   bool multi;         // toggle-list slot; stays armed after a pick
   const char* prompt; // status pill while armed
+  // The feature can't resolve without this slot (drives auto-advance: after
+  // a single-slot pick / at session start, the first unfilled REQUIRED slot
+  // arms itself). Optional slots ("Profiles: empty = all") never self-arm.
+  bool required = true;
 };
 
 // The slots the feature exposes IN ITS CURRENT STATE (e.g. the extrude
@@ -51,6 +55,22 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature);
 // Arms `slot` on the feature (kinds/prompt from SlotSpecsFor). Returns false
 // when the feature doesn't currently expose that slot.
 bool ArmSlot(AppState& state, const Feature& feature, PickSlot slot);
+
+// Whether the slot's underlying feature field holds a value ("2 edges
+// picked", "target set"). Multi slots count as filled with one item.
+bool SlotFilled(const Feature& feature, PickSlot slot);
+
+// Arms the first REQUIRED slot that is still unfilled, disarming instead
+// when none remain (the auto-advance rule: boolean stays pick-pick-done).
+void ArmNextUnfilledSlot(AppState& state, const Feature& feature);
+
+// U7b select-first: distributes the current Selection into the feature's
+// slots, greedily in declared order — single slots take the oldest matching
+// item (overwriting any default the Create* action guessed; a session-start
+// value is a guess, a pre-selected item is intent), multi slots append every
+// matching item. Called by BeginPreviewFeature before it replaces the
+// selection with the new feature.
+void SeedSlotsFromSelection(AppState& state, Feature& feature);
 
 // The fillet/chamfer whose BlendEdges slot is armed, or 0 — the blend pick
 // overlay and the selection overlay's channel handoff key off this.
