@@ -137,15 +137,6 @@ void DrawBrowserWindow(AppState& state) {
     state.showFileBrowser = false;
   }
 
-  // Assembly import extracts part geometry into the project folder — the
-  // browser can't run a save dialog, so it needs the project saved first.
-  const bool needSave =
-      state.fileBrowserAssemblyMode && state.projectPath.empty();
-  if (needSave) {
-    ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
-                       "Save the project first (File > Save Project)");
-  }
-
   ImGui::Separator();
 
   if (ImGui::BeginListBox("##files", ImVec2(400, 300))) {
@@ -175,7 +166,7 @@ void DrawBrowserWindow(AppState& state) {
             } catch (const std::exception& e) {
               LOG_ERROR("Error entering directory: {}", e.what());
             }
-          } else if (item.starts_with("[CAD]") && !needSave) {
+          } else if (item.starts_with("[CAD]")) {
             std::string fullPath =
                 (std::filesystem::path(state.currentPath) / item.substr(6))
                     .string();
@@ -276,27 +267,6 @@ void OpenStepAssemblyFileDialog(AppState& state) {
     OpenBrowserFallback(state, /*assemblyMode=*/true);
     return;
   }
-  // A fresh unsaved project: ask where to save it first — the import
-  // extracts per-part geometry into the project folder.
-  if (state.projectPath.empty()) {
-    nfdu8char_t* out = nullptr;
-    const nfdu8filteritem_t projFilter[] = {{"Designer project", "dsgn"}};
-    if (NFD_SaveDialogU8(&out, projFilter, 1, nullptr, "project.dsgn") !=
-        NFD_OKAY) {
-      return;
-    }
-    std::string path(out);
-    NFD_FreePathU8(out);
-    if (std::filesystem::path(path).extension().empty())
-      path += ".dsgn"; // directory format (F3)
-    std::string error;
-    if (!SaveProject(state, path, &error)) {
-      LOG_ERROR("Failed to save project before import: {}", error);
-      return;
-    }
-    MarkProjectSaved(state, path);
-  }
-
   nfdu8char_t* outPath = nullptr;
   const nfdu8filteritem_t filters[] = {{"STEP", "step,stp"}};
   if (NFD_OpenDialogU8(&outPath, filters, 1, nullptr) == NFD_OKAY) {
@@ -341,8 +311,11 @@ void SaveProjectDialog(AppState& state) {
     if (std::filesystem::path(path).extension().empty()) {
       path += ".dsgn"; // directory format is the default for new saves (F3)
     }
-    if (auto r = DocumentIO::Save(*state.document, path); !r) {
-      LOG_ERROR("Failed to save project: {}", r.error());
+    // SaveProject, not DocumentIO::Save: a multi-document project writes the
+    // container form; a lone part still lands in the flat form.
+    std::string error;
+    if (!SaveProject(state, path, &error)) {
+      LOG_ERROR("Failed to save project: {}", error);
     } else {
       MarkProjectSaved(state, path);
     }
@@ -494,5 +467,19 @@ void ExportBomDialog(AppState&) {
 }
 
 #endif
+
+void SaveProjectAction(AppState& state) {
+  if (!state.document)
+    return;
+  if (state.projectPath.empty()) {
+    SaveProjectDialog(state); // first save: pick a home
+    return;
+  }
+  std::string error;
+  if (SaveProject(state, state.projectPath, &error))
+    MarkProjectSaved(state, state.projectPath);
+  else
+    LOG_ERROR("Failed to save project: {}", error);
+}
 
 } // namespace ui

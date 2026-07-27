@@ -11,7 +11,11 @@ void OpenStepFileDialog(AppState& state);
 void OpenStepAssemblyFileDialog(AppState& state);
 void OpenReferenceImageDialog(AppState& state); // sketch underlay (v49)
 void OpenProjectDialog(AppState& state);
+// Save As: always asks for a (new) location.
 void SaveProjectDialog(AppState& state);
+// Plain save (Ctrl+S): re-saves in place when the project has a home; the
+// first save falls through to the Save As dialog.
+void SaveProjectAction(AppState& state);
 // Export the whole document; format chosen by the chosen file's extension
 // (.step/.stp, .stl, .brep). No-op without NFD.
 void ExportDialog(AppState& state);

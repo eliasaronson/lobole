@@ -9,6 +9,7 @@ GUI-dependent method, clean SIGTERM shutdown, and fail-fast on a taken port.
 
 Usage: headless_smoke.py <path-to-designer-binary>
 """
+import glob
 import math
 import os
 import signal
@@ -779,6 +780,36 @@ def main():
         d.call("import_step", path=step)
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
                "re-imported STEP has the original volume")
+
+        # Assembly import (I2) into an UNSAVED project: it ADDS to the
+        # current project (hand-modeled and imported parts mix); the .brep
+        # sidecars stage under the app state dir until the next save adopts
+        # them into <project>/imported/.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Mine", "position": [0, 0, 0],
+            "width": 1, "height": 1, "depth": 1})
+        rep = d.call("import_step", path=step, as_assembly=True)
+        expect(len(rep["occurrences"]) == 1,
+               "assembly import works without a saved project")
+        parts = d.call("list_parts")["parts"]
+        expect(len(parts) == 3 and
+               [p["type"] for p in parts].count("assembly") == 1,
+               f"own part + imported part + assembly tab: {parts}")
+        proj = os.path.join(tmp, "miximport.dsgn")
+        d.call("save_project", path=proj)
+        adopted = glob.glob(os.path.join(proj, "imported", "**", "*.brep"),
+                            recursive=True)
+        expect(len(adopted) == 1,
+               f"staged sidecar adopted into the project on save: {adopted}")
+        d.call("open_project", path=proj)
+        parts = d.call("list_parts")["parts"]
+        imported = [p for p in parts
+                    if p["type"] == "part" and p["name"] != "Part 1"]
+        expect(len(imported) == 1, f"imported part reloads: {parts}")
+        d.call("set_active_part", index=imported[0]["index"])
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
+               "adopted sidecar regenerates with the original volume")
         d.call("new_project")  # empty document
         try:
             d.call("export_step", path=os.path.join(tmp, "empty.step"))

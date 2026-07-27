@@ -1197,16 +1197,23 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
     LOG_WARN("Assembly import: {}", msg);
     return false;
   };
-  // Part geometry extracts into the project directory (self-contained,
-  // versionable) — so the project must have one.
-  if (state.projectPath.empty())
-    return fail("save the project first - assembly import extracts part "
-                "geometry into the project folder");
-
-  const std::string destDir =
-      (std::filesystem::path(state.projectPath) / "imported").string();
+  // Part geometry extracts as .brep sidecars. A saved project keeps them in
+  // its own folder (self-contained, versionable); before the first save they
+  // stage under the app state dir and the next SaveProject adopts them into
+  // the project (AdoptStagedImports).
+  const std::string asmName = std::filesystem::path(stepPath).stem().string();
+  const std::filesystem::path importRoot =
+      state.projectPath.empty()
+          ? std::filesystem::path(Autosaver::StateDir()) / "import-staging"
+          : std::filesystem::path(state.projectPath) / "imported";
+  // A unique subfolder per import: different files can share product names,
+  // and re-importing a changed file must not overwrite .breps that earlier
+  // features still read.
+  std::filesystem::path destDir = importRoot / asmName;
+  for (int n = 2; std::filesystem::exists(destDir); n++)
+    destDir = importRoot / (asmName + "-" + std::to_string(n));
   const interchange::AssemblyImportPlan plan =
-      interchange::BuildAssemblyImportPlan(stepPath, destDir);
+      interchange::BuildAssemblyImportPlan(stepPath, destDir.string());
   if (!plan.error.empty())
     return fail(plan.error);
 
@@ -1215,7 +1222,6 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
   // not undoable — it creates documents, like File > Open. The parts land in
   // a tab-bar folder named after the assembly so a 100-part import is one
   // flyout, not 100 tabs.
-  const std::string asmName = std::filesystem::path(stepPath).stem().string();
   std::vector<uint64_t> partIds;
   for (const interchange::PlannedPart& p : plan.parts) {
     AddPart(state, p.name);

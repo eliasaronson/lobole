@@ -9,21 +9,17 @@
 
 namespace fs = std::filesystem;
 
-namespace {
-
-fs::path UnsavedSlotDir() {
+std::string Autosaver::StateDir() {
   if (const char* xdg = std::getenv("XDG_STATE_HOME"); xdg && *xdg)
-    return fs::path(xdg) / "designer";
+    return (fs::path(xdg) / "designer").string();
   if (const char* home = std::getenv("HOME"); home && *home)
-    return fs::path(home) / ".local" / "state" / "designer";
-  return fs::temp_directory_path() / "designer-state";
+    return (fs::path(home) / ".local" / "state" / "designer").string();
+  return (fs::temp_directory_path() / "designer-state").string();
 }
-
-} // namespace
 
 std::string Autosaver::SidecarPath(const std::string& projectPath) {
   if (projectPath.empty())
-    return (UnsavedSlotDir() / "unsaved.autosave.json").string();
+    return (fs::path(StateDir()) / "unsaved.autosave.json").string();
   return projectPath + ".autosave";
 }
 

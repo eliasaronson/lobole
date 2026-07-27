@@ -115,7 +115,9 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
 #ifdef HAVE_NATIVEFILEDIALOG
   add("File: Open Project...", "Ctrl+O", true,
       [](AppState& s) { OpenProjectDialog(s); });
-  add("File: Save Project As...", "Ctrl+S", true,
+  add("File: Save Project", "Ctrl+S", true,
+      [](AppState& s) { SaveProjectAction(s); });
+  add("File: Save Project As...", "Ctrl+Shift+S", true,
       [](AppState& s) { SaveProjectDialog(s); });
 #endif
   add("File: Import STEP...", "Ctrl+I", true,

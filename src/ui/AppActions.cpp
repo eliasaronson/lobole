@@ -1341,9 +1341,54 @@ void GlobalRedo(AppState& state) {
     ActiveTabRedo(state);
 }
 
+namespace {
+// Imports made before the project had a home stage their .brep sidecars
+// under the app state dir (ImportStepAsAssembly). A save gives them a home:
+// copy each staged file into <project>/imported/ (keeping the per-import
+// subfolder) and repoint the features, so the saved project is
+// self-contained and the staging area gets reclaimed.
+void AdoptStagedImports(AppState& state, const std::filesystem::path& dir) {
+  namespace fs = std::filesystem;
+  const fs::path staging = fs::path(Autosaver::StateDir()) / "import-staging";
+  std::error_code ec;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    Document* doc = SlotDoc(state, i);
+    if (!doc)
+      continue;
+    for (size_t f = 0; f < doc->FeatureCount(); f++) {
+      auto* imp = dynamic_cast<ImportFeature*>(doc->GetFeature(f));
+      if (!imp)
+        continue;
+      const fs::path src(imp->path);
+      const fs::path rel = src.lexically_relative(staging);
+      if (rel.empty() || rel.native().starts_with(".."))
+        continue; // not staged: an original STEP, or already project-owned
+      const fs::path dest = dir / "imported" / rel;
+      fs::create_directories(dest.parent_path(), ec);
+      ec.clear();
+      if (!fs::copy_file(src, dest, fs::copy_options::overwrite_existing, ec) ||
+          ec) {
+        LOG_WARN("Could not adopt staged import '{}': {}", imp->path,
+                 ec.message());
+        ec.clear();
+        continue;
+      }
+      imp->path = dest.string();
+      fs::remove(src, ec);
+      fs::remove(src.parent_path(), ec); // rmdir-if-empty; failure is fine
+      ec.clear();
+    }
+  }
+}
+} // namespace
+
 bool SaveProject(AppState& state, const std::string& path, std::string* error) {
   namespace fs = std::filesystem;
   EnsureParts(state);
+  // Directory-form targets can own import sidecars; adopt any still staged
+  // before the write so the saved features point inside the project.
+  if (path.ends_with(".dsgn") || fs::is_directory(path))
+    AdoptStagedImports(state, fs::path(path));
   // A single part keeps the flat .dsgn form (backward compatible). A lone
   // assembly, or any multi-document project, uses the project container.
   // Phase V: a single part IS the whole project, so its file carries the

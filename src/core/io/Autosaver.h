@@ -25,6 +25,11 @@ public:
   // XDG state dir (~/.local/state/designer/unsaved.autosave.json).
   static std::string SidecarPath(const std::string& projectPath);
 
+  // The app's XDG state dir (~/.local/state/designer) — home of the unsaved
+  // autosave slot and the import staging area (sidecars extracted before the
+  // project has a folder to own them).
+  static std::string StateDir();
+
   // A sidecar exists and is newer than its project file (always true for an
   // existing sidecar whose project file is missing or path is empty).
   static bool HasNewerAutosave(const std::string& projectPath);
