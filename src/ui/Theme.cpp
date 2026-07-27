@@ -15,10 +15,10 @@ namespace {
 
 // Palette: near-black backgrounds with a single blue accent. Raised
 // surfaces get progressively lighter; interactive states brighten.
-constexpr ImVec4 kBg{0.106f, 0.113f, 0.136f, 1.00f};        // panels
-constexpr ImVec4 kBgDark{0.086f, 0.092f, 0.110f, 1.00f};    // title/tab bar
-constexpr ImVec4 kSurface{0.161f, 0.173f, 0.208f, 1.00f};   // frames, inputs
-constexpr ImVec4 kSurfaceHi{0.216f, 0.231f, 0.278f, 1.00f}; // hovered
+constexpr ImVec4 kBg{0.106f, 0.113f, 0.136f, 1.00f};         // panels
+constexpr ImVec4 kBgDark{0.086f, 0.092f, 0.110f, 1.00f};     // title/tab bar
+constexpr ImVec4 kSurface{0.161f, 0.173f, 0.208f, 1.00f};    // frames, inputs
+constexpr ImVec4 kSurfaceHi{0.216f, 0.231f, 0.278f, 1.00f};  // hovered
 constexpr ImVec4 kSurfaceHi2{0.263f, 0.282f, 0.341f, 1.00f}; // active
 constexpr ImVec4 kAccent{0.275f, 0.557f, 0.906f, 1.00f};
 constexpr ImVec4 kAccentDim{0.275f, 0.557f, 0.906f, 0.55f};

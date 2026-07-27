@@ -1,981 +1,1071 @@
 #include "render/MeshRenderer.h"
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
-#include <iostream>
-#include <fstream>
-#include <stdexcept>
 #include <cstring>
+#include <fstream>
+#include <iostream>
 #include <limits>
+#include <stdexcept>
 
 // Vertex3D implementation
 VkVertexInputBindingDescription Vertex3D::getBindingDescription() {
-    VkVertexInputBindingDescription bindingDescription{};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex3D);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    return bindingDescription;
+  VkVertexInputBindingDescription bindingDescription{};
+  bindingDescription.binding = 0;
+  bindingDescription.stride = sizeof(Vertex3D);
+  bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+  return bindingDescription;
 }
 
-std::vector<VkVertexInputAttributeDescription> Vertex3D::getAttributeDescriptions() {
-    std::vector<VkVertexInputAttributeDescription> attributeDescriptions(2);
+std::vector<VkVertexInputAttributeDescription>
+Vertex3D::getAttributeDescriptions() {
+  std::vector<VkVertexInputAttributeDescription> attributeDescriptions(2);
 
-    // Position
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex3D, position);
+  // Position
+  attributeDescriptions[0].binding = 0;
+  attributeDescriptions[0].location = 0;
+  attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+  attributeDescriptions[0].offset = offsetof(Vertex3D, position);
 
-    // Normal
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex3D, normal);
+  // Normal
+  attributeDescriptions[1].binding = 0;
+  attributeDescriptions[1].location = 1;
+  attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+  attributeDescriptions[1].offset = offsetof(Vertex3D, normal);
 
-    return attributeDescriptions;
+  return attributeDescriptions;
 }
 
 // MeshRenderer implementation
-MeshRenderer::MeshRenderer() {
-}
+MeshRenderer::MeshRenderer() {}
 
-MeshRenderer::~MeshRenderer() {
-    Shutdown();
-}
+MeshRenderer::~MeshRenderer() { Shutdown(); }
 
 bool MeshRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
-                             VkRenderPass renderPass, VkQueue graphicsQueue,
-                             uint32_t queueFamily, VkCommandPool commandPool,
-                             VkSampleCountFlagBits samples) {
-    m_msaaSamples = samples;
-    m_device = device;
-    m_physicalDevice = physicalDevice;
-    m_renderPass = renderPass;
-    m_graphicsQueue = graphicsQueue;
-    m_queueFamily = queueFamily;
-    m_commandPool = commandPool;
+                              VkRenderPass renderPass, VkQueue graphicsQueue,
+                              uint32_t queueFamily, VkCommandPool commandPool,
+                              VkSampleCountFlagBits samples) {
+  m_msaaSamples = samples;
+  m_device = device;
+  m_physicalDevice = physicalDevice;
+  m_renderPass = renderPass;
+  m_graphicsQueue = graphicsQueue;
+  m_queueFamily = queueFamily;
+  m_commandPool = commandPool;
 
-    if (!CreateDescriptorSetLayout()) return false;
-    if (!CreateGraphicsPipeline()) return false;
-    if (!CreateUniformBuffers()) return false;
-    if (!CreateDescriptorPool()) return false;
-    if (!CreateDescriptorSets()) return false;
+  if (!CreateDescriptorSetLayout())
+    return false;
+  if (!CreateGraphicsPipeline())
+    return false;
+  if (!CreateUniformBuffers())
+    return false;
+  if (!CreateDescriptorPool())
+    return false;
+  if (!CreateDescriptorSets())
+    return false;
 
-    return true;
+  return true;
 }
 
 void MeshRenderer::Shutdown() {
-    if (m_device == VK_NULL_HANDLE) return;
+  if (m_device == VK_NULL_HANDLE)
+    return;
 
-    // Cleanup assets + instances
-    for (auto& asset : m_assets) {
-        if (asset) {
-            DestroyAssetBuffers(asset.get());
-        }
+  // Cleanup assets + instances
+  for (auto& asset : m_assets) {
+    if (asset) {
+      DestroyAssetBuffers(asset.get());
     }
-    m_assets.clear();
-    m_instances.clear();
+  }
+  m_assets.clear();
+  m_instances.clear();
 
-    // Cleanup uniform buffers
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (m_uniformBuffers[i] != VK_NULL_HANDLE) {
-            vkDestroyBuffer(m_device, m_uniformBuffers[i], nullptr);
-        }
-        if (m_uniformBuffersMemory[i] != VK_NULL_HANDLE) {
-            vkFreeMemory(m_device, m_uniformBuffersMemory[i], nullptr);
-        }
+  // Cleanup uniform buffers
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    if (m_uniformBuffers[i] != VK_NULL_HANDLE) {
+      vkDestroyBuffer(m_device, m_uniformBuffers[i], nullptr);
     }
+    if (m_uniformBuffersMemory[i] != VK_NULL_HANDLE) {
+      vkFreeMemory(m_device, m_uniformBuffersMemory[i], nullptr);
+    }
+  }
 
-    if (m_descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
-    }
+  if (m_descriptorPool != VK_NULL_HANDLE) {
+    vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+  }
 
-    if (m_graphicsPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
-    }
+  if (m_graphicsPipeline != VK_NULL_HANDLE) {
+    vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
+  }
 
-    if (m_ghostPipeline != VK_NULL_HANDLE) {
-        vkDestroyPipeline(m_device, m_ghostPipeline, nullptr);
-    }
+  if (m_ghostPipeline != VK_NULL_HANDLE) {
+    vkDestroyPipeline(m_device, m_ghostPipeline, nullptr);
+  }
 
-    if (m_pipelineLayout != VK_NULL_HANDLE) {
-        vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-    }
+  if (m_pipelineLayout != VK_NULL_HANDLE) {
+    vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+  }
 
-    if (m_descriptorSetLayout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
-    }
+  if (m_descriptorSetLayout != VK_NULL_HANDLE) {
+    vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
+  }
 }
 
 MeshAsset* MeshRenderer::GetAsset(uint32_t assetId) {
-    if (assetId == 0 || assetId > m_assets.size()) return nullptr;
-    return m_assets[assetId - 1].get();
+  if (assetId == 0 || assetId > m_assets.size())
+    return nullptr;
+  return m_assets[assetId - 1].get();
 }
 
 MeshInstance* MeshRenderer::GetInstance(uint32_t instanceId) {
-    if (instanceId == 0 || instanceId > m_instances.size()) return nullptr;
-    return m_instances[instanceId - 1].get();
+  if (instanceId == 0 || instanceId > m_instances.size())
+    return nullptr;
+  return m_instances[instanceId - 1].get();
 }
 
-uint32_t MeshRenderer::CreateAsset(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
-    auto asset = std::make_unique<MeshAsset>();
-    asset->vertices = vertices;
-    asset->indices = indices;
+uint32_t MeshRenderer::CreateAsset(const std::vector<Vertex3D>& vertices,
+                                   const std::vector<uint32_t>& indices) {
+  auto asset = std::make_unique<MeshAsset>();
+  asset->vertices = vertices;
+  asset->indices = indices;
 
-    if (!CreateAssetBuffers(asset.get())) {
-        return 0; // Invalid asset id
-    }
+  if (!CreateAssetBuffers(asset.get())) {
+    return 0; // Invalid asset id
+  }
 
-    m_assets.push_back(std::move(asset));
-    return static_cast<uint32_t>(m_assets.size());
+  m_assets.push_back(std::move(asset));
+  return static_cast<uint32_t>(m_assets.size());
 }
 
-void MeshRenderer::UpdateAsset(uint32_t assetId, const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
-    MeshAsset* asset = GetAsset(assetId);
-    if (!asset) return;
+void MeshRenderer::UpdateAsset(uint32_t assetId,
+                               const std::vector<Vertex3D>& vertices,
+                               const std::vector<uint32_t>& indices) {
+  MeshAsset* asset = GetAsset(assetId);
+  if (!asset)
+    return;
 
-    asset->vertices = vertices;
-    asset->indices = indices;
+  asset->vertices = vertices;
+  asset->indices = indices;
 
-    // Ensure the old buffers aren't referenced by an in-flight frame before
-    // destroying them.
-    vkDeviceWaitIdle(m_device);
-    DestroyAssetBuffers(asset);
-    CreateAssetBuffers(asset);
+  // Ensure the old buffers aren't referenced by an in-flight frame before
+  // destroying them.
+  vkDeviceWaitIdle(m_device);
+  DestroyAssetBuffers(asset);
+  CreateAssetBuffers(asset);
 }
 
-uint32_t MeshRenderer::AddInstance(uint32_t assetId, const glm::mat4& transform) {
-    MeshAsset* asset = GetAsset(assetId);
-    if (!asset) return 0;
+uint32_t MeshRenderer::AddInstance(uint32_t assetId,
+                                   const glm::mat4& transform) {
+  MeshAsset* asset = GetAsset(assetId);
+  if (!asset)
+    return 0;
 
-    auto instance = std::make_unique<MeshInstance>();
-    instance->assetId = assetId;
-    instance->transform = transform;
-    asset->refCount++;
+  auto instance = std::make_unique<MeshInstance>();
+  instance->assetId = assetId;
+  instance->transform = transform;
+  asset->refCount++;
 
-    m_instances.push_back(std::move(instance));
-    return static_cast<uint32_t>(m_instances.size());
+  m_instances.push_back(std::move(instance));
+  return static_cast<uint32_t>(m_instances.size());
 }
 
 void MeshRenderer::RemoveInstance(uint32_t instanceId) {
-    MeshInstance* instance = GetInstance(instanceId);
-    if (!instance) return;
+  MeshInstance* instance = GetInstance(instanceId);
+  if (!instance)
+    return;
 
-    MeshAsset* asset = GetAsset(instance->assetId);
-    if (asset && --asset->refCount == 0) {
-        // Last occurrence gone: drop the tessellation too. Ensure the buffers
-        // aren't referenced by an in-flight frame before destroying them
-        // (rapid resync, e.g. accepting a feature preview, otherwise causes a
-        // GPU device-lost).
-        vkDeviceWaitIdle(m_device);
-        DestroyAssetBuffers(asset);
-        m_assets[instance->assetId - 1].reset();
-    }
-    m_instances[instanceId - 1].reset();
+  MeshAsset* asset = GetAsset(instance->assetId);
+  if (asset && --asset->refCount == 0) {
+    // Last occurrence gone: drop the tessellation too. Ensure the buffers
+    // aren't referenced by an in-flight frame before destroying them
+    // (rapid resync, e.g. accepting a feature preview, otherwise causes a
+    // GPU device-lost).
+    vkDeviceWaitIdle(m_device);
+    DestroyAssetBuffers(asset);
+    m_assets[instance->assetId - 1].reset();
+  }
+  m_instances[instanceId - 1].reset();
 }
 
-void MeshRenderer::SetInstanceTransform(uint32_t instanceId, const glm::mat4& transform) {
-    if (MeshInstance* instance = GetInstance(instanceId)) {
-        instance->transform = transform;
-    }
+void MeshRenderer::SetInstanceTransform(uint32_t instanceId,
+                                        const glm::mat4& transform) {
+  if (MeshInstance* instance = GetInstance(instanceId)) {
+    instance->transform = transform;
+  }
 }
 
-void MeshRenderer::SetInstanceColor(uint32_t instanceId, const glm::vec3& albedo) {
-    if (MeshInstance* instance = GetInstance(instanceId)) {
-        instance->baseColor = glm::vec4(albedo, 1.0f);
-    }
+void MeshRenderer::SetInstanceColor(uint32_t instanceId,
+                                    const glm::vec3& albedo) {
+  if (MeshInstance* instance = GetInstance(instanceId)) {
+    instance->baseColor = glm::vec4(albedo, 1.0f);
+  }
 }
 
-void MeshRenderer::SetInstanceMaterial(uint32_t instanceId, const glm::vec3& albedo,
+void MeshRenderer::SetInstanceMaterial(uint32_t instanceId,
+                                       const glm::vec3& albedo,
                                        const glm::vec4& params) {
-    if (MeshInstance* instance = GetInstance(instanceId)) {
-        instance->baseColor = glm::vec4(albedo, 1.0f);
-        instance->materialParams = params;
-    }
+  if (MeshInstance* instance = GetInstance(instanceId)) {
+    instance->baseColor = glm::vec4(albedo, 1.0f);
+    instance->materialParams = params;
+  }
 }
 
 void MeshRenderer::SetInstanceProcedural(uint32_t instanceId, int pattern,
-                                         float grainScale, float grainContrast) {
-    if (MeshInstance* instance = GetInstance(instanceId)) {
-        // .w (grain axis) is filled per-draw from the asset bbox.
-        instance->procParams = glm::vec4(static_cast<float>(pattern), grainScale,
-                                         grainContrast, 0.0f);
-    }
+                                         float grainScale,
+                                         float grainContrast) {
+  if (MeshInstance* instance = GetInstance(instanceId)) {
+    // .w (grain axis) is filled per-draw from the asset bbox.
+    instance->procParams =
+        glm::vec4(static_cast<float>(pattern), grainScale, grainContrast, 0.0f);
+  }
 }
 
 void MeshRenderer::SetInstanceVisible(uint32_t instanceId, bool visible) {
-    if (MeshInstance* instance = GetInstance(instanceId)) {
-        instance->visible = visible;
-    }
+  if (MeshInstance* instance = GetInstance(instanceId)) {
+    instance->visible = visible;
+  }
 }
 
 void MeshRenderer::SetInstanceGhost(uint32_t instanceId, float alpha) {
-    // Call after SetInstanceColor/Material — those reset baseColor.a to 1.
-    if (MeshInstance* instance = GetInstance(instanceId)) {
-        instance->ghost = true;
-        instance->baseColor.a = alpha;
-    }
+  // Call after SetInstanceColor/Material — those reset baseColor.a to 1.
+  if (MeshInstance* instance = GetInstance(instanceId)) {
+    instance->ghost = true;
+    instance->baseColor.a = alpha;
+  }
 }
 
-uint32_t MeshRenderer::AddMesh(const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
-    uint32_t assetId = CreateAsset(vertices, indices);
-    if (assetId == 0) return 0;
-    return AddInstance(assetId);
+uint32_t MeshRenderer::AddMesh(const std::vector<Vertex3D>& vertices,
+                               const std::vector<uint32_t>& indices) {
+  uint32_t assetId = CreateAsset(vertices, indices);
+  if (assetId == 0)
+    return 0;
+  return AddInstance(assetId);
 }
 
-void MeshRenderer::UpdateMesh(uint32_t instanceId, const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices) {
-    MeshInstance* instance = GetInstance(instanceId);
-    if (!instance) return;
-    UpdateAsset(instance->assetId, vertices, indices);
+void MeshRenderer::UpdateMesh(uint32_t instanceId,
+                              const std::vector<Vertex3D>& vertices,
+                              const std::vector<uint32_t>& indices) {
+  MeshInstance* instance = GetInstance(instanceId);
+  if (!instance)
+    return;
+  UpdateAsset(instance->assetId, vertices, indices);
 }
 
-void MeshRenderer::UpdateCamera(const glm::mat4& view, const glm::mat4& projection) {
-    m_viewMatrix = view;
-    m_projectionMatrix = projection;
+void MeshRenderer::UpdateCamera(const glm::mat4& view,
+                                const glm::mat4& projection) {
+  m_viewMatrix = view;
+  m_projectionMatrix = projection;
 }
 
-void MeshRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) {
-    // Update uniform buffer
-    UniformBufferObject ubo{};
-    ubo.view = m_viewMatrix;
-    ubo.proj = m_projectionMatrix;
+void MeshRenderer::Render(VkCommandBuffer commandBuffer,
+                          uint32_t currentFrame) {
+  // Update uniform buffer
+  UniformBufferObject ubo{};
+  ubo.view = m_viewMatrix;
+  ubo.proj = m_projectionMatrix;
 
-    // Extract camera position from inverse view matrix
-    glm::mat4 invView = glm::inverse(m_viewMatrix);
-    ubo.viewPos = glm::vec4(invView[3][0], invView[3][1], invView[3][2], 1.0f);
+  // Extract camera position from inverse view matrix
+  glm::mat4 invView = glm::inverse(m_viewMatrix);
+  ubo.viewPos = glm::vec4(invView[3][0], invView[3][1], invView[3][2], 1.0f);
 
-    // FreeCAD-style multi-light setup for professional CAD lighting
+  // FreeCAD-style multi-light setup for professional CAD lighting
 
-    // Primary directional light (main illumination from upper right)
-    ubo.primaryLight.direction = glm::vec4(glm::normalize(glm::vec3(1.0f, 1.5f, 1.0f)), 1.8f); // High intensity
-    ubo.primaryLight.color = glm::vec4(1.0f, 0.95f, 0.8f, 1.0f); // Slightly warm white
+  // Primary directional light (main illumination from upper right)
+  ubo.primaryLight.direction = glm::vec4(
+      glm::normalize(glm::vec3(1.0f, 1.5f, 1.0f)), 1.8f); // High intensity
+  ubo.primaryLight.color =
+      glm::vec4(1.0f, 0.95f, 0.8f, 1.0f); // Slightly warm white
 
-    // Fill light (softer light from opposite direction to reduce harsh shadows)
-    ubo.fillLight.direction = glm::vec4(glm::normalize(glm::vec3(-0.5f, -0.8f, -0.5f)), 0.4f); // Lower intensity
-    ubo.fillLight.color = glm::vec4(0.8f, 0.85f, 1.0f, 1.0f); // Slightly cool blue fill
+  // Fill light (softer light from opposite direction to reduce harsh shadows)
+  ubo.fillLight.direction = glm::vec4(
+      glm::normalize(glm::vec3(-0.5f, -0.8f, -0.5f)), 0.4f); // Lower intensity
+  ubo.fillLight.color =
+      glm::vec4(0.8f, 0.85f, 1.0f, 1.0f); // Slightly cool blue fill
 
-    // Rim light (side lighting for edge definition)
-    ubo.rimLight.direction = glm::vec4(glm::normalize(glm::vec3(0.8f, 0.2f, -0.9f)), 0.6f); // Medium intensity
-    ubo.rimLight.color = glm::vec4(1.0f, 1.0f, 0.9f, 1.0f); // Neutral white
+  // Rim light (side lighting for edge definition)
+  ubo.rimLight.direction = glm::vec4(
+      glm::normalize(glm::vec3(0.8f, 0.2f, -0.9f)), 0.6f); // Medium intensity
+  ubo.rimLight.color = glm::vec4(1.0f, 1.0f, 0.9f, 1.0f);  // Neutral white
 
-    // Ambient light (reduced for better contrast)
-    ubo.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 0.8f); // Cool ambient with intensity
+  // Ambient light (reduced for better contrast)
+  ubo.ambientColor =
+      glm::vec4(0.15f, 0.17f, 0.2f, 0.8f); // Cool ambient with intensity
 
-    // Section clip plane is global (same for every instance), so it rides in
-    // the shared UBO rather than per-draw push constants.
-    ubo.clipPlane = m_clipPlane;
+  // Section clip plane is global (same for every instance), so it rides in
+  // the shared UBO rather than per-draw push constants.
+  ubo.clipPlane = m_clipPlane;
 
-    // Key-light shadow map (S1): per-frame light fit from the ShadowRenderer
-    // (via SetShadowState). Strength 0.75 and a ~1.5-texel normal-offset bias
-    // are the screenshot-tuned defaults; only the primary light is attenuated
-    // in the shader — fill/rim/IBL stay unshadowed (they are the soft fill).
-    ubo.lightViewProj = m_lightViewProj;
-    ubo.shadowParams =
-        glm::vec4(0.75f, 1.5f * m_shadowTexelWorld, m_shadowTexelUV,
-                  m_shadowsEnabled ? 1.0f : 0.0f);
+  // Key-light shadow map (S1): per-frame light fit from the ShadowRenderer
+  // (via SetShadowState). Strength 0.75 and a ~1.5-texel normal-offset bias
+  // are the screenshot-tuned defaults; only the primary light is attenuated
+  // in the shader — fill/rim/IBL stay unshadowed (they are the soft fill).
+  ubo.lightViewProj = m_lightViewProj;
+  ubo.shadowParams = glm::vec4(0.75f, 1.5f * m_shadowTexelWorld,
+                               m_shadowTexelUV, m_shadowsEnabled ? 1.0f : 0.0f);
 
-    // SSAO (S2): the blurred AO map multiplies only the ambient/IBL term in
-    // the shader — direct light is handled by the shadow map, not AO.
-    ubo.aoParams =
-        glm::vec4(m_aoInvSize, m_aoEnabled ? 1.0f : 0.0f, 0.0f);
+  // SSAO (S2): the blurred AO map multiplies only the ambient/IBL term in
+  // the shader — direct light is handled by the shadow map, not AO.
+  ubo.aoParams = glm::vec4(m_aoInvSize, m_aoEnabled ? 1.0f : 0.0f, 0.0f);
 
-    // Set viewport to the central region (excludes the side panels)
-    VkViewport viewport{};
-    viewport.x = static_cast<float>(m_viewportX);
-    viewport.y = static_cast<float>(m_viewportY);
-    viewport.width = static_cast<float>(m_viewportWidth);
-    viewport.height = static_cast<float>(m_viewportHeight);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+  // Set viewport to the central region (excludes the side panels)
+  VkViewport viewport{};
+  viewport.x = static_cast<float>(m_viewportX);
+  viewport.y = static_cast<float>(m_viewportY);
+  viewport.width = static_cast<float>(m_viewportWidth);
+  viewport.height = static_cast<float>(m_viewportHeight);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
 
-    VkRect2D scissor{};
-    scissor.offset = {m_viewportX, m_viewportY};
-    scissor.extent = {m_viewportWidth, m_viewportHeight};
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+  VkRect2D scissor{};
+  scissor.offset = {m_viewportX, m_viewportY};
+  scissor.extent = {m_viewportWidth, m_viewportHeight};
+  vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-    // Per-frame resources are sized to MAX_FRAMES_IN_FLIGHT, but the caller
-    // passes the swapchain image index (0..ImageCount-1), which exceeds that on
-    // a >2-image swapchain — wrap it to stay in bounds (matches SSAORenderer's
-    // convention). Without this the UBO memcpy writes through an out-of-bounds
-    // (garbage) pointer: heap corruption, caught by ASan on Intel Arc.
-    const uint32_t frame = currentFrame % MAX_FRAMES_IN_FLIGHT;
+  // Per-frame resources are sized to MAX_FRAMES_IN_FLIGHT, but the caller
+  // passes the swapchain image index (0..ImageCount-1), which exceeds that on
+  // a >2-image swapchain — wrap it to stay in bounds (matches SSAORenderer's
+  // convention). Without this the UBO memcpy writes through an out-of-bounds
+  // (garbage) pointer: heap corruption, caught by ASan on Intel Arc.
+  const uint32_t frame = currentFrame % MAX_FRAMES_IN_FLIGHT;
 
-    // Shared UBO (camera + lights + clip plane); one write serves every draw
-    // this frame — everything per-instance rides in push constants
-    memcpy(m_uniformBuffersMapped[frame], &ubo, sizeof(ubo));
+  // Shared UBO (camera + lights + clip plane); one write serves every draw
+  // this frame — everything per-instance rides in push constants
+  memcpy(m_uniformBuffersMapped[frame], &ubo, sizeof(ubo));
 
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           m_pipelineLayout, 0, 1, &m_descriptorSets[frame], 0, nullptr);
+  vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          m_pipelineLayout, 0, 1, &m_descriptorSets[frame], 0,
+                          nullptr);
 
-    // One draw per instance; the asset's buffers are bound once per run of
-    // consecutive instances sharing it. Push constants live in the command
-    // stream, so per-instance data costs no descriptor or sync machinery.
-    // Two passes (A4): all opaque instances through the blend-disabled
-    // pipeline first, then ghosts through the alpha-blended, depth-write-off
-    // ghost pipeline (translucent context geometry never occludes anything).
-    struct PushConstants {
-        glm::mat4 model;
-        glm::uvec4 highlight;
-        glm::vec4 material;  // metallic, roughness, specular, reflectance
-        glm::vec4 baseColor; // per-instance albedo (a = ghost opacity)
-        // Procedural grain: x = pattern (0 flat, 1 wood, 2 plywood),
-        // y = grainScale, z = grainContrast, w = grain-axis index (0/1/2).
-        glm::vec4 procMaterial;
-    } push;
+  // One draw per instance; the asset's buffers are bound once per run of
+  // consecutive instances sharing it. Push constants live in the command
+  // stream, so per-instance data costs no descriptor or sync machinery.
+  // Two passes (A4): all opaque instances through the blend-disabled
+  // pipeline first, then ghosts through the alpha-blended, depth-write-off
+  // ghost pipeline (translucent context geometry never occludes anything).
+  struct PushConstants {
+    glm::mat4 model;
+    glm::uvec4 highlight;
+    glm::vec4 material;  // metallic, roughness, specular, reflectance
+    glm::vec4 baseColor; // per-instance albedo (a = ghost opacity)
+    // Procedural grain: x = pattern (0 flat, 1 wood, 2 plywood),
+    // y = grainScale, z = grainContrast, w = grain-axis index (0/1/2).
+    glm::vec4 procMaterial;
+  } push;
 
-    for (const bool ghostPass : {false, true}) {
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          ghostPass ? m_ghostPipeline : m_graphicsPipeline);
-        uint32_t boundAssetId = 0;
-        for (const auto& instance : m_instances) {
-            if (!instance || !instance->visible) continue;
-            if (instance->ghost != ghostPass) continue;
+  for (const bool ghostPass : {false, true}) {
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      ghostPass ? m_ghostPipeline : m_graphicsPipeline);
+    uint32_t boundAssetId = 0;
+    for (const auto& instance : m_instances) {
+      if (!instance || !instance->visible)
+        continue;
+      if (instance->ghost != ghostPass)
+        continue;
 
-            MeshAsset* asset = GetAsset(instance->assetId);
-            if (!asset || asset->vertices.empty()) continue;
+      MeshAsset* asset = GetAsset(instance->assetId);
+      if (!asset || asset->vertices.empty())
+        continue;
 
-            push.model = instance->transform;
-            push.highlight = instance->highlight;
-            push.material = instance->materialParams;
-            push.baseColor = instance->baseColor;
-            push.procMaterial = instance->procParams;
-            if (instance->procParams.x > 0.5f) {
-                // Derive the grain axis from the asset's local bbox: solid wood
-                // (pattern 1) runs the grain along the LONGEST extent (a board's
-                // length); plywood (pattern 2) lays its plies across the
-                // THINNEST extent (the sheet thickness). Cheap enough per-draw.
-                const glm::vec3 ext = asset->bboxMax - asset->bboxMin;
-                const bool plywood = instance->procParams.x > 1.5f;
-                int axis = 0;
-                for (int a = 1; a < 3; ++a) {
-                    if (plywood ? (ext[a] < ext[axis]) : (ext[a] > ext[axis]))
-                        axis = a;
-                }
-                push.procMaterial.w = static_cast<float>(axis);
-            }
-            vkCmdPushConstants(commandBuffer, m_pipelineLayout,
-                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(push), &push);
-
-            if (instance->assetId != boundAssetId) {
-                VkBuffer vertexBuffers[] = {asset->vertexBuffer};
-                VkDeviceSize offsets[] = {0};
-                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-                vkCmdBindIndexBuffer(commandBuffer, asset->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                boundAssetId = instance->assetId;
-            }
-
-            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(asset->indices.size()), 1, 0, 0, 0);
+      push.model = instance->transform;
+      push.highlight = instance->highlight;
+      push.material = instance->materialParams;
+      push.baseColor = instance->baseColor;
+      push.procMaterial = instance->procParams;
+      if (instance->procParams.x > 0.5f) {
+        // Derive the grain axis from the asset's local bbox: solid wood
+        // (pattern 1) runs the grain along the LONGEST extent (a board's
+        // length); plywood (pattern 2) lays its plies across the
+        // THINNEST extent (the sheet thickness). Cheap enough per-draw.
+        const glm::vec3 ext = asset->bboxMax - asset->bboxMin;
+        const bool plywood = instance->procParams.x > 1.5f;
+        int axis = 0;
+        for (int a = 1; a < 3; ++a) {
+          if (plywood ? (ext[a] < ext[axis]) : (ext[a] > ext[axis]))
+            axis = a;
         }
+        push.procMaterial.w = static_cast<float>(axis);
+      }
+      vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+                         VK_SHADER_STAGE_VERTEX_BIT |
+                             VK_SHADER_STAGE_FRAGMENT_BIT,
+                         0, sizeof(push), &push);
+
+      if (instance->assetId != boundAssetId) {
+        VkBuffer vertexBuffers[] = {asset->vertexBuffer};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(commandBuffer, asset->indexBuffer, 0,
+                             VK_INDEX_TYPE_UINT32);
+        boundAssetId = instance->assetId;
+      }
+
+      vkCmdDrawIndexed(commandBuffer,
+                       static_cast<uint32_t>(asset->indices.size()), 1, 0, 0,
+                       0);
     }
+  }
 }
 
-void MeshRenderer::SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex, uint32_t count) {
-    MeshInstance* instance = GetInstance(instanceId);
-    if (!instance) return;
-    ClearFaceHighlight();
-    instance->highlight.x = firstVertex;
-    instance->highlight.y = firstVertex + count;
+void MeshRenderer::SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex,
+                                    uint32_t count) {
+  MeshInstance* instance = GetInstance(instanceId);
+  if (!instance)
+    return;
+  ClearFaceHighlight();
+  instance->highlight.x = firstVertex;
+  instance->highlight.y = firstVertex + count;
 }
 
-void MeshRenderer::SetFaceHover(uint32_t instanceId, uint32_t firstVertex, uint32_t count) {
-    MeshInstance* instance = GetInstance(instanceId);
-    if (!instance) return;
-    ClearFaceHover();
-    instance->highlight.z = firstVertex;
-    instance->highlight.w = firstVertex + count;
+void MeshRenderer::SetFaceHover(uint32_t instanceId, uint32_t firstVertex,
+                                uint32_t count) {
+  MeshInstance* instance = GetInstance(instanceId);
+  if (!instance)
+    return;
+  ClearFaceHover();
+  instance->highlight.z = firstVertex;
+  instance->highlight.w = firstVertex + count;
 }
 
 void MeshRenderer::HighlightInstance(uint32_t instanceId) {
-    MeshInstance* instance = GetInstance(instanceId);
-    if (!instance) return;
-    MeshAsset* asset = GetAsset(instance->assetId);
-    if (!asset) return;
-    // Full vertex range = the whole instance; additive (no ClearFaceHighlight).
-    instance->highlight.x = 0;
-    instance->highlight.y = static_cast<uint32_t>(asset->vertices.size());
+  MeshInstance* instance = GetInstance(instanceId);
+  if (!instance)
+    return;
+  MeshAsset* asset = GetAsset(instance->assetId);
+  if (!asset)
+    return;
+  // Full vertex range = the whole instance; additive (no ClearFaceHighlight).
+  instance->highlight.x = 0;
+  instance->highlight.y = static_cast<uint32_t>(asset->vertices.size());
 }
 
 void MeshRenderer::ClearFaceHighlight() {
-    for (auto& instance : m_instances) {
-        if (instance) { instance->highlight.x = instance->highlight.y = 0; }
+  for (auto& instance : m_instances) {
+    if (instance) {
+      instance->highlight.x = instance->highlight.y = 0;
     }
+  }
 }
 
 void MeshRenderer::ClearFaceHover() {
-    for (auto& instance : m_instances) {
-        if (instance) { instance->highlight.z = instance->highlight.w = 0; }
+  for (auto& instance : m_instances) {
+    if (instance) {
+      instance->highlight.z = instance->highlight.w = 0;
     }
+  }
 }
 
-void MeshRenderer::SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height) {
-    m_viewportX = x;
-    m_viewportY = y;
-    m_viewportWidth = width;
-    m_viewportHeight = height;
+void MeshRenderer::SetViewport(int32_t x, int32_t y, uint32_t width,
+                               uint32_t height) {
+  m_viewportX = x;
+  m_viewportY = y;
+  m_viewportWidth = width;
+  m_viewportHeight = height;
 }
 
 bool MeshRenderer::GetShadowCasters(std::vector<ShadowCaster>& out,
                                     glm::vec3& bbMin, glm::vec3& bbMax) {
-    out.clear();
-    bbMin = glm::vec3(std::numeric_limits<float>::max());
-    bbMax = -bbMin;
-    for (const auto& instance : m_instances) {
-        // Exactly the main pass's opaque set: visible, non-ghost.
-        if (!instance || !instance->visible || instance->ghost) continue;
-        MeshAsset* asset = GetAsset(instance->assetId);
-        if (!asset || asset->vertices.empty()) continue;
+  out.clear();
+  bbMin = glm::vec3(std::numeric_limits<float>::max());
+  bbMax = -bbMin;
+  for (const auto& instance : m_instances) {
+    // Exactly the main pass's opaque set: visible, non-ghost.
+    if (!instance || !instance->visible || instance->ghost)
+      continue;
+    MeshAsset* asset = GetAsset(instance->assetId);
+    if (!asset || asset->vertices.empty())
+      continue;
 
-        out.push_back({asset->vertexBuffer, asset->indexBuffer,
-                       static_cast<uint32_t>(asset->indices.size()),
-                       instance->transform});
-        for (int c = 0; c < 8; c++) {
-            const glm::vec3 corner((c & 1) ? asset->bboxMax.x : asset->bboxMin.x,
-                                   (c & 2) ? asset->bboxMax.y : asset->bboxMin.y,
-                                   (c & 4) ? asset->bboxMax.z : asset->bboxMin.z);
-            const glm::vec3 wp =
-                glm::vec3(instance->transform * glm::vec4(corner, 1.0f));
-            bbMin = glm::min(bbMin, wp);
-            bbMax = glm::max(bbMax, wp);
-        }
+    out.push_back({asset->vertexBuffer, asset->indexBuffer,
+                   static_cast<uint32_t>(asset->indices.size()),
+                   instance->transform});
+    for (int c = 0; c < 8; c++) {
+      const glm::vec3 corner((c & 1) ? asset->bboxMax.x : asset->bboxMin.x,
+                             (c & 2) ? asset->bboxMax.y : asset->bboxMin.y,
+                             (c & 4) ? asset->bboxMax.z : asset->bboxMin.z);
+      const glm::vec3 wp =
+          glm::vec3(instance->transform * glm::vec4(corner, 1.0f));
+      bbMin = glm::min(bbMin, wp);
+      bbMax = glm::max(bbMax, wp);
     }
-    return !out.empty();
+  }
+  return !out.empty();
 }
 
 void MeshRenderer::RebindShadowMap(VkImageView shadowMap) {
-    m_shadowMapView = shadowMap;
-    if (m_descriptorSets.empty()) return;
-    for (size_t i = 0; i < m_descriptorSets.size(); i++) {
-        VkDescriptorImageInfo info{m_shadowSampler, m_shadowMapView,
-                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = m_descriptorSets[i];
-        write.dstBinding = 4;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.descriptorCount = 1;
-        write.pImageInfo = &info;
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
-    }
+  m_shadowMapView = shadowMap;
+  if (m_descriptorSets.empty())
+    return;
+  for (size_t i = 0; i < m_descriptorSets.size(); i++) {
+    VkDescriptorImageInfo info{m_shadowSampler, m_shadowMapView,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_descriptorSets[i];
+    write.dstBinding = 4;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.descriptorCount = 1;
+    write.pImageInfo = &info;
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+  }
 }
 
 void MeshRenderer::RebindAOMap(VkImageView aoMap) {
-    m_aoMapView = aoMap;
-    if (m_descriptorSets.empty()) return;
-    for (size_t i = 0; i < m_descriptorSets.size(); i++) {
-        VkDescriptorImageInfo info{m_aoSampler, m_aoMapView,
-                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = m_descriptorSets[i];
-        write.dstBinding = 5;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.descriptorCount = 1;
-        write.pImageInfo = &info;
-        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
-    }
+  m_aoMapView = aoMap;
+  if (m_descriptorSets.empty())
+    return;
+  for (size_t i = 0; i < m_descriptorSets.size(); i++) {
+    VkDescriptorImageInfo info{m_aoSampler, m_aoMapView,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_descriptorSets[i];
+    write.dstBinding = 5;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.descriptorCount = 1;
+    write.pImageInfo = &info;
+    vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+  }
 }
 
 // Private helper functions
 bool MeshRenderer::CreateDescriptorSetLayout() {
-    // 0: camera+lights UBO (vertex). 1-3: IBL maps (fragment) — irradiance,
-    // prefiltered specular, BRDF LUT. 4: key-light shadow map (fragment,
-    // compare sampler). 5: blurred SSAO map (fragment).
-    VkDescriptorSetLayoutBinding bindings[6]{};
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    for (int i = 1; i <= 5; i++) {
-        bindings[i].binding = static_cast<uint32_t>(i);
-        bindings[i].descriptorType =
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        bindings[i].descriptorCount = 1;
-        bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    }
+  // 0: camera+lights UBO (vertex). 1-3: IBL maps (fragment) — irradiance,
+  // prefiltered specular, BRDF LUT. 4: key-light shadow map (fragment,
+  // compare sampler). 5: blurred SSAO map (fragment).
+  VkDescriptorSetLayoutBinding bindings[6]{};
+  bindings[0].binding = 0;
+  bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  bindings[0].descriptorCount = 1;
+  bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  for (int i = 1; i <= 5; i++) {
+    bindings[i].binding = static_cast<uint32_t>(i);
+    bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[i].descriptorCount = 1;
+    bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+  }
 
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = 6;
-    layoutInfo.pBindings = bindings;
+  VkDescriptorSetLayoutCreateInfo layoutInfo{};
+  layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  layoutInfo.bindingCount = 6;
+  layoutInfo.pBindings = bindings;
 
-    if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create descriptor set layout!");
-        return false;
-    }
+  if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr,
+                                  &m_descriptorSetLayout) != VK_SUCCESS) {
+    LOG_ERROR("Failed to create descriptor set layout!");
+    return false;
+  }
 
-    return true;
+  return true;
 }
 
 bool MeshRenderer::CreateGraphicsPipeline() {
-    // Get executable directory and construct shader paths
-    const std::string shaderDir = RuntimePaths::ShaderDir().string();
-    std::string vertShaderPath = shaderDir + "/mesh_vert.spv";
-    std::string fragShaderPath = shaderDir + "/mesh_frag.spv";
+  // Get executable directory and construct shader paths
+  const std::string shaderDir = RuntimePaths::ShaderDir().string();
+  std::string vertShaderPath = shaderDir + "/mesh_vert.spv";
+  std::string fragShaderPath = shaderDir + "/mesh_frag.spv";
 
-    // Load shaders
-    auto vertShaderCode = ReadFile(vertShaderPath);
-    auto fragShaderCode = ReadFile(fragShaderPath);
+  // Load shaders
+  auto vertShaderCode = ReadFile(vertShaderPath);
+  auto fragShaderCode = ReadFile(fragShaderPath);
 
-    if (vertShaderCode.empty() || fragShaderCode.empty()) {
-        LOG_ERROR("Failed to load shader files from: {}", shaderDir);
-        LOG_ERROR("Vertex shader path: {}", vertShaderPath);
-        LOG_ERROR("Fragment shader path: {}", fragShaderPath);
-        return false;
-    }
+  if (vertShaderCode.empty() || fragShaderCode.empty()) {
+    LOG_ERROR("Failed to load shader files from: {}", shaderDir);
+    LOG_ERROR("Vertex shader path: {}", vertShaderPath);
+    LOG_ERROR("Fragment shader path: {}", fragShaderPath);
+    return false;
+  }
 
-    VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
-    VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
+  VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
+  VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
 
-    VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
-    vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertShaderStageInfo.module = vertShaderModule;
-    vertShaderStageInfo.pName = "main";
+  VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+  vertShaderStageInfo.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+  vertShaderStageInfo.module = vertShaderModule;
+  vertShaderStageInfo.pName = "main";
 
-    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = fragShaderModule;
-    fragShaderStageInfo.pName = "main";
+  VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+  fragShaderStageInfo.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+  fragShaderStageInfo.module = fragShaderModule;
+  fragShaderStageInfo.pName = "main";
 
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+  VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo,
+                                                    fragShaderStageInfo};
 
-    // Vertex input
-    auto bindingDescription = Vertex3D::getBindingDescription();
-    auto attributeDescriptions = Vertex3D::getAttributeDescriptions();
+  // Vertex input
+  auto bindingDescription = Vertex3D::getBindingDescription();
+  auto attributeDescriptions = Vertex3D::getAttributeDescriptions();
 
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 1;
-    vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
-    vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-    vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+  VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+  vertexInputInfo.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+  vertexInputInfo.vertexBindingDescriptionCount = 1;
+  vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+  vertexInputInfo.vertexAttributeDescriptionCount =
+      static_cast<uint32_t>(attributeDescriptions.size());
+  vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
-    // Input assembly
-    VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
-    inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssembly.primitiveRestartEnable = VK_FALSE;
+  // Input assembly
+  VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+  inputAssembly.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  inputAssembly.primitiveRestartEnable = VK_FALSE;
 
-    // Viewport and scissor (dynamic)
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
+  // Viewport and scissor (dynamic)
+  VkPipelineViewportStateCreateInfo viewportState{};
+  viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  viewportState.viewportCount = 1;
+  viewportState.scissorCount = 1;
 
-    // Rasterizer
-    VkPipelineRasterizationStateCreateInfo rasterizer{};
-    rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.depthClampEnable = VK_FALSE;
-    rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-    // With the Y-flipped projection, OCCT's outward-oriented triangles are
-    // counter-clockwise in framebuffer space (verified empirically; pinned
-    // by the "camera-facing triangles are CCW" unit test)
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+  // Rasterizer
+  VkPipelineRasterizationStateCreateInfo rasterizer{};
+  rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  rasterizer.depthClampEnable = VK_FALSE;
+  rasterizer.rasterizerDiscardEnable = VK_FALSE;
+  rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+  rasterizer.lineWidth = 1.0f;
+  rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+  // With the Y-flipped projection, OCCT's outward-oriented triangles are
+  // counter-clockwise in framebuffer space (verified empirically; pinned
+  // by the "camera-facing triangles are CCW" unit test)
+  rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+  rasterizer.depthBiasEnable = VK_FALSE;
 
-    // Multisampling
-    VkPipelineMultisampleStateCreateInfo multisampling{};
-    multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampling.sampleShadingEnable = VK_FALSE;
-    multisampling.rasterizationSamples = m_msaaSamples;
+  // Multisampling
+  VkPipelineMultisampleStateCreateInfo multisampling{};
+  multisampling.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  multisampling.sampleShadingEnable = VK_FALSE;
+  multisampling.rasterizationSamples = m_msaaSamples;
 
-    // Depth testing
-    VkPipelineDepthStencilStateCreateInfo depthStencil{};
-    depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
+  // Depth testing
+  VkPipelineDepthStencilStateCreateInfo depthStencil{};
+  depthStencil.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  depthStencil.depthTestEnable = VK_TRUE;
+  depthStencil.depthWriteEnable = VK_TRUE;
+  depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+  depthStencil.depthBoundsTestEnable = VK_FALSE;
+  depthStencil.stencilTestEnable = VK_FALSE;
 
-    // Color blending
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
+  // Color blending
+  VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+  colorBlendAttachment.colorWriteMask =
+      VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+      VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+  colorBlendAttachment.blendEnable = VK_FALSE;
 
-    VkPipelineColorBlendStateCreateInfo colorBlending{};
-    colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+  VkPipelineColorBlendStateCreateInfo colorBlending{};
+  colorBlending.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+  colorBlending.logicOpEnable = VK_FALSE;
+  colorBlending.attachmentCount = 1;
+  colorBlending.pAttachments = &colorBlendAttachment;
 
-    // Dynamic state
-    std::vector<VkDynamicState> dynamicStates = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR
-    };
+  // Dynamic state
+  std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT,
+                                               VK_DYNAMIC_STATE_SCISSOR};
 
-    VkPipelineDynamicStateCreateInfo dynamicState{};
-    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
-    dynamicState.pDynamicStates = dynamicStates.data();
+  VkPipelineDynamicStateCreateInfo dynamicState{};
+  dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+  dynamicState.pDynamicStates = dynamicStates.data();
 
-    // Pipeline layout
-    // Per-instance model matrix + highlight ranges (vertex) + PBR material +
-    // albedo + procedural-grain params (fragment) via push constants. The
-    // total is 128 bytes, exactly the Vulkan-guaranteed maxPushConstantsSize
-    // floor — adding the proc vec4 leaves no further headroom here.
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags =
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(glm::mat4) + sizeof(glm::uvec4) +
-                             sizeof(glm::vec4) + sizeof(glm::vec4) +
-                             sizeof(glm::vec4);
+  // Pipeline layout
+  // Per-instance model matrix + highlight ranges (vertex) + PBR material +
+  // albedo + procedural-grain params (fragment) via push constants. The
+  // total is 128 bytes, exactly the Vulkan-guaranteed maxPushConstantsSize
+  // floor — adding the proc vec4 leaves no further headroom here.
+  VkPushConstantRange pushConstantRange{};
+  pushConstantRange.stageFlags =
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+  pushConstantRange.offset = 0;
+  pushConstantRange.size = sizeof(glm::mat4) + sizeof(glm::uvec4) +
+                           sizeof(glm::vec4) + sizeof(glm::vec4) +
+                           sizeof(glm::vec4);
 
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+  VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+  pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  pipelineLayoutInfo.setLayoutCount = 1;
+  pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout;
+  pipelineLayoutInfo.pushConstantRangeCount = 1;
+  pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
 
-    if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create pipeline layout!");
-        vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
-        vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
-        return false;
-    }
-
-    // Create pipeline
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
-    pipelineInfo.pVertexInputState = &vertexInputInfo;
-    pipelineInfo.pInputAssemblyState = &inputAssembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizer;
-    pipelineInfo.pMultisampleState = &multisampling;
-    pipelineInfo.pDepthStencilState = &depthStencil;
-    pipelineInfo.pColorBlendState = &colorBlending;
-    pipelineInfo.pDynamicState = &dynamicState;
-    pipelineInfo.layout = m_pipelineLayout;
-    pipelineInfo.renderPass = m_renderPass;
-    pipelineInfo.subpass = 0;
-
-    if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create graphics pipeline!");
-        vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
-        vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
-        return false;
-    }
-
-    // Ghost pipeline (A4 in-context editing): identical except alpha blending
-    // on and depth writes off — translucent context geometry drawn in a
-    // second pass, depth-tested against (but never occluding) the opaque
-    // scene. Unsorted; fine at reference-visual alphas.
-    depthStencil.depthWriteEnable = VK_FALSE;
-    colorBlendAttachment.blendEnable = VK_TRUE;
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-    if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_ghostPipeline) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create ghost pipeline!");
-        vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
-        vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
-        return false;
-    }
-
+  if (vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr,
+                             &m_pipelineLayout) != VK_SUCCESS) {
+    LOG_ERROR("Failed to create pipeline layout!");
     vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
     vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
+    return false;
+  }
 
-    return true;
+  // Create pipeline
+  VkGraphicsPipelineCreateInfo pipelineInfo{};
+  pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  pipelineInfo.stageCount = 2;
+  pipelineInfo.pStages = shaderStages;
+  pipelineInfo.pVertexInputState = &vertexInputInfo;
+  pipelineInfo.pInputAssemblyState = &inputAssembly;
+  pipelineInfo.pViewportState = &viewportState;
+  pipelineInfo.pRasterizationState = &rasterizer;
+  pipelineInfo.pMultisampleState = &multisampling;
+  pipelineInfo.pDepthStencilState = &depthStencil;
+  pipelineInfo.pColorBlendState = &colorBlending;
+  pipelineInfo.pDynamicState = &dynamicState;
+  pipelineInfo.layout = m_pipelineLayout;
+  pipelineInfo.renderPass = m_renderPass;
+  pipelineInfo.subpass = 0;
+
+  if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                nullptr, &m_graphicsPipeline) != VK_SUCCESS) {
+    LOG_ERROR("Failed to create graphics pipeline!");
+    vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
+    return false;
+  }
+
+  // Ghost pipeline (A4 in-context editing): identical except alpha blending
+  // on and depth writes off — translucent context geometry drawn in a
+  // second pass, depth-tested against (but never occluding) the opaque
+  // scene. Unsorted; fine at reference-visual alphas.
+  depthStencil.depthWriteEnable = VK_FALSE;
+  colorBlendAttachment.blendEnable = VK_TRUE;
+  colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  colorBlendAttachment.dstColorBlendFactor =
+      VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+  colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+  colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+  if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo,
+                                nullptr, &m_ghostPipeline) != VK_SUCCESS) {
+    LOG_ERROR("Failed to create ghost pipeline!");
+    vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
+    return false;
+  }
+
+  vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+  vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
+
+  return true;
 }
 
 bool MeshRenderer::CreateUniformBuffers() {
-    VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+  VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-    m_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-    m_uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
-    m_uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+  m_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+  m_uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+  m_uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
 
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                         m_uniformBuffers[i], m_uniformBuffersMemory[i])) {
-            return false;
-        }
-
-        vkMapMemory(m_device, m_uniformBuffersMemory[i], 0, bufferSize, 0, &m_uniformBuffersMapped[i]);
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    if (!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      m_uniformBuffers[i], m_uniformBuffersMemory[i])) {
+      return false;
     }
 
-    return true;
+    vkMapMemory(m_device, m_uniformBuffersMemory[i], 0, bufferSize, 0,
+                &m_uniformBuffersMapped[i]);
+  }
+
+  return true;
 }
 
 bool MeshRenderer::CreateDescriptorPool() {
-    VkDescriptorPoolSize poolSizes[2]{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-    // 3 IBL samplers + shadow map + AO map per frame.
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 5;
+  VkDescriptorPoolSize poolSizes[2]{};
+  poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+  // 3 IBL samplers + shadow map + AO map per frame.
+  poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  poolSizes[1].descriptorCount =
+      static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT) * 5;
 
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 2;
-    poolInfo.pPoolSizes = poolSizes;
-    poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+  VkDescriptorPoolCreateInfo poolInfo{};
+  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  poolInfo.poolSizeCount = 2;
+  poolInfo.pPoolSizes = poolSizes;
+  poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
-    if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create descriptor pool!");
-        return false;
-    }
+  if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) !=
+      VK_SUCCESS) {
+    LOG_ERROR("Failed to create descriptor pool!");
+    return false;
+  }
 
-    return true;
+  return true;
 }
 
 bool MeshRenderer::CreateDescriptorSets() {
-    std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_descriptorSetLayout);
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_descriptorPool;
-    allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-    allocInfo.pSetLayouts = layouts.data();
+  std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT,
+                                             m_descriptorSetLayout);
+  VkDescriptorSetAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  allocInfo.descriptorPool = m_descriptorPool;
+  allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+  allocInfo.pSetLayouts = layouts.data();
 
-    m_descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-    if (vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data()) != VK_SUCCESS) {
-        LOG_ERROR("Failed to allocate descriptor sets!");
-        return false;
-    }
+  m_descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+  if (vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data()) !=
+      VK_SUCCESS) {
+    LOG_ERROR("Failed to allocate descriptor sets!");
+    return false;
+  }
 
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        VkDescriptorBufferInfo bufferInfo{};
-        bufferInfo.buffer = m_uniformBuffers[i];
-        bufferInfo.offset = 0;
-        bufferInfo.range = sizeof(UniformBufferObject);
+  for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = m_uniformBuffers[i];
+    bufferInfo.offset = 0;
+    bufferInfo.range = sizeof(UniformBufferObject);
 
-        // IBL image infos (bindings 1-3, from SetIBL) + shadow map (binding
-        // 4, from SetShadowMap) + blurred AO (binding 5, from SetAOMap);
-        // layouts match the prepasses' final SHADER_READ_ONLY layout.
-        VkDescriptorImageInfo irr{m_iblEnvSampler, m_iblIrradiance,
-                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorImageInfo pref{m_iblEnvSampler, m_iblPrefilter,
-                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorImageInfo brdf{m_iblLutSampler, m_iblBrdf,
-                                   VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorImageInfo shadow{m_shadowSampler, m_shadowMapView,
-                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorImageInfo ao{m_aoSampler, m_aoMapView,
+    // IBL image infos (bindings 1-3, from SetIBL) + shadow map (binding
+    // 4, from SetShadowMap) + blurred AO (binding 5, from SetAOMap);
+    // layouts match the prepasses' final SHADER_READ_ONLY layout.
+    VkDescriptorImageInfo irr{m_iblEnvSampler, m_iblIrradiance,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo pref{m_iblEnvSampler, m_iblPrefilter,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo brdf{m_iblLutSampler, m_iblBrdf,
+                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo shadow{m_shadowSampler, m_shadowMapView,
                                  VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkDescriptorImageInfo ao{m_aoSampler, m_aoMapView,
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
-        VkWriteDescriptorSet writes[6]{};
-        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet = m_descriptorSets[i];
-        writes[0].dstBinding = 0;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[0].descriptorCount = 1;
-        writes[0].pBufferInfo = &bufferInfo;
+    VkWriteDescriptorSet writes[6]{};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = m_descriptorSets[i];
+    writes[0].dstBinding = 0;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[0].descriptorCount = 1;
+    writes[0].pBufferInfo = &bufferInfo;
 
-        const VkDescriptorImageInfo* imgs[5] = {&irr, &pref, &brdf, &shadow,
-                                                &ao};
-        for (int b = 1; b <= 5; b++) {
-            writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[b].dstSet = m_descriptorSets[i];
-            writes[b].dstBinding = static_cast<uint32_t>(b);
-            writes[b].descriptorType =
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            writes[b].descriptorCount = 1;
-            writes[b].pImageInfo = imgs[b - 1];
-        }
-
-        vkUpdateDescriptorSets(m_device, 6, writes, 0, nullptr);
+    const VkDescriptorImageInfo* imgs[5] = {&irr, &pref, &brdf, &shadow, &ao};
+    for (int b = 1; b <= 5; b++) {
+      writes[b].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      writes[b].dstSet = m_descriptorSets[i];
+      writes[b].dstBinding = static_cast<uint32_t>(b);
+      writes[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      writes[b].descriptorCount = 1;
+      writes[b].pImageInfo = imgs[b - 1];
     }
 
-    return true;
+    vkUpdateDescriptorSets(m_device, 6, writes, 0, nullptr);
+  }
+
+  return true;
 }
 
 VkShaderModule MeshRenderer::CreateShaderModule(const std::vector<char>& code) {
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = code.size();
-    createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+  VkShaderModuleCreateInfo createInfo{};
+  createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  createInfo.codeSize = code.size();
+  createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
 
-    VkShaderModule shaderModule;
-    if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create shader module!");
-    }
+  VkShaderModule shaderModule;
+  if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) !=
+      VK_SUCCESS) {
+    throw std::runtime_error("failed to create shader module!");
+  }
 
-    return shaderModule;
+  return shaderModule;
 }
 
 std::vector<char> MeshRenderer::ReadFile(const std::string& filename) {
-    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+  std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
-    if (!file.is_open()) {
-        LOG_ERROR("Failed to open file: {}", filename);
-        return {};
-    }
+  if (!file.is_open()) {
+    LOG_ERROR("Failed to open file: {}", filename);
+    return {};
+  }
 
-    size_t fileSize = static_cast<size_t>(file.tellg());
-    std::vector<char> buffer(fileSize);
+  size_t fileSize = static_cast<size_t>(file.tellg());
+  std::vector<char> buffer(fileSize);
 
-    file.seekg(0);
-    file.read(buffer.data(), fileSize);
-    file.close();
+  file.seekg(0);
+  file.read(buffer.data(), fileSize);
+  file.close();
 
-    return buffer;
+  return buffer;
 }
 
 bool MeshRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                               VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+                                VkMemoryPropertyFlags properties,
+                                VkBuffer& buffer,
+                                VkDeviceMemory& bufferMemory) {
+  VkBufferCreateInfo bufferInfo{};
+  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.size = size;
+  bufferInfo.usage = usage;
+  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-        LOG_ERROR("Failed to create buffer!");
-        return false;
-    }
+  if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+    LOG_ERROR("Failed to create buffer!");
+    return false;
+  }
 
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
+  VkMemoryRequirements memRequirements;
+  vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = FindMemoryType(memRequirements.memoryTypeBits, properties);
+  VkMemoryAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  allocInfo.allocationSize = memRequirements.size;
+  allocInfo.memoryTypeIndex =
+      FindMemoryType(memRequirements.memoryTypeBits, properties);
 
-    if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-        LOG_ERROR("Failed to allocate buffer memory!");
-        return false;
-    }
+  if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) !=
+      VK_SUCCESS) {
+    LOG_ERROR("Failed to allocate buffer memory!");
+    return false;
+  }
 
-    vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
-    return true;
+  vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
+  return true;
 }
 
-uint32_t MeshRenderer::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
-    VkPhysicalDeviceMemoryProperties memProperties;
-    vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
+uint32_t MeshRenderer::FindMemoryType(uint32_t typeFilter,
+                                      VkMemoryPropertyFlags properties) {
+  VkPhysicalDeviceMemoryProperties memProperties;
+  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
 
-    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-        if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
-            return i;
-        }
+  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags &
+                                    properties) == properties) {
+      return i;
     }
+  }
 
-    throw std::runtime_error("failed to find suitable memory type!");
+  throw std::runtime_error("failed to find suitable memory type!");
 }
 
-void MeshRenderer::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = m_commandPool;
-    allocInfo.commandBufferCount = 1;
+void MeshRenderer::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer,
+                              VkDeviceSize size) {
+  VkCommandBufferAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandPool = m_commandPool;
+  allocInfo.commandBufferCount = 1;
 
-    VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
+  VkCommandBuffer commandBuffer;
+  vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+  vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
-    VkBufferCopy copyRegion{};
-    copyRegion.size = size;
-    vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+  VkBufferCopy copyRegion{};
+  copyRegion.size = size;
+  vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
 
-    vkEndCommandBuffer(commandBuffer);
+  vkEndCommandBuffer(commandBuffer);
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
 
-    vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(m_graphicsQueue);
+  vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  vkQueueWaitIdle(m_graphicsQueue);
 
-    vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
+  vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
 }
 
 bool MeshRenderer::CreateAssetBuffers(MeshAsset* asset) {
-    if (!asset || asset->vertices.empty()) return false;
+  if (!asset || asset->vertices.empty())
+    return false;
 
-    // Local-space bounds for the shadow frustum fit (see GetShadowCasters).
-    asset->bboxMin = asset->bboxMax = asset->vertices[0].position;
-    for (const Vertex3D& v : asset->vertices) {
-        asset->bboxMin = glm::min(asset->bboxMin, v.position);
-        asset->bboxMax = glm::max(asset->bboxMax, v.position);
-    }
+  // Local-space bounds for the shadow frustum fit (see GetShadowCasters).
+  asset->bboxMin = asset->bboxMax = asset->vertices[0].position;
+  for (const Vertex3D& v : asset->vertices) {
+    asset->bboxMin = glm::min(asset->bboxMin, v.position);
+    asset->bboxMax = glm::max(asset->bboxMax, v.position);
+  }
 
-    VkDeviceSize vertexBufferSize = sizeof(asset->vertices[0]) * asset->vertices.size();
-    VkDeviceSize indexBufferSize = sizeof(asset->indices[0]) * asset->indices.size();
+  VkDeviceSize vertexBufferSize =
+      sizeof(asset->vertices[0]) * asset->vertices.size();
+  VkDeviceSize indexBufferSize =
+      sizeof(asset->indices[0]) * asset->indices.size();
 
-    // Create staging buffers
-    VkBuffer vertexStagingBuffer;
-    VkDeviceMemory vertexStagingBufferMemory;
-    CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                vertexStagingBuffer, vertexStagingBufferMemory);
+  // Create staging buffers
+  VkBuffer vertexStagingBuffer;
+  VkDeviceMemory vertexStagingBufferMemory;
+  CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+               vertexStagingBuffer, vertexStagingBufferMemory);
 
-    void* data;
-    vkMapMemory(m_device, vertexStagingBufferMemory, 0, vertexBufferSize, 0, &data);
-    memcpy(data, asset->vertices.data(), static_cast<size_t>(vertexBufferSize));
-    vkUnmapMemory(m_device, vertexStagingBufferMemory);
+  void* data;
+  vkMapMemory(m_device, vertexStagingBufferMemory, 0, vertexBufferSize, 0,
+              &data);
+  memcpy(data, asset->vertices.data(), static_cast<size_t>(vertexBufferSize));
+  vkUnmapMemory(m_device, vertexStagingBufferMemory);
 
-    // Create vertex buffer
-    CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asset->vertexBuffer, asset->vertexBufferMemory);
+  // Create vertex buffer
+  CreateBuffer(vertexBufferSize,
+               VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asset->vertexBuffer,
+               asset->vertexBufferMemory);
 
-    CopyBuffer(vertexStagingBuffer, asset->vertexBuffer, vertexBufferSize);
+  CopyBuffer(vertexStagingBuffer, asset->vertexBuffer, vertexBufferSize);
 
-    vkDestroyBuffer(m_device, vertexStagingBuffer, nullptr);
-    vkFreeMemory(m_device, vertexStagingBufferMemory, nullptr);
+  vkDestroyBuffer(m_device, vertexStagingBuffer, nullptr);
+  vkFreeMemory(m_device, vertexStagingBufferMemory, nullptr);
 
-    // Create index buffer if indices exist
-    if (!asset->indices.empty()) {
-        VkBuffer indexStagingBuffer;
-        VkDeviceMemory indexStagingBufferMemory;
-        CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                    indexStagingBuffer, indexStagingBufferMemory);
+  // Create index buffer if indices exist
+  if (!asset->indices.empty()) {
+    VkBuffer indexStagingBuffer;
+    VkDeviceMemory indexStagingBufferMemory;
+    CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                 indexStagingBuffer, indexStagingBufferMemory);
 
-        vkMapMemory(m_device, indexStagingBufferMemory, 0, indexBufferSize, 0, &data);
-        memcpy(data, asset->indices.data(), static_cast<size_t>(indexBufferSize));
-        vkUnmapMemory(m_device, indexStagingBufferMemory);
+    vkMapMemory(m_device, indexStagingBufferMemory, 0, indexBufferSize, 0,
+                &data);
+    memcpy(data, asset->indices.data(), static_cast<size_t>(indexBufferSize));
+    vkUnmapMemory(m_device, indexStagingBufferMemory);
 
-        CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asset->indexBuffer, asset->indexBufferMemory);
+    CreateBuffer(indexBufferSize,
+                 VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asset->indexBuffer,
+                 asset->indexBufferMemory);
 
-        CopyBuffer(indexStagingBuffer, asset->indexBuffer, indexBufferSize);
+    CopyBuffer(indexStagingBuffer, asset->indexBuffer, indexBufferSize);
 
-        vkDestroyBuffer(m_device, indexStagingBuffer, nullptr);
-        vkFreeMemory(m_device, indexStagingBufferMemory, nullptr);
-    }
+    vkDestroyBuffer(m_device, indexStagingBuffer, nullptr);
+    vkFreeMemory(m_device, indexStagingBufferMemory, nullptr);
+  }
 
-    return true;
+  return true;
 }
 
 void MeshRenderer::DestroyAssetBuffers(MeshAsset* asset) {
-    if (!asset) return;
+  if (!asset)
+    return;
 
-    if (asset->vertexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, asset->vertexBuffer, nullptr);
-        asset->vertexBuffer = VK_NULL_HANDLE;
-    }
-    if (asset->vertexBufferMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(m_device, asset->vertexBufferMemory, nullptr);
-        asset->vertexBufferMemory = VK_NULL_HANDLE;
-    }
-    if (asset->indexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, asset->indexBuffer, nullptr);
-        asset->indexBuffer = VK_NULL_HANDLE;
-    }
-    if (asset->indexBufferMemory != VK_NULL_HANDLE) {
-        vkFreeMemory(m_device, asset->indexBufferMemory, nullptr);
-        asset->indexBufferMemory = VK_NULL_HANDLE;
-    }
+  if (asset->vertexBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(m_device, asset->vertexBuffer, nullptr);
+    asset->vertexBuffer = VK_NULL_HANDLE;
+  }
+  if (asset->vertexBufferMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(m_device, asset->vertexBufferMemory, nullptr);
+    asset->vertexBufferMemory = VK_NULL_HANDLE;
+  }
+  if (asset->indexBuffer != VK_NULL_HANDLE) {
+    vkDestroyBuffer(m_device, asset->indexBuffer, nullptr);
+    asset->indexBuffer = VK_NULL_HANDLE;
+  }
+  if (asset->indexBufferMemory != VK_NULL_HANDLE) {
+    vkFreeMemory(m_device, asset->indexBufferMemory, nullptr);
+    asset->indexBufferMemory = VK_NULL_HANDLE;
+  }
 }

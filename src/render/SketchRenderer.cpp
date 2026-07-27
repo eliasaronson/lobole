@@ -8,10 +8,10 @@
 #include <cstring>
 #include <fstream>
 
-bool SketchRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
+bool SketchRenderer::Initialize(VkDevice device,
+                                VkPhysicalDevice physicalDevice,
                                 VkRenderPass renderPass, VkQueue graphicsQueue,
-                                uint32_t queueFamily,
-                                VkCommandPool commandPool,
+                                uint32_t queueFamily, VkCommandPool commandPool,
                                 VkSampleCountFlagBits samples) {
   m_device = device;
   m_physicalDevice = physicalDevice;
@@ -70,9 +70,9 @@ bool SketchRenderer::CreateDescriptors() {
     vkGetBufferMemoryRequirements(m_device, u.buffer, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
-    ai.memoryTypeIndex =
-        FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    ai.memoryTypeIndex = FindMemoryType(
+        req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (vkAllocateMemory(m_device, &ai, nullptr, &u.memory) != VK_SUCCESS)
       return false;
     vkBindBufferMemory(m_device, u.buffer, u.memory, 0);
@@ -99,7 +99,8 @@ bool SketchRenderer::CreateDescriptors() {
   alloc.descriptorPool = m_descriptorPool;
   alloc.descriptorSetCount = kFramesInFlight;
   alloc.pSetLayouts = layouts.data();
-  if (vkAllocateDescriptorSets(m_device, &alloc, m_descriptorSets) != VK_SUCCESS)
+  if (vkAllocateDescriptorSets(m_device, &alloc, m_descriptorSets) !=
+      VK_SUCCESS)
     return false;
 
   for (int i = 0; i < kFramesInFlight; i++) {
@@ -155,7 +156,8 @@ bool SketchRenderer::CreatePipelines() {
   binding.stride = sizeof(LineVertex3D);
   binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
   std::array<VkVertexInputAttributeDescription, 2> attrs{};
-  attrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LineVertex3D, position)};
+  attrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+              offsetof(LineVertex3D, position)};
   attrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(LineVertex3D, color)};
   VkPipelineVertexInputStateCreateInfo vertexInput{
       VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
@@ -225,7 +227,8 @@ bool SketchRenderer::CreatePipelines() {
     // A no-depth-test variant (the gizmo) draws over geometry so its handles
     // stay visible/grabbable; everything else keeps the shared depth state.
     VkPipelineDepthStencilStateCreateInfo depthLocal = depth;
-    if (!depthTest) depthLocal.depthTestEnable = VK_FALSE;
+    if (!depthTest)
+      depthLocal.depthTestEnable = VK_FALSE;
 
     VkPipelineRasterizationStateCreateInfo raster{
         VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
@@ -254,8 +257,8 @@ bool SketchRenderer::CreatePipelines() {
     info.layout = m_pipelineLayout;
     info.renderPass = m_renderPass;
     info.subpass = 0;
-    return vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &info, nullptr,
-                                     &out) == VK_SUCCESS;
+    return vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &info,
+                                     nullptr, &out) == VK_SUCCESS;
   };
 
   bool ok =
@@ -278,7 +281,8 @@ bool SketchRenderer::CreatePipelines() {
   primBinding.stride = sizeof(PrimVertex);
   primBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
   std::array<VkVertexInputAttributeDescription, 5> primAttrs{};
-  primAttrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(PrimVertex, posThis)};
+  primAttrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+                  offsetof(PrimVertex, posThis)};
   primAttrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT,
                   offsetof(PrimVertex, posOther)};
   primAttrs[2] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(PrimVertex, corner)};
@@ -292,9 +296,9 @@ bool SketchRenderer::CreatePipelines() {
   primInput.vertexAttributeDescriptionCount = primAttrs.size();
   primInput.pVertexAttributeDescriptions = primAttrs.data();
 
-  ok = ok && makePipeline(primStages, &primInput,
-                          VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, true,
-                          m_primPipeline);
+  ok = ok &&
+       makePipeline(primStages, &primInput, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                    true, m_primPipeline);
 
   vkDestroyShaderModule(m_device, vert, nullptr);
   vkDestroyShaderModule(m_device, frag, nullptr);
@@ -319,9 +323,9 @@ uint32_t SketchRenderer::UploadRaw(DynamicBuffer& buf, const void* data,
     vkGetBufferMemoryRequirements(m_device, buf.buffer, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
-    ai.memoryTypeIndex =
-        FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    ai.memoryTypeIndex = FindMemoryType(
+        req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     vkAllocateMemory(m_device, &ai, nullptr, &buf.memory);
     vkBindBufferMemory(m_device, buf.buffer, buf.memory, 0);
     vkMapMemory(m_device, buf.memory, 0, cap, 0, &buf.mapped);

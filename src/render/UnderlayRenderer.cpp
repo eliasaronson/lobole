@@ -358,8 +358,8 @@ bool UnderlayRenderer::UploadTexture(const unsigned char* rgba, int w, int h,
   toDst.srcAccessMask = 0;
   toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-                       1, &toDst);
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &toDst);
 
   VkBufferImageCopy region{};
   region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -398,8 +398,9 @@ bool UnderlayRenderer::UploadTexture(const unsigned char* rgba, int w, int h,
   return true;
 }
 
-UnderlayRenderer::Texture* UnderlayRenderer::GetOrCreateTexture(
-    const std::string& asset, const std::vector<unsigned char>* bytes) {
+UnderlayRenderer::Texture*
+UnderlayRenderer::GetOrCreateTexture(const std::string& asset,
+                                     const std::vector<unsigned char>* bytes) {
   auto it = m_textures.find(asset);
   if (it != m_textures.end())
     return &it->second;
@@ -407,9 +408,9 @@ UnderlayRenderer::Texture* UnderlayRenderer::GetOrCreateTexture(
     return nullptr;
 
   int w = 0, h = 0, comp = 0;
-  stbi_uc* pixels = stbi_load_from_memory(bytes->data(),
-                                          static_cast<int>(bytes->size()), &w,
-                                          &h, &comp, STBI_rgb_alpha);
+  stbi_uc* pixels =
+      stbi_load_from_memory(bytes->data(), static_cast<int>(bytes->size()), &w,
+                            &h, &comp, STBI_rgb_alpha);
   if (!pixels) {
     LOG_WARN("UnderlayRenderer: failed to decode image '{}'", asset);
     return nullptr;
@@ -515,7 +516,8 @@ void UnderlayRenderer::Render(VkCommandBuffer commandBuffer,
 
   vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          m_pipelineLayout, 0, 1, &m_uboSets[frame], 0, nullptr);
+                          m_pipelineLayout, 0, 1, &m_uboSets[frame], 0,
+                          nullptr);
   VkDeviceSize offset = 0;
   vkCmdBindVertexBuffers(commandBuffer, 0, 1, &m_vertexBuffers[frame].buffer,
                          &offset);
@@ -530,9 +532,12 @@ void UnderlayRenderer::Render(VkCommandBuffer commandBuffer,
 }
 
 void UnderlayRenderer::DestroyTexture(Texture& tex) {
-  if (tex.view) vkDestroyImageView(m_device, tex.view, nullptr);
-  if (tex.image) vkDestroyImage(m_device, tex.image, nullptr);
-  if (tex.memory) vkFreeMemory(m_device, tex.memory, nullptr);
+  if (tex.view)
+    vkDestroyImageView(m_device, tex.view, nullptr);
+  if (tex.image)
+    vkDestroyImage(m_device, tex.image, nullptr);
+  if (tex.memory)
+    vkFreeMemory(m_device, tex.memory, nullptr);
   tex = Texture{};
 }
 
@@ -576,12 +581,16 @@ void UnderlayRenderer::Shutdown() {
     DestroyDynamic(m_uniformBuffers[i]);
     DestroyDynamic(m_vertexBuffers[i]);
   }
-  if (m_sampler) vkDestroySampler(m_device, m_sampler, nullptr);
-  if (m_pipeline) vkDestroyPipeline(m_device, m_pipeline, nullptr);
+  if (m_sampler)
+    vkDestroySampler(m_device, m_sampler, nullptr);
+  if (m_pipeline)
+    vkDestroyPipeline(m_device, m_pipeline, nullptr);
   if (m_pipelineLayout)
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-  if (m_texPool) vkDestroyDescriptorPool(m_device, m_texPool, nullptr);
-  if (m_uboPool) vkDestroyDescriptorPool(m_device, m_uboPool, nullptr);
+  if (m_texPool)
+    vkDestroyDescriptorPool(m_device, m_texPool, nullptr);
+  if (m_uboPool)
+    vkDestroyDescriptorPool(m_device, m_uboPool, nullptr);
   if (m_texSetLayout)
     vkDestroyDescriptorSetLayout(m_device, m_texSetLayout, nullptr);
   if (m_uboSetLayout)

@@ -64,9 +64,9 @@ bool FieldRenderer::CreateDescriptors() {
     vkGetBufferMemoryRequirements(m_device, u.buffer, &req);
     VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     ai.allocationSize = req.size;
-    ai.memoryTypeIndex =
-        FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    ai.memoryTypeIndex = FindMemoryType(
+        req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     if (vkAllocateMemory(m_device, &ai, nullptr, &u.memory) != VK_SUCCESS)
       return false;
     vkBindBufferMemory(m_device, u.buffer, u.memory, 0);
@@ -74,8 +74,10 @@ bool FieldRenderer::CreateDescriptors() {
     u.capacity = sizeof(Ubo);
   }
 
-  VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight};
-  VkDescriptorPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                kFramesInFlight};
+  VkDescriptorPoolCreateInfo poolInfo{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   poolInfo.poolSizeCount = 1;
   poolInfo.pPoolSizes = &poolSize;
   poolInfo.maxSets = kFramesInFlight;
@@ -83,13 +85,15 @@ bool FieldRenderer::CreateDescriptors() {
       VK_SUCCESS)
     return false;
 
-  std::array<VkDescriptorSetLayout, kFramesInFlight> layouts{m_descriptorSetLayout,
-                                                             m_descriptorSetLayout};
-  VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+  std::array<VkDescriptorSetLayout, kFramesInFlight> layouts{
+      m_descriptorSetLayout, m_descriptorSetLayout};
+  VkDescriptorSetAllocateInfo alloc{
+      VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
   alloc.descriptorPool = m_descriptorPool;
   alloc.descriptorSetCount = kFramesInFlight;
   alloc.pSetLayouts = layouts.data();
-  if (vkAllocateDescriptorSets(m_device, &alloc, m_descriptorSets) != VK_SUCCESS)
+  if (vkAllocateDescriptorSets(m_device, &alloc, m_descriptorSets) !=
+      VK_SUCCESS)
     return false;
   for (int i = 0; i < kFramesInFlight; i++) {
     VkDescriptorBufferInfo info{m_uniformBuffers[i].buffer, 0, sizeof(Ubo)};
@@ -140,8 +144,10 @@ bool FieldRenderer::CreatePipeline() {
   binding.stride = sizeof(FieldVertex);
   binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
   std::array<VkVertexInputAttributeDescription, 3> attrs{};
-  attrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FieldVertex, position)};
-  attrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(FieldVertex, displacement)};
+  attrs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT,
+              offsetof(FieldVertex, position)};
+  attrs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT,
+              offsetof(FieldVertex, displacement)};
   attrs[2] = {2, 0, VK_FORMAT_R32_SFLOAT, offsetof(FieldVertex, scalar)};
   VkPipelineVertexInputStateCreateInfo vin{
       VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
@@ -192,16 +198,18 @@ bool FieldRenderer::CreatePipeline() {
   dynamic.pDynamicStates = dyn;
 
   VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float)};
-  VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+  VkPipelineLayoutCreateInfo layoutInfo{
+      VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
   layoutInfo.setLayoutCount = 1;
   layoutInfo.pSetLayouts = &m_descriptorSetLayout;
   layoutInfo.pushConstantRangeCount = 1;
   layoutInfo.pPushConstantRanges = &push;
-  if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout) !=
-      VK_SUCCESS)
+  if (vkCreatePipelineLayout(m_device, &layoutInfo, nullptr,
+                             &m_pipelineLayout) != VK_SUCCESS)
     return false;
 
-  VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+  VkGraphicsPipelineCreateInfo info{
+      VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
   info.stageCount = 2;
   info.pStages = stages;
   info.pVertexInputState = &vin;
@@ -224,7 +232,8 @@ bool FieldRenderer::CreatePipeline() {
 
 void FieldRenderer::EnsureCapacity(DynamicBuffer& buf, VkDeviceSize bytes,
                                    VkBufferUsageFlags usage) {
-  if (bytes <= buf.capacity) return;
+  if (bytes <= buf.capacity)
+    return;
   DestroyDynamic(buf);
   VkDeviceSize cap = bytes * 2;
   VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
@@ -236,17 +245,19 @@ void FieldRenderer::EnsureCapacity(DynamicBuffer& buf, VkDeviceSize bytes,
   vkGetBufferMemoryRequirements(m_device, buf.buffer, &req);
   VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
   ai.allocationSize = req.size;
-  ai.memoryTypeIndex =
-      FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                             VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  ai.memoryTypeIndex = FindMemoryType(req.memoryTypeBits,
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   vkAllocateMemory(m_device, &ai, nullptr, &buf.memory);
   vkBindBufferMemory(m_device, buf.buffer, buf.memory, 0);
   vkMapMemory(m_device, buf.memory, 0, cap, 0, &buf.mapped);
   buf.capacity = cap;
 }
 
-void FieldRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame) {
-  if (!m_initialized || m_indices.empty()) return;
+void FieldRenderer::Render(VkCommandBuffer commandBuffer,
+                           uint32_t currentFrame) {
+  if (!m_initialized || m_indices.empty())
+    return;
   const uint32_t frame = currentFrame % kFramesInFlight;
 
   Ubo ubo{m_view, m_proj, m_clipPlane};
@@ -254,8 +265,10 @@ void FieldRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame)
 
   const VkDeviceSize vbytes = m_vertices.size() * sizeof(FieldVertex);
   const VkDeviceSize ibytes = m_indices.size() * sizeof(uint32_t);
-  EnsureCapacity(m_vertexBuffers[frame], vbytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-  EnsureCapacity(m_indexBuffers[frame], ibytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+  EnsureCapacity(m_vertexBuffers[frame], vbytes,
+                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+  EnsureCapacity(m_indexBuffers[frame], ibytes,
+                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
   std::memcpy(m_vertexBuffers[frame].mapped, m_vertices.data(), vbytes);
   std::memcpy(m_indexBuffers[frame].mapped, m_indices.data(), ibytes);
 
@@ -273,15 +286,16 @@ void FieldRenderer::Render(VkCommandBuffer commandBuffer, uint32_t currentFrame)
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           m_pipelineLayout, 0, 1, &m_descriptorSets[frame], 0,
                           nullptr);
-  vkCmdPushConstants(commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
-                     sizeof(float), &m_deformScale);
+  vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+                     VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float),
+                     &m_deformScale);
   VkDeviceSize offset = 0;
   vkCmdBindVertexBuffers(commandBuffer, 0, 1, &m_vertexBuffers[frame].buffer,
                          &offset);
   vkCmdBindIndexBuffer(commandBuffer, m_indexBuffers[frame].buffer, 0,
                        VK_INDEX_TYPE_UINT32);
-  vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(m_indices.size()), 1, 0, 0,
-                   0);
+  vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(m_indices.size()), 1, 0,
+                   0, 0);
 }
 
 void FieldRenderer::DestroyDynamic(DynamicBuffer& buf) {
@@ -301,16 +315,20 @@ void FieldRenderer::DestroyDynamic(DynamicBuffer& buf) {
 }
 
 void FieldRenderer::Shutdown() {
-  if (!m_device) return;
+  if (!m_device)
+    return;
   vkDeviceWaitIdle(m_device);
   for (int i = 0; i < kFramesInFlight; i++) {
     DestroyDynamic(m_uniformBuffers[i]);
     DestroyDynamic(m_vertexBuffers[i]);
     DestroyDynamic(m_indexBuffers[i]);
   }
-  if (m_pipeline) vkDestroyPipeline(m_device, m_pipeline, nullptr);
-  if (m_pipelineLayout) vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-  if (m_descriptorPool) vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+  if (m_pipeline)
+    vkDestroyPipeline(m_device, m_pipeline, nullptr);
+  if (m_pipelineLayout)
+    vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+  if (m_descriptorPool)
+    vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
   if (m_descriptorSetLayout)
     vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
   m_pipeline = VK_NULL_HANDLE;

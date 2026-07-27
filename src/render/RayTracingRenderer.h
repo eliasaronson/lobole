@@ -1,240 +1,254 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
-#include <vector>
 #include <memory>
+#include <vector>
+#include <vulkan/vulkan.h>
 
 // Forward declarations
 struct Vertex3D;
 class Mesh;
 
 struct RTAccelerationStructure {
-    VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
-    VkBuffer buffer = VK_NULL_HANDLE;
-    VkDeviceMemory memory = VK_NULL_HANDLE;
-    VkDeviceAddress deviceAddress = 0;
+  VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
+  VkBuffer buffer = VK_NULL_HANDLE;
+  VkDeviceMemory memory = VK_NULL_HANDLE;
+  VkDeviceAddress deviceAddress = 0;
 };
 
 // Per-geometry behavior flags (must match closesthit.rchit).
 enum RTGeometryFlags : uint32_t {
-    // Shadow catcher: shows the environment darkened by shadow/AO instead of a
-    // shaded surface — the ground plane under offline renders.
-    RT_GEOM_SHADOW_CATCHER = 1u << 0,
+  // Shadow catcher: shows the environment darkened by shadow/AO instead of a
+  // shaded surface — the ground plane under offline renders.
+  RT_GEOM_SHADOW_CATCHER = 1u << 0,
 };
 
 struct RTGeometry {
-    VkBuffer vertexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
-    VkDeviceAddress vertexAddress = 0;
-    VkBuffer indexBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory indexMemory = VK_NULL_HANDLE;
-    VkDeviceAddress indexAddress = 0;
-    uint32_t vertexCount = 0;
-    uint32_t indexCount = 0;
-    uint32_t materialIndex = 0;
-    uint32_t flags = 0; // RTGeometryFlags, forwarded to the closest-hit shader
-    // Per-geometry bottom-level AS (built in R4.2).
-    RTAccelerationStructure blas;
+  VkBuffer vertexBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
+  VkDeviceAddress vertexAddress = 0;
+  VkBuffer indexBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+  VkDeviceAddress indexAddress = 0;
+  uint32_t vertexCount = 0;
+  uint32_t indexCount = 0;
+  uint32_t materialIndex = 0;
+  uint32_t flags = 0; // RTGeometryFlags, forwarded to the closest-hit shader
+  // Per-geometry bottom-level AS (built in R4.2).
+  RTAccelerationStructure blas;
 };
 
 struct RTMaterial {
-    glm::vec3 baseColor;
-    float metallic;
-    glm::vec3 emissive;
-    float roughness;
-    glm::vec3 specular;
-    float transmission;
-    // Procedural grain (matches the closest-hit `Material`): x = pattern
-    // (0 flat/1 wood/2 plywood), y = grainScale, z = grainContrast, w = grain-
-    // axis index. std430: lands at offset 48, keeping the struct 64 bytes so
-    // the SSBO upload stays a blind memcpy of sizeof(RTMaterial).
-    glm::vec4 procParams{0.0f};
+  glm::vec3 baseColor;
+  float metallic;
+  glm::vec3 emissive;
+  float roughness;
+  glm::vec3 specular;
+  float transmission;
+  // Procedural grain (matches the closest-hit `Material`): x = pattern
+  // (0 flat/1 wood/2 plywood), y = grainScale, z = grainContrast, w = grain-
+  // axis index. std430: lands at offset 48, keeping the struct 64 bytes so
+  // the SSBO upload stays a blind memcpy of sizeof(RTMaterial).
+  glm::vec4 procParams{0.0f};
 };
 
 // Everything an offline still render needs from the app: output size, camera,
 // and the shared IBL maps (same environment as the raster viewport, so both
 // agree on lighting).
 struct RTStillDesc {
-    uint32_t width = 0;
-    uint32_t height = 0;
-    glm::mat4 view{1.0f};
-    glm::mat4 proj{1.0f};
-    glm::vec3 cameraPos{0.0f};
-    VkImageView environment = VK_NULL_HANDLE; // full-res HDR (background)
-    VkImageView irradiance = VK_NULL_HANDLE;
-    VkImageView prefilter = VK_NULL_HANDLE;
-    VkImageView brdfLut = VK_NULL_HANDLE;
-    VkSampler envSampler = VK_NULL_HANDLE;
-    VkSampler lutSampler = VK_NULL_HANDLE;
-    uint32_t prefilterMips = 1;
-    uint32_t seed = 0; // RNG seed; fixed seed -> deterministic image
+  uint32_t width = 0;
+  uint32_t height = 0;
+  glm::mat4 view{1.0f};
+  glm::mat4 proj{1.0f};
+  glm::vec3 cameraPos{0.0f};
+  VkImageView environment = VK_NULL_HANDLE; // full-res HDR (background)
+  VkImageView irradiance = VK_NULL_HANDLE;
+  VkImageView prefilter = VK_NULL_HANDLE;
+  VkImageView brdfLut = VK_NULL_HANDLE;
+  VkSampler envSampler = VK_NULL_HANDLE;
+  VkSampler lutSampler = VK_NULL_HANDLE;
+  uint32_t prefilterMips = 1;
+  uint32_t seed = 0; // RNG seed; fixed seed -> deterministic image
 };
 
 class RayTracingRenderer {
 public:
-    RayTracingRenderer();
-    ~RayTracingRenderer();
+  RayTracingRenderer();
+  ~RayTracingRenderer();
 
-    // Initialization and cleanup
-    bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice, 
-                   VkQueue graphicsQueue, uint32_t queueFamily, 
-                   VkCommandPool commandPool);
-    void Shutdown();
+  // Initialization and cleanup
+  bool Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
+                  VkQueue graphicsQueue, uint32_t queueFamily,
+                  VkCommandPool commandPool);
+  void Shutdown();
 
-    // RT capability checking
-    static bool IsRayTracingSupported(VkPhysicalDevice physicalDevice);
-    bool IsInitialized() const { return m_isInitialized; }
+  // RT capability checking
+  static bool IsRayTracingSupported(VkPhysicalDevice physicalDevice);
+  bool IsInitialized() const { return m_isInitialized; }
 
-    // Geometry management
-    uint32_t AddGeometry(const std::vector<Vertex3D>& vertices,
-                        const std::vector<uint32_t>& indices,
-                        uint32_t materialIndex = 0, uint32_t flags = 0);
-    void UpdateGeometry(uint32_t geometryId, const std::vector<Vertex3D>& vertices,
-                       const std::vector<uint32_t>& indices);
-    void RemoveGeometry(uint32_t geometryId);
-    // Drops all geometry + acceleration structures (offline render rebuilds the
-    // scene from scratch each time).
-    void ClearGeometry();
-    void ClearMaterials() { m_materials.clear(); m_nextMaterialId = 0; }
-    size_t GeometryCount() const { return m_geometries.size(); }
-    bool HasTLAS() const { return m_topLevelAS.handle != VK_NULL_HANDLE; }
+  // Geometry management
+  uint32_t AddGeometry(const std::vector<Vertex3D>& vertices,
+                       const std::vector<uint32_t>& indices,
+                       uint32_t materialIndex = 0, uint32_t flags = 0);
+  void UpdateGeometry(uint32_t geometryId,
+                      const std::vector<Vertex3D>& vertices,
+                      const std::vector<uint32_t>& indices);
+  void RemoveGeometry(uint32_t geometryId);
+  // Drops all geometry + acceleration structures (offline render rebuilds the
+  // scene from scratch each time).
+  void ClearGeometry();
+  void ClearMaterials() {
+    m_materials.clear();
+    m_nextMaterialId = 0;
+  }
+  size_t GeometryCount() const { return m_geometries.size(); }
+  bool HasTLAS() const { return m_topLevelAS.handle != VK_NULL_HANDLE; }
 
-    // Material management
-    uint32_t AddMaterial(const RTMaterial& material);
-    void UpdateMaterial(uint32_t materialId, const RTMaterial& material);
+  // Material management
+  uint32_t AddMaterial(const RTMaterial& material);
+  void UpdateMaterial(uint32_t materialId, const RTMaterial& material);
 
-    // Acceleration structure management
-    bool BuildAccelerationStructures();
-    
-    // Rendering
-    void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
-               const glm::mat4& view, const glm::mat4& projection,
-               const glm::vec3& cameraPos);
+  // Acceleration structure management
+  bool BuildAccelerationStructures();
 
-    // ---- Offline still render (R4.3-R4.5) ----
-    // On-demand path-traced still into an offscreen rgba32f image, accumulated
-    // over N samples and read back to a PNG. Independent of the raster viewport.
-    // Requires acceleration structures already built (BuildAccelerationStructures).
-    //   BeginStill  -> create the output image, UBO, per-body SSBOs, descriptor
-    //                  set, and clear the accumulation buffer.
-    //   RenderBatch -> dispatch `samplesInBatch` traces (one command buffer,
-    //                  submit + wait); call repeatedly until firstSample reaches
-    //                  the total. Cheap to batch for progress/cancel.
-    //   ReadbackStill -> divide by totalSamples, ACES tonemap + gamma, write PNG.
-    //   EndStill    -> free the per-render resources.
-    bool BeginStill(const RTStillDesc& desc);
-    bool RenderBatch(uint32_t firstSample, uint32_t samplesInBatch);
-    bool ReadbackStill(uint32_t totalSamples, const std::string& pngPath,
-                       std::string* error = nullptr);
-    void EndStill();
-    bool IsStillActive() const { return m_stillActive; }
+  // Rendering
+  void Render(VkCommandBuffer commandBuffer, uint32_t currentFrame,
+              const glm::mat4& view, const glm::mat4& projection,
+              const glm::vec3& cameraPos);
 
-    // Settings
-    void SetRenderMode(bool useRayTracing) { m_useRayTracing = useRayTracing; }
-    bool GetRenderMode() const { return m_useRayTracing; }
-    
-    void SetMaxRayDepth(uint32_t depth) { m_maxRayDepth = depth; }
-    void SetSamplesPerPixel(uint32_t samples) { m_samplesPerPixel = samples; }
+  // ---- Offline still render (R4.3-R4.5) ----
+  // On-demand path-traced still into an offscreen rgba32f image, accumulated
+  // over N samples and read back to a PNG. Independent of the raster viewport.
+  // Requires acceleration structures already built
+  // (BuildAccelerationStructures).
+  //   BeginStill  -> create the output image, UBO, per-body SSBOs, descriptor
+  //                  set, and clear the accumulation buffer.
+  //   RenderBatch -> dispatch `samplesInBatch` traces (one command buffer,
+  //                  submit + wait); call repeatedly until firstSample reaches
+  //                  the total. Cheap to batch for progress/cancel.
+  //   ReadbackStill -> divide by totalSamples, ACES tonemap + gamma, write PNG.
+  //   EndStill    -> free the per-render resources.
+  bool BeginStill(const RTStillDesc& desc);
+  bool RenderBatch(uint32_t firstSample, uint32_t samplesInBatch);
+  bool ReadbackStill(uint32_t totalSamples, const std::string& pngPath,
+                     std::string* error = nullptr);
+  void EndStill();
+  bool IsStillActive() const { return m_stillActive; }
+
+  // Settings
+  void SetRenderMode(bool useRayTracing) { m_useRayTracing = useRayTracing; }
+  bool GetRenderMode() const { return m_useRayTracing; }
+
+  void SetMaxRayDepth(uint32_t depth) { m_maxRayDepth = depth; }
+  void SetSamplesPerPixel(uint32_t samples) { m_samplesPerPixel = samples; }
 
 private:
-    // RT extension function pointers
-    struct RTFunctions {
-        PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = nullptr;
-        PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = nullptr;
-        PFN_vkBuildAccelerationStructuresKHR vkBuildAccelerationStructuresKHR = nullptr;
-        PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = nullptr;
-        PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = nullptr;
-        PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = nullptr;
-        PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
-        PFN_vkGetRayTracingShaderGroupHandlesKHR vkGetRayTracingShaderGroupHandlesKHR = nullptr;
-        PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
-    };
+  // RT extension function pointers
+  struct RTFunctions {
+    PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR =
+        nullptr;
+    PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR =
+        nullptr;
+    PFN_vkBuildAccelerationStructuresKHR vkBuildAccelerationStructuresKHR =
+        nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR
+        vkCmdBuildAccelerationStructuresKHR = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR
+        vkGetAccelerationStructureDeviceAddressKHR = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR
+        vkGetAccelerationStructureBuildSizesKHR = nullptr;
+    PFN_vkCreateRayTracingPipelinesKHR vkCreateRayTracingPipelinesKHR = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR
+        vkGetRayTracingShaderGroupHandlesKHR = nullptr;
+    PFN_vkCmdTraceRaysKHR vkCmdTraceRaysKHR = nullptr;
+  };
 
-    // Initialization helpers
-    bool LoadRTFunctions();
-    bool CheckRTProperties();
-    bool CreateRTPipeline();
-    bool CreateRTDescriptorSets();
-    bool CreateShaderBindingTable();
+  // Initialization helpers
+  bool LoadRTFunctions();
+  bool CheckRTProperties();
+  bool CreateRTPipeline();
+  bool CreateRTDescriptorSets();
+  bool CreateShaderBindingTable();
 
-    // Still-render helpers
-    void DestroyStillResources();
-    void TransitionImage(VkCommandBuffer cb, VkImage image,
-                         VkImageLayout oldLayout, VkImageLayout newLayout,
-                         VkPipelineStageFlags srcStage,
-                         VkPipelineStageFlags dstStage,
-                         VkAccessFlags srcAccess, VkAccessFlags dstAccess);
+  // Still-render helpers
+  void DestroyStillResources();
+  void TransitionImage(VkCommandBuffer cb, VkImage image,
+                       VkImageLayout oldLayout, VkImageLayout newLayout,
+                       VkPipelineStageFlags srcStage,
+                       VkPipelineStageFlags dstStage, VkAccessFlags srcAccess,
+                       VkAccessFlags dstAccess);
 
-    // Acceleration structure helpers
-    bool CreateBottomLevelAS();
-    bool CreateTopLevelAS();
-    
-    // Utility functions
-    VkBuffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                         VkMemoryPropertyFlags properties, VkDeviceMemory& bufferMemory);
-    VkDeviceAddress GetBufferDeviceAddress(VkBuffer buffer);
-    void DestroyAccelerationStructure(RTAccelerationStructure& as);
-    VkCommandBuffer BeginSingleTimeCommands();
-    void EndSingleTimeCommands(VkCommandBuffer cb);
-    uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
-    std::vector<char> ReadShaderFile(const std::string& filename);
-    VkShaderModule CreateShaderModule(const std::vector<char>& code);
+  // Acceleration structure helpers
+  bool CreateBottomLevelAS();
+  bool CreateTopLevelAS();
 
-    // Vulkan objects
-    VkDevice m_device = VK_NULL_HANDLE;
-    VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
-    VkQueue m_graphicsQueue = VK_NULL_HANDLE;
-    uint32_t m_queueFamily = 0;
-    VkCommandPool m_commandPool = VK_NULL_HANDLE;
+  // Utility functions
+  VkBuffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
+                        VkMemoryPropertyFlags properties,
+                        VkDeviceMemory& bufferMemory);
+  VkDeviceAddress GetBufferDeviceAddress(VkBuffer buffer);
+  void DestroyAccelerationStructure(RTAccelerationStructure& as);
+  VkCommandBuffer BeginSingleTimeCommands();
+  void EndSingleTimeCommands(VkCommandBuffer cb);
+  uint32_t FindMemoryType(uint32_t typeFilter,
+                          VkMemoryPropertyFlags properties);
+  std::vector<char> ReadShaderFile(const std::string& filename);
+  VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
-    // RT-specific objects
-    RTFunctions m_rtFunctions;
-    VkPipeline m_rtPipeline = VK_NULL_HANDLE;
-    VkPipelineLayout m_rtPipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_rtDescriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_rtDescriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet m_rtDescriptorSet = VK_NULL_HANDLE;
+  // Vulkan objects
+  VkDevice m_device = VK_NULL_HANDLE;
+  VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
+  VkQueue m_graphicsQueue = VK_NULL_HANDLE;
+  uint32_t m_queueFamily = 0;
+  VkCommandPool m_commandPool = VK_NULL_HANDLE;
 
-    // Shader binding table
-    VkBuffer m_shaderBindingTableBuffer = VK_NULL_HANDLE;
-    VkDeviceMemory m_shaderBindingTableMemory = VK_NULL_HANDLE;
-    VkStridedDeviceAddressRegionKHR m_raygenSBT{};
-    VkStridedDeviceAddressRegionKHR m_missSBT{};
-    VkStridedDeviceAddressRegionKHR m_hitSBT{};
-    VkStridedDeviceAddressRegionKHR m_callableSBT{};
+  // RT-specific objects
+  RTFunctions m_rtFunctions;
+  VkPipeline m_rtPipeline = VK_NULL_HANDLE;
+  VkPipelineLayout m_rtPipelineLayout = VK_NULL_HANDLE;
+  VkDescriptorSetLayout m_rtDescriptorSetLayout = VK_NULL_HANDLE;
+  VkDescriptorPool m_rtDescriptorPool = VK_NULL_HANDLE;
+  VkDescriptorSet m_rtDescriptorSet = VK_NULL_HANDLE;
 
-    // Acceleration structures
-    RTAccelerationStructure m_bottomLevelAS;
-    RTAccelerationStructure m_topLevelAS;
+  // Shader binding table
+  VkBuffer m_shaderBindingTableBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory m_shaderBindingTableMemory = VK_NULL_HANDLE;
+  VkStridedDeviceAddressRegionKHR m_raygenSBT{};
+  VkStridedDeviceAddressRegionKHR m_missSBT{};
+  VkStridedDeviceAddressRegionKHR m_hitSBT{};
+  VkStridedDeviceAddressRegionKHR m_callableSBT{};
 
-    // Geometry and materials
-    std::vector<std::unique_ptr<RTGeometry>> m_geometries;
-    std::vector<RTMaterial> m_materials;
-    uint32_t m_nextGeometryId = 1;
-    uint32_t m_nextMaterialId = 0;
+  // Acceleration structures
+  RTAccelerationStructure m_bottomLevelAS;
+  RTAccelerationStructure m_topLevelAS;
 
-    // RT properties
-    VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{};
+  // Geometry and materials
+  std::vector<std::unique_ptr<RTGeometry>> m_geometries;
+  std::vector<RTMaterial> m_materials;
+  uint32_t m_nextGeometryId = 1;
+  uint32_t m_nextMaterialId = 0;
 
-    // ---- Offline still-render resources (live between BeginStill/EndStill) ----
-    bool m_stillActive = false;
-    uint32_t m_stillWidth = 0;
-    uint32_t m_stillHeight = 0;
-    uint32_t m_stillSeed = 0;
-    VkImage m_stillImage = VK_NULL_HANDLE;          // rgba32f accumulation
-    VkDeviceMemory m_stillImageMemory = VK_NULL_HANDLE;
-    VkImageView m_stillImageView = VK_NULL_HANDLE;
-    VkBuffer m_stillUBO = VK_NULL_HANDLE;           // camera + light UBO
-    VkDeviceMemory m_stillUBOMemory = VK_NULL_HANDLE;
-    VkBuffer m_stillGeomInfo = VK_NULL_HANDLE;      // GeometryInfo[] SSBO
-    VkDeviceMemory m_stillGeomInfoMemory = VK_NULL_HANDLE;
-    VkBuffer m_stillMaterials = VK_NULL_HANDLE;     // RTMaterial[] SSBO
-    VkDeviceMemory m_stillMaterialsMemory = VK_NULL_HANDLE;
+  // RT properties
+  VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{};
 
-    // Settings
-    bool m_isInitialized = false;
-    bool m_useRayTracing = true;
-    uint32_t m_maxRayDepth = 4;
-    uint32_t m_samplesPerPixel = 1;
+  // ---- Offline still-render resources (live between BeginStill/EndStill) ----
+  bool m_stillActive = false;
+  uint32_t m_stillWidth = 0;
+  uint32_t m_stillHeight = 0;
+  uint32_t m_stillSeed = 0;
+  VkImage m_stillImage = VK_NULL_HANDLE; // rgba32f accumulation
+  VkDeviceMemory m_stillImageMemory = VK_NULL_HANDLE;
+  VkImageView m_stillImageView = VK_NULL_HANDLE;
+  VkBuffer m_stillUBO = VK_NULL_HANDLE; // camera + light UBO
+  VkDeviceMemory m_stillUBOMemory = VK_NULL_HANDLE;
+  VkBuffer m_stillGeomInfo = VK_NULL_HANDLE; // GeometryInfo[] SSBO
+  VkDeviceMemory m_stillGeomInfoMemory = VK_NULL_HANDLE;
+  VkBuffer m_stillMaterials = VK_NULL_HANDLE; // RTMaterial[] SSBO
+  VkDeviceMemory m_stillMaterialsMemory = VK_NULL_HANDLE;
+
+  // Settings
+  bool m_isInitialized = false;
+  bool m_useRayTracing = true;
+  uint32_t m_maxRayDepth = 4;
+  uint32_t m_samplesPerPixel = 1;
 };
