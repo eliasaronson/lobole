@@ -3230,34 +3230,18 @@ void DrawConstraintGlyphs(AppState& state) {
   const ImU32 colSel = IM_COL32(255, 220, 130, 255);
   using K = sketch::ConstraintKind;
 
-  // Fan out multiple badges on the same entity so they don't overlap. A
-  // badge hit-tests its rect: hovering latches glyphHot (the canvas selects
-  // on click, one frame behind — the dimHot convention), the selected
-  // constraint's badges show the accent.
-  std::map<uint32_t, int> stack;
+  // Collect the badges per entity first, then lay each entity's stack out
+  // with real text widths (the old fixed 13 px advance overlapped wide
+  // glyphs). Entities with more than two badges collapse to one "xN"
+  // summary that fans out on hover — the mess in dense sketches was
+  // every constraint of a vertex stamped on top of its neighbors.
+  struct BadgeItem {
+    int ci;
+    const char* text;
+  };
+  std::map<uint32_t, std::vector<BadgeItem>> byEntity;
   auto badge = [&](int ci, uint32_t entity, const char* text) {
-    auto uv = RefUV(*sketch, {entity, 0});
-    if (!uv)
-      return;
-    glm::vec2 s = SketchUVToScreen(state, sketch->plane, *uv);
-    float dx = 10.0f + 13.0f * stack[entity]++;
-    ImVec2 p(s.x + dx, s.y - 16.0f);
-    ImVec2 sz = ImGui::CalcTextSize(text);
-    const ImVec2 rmin(p.x - 2, p.y - 1);
-    const ImVec2 rmax(p.x + sz.x + 2, p.y + sz.y + 1);
-    const bool over = io.MousePos.x >= rmin.x && io.MousePos.x <= rmax.x &&
-                      io.MousePos.y >= rmin.y && io.MousePos.y <= rmax.y;
-    if (over)
-      edit.glyphHot = ci;
-    const bool selCon = edit.selectedConstraint == ci;
-    dl->AddRectFilled(rmin, rmax,
-                      selCon ? IM_COL32(84, 66, 26, 250)
-                      : over ? IM_COL32(45, 62, 52, 235)
-                             : IM_COL32(25, 32, 28, 200),
-                      2.0f);
-    if (selCon)
-      dl->AddRect(rmin, rmax, colSel, 2.0f);
-    dl->AddText(p, selCon ? colSel : col, text);
+    byEntity[entity].push_back({ci, text});
   };
 
   for (int i = 0; i < (int)sketch->constraints.size(); i++) {
@@ -3309,6 +3293,72 @@ void DrawConstraintGlyphs(AppState& state) {
       break; // dimensions render via DrawDimensions
     }
   }
+
+  // Draw one entity's stack. Returns the union rect of what it drew (for
+  // the hover-keeps-expanded test).
+  uint32_t stillExpanded = 0;
+  const auto drawOne = [&](const ImVec2& p, const char* text, int ci,
+                           bool summary) -> ImVec2 {
+    const ImVec2 sz = ImGui::CalcTextSize(text);
+    const ImVec2 rmin(p.x - 2, p.y - 1);
+    const ImVec2 rmax(p.x + sz.x + 2, p.y + sz.y + 1);
+    const bool over = io.MousePos.x >= rmin.x && io.MousePos.x <= rmax.x &&
+                      io.MousePos.y >= rmin.y && io.MousePos.y <= rmax.y;
+    if (over && !summary)
+      edit.glyphHot = ci;
+    const bool selCon = !summary && edit.selectedConstraint == ci;
+    dl->AddRectFilled(rmin, rmax,
+                      selCon ? IM_COL32(84, 66, 26, 250)
+                      : over ? IM_COL32(45, 62, 52, 235)
+                             : IM_COL32(25, 32, 28, 200),
+                      2.0f);
+    if (selCon)
+      dl->AddRect(rmin, rmax, colSel, 2.0f);
+    dl->AddText(p, selCon ? colSel : col, text);
+    return rmax;
+  };
+
+  for (const auto& [entity, items] : byEntity) {
+    auto uv = RefUV(*sketch, {entity, 0});
+    if (!uv)
+      continue;
+    const glm::vec2 s = SketchUVToScreen(state, sketch->plane, *uv);
+    const ImVec2 base(s.x + 10.0f, s.y - 16.0f);
+    const bool expanded = edit.glyphExpandedEntity == entity;
+    // A selected constraint keeps its entity's stack expanded too, so the
+    // accent doesn't hide inside a summary badge.
+    bool holdsSelection = false;
+    for (const BadgeItem& it : items)
+      holdsSelection |= (edit.selectedConstraint == it.ci);
+
+    if (items.size() <= 2 || expanded || holdsSelection) {
+      // Fan out horizontally with real widths; track the union rect so a
+      // hover-expansion stays open while the cursor is over the fan.
+      float x = base.x;
+      ImVec2 unionMin(base.x - 4, base.y - 4), unionMax(base.x, base.y);
+      for (const BadgeItem& it : items) {
+        const ImVec2 rmax = drawOne(ImVec2(x, base.y), it.text, it.ci,
+                                    /*summary=*/false);
+        unionMax.x = std::max(unionMax.x, rmax.x + 4);
+        unionMax.y = std::max(unionMax.y, rmax.y + 4);
+        x = rmax.x + 6.0f;
+      }
+      if (expanded && io.MousePos.x >= unionMin.x &&
+          io.MousePos.x <= unionMax.x && io.MousePos.y >= unionMin.y &&
+          io.MousePos.y <= unionMax.y) {
+        stillExpanded = entity;
+      }
+    } else {
+      char text[16];
+      std::snprintf(text, sizeof(text), "x%d", (int)items.size());
+      const ImVec2 rmax = drawOne(base, text, -1, /*summary=*/true);
+      if (io.MousePos.x >= base.x - 4 && io.MousePos.x <= rmax.x + 4 &&
+          io.MousePos.y >= base.y - 4 && io.MousePos.y <= rmax.y + 4) {
+        stillExpanded = entity; // hover the summary: expand next frame
+      }
+    }
+  }
+  edit.glyphExpandedEntity = stillExpanded;
 }
 
 glm::vec2 WorldToScreen(AppState& state, const glm::vec3& world) {
@@ -3821,7 +3871,8 @@ bool ApplyPattern(AppState& state) {
                                        glm::radians(edit.patternAngleDeg),
                                        edit.patternCount, edit.linkGenerative)
           : sketch->AddLinearPattern(sources, edit.patternStep,
-                                     edit.patternCount, edit.linkGenerative);
+                                     edit.patternCount, edit.linkGenerative,
+                                     edit.patternStep2, edit.patternCount2);
   if (gen.empty()) {
     edit.actionMsg = "Pattern: nothing generated (count must be >= 2).";
     return false;
@@ -3884,18 +3935,22 @@ bool ApplyOffset(AppState& state) {
 }
 
 bool EditPatternParams(AppState& state, size_t opIndex, glm::vec2 vec,
-                       double scalar, int count) {
+                       double scalar, int count, glm::vec2 vec2, int count2) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  count2 = std::max(1, count2);
   if (!sketch || opIndex >= sketch->derived.size() || count < 2)
     return false;
   sketch::DerivedOp& op = sketch->derived[opIndex];
-  if (op.vec == vec && op.scalar == scalar && op.count == count)
+  if (op.vec == vec && op.scalar == scalar && op.count == count &&
+      op.vec2 == vec2 && op.count2 == count2)
     return false; // no change
   nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
   op.vec = vec;       // linear step / circular centre
   op.scalar = scalar; // circular step angle (radians); unused for linear
   op.count = count;
+  op.vec2 = vec2; // v50: second linear grid direction (count2 = 1 → 1D)
+  op.count2 = count2;
   sketch->RegenerateDerived();
   sketch::Solver solver;
   solver.Load(*sketch);

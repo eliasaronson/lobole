@@ -175,10 +175,12 @@ bool ApplyPattern(AppState& state);
 bool SetPatternCount(AppState& state, size_t opIndex, int count);
 
 // Edits a linked pattern's full transform (linear step / circular centre in
-// `vec`, circular step angle in `scalar` radians, `count`) and regenerates it
+// `vec`, circular step angle in `scalar` radians, `count`; linear may also
+// carry the v50 second grid direction `vec2`/`count2`) and regenerates it
 // id-stably. No-op if unchanged or count < 2. One undo record.
 bool EditPatternParams(AppState& state, size_t opIndex, glm::vec2 vec,
-                       double scalar, int count);
+                       double scalar, int count, glm::vec2 vec2 = {0.0f, 0.0f},
+                       int count2 = 1);
 
 // Removes a linked pattern (its op + generated entities) and regenerates. One
 // undo record. No-op if opIndex is out of range.

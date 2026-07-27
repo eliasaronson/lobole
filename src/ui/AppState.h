@@ -118,8 +118,11 @@ struct SketchEditState {
   bool patternCircular = false;
   int patternCount = 3;
   glm::vec2 patternStep{2.0f, 0.0f}; // linear per-step translation
-  glm::vec2 patternCenter{0.0f};     // circular centre
-  float patternAngleDeg = 60.0f;     // circular step angle
+  // Second grid direction (v50): count2 = 1 keeps the pattern 1D.
+  int patternCount2 = 1;
+  glm::vec2 patternStep2{0.0f, 2.0f};
+  glm::vec2 patternCenter{0.0f}; // circular centre
+  float patternAngleDeg = 60.0f; // circular step angle
 
   // Offset tool params (applied to the selected closed loop).
   float offsetDistance = 0.5f;
@@ -190,6 +193,11 @@ struct SketchEditState {
   // list whose editor is open in the Tool window (-1 = none). Opened by
   // double-clicking an Operations row in the Model panel.
   int editOpIndex = -1;
+  // Entity whose collapsed constraint-badge stack is hover-expanded this
+  // frame (0 = none). Entities with >2 badges draw one "xN" summary; hovering
+  // it fans the individual badges out (they stay while the cursor is over
+  // the fan).
+  uint32_t glyphExpandedEntity = 0;
   uint32_t calibImageId = 0;
   glm::vec2 calibP1{0.0f, 0.0f};
   glm::vec2 calibP2{0.0f, 0.0f};

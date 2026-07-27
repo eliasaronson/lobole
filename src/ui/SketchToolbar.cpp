@@ -113,6 +113,8 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   BeginToolWindowFrame(state, circular ? "Circular Pattern" : "Linear Pattern");
   int count = op.count;
   glm::vec2 vec = op.vec;
+  glm::vec2 vec2 = op.vec2;
+  int count2 = op.count2;
   float angleDeg = static_cast<float>(glm::degrees(op.scalar));
   bool changed = false;
   ImGui::SetNextItemWidth(90);
@@ -126,12 +128,18 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   } else {
     ImGui::SetNextItemWidth(140);
     changed |= ImGui::DragFloat2("Step", &vec.x, 0.05f);
+    ImGui::SetNextItemWidth(90);
+    changed |= ImGui::DragInt("Rows", &count2, 0.1f, 1, 1000);
+    if (count2 > 1) {
+      ImGui::SetNextItemWidth(140);
+      changed |= ImGui::DragFloat2("Row step", &vec2.x, 0.05f);
+    }
   }
   if (changed) {
     // Commits + REPLACES the sketch feature — `sketch`/`op` dangle after;
     // nothing below reads them.
     EditPatternParams(state, oi, vec, circular ? glm::radians(angleDeg) : 0.0,
-                      count);
+                      count, vec2, count2);
   }
   ImGui::Separator();
   if (ImGui::Button(ICON_FA_TRASH_CAN " Delete")) {
@@ -319,6 +327,13 @@ void DrawSketchToolWindow(AppState& state) {
     if (!edit.patternCircular) {
       ImGui::SetNextItemWidth(140);
       ImGui::DragFloat2("Step (dx,dy)##pat", &edit.patternStep.x, 0.05f);
+      // Second grid direction (v50): rows = 1 keeps the pattern a row.
+      ImGui::SetNextItemWidth(80);
+      ImGui::DragInt("Rows##pat", &edit.patternCount2, 0.1f, 1, 1000);
+      if (edit.patternCount2 > 1) {
+        ImGui::SetNextItemWidth(140);
+        ImGui::DragFloat2("Row step (dx,dy)##pat", &edit.patternStep2.x, 0.05f);
+      }
     } else {
       ImGui::SetNextItemWidth(140);
       ImGui::DragFloat2("Centre##pat", &edit.patternCenter.x, 0.05f);
@@ -424,8 +439,13 @@ void DrawSketchModelSections(AppState& state) {
   // images, patterns, linked copies — as tree-style rows; double-click
   // opens the op's edit session in the Tool window (same grammar as the
   // model feature tree). Inserting images lives on the sketch toolbar.
-  if (!sketch->images.empty() || !sketch->derived.empty()) {
+  // Always shown while editing so the section is discoverable. NOTE:
+  // mirrors are symmetry CONSTRAINTS, not stored ops — they list under
+  // Constraints, not here.
+  {
     ImGui::SeparatorText("Operations");
+    if (sketch->images.empty() && sketch->derived.empty())
+      ImGui::TextDisabled("None yet (patterns, linked copies, images)");
     for (const sketch::ReferenceImage& img : sketch->images) {
       char label[96];
       std::snprintf(label, sizeof(label),
@@ -473,7 +493,8 @@ void DrawSketchModelSections(AppState& state) {
       if (opSelected && !open)
         ImGui::PopStyleColor();
     }
-    ImGui::TextDisabled("Double-click to edit");
+    if (!sketch->images.empty() || !sketch->derived.empty())
+      ImGui::TextDisabled("Double-click to edit");
   }
 
   // Constraint management (relational buttons live on the toolbar; the DOF
