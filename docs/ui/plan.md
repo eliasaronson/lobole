@@ -178,6 +178,17 @@ the right Properties panel **removed entirely** (feature editing becomes an
 explicit session; mass props → Model panel; legacy readouts die; Sketch
 options re-home left). Phases U7a–U7e in the design doc.
 
+## U8 — Sketch sessions
+
+**SHIPPED 2026-07-27** — [u8-sketch-sessions.md](u8-sketch-sessions.md).
+Sketch tool sessions (Mirror/Fillet/Pattern/Offset/Calibrate/Dimension +
+plane pick) in the floating Tool window; the Sketch panel is DELETED (its
+tenants: toolbar toggles, Model-panel sections, toolbar Extrude/Revolve);
+one shared prompt-pill renderer; sketch selection seeds extrude/revolve
+regions (select-profile-first). The sketch entity-selection store stays
+internal by design (U8c full-merge deliberately not done). Dockspace id
+versioned (one-time layout reset) so stale inis can't resurrect dead nodes.
+
 ## Backlog — standard-CAD affordances not yet scheduled
 
 Collected 2026-07-18 (user ask: "what are we missing vs other CAD?").

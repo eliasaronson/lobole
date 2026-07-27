@@ -1,6 +1,10 @@
 # U8 — Sketch sessions: the sketcher joins the uniform interface (design)
 
-> Status: **DESIGN — signed off 2026-07-27.** Decisions: (a) the Sketch
+> Status: **SHIPPED 2026-07-27** — U8-0 `5d43e8c` (dockspace version bump),
+> U8a `c06b061` (sessions in the Tool window, Sketch panel deleted), U8b
+> `9b141b1` (shared prompt pills, sketch selection seeds extrude/revolve
+> regions). gui 79/79, headless 538/538.
+> Original decisions at sign-off: (a) the Sketch
 > options panel is DELETED (tool sessions move to the Tool window, other
 > tenants disperse); (b) the sketch entity-selection store stays internal —
 > unification happens at the session/prompt/seeding level, not by merging
