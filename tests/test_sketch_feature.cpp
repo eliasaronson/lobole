@@ -797,6 +797,29 @@ TEST_CASE("TrimCurveAt turns a crossed circle into the complementary arc",
   CHECK(std::sin(mid) < 0.0); // surviving span is the bottom
 }
 
+TEST_CASE("TrimCurveAt splits a circle where another CIRCLE crosses it",
+          "[sketch][arc]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t c0 = sk.AddEntity(sketch::Circle{{0, 0}, 2.0});
+  // A small circle straddling the big one's rightmost point (2, 0): the two
+  // crossings bracket a short span around angle 0.
+  sk.AddEntity(sketch::Circle{{2, 0}, 0.5});
+
+  // Click at (2,0) — inside the small circle's bite → that span is removed
+  // and the big circle becomes the complementary arc.
+  REQUIRE(sk.TrimCurveAt(c0, {2, 0}));
+  size_t idx = sk.IndexOfEntity(c0);
+  REQUIRE(idx != SIZE_MAX);
+  REQUIRE(std::holds_alternative<sketch::Arc>(sk.entities[idx]));
+  const auto& arc = std::get<sketch::Arc>(sk.entities[idx]);
+  CHECK_THAT(arc.radius, WithinAbs(2.0, 1e-4));
+  // The surviving sweep is almost the whole circle (the bite is small).
+  CHECK(arc.endAngle - arc.startAngle > 5.5);
+  // Its midpoint is on the LEFT side, away from the removed bite at (2,0).
+  const double mid = 0.5 * (arc.startAngle + arc.endAngle);
+  CHECK(std::cos(mid) < 0.0);
+}
+
 TEST_CASE("TrimCurveAt splits a crossed arc, dropping the clicked sub-span",
           "[sketch][arc]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));

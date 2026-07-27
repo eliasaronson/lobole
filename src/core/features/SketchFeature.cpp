@@ -57,6 +57,31 @@ std::vector<float> LineCircleParams(glm::vec2 a, glm::vec2 d, glm::vec2 center,
   return out;
 }
 
+// Angles (radians) on circle (c1, r1) where circle (c2, r2) crosses it.
+// Tangent/concentric/separate pairs yield none.
+std::vector<double> CircleCircleAngles(glm::vec2 c1, double r1, glm::vec2 c2,
+                                       double r2) {
+  std::vector<double> out;
+  const glm::dvec2 d(double(c2.x) - c1.x, double(c2.y) - c1.y);
+  const double dist = std::hypot(d.x, d.y);
+  if (dist < 1e-9 || dist > r1 + r2 - 1e-9 || dist < std::abs(r1 - r2) + 1e-9) {
+    return out;
+  }
+  const double a = (r1 * r1 - r2 * r2 + dist * dist) / (2.0 * dist);
+  const double h2 = r1 * r1 - a * a;
+  if (h2 <= 0.0)
+    return out;
+  const double h = std::sqrt(h2);
+  const glm::dvec2 u = d / dist;
+  const glm::dvec2 mid(c1.x + u.x * a, c1.y + u.y * a);
+  const glm::dvec2 perp(-u.y, u.x);
+  for (const double sign : {1.0, -1.0}) {
+    const glm::dvec2 p(mid.x + perp.x * h * sign, mid.y + perp.y * h * sign);
+    out.push_back(std::atan2(p.y - c1.y, p.x - c1.x));
+  }
+  return out;
+}
+
 // True if angle `ang` lies within an arc's CCW sweep [startAngle, endAngle].
 bool AngleInArc(double ang, const sketch::Arc& arc) {
   double s = arc.startAngle, en = arc.endAngle;
@@ -547,10 +572,26 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
   for (const auto& e : entities) {
     if (sketch::EntityId(e) == id)
       continue;
-    auto* o = std::get_if<sketch::Line>(&e);
-    if (!o)
+    // Crossings from lines, other circles, and arcs alike — circles laid
+    // over a circle split it just like lines do.
+    std::vector<double> angles;
+    if (auto* o = std::get_if<sketch::Line>(&e)) {
+      angles = LineCircleAngles(center, radius, o->a, o->b);
+    } else if (auto* oc = std::get_if<sketch::Circle>(&e)) {
+      angles = CircleCircleAngles(center, radius, oc->center, oc->radius);
+    } else if (auto* oa = std::get_if<sketch::Arc>(&e)) {
+      for (double ang :
+           CircleCircleAngles(center, radius, oa->center, oa->radius)) {
+        const glm::vec2 p(center.x + static_cast<float>(radius * std::cos(ang)),
+                          center.y +
+                              static_cast<float>(radius * std::sin(ang)));
+        if (AngleInArc(std::atan2(p.y - oa->center.y, p.x - oa->center.x), *oa))
+          angles.push_back(ang);
+      }
+    } else {
       continue;
-    for (double ang : LineCircleAngles(center, radius, o->a, o->b)) {
+    }
+    for (double ang : angles) {
       double off = rel(ang);
       if (off > 1e-4 && off < span - 1e-4)
         cuts.push_back(off);
