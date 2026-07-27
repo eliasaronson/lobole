@@ -3,6 +3,7 @@
 #include "cad/CADMaterials.h"
 #include "core/Command.h"
 #include "core/Feature.h"
+#include "core/MassProps.h" // Measure::MassOfBodies (mass-props section)
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/SketchFeature.h"
@@ -23,6 +24,56 @@
 namespace ui {
 
 namespace {
+
+// Mass properties for the active part, shown on demand (the OCC volume-props
+// pass isn't per-frame cheap, so it's cached by document version). When the
+// section is open the document's center of mass is stamped into AppState so
+// the viewport draws a CoG marker. Lives at the bottom of the Model panel
+// (U7e — was the Properties panel's last tenant).
+void DrawMassPropertiesSection(AppState& state) {
+  state.showCog = false;
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  ImGui::Spacing();
+  if (!ImGui::CollapsingHeader("Mass properties"))
+    return;
+
+  static Measure::DocumentMass cache;
+  static const void* cachedDoc = nullptr;
+  static uint64_t cachedVersion = UINT64_MAX;
+  static bool cachedOk = false;
+  const uint64_t version = state.document->Version();
+  if (cachedDoc != static_cast<const void*>(state.document.get()) ||
+      cachedVersion != version) {
+    const auto m = Measure::MassOfBodies(state.document->GetBodies());
+    cachedOk = m.has_value();
+    if (cachedOk)
+      cache = *m;
+    cachedDoc = state.document.get();
+    cachedVersion = version;
+  }
+  if (!cachedOk) {
+    ImGui::TextDisabled("Mass properties unavailable.");
+    return;
+  }
+
+  ImGui::Text("Volume: %.3f mm\xc2\xb3", cache.volume);
+  double area = 0.0;
+  for (const auto& b : cache.bodies)
+    area += b.surfaceArea;
+  ImGui::Text("Surface area: %.3f mm\xc2\xb2", area);
+  if (cache.massKnown)
+    ImGui::Text("Mass: %.3f g", cache.massG);
+  else
+    ImGui::TextDisabled("Mass: unknown (assign a material)");
+  ImGui::Text("Center of mass:");
+  ImGui::Text("  (%.3f, %.3f, %.3f)", cache.centerOfMass.x,
+              cache.centerOfMass.y, cache.centerOfMass.z);
+
+  // Draw the CoG marker in the viewport while this section is open.
+  state.showCog = true;
+  state.cogWorld = glm::vec3(cache.centerOfMass);
+}
 
 // Per-kind glyph for the feature tree (U5) — same atlas as the toolbar.
 const char* FeatureIcon(const std::string& type) {
@@ -221,7 +272,8 @@ void DrawFeatureTreePanel(AppState& state) {
             state.camera->AlignToFace(sketchFeat->plane.GetOrigin(),
                                       sketchFeat->plane.GetNormal());
         } else if (ImGui::IsMouseDoubleClicked(0)) {
-          ImGui::SetWindowFocus("Properties");
+          // U7e: editing a committed feature is explicit — the Tool window.
+          OpenFeatureEditor(state, feature->GetId());
         }
       }
       // Drag a row onto another to reorder (validated on drop). The row being
@@ -257,6 +309,11 @@ void DrawFeatureTreePanel(AppState& state) {
                                        : "After the rollback bar");
       }
       if (ImGui::BeginPopupContextItem()) {
+        // U7e: the explicit path to the committed-feature editor session
+        // (double-click is the shortcut).
+        if (ImGui::MenuItem("Edit…")) {
+          OpenFeatureEditor(state, feature->GetId());
+        }
         if (ImGui::MenuItem("Rename")) {
           renaming = static_cast<int>(i);
           snprintf(renameBuf, sizeof(renameBuf), "%s",
@@ -444,6 +501,8 @@ void DrawFeatureTreePanel(AppState& state) {
       }
     }
   }
+
+  DrawMassPropertiesSection(state);
 
   ImGui::End();
 }

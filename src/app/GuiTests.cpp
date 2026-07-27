@@ -136,7 +136,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "app", "core_windows_exist");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     IM_CHECK(ctx->GetWindowByRef("//Model") != nullptr);
-    IM_CHECK(ctx->GetWindowByRef("//Properties") != nullptr);
   };
 
   t = IM_REGISTER_TEST(engine, "document", "parametric_box_undo_redo");
@@ -251,10 +250,13 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(box != nullptr);
     IM_CHECK_EQ(box->width, 2.0);
 
-    ctx->ItemClick("//Model/Box 1##0");
+    // U7e: committed-feature editing is an explicit session — double-click
+    // the tree row, edit in the Tool window.
+    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->Yield();
     // Labels-left rows (U4): the widget id is "##<label>", the visible label
     // is a separate Text item.
-    ctx->ItemInputValue("//Properties/##Width", 5.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/##Width", 5.0f);
     ctx->Yield();
 
     box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
@@ -2268,7 +2270,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
                                                        ExtrudeMode::NewBody));
     Doc()->Regenerate();
     const uint64_t extId = Doc()->GetFeature(1)->GetId();
-    ui::SelectFeature(*s_App, extId);
+    ui::OpenFeatureEditor(*s_App, extId); // committed feature → Tool window
 
     s_App->camera->StopAnimation();
     s_App->camera->SetTarget(glm::vec3(2.5f, 0.0f, 0.0f));
@@ -2277,7 +2279,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
 
     // Arm the Profiles slot (committed feature → Properties panel).
-    ctx->ItemClick("//Properties/###slot7");
+    ctx->ItemClick("//Extrude###ToolWindow/###slot7");
     IM_CHECK(s_App->slotPick.Active());
 
     // Click inside circle 1's region (the sketch-plane point, not the body).

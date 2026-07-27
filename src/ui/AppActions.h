@@ -28,6 +28,9 @@ Feature* SelectedFeature(AppState& state, size_t* indexOut = nullptr);
 int SelectedFeatureIndexOrMinus1(AppState& state);       // RPC back-compat
 void SelectFeature(AppState& state, uint64_t featureId); // replaces the set
 void SelectFeatureByIndex(AppState& state, size_t index);
+// Opens the committed-feature editor session in the Tool window (U7e —
+// tree double-click / context-menu Edit). No-op for unknown ids.
+void OpenFeatureEditor(AppState& state, uint64_t featureId);
 // Assembly-tab selection through the same set (U1d). Occurrence and mate
 // items coexist (the panel lists select independently, as the old separate
 // fields did): each setter replaces only its own kind; 0 removes it.

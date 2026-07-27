@@ -16,7 +16,6 @@
 #include "ui/MainMenuBar.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
-#include "ui/PropertiesPanel.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
@@ -377,7 +376,6 @@ void DrawUI(AppState& state) {
     }
     DrawVariablesPanel(state);
     DrawConfigurationsPanel(state);
-    DrawPropertiesPanel(state);
     DrawSketchToolbar(state);
   } else if (state.assembly) {
     DrawOccurrencePanel(state); // occurrence list + editor in the Model panel

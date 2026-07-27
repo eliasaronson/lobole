@@ -47,7 +47,9 @@ std::string FreshName(const AppState& state) {
 } // namespace
 
 void DrawVariablesPanel(AppState& state) {
-  ImGui::Begin("Variables");
+  // A secondary tab must never steal the shared node from Model on its
+  // first appearance (fresh layout builds select the last-appearing tab).
+  ImGui::Begin("Variables", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
   if (!state.document) {
     ImGui::End();
     return;

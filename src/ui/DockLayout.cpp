@@ -57,12 +57,12 @@ void BeginDockspace(AppState& state) {
                    ImGuiDockNodeFlags_PassthruCentralNode);
 
   // Self-heal a missing or stale layout. If the dockspace root has no split
-  // children, the Model/Properties panels aren't docked into it (a fresh run,
-  // or a leftover imgui.ini from an older layout that left them floating). In
+  // children, the Model panel isn't docked into it (a fresh run, or a
+  // leftover imgui.ini from an older layout that left it floating). In
   // that state the panels can't track the window edges, so rebuild the default
   // layout. Once docked, the root has splits and this won't fire again. With
-  // the panels docked, ImGui keeps the side panels a fixed width against their
-  // edges and grows the central node on resize — no manual re-fit needed.
+  // the panels docked, ImGui keeps the side panel a fixed width against its
+  // edge and grows the central node on resize — no manual re-fit needed.
   if (!state.buildDefaultDockLayout) {
     ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspaceId);
     if (root == nullptr || root->IsLeafNode())
@@ -74,15 +74,14 @@ void BeginDockspace(AppState& state) {
   // on a rebuild — so the new panel floats over the viewport forever (this is
   // how Configurations shipped floating). Once per launch, after the panel
   // windows have been created from settings, re-dock strays: secondary panels
-  // join the node their sibling lives in; if a *core* panel (Model/Properties)
-  // is adrift, rebuild the whole default layout. Once-per-launch so users can
+  // join the node their sibling lives in; if the *core* Model panel is
+  // adrift, rebuild the whole default layout. Once-per-launch so users can
   // still float panels freely within a session.
   if (!state.dockHomesEnforced && !state.buildDefaultDockLayout) {
     ImGuiWindow* model = ImGui::FindWindowByName("Model");
-    ImGuiWindow* props = ImGui::FindWindowByName("Properties");
-    if (model != nullptr && props != nullptr) {
+    if (model != nullptr) {
       state.dockHomesEnforced = true;
-      if (model->DockId == 0 || props->DockId == 0) {
+      if (model->DockId == 0) {
         state.buildDefaultDockLayout = true;
       } else {
         auto redock = [](const char* name, ImGuiID home) {
@@ -92,7 +91,7 @@ void BeginDockspace(AppState& state) {
         };
         redock("Variables", model->DockId);
         redock("Configurations", model->DockId);
-        redock("Sketch", props->DockId);
+        redock("Sketch", model->DockId);
       }
     }
   }
@@ -106,18 +105,20 @@ void BeginDockspace(AppState& state) {
       avail = vp->WorkSize; // first frame: content region not yet sized
     ImGui::DockBuilderSetNodeSize(dockspaceId, avail);
     ImGuiID center = dockspaceId;
-    // Favor the 3D viewport: narrow-ish side panels (~17% left, ~18% right),
-    // leaving ~65% for the central node.
+    // U7e: one docked side panel — the right node is gone (feature editing
+    // and every tool session live in the floating Tool window), so the
+    // viewport gets everything right of the tree.
     ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.17f,
                                                nullptr, &center);
-    ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.22f,
-                                                nullptr, &center);
     ImGui::DockBuilderDockWindow("Model", left);
     ImGui::DockBuilderDockWindow("Variables", left);      // tabbed behind Model
     ImGui::DockBuilderDockWindow("Configurations", left); // tabbed behind Model
-    ImGui::DockBuilderDockWindow("Properties", right);
-    ImGui::DockBuilderDockWindow("Sketch", right); // sketch options, tabbed
+    ImGui::DockBuilderDockWindow("Sketch", left); // sketch options, tabbed
     ImGui::DockBuilderFinish(dockspaceId);
+    // The tab focused last wins the shared node; make sure that is Model —
+    // with Sketch tabbed here too (U7e), it could otherwise end up on top
+    // and hide the tree from both the user and the gui tests.
+    ImGui::SetWindowFocus("Model");
   }
 
   ImGui::End(); // host window

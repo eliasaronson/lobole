@@ -242,6 +242,9 @@ void HandleViewportInput(AppState& state) {
       state.slotPick = {};
       escUsed = true;
     }
+  } else if (state.editFeatureId != 0 && esc) {
+    state.editFeatureId = 0; // Escape closes the editor session
+    escUsed = true;
   } else if (state.measure.active && esc) {
     state.measure = MeasureState{}; // Escape exits (clears pair + readout)
     escUsed = true;

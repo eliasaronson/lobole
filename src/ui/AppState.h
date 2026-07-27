@@ -652,6 +652,10 @@ struct AppState {
   // Feature being previewed (in the document + rendered, but NOT on the undo
   // stack until accepted). 0 = none. See PreviewFeature.
   uint64_t pendingFeatureId = 0;
+  // Committed feature open in the Tool-window editor session (U7e: editing
+  // is explicit — double-click / context-menu Edit — now that the always-on
+  // Properties panel is gone). 0 = none. Transient; edits commit as usual.
+  uint64_t editFeatureId = 0;
   ViewportDrag viewportDrag = ViewportDrag::None;
   // True when the drag was started with Alt+left (trackpad-friendly) rather
   // than the middle/right button; the drag then owns the left button, so the

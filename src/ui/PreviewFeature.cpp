@@ -20,6 +20,7 @@ uint64_t BeginPreviewFeature(AppState& state,
   const size_t idx = state.document->FeatureCount() - 1;
   Feature* added = state.document->GetFeature(idx);
   state.pendingFeatureId = added->GetId();
+  state.editFeatureId = 0; // a new preview supersedes an editor session
   // Select-first (U7b): whatever was selected seeds the new tool's slots
   // before SelectFeature replaces the selection with the feature itself;
   // then the first unfilled required slot arms for the next viewport click
@@ -171,6 +172,25 @@ void DrawToolWindow(AppState& state) {
   Feature* feature = ResolvePendingFeature(state, &idx);
   if (!feature) {
     state.pendingFeatureId = 0;
+    // Committed-feature editor session (U7e): same window, live commits.
+    if (state.editFeatureId != 0 && state.document &&
+        !state.sketchEdit.IsEditing()) {
+      size_t eidx = 0;
+      Feature* ef = state.document->FindFeatureById(state.editFeatureId, &eidx);
+      if (ef == nullptr) {
+        state.editFeatureId = 0; // the session ends with its feature
+      } else {
+        BeginToolWindowFrame(state, ef->TypeName());
+        DrawFeatureParamWidgets(state, *ef, eidx, /*commit=*/true);
+        ImGui::Separator();
+        if (ImGui::Button("Close")) {
+          state.editFeatureId = 0;
+          state.slotPick = {}; // armed slots end with the session
+        }
+        ImGui::End();
+        return;
+      }
+    }
     if (state.measure.active)
       DrawMeasureToolWindow(state); // measure never coexists with a preview
     return;

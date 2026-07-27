@@ -43,7 +43,8 @@ std::string OverrideOf(const Configuration& c, const std::string& name) {
 } // namespace
 
 void DrawConfigurationsPanel(AppState& state) {
-  ImGui::Begin("Configurations");
+  // Never steal the shared node from Model on first appearance.
+  ImGui::Begin("Configurations", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
   if (!state.document) {
     ImGui::End();
     return;

@@ -93,6 +93,13 @@ void SelectFeature(AppState& state, uint64_t featureId) {
   state.selection.Replace({SelectionItem::Kind::Feature, featureId, {}});
 }
 
+void OpenFeatureEditor(AppState& state, uint64_t featureId) {
+  if (!state.document || state.document->FindFeatureById(featureId) == nullptr)
+    return;
+  SelectFeature(state, featureId);
+  state.editFeatureId = featureId; // the Tool window shows the editor session
+}
+
 void SelectFeatureByIndex(AppState& state, size_t index) {
   if (!state.document || index >= state.document->FeatureCount())
     return;
@@ -832,6 +839,7 @@ void ResetActiveTabUiState(AppState& state) {
   state.slotPick = {};
   state.hiddenBodies.clear();
   state.pendingFeatureId = 0;
+  state.editFeatureId = 0;
   state.sketchEdit = SketchEditState{};
   // Any tab change exits in-context editing (EnterInContextEdit re-arms it
   // after its SetActivePart returns).
