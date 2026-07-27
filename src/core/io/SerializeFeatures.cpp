@@ -243,11 +243,12 @@ json DerivedOpToJson(const sketch::DerivedOp& op) {
   json insts = json::array();
   for (const auto& in : op.instances)
     insts.push_back({{"source", in.sourceId}, {"k", in.k}, {"gen", in.genId}});
-  json j = {{"kind", op.kind == sketch::DerivedKind::CircularPattern
-                         ? "circular_pattern"
-                     : op.kind == sketch::DerivedKind::LinkedCopy
-                         ? "linked_copy" // v35
-                         : "linear_pattern"},
+  json j = {{"kind",
+             op.kind == sketch::DerivedKind::CircularPattern
+                 ? "circular_pattern"
+             : op.kind == sketch::DerivedKind::LinkedCopy ? "linked_copy" // v35
+             : op.kind == sketch::DerivedKind::Mirror     ? "mirror"      // v51
+                                                          : "linear_pattern"},
             {"source_ids", op.sourceIds},
             {"vec", Vec2ToJson(op.vec)},
             {"scalar", op.scalar},
@@ -256,6 +257,12 @@ json DerivedOpToJson(const sketch::DerivedOp& op) {
   if (op.count2 > 1) { // v50: 2D linear grid; omitted = 1D (back-compat)
     j["vec2"] = Vec2ToJson(op.vec2);
     j["count2"] = op.count2;
+  }
+  if (op.axisEntity != 0) // v51: mirror axis
+    j["axis_entity"] = op.axisEntity;
+  if (op.centerEntity != 0) { // v51: circular centre reference
+    j["center_entity"] = op.centerEntity;
+    j["center_which"] = static_cast<int>(op.centerWhich);
   }
   if (op.sourceSketchId != 0)
     j["source_sketch_id"] = op.sourceSketchId;
@@ -267,6 +274,7 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
   const std::string kind = j.at("kind").get<std::string>();
   op.kind = kind == "circular_pattern" ? sketch::DerivedKind::CircularPattern
             : kind == "linked_copy"    ? sketch::DerivedKind::LinkedCopy
+            : kind == "mirror"         ? sketch::DerivedKind::Mirror // v51
                                        : sketch::DerivedKind::LinearPattern;
   op.sourceSketchId = j.value("source_sketch_id", uint64_t{0});
   for (const auto& s : j.at("source_ids"))
@@ -277,6 +285,9 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
   if (j.contains("vec2")) // v50: 2D linear grid
     op.vec2 = Vec2FromJson(j.at("vec2"));
   op.count2 = j.value("count2", 1);
+  op.axisEntity = j.value("axis_entity", uint32_t{0});     // v51
+  op.centerEntity = j.value("center_entity", uint32_t{0}); // v51
+  op.centerWhich = static_cast<uint8_t>(j.value("center_which", 0));
   for (const auto& in : j.at("instances"))
     op.instances.push_back({in.at("source").get<uint32_t>(),
                             in.at("k").get<int>(),

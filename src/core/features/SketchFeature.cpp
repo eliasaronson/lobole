@@ -622,7 +622,6 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::vec2 clickUV) {
 std::vector<uint32_t>
 SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
                               uint32_t axisLineId, bool link) {
-  using K = sketch::ConstraintKind;
   std::vector<uint32_t> generated;
   // Axis geometry comes from the datum helpers for the X/Y axes, else from the
   // axis line entity. The linked Symmetric constraints reference axisLineId
@@ -643,60 +642,33 @@ SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
     b = axis->b;
   }
 
-  std::vector<std::pair<uint32_t, uint32_t>> pairs; // (source id, copy id)
-  for (uint32_t sid : sourceIds) {
-    const size_t si = IndexOfEntity(sid);
-    if (si == std::numeric_limits<size_t>::max() || sid == axisLineId)
-      continue;
-    sketch::Entity copy = sketch::ReflectEntity(entities[si], a, b);
-    // Perturb a reflected arc so the solver can distinguish Symmetry from Equal
-    // (FreeCAD issue #13551).
-    if (link)
-      if (auto* arc = std::get_if<sketch::Arc>(&copy)) {
-        arc->startAngle += 1e-6;
-        arc->endAngle += 1e-6;
-      }
-    const uint32_t cid = AddEntity(copy);
-    pairs.emplace_back(sid, cid);
-    generated.push_back(cid);
-  }
-  if (!link)
+  if (!link) {
+    // One-shot bake: free reflected copies, no record.
+    for (uint32_t sid : sourceIds) {
+      const size_t si = IndexOfEntity(sid);
+      if (si == std::numeric_limits<size_t>::max() || sid == axisLineId)
+        continue;
+      generated.push_back(AddEntity(sketch::ReflectEntity(entities[si], a, b)));
+    }
     return generated;
-
-  auto onAxis = [&](glm::vec2 p) {
-    return glm::length(p - sketch::ReflectPoint(p, a, b)) < 1e-6f;
-  };
-  for (auto [sid, cid] : pairs) {
-    const sketch::Entity& src = entities[IndexOfEntity(sid)];
-    // Symmetric pins source point `sw` to copy point `cw` about the axis; a
-    // point already on the axis is its own mirror → use Coincident instead.
-    auto symPair = [&](uint8_t sw, uint8_t cw) {
-      if (onAxis(sketch::EntityPointUV(src, sw)))
-        constraints.push_back({K::Coincident, {sid, sw}, {cid, cw}, 0.0});
-      else
-        constraints.push_back(
-            {K::Symmetric, {sid, sw}, {cid, cw}, 0.0, {axisLineId, 0}});
-    };
-    std::visit(
-        [&](const auto& g) {
-          using T = std::decay_t<decltype(g)>;
-          if constexpr (std::is_same_v<T, sketch::Point>) {
-            symPair(0, 0);
-          } else if constexpr (std::is_same_v<T, sketch::Line>) {
-            symPair(0, 0);
-            symPair(1, 1);
-          } else if constexpr (std::is_same_v<T, sketch::Circle>) {
-            constraints.push_back({K::Equal, {sid, 0}, {cid, 0}, 0.0});
-            symPair(0, 0); // centres
-          } else {         // Arc: reflection swaps start/end (winding flips)
-            constraints.push_back({K::Equal, {sid, 0}, {cid, 0}, 0.0});
-            symPair(0, 0); // centres
-            symPair(1, 2);
-            symPair(2, 1);
-          }
-        },
-        src);
   }
+
+  // Linked (v51): a Mirror derived op — replayed each regeneration, so the
+  // copies track their sources AND the axis. Replaces the old
+  // symmetry-constraint fan-out (which flooded the constraint list and
+  // fought the solver on arcs — FreeCAD issue #13551).
+  sketch::DerivedOp op;
+  op.kind = sketch::DerivedKind::Mirror;
+  for (uint32_t sid : sourceIds)
+    if (sid != axisLineId && IndexOfEntity(sid) != SIZE_MAX)
+      op.sourceIds.push_back(sid);
+  if (op.sourceIds.empty())
+    return generated;
+  op.axisEntity = axisLineId;
+  derived.push_back(op);
+  RegenerateDerived();
+  for (const auto& in : derived.back().instances)
+    generated.push_back(in.genId);
   return generated;
 }
 
@@ -1102,9 +1074,51 @@ void SketchFeature::RegenerateDerived() {
   for (auto& op : derived) {
     if (op.kind == sketch::DerivedKind::LinkedCopy && op.sourceSketchId != 0)
       continue; // cross-sketch: replayed in Execute (needs the source)
+
+    // Mirror (v51): resolve the axis endpoints fresh each regen so the
+    // copies track it. An unresolvable axis prunes the instances (same as
+    // a vanished source).
+    glm::vec2 axisA{0.0f}, axisB{0.0f};
+    if (op.kind == sketch::DerivedKind::Mirror) {
+      bool axisOk = false;
+      if (sketch::IsDatum(op.axisEntity)) {
+        const auto ep = sketch::DatumAxisEndpoints(op.axisEntity);
+        axisA = ep.first;
+        axisB = ep.second;
+        axisOk = true;
+      } else {
+        const size_t ai = IndexOfEntity(op.axisEntity);
+        if (ai != std::numeric_limits<size_t>::max()) {
+          if (auto* axis = std::get_if<sketch::Line>(&entities[ai])) {
+            axisA = axis->a;
+            axisB = axis->b;
+            axisOk = true;
+          }
+        }
+      }
+      if (!axisOk) {
+        for (const auto& in : op.instances)
+          DeleteEntity(in.genId);
+        op.instances.clear();
+        continue;
+      }
+    }
+
+    // Circular (v51): an optional centre REFERENCE tracks an entity point;
+    // fall back to the baked coordinate when unset or unresolvable.
+    glm::vec2 circCenter = op.vec;
+    if (op.kind == sketch::DerivedKind::CircularPattern &&
+        op.centerEntity != 0) {
+      const size_t ci = IndexOfEntity(op.centerEntity);
+      if (ci != std::numeric_limits<size_t>::max())
+        circCenter = sketch::EntityPointUV(entities[ci], op.centerWhich);
+    }
+
     auto transform = [&](const sketch::Entity& src, int k) -> sketch::Entity {
       if (op.kind == sketch::DerivedKind::LinkedCopy)
         return sketch::TranslateEntity(src, op.vec);
+      if (op.kind == sketch::DerivedKind::Mirror)
+        return sketch::ReflectEntity(src, axisA, axisB);
       if (op.kind == sketch::DerivedKind::LinearPattern) {
         // 2D grid (v50): the flat instance index k unfolds row-major.
         // count2 == 1 degenerates to the old 1D behavior (k * vec).
@@ -1114,12 +1128,13 @@ void SketchFeature::RegenerateDerived() {
                                        static_cast<float>(col) * op.vec +
                                            static_cast<float>(row) * op.vec2);
       }
-      return sketch::RotateEntity(src, op.vec,
+      return sketch::RotateEntity(src, circCenter,
                                   static_cast<double>(k) * op.scalar);
     };
     const int total = op.kind == sketch::DerivedKind::LinearPattern
                           ? op.count * std::max(1, op.count2)
-                          : op.count;
+                      : op.kind == sketch::DerivedKind::Mirror ? 2
+                                                               : op.count;
     std::vector<sketch::DerivedOp::Inst> keep;
     for (uint32_t sid : op.sourceIds) {
       const size_t si = IndexOfEntity(sid);
@@ -1243,13 +1258,18 @@ SketchFeature::AddLinearPattern(const std::vector<uint32_t>& sourceIds,
   return gen;
 }
 
-std::vector<uint32_t>
-SketchFeature::AddCircularPattern(const std::vector<uint32_t>& sourceIds,
-                                  glm::vec2 center, double stepAngle, int count,
-                                  bool link) {
+std::vector<uint32_t> SketchFeature::AddCircularPattern(
+    const std::vector<uint32_t>& sourceIds, glm::vec2 center, double stepAngle,
+    int count, bool link, uint32_t centerEntity, uint8_t centerWhich) {
   std::vector<uint32_t> gen;
   if (count < 2 || sourceIds.empty())
     return gen;
+  // A referenced centre resolves to its current point for the bake too.
+  if (centerEntity != 0) {
+    const size_t ci = IndexOfEntity(centerEntity);
+    if (ci != std::numeric_limits<size_t>::max())
+      center = sketch::EntityPointUV(entities[ci], centerWhich);
+  }
   if (!link) {
     for (uint32_t sid : sourceIds) {
       const size_t si = IndexOfEntity(sid);
@@ -1268,6 +1288,8 @@ SketchFeature::AddCircularPattern(const std::vector<uint32_t>& sourceIds,
   op.vec = center;
   op.scalar = stepAngle;
   op.count = count;
+  op.centerEntity = centerEntity;
+  op.centerWhich = centerWhich;
   derived.push_back(op);
   RegenerateDerived();
   for (const auto& in : derived.back().instances)

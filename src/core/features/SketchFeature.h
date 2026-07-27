@@ -617,6 +617,12 @@ struct Constraint {
 enum class DerivedKind {
   LinearPattern,
   CircularPattern,
+  // A LINKED MIRROR (v51): one reflected copy per source across an axis
+  // line (or X/Y datum axis), replayed on every regeneration so the copies
+  // track both their sources and the axis. Replaces the old
+  // symmetry-constraint fan-out (which cluttered the constraint list and
+  // could not be edited as one thing).
+  Mirror,
   // A LINKED COPY (docs/sketching/copy-links.md): pasted entities that
   // re-sync from their source until the link is broken. Same-sketch sources
   // replay in RegenerateDerived; cross-sketch sources (sourceSketchId != 0)
@@ -644,6 +650,14 @@ struct DerivedOp {
   // records need no new fields.
   glm::vec2 vec2{0.0f};
   int count2 = 1;
+  // Mirror only (v51): the axis line entity (or X/Y datum axis id) the
+  // copies reflect across — resolved fresh each regeneration.
+  uint32_t axisEntity = 0;
+  // Circular only (v51): optional centre REFERENCE — an entity point the
+  // centre tracks (entity id + point index, like sketch::PointRef). 0 =
+  // the baked `vec` coordinate.
+  uint32_t centerEntity = 0;
+  uint8_t centerWhich = 0;
   uint64_t sourceSketchId = 0; // LinkedCopy: cross-sketch source (0 = here)
   struct Inst {
     uint32_t sourceId = 0;
@@ -801,8 +815,11 @@ public:
                                          glm::vec2 step2 = {0.0f, 0.0f},
                                          int count2 = 1);
   std::vector<uint32_t>
+  // centerEntity/centerWhich (v51): optional entity-point reference the
+  // centre tracks across regenerations; 0 = the baked `center` coordinate.
   AddCircularPattern(const std::vector<uint32_t>& sourceIds, glm::vec2 center,
-                     double stepAngle, int count, bool link);
+                     double stepAngle, int count, bool link,
+                     uint32_t centerEntity = 0, uint8_t centerWhich = 0);
 
   // Offsets the closed loop formed by `chainIds` by `distance` (signed; corner
   // treatment via `joinArc` — arcs at convex corners, else extend/trim),

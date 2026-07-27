@@ -724,8 +724,12 @@ TEST_CASE("An arc endpoint constrained coincident to a line endpoint solves",
              WithinRel(static_cast<float>(arc.radius), 1e-3f));
 }
 
-TEST_CASE("A linked mirror follows the source through the solver",
+TEST_CASE("A linked mirror follows the source through solve + regeneration",
           "[solver][generative]") {
+  // v51: the linked mirror is a derived OP — the solver doesn't couple the
+  // copy; the regeneration pass after every solve re-stamps it (same
+  // lifecycle as linked patterns; the UI always runs solve → WriteBack →
+  // RegenerateDerived).
   SketchFeature s = MakeSketch();
   uint32_t axis = s.AddEntity(sketch::Line{{0, -5}, {0, 5}}); // y-axis
   uint32_t seg = s.AddEntity(sketch::Line{{2, 1}, {3, 4}});
@@ -735,17 +739,18 @@ TEST_CASE("A linked mirror follows the source through the solver",
   auto gen = s.MirrorEntities({seg}, axis, /*link=*/true);
   REQUIRE(gen.size() == 1);
 
-  // Move the source line's endpoint, then re-solve: the linked copy must
-  // mirror.
+  // Move the source line's endpoint, solve, write back, regenerate: the
+  // linked copy must mirror the moved source.
   std::get<sketch::Line>(s.entities[s.IndexOfEntity(seg)]).a = {2.5f, 2.0f};
   sketch::Solver solver;
   solver.Load(s);
   REQUIRE(solver.Solve().ok);
-  std::vector<sketch::Entity> out;
-  solver.WriteBack(out);
+  solver.WriteBack(s.entities);
+  s.RegenerateDerived();
 
-  glm::vec2 srcA = std::get<sketch::Line>(out[s.IndexOfEntity(seg)]).a;
-  glm::vec2 copyA = std::get<sketch::Line>(out[s.IndexOfEntity(gen[0])]).a;
+  glm::vec2 srcA = std::get<sketch::Line>(s.entities[s.IndexOfEntity(seg)]).a;
+  glm::vec2 copyA =
+      std::get<sketch::Line>(s.entities[s.IndexOfEntity(gen[0])]).a;
   // Copy endpoint is the mirror of the (moved) source endpoint about x=0.
   CHECK_THAT(copyA.x, WithinAbs(-srcA.x, 1e-3f));
   CHECK_THAT(copyA.y, WithinAbs(srcA.y, 1e-3f));

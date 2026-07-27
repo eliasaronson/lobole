@@ -38,23 +38,37 @@ TEST_CASE("MirrorEntities reflects geometry across an axis line", "[sketch]") {
     CHECK_THAT(copy.b.y, WithinAbs(4.0f, 1e-5f));
     CHECK(sk.constraints.empty()); // bake adds none
   }
-  SECTION("linked: adds Symmetric constraints tying copy to source") {
+  SECTION("linked: a Mirror op that tracks source AND axis (v51)") {
     auto gen = sk.MirrorEntities({seg}, axis, /*link=*/true);
     REQUIRE(gen.size() == 1);
-    int sym = 0;
-    for (const auto& c : sk.constraints)
-      if (c.kind == sketch::ConstraintKind::Symmetric) {
-        sym++;
-        CHECK(c.c.entity == axis); // symmetry about the axis line
-      }
-    CHECK(sym == 2); // both endpoints
+    REQUIRE(sk.derived.size() == 1);
+    CHECK(sk.derived[0].kind == sketch::DerivedKind::Mirror);
+    CHECK(sk.derived[0].axisEntity == axis);
+    CHECK(sk.constraints.empty()); // no symmetry-constraint fan-out anymore
+
+    // Move the SOURCE: the copy follows on regeneration, id-stable.
+    std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(seg)]).a = {2, 2};
+    sk.RegenerateDerived();
+    const auto& c1 =
+        std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
+    CHECK_THAT(c1.a.x, WithinAbs(-2.0f, 1e-5f));
+    CHECK_THAT(c1.a.y, WithinAbs(2.0f, 1e-5f));
+
+    // Move the AXIS (shift to x = 1): the copy re-reflects.
+    auto& ax = std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(axis)]);
+    ax.a = {1, -5};
+    ax.b = {1, 5};
+    sk.RegenerateDerived();
+    const auto& c2 =
+        std::get<sketch::Line>(sk.entities[sk.IndexOfEntity(gen[0])]);
+    CHECK_THAT(c2.a.x, WithinAbs(0.0f, 1e-5f)); // 2 reflected about x=1
   }
 }
 
 TEST_CASE("Mirror across a datum axis reflects and links to it",
           "[sketch][mirror][datum]") {
-  // No axis entity needed — the Y axis datum reflects across x = 0 and the
-  // linked Symmetric constraints reference kAxisY (resolved by the solver).
+  // No axis entity needed — the Y axis datum reflects across x = 0; the
+  // linked Mirror op (v51) records kAxisY as its axis.
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t seg = sk.AddEntity(sketch::Line{{1, 0}, {2, 1}});
   auto gen = sk.MirrorEntities({seg}, sketch::kAxisY, /*link=*/true);
@@ -66,12 +80,10 @@ TEST_CASE("Mirror across a datum axis reflects and links to it",
   CHECK_THAT(copy.b.x, WithinAbs(-2.0f, 1e-4f));
   CHECK_THAT(copy.b.y, WithinAbs(1.0f, 1e-4f));
 
-  bool symToAxis = false;
-  for (const auto& c : sk.constraints)
-    if (c.kind == sketch::ConstraintKind::Symmetric &&
-        c.c.entity == sketch::kAxisY)
-      symToAxis = true;
-  CHECK(symToAxis);
+  REQUIRE(sk.derived.size() == 1);
+  CHECK(sk.derived[0].kind == sketch::DerivedKind::Mirror);
+  CHECK(sk.derived[0].axisEntity == sketch::kAxisY);
+  CHECK(sk.constraints.empty());
 
   sketch::Solver solver; // the datum-referencing constraints solve
   solver.Load(sk);
@@ -177,6 +189,28 @@ TEST_CASE("2D linear pattern fills a grid (v50)", "[sketch][pattern]") {
   sk2.RegenerateDerived();
   CHECK(sk2.entities.size() == 2); // seed + the k=1 instance
   CHECK(sk2.IndexOfEntity(gen2[0]) != SIZE_MAX);
+}
+
+TEST_CASE("Circular pattern centre reference tracks its point (v51)",
+          "[sketch][pattern]") {
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  uint32_t ctr = sk.AddEntity(sketch::Point{{0, 0}});
+  uint32_t c = sk.AddEntity(sketch::Circle{{2, 0}, 0.5});
+  auto gen = sk.AddCircularPattern({c}, {9, 9} /*ignored*/, M_PI, 2,
+                                   /*link=*/true, ctr, 0);
+  REQUIRE(gen.size() == 1);
+  // Centre resolved from the point (0,0): the copy lands at (-2, 0).
+  const auto& g0 =
+      std::get<sketch::Circle>(sk.entities[sk.IndexOfEntity(gen[0])]);
+  CHECK_THAT(g0.center.x, WithinAbs(-2.0f, 1e-4f));
+
+  // Move the centre point: the pattern follows on regeneration.
+  std::get<sketch::Point>(sk.entities[sk.IndexOfEntity(ctr)]).p = {2, 2};
+  sk.RegenerateDerived();
+  const auto& g1 =
+      std::get<sketch::Circle>(sk.entities[sk.IndexOfEntity(gen[0])]);
+  CHECK_THAT(g1.center.x, WithinAbs(2.0f, 1e-4f)); // (2,0) rotated pi about
+  CHECK_THAT(g1.center.y, WithinAbs(4.0f, 1e-4f)); // (2,2) → (2,4)
 }
 
 TEST_CASE("Circular pattern bakes rotated copies", "[sketch][pattern]") {
