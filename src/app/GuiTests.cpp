@@ -114,6 +114,12 @@ static void EnterSketchOnPlane(ImGuiTestContext* ctx, int planeIdx) {
       "Sketch " + std::to_string(Doc()->FeatureCount() + 1);
   ui::BeginSketchOnPlane(*s_App, ui::DefaultPlane(planeIdx), name);
   ctx->Yield();
+  // Jump the align-to-plane animation to its end: clicks computed via
+  // SketchUVToScreen must not race a camera still in flight (the infer/
+  // snap tests were load-dependent flaky exactly because of this).
+  if (s_App->camera)
+    s_App->camera->FinishAnimation();
+  ctx->Yield();
 }
 
 void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {

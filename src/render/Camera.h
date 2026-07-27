@@ -106,6 +106,18 @@ public:
   void AnimateToPosition(const glm::vec3& position, const glm::vec3& target,
                          float duration = 1.0f);
   void StopAnimation() { m_isAnimating = false; }
+  // Jump straight to the animation's end state. StopAnimation freezes the
+  // blend wherever it happens to be, which makes any screen<->world mapping
+  // taken next frame-timing dependent — tests use this for determinism.
+  void FinishAnimation() {
+    if (!m_isAnimating)
+      return;
+    m_orientation = m_animEndOrient;
+    m_pivot = m_animEndPivot;
+    m_distance = m_animEndDistance;
+    m_isAnimating = false;
+    UpdateViewMatrix();
+  }
   bool IsAnimating() const { return m_isAnimating; }
 
 private:
