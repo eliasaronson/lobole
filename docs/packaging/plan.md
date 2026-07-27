@@ -337,8 +337,9 @@ Build:
 
 What it took (the code was the easy part — the deps were the work):
 - **Platform shims**, ~6 files, all `#ifdef`-guarded with the Linux path unchanged
-  (native build + 538 tests + crash-test stay green): RuntimePaths→`GetModuleFileNameA`,
-  CrashHandler→`SetUnhandledExceptionFilter`, RemoteServer→Winsock (+ `ws2_32`),
+  (native build + 538 tests + crash-test stay green): RuntimePaths→`GetModuleFileNameA`
+  (+ a macOS `_NSGetExecutablePath` branch — see macOS notes), CrashHandler→
+  `SetUnhandledExceptionFilter`, RemoteServer→Winsock (+ `ws2_32`),
   GitVault→`nul`/`_pclose`, main.cpp→`std::this_thread::sleep_for`. Zero GNU compiler
   extensions in the tree kept MSVC-style churn near-nil; no fork/exec.
 - **OCC cross needs derivation surgery** (`occ-cross.nix`): stock nixpkgs opencascade-occt
@@ -350,11 +351,18 @@ What it took (the code was the easy part — the deps were the work):
 - Small nix-cross quirks: `config.allowUnsupportedSystem` for header libs (eigen/spectra);
   spdlog's packaged tests don't link (turned off); imgui_test_engine needs
   `mingw_w64_pthreads`.
-- **MVP scope, deferred (not blockers):** Netgen (FEM meshing) and FEM-GPU (Vulkan
-  compute) omitted to keep the build light.
+**Feature parity (all cross-built + Wine-verified):** modeling (OpenCASCADE),
+PlaneGCS sketch solver (verified *solving*), Spectra modal, and the **FEM-GPU
+Vulkan-compute topology solver** (enabled 2026-07-27 — compute shaders build
+natively via glslc, 204 objects). The one gap is **Netgen** (FEM meshing), so FEM
+*studies that need a mesh* are unavailable on Windows; everything else works.
 
 Remaining before a *polished* Windows release:
-- [ ] **Netgen** cross-build if FEM meshing is wanted on Windows.
+- [ ] **Netgen** (FEM meshing) — attempted from-scratch (`netgen-cross.nix`) but
+      **blocked**: Netgen's source assumes MSVC on Windows (emits `/bigobj`-style
+      MSVC flags that mingw g++ rejects, `FARPROC→void*` casts). Needs upstream-style
+      source patches to cross-compile with mingw. The derivation + blocker notes are
+      kept as the starting point.
 - [ ] **Real-hardware QA + code signing** — needs a Windows box / cloud Windows; Wine
       proves function but isn't sign-off, and unsigned installers trip SmartScreen.
 - [ ] Trim the bundle (strip DLLs), and confirm portal-less file dialogs on Windows (NFD
