@@ -23,9 +23,10 @@ one. Treat this as a focused U1e follow-up, not a second selection model.
    ray hit with depth; preserve the priority rule Edge > Face at equal depth,
    then sort by depth. Feed that list into the existing stable-item pipeline
    and repeat-click cycle.
-2. **Projection completeness.** Make multiple selected faces on the same
+2. **Projection completeness.** ~~Make multiple selected faces on the same
    renderer instance visible simultaneously rather than retaining only the
-   most recently synchronized face range.
+   most recently synchronized face range.~~ **DONE 2026-07-27** (`3c22fcc`,
+   with U7): per-instance range list + discard-outside sub-draws.
 3. **Acceptance coverage.** Add GUI tests for two stacked faces cycling to the
    hidden face, an armed blend/slot prompt and filter flow, and an
    assembly-occurrence click/gizmo flow. Keep the existing stable-ID and
