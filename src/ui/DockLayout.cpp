@@ -52,7 +52,11 @@ void BeginDockspace(AppState& state) {
   ImGui::PopStyleColor();
 
   // Dockspace filling the rest; passthru central node shows the 3D behind it.
-  ImGuiID dockspaceId = ImGui::GetID("MainDockSpace");
+  // V2 (U8-0): versioned id — an imgui.ini written for the old layout has
+  // no entry for this id, so the default layout rebuilds ONCE and stale
+  // nodes (e.g. the deleted right panel node, which the Sketch window kept
+  // resurrecting from its remembered dock id) are orphaned and dropped.
+  ImGuiID dockspaceId = ImGui::GetID("MainDockSpaceV2");
   ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f),
                    ImGuiDockNodeFlags_PassthruCentralNode);
 
