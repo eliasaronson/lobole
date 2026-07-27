@@ -109,6 +109,28 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
     return;
   }
 
+  if (op.kind == sketch::DerivedKind::Mirror) {
+    BeginToolWindowFrame(state, "Mirror");
+    if (sketch::IsDatum(op.axisEntity))
+      ImGui::Text("%zu entities across a datum axis", op.sourceIds.size());
+    else
+      ImGui::Text("%zu entities across line %u", op.sourceIds.size(),
+                  op.axisEntity);
+    ImGui::TextDisabled("Copies track the sources and the axis.");
+    ImGui::Separator();
+    if (ImGui::Button(ICON_FA_TRASH_CAN " Delete")) {
+      RemovePattern(state, oi); // removes the op + its generated copies
+      edit.editOpIndex = -1;
+      ImGui::End();
+      return;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close"))
+      edit.editOpIndex = -1;
+    ImGui::End();
+    return;
+  }
+
   const bool circular = op.kind == sketch::DerivedKind::CircularPattern;
   BeginToolWindowFrame(state, circular ? "Circular Pattern" : "Linear Pattern");
   int count = op.count;
@@ -335,8 +357,25 @@ void DrawSketchToolWindow(AppState& state) {
         ImGui::DragFloat2("Row step (dx,dy)##pat", &edit.patternStep2.x, 0.05f);
       }
     } else {
+      // Centre: type coordinates, or Pick a sketch point — picking an
+      // entity point stores its REFERENCE so the pattern tracks it (v51).
       ImGui::SetNextItemWidth(140);
-      ImGui::DragFloat2("Centre##pat", &edit.patternCenter.x, 0.05f);
+      if (ImGui::DragFloat2("Centre##pat", &edit.patternCenter.x, 0.05f))
+        edit.patternCenterRef = {0, 0}; // typing detaches the reference
+      ImGui::SameLine();
+      if (edit.patternPickCenter)
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+      if (ImGui::Button("Pick###patCenterPick"))
+        edit.patternPickCenter = !edit.patternPickCenter;
+      if (edit.patternPickCenter)
+        ImGui::PopStyleColor();
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Click a sketch point to centre on (a point keeps "
+                          "the pattern tracking it)");
+      if (edit.patternCenterRef.entity != 0)
+        ImGui::TextDisabled("Centred on point of entity %u",
+                            edit.patternCenterRef.entity);
       ImGui::SetNextItemWidth(80);
       ImGui::DragFloat("Angle##pat", &edit.patternAngleDeg, 0.5f, -360.0f,
                        360.0f, "%.1f deg");
@@ -465,6 +504,9 @@ void DrawSketchModelSections(AppState& state) {
       char label[96];
       if (op.kind == sketch::DerivedKind::LinkedCopy) {
         std::snprintf(label, sizeof(label), ICON_FA_LINK "  Linked copy (%zu)",
+                      op.sourceIds.size());
+      } else if (op.kind == sketch::DerivedKind::Mirror) {
+        std::snprintf(label, sizeof(label), ICON_FA_LEFT_RIGHT "  Mirror (%zu)",
                       op.sourceIds.size());
       } else {
         std::snprintf(label, sizeof(label), ICON_FA_GRIP "  %s pattern (x%d)",

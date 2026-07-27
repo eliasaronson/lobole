@@ -1982,12 +1982,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
 
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
-    bool symToYAxis = false;
-    for (const auto& c : sk->constraints)
-      if (c.kind == sketch::ConstraintKind::Symmetric &&
-          c.c.entity == sketch::kAxisY)
-        symToYAxis = true;
-    IM_CHECK(symToYAxis); // mirrored across the Y axis
+    // v51: the linked mirror is a derived OP recording the datum axis.
+    IM_CHECK(!sk->derived.empty());
+    IM_CHECK(sk->derived[0].kind == sketch::DerivedKind::Mirror);
+    IM_CHECK(sk->derived[0].axisEntity == sketch::kAxisY);
   };
 
   // With auto-constrain off, no constraints are inferred.

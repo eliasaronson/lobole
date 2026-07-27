@@ -123,6 +123,11 @@ struct SketchEditState {
   glm::vec2 patternStep2{0.0f, 2.0f};
   glm::vec2 patternCenter{0.0f}; // circular centre
   float patternAngleDeg = 60.0f; // circular step angle
+  // Circular centre picking (v51): armed by the session's Pick button — the
+  // next canvas click sets the centre; hitting an entity point stores its
+  // REFERENCE so the pattern tracks it.
+  bool patternPickCenter = false;
+  sketch::PointRef patternCenterRef{0, 0};
 
   // Offset tool params (applied to the selected closed loop).
   float offsetDistance = 0.5f;
