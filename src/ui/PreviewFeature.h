@@ -26,7 +26,8 @@ Feature* ResolvePendingFeature(AppState& state, size_t* outIndex = nullptr);
 void AcceptPendingFeature(AppState& state);
 void CancelPendingFeature(AppState& state);
 
-// Draws the accept/cancel dialog when a feature is pending (no-op otherwise).
-void DrawPreviewDialog(AppState& state);
+// Draws the floating tool-session window when a feature is pending (no-op
+// otherwise): slot rows + params + accept/cancel (U7's "Tool" window).
+void DrawToolWindow(AppState& state);
 
 } // namespace ui

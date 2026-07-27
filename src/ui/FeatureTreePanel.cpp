@@ -9,6 +9,7 @@
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "ui/AppActions.h" // SelectFeature / SelectedFeatureId
+#include "ui/FeatureEditor.h" // ArmSlot (blend edge re-pick)
 #include "ui/SketchInteraction.h"
 
 #include "IconsFontAwesome6.h"
@@ -290,12 +291,11 @@ void DrawFeatureTreePanel(AppState& state) {
           }
         }
         // A fillet/chamfer's edges can be re-picked (e.g. after a ref went
-        // dangling): arms edge picking for this feature.
+        // dangling): arms the edge slot for this feature.
         auto* fil = dynamic_cast<FilletFeature*>(feature);
         if (fil != nullptr) {
           if (ImGui::MenuItem("Pick edges…")) {
-            state.edgePick = {};
-            state.edgePick.filletId = fil->GetId();
+            ArmSlot(state, *fil, PickSlot::BlendEdges);
           }
         }
         if (ImGui::MenuItem("Delete")) {

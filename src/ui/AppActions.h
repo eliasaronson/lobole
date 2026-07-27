@@ -14,8 +14,9 @@
 #include <vector>
 
 class SketchPlane;
-struct RTStillDesc; // defined in RayTracingRenderer.h
-struct Ray;         // defined in FaceSelector.h
+class FilletFeature; // defined in core/features/FilletFeature.h
+struct RTStillDesc;  // defined in RayTracingRenderer.h
+struct Ray;          // defined in FaceSelector.h
 
 namespace ui {
 
@@ -486,12 +487,14 @@ void MeasureElementClicked(AppState& state, const ElementRef& ref, bool isEdge,
 // Recomputes the readout after the picked set changes (panel removals).
 void UpdateMeasureReadout(AppState& state);
 
-// Blend edge collection (fillet/chamfer): toggles the clicked edge on the
-// collecting feature, remapping the displayed (already blended) name onto
-// the blend's input body first. meshId/edgeIndex are the displayed handles
-// the geometric remap anchors on.
-void BlendEdgeClicked(AppState& state, const ElementRef& displayed,
-                      uint32_t meshId, uint32_t edgeIndex);
+// Blend edge collection (fillet/chamfer): toggles the clicked edge on `fil`,
+// remapping the displayed (already blended) name onto the blend's input body
+// first. meshId/edgeIndex are the displayed handles the geometric remap
+// anchors on. Commits internally (preview: mutate+regen; committed: one undo
+// step); sets an actionMsg for a blend-created edge instead.
+void ApplyBlendEdgePick(AppState& state, FilletFeature& fil,
+                        const ElementRef& displayed, uint32_t meshId,
+                        uint32_t edgeIndex);
 
 // Appends edge highlight primitives while edge picking is active: every body
 // edge dimmed, the hovered edge and the blend's picked edges emphasized.

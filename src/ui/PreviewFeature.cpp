@@ -47,8 +47,7 @@ void AcceptPendingFeature(AppState& state) {
   state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(owned)),
                           *state.document);
   SelectFeature(state, id);
-  state.edgePick = {}; // a blend preview's edge picking ends with it
-  state.slotPick = {}; // armed dialog slots end with the dialog
+  state.slotPick = {}; // armed slots end with the session
 }
 
 void CancelPendingFeature(AppState& state) {
@@ -58,11 +57,10 @@ void CancelPendingFeature(AppState& state) {
   }
   state.pendingFeatureId = 0;
   state.selection.Clear();
-  state.edgePick = {};
   state.slotPick = {};
 }
 
-void DrawPreviewDialog(AppState& state) {
+void DrawToolWindow(AppState& state) {
   size_t idx = 0;
   Feature* feature = ResolvePendingFeature(state, &idx);
   if (!feature) {
@@ -70,17 +68,20 @@ void DrawPreviewDialog(AppState& state) {
     return;
   }
 
-  // Floating panel anchored bottom-center of the viewport region.
-  ImGuiViewport* vp = ImGui::GetMainViewport();
-  const float cx = vp->WorkPos.x + vp->WorkSize.x * 0.5f;
-  const float by = vp->WorkPos.y + vp->WorkSize.y - 24.0f;
-  ImGui::SetNextWindowPos(ImVec2(cx, by), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+  // The floating tool-session window (U7): anchored top-right of the 3D
+  // viewport when it (re)opens — NEVER bottom-center, which occluded the
+  // viewport clicks GUI tests make — and draggable for the session.
+  const glm::vec2 tr = state.viewportPos +
+                       glm::vec2(state.viewportSize.x, 0.0f) +
+                       glm::vec2(-12.0f, 12.0f);
+  ImGui::SetNextWindowPos(ImVec2(tr.x, tr.y), ImGuiCond_Appearing,
+                          ImVec2(1.0f, 0.0f));
   ImGui::SetNextWindowBgAlpha(0.96f);
   ImGuiWindowFlags flags =
-      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoMove |
-      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
-      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings;
-  ImGui::Begin((std::string(feature->TypeName()) + "###PreviewDialog").c_str(),
+      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoResize |
+      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings;
+  ImGui::Begin((std::string(feature->TypeName()) + "###ToolWindow").c_str(),
                nullptr, flags);
 
   DrawFeatureParamWidgets(state, *feature, idx, /*commit=*/false);

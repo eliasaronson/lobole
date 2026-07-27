@@ -252,18 +252,6 @@ struct SketchDragSession {
   size_t featureIndex = 0;      // sketch index for the commit
 };
 
-// Edge picking for fillet/chamfer (M7): active while a blend feature is
-// collecting edge refs — during its creation preview, or re-armed later from
-// the inspector / tree ("Pick edges…"). Viewport clicks toggle edges on that
-// feature; hovering pre-highlights the edge under the cursor.
-struct EdgePickState {
-  uint64_t filletId = 0; // the FilletFeature collecting edges; 0 = inactive
-  bool hasHover = false;
-  uint32_t hoverMeshId = 0;
-  uint32_t hoverEdgeIndex = 0;
-  bool Active() const { return filletId != 0; }
-};
-
 // An armed feature-dialog pick slot (U3): a reference field of the feature
 // being edited collects viewport picks. The selection pipeline filters
 // candidates to `kinds` and routes the resolved item to SlotPickClicked;
@@ -741,8 +729,7 @@ struct AppState {
 
   SketchEditState sketchEdit;
   SketchDragSession sketchDrag;
-  EdgePickState edgePick;
-  SlotPickState slotPick; // U3: armed dialog pick slot
+  SlotPickState slotPick; // U3/U7: armed tool-session pick slot
   MeasureState measure;
   SimulationState simulation;
   // The active topology-optimization run (TO2), or null when none is running.

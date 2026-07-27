@@ -164,6 +164,19 @@ mirrored, shortcuts shown, same action functions as the menus. Not yet
 enumerated: sketch-mode tools and constraint commands (the sketch keymap
 owns those contexts) — extend when the sketch toolbar consolidates.
 
+## U7 — Tool sessions & right-panel removal
+
+**DESIGN signed off 2026-07-27** — [u7-tool-sessions.md](u7-tool-sessions.md).
+One pattern for every pick-collecting tool: declarative slot specs rendered
+in a single floating session window (top-right anchor; the bottom-center
+preview dialog and its click-occlusion class die), exactly one armed slot
+driving U1's filter, per-item editing everywhere, greedy seed from
+pre-selection (select-first like SW/Onshape), mate connectors folded into
+`SelectionItem` (`Kind::Connector` — the last private picker deletes), and
+the right Properties panel **removed entirely** (feature editing becomes an
+explicit session; mass props → Model panel; legacy readouts die; Sketch
+options re-home left). Phases U7a–U7e in the design doc.
+
 ## Backlog — standard-CAD affordances not yet scheduled
 
 Collected 2026-07-18 (user ask: "what are we missing vs other CAD?").
@@ -217,3 +230,6 @@ at 1080p and 4K-scaled.
   user-facing win of the workstream.
 - **U5 then U6** close it out; both are independent and can interleave
   anywhere if a release needs to look good sooner.
+- **U7 (added 2026-07-27)** follows the v1 workstream: it consumes U1's
+  filters and U3's slots and supersedes the "full dialog frame" remnant of
+  U3 — see [u7-tool-sessions.md](u7-tool-sessions.md).

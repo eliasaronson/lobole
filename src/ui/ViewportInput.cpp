@@ -23,10 +23,9 @@ void HandleViewportInput(AppState& state) {
   if (!state.camera)
     return;
 
-  // The pick pipeline re-sets these when it runs; consumed frames (sketch,
+  // The pick pipeline re-sets this when it runs; consumed frames (sketch,
   // assembly) must not leave a stale edge-hover preview behind.
   state.pick.edgeHover = false;
-  state.edgePick.hasHover = false;
 
   ImGuiIO& io = ImGui::GetIO();
   // With the passthru central dock node, WantCaptureMouse is true over
@@ -229,16 +228,6 @@ void HandleViewportInput(AppState& state) {
     // Escape aborts a handle drag only — the preview itself survives.
     AbortPreviewHandleDrag(state);
     escUsed = true;
-  } else if (state.edgePick.Active() && state.document) {
-    auto* fil = state.document->FindFeatureById(state.edgePick.filletId);
-    if (fil == nullptr) {
-      state.edgePick = {}; // the mode ends with its feature
-    } else if (esc && state.pendingFeatureId != state.edgePick.filletId) {
-      // Escape ends a re-pick session; while previewing it stays with the
-      // preview's own cancel handling.
-      state.edgePick = {};
-      escUsed = true;
-    }
   } else if (state.slotPick.Active()) {
     if (state.document == nullptr ||
         state.document->FindFeatureById(state.slotPick.featureId) == nullptr) {

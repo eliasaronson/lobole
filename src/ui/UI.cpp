@@ -384,7 +384,7 @@ void DrawUI(AppState& state) {
   } else if (state.drawing) {
     DrawSheetPanel(state); // sheet settings + title block in the Model panel
   }
-  DrawPreviewDialog(state);
+  DrawToolWindow(state);
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);
   DrawModelToolPrompt(state);

@@ -221,18 +221,15 @@ std::optional<Candidate> RegionCandidate(AppState& state, const Ray& ray) {
 
 // The armed pick context, derived fresh each frame from the tools' own state
 // — never stored, so there is no second source of truth for "what's armed".
-// Priority mirrors the old ViewportInput chain: blend edges, measure, sim.
+// Priority mirrors the old ViewportInput chain: dialog slots, measure, sim.
 struct ArmedContext {
   uint32_t kinds = 0;
   const char* prompt = nullptr;
   void (*consume)(AppState&, const Candidate&) = nullptr;
 };
 
-void ConsumeBlendEdge(AppState& state, const Candidate& c) {
-  BlendEdgeClicked(state, c.item.element, c.meshId, c.index);
-}
 void ConsumeSlotPick(AppState& state, const Candidate& c) {
-  SlotPickClicked(state, c.item);
+  SlotPickClicked(state, c.item, c.meshId, c.index);
 }
 void ConsumeMeasure(AppState& state, const Candidate& c) {
   // On assemblies the Face/Edge item's id is the owning occurrence (0 on
@@ -245,10 +242,6 @@ void ConsumeSimFace(AppState& state, const Candidate& c) {
 }
 
 std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
-  if (state.edgePick.Active()) {
-    return ArmedContext{KindBit(SelectionItem::Kind::Edge),
-                        "Click edges to add or remove them", ConsumeBlendEdge};
-  }
   if (state.slotPick.Active()) {
     return ArmedContext{state.slotPick.kinds, state.slotPick.prompt.c_str(),
                         ConsumeSlotPick};
@@ -380,11 +373,6 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       state.pick.edgeHover = true;
       state.pick.edgeHoverMesh = top.meshId;
       state.pick.edgeHoverIndex = top.index;
-      if (state.edgePick.Active()) {
-        state.edgePick.hasHover = true;
-        state.edgePick.hoverMeshId = top.meshId;
-        state.edgePick.hoverEdgeIndex = top.index;
-      }
     } else if (top.item.kind == SelectionItem::Kind::Face ||
                top.item.kind == SelectionItem::Kind::Occurrence) {
       // Occurrences hover via the hit face's range for now (a whole-instance
@@ -512,7 +500,7 @@ void SyncSelectionHighlights(AppState& state) {
 }
 
 void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
-  if ((!state.document && !state.assembly) || state.edgePick.Active() ||
+  if ((!state.document && !state.assembly) || ArmedBlendFeatureId(state) != 0 ||
       state.sketchEdit.IsEditing()) {
     return; // blend edge-pick / sketch mode own the overlay channel
   }

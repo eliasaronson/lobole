@@ -52,7 +52,6 @@ static void ResetAppForTest() {
   s_App->selection.Clear();
   s_App->sketchEdit = {};
   s_App->sketchDrag = {};
-  s_App->edgePick = {};
   s_App->slotPick = {};
   s_App->measure = {};
 }
@@ -962,7 +961,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
 
-    ctx->SetRef("//Pattern###PreviewDialog");
+    ctx->SetRef("//Pattern###ToolWindow");
     ctx->ComboClick("##Type/Circular");
     ctx->Yield(2);
     {
@@ -1935,9 +1934,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//##MainMenuBar");
     ToolbarClick(ctx, "###tb_fillet");
     ctx->Yield();
-    IM_CHECK(s_App->edgePick.Active());
+    IM_CHECK(s_App->slotPick.Active()); // the edge slot armed itself (U7)
     auto* fil = dynamic_cast<FilletFeature*>(
-        Doc()->FindFeatureById(s_App->edgePick.filletId));
+        Doc()->FindFeatureById(s_App->slotPick.featureId));
     IM_CHECK(fil != nullptr);
     fil->radius = 0.3;
 
@@ -1978,7 +1977,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     ui::AcceptPendingFeature(*s_App);
     ctx->Yield();
-    IM_CHECK(!s_App->edgePick.Active()); // picking ends with the preview
+    IM_CHECK(!s_App->slotPick.Active()); // picking ends with the preview
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
     IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < before - 1e-6);
     IM_CHECK(s_App->commands->CanUndo()); // accept = one undoable action
@@ -2153,15 +2152,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const uint64_t box2Id = box2->GetId();
 
     // Arm Target, click box 1's TOP face; arm Tool, click box 2's —
-    // top faces project high on screen, clear of the bottom-center dialog.
-    ctx->ItemClick("//Boolean###PreviewDialog/###slot1"); // Target
+    // top faces project high on screen, clear of overlapping windows.
+    ctx->ItemClick("//Boolean###ToolWindow/###slot1"); // Target
     IM_CHECK(s_App->slotPick.Active());
     ctx->MouseMoveToPos(WorldToWindow(glm::vec3(-3.7f, 2.0f, 1.0f)));
     ctx->Yield();
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     IM_CHECK(!s_App->slotPick.Active()); // single slot disarms on pick
-    ctx->ItemClick("//Boolean###PreviewDialog/###slot2"); // Tool
+    ctx->ItemClick("//Boolean###ToolWindow/###slot2"); // Tool
     ctx->MouseMoveToPos(WorldToWindow(glm::vec3(-1.3f, 2.0f, 1.0f)));
     ctx->Yield();
     ctx->MouseClick(ImGuiMouseButton_Left);
