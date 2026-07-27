@@ -768,6 +768,17 @@ bool EffectivePlaneVisibility(const AppState& state) {
 void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.document = std::move(doc);
   state.commands = std::make_unique<CommandStack>();
+  // The active tab may have been an assembly or drawing: this replacement
+  // makes the live tab a part, so drop the other-kind state — leaving
+  // state.assembly set alongside state.document half-switches the UI (the
+  // assembly toolbar keeps drawing and the part never syncs; File > New on
+  // an assembly tab hit exactly that).
+  state.assembly = nullptr;
+  state.drawing = nullptr;
+  state.assemblyHistory = {};
+  state.drawingHistory = {};
+  state.drawingRenders.clear();
+  state.solvedPartVersions.clear();
   // Phase V: a wholesale replacement (File > New, Open flat, checkpoint/history
   // restore) collapses the project to this single part, so ITS parameters
   // become the project scope (one part = the whole project). The project-var
