@@ -189,6 +189,40 @@ regions (select-profile-first). The sketch entity-selection store stays
 internal by design (U8c full-merge deliberately not done). Dockspace id
 versioned (one-time layout reset) so stale inis can't resurrect dead nodes.
 
+## Post-U8 polish rounds (all shipped 2026-07-27)
+
+Dogfooding-driven follow-ups, one round per user report; commits inline.
+
+- **Interaction grammar** (`fee678c`, `3dec193`): three sketch tool
+  families — collect tools (Mirror/Pattern/Offset: click toggles, drag
+  box-selects, tap-empty/Enter confirms), act-per-click tools (Fillet/
+  Trim: tap-empty/Enter finishes), draw tools (chain until Esc). Apply
+  returns to Select; a preselected sole construction line IS the mirror
+  axis (one-gesture mirror); the Tool window clamps inside the app window;
+  the Z zoom key died (collided with undo/redo).
+- **Ops as first-class objects** (`f1fe8be`, `508649b`…`905daef`,
+  `ead9cf3`): Operations list in the Model panel (double-click → edit
+  session); reference images are a tool session; **format v50** 2D linear
+  patterns (row-major k, back-compat); **format v51** mirror as a derived
+  op (tracks sources AND axis; symmetry-constraint fan-out deleted) +
+  circular-pattern centre REFERENCES (Pick button; tracks the point); op
+  edit sessions re-pick sources/axis; trim guards generated instances.
+- **Input & feedback** (`3c22fcc`, `18d0726`, `ab1d45c`, `6053d96`):
+  multi-select face highlight (per-instance range lists + discard-outside
+  sub-draws — U1e projection completeness); constraint badges group per
+  entity, real-width layout, ">2 collapses to xN + hover-fan";
+  point-on-curve snaps combine with one axis alignment (top-of-circle);
+  trim splits circles crossed by circles; view cube above the tab bar;
+  **ui/ExprInput** = the one numeric-input widget family — every wrapped
+  field evaluates expressions/variables on commit ("360/3", "width/2");
+  stored-expression fields keep ExprDim (persistence ⇒ re-evaluation).
+
+State after this: one selection pipeline, one floating Tool window, one
+prompt bar, one collect-phase grammar, and one numeric-input widget across
+model, assembly, drawing, and sketch spaces. Remaining leftovers live in
+the backlog below (notably: ExprInput for the DragFloat3 fields, curve
+trim previews, U1e depth cycling, U8c store merge if ever).
+
 ## Backlog — standard-CAD affordances not yet scheduled
 
 Collected 2026-07-18 (user ask: "what are we missing vs other CAD?").
