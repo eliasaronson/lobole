@@ -96,6 +96,11 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit);
 // the Select tool with nothing to say. Call once per frame from the UI pass.
 void DrawToolPrompt(AppState& state);
 
+// Mirror activation hook (U8 polish): a pre-selection containing exactly one
+// construction line among other entities names its own axis — the mirror
+// commits immediately. No-op otherwise (the two-step flow proceeds).
+void MirrorToolActivated(AppState& state);
+
 // Projects a plane-UV point to viewport screen coords (pixels), matching the
 // picking/render path.
 // Projects a world-space point to viewport pixel coordinates (proj*view then

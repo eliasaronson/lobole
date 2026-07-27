@@ -143,10 +143,8 @@ void HandleViewportInput(AppState& state) {
     arrow(ImGuiKey_RightArrow, 1.0, 0.0);
     arrow(ImGuiKey_UpArrow, 0.0, -1.0);
     arrow(ImGuiKey_DownArrow, 0.0, 1.0);
-
-    if (ImGui::IsKeyPressed(ImGuiKey_Z)) {
-      state.camera->Zoom(io.KeyShift ? -5.0 : 5.0);
-    }
+    // (No Z zoom key: it fired alongside Ctrl+Z / Ctrl+Shift+Z undo/redo.
+    // Zoom is the wheel/trackpad; F fits.)
   }
 
   // Onshape view/model shortcuts. Guarded only by WantTextInput (like the

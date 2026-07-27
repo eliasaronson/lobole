@@ -278,6 +278,8 @@ void DrawSketchModeToolbar(AppState& state) {
     if (t == SketchTool::Dimension)
       edit.selected.clear(); // dimension targets accumulate from scratch
     edit.actionMsg.clear();
+    if (t == SketchTool::Mirror)
+      MirrorToolActivated(state); // preselected construction line = axis
   };
   auto toolBtn = [&](const char* icon, const char* tip, SketchTool t) {
     const bool active = edit.tool == t;

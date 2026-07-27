@@ -1547,6 +1547,75 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)2);
   };
 
+  // U8 polish: the Mirror collect phase box-selects like the Select tool,
+  // and a tap in empty space advances to the axis pick.
+  t = IM_REGISTER_TEST(engine, "mirror", "box_select_and_tap_advances");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::Line{{0, 0}, {1, 0}});
+    sk->AddEntity(sketch::Line{{0, 1}, {1, 1}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Mirror;
+
+    // Box around both lines (empty-space corners) adds them to the set.
+    glm::vec2 a = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1, -1));
+    glm::vec2 b = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2, 2));
+    ctx->MouseMoveToPos(ImVec2(a.x, a.y));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(b.x, b.y));
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)2);
+    IM_CHECK(!s_App->sketchEdit.mirrorAxisPhase);
+
+    // A tap in empty space continues to the axis step.
+    glm::vec2 t2 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(4, 4));
+    ctx->MouseMoveToPos(ImVec2(t2.x, t2.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.mirrorAxisPhase);
+  };
+
+  // U8 polish: a pre-selection whose sole construction line names the mirror
+  // axis commits the mirror on tool activation — one gesture.
+  t = IM_REGISTER_TEST(engine, "mirror", "preselected_construction_axis");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t l1 = sk->AddEntity(sketch::Line{{1, 0}, {2, 1}});
+    sketch::Line axisLine{{0, -2}, {0, 2}};
+    axisLine.construction = true;
+    const uint32_t ax = sk->AddEntity(axisLine);
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const size_t entitiesBefore = sk->entities.size();
+
+    s_App->sketchEdit.selected = {{l1, 0}, {ax, 0}};
+    s_App->sketchEdit.tool = ui::SketchTool::Mirror;
+    ui::MirrorToolActivated(*s_App); // the toolbar activation hook
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk->entities.size() > entitiesBefore); // mirrored copy exists
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select); // done
+    IM_CHECK(s_App->sketchEdit.selected.empty());
+  };
+
   // Escape backs out one level per press: tool → clear selection → leave edit.
   t = IM_REGISTER_TEST(engine, "select", "escape_cascade");
   t->TestFunc = [](ImGuiTestContext* ctx) {

@@ -111,15 +111,43 @@ void DrawSketchToolWindow(AppState& state) {
   switch (edit.tool) {
   case SketchTool::Mirror: {
     BeginToolWindowFrame(state, "Mirror");
-    geometryRow("Geometry");
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Axis");
-    ImGui::SameLine(ImGui::GetFontSize() * 7.0f);
-    if (edit.mirrorAxisPhase)
-      ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_NavCursor),
-                         "(click an axis line)");
-    else
-      ImGui::TextDisabled("Enter confirms geometry first");
+    // Clickable step rows (Onshape-style): pick which step you're editing.
+    // The active step shows in the accent color; a tap in empty viewport
+    // space also advances geometry → axis.
+    const auto stepRow = [&](const char* label, const std::string& value,
+                             const char* id, bool active, bool enabled) {
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(label);
+      ImGui::SameLine(ImGui::GetFontSize() * 7.0f);
+      if (active) {
+        const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_NavCursor);
+        ImGui::PushStyleColor(ImGuiCol_Button,
+                              ImVec4(accent.x, accent.y, accent.z, 0.35f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              ImVec4(accent.x, accent.y, accent.z, 0.55f));
+      }
+      const bool clicked =
+          ImGui::Button((value + id).c_str(),
+                        ImVec2(ImGui::GetFontSize() * 14.0f, 0.0f)) &&
+          enabled;
+      if (active)
+        ImGui::PopStyleColor(2);
+      return clicked;
+    };
+    if (stepRow("Geometry",
+                edit.selected.empty()
+                    ? "(click or box-select)"
+                    : std::to_string(edit.selected.size()) + " selected",
+                "###mirrorGeom", !edit.mirrorAxisPhase, true)) {
+      edit.mirrorAxisPhase = false; // back to collecting
+    }
+    if (stepRow("Axis",
+                edit.mirrorAxisPhase ? "(click an axis line)"
+                                     : "(click here or tap empty space)",
+                "###mirrorAxis", edit.mirrorAxisPhase,
+                !edit.selected.empty())) {
+      edit.mirrorAxisPhase = true;
+    }
     ImGui::Checkbox("Linked##gen", &edit.linkGenerative);
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("Add symmetry constraints so the mirror tracks edits "

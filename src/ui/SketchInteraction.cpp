@@ -1205,6 +1205,81 @@ bool HandleProjectTool(AppState& state, SketchFeature& sketch, size_t index,
 
 } // namespace
 
+// Commits a mirror of the selected entities across `axisEntity` (a line or
+// datum axis id): solve, regenerate, one undo step, back to Select. Shared
+// by the axis-phase click and mirror-on-activate seeding. Returns false
+// (with an actionMsg) when the selection holds nothing besides the axis.
+static bool CommitMirrorAcross(AppState& state, SketchFeature& sketch,
+                               size_t index, uint32_t axisEntity) {
+  SketchEditState& edit = state.sketchEdit;
+  std::vector<uint32_t> sources; // unique selected ids, minus the axis
+  for (const auto& r : edit.selected) {
+    if (r.entity == axisEntity)
+      continue;
+    bool seen = false;
+    for (uint32_t s : sources)
+      seen |= (s == r.entity);
+    if (!seen)
+      sources.push_back(r.entity);
+  }
+  if (sources.empty()) {
+    edit.actionMsg = "Mirror: pick an axis other than the selected geometry.";
+    return false;
+  }
+  nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+  sketch.MirrorEntities(sources, axisEntity, edit.linkGenerative);
+  sketch::Solver solver;
+  solver.Load(sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch.entities);
+  sketch.RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  edit.selected.clear();
+  edit.mirrorAxisPhase = false;
+  edit.actionMsg.clear();
+  edit.tool = SketchTool::Select;
+  return true;
+}
+
+void MirrorToolActivated(AppState& state) {
+  // Select-first shortcut (U8 polish): a pre-selection that contains exactly
+  // one construction line among other entities names its own axis — mirror
+  // immediately, one gesture, no phases.
+  SketchEditState& edit = state.sketchEdit;
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (sketch == nullptr || edit.selected.empty())
+    return;
+  uint32_t axis = 0;
+  int constructionLines = 0;
+  int others = 0;
+  std::vector<uint32_t> uniq;
+  for (const auto& r : edit.selected) {
+    bool seen = false;
+    for (uint32_t u : uniq)
+      seen |= (u == r.entity);
+    if (seen)
+      continue;
+    uniq.push_back(r.entity);
+    const size_t ei = sketch->IndexOfEntity(r.entity);
+    const auto* line = ei != SIZE_MAX
+                           ? std::get_if<sketch::Line>(&sketch->entities[ei])
+                           : nullptr;
+    if (line != nullptr && line->construction) {
+      axis = r.entity;
+      constructionLines++;
+    } else {
+      others++;
+    }
+  }
+  if (constructionLines == 1 && others > 0)
+    CommitMirrorAcross(state, *sketch, index, axis);
+}
+
 bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
                           bool overViewport) {
   SketchEditState& edit = state.sketchEdit;
@@ -1619,16 +1694,47 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
 
     if (!edit.mirrorAxisPhase) {
       // Step 1 — collect the geometry to mirror. A click toggles the whole
-      // entity in the selection; Enter advances to the axis pick.
-      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
-        bool removed = false;
-        for (size_t i = edit.selected.size(); i-- > 0;)
-          if (edit.selected[i].entity == hover.ref.entity) {
-            edit.selected.erase(edit.selected.begin() + i);
-            removed = true;
+      // entity; a DRAG in empty space box-selects (adds); a TAP in empty
+      // space — or Enter, or the session window's Axis row — advances to
+      // the axis pick.
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (hover.hit) {
+          bool removed = false;
+          for (size_t i = edit.selected.size(); i-- > 0;)
+            if (edit.selected[i].entity == hover.ref.entity) {
+              edit.selected.erase(edit.selected.begin() + i);
+              removed = true;
+            }
+          if (!removed)
+            edit.selected.push_back({hover.ref.entity, 0});
+        } else {
+          edit.boxActive = true;
+          edit.boxStart = edit.boxEnd = mousePos;
+        }
+      }
+      if (edit.boxActive && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        edit.boxEnd = mousePos;
+      if (edit.boxActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        if (glm::length(edit.boxEnd - edit.boxStart) < 4.0f) {
+          // Tap in empty space: continue to the axis step (Onshape-style).
+          if (!edit.selected.empty())
+            edit.mirrorAxisPhase = true;
+        } else {
+          const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
+          auto project = [&](glm::vec2 p) {
+            return SketchUVToScreen(state, sketch->plane, p);
+          };
+          for (uint32_t id :
+               sketch::BoxSelect(sketch->entities, edit.boxStart, edit.boxEnd,
+                                 crossing, project)) {
+            bool seen = false;
+            for (const auto& r : edit.selected)
+              seen |= (r.entity == id);
+            if (!seen)
+              edit.selected.push_back({id, 0});
           }
-        if (!removed)
-          edit.selected.push_back({hover.ref.entity, 0});
+        }
+        edit.boxActive = false;
       }
       if (ImGui::IsKeyPressed(ImGuiKey_Enter) && !edit.selected.empty())
         edit.mirrorAxisPhase = true;
@@ -1645,29 +1751,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       if (!isLine) {
         edit.actionMsg = "Mirror: the axis must be a line or an X/Y axis.";
       } else {
-        std::vector<uint32_t> sources; // unique selected ids, minus the axis
-        for (const auto& r : edit.selected) {
-          if (r.entity == hover.ref.entity)
-            continue;
-          bool seen = false;
-          for (uint32_t s : sources)
-            seen |= (s == r.entity);
-          if (!seen)
-            sources.push_back(r.entity);
-        }
-        if (sources.empty()) {
-          edit.actionMsg = "Mirror: pick an axis other than the selected "
-                           "geometry.";
-        } else {
-          nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-          sketch->MirrorEntities(sources, hover.ref.entity,
-                                 edit.linkGenerative);
-          commitMutation(before);
-          edit.selected.clear();
-          edit.mirrorAxisPhase = false;
-          edit.actionMsg.clear();
-          edit.tool = SketchTool::Select;
-        }
+        CommitMirrorAcross(state, *sketch, index, hover.ref.entity);
       }
     }
     return true;
@@ -2272,8 +2356,9 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     break;
   case T::Mirror:
     set("Mirror", edit.mirrorAxisPhase ? 2 : 1, 2,
-        edit.mirrorAxisPhase ? "click a line to mirror across"
-                             : "click geometry to mirror (Enter to continue)");
+        edit.mirrorAxisPhase
+            ? "click a line to mirror across"
+            : "click or box-select geometry (tap empty space to continue)");
     break;
   case T::Fillet:
     set("Fillet", 0, 0, "click a corner where two lines meet");
