@@ -166,7 +166,8 @@ owns those contexts) — extend when the sketch toolbar consolidates.
 
 ## U7 — Tool sessions & right-panel removal
 
-**DESIGN signed off 2026-07-27** — [u7-tool-sessions.md](u7-tool-sessions.md).
+**SHIPPED 2026-07-27** (U7a–U7e, commits in the design doc's status line) —
+[u7-tool-sessions.md](u7-tool-sessions.md).
 One pattern for every pick-collecting tool: declarative slot specs rendered
 in a single floating session window (top-right anchor; the bottom-center
 preview dialog and its click-occlusion class die), exactly one armed slot

@@ -1,6 +1,12 @@
 # U7 — Tool sessions: one pattern for every pick-collecting tool (design)
 
-> Status: **DESIGN — direction signed off 2026-07-27.** Decisions recorded:
+> Status: **SHIPPED 2026-07-27** — all five phases, same day as sign-off
+> (U7a `8152584`, U7b `b0442ea`, U7c `c6cd9e8`, U7d `6fa06d8`, U7e
+> `9412be4`; plus two pre-existing fixes the suite surfaced: File>New on an
+> assembly tab `1bda1d3`, sketch-entry camera race `18ad7d0`). One scope
+> call recorded inline: sim loads stay in the Studies panel (U7d note).
+> gui suite 78/78; headless 538/538.
+> Original decisions recorded at sign-off:
 > (a) the floating session window is THE tool home and the right Properties
 > panel is **removed entirely**; (b) pre-selection seeds slots greedily in
 > slot order, no disambiguation prompt in v1; (c) mate connectors fold into
