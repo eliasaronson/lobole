@@ -2,11 +2,13 @@
 
 #include "common/Logger.h"
 #include "core/features/SketchFeature.h"
+#include "core/sketch/SketchProfile.h" // BuildLoops (extrude gating)
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
+#include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (U8a)
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -432,6 +434,48 @@ void DrawSketchModeToolbar(AppState& state) {
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     ImGui::SetTooltip("Construction (Q) — reference geometry, dashed");
   ImGui::SameLine();
+  Divider();
+
+  // Mode toggles (were the Sketch panel's checkboxes, U8a).
+  auto toggleBtn = [&](const char* label, const char* tip, bool& value) {
+    if (value)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button(label))
+      value = !value;
+    if (value)
+      ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", tip);
+    ImGui::SameLine();
+  };
+  toggleBtn(ICON_FA_MAGNET "###tb_sk_autocon",
+            "Auto-constrain — snap and add constraints while drawing (hold "
+            "Ctrl to place freely; Shift+S toggles)",
+            edit.autoConstrain);
+  toggleBtn(ICON_FA_EYE "###tb_sk_glyphs", "Show constraint glyphs",
+            edit.showConstraintGlyphs);
+  Divider();
+
+  // Extrude/Revolve straight from the sketch (were panel buttons, U8a);
+  // Finish (✓) already exits without a solid.
+  {
+    SketchFeature* sketch = ResolveActiveSketch(state);
+    const bool canExtrude =
+        sketch != nullptr && !sketch::BuildLoops(sketch->entities).empty();
+    ImGui::BeginDisabled(!canExtrude);
+    if (ImGui::Button(ICON_FA_UP_LONG "###tb_sk_extrude"))
+      BeginSketchExtrude(state); // Shift+E
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("Extrude the sketch (Shift+E)");
+    ImGui::SameLine();
+    if (ImGui::Button(ICON_FA_ROTATE "###tb_sk_revolve"))
+      BeginSketchRevolve(state); // Shift+R
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("Revolve the sketch (Shift+R)");
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+  }
   Divider();
 
   if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)"))

@@ -69,11 +69,14 @@ const char* ConstraintKindName(sketch::ConstraintKind k) {
 }
 } // namespace
 
-void DrawSketchToolbar(AppState& state) {
+// The active sketch tool's session in the floating Tool window (U8a). Only
+// tools with options/Apply/collected targets get a window — plain drawing
+// tools are fully served by the staged prompt pill.
+void DrawSketchToolWindow(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
 
   if (edit.pickingPlane) {
-    ImGui::Begin("Sketch Tools");
+    BeginToolWindowFrame(state, "New Sketch");
     ImGui::TextWrapped(
         "Pick a plane or a model face to sketch on. (Esc to cancel)");
     if (ImGui::Button("Cancel"))
@@ -82,32 +85,57 @@ void DrawSketchToolbar(AppState& state) {
     return;
   }
 
-  size_t index = 0;
-  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  SketchFeature* sketch = ResolveActiveSketch(state);
   if (!sketch)
     return;
 
-  // The tools + common constraints live in the top toolbar (Toolbar.cpp) now;
-  // this panel holds the active tool's options, dimensions, extra constraints,
-  // status, and Extrude.
-  ImGui::Begin("Sketch");
-  ImGui::TextUnformatted(sketch->GetName().c_str());
-  ImGui::Separator();
+  const bool hasSession =
+      edit.tool == SketchTool::Mirror || edit.tool == SketchTool::Fillet ||
+      edit.tool == SketchTool::Pattern || edit.tool == SketchTool::Offset ||
+      edit.tool == SketchTool::CalibrateImage ||
+      edit.tool == SketchTool::Dimension;
+  if (!hasSession)
+    return;
 
-  // Active-tool options.
-  if (edit.tool == SketchTool::Mirror) {
-    ImGui::TextUnformatted("Mirror: select geometry, then click an axis line.");
+  // Selection-count row, slot-style: the tool's source geometry.
+  const auto geometryRow = [&](const char* label) {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(ImGui::GetFontSize() * 7.0f);
+    if (edit.selected.empty())
+      ImGui::TextDisabled("(select in the sketch)");
+    else
+      ImGui::Text("%zu selected", edit.selected.size());
+  };
+
+  switch (edit.tool) {
+  case SketchTool::Mirror: {
+    BeginToolWindowFrame(state, "Mirror");
+    geometryRow("Geometry");
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Axis");
+    ImGui::SameLine(ImGui::GetFontSize() * 7.0f);
+    if (edit.mirrorAxisPhase)
+      ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_NavCursor),
+                         "(click an axis line)");
+    else
+      ImGui::TextDisabled("Enter confirms geometry first");
     ImGui::Checkbox("Linked##gen", &edit.linkGenerative);
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("Add symmetry constraints so the mirror tracks edits "
                         "(off = one-shot copy)");
-  } else if (edit.tool == SketchTool::Fillet) {
-    ImGui::TextUnformatted("Fillet: click a corner where two lines meet.");
+    break;
+  }
+  case SketchTool::Fillet:
+    BeginToolWindowFrame(state, "Sketch Fillet");
+    ImGui::TextUnformatted("Click a corner where two lines meet.");
     ImGui::SetNextItemWidth(90);
     ImGui::DragFloat("Radius##fillet", &edit.filletRadius, 0.02f, 0.01f, 1e6f,
                      "%.3f");
-  } else if (edit.tool == SketchTool::Pattern) {
-    ImGui::TextUnformatted("Pattern: select geometry, set params, then Apply.");
+    break;
+  case SketchTool::Pattern: {
+    BeginToolWindowFrame(state, "Sketch Pattern");
+    geometryRow("Geometry");
     ImGui::RadioButton("Linear", !edit.patternCircular);
     if (ImGui::IsItemClicked())
       edit.patternCircular = false;
@@ -128,24 +156,29 @@ void DrawSketchToolbar(AppState& state) {
                        360.0f, "%.1f deg");
     }
     ImGui::Checkbox("Linked##pat", &edit.linkGenerative);
-    ImGui::SameLine();
+    ImGui::Separator();
     ImGui::BeginDisabled(edit.selected.empty());
     if (ImGui::Button("Apply##pat"))
       ApplyPattern(state);
     ImGui::EndDisabled();
-  } else if (edit.tool == SketchTool::Offset) {
-    ImGui::TextUnformatted(
-        "Offset: select a closed loop, set distance, Apply.");
+    break;
+  }
+  case SketchTool::Offset:
+    BeginToolWindowFrame(state, "Offset");
+    geometryRow("Loop");
     ImGui::SetNextItemWidth(90);
     ImGui::DragFloat("Distance##off", &edit.offsetDistance, 0.02f, -1e6f, 1e6f,
                      "%.3f");
     ImGui::SameLine();
     ImGui::Checkbox("Round corners##off", &edit.offsetJoinArc);
+    ImGui::Separator();
     ImGui::BeginDisabled(edit.selected.empty());
     if (ImGui::Button("Apply##off"))
       ApplyOffset(state);
     ImGui::EndDisabled();
-  } else if (edit.tool == SketchTool::CalibrateImage) {
+    break;
+  case SketchTool::CalibrateImage:
+    BeginToolWindowFrame(state, "Calibrate Image");
     if (edit.calibStage < 2) {
       ImGui::TextWrapped("Click two points on the image a known distance apart "
                          "(e.g. the ends of a printed dimension).");
@@ -164,31 +197,66 @@ void DrawSketchToolbar(AppState& state) {
         edit.calibStage = 0;
         edit.calibImageId = 0;
         edit.tool = SketchTool::Select;
-        ImGui::End(); // the ModifyFeatureCommand replaced the feature: `sketch`
-        return;       // is now dangling — bail out and redraw next frame
+        ImGui::End(); // the commit replaced the feature — redraw next frame
+        return;
       }
       ImGui::SameLine();
       if (ImGui::Button("Re-pick##calib"))
         edit.calibStage = 0;
     }
+    break;
+  case SketchTool::Dimension: {
+    BeginToolWindowFrame(state, "Dimension");
+    if (edit.dimPlacing) {
+      ImGui::TextDisabled("Click to place the dimension");
+    } else if (edit.selected.empty()) {
+      ImGui::TextDisabled("Pick points/lines/curves to dimension");
+    } else {
+      // Accumulated targets, each removable (kept in lockstep with the
+      // parallel dimPickBody flags).
+      for (size_t i = 0; i < edit.selected.size(); i++) {
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::SmallButton("x")) {
+          edit.selected.erase(edit.selected.begin() + static_cast<long>(i));
+          if (i < edit.dimPickBody.size())
+            edit.dimPickBody.erase(edit.dimPickBody.begin() +
+                                   static_cast<long>(i));
+          ImGui::PopID();
+          break;
+        }
+        ImGui::SameLine();
+        const bool body = i < edit.dimPickBody.size() && edit.dimPickBody[i];
+        ImGui::Text("%s of entity %u", body ? "body" : "point",
+                    edit.selected[i].entity);
+        ImGui::PopID();
+      }
+    }
+    break;
   }
-  // actionMsg / staged guidance is shown in the viewport tool-prompt bar
-  // (DrawToolPrompt), not duplicated here.
+  default:
+    return; // unreachable (hasSession gate)
+  }
+  ImGui::End();
+}
 
-  ImGui::Checkbox("Auto-constrain", &edit.autoConstrain);
-  if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("Snap and add constraints while drawing (hold Ctrl to "
-                      "place freely) — Shift+S to toggle");
+// Persistent sketch sections at the bottom of the Model panel while editing
+// (U8a): reference images, constraint list, linked patterns, linked copies.
+// The old Status section is gone — the DOF pill already says it.
+void DrawSketchModelSections(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch)
+    return;
 
-  // Reference images (v49): import an underlay, tune it, calibrate it to a real
-  // dimension, or delete it. Opacity/hide are live cosmetic edits (not
+  // Reference images (v49): import an underlay, tune it, calibrate it to a
+  // real dimension, or delete it. Opacity/hide are live cosmetic edits (not
   // undoable); import/calibrate/delete each commit one undo step and REPLACE
-  // the sketch feature — so after any of them `sketch` dangles: End() + return
-  // immediately.
+  // the sketch feature — so after any of them `sketch` dangles: return
+  // immediately and redraw next frame.
   ImGui::SeparatorText("Reference images");
   if (ImGui::Button("Insert image...##ref")) {
     OpenReferenceImageDialog(state); // may add + commit (feature replaced)
-    ImGui::End();
     return;
   }
   for (size_t i = 0; i < sketch->images.size(); i++) {
@@ -219,52 +287,42 @@ void DrawSketchToolbar(AppState& state) {
       if (ImGui::Button("Delete##ref")) {
         DeleteReferenceImageAction(state, img.id); // feature replaced
         ImGui::PopID();
-        ImGui::End();
         return;
       }
     }
     ImGui::PopID();
   }
 
-  // Constraint status + management. (Relational constraints moved to the top
-  // toolbar; dimensional ones go through the Dimension tool / inline editing.)
-  ImGui::SeparatorText("Status");
-  if (edit.dof == 0)
-    ImGui::TextColored(ImVec4(0.55f, 0.95f, 0.60f, 1.0f), "Fully constrained");
-  else if (edit.dof > 0)
-    ImGui::TextColored(ImVec4(0.55f, 0.80f, 1.0f, 1.0f), "%d DOF free",
-                       edit.dof);
-  else
-    ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "Not solved");
-  if (!edit.conflictingConstraints.empty())
-    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%zu conflicting",
-                       edit.conflictingConstraints.size());
-  ImGui::Checkbox("Show constraints", &edit.showConstraintGlyphs);
-
-  if (!sketch->constraints.empty() && ImGui::TreeNode("Constraints##list")) {
-    std::set<size_t> bad(edit.conflictingConstraints.begin(),
-                         edit.conflictingConstraints.end());
-    int toDelete = -1;
-    for (size_t i = 0; i < sketch->constraints.size(); i++) {
-      ImGui::PushID(static_cast<int>(i));
-      if (ImGui::SmallButton("x"))
-        toDelete = static_cast<int>(i);
-      ImGui::SameLine();
-      const char* name = ConstraintKindName(sketch->constraints[i].kind);
-      if (bad.count(i))
-        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", name);
-      else
-        ImGui::TextUnformatted(name);
-      ImGui::PopID();
-    }
-    ImGui::TreePop();
-    if (toDelete >= 0) {
-      // DeleteConstraint commits a ModifyFeatureCommand, replacing the active
-      // feature. `sketch` is therefore dangling for the remainder of this
-      // frame; close the panel and redraw against the replacement next frame.
-      DeleteConstraint(state, static_cast<size_t>(toDelete));
-      ImGui::End();
-      return;
+  // Constraint management (relational buttons live on the toolbar; the DOF
+  // status lives in the pill). Conflicts still flagged here beside the list.
+  if (!sketch->constraints.empty()) {
+    ImGui::SeparatorText("Constraints");
+    if (!edit.conflictingConstraints.empty())
+      ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%zu conflicting",
+                         edit.conflictingConstraints.size());
+    if (ImGui::TreeNode("Constraints##list")) {
+      std::set<size_t> bad(edit.conflictingConstraints.begin(),
+                           edit.conflictingConstraints.end());
+      int toDelete = -1;
+      for (size_t i = 0; i < sketch->constraints.size(); i++) {
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::SmallButton("x"))
+          toDelete = static_cast<int>(i);
+        ImGui::SameLine();
+        const char* name = ConstraintKindName(sketch->constraints[i].kind);
+        if (bad.count(i))
+          ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", name);
+        else
+          ImGui::TextUnformatted(name);
+        ImGui::PopID();
+      }
+      ImGui::TreePop();
+      if (toDelete >= 0) {
+        // DeleteConstraint commits a ModifyFeatureCommand, replacing the
+        // active feature — `sketch` dangles; redraw next frame.
+        DeleteConstraint(state, static_cast<size_t>(toDelete));
+        return;
+      }
     }
   }
 
@@ -321,13 +379,6 @@ void DrawSketchToolbar(AppState& state) {
       RemovePattern(state, static_cast<size_t>(deleteOp));
   }
 
-  ImGui::SeparatorText("Profile");
-  ImGui::Text("Entities: %zu  Constraints: %zu", sketch->entities.size(),
-              sketch->constraints.size());
-
-  const bool canExtrude = !sketch::BuildLoops(sketch->entities).empty();
-  ImGui::Text("Closed profile: %s", canExtrude ? "yes" : "no");
-
   // Linked copies (violet geometry): status + break-link per op.
   {
     bool anyLinks = false;
@@ -350,14 +401,14 @@ void DrawSketchToolbar(AppState& state) {
         ImGui::SameLine();
         if (ImGui::SmallButton("Break link")) {
           // Keeps the outputs as free geometry (ids intact); one undo step.
-          size_t index = 0;
-          if (ResolveActiveSketch(state, &index) == sketch) {
+          size_t idx = 0;
+          if (ResolveActiveSketch(state, &idx) == sketch) {
             nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
             sketch->BreakLink(oi);
             state.document->Regenerate();
             nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
             state.commands->PushApplied(
-                std::make_unique<ModifyFeatureCommand>(index, before, after));
+                std::make_unique<ModifyFeatureCommand>(idx, before, after));
           }
           ImGui::PopID();
           break; // op list changed; redraw next frame
@@ -366,21 +417,6 @@ void DrawSketchToolbar(AppState& state) {
       }
     }
   }
-
-  ImGui::Separator();
-  ImGui::BeginDisabled(!canExtrude);
-  if (ImGui::Button("Extrude..."))
-    BeginSketchExtrude(state); // Shift+E does the same
-  ImGui::SameLine();
-  if (ImGui::Button("Revolve..."))
-    BeginSketchRevolve(state); // Shift+R does the same
-  ImGui::EndDisabled();
-
-  ImGui::SameLine();
-  if (ImGui::Button("Exit Sketch"))
-    edit = SketchEditState{};
-
-  ImGui::End();
 }
 
 // Add once a body exists; the first extrude starts the solid.

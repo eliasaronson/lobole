@@ -6,6 +6,7 @@
 #include "core/drawing/DrawingDocument.h" // DrawingDimKind (dim session)
 #include "ui/AppActions.h"                // SelectFeature
 #include "ui/FeatureEditor.h"
+#include "ui/SketchToolbar.h" // DrawSketchToolWindow (U8a)
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -158,6 +159,12 @@ void DrawDimToolWindow(AppState& state) {
 } // namespace
 
 void DrawToolWindow(AppState& state) {
+  // Sketch-mode sessions (U8a): plane pick + the active sketch tool's
+  // options/Apply. Sketch mode owns the window while editing.
+  if (state.sketchEdit.pickingPlane || state.sketchEdit.IsEditing()) {
+    DrawSketchToolWindow(state);
+    return;
+  }
   // Mate sessions (assembly tabs) share the window; drawn by the panel
   // module that owns the mate helpers.
   if (state.assembly && state.mateTool.active) {

@@ -12,6 +12,7 @@
 #include "ui/AppActions.h" // SelectFeature / SelectedFeatureId
 #include "ui/FeatureEditor.h" // ArmSlot (blend edge re-pick)
 #include "ui/SketchInteraction.h"
+#include "ui/SketchToolbar.h" // DrawSketchModelSections (U8a)
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -501,6 +502,10 @@ void DrawFeatureTreePanel(AppState& state) {
       }
     }
   }
+
+  // Sketch-mode sections (U8a): images/constraints/patterns/linked copies
+  // live here while a sketch is being edited (the Sketch panel is gone).
+  DrawSketchModelSections(state);
 
   DrawMassPropertiesSection(state);
 

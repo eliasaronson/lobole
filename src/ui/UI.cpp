@@ -376,7 +376,6 @@ void DrawUI(AppState& state) {
     }
     DrawVariablesPanel(state);
     DrawConfigurationsPanel(state);
-    DrawSketchToolbar(state);
   } else if (state.assembly) {
     DrawOccurrencePanel(state); // occurrence list + editor in the Model panel
   } else if (state.drawing) {

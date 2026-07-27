@@ -651,9 +651,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield();
 
-    // Extrude from the toolbar → preview, then accept
-    ctx->SetRef("//Sketch");
-    ctx->ItemClick("Extrude...");
+    // Extrude from the sketch toolbar (U8a) → preview, then accept
+    ToolbarClick(ctx, "###tb_sk_extrude");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App)); // extrude is a pending preview
     ui::AcceptPendingFeature(*s_App);
@@ -740,8 +739,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
     ctx->Yield();
 
-    ctx->SetRef("//Sketch");
-    ctx->ItemClick("Extrude...");
+    ToolbarClick(ctx, "###tb_sk_extrude");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
     auto* ext =
