@@ -66,17 +66,12 @@ void CancelPendingFeature(AppState& state) {
   state.slotPick = {};
 }
 
-void DrawToolWindow(AppState& state) {
-  size_t idx = 0;
-  Feature* feature = ResolvePendingFeature(state, &idx);
-  if (!feature) {
-    state.pendingFeatureId = 0;
-    return;
-  }
-
+void BeginToolWindowFrame(AppState& state, const std::string& title) {
   // The floating tool-session window (U7): anchored top-right of the 3D
   // viewport when it (re)opens — NEVER bottom-center, which occluded the
-  // viewport clicks GUI tests make — and draggable for the session.
+  // viewport clicks GUI tests make — and draggable for the session. One
+  // stable id: only one session exists at a time, and tests address rows
+  // as //<Title>###ToolWindow/###slotN.
   const glm::vec2 tr = state.viewportPos +
                        glm::vec2(state.viewportSize.x, 0.0f) +
                        glm::vec2(-12.0f, 12.0f);
@@ -87,8 +82,24 @@ void DrawToolWindow(AppState& state) {
       ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoResize |
       ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
       ImGuiWindowFlags_NoSavedSettings;
-  ImGui::Begin((std::string(feature->TypeName()) + "###ToolWindow").c_str(),
-               nullptr, flags);
+  ImGui::Begin((title + "###ToolWindow").c_str(), nullptr, flags);
+}
+
+void DrawToolWindow(AppState& state) {
+  // Mate sessions (assembly tabs) share the window; drawn by the panel
+  // module that owns the mate helpers.
+  if (state.assembly && state.mateTool.active) {
+    DrawMateToolWindow(state);
+    return;
+  }
+  size_t idx = 0;
+  Feature* feature = ResolvePendingFeature(state, &idx);
+  if (!feature) {
+    state.pendingFeatureId = 0;
+    return;
+  }
+
+  BeginToolWindowFrame(state, feature->TypeName());
 
   DrawFeatureParamWidgets(state, *feature, idx, /*commit=*/false);
 

@@ -448,18 +448,29 @@ struct SelectionItem {
     Feature,
     Occurrence,
     Mate,
-    SketchRegion // U2
+    SketchRegion, // U2
+    Connector     // U7c: mate connector — id = occurrence, element = face
   };
   Kind kind = Kind::Feature;
   uint64_t id = 0;    // Feature/Occurrence/Mate id; Body: its createdBy
   ElementRef element; // Face/Edge/SketchRegion: {featureId, stable name}
+  // Connector only: the snapped edge (hole center / edge midpoint) refining
+  // the face anchor. Empty for every other kind.
+  ElementRef snapElement;
 
   bool operator==(const SelectionItem& o) const {
     return kind == o.kind && id == o.id &&
            element.featureId == o.element.featureId &&
-           element.name == o.element.name;
+           element.name == o.element.name &&
+           snapElement.name == o.snapElement.name;
   }
 };
+
+// The bit a Kind occupies in a selection-filter mask (SlotSpec::kinds,
+// SlotPickState::kinds, the pipeline's candidate filter).
+constexpr uint32_t SelectionKindBit(SelectionItem::Kind k) {
+  return 1u << static_cast<int>(k);
+}
 
 struct Selection {
   std::vector<SelectionItem> items; // ordered: pick order matters to tools
@@ -546,6 +557,9 @@ struct AppState {
     bool haveFirst = false;     // the first connector is picked
     Connector first;            // occurrence + face anchor of the first pick
     uint64_t previewMateId = 0; // non-zero once both picked: the live preview
+    // U7c: non-zero = the session re-picks THIS existing mate's connectors
+    // (each pick rewrites a side + re-solves; no preview mate involved).
+    uint64_t editMateId = 0;
     // Transient connector resolved under the cursor before a click. It uses
     // the same face/snap inference as MateToolPick but never affects a mate.
     bool hasHover = false;

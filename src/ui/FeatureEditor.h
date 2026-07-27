@@ -30,7 +30,14 @@ enum class PickSlot : int {
   RibBody,        // Body (0 = nearest overlapping)
   ThreadFace,     // a cylindrical Face
   BlendEdges,     // U7: fillet/chamfer edge collection (Edge, multi)
+  MateConnectorA, // U7c: mate session (assembly; not a feature slot)
+  MateConnectorB,
 };
+
+// SlotPickState.featureId sentinel for the mate session's connector slots —
+// mates live on the AssemblyDocument, not the feature list. SlotPickClicked
+// routes these to MateConnectorPicked (AssemblyActions).
+inline constexpr uint64_t kMateSessionSlot = ~0ull;
 
 // A tool's pick slots, declaratively (U7): the ordered list drives arming
 // (kinds/prompt come from here, not the draw site), viewport routing, and —

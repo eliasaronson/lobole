@@ -1,5 +1,7 @@
 #include "ui/AppActions.h"
 
+#include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (U7c mate slots)
+
 #include "cad/CADMaterials.h"
 #include "cad/CADMeshConverter.h"
 #include "cad/FaceSelector.h"
@@ -343,6 +345,31 @@ std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,
   return OccurrenceMatrix(*occ) * *local;
 }
 
+// Arms one of the mate session's connector slots on the shared armed-slot
+// state (kMateSessionSlot marks it as non-feature; SlotPickClicked routes
+// back to MateConnectorPicked).
+void ArmMateConnector(AppState& state, bool second) {
+  state.slotPick = {kMateSessionSlot,
+                    static_cast<int>(second ? PickSlot::MateConnectorB
+                                            : PickSlot::MateConnectorA),
+                    SelectionKindBit(SelectionItem::Kind::Connector),
+                    /*multi=*/false,
+                    second ? "Pick the second face (connector B)"
+                           : "Pick the first face (connector A)"};
+}
+
+namespace {
+// A pipeline Connector item as the mate-side Connector it names.
+Connector ConnectorFromItem(const SelectionItem& item) {
+  Connector c;
+  c.occurrenceId = item.id;
+  c.anchor.origin = false;
+  c.anchor.face = item.element;
+  c.anchor.snapEdge = item.snapElement;
+  return c;
+}
+} // namespace
+
 void StartMateTool(AppState& state, MateType type) {
   if (!state.assembly)
     return;
@@ -350,78 +377,80 @@ void StartMateTool(AppState& state, MateType type) {
   state.mateTool = AppState::MateToolState{};
   state.mateTool.active = true;
   state.mateTool.type = type;
-  state.mateTool.message = "Pick the first face (connector A)";
   SelectOccurrence(state, 0); // the tool owns clicks now
+  ArmMateConnector(state, /*second=*/false);
 }
 
-void ClearMateToolHover(AppState& state) {
-  state.mateTool.hasHover = false;
-  state.mateTool.hover = Connector{};
-  state.mateTool.hoverSnapIsMidpoint = false;
+void StartMateEdit(AppState& state, uint64_t mateId) {
+  if (!state.assembly || state.assembly->FindMateById(mateId) == nullptr)
+    return;
+  CancelMateTool(state);
+  state.mateTool = AppState::MateToolState{};
+  state.mateTool.active = true;
+  state.mateTool.editMateId = mateId;
+  state.mateTool.message =
+      "Click a connector row, then pick its new face in the viewport";
 }
 
-void UpdateMateToolHover(AppState& state, const Ray& ray) {
+void MateConnectorPicked(AppState& state, const SelectionItem& item) {
   auto& tool = state.mateTool;
-  if (!tool.active || tool.previewMateId != 0) {
-    ClearMateToolHover(state);
+  if (!state.assembly || !tool.active ||
+      item.kind != SelectionItem::Kind::Connector) {
     return;
   }
-  AssemblyFacePick pick;
-  if (!PickAssemblyFace(state, ray, pick)) {
-    ClearMateToolHover(state);
-    return;
-  }
-  tool.hasHover = true;
-  tool.hover.occurrenceId = pick.occurrenceId;
-  tool.hover.anchor.face = pick.face;
-  tool.hover.anchor.snapEdge = pick.snapEdge;
-  tool.hoverSnapIsMidpoint =
-      pick.snapType == AssemblyFacePick::SnapType::EdgeMidpoint;
-}
+  const bool slotB =
+      state.slotPick.slot == static_cast<int>(PickSlot::MateConnectorB);
+  const Connector conn = ConnectorFromItem(item);
 
-void MateToolPick(AppState& state, const Ray& ray) {
-  if (!state.assembly || !state.mateTool.active ||
-      state.mateTool.previewMateId != 0)
-    return;
-  AssemblyFacePick pick;
-  if (!PickAssemblyFace(state, ray, pick)) {
-    state.mateTool.message = "No named face there — pick a face of a part";
+  // Re-pick session on an existing mate: rewrite the armed side and
+  // re-solve; each pick is one undo step. The slot disarms after one pick
+  // (click the other row to re-pick that side).
+  if (tool.editMateId != 0) {
+    Mate* m = state.assembly->FindMateById(tool.editMateId);
+    if (m == nullptr) {
+      CancelMateTool(state);
+      return;
+    }
+    Connector& other = slotB ? m->a : m->b;
+    if (conn.occurrenceId == other.occurrenceId) {
+      tool.message = "Pick a face on a different occurrence";
+      return;
+    }
+    SnapshotAssembly(state);
+    (slotB ? m->b : m->a) = conn;
+    state.assembly->BumpVersion();
+    SolveActiveAssembly(state);
+    tool.message.clear();
+    state.slotPick = {};
     return;
   }
-  auto& tool = state.mateTool;
-  if (!tool.haveFirst) {
-    tool.first.occurrenceId = pick.occurrenceId;
-    tool.first.anchor.origin = false;
-    tool.first.anchor.face = pick.face;
-    tool.first.anchor.snapEdge = pick.snapEdge; // hole-center snap, if any
+
+  if (!slotB) {
+    tool.first = conn;
     tool.haveFirst = true;
-    tool.message = pick.snapType == AssemblyFacePick::SnapType::HoleCenter
-                       ? "Snapped to a hole center — pick connector B"
-                   : pick.snapType == AssemblyFacePick::SnapType::EdgeMidpoint
-                       ? "Snapped to an edge midpoint — pick connector B"
-                       : "Pick the second face (connector B)";
+    tool.message = conn.anchor.snapEdge.IsSet()
+                       ? "Snapped to an edge — pick connector B"
+                       : "";
+    ArmMateConnector(state, /*second=*/true);
     return;
   }
-  if (pick.occurrenceId == tool.first.occurrenceId) {
+  if (conn.occurrenceId == tool.first.occurrenceId) {
     tool.message = "Pick a face on a different occurrence";
-    return;
+    return; // stay armed
   }
   // Second connector: add a live preview mate (snapshot first, so accept is a
-  // single undo step and cancel just pops it) and solve.
+  // single undoable action and cancel just pops it) and solve.
   Mate mate;
   mate.type = tool.type;
   mate.name = "Mate";
   mate.a = tool.first;
-  mate.b.occurrenceId = pick.occurrenceId;
-  mate.b.anchor.origin = false;
-  mate.b.anchor.face = pick.face;
-  mate.b.anchor.snapEdge = pick.snapEdge; // hole-center snap, if any
+  mate.b = conn;
   SnapshotAssembly(state);
   tool.previewMateId = state.assembly->AddMate(mate);
-  ClearMateToolHover(state);
   const int errored = SolveActiveAssembly(state);
   tool.message = errored ? "Over-constrained — try Flip, or Cancel"
                          : "Accept, Flip, or Cancel";
+  state.slotPick = {}; // both picked; the session shows Accept/Cancel
 }
 
 void AcceptMateTool(AppState& state) {
@@ -429,6 +458,8 @@ void AcceptMateTool(AppState& state) {
     return;
   const uint64_t id = state.mateTool.previewMateId;
   state.mateTool = AppState::MateToolState{}; // keep the mate; clear the tool
+  if (state.slotPick.featureId == kMateSessionSlot)
+    state.slotPick = {};
   if (id)
     SelectMate(state, id);
 }
@@ -442,6 +473,8 @@ void CancelMateTool(AppState& state) {
     SolveActiveAssembly(state);
   }
   tool = AppState::MateToolState{};
+  if (state.slotPick.featureId == kMateSessionSlot)
+    state.slotPick = {};
 }
 
 namespace {

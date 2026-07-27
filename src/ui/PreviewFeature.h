@@ -26,8 +26,13 @@ Feature* ResolvePendingFeature(AppState& state, size_t* outIndex = nullptr);
 void AcceptPendingFeature(AppState& state);
 void CancelPendingFeature(AppState& state);
 
-// Draws the floating tool-session window when a feature is pending (no-op
-// otherwise): slot rows + params + accept/cancel (U7's "Tool" window).
+// Draws the floating tool-session window (U7): a pending feature's slot
+// rows + params + accept/cancel, or the mate session's connector slots on
+// assembly tabs. No-op when no session is open.
 void DrawToolWindow(AppState& state);
+
+// Opens the shared session-window frame (top-right anchor, stable
+// "###ToolWindow" id). The caller draws the contents and calls ImGui::End().
+void BeginToolWindowFrame(AppState& state, const std::string& title);
 
 } // namespace ui

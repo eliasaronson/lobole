@@ -1,5 +1,7 @@
 #include "ui/AppActions.h"
+#include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
+#include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
 #include "ui/PropertiesPanel.h" // DrawMeasureSection (shared readout)
 
 #include "imgui.h"
@@ -48,31 +50,14 @@ std::string OccLabel(const AppState& state, const AssemblyDocument& asmDoc,
   return o->name.empty() ? PartNameById(state, o->partId) : o->name;
 }
 
-// The mate-creation preview controls (Flip / Accept / Cancel) + the mate list
-// and its selected-mate editor. Split out to keep DrawOccurrencePanel legible.
+// The mate list and its selected-mate editor. The create/edit session's
+// controls (connector slot rows, flip, accept/cancel) live in the floating
+// Tool window (DrawMateToolWindow below, U7c).
 void DrawMatesSection(AppState& state) {
   AssemblyDocument& asmDoc = *state.assembly;
 
-  // Live preview of a mate being created: adjust the flip, then accept/cancel.
-  if (state.mateTool.active && state.mateTool.previewMateId) {
-    ImGui::SeparatorText("New mate (preview)");
-    if (Mate* pm = asmDoc.FindMateById(state.mateTool.previewMateId)) {
-      ImGui::Text("%s: %s -> %s", MateTypeLabel(pm->type),
-                  OccLabel(state, asmDoc, pm->a.occurrenceId).c_str(),
-                  OccLabel(state, asmDoc, pm->b.occurrenceId).c_str());
-      if (ImGui::Checkbox("Flip", &pm->flipped))
-        SolveActiveAssembly(state);
-      if (!pm->error.empty())
-        ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
-                           pm->error.c_str());
-      if (ImGui::Button("Accept"))
-        AcceptMateTool(state);
-      ImGui::SameLine();
-      if (ImGui::Button("Cancel"))
-        CancelMateTool(state);
-    }
-    return; // don't also show the list mid-preview
-  }
+  if (state.mateTool.active && state.mateTool.previewMateId)
+    return; // the Tool window owns the mid-preview UI; hide the transient mate
 
   ImGui::SeparatorText("Mates");
   if (asmDoc.MateCount() == 0) {
@@ -182,6 +167,11 @@ void DrawMatesSection(AppState& state) {
   if (!sel->error.empty())
     ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
                        sel->error.c_str());
+
+  // Re-pick a connector face (U7c): opens the mate session on this mate —
+  // click a connector row in the Tool window, then pick in the viewport.
+  if (ImGui::Button("Edit connectors…"))
+    StartMateEdit(state, sel->id);
 
   if (ImGui::Button("Delete mate")) {
     const uint64_t id = sel->id;
@@ -484,6 +474,128 @@ void DrawOccurrencePanel(AppState& state) {
   DrawBomSection(state);
 
   ImGui::End();
+}
+
+// The mate session's Tool-window contents (U7c): two connector slot rows
+// (same "###slotN" convention as the feature dialogs), then the preview's
+// flip/error/accept/cancel — or a Done button for a re-pick session.
+void DrawMateToolWindow(AppState& state) {
+  auto& tool = state.mateTool;
+  AssemblyDocument& asmDoc = *state.assembly;
+  Mate* editM =
+      tool.editMateId ? asmDoc.FindMateById(tool.editMateId) : nullptr;
+  Mate* pm =
+      tool.previewMateId ? asmDoc.FindMateById(tool.previewMateId) : nullptr;
+  if (tool.editMateId != 0 && editM == nullptr) {
+    CancelMateTool(state); // the edited mate vanished (undo/delete)
+    return;
+  }
+
+  BeginToolWindowFrame(state, editM != nullptr
+                                  ? std::string("Edit Mate")
+                                  : std::string(MateTypeLabel(tool.type)));
+
+  // A connector as a slot-row value ("Bracket-2", "+ snapped edge").
+  const auto connLabel = [&](const Connector& c, bool have) -> std::string {
+    if (!have || c.occurrenceId == 0)
+      return "";
+    std::string s = OccLabel(state, asmDoc, c.occurrenceId);
+    if (c.anchor.snapEdge.IsSet())
+      s += " (snapped)";
+    return s;
+  };
+  Connector a{}, b{};
+  bool haveA = false, haveB = false;
+  if (editM != nullptr) {
+    a = editM->a;
+    b = editM->b;
+    haveA = haveB = true;
+  } else if (pm != nullptr) {
+    a = pm->a;
+    b = pm->b;
+    haveA = haveB = true;
+  } else {
+    a = tool.first;
+    haveA = tool.haveFirst;
+  }
+
+  // Slot rows: click to (re)arm; the armed row shows in the accent color.
+  // Mid-preview re-picking is locked (Cancel first) — except in edit mode,
+  // where re-picking IS the session.
+  const bool rowsLive = editM != nullptr || pm == nullptr;
+  const auto slotRow = [&](PickSlot slot, const char* label,
+                           const std::string& value) {
+    const bool armed = state.slotPick.featureId == kMateSessionSlot &&
+                       state.slotPick.slot == static_cast<int>(slot);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine(ImGui::GetFontSize() * 7.0f);
+    if (armed) {
+      const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_NavCursor);
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImVec4(accent.x, accent.y, accent.z, 0.35f));
+      ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                            ImVec4(accent.x, accent.y, accent.z, 0.55f));
+    }
+    const std::string text =
+        (value.empty() ? std::string(armed ? "(pick in viewport)" : "(none)")
+                       : value) +
+        "###slot" + std::to_string(static_cast<int>(slot));
+    if (ImGui::Button(text.c_str(), ImVec2(ImGui::GetFontSize() * 14.0f, 0)) &&
+        rowsLive) {
+      if (armed)
+        state.slotPick = {};
+      else
+        ArmMateConnector(state, slot == PickSlot::MateConnectorB);
+    }
+    if (armed)
+      ImGui::PopStyleColor(2);
+  };
+  slotRow(PickSlot::MateConnectorA, "Connector A", connLabel(a, haveA));
+  slotRow(PickSlot::MateConnectorB, "Connector B", connLabel(b, haveB));
+
+  if (!tool.message.empty())
+    ImGui::TextDisabled("%s", tool.message.c_str());
+
+  Mate* live = editM != nullptr ? editM : pm;
+  if (live != nullptr) {
+    if (ImGui::Checkbox("Flip", &live->flipped)) {
+      if (editM != nullptr)
+        SnapshotAssembly(state);
+      SolveActiveAssembly(state);
+    }
+    if (!live->error.empty())
+      ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
+                         live->error.c_str());
+  }
+
+  ImGui::Separator();
+  bool accept = false, cancel = false;
+  if (editM != nullptr) {
+    if (ImGui::Button("Done"))
+      accept = true; // edits were applied live (each re-pick = one undo step)
+  } else {
+    ImGui::BeginDisabled(pm == nullptr);
+    if (ImGui::Button("Accept"))
+      accept = true;
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel"))
+      cancel = true;
+  }
+  // Enter accepts / Escape flows through ViewportInput's cascade (slot
+  // disarm first, then session cancel).
+  if (!ImGui::IsAnyItemActive() && pm != nullptr &&
+      (ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
+       ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false))) {
+    accept = true;
+  }
+  ImGui::End();
+
+  if (accept)
+    AcceptMateTool(state);
+  else if (cancel)
+    CancelMateTool(state);
 }
 
 } // namespace ui

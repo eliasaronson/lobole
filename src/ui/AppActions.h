@@ -128,18 +128,29 @@ struct AssemblyFacePick {
 };
 bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
 
-// Mate creation tool (A3 phase 3). StartMateTool arms it with a type;
-// MateToolPick feeds it a viewport ray (picks the two connector faces, then
-// adds a live preview mate); Accept keeps the preview, Cancel removes it.
-// All no-op without an active assembly.
+// Mate creation tool (A3 phase 3, U7c slots). StartMateTool opens the
+// session and arms connector slot A; the selection pipeline resolves
+// Connector candidates and routes picks to MateConnectorPicked (slot A →
+// advance to B; slot B → live preview mate; edit session → rewrite the
+// mate's connector and re-solve). Accept keeps the preview / closes the
+// session; Cancel removes it. All no-op without an active assembly.
 void StartMateTool(AppState& state, MateType type);
-// Updates the transient pre-click connector marker. Does not mutate assembly
-// data; a click always resolves its own fresh pick.
-void UpdateMateToolHover(AppState& state, const Ray& ray);
-void ClearMateToolHover(AppState& state);
-void MateToolPick(AppState& state, const Ray& ray);
+// Re-pick session for an existing mate: opens the mate session with both
+// connectors filled from the mate; clicking a connector row re-arms it and
+// the next pick rewrites that side (one undo step per re-pick).
+void StartMateEdit(AppState& state, uint64_t mateId);
+// The armed connector slot consumed a pipeline pick (SlotPickClicked routes
+// kMateSessionSlot here).
+void MateConnectorPicked(AppState& state, const SelectionItem& item);
 void AcceptMateTool(AppState& state);
 void CancelMateTool(AppState& state);
+// Arms connector slot A or B on the shared armed-slot state (the mate
+// session's slot rows re-arm through this too).
+void ArmMateConnector(AppState& state, bool second);
+// The mate session's Tool-window contents (connector slot rows, flip/error,
+// accept/cancel). Lives with the other mate UI in OccurrencePanel.cpp;
+// called from DrawToolWindow.
+void DrawMateToolWindow(AppState& state);
 // The world frame of a connector (occurrence placement ∘ its part-local frame),
 // or nullopt if it doesn't resolve. For drawing the connector triad.
 std::optional<glm::mat4> ConnectorWorldFrame(AppState& state,

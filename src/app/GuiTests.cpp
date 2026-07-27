@@ -3328,6 +3328,98 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->mateTool.active);
   };
 
+  // U7c: an existing mate's connector can be re-picked — StartMateEdit opens
+  // the session, clicking the B row arms it, and a viewport pick rewrites
+  // that side (one undo step) and re-solves.
+  t = IM_REGISTER_TEST(engine, "assembly", "mate_edit_repick_connector");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
+    glm::vec3 min, max;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
+    const uint64_t partSlotId = s_App->parts[0].id;
+
+    ui::AddAssembly(*s_App, "Asm");
+    ctx->Yield();
+    Occurrence first;
+    first.partId = partSlotId;
+    first.fixed = true;
+    s_App->assembly->AddOccurrence(first);
+    Occurrence second;
+    second.partId = partSlotId;
+    second.position = glm::vec3(10.0f, 0.0f, 0.0f);
+    const uint64_t secondId = s_App->assembly->AddOccurrence(second);
+    s_App->assembly->BumpVersion();
+    ctx->Yield(3);
+
+    const glm::vec3 center = (min + max) * 0.5f;
+    const glm::vec3 mid = center + glm::vec3(5.0f, 0.0f, 0.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(mid +
+                               glm::normalize(glm::vec3(0.3f, 1.0f, 0.4f)) *
+                                   glm::length(max - min) * 6.0f);
+    ctx->Yield();
+
+    // Create a fastened mate via the session (top faces of both boxes).
+    ui::StartMateTool(*s_App, MateType::Fastened);
+    ctx->Yield();
+    IM_CHECK(s_App->slotPick.Active()); // connector A armed itself
+    const glm::vec3 topFirst(center.x, max.y, center.z);
+    const glm::vec3 topSecond = topFirst + glm::vec3(10.0f, 0.0f, 0.0f);
+    ctx->MouseMoveToPos(WorldToWindow(topFirst));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->mateTool.haveFirst);
+    IM_CHECK(s_App->slotPick.Active()); // auto-advanced to connector B
+    ctx->MouseMoveToPos(WorldToWindow(topSecond));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_NE(s_App->mateTool.previewMateId, uint64_t{0});
+    ui::AcceptMateTool(*s_App);
+    ctx->Yield();
+    const uint64_t mateId = ui::SelectedMateId(*s_App);
+    IM_CHECK_NE(mateId, uint64_t{0});
+    const std::string oldFaceA =
+        s_App->assembly->FindMateById(mateId)->a.anchor.face.name;
+
+    // Re-pick connector A onto the FIXED box's front face (occurrence 2
+    // moved when the fastened mate solved; occurrence 1 stays at the
+    // origin, so its face positions are known). Frame it center-screen —
+    // the session window floats at the viewport's top right, and a pick
+    // under it would hit the window instead.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(center);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(center +
+                               glm::normalize(glm::vec3(0.15f, 0.35f, 1.0f)) *
+                                   glm::length(max - min) * 5.0f);
+    ctx->Yield();
+    ui::StartMateEdit(*s_App, mateId);
+    ctx->Yield();
+    IM_CHECK(!s_App->slotPick.Active()); // rows filled: nothing self-arms
+    ctx->ItemClick("//Edit Mate###ToolWindow/###slot12");
+    IM_CHECK(s_App->slotPick.Active());
+    const glm::vec3 frontFirst(center.x, center.y, max.z);
+    ctx->MouseMoveToPos(WorldToWindow(frontFirst));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    Mate* m = s_App->assembly->FindMateById(mateId);
+    IM_CHECK(m != nullptr);
+    IM_CHECK(m->a.anchor.face.name != oldFaceA);
+    IM_CHECK(!s_App->slotPick.Active()); // one re-pick per row click
+
+    ctx->ItemClick("//Edit Mate###ToolWindow/Done");
+    ctx->Yield();
+    IM_CHECK(!s_App->mateTool.active);
+  };
+
   // Assembly measure: two occurrences of a 2mm box, 10mm apart — measuring
   // a top face on each reads the 8mm gap in world space; re-clicking one
   // deselects it (occurrence is part of the element's identity).

@@ -1007,7 +1007,15 @@ void SeedSlotsFromSelection(AppState& state, Feature& feature) {
 
 void SlotPickClicked(AppState& state, const SelectionItem& item,
                      uint32_t meshId, uint32_t index) {
-  if (!state.slotPick.Active() || !state.document)
+  if (!state.slotPick.Active())
+    return;
+  if (state.slotPick.featureId == kMateSessionSlot) {
+    // The mate session's connector slots live on the assembly, not the
+    // feature list; routing/advance/disarm happen in AssemblyActions.
+    MateConnectorPicked(state, item);
+    return;
+  }
+  if (!state.document)
     return;
   size_t featureIndex = 0;
   Feature* f =

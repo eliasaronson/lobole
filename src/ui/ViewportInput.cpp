@@ -5,6 +5,7 @@
 #include "render/Camera.h"
 #include "render/MeshRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/FeatureEditor.h" // kMateSessionSlot (U7c)
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SelectionPipeline.h"
@@ -229,9 +230,14 @@ void HandleViewportInput(AppState& state) {
     AbortPreviewHandleDrag(state);
     escUsed = true;
   } else if (state.slotPick.Active()) {
-    if (state.document == nullptr ||
-        state.document->FindFeatureById(state.slotPick.featureId) == nullptr) {
-      state.slotPick = {}; // the slot ends with its feature
+    const bool mateSlot = state.slotPick.featureId == kMateSessionSlot;
+    const bool valid =
+        mateSlot ? (state.assembly != nullptr && state.mateTool.active)
+                 : (state.document != nullptr &&
+                    state.document->FindFeatureById(state.slotPick.featureId) !=
+                        nullptr);
+    if (!valid) {
+      state.slotPick = {}; // the slot ends with its feature/session
     } else if (esc) {
       state.slotPick = {};
       escUsed = true;
@@ -252,12 +258,12 @@ void HandleViewportInput(AppState& state) {
     return;
 
   // Assembly tab: occurrences select through the pipeline; double-click
-  // enters the referenced part in context (assembly ghosted, A4). While the
-  // mate tool is arming, clicks pick connector faces (its own picker —
-  // connector frames need the (occurrence, face) pair, see U1d notes).
+  // enters the referenced part in context (assembly ghosted, A4). Mate
+  // connector picks flow through the pipeline too (U7c: Kind::Connector).
   if (state.assembly) {
-    // Escape cancels an in-progress mate.
-    if (state.mateTool.active && esc) {
+    // Escape cancels an in-progress mate session (after the armed-slot
+    // branch above disarmed the slot: the usual two-step cascade).
+    if (state.mateTool.active && esc && !escUsed) {
       CancelMateTool(state);
       escUsed = true;
     }
@@ -279,30 +285,6 @@ void HandleViewportInput(AppState& state) {
         if (HandleGizmoInput(state, ray, clicked, down, released))
           return;
       }
-    }
-
-    if (state.mateTool.active && state.mateTool.previewMateId == 0) {
-      if (overViewport) {
-        Ray ray = state.faceSelector->ScreenToWorldRay(
-            io.MousePos.x - state.viewportPos.x,
-            io.MousePos.y - state.viewportPos.y,
-            static_cast<int>(state.viewportSize.x),
-            static_cast<int>(state.viewportSize.y), *state.camera);
-        UpdateMateToolHover(state, ray);
-      } else {
-        ClearMateToolHover(state);
-      }
-    }
-
-    if (state.mateTool.active && state.mateTool.previewMateId == 0 &&
-        overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-      Ray ray = state.faceSelector->ScreenToWorldRay(
-          io.MousePos.x - state.viewportPos.x,
-          io.MousePos.y - state.viewportPos.y,
-          static_cast<int>(state.viewportSize.x),
-          static_cast<int>(state.viewportSize.y), *state.camera);
-      MateToolPick(state, ray);
-      return;
     }
 
     // Double-click enters in context: the first click of the pair already

@@ -81,6 +81,9 @@ struct Candidate {
   SelectionItem item;
   uint32_t meshId = 0;
   uint32_t index = 0;
+  // Connector candidates only: the snap was an edge MIDPOINT (vs a hole
+  // center / plain face centroid) — drives the hover marker style.
+  bool snapMidpoint = false;
 };
 
 // Candidates under the cursor, best first, restricted to `kinds`. Edges
@@ -95,6 +98,21 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
   if (kinds & KindBit(SelectionItem::Kind::SketchRegion)) {
     if (auto region = RegionCandidate(state, ray))
       out.push_back(*region);
+  }
+  if ((kinds & KindBit(SelectionItem::Kind::Connector)) && state.assembly) {
+    // Mate connectors (U7c): the assembly face picker resolves the owning
+    // occurrence + named face + hole-center/edge-midpoint snap in one go.
+    AssemblyFacePick pick;
+    if (PickAssemblyFace(state, ray, pick)) {
+      Candidate c;
+      c.item.kind = SelectionItem::Kind::Connector;
+      c.item.id = pick.occurrenceId;
+      c.item.element = pick.face;
+      c.item.snapElement = pick.snapEdge;
+      c.snapMidpoint =
+          pick.snapType == AssemblyFacePick::SnapType::EdgeMidpoint;
+      out.push_back(c);
+    }
   }
   if (kinds & KindBit(SelectionItem::Kind::Occurrence)) {
     // Assembly tab: a face hit selects the whole occurrence it belongs to.
@@ -268,6 +286,10 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
 void ClearHoverPreviews(AppState& state) {
   state.pick.edgeHover = false;
   state.pick.regionHoverIds.clear();
+  // The connector-hover mirror (triad + snap marker overlay reads it).
+  state.mateTool.hasHover = false;
+  state.mateTool.hover = Connector{};
+  state.mateTool.hoverSnapIsMidpoint = false;
   if (state.faceSelector)
     state.faceSelector->ClearHover();
   if (state.meshRenderer)
@@ -373,6 +395,13 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       state.pick.edgeHover = true;
       state.pick.edgeHoverMesh = top.meshId;
       state.pick.edgeHoverIndex = top.index;
+    } else if (top.item.kind == SelectionItem::Kind::Connector) {
+      // Mirror into the mate tool's hover so its triad/snap overlay draws.
+      state.mateTool.hasHover = true;
+      state.mateTool.hover.occurrenceId = top.item.id;
+      state.mateTool.hover.anchor.face = top.item.element;
+      state.mateTool.hover.anchor.snapEdge = top.item.snapElement;
+      state.mateTool.hoverSnapIsMidpoint = top.snapMidpoint;
     } else if (top.item.kind == SelectionItem::Kind::Face ||
                top.item.kind == SelectionItem::Kind::Occurrence) {
       // Occurrences hover via the hit face's range for now (a whole-instance
