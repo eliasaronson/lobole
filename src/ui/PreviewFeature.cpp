@@ -11,6 +11,8 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
+#include <algorithm> // std::min/max (session-window clamp)
+
 namespace ui {
 
 uint64_t BeginPreviewFeature(AppState& state,
@@ -87,6 +89,22 @@ void BeginToolWindowFrame(AppState& state, const std::string& title) {
       ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
       ImGuiWindowFlags_NoSavedSettings;
   ImGui::Begin((title + "###ToolWindow").c_str(), nullptr, flags);
+  // Keep the window inside the app window. The pivot anchoring above uses
+  // the window's size, which is UNKNOWN on the appearing frame with
+  // AlwaysAutoResize — the window landed hanging off the right edge and
+  // stayed there. Clamp every frame (dragging just stops at the edges).
+  const ImGuiViewport* mainVp = ImGui::GetMainViewport();
+  const ImVec2 wpos = ImGui::GetWindowPos();
+  const ImVec2 wsize = ImGui::GetWindowSize();
+  ImVec2 clamped = wpos;
+  clamped.x = std::min(clamped.x,
+                       mainVp->WorkPos.x + mainVp->WorkSize.x - wsize.x - 4.0f);
+  clamped.y = std::min(clamped.y,
+                       mainVp->WorkPos.y + mainVp->WorkSize.y - wsize.y - 4.0f);
+  clamped.x = std::max(clamped.x, mainVp->WorkPos.x + 4.0f);
+  clamped.y = std::max(clamped.y, mainVp->WorkPos.y + 4.0f);
+  if (clamped.x != wpos.x || clamped.y != wpos.y)
+    ImGui::SetWindowPos(clamped);
 }
 
 namespace {

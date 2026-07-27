@@ -1577,8 +1577,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)2);
     IM_CHECK(!s_App->sketchEdit.mirrorAxisPhase);
 
-    // A tap in empty space continues to the axis step.
-    glm::vec2 t2 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(4, 4));
+    // A tap in empty space continues to the axis step (bottom-left, clear
+    // of the top-right session window).
+    glm::vec2 t2 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-2, -2));
     ctx->MouseMoveToPos(ImVec2(t2.x, t2.y));
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
@@ -1613,6 +1614,49 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk->entities.size() > entitiesBefore); // mirrored copy exists
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select); // done
+    IM_CHECK(s_App->sketchEdit.selected.empty());
+  };
+
+  // U8 polish: Pattern selects in-tool (box select), a tap in empty space
+  // applies, and Apply hands the tool back to Select.
+  t = IM_REGISTER_TEST(engine, "pattern", "in_tool_select_and_tap_applies");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::Circle{{0, 0}, 0.5});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.tool = ui::SketchTool::Pattern;
+    s_App->sketchEdit.patternCircular = false;
+    s_App->sketchEdit.patternCount = 3;
+    s_App->sketchEdit.patternStep = glm::vec2(2.0f, 0.0f);
+
+    // Box-select the circle while the tool is active.
+    glm::vec2 a = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1, -1));
+    glm::vec2 b = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(1, 1));
+    ctx->MouseMoveToPos(ImVec2(a.x, a.y));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(b.x, b.y));
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
+
+    // Tap in empty space = Apply; the tool returns to Select. (Bottom-left,
+    // clear of the top-right session window.)
+    glm::vec2 t2 = ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-2, -2));
+    ctx->MouseMoveToPos(ImVec2(t2.x, t2.y));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(!sk->derived.empty()); // the pattern op exists
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
     IM_CHECK(s_App->sketchEdit.selected.empty());
   };
 

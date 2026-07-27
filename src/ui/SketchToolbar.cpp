@@ -103,7 +103,7 @@ void DrawSketchToolWindow(AppState& state) {
     ImGui::TextUnformatted(label);
     ImGui::SameLine(ImGui::GetFontSize() * 7.0f);
     if (edit.selected.empty())
-      ImGui::TextDisabled("(select in the sketch)");
+      ImGui::TextDisabled("(click or box-select)");
     else
       ImGui::Text("%zu selected", edit.selected.size());
   };

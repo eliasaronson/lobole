@@ -1205,6 +1205,57 @@ bool HandleProjectTool(AppState& state, SketchFeature& sketch, size_t index,
 
 } // namespace
 
+// Collect-phase interaction shared by the select-first generative tools
+// (Mirror step 1, Pattern, Offset): a click toggles the whole entity in the
+// selection, an empty-space DRAG box-selects (additive, window/crossing),
+// and an empty-space TAP or Enter calls `finish` — only once something is
+// selected. Escape stays the abort path (the ladder in HandleSketchViewport).
+template <class F>
+static void HandleCollectPhase(AppState& state, SketchFeature& sketch,
+                               const glm::vec2& mousePos, bool hoverHit,
+                               uint32_t hoverEntity, F&& finish) {
+  SketchEditState& edit = state.sketchEdit;
+  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (hoverHit) {
+      bool removed = false;
+      for (size_t i = edit.selected.size(); i-- > 0;)
+        if (edit.selected[i].entity == hoverEntity) {
+          edit.selected.erase(edit.selected.begin() + i);
+          removed = true;
+        }
+      if (!removed)
+        edit.selected.push_back({hoverEntity, 0});
+    } else {
+      edit.boxActive = true;
+      edit.boxStart = edit.boxEnd = mousePos;
+    }
+  }
+  if (edit.boxActive && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+    edit.boxEnd = mousePos;
+  if (edit.boxActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+    if (glm::length(edit.boxEnd - edit.boxStart) < 4.0f) {
+      if (!edit.selected.empty())
+        finish(); // tap in empty space: confirm/continue (Onshape-style)
+    } else {
+      const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
+      auto project = [&](glm::vec2 p) {
+        return SketchUVToScreen(state, sketch.plane, p);
+      };
+      for (uint32_t id : sketch::BoxSelect(sketch.entities, edit.boxStart,
+                                           edit.boxEnd, crossing, project)) {
+        bool seen = false;
+        for (const auto& r : edit.selected)
+          seen |= (r.entity == id);
+        if (!seen)
+          edit.selected.push_back({id, 0});
+      }
+    }
+    edit.boxActive = false;
+  }
+  if (ImGui::IsKeyPressed(ImGuiKey_Enter) && !edit.selected.empty())
+    finish();
+}
+
 // Commits a mirror of the selected entities across `axisEntity` (a line or
 // datum axis id): solve, regenerate, one undo step, back to Select. Shared
 // by the axis-phase click and mirror-on-activate seeding. Returns false
@@ -1667,6 +1718,11 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
             *state.document);
       }
     }
+    // A tap in empty space or Enter finishes the tool (Escape = abort).
+    if ((ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !hover.hit) ||
+        ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+      edit.tool = SketchTool::Select;
+    }
     return true;
   }
 
@@ -1693,51 +1749,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.hoveredRef = hover.ref;
 
     if (!edit.mirrorAxisPhase) {
-      // Step 1 — collect the geometry to mirror. A click toggles the whole
-      // entity; a DRAG in empty space box-selects (adds); a TAP in empty
-      // space — or Enter, or the session window's Axis row — advances to
-      // the axis pick.
-      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        if (hover.hit) {
-          bool removed = false;
-          for (size_t i = edit.selected.size(); i-- > 0;)
-            if (edit.selected[i].entity == hover.ref.entity) {
-              edit.selected.erase(edit.selected.begin() + i);
-              removed = true;
-            }
-          if (!removed)
-            edit.selected.push_back({hover.ref.entity, 0});
-        } else {
-          edit.boxActive = true;
-          edit.boxStart = edit.boxEnd = mousePos;
-        }
-      }
-      if (edit.boxActive && ImGui::IsMouseDown(ImGuiMouseButton_Left))
-        edit.boxEnd = mousePos;
-      if (edit.boxActive && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-        if (glm::length(edit.boxEnd - edit.boxStart) < 4.0f) {
-          // Tap in empty space: continue to the axis step (Onshape-style).
-          if (!edit.selected.empty())
-            edit.mirrorAxisPhase = true;
-        } else {
-          const bool crossing = edit.boxEnd.x < edit.boxStart.x; // right→left
-          auto project = [&](glm::vec2 p) {
-            return SketchUVToScreen(state, sketch->plane, p);
-          };
-          for (uint32_t id :
-               sketch::BoxSelect(sketch->entities, edit.boxStart, edit.boxEnd,
-                                 crossing, project)) {
-            bool seen = false;
-            for (const auto& r : edit.selected)
-              seen |= (r.entity == id);
-            if (!seen)
-              edit.selected.push_back({id, 0});
-          }
-        }
-        edit.boxActive = false;
-      }
-      if (ImGui::IsKeyPressed(ImGuiKey_Enter) && !edit.selected.empty())
-        edit.mirrorAxisPhase = true;
+      // Step 1 — collect the geometry to mirror (shared collect phase:
+      // click toggles, drag box-selects, tap/Enter continues to the axis).
+      HandleCollectPhase(state, *sketch, mousePos, hover.hit, hover.ref.entity,
+                         [&] { edit.mirrorAxisPhase = true; });
       return true;
     }
 
@@ -1754,6 +1769,26 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         CommitMirrorAcross(state, *sketch, index, hover.ref.entity);
       }
     }
+    return true;
+  }
+
+  if (edit.tool == SketchTool::Pattern || edit.tool == SketchTool::Offset) {
+    // In-tool selection (same collect phase as Mirror): click toggles, drag
+    // box-selects; a TAP in empty space or Enter = Apply (the session
+    // window's button); Escape aborts via the ladder.
+    SketchPick hover = PickSketchEntity(
+        state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
+    edit.hasHover = hover.hit;
+    if (hover.hit)
+      edit.hoveredRef = hover.ref;
+    const bool pattern = edit.tool == SketchTool::Pattern;
+    HandleCollectPhase(state, *sketch, mousePos, hover.hit, hover.ref.entity,
+                       [&] {
+                         if (pattern)
+                           ApplyPattern(state);
+                         else
+                           ApplyOffset(state);
+                       });
     return true;
   }
 
@@ -1811,6 +1846,12 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           edit.actionMsg = "Fillet: click a corner where two lines meet.";
         }
       }
+    }
+    // A tap in empty space or Enter finishes the tool (Escape = abort).
+    if ((ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !vtx.hit) ||
+        ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+      edit.tool = SketchTool::Select;
+      edit.actionMsg.clear();
     }
     return true;
   }
@@ -2365,13 +2406,15 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
     break;
   case T::Pattern:
     set("Pattern", edit.selected.empty() ? 1 : 2, 2,
-        edit.selected.empty() ? "select the geometry to pattern"
-                              : "set count/spacing in the panel, then Apply");
+        edit.selected.empty()
+            ? "click or box-select the geometry to pattern"
+            : "set count/spacing, then tap empty space (or Apply)");
     break;
   case T::Offset:
     set("Offset", edit.selected.empty() ? 1 : 2, 2,
-        edit.selected.empty() ? "select a closed loop (its edges)"
-                              : "set the distance in the panel, then Apply");
+        edit.selected.empty()
+            ? "click or box-select a closed loop (its edges)"
+            : "set the distance, then tap empty space (or Apply)");
     break;
   case T::Dimension:
     if (edit.dimPlacing)
@@ -3786,6 +3829,8 @@ bool ApplyPattern(AppState& state) {
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
   edit.actionMsg.clear();
+  edit.selected.clear();
+  edit.tool = SketchTool::Select; // applied: the session is done
   return true;
 }
 
@@ -3825,6 +3870,8 @@ bool ApplyOffset(AppState& state) {
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
   edit.actionMsg.clear();
+  edit.selected.clear();
+  edit.tool = SketchTool::Select; // applied: the session is done
   return true;
 }
 
