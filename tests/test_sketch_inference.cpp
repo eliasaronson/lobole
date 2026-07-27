@@ -31,6 +31,30 @@ TEST_CASE("Infer snaps onto a line body (point-on-line)", "[inference]") {
   CHECK_THAT(s.uv.y, WithinAbs(0.0f, 1e-5f)); // dropped onto the line
 }
 
+TEST_CASE("Point-on-curve combines with an axis alignment", "[inference]") {
+  // A circle at (5,5) r=2: hovering near its TOP rim snaps onto the rim AND
+  // vertically aligned with the centre — the exact quadrant point.
+  std::vector<sketch::Entity> e = {sketch::Circle{{5, 5}, 2.0, 1}};
+  sketch::Snap s = sketch::InferPoint(e, {5.3f, 6.9f}, std::nullopt, 0, kScale);
+  REQUIRE(s.pointOnLine.has_value());
+  CHECK(*s.pointOnLine == 1u);
+  REQUIRE(s.alignShareX.has_value()); // shared X with the centre = Vertical
+  CHECK(s.alignShareX->entity == 1u);
+  CHECK_THAT(s.uv.x, WithinAbs(5.0f, 1e-4f)); // slid to the quadrant point
+  CHECK_THAT(s.uv.y, WithinAbs(7.0f, 1e-4f));
+
+  // On a LINE, alignment with another entity's vertex slides along the line.
+  std::vector<sketch::Entity> e2 = {sketch::Line{{0, 0}, {4, 4}, 1},
+                                    sketch::Point{{3, 9}, 2}};
+  sketch::Snap s2 =
+      sketch::InferPoint(e2, {2.8f, 3.2f}, std::nullopt, 0, kScale);
+  REQUIRE(s2.pointOnLine.has_value());
+  REQUIRE(s2.alignShareX.has_value()); // shares x=3 with the point
+  CHECK(s2.alignShareX->entity == 2u);
+  CHECK_THAT(s2.uv.x, WithinAbs(3.0f, 1e-4f));
+  CHECK_THAT(s2.uv.y, WithinAbs(3.0f, 1e-4f)); // on the diagonal at x=3
+}
+
 TEST_CASE("Infer detects horizontal and vertical segments", "[inference]") {
   std::vector<sketch::Entity> e; // empty — no vertices to snap to
   // Drawn away from the origin/axes so datum snapping doesn't claim an axis.

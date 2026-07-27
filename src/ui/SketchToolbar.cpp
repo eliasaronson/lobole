@@ -1,5 +1,6 @@
 #include "ui/SketchToolbar.h"
 
+#include "core/Expression.h" // ExprDrag evaluation (v51 session fields)
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
@@ -15,7 +16,11 @@
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
+#include "imgui_internal.h" // TempInputIsActive/GetInputTextState (ExprDrag)
 
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
 #include <set>
 
 namespace ui {
@@ -71,12 +76,97 @@ const char* ConstraintKindName(sketch::ConstraintKind k) {
 
 namespace {
 
+// A drag field with expression support: while the drag's Ctrl+click text
+// input is active, mirror its buffer; on commit, anything that isn't a
+// plain number evaluates against the document variables ("360/3",
+// "width/2") and the RESULT is written back. Session params are transient,
+// so the expression text itself isn't stored (unlike feature ExprDim).
+bool ExprDragFloat(AppState& state, const char* label, float* v, float speed,
+                   float vmin, float vmax, const char* fmt) {
+  bool changed = ImGui::DragFloat(label, v, speed, vmin, vmax, fmt);
+  const ImGuiID id = ImGui::GetItemID();
+  static ImGuiID trackId = 0;
+  static char buf[64];
+  if (ImGui::TempInputIsActive(id)) {
+    if (ImGuiInputTextState* st = ImGui::GetInputTextState(id)) {
+      // TextA is the live buffer (TextSrc is only valid inside InputText).
+      std::snprintf(buf, sizeof(buf), "%.*s", static_cast<int>(st->TextLen),
+                    st->TextA.Data);
+      trackId = id;
+    }
+  }
+  if (trackId == id && ImGui::IsItemDeactivatedAfterEdit()) {
+    trackId = 0;
+    char* end = nullptr;
+    std::strtod(buf, &end);
+    const bool plainNumber = end != nullptr && *end == '\0';
+    if (!plainNumber && state.document != nullptr) {
+      const auto r = ExpressionEngine::Default().EvaluateText(
+          buf, state.document->Symbols());
+      if (r.has_value()) {
+        *v = std::clamp(static_cast<float>(*r), vmin, vmax);
+        changed = true;
+      } else {
+        state.sketchEdit.actionMsg = r.error().message;
+      }
+    }
+  }
+  return changed;
+}
+
+bool ExprDragInt(AppState& state, const char* label, int* v, float speed,
+                 int vmin, int vmax) {
+  float f = static_cast<float>(*v);
+  const bool changed =
+      ExprDragFloat(state, label, &f, speed, static_cast<float>(vmin),
+                    static_cast<float>(vmax), "%.0f");
+  if (changed)
+    *v = std::clamp(static_cast<int>(std::lround(f)), vmin, vmax);
+  return changed;
+}
+
+// Slot-style re-pick row for the op edit session (sources / mirror axis):
+// click arms the mode, shown in the accent color while armed.
+bool OpPickRow(const char* label, const std::string& value, bool armed,
+               const char* id) {
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted(label);
+  ImGui::SameLine(ImGui::GetFontSize() * 7.0f);
+  if (armed) {
+    const ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_NavCursor);
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImVec4(accent.x, accent.y, accent.z, 0.35f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                          ImVec4(accent.x, accent.y, accent.z, 0.55f));
+  }
+  const bool clicked = ImGui::Button(
+      ((armed ? "(pick in the sketch)" : value) + std::string(id)).c_str(),
+      ImVec2(ImGui::GetFontSize() * 12.0f, 0.0f));
+  if (armed)
+    ImGui::PopStyleColor(2);
+  return clicked;
+}
+
 // Derived-op edit session (U8 polish): live pattern parameter editors /
 // linked-copy break-link for sketch->derived[edit.editOpIndex].
 void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   SketchEditState& edit = state.sketchEdit;
   const size_t oi = static_cast<size_t>(edit.editOpIndex);
   const sketch::DerivedOp& op = sketch.derived[oi];
+
+  // Sources row, shared by mirror and both pattern kinds: arming loads the
+  // current sources into the selection for collect-phase editing.
+  const auto sourcesRow = [&] {
+    if (OpPickRow("Sources", std::to_string(op.sourceIds.size()) + " entities",
+                  edit.opPickSources, "###opSources")) {
+      edit.opPickSources = !edit.opPickSources;
+      edit.opPickAxis = false;
+      edit.selected.clear();
+      if (edit.opPickSources)
+        for (uint32_t sid : op.sourceIds)
+          edit.selected.push_back({sid, 0});
+    }
+  };
 
   if (op.kind == sketch::DerivedKind::LinkedCopy) {
     BeginToolWindowFrame(state, "Linked Copy");
@@ -111,28 +201,36 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
 
   if (op.kind == sketch::DerivedKind::Mirror) {
     BeginToolWindowFrame(state, "Mirror");
-    if (sketch::IsDatum(op.axisEntity))
-      ImGui::Text("%zu entities across a datum axis", op.sourceIds.size());
-    else
-      ImGui::Text("%zu entities across line %u", op.sourceIds.size(),
-                  op.axisEntity);
+    sourcesRow();
+    if (OpPickRow("Axis",
+                  sketch::IsDatum(op.axisEntity)
+                      ? std::string("datum axis")
+                      : "line " + std::to_string(op.axisEntity),
+                  edit.opPickAxis, "###opAxis")) {
+      edit.opPickAxis = !edit.opPickAxis;
+      edit.opPickSources = false;
+    }
     ImGui::TextDisabled("Copies track the sources and the axis.");
     ImGui::Separator();
     if (ImGui::Button(ICON_FA_TRASH_CAN " Delete")) {
       RemovePattern(state, oi); // removes the op + its generated copies
       edit.editOpIndex = -1;
+      edit.opPickSources = edit.opPickAxis = false;
       ImGui::End();
       return;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Close"))
+    if (ImGui::Button("Close")) {
       edit.editOpIndex = -1;
+      edit.opPickSources = edit.opPickAxis = false;
+    }
     ImGui::End();
     return;
   }
 
   const bool circular = op.kind == sketch::DerivedKind::CircularPattern;
   BeginToolWindowFrame(state, circular ? "Circular Pattern" : "Linear Pattern");
+  sourcesRow();
   int count = op.count;
   glm::vec2 vec = op.vec;
   glm::vec2 vec2 = op.vec2;
@@ -140,18 +238,18 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   float angleDeg = static_cast<float>(glm::degrees(op.scalar));
   bool changed = false;
   ImGui::SetNextItemWidth(90);
-  changed |= ImGui::DragInt("Count", &count, 0.1f, 2, 1000);
+  changed |= ExprDragInt(state, "Count", &count, 0.1f, 2, 1000);
   if (circular) {
     ImGui::SetNextItemWidth(140);
     changed |= ImGui::DragFloat2("Centre", &vec.x, 0.05f);
     ImGui::SetNextItemWidth(90);
-    changed |=
-        ImGui::DragFloat("Angle", &angleDeg, 0.5f, -360.0f, 360.0f, "%.1f deg");
+    changed |= ExprDragFloat(state, "Angle", &angleDeg, 0.5f, -360.0f, 360.0f,
+                             "%.1f deg");
   } else {
     ImGui::SetNextItemWidth(140);
     changed |= ImGui::DragFloat2("Step", &vec.x, 0.05f);
     ImGui::SetNextItemWidth(90);
-    changed |= ImGui::DragInt("Rows", &count2, 0.1f, 1, 1000);
+    changed |= ExprDragInt(state, "Rows", &count2, 0.1f, 1, 1000);
     if (count2 > 1) {
       ImGui::SetNextItemWidth(140);
       changed |= ImGui::DragFloat2("Row step", &vec2.x, 0.05f);
@@ -167,12 +265,15 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   if (ImGui::Button(ICON_FA_TRASH_CAN " Delete")) {
     RemovePattern(state, oi);
     edit.editOpIndex = -1;
+    edit.opPickSources = edit.opPickAxis = false;
     ImGui::End();
     return;
   }
   ImGui::SameLine();
-  if (ImGui::Button("Close"))
+  if (ImGui::Button("Close")) {
     edit.editOpIndex = -1;
+    edit.opPickSources = edit.opPickAxis = false;
+  }
   ImGui::End();
 }
 
@@ -250,6 +351,7 @@ void DrawSketchToolWindow(AppState& state) {
   if (edit.editOpIndex >= 0) {
     if (static_cast<size_t>(edit.editOpIndex) >= sketch->derived.size()) {
       edit.editOpIndex = -1; // the op vanished (undo/delete)
+      edit.opPickSources = edit.opPickAxis = false;
     } else {
       DrawOpEditSession(state, *sketch);
       return;
@@ -331,8 +433,8 @@ void DrawSketchToolWindow(AppState& state) {
     BeginToolWindowFrame(state, "Sketch Fillet");
     ImGui::TextUnformatted("Click a corner where two lines meet.");
     ImGui::SetNextItemWidth(90);
-    ImGui::DragFloat("Radius##fillet", &edit.filletRadius, 0.02f, 0.01f, 1e6f,
-                     "%.3f");
+    ExprDragFloat(state, "Radius##fillet", &edit.filletRadius, 0.02f, 0.01f,
+                  1e6f, "%.3f");
     break;
   case SketchTool::Pattern: {
     BeginToolWindowFrame(state, "Sketch Pattern");
@@ -345,13 +447,13 @@ void DrawSketchToolWindow(AppState& state) {
     if (ImGui::IsItemClicked())
       edit.patternCircular = true;
     ImGui::SetNextItemWidth(80);
-    ImGui::DragInt("Count##pat", &edit.patternCount, 0.1f, 2, 1000);
+    ExprDragInt(state, "Count##pat", &edit.patternCount, 0.1f, 2, 1000);
     if (!edit.patternCircular) {
       ImGui::SetNextItemWidth(140);
       ImGui::DragFloat2("Step (dx,dy)##pat", &edit.patternStep.x, 0.05f);
       // Second grid direction (v50): rows = 1 keeps the pattern a row.
       ImGui::SetNextItemWidth(80);
-      ImGui::DragInt("Rows##pat", &edit.patternCount2, 0.1f, 1, 1000);
+      ExprDragInt(state, "Rows##pat", &edit.patternCount2, 0.1f, 1, 1000);
       if (edit.patternCount2 > 1) {
         ImGui::SetNextItemWidth(140);
         ImGui::DragFloat2("Row step (dx,dy)##pat", &edit.patternStep2.x, 0.05f);
@@ -377,8 +479,8 @@ void DrawSketchToolWindow(AppState& state) {
         ImGui::TextDisabled("Centred on point of entity %u",
                             edit.patternCenterRef.entity);
       ImGui::SetNextItemWidth(80);
-      ImGui::DragFloat("Angle##pat", &edit.patternAngleDeg, 0.5f, -360.0f,
-                       360.0f, "%.1f deg");
+      ExprDragFloat(state, "Angle##pat", &edit.patternAngleDeg, 0.5f, -360.0f,
+                    360.0f, "%.1f deg");
     }
     ImGui::Checkbox("Linked##pat", &edit.linkGenerative);
     ImGui::Separator();
@@ -392,8 +494,8 @@ void DrawSketchToolWindow(AppState& state) {
     BeginToolWindowFrame(state, "Offset");
     geometryRow("Loop");
     ImGui::SetNextItemWidth(90);
-    ImGui::DragFloat("Distance##off", &edit.offsetDistance, 0.02f, -1e6f, 1e6f,
-                     "%.3f");
+    ExprDragFloat(state, "Distance##off", &edit.offsetDistance, 0.02f, -1e6f,
+                  1e6f, "%.3f");
     ImGui::SameLine();
     ImGui::Checkbox("Round corners##off", &edit.offsetJoinArc);
     ImGui::Separator();
@@ -531,6 +633,7 @@ void DrawSketchModelSections(AppState& state) {
                             ImGuiSelectableFlags_AllowDoubleClick) &&
           ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         edit.editOpIndex = static_cast<int>(i);
+        edit.opPickSources = edit.opPickAxis = false;
       }
       if (opSelected && !open)
         ImGui::PopStyleColor();

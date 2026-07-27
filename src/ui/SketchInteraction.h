@@ -186,6 +186,16 @@ bool EditPatternParams(AppState& state, size_t opIndex, glm::vec2 vec,
 // undo record. No-op if opIndex is out of range.
 bool RemovePattern(AppState& state, size_t opIndex);
 
+// Replaces a derived op's SOURCE set (dedup'd; the op's own generated
+// instances and — for a mirror — its axis are filtered out) and regenerates
+// id-stably. One undo record. False if the filtered set is empty.
+bool EditOpSources(AppState& state, size_t opIndex,
+                   const std::vector<uint32_t>& ids);
+
+// Re-points a mirror op's axis (a line entity or X/Y datum axis id) and
+// regenerates. One undo record. False for non-mirror ops / invalid axes.
+bool EditOpAxis(AppState& state, size_t opIndex, uint32_t axisEntity);
+
 // Sets a dimension constraint's value (by index in the active sketch),
 // re-solves, and commits one undo record. No-op if the index isn't a valid
 // constraint. Used by the panel's radius editor and dimension edits.

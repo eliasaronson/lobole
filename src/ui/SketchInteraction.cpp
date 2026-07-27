@@ -1462,6 +1462,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.boxActive = false;
     } else if (edit.tool == SketchTool::Mirror && edit.mirrorAxisPhase) {
       edit.mirrorAxisPhase = false; // axis-pick → back to collecting geometry
+    } else if (edit.opPickSources || edit.opPickAxis) {
+      edit.opPickSources = edit.opPickAxis = false; // back to the session
+      edit.selected.clear();
     } else if (edit.editOpIndex >= 0) {
       edit.editOpIndex = -1; // close the derived-op edit session
     } else if (edit.tool == SketchTool::Dimension && !edit.selected.empty()) {
@@ -1574,6 +1577,37 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   // DrawDimensions runs the drag/inline-edit; don't also draw/select under it.
   if (edit.dimHot >= 0 || edit.dimDrag >= 0)
     return true;
+
+  // Derived-op re-pick modes (armed by the op edit session's rows):
+  // sources via the shared collect phase, the mirror axis via one click.
+  // Independent of the active tool.
+  if (edit.editOpIndex >= 0 && (edit.opPickSources || edit.opPickAxis)) {
+    SketchPick hover = PickSketchEntity(
+        state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
+    edit.hasHover = hover.hit;
+    if (hover.hit)
+      edit.hoveredRef = hover.ref;
+    if (edit.opPickAxis) {
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && hover.hit) {
+        if (EditOpAxis(state, static_cast<size_t>(edit.editOpIndex),
+                       hover.ref.entity))
+          edit.opPickAxis = false;
+      }
+      return true;
+    }
+    HandleCollectPhase(
+        state, *sketch, mousePos, hover.hit, hover.ref.entity, [&] {
+          std::vector<uint32_t> ids;
+          for (const auto& r : edit.selected)
+            ids.push_back(r.entity);
+          if (EditOpSources(state, static_cast<size_t>(edit.editOpIndex),
+                            ids)) {
+            edit.opPickSources = false;
+            edit.selected.clear();
+          }
+        });
+    return true;
+  }
 
   if (edit.tool == SketchTool::Select) {
     // Track what the cursor is over for hover highlighting (endpoint-first,
@@ -2382,6 +2416,16 @@ void DrawSnapGlyphs(AppState& state) {
 ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
   using T = SketchTool;
   ToolPrompt p;
+  // Op re-pick modes outrank the active tool's prompt.
+  if (edit.opPickSources) {
+    p.text = "Operation sources: click or box-select, tap empty space to "
+             "confirm";
+    return p;
+  }
+  if (edit.opPickAxis) {
+    p.text = "Click the new mirror axis (a line or an X/Y axis)";
+    return p;
+  }
   auto set = [&](const char* name, int step, int count, const char* what) {
     p.step = step;
     p.stepCount = count;
@@ -4055,6 +4099,84 @@ bool RemovePattern(AppState& state, size_t opIndex) {
   state.commands->Execute(
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
+  return true;
+}
+
+// Shared solve→regen→one-undo-step tail for the op edits below.
+static void CommitOpEdit(AppState& state, SketchFeature& sketch, size_t index,
+                         const nlohmann::json& before) {
+  sketch.RegenerateDerived();
+  sketch::Solver solver;
+  solver.Load(sketch);
+  if (solver.Solve().ok)
+    solver.WriteBack(sketch.entities);
+  sketch.RegenerateDerived();
+  state.document->Regenerate();
+  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+}
+
+bool EditOpSources(AppState& state, size_t opIndex,
+                   const std::vector<uint32_t>& ids) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || opIndex >= sketch->derived.size())
+    return false;
+  sketch::DerivedOp& op = sketch->derived[opIndex];
+  std::vector<uint32_t> clean;
+  for (uint32_t id : ids) {
+    if (op.kind == sketch::DerivedKind::Mirror && id == op.axisEntity)
+      continue;        // the axis can't mirror itself
+    bool self = false; // the op's own outputs can't be its inputs
+    for (const auto& in : op.instances)
+      self |= (in.genId == id);
+    if (self || sketch->IndexOfEntity(id) == SIZE_MAX)
+      continue;
+    bool seen = false;
+    for (uint32_t s : clean)
+      seen |= (s == id);
+    if (!seen)
+      clean.push_back(id);
+  }
+  if (clean.empty()) {
+    state.sketchEdit.actionMsg = "Select at least one source entity.";
+    return false;
+  }
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  op.sourceIds = std::move(clean);
+  CommitOpEdit(state, *sketch, index, before);
+  return true;
+}
+
+bool EditOpAxis(AppState& state, size_t opIndex, uint32_t axisEntity) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  if (!sketch || opIndex >= sketch->derived.size())
+    return false;
+  sketch::DerivedOp& op = sketch->derived[opIndex];
+  if (op.kind != sketch::DerivedKind::Mirror)
+    return false;
+  const size_t ai = sketch->IndexOfEntity(axisEntity);
+  const bool isLine = sketch::IsDatum(axisEntity) ||
+                      (ai != SIZE_MAX && std::holds_alternative<sketch::Line>(
+                                             sketch->entities[ai]));
+  if (!isLine) {
+    state.sketchEdit.actionMsg =
+        "Mirror: the axis must be a line or an X/Y axis.";
+    return false;
+  }
+  bool self = false; // an op output can't be its own axis
+  for (const auto& in : op.instances)
+    self |= (in.genId == axisEntity);
+  if (self) {
+    state.sketchEdit.actionMsg = "Pick an axis the mirror doesn't generate.";
+    return false;
+  }
+  nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  op.axisEntity = axisEntity;
+  CommitOpEdit(state, *sketch, index, before);
   return true;
 }
 

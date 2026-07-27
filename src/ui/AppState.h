@@ -198,6 +198,10 @@ struct SketchEditState {
   // list whose editor is open in the Tool window (-1 = none). Opened by
   // double-clicking an Operations row in the Model panel.
   int editOpIndex = -1;
+  // Re-pick modes within the op edit session: sources (collect-phase toggle/
+  // box, tap/Enter commits) and — mirror only — the axis (one click).
+  bool opPickSources = false;
+  bool opPickAxis = false;
   // Entity whose collapsed constraint-badge stack is hover-expanded this
   // frame (0 = none). Entities with >2 badges draw one "xN" summary; hovering
   // it fans the individual badges out (they stay while the cursor is over
