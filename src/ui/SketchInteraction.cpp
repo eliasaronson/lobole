@@ -1462,6 +1462,8 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.boxActive = false;
     } else if (edit.tool == SketchTool::Mirror && edit.mirrorAxisPhase) {
       edit.mirrorAxisPhase = false; // axis-pick → back to collecting geometry
+    } else if (edit.editOpIndex >= 0) {
+      edit.editOpIndex = -1; // close the derived-op edit session
     } else if (edit.tool == SketchTool::Dimension && !edit.selected.empty()) {
       // Clear the accumulated targets first; a second Esc disarms the tool.
       edit.selected.clear();
@@ -1789,6 +1791,12 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
                          else
                            ApplyOffset(state);
                        });
+    return true;
+  }
+
+  if (edit.tool == SketchTool::Image) {
+    // The reference-image session lives in the Tool window; canvas clicks
+    // are consumed doing nothing (Esc / Done closes).
     return true;
   }
 

@@ -69,6 +69,131 @@ const char* ConstraintKindName(sketch::ConstraintKind k) {
 }
 } // namespace
 
+namespace {
+
+// Derived-op edit session (U8 polish): live pattern parameter editors /
+// linked-copy break-link for sketch->derived[edit.editOpIndex].
+void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
+  SketchEditState& edit = state.sketchEdit;
+  const size_t oi = static_cast<size_t>(edit.editOpIndex);
+  const sketch::DerivedOp& op = sketch.derived[oi];
+
+  if (op.kind == sketch::DerivedKind::LinkedCopy) {
+    BeginToolWindowFrame(state, "Linked Copy");
+    std::string srcName = "this sketch";
+    if (op.sourceSketchId != 0) {
+      Feature* src = state.document->FindFeatureById(op.sourceSketchId);
+      srcName = src != nullptr ? src->GetName() : "(missing sketch)";
+    }
+    ImGui::Text("%zu entities from %s", op.sourceIds.size(), srcName.c_str());
+    ImGui::Separator();
+    if (ImGui::Button("Break link")) {
+      // Keeps the outputs as free geometry (ids intact); one undo step.
+      size_t idx = 0;
+      if (ResolveActiveSketch(state, &idx) == &sketch) {
+        nlohmann::json before = DocumentIO::FeatureToJson(sketch);
+        sketch.BreakLink(oi);
+        state.document->Regenerate();
+        nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+        state.commands->PushApplied(
+            std::make_unique<ModifyFeatureCommand>(idx, before, after));
+      }
+      edit.editOpIndex = -1;
+      ImGui::End();
+      return; // op list changed; redraw next frame
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close"))
+      edit.editOpIndex = -1;
+    ImGui::End();
+    return;
+  }
+
+  const bool circular = op.kind == sketch::DerivedKind::CircularPattern;
+  BeginToolWindowFrame(state, circular ? "Circular Pattern" : "Linear Pattern");
+  int count = op.count;
+  glm::vec2 vec = op.vec;
+  float angleDeg = static_cast<float>(glm::degrees(op.scalar));
+  bool changed = false;
+  ImGui::SetNextItemWidth(90);
+  changed |= ImGui::DragInt("Count", &count, 0.1f, 2, 1000);
+  if (circular) {
+    ImGui::SetNextItemWidth(140);
+    changed |= ImGui::DragFloat2("Centre", &vec.x, 0.05f);
+    ImGui::SetNextItemWidth(90);
+    changed |=
+        ImGui::DragFloat("Angle", &angleDeg, 0.5f, -360.0f, 360.0f, "%.1f deg");
+  } else {
+    ImGui::SetNextItemWidth(140);
+    changed |= ImGui::DragFloat2("Step", &vec.x, 0.05f);
+  }
+  if (changed) {
+    // Commits + REPLACES the sketch feature — `sketch`/`op` dangle after;
+    // nothing below reads them.
+    EditPatternParams(state, oi, vec, circular ? glm::radians(angleDeg) : 0.0,
+                      count);
+  }
+  ImGui::Separator();
+  if (ImGui::Button(ICON_FA_TRASH_CAN " Delete")) {
+    RemovePattern(state, oi);
+    edit.editOpIndex = -1;
+    ImGui::End();
+    return;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Close"))
+    edit.editOpIndex = -1;
+  ImGui::End();
+}
+
+// Reference-image session (U8 polish): opacity/hide live edits, calibrate
+// hand-off, delete — for edit.selectedImageId. Opened by the toolbar's
+// Insert image button (on the fresh image) or an Operations row.
+void DrawImageSession(AppState& state, SketchFeature& sketch) {
+  SketchEditState& edit = state.sketchEdit;
+  sketch::ReferenceImage* img = nullptr;
+  for (auto& im : sketch.images)
+    if (im.id == edit.selectedImageId)
+      img = &im;
+  if (img == nullptr) { // deleted/undone underneath the session
+    edit.selectedImageId = 0;
+    edit.tool = SketchTool::Select;
+    return;
+  }
+  BeginToolWindowFrame(state, "Reference Image");
+  ImGui::Text("Image %u  (%d x %d px)", img->id, img->widthPx, img->heightPx);
+  ImGui::SetNextItemWidth(160);
+  float op = static_cast<float>(img->opacity);
+  if (ImGui::SliderFloat("Opacity", &op, 0.05f, 1.0f, "%.2f"))
+    img->opacity = op; // live cosmetic edit (not undoable)
+  bool hidden = img->hidden;
+  if (ImGui::Checkbox("Hide", &hidden))
+    img->hidden = hidden;
+  ImGui::Separator();
+  if (ImGui::Button("Calibrate...")) {
+    edit.calibImageId = img->id;
+    edit.calibStage = 0;
+    edit.calibAlignAxis = false;
+    edit.tool = SketchTool::CalibrateImage;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Delete")) {
+    DeleteReferenceImageAction(state, img->id); // feature replaced
+    edit.selectedImageId = 0;
+    edit.tool = SketchTool::Select;
+    ImGui::End();
+    return;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Done")) {
+    edit.selectedImageId = 0;
+    edit.tool = SketchTool::Select;
+  }
+  ImGui::End();
+}
+
+} // namespace
+
 // The active sketch tool's session in the floating Tool window (U8a). Only
 // tools with options/Apply/collected targets get a window — plain drawing
 // tools are fully served by the staged prompt pill.
@@ -89,13 +214,31 @@ void DrawSketchToolWindow(AppState& state) {
   if (!sketch)
     return;
 
+  // Derived-op edit session (double-click an Operations row in the Model
+  // panel): pattern parameter editors / linked-copy break-link — the same
+  // window the op's creating tool used.
+  if (edit.editOpIndex >= 0) {
+    if (static_cast<size_t>(edit.editOpIndex) >= sketch->derived.size()) {
+      edit.editOpIndex = -1; // the op vanished (undo/delete)
+    } else {
+      DrawOpEditSession(state, *sketch);
+      return;
+    }
+  }
+
   const bool hasSession =
       edit.tool == SketchTool::Mirror || edit.tool == SketchTool::Fillet ||
       edit.tool == SketchTool::Pattern || edit.tool == SketchTool::Offset ||
       edit.tool == SketchTool::CalibrateImage ||
-      edit.tool == SketchTool::Dimension;
+      edit.tool == SketchTool::Dimension || edit.tool == SketchTool::Image;
   if (!hasSession)
     return;
+
+  // The image session needs its image; if it vanished (undo), close.
+  if (edit.tool == SketchTool::Image) {
+    DrawImageSession(state, *sketch);
+    return;
+  }
 
   // Selection-count row, slot-style: the tool's source geometry.
   const auto geometryRow = [&](const char* label) {
@@ -277,48 +420,60 @@ void DrawSketchModelSections(AppState& state) {
   if (!sketch)
     return;
 
-  // Reference images (v49): import an underlay, tune it, calibrate it to a
-  // real dimension, or delete it. Opacity/hide are live cosmetic edits (not
-  // undoable); import/calibrate/delete each commit one undo step and REPLACE
-  // the sketch feature — so after any of them `sketch` dangles: return
-  // immediately and redraw next frame.
-  ImGui::SeparatorText("Reference images");
-  if (ImGui::Button("Insert image...##ref")) {
-    OpenReferenceImageDialog(state); // may add + commit (feature replaced)
-    return;
-  }
-  for (size_t i = 0; i < sketch->images.size(); i++) {
-    sketch::ReferenceImage& img = sketch->images[i];
-    ImGui::PushID(static_cast<int>(img.id));
-    const bool selected = edit.selectedImageId == img.id;
-    char label[80];
-    std::snprintf(label, sizeof(label), "Image %u  (%d x %d px)", img.id,
-                  img.widthPx, img.heightPx);
-    if (ImGui::Selectable(label, selected))
-      edit.selectedImageId = selected ? 0 : img.id;
-    if (edit.selectedImageId == img.id) {
-      ImGui::SetNextItemWidth(160);
-      float op = static_cast<float>(img.opacity);
-      if (ImGui::SliderFloat("Opacity##ref", &op, 0.05f, 1.0f, "%.2f"))
-        img.opacity = op; // live cosmetic edit
-      bool hidden = img.hidden;
-      if (ImGui::Checkbox("Hide##ref", &hidden))
-        img.hidden = hidden;
-      ImGui::SameLine();
-      if (ImGui::Button("Calibrate##ref")) {
-        edit.calibImageId = img.id;
-        edit.calibStage = 0;
-        edit.calibAlignAxis = false;
-        edit.tool = SketchTool::CalibrateImage;
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("Delete##ref")) {
-        DeleteReferenceImageAction(state, img.id); // feature replaced
-        ImGui::PopID();
-        return;
+  // Operations (U8 polish): the sketch's transform-like ops — reference
+  // images, patterns, linked copies — as tree-style rows; double-click
+  // opens the op's edit session in the Tool window (same grammar as the
+  // model feature tree). Inserting images lives on the sketch toolbar.
+  if (!sketch->images.empty() || !sketch->derived.empty()) {
+    ImGui::SeparatorText("Operations");
+    for (const sketch::ReferenceImage& img : sketch->images) {
+      char label[96];
+      std::snprintf(label, sizeof(label),
+                    ICON_FA_IMAGE "  Image %u (%dx%d)###img%u", img.id,
+                    img.widthPx, img.heightPx, img.id);
+      const bool open =
+          edit.tool == SketchTool::Image && edit.selectedImageId == img.id;
+      if (ImGui::Selectable(label, open,
+                            ImGuiSelectableFlags_AllowDoubleClick) &&
+          ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        edit.selectedImageId = img.id;
+        edit.tool = SketchTool::Image;
       }
     }
-    ImGui::PopID();
+    for (size_t i = 0; i < sketch->derived.size(); i++) {
+      const sketch::DerivedOp& op = sketch->derived[i];
+      char label[96];
+      if (op.kind == sketch::DerivedKind::LinkedCopy) {
+        std::snprintf(label, sizeof(label), ICON_FA_LINK "  Linked copy (%zu)",
+                      op.sourceIds.size());
+      } else {
+        std::snprintf(label, sizeof(label), ICON_FA_GRIP "  %s pattern (x%d)",
+                      op.kind == sketch::DerivedKind::CircularPattern
+                          ? "Circular"
+                          : "Linear",
+                      op.count);
+      }
+      // Highlight the op whose instance/source is currently selected.
+      bool opSelected = false;
+      for (const auto& r : edit.selected) {
+        for (const auto& in : op.instances)
+          opSelected |= (in.genId == r.entity);
+        for (uint32_t sid : op.sourceIds)
+          opSelected |= (sid == r.entity);
+      }
+      const bool open = edit.editOpIndex == static_cast<int>(i);
+      if (opSelected && !open)
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.4f, 1.0f));
+      const std::string id = std::string(label) + "###op" + std::to_string(i);
+      if (ImGui::Selectable(id.c_str(), open,
+                            ImGuiSelectableFlags_AllowDoubleClick) &&
+          ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        edit.editOpIndex = static_cast<int>(i);
+      }
+      if (opSelected && !open)
+        ImGui::PopStyleColor();
+    }
+    ImGui::TextDisabled("Double-click to edit");
   }
 
   // Constraint management (relational buttons live on the toolbar; the DOF
@@ -350,98 +505,6 @@ void DrawSketchModelSections(AppState& state) {
         // active feature — `sketch` dangles; redraw next frame.
         DeleteConstraint(state, static_cast<size_t>(toDelete));
         return;
-      }
-    }
-  }
-
-  // Linked patterns: edit the full transform live (regenerates id-stably),
-  // delete the op, and highlight the one whose instance/source is selected.
-  if (!sketch->derived.empty()) {
-    ImGui::SeparatorText("Patterns");
-    int deleteOp = -1;
-    for (size_t i = 0; i < sketch->derived.size(); i++) {
-      ImGui::PushID(static_cast<int>(i));
-      const sketch::DerivedOp& op = sketch->derived[i];
-      const bool circular = op.kind == sketch::DerivedKind::CircularPattern;
-
-      // Is a generated instance (or a source) of this op currently selected?
-      bool opSelected = false;
-      for (const auto& r : edit.selected) {
-        for (const auto& in : op.instances)
-          opSelected |= (in.genId == r.entity);
-        for (uint32_t sid : op.sourceIds)
-          opSelected |= (sid == r.entity);
-      }
-      const char* label = circular ? "Circular" : "Linear";
-      if (opSelected)
-        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.4f, 1.0f), "%s (selected)",
-                           label);
-      else
-        ImGui::TextUnformatted(label);
-      ImGui::SameLine();
-      if (ImGui::SmallButton(ICON_FA_TRASH_CAN "##delpat"))
-        deleteOp = static_cast<int>(i);
-
-      int count = op.count;
-      glm::vec2 vec = op.vec;
-      float angleDeg = static_cast<float>(glm::degrees(op.scalar));
-      bool changed = false;
-      ImGui::SetNextItemWidth(90);
-      changed |= ImGui::DragInt("Count", &count, 0.1f, 2, 1000);
-      if (circular) {
-        ImGui::SetNextItemWidth(140);
-        changed |= ImGui::DragFloat2("Centre", &vec.x, 0.05f);
-        ImGui::SetNextItemWidth(90);
-        changed |= ImGui::DragFloat("Angle", &angleDeg, 0.5f, -360.0f, 360.0f,
-                                    "%.1f deg");
-      } else {
-        ImGui::SetNextItemWidth(140);
-        changed |= ImGui::DragFloat2("Step", &vec.x, 0.05f);
-      }
-      if (changed)
-        EditPatternParams(state, i, vec,
-                          circular ? glm::radians(angleDeg) : 0.0, count);
-      ImGui::PopID();
-    }
-    if (deleteOp >= 0) // deferred so we don't mutate `derived` mid-iteration
-      RemovePattern(state, static_cast<size_t>(deleteOp));
-  }
-
-  // Linked copies (violet geometry): status + break-link per op.
-  {
-    bool anyLinks = false;
-    for (const auto& op : sketch->derived)
-      if (op.kind == sketch::DerivedKind::LinkedCopy)
-        anyLinks = true;
-    if (anyLinks) {
-      ImGui::SeparatorText("Linked copies");
-      for (size_t oi = 0; oi < sketch->derived.size(); oi++) {
-        const auto& op = sketch->derived[oi];
-        if (op.kind != sketch::DerivedKind::LinkedCopy)
-          continue;
-        ImGui::PushID(static_cast<int>(oi));
-        std::string srcName = "this sketch";
-        if (op.sourceSketchId != 0) {
-          Feature* src = state.document->FindFeatureById(op.sourceSketchId);
-          srcName = src != nullptr ? src->GetName() : "(missing sketch)";
-        }
-        ImGui::Text("%zu from %s", op.sourceIds.size(), srcName.c_str());
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Break link")) {
-          // Keeps the outputs as free geometry (ids intact); one undo step.
-          size_t idx = 0;
-          if (ResolveActiveSketch(state, &idx) == sketch) {
-            nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
-            sketch->BreakLink(oi);
-            state.document->Regenerate();
-            nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
-            state.commands->PushApplied(
-                std::make_unique<ModifyFeatureCommand>(idx, before, after));
-          }
-          ImGui::PopID();
-          break; // op list changed; redraw next frame
-        }
-        ImGui::PopID();
       }
     }
   }

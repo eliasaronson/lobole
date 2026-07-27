@@ -1660,6 +1660,51 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->sketchEdit.selected.empty());
   };
 
+  // U8 polish: sketch operations (linked patterns/copies/images) list as
+  // rows in the Model panel; double-click opens the op's edit session in
+  // the Tool window, where params edit live.
+  t = IM_REGISTER_TEST(engine, "sketch", "ops_row_opens_pattern_session");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t c1 = sk->AddEntity(sketch::Circle{{0, 0}, 0.5});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    // A LINKED pattern is a derived op (one-shot copies wouldn't list).
+    s_App->sketchEdit.selected = {{c1, 0}};
+    s_App->sketchEdit.patternCircular = false;
+    s_App->sketchEdit.patternCount = 3;
+    s_App->sketchEdit.patternStep = glm::vec2(2.0f, 0.0f);
+    s_App->sketchEdit.linkGenerative = true;
+    IM_CHECK(ui::ApplyPattern(*s_App));
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->derived.size(), (size_t)1);
+
+    // Double-click the Operations row → the edit session opens.
+    ctx->ItemDoubleClick("//Model/###op0");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.editOpIndex, 0);
+    IM_CHECK(ctx->GetWindowByRef("//Linear Pattern###ToolWindow") != nullptr);
+
+    // Edit the count in the session; the op regenerates.
+    ctx->ItemInputValue("//Linear Pattern###ToolWindow/Count", 5);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->derived[0].count, 5);
+
+    ctx->KeyPress(ImGuiKey_Escape); // closes the session
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->sketchEdit.editOpIndex, -1);
+  };
+
   // Escape backs out one level per press: tool → clear selection → leave edit.
   t = IM_REGISTER_TEST(engine, "select", "escape_cascade");
   t->TestFunc = [](ImGuiTestContext* ctx) {

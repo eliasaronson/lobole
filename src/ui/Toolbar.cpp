@@ -459,6 +459,26 @@ void DrawSketchModeToolbar(AppState& state) {
             edit.showConstraintGlyphs);
   Divider();
 
+  // Insert reference image (U8 polish): file dialog, then the fresh image's
+  // session (opacity/calibrate/delete) opens in the Tool window. Editing
+  // later: double-click the image's Operations row in the Model panel.
+  {
+    SketchFeature* sk0 = ResolveActiveSketch(state);
+    const size_t imagesBefore = sk0 != nullptr ? sk0->images.size() : 0;
+    if (ImGui::Button(ICON_FA_IMAGE "###tb_sk_image")) {
+      OpenReferenceImageDialog(state); // commits + REPLACES the sketch feature
+      SketchFeature* sk1 = ResolveActiveSketch(state);
+      if (sk1 != nullptr && sk1->images.size() > imagesBefore) {
+        activateTool(SketchTool::Image);
+        edit.selectedImageId = sk1->images.back().id;
+      }
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Insert reference image\xe2\x80\xa6");
+    ImGui::SameLine();
+  }
+  Divider();
+
   // Extrude/Revolve straight from the sketch (were panel buttons, U8a);
   // Finish (✓) already exits without a solid.
   {

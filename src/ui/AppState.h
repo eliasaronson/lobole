@@ -71,7 +71,9 @@ enum class SketchTool {
   Project,         // click a body edge/face -> live projected construction geom
   CalibrateImage,  // click two points on a reference image, then type the real
                    // distance between them to scale the image (v49)
-  EllipseArc       // 5-click: centre, major-axis end, minor radius, start, end
+  EllipseArc,      // 5-click: centre, major-axis end, minor radius, start, end
+  Image            // U8 polish: reference-image session (insert/opacity/
+                   // calibrate/delete for selectedImageId) in the Tool window
 };
 
 // Transient state for the active sketch-editing session. The sketch itself
@@ -184,6 +186,10 @@ struct SketchEditState {
   //   calibStage 0 = awaiting the first point, 1 = awaiting the second,
   //   2 = both picked, awaiting the typed distance (Apply).
   uint32_t selectedImageId = 0;
+  // Derived-op edit session (U8 polish): index into the sketch's `derived`
+  // list whose editor is open in the Tool window (-1 = none). Opened by
+  // double-clicking an Operations row in the Model panel.
+  int editOpIndex = -1;
   uint32_t calibImageId = 0;
   glm::vec2 calibP1{0.0f, 0.0f};
   glm::vec2 calibP2{0.0f, 0.0f};
