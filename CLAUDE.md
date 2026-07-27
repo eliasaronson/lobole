@@ -15,6 +15,11 @@ nix-shell shell.nix --run "cd build && ninja designer designer_tests"
 ccache is shared machine-wide, so rebuilds are fast. Do NOT nest a `nix-shell`
 inside another (temp-dir failures) — the tool scripts already self-manage nix.
 
+**Formatting:** `.clang-format` (LLVM, 2-space, 80-col) governs C/C++. Run
+`tools/setup-hooks.sh` once per clone to enable the `.githooks/pre-commit` hook,
+which clang-formats-checks only the staged hunks — keeps new code formatted
+without forcing whole-file reflows.
+
 ## Tests
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`

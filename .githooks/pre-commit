@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Verify the STAGED C/C++ changes are clang-formatted before allowing a commit.
+#
+# Hunk-scoped (via git-clang-format): only the lines you're committing are
+# checked, so touching a not-yet-fully-formatted file does NOT force a
+# whole-file reformat — that's what keeps big formatting diffs from piling up.
+#
+# Enable once per clone:  tools/setup-hooks.sh   (sets core.hooksPath).
+set -euo pipefail
+
+# Resolve tooling: prefer PATH, else fall back to nix (this repo is nix-based).
+if command -v git-clang-format >/dev/null 2>&1; then
+  fmtdiff() { git clang-format --staged --diff -- "$@"; }
+elif command -v nix-shell >/dev/null 2>&1; then
+  fmtdiff() { nix-shell -p clang-tools git --run "git clang-format --staged --diff -- $*"; }
+else
+  echo "pre-commit: clang-format unavailable — skipping format check" >&2
+  exit 0
+fi
+
+# Our sources only (skip vendored trees).
+mapfile -t files < <(git diff --cached --name-only --diff-filter=ACM \
+  -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' '*.hxx' \
+  | grep -vE '^(deps/|src/thirdparty/)' || true)
+[ ${#files[@]} -eq 0 ] && exit 0
+
+out=$(fmtdiff "${files[@]}" 2>/dev/null || true)
+case "$out" in
+  "" | *"no modified files to format"* | *"did not modify any files"*) exit 0 ;;
+esac
+
+echo "✗ pre-commit: staged C/C++ changes are not clang-formatted." >&2
+echo "  Fix (formats just your staged hunks, then re-stage):" >&2
+echo "      git clang-format --staged && git add -u" >&2
+echo "  In nix:  nix-shell -p clang-tools git --run 'git clang-format --staged' && git add -u" >&2
+echo "  Bypass once (not recommended):  git commit --no-verify" >&2
+exit 1
