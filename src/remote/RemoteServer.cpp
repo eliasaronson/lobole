@@ -531,6 +531,17 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (json cfgOut; remote::HandleAssemblyConfigurationRpc(
             state, *state.assembly, m, p, cfgOut))
       return cfgOut;
+  } else {
+    // Neither tab kind (a drawing is active): recognize config methods so
+    // they fail with guidance instead of falling through to
+    // "unknown method".
+    for (const auto& d : remote::ConfigurationMethodDocs()) {
+      if (m == d.name) {
+        throw std::runtime_error(
+            m + " needs a part or assembly tab (the active tab is a "
+                "drawing) — switch with set_active_part");
+      }
+    }
   }
 
   if (m == "ping") {

@@ -90,8 +90,17 @@ if(TARGET fem_gpu)
     target_include_directories(femgpu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
     # GPU cases contend for the compute device — a shared RESOURCE_LOCK
     # serializes them among themselves while the CPU suite runs parallel
-    # around them (the reason `ctest -j` is safe repo-wide).
-    catch_discover_tests(femgpu_tests PROPERTIES RESOURCE_LOCK gpu)
+    # around them (the reason `ctest -j` is safe repo-wide). The
+    # TopologyOptimize case is additionally timing-sensitive under CPU load
+    # (the known rerun-only flake), so it alone gets RUN_SERIAL: nothing
+    # else runs beside it, and the other GPU cases keep overlapping the
+    # CPU suite.
+    catch_discover_tests(femgpu_tests
+                         TEST_SPEC "~\"femgpu: TopologyOptimize lands on the CPU design via the GPU solver\""
+                         PROPERTIES RESOURCE_LOCK gpu)
+    catch_discover_tests(femgpu_tests
+                         TEST_SPEC "\"femgpu: TopologyOptimize lands on the CPU design via the GPU solver\""
+                         PROPERTIES RESOURCE_LOCK gpu RUN_SERIAL TRUE)
 endif()
 
 # GUI smoke tests drive the real app through ImGui Test Engine.

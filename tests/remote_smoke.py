@@ -703,6 +703,38 @@ def main():
                        f"described method '{name}' must dispatch: {e}")
         d.call("new_project")
 
+        # The reverse direction: every `m == "..."` literal dispatched in
+        # src/remote/*.cpp must be described (screenshot is the one method
+        # dispatched outside the if-chains, and it IS described).
+        import glob
+        import re
+        remote_src = os.path.join(os.path.dirname(__file__), "..", "src",
+                                  "remote")
+        dispatched = set()
+        for cpp in glob.glob(os.path.join(remote_src, "*.cpp")):
+            with open(cpp) as f:
+                dispatched |= set(re.findall(r'm == "([a-z_0-9]+)"',
+                                             f.read()))
+        undescribed = sorted(dispatched - set(names))
+        expect(not undescribed,
+               f"dispatched but missing from describe tables: {undescribed}")
+        undispatched = sorted(set(names) - dispatched - {"screenshot",
+                                                         "describe"})
+        expect(not undispatched,
+               f"described but never dispatched: {undispatched}")
+
+        # Config methods on a drawing tab explain themselves instead of
+        # reporting "unknown method".
+        d.call("new_project")
+        d.call("create_drawing")
+        try:
+            d.call("list_configurations")
+            expect(False, "config on a drawing tab should error")
+        except RuntimeError as e:
+            expect("drawing" in str(e) and "unknown method" not in str(e),
+                   f"config-on-drawing error is specific: {e}")
+        d.call("new_project")
+
         print("remote_smoke: ALL CHECKS PASSED")
         return 0
     finally:
