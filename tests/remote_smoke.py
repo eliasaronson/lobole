@@ -664,6 +664,20 @@ def main():
         expect(st["regen"]["ok"] is False and "failed" in st["regen"],
                "get_state regen block carries the summary")
 
+        # check_geometry honesty: `ok` = built AND valid; `valid` alone is
+        # vacuous over zero bodies (exposed via body_count).
+        cg = d.call("check_geometry")  # doc still has the broken features
+        expect(cg["valid"] and not cg["ok"] and cg["feature_errors"],
+               f"check_geometry: broken features -> ok false: {cg}")
+        d.call("new_project")
+        cg = d.call("check_geometry")
+        expect(cg["ok"] and cg["body_count"] == 0,
+               "check_geometry: empty doc is ok with body_count 0")
+        d.call("add_feature", feature=BOX)
+        cg = d.call("check_geometry")
+        expect(cg["ok"] and cg["valid"] and cg["body_count"] == 1,
+               "check_geometry: healthy box is ok")
+
         print("remote_smoke: ALL CHECKS PASSED")
         return 0
     finally:

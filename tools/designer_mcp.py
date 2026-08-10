@@ -342,12 +342,13 @@ def mass_properties(body: int = -1) -> dict:
     return _call("mass_properties", **({"body": body} if body >= 0 else {}))
 
 
-@mcp.tool(description="B-Rep validity check per body (OCC BRepCheck_Analyzer): "
-          "returns {valid, bodies:[{body, name, valid, bad_faces, bad_edges, "
-          "bad_wires, reasons}]}. Flags invalid faces/edges/self-intersecting "
-          "wires and the distinct reasons. Read-only — run it on imported STEP "
-          "or after booleans to confirm the solid is well-formed. Optional body "
-          "index restricts to one body.")
+@mcp.tool(description="Did the model build? Returns {ok, valid, body_count, "
+          "feature_errors, bodies:[{body, name, valid, bad_faces, bad_edges, "
+          "bad_wires, reasons}]}. `ok` is the probe you want: every existing "
+          "body is a valid B-Rep AND no feature errored. `valid` is only the "
+          "B-Rep check (OCC BRepCheck_Analyzer) — vacuously true over zero "
+          "bodies, so read it with body_count. Read-only — run it on imported "
+          "STEP or after booleans. Optional body index restricts to one body.")
 def check_geometry(body: int = -1) -> dict:
     return _call("check_geometry", **({"body": body} if body >= 0 else {}))
 

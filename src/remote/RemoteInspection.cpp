@@ -264,7 +264,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // B-Rep validity per body (OCC BRepCheck_Analyzer) — flags invalid faces/
     // edges/wires and the distinct reasons. Read-only; useful on imported STEP
     // and after booleans. params: {body?: index} (all bodies when omitted).
-    const auto& bodies = RequirePartDoc(doc, "check_geometry").GetBodies();
+    //
+    // `valid` is strictly "every EXISTING body is a valid B-Rep" — vacuously
+    // true over zero bodies. The natural "did my model build?" probe is `ok`,
+    // which also demands no feature errored; body_count exposes the vacuous
+    // case ("valid over nothing") explicitly.
+    Document& part = RequirePartDoc(doc, "check_geometry");
+    const auto& bodies = part.GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
@@ -283,7 +289,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                       {"bad_wires", r.badWires},
                       {"reasons", r.reasons}});
     }
-    return json{{"valid", allValid}, {"bodies", rows}};
+    json featureErrors = RegenSummaryJson(part)["failed"];
+    const bool ok = allValid && featureErrors.empty();
+    return json{{"valid", allValid},
+                {"bodies", rows},
+                {"body_count", bodies.size()},
+                {"feature_errors", std::move(featureErrors)},
+                {"ok", ok}};
   }
   if (m == "measure") {
     // Geometry queries over stable element names (I1). params:
