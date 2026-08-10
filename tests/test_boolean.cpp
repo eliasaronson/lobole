@@ -148,3 +148,14 @@ TEST_CASE("Boolean regeneration is deterministic", "[boolean]") {
   const double v2 = doc.GetBodies()[0].shape.Volume();
   CHECK_THAT(v1, WithinAbs(v2, 1e-9));
 }
+
+TEST_CASE("A boolean with a missing operand reports why", "[boolean][error]") {
+  Document doc;
+  uint64_t a, b;
+  AddTwoBoxes(doc, a, b);
+  doc.AddFeature(
+      std::make_unique<BooleanFeature>("Cut", a, 9999, BooleanOp::Subtract));
+  CHECK_FALSE(doc.Regenerate());
+  const std::string err = doc.GetFeature(2)->GetError();
+  CHECK(err.find("operand body") != std::string::npos);
+}

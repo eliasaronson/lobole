@@ -26,12 +26,13 @@ namespace topo {
 
 // Boolean of two named shapes. `out` receives the propagated map for the
 // result (boolean section edges not reached by history seed "<tag>/seam<i>").
-// Returns an invalid CADShape on failure, with `out` cleared. Either input
+// Returns an invalid CADShape on failure, with `out` cleared and, when OCC
+// reported a reason, a diagnostic in *error (may be null). Either input
 // map may be empty — the op still runs, the result just carries fewer names.
 CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
-                      ElementMap& out);
+                      ElementMap& out, std::string* error = nullptr);
 
 // Constant-radius fillet or chamfer of the given edges (edgeIndex space,
 // the ElementMap convention). Blend faces are named

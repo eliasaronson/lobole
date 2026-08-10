@@ -600,6 +600,21 @@ def main():
         except RuntimeError:
             pass
 
+        # A failing feature carries a SPECIFIC error, not the generic
+        # "regeneration failed" fallback: a cut into an empty document.
+        d.call("new_project")
+        ske = d.call("add_feature", feature={
+            "type": "Sketch", "name": "S",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "rect", "c1": [0, 0], "c2": [2, 2]}]})
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Cut", "sketch_id": ske["id"],
+            "distance": 2.0, "mode": "cut"})
+        feats = d.call("get_state")["features"]
+        expect("no bodies" in feats[1].get("error", ""),
+               f"cut-with-no-bodies is a specific error: {feats[1].get('error')}")
+
         print("remote_smoke: ALL CHECKS PASSED")
         return 0
     finally:

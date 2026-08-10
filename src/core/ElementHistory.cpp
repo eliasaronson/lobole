@@ -226,9 +226,11 @@ void AppendSubshapeArgs(const TopoDS_Shape& shape, TopTools_ListOfShape& args) {
 CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
-                      ElementMap& out) {
+                      ElementMap& out, std::string* error) {
   out = {};
   if (!target.IsValid() || !tool.IsValid()) {
+    if (error)
+      *error = "boolean input shape is invalid";
     return CADShape();
   }
   try {
@@ -248,6 +250,8 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
       break;
     }
     if (!mk->IsDone()) {
+      if (error)
+        *error = "boolean operation did not complete";
       return CADShape();
     }
     const TopoDS_Shape result = mk->Shape();
@@ -265,6 +269,8 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
     return CADShape(result);
   } catch (const Standard_Failure& e) {
     LOG_ERROR("BooleanNamed: OCCT error: {}", e.GetMessageString());
+    if (error)
+      *error = std::string("OCCT error: ") + e.GetMessageString();
     out = {};
     return CADShape();
   }

@@ -14,7 +14,7 @@ BooleanFeature::BooleanFeature(const std::string& name, uint64_t targetId,
 
 bool BooleanFeature::Execute(RegenContext& ctx) {
   if (targetId == 0 || toolId == 0 || targetId == toolId) {
-    LOG_ERROR("BooleanFeature '{}': needs two distinct operand bodies", m_name);
+    SetError("needs two distinct operand bodies");
     return false;
   }
 
@@ -26,9 +26,8 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
   auto target = byOwner(targetId);
   auto tool = byOwner(toolId);
   if (target == bodies.end() || tool == bodies.end()) {
-    LOG_ERROR("BooleanFeature '{}': an operand body was not found "
-              "(consumed earlier, or its feature made none)",
-              m_name);
+    SetError("an operand body was not found (consumed earlier, or its "
+             "feature made none)");
     return false;
   }
 
@@ -36,13 +35,14 @@ bool BooleanFeature::Execute(RegenContext& ctx) {
   // propagate onto the result (toponaming T5).
   const double targetVol = target->shape.Volume();
   ElementMap map;
+  std::string boolErr;
   CADShape result =
       topo::BooleanNamed(op, target->shape, target->elementMap, tool->shape,
-                         tool->elementMap, GetId(), map);
+                         tool->elementMap, GetId(), map, &boolErr);
   if (!result.IsValid() || result.Volume() < 1e-9) {
-    LOG_ERROR("BooleanFeature '{}': operation produced an empty or invalid "
-              "solid (are the bodies disjoint?)",
-              m_name);
+    SetError("operation produced an empty or invalid solid (are the bodies "
+             "disjoint?)" +
+             (boolErr.empty() ? "" : " — " + boolErr));
     return false;
   }
   // A subtract/union whose result equals the target did nothing — the operands

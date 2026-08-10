@@ -18,14 +18,14 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
   const auto* sketch =
       dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
   if (!sketch) {
-    LOG_ERROR("RevolveFeature '{}': sketch id {} not found earlier in history",
-              m_name, sketchId);
+    SetError("profile sketch (id " + std::to_string(sketchId) +
+             ") not found earlier in history");
     return false;
   }
 
   std::vector<sketch::Loop> loops = sketch::BuildLoops(sketch->entities);
   if (loops.empty()) {
-    LOG_ERROR("RevolveFeature '{}': sketch has no closed profile", m_name);
+    SetError("sketch has no closed profile");
     return false;
   }
   // Region selection (U2): keep only the chosen regions (+ their holes).
@@ -42,7 +42,7 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
   glm::vec3 axisOrigin{0.0f};
   glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
   if (!ResolveAxis(ctx, axis, axisOrigin, axisDir)) {
-    LOG_ERROR("RevolveFeature '{}': axis not found", m_name);
+    SetError("revolve axis not found (deleted datum axis or sketch line?)");
     return false;
   }
 
@@ -53,7 +53,7 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
   const glm::vec3 planeO = sketch->plane.GetOrigin();
   if (std::abs(glm::dot(axisDir, n)) > 1e-4f ||
       std::abs(glm::dot(axisOrigin - planeO, n)) > 1e-4f) {
-    LOG_ERROR("RevolveFeature '{}': axis is not in the sketch plane", m_name);
+    SetError("revolve axis is not in the sketch plane");
     return false;
   }
 
@@ -62,7 +62,7 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
                                              axisDir, glm::radians(angleDeg),
                                              reversed, symmetric, GetId(), map);
   if (!solid.IsValid()) {
-    LOG_ERROR("RevolveFeature '{}': revolve construction failed", m_name);
+    SetError("revolve construction failed");
     return false;
   }
 

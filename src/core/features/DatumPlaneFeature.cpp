@@ -96,7 +96,7 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
   case DatumPlaneKind::Offset: {
     const auto parent = ResolveParentPlane(ctx, parentId, basePlane);
     if (!parent) {
-      LOG_ERROR("Datum plane '{}': parent plane not found", GetName());
+      SetError("parent plane not found");
       return false;
     }
     const double d = flip ? -offset : offset;
@@ -108,18 +108,17 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
   case DatumPlaneKind::Angled: {
     const auto parent = ResolveParentPlane(ctx, parentId, basePlane);
     if (!parent) {
-      LOG_ERROR("Datum plane '{}': parent plane not found", GetName());
+      SetError("parent plane not found");
       return false;
     }
     glm::vec3 axisOrigin{0.0f};
     glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
     if (!ResolveAxis(ctx, axis, axisOrigin, axisDir)) {
-      LOG_ERROR("Datum plane '{}': axis not found", GetName());
+      SetError("axis not found");
       return false;
     }
     if (NearlyParallel(axisDir, parent->GetNormal())) {
-      LOG_ERROR("Datum plane '{}': axis is parallel to the parent normal",
-                GetName());
+      SetError("axis is parallel to the parent normal");
       return false;
     }
     const float rad = glm::radians(static_cast<float>(angleDeg));
@@ -132,7 +131,7 @@ bool DatumPlaneFeature::Execute(RegenContext& ctx) {
   case DatumPlaneKind::ThroughPoints: {
     const glm::vec3 n = glm::cross(p1 - p0, p2 - p0);
     if (glm::dot(n, n) < 1e-12f) {
-      LOG_ERROR("Datum plane '{}': points are collinear", GetName());
+      SetError("the three points are collinear");
       return false;
     }
     m_outPlane = SketchPlane(p0, glm::normalize(n), glm::normalize(p1 - p0));

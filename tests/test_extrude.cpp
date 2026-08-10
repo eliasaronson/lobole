@@ -757,3 +757,17 @@ TEST_CASE("Extrude regions select one profile of a multi-region sketch",
   CHECK_FALSE(doc.Regenerate());
   CHECK_FALSE(e->GetError().empty());
 }
+
+TEST_CASE("A cut into an empty document reports why", "[extrude][error]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", kXY);
+  for (auto& e : RectLines({0, 0}, {2, 2}))
+    sk->entities.push_back(e);
+  doc.AddFeature(std::move(sk));
+  const uint64_t sid = doc.GetFeature(0)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Cut", sid, 2.0, ExtrudeMode::Cut));
+  CHECK_FALSE(doc.Regenerate());
+  const std::string err = doc.GetFeature(1)->GetError();
+  CHECK(err.find("no bodies") != std::string::npos);
+}

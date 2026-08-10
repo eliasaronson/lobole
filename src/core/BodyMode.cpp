@@ -21,12 +21,21 @@ bool VolumeUnchanged(double before, double after) {
   return before > 1e-9 &&
          std::abs(before - after) < 1e-6 * std::max(before, 1.0);
 }
+
+// Route a failure reason to the caller when it wants one, else to the log
+// (Document logs the caller-surfaced text again, so never both).
+void Fail(std::string* error, std::string message) {
+  if (error)
+    *error = std::move(message);
+  else
+    LOG_ERROR("{}", message);
+}
 } // namespace
 
 bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
                    ElementMap shapeMap, ExtrudeMode mode,
                    const std::string& name, const std::string& material,
-                   uint64_t ownerId, std::string* warning) {
+                   uint64_t ownerId, std::string* warning, std::string* error) {
   switch (mode) {
   case ExtrudeMode::NewBody:
     bodies.push_back({name, std::move(shape), material, ownerId});
@@ -53,11 +62,13 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
       }
     }
     ElementMap fusedMap;
+    std::string boolErr;
     CADShape fused = topo::BooleanNamed(BooleanOp::Union, bodies[target].shape,
                                         bodies[target].elementMap, shape,
-                                        shapeMap, ownerId, fusedMap);
+                                        shapeMap, ownerId, fusedMap, &boolErr);
     if (!fused.IsValid()) {
-      LOG_ERROR("ApplyBodyMode '{}': fuse failed", name);
+      Fail(error, "add failed to fuse with body '" + bodies[target].name + "'" +
+                      (boolErr.empty() ? "" : ": " + boolErr));
       return false;
     }
     if (warning &&
@@ -72,7 +83,8 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
 
   case ExtrudeMode::Cut: {
     if (bodies.empty()) {
-      LOG_ERROR("ApplyBodyMode '{}': Cut with no bodies", name);
+      Fail(error, "cut with no bodies — nothing exists yet to cut into "
+                  "(did an earlier feature fail?)");
       return false;
     }
     double volBefore = 0.0;
@@ -114,12 +126,15 @@ bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
 bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,
                             ElementMap shapeMap, ExtrudeMode mode,
                             Feature& owner) {
-  std::string warning;
+  std::string warning, error;
   const bool ok = ApplyBodyMode(bodies, std::move(shape), std::move(shapeMap),
                                 mode, owner.GetName(), owner.GetMaterial(),
-                                owner.GetId(), &warning);
+                                owner.GetId(), &warning, &error);
   if (!warning.empty()) {
     owner.SetWarning(warning);
+  }
+  if (!ok) {
+    owner.SetError(error.empty() ? "body operation failed" : error);
   }
   return ok;
 }
@@ -127,17 +142,18 @@ bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,
 bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
                                   std::vector<CADShape> instanceShapes,
                                   const std::string& name,
-                                  const std::string& material,
-                                  uint64_t ownerId) {
+                                  const std::string& material, uint64_t ownerId,
+                                  std::string* error) {
   if (instanceShapes.empty()) {
+    Fail(error, "pattern produced no instances");
     return false;
   }
   const bool hasSource =
       std::any_of(bodies.begin(), bodies.end(),
                   [&](const Body& b) { return b.createdBy == sourceId; });
   if (!hasSource) {
-    LOG_ERROR("Pattern '{}': source body (feature {}) not found", name,
-              sourceId);
+    Fail(error, "source body (feature " + std::to_string(sourceId) +
+                    ") not found — did the source feature fail?");
     return false;
   }
 
@@ -146,7 +162,8 @@ bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
   for (size_t i = 1; i < instanceShapes.size(); i++) {
     CADShape next = fused.Union(instanceShapes[i]);
     if (!next.IsValid()) {
-      LOG_ERROR("Pattern '{}': fusing instances failed", name);
+      Fail(error,
+           "fusing pattern instance " + std::to_string(i + 1) + " failed");
       return false;
     }
     fused = std::move(next);

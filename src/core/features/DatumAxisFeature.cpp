@@ -26,7 +26,7 @@ bool DatumAxisFeature::Execute(RegenContext& ctx) {
   case DatumAxisKind::TwoPoints: {
     const glm::vec3 d = p1 - p0;
     if (glm::dot(d, d) < 1e-12f) {
-      LOG_ERROR("DatumAxis '{}': the two points are coincident", GetName());
+      SetError("the two points are coincident");
       return false;
     }
     m_origin = p0;
@@ -40,8 +40,7 @@ bool DatumAxisFeature::Execute(RegenContext& ctx) {
     ref.sketchId = sketchId;
     ref.entityId = entityId;
     if (!ResolveAxis(ctx, ref, m_origin, m_dir)) {
-      LOG_ERROR("DatumAxis '{}': sketch line not found or degenerate",
-                GetName());
+      SetError("sketch line not found or degenerate");
       return false;
     }
     return true;

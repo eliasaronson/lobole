@@ -17,15 +17,14 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   const Feature* ref = ctx.FindById(sketchId);
   const auto* sketch = dynamic_cast<const SketchFeature*>(ref);
   if (!sketch) {
-    LOG_ERROR("ExtrudeFeature '{}': sketch id {} not found earlier in history",
-              m_name, sketchId);
+    SetError("profile sketch (id " + std::to_string(sketchId) +
+             ") not found earlier in history");
     return false;
   }
 
   std::vector<sketch::Loop> loops = sketch::BuildLoops(sketch->entities);
   if (loops.empty()) {
     SetError("sketch has no closed profile");
-    LOG_ERROR("ExtrudeFeature '{}': sketch has no closed profile", m_name);
     return false;
   }
   // Region selection (U2): keep only the chosen regions (+ their holes).
@@ -89,7 +88,6 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
                     "profile, or thickness <= 0?)"
                   : "profile could not be extruded (overlapping loops? "
                     "see log)");
-    LOG_ERROR("ExtrudeFeature '{}': prism construction failed", m_name);
     return false;
   }
   if (backOffset != 0.0) {
@@ -98,10 +96,6 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     prism.Translate(n * (sign * static_cast<float>(backOffset)));
   }
 
-  std::string warn;
-  const bool ok = ApplyBodyMode(ctx.bodies, std::move(prism), std::move(map),
-                                mode, m_name, m_material, GetId(), &warn);
-  if (!warn.empty())
-    SetWarning(warn);
-  return ok;
+  return ApplyBodyModeReporting(ctx.bodies, std::move(prism), std::move(map),
+                                mode, *this);
 }

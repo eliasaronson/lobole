@@ -168,3 +168,13 @@ TEST_CASE("Pattern regeneration is deterministic", "[pattern]") {
   doc.Regenerate();
   CHECK_THAT(TotalVolume(doc), WithinAbs(v1, 1e-9));
 }
+
+TEST_CASE("A pattern with a missing source reports why", "[pattern][error]") {
+  Document doc;
+  auto pat = std::make_unique<PatternFeature>("Pat", PatternKind::Linear, 9999);
+  pat->count = 3;
+  doc.AddFeature(std::move(pat));
+  CHECK_FALSE(doc.Regenerate());
+  const std::string err = doc.GetFeature(0)->GetError();
+  CHECK(err.find("source body") != std::string::npos);
+}

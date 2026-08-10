@@ -25,8 +25,8 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     }
   }
   if (instances.empty()) {
-    LOG_ERROR("PatternFeature '{}': source body (feature {}) not found", m_name,
-              sourceId);
+    SetError("source body (feature " + std::to_string(sourceId) +
+             ") not found — did the source feature fail?");
     return false;
   }
   const size_t seedCount = instances.size();
@@ -34,7 +34,7 @@ bool PatternFeature::Execute(RegenContext& ctx) {
   if (kind == PatternKind::Mirror) {
     const auto plane = ResolveParentPlane(ctx, planeId, basePlane);
     if (!plane) {
-      LOG_ERROR("PatternFeature '{}': mirror plane not found", m_name);
+      SetError("mirror plane not found");
       return false;
     }
     const glm::vec3 o = plane->GetOrigin();
@@ -48,7 +48,7 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     glm::vec3 axisOrigin{0.0f};
     glm::vec3 axisDir{1.0f, 0.0f, 0.0f};
     if (!ResolveAxis(ctx, axis, axisOrigin, axisDir)) {
-      LOG_ERROR("PatternFeature '{}': axis not found", m_name);
+      SetError("pattern axis not found");
       return false;
     }
     // Resolve the count (expression over the parameter table, else literal).
@@ -76,6 +76,11 @@ bool PatternFeature::Execute(RegenContext& ctx) {
     }
   }
 
-  return FuseInstancesReplacingSource(
-      ctx.bodies, sourceId, std::move(instances), m_name, m_material, GetId());
+  std::string fuseErr;
+  const bool ok =
+      FuseInstancesReplacingSource(ctx.bodies, sourceId, std::move(instances),
+                                   m_name, m_material, GetId(), &fuseErr);
+  if (!ok)
+    SetError(fuseErr.empty() ? "pattern failed" : fuseErr);
+  return ok;
 }

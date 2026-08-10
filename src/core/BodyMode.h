@@ -25,14 +25,20 @@
 // body (total volume unchanged), or an Add whose tool lay entirely inside its
 // target. These are not errors (the result is valid), but almost always signal
 // a mis-placed sketch/plane, so callers surface them via Feature::SetWarning.
+//
+// `error` (optional out-param): the reason for a false return, in user-grade
+// prose, so callers can surface it via Feature::SetError instead of the
+// generic "regeneration failed". Without it the reason is only logged.
 bool ApplyBodyMode(std::vector<Body>& bodies, CADShape shape,
                    ElementMap shapeMap, ExtrudeMode mode,
                    const std::string& name, const std::string& material,
-                   uint64_t ownerId, std::string* warning = nullptr);
+                   uint64_t ownerId, std::string* warning = nullptr,
+                   std::string* error = nullptr);
 
 // Convenience for the solid-producing features: run ApplyBodyMode and forward
-// any advisory onto `owner` (Feature::SetWarning), so every cut/add feature
-// reports a no-op the same way without repeating the plumbing.
+// any advisory onto `owner` (Feature::SetWarning) and any failure reason onto
+// Feature::SetError, so every cut/add feature reports the same way without
+// repeating the plumbing.
 bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,
                             ElementMap shapeMap, ExtrudeMode mode,
                             Feature& owner);
@@ -41,9 +47,10 @@ bool ApplyBodyModeReporting(std::vector<Body>& bodies, CADShape shape,
 // the result back into its connected solids, erases every body created by
 // `sourceId`, and appends each solid as a body owned by `ownerId`. Instances
 // that touch merge into one body; disjoint instances become separate bodies.
-// Returns false if no source body was found or the fuse failed.
+// Returns false if no source body was found or the fuse failed; `error`
+// (optional) receives the reason for callers to SetError.
 bool FuseInstancesReplacingSource(std::vector<Body>& bodies, uint64_t sourceId,
                                   std::vector<CADShape> instanceShapes,
                                   const std::string& name,
-                                  const std::string& material,
-                                  uint64_t ownerId);
+                                  const std::string& material, uint64_t ownerId,
+                                  std::string* error = nullptr);
