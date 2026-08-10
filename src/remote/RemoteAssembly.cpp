@@ -416,6 +416,19 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     return json{{"path", path}, {"rows", bom.rows.size()}};
   }
   if (m == "set_active_part") {
+    // params: {index} or {name} — the describe doc promises both, and every
+    // sibling RPC (rename_part, add_occurrence) already resolves names.
+    if (p.contains("name")) {
+      const std::string name = p.at("name").get<std::string>();
+      ui::EnsureParts(state);
+      for (size_t i = 0; i < state.parts.size(); i++) {
+        if (state.parts[i].name == name) {
+          ui::SetActivePart(state, i);
+          return json{{"active", state.activePart}};
+        }
+      }
+      throw std::runtime_error("no tab named '" + name + "' (see list_parts)");
+    }
     ui::SetActivePart(state, p.at("index").get<size_t>());
     return json{{"active", state.activePart}};
   }

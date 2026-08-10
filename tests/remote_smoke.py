@@ -723,6 +723,18 @@ def main():
         expect(not undispatched,
                f"described but never dispatched: {undispatched}")
 
+        # set_active_part accepts a NAME as well as an index (the describe
+        # doc promises both; the name path was missing until it bit).
+        d.call("new_project")
+        d.call("add_part", name="Named Tab")
+        r = d.call("set_active_part", name="Named Tab")
+        expect(r["active"] >= 0, "set_active_part by name")
+        try:
+            d.call("set_active_part", name="No Such Tab")
+            expect(False, "bad tab name should error")
+        except RuntimeError as e:
+            expect("list_parts" in str(e), f"bad-name error is helpful: {e}")
+
         # Config methods on a drawing tab explain themselves instead of
         # reporting "unknown method".
         d.call("new_project")
