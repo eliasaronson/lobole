@@ -21,8 +21,10 @@ from designer_remote import Designer  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Format reference, embedded into tool descriptions. Source of truth:
-# src/core/io/Serialization.cpp (FeatureFromJson / EntityToJson) and
-# src/remote/RemoteServer.cpp (add_constraint). Transcribed for OCCT-side v12.
+# src/core/io/SerializeFeatures.cpp (FeatureFromJson / EntityFromJson) and
+# RemoteModeling.cpp (ConstraintKindTable). The describe RPC serves the
+# authoritative type lists; mcp_smoke cross-checks this text against it, so
+# a new feature type that isn't documented here fails the suite.
 # ---------------------------------------------------------------------------
 
 AXIS_REF = """An axis reference is {"kind": "x"|"y"|"z"} (global axes) or
@@ -46,6 +48,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
       "start_angle": rad, "end_angle": rad}}
     {{"type": "ellipse", "center": [u,v], "r_major": num, "r_minor": num,
       "rotation": rad}}
+    {{"type": "ellipse_arc", "center": [u,v], "r_major": num, "r_minor": num,
+      "rotation": rad, "start_param": rad, "end_param": rad}}
+    {{"type": "spline", "poles": [[u,v], ...], "degree"?: int (default 3)}}
   Any entity may set "construction": true (reference geometry, not profiled).
   Entity coordinates can be EXPRESSION-DRIVEN via "<field>_expr" keys
   evaluated against document variables on every regeneration: line "ax_expr"/
@@ -114,22 +119,52 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   counterbore: "cb_diameter"/"cb_depth", countersink: "cs_diameter"/
   "cs_depth"}} — far cleaner than a construction circle + cut-extrude per
   bolt hole; put the point sketch on the face you drill from.
-- Sweep (sweep a closed profile sketch along an open path sketch):
+- Sweep (sweep a closed profile sketch along an open path):
   {{"type": "Sweep", "name": str, "profile_id": <sketch feature id>,
-  "path_id": <sketch feature id>, "mode": "new_body"|"add"|"cut"}} — put the
-  profile at the path's start, on a plane perpendicular to the path (e.g.
-  profile on XY, path on XZ/YZ from the origin). Path = one open chain of
-  lines/arcs (not closed).
+  "path_id": <sketch OR Curve3D feature id>, "guide_id"?: <sketch/Curve3D —
+  a guide curve shaping the section along the way>,
+  "frame"?: "corrected_frenet" (default) | "frenet" | "fixed",
+  "mode": "new_body"|"add"|"cut"}} — put the profile at the path's start, on
+  a plane perpendicular to the path (e.g. profile on XY, path on XZ/YZ from
+  the origin). Path = one open chain of lines/arcs (not closed).
 - Loft (skin a solid through 2+ profile sketches): {{"type": "Loft",
   "name": str, "sketch_ids": [<feature id>, <feature id>, ...],
+  "path_id"?: <spine curve>, "guide_id"?: <guide curve>,
   "mode": "new_body"|"add"|"cut"}} — each sketch's outer profile is a
   section, in order; put the sketches on datum planes at different heights.
+- Curve3D (a 3D curve for sweep/pipe/loft paths): {{"type": "Curve3D",
+  "name": str, "kind": "fit_spline"|"control_poly"|"helix", ...}}
+  fit_spline/control_poly: "points": [[x,y,z], ...], "degree"?: int,
+  "closed"?: bool
+  helix: "origin": [x,y,z], "axis": [x,y,z], "radius": num, "pitch": num,
+  "turns": num (each with "_expr" twins), "left_handed"?: bool
+- Pipe (tube along a path, no profile sketch needed): {{"type": "Pipe",
+  "name": str, "path_id": <sketch/Curve3D id>, "outer_diameter": num,
+  "wall_thickness": num (0 = solid rod), "outer_diameter_expr"?/
+  "wall_thickness_expr"?: str, "mode": "new_body"|"add"|"cut"}}
+- Rib (thicken an open sketch chain into a web up to the body):
+  {{"type": "Rib", "name": str, "sketch_id": <open-profile sketch id>,
+  "thickness": num, "thickness_expr"?: str, "flip"?: bool,
+  "body_id"?: <target body's created_by id>}}
+- Thread (cosmetic or modeled thread on a cylindrical face):
+  {{"type": "Thread", "name": str, "face": {{"feature_id", "element"}},
+  "designation"?: str (e.g. "M8x1.25"), "pitch": num, "length"?: num,
+  "length_expr"?: str, "modeled"?: bool (true cuts real helical threads)}}
+- Split (cut a body in two, keeping chosen sides): {{"type": "Split",
+  "name": str, "body_id": <created_by id>, "knife"?: "plane" (default) |
+  "face", plane: "datum_id"?: <DatumPlane id> or "base_plane":
+  "xy"|"xz"|"yz" + "offset"/"offset_expr", face: "face": {{"feature_id",
+  "element"}}, "keep"?: which sides}}
+- Refine (heal/simplify a body's B-Rep — merge split faces):
+  {{"type": "Refine", "name": str, "body_id": <created_by id>}}
 - Shell (hollow a body into a wall): {{"type": "Shell", "name": str,
   "body_id": <the body's created_by feature id>, "thickness": num,
   "thickness_expr"?: str, "open_faces": [{{"feature_id": <same body>,
   "element": <stable face name from list_elements>}}, ...]}} — at least one
   open face is required (the faces removed to hollow through).
 - Import (STEP): {{"type": "Import", "name": str, "path": str}}
+
+Call the `describe` tool for the authoritative method/type/enum lists.
 
 {AXIS_REF}
 
@@ -270,6 +305,17 @@ def _call(method, **params):
 # ---------------------------------------------------------------------------
 # Inspect
 # ---------------------------------------------------------------------------
+
+@mcp.tool(description="API introspection — call this FIRST to learn the "
+          "surface: every RPC method with a one-line doc and whether it needs "
+          "an active part tab, the feature types (with the format version "
+          "each arrived in), sketch entity types, constraint kinds, extrude "
+          "modes, axis kinds, material slugs, and the document format "
+          "version. The authoritative companion to the format prose in this "
+          "server's tool descriptions.")
+def describe() -> dict:
+    return _call("describe")
+
 
 @mcp.tool(description="Full document state: features (with ids and per-type "
           "fields, plus 'error' if regeneration failed and 'warning' for a "

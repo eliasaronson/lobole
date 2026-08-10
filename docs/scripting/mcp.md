@@ -26,7 +26,8 @@ tools error with the remedy until it is reachable.
 
 ## What's exposed
 
-30 tools mirroring the JSON-RPC remote surface (same names): document state
+The full JSON-RPC remote surface as same-named tools (call the `describe`
+tool for the authoritative list): document state
 (`get_state`), features (`add_feature`, `modify_feature`, …), sketch
 constraints and ops (`add_constraint`, `fillet`, `mirror`, `pattern`,
 `offset`), variables, undo/redo, project I/O, and the verification loop —
@@ -48,10 +49,12 @@ The `modeling-workflow` prompt teaches the loop that works: variables first,
 constrain fully, verify with `get_state` + `screenshot` after every step.
 
 The feature/entity/constraint JSON dialects are documented in the tool
-descriptions; the source of truth is `Serialization.cpp` (`FeatureFromJson`)
-— when a new feature type lands there, add it to `FEATURE_FORMATS` in
-`designer_mcp.py` (standing rule: a feature an LLM can't drive is
-half-shipped).
+descriptions; the source of truth is `SerializeFeatures.cpp`
+(`FeatureFromJson`), served at runtime by the `describe` RPC. Standing rule
+(a feature an LLM can't drive is half-shipped), now test-enforced: a new
+feature type must be added to the describe table beside the dispatch chain
+(remote_smoke fails otherwise) and to `FEATURE_FORMATS` in
+`designer_mcp.py` (mcp_smoke cross-checks it against describe).
 
 ## Testing
 

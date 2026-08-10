@@ -64,13 +64,27 @@ async def run(port):
             await session.initialize()
 
             tools = (await session.list_tools()).tools
-            expect(len(tools) >= 25, f"tool count ({len(tools)})")
+            expect(len(tools) >= 115, f"tool count ({len(tools)})")
             prompts = (await session.list_prompts()).prompts
             expect(any(p.name == "modeling-workflow" for p in prompts),
                    "workflow prompt registered")
 
             async def call(tool, /, **args):
                 return result(await session.call_tool(tool, args))
+
+            # Drift gate: every feature type the app accepts must be
+            # documented in FEATURE_FORMATS (the standing rule from
+            # docs/scripting/mcp.md, enforced). `describe` is the app-side
+            # truth; the module constant is the MCP-side prose.
+            import designer_mcp
+            desc = await call("describe")
+            for ft in desc["feature_types"]:
+                expect(ft["type"] in designer_mcp.FEATURE_FORMATS,
+                       f"feature type {ft['type']} missing from "
+                       "FEATURE_FORMATS")
+            for ent in desc["sketch_entity_types"]:
+                expect(f'"{ent}"' in designer_mcp.FEATURE_FORMATS,
+                       f"entity type {ent} missing from FEATURE_FORMATS")
 
             # The bracket, parameters-first (the workflow the prompt teaches)
             await call("new_project")
