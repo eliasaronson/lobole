@@ -8,6 +8,7 @@
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include "core/sketch/SketchProfile.h"
 
 #include <cmath>
 #include <filesystem>
@@ -213,4 +214,97 @@ TEST_CASE("Revolve round-trips through JSON", "[revolve]") {
              WithinRel(0.75 * 24.0 * M_PI, 1e-3));
 
   fs::remove(path);
+}
+
+// --- Exactly-authored arc profiles (RPC path: no solver noise) ------------
+
+// A revolve half-section in (r, z) sketch UV: a driver-like outline whose
+// dust-cap dome is an arc meeting a line at exact coordinates. `apexZ` sets
+// the dome apex; the arc is the circle through (10,-13) and (0,apexZ) with a
+// horizontal tangent at the apex, exactly as an RPC client authors it.
+static std::vector<sketch::Entity> ArcCapProfile(double apexZ) {
+  const double sag = 13.0 + apexZ; // cone depth 13
+  const double r = (10.0 * 10.0 + sag * sag) / (2.0 * sag);
+  const double zc = apexZ - r;
+  const double a0 = std::atan2(-13.0 - zc, 10.0);
+  const glm::vec2 A{0.0f, -62.1f}, B{38.0f, -62.1f}, C{38.0f, -25.7f},
+      D{49.5f, -8.0f}, E{52.5f, -7.4f}, F{52.5f, -5.4f}, G{61.0f, -3.4f},
+      H{61.0f, -2.4f}, I{46.0f, 0.0f}, J{10.0f, -13.0f},
+      K{0.0f, static_cast<float>(apexZ)};
+  std::vector<sketch::Entity> e;
+  for (auto [p, q] : {std::pair{A, B},
+                      {B, C},
+                      {C, D},
+                      {D, E},
+                      {E, F},
+                      {F, G},
+                      {G, H},
+                      {H, I},
+                      {I, J},
+                      {K, A}})
+    e.push_back(sketch::Line{p, q});
+  e.push_back(sketch::Arc{{0.0f, static_cast<float>(zc)}, r, a0, M_PI / 2.0});
+  return e;
+}
+
+// The plane the RPC repro used: XZ with normal -Y, so sketch (u,v) = (x,z)
+// and the revolve axis is world Z.
+static const SketchPlane kXZNegY({0, 0, 0}, {0, -1, 0}, {1, 0, 0});
+
+TEST_CASE("Exact-coordinate arc profile revolves (float32 joint tolerance)",
+          "[revolve][arc]") {
+  // Regression: with apex -9.5 the dome arc's joint vertices sat ~1e-6 off
+  // the exact-double trimming circle (all UV math is float32) while their
+  // tolerance was measured only against the float endpoint — MakeEdge's
+  // projection failed and the whole revolve threw "BRep_API: command not
+  // done". Solver-noised GUI arcs accidentally cleared the bar; exactly-
+  // authored RPC arcs are the ones that collapsed it.
+  auto loops = sketch::BuildLoops(ArcCapProfile(-9.5));
+  REQUIRE(loops.size() == 1);
+  CADShape solid = sketch::BuildRevolve(kXZNegY, loops, {0, 0, 0}, {0, 0, 1},
+                                        2.0 * M_PI, false, false);
+  REQUIRE(solid.IsValid());
+  // Straight-capped variant of this profile measures ~3.13e5; the dome only
+  // trades sub-1% volume. Loose bounds keep the check shape-level.
+  CHECK(solid.Volume() > 3.0e5);
+  CHECK(solid.Volume() < 3.25e5);
+}
+
+TEST_CASE("Arc profile builds across a dome-radius sweep", "[revolve][arc]") {
+  // The failure was bit-pattern dependent (R=16.0357 failed, R=14.5 built).
+  // Sweep the apex so the arc radius walks through many float32 patterns;
+  // every single one must build.
+  for (int k = 0; k < 40; k++) {
+    const double apex = -9.5 + 0.01 * k;
+    auto loops = sketch::BuildLoops(ArcCapProfile(apex));
+    REQUIRE(loops.size() == 1);
+    CADShape solid = sketch::BuildRevolve(kXZNegY, loops, {0, 0, 0}, {0, 0, 1},
+                                          2.0 * M_PI, false, false);
+    INFO("apex " << apex);
+    REQUIRE(solid.IsValid());
+  }
+}
+
+TEST_CASE("BuildLoops arc endpoints match the wire builder's rounding",
+          "[revolve][arc]") {
+  // BuildLoops and MakeLoopWire must derive arc endpoints with the same
+  // float32 rounding (center + float(r*cos a)), or the joint midpoints drift
+  // from the trimming circle by an extra ulp.
+  auto loops = sketch::BuildLoops(ArcCapProfile(-9.5));
+  REQUIRE(loops.size() == 1);
+  const sketch::LoopEdge* arc = nullptr;
+  for (const auto& e : loops[0].edges)
+    if (e.arc)
+      arc = &e;
+  REQUIRE(arc != nullptr);
+  const auto onCircle = [&](double ang) {
+    return glm::vec2{
+        arc->center.x + static_cast<float>(arc->radius * std::cos(ang)),
+        arc->center.y + static_cast<float>(arc->radius * std::sin(ang))};
+  };
+  const glm::vec2 s = onCircle(arc->angStart), en = onCircle(arc->angEnd);
+  // BuildLoops may swap a/b to fit the walk; accept either pairing, bitwise.
+  const bool fwd = arc->a == s && arc->b == en;
+  const bool rev = arc->a == en && arc->b == s;
+  CHECK((fwd || rev));
 }

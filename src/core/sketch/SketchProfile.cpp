@@ -146,8 +146,11 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
             double s = e.startAngle, en = e.endAngle;
             while (en <= s)
               en += 2.0 * M_PI; // CCW-always
-            freeEdges.push_back({true, ArcPointUV(e, 1), ArcPointUV(e, 2),
-                                 e.center, e.radius, s, en, e.id});
+            // Endpoints via OnCircle, not ArcPointUV: MakeLoopWire re-derives
+            // them with OnCircle, and the two round float32 differently.
+            freeEdges.push_back({true, OnCircle(e.center, e.radius, s),
+                                 OnCircle(e.center, e.radius, en), e.center,
+                                 e.radius, s, en, e.id});
           } else if constexpr (std::is_same_v<T, EllipseArc>) {
             LoopEdge ee;
             ee.a = EllipseArcPointUV(e, 1);
@@ -259,7 +262,7 @@ Handle(Geom_BSplineCurve)
 // wire is passed through ShapeFix_Wire (reorder / reconnect / close) so greedy
 // edge order and small endpoint gaps — especially where arcs meet lines — are
 // repaired before face building (FreeCAD Sketch::toShape does the same).
-TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
+TopoDS_Wire MakeLoopWireImpl(const SketchPlane& plane, const Loop& loop) {
   const glm::vec3 n3 = plane.GetNormal();
   const gp_Dir normal(n3.x, n3.y, n3.z);
   auto toPnt = [&](const glm::vec2& uv) {
@@ -272,7 +275,10 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
     glm::vec3 u = plane.GetUAxis();
     gp_Ax2 axis(toPnt(loop.circle->center), normal, gp_Dir(u.x, u.y, u.z));
     gp_Circ circ(axis, loop.circle->radius);
-    wire.Add(BRepBuilderAPI_MakeEdge(circ).Edge());
+    BRepBuilderAPI_MakeEdge me(circ);
+    if (!me.IsDone())
+      return TopoDS_Wire();
+    wire.Add(me.Edge());
   } else if (loop.ellipse) {
     const Ellipse& el = *loop.ellipse;
     // Major-axis direction: +U rotated by `rotation` within the plane.
@@ -281,7 +287,10 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
     glm::vec3 major = u * static_cast<float>(c) + v * static_cast<float>(s);
     gp_Ax2 axis(toPnt(el.center), normal, gp_Dir(major.x, major.y, major.z));
     gp_Elips ell(axis, el.rMajor, el.rMinor);
-    wire.Add(BRepBuilderAPI_MakeEdge(ell).Edge());
+    BRepBuilderAPI_MakeEdge me(ell);
+    if (!me.IsDone())
+      return TopoDS_Wire();
+    wire.Add(me.Edge());
   } else {
     // Consecutive edges share one explicit vertex per chain joint. BuildLoops
     // matched the endpoints within kChainTol, but solver float noise can
@@ -299,7 +308,10 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
     if (n == 1 && loop.edges[0].spline) {
       Handle(Geom_BSplineCurve) curve =
           MakeBSplineCurve(plane, *loop.edges[0].spline);
-      wire.Add(BRepBuilderAPI_MakeEdge(curve).Edge());
+      BRepBuilderAPI_MakeEdge me(curve);
+      if (!me.IsDone())
+        return TopoDS_Wire();
+      wire.Add(me.Edge());
       if (!wire.IsDone())
         return TopoDS_Wire();
       ShapeFix_Wire fix;
@@ -346,32 +358,62 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
       const glm::vec2 mid = (loop.edges[i].b + loop.edges[next].a) * 0.5f;
       const gp_Pnt p = toPnt(mid);
       double tol = Precision::Confusion();
-      if (loop.edges[i].arc || loop.edges[i].spline || loop.edges[i].ellipseArc)
-        tol = std::max(tol, p.Distance(endPointWorld(i, true)) +
+      // The joint must lie on each adjacent curve within its tolerance. Two
+      // terms per neighbour: the distance to the traversal endpoint (angular
+      // mismatch; the only term splines/ellipse-arcs need), and for arcs the
+      // radial distance to the trimming circle itself. MakeEdge projects the
+      // vertex onto the exact-double gp_Circ while every UV point here went
+      // through float32, so an exactly-authored profile can sit ~1e-6 off
+      // the circle — past the endpoint-only tolerance, which made the edge
+      // constructor fail on bit patterns (solver-noised GUI arcs, ~1e-6 off
+      // their endpoints, accidentally cleared it).
+      auto growForEdge = [&](size_t k, bool atB) {
+        const LoopEdge& e = loop.edges[k];
+        if (!e.arc && !e.spline && !e.ellipseArc)
+          return;
+        tol = std::max(tol, p.Distance(endPointWorld(k, atB)) +
                                 Precision::Confusion());
-      if (loop.edges[next].arc || loop.edges[next].spline ||
-          loop.edges[next].ellipseArc)
-        tol = std::max(tol, p.Distance(endPointWorld(next, false)) +
-                                Precision::Confusion());
+        if (e.arc)
+          tol = std::max(tol, std::abs(p.Distance(toPnt(e.center)) - e.radius) +
+                                  Precision::Confusion());
+      };
+      growForEdge(i, true);
+      growForEdge(next, false);
       builder.MakeVertex(joints[i], p, tol);
     }
 
     for (size_t i = 0; i < n; i++) {
       const LoopEdge& e = loop.edges[i];
+      // .Edge() on a not-done maker throws; check IsDone so a failed edge is
+      // a failed wire (feature error), not a Standard_Failure escape.
+      auto addEdge = [&](BRepBuilderAPI_MakeEdge& me) {
+        if (!me.IsDone()) {
+          LOG_ERROR("Sketch profile: edge {} of {} failed to build "
+                    "(vertex off curve?)",
+                    i, n);
+          return false;
+        }
+        wire.Add(me.Edge());
+        return true;
+      };
       const TopoDS_Vertex& from = joints[(i + n - 1) % n];
       const TopoDS_Vertex& to = joints[i];
       if (e.spline) {
         // Poles are pre-oriented a → b, so the curve runs from `from` to `to`.
         Handle(Geom_BSplineCurve) curve = MakeBSplineCurve(plane, *e.spline);
-        wire.Add(BRepBuilderAPI_MakeEdge(curve, from, to).Edge());
+        BRepBuilderAPI_MakeEdge me(curve, from, to);
+        if (!addEdge(me))
+          return TopoDS_Wire();
       } else if (e.arc) {
         // Trim the gp_Circ by the shared vertices, ordered to match the
         // canonical CCW span; ShapeFix_Wire fixes up the in-loop orientation.
         glm::vec3 u = plane.GetUAxis();
         gp_Ax2 axis(toPnt(e.center), normal, gp_Dir(u.x, u.y, u.z));
         gp_Circ circ(axis, e.radius);
-        wire.Add(forward[i] ? BRepBuilderAPI_MakeEdge(circ, from, to).Edge()
-                            : BRepBuilderAPI_MakeEdge(circ, to, from).Edge());
+        BRepBuilderAPI_MakeEdge me(circ, forward[i] ? from : to,
+                                   forward[i] ? to : from);
+        if (!addEdge(me))
+          return TopoDS_Wire();
       } else if (e.ellipseArc) {
         // Trim a gp_Elips built on the major-axis frame (its parametrisation
         // matches EllipseArc's), ordered to the canonical sweep like the arc.
@@ -383,14 +425,18 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
         gp_Ax2 axis(toPnt(ea.center), normal,
                     gp_Dir(major.x, major.y, major.z));
         gp_Elips ell(axis, ea.rMajor, ea.rMinor);
-        wire.Add(forward[i] ? BRepBuilderAPI_MakeEdge(ell, from, to).Edge()
-                            : BRepBuilderAPI_MakeEdge(ell, to, from).Edge());
+        BRepBuilderAPI_MakeEdge me(ell, forward[i] ? from : to,
+                                   forward[i] ? to : from);
+        if (!addEdge(me))
+          return TopoDS_Wire();
       } else {
         const gp_Pnt p0 = BRep_Tool::Pnt(from), p1 = BRep_Tool::Pnt(to);
         if (p0.Distance(p1) < Precision::Confusion())
           continue; // degenerate sliver after snapping
         Handle(Geom_TrimmedCurve) seg = GC_MakeSegment(p0, p1).Value();
-        wire.Add(BRepBuilderAPI_MakeEdge(seg, from, to).Edge());
+        BRepBuilderAPI_MakeEdge me(seg, from, to);
+        if (!addEdge(me))
+          return TopoDS_Wire();
       }
       if (wire.Error() != BRepBuilderAPI_WireDone) {
         LOG_ERROR("Sketch profile: wire rejected edge {} of {}", i, n);
@@ -408,6 +454,19 @@ TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
   fix.FixConnected();
   fix.FixClosed();
   return fix.Wire();
+}
+
+TopoDS_Wire MakeLoopWire(const SketchPlane& plane, const Loop& loop) {
+  // OCCT edge/wire construction can throw (StdFail_NotDone and friends), and
+  // several callers sit outside any try (offset, loft, sweep profiles) — an
+  // escaping exception aborts the app. Contain it: a throw is a failed wire.
+  try {
+    return MakeLoopWireImpl(plane, loop);
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Sketch profile: wire construction: OCCT error: {}",
+              e.GetMessageString());
+    return TopoDS_Wire();
+  }
 }
 
 // The loop's boundary as a UV polygon (arcs/circles tessellated).
