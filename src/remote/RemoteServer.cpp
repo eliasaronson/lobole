@@ -18,6 +18,7 @@
 #include "remote/RemoteAssembly.h"
 #include "remote/RemoteConfigurations.h"
 #include "remote/RemoteDrawings.h"
+#include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h"
 #include "remote/RemoteModeling.h"
 #include "remote/RemoteProject.h"
@@ -460,6 +461,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // nothing instead of silently reading stale bodies.
       if (!doc->GetFeature(i)->GetError().empty()) {
         f["error"] = doc->GetFeature(i)->GetError();
+        // Failure downstream of another failure — usually collateral; fix
+        // the first red feature first.
+        if (doc->GetFeature(i)->ErrorAfterEarlierFailure()) {
+          f["after_earlier_failure"] = true;
+        }
       }
       // Non-fatal advisory (e.g. a cut that intersected nothing): the feature
       // built a valid result, but likely not the intended one.
@@ -534,8 +540,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"can_redo", ui::CanGlobalRedo(state)},
             {"rollback", doc->Rollback()},
             {"regen",
-             {{"executed", doc->LastRegenStats().executed},
-              {"cached", doc->LastRegenStats().cached}}},
+             [&] {
+               json r = remote::RegenSummaryJson(*doc);
+               r["executed"] = doc->LastRegenStats().executed;
+               r["cached"] = doc->LastRegenStats().cached;
+               return r;
+             }()},
             {"pending_feature_id", state.pendingFeatureId}};
   }
   if (m == "rt_build") {

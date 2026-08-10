@@ -83,6 +83,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         ids.push_back(sketch::EntityId(e));
       resp["entity_ids"] = ids;
     }
+    resp["regen"] = RegenSummaryJson(*doc);
     return resp;
   }
   if (m == "modify_feature") {
@@ -96,7 +97,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                  *doc)) {
       throw std::runtime_error("modify failed");
     }
-    return json::object();
+    return json{{"regen", RegenSummaryJson(*doc)}};
   }
   if (m == "set_material") {
     // Assign a material to a feature (by id). params: {feature_id, material}
@@ -124,14 +125,15 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // are unchanged and SyncDocumentRenderers would skip the re-push. Force a
     // resync so the shaded body recolors immediately (no other edit needed).
     state.syncedDocumentVersion = UINT64_MAX;
-    return json::object();
+    return json{{"regen", RegenSummaryJson(*doc)}};
   }
   if (m == "set_rollback") {
     // Move the rollback bar: regeneration executes features [0, index) only;
     // -1 (or >= count) = end. Not undoable — it is a view of the history,
     // not an edit of it. params: {index}
     doc->SetRollback(p.at("index").get<int>());
-    return json{{"rollback", doc->Rollback()}};
+    return json{{"rollback", doc->Rollback()},
+                {"regen", RegenSummaryJson(*doc)}};
   }
   if (m == "suppress_feature") {
     // Toggle suppression (by feature id) as one undoable edit; a suppressed
@@ -148,7 +150,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     json after = DocumentIO::FeatureToJson(*f);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
-    return json::object();
+    return json{{"regen", RegenSummaryJson(*doc)}};
   }
   if (m == "delete_feature") {
     if (!state.commands->Execute(
@@ -156,7 +158,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
             *doc)) {
       throw std::runtime_error("no feature at index");
     }
-    return json::object();
+    return json{{"regen", RegenSummaryJson(*doc)}};
   }
   if (m == "project_geometry") {
     // Add LIVE external (projected) geometry to a sketch: a face or edge of a
@@ -502,6 +504,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     json result = {{"value", param->value}, {"scope", scope}};
     if (!param->error.empty())
       result["error"] = param->error;
+    result["regen"] = RegenSummaryJson(*doc);
     return result;
   }
   if (m == "delete_variable") {

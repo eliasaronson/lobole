@@ -258,3 +258,33 @@ TEST_CASE("Expression edits invalidate the cache through parameters",
   doc.Regenerate();
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(24.0, 1e-6));
 }
+
+TEST_CASE("Downstream failures are tagged after-earlier-failure",
+          "[document][regen]") {
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  sk->AddRectangle({0, 0}, {2, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t sid = doc.GetFeature(0)->GetId();
+  // Root failure: an extrude referencing a nonexistent sketch (makes no
+  // body). Collateral: a cut with nothing to cut into.
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Root", 9999, 1.0,
+                                                  ExtrudeMode::NewBody));
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Cut", sid, 1.0, ExtrudeMode::Cut));
+
+  CHECK_FALSE(doc.Regenerate());
+  CHECK_FALSE(doc.GetFeature(1)->GetError().empty());
+  CHECK_FALSE(doc.GetFeature(1)->ErrorAfterEarlierFailure()); // the root
+  CHECK_FALSE(doc.GetFeature(2)->GetError().empty());
+  CHECK(doc.GetFeature(2)->ErrorAfterEarlierFailure()); // collateral
+
+  // Fixing the root (point it at the real sketch) clears both flags.
+  auto* root = dynamic_cast<ExtrudeFeature*>(doc.GetFeature(1));
+  REQUIRE(root != nullptr);
+  root->sketchId = sid;
+  CHECK(doc.Regenerate());
+  CHECK(doc.GetFeature(1)->GetError().empty());
+  CHECK(doc.GetFeature(2)->GetError().empty());
+  CHECK_FALSE(doc.GetFeature(2)->ErrorAfterEarlierFailure());
+}

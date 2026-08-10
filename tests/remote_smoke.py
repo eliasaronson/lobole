@@ -630,6 +630,40 @@ def main():
         expect("cross the axis" in feats[1].get("error", ""),
                f"axis-crossing revolve names the reason: {feats[1].get('error')}")
 
+        # Mutating RPCs return a regen summary: failures arrive with the call
+        # that caused them, root vs collateral distinguished.
+        d.call("new_project")
+        r = d.call("add_feature", feature={
+            "type": "Box", "name": "A", "position": [0, 0, 0],
+            "width": 2, "height": 2, "depth": 2})
+        expect(r["regen"]["ok"] and r["regen"]["failed"] == [],
+               "healthy add_feature reports regen.ok")
+        r = d.call("add_feature", feature={
+            "type": "Extrude", "name": "Bad", "sketch_id": 9999,
+            "distance": 1.0, "mode": "new_body"})
+        expect(not r["regen"]["ok"], "failing add_feature reports regen not-ok")
+        expect("not found" in r["regen"]["failed"][0]["error"],
+               f"regen.failed carries the reason: {r['regen']['failed']}")
+        # A collateral failure downstream is tagged after_earlier_failure.
+        skc = d.call("add_feature", feature={
+            "type": "Sketch", "name": "S",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [20, 0],
+                          "radius": 1.0}]})
+        d.call("delete_feature", index=0)  # remove the box: Bad is now root
+        r = d.call("add_feature", feature={
+            "type": "Extrude", "name": "Collateral", "sketch_id": skc["id"],
+            "distance": 1.0, "mode": "cut"})
+        failed = {f["name"]: f for f in r["regen"]["failed"]}
+        expect(not failed["Bad"].get("after_earlier_failure", False),
+               "root failure is not tagged")
+        expect(failed["Collateral"].get("after_earlier_failure", False),
+               "collateral failure is tagged after_earlier_failure")
+        st = d.call("get_state")
+        expect(st["regen"]["ok"] is False and "failed" in st["regen"],
+               "get_state regen block carries the summary")
+
         print("remote_smoke: ALL CHECKS PASSED")
         return 0
     finally:

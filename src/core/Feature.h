@@ -103,7 +103,22 @@ public:
   // the tree can show which feature broke and why.
   [[nodiscard]] const std::string& GetError() const { return m_error; }
   void SetError(const std::string& error) { m_error = error; }
-  void ClearError() { m_error.clear(); }
+  void ClearError() {
+    m_error.clear();
+    m_errorAfterEarlierFailure = false;
+  }
+
+  // Whether this feature's failure happened while an EARLIER feature in the
+  // same regeneration had already failed. Deliberately non-causal ("after",
+  // not "because of"): with continue-past-failure regen semantics true
+  // causality is a heuristic, but downstream failures are usually collateral,
+  // and clients want to fix the first red feature first. Transient, stamped
+  // at execution time (cached-prefix errors keep the flag from their last
+  // execution, exactly like m_error).
+  [[nodiscard]] bool ErrorAfterEarlierFailure() const {
+    return m_errorAfterEarlierFailure;
+  }
+  void SetErrorAfterEarlierFailure(bool v) { m_errorAfterEarlierFailure = v; }
 
   // A non-fatal advisory from the last regeneration (empty = none). Unlike
   // m_error, a warning does NOT mark the feature broken or count against
@@ -128,6 +143,7 @@ protected:
   uint64_t m_id = 0;
   std::string m_error;
   std::string m_warning;
+  bool m_errorAfterEarlierFailure = false;
   bool m_suppressed = false;
 };
 

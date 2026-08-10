@@ -157,9 +157,11 @@ bool Document::Regenerate() {
                             : std::vector<Body>{};
   // Errors in the cached prefix persist from their last (deterministic)
   // execution; they still count against the result.
+  bool anyFailedYet = false;
   for (size_t i = 0; i < divergence; i++) {
     if (!m_features[i]->GetError().empty()) {
       allOk = false;
+      anyFailedYet = true;
     }
   }
 
@@ -175,6 +177,10 @@ bool Document::Regenerate() {
           if (m_features[i]->GetError().empty()) {
             m_features[i]->SetError("regeneration failed");
           }
+          // A failure downstream of another failure is usually collateral —
+          // tag it so clients can point at the first red feature.
+          m_features[i]->SetErrorAfterEarlierFailure(anyFailedYet);
+          anyFailedYet = true;
           // Continue past the failure (R1): the broken feature contributes
           // nothing; downstream features see the bodies as of this point
           // and fail on their own if they referenced its outputs.
