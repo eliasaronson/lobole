@@ -22,6 +22,25 @@ namespace remote {
 
 // Drawing / sheet RPCs (create_drawing..) carved out of
 // RemoteServer::HandleSemantic. Act on the active drawing tab / project.
+// describe: one row per `m ==` branch below — extend together.
+static constexpr MethodDoc DrawingMethods[] = {
+    {"create_drawing",
+     "Add a drawing document (sheet size, title block) to the project."},
+    {"list_drawings", "List drawing documents."},
+    {"add_drawing_view", "Add an HLR view of a part/assembly {drawing, source, "
+                         "orientation, scale, position}."},
+    {"remove_drawing_view", "Remove a view by id."},
+    {"list_drawing_views", "List views with placement and scale."},
+    {"update_drawing", "Re-project all views from current geometry."},
+    {"list_drawing_geometry",
+     "Projected 2D curves of a view (for picking/dimensioning)."},
+    {"add_drawing_dim", "Add a driven dimension between picked view geometry."},
+    {"remove_drawing_dim", "Remove a dimension by id."},
+    {"list_drawing_dims", "List dimensions with values."},
+    {"export_drawing", "Export the drawing to SVG or PDF by extension {path}."},
+};
+std::span<const MethodDoc> DrawingMethodDocs() { return DrawingMethods; }
+
 std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   if (m == "create_drawing") {

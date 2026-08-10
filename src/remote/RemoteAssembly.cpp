@@ -21,6 +21,40 @@ namespace remote {
 
 // Assembly RPCs (add_occurrence..) carved out of RemoteServer::HandleSemantic.
 // Act on the active assembly tab / project.
+// describe: one row per `m ==` branch below — extend together.
+static constexpr MethodDoc AssemblyMethods[] = {
+    {"set_active_part", "Switch the active tab by name or index."},
+    {"delete_part", "Delete a part (refused while referenced by an assembly)."},
+    {"add_occurrence",
+     "Insert an occurrence of a part into the assembly {part, transform?}."},
+    {"remove_occurrence", "Remove an occurrence by id."},
+    {"list_occurrences", "List occurrences with transforms and state."},
+    {"set_occurrence_transform", "Set an occurrence's world transform."},
+    {"set_occurrence_visible", "Show/hide an occurrence."},
+    {"set_occurrence_fixed", "Fix/free an occurrence for the solver."},
+    {"rename_occurrence", "Rename an occurrence."},
+    {"select_occurrence", "Select an occurrence in the UI."},
+    {"add_mate",
+     "Add a mate {type: fastened|revolute|slider|cylindrical|planar|ball, "
+     "connectors...}."},
+    {"set_mate", "Edit a mate's parameters."},
+    {"remove_mate", "Remove a mate by id."},
+    {"list_mates", "List mates with status/errors."},
+    {"select_mate", "Select a mate in the UI."},
+    {"solve_assembly", "Run the mate solver; returns satisfied/errored mates."},
+    {"bom", "Bill of materials (aggregated part counts, masses)."},
+    {"export_bom", "Export the BOM as CSV {path}."},
+    {"edit_in_context",
+     "Enter in-context editing of a part within the assembly."},
+    {"add_exploded_view", "Add an exploded view."},
+    {"remove_exploded_view", "Remove an exploded view."},
+    {"list_exploded_views", "List exploded views."},
+    {"set_explode_step", "Add/edit an explode step (occurrence + offset)."},
+    {"auto_explode", "Generate explode steps automatically."},
+    {"set_explode", "Set the live explode factor (0..1)."},
+};
+std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
+
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
   if (m == "add_occurrence") {

@@ -32,6 +32,95 @@ namespace remote {
 
 // Modeling / feature-tree RPCs (select_feature..list_variables) carved out of
 // RemoteServer::HandleSemantic. All act on the active part document.
+// Sketch constraint kinds accepted by add_constraint(s), also served by the
+// describe endpoint. Keep in lockstep with sketch::ConstraintKind.
+static const std::map<std::string, sketch::ConstraintKind>&
+ConstraintKindTable() {
+  static const std::map<std::string, sketch::ConstraintKind> kinds = {
+      {"coincident", sketch::ConstraintKind::Coincident},
+      {"horizontal", sketch::ConstraintKind::Horizontal},
+      {"vertical", sketch::ConstraintKind::Vertical},
+      {"parallel", sketch::ConstraintKind::Parallel},
+      {"perpendicular", sketch::ConstraintKind::Perpendicular},
+      {"equal", sketch::ConstraintKind::Equal},
+      {"distance", sketch::ConstraintKind::Distance},
+      {"radius", sketch::ConstraintKind::Radius},
+      {"angle", sketch::ConstraintKind::Angle},
+      {"tangent", sketch::ConstraintKind::Tangent},
+      {"point_on_line", sketch::ConstraintKind::PointOnLine},
+      {"symmetric", sketch::ConstraintKind::Symmetric},
+      {"midpoint", sketch::ConstraintKind::Midpoint},
+      {"fixed", sketch::ConstraintKind::Fixed},
+      {"concentric", sketch::ConstraintKind::Concentric},
+      {"collinear", sketch::ConstraintKind::Collinear},
+      {"distance_x", sketch::ConstraintKind::DistanceX},
+      {"distance_y", sketch::ConstraintKind::DistanceY},
+      {"diameter", sketch::ConstraintKind::Diameter},
+      {"distance_pl", sketch::ConstraintKind::DistancePL}};
+  return kinds;
+}
+
+std::vector<std::string> ConstraintKindNames() {
+  std::vector<std::string> names;
+  for (const auto& [name, kind] : ConstraintKindTable())
+    names.push_back(name);
+  return names;
+}
+
+// describe: one row per `m ==` branch below — extend together.
+static constexpr MethodDoc ModelingMethods[] = {
+    {"select_feature", "Select a feature by index or feature_id (-1/0 clears); "
+                       "drives the same selection the tree uses."},
+    {"accept_pending",
+     "Commit the pending (preview) feature, like clicking the checkmark."},
+    {"cancel_pending", "Discard the pending (preview) feature."},
+    {"add_feature", "Append a feature (see feature_types for the JSON dialect) "
+                    "and regenerate; returns {index, id, entity_ids?, regen}."},
+    {"modify_feature", "Replace the feature at `index` with `feature` JSON; "
+                       "one undo step; returns {regen}."},
+    {"set_material", "Assign a material slug (see material_slugs) to a feature "
+                     "by feature_id; '' restores default."},
+    {"set_rollback",
+     "Move the rollback bar: only features [0, index) regenerate; -1 = end."},
+    {"suppress_feature", "Toggle suppression by feature_id; suppressed "
+                         "features are skipped but keep parameters."},
+    {"delete_feature",
+     "Delete the feature at `index`; one undo step; returns {regen}."},
+    {"project_geometry", "Project a body face/edge (feature_id + element) into "
+                         "a sketch as live locked construction geometry."},
+    {"add_reference_image", "Attach an image underlay to a sketch (path or "
+                            "base64 bytes); returns image_id."},
+    {"set_reference_image",
+     "Update an underlay's placement/opacity/lock by {sketch_id, image_id}."},
+    {"calibrate_reference_image",
+     "Scale an underlay so two picked image points span a given distance."},
+    {"delete_reference_image", "Remove an underlay by {sketch_id, image_id}."},
+    {"add_constraint",
+     "Append one sketch constraint {sketch_id, kind, refs, value?/expr?}; "
+     "kinds in constraint_kinds; solves once."},
+    {"add_constraints", "Append MANY constraints in one solve+regen+undo step: "
+                        "{sketch_id, constraints: [...]}."},
+    {"delete_entity", "Delete a sketch entity by {sketch_id, entity_id}, "
+                      "dropping constraints that reference it."},
+    {"fillet", "Sketch fillet: round the corner between two lines {sketch_id, "
+               "a, b, radius}."},
+    {"offset", "Offset a closed sketch chain by a distance {sketch_id, "
+               "entity_ids, distance, join_arc?}."},
+    {"mirror", "Mirror sketch entities across a line {sketch_id, entity_ids, "
+               "axis_entity}."},
+    {"pattern", "Sketch pattern (linear/circular) of entities; "
+                "expression-capable count/spacing."},
+    {"set_variable", "Add or redefine a variable {name, expression, comment?, "
+                     "scope: project|part}; returns value + regen."},
+    {"rename_variable",
+     "Rename a variable, rewriting every referencing expression."},
+    {"delete_variable", "Delete a variable; refused (with the referencers) "
+                        "while anything references it."},
+    {"list_variables",
+     "List variables with expressions, values, comments, and scope."},
+};
+std::span<const MethodDoc> ModelingMethodDocs() { return ModelingMethods; }
+
 std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                       const std::string& m,
                                       const RpcParams& p) {
@@ -208,27 +297,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (!sk)
       throw std::runtime_error("no such sketch");
 
-    static const std::map<std::string, sketch::ConstraintKind> kinds = {
-        {"coincident", sketch::ConstraintKind::Coincident},
-        {"horizontal", sketch::ConstraintKind::Horizontal},
-        {"vertical", sketch::ConstraintKind::Vertical},
-        {"parallel", sketch::ConstraintKind::Parallel},
-        {"perpendicular", sketch::ConstraintKind::Perpendicular},
-        {"equal", sketch::ConstraintKind::Equal},
-        {"distance", sketch::ConstraintKind::Distance},
-        {"radius", sketch::ConstraintKind::Radius},
-        {"angle", sketch::ConstraintKind::Angle},
-        {"tangent", sketch::ConstraintKind::Tangent},
-        {"point_on_line", sketch::ConstraintKind::PointOnLine},
-        {"symmetric", sketch::ConstraintKind::Symmetric},
-        {"midpoint", sketch::ConstraintKind::Midpoint},
-        {"fixed", sketch::ConstraintKind::Fixed},
-        {"concentric", sketch::ConstraintKind::Concentric},
-        {"collinear", sketch::ConstraintKind::Collinear},
-        {"distance_x", sketch::ConstraintKind::DistanceX},
-        {"distance_y", sketch::ConstraintKind::DistanceY},
-        {"diameter", sketch::ConstraintKind::Diameter},
-        {"distance_pl", sketch::ConstraintKind::DistancePL}};
+    const auto& kinds = ConstraintKindTable();
 
     // Build one Constraint from a spec object. Throws on a bad kind/expr.
     const auto build = [&](const json& spec) -> sketch::Constraint {

@@ -1,10 +1,12 @@
 #pragma once
 
+#include "remote/RemoteHelpers.h"
 #include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
 #include <optional>
 #include <string>
+#include <vector>
 
 class Document;
 namespace ui {
@@ -21,5 +23,11 @@ std::optional<nlohmann::json> HandleModelingRpc(ui::AppState& state,
                                                 Document& doc,
                                                 const std::string& method,
                                                 const RpcParams& params);
+
+// One row per RPC this module dispatches (for the describe endpoint).
+std::span<const MethodDoc> ModelingMethodDocs();
+
+// Sketch constraint kind names accepted by add_constraint(s), for describe.
+std::vector<std::string> ConstraintKindNames();
 
 } // namespace remote

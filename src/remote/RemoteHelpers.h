@@ -5,12 +5,22 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include <span>
+
 // Small helpers shared by the RemoteServer RPC domain modules (RemoteModeling,
 // RemoteInspection, RemoteView, ...). Each module is
 // `remote::HandleXxxRpc(AppState&, [Document&], method, params, out&) -> bool`,
 // carved out of RemoteServer::HandleSemantic (the RemoteConfigurations
 // pattern).
 namespace remote {
+
+// One entry per RPC method for the describe endpoint. Each domain module
+// keeps a static table ADJACENT to its dispatch if-chain (the drift defense:
+// add the branch, add the row) exposed via XxxMethodDocs().
+struct MethodDoc {
+  const char* name; // exact RPC method literal
+  const char* doc;  // one-line description (params in prose)
+};
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

@@ -388,46 +388,92 @@ bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit) {
 
 } // namespace
 
+// Methods that act on the project container or the active assembly tab, not
+// on an active part document. Everything else needs a live part: when an
+// assembly tab is active, `doc` is null, so fail with a clear message rather
+// than dereferencing null. File scope so the describe endpoint can derive
+// each method's requires_part_doc from it.
+static const std::set<std::string> kNoPartDoc = {
+    "describe", "ping", "list_parts", "add_part", "add_assembly",
+    "set_active_part", "delete_part", "rename_part",
+    // Configuration RPCs target the active tab: part-doc handling above,
+    // assembly handling below. Listed here so they are allowed on an
+    // assembly tab (where doc is null).
+    "add_configuration", "remove_configuration", "list_configurations",
+    "set_configuration", "set_active_configuration", "create_drawing",
+    "list_drawings", "add_drawing_view", "remove_drawing_view",
+    "update_drawing", "list_drawing_views", "export_drawing",
+    "list_drawing_geometry", "add_drawing_dim", "remove_drawing_dim",
+    "list_drawing_dims", "new_project", "save_project", "open_project",
+    "add_occurrence", "remove_occurrence", "list_occurrences",
+    "set_occurrence_transform", "set_occurrence_visible",
+    "set_occurrence_fixed", "rename_occurrence", "add_mate", "set_mate",
+    "remove_mate", "list_mates", "select_mate", "select_occurrence",
+    "solve_assembly", "bom", "export_bom", "edit_in_context",
+    "add_exploded_view", "remove_exploded_view", "list_exploded_views",
+    "set_explode_step", "auto_explode", "set_explode",
+    // export_visual works on a part OR an assembly (occurrence walk).
+    "export_visual",
+    // interference runs on occurrence pairs on an assembly tab;
+    // list_elements/measure work there when given an explicit `part`;
+    // mass_properties aggregates occurrence masses in world space.
+    "interference", "list_elements", "measure", "mass_properties",
+    // undo/redo route to the assembly's snapshot history on an assembly tab.
+    "undo", "redo",
+    // Camera / rendering act on the viewport, not the part document, so they
+    // work on an assembly tab too.
+    "view", "fit_view", "screenshot", "set_render_options"};
+
+// The methods RemoteServer dispatches itself (viewport, camera, selection,
+// project tabs, UI events). describe: one row per `m ==` branch — extend
+// together. `screenshot` and the UI actions are dispatched outside
+// HandleSemantic but are part of the same surface.
+static constexpr remote::MethodDoc kServerMethods[] = {
+    {"describe",
+     "This endpoint: methods, feature/entity/constraint types, enums, and the "
+     "document format version."},
+    {"ping", "Liveness check; returns {ok, app}."},
+    {"get_state",
+     "Full snapshot: features (with errors), bodies (volume, bbox), "
+     "selection, camera, undo/redo, rollback, regen summary."},
+    {"undo", "Undo one step (assembly snapshot history on an assembly tab)."},
+    {"redo", "Redo one step."},
+    {"view",
+     "Orient the camera to a named view {name: front|back|left|right|top|"
+     "bottom|iso}."},
+    {"fit_view", "Frame the geometry in the viewport."},
+    {"set_camera", "Set camera {position, target, up?} explicitly."},
+    {"orient_to_face", "Look straight at the selected face."},
+    {"select_face",
+     "Select a face by {mesh, face} or stable {element}/{feature_id, "
+     "element}; returns normal/center."},
+    {"screenshot", "Write the rendered viewport to {path} (needs a renderer "
+                   "— not available under --headless)."},
+    {"render_still",
+     "Path-traced still to {path} (ray tracing; needs GPU support)."},
+    {"rt_build", "Build ray-tracing acceleration structures."},
+    {"set_render_options", "Toggle shadows/SSAO/quality options."},
+    {"reset_layout", "Reset the dock layout."},
+    {"add_part", "Add a new empty part tab."},
+    {"add_assembly", "Add an assembly tab."},
+    {"list_parts", "List project tabs (parts, assemblies, drawings)."},
+    {"rename_part", "Rename a part."},
+    {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\"."},
+    {"key_press", "Send a key chord, e.g. \"Ctrl+Z\"."},
+    {"item_click", "UI test tier: click a widget by ImGui label."},
+    {"item_double_click", "UI test tier: double-click a widget."},
+    {"item_input", "UI test tier: type into a widget."},
+    {"viewport_click", "Click the 3D viewport at normalized (x, y)."},
+    {"viewport_drag", "Drag in the viewport (button 0/1/2) — orbit/pan."},
+    {"scroll", "Scroll (zoom) the viewport."},
+};
+
 json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                   bool& handled, remote::RpcParams& p) {
   const std::string& m = request.method;
   Document* doc = state.document.get();
   handled = true;
 
-  // Methods that act on the project container or the active assembly tab, not
-  // on an active part document. Everything else needs a live part: when an
-  // assembly tab is active, `doc` is null, so fail with a clear message rather
-  // than dereferencing null.
-  static const std::set<std::string> kNoPartDoc = {
-      "ping", "list_parts", "add_part", "add_assembly", "set_active_part",
-      "delete_part", "rename_part",
-      // Configuration RPCs target the active tab: part-doc handling above,
-      // assembly handling below. Listed here so they are allowed on an
-      // assembly tab (where doc is null).
-      "add_configuration", "remove_configuration", "list_configurations",
-      "set_configuration", "set_active_configuration", "create_drawing",
-      "list_drawings", "add_drawing_view", "remove_drawing_view",
-      "update_drawing", "list_drawing_views", "export_drawing",
-      "list_drawing_geometry", "add_drawing_dim", "remove_drawing_dim",
-      "list_drawing_dims", "new_project", "save_project", "open_project",
-      "add_occurrence", "remove_occurrence", "list_occurrences",
-      "set_occurrence_transform", "set_occurrence_visible",
-      "set_occurrence_fixed", "rename_occurrence", "add_mate", "set_mate",
-      "remove_mate", "list_mates", "select_mate", "select_occurrence",
-      "solve_assembly", "bom", "export_bom", "edit_in_context",
-      "add_exploded_view", "remove_exploded_view", "list_exploded_views",
-      "set_explode_step", "auto_explode", "set_explode",
-      // export_visual works on a part OR an assembly (occurrence walk).
-      "export_visual",
-      // interference runs on occurrence pairs on an assembly tab;
-      // list_elements/measure work there when given an explicit `part`;
-      // mass_properties aggregates occurrence masses in world space.
-      "interference", "list_elements", "measure", "mass_properties",
-      // undo/redo route to the assembly's snapshot history on an assembly tab.
-      "undo", "redo",
-      // Camera / rendering act on the viewport, not the part document, so they
-      // work on an assembly tab too.
-      "view", "fit_view", "screenshot", "set_render_options"};
   // UI actions (item_click, viewport_click, …) fall through to QueueUiAction,
   // not HandleSemantic, so don't guard them here — they drive the assembly tab.
   if (!doc && !kNoPartDoc.count(m) && !IsUiAction(m)) {
@@ -436,6 +482,44 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                        : "not a part";
     throw std::runtime_error("the active document is " + std::string(kind) +
                              ", not a part; switch to a part tab");
+  }
+
+  if (m == "describe") {
+    // API introspection: every method with a one-line doc, the feature/entity/
+    // constraint dialects, and enum values — so clients (agents, the MCP
+    // wrapper) discover the surface without grepping the source. Static
+    // metadata only; safe with no document.
+    json methods = json::array();
+    const auto addDocs = [&](std::span<const remote::MethodDoc> docs) {
+      for (const auto& d : docs) {
+        methods.push_back({{"name", d.name},
+                           {"doc", d.doc},
+                           {"requires_part_doc",
+                            !kNoPartDoc.count(d.name) && !IsUiAction(d.name)}});
+      }
+    };
+    addDocs(kServerMethods);
+    addDocs(remote::ModelingMethodDocs());
+    addDocs(remote::ProjectMethodDocs());
+    addDocs(remote::AssemblyMethodDocs());
+    addDocs(remote::InspectionMethodDocs());
+    addDocs(remote::DrawingMethodDocs());
+    addDocs(remote::ConfigurationMethodDocs());
+    addDocs(remote::SimulationMethodDocs());
+    json featureTypes = json::array();
+    for (const auto& ft : DocumentIO::FeatureTypes())
+      featureTypes.push_back(
+          {{"type", ft.type}, {"since_version", ft.sinceVersion}});
+    return json{
+        {"app", "designer"},
+        {"document_format_version", DocumentIO::DocumentFormatVersion()},
+        {"methods", std::move(methods)},
+        {"feature_types", std::move(featureTypes)},
+        {"sketch_entity_types", DocumentIO::SketchEntityTypes()},
+        {"constraint_kinds", remote::ConstraintKindNames()},
+        {"extrude_modes", {"new_body", "add", "cut"}},
+        {"axis_kinds", {"x", "y", "z", "sketch_line", "datum_axis"}},
+        {"material_slugs", CADMaterials::MaterialLibrary::AllSlugs()}};
   }
 
   // Doc-level-object RPCs carved into their own module (decision 7). The
@@ -847,24 +931,33 @@ bool RemoteServer::QueueUiAction(const Request& request) {
   const std::string& m = request.method;
   const json p = request.params; // copy: captured by the action lambda
 
+  // Required params are extracted HERE, on the RPC thread, where a missing
+  // key throws into ProcessPending's catch and becomes an error response. A
+  // p.at() inside an action lambda would throw in the test-engine coroutine
+  // instead, escape it, and std::terminate the whole app.
   if (m == "menu_click") {
-    m_uiAction = [p](ImGuiTestContext* ctx) {
+    const std::string path = p.at("path").get<std::string>();
+    m_uiAction = [path](ImGuiTestContext* ctx) {
       ctx->SetRef("//##MainMenuBar");
-      ctx->MenuClick(p.at("path").get<std::string>().c_str());
+      ctx->MenuClick(path.c_str());
     };
   } else if (m == "item_click") {
-    m_uiAction = [p](ImGuiTestContext* ctx) {
-      ctx->ItemClick(p.at("ref").get<std::string>().c_str(),
-                     p.value("button", 0)); // 1 = right-click (context menus)
+    const std::string ref = p.at("ref").get<std::string>();
+    const int button = p.value("button", 0); // 1 = right-click (context menus)
+    m_uiAction = [ref, button](ImGuiTestContext* ctx) {
+      ctx->ItemClick(ref.c_str(), button);
     };
   } else if (m == "item_double_click") {
-    m_uiAction = [p](ImGuiTestContext* ctx) {
-      ctx->ItemDoubleClick(p.at("ref").get<std::string>().c_str());
+    const std::string ref = p.at("ref").get<std::string>();
+    m_uiAction = [ref](ImGuiTestContext* ctx) {
+      ctx->ItemDoubleClick(ref.c_str());
     };
   } else if (m == "item_input") {
-    m_uiAction = [p](ImGuiTestContext* ctx) {
-      const std::string ref = p.at("ref").get<std::string>();
-      const json& value = p.at("value");
+    const std::string ref = p.at("ref").get<std::string>();
+    const json value = p.at("value");
+    if (!value.is_number() && !value.is_string())
+      throw std::runtime_error("item_input value must be a number or string");
+    m_uiAction = [ref, value](ImGuiTestContext* ctx) {
       if (value.is_number()) {
         ctx->ItemInputValue(ref.c_str(), value.get<float>());
       } else {

@@ -73,6 +73,24 @@ Document& RequirePartDoc(Document* doc, const char* what) {
 // Inspection RPCs (section clip, interference, mass properties, measure,
 // element listing) carved out of RemoteServer::HandleSemantic. `docIn` is
 // null on an assembly/drawing tab.
+// describe: one row per `m ==` branch below — extend together.
+static constexpr MethodDoc InspectionMethods[] = {
+    {"check_geometry", "Did the model build? {ok, valid, body_count, "
+                       "feature_errors, bodies:[...B-Rep checks]}."},
+    {"mass_properties",
+     "Mass/volume/center-of-mass per body and total (density from materials)."},
+    {"measure", "Geometry queries over stable element names: "
+                "point/distance/angle/radius between elements a and b."},
+    {"list_elements", "Stable face/edge names per body (the toponaming handles "
+                      "measure/fillet/mates use)."},
+    {"interference",
+     "Pairwise interference (clash) check between bodies or occurrences."},
+    {"section", "Raster cross-section preview of the bodies at a plane."},
+    {"set_section",
+     "Enable/disable the live section view {plane, offset, flip?}."},
+};
+std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
+
 std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                         const std::string& m,
                                         const RpcParams& p) {

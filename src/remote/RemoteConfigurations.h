@@ -1,5 +1,6 @@
 #pragma once
 
+#include "remote/RemoteHelpers.h"
 #include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
@@ -33,5 +34,8 @@ bool HandleAssemblyConfigurationRpc(ui::AppState& state,
                                     const std::string& method,
                                     const RpcParams& params,
                                     nlohmann::json& out);
+
+// One row per RPC this module dispatches (for the describe endpoint).
+std::span<const MethodDoc> ConfigurationMethodDocs();
 
 } // namespace remote

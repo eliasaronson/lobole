@@ -1,5 +1,6 @@
 #pragma once
 
+#include "remote/RemoteHelpers.h"
 #include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
@@ -18,5 +19,8 @@ namespace remote {
 std::optional<nlohmann::json> HandleProjectRpc(ui::AppState& state,
                                                const std::string& method,
                                                const RpcParams& params);
+
+// One row per RPC this module dispatches (for the describe endpoint).
+std::span<const MethodDoc> ProjectMethodDocs();
 
 } // namespace remote

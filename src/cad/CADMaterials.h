@@ -83,6 +83,8 @@ public:
   static MaterialType FromSlug(const std::string& slug);
   // All assignable materials in display order (for UI enumeration).
   static const std::vector<MaterialType>& AllTypes();
+  // All assignable slugs in display order (RPC/describe enumeration).
+  static const std::vector<std::string>& AllSlugs();
 
 private:
   static std::unordered_map<MaterialType, MaterialProperties> materials;

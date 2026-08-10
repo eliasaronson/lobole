@@ -8,6 +8,7 @@
 
 #include <expected>
 #include <memory>
+#include <span>
 #include <string>
 
 // Saves/loads the feature list as pretty-printed JSON. This is the on-disk
@@ -29,6 +30,16 @@ Load(const std::string& path);
 // FeatureFromJson throws on malformed/unknown input.
 nlohmann::json FeatureToJson(const Feature& feature);
 std::unique_ptr<Feature> FeatureFromJson(const nlohmann::json& j);
+
+// Introspection for the describe RPC (read-only metadata; the tables live
+// beside the dispatch chains in SerializeFeatures.cpp — extend together).
+int DocumentFormatVersion(); // == kVersion without exposing the internal hdr
+struct FeatureTypeInfo {
+  const char* type; // FeatureFromJson dispatch string, e.g. "Extrude"
+  int sinceVersion; // document format version it arrived in (1 = original)
+};
+std::span<const FeatureTypeInfo> FeatureTypes();
+std::span<const char* const> SketchEntityTypes();
 
 // Assembly (de)serialization (A2). Same on-disk form as a part —
 // directory (`.dsgn`, one file per occurrence) or single JSON file, dispatched

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "remote/RemoteHelpers.h"
 #include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
@@ -22,5 +23,8 @@ std::optional<nlohmann::json> HandleInspectionRpc(ui::AppState& state,
                                                   Document* doc,
                                                   const std::string& method,
                                                   const RpcParams& params);
+
+// One row per RPC this module dispatches (for the describe endpoint).
+std::span<const MethodDoc> InspectionMethodDocs();
 
 } // namespace remote

@@ -15,6 +15,20 @@ using nlohmann::json;
 
 namespace remote {
 
+// describe: one row per `m ==` branch below — extend together.
+static constexpr MethodDoc ConfigurationMethods[] = {
+    {"add_configuration",
+     "Add a configuration to the active part (parameter overrides + feature "
+     "suppression) or assembly (occurrence suppression)."},
+    {"remove_configuration", "Remove a configuration by name."},
+    {"list_configurations", "List configurations and the active one."},
+    {"set_configuration", "Edit a configuration's overrides/suppressions."},
+    {"set_active_configuration", "Activate a configuration and regenerate."},
+};
+std::span<const MethodDoc> ConfigurationMethodDocs() {
+  return ConfigurationMethods;
+}
+
 bool HandleConfigurationRpc(ui::AppState& state, Document& doc,
                             const std::string& m, const RpcParams& p,
                             json& out) {

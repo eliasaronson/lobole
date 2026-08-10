@@ -24,6 +24,35 @@ namespace remote {
 // active part document. Returns the result json when `m` is one of ours,
 // std::nullopt otherwise; throws std::runtime_error on error (the caller's
 // try/catch turns it into an error response).
+// describe: one row per `m ==` branch below — extend together.
+static constexpr MethodDoc SimulationMethods[] = {
+    {"enter_simulation", "Enter simulation mode for the active part."},
+    {"exit_simulation", "Leave simulation mode."},
+    {"add_study", "Add a study {kind: static|modal|topology, name?}."},
+    {"remove_study", "Remove a study by id."},
+    {"list_studies", "List studies with status."},
+    {"set_study",
+     "Edit study settings (mesh size, materials, solver options)."},
+    {"add_load",
+     "Add a load/fixture to a study {study, kind, element, magnitude...}."},
+    {"remove_load", "Remove a load by index."},
+    {"add_refinement", "Add a local mesh refinement on an element."},
+    {"remove_refinement", "Remove a refinement."},
+    {"add_keep_face", "Topology optimization: mark a face to keep."},
+    {"remove_keep_face", "Unmark a kept face."},
+    {"mesh_study",
+     "Mesh the study (Netgen tets); returns element counts/quality."},
+    {"run_study", "Solve the study (blocking or async; poll study_status)."},
+    {"cancel_study", "Cancel a running study."},
+    {"study_status", "Status/progress of a study."},
+    {"study_results",
+     "Result summary (max displacement, von Mises, frequencies, compliance)."},
+    {"set_result_display", "Choose the displayed result field/deform scale."},
+    {"set_topo_ghost", "Toggle the topology-optimization ghost overlay."},
+    {"export_topo_stl", "Export the optimized topology as STL."},
+};
+std::span<const MethodDoc> SimulationMethodDocs() { return SimulationMethods; }
+
 std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                                         const std::string& m,
                                         const RpcParams& p) {

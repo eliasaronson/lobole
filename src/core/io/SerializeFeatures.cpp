@@ -864,6 +864,26 @@ json FeatureToJson(const Feature& feature) {
   return j;
 }
 
+int DocumentFormatVersion() { return kVersion; }
+
+// Keep in lockstep with the FeatureFromJson chain below (one entry per
+// `type ==` branch; Fillet/Chamfer share a branch but are distinct types).
+static constexpr FeatureTypeInfo kFeatureTypes[] = {
+    {"Sketch", 1},    {"Extrude", 1},  {"Box", 1},        {"Sphere", 1},
+    {"Cylinder", 1},  {"Import", 1},   {"DatumPlane", 1}, {"Revolve", 1},
+    {"DatumAxis", 1}, {"Curve3D", 42}, {"Boolean", 1},    {"Split", 39},
+    {"Refine", 47},   {"Fillet", 17},  {"Chamfer", 17},   {"Shell", 20},
+    {"Loft", 20},     {"Sweep", 20},   {"Pipe", 43},      {"Rib", 36},
+    {"Thread", 36},   {"Hole", 21},    {"Draft", 22},     {"Pattern", 1},
+};
+std::span<const FeatureTypeInfo> FeatureTypes() { return kFeatureTypes; }
+
+// Keep in lockstep with EntityFromJson above.
+static constexpr const char* kSketchEntityTypes[] = {
+    "point", "line", "circle", "arc", "ellipse", "ellipse_arc", "spline",
+};
+std::span<const char* const> SketchEntityTypes() { return kSketchEntityTypes; }
+
 std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   const std::string type = j.at("type").get<std::string>();
   const std::string name = j.at("name").get<std::string>();

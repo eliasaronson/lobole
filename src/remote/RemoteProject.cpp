@@ -29,6 +29,27 @@ namespace remote {
 // Project IO / checkpoint / history / export-import RPCs (new_project..) carved
 // out of RemoteServer::HandleSemantic. `doc` is the active part document (may
 // be null on an assembly tab, matching the original un-guarded behavior).
+// describe: one row per `m ==` branch below — extend together.
+static constexpr MethodDoc ProjectMethods[] = {
+    {"new_project", "Reset to an empty project (one empty part)."},
+    {"open_project", "Open a project {path} (.json file or .dsgn directory)."},
+    {"save_project", "Save the project to {path}."},
+    {"import_step", "Import a STEP file into the current project (XCAF: names, "
+                    "colors, real assemblies)."},
+    {"export_step", "Export the active part (or {part}) to STEP {path}."},
+    {"export_stl", "Export to STL {path, deflection?}."},
+    {"export_brep", "Export to BREP {path}."},
+    {"export_visual", "Export a visual-quality mesh (glTF/OBJ by extension) of "
+                      "the part or whole assembly."},
+    {"checkpoint_create",
+     "Create a named checkpoint (git vault) of the project."},
+    {"checkpoint_list", "List checkpoints."},
+    {"checkpoint_restore", "Restore a checkpoint by id."},
+    {"history_log", "List the project's git history."},
+    {"history_restore", "Restore the project to a git revision."},
+};
+std::span<const MethodDoc> ProjectMethodDocs() { return ProjectMethods; }
+
 std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   Document* doc = state.document.get();

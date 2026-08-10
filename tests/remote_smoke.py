@@ -678,6 +678,31 @@ def main():
         expect(cg["ok"] and cg["valid"] and cg["body_count"] == 1,
                "check_geometry: healthy box is ok")
 
+        # describe: the introspection endpoint, and the drift ratchet. Every
+        # listed method must be dispatchable (anything reaching a handler
+        # errors on params/state, never "unknown method"), counts only grow,
+        # and the newest dialect entries are present.
+        desc = d.call("describe")
+        names = [meth["name"] for meth in desc["methods"]]
+        expect(len(names) == len(set(names)), "describe lists each method once")
+        expect(len(names) >= 133, f"method count ratchet: {len(names)}")
+        expect(len(desc["feature_types"]) >= 24, "feature type ratchet")
+        expect({"ellipse_arc", "spline"} <= set(desc["sketch_entity_types"]),
+               "newest sketch entity types are described")
+        expect(desc["document_format_version"] >= 51, "format version present")
+        expect(len(desc["constraint_kinds"]) >= 20, "constraint kinds")
+        expect("aluminum" in desc["material_slugs"], "material slugs")
+        for name in names:
+            if name == "describe":
+                continue
+            d.call("new_project")  # deterministic tab state per probe
+            try:
+                d.call(name)
+            except RuntimeError as e:
+                expect("unknown method" not in str(e),
+                       f"described method '{name}' must dispatch: {e}")
+        d.call("new_project")
+
         print("remote_smoke: ALL CHECKS PASSED")
         return 0
     finally:

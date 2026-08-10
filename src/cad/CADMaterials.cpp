@@ -379,6 +379,16 @@ MaterialType MaterialLibrary::FromSlug(const std::string& slug) {
   return MaterialType::DEFAULT;
 }
 
+const std::vector<std::string>& MaterialLibrary::AllSlugs() {
+  static const std::vector<std::string> slugs = [] {
+    std::vector<std::string> v;
+    for (const auto& [t, slug] : SlugTable())
+      v.push_back(slug);
+    return v;
+  }();
+  return slugs;
+}
+
 const std::vector<MaterialType>& MaterialLibrary::AllTypes() {
   static const std::vector<MaterialType> types = [] {
     std::vector<MaterialType> v;
