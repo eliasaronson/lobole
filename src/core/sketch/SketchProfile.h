@@ -77,10 +77,12 @@ CADShape BuildPrism(const SketchPlane& plane, const std::vector<Loop>& loops,
 // caps "<featureTag>/cap0" (base) and "cap1" (top). The names key on the
 // faceIndex (TopExp_Explorer order) that GenerateMesh and picking use, so they
 // survive upstream sketch edits. `loops` must carry entity ids (see
-// BuildLoops).
+// BuildLoops). On failure `error` (optional) receives the reason in
+// user-grade prose for Feature::SetError.
 CADShape BuildPrismNamed(const SketchPlane& plane,
                          const std::vector<Loop>& loops, double distance,
-                         bool reversed, uint64_t featureTag, ElementMap& out);
+                         bool reversed, uint64_t featureTag, ElementMap& out,
+                         std::string* error = nullptr);
 
 // Which side of the profile curve a thin extrude's wall grows toward.
 enum class ThinSide { Out, In, Both };
@@ -90,11 +92,13 @@ enum class ThinSide { Out, In, Both };
 // `distance`. Loops are walled individually — holes become walls too, and
 // grouping does not apply. Caps are named per loop ("cap0@g<entityId>" when
 // several); wall side faces get names via the fallback passes. Invalid
-// CADShape when an offset self-intersects or thickness <= 0.
+// CADShape when an offset self-intersects or thickness <= 0; `error`
+// (optional) receives the reason.
 CADShape BuildThinPrismNamed(const SketchPlane& plane,
                              const std::vector<Loop>& loops, double distance,
                              bool reversed, double thickness, ThinSide side,
-                             uint64_t featureTag, ElementMap& out);
+                             uint64_t featureTag, ElementMap& out,
+                             std::string* error = nullptr);
 
 // Builds the profile face and revolves it about the given world-space axis
 // (origin + unit direction) through `angleRadians`. `reversed` sweeps the
@@ -111,12 +115,13 @@ CADShape BuildRevolve(const SketchPlane& plane, const std::vector<Loop>& loops,
 // sketch entity, the two planar ends of a partial revolve "cap0"/"cap1" (a
 // full revolution has none), degenerate pole edges at the axis
 // "<featureTag>/pole<n>", and the U/L fallback passes for everything else.
+// On failure `error` (optional) receives the reason.
 CADShape BuildRevolveNamed(const SketchPlane& plane,
                            const std::vector<Loop>& loops,
                            const glm::vec3& axisOrigin,
                            const glm::vec3& axisDir, double angleRadians,
                            bool reversed, bool symmetric, uint64_t featureTag,
-                           ElementMap& out);
+                           ElementMap& out, std::string* error = nullptr);
 
 // Tessellates one entity into a UV polyline for rendering/preview: Line = 2
 // points, Circle = 33 (closed, 32 segments), Point = empty (rendered as a

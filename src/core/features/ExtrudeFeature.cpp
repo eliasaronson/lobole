@@ -78,16 +78,15 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   // and Add/Cut propagate it through their boolean (T5) — a face the boolean
   // leaves alone keeps its name, a pierced one gains ";M<id>".
   ElementMap map;
-  CADShape prism = thin ? sketch::BuildThinPrismNamed(
-                              sketch->plane, loops, total, sweepReversed,
-                              thinThickness, thinSide, GetId(), map)
-                        : sketch::BuildPrismNamed(sketch->plane, loops, total,
-                                                  sweepReversed, GetId(), map);
+  std::string buildErr;
+  CADShape prism =
+      thin ? sketch::BuildThinPrismNamed(sketch->plane, loops, total,
+                                         sweepReversed, thinThickness, thinSide,
+                                         GetId(), map, &buildErr)
+           : sketch::BuildPrismNamed(sketch->plane, loops, total, sweepReversed,
+                                     GetId(), map, &buildErr);
   if (!prism.IsValid()) {
-    SetError(thin ? "thin profile could not be built (wall thicker than the "
-                    "profile, or thickness <= 0?)"
-                  : "profile could not be extruded (overlapping loops? "
-                    "see log)");
+    SetError(buildErr.empty() ? "profile could not be extruded" : buildErr);
     return false;
   }
   if (backOffset != 0.0) {

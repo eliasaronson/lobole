@@ -100,6 +100,9 @@ TEST_CASE("A profile that crosses the axis is rejected", "[revolve]") {
   doc.AddFeature(std::move(rev));
   CHECK(doc.GetBodies().empty());
   CHECK_FALSE(doc.Regenerate());
+  // The rejection carries the specific reason, not the generic fallback.
+  CHECK(doc.GetFeature(1)->GetError().find("cross the axis") !=
+        std::string::npos);
 }
 
 TEST_CASE("An axis out of the sketch plane fails", "[revolve]") {

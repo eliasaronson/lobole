@@ -615,6 +615,21 @@ def main():
         expect("no bodies" in feats[1].get("error", ""),
                f"cut-with-no-bodies is a specific error: {feats[1].get('error')}")
 
+        # A profile-builder failure (axis-crossing revolve) surfaces the OCC
+        # side's reason too.
+        d.call("new_project")
+        skx = d.call("add_feature", feature={
+            "type": "Sketch", "name": "X",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "rect", "c1": [-1, 0], "c2": [3, 3]}]})
+        d.call("add_feature", feature={
+            "type": "Revolve", "name": "Rev", "sketch_id": skx["id"],
+            "axis": {"kind": "y"}, "angle_deg": 360.0, "mode": "new_body"})
+        feats = d.call("get_state")["features"]
+        expect("cross the axis" in feats[1].get("error", ""),
+               f"axis-crossing revolve names the reason: {feats[1].get('error')}")
+
         print("remote_smoke: ALL CHECKS PASSED")
         return 0
     finally:

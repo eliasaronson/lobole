@@ -1061,17 +1061,32 @@ int FaceIndexOf(const TopoDS_Shape& shape, const TopoDS_Shape& face) {
 
 } // namespace
 
+namespace {
+// Route a builder failure reason to the caller when it wants one, else log
+// it (features surface the text via SetError, and Document logs that).
+void ProfileFail(std::string* error, std::string message) {
+  if (error)
+    *error = std::move(message);
+  else
+    LOG_ERROR("Sketch profile: {}", message);
+}
+} // namespace
+
 CADShape BuildPrismNamed(const SketchPlane& plane,
                          const std::vector<Loop>& loops, double distance,
-                         bool reversed, uint64_t featureTag, ElementMap& out) {
+                         bool reversed, uint64_t featureTag, ElementMap& out,
+                         std::string* error) {
   out.names.clear();
   if (loops.empty() || std::abs(distance) < 1e-9) {
+    ProfileFail(error, "empty profile or zero extrude distance");
     return CADShape();
   }
 
   try {
     const std::vector<ProfileGroup> groups = ClassifyLoops(loops);
     if (groups.empty()) {
+      ProfileFail(error,
+                  "profile loops overlap or nest inconsistently (see log)");
       return CADShape();
     }
 
@@ -1093,11 +1108,13 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
     for (const ProfileGroup& group : groups) {
       TopoDS_Face face = BuildGroupFace(plane, loops, group);
       if (face.IsNull()) {
+        ProfileFail(error, "failed to build a face for the profile "
+                           "(bad wire geometry, see log)");
         return CADShape();
       }
       BRepPrimAPI_MakePrism prism(face, extrusion);
       if (!prism.IsDone()) {
-        LOG_ERROR("Sketch profile: prism construction failed");
+        ProfileFail(error, "prism construction failed");
         return CADShape();
       }
       const TopoDS_Shape shape = prism.Shape();
@@ -1145,7 +1162,7 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
     topo::ApplyFallbackPasses(result, out);
     return result;
   } catch (const Standard_Failure& e) {
-    LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
+    ProfileFail(error, std::string("OCCT error: ") + e.GetMessageString());
     return CADShape();
   }
 }
@@ -1155,10 +1172,11 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
                            const glm::vec3& axisOrigin,
                            const glm::vec3& axisDir, double angleRadians,
                            bool reversed, bool symmetric, uint64_t featureTag,
-                           ElementMap& out) {
+                           ElementMap& out, std::string* error) {
   out = {};
   double angle = std::abs(angleRadians);
   if (loops.empty() || angle < 1e-9) {
+    ProfileFail(error, "empty profile or zero revolve angle");
     return CADShape();
   }
   if (angle > 2.0 * M_PI) {
@@ -1169,6 +1187,8 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
   try {
     const std::vector<ProfileGroup> groups = ClassifyLoops(loops);
     if (groups.empty()) {
+      ProfileFail(error,
+                  "profile loops overlap or nest inconsistently (see log)");
       return CADShape();
     }
 
@@ -1187,6 +1207,8 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
     for (const ProfileGroup& group : groups) {
       TopoDS_Face face = BuildGroupFace(plane, loops, group);
       if (face.IsNull()) {
+        ProfileFail(error, "failed to build a face for the profile "
+                           "(bad wire geometry, see log)");
         return CADShape();
       }
 
@@ -1206,7 +1228,8 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
 
       BRepPrimAPI_MakeRevol revol(profile, ax, sweep);
       if (!revol.IsDone()) {
-        LOG_ERROR("Sketch profile: revolve construction failed");
+        ProfileFail(error, "revolve construction failed (does the profile "
+                           "cross the axis?)");
         return CADShape();
       }
       const TopoDS_Shape shape = revol.Shape();
@@ -1256,8 +1279,8 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
 
     CADShape result(multi ? TopoDS_Shape(compound) : single);
     if (!result.IsValid() || result.Volume() < 1e-9) {
-      LOG_ERROR("Sketch profile: revolve produced an invalid solid "
-                "(does the profile cross the axis?)");
+      ProfileFail(error, "revolve produced an invalid solid "
+                         "(does the profile cross the axis?)");
       return CADShape();
     }
     const TopoDS_Shape& shape = result.GetShape();
@@ -1277,7 +1300,7 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
     topo::ApplyFallbackPasses(result, out);
     return result;
   } catch (const Standard_Failure& e) {
-    LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
+    ProfileFail(error, std::string("OCCT error: ") + e.GetMessageString());
     return CADShape();
   }
 }
@@ -1285,9 +1308,12 @@ CADShape BuildRevolveNamed(const SketchPlane& plane,
 CADShape BuildThinPrismNamed(const SketchPlane& plane,
                              const std::vector<Loop>& loops, double distance,
                              bool reversed, double thickness, ThinSide side,
-                             uint64_t featureTag, ElementMap& out) {
+                             uint64_t featureTag, ElementMap& out,
+                             std::string* error) {
   out = {};
   if (loops.empty() || std::abs(distance) < 1e-9 || thickness <= 0.0) {
+    ProfileFail(error,
+                "empty profile, zero distance, or non-positive thickness");
     return CADShape();
   }
 
@@ -1327,6 +1353,7 @@ CADShape BuildThinPrismNamed(const SketchPlane& plane,
     for (const Loop& loop : loops) {
       const TopoDS_Wire wire = MakeLoopWire(plane, loop);
       if (wire.IsNull()) {
+        ProfileFail(error, "failed to build the profile wire (see log)");
         return CADShape();
       }
       TopoDS_Wire outer, inner;
@@ -1345,20 +1372,20 @@ CADShape BuildThinPrismNamed(const SketchPlane& plane,
         break;
       }
       if (outer.IsNull() || inner.IsNull()) {
-        LOG_ERROR("Sketch profile: thin offset degenerated (wall thicker "
-                  "than the profile?)");
+        ProfileFail(error, "thin offset degenerated (wall thicker than the "
+                           "profile?)");
         return CADShape();
       }
 
       BRepBuilderAPI_MakeFace ring(pln, outer);
       ring.Add(TopoDS::Wire(inner.Reversed()));
       if (!ring.IsDone()) {
-        LOG_ERROR("Sketch profile: thin ring face construction failed");
+        ProfileFail(error, "thin ring face construction failed");
         return CADShape();
       }
       BRepPrimAPI_MakePrism prism(ring.Face(), extrusion);
       if (!prism.IsDone()) {
-        LOG_ERROR("Sketch profile: prism construction failed");
+        ProfileFail(error, "prism construction failed");
         return CADShape();
       }
       const TopoDS_Shape shape = prism.Shape();
@@ -1383,7 +1410,7 @@ CADShape BuildThinPrismNamed(const SketchPlane& plane,
     topo::ApplyFallbackPasses(result, out);
     return result;
   } catch (const Standard_Failure& e) {
-    LOG_ERROR("Sketch profile: OCCT error: {}", e.GetMessageString());
+    ProfileFail(error, std::string("OCCT error: ") + e.GetMessageString());
     return CADShape();
   }
 }
