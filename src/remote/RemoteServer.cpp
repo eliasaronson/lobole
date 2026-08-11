@@ -418,6 +418,10 @@ static const std::set<std::string> kNoPartDoc = {
     // list_elements/measure work there when given an explicit `part`;
     // mass_properties aggregates occurrence masses in world space.
     "interference", "list_elements", "measure", "mass_properties",
+    // set_section only writes the global viewport clip plane (per-frame UBO,
+    // world space) — it clips assembly occurrences too. The `section` AREA
+    // query stays part-only (computes on one document's bodies).
+    "set_section",
     // undo/redo route to the assembly's snapshot history on an assembly tab.
     "undo", "redo",
     // Camera / rendering act on the viewport, not the part document, so they

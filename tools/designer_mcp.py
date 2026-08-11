@@ -340,8 +340,10 @@ def list_variables() -> dict:
 @mcp.tool(description="Toggle the viewport SECTION VIEW — a clipping plane "
           "that cuts the model open so you can see inside (screenshot to "
           "view it). enabled=False clears it. Plane by base_plane+offset or "
-          "origin+normal. (This is the visual cut; use `section` for the "
-          "cross-section AREA.)")
+          "origin+normal. Works on part AND assembly tabs; on assemblies the "
+          "clip applies per occurrence in world space but there are no "
+          "filled cut caps, so the section reads hollow. (This is the "
+          "visual cut; use `section` for the cross-section AREA.)")
 def set_section(enabled: bool = True, base_plane: str = "xy",
                 offset: float = 0.0, origin: list | None = None,
                 normal: list | None = None) -> dict:

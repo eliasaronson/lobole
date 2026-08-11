@@ -791,6 +791,12 @@ def main():
         expect(r["active"] != 0 and abs(r["factor"] - 0.8) < 1e-6,
                "factor-only set_explode auto-activates the only view")
 
+        # set_section works on the assembly tab (global viewport clip; the
+        # renderer applies it per occurrence in world space). Headless has no
+        # renderer, so this asserts the RPC contract only.
+        d.call("set_section", enabled=True, base_plane="yz", offset=5)
+        d.call("set_section", enabled=False)
+
         # Config methods on a drawing tab explain themselves instead of
         # reporting "unknown method".
         d.call("new_project")

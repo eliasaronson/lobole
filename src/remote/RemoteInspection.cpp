@@ -87,7 +87,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Pairwise interference (clash) check between bodies or occurrences."},
     {"section", "Raster cross-section preview of the bodies at a plane."},
     {"set_section",
-     "Enable/disable the live section view {plane, offset, flip?}."},
+     "Enable/disable the live section clip {base_plane|origin+normal, "
+     "offset}. Works on part AND assembly tabs (assemblies clip per "
+     "occurrence but have no filled cut caps — the section reads hollow)."},
 };
 std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
 
