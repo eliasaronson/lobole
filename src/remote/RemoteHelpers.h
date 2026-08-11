@@ -30,14 +30,23 @@ inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
 // response (and merged into get_state's regen block) so clients learn about
 // failures from the call that caused them instead of having to poll:
 //   {"ok": bool, "failed": [{"index", "name", "error",
-//                            "after_earlier_failure"?}, ...]}
+//                            "after_earlier_failure"?}, ...],
+//    "warnings": [{"index", "name", "warning"}, ...]}
+// `ok` reflects errors only — a warning means the feature built a valid
+// result that is likely not what was intended (the silent no-op cut), and
+// scripts should surface it without treating the edit as failed.
 // Computed from the features' transient error state — regeneration has always
 // completed synchronously by the time a handler builds its response.
 inline nlohmann::json RegenSummaryJson(const Document& doc) {
   nlohmann::json failed = nlohmann::json::array();
+  nlohmann::json warnings = nlohmann::json::array();
   const auto& features = doc.GetFeatures();
   for (size_t i = 0; i < features.size(); i++) {
     const Feature* f = features[i].get();
+    if (!f->GetWarning().empty()) {
+      warnings.push_back(
+          {{"index", i}, {"name", f->GetName()}, {"warning", f->GetWarning()}});
+    }
     if (f->GetError().empty())
       continue;
     nlohmann::json entry = {
@@ -46,7 +55,9 @@ inline nlohmann::json RegenSummaryJson(const Document& doc) {
       entry["after_earlier_failure"] = true;
     failed.push_back(std::move(entry));
   }
-  return {{"ok", failed.empty()}, {"failed", std::move(failed)}};
+  return {{"ok", failed.empty()},
+          {"failed", std::move(failed)},
+          {"warnings", std::move(warnings)}};
 }
 
 } // namespace remote

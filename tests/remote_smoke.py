@@ -636,8 +636,27 @@ def main():
         r = d.call("add_feature", feature={
             "type": "Box", "name": "A", "position": [0, 0, 0],
             "width": 2, "height": 2, "depth": 2})
-        expect(r["regen"]["ok"] and r["regen"]["failed"] == [],
-               "healthy add_feature reports regen.ok")
+        expect(r["regen"]["ok"] and r["regen"]["failed"] == []
+               and r["regen"]["warnings"] == [],
+               "healthy add_feature reports regen.ok with no warnings")
+        # A cut whose profile misses every body is VALID but almost always a
+        # mistake — the warning must ride the regen summary so scripts see it
+        # in the response that caused it (regen.ok stays true).
+        skm = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Off target",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [50, 50],
+                          "radius": 1.0}]})
+        r = d.call("add_feature", feature={
+            "type": "Extrude", "name": "Miss", "sketch_id": skm["id"],
+            "distance": 5.0, "mode": "cut"})
+        expect(r["regen"]["ok"], "a no-op cut is not an error")
+        expect(any("removed no material" in w["warning"]
+                   for w in r["regen"]["warnings"]),
+               f"no-op cut warning rides the summary: {r['regen']}")
+        d.call("delete_feature", index=2)
+        d.call("delete_feature", index=1)
         r = d.call("add_feature", feature={
             "type": "Extrude", "name": "Bad", "sketch_id": 9999,
             "distance": 1.0, "mode": "new_body"})

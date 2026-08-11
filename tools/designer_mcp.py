@@ -457,9 +457,14 @@ def list_elements(body: int = -1, part: str | int | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool(description="Append a feature to the history and regenerate. "
-          "Returns {index, id, entity_ids?} — reference the feature by this "
-          "id (e.g. Extrude.sketch_id), and sketch entities by entity_ids "
-          "(in the order you sent them). One undo step.\n\n" + FEATURE_FORMATS)
+          "Returns {index, id, entity_ids?, regen} — reference the feature by "
+          "this id (e.g. Extrude.sketch_id), and sketch entities by "
+          "entity_ids (in the order you sent them). One undo step. ALWAYS "
+          "check regen: {ok, failed:[{index,name,error}], warnings:[{index,"
+          "name,warning}]} — ok false means the edit broke the model (fix the "
+          "first non-collateral failure); a warning means it built but likely "
+          "did nothing intended (e.g. a cut whose profile missed every "
+          "body).\n\n" + FEATURE_FORMATS)
 def add_feature(feature: dict) -> dict:
     return _call("add_feature", feature=feature)
 
