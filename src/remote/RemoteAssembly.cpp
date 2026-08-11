@@ -50,8 +50,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"remove_exploded_view", "Remove an exploded view."},
     {"list_exploded_views", "List exploded views."},
     {"set_explode_step", "Add/edit an explode step (occurrence + offset)."},
-    {"auto_explode", "Generate explode steps automatically."},
-    {"set_explode", "Set the live explode factor (0..1)."},
+    {"auto_explode", "Generate explode steps automatically (creates and "
+                     "activates a view when none is given)."},
+    {"set_explode",
+     "Set the live explode factor (0..1); auto-activates the only view, "
+     "errors if ambiguous. view: 0 deactivates."},
 };
 std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
 
@@ -357,6 +360,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                     "occurrences) — call add_exploded_view first, or omit "
                     "`view` to auto-create one");
     }
+    // A just-created view becomes the active one (the GUI's create button
+    // does the same) so a following set_explode {factor} applies it without
+    // the silent-nothing trap.
+    if (created)
+      state.activeExplodedView = id;
     json out = DocumentIO::ExplodedViewToJson(
         *state.assembly->FindExplodedViewById(id));
     out["view"] = id; // the (possibly just-created) view id
@@ -364,8 +372,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "set_explode") {
     // Display state (transient, never saved): which view is applied and how
-    // far. params: {view?, factor?} — view 0/omitted-with-factor keeps the
-    // current view; view 0 explicitly = none.
+    // far. params: {view?, factor?} — view omitted keeps the current view;
+    // view 0 explicitly = none.
     if (!state.assembly)
       throw std::runtime_error("the active document is not an assembly");
     if (p.contains("view")) {
@@ -374,8 +382,23 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error("no such exploded view");
       state.activeExplodedView = id;
     }
-    if (p.contains("factor"))
-      state.explodeFactor = std::clamp(p.at("factor").get<float>(), 0.0f, 1.0f);
+    if (p.contains("factor")) {
+      const float factor = std::clamp(p.at("factor").get<float>(), 0.0f, 1.0f);
+      // A positive factor with no active view used to succeed and visibly do
+      // NOTHING. Auto-activate the only view when that's unambiguous;
+      // otherwise say what's missing. factor 0 stays a no-op success (the
+      // reset idiom).
+      if (factor > 0.0f && state.activeExplodedView == 0) {
+        const auto& views = state.assembly->GetExplodedViews();
+        if (views.size() == 1)
+          state.activeExplodedView = views[0].id;
+        else
+          throw std::runtime_error(
+              "no active exploded view — pass view: <id> (see "
+              "list_exploded_views, or auto_explode to create one)");
+      }
+      state.explodeFactor = factor;
+    }
     state.syncedDocumentVersion = UINT64_MAX; // display change: force resync
     return json{{"active", state.activeExplodedView},
                 {"factor", state.explodeFactor}};

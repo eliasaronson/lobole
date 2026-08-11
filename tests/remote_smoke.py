@@ -764,6 +764,33 @@ def main():
         except RuntimeError as e:
             expect("list_parts" in str(e), f"bad-name error is helpful: {e}")
 
+        # Explode activation: factor-only set_explode auto-activates the only
+        # view (was a silent visual no-op); errors helpfully with none.
+        d.call("new_project")
+        d.call("add_feature", feature=BOX)
+        bidx = d.call("add_part", name="B2")["index"]
+        d.call("set_active_part", index=bidx)
+        d.call("add_feature", feature=dict(BOX, name="Box B",
+                                           position=[10, 0, 0]))
+        aidx = d.call("add_assembly", name="ExpAsm")["index"]
+        d.call("set_active_part", index=aidx)
+        d.call("add_occurrence", part="Part 1")
+        d.call("add_occurrence", part="B2")
+        try:
+            d.call("set_explode", factor=0.5)
+            expect(False, "factor with no views should error")
+        except RuntimeError as e:
+            expect("list_exploded_views" in str(e),
+                   f"no-view explode error is helpful: {e}")
+        r = d.call("auto_explode")
+        expect(d.call("list_exploded_views")["active"] == r["view"],
+               "auto_explode activates the view it creates")
+        d.call("set_explode", view=0)  # explicit deactivate must keep working
+        expect(d.call("list_exploded_views")["active"] == 0, "deactivated")
+        r = d.call("set_explode", factor=0.8)
+        expect(r["active"] != 0 and abs(r["factor"] - 0.8) < 1e-6,
+               "factor-only set_explode auto-activates the only view")
+
         # Config methods on a drawing tab explain themselves instead of
         # reporting "unknown method".
         d.call("new_project")
