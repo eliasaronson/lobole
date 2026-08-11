@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -30,13 +31,26 @@ public:
     return params_.contains(key);
   }
 
+  // Required parameter: a missing key throws a caller-grade message ("missing
+  // required parameter 'x'"), not nlohmann's "key 'x' not found" — the
+  // unknown-key "did you mean" path only covers keys that are PRESENT, so
+  // this is the one place a missing key can be reported helpfully. seen_ is
+  // recorded before the throw so the accepted-keys list stays complete.
   template <class K> const nlohmann::json& at(const K& key) const {
     seen_.emplace(key);
+    if (!params_.contains(key))
+      throw std::runtime_error("missing required parameter '" +
+                               std::string(key) + "'");
     return params_.at(key);
   }
 
   template <class K> const nlohmann::json& operator[](const K& key) const {
     seen_.emplace(key);
+    // operator[] on a const json with a missing key is UB, not an exception —
+    // guard it the same way.
+    if (!params_.contains(key))
+      throw std::runtime_error("missing required parameter '" +
+                               std::string(key) + "'");
     return params_[key];
   }
 

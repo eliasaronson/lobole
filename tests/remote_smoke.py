@@ -742,6 +742,16 @@ def main():
         expect(not undispatched,
                f"described but never dispatched: {undispatched}")
 
+        # A missing REQUIRED parameter reports itself in caller terms, not as
+        # nlohmann's "key 'x' not found" (the did-you-mean path only covers
+        # keys that are present-but-unknown).
+        try:
+            d.call("rename_part", new_name="X")
+            expect(False, "rename_part without 'part' should error")
+        except RuntimeError as e:
+            expect("missing required parameter 'part'" in str(e),
+                   f"missing-param error is caller-grade: {e}")
+
         # set_active_part accepts a NAME as well as an index (the describe
         # doc promises both; the name path was missing until it bit).
         d.call("new_project")
