@@ -11,6 +11,9 @@ void Logger::Initialize(spdlog::level::level_enum level) {
   s_logger = std::make_shared<spdlog::logger>("CAD", console_sink);
   s_logger->set_level(level);
   s_logger->set_pattern("[%H:%M:%S] [%^%l%$] %v");
+  // Flush every message: when stdout is a pipe/file (CI, remote harnesses),
+  // block buffering otherwise swallows the tail of the log on crash or kill.
+  s_logger->flush_on(spdlog::level::trace);
 
   // Set as default logger
   spdlog::set_default_logger(s_logger);

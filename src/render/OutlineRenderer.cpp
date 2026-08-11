@@ -4,13 +4,12 @@
 #include "render/MeshRenderer.h"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <climits>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <map>
-#include <set>
 #include <stdexcept>
 #include <unistd.h>
 
@@ -91,9 +90,11 @@ void OutlineRenderer::Shutdown() {
         vkDestroyBuffer(m_device, mesh->indexBuffer, nullptr);
         vkFreeMemory(m_device, mesh->indexBufferMemory, nullptr);
       }
-      if (mesh->edgeIndexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, mesh->edgeIndexBuffer, nullptr);
-        vkFreeMemory(m_device, mesh->edgeIndexBufferMemory, nullptr);
+      for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
+        if (mesh->edgeIndexBuffers[f] != VK_NULL_HANDLE) {
+          vkDestroyBuffer(m_device, mesh->edgeIndexBuffers[f], nullptr);
+          vkFreeMemory(m_device, mesh->edgeIndexBufferMemory[f], nullptr);
+        }
       }
     }
   }
@@ -625,10 +626,6 @@ uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices,
   mesh->vertexCount = static_cast<uint32_t>(vertices.size());
   mesh->indexCount = static_cast<uint32_t>(indices.size());
 
-  // Store original data for view-dependent edge calculation
-  mesh->originalVertices = vertices;
-  mesh->originalIndices = indices;
-
   // Create vertex buffer
   VkDeviceSize vertexBufferSize = sizeof(Vertex3D) * vertices.size();
   VkBuffer stagingBuffer;
@@ -678,41 +675,37 @@ uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices,
   vkDestroyBuffer(m_device, stagingBuffer, nullptr);
   vkFreeMemory(m_device, stagingBufferMemory, nullptr);
 
-  // Extract edges for wireframe rendering and create edge index buffer
-  auto edgeIndices = ExtractEdges(vertices, indices);
-  mesh->edgeIndexCount = static_cast<uint32_t>(edgeIndices.size());
+  // Precompute edge adjacency once; classification per view is then a flat
+  // pass (see OutlineEdges.h). The per-frame edge index buffers are sized to
+  // the worst case any view can produce, so they are never reallocated.
+  mesh->adjacency = outline::BuildEdgeAdjacency(
+      vertices.empty() ? nullptr : &vertices[0].position, vertices.size(),
+      sizeof(Vertex3D), indices.data(), indices.size());
+  mesh->edgeIndices = mesh->adjacency.staticIndices;
+  mesh->staticIndexCount = static_cast<uint32_t>(mesh->edgeIndices.size());
 
-  if (!edgeIndices.empty()) {
-    VkDeviceSize edgeIndexBufferSize = sizeof(uint32_t) * edgeIndices.size();
-
-    stagingBuffer =
-        CreateBuffer(edgeIndexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                     stagingBufferMemory);
-
-    vkMapMemory(m_device, stagingBufferMemory, 0, edgeIndexBufferSize, 0,
-                &data);
-    memcpy(data, edgeIndices.data(), (size_t)edgeIndexBufferSize);
-    vkUnmapMemory(m_device, stagingBufferMemory);
-
-    mesh->edgeIndexBuffer = CreateBuffer(
-        edgeIndexBufferSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh->edgeIndexBufferMemory);
-
-    CopyBuffer(stagingBuffer, mesh->edgeIndexBuffer, edgeIndexBufferSize);
-
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+  const VkDeviceSize edgeCapacityBytes =
+      sizeof(uint32_t) * mesh->adjacency.MaxIndexCount();
+  if (edgeCapacityBytes > 0) {
+    for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
+      mesh->edgeIndexBuffers[f] =
+          CreateBuffer(edgeCapacityBytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                       mesh->edgeIndexBufferMemory[f]);
+      vkMapMemory(m_device, mesh->edgeIndexBufferMemory[f], 0,
+                  edgeCapacityBytes, 0, &mesh->edgeIndexMapped[f]);
+    }
   }
+  m_silhouettesDirty = true;
 
   uint32_t meshId = m_nextMeshId++;
   m_meshes.push_back(std::move(mesh));
 
-  LOG_INFO(
-      "OutlineRenderer: Created mesh {} with {} vertices and {} edge indices",
-      meshId, vertices.size(), edgeIndices.size());
+  LOG_INFO("OutlineRenderer: Created mesh {} with {} vertices, {} static edge "
+           "indices, {} silhouette candidates",
+           meshId, vertices.size(), m_meshes.back()->staticIndexCount,
+           m_meshes.back()->adjacency.smoothEdges.size());
 
   return meshId;
 }
@@ -727,17 +720,15 @@ void OutlineRenderer::UpdateCamera(const glm::mat4& view,
   glm::mat4 invView = glm::inverse(view);
   glm::vec3 newCameraPosition = glm::vec3(invView[3]);
 
-  // Check if camera moved significantly (increased threshold for performance)
+  // A significant move restarts the settle clock; silhouettes reclassify
+  // once the camera has been still for silhouetteSettleMs (RefreshSilhouettes
+  // via UpdateUniformBuffers). Static feature/boundary edges draw throughout.
   float cameraMoveDistance = glm::length(newCameraPosition - m_cameraPosition);
   float viewChangeAmount = glm::length(glm::vec3(view[0] - prevView[0]));
 
   if (cameraMoveDistance > 0.05f || viewChangeAmount > 0.05f) {
-    // Camera moved or rotated significantly, mark all meshes for edge update
-    for (auto& mesh : m_meshes) {
-      if (mesh) {
-        mesh->needsEdgeUpdate = true;
-      }
-    }
+    m_lastCameraMove = std::chrono::steady_clock::now();
+    m_silhouettesDirty = true;
   }
 
   m_cameraPosition = newCameraPosition;
@@ -773,233 +764,6 @@ void OutlineRenderer::Render(VkCommandBuffer commandBuffer,
   default:
     break;
   }
-}
-
-// Utility function implementations
-std::vector<uint32_t>
-OutlineRenderer::ExtractEdges(const std::vector<Vertex3D>& vertices,
-                              const std::vector<uint32_t>& indices) {
-  // Extract feature edges and boundary edges for CAD-style wireframe
-  std::map<std::pair<uint32_t, uint32_t>, std::vector<glm::vec3>> edgeToNormals;
-  std::vector<uint32_t> edges;
-
-  // Calculate triangle normals and associate them with edges
-  for (size_t i = 0; i < indices.size(); i += 3) {
-    uint32_t v0 = indices[i];
-    uint32_t v1 = indices[i + 1];
-    uint32_t v2 = indices[i + 2];
-
-    // Calculate triangle normal
-    glm::vec3 p0 = glm::vec3(vertices[v0].position[0], vertices[v0].position[1],
-                             vertices[v0].position[2]);
-    glm::vec3 p1 = glm::vec3(vertices[v1].position[0], vertices[v1].position[1],
-                             vertices[v1].position[2]);
-    glm::vec3 p2 = glm::vec3(vertices[v2].position[0], vertices[v2].position[1],
-                             vertices[v2].position[2]);
-
-    glm::vec3 normal = glm::normalize(glm::cross(p1 - p0, p2 - p0));
-
-    // Add this normal to all three edges of the triangle
-    auto addEdgeNormal = [&](uint32_t a, uint32_t b) {
-      if (a > b)
-        std::swap(a, b);
-      edgeToNormals[{a, b}].push_back(normal);
-    };
-
-    addEdgeNormal(v0, v1);
-    addEdgeNormal(v1, v2);
-    addEdgeNormal(v2, v0);
-  }
-
-  // Extract edges based on criteria
-  const float featureAngleThreshold =
-      0.5f; // cos(60 degrees) - adjust for sharper/softer features
-
-  for (const auto& edgeData : edgeToNormals) {
-    bool shouldIncludeEdge = false;
-
-    if (edgeData.second.size() == 1) {
-      // Boundary edge (only one adjacent triangle)
-      shouldIncludeEdge = true;
-    } else if (edgeData.second.size() == 2) {
-      // Internal edge - check if it's a feature edge (sharp angle between
-      // normals)
-      float dotProduct = glm::dot(edgeData.second[0], edgeData.second[1]);
-      if (dotProduct < featureAngleThreshold) {
-        shouldIncludeEdge = true;
-      }
-    }
-
-    if (shouldIncludeEdge) {
-      edges.push_back(edgeData.first.first);
-      edges.push_back(edgeData.first.second);
-    }
-  }
-
-  // If we got very few edges, the threshold might be too strict for this mesh
-  if (edges.size() < 6) { // Less than 3 edges total
-    edges.clear();
-    // Use a more lenient threshold
-    const float lenientThreshold = 0.8f; // cos(36 degrees)
-
-    for (const auto& edgeData : edgeToNormals) {
-      if (edgeData.second.size() == 1) {
-        // Always include boundary edges
-        edges.push_back(edgeData.first.first);
-        edges.push_back(edgeData.first.second);
-      } else if (edgeData.second.size() == 2) {
-        float dotProduct = glm::dot(edgeData.second[0], edgeData.second[1]);
-        if (dotProduct < lenientThreshold) {
-          edges.push_back(edgeData.first.first);
-          edges.push_back(edgeData.first.second);
-        }
-      }
-    }
-  }
-
-  return edges;
-}
-
-void OutlineRenderer::UpdateMeshEdgesForView(OutlineMesh& mesh) {
-  if (!mesh.needsEdgeUpdate && !mesh.originalVertices.empty()) {
-    return; // Skip if no update needed
-  }
-
-  if (mesh.originalVertices.empty()) {
-    return;
-  }
-
-  // Calculate view-dependent silhouette edges
-  std::map<std::pair<uint32_t, uint32_t>,
-           std::vector<std::pair<glm::vec3, bool>>>
-      edgeToTriangles;
-  std::vector<uint32_t> visibleEdges;
-
-  glm::vec3 viewDir = glm::normalize(m_cameraPosition);
-
-  // Group triangles by edges and calculate their visibility
-  for (size_t i = 0; i < mesh.originalIndices.size(); i += 3) {
-    uint32_t v0 = mesh.originalIndices[i];
-    uint32_t v1 = mesh.originalIndices[i + 1];
-    uint32_t v2 = mesh.originalIndices[i + 2];
-
-    // Transform vertices by mesh transform
-    glm::vec4 p0_4 =
-        mesh.transform * glm::vec4(mesh.originalVertices[v0].position[0],
-                                   mesh.originalVertices[v0].position[1],
-                                   mesh.originalVertices[v0].position[2], 1.0f);
-    glm::vec4 p1_4 =
-        mesh.transform * glm::vec4(mesh.originalVertices[v1].position[0],
-                                   mesh.originalVertices[v1].position[1],
-                                   mesh.originalVertices[v1].position[2], 1.0f);
-    glm::vec4 p2_4 =
-        mesh.transform * glm::vec4(mesh.originalVertices[v2].position[0],
-                                   mesh.originalVertices[v2].position[1],
-                                   mesh.originalVertices[v2].position[2], 1.0f);
-
-    glm::vec3 p0 = glm::vec3(p0_4);
-    glm::vec3 p1 = glm::vec3(p1_4);
-    glm::vec3 p2 = glm::vec3(p2_4);
-
-    // Calculate triangle normal
-    glm::vec3 normal = glm::normalize(glm::cross(p1 - p0, p2 - p0));
-
-    // Calculate triangle center for view direction
-    glm::vec3 center = (p0 + p1 + p2) / 3.0f;
-    glm::vec3 toCamera = glm::normalize(m_cameraPosition - center);
-
-    // Determine if triangle is front-facing
-    bool isFrontFacing = glm::dot(normal, toCamera) > 0.0f;
-
-    // Add triangle info to each edge
-    auto addEdgeTriangle = [&](uint32_t a, uint32_t b) {
-      if (a > b)
-        std::swap(a, b);
-      edgeToTriangles[{a, b}].push_back({normal, isFrontFacing});
-    };
-
-    addEdgeTriangle(v0, v1);
-    addEdgeTriangle(v1, v2);
-    addEdgeTriangle(v2, v0);
-  }
-
-  // Find only true silhouette edges - much more aggressive filtering
-  int boundaryEdges = 0, silhouetteEdges = 0, hiddenEdges = 0;
-
-  for (const auto& edgeData : edgeToTriangles) {
-    if (edgeData.second.size() == 2) {
-      // Only process internal edges (shared by exactly 2 triangles)
-      bool firstFront = edgeData.second[0].second;
-      bool secondFront = edgeData.second[1].second;
-
-      if (firstFront != secondFront) {
-        // True silhouette edge - one side faces camera, other faces away
-        visibleEdges.push_back(edgeData.first.first);
-        visibleEdges.push_back(edgeData.first.second);
-        silhouetteEdges++;
-      } else {
-        // Both triangles face same direction - hide this edge
-        hiddenEdges++;
-      }
-    } else if (edgeData.second.size() == 1) {
-      // Boundary edges - only show if they're on front-facing triangles
-      // For complex shapes, be more selective about boundary edges
-      if (edgeData.second[0].second) {
-        visibleEdges.push_back(edgeData.first.first);
-        visibleEdges.push_back(edgeData.first.second);
-        boundaryEdges++;
-      }
-    }
-  }
-
-  // Update the edge buffer if we have visible edges and they changed
-  if (!visibleEdges.empty() && visibleEdges.size() != mesh.edgeIndexCount) {
-    // Recreate edge index buffer with new data.
-    if (mesh.edgeIndexBuffer != VK_NULL_HANDLE) {
-      // The old buffer may still be referenced by an in-flight frame's
-      // wireframe draw (this runs mid-frame from Render/UpdateUniformBuffers).
-      // Destroying it while the GPU reads it is a use-after-free that shows
-      // up as VK_ERROR_DEVICE_LOST once frames overlap enough (more/larger
-      // geometry) — e.g. an assembly of two distinct extruded parts, whose
-      // asymmetric silhouettes actually change edge count. Wait for prior
-      // GPU work before freeing. (This renderer is already synchronous here
-      // — every CopyBuffer does a queue wait-idle; a per-frame-in-flight
-      // edge-buffer ring would remove the stall, TODO.)
-      vkDeviceWaitIdle(m_device);
-      vkDestroyBuffer(m_device, mesh.edgeIndexBuffer, nullptr);
-      vkFreeMemory(m_device, mesh.edgeIndexBufferMemory, nullptr);
-    }
-
-    mesh.edgeIndexCount = static_cast<uint32_t>(visibleEdges.size());
-
-    VkDeviceSize edgeIndexBufferSize = sizeof(uint32_t) * visibleEdges.size();
-    VkBuffer stagingBuffer;
-    VkDeviceMemory stagingBufferMemory;
-
-    stagingBuffer =
-        CreateBuffer(edgeIndexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                     stagingBufferMemory);
-
-    void* data;
-    vkMapMemory(m_device, stagingBufferMemory, 0, edgeIndexBufferSize, 0,
-                &data);
-    memcpy(data, visibleEdges.data(), (size_t)edgeIndexBufferSize);
-    vkUnmapMemory(m_device, stagingBufferMemory);
-
-    mesh.edgeIndexBuffer = CreateBuffer(
-        edgeIndexBufferSize,
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh.edgeIndexBufferMemory);
-
-    CopyBuffer(stagingBuffer, mesh.edgeIndexBuffer, edgeIndexBufferSize);
-
-    vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-    vkFreeMemory(m_device, stagingBufferMemory, nullptr);
-  }
-
-  mesh.needsEdgeUpdate = false;
 }
 
 // Rest of utility functions (same as in MeshRenderer/RayTracingRenderer)
@@ -1132,6 +896,9 @@ void OutlineRenderer::RemoveMesh(uint32_t meshId) {
   if (!mesh)
     return;
 
+  // Removal is rare (body delete/regen), so a full wait before freeing
+  // buffers an in-flight frame may still reference is acceptable here —
+  // unlike the old per-frame silhouette path, this never runs mid-orbit.
   vkDeviceWaitIdle(m_device);
 
   if (mesh->vertexBuffer != VK_NULL_HANDLE) {
@@ -1142,9 +909,11 @@ void OutlineRenderer::RemoveMesh(uint32_t meshId) {
     vkDestroyBuffer(m_device, mesh->indexBuffer, nullptr);
     vkFreeMemory(m_device, mesh->indexBufferMemory, nullptr);
   }
-  if (mesh->edgeIndexBuffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(m_device, mesh->edgeIndexBuffer, nullptr);
-    vkFreeMemory(m_device, mesh->edgeIndexBufferMemory, nullptr);
+  for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
+    if (mesh->edgeIndexBuffers[f] != VK_NULL_HANDLE) {
+      vkDestroyBuffer(m_device, mesh->edgeIndexBuffers[f], nullptr);
+      vkFreeMemory(m_device, mesh->edgeIndexBufferMemory[f], nullptr);
+    }
   }
   m_meshes[meshId - 1].reset();
 }
@@ -1152,7 +921,12 @@ void OutlineRenderer::RemoveMesh(uint32_t meshId) {
 void OutlineRenderer::SetMeshTransform(uint32_t meshId,
                                        const glm::mat4& transform) {
   if (meshId > 0 && meshId <= m_meshes.size() && m_meshes[meshId - 1]) {
-    m_meshes[meshId - 1]->transform = transform;
+    if (m_meshes[meshId - 1]->transform != transform) {
+      m_meshes[meshId - 1]->transform = transform;
+      // Silhouettes are classified in mesh-local space against a transformed
+      // camera, so a moved occurrence needs a fresh pass.
+      m_silhouettesDirty = true;
+    }
   }
 }
 
@@ -1164,11 +938,72 @@ void OutlineRenderer::SetViewport(int32_t x, int32_t y, uint32_t width,
   m_viewportHeight = height;
 }
 
-void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
-  // Update wireframe edges based on current camera view for each mesh
+void OutlineRenderer::DropToStaticEdges() {
   for (auto& mesh : m_meshes) {
-    if (mesh) {
-      UpdateMeshEdgesForView(*mesh);
+    if (mesh && mesh->edgeIndices.size() != mesh->staticIndexCount) {
+      mesh->edgeIndices.resize(mesh->staticIndexCount);
+      mesh->edgeVersion++;
+    }
+  }
+  m_silhouettesShown = false;
+}
+
+void OutlineRenderer::RefreshSilhouettes() {
+  const auto t0 = std::chrono::steady_clock::now();
+  size_t meshCount = 0;
+  size_t silhouetteIndices = 0;
+  for (auto& mesh : m_meshes) {
+    if (!mesh || mesh->adjacency.smoothEdges.empty()) {
+      // Nothing view-dependent; the static prefix (already in edgeIndices)
+      // is the whole wireframe.
+      continue;
+    }
+    mesh->edgeIndices.resize(mesh->staticIndexCount);
+    const glm::vec3 cameraLocal = glm::vec3(glm::inverse(mesh->transform) *
+                                            glm::vec4(m_cameraPosition, 1.0f));
+    outline::AppendSilhouetteIndices(mesh->adjacency, cameraLocal,
+                                     m_silhouetteScratch, mesh->edgeIndices);
+    mesh->edgeVersion++;
+    meshCount++;
+    silhouetteIndices += mesh->edgeIndices.size() - mesh->staticIndexCount;
+  }
+  m_silhouettesShown = true;
+  m_silhouettesDirty = false;
+
+  const auto elapsed = std::chrono::duration<double, std::milli>(
+      std::chrono::steady_clock::now() - t0);
+  LOG_DEBUG("OutlineRenderer: silhouette pass: {} meshes, {} silhouette "
+            "indices, {:.2f} ms",
+            meshCount, silhouetteIndices, elapsed.count());
+}
+
+void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
+  // Wireframe edge policy: while the camera moves, only the static
+  // feature/boundary prefix draws; silhouettes are reclassified in one flat
+  // pass once it has settled (or every change with liveSilhouettes).
+  using clock = std::chrono::steady_clock;
+  const bool settled = m_settings.liveSilhouettes ||
+                       clock::now() - m_lastCameraMove >=
+                           std::chrono::duration_cast<clock::duration>(
+                               std::chrono::duration<float, std::milli>(
+                                   m_settings.silhouetteSettleMs));
+
+  if (!settled && m_silhouettesShown)
+    DropToStaticEdges();
+  if (settled && m_silhouettesDirty)
+    RefreshSilhouettes();
+
+  // Upload this frame slot's edge buffer where its content is stale. The
+  // frame loop has already fence-waited this slot, so writing the mapped
+  // buffer here cannot race an in-flight read.
+  for (auto& mesh : m_meshes) {
+    if (mesh && mesh->edgeIndexBuffers[currentFrame] != VK_NULL_HANDLE &&
+        mesh->uploadedVersion[currentFrame] != mesh->edgeVersion) {
+      memcpy(mesh->edgeIndexMapped[currentFrame], mesh->edgeIndices.data(),
+             mesh->edgeIndices.size() * sizeof(uint32_t));
+      mesh->uploadedIndexCount[currentFrame] =
+          static_cast<uint32_t>(mesh->edgeIndices.size());
+      mesh->uploadedVersion[currentFrame] = mesh->edgeVersion;
     }
   }
 
@@ -1274,16 +1109,20 @@ void OutlineRenderer::RenderWireframes(VkCommandBuffer commandBuffer,
 
   for (const auto& mesh : m_meshes) {
     if (mesh && mesh->vertexBuffer != VK_NULL_HANDLE &&
-        mesh->edgeIndexBuffer != VK_NULL_HANDLE) {
+        mesh->edgeIndexBuffers[currentFrame] != VK_NULL_HANDLE &&
+        mesh->uploadedIndexCount[currentFrame] > 0) {
       vkCmdPushConstants(commandBuffer, m_wireframePipelineLayout,
                          VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4),
                          &mesh->transform); // per-mesh model (A2.5)
       VkBuffer vertexBuffers[] = {mesh->vertexBuffer};
       VkDeviceSize offsets[] = {0};
       vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-      vkCmdBindIndexBuffer(commandBuffer, mesh->edgeIndexBuffer, 0,
-                           VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(commandBuffer, mesh->edgeIndexCount, 1, 0, 0, 0);
+      // Bind this frame slot's buffer and draw exactly what was uploaded to
+      // it — the CPU-side list may already be newer.
+      vkCmdBindIndexBuffer(commandBuffer, mesh->edgeIndexBuffers[currentFrame],
+                           0, VK_INDEX_TYPE_UINT32);
+      vkCmdDrawIndexed(commandBuffer, mesh->uploadedIndexCount[currentFrame], 1,
+                       0, 0, 0);
     }
   }
 }

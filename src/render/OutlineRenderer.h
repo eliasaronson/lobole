@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/OutlineEdges.h"
+#include <chrono>
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -25,6 +27,12 @@ struct OutlineSettings {
   float lineWidth = 1.5f;
   bool enableDepthTest = true;
   bool enableBlending = true;
+  // Wireframe silhouettes are recomputed once the camera has been still for
+  // this long; while it moves, only the static feature/boundary edges draw.
+  float silhouetteSettleMs = 120.0f;
+  // Escape hatch: reclassify silhouettes on every camera change instead of
+  // waiting for it to settle (costs CPU on large assemblies).
+  bool liveSilhouettes = false;
 };
 
 class OutlineRenderer {
@@ -68,22 +76,34 @@ public:
   bool IsInitialized() const { return m_isInitialized; }
 
 private:
+  static const int MAX_FRAMES_IN_FLIGHT = 2;
+
   struct OutlineMesh {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory vertexBufferMemory = VK_NULL_HANDLE;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory indexBufferMemory = VK_NULL_HANDLE;
-    VkBuffer edgeIndexBuffer = VK_NULL_HANDLE; // For edge-only rendering
-    VkDeviceMemory edgeIndexBufferMemory = VK_NULL_HANDLE;
     uint32_t vertexCount = 0;
     uint32_t indexCount = 0;
-    uint32_t edgeIndexCount = 0;
     glm::mat4 transform = glm::mat4(1.0f);
 
-    // Store original data for view-dependent edge calculation
-    std::vector<Vertex3D> originalVertices;
-    std::vector<uint32_t> originalIndices;
-    bool needsEdgeUpdate = true;
+    // Wireframe edge indices. CPU side: precomputed adjacency plus the
+    // current line list, laid out [static feature/boundary prefix |
+    // per-view silhouette suffix]. GPU side: one persistently mapped
+    // host-visible buffer per frame in flight, allocated once at worst case
+    // (MaxIndexCount) — updates are a memcpy into the slot whose fence the
+    // frame loop already waited on, so no reallocation, no staging copy and
+    // no mid-frame vkDeviceWaitIdle, and an in-flight frame can never see
+    // its buffer freed under it.
+    outline::EdgeAdjacency adjacency;
+    std::vector<uint32_t> edgeIndices;
+    uint32_t staticIndexCount = 0;
+    uint64_t edgeVersion = 1; // bumped whenever edgeIndices changes
+    VkBuffer edgeIndexBuffers[MAX_FRAMES_IN_FLIGHT] = {};
+    VkDeviceMemory edgeIndexBufferMemory[MAX_FRAMES_IN_FLIGHT] = {};
+    void* edgeIndexMapped[MAX_FRAMES_IN_FLIGHT] = {};
+    uint32_t uploadedIndexCount[MAX_FRAMES_IN_FLIGHT] = {};
+    uint64_t uploadedVersion[MAX_FRAMES_IN_FLIGHT] = {};
   };
 
   struct OutlineUniformBufferObject {
@@ -115,10 +135,9 @@ private:
   bool CreateDescriptorPool();
   bool CreateDescriptorSets();
 
-  // Edge detection
-  std::vector<uint32_t> ExtractEdges(const std::vector<Vertex3D>& vertices,
-                                     const std::vector<uint32_t>& indices);
-  void UpdateMeshEdgesForView(OutlineMesh& mesh);
+  // Edge classification state (see OutlineEdges.h for the algorithm)
+  void RefreshSilhouettes();
+  void DropToStaticEdges();
 
   // Rendering helpers
   void UpdateUniformBuffers(uint32_t currentFrame);
@@ -172,6 +191,14 @@ private:
   glm::mat4 m_projectionMatrix = glm::mat4(1.0f);
   glm::vec3 m_cameraPosition = glm::vec3(0.0f);
 
+  // Silhouette settle state: while the camera moves only static edges draw;
+  // one classification pass runs after it has been still for the configured
+  // delay (or immediately, with liveSilhouettes).
+  std::chrono::steady_clock::time_point m_lastCameraMove{};
+  bool m_silhouettesShown = false;
+  bool m_silhouettesDirty = true;
+  outline::SilhouetteScratch m_silhouetteScratch;
+
   // Viewport
   int32_t m_viewportX = 0;
   int32_t m_viewportY = 0;
@@ -184,5 +211,4 @@ private:
 
   // State
   bool m_isInitialized = false;
-  static const int MAX_FRAMES_IN_FLIGHT = 2;
 };

@@ -175,6 +175,7 @@ set(core_sources
     src/render/Camera.cpp
     src/common/Logger.cpp
     src/render/Scene.cpp
+    src/render/OutlineEdges.cpp
     src/cad/CADObject.cpp
     src/cad/CADKernel.cpp
     src/cad/CADMeshConverter.cpp

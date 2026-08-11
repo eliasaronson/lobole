@@ -17,6 +17,14 @@
 > on the `main.cpp` render-path cleanup (not started: `main.cpp` is ~1300
 > lines, no extracted `VulkanContext`). Of 6b's two preconditions, PBR (✓)
 > is met; the cleanup is not.
+>
+> **2026-08-11: outline/wireframe interaction perf — SHIPPED.** Orbiting
+> lagged on many-body assemblies (CPU-side per-frame silhouette recompute +
+> mid-frame `vkDeviceWaitIdle` in `OutlineRenderer`). Fixed: precomputed
+> edge adjacency (`OutlineEdges.{h,cpp}`) + flat settle-pass reclassify +
+> per-frame-in-flight edge buffers — 131-mesh Waveshare assembly reclassifies
+> in 0.8 ms, only on camera settle. Plan + numbers:
+> [outline-perf.md](outline-perf.md).
 
 Most open-source CAD looks cheap, and that alone makes it unpleasant to use. The fix is
 mostly *not* raytracing — it's a modern raster pipeline done properly. Ordered by
