@@ -1064,6 +1064,23 @@ bool DeletePart(AppState& state, size_t index) {
   return true;
 }
 
+void MoveToFolder(AppState& state, size_t index, const std::string& folder) {
+  if (index >= state.parts.size() || state.parts[index].folder == folder)
+    return;
+  state.parts[index].folder = folder;
+  state.projectMetaDirty = true;
+}
+
+void RenameFolder(AppState& state, const std::string& from,
+                  const std::string& to) {
+  if (from.empty() || to.empty() || from == to)
+    return;
+  for (PartSlot& slot : state.parts)
+    if (slot.folder == from)
+      slot.folder = to;
+  state.projectMetaDirty = true;
+}
+
 namespace {
 // A part's document, whether active (in AppState) or stashed (in its slot).
 // Null for an assembly slot.
@@ -1620,10 +1637,13 @@ void StampAllSaved(AppState& state) {
   }
   if (state.parts.empty())
     state.lastSavedVersion = state.document ? state.document->Version() : 0;
+  state.projectMetaDirty = false;
 }
 } // namespace
 
 bool ProjectDirty(AppState& state) {
+  if (state.projectMetaDirty)
+    return true;
   if (state.parts.empty())
     return state.document &&
            state.document->Version() != state.lastSavedVersion;

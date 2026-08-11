@@ -58,6 +58,14 @@ size_t AddDrawing(AppState& state, const std::string& name);
 void SetActivePart(AppState& state, size_t index);
 bool DeletePart(AppState& state, size_t index);
 
+// Tab-bar folders (display grouping only — storage stays flat, ids and
+// references are unaffected). MoveToFolder reassigns one tab ("" = top
+// level); RenameFolder renames every member (renaming onto an existing
+// folder merges them). Both mark the project meta-dirty.
+void MoveToFolder(AppState& state, size_t index, const std::string& folder);
+void RenameFolder(AppState& state, const std::string& from,
+                  const std::string& to);
+
 // The document id (PartSlot::id) for a part name, or 0 if no such part.
 // Occurrences reference parts by this stable id, never by name.
 uint64_t PartIdByName(const AppState& state, const std::string& name);

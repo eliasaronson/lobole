@@ -3435,6 +3435,104 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     std::filesystem::remove_all(dir);
   };
 
+  // The bottom-bar "+" collapses the three add buttons into one menu.
+  t = IM_REGISTER_TEST(engine, "tabs", "add_menu");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New Part##addpart");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)2);
+    IM_CHECK(s_App->parts[1].kind == ui::DocKind::Part);
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New Assembly##addasm");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)3);
+    IM_CHECK(s_App->parts[2].kind == ui::DocKind::Assembly);
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New Drawing##adddwg");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)4);
+    IM_CHECK(s_App->parts[3].kind == ui::DocKind::Drawing);
+  };
+
+  // Folder management (Onshape-style tab folders): rename via right-click,
+  // move docs in/out via the tab context menus, and drag-drop between the
+  // bar and folder buttons. Folder edits mark the project dirty even though
+  // no document version changes (they live only in project.json).
+  t = IM_REGISTER_TEST(engine, "tabs", "folder_manage");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ui::AddPart(*s_App, "Bolt");
+    s_App->parts.back().folder = "Imported";
+    ui::AddPart(*s_App, "Nut");
+    s_App->parts.back().folder = "Imported";
+    ui::SetActivePart(*s_App, 0);
+    s_App->projectMetaDirty = false; // direct setup writes above don't count
+    ctx->Yield(2);
+
+    // Rename the folder via right-click > Rename.
+    ctx->ItemClick("//##PartTabs/Imported (2)##folderImported",
+                   ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Rename...");
+    ctx->Yield(2);
+    ctx->KeyCharsReplaceEnter("Hardware");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts[1].folder, std::string("Hardware"));
+    IM_CHECK_EQ(s_App->parts[2].folder, std::string("Hardware"));
+    IM_CHECK(ui::ProjectDirty(*s_App));
+
+    // Move the top-level part into a NEW folder via its context menu.
+    ctx->ItemClick("//##PartTabs/Part 1##part0", ImGuiMouseButton_Right);
+    ctx->MenuClick("//$FOCUSED/Move to folder/New folder...##mvnew");
+    ctx->Yield(2);
+    ctx->KeyCharsReplaceEnter("Misc");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts[0].folder, std::string("Misc"));
+
+    // ...and back out of it via the flyout entry's context menu.
+    ctx->ItemClick("//##PartTabs/Misc (1)##folderMisc");
+    ctx->ItemClick("//$FOCUSED/Part 1##fpart0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Move out of folder");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts[0].folder, std::string(""));
+
+    // Drag the top-level tab onto the folder button to file it.
+    ctx->ItemDragAndDrop("//##PartTabs/Part 1##part0",
+                         "//##PartTabs/Hardware (2)##folderHardware");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts[0].folder, std::string("Hardware"));
+
+    // Drag "Nut" out of the open flyout onto the bar's empty tail.
+    // Hand-rolled with raw positions: ItemDragAndDrop refocuses the target's
+    // window to resolve it, which closes the flyout mid-drag.
+    const ImVec2 tailPos =
+        ctx->ItemInfo("//##PartTabs/##tabsdroptail").RectFull.GetCenter();
+    ctx->ItemClick("//##PartTabs/Hardware (3)##folderHardware");
+    const ImVec2 nutPos =
+        ctx->ItemInfo("//$FOCUSED/Nut##fpart2").RectFull.GetCenter();
+    ctx->MouseMoveToPos(nutPos);
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(tailPos);
+    ctx->Yield(2);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts[2].folder, std::string(""));
+
+    // Dissolve the folder: contents move to the top level, nothing deleted.
+    ctx->ItemClick("//##PartTabs/Hardware (2)##folderHardware",
+                   ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Dissolve folder");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)3);
+    for (const auto& s : s_App->parts)
+      IM_CHECK_EQ(s.folder, std::string(""));
+  };
+
   // Mate-tool hover feedback uses the same fresh face inference as a click:
   // before committing either connector it identifies the candidate occurrence,
   // then clears the transient marker as soon as the live mate preview starts.

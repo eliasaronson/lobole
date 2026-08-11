@@ -28,6 +28,7 @@
 
 #include <algorithm>
 #include <cfloat> // FLT_MAX (folder flyout size constraint)
+#include <cstdio> // snprintf (folder rename buffer)
 #include <string>
 #include <vector>
 
@@ -251,6 +252,72 @@ void DrawPartTabs(AppState& state) {
       ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
   if (ImGui::Begin("##PartTabs", nullptr, flags)) {
+    // Folder-name entry state (rename, or naming a new folder for one doc).
+    // One popup serves both: renameFolderTarget non-empty = rename mode,
+    // otherwise newFolderDocId says which doc moves into the named folder.
+    static char folderNameBuf[128];
+    static std::string renameFolderTarget;
+    static uint64_t newFolderDocId = 0;
+    static bool openFolderNamePopup = false;
+
+    // Folders in order of first appearance (needed up front: the tab context
+    // menus offer "Move to folder" targets).
+    std::vector<std::string> folders;
+    for (const PartSlot& s : state.parts)
+      if (!s.folder.empty() &&
+          std::find(folders.begin(), folders.end(), s.folder) == folders.end())
+        folders.push_back(s.folder);
+
+    // Docs drag by stable id (indices shift on delete; ids never lie).
+    const auto docDragSource = [&](size_t i) {
+      if (ImGui::BeginDragDropSource()) {
+        ImGui::SetDragDropPayload("DOC_TAB", &state.parts[i].id,
+                                  sizeof(uint64_t));
+        ImGui::TextUnformatted(state.parts[i].name.c_str());
+        ImGui::EndDragDropSource();
+      }
+    };
+    // Makes the last item a drop target that files the dragged doc under
+    // `folder` ("" = back to top level).
+    const auto acceptDocDrop = [&](const std::string& folder) {
+      if (!ImGui::BeginDragDropTarget())
+        return;
+      if (const ImGuiPayload* pl = ImGui::AcceptDragDropPayload("DOC_TAB")) {
+        const uint64_t id = *static_cast<const uint64_t*>(pl->Data);
+        for (size_t i = 0; i < state.parts.size(); i++)
+          if (state.parts[i].id == id)
+            MoveToFolder(state, i, folder);
+      }
+      ImGui::EndDragDropTarget();
+    };
+    // "Move to folder" submenu shared by top-level tabs and flyout entries.
+    const auto moveToFolderMenu = [&](size_t i) {
+      if (!ImGui::BeginMenu("Move to folder"))
+        return;
+      for (const std::string& f : folders)
+        if (f != state.parts[i].folder &&
+            ImGui::MenuItem((f + "##mv" + f).c_str()))
+          MoveToFolder(state, i, f);
+      if (!folders.empty())
+        ImGui::Separator();
+      if (ImGui::MenuItem("New folder...##mvnew")) {
+        newFolderDocId = state.parts[i].id;
+        renameFolderTarget.clear();
+        folderNameBuf[0] = '\0';
+        openFolderNamePopup = true;
+      }
+      ImGui::EndMenu();
+    };
+    // Delete menu item shared by top-level tabs and flyout entries.
+    const auto deleteMenuItem = [&](size_t i) {
+      const char* label =
+          state.parts[i].kind == DocKind::Assembly  ? "Delete assembly"
+          : state.parts[i].kind == DocKind::Drawing ? "Delete drawing"
+                                                    : "Delete part";
+      if (ImGui::MenuItem(label, nullptr, false, state.parts.size() > 1))
+        DeletePart(state, i);
+    };
+
     // Top-level tabs first, one button each; foldered documents (assembly
     // import drops its parts in a folder) collapse to one flyout per folder
     // so a 100-part import doesn't flood the bar.
@@ -273,24 +340,17 @@ void DrawPartTabs(AppState& state) {
         SetActivePart(state, i);
       if (active)
         ImGui::PopStyleColor();
-      // Right-click a tab to delete it (never the last).
+      docDragSource(i);
+      acceptDocDrop(""); // dropping on a top-level tab = out of its folder
+      // Right-click a tab: move to a folder, or delete it (never the last).
       if (ImGui::BeginPopupContextItem(
               ("##pctx" + std::to_string(i)).c_str())) {
-        const char* label =
-            state.parts[i].kind == DocKind::Assembly  ? "Delete assembly"
-            : state.parts[i].kind == DocKind::Drawing ? "Delete drawing"
-                                                      : "Delete part";
-        if (ImGui::MenuItem(label, nullptr, false, state.parts.size() > 1))
-          DeletePart(state, i);
+        moveToFolderMenu(i);
+        deleteMenuItem(i);
         ImGui::EndPopup();
       }
     }
-    // Folder flyouts, in order of first appearance.
-    std::vector<std::string> folders;
-    for (const PartSlot& s : state.parts)
-      if (!s.folder.empty() &&
-          std::find(folders.begin(), folders.end(), s.folder) == folders.end())
-        folders.push_back(s.folder);
+    // Folder flyouts.
     for (const std::string& folder : folders) {
       size_t count = 0;
       bool activeInside = false;
@@ -310,6 +370,22 @@ void DrawPartTabs(AppState& state) {
         ImGui::OpenPopup(("##folderpop" + folder).c_str());
       if (activeInside)
         ImGui::PopStyleColor();
+      acceptDocDrop(folder); // drag a tab onto the folder to file it
+      // Right-click the folder: rename, or dissolve (contents move to the
+      // top level — documents are never deleted with their folder).
+      if (ImGui::BeginPopupContextItem(("##fctx" + folder).c_str())) {
+        if (ImGui::MenuItem("Rename...")) {
+          renameFolderTarget = folder;
+          std::snprintf(folderNameBuf, sizeof(folderNameBuf), "%s",
+                        folder.c_str());
+          openFolderNamePopup = true;
+        }
+        if (ImGui::MenuItem("Dissolve folder"))
+          for (size_t i = 0; i < state.parts.size(); i++)
+            if (state.parts[i].folder == folder)
+              MoveToFolder(state, i, "");
+        ImGui::EndPopup();
+      }
       // Tall folders scroll instead of running off screen.
       ImGui::SetNextWindowSizeConstraints(
           ImVec2(0, 0), ImVec2(FLT_MAX, vp->WorkSize.y * 0.6f));
@@ -323,19 +399,72 @@ void DrawPartTabs(AppState& state) {
                   active)) {
             SetActivePart(state, i);
           }
+          docDragSource(i); // draggable out to the bar / another folder
+          if (ImGui::BeginPopupContextItem(
+                  ("##fpctx" + std::to_string(i)).c_str())) {
+            if (ImGui::MenuItem("Move out of folder"))
+              MoveToFolder(state, i, "");
+            moveToFolderMenu(i);
+            deleteMenuItem(i);
+            ImGui::EndPopup();
+          }
         }
         ImGui::EndPopup();
       }
     }
+    // One "+" for all document kinds (was three separate buttons).
     sameLine();
-    if (ImGui::Button("+Part##addpart"))
-      AddPart(state, "Part " + std::to_string(state.parts.size() + 1));
+    if (ImGui::Button("+##addmenu"))
+      ImGui::OpenPopup("##addmenupop");
+    if (ImGui::BeginPopup("##addmenupop")) {
+      if (ImGui::MenuItem("New Part##addpart"))
+        AddPart(state, "Part " + std::to_string(state.parts.size() + 1));
+      if (ImGui::MenuItem("New Assembly##addasm"))
+        AddAssembly(state,
+                    "Assembly " + std::to_string(state.parts.size() + 1));
+      if (ImGui::MenuItem("New Drawing##adddwg"))
+        AddDrawing(state, "Drawing " + std::to_string(state.parts.size() + 1));
+      ImGui::EndPopup();
+    }
+    // The bar's empty tail is a drop target too: drag a doc out of a folder
+    // and release it on open bar space to unfolder it.
     ImGui::SameLine();
-    if (ImGui::Button("+Asm##addasm"))
-      AddAssembly(state, "Assembly " + std::to_string(state.parts.size() + 1));
-    ImGui::SameLine();
-    if (ImGui::Button("+Dwg##adddwg"))
-      AddDrawing(state, "Drawing " + std::to_string(state.parts.size() + 1));
+    const float tailW = ImGui::GetContentRegionAvail().x;
+    if (tailW > 8.0f) {
+      ImGui::InvisibleButton("##tabsdroptail",
+                             ImVec2(tailW, ImGui::GetFrameHeight()));
+      acceptDocDrop("");
+    }
+
+    // Folder-name popup (rename / new folder), opened outside the context
+    // menus so it survives their closing.
+    if (openFolderNamePopup) {
+      ImGui::OpenPopup("##foldername");
+      openFolderNamePopup = false;
+    }
+    if (ImGui::BeginPopup("##foldername")) {
+      ImGui::TextUnformatted(renameFolderTarget.empty() ? "New folder"
+                                                        : "Rename folder");
+      if (ImGui::IsWindowAppearing())
+        ImGui::SetKeyboardFocusHere();
+      ImGui::SetNextItemWidth(180.0f);
+      const bool entered =
+          ImGui::InputText("##fname", folderNameBuf, sizeof(folderNameBuf),
+                           ImGuiInputTextFlags_EnterReturnsTrue);
+      if (entered) {
+        if (folderNameBuf[0] != '\0') {
+          if (!renameFolderTarget.empty()) {
+            RenameFolder(state, renameFolderTarget, folderNameBuf);
+          } else {
+            for (size_t i = 0; i < state.parts.size(); i++)
+              if (state.parts[i].id == newFolderDocId)
+                MoveToFolder(state, i, folderNameBuf);
+          }
+        }
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::EndPopup();
+    }
   }
   ImGui::End();
 }

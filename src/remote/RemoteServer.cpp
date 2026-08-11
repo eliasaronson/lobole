@@ -771,6 +771,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (newName.empty())
       throw std::runtime_error("new_name must be non-empty");
     state.parts[slot].name = newName;
+    state.projectMetaDirty = true; // tab names live in project.json only
     return {{"index", slot}, {"name", newName}, {"id", state.parts[slot].id}};
   }
   if (auto r = remote::HandleDrawingRpc(state, m, p))

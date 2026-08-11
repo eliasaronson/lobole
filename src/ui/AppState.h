@@ -802,6 +802,10 @@ struct AppState {
   // Drives autosave (core/Autosaver) and its recovery sidecars.
   std::string projectPath;
   uint64_t lastSavedVersion = 0;
+  // Project-metadata edits (tab folders, tab renames) live in project.json,
+  // not in any document, so they bump no document version — this flag keeps
+  // them save-prompt visible. Cleared on save/open (StampAllSaved).
+  bool projectMetaDirty = false;
   // Non-empty: OpenProjectDialog found an autosave newer than this project
   // file; the recovery modal (DrawFileBrowser) resolves it.
   std::string recoveryOffer;
