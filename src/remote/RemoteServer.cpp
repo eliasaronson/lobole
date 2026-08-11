@@ -711,7 +711,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         entry["folder"] = state.parts[i].folder;
       arr.push_back(std::move(entry));
     }
-    return {{"parts", arr}, {"active", state.activePart}};
+    json out = {{"parts", arr}, {"active", state.activePart}};
+    if (!state.tabFolders.empty()) // tab-bar folder registry (may hold empty)
+      out["folders"] = state.tabFolders;
+    return out;
   }
   if (m == "add_part") {
     const std::string name =

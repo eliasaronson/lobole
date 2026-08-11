@@ -3458,6 +3458,48 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->parts[3].kind == ui::DocKind::Drawing);
   };
 
+  // "+ > New Folder" creates an EMPTY folder (registry-backed): it renders
+  // as a (0) flyout button, survives save/load while empty, and accepts a
+  // dropped tab.
+  t = IM_REGISTER_TEST(engine, "tabs", "folder_empty_create");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ui::AddPart(*s_App, "Bolt");
+    ctx->Yield();
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New Folder##addfolder");
+    ctx->Yield(2);
+    ctx->KeyCharsReplaceEnter("Fasteners");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->tabFolders.size(), (size_t)1);
+    IM_CHECK_EQ(s_App->tabFolders[0], std::string("Fasteners"));
+    IM_CHECK(ui::ProjectDirty(*s_App));
+
+    const std::string dir =
+        (std::filesystem::temp_directory_path() / "designer_test_empty_folder")
+            .string();
+    std::filesystem::remove_all(dir);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir, &err));
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->tabFolders.size(), (size_t)0);
+    IM_CHECK(ui::OpenProject(*s_App, dir, &err));
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->tabFolders.size(), (size_t)1);
+    IM_CHECK_EQ(s_App->tabFolders[0], std::string("Fasteners"));
+
+    // The empty folder is a live drop target.
+    ctx->ItemDragAndDrop("//##PartTabs/Bolt##part1",
+                         "//##PartTabs/Fasteners (0)##folderFasteners");
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->parts[1].folder, std::string("Fasteners"));
+    std::filesystem::remove_all(dir);
+  };
+
   // Folder management (Onshape-style tab folders): rename via right-click,
   // move docs in/out via the tab context menus, and drag-drop between the
   // bar and folder buttons. Folder edits mark the project dirty even though

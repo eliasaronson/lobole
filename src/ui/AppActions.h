@@ -59,12 +59,17 @@ void SetActivePart(AppState& state, size_t index);
 bool DeletePart(AppState& state, size_t index);
 
 // Tab-bar folders (display grouping only — storage stays flat, ids and
-// references are unaffected). MoveToFolder reassigns one tab ("" = top
-// level); RenameFolder renames every member (renaming onto an existing
-// folder merges them). Both mark the project meta-dirty.
+// references are unaffected). Folders live in state.tabFolders and may be
+// empty; CreateFolder registers a name, MoveToFolder reassigns one tab
+// ("" = top level, registering the folder as needed), RenameFolder renames
+// the registry entry and every member (renaming onto an existing folder
+// merges them), DissolveFolder unregisters and moves members to the top
+// level. All mark the project meta-dirty.
+void CreateFolder(AppState& state, const std::string& folder);
 void MoveToFolder(AppState& state, size_t index, const std::string& folder);
 void RenameFolder(AppState& state, const std::string& from,
                   const std::string& to);
+void DissolveFolder(AppState& state, const std::string& folder);
 
 // The document id (PartSlot::id) for a part name, or 0 if no such part.
 // Occurrences reference parts by this stable id, never by name.

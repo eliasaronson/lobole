@@ -260,13 +260,17 @@ void DrawPartTabs(AppState& state) {
     static uint64_t newFolderDocId = 0;
     static bool openFolderNamePopup = false;
 
-    // Folders in order of first appearance (needed up front: the tab context
-    // menus offer "Move to folder" targets).
-    std::vector<std::string> folders;
+    // The registry is THE folder list (it can hold empty folders). Slot
+    // folders something else set directly (import, hand-edited project.json)
+    // self-register here so the bar and the next save both know them.
     for (const PartSlot& s : state.parts)
       if (!s.folder.empty() &&
-          std::find(folders.begin(), folders.end(), s.folder) == folders.end())
-        folders.push_back(s.folder);
+          std::find(state.tabFolders.begin(), state.tabFolders.end(),
+                    s.folder) == state.tabFolders.end())
+        state.tabFolders.push_back(s.folder);
+    // Iterate a copy: Dissolve (and rename merges) mutate the registry from
+    // inside the loops below.
+    const std::vector<std::string> folders = state.tabFolders;
 
     // Docs drag by stable id (indices shift on delete; ids never lie).
     const auto docDragSource = [&](size_t i) {
@@ -381,15 +385,15 @@ void DrawPartTabs(AppState& state) {
           openFolderNamePopup = true;
         }
         if (ImGui::MenuItem("Dissolve folder"))
-          for (size_t i = 0; i < state.parts.size(); i++)
-            if (state.parts[i].folder == folder)
-              MoveToFolder(state, i, "");
+          DissolveFolder(state, folder);
         ImGui::EndPopup();
       }
       // Tall folders scroll instead of running off screen.
       ImGui::SetNextWindowSizeConstraints(
           ImVec2(0, 0), ImVec2(FLT_MAX, vp->WorkSize.y * 0.6f));
       if (ImGui::BeginPopup(("##folderpop" + folder).c_str())) {
+        if (count == 0)
+          ImGui::TextDisabled("(empty — drag tabs here)");
         for (size_t i = 0; i < state.parts.size(); i++) {
           if (state.parts[i].folder != folder)
             continue;
@@ -424,6 +428,13 @@ void DrawPartTabs(AppState& state) {
                     "Assembly " + std::to_string(state.parts.size() + 1));
       if (ImGui::MenuItem("New Drawing##adddwg"))
         AddDrawing(state, "Drawing " + std::to_string(state.parts.size() + 1));
+      ImGui::Separator();
+      if (ImGui::MenuItem("New Folder##addfolder")) {
+        newFolderDocId = 0; // no doc to file: create the folder empty
+        renameFolderTarget.clear();
+        folderNameBuf[0] = '\0';
+        openFolderNamePopup = true;
+      }
       ImGui::EndPopup();
     }
     // The bar's empty tail is a drop target too: drag a doc out of a folder
@@ -455,10 +466,12 @@ void DrawPartTabs(AppState& state) {
         if (folderNameBuf[0] != '\0') {
           if (!renameFolderTarget.empty()) {
             RenameFolder(state, renameFolderTarget, folderNameBuf);
-          } else {
+          } else if (newFolderDocId != 0) {
             for (size_t i = 0; i < state.parts.size(); i++)
               if (state.parts[i].id == newFolderDocId)
                 MoveToFolder(state, i, folderNameBuf);
+          } else {
+            CreateFolder(state, folderNameBuf); // "+ > New Folder": born empty
           }
         }
         ImGui::CloseCurrentPopup();

@@ -56,6 +56,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
   if (m == "new_project") {
     ui::ReplaceDocument(state, std::make_unique<Document>());
     state.parts.clear(); // reset to a single fresh part (A1)
+    state.tabFolders.clear();
     ui::EnsureParts(state, "Part 1");
     ui::MarkProjectOpened(state, "");
     return json::object();

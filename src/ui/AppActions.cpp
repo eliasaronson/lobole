@@ -1064,9 +1064,19 @@ bool DeletePart(AppState& state, size_t index) {
   return true;
 }
 
+void CreateFolder(AppState& state, const std::string& folder) {
+  if (folder.empty() ||
+      std::find(state.tabFolders.begin(), state.tabFolders.end(), folder) !=
+          state.tabFolders.end())
+    return;
+  state.tabFolders.push_back(folder);
+  state.projectMetaDirty = true;
+}
+
 void MoveToFolder(AppState& state, size_t index, const std::string& folder) {
   if (index >= state.parts.size() || state.parts[index].folder == folder)
     return;
+  CreateFolder(state, folder); // no-op for "" / already-registered
   state.parts[index].folder = folder;
   state.projectMetaDirty = true;
 }
@@ -1078,6 +1088,26 @@ void RenameFolder(AppState& state, const std::string& from,
   for (PartSlot& slot : state.parts)
     if (slot.folder == from)
       slot.folder = to;
+  // Registry: rename in place; renaming onto an existing folder merges (drop
+  // the old entry instead of duplicating the surviving one).
+  auto it = std::find(state.tabFolders.begin(), state.tabFolders.end(), from);
+  if (it != state.tabFolders.end()) {
+    if (std::find(state.tabFolders.begin(), state.tabFolders.end(), to) !=
+        state.tabFolders.end())
+      state.tabFolders.erase(it);
+    else
+      *it = to;
+  }
+  state.projectMetaDirty = true;
+}
+
+void DissolveFolder(AppState& state, const std::string& folder) {
+  if (folder.empty())
+    return;
+  for (PartSlot& slot : state.parts)
+    if (slot.folder == folder)
+      slot.folder.clear();
+  std::erase(state.tabFolders, folder);
   state.projectMetaDirty = true;
 }
 
@@ -1413,7 +1443,8 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error) {
   // part also holds part-local variables (both scopes then need distinct homes
   // — flat has room for one `parameters` list).
   if (state.parts.size() == 1 && state.parts[0].kind == DocKind::Part &&
-      state.document->GetParameters().empty()) {
+      state.document->GetParameters().empty() && state.tabFolders.empty() &&
+      state.parts[0].folder.empty()) {
     // Fold the project scope into the doc for the write (they reload as project
     // scope), then restore the (empty) local table.
     std::vector<Parameter> localBackup = state.document->TakeParameters();
@@ -1443,6 +1474,10 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error) {
         index["parameters"].push_back(std::move(pj));
       }
     }
+    // Folder registry (display order; may hold empty folders). Written only
+    // when non-empty so pre-folder projects keep byte-identical indexes.
+    if (!state.tabFolders.empty())
+      index["folders"] = state.tabFolders;
     index["documents"] = nlohmann::json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
       const PartSlot& slot = state.parts[i];
@@ -1507,6 +1542,7 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
     }
     ReplaceDocument(state, std::move(*loaded));
     state.parts.clear();
+    state.tabFolders.clear();
     state.nextPartId = 1;
     EnsureParts(state, fs::path(path).stem().string());
     return true;
@@ -1575,6 +1611,17 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
       state.parts.push_back(std::move(slot));
     }
     state.nextPartId = maxId + 1;
+    // Folder registry: the saved list (empty folders and their order), plus
+    // any slot folder it doesn't know (pre-registry saves, hand-edits).
+    state.tabFolders.clear();
+    for (const auto& f : index.value("folders", nlohmann::json::array()))
+      if (f.is_string() && !f.get<std::string>().empty())
+        state.tabFolders.push_back(f.get<std::string>());
+    for (const PartSlot& slot : state.parts)
+      if (!slot.folder.empty() &&
+          std::find(state.tabFolders.begin(), state.tabFolders.end(),
+                    slot.folder) == state.tabFolders.end())
+        state.tabFolders.push_back(slot.folder);
 
     size_t wantActive = static_cast<size_t>(index.value("active", 0));
     if (wantActive >= state.parts.size())

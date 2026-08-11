@@ -1227,6 +1227,7 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
     AddPart(state, p.name);
     PartSlot& slot = state.parts[static_cast<size_t>(state.activePart)];
     slot.folder = asmName;
+    CreateFolder(state, asmName); // register (idempotent) so saves know it
     auto feature = std::make_unique<ImportFeature>(p.name, p.brepPath);
     feature->hasColor = p.hasColor;
     feature->color = p.color;

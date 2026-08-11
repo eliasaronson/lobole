@@ -545,6 +545,11 @@ struct AppState {
   std::vector<PartSlot> parts;
   int activePart = 0;
   uint64_t nextPartId = 1; // stable document-id allocator (A2)
+  // Tab-bar folder registry, in display order. THE list of folders: lets a
+  // folder exist empty ("+ > New folder" before anything is filed in it, or
+  // after its last member moves out). Slot folders self-register on
+  // load/import; only Dissolve removes an entry. Persisted in project.json.
+  std::vector<std::string> tabFolders;
 
   // Project-wide variables (Phase V, docs/plan-caster-backlog.md). THE project
   // scope: an ordered parameter table shared by every part, and its evaluated
