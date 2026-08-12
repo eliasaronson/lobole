@@ -69,9 +69,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "end_mode"?: "symmetric" (centered on the plane) | "two_sided"
   (+ "distance2"/"distance2_expr" backward) | "up_to_face"
   (+ "end_target": {{"feature_id", "element"}} — a planar face from
-  list_elements; follows upstream edits),
+  list_elements; follows upstream edits) | "through_all" (cut only:
+  sweeps past every body, distance ignored),
   "thin"?: {{"thickness": num, "thickness_expr"?: str,
   "side": "out"|"in"|"both"}} — walls every loop instead of filling}}.
+  Extrudes sweep along the sketch plane's +normal; "reversed": true flips
+  them. So a cut whose sketch sits ON a face wants "reversed" (into the
+  material) — no need to park the plane behind the part and overshoot;
+  "through_all" + "reversed" is the usual drill-through-from-a-face combo.
   Sketches may hold SEVERAL disjoint profiles (e.g. four bolt-hole circles):
   nested loops become holes, islands become solids again.
   "regions"?: [[entity ids]] — extrude only the listed regions, each named

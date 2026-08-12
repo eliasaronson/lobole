@@ -1141,28 +1141,30 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   } else if (auto* da = dynamic_cast<DatumAxisFeature*>(&feature)) {
     DrawDatumAxisParams(state, *da, index, commit);
   } else if (auto* ext = dynamic_cast<ExtrudeFeature*>(&feature)) {
-    const char* ends[] = {"Blind", "Symmetric", "Two-sided", "Up to face"};
+    const char* ends[] = {"Blind", "Symmetric", "Two-sided", "Up to face",
+                          "Through all"};
     int end = std::to_underlying(ext->endMode);
-    if (LabeledCombo("End", &end, ends, 4)) {
+    if (LabeledCombo("End", &end, ends, 5)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ext);
       ext->endMode = static_cast<ExtrudeEnd>(end);
       CommitDiscrete(state, feature, before, index, commit);
     }
-    if (ext->endMode != ExtrudeEnd::UpToFace) {
-      ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
-              ext->distance);
-    } else {
+    if (ext->endMode == ExtrudeEnd::UpToFace) {
       // Target face: a pick slot (U3) — arm it, click the face in the
       // viewport. Far saner than the old every-named-face combo.
       PickSlotRow(state, feature, PickSlot::ExtrudeEndFace,
                   ext->endTarget.IsSet() ? ext->endTarget.name : "");
+    } else if (ext->endMode != ExtrudeEnd::ThroughAll) { // no distance there
+      ExprDim(state, feature, index, commit, "Distance", ext->distanceExpr,
+              ext->distance);
     }
     if (ext->endMode == ExtrudeEnd::TwoSided) {
       ExprDim(state, feature, index, commit, "Distance 2", ext->distance2Expr,
               ext->distance2);
     }
     if (ext->endMode == ExtrudeEnd::Blind ||
-        ext->endMode == ExtrudeEnd::TwoSided) // no effect otherwise
+        ext->endMode == ExtrudeEnd::TwoSided ||
+        ext->endMode == ExtrudeEnd::ThroughAll) // no effect otherwise
       HandleEdit(state, feature, ImGui::Checkbox("Reversed", &ext->reversed),
                  index, commit);
 

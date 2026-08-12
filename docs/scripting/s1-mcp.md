@@ -100,7 +100,9 @@ the tool descriptions. Single source of truth: a `FORMATS` reference in
   {position,width,height,depth}, `Sphere` {center,radius}, `Cylinder`
   {center,direction,radius,height}, `Sketch` {plane{origin,normal,uAxis} |
   plane_ref, entities[], constraints[]}, `Extrude` {sketch_id, distance,
-  distance_expr?, reversed?, mode: new_body|add|cut}, `Revolve`, `Boolean`,
+  distance_expr?, reversed?, mode: new_body|add|cut, end_mode?:
+  symmetric|two_sided|up_to_face|through_all (v52: through_all = cut only,
+  distance ignored)}, `Revolve`, `Boolean`,
   `Pattern`, `DatumPlane` {kind: offset|angled|through_points,
   parent_id|base_plane, …}, `DatumAxis`, `Import` {path}. Expression-capable
   fields (`distance_expr`, `offset_expr`, `angle_expr`) documented alongside

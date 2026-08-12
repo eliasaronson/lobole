@@ -522,6 +522,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"sketch_entity_types", DocumentIO::SketchEntityTypes()},
         {"constraint_kinds", remote::ConstraintKindNames()},
         {"extrude_modes", {"new_body", "add", "cut"}},
+        {"extrude_end_modes",
+         {"blind", "symmetric", "two_sided", "up_to_face", "through_all"}},
         {"axis_kinds", {"x", "y", "z", "sketch_line", "datum_axis"}},
         {"material_slugs", CADMaterials::MaterialLibrary::AllSlugs()}};
   }

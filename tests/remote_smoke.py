@@ -708,9 +708,11 @@ def main():
         expect(len(desc["feature_types"]) >= 24, "feature type ratchet")
         expect({"ellipse_arc", "spline"} <= set(desc["sketch_entity_types"]),
                "newest sketch entity types are described")
-        expect(desc["document_format_version"] >= 51, "format version present")
+        expect(desc["document_format_version"] >= 52, "format version present")
         expect(len(desc["constraint_kinds"]) >= 20, "constraint kinds")
         expect("aluminum" in desc["material_slugs"], "material slugs")
+        expect("through_all" in desc["extrude_end_modes"],
+               "extrude end modes are described")
         for name in names:
             if name == "describe":
                 continue
