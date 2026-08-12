@@ -11,6 +11,9 @@ void OpenStepFileDialog(AppState& state);
 void OpenStepAssemblyFileDialog(AppState& state);
 void OpenReferenceImageDialog(AppState& state); // sketch underlay (v49)
 void OpenProjectDialog(AppState& state);
+// Folder picker for directory-form projects (.dsgn / project.json folders),
+// which the file dialog above can't select.
+void OpenProjectFolderDialog(AppState& state);
 // Save As: always asks for a (new) location.
 void SaveProjectDialog(AppState& state);
 // Plain save (Ctrl+S): re-saves in place when the project has a home; the

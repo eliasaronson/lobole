@@ -38,6 +38,29 @@ void OpenProjectFile(AppState& state, const std::string& path) {
   }
 }
 
+// A FILE picker can't select a directory-form project (a folder holding
+// project.json), so users pick the project.json inside it instead — map
+// that back to the project root the loaders expect.
+std::string NormalizeProjectPick(const std::string& path) {
+  std::filesystem::path p(path);
+  if (p.filename() == "project.json")
+    return p.parent_path().string();
+  return path;
+}
+
+// Container-aware GUI open: ui::OpenProject handles both project forms
+// (directory with project.json, flat single-document file) — unlike
+// OpenProjectFile above, which predates multi-document projects and is now
+// only right for recovery sidecars (always flat).
+void OpenPickedProject(AppState& state, const std::string& path) {
+  std::string error;
+  if (!OpenProject(state, path, &error)) {
+    LOG_ERROR("Failed to open project '{}': {}", path, error);
+    return;
+  }
+  MarkProjectOpened(state, path);
+}
+
 void UpdateDirectoryContents(AppState& state) {
   state.directoryContents.clear();
 
@@ -107,8 +130,7 @@ void DrawRecoveryModal(AppState& state) {
     }
     ImGui::SameLine();
     if (ImGui::Button("Open saved file")) {
-      OpenProjectFile(state, state.recoveryOffer);
-      MarkProjectOpened(state, state.recoveryOffer);
+      OpenPickedProject(state, state.recoveryOffer);
       Autosaver::Clear(state.recoveryOffer); // explicit discard
       state.recoveryOffer.clear();
       ImGui::CloseCurrentPopup();
@@ -284,7 +306,7 @@ void OpenProjectDialog(AppState& state) {
   nfdu8char_t* outPath = nullptr;
   const nfdu8filteritem_t filters[] = {{"Designer project", "dsgn,json"}};
   if (NFD_OpenDialogU8(&outPath, filters, 1, nullptr) == NFD_OKAY) {
-    std::string path(outPath);
+    const std::string path = NormalizeProjectPick(outPath);
     NFD_FreePathU8(outPath);
     if (Autosaver::HasNewerAutosave(path)) {
       // Defer to the recovery modal (DrawFileBrowser) — the user picks
@@ -292,8 +314,24 @@ void OpenProjectDialog(AppState& state) {
       state.recoveryOffer = path;
       return;
     }
-    OpenProjectFile(state, path);
-    MarkProjectOpened(state, path);
+    OpenPickedProject(state, path);
+  }
+}
+
+void OpenProjectFolderDialog(AppState& state) {
+  // Directory-form projects (.dsgn / any folder with a project.json) can't
+  // be selected in the FILE dialog above — this folder picker can.
+  if (!NativeDialogsSafe())
+    return;
+  nfdu8char_t* outPath = nullptr;
+  if (NFD_PickFolderU8(&outPath, nullptr) == NFD_OKAY) {
+    const std::string path(outPath);
+    NFD_FreePathU8(outPath);
+    if (Autosaver::HasNewerAutosave(path)) {
+      state.recoveryOffer = path;
+      return;
+    }
+    OpenPickedProject(state, path);
   }
 }
 
@@ -450,6 +488,10 @@ void OpenStepAssemblyFileDialog(AppState& state) {
 void OpenReferenceImageDialog(AppState& state) {
   state.sketchEdit.actionMsg =
       "Reference-image import needs the native file dialog.";
+}
+
+void OpenProjectFolderDialog(AppState&) {
+  LOG_WARN("Project open requires nativefiledialog");
 }
 
 void OpenProjectDialog(AppState&) {

@@ -38,6 +38,9 @@ void DrawFileMenu(AppState& state) {
   if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
     OpenProjectDialog(state);
   }
+  if (ImGui::MenuItem("Open Project Folder...")) {
+    OpenProjectFolderDialog(state);
+  }
   if (ImGui::MenuItem("Save Project", "Ctrl+S")) {
     SaveProjectAction(state);
   }
