@@ -78,8 +78,10 @@ static constexpr MethodDoc ModelingMethods[] = {
                     "and regenerate; returns {index, id, entity_ids?, regen}."},
     {"modify_feature", "Replace the feature at `index` with `feature` JSON; "
                        "one undo step; returns {regen}."},
-    {"set_material", "Assign a material slug (see material_slugs) to a feature "
-                     "by feature_id; '' restores default."},
+    {"set_material",
+     "Assign a material slug (see material_slugs) to a body's creating "
+     "feature, by feature_id (its created_by) or by body index; '' restores "
+     "default."},
     {"set_rollback",
      "Move the rollback bar: only features [0, index) regenerate; -1 = end."},
     {"suppress_feature", "Toggle suppression by feature_id; suppressed "
@@ -189,14 +191,35 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     return json{{"regen", RegenSummaryJson(*doc)}};
   }
   if (m == "set_material") {
-    // Assign a material to a feature (by id). params: {feature_id, material}
-    // where material is a library slug (e.g. "steel") or "" for default.
-    // Commits one undoable edit and regenerates.
+    // Assign a material to a body-creating feature — by feature_id (the
+    // body's created_by) or by body index (get_state order). params:
+    // {feature_id? | body?, material} where material is a library slug
+    // (e.g. "steel") or "" for default. Commits one undoable edit and
+    // regenerates.
+    const bool byId = p.contains("feature_id");
+    const bool byBody = p.contains("body");
+    if (byId == byBody) // neither, or both
+      throw std::runtime_error(
+          "set_material needs exactly one of feature_id (the body's "
+          "created_by from get_state/list_elements) or body (an index into "
+          "get_state's bodies)");
     size_t index = 0;
-    Feature* f =
-        doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
-    if (!f)
-      throw std::runtime_error("no such feature");
+    Feature* f = nullptr;
+    if (byId) {
+      f = doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
+      if (!f)
+        throw std::runtime_error("no such feature");
+    } else {
+      const auto& bodies = doc->GetBodies();
+      const int body = p.at("body").get<int>();
+      if (body < 0 || body >= static_cast<int>(bodies.size()))
+        throw std::runtime_error("body index out of range");
+      // Add/Cut keep the original creator, so this recolors everything
+      // fused into that body.
+      f = doc->FindFeatureById(bodies[body].createdBy, &index);
+      if (!f)
+        throw std::runtime_error("body has no creating feature");
+    }
     const std::string slug = p.value("material", std::string{});
     // A non-empty slug that resolves to DEFAULT is unknown (DEFAULT is never in
     // the slug table, so valid slugs always map to a specific material).

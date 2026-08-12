@@ -526,11 +526,35 @@ def main():
             expect(False, "unknown material should error")
         except RuntimeError:
             pass
+        # By body index: resolves createdBy to the same feature path.
+        d.call("set_material", body=0, material="brass")
+        mstate = d.call("get_state")
+        expect(mstate["features"][0].get("material") == "brass",
+               "set_material by body index reaches the creating feature")
+        expect(mstate["bodies"][0]["material"] == "brass",
+               "by-body material stamped on body")
+        try:
+            d.call("set_material", body=99, material="steel")
+            expect(False, "out-of-range body should error")
+        except RuntimeError:
+            pass
+        try:
+            d.call("set_material", material="steel")
+            expect(False, "set_material with no target should error")
+        except RuntimeError as e:
+            expect("created_by" in str(e) and "body" in str(e),
+                   "no-target error says where the ids come from")
+        try:
+            d.call("set_material", feature_id=mb["id"], body=0,
+                   material="steel")
+            expect(False, "both feature_id and body should error")
+        except RuntimeError:
+            pass
         mpath = os.path.join(tmp, "material.json")
         d.call("save_project", path=mpath)
         d.call("new_project")
         d.call("open_project", path=mpath)
-        expect(d.call("get_state")["bodies"][0]["material"] == "steel",
+        expect(d.call("get_state")["bodies"][0]["material"] == "brass",
                "material survives save/load")
 
         # Screenshot: the controller can see what the user sees

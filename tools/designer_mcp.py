@@ -489,10 +489,15 @@ def delete_feature(index: int) -> dict:
     return _call("delete_feature", index=index)
 
 
-@mcp.tool(description="Assign a render material to a feature (by feature id)."
-          " Slugs: " + MATERIAL_SLUGS + ". Empty string restores the default.")
-def set_material(feature_id: int, material: str) -> dict:
-    return _call("set_material", feature_id=feature_id, material=material)
+@mcp.tool(description="Assign a render material. Target ONE of: feature_id "
+          "(the body's created_by from get_state/list_elements) or body (an "
+          "index into get_state's bodies — add/cut keep the original creator, "
+          "so this recolors everything fused into that body). Slugs: "
+          + MATERIAL_SLUGS + ". Empty string restores the default.")
+def set_material(material: str, feature_id: int = -1, body: int = -1) -> dict:
+    args = {"feature_id": feature_id} if feature_id >= 0 else \
+        ({"body": body} if body >= 0 else {})
+    return _call("set_material", material=material, **args)
 
 
 # ---------------------------------------------------------------------------
