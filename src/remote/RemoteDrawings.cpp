@@ -2,6 +2,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/drawing/DrawingCallout.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingValidate.h"
 #include "core/io/Serialization.h"
@@ -438,13 +439,21 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
           {"kind", isEdge ? "edge" : "silhouette"},
           {"source_id", c.sourceId},
           {"ref", {{"feature_id", ref.featureId}, {"element", ref.name}}}};
-      // Which feature made this element (part sources only): lets a caller
-      // tell a screw bore from a corner-fillet arc without radius guessing.
+      // Which feature made THIS element (part sources only): the MappedName
+      // encodes it (a hole's rim mentions the Hole feature id), which beats
+      // ref.featureId — that is the body's creator, i.e. "Extrude" for every
+      // element of the fused body. Prefer the LAST id in the name (the most
+      // recent maker); fall back to the body creator.
       if (srcDoc) {
-        if (const Feature* f =
-                const_cast<Document*>(srcDoc)->FindFeatureById(ref.featureId))
-          e["source_feature"] = {{"type", f->TypeName()},
-                                 {"name", f->GetName()}};
+        const Feature* maker = nullptr;
+        const auto ids = drawing::MappedNameFeatureIds(ref.name);
+        for (auto it2 = ids.rbegin(); it2 != ids.rend() && !maker; ++it2)
+          maker = const_cast<Document*>(srcDoc)->FindFeatureById(*it2);
+        if (!maker)
+          maker = const_cast<Document*>(srcDoc)->FindFeatureById(ref.featureId);
+        if (maker)
+          e["source_feature"] = {{"type", maker->TypeName()},
+                                 {"name", maker->GetName()}};
       }
       fillGeometry(e);
       seen.emplace(key, edges.size());

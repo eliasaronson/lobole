@@ -86,8 +86,15 @@ void StrokeDashed(ImDrawList* dl, AppState& state,
 }
 
 // How many refs a dimension kind needs before it can be created.
+// Refs a dim kind needs before it commits; -1 = open-ended (2+ picks,
+// Enter finishes — the pattern callout's pick-a-row flow).
 int NeededRefs(DrawingDimKind k) {
-  return (k == DrawingDimKind::Radius || k == DrawingDimKind::Diameter) ? 1 : 2;
+  if (k == DrawingDimKind::Radius || k == DrawingDimKind::Diameter ||
+      k == DrawingDimKind::HoleCallout)
+    return 1;
+  if (k == DrawingDimKind::PatternCallout)
+    return -1;
+  return 2;
 }
 
 double PointSegDist(glm::dvec2 p, glm::dvec2 a, glm::dvec2 b) {
@@ -158,6 +165,30 @@ void HandleDimTool(ImDrawList* dl, AppState& state) {
   if (hit && state.dimTool.viewId && viewId != state.dimTool.viewId)
     hit = nullptr;
 
+  const auto commitDim = [&] {
+    DrawingDim d;
+    d.kind = state.dimTool.kind;
+    d.viewId = state.dimTool.viewId;
+    d.refs = state.dimTool.refs;
+    // Auto-place clear of the view (drag to move); the picked view is in
+    // drawingRenders by construction — the user just clicked its curves.
+    const auto rit = state.drawingRenders.find(d.viewId);
+    d.labelOffset = rit != state.drawingRenders.end()
+                        ? drawing::DefaultDimOffset(d, rit->second)
+                        : glm::dvec2{0.0, -12.0};
+    SnapshotDrawing(state);
+    state.drawing->AddDim(d);
+    state.dimTool = AppState::DimTool{}; // done — disarm
+  };
+
+  // Open-ended kinds (pattern callout): Enter commits once 2+ refs are in.
+  const int needed = NeededRefs(state.dimTool.kind);
+  if (needed < 0 && state.dimTool.refs.size() >= 2 &&
+      ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+    commitDim();
+    return;
+  }
+
   if (hit) {
     const ImU32 hl = IM_COL32(80, 170, 255, 255);
     for (size_t i = 1; i < hit->points.size(); ++i)
@@ -167,22 +198,8 @@ void HandleDimTool(ImDrawList* dl, AppState& state) {
         !state.sheetView.panning) {
       state.dimTool.refs.push_back(RefOfCurve(*hit, viewId));
       state.dimTool.viewId = viewId;
-      if (static_cast<int>(state.dimTool.refs.size()) >=
-          NeededRefs(state.dimTool.kind)) {
-        DrawingDim d;
-        d.kind = state.dimTool.kind;
-        d.viewId = state.dimTool.viewId;
-        d.refs = state.dimTool.refs;
-        // Auto-place clear of the view (drag to move); the picked view is in
-        // drawingRenders by construction — the user just clicked its curves.
-        const auto rit = state.drawingRenders.find(d.viewId);
-        d.labelOffset = rit != state.drawingRenders.end()
-                            ? drawing::DefaultDimOffset(d, rit->second)
-                            : glm::dvec2{0.0, -12.0};
-        SnapshotDrawing(state);
-        state.drawing->AddDim(d);
-        state.dimTool = AppState::DimTool{}; // done — disarm
-      }
+      if (needed > 0 && static_cast<int>(state.dimTool.refs.size()) >= needed)
+        commitDim();
     }
   }
 }
@@ -598,7 +615,9 @@ void DrawDimsSection(AppState& state) {
                                  {"Dist Y", DrawingDimKind::DistanceY},
                                  {"Radius", DrawingDimKind::Radius},
                                  {"Diameter", DrawingDimKind::Diameter},
-                                 {"Angle", DrawingDimKind::Angle}};
+                                 {"Angle", DrawingDimKind::Angle},
+                                 {"Hole note", DrawingDimKind::HoleCallout},
+                                 {"Pattern", DrawingDimKind::PatternCallout}};
     for (size_t i = 0; i < std::size(tools); ++i) {
       if (i % 3 != 0)
         ImGui::SameLine();

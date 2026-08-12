@@ -728,6 +728,10 @@ void DrawDrawingToolbar(AppState& state) {
   dimBtn(ICON_FA_CIRCLE_HALF_STROKE, "Diameter dimension",
          DrawingDimKind::Diameter);
   dimBtn(ICON_FA_ANGLE_LEFT, "Angle dimension", DrawingDimKind::Angle);
+  dimBtn(ICON_FA_BULLSEYE, "Hole callout (pick a drilled hole's circle)",
+         DrawingDimKind::HoleCallout);
+  dimBtn(ICON_FA_ELLIPSIS, "Pattern callout (pick 2+ circles, Enter finishes)",
+         DrawingDimKind::PatternCallout);
 
   Divider();
 
@@ -739,11 +743,18 @@ void DrawDrawingToolbar(AppState& state) {
 
   if (state.dimTool.active) {
     ImGui::SameLine();
-    const bool radial = state.dimTool.kind == DrawingDimKind::Radius ||
-                        state.dimTool.kind == DrawingDimKind::Diameter;
-    ImGui::TextDisabled("pick edge %d of %d (Esc to cancel)",
-                        static_cast<int>(state.dimTool.refs.size()) + 1,
-                        radial ? 1 : 2);
+    const int picked = static_cast<int>(state.dimTool.refs.size());
+    if (state.dimTool.kind == DrawingDimKind::PatternCallout) {
+      ImGui::TextDisabled("pick circles (%d so far) - Enter finishes, Esc "
+                          "cancels",
+                          picked);
+    } else {
+      const bool one = state.dimTool.kind == DrawingDimKind::Radius ||
+                       state.dimTool.kind == DrawingDimKind::Diameter ||
+                       state.dimTool.kind == DrawingDimKind::HoleCallout;
+      ImGui::TextDisabled("pick edge %d of %d (Esc to cancel)", picked + 1,
+                          one ? 1 : 2);
+    }
   }
   ImGui::NewLine();
 }
