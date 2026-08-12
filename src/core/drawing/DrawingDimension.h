@@ -41,4 +41,16 @@ struct ResolvedDim {
 // SheetView for dim.viewId.
 ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view);
 
+// Gap between a view's bbox and an auto-placed dimension line, sheet mm.
+inline constexpr double kDimOffsetGapMM = 8.0;
+
+// A sensible labelOffset when the caller gave none: the dimension line lands
+// a gap BELOW the view's bbox (distance / distance_x / angle), LEFT of it
+// (distance_y), or — for radius/diameter — the leader points away from the
+// bbox centre. Falls back to {0, -12} (the historical GUI default) when the
+// dim doesn't resolve or the view has no geometry. Anchors are sheet mm
+// (view position included), matching ResolveDim's per-kind offset semantics
+// exactly. Stacked-dim collision nudging is a known follow-up.
+glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view);
+
 } // namespace drawing

@@ -442,6 +442,13 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     if (p.contains("offset")) {
       const json& o = p.at("offset");
       dim.labelOffset = {o.at(0).get<double>(), o.at(1).get<double>()};
+    } else {
+      // No offset given: place the dimension clear of the view instead of on
+      // top of the geometry (offset {0,0} was the old, useless default).
+      const auto it = state.drawingRenders.find(viewId);
+      dim.labelOffset = it != state.drawingRenders.end()
+                            ? drawing::DefaultDimOffset(dim, it->second)
+                            : glm::dvec2{0.0, -12.0};
     }
     ui::SnapshotDrawing(state);
     const uint64_t id = state.drawing->AddDim(dim);
@@ -451,7 +458,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     return json{{"id", id},
                 {"resolved", rd.resolved},
                 {"value", rd.value},
-                {"text", rd.text}};
+                {"text", rd.text},
+                {"offset", {dim.labelOffset.x, dim.labelOffset.y}}};
   }
   if (m == "remove_drawing_dim") {
     if (!state.drawing)

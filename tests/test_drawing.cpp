@@ -545,3 +545,59 @@ TEST_CASE("ValidateDrawing flags layout problems and stays quiet when clean",
     CHECK(std::count(k.begin(), k.end(), "dim_outside_border") == 1);
   }
 }
+
+TEST_CASE("DefaultDimOffset places dimensions clear of the view",
+          "[drawing][dimension][placement]") {
+  drawing::SheetView view = DimTestView();
+  view.bboxMin = {0.0, 0.0};
+  view.bboxMax = {30.0, 20.0};
+
+  const auto place = [&](DrawingDim d) {
+    d.labelOffset = drawing::DefaultDimOffset(d, view);
+    return drawing::ResolveDim(d, view);
+  };
+
+  SECTION("distance_x lands a gap below the bbox") {
+    const auto rd = place(
+        MakeDim(DrawingDimKind::DistanceX, {EdgeRef(1, "L"), EdgeRef(1, "R")}));
+    REQUIRE(rd.resolved);
+    CHECK(rd.dim1.y ==
+          Catch::Approx(view.bboxMin.y - drawing::kDimOffsetGapMM));
+    CHECK(rd.dim2.y == rd.dim1.y);
+    CHECK(rd.labelPos.y < view.bboxMin.y);
+  }
+
+  SECTION("distance lands its whole line below the bbox") {
+    const auto rd = place(
+        MakeDim(DrawingDimKind::Distance, {EdgeRef(1, "L"), EdgeRef(1, "R")}));
+    REQUIRE(rd.resolved);
+    CHECK(std::max(rd.dim1.y, rd.dim2.y) <=
+          view.bboxMin.y - drawing::kDimOffsetGapMM + 1e-9);
+  }
+
+  SECTION("distance_y lands a gap left of the bbox") {
+    const auto rd = place(
+        MakeDim(DrawingDimKind::DistanceY, {EdgeRef(1, "L"), EdgeRef(1, "R")}));
+    REQUIRE(rd.resolved);
+    CHECK(rd.dim1.x ==
+          Catch::Approx(view.bboxMin.x - drawing::kDimOffsetGapMM));
+  }
+
+  SECTION("diameter leader points away from the view centre") {
+    const auto rd =
+        place(MakeDim(DrawingDimKind::Diameter, {EdgeRef(2, "hole")}));
+    REQUIRE(rd.resolved);
+    // Circle centre (10,10) is left of the bbox centre (15,10): the leader
+    // must run further left, label beyond the rim.
+    CHECK(rd.rim.x < rd.center.x);
+    CHECK(rd.labelPos.x < rd.rim.x);
+  }
+
+  SECTION("unresolvable dims fall back to the historical default") {
+    DrawingDim d = MakeDim(DrawingDimKind::DistanceX,
+                           {EdgeRef(1, "L"), EdgeRef(9, "gone")});
+    const glm::dvec2 off = drawing::DefaultDimOffset(d, view);
+    CHECK(off.x == 0.0);
+    CHECK(off.y == Catch::Approx(-12.0));
+  }
+}

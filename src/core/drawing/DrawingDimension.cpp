@@ -197,4 +197,42 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view) {
   return rd;
 }
 
+glm::dvec2 DefaultDimOffset(const DrawingDim& dim, const SheetView& view) {
+  constexpr glm::dvec2 kFallback{0.0, -12.0}; // the historical GUI default
+  if (!view.hasGeometry)
+    return kFallback;
+  // Probe-resolve with a zero offset to learn the anchors, then compute the
+  // offset that puts the laid-out geometry outside the bbox per this kind's
+  // exact offset semantics in ResolveDim above.
+  DrawingDim probe = dim;
+  probe.labelOffset = {0.0, 0.0};
+  const ResolvedDim rd = ResolveDim(probe, view);
+  if (!rd.resolved)
+    return kFallback;
+  const double below = view.bboxMin.y - kDimOffsetGapMM;
+  const double left = view.bboxMin.x - kDimOffsetGapMM;
+  switch (dim.kind) {
+  case DrawingDimKind::Distance: // dim line = anchors + off
+    return {0.0, below - std::max(rd.ext1.y, rd.ext2.y)};
+  case DrawingDimKind::DistanceX: // line at min(a.y, b.y) + off.y
+    return {0.0, below - std::min(rd.ext1.y, rd.ext2.y)};
+  case DrawingDimKind::DistanceY: // line at min(a.x, b.x) + off.x
+    return {left - std::min(rd.ext1.x, rd.ext2.x), 0.0};
+  case DrawingDimKind::Radius:
+  case DrawingDimKind::Diameter: {
+    // Leader direction away from the view centre; offset length = gap.
+    const glm::dvec2 centre = 0.5 * (view.bboxMin + view.bboxMax);
+    const glm::dvec2 away = rd.center - centre;
+    const glm::dvec2 dir = glm::length(away) > 1e-9
+                               ? glm::normalize(away)
+                               : glm::dvec2(0.7071, 0.7071);
+    return dir * kDimOffsetGapMM;
+  }
+  case DrawingDimKind::Angle:
+    return {0.0, below - 0.5 * (rd.ext1.y + rd.ext2.y)};
+  default: // new kinds (callouts) fall back until they add an arm
+    return kFallback;
+  }
+}
+
 } // namespace drawing

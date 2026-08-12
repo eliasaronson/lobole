@@ -235,6 +235,19 @@ def main():
         d.call("set_drawing_view", id=iso_id, position=[300, 190])
         expect(d.call("check_drawing")["ok"], "restored layout is clean")
 
+        # Auto-placement: a dim with NO offset lands clear of the view, not
+        # at the old useless {0,0}.
+        auto = d.call("add_drawing_dim", view=front_id, kind="distance_x",
+                      refs=[{"edge": vlines[0]["ref"]},
+                            {"edge": vlines[-1]["ref"]}])
+        expect(auto["resolved"] and auto["offset"] != [0, 0],
+               f"omitted offset is auto-placed: {auto}")
+        chk = d.call("check_drawing", update=False)
+        expect(not any(i["kind"] == "dim_outside_border" and
+                       i.get("dim") == auto["id"] for i in chk["issues"]),
+               f"auto-placed dim stays on the paper: {chk}")
+        d.call("remove_drawing_dim", id=auto["id"])
+
         # Folding: the top view folds from front, sharing sheet-X. Moving its
         # x is overridden; the reply says so.
         top_id = by_name["top"]["id"]
