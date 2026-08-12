@@ -15,6 +15,7 @@ Usage: fem_smoke.py <path-to-designer-binary>
 import os
 import subprocess
 import sys
+import time
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
@@ -106,6 +107,32 @@ def main():
         res2 = d.call("run_study", study=study)
         ratio = res2["max_von_mises_mpa"]["value"] / sigma
         expect(abs(ratio - 2.0) < 0.05, f"stress scales 2x with load, got {ratio}")
+
+        # --- async static run: same physics through the worker-thread path
+        # (the big-mesh escape from synchronous-solve client timeouts).
+        d.call("set_variable", name="load_n", expression="10000")
+        started = d.call("run_study", study=study, **{"async": True})
+        expect(started.get("started") and started.get("running"),
+               f"async static run starts: {started}")
+        deadline = time.time() + 120
+        while time.time() < deadline:
+            st = d.call("study_status", study=study)
+            if not st.get("running", False):
+                break
+            expect("elapsed_seconds" in st,
+                   f"running status reports elapsed: {st}")
+            try:
+                d.call("cancel_study", study=study)
+                raise AssertionError("static solve must refuse to cancel")
+            except RuntimeError as e:
+                expect("cannot be cancelled" in str(e),
+                       f"cancel error explains: {e}")
+            time.sleep(0.2)
+        res3 = d.call("study_results", study=study)
+        expect(res3["stale"] is False, f"async result cached: {res3}")
+        sigma3 = res3["max_von_mises_mpa"]["value"]
+        expect(abs(sigma3 / sigma - 1.0) < 0.05,
+               f"async solve matches the sync physics: {sigma3} vs {sigma}")
 
         # --- modal analysis: cantilever natural frequencies (v2) ------------
         modal = d.call("add_study", name="Modes")["id"]

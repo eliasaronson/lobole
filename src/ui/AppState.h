@@ -783,6 +783,9 @@ struct AppState {
   // stores the result at completion. One run at a time. See ui::TopoJob and the
   // Start/Poll/Cancel TopologyRun helpers.
   std::unique_ptr<TopoJob> topoJob;
+  // The active async static/modal solve, or null. One study run at a time
+  // across both job slots (see Start{Topology,Study}Run's shared guard).
+  std::unique_ptr<StudyJob> studyJob;
   // Mass-properties center-of-gravity marker (C3): drawn as a small world-space
   // cross when the Properties panel's Mass properties section is open. The
   // panel computes the CoM and stamps it here; the overlay build reads it.

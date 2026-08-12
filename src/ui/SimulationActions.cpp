@@ -177,6 +177,71 @@ void PollTopologyRun(AppState& state, Document& doc) {
   state.topoJob.reset();
 }
 
+bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
+                   std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (state.topoJob || state.studyJob)
+    return fail("a study run is already in progress");
+  fem::Study* s = doc.FindStudy(studyId);
+  if (!s)
+    return fail("no such study");
+  if (s->type == fem::AnalysisType::Topology)
+    return fail("topology studies run through the topology path");
+
+  // Prepare (expressions, face refs, meshing) on this thread — it needs the
+  // Document. The worker only ever sees the pure snapshot.
+  auto job = std::make_unique<StudyJob>();
+  if (!fem::PrepareStudy(doc, *s, job->input, error))
+    return false;
+  job->studyId = studyId;
+  job->started = std::chrono::steady_clock::now();
+  StudyJob* j = job.get(); // outlives the thread (joined in Poll/dtor)
+  job->thread = std::thread([j]() {
+    std::string err;
+    if (!fem::SolvePreparedStudy(j->input, j->runtime, &err))
+      j->error = err.empty() ? "solve failed" : err;
+    j->done.store(true, std::memory_order_release);
+  });
+  state.studyJob = std::move(job);
+  return true;
+}
+
+void PollStudyRun(AppState& state, Document& doc) {
+  if (!state.studyJob || !state.studyJob->done.load(std::memory_order_acquire))
+    return;
+  StudyJob& job = *state.studyJob;
+  job.thread.join(); // finished; consume the result (single join point)
+  if (job.error.empty()) {
+    job.runtime.solvedAtVersion = doc.Version();
+    job.runtime.solver = "cpu (Eigen CG-IC)";
+    job.runtime.solveSeconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      job.started)
+            .count();
+    doc.StoreStudyResults(job.studyId, std::move(job.runtime));
+  } else if (fem::Study* s = doc.FindStudy(job.studyId)) {
+    s->error = job.error;
+  }
+  state.studyJob.reset();
+}
+
+StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
+  StudyRunStatus st;
+  const StudyJob* job = state.studyJob.get();
+  if (!job || job->studyId != studyId ||
+      job->done.load(std::memory_order_acquire))
+    return st;
+  st.running = true;
+  st.elapsedSeconds = std::chrono::duration<double>(
+                          std::chrono::steady_clock::now() - job->started)
+                          .count();
+  return st;
+}
+
 bool CancelTopologyRun(AppState& state, uint64_t studyId) {
   if (!state.topoJob || state.topoJob->studyId != studyId)
     return false;

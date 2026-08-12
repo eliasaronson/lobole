@@ -7,6 +7,7 @@
 // atomics + a single join on the main thread (see SimulationActions:
 // Start/Poll/Cancel TopologyRun). Owned by AppState (one run at a time).
 
+#include "core/fem/FemSolver.h"
 #include "core/fem/FemTopo.h"
 
 #include <atomic>
@@ -51,6 +52,26 @@ struct TopoJob {
   // std::thread that is destroyed would std::terminate the process.
   ~TopoJob() {
     cancel.store(true);
+    if (thread.joinable())
+      thread.join();
+  }
+};
+
+// A running static/modal solve on a worker thread (the async path that keeps
+// a minutes-long CG solve from blocking the app and timing out remote
+// clients). Same immutable-snapshot rule as TopoJob: PrepareStudy runs on
+// the main thread, the worker touches only pure fem data. NOT cancellable —
+// the linear solver has no interruption points; teardown blocks on the join.
+struct StudyJob {
+  uint64_t studyId = 0;
+  fem::StudyJobInput input;
+  fem::StudyRuntime runtime; // read by main only after `done` + join
+  std::string error;
+  std::atomic<bool> done{false};
+  std::chrono::steady_clock::time_point started;
+  std::thread thread;
+
+  ~StudyJob() {
     if (thread.joinable())
       thread.join();
   }

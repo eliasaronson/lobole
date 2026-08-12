@@ -447,8 +447,11 @@ def measure(a: dict, b: dict | None = None,
 @mcp.tool(description="Stable element names (topological naming) for each "
           "body's faces and edges, plus the body's created_by feature id. "
           "Every face carries kind ('plane'|'cylinder'|'cone'|'sphere'|"
-          "'other') and area; every edge carries kind ('line'|'circle'|'arc'|"
-          "'other'), length, and radius when circular — identify bore rims / "
+          "'other'), area, `centroid` [x,y,z], and outward `normal` [x,y,z] "
+          "— find 'the back face' or 'the +Y pocket floors' by geometry "
+          "directly, NO select_face probe loop needed; every edge carries "
+          "kind ('line'|'circle'|'arc'|'other'), length, `midpoint`, and "
+          "radius when circular — identify bore rims / "
           "seams directly instead of measure-probing names. This is how "
           "Fillet/Chamfer edge refs are built: edges: "
           "[{feature_id: <created_by>, element: <edge name>}]. Names survive "
@@ -1318,9 +1321,14 @@ def mesh_study(study: int) -> dict:
           "stale:false. A modal study returns per-body frequencies_hz (the "
           "natural frequencies). A TOPOLOGY study runs ASYNC (minutes on a "
           "worker thread): it returns {started:true} immediately — poll "
-          "study_status until running:false, then read study_results. Errors "
-          "name the offending face/material/support.")
-def run_study(study: int) -> dict:
+          "study_status until running:false, then read study_results. "
+          "async_run=True runs a static/modal study the same way — use it "
+          "for big meshes (a synchronous solve can outlive the client "
+          "timeout; note a running static solve cannot be cancelled). "
+          "Errors name the offending face/material/support.")
+def run_study(study: int, async_run: bool = False) -> dict:
+    if async_run:
+        return _call("run_study", study=study, **{"async": True})
     return _call("run_study", study=study)
 
 

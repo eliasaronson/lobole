@@ -302,15 +302,26 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
     // params: {study}
     // Catch a finished async run first, so its result is stored before we read.
     ui::PollTopologyRun(state, *doc);
+    ui::PollStudyRun(state, *doc);
     const uint64_t id = p.at("study").get<uint64_t>();
     fem::Study* s = doc->FindStudy(id);
     if (!s)
       throw std::runtime_error("no such study");
 
     if (m == "cancel_study") {
+      if (ui::GetStudyRunStatus(state, id).running)
+        throw std::runtime_error(
+            "a static/modal solve cannot be cancelled (the linear solver "
+            "has no interruption points) — wait for study_status running: "
+            "false");
       return json{{"cancelled", ui::CancelTopologyRun(state, id)}};
     }
     if (m == "study_status") {
+      const ui::StudyRunStatus srs = ui::GetStudyRunStatus(state, id);
+      if (srs.running)
+        return json{{"running", true},
+                    {"solver", "cpu (Eigen CG-IC)"},
+                    {"elapsed_seconds", srs.elapsedSeconds}};
       const ui::TopoRunStatus st = ui::GetTopologyStatus(state, id);
       if (st.running)
         return json{{"running", true},
@@ -337,6 +348,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       if (s->type == fem::AnalysisType::Topology) {
         std::string err;
         if (!ui::StartTopologyRun(state, *doc, id, &err))
+          throw std::runtime_error(err);
+        return json{{"started", true}, {"running", true}};
+      }
+      // Static/modal: async on request (a big mesh can outlive a remote
+      // client's socket timeout when solved synchronously).
+      if (p.value("async", false)) {
+        std::string err;
+        if (!ui::StartStudyRun(state, *doc, id, &err))
           throw std::runtime_error(err);
         return json{{"started", true}, {"running", true}};
       }

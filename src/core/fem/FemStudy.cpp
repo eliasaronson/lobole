@@ -173,9 +173,9 @@ bool MeshStudy(const Document& doc, Study& study,
   return true;
 }
 
-bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
-              std::string* error) {
-  rt = StudyRuntime{};
+bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
+                  std::string* error) {
+  out = StudyJobInput{};
   study.error.clear();
   auto fail = [&](const std::string& m) {
     study.error = m;
@@ -187,6 +187,9 @@ bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
   std::string err;
   if (!EvaluateStudyExprs(study, doc.Symbols(), &err))
     return fail(err);
+  out.type = study.type;
+  out.numModes = study.numModes;
+  out.gravity = study.gravity;
 
   const auto& bodies = doc.GetBodies();
 
@@ -271,47 +274,86 @@ bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
     if (fixedSet.empty())
       return fail("body '" + body.name + "': fixed face meshed to no nodes");
 
+    // Density-dependent analyses must fail HERE (prepare has the material
+    // library and study), not on the worker.
+    if (study.type == AnalysisType::Modal && mp.density <= 0.0f)
+      return fail("body '" + body.name +
+                  "': material has no density (needed "
+                  "for modal analysis)");
+    if (study.type != AnalysisType::Modal &&
+        (study.gravity.x != 0 || study.gravity.y != 0 ||
+         study.gravity.z != 0) &&
+        mp.density <= 0.0f)
+      return fail("body '" + body.name +
+                  "': material has no density (needed "
+                  "for gravity)");
+
     // GPa -> MPa; density kg/m^3 -> tonne/mm^3 for the consistent mm-N-t-s
     // system (so gravity loads and modal frequencies come out right).
-    Material mat{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
-    std::vector<int> fixedNodes(fixedSet.begin(), fixedSet.end());
+    StudyJobBody jb;
+    jb.bodyIndex = bodyIndex;
+    jb.bodyName = body.name;
+    jb.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+    jb.fixedNodes.assign(fixedSet.begin(), fixedSet.end());
+    jb.faceLoads = std::move(faceLoads);
+    jb.mesh = std::move(*mesh);
+    out.bodies.push_back(std::move(jb));
+  }
+  return true;
+}
 
+bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
+                        std::string* error) {
+  rt = StudyRuntime{};
+  std::string err;
+  auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  for (StudyJobBody& jb : in.bodies) {
     StudyBodyResult sbr;
-    sbr.bodyIndex = bodyIndex;
-    sbr.bodyName = body.name;
+    sbr.bodyIndex = jb.bodyIndex;
+    sbr.bodyName = jb.bodyName;
 
-    if (study.type == AnalysisType::Modal) {
-      if (mp.density <= 0.0f)
-        return fail("body '" + body.name +
-                    "': material has no density (needed "
-                    "for modal analysis)");
-      auto modes = SolveModal(*mesh, mat, fixedNodes, study.numModes, &err);
+    if (in.type == AnalysisType::Modal) {
+      auto modes =
+          SolveModal(jb.mesh, jb.mat, jb.fixedNodes, in.numModes, &err);
       if (!modes)
-        return fail("body '" + body.name + "': " + err);
+        return fail("body '" + jb.bodyName + "': " + err);
       sbr.results.modes = std::move(*modes);
     } else {
-      const glm::dvec3 g = study.gravity * 1000.0; // m/s^2 -> mm/s^2
-      if ((g.x != 0 || g.y != 0 || g.z != 0) && mp.density <= 0.0f)
-        return fail("body '" + body.name +
-                    "': material has no density (needed "
-                    "for gravity)");
-      auto res = Solve(*mesh, mat, fixedNodes, faceLoads, &err, g);
+      const glm::dvec3 g = in.gravity * 1000.0; // m/s^2 -> mm/s^2
+      auto res = Solve(jb.mesh, jb.mat, jb.fixedNodes, jb.faceLoads, &err, g);
       if (!res)
-        return fail("body '" + body.name + "': " + err);
+        return fail("body '" + jb.bodyName + "': " + err);
       if (res->maxVonMises > rt.maxVonMises) {
         rt.maxVonMises = res->maxVonMises;
         rt.maxVmAt = res->maxVmAt;
-        rt.maxVmBody = body.name;
+        rt.maxVmBody = jb.bodyName;
       }
       if (res->maxDisplacement > rt.maxDisplacement) {
         rt.maxDisplacement = res->maxDisplacement;
         rt.maxDispAt = res->maxDispAt;
-        rt.maxDispBody = body.name;
+        rt.maxDispBody = jb.bodyName;
       }
       sbr.results = std::move(*res);
     }
-    sbr.mesh = std::move(*mesh);
+    sbr.mesh = std::move(jb.mesh);
     rt.bodies.push_back(std::move(sbr));
+  }
+  return true;
+}
+
+bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
+              std::string* error) {
+  StudyJobInput input;
+  if (!PrepareStudy(doc, study, input, error))
+    return false;
+  if (!SolvePreparedStudy(input, rt, error)) {
+    // Solve failures set study.error too, matching the pre-split behavior.
+    study.error = error ? *error : "solve failed";
+    return false;
   }
   return true;
 }

@@ -152,6 +152,7 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
 
   // Store a finished run (the GUI's per-frame join point).
   PollTopologyRun(state, *doc);
+  PollStudyRun(state, *doc);
   const TopoRunStatus st = GetTopologyStatus(state, s.id);
   if (st.running) {
     const float frac =

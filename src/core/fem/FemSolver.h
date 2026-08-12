@@ -155,6 +155,29 @@ struct StudyRuntime {
 bool RunStudy(const Document& doc, Study& study, StudyRuntime& rt,
               std::string* error);
 
+// RunStudy, split at the thread boundary (the TopoInput pattern): everything
+// Document-bound — expression evaluation, face resolution, validation, and
+// meshing — happens in PrepareStudy on the main thread; SolvePreparedStudy is
+// pure fem data and safe on a worker. RunStudy == Prepare + SolvePrepared.
+struct StudyJobBody {
+  int bodyIndex = 0;
+  std::string bodyName;
+  FemMesh mesh;
+  Material mat;
+  std::vector<int> fixedNodes;
+  std::vector<FaceLoad> faceLoads;
+};
+struct StudyJobInput {
+  AnalysisType type = AnalysisType::Static;
+  int numModes = 8;
+  glm::dvec3 gravity{0.0};
+  std::vector<StudyJobBody> bodies;
+};
+bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
+                  std::string* error);
+bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
+                        std::string* error);
+
 // Meshes the study's single loaded body (v1) and runs SIMP topology
 // optimization on it (the study's Force/Pressure loads + fixed supports; keep
 // faces frozen solid; gravity ignored). Fills `rt` with the optimized per-tet

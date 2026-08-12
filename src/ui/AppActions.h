@@ -284,6 +284,20 @@ struct TopoRunStatus {
 };
 TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
 
+// The async static/modal counterparts (StudyJob): prepare-on-main +
+// solve-on-worker, polled at the same sites as the topology run. A static
+// solve is NOT cancellable (no interruption points in the linear solver).
+bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
+                   std::string* error);
+void PollStudyRun(AppState& state, Document& doc);
+// running=false when no static/modal job is active for `studyId`;
+// elapsedSeconds since launch otherwise.
+struct StudyRunStatus {
+  bool running = false;
+  double elapsedSeconds = 0.0;
+};
+StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId);
+
 // The Studies panel drawn in the Model dock while in simulation mode. Defined
 // in StudyPanel.cpp.
 void DrawStudyPanel(AppState& state);
