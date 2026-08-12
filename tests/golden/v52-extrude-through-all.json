@@ -1,0 +1,102 @@
+{
+  "format": "designer-document",
+  "version": 52,
+  "features": [
+    {
+      "type": "Box",
+      "name": "Block",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 4.0,
+      "height": 4.0,
+      "depth": 2.0
+    },
+    {
+      "type": "Sketch",
+      "name": "Slot profile",
+      "id": 2,
+      "next_entity_id": 5,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          2
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "line",
+          "id": 1,
+          "a": [
+            1.5,
+            1.5
+          ],
+          "b": [
+            2.5,
+            1.5
+          ]
+        },
+        {
+          "type": "line",
+          "id": 2,
+          "a": [
+            2.5,
+            1.5
+          ],
+          "b": [
+            2.5,
+            2.5
+          ]
+        },
+        {
+          "type": "line",
+          "id": 3,
+          "a": [
+            2.5,
+            2.5
+          ],
+          "b": [
+            1.5,
+            2.5
+          ]
+        },
+        {
+          "type": "line",
+          "id": 4,
+          "a": [
+            1.5,
+            2.5
+          ],
+          "b": [
+            1.5,
+            1.5
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Extrude",
+      "name": "Slot",
+      "id": 3,
+      "sketch_id": 2,
+      "distance": 1.0,
+      "mode": "cut",
+      "reversed": true,
+      "end_mode": "through_all"
+    }
+  ]
+}

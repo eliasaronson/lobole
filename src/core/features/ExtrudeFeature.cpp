@@ -65,6 +65,31 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     const glm::vec3 n = sketch->plane.GetNormal();
     total = glm::dot(target->GetOrigin() - sketch->plane.GetOrigin(), n);
     sweepReversed = false;
+  } else if (endMode == ExtrudeEnd::ThroughAll) {
+    if (mode != ExtrudeMode::Cut) {
+      SetError("through_all requires mode 'cut'");
+      return false;
+    }
+    if (ctx.bodies.empty()) {
+      SetError("through_all cut needs an existing body");
+      return false;
+    }
+    // Sweep from the sketch plane to just past the farthest body extent
+    // along the cut direction (`reversed` picks the side, like a blind cut).
+    const glm::vec3 n = sketch->plane.GetNormal();
+    const glm::vec3 dir = reversed ? -n : n;
+    const glm::vec3 origin = sketch->plane.GetOrigin();
+    float reach = 0.0f;
+    for (const auto& b : ctx.bodies) {
+      glm::vec3 lo, hi;
+      b.shape.GetBoundingBox(lo, hi);
+      for (int c = 0; c < 8; ++c) {
+        const glm::vec3 corner{c & 1 ? hi.x : lo.x, c & 2 ? hi.y : lo.y,
+                               c & 4 ? hi.z : lo.z};
+        reach = std::max(reach, glm::dot(corner - origin, dir));
+      }
+    }
+    total = reach + 1.0;
   }
   if (std::abs(total) < 1e-9) {
     SetError(endMode == ExtrudeEnd::UpToFace

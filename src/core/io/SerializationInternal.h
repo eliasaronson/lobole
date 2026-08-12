@@ -16,8 +16,8 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 51; // v51: mirror ops + circular-pattern
-                                    // centre refs (v50: 2D linear patterns)
+inline constexpr int kVersion = 52; // v52: extrude end_mode "through_all"
+                                    // (v51: mirror ops + circular patterns)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

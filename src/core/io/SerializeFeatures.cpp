@@ -589,7 +589,9 @@ json FeatureToJson(const Feature& feature) {
     if (ext->endMode != ExtrudeEnd::Blind) { // v18; omit the default
       j["end_mode"] = ext->endMode == ExtrudeEnd::Symmetric  ? "symmetric"
                       : ext->endMode == ExtrudeEnd::TwoSided ? "two_sided"
-                                                             : "up_to_face";
+                      : ext->endMode == ExtrudeEnd::ThroughAll
+                          ? "through_all" // v52
+                          : "up_to_face";
       if (ext->endMode == ExtrudeEnd::TwoSided) {
         j["distance2"] = ext->distance2;
         if (!ext->distance2Expr.empty())
@@ -1043,10 +1045,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.value("distance_expr", std::string{}); // absent (pre-v11) = literal
     // End condition (v18); absent = blind.
     const std::string end = j.value("end_mode", "blind");
-    ext->endMode = end == "symmetric"    ? ExtrudeEnd::Symmetric
-                   : end == "two_sided"  ? ExtrudeEnd::TwoSided
-                   : end == "up_to_face" ? ExtrudeEnd::UpToFace
-                                         : ExtrudeEnd::Blind;
+    ext->endMode = end == "symmetric"     ? ExtrudeEnd::Symmetric
+                   : end == "two_sided"   ? ExtrudeEnd::TwoSided
+                   : end == "up_to_face"  ? ExtrudeEnd::UpToFace
+                   : end == "through_all" ? ExtrudeEnd::ThroughAll // v52
+                                          : ExtrudeEnd::Blind;
     ext->distance2 = j.value("distance2", 1.0);
     ext->distance2Expr = j.value("distance2_expr", std::string{});
     if (j.contains("regions")) // v34

@@ -11,10 +11,12 @@ enum class ExtrudeMode { NewBody, Add, Cut };
 // End condition (M3.2/M3.3): Blind sweeps `distance` from the sketch plane;
 // Symmetric centers `distance` on it; TwoSided sweeps `distance` forward and
 // `distance2` backward; UpToFace sweeps to a referenced planar face
-// (endTarget), following it across upstream edits. All build ONE prism of
-// the computed total length translated back along the normal, so element
-// names are identical to a blind extrude's.
-enum class ExtrudeEnd { Blind, Symmetric, TwoSided, UpToFace };
+// (endTarget), following it across upstream edits. ThroughAll (v52, Cut
+// only) sweeps past every body's extent, ignoring `distance`; `reversed`
+// picks the side like a blind cut. All build ONE prism of the computed total
+// length translated back along the normal, so element names are identical to
+// a blind extrude's.
+enum class ExtrudeEnd { Blind, Symmetric, TwoSided, UpToFace, ThroughAll };
 
 // Extrudes a referenced SketchFeature's closed profile into a solid.
 //   NewBody: append the prism as its own body

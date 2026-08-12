@@ -102,6 +102,8 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 34 | (U2) | Extrude/Revolve `regions` (selected profile loops by boundary entity-id sets; absent = whole sketch) |
 | … | | (v35–v37: linked copies, thread/rib, point-line distance dims — see golden corpus) |
 | 38 | (2A) | Sketch entity coordinate expressions (`<field>_expr` keys on entity JSON: line `ax/ay/bx/by`, circle+arc `cx/cy/r`, point `x/y`) |
+| … | | (v39–v51: split, curves/sweep/pipe, images, refine, XCAF import, patterns/mirror — see golden corpus) |
+| 52 | | Extrude `end_mode: "through_all"` (cut only; sweeps past every body along ±normal per `reversed`, `distance` ignored) |
 
 ## The directory format (F3, default for new saves)
 

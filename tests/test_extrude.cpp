@@ -562,6 +562,99 @@ TEST_CASE("End conditions round-trip through serialization (v18)",
   std::filesystem::remove(path);
 }
 
+TEST_CASE("Through-all cut pierces the whole body without a distance",
+          "[extrude][end]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4,
+                                              2)); // z 0..2, vol 32
+  // Sketch ON the top face, cutting back down through the box — the case
+  // that used to need a plane parked behind the material plus an overshoot
+  // distance. The 0.123 literal must be ignored.
+  SketchPlane top(PlaneType::XY, glm::vec3(0, 0, 2));
+  uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}, top);
+  auto ext = std::make_unique<ExtrudeFeature>("Slot", sid, 0.123,
+                                              ExtrudeMode::Cut, true);
+  ext->endMode = ExtrudeEnd::ThroughAll;
+  doc.AddFeature(std::move(ext));
+
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(32.0 - 2 * 2 * 2, 1e-4));
+  CHECK(doc.GetFeature(doc.FeatureCount() - 1)->GetWarning().empty());
+}
+
+TEST_CASE("Through-all cut sweeps forward without reversed", "[extrude][end]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+  uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}); // on XY at z=0, +normal up
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Slot", sid, 1.0, ExtrudeMode::Cut);
+  ext->endMode = ExtrudeEnd::ThroughAll;
+  doc.AddFeature(std::move(ext));
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(),
+             WithinRel(32.0 - 2 * 2 * 2, 1e-4));
+}
+
+TEST_CASE("Through-all requires cut mode", "[extrude][end]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+  uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3});
+  auto ext =
+      std::make_unique<ExtrudeFeature>("Pad", sid, 1.0, ExtrudeMode::NewBody);
+  ext->endMode = ExtrudeEnd::ThroughAll;
+  doc.AddFeature(std::move(ext));
+  auto* f = doc.GetFeature(doc.FeatureCount() - 1);
+  CHECK_FALSE(f->GetError().empty());
+  CHECK(f->GetError().find("cut") != std::string::npos);
+  CHECK(doc.GetBodies().size() == 1); // just the base — nothing was padded
+}
+
+TEST_CASE("Through-all cut that misses warns like a blind cut",
+          "[extrude][end][warning]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+  SketchPlane top(PlaneType::XY, glm::vec3(0, 0, 2));
+  uint64_t sid = AddRectSketch(doc, {10, 10}, {12, 12}, top); // off to the side
+  auto ext = std::make_unique<ExtrudeFeature>("Slot", sid, 1.0,
+                                              ExtrudeMode::Cut, true);
+  ext->endMode = ExtrudeEnd::ThroughAll;
+  doc.AddFeature(std::move(ext));
+  REQUIRE(doc.GetBodies().size() == 1);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(32.0, 1e-9));
+  auto* cut = doc.GetFeature(doc.FeatureCount() - 1);
+  CHECK(cut->GetError().empty());
+  CHECK_FALSE(cut->GetWarning().empty());
+}
+
+TEST_CASE("Through-all round-trips through serialization (v52)",
+          "[extrude][end][serialization]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0, 0, 0), 4, 4, 2));
+  SketchPlane top(PlaneType::XY, glm::vec3(0, 0, 2));
+  uint64_t sid = AddRectSketch(doc, {1, 1}, {3, 3}, top);
+  auto ext = std::make_unique<ExtrudeFeature>("Slot", sid, 1.0,
+                                              ExtrudeMode::Cut, true);
+  ext->endMode = ExtrudeEnd::ThroughAll;
+  doc.AddFeature(std::move(ext));
+
+  const auto path = std::filesystem::temp_directory_path() / "thru_rt.json";
+  REQUIRE(testio::Save(doc, path.string()));
+  auto loaded = testio::Load(path.string());
+  REQUIRE(loaded != nullptr);
+  auto* rt = dynamic_cast<ExtrudeFeature*>(loaded->GetFeature(2));
+  REQUIRE(rt != nullptr);
+  CHECK(rt->endMode == ExtrudeEnd::ThroughAll);
+  CHECK(rt->reversed);
+  CHECK_THAT(loaded->GetBodies()[0].shape.Volume(),
+             WithinRel(32.0 - 2 * 2 * 2, 1e-4));
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("Up-to-face extrude reaches the target and follows upstream edits",
           "[extrude][end][toponaming]") {
   Document doc;
