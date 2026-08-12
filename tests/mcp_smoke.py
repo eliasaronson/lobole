@@ -64,7 +64,7 @@ async def run(port):
             await session.initialize()
 
             tools = (await session.list_tools()).tools
-            expect(len(tools) >= 115, f"tool count ({len(tools)})")
+            expect(len(tools) >= 118, f"tool count ({len(tools)})")
             prompts = (await session.list_prompts()).prompts
             expect(any(p.name == "modeling-workflow" for p in prompts),
                    "workflow prompt registered")

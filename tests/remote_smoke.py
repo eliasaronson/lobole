@@ -747,7 +747,7 @@ def main():
         desc = d.call("describe")
         names = [meth["name"] for meth in desc["methods"]]
         expect(len(names) == len(set(names)), "describe lists each method once")
-        expect(len(names) >= 133, f"method count ratchet: {len(names)}")
+        expect(len(names) >= 136, f"method count ratchet: {len(names)}")
         expect(len(desc["feature_types"]) >= 24, "feature type ratchet")
         expect({"ellipse_arc", "spline"} <= set(desc["sketch_entity_types"]),
                "newest sketch entity types are described")

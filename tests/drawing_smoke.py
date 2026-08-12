@@ -193,6 +193,59 @@ def main():
         expect(b"/BaseFont /Helvetica" in pdf, "PDF font")
         expect(b"startxref" in pdf, "PDF xref")
 
+        # --- Round 2: layout validation + view/sheet editing -----------------
+        chk = d.call("check_drawing")
+        expect(chk["ok"] and chk["issues"] == [],
+               f"well-laid-out sheet validates clean: {chk}")
+        # Sheet-size strictness: case-insensitive accept, loud reject.
+        up = d.call("set_drawing_sheet", size="A3")
+        expect(up["size"] == "a3", f"'A3' accepted case-insensitively: {up}")
+        try:
+            d.call("set_drawing_sheet", size="b5")
+            raise AssertionError("unknown sheet size must error")
+        except RuntimeError as e:
+            expect("a4, a3, a2, a1, a0, letter" in str(e),
+                   f"size error lists accepted values: {e}")
+        try:
+            d.call("create_drawing", name="bad", sheet={"size": "ansi_b"})
+            raise AssertionError("create_drawing bad size must error")
+        except RuntimeError:
+            pass
+        expect(len(d.call("list_drawings")["drawings"]) == 1,
+               "failed create_drawing left no half-configured tab")
+
+        # set_drawing_view: park the iso off the sheet -> check flags it,
+        # and the export reply echoes the same issues.
+        iso_id = by_name["iso"]["id"]
+        d.call("set_drawing_view", id=iso_id, position=[500, 190])
+        chk = d.call("check_drawing")
+        expect(not chk["ok"] and any(i["kind"] == "view_outside_border"
+                                     and i.get("view") == iso_id
+                                     for i in chk["issues"]),
+               f"off-sheet view reported: {chk}")
+        exp2 = d.call("export_drawing", path=os.path.join(tmp, "issues.svg"))
+        expect(any(i["kind"] == "view_outside_border" for i in exp2["issues"]),
+               f"export echoes issues: {exp2}")
+        # Drop it onto the title block -> overlap issue; then restore.
+        d.call("set_drawing_view", id=iso_id, position=[350, 30])
+        chk = d.call("check_drawing")
+        expect(any(i["kind"] == "view_overlaps_title_block"
+                   for i in chk["issues"]),
+               f"title-block collision reported: {chk}")
+        d.call("set_drawing_view", id=iso_id, position=[300, 190])
+        expect(d.call("check_drawing")["ok"], "restored layout is clean")
+
+        # Folding: the top view folds from front, sharing sheet-X. Moving its
+        # x is overridden; the reply says so.
+        top_id = by_name["top"]["id"]
+        d.call("set_drawing_view", id=top_id, base_view=front_id)
+        moved = d.call("set_drawing_view", id=top_id, position=[250, 140])
+        expect(moved["effective_position"][0] == 110.0,
+               f"folded x follows the base: {moved}")
+        expect("x" in moved.get("folded_axes", []) and "note" in moved,
+               f"fold override is called out: {moved}")
+        d.call("set_drawing_view", id=top_id, base_view=0)  # unfold again
+
         # --- D3: dangling refs are first-class, never rebound ---------------
         # Delete the box feature its width dim references; the projected edges
         # vanish, so the dim reads dangling after an explicit update.

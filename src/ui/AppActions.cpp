@@ -2140,26 +2140,8 @@ drawing::SheetView ProjectDrawingView(AppState& state,
 
   const double s = view.scale != 0.0 ? view.scale : 1.0;
 
-  // Folding alignment: a projected child is kept aligned to its base along the
-  // shared sheet axis (design §2). Two orthographic views share sheet-X when
-  // they map the same world direction to it (equal `right` vectors), and
-  // sheet-Y when their `up` vectors match; the shared coordinate locks to the
-  // base's, leaving the fold axis free. Iso shares neither -> placed freely.
-  glm::dvec2 effectivePos = view.position;
-  if (view.baseViewId) {
-    if (const DrawingView* base = state.drawing->FindView(view.baseViewId)) {
-      glm::dvec3 vd, up, bvd, bup;
-      OrientationAxes(view.orientation, vd, up);
-      OrientationAxes(base->orientation, bvd, bup);
-      const glm::dvec3 right = glm::normalize(glm::cross(vd, up));
-      const glm::dvec3 bright = glm::normalize(glm::cross(bvd, bup));
-      constexpr double eps = 1e-6;
-      if (glm::length(right - bright) < eps)
-        effectivePos.x = base->position.x;
-      if (glm::length(up - bup) < eps)
-        effectivePos.y = base->position.y;
-    }
-  }
+  // Folding alignment (the one computation lives in DrawingFoldedPosition).
+  const glm::dvec2 effectivePos = DrawingFoldedPosition(state, view).pos;
 
   glm::dvec2 lo(1e30), hi(-1e30);
   for (const drawing::ProjectedCurve& pc : projected->curves) {
@@ -2200,6 +2182,35 @@ drawing::SheetView ProjectDrawingView(AppState& state,
 }
 
 } // namespace
+
+FoldedPosition DrawingFoldedPosition(AppState& state, const DrawingView& view) {
+  // A projected child is kept aligned to its base along the shared sheet
+  // axis (design §2). Two orthographic views share sheet-X when they map the
+  // same world direction to it (equal `right` vectors), and sheet-Y when
+  // their `up` vectors match; the shared coordinate locks to the base's,
+  // leaving the fold axis free. Iso shares neither -> placed freely.
+  FoldedPosition out{view.position, false, false};
+  if (!view.baseViewId || !state.drawing)
+    return out;
+  const DrawingView* base = state.drawing->FindView(view.baseViewId);
+  if (!base)
+    return out;
+  glm::dvec3 vd, up, bvd, bup;
+  OrientationAxes(view.orientation, vd, up);
+  OrientationAxes(base->orientation, bvd, bup);
+  const glm::dvec3 right = glm::normalize(glm::cross(vd, up));
+  const glm::dvec3 bright = glm::normalize(glm::cross(bvd, bup));
+  constexpr double eps = 1e-6;
+  if (glm::length(right - bright) < eps) {
+    out.pos.x = base->position.x;
+    out.xLocked = true;
+  }
+  if (glm::length(up - bup) < eps) {
+    out.pos.y = base->position.y;
+    out.yLocked = true;
+  }
+  return out;
+}
 
 drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
   const auto it = state.drawingRenders.find(dim.viewId);

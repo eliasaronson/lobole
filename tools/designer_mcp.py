@@ -1431,6 +1431,55 @@ def remove_drawing_view(id: int) -> dict:
     return _call("remove_drawing_view", id=id)
 
 
+@mcp.tool(description="Edit a view in place: position [x,y] sheet mm, scale, "
+          "name, show_hidden, base_view (0 clears folding). Re-projects. A "
+          "folded child's shared axis follows its base — the reply's "
+          "effective_position/folded_axes say when a requested coordinate "
+          "was overridden.")
+def set_drawing_view(id: int, position: list | None = None, scale: float = 0,
+                     name: str = "", show_hidden: int = -1,
+                     base_view: int = -1) -> dict:
+    params = {"id": id}
+    if position is not None:
+        params["position"] = position
+    if scale > 0:
+        params["scale"] = scale
+    if name:
+        params["name"] = name
+    if show_hidden >= 0:
+        params["show_hidden"] = bool(show_hidden)
+    if base_view >= 0:
+        params["base_view"] = base_view
+    return _call("set_drawing_view", **params)
+
+
+@mcp.tool(description="Edit the active drawing's sheet after creation: size "
+          "('a4'..'a0'|'letter', case-insensitive — unknown sizes ERROR), "
+          "landscape, title_block fields. Views keep their positions; run "
+          "check_drawing to see what no longer fits.")
+def set_drawing_sheet(size: str = "", landscape: int = -1,
+                      title_block: dict | None = None) -> dict:
+    params = {}
+    if size:
+        params["size"] = size
+    if landscape >= 0:
+        params["landscape"] = bool(landscape)
+    if title_block is not None:
+        params["title_block"] = title_block
+    return _call("set_drawing_sheet", **params)
+
+
+@mcp.tool(description="Validate the active drawing's sheet layout — the "
+          "checks a drafter does by eye: every view inside the border, no "
+          "view/view or view/title-block overlaps, dimensions on the paper, "
+          "nothing dangling or stale. Returns {ok, issues:[{kind, detail, "
+          "view?, other_view?, dim?}]}. update=False judges the cached "
+          "projection instead of re-projecting. Run before export_drawing "
+          "(whose reply echoes the same issues).")
+def check_drawing(update: bool = True) -> dict:
+    return _call("check_drawing", update=update)
+
+
 @mcp.tool(description="Re-project every view of the active drawing (the "
           "explicit hidden-line-removal pass — expensive, never automatic). "
           "Returns per-view curve counts (visible/hidden/silhouettes) and any "
@@ -1450,7 +1499,8 @@ def list_drawing_views() -> dict:
           ".svg or .pdf). Re-projects first so the file reflects the current "
           "geometry, then writes the sheet — border, title block, every view's "
           "visible (solid)/hidden (dashed) edges, and each resolved dimension. "
-          "Returns the path and view count.")
+          "Returns the path, view count, and the check_drawing issue list "
+          "(export never blocks on issues — read them).")
 def export_drawing(path: str) -> dict:
     return _call("export_drawing", path=path)
 

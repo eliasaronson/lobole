@@ -210,6 +210,16 @@ void UpdateDrawingRenders(AppState& state);
 // stale when this differs from the version stamped at its last projection.
 uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId);
 
+// Where a view actually lands on the sheet: a folded child's shared axis is
+// locked to its base (design §2), so the stored position's x and/or y may be
+// overridden at projection time. The one fold computation — projection and
+// the set_drawing_view RPC's "your x was overridden" note both use it.
+struct FoldedPosition {
+  glm::dvec2 pos{0.0};
+  bool xLocked = false, yLocked = false;
+};
+FoldedPosition DrawingFoldedPosition(AppState& state, const DrawingView& view);
+
 // Resolves one dimension against the active drawing's projected geometry (its
 // view's cached SheetView). Returns an unresolved ResolvedDim if the view is
 // not projected or a ref is dangling. Defined in AppActions.cpp.

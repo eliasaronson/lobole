@@ -1,6 +1,7 @@
 #include "core/drawing/DrawingDocument.h"
 
 #include <algorithm>
+#include <cctype>
 
 uint64_t DrawingDocument::AddView(DrawingView view) {
   view.id = m_nextId++;
@@ -153,7 +154,10 @@ const char* SheetSizeToString(SheetSize size) {
   return "a4";
 }
 
-bool SheetSizeFromString(const std::string& s, SheetSize& out) {
+bool SheetSizeFromString(const std::string& sIn, SheetSize& out) {
+  std::string s = sIn; // case-insensitive: "A3" and "a3" both mean A3
+  std::transform(s.begin(), s.end(), s.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
   if (s == "a4")
     out = SheetSize::A4;
   else if (s == "a3")

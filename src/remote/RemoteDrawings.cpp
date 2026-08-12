@@ -3,6 +3,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/drawing/DrawingExport.h"
+#include "core/drawing/DrawingValidate.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "ui/AppActions.h"
@@ -26,7 +27,14 @@ namespace remote {
 static constexpr MethodDoc DrawingMethods[] = {
     {"create_drawing",
      "Add a drawing document (sheet size, title block) to the project."},
+    {"set_drawing_sheet",
+     "Edit the active drawing's sheet {size?, landscape?, title_block?}."},
     {"list_drawings", "List drawing documents."},
+    {"set_drawing_view", "Edit a view {id, position?, scale?, name?, "
+                         "show_hidden?, base_view?}; folded axes note."},
+    {"check_drawing",
+     "Validate sheet layout: views vs border/title block, overlaps, dim "
+     "placement, dangling/stale {update?}."},
     {"add_drawing_view", "Add an HLR view of a part/assembly {drawing, source, "
                          "orientation, scale, position}."},
     {"remove_drawing_view", "Remove a view by id."},
@@ -41,6 +49,67 @@ static constexpr MethodDoc DrawingMethods[] = {
 };
 std::span<const MethodDoc> DrawingMethodDocs() { return DrawingMethods; }
 
+namespace {
+
+// Parse a sheet-size string, throwing the accepted list on failure (the
+// silent A3-stays-A4 bug class). Case handled by SheetSizeFromString.
+SheetSize ParseSheetSizeOrThrow(const std::string& s) {
+  SheetSize size;
+  if (!SheetSizeFromString(s, size))
+    throw std::runtime_error("unknown sheet size '" + s +
+                             "' (expected one of: a4, a3, a2, a1, a0, "
+                             "letter)");
+  return size;
+}
+
+// Apply a create_drawing/set_drawing_sheet `sheet` JSON block. The size
+// string must already be validated (ParseSheetSizeOrThrow) so this never
+// half-applies.
+void ApplySheetJson(Sheet& sheet, const json& sj) {
+  if (sj.contains("size"))
+    sheet.size = ParseSheetSizeOrThrow(sj.at("size").get<std::string>());
+  sheet.landscape = sj.value("landscape", sheet.landscape);
+  if (sj.contains("title_block")) {
+    const json& tb = sj.at("title_block");
+    sheet.titleBlock.project = tb.value("project", sheet.titleBlock.project);
+    sheet.titleBlock.document = tb.value("document", sheet.titleBlock.document);
+    sheet.titleBlock.author = tb.value("author", sheet.titleBlock.author);
+    sheet.titleBlock.date = tb.value("date", sheet.titleBlock.date);
+    sheet.titleBlock.notes = tb.value("notes", sheet.titleBlock.notes);
+  }
+}
+
+// The layout report shared by check_drawing and export_drawing: resolve
+// every dim, compute per-view staleness, run the validator. Reads only
+// derived state (plus the document) — never mutates or snapshots.
+json DrawingIssuesJson(ui::AppState& state) {
+  std::vector<drawing::ResolvedDim> dims;
+  for (const DrawingDim& dim : state.drawing->GetDims())
+    dims.push_back(ui::ResolveDrawingDim(state, dim));
+  std::map<uint64_t, bool> stale;
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    const auto it = state.drawingRenders.find(view.id);
+    stale[view.id] = it != state.drawingRenders.end() &&
+                     ui::DrawingSourceVersion(state, view.sourceDocId) !=
+                         it->second.solvedSourceVersion;
+  }
+  json arr = json::array();
+  for (const drawing::DrawingIssue& i : drawing::ValidateDrawing(
+           *state.drawing, state.drawingRenders, dims, stale)) {
+    json ij = {{"kind", i.kind}, {"detail", i.detail}};
+    if (i.viewId)
+      ij["view"] = i.viewId;
+    if (i.otherViewId)
+      ij["other_view"] = i.otherViewId;
+    if (i.dimId)
+      ij["dim"] = i.dimId;
+    arr.push_back(std::move(ij));
+  }
+  return arr;
+}
+
+} // namespace
+
 std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   if (m == "create_drawing") {
@@ -48,31 +117,42 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     // title-block fields so a headless caller can set them in one call.
     const std::string name =
         p.value("name", "Drawing " + std::to_string(state.parts.size() + 1));
+    // Validate BEFORE creating the tab — a bad size string must not leave a
+    // half-configured drawing behind.
+    if (p.contains("sheet") && p.at("sheet").contains("size"))
+      ParseSheetSizeOrThrow(p.at("sheet").at("size").get<std::string>());
     const size_t idx = ui::AddDrawing(state, name);
     if (p.contains("sheet") && state.drawing) {
-      const json& sj = p.at("sheet");
-      Sheet& sheet = state.drawing->GetSheet();
-      SheetSize size;
-      if (sj.contains("size") &&
-          SheetSizeFromString(sj.at("size").get<std::string>(), size))
-        sheet.size = size;
-      sheet.landscape = sj.value("landscape", sheet.landscape);
-      if (sj.contains("title_block")) {
-        const json& tb = sj.at("title_block");
-        sheet.titleBlock.project =
-            tb.value("project", sheet.titleBlock.project);
-        sheet.titleBlock.document =
-            tb.value("document", sheet.titleBlock.document);
-        sheet.titleBlock.author = tb.value("author", sheet.titleBlock.author);
-        sheet.titleBlock.date = tb.value("date", sheet.titleBlock.date);
-        sheet.titleBlock.notes = tb.value("notes", sheet.titleBlock.notes);
-      }
+      ApplySheetJson(state.drawing->GetSheet(), p.at("sheet"));
       state.drawing->BumpVersion();
     }
     return json{{"index", idx},
                 {"name", name},
                 {"id", state.parts[idx].id},
                 {"size", SheetSizeToString(state.drawing->GetSheet().size)}};
+  }
+  if (m == "set_drawing_sheet") {
+    // Edit the active drawing's sheet after creation (was GUI-only). params:
+    // {size?, landscape?, title_block?{project,document,author,date,notes}}.
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    if (p.contains("size"))
+      ParseSheetSizeOrThrow(p.at("size").get<std::string>()); // validate first
+    ui::SnapshotDrawing(state);
+    json sj = json::object();
+    if (p.contains("size"))
+      sj["size"] = p.at("size");
+    if (p.contains("landscape"))
+      sj["landscape"] = p.at("landscape");
+    if (p.contains("title_block"))
+      sj["title_block"] = p.at("title_block");
+    ApplySheetJson(state.drawing->GetSheet(), sj);
+    state.drawing->BumpVersion();
+    state.sheetView.scale = 0.0; // refit the 2D camera to the new paper
+    const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
+    return json{{"size", SheetSizeToString(state.drawing->GetSheet().size)},
+                {"landscape", state.drawing->GetSheet().landscape},
+                {"extent", {chrome.extent.x, chrome.extent.y}}};
   }
   if (m == "list_drawings") {
     ui::EnsureParts(state);
@@ -146,6 +226,78 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     ui::UpdateDrawingRenders(state); // drop the removed view's geometry
     return json::object();
   }
+  if (m == "set_drawing_view") {
+    // Edit a view in place — the missing mutation that used to force
+    // remove+re-add (losing the view's dims). params: {id, position?: [x,y],
+    // scale?, name?, show_hidden?, base_view?}. Everything is validated
+    // BEFORE the undo snapshot so a failed call leaves no undo entry.
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    DrawingView* view = state.drawing->FindView(p.at("id").get<uint64_t>());
+    if (!view)
+      throw std::runtime_error("no such view");
+    if (p.contains("scale") && p.at("scale").get<double>() <= 0.0)
+      throw std::runtime_error("scale must be positive");
+    if (p.contains("base_view")) {
+      const uint64_t baseId = p.at("base_view").get<uint64_t>();
+      if (baseId != 0) {
+        const DrawingView* base = state.drawing->FindView(baseId);
+        if (!base || baseId == view->id)
+          throw std::runtime_error("base_view must name another view");
+        if (base->baseViewId == view->id)
+          throw std::runtime_error(
+              "base_view cycle: that view already folds from this one");
+      }
+    }
+    ui::SnapshotDrawing(state);
+    if (p.contains("position")) {
+      const json& pos = p.at("position");
+      view->position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
+    }
+    if (p.contains("scale"))
+      view->scale = p.at("scale").get<double>();
+    if (p.contains("name"))
+      view->name = p.at("name").get<std::string>();
+    if (p.contains("show_hidden"))
+      view->showHidden = p.at("show_hidden").get<bool>();
+    if (p.contains("base_view"))
+      view->baseViewId = p.at("base_view").get<uint64_t>();
+    state.drawing->BumpVersion();
+    ui::UpdateDrawingRenders(state); // bboxes/dims are baked at projection
+
+    const ui::FoldedPosition folded = ui::DrawingFoldedPosition(state, *view);
+    json out = {{"id", view->id},
+                {"position", {view->position.x, view->position.y}},
+                {"effective_position", {folded.pos.x, folded.pos.y}}};
+    json axes = json::array();
+    if (folded.xLocked)
+      axes.push_back("x");
+    if (folded.yLocked)
+      axes.push_back("y");
+    if (!axes.empty()) {
+      out["folded_axes"] = axes;
+      if (p.contains("position") && (folded.pos.x != view->position.x ||
+                                     folded.pos.y != view->position.y))
+        out["note"] = "a folded child's shared axis follows its base view; "
+                      "the overridden coordinate was ignored";
+    }
+    return out;
+  }
+  if (m == "check_drawing") {
+    // Report-only sheet-layout validation. update=true (default) re-projects
+    // first so the verdict reflects current geometry (matching what
+    // export_drawing would produce); update=false judges the cached renders
+    // and reports staleness instead. Derived-cache write only — no snapshot.
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    if (p.value("update", true))
+      ui::UpdateDrawingRenders(state);
+    const json issues = DrawingIssuesJson(state);
+    return json{{"ok", issues.empty()},
+                {"issues", issues},
+                {"views", state.drawing->ViewCount()},
+                {"dims", state.drawing->DimCount()}};
+  }
   if (m == "update_drawing") {
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
@@ -213,7 +365,11 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     std::string err;
     if (!ui::ExportActiveDrawing(state, path, &err))
       throw std::runtime_error(err);
-    return json{{"path", path}, {"views", state.drawing->ViewCount()}};
+    // Echo the layout report (renders are fresh — ExportActiveDrawing just
+    // updated them) so a script can't miss a broken sheet. Never blocks.
+    return json{{"path", path},
+                {"views", state.drawing->ViewCount()},
+                {"issues", DrawingIssuesJson(state)}};
   }
   if (m == "list_drawing_geometry") {
     // Discovery for dimensioning: the distinct source edges/silhouettes of a
