@@ -400,3 +400,32 @@ TEST_CASE("HLR timing: 49-instance assembly grid", "[.][hlr-perf50]") {
 }
 
 #endif // HAVE_OPENCASCADE
+
+TEST_CASE("HLR marks full-sweep conic intervals closed",
+          "[drawing][hlr][closed]") {
+  // Top view of the block-with-hole: the bore rim projects as full circles.
+  const CADShape shape = BlockWithHole();
+  std::string err;
+  const auto res = ProjectView(One(shape), kTopDir, kTopUp, {}, &err);
+  INFO(err);
+  REQUIRE(res.has_value());
+  bool sawClosedCircle = false;
+  for (const ProjectedCurve& c : res->curves)
+    if (c.conicRadius > 0.0 && c.closed)
+      sawClosedCircle = true;
+  CHECK(sawClosedCircle);
+
+  // A tall slab burying half the bore splits the rim into partial visible /
+  // hidden intervals - none of them is a full sweep on the visible side.
+  CADShape slab = CADKernel::Instance().CreateBox(50.0, 40.0, 60.0);
+  std::vector<InputBody> two = One(shape);
+  two.push_back(InputBody{slab.GetShape(), glm::dmat4(1.0), 2});
+  const auto occluded = ProjectView(two, kTopDir, kTopUp, {}, &err);
+  REQUIRE(occluded.has_value());
+  // The visible rim arcs of the half-buried bore are partial sweeps.
+  int partialVisibleArcs = 0;
+  for (const ProjectedCurve& c : occluded->curves)
+    if (c.conicRadius > 0.0 && c.visible && !c.closed)
+      ++partialVisibleArcs;
+  CHECK(partialVisibleArcs > 0);
+}

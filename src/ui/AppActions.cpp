@@ -2149,6 +2149,7 @@ drawing::SheetView ProjectDrawingView(AppState& state,
     sc.kind = pc.kind;
     sc.visible = pc.visible;
     sc.curveType = pc.curveType;
+    sc.closed = pc.closed;
     if (pc.conicRadius > 0.0) { // place the conic on the sheet too
       sc.conicCenter = effectivePos + s * pc.conicCenter;
       sc.conicRadius = s * pc.conicRadius;
@@ -2265,6 +2266,15 @@ uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId) {
     }
   }
   return 0;
+}
+
+Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].id == sourceDocId &&
+        state.parts[i].kind == DocKind::Part)
+      return SlotDoc(state, i);
+  }
+  return nullptr;
 }
 
 void UpdateDrawingRenders(AppState& state) {

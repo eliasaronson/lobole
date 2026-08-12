@@ -63,6 +63,11 @@ struct ProjectedCurve {
   // radius (major radius for ellipses). Zero/negative when not symbolic.
   glm::dvec2 conicCenter{0.0};
   double conicRadius = -1.0;
+  // For conics: this interval sweeps the full circle/ellipse. A corner fillet
+  // arc is NOT closed; a through-hole rim usually is — the hint dimensioning
+  // needs to tell a bore from a rounded corner. Per-interval: a circle split
+  // into visible+hidden halves yields two non-closed segments.
+  bool closed = false;
   SourceRef source;
 };
 

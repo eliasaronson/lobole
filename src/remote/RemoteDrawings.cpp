@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -347,12 +348,19 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
         vj["has_geometry"] = it->second.hasGeometry;
         vj["stale"] = ui::DrawingSourceVersion(state, view.sourceDocId) !=
                       it->second.solvedSourceVersion;
+        // Sheet-mm bounds of the projected geometry — the rect check_drawing
+        // judges and set_drawing_view layouts against.
+        vj["bbox"] = it->second.hasGeometry
+                         ? json{{it->second.bboxMin.x, it->second.bboxMin.y},
+                                {it->second.bboxMax.x, it->second.bboxMax.y}}
+                         : json(nullptr);
         if (!it->second.error.empty())
           vj["error"] = it->second.error;
       } else {
         vj["curves"] = 0;
         vj["has_geometry"] = false;
         vj["stale"] = true; // never projected
+        vj["bbox"] = nullptr;
       }
       arr.push_back(vj);
     }
@@ -382,9 +390,14 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     if (it == state.drawingRenders.end())
       throw std::runtime_error("view not projected; call update_drawing first");
     // Deduplicate curves by their source ref (an edge splits into visible +
-    // hidden segments); keep the first geometry seen.
+    // hidden segments): prefer a VISIBLE segment as the representative, and
+    // OR `closed` across segments (a bore rim's full sweep may live on one
+    // interval while another is a partial arc).
+    const Document* srcDoc = nullptr;
+    if (const DrawingView* view = state.drawing->FindView(viewId))
+      srcDoc = ui::DrawingSourceDocument(state, view->sourceDocId);
     json edges = json::array();
-    std::set<std::string> seen;
+    std::map<std::string, size_t> seen; // key -> index into `edges`
     for (const drawing::SheetCurve& c : it->second.curves) {
       const bool isEdge = c.edge.IsSet();
       const ElementRef& ref = isEdge ? c.edge : c.silFace;
@@ -393,21 +406,48 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       const std::string key = std::to_string(c.sourceId) + "|" +
                               (isEdge ? "e|" : "s|") +
                               std::to_string(ref.featureId) + "|" + ref.name;
-      if (!seen.insert(key).second)
+      const auto fillGeometry = [&](json& e) {
+        e["visible"] = c.visible;
+        if (c.conicRadius > 0.0) {
+          e["type"] = "circle";
+          e["center"] = {c.conicCenter.x, c.conicCenter.y};
+          e["radius"] = c.conicRadius;
+          e["closed"] = c.closed; // full circle (bore) vs arc (fillet)
+        } else if (c.points.size() >= 2) {
+          e["type"] = c.curveType == 0 ? "line" : "curve";
+          e["p1"] = {c.points.front().x, c.points.front().y};
+          e["p2"] = {c.points.back().x, c.points.back().y};
+        }
+      };
+      const auto found = seen.find(key);
+      if (found != seen.end()) {
+        json& e = edges[found->second];
+        // A later full-sweep segment upgrades `closed`; a visible segment
+        // replaces a hidden representative's geometry.
+        if (c.conicRadius > 0.0 && c.closed && e.contains("closed"))
+          e["closed"] = true;
+        if (!e.value("visible", true) && c.visible) {
+          const bool wasClosed = e.value("closed", false);
+          fillGeometry(e);
+          if (e.contains("closed"))
+            e["closed"] = e["closed"].get<bool>() || wasClosed;
+        }
         continue;
+      }
       json e = {
           {"kind", isEdge ? "edge" : "silhouette"},
           {"source_id", c.sourceId},
           {"ref", {{"feature_id", ref.featureId}, {"element", ref.name}}}};
-      if (c.conicRadius > 0.0) {
-        e["type"] = "circle";
-        e["center"] = {c.conicCenter.x, c.conicCenter.y};
-        e["radius"] = c.conicRadius;
-      } else if (c.points.size() >= 2) {
-        e["type"] = c.curveType == 0 ? "line" : "curve";
-        e["p1"] = {c.points.front().x, c.points.front().y};
-        e["p2"] = {c.points.back().x, c.points.back().y};
+      // Which feature made this element (part sources only): lets a caller
+      // tell a screw bore from a corner-fillet arc without radius guessing.
+      if (srcDoc) {
+        if (const Feature* f =
+                const_cast<Document*>(srcDoc)->FindFeatureById(ref.featureId))
+          e["source_feature"] = {{"type", f->TypeName()},
+                                 {"name", f->GetName()}};
       }
+      fillGeometry(e);
+      seen.emplace(key, edges.size());
       edges.push_back(std::move(e));
     }
     return json{{"geometry", edges}};

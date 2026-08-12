@@ -210,6 +210,11 @@ void UpdateDrawingRenders(AppState& state);
 // stale when this differs from the version stamped at its last projection.
 uint64_t DrawingSourceVersion(AppState& state, uint64_t sourceDocId);
 
+// The part Document behind a drawing view's sourceDocId; null for assembly
+// sources (occurrence resolution is a follow-up) or a missing slot. Lets
+// list_drawing_geometry name the feature a projected curve came from.
+Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId);
+
 // Where a view actually lands on the sheet: a folded child's shared axis is
 // locked to its base (design §2), so the stored position's x and/or y may be
 // overridden at projection time. The one fold computation — projection and

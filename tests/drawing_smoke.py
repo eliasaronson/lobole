@@ -235,6 +235,22 @@ def main():
         d.call("set_drawing_view", id=iso_id, position=[300, 190])
         expect(d.call("check_drawing")["ok"], "restored layout is clean")
 
+        # Discovery hints: bbox on views; visible/closed/source_feature on
+        # geometry rows (the Ø-dim-measured-a-corner-fillet fix).
+        lv = {v["id"]: v for v in d.call("list_drawing_views")["views"]}
+        expect(lv[front_id]["bbox"] is not None and
+               len(lv[front_id]["bbox"]) == 2,
+               f"projected view exposes its bbox: {lv[front_id]}")
+        geo2 = d.call("list_drawing_geometry", view=front_id)["geometry"]
+        expect(all("visible" in g for g in geo2),
+               f"geometry rows carry visibility: {geo2[0]}")
+        expect(any(g.get("source_feature", {}).get("type") == "Box"
+                   for g in geo2),
+               f"geometry rows name their source feature: {geo2[0]}")
+        circles = [g for g in geo2 if g.get("type") == "circle"]
+        expect(all("closed" in g for g in circles),
+               f"circles carry the closed hint: {circles}")
+
         # Auto-placement: a dim with NO offset lands clear of the view, not
         # at the old useless {0,0}.
         auto = d.call("add_drawing_dim", view=front_id, kind="distance_x",

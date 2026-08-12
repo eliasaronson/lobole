@@ -36,6 +36,7 @@ struct SheetCurve {
   // radius <= 0 means not a symbolic conic.
   glm::dvec2 conicCenter{0.0};
   double conicRadius = -1.0;
+  bool closed = false; // conic interval sweeps the full circle (bore vs arc)
 };
 
 // All geometry for one view, ready to render or export.

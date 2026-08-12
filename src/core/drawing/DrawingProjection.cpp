@@ -327,10 +327,12 @@ ProjectView(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
           const gp_Circ2d circle = gc.Circle();
           curve.conicCenter = {circle.Location().X(), circle.Location().Y()};
           curve.conicRadius = circle.Radius();
+          curve.closed = (u2 - u1) >= 2.0 * M_PI - 1e-6;
         } else if (type == GeomAbs_Ellipse) {
           const gp_Elips2d ellipse = gc.Ellipse();
           curve.conicCenter = {ellipse.Location().X(), ellipse.Location().Y()};
           curve.conicRadius = ellipse.MajorRadius();
+          curve.closed = (u2 - u1) >= 2.0 * M_PI - 1e-6;
         }
         if (!source.IsResolved())
           ++result.stats.unresolvedSources;
