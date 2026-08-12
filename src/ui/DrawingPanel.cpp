@@ -16,14 +16,8 @@ namespace ui {
 
 namespace {
 
-// Sheet extent in millimetres for the current orientation (portrait short/long
-// from SheetExtentMM, swapped for landscape).
-glm::dvec2 SheetExtent(const Sheet& sheet) {
-  glm::dvec2 ext = SheetExtentMM(sheet.size);
-  if (sheet.landscape)
-    ext = {ext.y, ext.x};
-  return ext;
-}
+// Sheet extent in millimetres for the current orientation (shared chrome).
+glm::dvec2 SheetExtent(const Sheet& sheet) { return ChromeOf(sheet).extent; }
 
 // The screen pixel at the centre of the viewport region.
 ImVec2 ViewportCenter(const AppState& state) {
@@ -215,10 +209,19 @@ void DrawDims(ImDrawList* dl, AppState& state) {
   for (DrawingDim& dim : state.drawing->GetDims()) {
     const drawing::ResolvedDim d = ResolveDrawingDim(state, dim);
     if (!d.resolved) {
-      // Dangling: a red marker at the label offset from the (stored) offset.
-      if (fontPx >= 4.0f)
-        dl->AddText(font, fontPx, SheetToScreen(state, dim.labelOffset), err,
+      // Dangling: anchor the marker at the view's bbox corner (labelOffset is
+      // an OFFSET — drawing it as an absolute point parked the marker at the
+      // sheet origin). Fall back to the view's position, then the offset.
+      if (fontPx >= 4.0f) {
+        glm::dvec2 anchor = dim.labelOffset;
+        const auto rit = state.drawingRenders.find(dim.viewId);
+        if (rit != state.drawingRenders.end() && rit->second.hasGeometry)
+          anchor = {rit->second.bboxMin.x, rit->second.bboxMax.y + 4.0};
+        else if (const DrawingView* dv = state.drawing->FindView(dim.viewId))
+          anchor = dv->position;
+        dl->AddText(font, fontPx, SheetToScreen(state, anchor), err,
                     "dangling dim");
+      }
       continue;
     }
     if (d.radial) {
@@ -401,17 +404,16 @@ void DrawSheet(AppState& state) {
                     IM_COL32(250, 250, 250, 255));
 
   const ImU32 ink = IM_COL32(30, 30, 30, 255);
-  // Drawing border: a margin inset from the paper edge (ISO ~10 mm).
-  const double margin = 10.0;
-  const ImVec2 mbl = SheetToScreen(state, {margin, margin});
-  const ImVec2 mtr = SheetToScreen(state, {ext.x - margin, ext.y - margin});
+  // Drawing border + title block from the shared chrome (the validator and
+  // both exporters measure against the same rects).
+  const SheetChrome chrome = ChromeOf(sheet);
+  const ImVec2 mbl = SheetToScreen(state, chrome.borderMin);
+  const ImVec2 mtr = SheetToScreen(state, chrome.borderMax);
   dl->AddRect(mbl, mtr, ink, 0.0f, 0, 1.5f);
 
-  // Title block: a fixed-size labelled table pinned to the bottom-right corner
-  // of the border. Sheet-anchored, so it scales with zoom.
-  const double tbW = std::min(160.0, ext.x - 2 * margin);
-  const double tbH = 32.0;
-  const double x0 = ext.x - margin - tbW, y0 = margin;
+  const double tbW = chrome.titleBlockMax.x - chrome.titleBlockMin.x;
+  const double tbH = chrome.titleBlockMax.y - chrome.titleBlockMin.y;
+  const double x0 = chrome.titleBlockMin.x, y0 = chrome.titleBlockMin.y;
   const std::array<std::pair<const char*, std::string>, 4> fields = {{
       {"PROJECT", sheet.titleBlock.project},
       {"DOCUMENT", sheet.titleBlock.document},
@@ -522,9 +524,7 @@ void DrawViewsSection(AppState& state) {
                  IM_ARRAYSIZE(kOrientLabels));
     ImGui::InputFloat("Scale", &addScale, 0.0f, 0.0f, "%.3f");
     if (ImGui::Button("Add view")) {
-      glm::dvec2 ext = SheetExtentMM(state.drawing->GetSheet().size);
-      if (state.drawing->GetSheet().landscape)
-        ext = {ext.y, ext.x};
+      const glm::dvec2 ext = ChromeOf(state.drawing->GetSheet()).extent;
       DrawingView v;
       v.name = std::string(kOrientLabels[orientIdx]);
       v.sourceDocId = partSlots[srcIdx]->id;

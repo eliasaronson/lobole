@@ -679,9 +679,7 @@ void DrawDrawingToolbar(AppState& state) {
       if (ImGui::BeginMenu(s.name.c_str())) {
         for (const Ori& ori : orients) {
           if (ImGui::MenuItem(ori.label)) {
-            glm::dvec2 ext = SheetExtentMM(dwg.GetSheet().size);
-            if (dwg.GetSheet().landscape)
-              ext = {ext.y, ext.x};
+            const glm::dvec2 ext = ChromeOf(dwg.GetSheet()).extent;
             DrawingView v;
             v.name = ori.label;
             v.sourceDocId = s.id;

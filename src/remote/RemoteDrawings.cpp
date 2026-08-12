@@ -126,10 +126,7 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
       const json& pos = p.at("position");
       v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
     } else { // default to the sheet centre
-      glm::dvec2 ext = SheetExtentMM(state.drawing->GetSheet().size);
-      if (state.drawing->GetSheet().landscape)
-        ext = {ext.y, ext.x};
-      v.position = ext * 0.5;
+      v.position = ChromeOf(state.drawing->GetSheet()).extent * 0.5;
     }
     ui::SnapshotDrawing(state);
     const uint64_t id = state.drawing->AddView(v);

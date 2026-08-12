@@ -144,6 +144,23 @@ private:
 // Portrait short/long sheet extents in millimetres.
 glm::dvec2 SheetExtentMM(SheetSize size);
 
+// The sheet's fixed furniture, computed once from the Sheet: the ORIENTED
+// paper extent (landscape swap applied), the ISO border margin, and the
+// title-block rect pinned to the border's bottom-right corner. The single
+// source the viewport, the SVG/PDF exporters, and the validator share —
+// change a constant here and every consumer (and check_drawing) agrees.
+inline constexpr double kSheetMarginMM = 10.0;
+inline constexpr double kTitleBlockWidthMM = 160.0;
+inline constexpr double kTitleBlockHeightMM = 32.0;
+
+struct SheetChrome {
+  glm::dvec2 extent;
+  double margin = kSheetMarginMM;
+  glm::dvec2 borderMin, borderMax;
+  glm::dvec2 titleBlockMin, titleBlockMax;
+};
+SheetChrome ChromeOf(const Sheet& sheet);
+
 // The orthographic view direction (the way the viewer looks) and the world
 // vector that maps to sheet +Y (up), for a named orientation. World Z is up;
 // a Front view maps world +X -> sheet +X and +Z -> sheet +Y. Passed straight

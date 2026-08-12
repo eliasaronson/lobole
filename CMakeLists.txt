@@ -201,6 +201,7 @@ set(core_sources
     src/core/drawing/DrawingDocument.cpp
     src/core/drawing/DrawingExport.cpp
     src/core/drawing/DrawingDimension.cpp
+    src/core/drawing/DrawingValidate.cpp
     src/core/io/Format.cpp
     src/core/Command.cpp
     src/core/Expression.cpp

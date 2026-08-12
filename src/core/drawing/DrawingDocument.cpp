@@ -89,6 +89,18 @@ glm::dvec2 SheetExtentMM(SheetSize size) {
   return {210.0, 297.0};
 }
 
+SheetChrome ChromeOf(const Sheet& sheet) {
+  SheetChrome c;
+  const glm::dvec2 portrait = SheetExtentMM(sheet.size);
+  c.extent = sheet.landscape ? glm::dvec2{portrait.y, portrait.x} : portrait;
+  c.borderMin = {c.margin, c.margin};
+  c.borderMax = c.extent - glm::dvec2{c.margin, c.margin};
+  const double tbW = std::min(kTitleBlockWidthMM, c.extent.x - 2.0 * c.margin);
+  c.titleBlockMin = {c.extent.x - c.margin - tbW, c.margin};
+  c.titleBlockMax = c.titleBlockMin + glm::dvec2{tbW, kTitleBlockHeightMM};
+  return c;
+}
+
 void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up) {
   switch (o) {
   case ViewOrientation::Front:

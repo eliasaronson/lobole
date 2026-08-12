@@ -8,14 +8,8 @@ namespace DrawingExport {
 
 namespace {
 
-// Sheet extent in mm for the current orientation (landscape swaps portrait
-// short/long), matching the viewport's SheetExtent.
-glm::dvec2 Extent(const Sheet& sheet) {
-  glm::dvec2 ext = SheetExtentMM(sheet.size);
-  if (sheet.landscape)
-    ext = {ext.y, ext.x};
-  return ext;
-}
+// Sheet extent in mm for the current orientation, from the shared chrome.
+glm::dvec2 Extent(const Sheet& sheet) { return ChromeOf(sheet).extent; }
 
 // XML-escape text for an SVG attribute / element body.
 std::string Esc(const std::string& s) {
@@ -101,8 +95,8 @@ bool SaveSVG(const DrawingDocument& doc,
              const std::string& path, std::string* error) {
   try {
     const Sheet& sheet = doc.GetSheet();
-    const glm::dvec2 ext = Extent(sheet);
-    const double W = ext.x, H = ext.y;
+    const SheetChrome chrome = ChromeOf(sheet);
+    const double W = chrome.extent.x, H = chrome.extent.y;
     // Sheet mm is Y-up; SVG is Y-down. Flip Y about the sheet height so the
     // written coordinates read as sheet mm and text stays upright.
     const auto fy = [H](double y) { return H - y; };
@@ -115,8 +109,8 @@ bool SaveSVG(const DrawingDocument& doc,
     out << "  <rect x=\"0\" y=\"0\" width=\"" << Num(W) << "\" height=\""
         << Num(H) << "\" fill=\"white\"/>\n";
 
-    // Drawing border (ISO ~10 mm margin).
-    const double m = 10.0;
+    // Drawing border (shared chrome; ISO ~10 mm margin).
+    const double m = chrome.margin;
     out << "  <rect x=\"" << Num(m) << "\" y=\"" << Num(m) << "\" width=\""
         << Num(W - 2 * m) << "\" height=\"" << Num(H - 2 * m)
         << "\" fill=\"none\" stroke=\"#141418\" stroke-width=\"0.5\"/>\n";
@@ -195,10 +189,10 @@ bool SaveSVG(const DrawingDocument& doc,
     }
 
     // Title block: a labelled table in the bottom-right corner of the border.
-    const double tbW = std::min(160.0, W - 2 * m);
-    const double tbH = 32.0;
-    const double x0 = W - m - tbW,
-                 y0 = m; // bottom-left of the block (sheet mm)
+    const double tbW = chrome.titleBlockMax.x - chrome.titleBlockMin.x;
+    const double tbH = chrome.titleBlockMax.y - chrome.titleBlockMin.y;
+    const double x0 = chrome.titleBlockMin.x,
+                 y0 = chrome.titleBlockMin.y; // bottom-left (sheet mm)
     struct Row {
       const char* label;
       std::string value;
@@ -251,9 +245,9 @@ bool SavePDF(const DrawingDocument& doc,
              const std::string& path, std::string* error) {
   try {
     const Sheet& sheet = doc.GetSheet();
-    const glm::dvec2 ext = Extent(sheet);
+    const SheetChrome chrome = ChromeOf(sheet);
     const double k = 72.0 / 25.4; // points per millimetre
-    const double W = ext.x, H = ext.y;
+    const double W = chrome.extent.x, H = chrome.extent.y;
     // PDF user space is Y-up with the origin bottom-left — same as sheet mm —
     // so coordinates are just scaled, never flipped.
     const auto P = [k](double mm) { return Num(mm * k); };
@@ -262,8 +256,8 @@ bool SavePDF(const DrawingDocument& doc,
     cs << "1 1 1 rg 0 0 " << P(W) << ' ' << P(H) << " re f\n"; // white page
     cs << "0 0 0 RG 0 0 0 rg\n";
 
-    // Border.
-    const double m = 10.0;
+    // Border (shared chrome).
+    const double m = chrome.margin;
     cs << P(1.5 * 0.35) << " w " << P(m) << ' ' << P(m) << ' ' << P(W - 2 * m)
        << ' ' << P(H - 2 * m) << " re S\n";
 
@@ -330,9 +324,9 @@ bool SavePDF(const DrawingDocument& doc,
     }
 
     // Title block.
-    const double tbW = std::min(160.0, W - 2 * m);
-    const double tbH = 32.0;
-    const double x0 = W - m - tbW, y0 = m;
+    const double tbW = chrome.titleBlockMax.x - chrome.titleBlockMin.x;
+    const double tbH = chrome.titleBlockMax.y - chrome.titleBlockMin.y;
+    const double x0 = chrome.titleBlockMin.x, y0 = chrome.titleBlockMin.y;
     struct Row {
       const char* label;
       std::string value;

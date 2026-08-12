@@ -6,11 +6,14 @@
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingRender.h"
+#include "core/drawing/DrawingValidate.h"
 #include "core/io/Format.h"
 #include "core/io/Serialization.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 
 namespace fs = std::filesystem;
@@ -423,5 +426,122 @@ TEST_CASE("Drawing loaders reject the wrong document kind",
     const auto asDrawing = DocumentIO::LoadDrawing(partGolden.string());
     CHECK_FALSE(asDrawing.has_value());
     CHECK_FALSE(asDrawing.error().empty());
+  }
+}
+
+TEST_CASE("SheetChrome: one source for extent, border, and title block",
+          "[drawing][chrome]") {
+  Sheet sheet;
+  sheet.size = SheetSize::A3;
+  sheet.landscape = false;
+  const SheetChrome portrait = ChromeOf(sheet);
+  CHECK(portrait.extent == glm::dvec2{297.0, 420.0});
+  CHECK(portrait.borderMin == glm::dvec2{10.0, 10.0});
+  CHECK(portrait.borderMax == glm::dvec2{287.0, 410.0});
+
+  sheet.landscape = true;
+  const SheetChrome landscape = ChromeOf(sheet);
+  CHECK(landscape.extent == glm::dvec2{420.0, 297.0});
+  // Title block pinned to the border's bottom-right corner, 160x32.
+  CHECK(landscape.titleBlockMax.x == Catch::Approx(410.0));
+  CHECK(landscape.titleBlockMin.x == Catch::Approx(410.0 - 160.0));
+  CHECK(landscape.titleBlockMin.y == Catch::Approx(10.0));
+  CHECK(landscape.titleBlockMax.y == Catch::Approx(42.0));
+
+  // A sheet narrower than the block clamps the width to the border span.
+  Sheet letter;
+  letter.size = SheetSize::Letter;
+  letter.landscape = false; // 215.9 wide; border span 195.9 > 160 - no clamp
+  CHECK(ChromeOf(letter).titleBlockMax.x - ChromeOf(letter).titleBlockMin.x ==
+        Catch::Approx(160.0));
+}
+
+TEST_CASE("ValidateDrawing flags layout problems and stays quiet when clean",
+          "[drawing][validate]") {
+  DrawingDocument dwg;
+  dwg.GetSheet().size = SheetSize::A3;
+  dwg.GetSheet().landscape = true; // extent 420 x 297, border 10..410/287
+
+  DrawingView a;
+  a.name = "front";
+  const uint64_t aId = dwg.AddView(a);
+  DrawingView b;
+  b.name = "top";
+  const uint64_t bId = dwg.AddView(b);
+
+  const auto mkView = [](uint64_t id, glm::dvec2 lo, glm::dvec2 hi) {
+    drawing::SheetView sv;
+    sv.viewId = id;
+    sv.bboxMin = lo;
+    sv.bboxMax = hi;
+    sv.hasGeometry = true;
+    sv.solvedSourceVersion = 1;
+    return sv;
+  };
+  const auto kinds = [](const std::vector<drawing::DrawingIssue>& issues) {
+    std::vector<std::string> k;
+    for (const auto& i : issues)
+      k.push_back(i.kind);
+    return k;
+  };
+
+  SECTION("clean layout: no issues") {
+    std::map<uint64_t, drawing::SheetView> renders;
+    renders[aId] = mkView(aId, {50, 150}, {200, 250});
+    renders[bId] = mkView(bId, {50, 60}, {200, 140});
+    const auto issues = drawing::ValidateDrawing(dwg, renders, {}, {});
+    CHECK(issues.empty());
+  }
+
+  SECTION("off-border, overlap, and title-block collisions are reported") {
+    std::map<uint64_t, drawing::SheetView> renders;
+    renders[aId] = mkView(aId, {300, 5}, {430, 100});  // off right + bottom
+    renders[bId] = mkView(bId, {290, 20}, {405, 120}); // overlaps a + block
+    const auto issues = drawing::ValidateDrawing(dwg, renders, {}, {});
+    const auto k = kinds(issues);
+    CHECK(std::count(k.begin(), k.end(), "view_outside_border") >= 1);
+    CHECK(std::count(k.begin(), k.end(), "view_overlap") == 1);
+    CHECK(std::count(k.begin(), k.end(), "view_overlaps_title_block") == 2);
+  }
+
+  SECTION("touching bboxes are not an overlap") {
+    std::map<uint64_t, drawing::SheetView> renders;
+    renders[aId] = mkView(aId, {50, 150}, {200, 250});
+    renders[bId] = mkView(bId, {200, 150}, {280, 250}); // shares x=200 edge
+    const auto issues = drawing::ValidateDrawing(dwg, renders, {}, {});
+    CHECK(issues.empty());
+  }
+
+  SECTION("unprojected and stale views are reported") {
+    std::map<uint64_t, drawing::SheetView> renders;
+    renders[aId] = mkView(aId, {50, 150}, {200, 250});
+    // bId missing from renders entirely.
+    const auto issues =
+        drawing::ValidateDrawing(dwg, renders, {}, {{aId, true}});
+    const auto k = kinds(issues);
+    CHECK(std::count(k.begin(), k.end(), "unprojected_view") == 1);
+    CHECK(std::count(k.begin(), k.end(), "stale_view") == 1);
+  }
+
+  SECTION("dim issues: dangling and off-paper") {
+    std::map<uint64_t, drawing::SheetView> renders;
+    renders[aId] = mkView(aId, {50, 150}, {200, 250});
+    renders[bId] = mkView(bId, {50, 60}, {200, 140});
+    drawing::ResolvedDim dangling;
+    dangling.id = 7;
+    dangling.resolved = false;
+    drawing::ResolvedDim off;
+    off.id = 8;
+    off.resolved = true;
+    off.kind = DrawingDimKind::Distance;
+    off.dim1 = {50, 5}; // below the border
+    off.dim2 = {200, 5};
+    off.labelPos = {125, 5};
+    off.text = "150";
+    const auto issues =
+        drawing::ValidateDrawing(dwg, renders, {dangling, off}, {});
+    const auto k = kinds(issues);
+    CHECK(std::count(k.begin(), k.end(), "dangling_dim") == 1);
+    CHECK(std::count(k.begin(), k.end(), "dim_outside_border") == 1);
   }
 }
