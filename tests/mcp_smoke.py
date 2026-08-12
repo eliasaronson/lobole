@@ -85,6 +85,14 @@ async def run(port):
             for ent in desc["sketch_entity_types"]:
                 expect(f'"{ent}"' in designer_mcp.FEATURE_FORMATS,
                        f"entity type {ent} missing from FEATURE_FORMATS")
+            # Same drift gate for the material-slug prose: the hand-written
+            # MATERIAL_SLUGS literal must list exactly the app's slugs.
+            prose = {s.strip() for s in
+                     designer_mcp.MATERIAL_SLUGS.split(",")}
+            expect(prose == set(desc["material_slugs"]),
+                   "MATERIAL_SLUGS drifted from describe.material_slugs: "
+                   f"prose-only {prose - set(desc['material_slugs'])}, "
+                   f"app-only {set(desc['material_slugs']) - prose}")
 
             # The bracket, parameters-first (the workflow the prompt teaches)
             await call("new_project")

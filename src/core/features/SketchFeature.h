@@ -800,8 +800,9 @@ public:
   // the arc, and adds two Tangent + two Coincident constraints (removing the
   // old corner coincident). Returns the new arc's id, or 0 if the lines don't
   // share a corner, are parallel, or the radius is too large for either
-  // segment.
-  uint32_t FilletCorner(uint32_t lineId1, uint32_t lineId2, double radius);
+  // segment — `whyNot` (when given) receives the specific reason.
+  uint32_t FilletCorner(uint32_t lineId1, uint32_t lineId2, double radius,
+                        std::string* whyNot = nullptr);
 
   // Patterns of `sourceIds`. Linear: `count` instances (incl. the seed) each
   // stepped by `step` in UV. Circular: `count` instances stepped by `stepAngle`

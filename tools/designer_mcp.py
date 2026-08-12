@@ -51,6 +51,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
     {{"type": "ellipse_arc", "center": [u,v], "r_major": num, "r_minor": num,
       "rotation": rad, "start_param": rad, "end_param": rad}}
     {{"type": "spline", "poles": [[u,v], ...], "degree"?: int (default 3)}}
+    {{"type": "rect", "c1": [u,v], "c2": [u,v]}} — a convenience that
+      expands to FOUR "line" entities (+ corner coincident/H/V constraints);
+      the 4 ids land at the END of entity_ids, after every non-rect
+      entity's, in rect order. Corner-fillet the expanded lines like any
+      other adjacent pair.
   Any entity may set "construction": true (reference geometry, not profiled).
   Entity coordinates can be EXPRESSION-DRIVEN via "<field>_expr" keys
   evaluated against document variables on every regeneration: line "ax_expr"/
@@ -62,7 +67,8 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   entity exprs shine for direct analytic placement (lobe centers, cam
   profiles).
   Do NOT send entity ids — the app assigns them; add_feature returns
-  "entity_ids" in list order. Use those ids for constraints and ops.
+  "entity_ids" in list order (except rect expansions — see above). Use
+  those ids for constraints and ops.
 - Extrude: {{"type": "Extrude", "name": str, "sketch_id": <feature id>,
   "distance": num, "distance_expr"?: str, "reversed"?: bool,
   "mode": "new_body"|"add"|"cut",
@@ -312,12 +318,12 @@ def _call(method, **params):
 # ---------------------------------------------------------------------------
 
 @mcp.tool(description="API introspection — call this FIRST to learn the "
-          "surface: every RPC method with a one-line doc and whether it needs "
-          "an active part tab, the feature types (with the format version "
-          "each arrived in), sketch entity types, constraint kinds, extrude "
-          "modes, axis kinds, material slugs, and the document format "
-          "version. The authoritative companion to the format prose in this "
-          "server's tool descriptions.")
+          "surface. Top-level keys: methods (name + one-line doc + "
+          "requires_part_doc), feature_types (type + since_version), "
+          "sketch_entity_types, constraint_kinds, extrude_modes, "
+          "extrude_end_modes, axis_kinds, material_slugs, "
+          "document_format_version. The authoritative companion to the "
+          "format prose in this server's tool descriptions.")
 def describe() -> dict:
     return _call("describe")
 
@@ -466,7 +472,8 @@ def list_elements(body: int = -1, part: str | int | None = None) -> dict:
 @mcp.tool(description="Append a feature to the history and regenerate. "
           "Returns {index, id, entity_ids?, regen} — reference the feature by "
           "this id (e.g. Extrude.sketch_id), and sketch entities by "
-          "entity_ids (in the order you sent them). One undo step. ALWAYS "
+          "entity_ids (in the order you sent them; each rect expands to 4 "
+          "line ids appended at the end). One undo step. ALWAYS "
           "check regen: {ok, failed:[{index,name,error}], warnings:[{index,"
           "name,warning}]} — ok false means the edit broke the model (fix the "
           "first non-collateral failure); a warning means it built but likely "

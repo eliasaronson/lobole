@@ -714,18 +714,26 @@ SketchFeature::MirrorEntities(const std::vector<uint32_t>& sourceIds,
 }
 
 uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
-                                     double radius) {
+                                     double radius, std::string* whyNot) {
   using K = sketch::ConstraintKind;
+  const auto fail = [&](const std::string& why) -> uint32_t {
+    if (whyNot)
+      *whyNot = why;
+    return 0;
+  };
   if (radius <= 0.0)
-    return 0;
+    return fail("fillet radius must be positive");
   const size_t i1 = IndexOfEntity(lineId1), i2 = IndexOfEntity(lineId2);
-  if (i1 == std::numeric_limits<size_t>::max() ||
-      i2 == std::numeric_limits<size_t>::max())
-    return 0;
+  if (i1 == std::numeric_limits<size_t>::max())
+    return fail("no sketch entity with id " + std::to_string(lineId1));
+  if (i2 == std::numeric_limits<size_t>::max())
+    return fail("no sketch entity with id " + std::to_string(lineId2));
   auto* l1 = std::get_if<sketch::Line>(&entities[i1]);
   auto* l2 = std::get_if<sketch::Line>(&entities[i2]);
   if (!l1 || !l2)
-    return 0;
+    return fail("entity " + std::to_string(!l1 ? lineId1 : lineId2) +
+                " is not a line (a fillet rounds the corner of two lines "
+                "sharing an endpoint; rects arrive as four lines)");
 
   // The shared corner: the endpoint pair (one per line) that coincides. c1/c2
   // are the which-index (0=a, 1=b) of the corner endpoint on each line.
@@ -740,21 +748,23 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
         break;
       }
   if (c1 < 0)
-    return 0; // no shared corner
+    return fail("the lines share no endpoint (within 1e-4) - no corner to "
+                "round");
 
   const glm::vec2 C = e1[c1];
   glm::vec2 d1 = e1[1 - c1] - C, d2 = e2[1 - c2] - C;
   const float len1 = glm::length(d1), len2 = glm::length(d2);
   if (len1 < tol || len2 < tol)
-    return 0;
+    return fail("a line is zero-length");
   d1 /= len1;
   d2 /= len2;
   const double theta = std::acos(glm::clamp(glm::dot(d1, d2), -1.0f, 1.0f));
   if (theta < 1e-3 || theta > M_PI - 1e-3)
-    return 0; // parallel / collinear
+    return fail("the lines are parallel/collinear - no corner to round");
   const double dTan = radius / std::tan(theta / 2.0);
   if (dTan > len1 - tol || dTan > len2 - tol)
-    return 0; // radius too large for a segment
+    return fail("radius " + std::to_string(radius) +
+                " is too large - the fillet would consume a whole segment");
   const glm::vec2 bis = glm::normalize(d1 + d2);
   const glm::vec2 center =
       C + bis * static_cast<float>(radius / std::sin(theta / 2.0));

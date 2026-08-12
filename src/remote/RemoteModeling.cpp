@@ -105,11 +105,11 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"delete_entity", "Delete a sketch entity by {sketch_id, entity_id}, "
                       "dropping constraints that reference it."},
     {"fillet", "Sketch fillet: round the corner between two lines {sketch_id, "
-               "a, b, radius}."},
+               "line1, line2, radius}; errors explain a failed corner."},
     {"offset", "Offset a closed sketch chain by a distance {sketch_id, "
-               "entity_ids, distance, join_arc?}."},
-    {"mirror", "Mirror sketch entities across a line {sketch_id, entity_ids, "
-               "axis_entity}."},
+               "chain: [entity ids], distance, join_arc?}."},
+    {"mirror", "Mirror sketch entities across a line {sketch_id, "
+               "sources: [entity ids], axis: <line entity id>, link?}."},
     {"pattern", "Sketch pattern (linear/circular) of entities; "
                 "expression-capable count/spacing."},
     {"set_variable", "Add or redefine a variable {name, expression, comment?, "
@@ -416,9 +416,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       result["generated"] = sk->OffsetChain(
           chain, p.at("distance").get<double>(), p.value("join_arc", true));
     } else {
-      result["arc_id"] = sk->FilletCorner(p.at("line1").get<uint32_t>(),
-                                          p.at("line2").get<uint32_t>(),
-                                          p.at("radius").get<double>());
+      std::string whyNot;
+      const uint32_t arcId = sk->FilletCorner(
+          p.at("line1").get<uint32_t>(), p.at("line2").get<uint32_t>(),
+          p.at("radius").get<double>(), &whyNot);
+      if (arcId == 0) // loud, not {"arc_id": 0} — a silent no-op to a script
+        throw std::runtime_error("fillet failed: " + whyNot);
+      result["arc_id"] = arcId;
     }
     sketch::Solver solver;
     solver.Load(*sk);

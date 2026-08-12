@@ -474,6 +474,25 @@ def main():
         arc = next(e for e in fents if e["id"] == ff["arc_id"])
         expect(arc["type"] == "arc" and abs(arc["radius"] - 1.0) < 1e-3,
                "fillet arc has the requested radius")
+        # A failed fillet is a loud error naming the reason, never arc_id 0.
+        skc2 = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Sketch F2",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [9, 9], "radius": 1},
+                         {"type": "line", "a": [8, 0], "b": [12, 0]},
+                         {"type": "line", "a": [20, 20], "b": [20, 24]}]})
+        cid, lid1, lid2 = skc2["entity_ids"]
+        for args, why in [
+                ({"line1": cid, "line2": lid1, "radius": 1.0}, "not a line"),
+                ({"line1": lid1, "line2": lid2, "radius": 1.0},
+                 "share no endpoint"),
+                ({"line1": lid1, "line2": lid2, "radius": 0.0}, "positive")]:
+            try:
+                d.call("fillet", sketch_id=skc2["id"], **args)
+                expect(False, f"fillet should error ({why})")
+            except RuntimeError as e:
+                expect(why in str(e), f"fillet error explains: {why} ({e})")
 
         # Linked linear pattern, then edit its count via modify_feature.
         d.call("new_project")
