@@ -208,8 +208,9 @@ def main():
         d.call("delete_part", index=idx)
         d.call("reset_layout")  # harmless no-op headless (flag only)
 
-        # Importing an STL names the real limitation instead of a generic
-        # regeneration failure.
+        # Importing a broken STL (zero triangles) names the file and format
+        # instead of a generic regeneration failure. (Valid STLs import as
+        # sewn shells/solids — covered in the interchange section below.)
         stl_path = os.path.join(tmp, "mesh.stl")
         with open(stl_path, "wb") as fh:
             fh.write(b"\0" * 84)
@@ -217,7 +218,7 @@ def main():
                    feature={"type": "Import", "name": "Mesh",
                             "path": stl_path})
         failed = r["regen"]["failed"]
-        expect(failed and "triangle mesh" in failed[0]["error"],
+        expect(failed and "as STL" in failed[0]["error"],
                f"STL import error is specific: {failed}")
         d.call("delete_feature", index=len(d.call("get_state")["features"]) - 1)
 
@@ -802,6 +803,12 @@ def main():
         d.call("import_step", path=step)
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
                "re-imported STEP has the original volume")
+        # STL import: the watertight mesh comes back as a closed SOLID (the
+        # sewn shell is promoted), so volume works; a box tessellates exactly.
+        d.call("new_project")
+        d.call("import_step", path=stl)
+        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
+               "re-imported STL is a solid with the original volume")
 
         # Assembly import (I2) into an UNSAVED project: it ADDS to the
         # current project (hand-modeled and imported parts mix); the .brep

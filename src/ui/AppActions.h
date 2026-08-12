@@ -471,8 +471,11 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
 // success/error so the Render modal can show progress.
 void PumpRenderJob(AppState& state);
 
-// Imports a STEP file as an undoable ImportFeature and fits the camera.
-void LoadSTEPFile(AppState& state, const std::string& filename);
+// Imports a CAD file (.step/.stp, .brep, .stl) into the ACTIVE part as an
+// undoable ImportFeature and fits the camera. False (with *error set) when
+// nothing imported.
+bool ImportAsFeature(AppState& state, const std::string& filename,
+                     std::string* error = nullptr);
 
 // Reference-image underlays (v49). Add reads/decodes the file and centres it on
 // the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`
@@ -487,10 +490,18 @@ void DeleteReferenceImageAction(AppState& state, uint32_t imageId);
 
 // Imports an assembly STEP as parts + an assembly (interchange I2): one part
 // tab per unique product (geometry extracted as .brep into
-// <project>/imported), occurrences placed from the file's instance tree.
-// Requires a saved project; not undoable (creates documents, like Open).
+// <project>/imported, or the staging area before the first save),
+// occurrences placed from the file's instance tree. Not undoable (creates
+// documents, like Open).
 bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
                           std::string* error);
+
+// THE import entry point (one Import… button): a STEP whose structure places
+// several instances imports as an assembly (above); everything else —
+// single-product STEP, .brep, .stl — imports as a feature into the active
+// part.
+bool ImportCADFile(AppState& state, const std::string& path,
+                   std::string* error);
 
 // Shared feature-creation actions (menu + toolbar call these). Each starts a
 // preview the user accepts/cancels (see PreviewFeature).

@@ -98,14 +98,19 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     return path.size() > n && path.rfind(ext) == path.size() - n;
   };
   if (hasExt(".stl")) {
-    // Be specific instead of a generic regeneration failure: a triangle mesh
-    // has no B-Rep to import (sewing an organic mesh — e.g. a topology-
-    // optimization export — into a solid is not supported).
-    SetError("'.stl' is a triangle mesh, not a B-Rep — import supports STEP "
-             "(.step/.stp) and .brep; slice an STL directly instead");
-    return false;
-  }
-  if (hasExt(".brep")) {
+    // Triangle mesh → B-Rep: one planar face per triangle, sewn; a closed
+    // mesh arrives as a solid (LoadSTL), an open one as a surface shell.
+    // Fine for print round-trips and reference geometry; organic meshes get
+    // heavy — every triangle is a face.
+    CADShape shape;
+    if (!CADKernel::Instance().LoadSTL(path, shape)) {
+      SetError("failed to read '" + path + "' as STL");
+      LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
+      return false;
+    }
+    model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
+    model.instances.push_back({0, glm::mat4(1.0f), ""});
+  } else if (hasExt(".brep")) {
     // Native BREP sidecar (assembly import extracts per-part geometry as
     // .brep, I2): one anonymous product at identity.
     CADShape shape;
@@ -118,8 +123,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     model.instances.push_back({0, glm::mat4(1.0f), ""});
   } else if (!CADKernel::Instance().LoadSTEPStructured(path, model)) {
     SetError("failed to read '" + path +
-             "' as STEP (expected .step/.stp, "
-             "or .brep)");
+             "' as STEP (expected .step/.stp, .brep, or .stl)");
     LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
     return false;
   }

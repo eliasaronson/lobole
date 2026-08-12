@@ -230,9 +230,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       return json{{"assembly_index", state.activePart}, {"occurrences", occs}};
     }
     const size_t before = doc->GetBodies().size();
-    ui::LoadSTEPFile(state, p.at("path").get<std::string>());
-    if (doc->GetBodies().size() <= before)
-      throw std::runtime_error("import produced no bodies");
+    std::string error;
+    if (!ui::ImportAsFeature(state, p.at("path").get<std::string>(), &error))
+      throw std::runtime_error(error);
     return json{{"bodies", doc->GetBodies().size() - before}};
   }
   return std::nullopt;

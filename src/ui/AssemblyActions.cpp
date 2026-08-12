@@ -2,6 +2,7 @@
 
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (U7c mate slots)
 
+#include "cad/CADKernel.h" // ImportCADFile structure probe
 #include "cad/CADMaterials.h"
 #include "cad/CADMeshConverter.h"
 #include "cad/FaceSelector.h"
@@ -1252,6 +1253,23 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
   LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", stepPath,
            plan.parts.size(), plan.occurrences.size());
   return true;
+}
+
+bool ImportCADFile(AppState& state, const std::string& path,
+                   std::string* error) {
+  std::string ext = std::filesystem::path(path).extension().string();
+  std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+  if (ext == ".step" || ext == ".stp") {
+    // Probe the product structure: several placed instances is a real
+    // assembly → parts + occurrences; a lone product reads better as a
+    // feature in the active part. (The probe re-parses the file; STEP reads
+    // are cheap next to the extraction that follows.)
+    CADKernel::ImportedModel model;
+    if (CADKernel::Instance().LoadSTEPStructured(path, model) &&
+        model.instances.size() > 1)
+      return ImportStepAsAssembly(state, path, error);
+  }
+  return ImportAsFeature(state, path, error);
 }
 
 } // namespace ui

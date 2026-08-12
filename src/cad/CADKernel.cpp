@@ -13,8 +13,11 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
+#include <BRepCheck_Shell.hxx>
 #include <BRepGProp.hxx>
+#include <BRepLib.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
@@ -893,11 +896,25 @@ bool CADKernel::LoadSTL(const std::string& filename, CADShape& shape) {
   StlAPI_Reader reader;
   TopoDS_Shape occShape;
 
-  if (reader.Read(occShape, filename.c_str())) {
-    shape = CADShape(occShape);
-    return true;
+  if (!reader.Read(occShape, filename.c_str()) || occShape.IsNull())
+    return false;
+  // The reader sews the triangles into a shell of planar faces. Promote a
+  // closed (watertight) shell to a solid so volume/mass and booleans work;
+  // an open mesh stays a surface shell.
+  if (occShape.ShapeType() == TopAbs_SHELL) {
+    const TopoDS_Shell shell = TopoDS::Shell(occShape);
+    BRepCheck_Shell check(shell);
+    if (check.Closed() == BRepCheck_NoError) {
+      BRepBuilderAPI_MakeSolid make(shell);
+      if (make.IsDone()) {
+        TopoDS_Solid solid = make.Solid();
+        if (BRepLib::OrientClosedSolid(solid)) // material on the inside
+          occShape = solid;
+      }
+    }
   }
-  return false;
+  shape = CADShape(occShape);
+  return true;
 }
 
 bool CADKernel::SaveSTL(const std::string& filename, const CADShape& shape,

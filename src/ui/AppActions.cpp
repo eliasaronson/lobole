@@ -3319,20 +3319,34 @@ void DeleteReferenceImageAction(AppState& state, uint32_t imageId) {
     state.sketchEdit.selectedImageId = 0;
 }
 
-void LoadSTEPFile(AppState& state, const std::string& filename) {
-  if (!state.document || !state.commands)
-    return;
+bool ImportAsFeature(AppState& state, const std::string& filename,
+                     std::string* error) {
+  if (!state.document || !state.commands) {
+    if (error)
+      *error = "no active part document";
+    return false;
+  }
 
+  const size_t before = state.document->GetBodies().size();
   const std::string name = std::filesystem::path(filename).stem().string();
   auto feature = std::make_unique<ImportFeature>(name, filename);
   state.commands->Execute(
       std::make_unique<AddFeatureCommand>(std::move(feature)), *state.document);
 
-  if (state.document->GetBodies().empty()) {
-    LOG_ERROR("Import of '{}' produced no bodies", filename);
-  } else {
-    FitCameraToDocument(state);
+  if (state.document->GetBodies().size() <= before) {
+    // The feature carries the specific reason (bad read, empty file, …).
+    std::string why = "produced no bodies";
+    if (const size_t n = state.document->FeatureCount())
+      if (const Feature* f = state.document->GetFeature(n - 1);
+          f && !f->GetError().empty())
+        why = f->GetError();
+    if (error)
+      *error = "import of '" + filename + "': " + why;
+    LOG_ERROR("Import of '{}': {}", filename, why);
+    return false;
   }
+  FitCameraToDocument(state);
+  return true;
 }
 
 } // namespace ui

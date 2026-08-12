@@ -4,16 +4,17 @@
 
 namespace ui {
 
-// Native (NFD) dialogs when available; STEP import falls back to an ImGui
-// browser window otherwise (project open/save require NFD for now).
-void OpenStepFileDialog(AppState& state);
-// Import a STEP's product structure as parts + an assembly (interchange I2).
-void OpenStepAssemblyFileDialog(AppState& state);
+// Native (NFD) dialogs when available; import falls back to an ImGui browser
+// window otherwise (project open/save require NFD for now).
+//
+// THE import entry (Ctrl+I): .step/.stp/.stl/.brep in one dialog. A STEP
+// placing several instances imports as an assembly, everything else as a
+// feature into the active part (ImportCADFile).
+void ImportFileDialog(AppState& state);
 void OpenReferenceImageDialog(AppState& state); // sketch underlay (v49)
+// Folder picker (projects are .dsgn folders): picking the project — or
+// anything inside it — opens it.
 void OpenProjectDialog(AppState& state);
-// Folder picker for directory-form projects (.dsgn / project.json folders),
-// which the file dialog above can't select.
-void OpenProjectFolderDialog(AppState& state);
 // Save As: always asks for a (new) location.
 void SaveProjectDialog(AppState& state);
 // Plain save (Ctrl+S): re-saves in place when the project has a home; the

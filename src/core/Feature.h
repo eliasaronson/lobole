@@ -194,7 +194,9 @@ public:
   std::string TypeName() const override { return "Import"; }
   bool Execute(RegenContext& ctx) override;
 
-  std::string path; // .step/.stp (structured) or .brep (exact sidecar)
+  // .step/.stp (structured), .brep (exact sidecar), or .stl (triangle mesh,
+  // sewn to a shell/solid).
+  std::string path;
   // Display color for the imported bodies. Assembly import (I2) extracts
   // per-part .brep sidecars, which carry no color — the import plan passes
   // the product's STEP color through here instead. Per-product colors in a

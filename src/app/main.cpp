@@ -1243,7 +1243,7 @@ int main(int argc, char** argv) {
   // Load startup file if specified
   if (!args.fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", args.fileToLoad);
-    ui::LoadSTEPFile(g_App, args.fileToLoad);
+    ui::ImportAsFeature(g_App, args.fileToLoad);
   }
 
   LOG_INFO("=== APPLICATION READY - click selects edges/faces (again: cycle, "

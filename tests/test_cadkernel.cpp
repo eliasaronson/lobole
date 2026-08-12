@@ -186,6 +186,26 @@ TEST_CASE("STEP save/load roundtrip preserves volume", "[kernel][io]") {
   fs::remove(path);
 }
 
+TEST_CASE("STL save/load roundtrip yields a SOLID with the box volume",
+          "[kernel][io]") {
+  namespace fs = std::filesystem;
+  CADKernel& k = CADKernel::Instance();
+
+  CADShape box = k.CreateBox(2.0, 3.0, 4.0);
+  fs::path path = fs::temp_directory_path() / "designer_test_roundtrip.stl";
+  REQUIRE(k.SaveSTL(path.string(), box, 0.1));
+
+  // A watertight mesh must come back as a closed solid (LoadSTL promotes the
+  // sewn shell), so volume/mass work on it — a planar box tessellates
+  // exactly, so the volume is exact too.
+  CADShape in;
+  REQUIRE(k.LoadSTL(path.string(), in));
+  REQUIRE(in.IsValid());
+  CHECK_THAT(in.Volume(), WithinRel(24.0, 1e-6));
+
+  fs::remove(path);
+}
+
 TEST_CASE("Mass properties of a box match the analytic values",
           "[kernel][massprops]") {
   using Catch::Matchers::WithinAbs;

@@ -120,8 +120,8 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
   add("File: Save Project As...", "Ctrl+Shift+S", true,
       [](AppState& s) { SaveProjectDialog(s); });
 #endif
-  add("File: Import STEP...", "Ctrl+I", true,
-      [](AppState& s) { OpenStepFileDialog(s); });
+  add("File: Import... (STEP/STL/BREP)", "Ctrl+I", true,
+      [](AppState& s) { ImportFileDialog(s); });
   add("File: Export...", nullptr, hasBody,
       [](AppState& s) { ExportDialog(s); });
   return cmds;

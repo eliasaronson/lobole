@@ -38,9 +38,6 @@ void DrawFileMenu(AppState& state) {
   if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
     OpenProjectDialog(state);
   }
-  if (ImGui::MenuItem("Open Project Folder...")) {
-    OpenProjectFolderDialog(state);
-  }
   if (ImGui::MenuItem("Save Project", "Ctrl+S")) {
     SaveProjectAction(state);
   }
@@ -80,14 +77,11 @@ void DrawFileMenu(AppState& state) {
     ImGui::EndMenu();
   }
   ImGui::Separator();
-  if (ImGui::MenuItem("Import STEP...", "Ctrl+I")) {
-    OpenStepFileDialog(state);
-  }
-  // Adds the file's products as part tabs + an assembly tab to the CURRENT
-  // project — imported and hand-modeled parts mix freely. (From SolidWorks:
-  // Save As > STEP AP242, then import that.)
-  if (ImGui::MenuItem("Import STEP as Assembly...")) {
-    OpenStepAssemblyFileDialog(state);
+  // One import for STEP/STL/BREP: an assembly-structured STEP becomes part
+  // tabs + an assembly tab in the CURRENT project (imported and hand-modeled
+  // parts mix freely); anything else lands as a feature in the active part.
+  if (ImGui::MenuItem("Import...", "Ctrl+I")) {
+    ImportFileDialog(state);
   }
   // Enabled for a part with bodies, an assembly (visual export walks its
   // occurrences), or a drawing with views (SVG/PDF sheet export).
@@ -341,7 +335,7 @@ void HandleShortcuts(AppState& state) {
   }
 #endif
   if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_I, route)) {
-    OpenStepFileDialog(state);
+    ImportFileDialog(state);
   }
 }
 

@@ -44,7 +44,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
 
   if (!fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", fileToLoad);
-    ui::LoadSTEPFile(state, fileToLoad);
+    ui::ImportAsFeature(state, fileToLoad);
   }
 
   RemoteServer server;

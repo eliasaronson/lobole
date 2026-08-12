@@ -830,7 +830,6 @@ struct AppState {
   // — missing GSettings schemas make GLib call abort() the moment a file
   // chooser opens (the NixOS bare-env classic).
   bool showFileBrowser = false;
-  bool fileBrowserAssemblyMode = false; // pick = import as assembly (I2)
   std::string currentPath = "../CAD_files";
   std::vector<std::string> directoryContents;
 };

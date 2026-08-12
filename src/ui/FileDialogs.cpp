@@ -38,14 +38,18 @@ void OpenProjectFile(AppState& state, const std::string& path) {
   }
 }
 
-// A FILE picker can't select a directory-form project (a folder holding
-// project.json), so users pick the project.json inside it instead — map
-// that back to the project root the loaders expect.
+// Map any pick to the project root the loaders expect: the project.json
+// inside a container project, or any file/folder inside a .dsgn, normalizes
+// up to the owning project folder.
 std::string NormalizeProjectPick(const std::string& path) {
-  std::filesystem::path p(path);
+  namespace fs = std::filesystem;
+  fs::path p(path);
   if (p.filename() == "project.json")
-    return p.parent_path().string();
-  return path;
+    p = p.parent_path();
+  for (fs::path a = p; !a.empty() && a != a.root_path(); a = a.parent_path())
+    if (a.extension() == ".dsgn")
+      return a.string();
+  return p.string();
 }
 
 // Container-aware GUI open: ui::OpenProject handles both project forms
@@ -82,8 +86,8 @@ void UpdateDirectoryContents(AppState& state) {
           std::string ext = entry.path().extension().string();
           std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
-          if (ext == ".step" || ext == ".stp" || ext == ".iges" ||
-              ext == ".igs") {
+          if (ext == ".step" || ext == ".stp" || ext == ".stl" ||
+              ext == ".brep") {
             state.directoryContents.push_back("[CAD] " + filename);
           } else {
             state.directoryContents.push_back(filename);
@@ -99,8 +103,7 @@ void UpdateDirectoryContents(AppState& state) {
   std::sort(state.directoryContents.begin(), state.directoryContents.end());
 }
 
-void OpenBrowserFallback(AppState& state, bool assemblyMode) {
-  state.fileBrowserAssemblyMode = assemblyMode;
+void OpenBrowserFallback(AppState& state) {
   state.showFileBrowser = true;
   if (state.currentPath.empty() ||
       !std::filesystem::is_directory(state.currentPath)) {
@@ -143,9 +146,7 @@ void DrawBrowserWindow(AppState& state) {
   if (!state.showFileBrowser)
     return;
 
-  const char* title = state.fileBrowserAssemblyMode ? "Import STEP as Assembly"
-                                                    : "Open STEP File";
-  ImGui::Begin(title, &state.showFileBrowser,
+  ImGui::Begin("Import CAD File", &state.showFileBrowser,
                ImGuiWindowFlags_AlwaysAutoResize);
 
   ImGui::Text("Current Path: %s", state.currentPath.c_str());
@@ -193,13 +194,9 @@ void DrawBrowserWindow(AppState& state) {
                 (std::filesystem::path(state.currentPath) / item.substr(6))
                     .string();
             LOG_INFO("Loading selected file: {}", fullPath);
-            if (state.fileBrowserAssemblyMode) {
-              std::string error;
-              if (!ImportStepAsAssembly(state, fullPath, &error))
-                LOG_ERROR("Assembly import failed: {}", error);
-            } else {
-              LoadSTEPFile(state, fullPath);
-            }
+            std::string error;
+            if (!ImportCADFile(state, fullPath, &error))
+              LOG_ERROR("Import failed: {}", error);
             state.showFileBrowser = false;
           }
         }
@@ -241,25 +238,29 @@ void DrawFileBrowser(AppState& state) {
 
 #ifdef HAVE_NATIVEFILEDIALOG
 
-void OpenStepFileDialog(AppState& state) {
+void ImportFileDialog(AppState& state) {
   if (!NativeDialogsSafe()) {
-    OpenBrowserFallback(state, /*assemblyMode=*/false);
+    OpenBrowserFallback(state);
     return;
   }
   nfdu8char_t* outPath = nullptr;
-  const nfdu8filteritem_t filters[] = {{"CAD files", "step,stp,iges,igs"}};
+  // No IGES: ImportFeature reads STEP/BREP/STL only (listing .iges here
+  // used to just defer the failure to regeneration).
+  const nfdu8filteritem_t filters[] = {{"CAD files", "step,stp,stl,brep"}};
 
   nfdresult_t result = NFD_OpenDialogU8(&outPath, filters, 1, nullptr);
   if (result == NFD_OKAY) {
     std::string filePath(outPath);
     NFD_FreePathU8(outPath);
     LOG_INFO("Selected file: {}", filePath);
-    LoadSTEPFile(state, filePath);
+    std::string error;
+    if (!ImportCADFile(state, filePath, &error))
+      LOG_ERROR("Import failed: {}", error);
   } else if (result == NFD_CANCEL) {
     LOG_DEBUG("User cancelled file dialog");
   } else {
     LOG_ERROR("Error opening file dialog: {}", NFD_GetError());
-    OpenBrowserFallback(state, /*assemblyMode=*/false);
+    OpenBrowserFallback(state);
   }
 }
 
@@ -284,50 +285,19 @@ void OpenReferenceImageDialog(AppState& state) {
   }
 }
 
-void OpenStepAssemblyFileDialog(AppState& state) {
-  if (!NativeDialogsSafe()) {
-    OpenBrowserFallback(state, /*assemblyMode=*/true);
-    return;
-  }
-  nfdu8char_t* outPath = nullptr;
-  const nfdu8filteritem_t filters[] = {{"STEP", "step,stp"}};
-  if (NFD_OpenDialogU8(&outPath, filters, 1, nullptr) == NFD_OKAY) {
-    std::string filePath(outPath);
-    NFD_FreePathU8(outPath);
-    std::string error;
-    if (!ImportStepAsAssembly(state, filePath, &error))
-      LOG_ERROR("Assembly import failed: {}", error);
-  }
-}
-
 void OpenProjectDialog(AppState& state) {
+  // Projects are folders (.dsgn), so this is a FOLDER picker — select the
+  // project itself and hit Open. A pick inside a project (or of the
+  // project.json) normalizes up to the project root.
   if (!NativeDialogsSafe())
     return;
   nfdu8char_t* outPath = nullptr;
-  const nfdu8filteritem_t filters[] = {{"Designer project", "dsgn,json"}};
-  if (NFD_OpenDialogU8(&outPath, filters, 1, nullptr) == NFD_OKAY) {
+  if (NFD_PickFolderU8(&outPath, nullptr) == NFD_OKAY) {
     const std::string path = NormalizeProjectPick(outPath);
     NFD_FreePathU8(outPath);
     if (Autosaver::HasNewerAutosave(path)) {
       // Defer to the recovery modal (DrawFileBrowser) — the user picks
       // between the saved file and the newer autosave.
-      state.recoveryOffer = path;
-      return;
-    }
-    OpenPickedProject(state, path);
-  }
-}
-
-void OpenProjectFolderDialog(AppState& state) {
-  // Directory-form projects (.dsgn / any folder with a project.json) can't
-  // be selected in the FILE dialog above — this folder picker can.
-  if (!NativeDialogsSafe())
-    return;
-  nfdu8char_t* outPath = nullptr;
-  if (NFD_PickFolderU8(&outPath, nullptr) == NFD_OKAY) {
-    const std::string path(outPath);
-    NFD_FreePathU8(outPath);
-    if (Autosaver::HasNewerAutosave(path)) {
       state.recoveryOffer = path;
       return;
     }
@@ -477,21 +447,11 @@ void ExportBomDialog(AppState& state) {
 
 #else // no nativefiledialog: the ImGui browser is the only picker
 
-void OpenStepFileDialog(AppState& state) {
-  OpenBrowserFallback(state, /*assemblyMode=*/false);
-}
-
-void OpenStepAssemblyFileDialog(AppState& state) {
-  OpenBrowserFallback(state, /*assemblyMode=*/true);
-}
+void ImportFileDialog(AppState& state) { OpenBrowserFallback(state); }
 
 void OpenReferenceImageDialog(AppState& state) {
   state.sketchEdit.actionMsg =
       "Reference-image import needs the native file dialog.";
-}
-
-void OpenProjectFolderDialog(AppState&) {
-  LOG_WARN("Project open requires nativefiledialog");
 }
 
 void OpenProjectDialog(AppState&) {
