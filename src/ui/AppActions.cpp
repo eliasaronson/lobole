@@ -2462,14 +2462,41 @@ void SyncDocumentRenderers(AppState& state) {
 }
 
 bool SyncRayTracingScene(AppState& state, bool groundPlane) {
-  if (!state.rayTracer || !state.rayTracer->IsInitialized() || !state.document)
+  if (!state.rayTracer || !state.rayTracer->IsInitialized())
     return false;
+  if (!state.document && !state.assembly)
+    return false;
+
+  // What to render: a part's bodies at identity, or — on an assembly tab —
+  // every visible occurrence's bodies at its SOLVED placement (the
+  // BuildVisualExportItems walk; never exploded).
+  struct RTItem {
+    const Body* body;
+    glm::mat4 xf;
+  };
+  std::vector<RTItem> rtItems;
+  if (state.assembly) {
+    for (const Occurrence& occ : state.assembly->GetOccurrences()) {
+      if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
+        continue;
+      Document* part = PartDocById(state, occ.partId);
+      if (!part)
+        continue;
+      const glm::mat4 xf = OccurrenceMatrix(occ);
+      for (const auto& body : part->GetBodies())
+        rtItems.push_back({&body, xf});
+    }
+  } else {
+    for (const auto& body : state.document->GetBodies())
+      rtItems.push_back({&body, glm::mat4(1.0f)});
+  }
 
   state.rayTracer->ClearGeometry();
   state.rayTracer->ClearMaterials();
 
   glm::vec3 bbMin(FLT_MAX), bbMax(-FLT_MAX);
-  for (const auto& body : state.document->GetBodies()) {
+  for (const RTItem& it : rtItems) {
+    const Body& body = *it.body;
     CADShape::Mesh cadMesh = body.shape.GenerateMesh(0.1);
     if (cadMesh.vertices.empty())
       continue;
@@ -2482,6 +2509,16 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
 
     std::vector<Vertex3D> vertices =
         CADMeshConverter::ConvertCADMeshToVertices(cadMesh);
+    if (it.xf != glm::mat4(1.0f)) {
+      // Occurrence placement is rigid: positions by the matrix, normals by
+      // its rotation. RT geometry carries no per-instance transform, so the
+      // bake happens CPU-side (a still render, not a per-frame path).
+      const glm::mat3 rot(it.xf);
+      for (Vertex3D& v : vertices) {
+        v.position = glm::vec3(it.xf * glm::vec4(v.position, 1.0f));
+        v.normal = glm::normalize(rot * v.normal);
+      }
+    }
 
     // Per-body local bbox: feeds the scene bbox (ground plane) and the grain
     // axis. RT geometry goes in untransformed, so this is object/part-local.

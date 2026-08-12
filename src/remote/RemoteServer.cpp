@@ -425,8 +425,10 @@ static const std::set<std::string> kNoPartDoc = {
     // undo/redo route to the assembly's snapshot history on an assembly tab.
     "undo", "redo",
     // Camera / rendering act on the viewport, not the part document, so they
-    // work on an assembly tab too.
-    "view", "fit_view", "screenshot", "set_render_options"};
+    // work on an assembly tab too. render_still's RT scene sync does the
+    // occurrence walk itself.
+    "view", "fit_view", "screenshot", "set_render_options", "set_camera",
+    "render_still"};
 
 // The methods RemoteServer dispatches itself (viewport, camera, selection,
 // project tabs, UI events). describe: one row per `m ==` branch — extend

@@ -81,10 +81,19 @@ def main():
         faces = [f["name"] for f in els["faces"]]
         fixed_face, load_face = faces[0], faces[1]  # an opposite pair
 
-        # --- a topology study ----------------------------------------------
-        study = d.call("add_study", name="Generative")["id"]
-        d.call("set_study", study=study, type="topology", mesh_size=7.0,
+        # --- a topology study (kind set at creation, one call) --------------
+        created = d.call("add_study", name="Generative", kind="topology")
+        expect(created["kind"] == "topology",
+               f"add_study kind applied: {created}")
+        study = created["id"]
+        d.call("set_study", study=study, mesh_size=7.0,
                volume_fraction=0.4, filter_radius=14.0, max_iterations=25)
+        try:
+            d.call("add_study", name="bogus", kind="banana")
+            raise AssertionError("unknown study kind must error")
+        except RuntimeError as e:
+            expect("static, modal, or topology" in str(e),
+                   f"kind error lists options: {e}")
         d.call("add_load", study=study, type="fixed",
                face={"feature_id": created_by, "element": fixed_face})
         d.call("add_load", study=study, type="force",
@@ -136,6 +145,10 @@ def main():
             ntri = int.from_bytes(fh.read(4), "little")
         expect(os.path.getsize(stl) == 84 + ntri * 50, "STL size matches count")
         expect(ntri > 0, "STL has triangles")
+        # The reply reports what a slicer will see (export_stl's honesty).
+        expect(exp["triangles"] == ntri, f"triangle count echoed: {exp}")
+        expect("watertight" in exp and "boundary_edges" in exp,
+               f"watertightness reported: {exp}")
 
         # --- shape-guide ghost toggle ---------------------------------------
         g = d.call("set_topo_ghost", study=study, on=True)

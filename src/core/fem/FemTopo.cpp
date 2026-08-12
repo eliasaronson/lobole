@@ -314,7 +314,7 @@ void TaubinSmooth(std::vector<glm::vec3>& verts,
 
 bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
                    double threshold, int smoothIters, const std::string& path,
-                   std::string* error) {
+                   std::string* error, TopoStlStats* stats) {
   std::vector<glm::vec3> pos, nrm;
   std::vector<uint32_t> idx;
   ExtractIsoSurface(mesh, density, threshold, pos, nrm, idx);
@@ -328,6 +328,23 @@ bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
   std::vector<std::array<uint32_t, 3>> tris;
   WeldSurface(pos, verts, tris);
   TaubinSmooth(verts, tris, smoothIters);
+
+  if (stats) {
+    // Watertight = every edge shared by exactly two triangles. Count edge
+    // uses on the welded mesh; an odd/single-use edge is a boundary.
+    std::map<std::pair<uint32_t, uint32_t>, int> edgeUses;
+    for (const auto& t : tris)
+      for (int e = 0; e < 3; ++e) {
+        const uint32_t a = t[e], b = t[(e + 1) % 3];
+        edgeUses[{std::min(a, b), std::max(a, b)}]++;
+      }
+    stats->triangles = tris.size();
+    stats->boundaryEdges = 0;
+    for (const auto& [edge, uses] : edgeUses)
+      if (uses != 2)
+        stats->boundaryEdges++;
+    stats->watertight = stats->boundaryEdges == 0;
+  }
 
   std::ofstream out(path, std::ios::binary);
   if (!out) {

@@ -197,7 +197,29 @@ def main():
         expect(abs(v["target"][1] - 2.0) < 1e-6, "set_camera target")
         v = d.call("set_camera", direction=[0, 0, 1])
         expect(v["position"][2] > v["target"][2], "set_camera direction")
+        # ...and on an ASSEMBLY tab (viewport state, not part state).
+        d.call("add_assembly", name="CamAsm")
+        d.call("set_active_part", name="CamAsm")
+        v = d.call("set_camera", target=[5.0, 0.0, 0.0], distance=100.0)
+        expect(abs(v["distance"] - 100.0) < 1e-3, "set_camera on assembly")
+        idx = [pp["index"] for pp in d.call("list_parts")["parts"]
+               if pp["name"] == "CamAsm"][0]
+        d.call("set_active_part", index=0)
+        d.call("delete_part", index=idx)
         d.call("reset_layout")  # harmless no-op headless (flag only)
+
+        # Importing an STL names the real limitation instead of a generic
+        # regeneration failure.
+        stl_path = os.path.join(tmp, "mesh.stl")
+        with open(stl_path, "wb") as fh:
+            fh.write(b"\0" * 84)
+        r = d.call("add_feature",
+                   feature={"type": "Import", "name": "Mesh",
+                            "path": stl_path})
+        failed = r["regen"]["failed"]
+        expect(failed and "triangle mesh" in failed[0]["error"],
+               f"STL import error is specific: {failed}")
+        d.call("delete_feature", index=len(d.call("get_state")["features"]) - 1)
 
         # A SECOND simultaneous client works (multi-client remote): both see
         # the same document and responses route to the right connection.

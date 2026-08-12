@@ -152,9 +152,17 @@ double AutoIsoThreshold(const FemMesh& mesh, const std::vector<double>& density,
 // Taubin (lambda/mu) smoothing passes (shrink-free surface fairing), and writes
 // a binary STL to `path` — the print-it-directly path for a generative result.
 // Returns false + *error on an empty surface or an I/O failure. Pure geometry.
+// `stats` (optional) reports what a slicer will see: triangle count and
+// boundary-edge count (0 boundary edges = watertight), mirroring export_stl's
+// honesty about non-watertight sources.
+struct TopoStlStats {
+  size_t triangles = 0;
+  size_t boundaryEdges = 0;
+  bool watertight = false;
+};
 bool ExportTopoStl(const FemMesh& mesh, const std::vector<double>& density,
                    double threshold, int smoothIters, const std::string& path,
-                   std::string* error);
+                   std::string* error, TopoStlStats* stats = nullptr);
 
 // ---- Study orchestration (async-ready) ------------------------------------
 

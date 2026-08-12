@@ -58,12 +58,24 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                                         const RpcParams& p) {
   Document* doc = &document; // keep the moved block's `doc->` verbatim
   if (m == "add_study") {
+    // Optional `kind` sets the analysis type at creation (the doc row always
+    // promised it; it used to require a second set_study call). Folding it
+    // into the create keeps this one undo step.
+    fem::AnalysisType type = fem::AnalysisType::Static;
+    const bool hasKind = p.contains("kind");
+    if (hasKind &&
+        !fem::AnalysisTypeFromString(p.at("kind").get<std::string>(), type))
+      throw std::runtime_error("study kind must be static, modal, or topology");
     auto cmd =
         std::make_unique<AddStudyCommand>(p.value("name", std::string{}));
     AddStudyCommand* raw = cmd.get();
     state.commands->Execute(std::move(cmd), *doc);
-    const fem::Study* s = doc->FindStudy(raw->StudyId());
-    return json{{"id", s->id}, {"name", s->name}};
+    fem::Study* s = doc->FindStudy(raw->StudyId());
+    if (hasKind)
+      s->type = type;
+    return json{{"id", s->id},
+                {"name", s->name},
+                {"kind", fem::AnalysisTypeToString(s->type)}};
   }
   if (m == "remove_study") {
     const uint64_t id = p.at("study").get<uint64_t>();
@@ -460,10 +472,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
                                     rt->volumeFractionAchieved);
     const std::string path = p.at("path").get<std::string>();
     std::string err;
+    fem::TopoStlStats stats;
     if (!fem::ExportTopoStl(b.mesh, b.density, thr, p.value("smooth", 3), path,
-                            &err))
+                            &err, &stats))
       throw std::runtime_error(err);
-    return json{{"path", path}, {"threshold", thr}};
+    // The same honesty export_stl gives: a non-watertight mesh still
+    // exports, but flag it before anyone slices the file.
+    return json{{"path", path},
+                {"threshold", thr},
+                {"triangles", stats.triangles},
+                {"boundary_edges", stats.boundaryEdges},
+                {"watertight", stats.watertight}};
   }
   if (m == "enter_simulation") {
     // Enter the FEM simulation workspace (the GUI mode), optionally selecting a

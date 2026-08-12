@@ -1184,11 +1184,12 @@ def orient_to_face() -> dict:
 
 
 @mcp.tool(description="Offline path-traced render (soft shadows, materials, "
-          "environment lighting) returned as an image. Frame with view/"
-          "fit_view first. The app freezes for the duration — samples=64 is "
-          "a fast preview, 512+ presentation quality. ground adds a shadow-"
-          "catcher plane. Requires a ray-tracing GPU (errors otherwise). "
-          "Optional path also keeps the PNG.")
+          "environment lighting) returned as an image. Works on part AND "
+          "assembly tabs (occurrences render at their solved placements). "
+          "Frame with view/fit_view first. The app freezes for the duration "
+          "— samples=64 is a fast preview, 512+ presentation quality. ground "
+          "adds a shadow-catcher plane. Requires a ray-tracing GPU (errors "
+          "otherwise). Optional path also keeps the PNG.")
 def render_still(width: int = 640, height: int = 480, samples: int = 64,
                  seed: int = 1, ground: bool = True, path: str = "") -> Image:
     out = path or os.path.join(tempfile.gettempdir(), "designer_mcp_still.png")
@@ -1211,10 +1212,16 @@ def render_still(width: int = 640, height: int = 480, samples: int = 64,
 # re-run explicitly. The whole loop is headless: no GUI needed.
 
 
-@mcp.tool(description="Create a FEM study on the active part. Returns {id, "
-          "name}. A study fixes/loads faces and solves for stress.")
-def add_study(name: str = "") -> dict:
-    return _call("add_study", **({"name": name} if name else {}))
+@mcp.tool(description="Create a FEM study on the active part. kind = "
+          "'static' (default) | 'modal' | 'topology'. Returns {id, name, "
+          "kind}. A study fixes/loads faces and solves for stress.")
+def add_study(name: str = "", kind: str = "") -> dict:
+    params = {}
+    if name:
+        params["name"] = name
+    if kind:
+        params["kind"] = kind
+    return _call("add_study", **params)
 
 
 @mcp.tool(description="Delete a study (by id) and its cached results.")
@@ -1341,7 +1348,11 @@ def study_results(study: int) -> dict:
 @mcp.tool(description="Export a topology study's optimized shape (the "
           "iso-surface, Taubin-smoothed) to a binary STL for 3D printing. "
           "threshold (0..1, 0 = auto volume-matched) sets how much material to "
-          "keep; smooth is the number of smoothing passes (default 3).")
+          "keep; smooth is the number of smoothing passes (default 3). The "
+          "reply reports {triangles, boundary_edges, watertight} — flag a "
+          "non-watertight mesh before anyone slices it. Note: the organic STL "
+          "cannot be re-imported as a B-Rep; view results via "
+          "set_result_display field='shape'.")
 def export_topo_stl(study: int, path: str, threshold: float = 0.0,
                     smooth: int = 3) -> dict:
     return _call("export_topo_stl", study=study, path=path,
@@ -1350,7 +1361,9 @@ def export_topo_stl(study: int, path: str, threshold: float = 0.0,
 
 @mcp.tool(description="Toggle the topology SHAPE GUIDE: a translucent overlay "
           "of a study's optimized shape in the normal modeling workspace, to "
-          "re-model clean geometry against. on=false hides it.")
+          "re-model clean geometry against. on=false hides it. The opaque "
+          "body can hide the guide from most angles — to LOOK at a result, "
+          "set_result_display field='shape' is the reliable view.")
 def set_topo_ghost(study: int, on: bool = True) -> dict:
     return _call("set_topo_ghost", study=study, on=on)
 
