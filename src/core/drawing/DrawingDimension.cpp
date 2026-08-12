@@ -1,5 +1,7 @@
 #include "core/drawing/DrawingDimension.h"
 
+#include "core/drawing/DrawingCallout.h"
+#include "core/features/HoleFeature.h"
 #include "core/io/Format.h"
 
 #include <algorithm>
@@ -119,11 +121,13 @@ bool RefLine(const SheetView& v, const ProjRef& r, glm::dvec2& p,
 
 } // namespace
 
-ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view) {
+ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
+                       const DimContext& ctx) {
   ResolvedDim rd;
   rd.id = dim.id;
   rd.kind = dim.kind;
   const glm::dvec2 off = dim.labelOffset;
+  const double vs = ctx.viewScale > 0.0 ? ctx.viewScale : 1.0;
 
   switch (dim.kind) {
   case DrawingDimKind::Distance:
@@ -190,6 +194,75 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view) {
     rd.ext1 = pa;
     rd.ext2 = pb;
     rd.labelPos = 0.5 * (pa + pb) + off;
+    rd.resolved = true;
+    break;
+  }
+  case DrawingDimKind::HoleCallout: {
+    // One circle ref, resolved back to the HoleFeature that drilled it via
+    // the feature ids in its MappedName + a radius cross-check. No source
+    // document (assembly view) or no provenance match -> dangling, never a
+    // guessed label.
+    if (dim.refs.empty() || !ctx.sourceDoc)
+      return rd;
+    glm::dvec2 c;
+    double rad = 0.0;
+    if (!RefCircle(view, dim.refs[0], c, rad))
+      return rd;
+    const std::string& name = dim.refs[0].edge.name;
+    const HoleFeature* hole = FindHoleForRef(*ctx.sourceDoc, name, rad / vs);
+    if (!hole)
+      return rd;
+    rd.leader = true;
+    rd.center = c;
+    rd.radius = rad;
+    rd.value = hole->diameter; // model mm
+    rd.text = FormatHoleCallout(*hole);
+    const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
+                                                   : glm::dvec2(0.7071, 0.7071);
+    rd.rim = c + dir * rad;
+    rd.labelPos = rd.rim + off;
+    rd.resolved = true;
+    break;
+  }
+  case DrawingDimKind::PatternCallout: {
+    // 2+ circle refs of equal radius: "N× <base>", plus " PITCH p" when the
+    // centres form a uniform collinear row. Base text upgrades to the full
+    // hole callout when the first circle's provenance resolves.
+    if (dim.refs.size() < 2)
+      return rd;
+    std::vector<glm::dvec2> centers;
+    double rad = -1.0;
+    for (const ProjRef& ref : dim.refs) {
+      glm::dvec2 c;
+      double r = 0.0;
+      if (!RefCircle(view, ref, c, r))
+        return rd;
+      if (rad < 0.0)
+        rad = r;
+      else if (std::abs(r - rad) > 1e-3 * std::max(rad, 1.0))
+        return rd; // mixed radii: not one pattern
+      centers.push_back(c);
+    }
+    std::string base = "\xC3\x98" + core::FormatLength(2.0 * rad / vs);
+    if (ctx.sourceDoc)
+      if (const HoleFeature* hole =
+              FindHoleForRef(*ctx.sourceDoc, dim.refs[0].edge.name, rad / vs))
+        base = FormatHoleCallout(*hole);
+    rd.text = std::to_string(dim.refs.size()) + "\xC3\x97 " + base; // "N× "
+    const auto pitch = UniformCollinearPitch(centers);
+    if (pitch) {
+      rd.value = *pitch / vs;
+      rd.text += " PITCH " + core::FormatLength(rd.value);
+    } else {
+      rd.value = 2.0 * rad / vs;
+    }
+    rd.leader = true;
+    rd.center = centers.front();
+    rd.radius = rad;
+    const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)
+                                                   : glm::dvec2(0.7071, 0.7071);
+    rd.rim = centers.front() + dir * rad;
+    rd.labelPos = rd.rim + off;
     rd.resolved = true;
     break;
   }

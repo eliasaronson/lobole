@@ -1165,7 +1165,12 @@ json DrawingDimToJson(const DrawingDim& d) {
 DrawingDim DrawingDimFromJson(const json& j) {
   DrawingDim d;
   d.id = j.value("id", uint64_t{0});
-  DrawingDimKindFromString(j.value("kind", std::string("distance")), d.kind);
+  // An unknown kind string used to silently default to Distance — surface it
+  // instead (the version gate is the real forward-compat guard, so this only
+  // fires on corrupt/hand-edited files).
+  const std::string kind = j.value("kind", std::string("distance"));
+  if (!DrawingDimKindFromString(kind, d.kind))
+    throw std::runtime_error("unknown drawing dimension kind '" + kind + "'");
   d.viewId = j.value("view", uint64_t{0});
   for (const json& rj : j.value("refs", json::array()))
     d.refs.push_back(ProjRefFromJson(rj));

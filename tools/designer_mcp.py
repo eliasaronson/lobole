@@ -1507,20 +1507,28 @@ def export_drawing(path: str) -> dict:
 
 @mcp.tool(description="List a projected view's dimensionable geometry: each "
           "distinct source edge / silhouette with the `ref` to pass to "
-          "add_drawing_dim, its type (line/circle/curve), and sheet-mm "
-          "endpoints or circle centre+radius. Call update_drawing first.")
+          "add_drawing_dim, its type (line/circle/curve), sheet-mm endpoints "
+          "or circle centre+radius, `visible`, `closed` (a full circle = a "
+          "bore rim; false = an arc such as a corner fillet — do NOT put a "
+          "diameter dim on those), and `source_feature` {type,name} (part "
+          "sources). Call update_drawing first.")
 def list_drawing_geometry(view: int) -> dict:
     return _call("list_drawing_geometry", view=view)
 
 
 @mcp.tool(description="Add a driven dimension to a view of the active drawing. "
           "kind = 'distance'|'distance_x'|'distance_y'|'radius'|'diameter'|"
-          "'angle'. refs = a list of {edge OR sil_face: {feature_id, element} "
-          "(from list_drawing_geometry), occurrence?: source_id, end?: 0 whole "
-          "/ 1|2 endpoint}: two refs for distance/angle, one for radius/"
-          "diameter. offset = [x,y] label offset in sheet mm. The value is "
-          "MEASURED from the projected geometry (read-only). Returns the id and "
-          "the measured value/text.")
+          "'angle'|'hole_callout'|'pattern_callout'. refs = a list of {edge OR "
+          "sil_face: {feature_id, element} (from list_drawing_geometry), "
+          "occurrence?: source_id, end?: 0 whole / 1|2 endpoint}: two refs for "
+          "distance/angle, one for radius/diameter, ONE closed circle of a "
+          "drilled hole for hole_callout ('Ø4.5 THRU', 'Ø4.5 CSK Ø9.5 × 90°' "
+          "— text derived from the Hole feature; part sources only), 2+ "
+          "equal-radius circles for pattern_callout ('3× Ø4.5', '+ PITCH p' "
+          "when collinear and evenly spaced). offset = [x,y] label offset in "
+          "sheet mm; OMIT it to auto-place the dim clear of the view. The "
+          "value is MEASURED from the projected geometry (read-only). Returns "
+          "the id, measured value/text, and the stored offset.")
 def add_drawing_dim(view: int, kind: str, refs: list,
                     offset: list | None = None) -> dict:
     params = {"view": view, "kind": kind, "refs": refs}

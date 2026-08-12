@@ -2,11 +2,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "TestIO.h"
+#include "core/Document.h"
+#include "core/drawing/DrawingCallout.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/drawing/DrawingValidate.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/HoleFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/io/Format.h"
 #include "core/io/Serialization.h"
 
@@ -600,4 +605,173 @@ TEST_CASE("DefaultDimOffset places dimensions clear of the view",
     CHECK(off.x == 0.0);
     CHECK(off.y == Catch::Approx(-12.0));
   }
+}
+
+TEST_CASE("Callout provenance: MappedName parsing, hole text, pitch",
+          "[drawing][callout]") {
+  SECTION("MappedNameFeatureIds over the naming corpus") {
+    using drawing::MappedNameFeatureIds;
+    CHECK(MappedNameFeatureIds("14/face0") == std::vector<uint64_t>{14});
+    CHECK(MappedNameFeatureIds("14/seam0") == std::vector<uint64_t>{14});
+    CHECK(MappedNameFeatureIds("14/face0;U2") == std::vector<uint64_t>{14});
+    CHECK(MappedNameFeatureIds("3/cap1;M14") == std::vector<uint64_t>({3, 14}));
+    CHECK(MappedNameFeatureIds("2/cap0;G4.0") == std::vector<uint64_t>({2, 4}));
+    CHECK(MappedNameFeatureIds("4/face1;U2;M4") ==
+          std::vector<uint64_t>({4, 4}));
+    CHECK(MappedNameFeatureIds("a;U0,b;U1;L").empty());
+    CHECK(MappedNameFeatureIds("").empty());
+    CHECK(MappedNameFeatureIds("garbage").empty());
+  }
+
+  SECTION("FormatHoleCallout for every kind") {
+    HoleFeature simple("h", 1, HoleKind::Simple, 4.5, 6.0);
+    CHECK(drawing::FormatHoleCallout(simple) == "\xC3\x98"
+                                                "4.5 DEEP 6");
+    simple.through = true;
+    CHECK(drawing::FormatHoleCallout(simple) == "\xC3\x98"
+                                                "4.5 THRU");
+    HoleFeature cbore("h", 1, HoleKind::Counterbore, 4.5, 6.0);
+    cbore.through = true;
+    cbore.cbDiameter = 9.0;
+    cbore.cbDepth = 3.0;
+    CHECK(drawing::FormatHoleCallout(cbore) == "\xC3\x98"
+                                               "4.5 THRU CBORE \xC3\x98"
+                                               "9 DEEP 3");
+    HoleFeature csk("h", 1, HoleKind::Countersink, 4.5, 6.0);
+    csk.through = true;
+    csk.csDiameter = 9.5;
+    csk.csDepth = 2.5; // 2*atan2(2.5, 2.5) = 90 deg
+    CHECK(drawing::FormatHoleCallout(csk) == "\xC3\x98"
+                                             "4.5 THRU CSK \xC3\x98"
+                                             "9.5 \xC3\x97 90.0\xC2\xB0");
+  }
+
+  SECTION("UniformCollinearPitch") {
+    using drawing::UniformCollinearPitch;
+    const glm::dvec2 row[] = {{0, 0}, {10, 0}, {20, 0}};
+    REQUIRE(UniformCollinearPitch(row).has_value());
+    CHECK(*UniformCollinearPitch(row) == Catch::Approx(10.0));
+    const glm::dvec2 uneven[] = {{0, 0}, {10, 0}, {25, 0}};
+    CHECK_FALSE(UniformCollinearPitch(uneven).has_value());
+    const glm::dvec2 triangle[] = {{0, 0}, {10, 0}, {5, 8}};
+    CHECK_FALSE(UniformCollinearPitch(triangle).has_value());
+    const glm::dvec2 pair[] = {{0, 0}, {0, 32}};
+    CHECK(*UniformCollinearPitch(pair) == Catch::Approx(32.0));
+    const glm::dvec2 lone[] = {{5, 5}};
+    CHECK_FALSE(UniformCollinearPitch(lone).has_value());
+  }
+}
+
+TEST_CASE("Hole rim element names carry the hole feature id",
+          "[drawing][callout][integration]") {
+  // The load-bearing assumption behind hole callouts, pinned in-tree: every
+  // circular edge a HoleFeature makes mentions the hole's id in its
+  // MappedName (prefix "<id>/..." or ";G<id>"/";M<id>" suffix).
+  Document doc;
+  auto sk = std::make_unique<SketchFeature>("Base", SketchPlane(PlaneType::XY));
+  sk->AddRectangle({0, 0}, {40, 20});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(0)->GetId();
+  doc.AddFeature(
+      std::make_unique<ExtrudeFeature>("Pad", skId, 5.0, ExtrudeMode::NewBody));
+  auto centers = std::make_unique<SketchFeature>(
+      "Centers", SketchPlane(PlaneType::XY, glm::vec3(0, 0, 5)));
+  centers->AddEntity(sketch::Point{{10, 10}});
+  doc.AddFeature(std::move(centers));
+  const uint64_t centersId = doc.GetFeature(2)->GetId();
+  auto hole = std::make_unique<HoleFeature>("Drill", centersId,
+                                            HoleKind::Countersink, 4.5, 5.0);
+  hole->through = true;
+  hole->csDiameter = 9.5;
+  hole->csDepth = 2.5;
+  doc.AddFeature(std::move(hole));
+  const uint64_t holeId = doc.GetFeature(3)->GetId();
+
+  REQUIRE(doc.GetBodies().size() == 1);
+  const ElementMap& map = doc.GetBodies()[0].elementMap;
+  int holeNamedEdges = 0;
+  for (const auto& [index, name] : map.edgeNames) {
+    const auto ids = drawing::MappedNameFeatureIds(name);
+    if (std::find(ids.begin(), ids.end(), holeId) != ids.end())
+      ++holeNamedEdges;
+  }
+  CHECK(holeNamedEdges >= 2); // bore rim(s) + countersink rim at least
+
+  // And FindHoleForRef resolves one of those names with the bore radius.
+  const HoleFeature* found = nullptr;
+  for (const auto& [index, name] : map.edgeNames) {
+    found = drawing::FindHoleForRef(doc, name, 4.5 / 2.0);
+    if (found)
+      break;
+  }
+  REQUIRE(found != nullptr);
+  CHECK(found->GetId() == holeId);
+  // A radius that matches nothing keeps missing (never mislabels).
+  CHECK(drawing::FindHoleForRef(doc, "2/cap0;G" + std::to_string(holeId),
+                                3.14159) == nullptr);
+}
+
+TEST_CASE("ResolveDim callout kinds", "[drawing][callout][dimension]") {
+  drawing::SheetView view = DimTestView();
+  // Three equal circles in a row for the pattern (r=4, pitch 12).
+  for (int i = 1; i < 3; ++i) {
+    drawing::SheetCurve c;
+    c.edge = ElementRef{2, "hole" + std::to_string(i)};
+    c.sourceId = 1;
+    c.curveType = 1;
+    c.conicCenter = {10.0 + 12.0 * i, 10.0};
+    c.conicRadius = 4.0;
+    c.closed = true;
+    c.points = {{14.0 + 12.0 * i, 10}, {6.0 + 12.0 * i, 10}};
+    view.curves.push_back(c);
+  }
+
+  SECTION("hole callout without a source document dangles") {
+    const auto rd = drawing::ResolveDim(
+        MakeDim(DrawingDimKind::HoleCallout, {EdgeRef(2, "hole")}), view);
+    CHECK_FALSE(rd.resolved);
+  }
+
+  SECTION("pattern callout: N x diameter + uniform pitch, leader laid out") {
+    DrawingDim d =
+        MakeDim(DrawingDimKind::PatternCallout,
+                {EdgeRef(2, "hole"), EdgeRef(2, "hole1"), EdgeRef(2, "hole2")});
+    d.labelOffset = {0.0, 14.0};
+    const auto rd = drawing::ResolveDim(d, view);
+    REQUIRE(rd.resolved);
+    CHECK(rd.leader);
+    CHECK(rd.text == "3\xC3\x97 \xC3\x98"
+                     "8 PITCH 12");
+    CHECK(rd.value == Catch::Approx(12.0));
+  }
+
+  SECTION("pattern callout with mixed radii dangles") {
+    view.curves[2].conicRadius = 3.0; // the first 'hole' curve
+    const auto rd =
+        drawing::ResolveDim(MakeDim(DrawingDimKind::PatternCallout,
+                                    {EdgeRef(2, "hole"), EdgeRef(2, "hole1")}),
+                            view);
+    CHECK_FALSE(rd.resolved);
+  }
+}
+
+TEST_CASE("Drawing golden loads and round-trips (v53 callouts)",
+          "[drawing][serialization][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "drawing" / "v53-callouts.json";
+  REQUIRE(fs::exists(golden));
+  auto dwg = testio::LoadDrawing(golden.string());
+  REQUIRE(dwg != nullptr);
+  REQUIRE(dwg->DimCount() == 2);
+  CHECK(dwg->GetDims()[0].kind == DrawingDimKind::HoleCallout);
+  CHECK(dwg->GetDims()[1].kind == DrawingDimKind::PatternCallout);
+  CHECK(dwg->GetDims()[1].refs.size() == 3);
+
+  const fs::path tmp = fs::temp_directory_path() / "dwg_v53_rt.json";
+  REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
+  auto reloaded = testio::LoadDrawing(tmp.string());
+  REQUIRE(reloaded != nullptr);
+  CHECK(reloaded->GetDims()[0].kind == DrawingDimKind::HoleCallout);
+  CHECK(reloaded->GetDims()[1].kind == DrawingDimKind::PatternCallout);
+  fs::remove(tmp);
 }

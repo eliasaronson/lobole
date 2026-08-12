@@ -2221,7 +2221,16 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim) {
     rd.kind = dim.kind;
     return rd;
   }
-  return drawing::ResolveDim(dim, it->second);
+  // Callout kinds need the source part document (hole provenance) and the
+  // view scale (sheet mm -> model mm); legacy kinds ignore the context.
+  drawing::DimContext ctx;
+  if (state.drawing) {
+    if (const DrawingView* view = state.drawing->FindView(dim.viewId)) {
+      ctx.sourceDoc = DrawingSourceDocument(state, view->sourceDocId);
+      ctx.viewScale = view->scale;
+    }
+  }
+  return drawing::ResolveDim(dim, it->second, ctx);
 }
 
 bool ExportActiveDrawing(AppState& state, const std::string& path,

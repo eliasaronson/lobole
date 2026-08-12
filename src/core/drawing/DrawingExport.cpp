@@ -59,9 +59,9 @@ std::string Num(double v) {
   return s;
 }
 
-// Escapes a UTF-8 display string into PDF WinAnsi bytes: the two non-ASCII
-// glyphs dimension text uses (Ø, °) map to their WinAnsi code points; other
-// non-ASCII is replaced with '?'. Parens/backslash are escaped.
+// Escapes a UTF-8 display string into PDF WinAnsi bytes: the three
+// non-ASCII glyphs dimension text uses (Ø, °, ×) map to their WinAnsi code
+// points; other non-ASCII is replaced with '?'. Parens/backslash escaped.
 std::string PdfText(const std::string& s) {
   std::string out;
   for (size_t i = 0; i < s.size();) {
@@ -69,6 +69,10 @@ std::string PdfText(const std::string& s) {
     if (c == 0xC3 && i + 1 < s.size() &&
         static_cast<unsigned char>(s[i + 1]) == 0x98) { // Ø
       out += static_cast<char>(0xD8);
+      i += 2;
+    } else if (c == 0xC3 && i + 1 < s.size() &&
+               static_cast<unsigned char>(s[i + 1]) == 0x97) { // × (callouts)
+      out += static_cast<char>(0xD7);
       i += 2;
     } else if (c == 0xC2 && i + 1 < s.size() &&
                static_cast<unsigned char>(s[i + 1]) == 0xB0) { // °
@@ -169,6 +173,10 @@ bool SaveSVG(const DrawingDocument& doc,
         if (d.radial) {
           line(d.center, d.rim, 0.25);
           arrow(d.rim, glm::normalize(d.rim - d.center));
+        } else if (d.leader) { // callout: rim -> label leader
+          line(d.rim, d.labelPos, 0.25);
+          if (glm::length(d.rim - d.labelPos) > 1e-9)
+            arrow(d.rim, glm::normalize(d.rim - d.labelPos));
         } else if (d.kind == DrawingDimKind::Angle) {
           // v1 angle: just the value, placed between the two edges.
         } else {                     // linear
@@ -309,6 +317,10 @@ bool SavePDF(const DrawingDocument& doc,
       if (d.radial) {
         seg(d.center, d.rim, 0.25);
         arrow(d.rim, glm::normalize(d.rim - d.center));
+      } else if (d.leader) { // callout: rim -> label leader
+        seg(d.rim, d.labelPos, 0.25);
+        if (glm::length(d.rim - d.labelPos) > 1e-9)
+          arrow(d.rim, glm::normalize(d.rim - d.labelPos));
       } else if (d.kind != DrawingDimKind::Angle) {
         seg(d.ext1, d.dim1, 0.2);
         seg(d.ext2, d.dim2, 0.2);

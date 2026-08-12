@@ -1,0 +1,85 @@
+{
+  "format": "designer-document",
+  "version": 53,
+  "kind": "drawing",
+  "sheet": {
+    "size": "a3",
+    "landscape": true,
+    "title_block": {
+      "project": "Screwdriver Set",
+      "document": "Stand",
+      "author": "Elias",
+      "date": "2026-08-12"
+    }
+  },
+  "views": [
+    {
+      "id": 1,
+      "name": "face",
+      "source": 3,
+      "orientation": "top",
+      "scale": 1.0,
+      "position": [
+        130.0,
+        95.0
+      ],
+      "show_hidden": true
+    }
+  ],
+  "dims": [
+    {
+      "id": 2,
+      "kind": "hole_callout",
+      "view": 1,
+      "refs": [
+        {
+          "view": 1,
+          "end": 0,
+          "edge": {
+            "feature_id": 2,
+            "element": "2/cap0;G4.0"
+          }
+        }
+      ],
+      "label_offset": [
+        10.0,
+        8.0
+      ]
+    },
+    {
+      "id": 3,
+      "kind": "pattern_callout",
+      "view": 1,
+      "refs": [
+        {
+          "view": 1,
+          "end": 0,
+          "edge": {
+            "feature_id": 2,
+            "element": "2/cap0;G4.0"
+          }
+        },
+        {
+          "view": 1,
+          "end": 0,
+          "edge": {
+            "feature_id": 2,
+            "element": "2/cap0;G4.1"
+          }
+        },
+        {
+          "view": 1,
+          "end": 0,
+          "edge": {
+            "feature_id": 2,
+            "element": "2/cap0;G4.2"
+          }
+        }
+      ],
+      "label_offset": [
+        -12.0,
+        10.0
+      ]
+    }
+  ]
+}

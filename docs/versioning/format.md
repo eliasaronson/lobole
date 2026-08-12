@@ -104,6 +104,7 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | 38 | (2A) | Sketch entity coordinate expressions (`<field>_expr` keys on entity JSON: line `ax/ay/bx/by`, circle+arc `cx/cy/r`, point `x/y`) |
 | … | | (v39–v51: split, curves/sweep/pipe, images, refine, XCAF import, patterns/mirror — see golden corpus) |
 | 52 | | Extrude `end_mode: "through_all"` (cut only; sweeps past every body along ±normal per `reversed`, `distance` ignored) |
+| 53 | | Drawing dim kinds `hole_callout` (text derived from the drilling HoleFeature) and `pattern_callout` (N× + uniform pitch over picked circles) |
 
 ## The directory format (F3, default for new saves)
 

@@ -229,6 +229,10 @@ const char* DrawingDimKindToString(DrawingDimKind k) {
     return "diameter";
   case DrawingDimKind::Angle:
     return "angle";
+  case DrawingDimKind::HoleCallout:
+    return "hole_callout";
+  case DrawingDimKind::PatternCallout:
+    return "pattern_callout";
   }
   return "distance";
 }
@@ -246,7 +250,16 @@ bool DrawingDimKindFromString(const std::string& s, DrawingDimKind& out) {
     out = DrawingDimKind::Diameter;
   else if (s == "angle")
     out = DrawingDimKind::Angle;
+  else if (s == "hole_callout") // v53
+    out = DrawingDimKind::HoleCallout;
+  else if (s == "pattern_callout") // v53
+    out = DrawingDimKind::PatternCallout;
   else
     return false;
   return true;
+}
+
+std::vector<const char*> DrawingDimKindNames() {
+  return {"distance", "distance_x", "distance_y",   "radius",
+          "diameter", "angle",      "hole_callout", "pattern_callout"};
 }

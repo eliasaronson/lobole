@@ -28,14 +28,20 @@ enum class SheetSize { A4, A3, A2, A1, A0, Letter };
 enum class ViewOrientation { Front, Back, Left, Right, Top, Bottom, Iso };
 
 // The driven dimension kinds — the six that carry over from sketch dimensions
-// (SketchFeature.h ConstraintKind), measured here rather than solved.
+// (SketchFeature.h ConstraintKind), measured here rather than solved, plus
+// the v53 callouts: HoleCallout derives its text from the HoleFeature that
+// drilled the picked circle; PatternCallout counts 2+ picked circles and
+// reports their uniform pitch. Still driven — the text is computed from the
+// model, never authored.
 enum class DrawingDimKind {
   Distance,
   DistanceX,
   DistanceY,
   Radius,
   Diameter,
-  Angle
+  Angle,
+  HoleCallout,
+  PatternCallout
 };
 
 // Title-block fields (a simple labelled table under the border). All cosmetic
@@ -174,3 +180,6 @@ const char* ViewOrientationToString(ViewOrientation o);
 bool ViewOrientationFromString(const std::string& s, ViewOrientation& out);
 const char* DrawingDimKindToString(DrawingDimKind k);
 bool DrawingDimKindFromString(const std::string& s, DrawingDimKind& out);
+// Every kind string, for describe — generated beside To/FromString so the
+// introspection can't drift from the parser.
+std::vector<const char*> DrawingDimKindNames();

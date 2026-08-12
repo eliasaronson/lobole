@@ -233,6 +233,13 @@ void DrawDims(ImDrawList* dl, AppState& state) {
       dl->AddLine(SheetToScreen(state, d.center), SheetToScreen(state, d.rim),
                   ink, 1.2f);
       SheetArrow(dl, state, d.rim, glm::normalize(d.rim - d.center), ink);
+    } else if (d.leader) {
+      // Callout: a leader from the circle rim to the label, arrow at the rim.
+      dl->AddLine(SheetToScreen(state, d.rim), SheetToScreen(state, d.labelPos),
+                  ink, 1.2f);
+      const glm::dvec2 back = d.rim - d.labelPos;
+      if (glm::length(back) > 1e-9)
+        SheetArrow(dl, state, d.rim, glm::normalize(back), ink);
     } else if (d.kind == DrawingDimKind::Angle) {
       // v1 angle: value only (rendered below).
     } else {

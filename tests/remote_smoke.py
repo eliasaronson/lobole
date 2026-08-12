@@ -756,6 +756,9 @@ def main():
         expect("aluminum" in desc["material_slugs"], "material slugs")
         expect("through_all" in desc["extrude_end_modes"],
                "extrude end modes are described")
+        expect({"hole_callout", "pattern_callout"} <=
+               set(desc["drawing_dim_kinds"]),
+               "drawing dim kinds are described")
         for name in names:
             if name == "describe":
                 continue
