@@ -140,18 +140,23 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
       return rd;
     rd.ext1 = a;
     rd.ext2 = b;
+    // Geometry stays in sheet millimetres (that is where the dimension is
+    // drawn); the VALUE is a measurement of the part, so it divides by the
+    // view scale — a 2 mm box drawn at 20:1 is 2 mm, not the 40 mm of paper
+    // it covers. (HoleCallout already did this; distances and radii did not,
+    // which stayed invisible while every view was 1:1.)
     if (dim.kind == DrawingDimKind::DistanceX) {
-      rd.value = std::abs(b.x - a.x);
+      rd.value = std::abs(b.x - a.x) / vs;
       const double dy = std::min(a.y, b.y) + off.y;
       rd.dim1 = {a.x, dy};
       rd.dim2 = {b.x, dy};
     } else if (dim.kind == DrawingDimKind::DistanceY) {
-      rd.value = std::abs(b.y - a.y);
+      rd.value = std::abs(b.y - a.y) / vs;
       const double dx = std::min(a.x, b.x) + off.x;
       rd.dim1 = {dx, a.y};
       rd.dim2 = {dx, b.y};
     } else {
-      rd.value = glm::length(b - a);
+      rd.value = glm::length(b - a) / vs;
       rd.dim1 = a + off;
       rd.dim2 = b + off;
     }
@@ -171,7 +176,7 @@ ResolvedDim ResolveDim(const DrawingDim& dim, const SheetView& view,
     rd.radial = true;
     rd.center = c;
     rd.radius = rad;
-    rd.value = dim.kind == DrawingDimKind::Diameter ? 2.0 * rad : rad;
+    rd.value = (dim.kind == DrawingDimKind::Diameter ? 2.0 * rad : rad) / vs;
     rd.text = (dim.kind == DrawingDimKind::Diameter ? "\xC3\x98" : "R") +
               core::FormatLength(rd.value);
     const glm::dvec2 dir = glm::length(off) > 1e-9 ? glm::normalize(off)

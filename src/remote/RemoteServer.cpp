@@ -422,6 +422,9 @@ json ItemsToJson(const ImGuiTestItemList& items) {
            {"id", it.ID},
            {"depth", it.Depth},
            {"disabled", (it.ItemFlags & ImGuiItemFlags_Disabled) != 0},
+           // Openable = a submenu header: clicking it only opens more items,
+           // so callers must address the leaf as "Parent/Leaf".
+           {"submenu", (it.StatusFlags & ImGuiItemStatusFlags_Openable) != 0},
            {"x", it.RectFull.GetCenter().x},
            {"y", it.RectFull.GetCenter().y}};
     if (it.Window != nullptr)
@@ -598,9 +601,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"popup_click", "UI test tier: open the popup of {ref|id} ({button}: 1 "
                     "= context menu) and click {item} in it — the only way "
                     "to reach a menu that is not the main menu bar (the tab "
-                    "bar's '+', context menus)."},
-    {"popup_items", "UI test tier: list what the popup of {ref|id} holds, "
-                    "then close it. Makes those menus discoverable."},
+                    "bar's '+', context menus). {item} may be a submenu path, "
+                    "\"Part 1/Front\"."},
+    {"popup_items", "UI test tier: list what the popup of {ref|id} holds "
+                    "(submenu: true = address its children as "
+                    "\"Parent/Child\"), then close it."},
     {"item_combo", "UI test tier: choose {value} in the combo {ref|id} "
                    "(opens and picks in one action — the popup does not "
                    "survive between RPCs)."},
@@ -1155,8 +1160,14 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       ImGuiWindow* popup = OpenPopupOf(ctx, target, button);
       if (popup == nullptr)
         return;
-      ctx->ItemClick(
-          (std::string("//") + popup->Name + "/**/" + entry).c_str());
+      const std::string root = std::string("//") + popup->Name + "/";
+      if (entry.find('/') != std::string::npos) {
+        // A path walks submenus ("Part 1/Front"): MenuClick knows how to
+        // hover a submenu open without cutting the corner and closing it.
+        ctx->MenuClick((root + entry).c_str());
+      } else {
+        ctx->ItemClick((root + "**/" + entry).c_str());
+      }
     };
   } else if (m == "popup_items") {
     const ItemTarget target(p, m);

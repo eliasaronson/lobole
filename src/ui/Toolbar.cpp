@@ -792,16 +792,12 @@ void DrawDrawingToolbar(AppState& state) {
       if (ImGui::BeginMenu(s.name.c_str())) {
         for (const Ori& ori : orients) {
           if (ImGui::MenuItem(ori.label)) {
-            const glm::dvec2 ext = ChromeOf(dwg.GetSheet()).extent;
             DrawingView v;
             v.name = ori.label;
             v.sourceDocId = s.id;
             v.orientation = ori.o;
-            v.scale = 1.0;
-            v.position = ext * 0.5;
-            SnapshotDrawing(state);
-            dwg.AddView(v);
-            UpdateDrawingRenders(state);
+            v.scale = 0.0; // 0 = fit a standard scale to the sheet
+            AddDrawingViewPlaced(state, v);
           }
         }
         ImGui::EndMenu();

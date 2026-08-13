@@ -2378,6 +2378,80 @@ Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId) {
   return nullptr;
 }
 
+void AddDrawingViewPlaced(AppState& state, DrawingView v) {
+  if (!state.drawing)
+    return;
+  DrawingDocument& dwg = *state.drawing;
+  const glm::dvec2 ext = ChromeOf(dwg.GetSheet()).extent;
+
+  // Project a 1:1 copy anchored at the origin: its bbox IS the part's size in
+  // millimetres, which is what both decisions below need.
+  DrawingView probe = v;
+  probe.id = 0;
+  probe.scale = 1.0;
+  probe.position = glm::dvec2(0.0);
+  probe.baseViewId = 0; // a folded child would inherit its parent's place
+  const drawing::SheetView sv = ProjectDrawingView(state, probe);
+  const bool measured = sv.hasGeometry;
+  const glm::dvec2 size = measured ? sv.bboxMax - sv.bboxMin : glm::dvec2(0.0);
+
+  // Scale (only when the caller did not choose one): the largest standard
+  // ratio that keeps the view inside ~45% of the sheet, so a few views fit
+  // side by side. Without this a 2 mm part is a 2 mm dot at 1:1.
+  if (v.scale <= 0.0) {
+    v.scale = 1.0;
+    if (measured && size.x > 1e-9 && size.y > 1e-9) {
+      static const double kStandard[] = {100.0, 50.0, 20.0, 10.0, 5.0,
+                                         2.0,   1.0,  0.5,  0.2,  0.1,
+                                         0.05,  0.02, 0.01};
+      const glm::dvec2 budget = ext * 0.45;
+      v.scale = kStandard[std::size(kStandard) - 1];
+      for (double s : kStandard) {
+        if (size.x * s <= budget.x && size.y * s <= budget.y) {
+          v.scale = s;
+          break;
+        }
+      }
+    }
+  }
+
+  // Position: sheet centre for the first view, else clear to the right of
+  // everything already placed (wrapping below when the row is full). The
+  // sheet anchor maps model -> pos + scale * model, so the left edge lands at
+  // `x` when pos.x = x - scale * bboxMin.x.
+  glm::dvec2 pos = ext * 0.5;
+  if (measured) {
+    double right = -1e30, bottom = -1e30, firstMidY = ext.y * 0.5;
+    bool anyPlaced = false;
+    for (const DrawingView& other : dwg.GetViews()) {
+      const auto it = state.drawingRenders.find(other.id);
+      if (it == state.drawingRenders.end() || !it->second.hasGeometry)
+        continue;
+      if (!anyPlaced)
+        firstMidY = (it->second.bboxMin.y + it->second.bboxMax.y) * 0.5;
+      anyPlaced = true;
+      right = std::max(right, it->second.bboxMax.x);
+      bottom = std::max(bottom, it->second.bboxMax.y);
+    }
+    const glm::dvec2 placed = size * v.scale;
+    const double gap = std::max(8.0, std::max(placed.x, placed.y) * 0.15);
+    if (!anyPlaced) {
+      pos = ext * 0.5 - v.scale * (sv.bboxMin + sv.bboxMax) * 0.5;
+    } else if (right + gap + placed.x <= ext.x) {
+      pos.x = right + gap - v.scale * sv.bboxMin.x;
+      pos.y = firstMidY - v.scale * (sv.bboxMin.y + sv.bboxMax.y) * 0.5;
+    } else { // new row under everything
+      pos.x = gap - v.scale * sv.bboxMin.x;
+      pos.y = bottom + gap - v.scale * sv.bboxMin.y;
+    }
+  }
+  v.position = pos;
+
+  SnapshotDrawing(state);
+  dwg.AddView(v);
+  UpdateDrawingRenders(state);
+}
+
 void UpdateDrawingRenders(AppState& state) {
   if (!state.drawing)
     return;

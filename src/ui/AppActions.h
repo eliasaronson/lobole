@@ -205,6 +205,13 @@ void HandleSheetInput(AppState& state);
 // Failed views keep their last-good geometry with an error string.
 void UpdateDrawingRenders(AppState& state);
 
+// Adds a view to the active drawing, choosing the two things a human should
+// not have to compute: a standard scale that makes the part legible on this
+// sheet (only when `v.scale` is <= 0), and a spot clear of the views already
+// placed. Snapshots for undo and re-projects. Shared by the drawing
+// toolbar's Add-view menu and the panel's Add view button.
+void AddDrawingViewPlaced(AppState& state, DrawingView v);
+
 // The current Document::Version() / AssemblyDocument::Version() of a source
 // document (part or assembly) by stable id, or 0 if absent. A drawing view is
 // stale when this differs from the version stamped at its last projection.

@@ -339,10 +339,17 @@ void DrawViews(ImDrawList* dl, AppState& state) {
       dl->AddRect(SheetToScreen(state, sv.bboxMin - pad),
                   SheetToScreen(state, sv.bboxMax + pad), frame, 0.0f, 0, 1.0f);
       if (fontPx >= 4.0f) {
+        // Drafting convention: reductions read 1:n, enlargements n:1. The
+        // old label divided unconditionally, so a 20x view read "1:0.05".
+        const double sc = view.scale > 0 ? view.scale : 1.0;
+        char ratio[32];
+        if (sc >= 1.0)
+          std::snprintf(ratio, sizeof(ratio), "%g:1", sc);
+        else
+          std::snprintf(ratio, sizeof(ratio), "1:%g", 1.0 / sc);
         char label[128];
-        std::snprintf(label, sizeof(label), "%s  1:%g",
-                      view.name.empty() ? "view" : view.name.c_str(),
-                      view.scale > 0 ? 1.0 / view.scale : 1.0);
+        std::snprintf(label, sizeof(label), "%s  %s",
+                      view.name.empty() ? "view" : view.name.c_str(), ratio);
         dl->AddText(font, fontPx,
                     SheetToScreen(state, {sv.bboxMin.x, sv.bboxMax.y + 6.0}),
                     frame, label);
@@ -553,16 +560,13 @@ void DrawViewsSection(AppState& state) {
                  IM_ARRAYSIZE(kOrientLabels));
     ImGui::InputFloat("Scale", &addScale, 0.0f, 0.0f, "%.3f");
     if (ImGui::Button("Add view")) {
-      const glm::dvec2 ext = ChromeOf(state.drawing->GetSheet()).extent;
       DrawingView v;
       v.name = std::string(kOrientLabels[orientIdx]);
       v.sourceDocId = partSlots[srcIdx]->id;
       v.orientation = static_cast<ViewOrientation>(orientIdx);
-      v.scale = addScale > 0 ? addScale : 1.0;
-      v.position = ext * 0.5;
-      SnapshotDrawing(state);
-      state.drawing->AddView(v);
-      UpdateDrawingRenders(state);
+      // A scale typed here is respected; 0 asks for the fitted standard one.
+      v.scale = addScale > 0 ? addScale : 0.0;
+      AddDrawingViewPlaced(state, v);
     }
   }
 

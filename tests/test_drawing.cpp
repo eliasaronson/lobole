@@ -294,6 +294,26 @@ TEST_CASE("ResolveDim measures projected geometry", "[drawing][dimension]") {
     CHECK(rd.text == "R4");
   }
 
+  // A dimension states the size of the PART, not of the paper it covers.
+  // Distances and radii used to report sheet millimetres, which matched the
+  // model only while every view sat at 1:1 (found by the 2026-08-13 clicks-
+  // only drawing round, once views started auto-scaling).
+  SECTION("values are model size, not sheet size, at a non-1:1 scale") {
+    drawing::DimContext ctx;
+    ctx.viewScale = 20.0; // 20:1 enlargement
+    auto dx = drawing::ResolveDim(
+        MakeDim(DrawingDimKind::DistanceX, {EdgeRef(1, "L"), EdgeRef(1, "R")}),
+        view, ctx);
+    REQUIRE(dx.resolved);
+    CHECK(dx.value == Catch::Approx(1.5)); // 30 mm of paper / 20
+    CHECK(dx.text == "1.5");
+    auto dia = drawing::ResolveDim(
+        MakeDim(DrawingDimKind::Diameter, {EdgeRef(2, "hole")}), view, ctx);
+    REQUIRE(dia.resolved);
+    CHECK(dia.value == Catch::Approx(0.4));
+    CHECK(dia.radius == Catch::Approx(4.0)); // drawn at sheet size, though
+  }
+
   SECTION("a ref that matches no curve is dangling, never rebound") {
     auto rd =
         drawing::ResolveDim(MakeDim(DrawingDimKind::DistanceX,
