@@ -329,23 +329,42 @@ bool CADShape::FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
     return false;
 
   BRepAdaptor_Surface surf(face);
-  if (surf.GetType() != GeomAbs_Cylinder)
+  const GeomAbs_SurfaceType type = surf.GetType();
+  if (type == GeomAbs_Sphere) {
+    // A sphere has no natural axis — anchor at the CENTER with a
+    // deterministic vertical axis. Enough for a ball-mate connector (which
+    // only consumes the origin) and predictable everywhere else.
+    const gp_Pnt c = surf.Sphere().Location();
+    origin = glm::vec3(c.X(), c.Y(), c.Z());
+    axis = glm::vec3(0.0f, 0.0f, 1.0f);
+    xAxis = glm::vec3(1.0f, 0.0f, 0.0f);
+    return true;
+  }
+  if (type != GeomAbs_Cylinder && type != GeomAbs_Cone)
     return false;
 
-  const gp_Ax1 ax = surf.Cylinder().Axis();
+  const gp_Ax1 ax =
+      type == GeomAbs_Cone ? surf.Cone().Axis() : surf.Cylinder().Axis();
   const gp_Pnt ap = ax.Location();
   const gp_Dir ad = ax.Direction();
   const glm::vec3 axisPoint(ap.X(), ap.Y(), ap.Z());
   axis = glm::normalize(glm::vec3(ad.X(), ad.Y(), ad.Z()));
 
-  // Origin = the face centroid projected onto the axis, so the frame sits at
-  // the middle of the actual (possibly partial) cylindrical patch rather than
-  // at OCC's arbitrary axis location.
-  GProp_GProps props;
-  BRepGProp::SurfaceProperties(face, props);
-  const gp_Pnt c = props.CentreOfMass();
-  const glm::vec3 centroid(c.X(), c.Y(), c.Z());
-  origin = axisPoint + glm::dot(centroid - axisPoint, axis) * axis;
+  if (type == GeomAbs_Cone) {
+    // A cone anchors at its APEX — for a seat face that is exactly where a
+    // mating ball's contact ray converges, the point a ball mate wants.
+    const gp_Pnt apex = surf.Cone().Apex();
+    origin = glm::vec3(apex.X(), apex.Y(), apex.Z());
+  } else {
+    // Origin = the face centroid projected onto the axis, so the frame sits
+    // at the middle of the actual (possibly partial) cylindrical patch
+    // rather than at OCC's arbitrary axis location.
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(face, props);
+    const gp_Pnt c = props.CentreOfMass();
+    const glm::vec3 centroid(c.X(), c.Y(), c.Z());
+    origin = axisPoint + glm::dot(centroid - axisPoint, axis) * axis;
+  }
 
   // Deterministic perpendicular (matches FacePlane's u-axis heuristic).
   glm::vec3 u =

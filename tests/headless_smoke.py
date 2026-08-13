@@ -543,6 +543,14 @@ def main():
         occs = d.call("list_occurrences")["occurrences"]
         names = {o["id"]: o["name"] for o in occs}
         by_name = d.call("interference", a=names[o1], b="CubeB")
+        # No pair named -> sweep every visible occurrence pair.
+        sweep = d.call("interference")
+        expect(sweep["clash"] and len(sweep["pairs"]) == 1
+               and abs(sweep["pairs"][0]["volume"] - 1.0) < 1e-3,
+               f"all-pairs sweep finds the clash: {sweep}")
+        # Project-level reads work from the assembly tab (were part-gated).
+        d.call("history_log")
+        d.call("checkpoint_list")
         expect(by_name["clash"], "occurrence-name interference works")
 
         # Assembly mass_properties (finding #5): aggregate both occurrences in

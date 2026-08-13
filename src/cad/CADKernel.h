@@ -67,11 +67,14 @@ public:
                  glm::vec3& uAxis) const;
 
   // For the cylindrical face at `faceIndex` (same explorer order as
-  // FacePlane), outputs a frame on the cylinder axis: `origin` = the face
-  // centroid projected onto the axis, `axis` = the (unit) axis direction,
-  // `xAxis` = a deterministic perpendicular. Returns false if the index is
-  // out of range or the face is not cylindrical. Used by A3 revolute/slider
-  // mate connectors, which align along the axis (assemblies A3).
+  // FacePlane), outputs an axis frame: cylinder -> origin = face centroid
+  // projected onto the axis; cone -> origin = the APEX (where a mating
+  // ball's contact converges); sphere -> origin = the CENTER with a
+  // deterministic vertical axis (spheres have no natural one — enough for a
+  // ball-mate connector, which consumes only the origin). `axis` = the
+  // (unit) axis direction, `xAxis` = a deterministic perpendicular. Returns
+  // false if the index is out of range or the face is none of those. Used by
+  // A3 mate connectors (assemblies A3).
   bool FaceAxis(int faceIndex, glm::vec3& origin, glm::vec3& axis,
                 glm::vec3& xAxis) const;
 

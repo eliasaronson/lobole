@@ -183,7 +183,18 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     const uint64_t id = state.assembly->AddMate(mate);
     const int errored = ui::SolveActiveAssembly(state);
     json out = DocumentIO::MateToJson(*state.assembly->FindMateById(id));
+    // errored_mates is the GLOBAL count after the re-solve (an earlier
+    // broken mate keeps it non-zero even when THIS mate is fine) — name the
+    // actual offenders so a script never has to guess which one failed.
     out["errored_mates"] = errored;
+    if (errored > 0) {
+      json list = json::array();
+      for (const Mate& mm : state.assembly->GetMates())
+        if (!mm.error.empty())
+          list.push_back(
+              {{"id", mm.id}, {"name", mm.name}, {"error", mm.error}});
+      out["errored"] = std::move(list);
+    }
     if (const Mate* mm = state.assembly->FindMateById(id);
         mm && !mm->error.empty())
       out["error"] = mm->error;

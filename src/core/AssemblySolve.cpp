@@ -136,7 +136,8 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
               body.shape.FaceAxis(*faceIdx, origin, primary, xHint);
     if (!ok)
       return fail("face '" + ref.name +
-                  "' is neither planar nor cylindrical — no connector frame");
+                  "' has no connector frame (planar, cylindrical, conical, "
+                  "and spherical faces do)");
 
     // Inference snap (A2.5 phase 4): override the origin with the snapped
     // edge's characteristic point (a hole center, etc.), keeping the face's Z

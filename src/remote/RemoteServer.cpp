@@ -424,6 +424,10 @@ static const std::set<std::string> kNoPartDoc = {
     "set_section",
     // undo/redo route to the assembly's snapshot history on an assembly tab.
     "undo", "redo",
+    // Project-level reads (git vault / checkpoint list act on projectPath,
+    // not the active document). checkpoint_create/restore snapshot the
+    // ACTIVE PART document and stay part-gated.
+    "history_log", "checkpoint_list",
     // Camera / rendering act on the viewport, not the part document, so they
     // work on an assembly tab too. render_still's RT scene sync does the
     // occurrence walk itself.

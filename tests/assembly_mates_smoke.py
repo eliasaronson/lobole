@@ -102,6 +102,11 @@ def main():
                         "face": {"feature_id": 999999, "element": "nope"}},
                      b={"occurrence": o2, "origin": True})
         expect("error" in bad, f"dangling ref surfaced an error: {bad}")
+        # The reply also NAMES the offender (errored_mates alone is the
+        # global count — ambiguous when an earlier mate is the broken one).
+        expect(any(e["id"] == bad["id"] and e["error"]
+                   for e in bad.get("errored", [])),
+               f"errored list names the broken mate: {bad}")
         solve = d.call("solve_assembly")
         expect(solve["errored_mates"] == 1, f"exactly one errored mate: {solve}")
         # The good slider still holds the arm at 25.
@@ -139,6 +144,57 @@ def main():
                if o["id"] == o2][0]
         expect(abs(arm["transform"]["position"][2] - 25.0) < 1e-4,
                "the last solved pose reopened")
+
+        # --- Sphere + cone connector frames (ball-and-seat, no origin
+        # gymnastics): the sphere anchors at its CENTER, the cone at its
+        # APEX; a ball mate coincides the two.
+        d.call("add_part", name="ballpart")
+        d.call("set_active_part", name="ballpart")
+        d.call("add_feature", feature={"type": "Sphere", "name": "Ball",
+                                       "center": [0, 0, 0], "radius": 5})
+        d.call("add_part", name="seat")
+        d.call("set_active_part", name="seat")
+        d.call("add_feature", feature={"type": "Box", "name": "Block",
+                                       "position": [-10, -10, -10],
+                                       "width": 20, "height": 20, "depth": 10})
+        sks = d.call("add_feature", feature={
+            "type": "Sketch", "name": "C",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "point", "p": [0, 0]}]})
+        # 45-deg countersink: cone tapers 5.5 -> 2.75 radius over 2.75 deep,
+        # so the apex extrapolates to z = -5.5 on the hole axis.
+        d.call("add_feature", feature={
+            "type": "Hole", "name": "Seat", "sketch_id": sks["id"],
+            "hole_kind": "countersink", "diameter": 5.5, "depth": 8,
+            "cs_diameter": 11.0, "cs_depth": 2.75})
+
+        def face_of(part, kind):
+            els = d.call("list_elements", part=part)["bodies"][0]
+            for f in els["faces"]:
+                if f["kind"] == kind:
+                    return els["created_by"], f["name"]
+            raise AssertionError(f"no {kind} face in {part}")
+        sph = face_of("ballpart", "sphere")
+        cone = face_of("seat", "cone")
+
+        d.call("set_active_part", name="robot")
+        ob_ball = d.call("add_occurrence", part="ballpart")["id"]
+        ob_seat = d.call("add_occurrence", part="seat", fixed=True)["id"]
+        bm = d.call("add_mate", type="ball", name="ball-in-seat",
+                    a={"occurrence": ob_ball,
+                       "face": {"feature_id": sph[0], "element": sph[1]}},
+                    b={"occurrence": ob_seat,
+                       "face": {"feature_id": cone[0], "element": cone[1]}})
+        expect("error" not in bm,
+               f"sphere/cone faces carry connector frames now: {bm}")
+        ball_occ = [o for o in d.call("list_occurrences")["occurrences"]
+                    if o["id"] == ob_ball][0]
+        bp = ball_occ["transform"]["position"]
+        expect(abs(bp[0]) < 1e-3 and abs(bp[1]) < 1e-3
+               and abs(bp[2] - (-5.5)) < 1e-2,
+               f"ball centre at the cone apex (0,0,-5.5): {bp}")
+
 
         print("assembly_mates_smoke: OK")
     finally:

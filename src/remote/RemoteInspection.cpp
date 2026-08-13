@@ -167,21 +167,47 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                    " not found (see list_occurrences)");
         return *o;
       };
+      const auto pairVolume = [&](const Occurrence& oa,
+                                  const Occurrence& ob) -> double {
+        Document* pa = ui::PartDocById(state, oa.partId);
+        Document* pb = ui::PartDocById(state, ob.partId);
+        if (pa == nullptr || pb == nullptr)
+          throw std::runtime_error("an occurrence's part document is missing");
+        const auto v = Measure::InterferenceVolume(
+            pa->GetBodies(), ui::OccurrenceMatrix(oa), pb->GetBodies(),
+            ui::OccurrenceMatrix(ob));
+        if (!v)
+          throw std::runtime_error("interference check failed (see log)");
+        return *v;
+      };
+      if (!p.contains("a") && !p.contains("b")) {
+        // No pair named: sweep EVERY visible, unsuppressed pair — the
+        // whole-assembly clash check a design review actually wants.
+        std::vector<const Occurrence*> occs;
+        for (const Occurrence& o : state.assembly->GetOccurrences())
+          if (o.visible && !state.assembly->OccurrenceSuppressed(o.id))
+            occs.push_back(&o);
+        json pairs = json::array();
+        bool any = false;
+        for (size_t i = 0; i < occs.size(); ++i)
+          for (size_t j = i + 1; j < occs.size(); ++j) {
+            const double v = pairVolume(*occs[i], *occs[j]);
+            if (v > 1e-9)
+              any = true;
+            pairs.push_back({{"a", occs[i]->name},
+                             {"b", occs[j]->name},
+                             {"clash", v > 1e-9},
+                             {"volume", v}});
+          }
+        return json{{"clash", any}, {"pairs", pairs}};
+      }
       const Occurrence& oa = occOf(p.at("a"));
       const Occurrence& ob = occOf(p.at("b"));
       if (oa.id == ob.id)
         throw std::runtime_error("pick two different occurrences");
-      Document* pa = ui::PartDocById(state, oa.partId);
-      Document* pb = ui::PartDocById(state, ob.partId);
-      if (pa == nullptr || pb == nullptr)
-        throw std::runtime_error("an occurrence's part document is missing");
-      const auto v = Measure::InterferenceVolume(
-          pa->GetBodies(), ui::OccurrenceMatrix(oa), pb->GetBodies(),
-          ui::OccurrenceMatrix(ob));
-      if (!v)
-        throw std::runtime_error("interference check failed (see log)");
+      const double v = pairVolume(oa, ob);
       return json{
-          {"clash", *v > 1e-9}, {"volume", *v}, {"a", oa.name}, {"b", ob.name}};
+          {"clash", v > 1e-9}, {"volume", v}, {"a", oa.name}, {"b", ob.name}};
     }
     const auto& bodies = RequirePartDoc(doc, "interference").GetBodies();
     const int ia = p.at("a").get<int>();

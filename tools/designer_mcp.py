@@ -381,9 +381,13 @@ def section(base_plane: str = "xy", offset: float = 0.0,
           "volume} — the volume of the overlap. On a PART tab a/b are body "
           "indices. On an active ASSEMBLY tab a/b are occurrence ids (int) "
           "or occurrence names (str); each occurrence's part bodies are "
-          "placed by its solved transform and checked in world space. Run it "
-          "after mating — clash checks matter most in assemblies.")
-def interference(a: int | str, b: int | str) -> dict:
+          "placed by its solved transform and checked in world space — or "
+          "OMIT a/b to sweep EVERY visible occurrence pair (returns {clash, "
+          "pairs: [{a, b, clash, volume}]}). Run it after mating — clash "
+          "checks matter most in assemblies.")
+def interference(a: int | str | None = None, b: int | str | None = None) -> dict:
+    if a is None and b is None:
+        return _call("interference")
     return _call("interference", a=a, b=b)
 
 
@@ -929,7 +933,12 @@ def list_occurrences() -> dict:
           "slide), 'planar' (slide in-plane via dx/dy + spin), or 'ball' "
           "(free 3-axis rotation). Each connector `a`/`b` is {occurrence:<id>, "
           "origin:true} for the part origin, or {occurrence:<id>, face:"
-          "{feature_id, element}} for a named face (see list_elements). `b`'s "
+          "{feature_id, element}} for a named face (see list_elements): "
+          "planar/cylindrical faces give a full frame; a CONE anchors at its "
+          "apex, a SPHERE at its centre (natural ball-mate anchors). Beware "
+          "coaxial faces sharing a centroid (a head and its cross-hole) — "
+          "pick by area. The reply's errored_mates is the GLOBAL count after "
+          "re-solve; `errored` lists which mates failed and why. `b`'s "
           "occurrence is placed relative to `a`. flipped opposes the two Z "
           "axes (default true, so touching faces mate); rotation/offset/dx/dy "
           "and ball_rotation ([x,y,z,w]) set the DOF pose. offset slides `b` "
