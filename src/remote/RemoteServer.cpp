@@ -355,10 +355,60 @@ ImGuiKeyChord ParseChord(const std::string& text, std::string* error) {
   return chord;
 }
 
-ImVec2 FractionToPos(const json& params) {
-  ImVec2 size = ImGui::GetMainViewport()->Size;
-  return ImVec2(params.value("x", 0.5f) * size.x,
-                params.value("y", 0.5f) * size.y);
+// The 3D viewport's screen rect, snapshotted every tick in ProcessPending.
+// Zero size = no renderer (--headless) or not drawn yet; callers fall back to
+// the whole window.
+ImVec2 s_ViewportPos(0.0f, 0.0f);
+ImVec2 s_ViewportSize(0.0f, 0.0f);
+
+// (x, y) in 0..1 of the 3D VIEWPORT, which is what `describe` and every
+// caller means by "viewport_click" — mapping them over the whole OS window
+// aimed every click at the wrong pixel whenever a panel was docked (0.5,0.5
+// landed in the feature tree, not the middle of the model).
+ImVec2 FractionToPos(const json& params, const char* xKey = "x",
+                     const char* yKey = "y", float xDef = 0.5f,
+                     float yDef = 0.5f) {
+  ImVec2 pos = s_ViewportPos;
+  ImVec2 size = s_ViewportSize;
+  if (size.x <= 1.0f || size.y <= 1.0f) {
+    pos = ImVec2(0.0f, 0.0f);
+    size = ImGui::GetMainViewport()->Size;
+  }
+  return ImVec2(pos.x + params.value(xKey, xDef) * size.x,
+                pos.y + params.value(yKey, yDef) * size.y);
+}
+
+// Why the last UI action failed, from the test engine's own log ("Unable to
+// locate item: '###tb_box'"). Without this the client got "see app log" and
+// nothing was ever written there.
+std::string UiActionFailureReason(ImGuiTest* test) {
+  if (test == nullptr)
+    return {};
+  ImGuiTextBuffer buf;
+  test->Output.Log.ExtractLinesForVerboseLevels(
+      ImGuiTestVerboseLevel_Error, ImGuiTestVerboseLevel_Warning, &buf);
+  // The raw log is the engine's own transcript ("[0007] Error 'Unable to
+  // locate item: ...'"). Keep the reasons, drop the frame stamps and the
+  // bookkeeping lines, and join them into one JSON-RPC error string.
+  std::string out;
+  std::string line;
+  std::istringstream in(buf.c_str());
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+    const size_t close = line.find("] ");
+    if (line.rfind("[", 0) == 0 && close != std::string::npos)
+      line = line.substr(close + 2); // strip "[0007] "
+    if (line.rfind("Test: ", 0) == 0 ||
+        line.find("test failed.") != std::string::npos || line.empty())
+      continue;
+    if (line.rfind("Error ", 0) == 0)
+      line = line.substr(6); // the level is already implied
+    if (!out.empty())
+      out += "; ";
+    out += line;
+  }
+  return out;
 }
 
 // Snap the camera to a named standard view (optionally fitting first). Shared
@@ -470,10 +520,21 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"rename_part", "Rename a part."},
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\"."},
     {"key_press", "Send a key chord, e.g. \"Ctrl+Z\"."},
-    {"item_click", "UI test tier: click a widget by ImGui label."},
-    {"item_double_click", "UI test tier: double-click a widget."},
-    {"item_input", "UI test tier: type into a widget."},
-    {"viewport_click", "Click the 3D viewport at normalized (x, y)."},
+    {"item_click",
+     "UI test tier: click a widget by test-engine ref, e.g. "
+     "\"//##DockHost/**/###tb_box\" (//window, ** = any depth, ### = the "
+     "widget's stable id); {button: 1} right-clicks."},
+    {"item_double_click", "UI test tier: double-click a widget (same ref "
+                          "grammar as item_click)."},
+    {"item_input", "UI test tier: type into a widget {ref, value}."},
+    {"item_hover", "UI test tier: hover a widget {ref} — shows its tooltip "
+                   "and hover state without clicking."},
+    {"ui_items", "UI test tier: list the widgets under {ref} (default the "
+                 "focused window, {depth}): label, id, window, disabled, "
+                 "screen centre. The GUI, self-described."},
+    {"viewport_click",
+     "Click the 3D viewport at (x, y) as 0-1 fractions OF THE VIEWPORT "
+     "rect (0.5,0.5 = its centre, whatever is docked around it)."},
     {"viewport_drag", "Drag in the viewport (button 0/1/2) — orbit/pan."},
     {"scroll", "Scroll (zoom) the viewport."},
 };
@@ -947,8 +1008,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 
 bool RemoteServer::IsUiAction(const std::string& method) {
   static const char* kActions[] = {
-      "menu_click",     "item_click",    "item_double_click", "item_input",
-      "viewport_click", "viewport_drag", "key_press",         "scroll"};
+      "menu_click", "item_click", "item_double_click", "item_input",
+      "item_hover", "ui_items",   "viewport_click",    "viewport_drag",
+      "key_press",  "scroll"};
   for (const char* a : kActions)
     if (method == a)
       return true;
@@ -992,6 +1054,29 @@ bool RemoteServer::QueueUiAction(const Request& request) {
         ctx->ItemInputValue(ref.c_str(), value.get<std::string>().c_str());
       }
     };
+  } else if (m == "item_hover") {
+    const std::string ref = p.at("ref").get<std::string>();
+    m_uiAction = [ref](ImGuiTestContext* ctx) { ctx->MouseMove(ref.c_str()); };
+  } else if (m == "ui_items") {
+    const std::string ref = p.value("ref", "//$FOCUSED");
+    const int depth = p.value("depth", -1);
+    m_uiAction = [this, ref, depth](ImGuiTestContext* ctx) {
+      ImGuiTestItemList items;
+      ctx->GatherItems(&items, ref.c_str(), depth);
+      json out = json::array();
+      for (const ImGuiTestItemInfo& it : items) {
+        json e{{"label", it.DebugLabel},
+               {"id", it.ID},
+               {"depth", it.Depth},
+               {"disabled", (it.ItemFlags & ImGuiItemFlags_Disabled) != 0},
+               {"x", it.RectFull.GetCenter().x},
+               {"y", it.RectFull.GetCenter().y}};
+        if (it.Window != nullptr)
+          e["window"] = it.Window->Name;
+        out.push_back(std::move(e));
+      }
+      m_uiActionResult = json{{"items", std::move(out)}};
+    };
   } else if (m == "viewport_click") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
       const bool ctrl = p.value("ctrl", false);
@@ -1004,9 +1089,8 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     };
   } else if (m == "viewport_drag") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
-      ImVec2 size = ImGui::GetMainViewport()->Size;
-      ImVec2 from(p.value("x0", 0.5f) * size.x, p.value("y0", 0.5f) * size.y);
-      ImVec2 to(p.value("x1", 0.6f) * size.x, p.value("y1", 0.6f) * size.y);
+      const ImVec2 from = FractionToPos(p, "x0", "y0", 0.5f, 0.5f);
+      const ImVec2 to = FractionToPos(p, "x1", "y1", 0.6f, 0.6f);
       const int button = p.value("button", ImGuiMouseButton_Middle);
       const bool ctrl = p.value("ctrl", false);
       const bool shift = p.value("shift", false);
@@ -1026,8 +1110,12 @@ bool RemoteServer::QueueUiAction(const Request& request) {
   } else if (m == "key_press") {
     std::string error;
     ImGuiKeyChord chord = ParseChord(p.at("chord").get<std::string>(), &error);
-    if (chord == 0)
-      return false;
+    if (chord == 0) {
+      // Returning false here made the dispatcher answer "unknown method:
+      // key_press" — the chord is what was unknown, and it said so.
+      throw std::runtime_error(error.empty() ? "could not parse the key chord"
+                                             : error);
+    }
     m_uiAction = [chord](ImGuiTestContext* ctx) { ctx->KeyPress(chord); };
   } else if (m == "scroll") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
@@ -1040,6 +1128,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
 
   m_uiActionId = request.id;
   m_uiActionClient = request.client;
+  m_uiActionResult = json::object();
   m_uiActionInFlight = true;
   ImGuiTestEngine_QueueTest(m_engine, s_UiActionTest);
   return true;
@@ -1048,6 +1137,11 @@ bool RemoteServer::QueueUiAction(const Request& request) {
 void RemoteServer::ProcessPending(ui::AppState& state) {
   if (!m_running)
     return;
+
+  // Fractional viewport coordinates are resolved against the 3D viewport's
+  // rect, so snapshot it while we are on the main thread with `state` in hand.
+  s_ViewportPos = ImVec2(state.viewportPos.x, state.viewportPos.y);
+  s_ViewportSize = ImVec2(state.viewportSize.x, state.viewportSize.y);
 
   // Store a finished async topology run (TO2) even if the client never polls
   // study_status — this is the app's per-tick main-thread join point.
@@ -1061,10 +1155,14 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
     m_uiActionInFlight = false;
     m_uiAction = nullptr;
     if (s_UiActionTest->Output.Status == ImGuiTestStatus_Success) {
-      Respond(m_uiActionClient, m_uiActionId, json::object());
+      Respond(m_uiActionClient, m_uiActionId, m_uiActionResult);
     } else {
+      const std::string why = UiActionFailureReason(s_UiActionTest);
+      LOG_ERROR("Remote UI action failed: {}",
+                why.empty() ? "no reason logged" : why);
       RespondError(m_uiActionClient, m_uiActionId,
-                   "ui action failed (see app log)");
+                   why.empty() ? "ui action failed"
+                               : "ui action failed: " + why);
     }
   }
 

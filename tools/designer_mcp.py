@@ -1584,15 +1584,21 @@ def list_drawing_dims() -> dict:
 # ---------------------------------------------------------------------------
 
 _UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
-               "viewport_click", "viewport_drag", "key_press", "scroll")
+               "item_hover", "ui_items", "viewport_click", "viewport_drag",
+               "key_press", "scroll")
 
 
 @mcp.tool(description="Raw GUI event, for driving or testing the Designer "
           "GUI itself — for modeling, use the semantic tools instead. "
+          "A `ref` is a test-engine path: '//WindowName/**/###stable_id' "
+          "(** = any depth; ### ids are stable across labels/icons); "
+          "ui_items lists what is actually there. "
           "action + params: menu_click {path: 'Edit/Undo'}; item_click "
-          "{ref}; item_double_click {ref} (e.g. a tree sketch → edit mode); "
-          "item_input {ref, value}; viewport_click {x, y (0-1 window "
-          "fractions), button?: 0/1/2, ctrl?}; viewport_drag {x0, y0, x1, "
+          "{ref, button?: 1 = right-click}; item_double_click {ref} (e.g. a "
+          "tree sketch → edit mode); item_input {ref, value}; item_hover "
+          "{ref}; ui_items {ref?, depth?} → {items: [{label, id, window, "
+          "disabled, x, y}]}; viewport_click {x, y (0-1 fractions OF THE 3D "
+          "VIEWPORT), button?: 0/1/2, ctrl?}; viewport_drag {x0, y0, x1, "
           "y1, button?: 2=MMB orbit, ctrl?: pan, shift?: zoom}; key_press "
           "{chord: 'Ctrl+Z'}; scroll {x, y, amount}.")
 def ui_action(action: str, params: dict | None = None) -> dict:

@@ -377,6 +377,28 @@ def main():
         d.call("cancel_pending")
         expect(len(d.call("get_state")["features"]) == 1, "cancel discards")
 
+        # Driving the GUI as a scripted human (U9): the failure says WHY, the
+        # widgets can be enumerated instead of grepped for, and hover works.
+        try:
+            d.call("item_click", ref="//##DockHost/**/###tb_not_a_button")
+            expect(False, "clicking a missing widget must fail")
+        except RuntimeError as e:
+            expect("Unable to locate item" in str(e),
+                   f"ui action failure carries the engine's reason: {e}")
+        try:
+            d.call("key_press", chord="Ctrl+Nope")
+            expect(False, "a bad chord must fail")
+        except RuntimeError as e:
+            expect("unknown key token" in str(e),
+                   f"key_press reports the bad token, not 'unknown method': {e}")
+        items = d.call("ui_items", ref="//##DockHost")["items"]
+        labels = [i["label"] for i in items]
+        expect(any("###tb_box" in lb for lb in labels),
+               "ui_items enumerates the toolbar buttons")
+        expect(any(i["disabled"] for i in items),
+               "ui_items reports which widgets are disabled")
+        d.call("item_hover", ref="//##DockHost/**/###tb_box")
+
         # Constraint solving: two lines snap coincident
         d.call("new_project")
         sk = d.call("add_feature", feature={
