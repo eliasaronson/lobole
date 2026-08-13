@@ -722,6 +722,30 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
   };
 
+  // A pending preview is added straight to the Document (not via a command),
+  // so switching tabs used to stash it into the old part permanently — off
+  // the undo stack, unremovable. The tab switch must discard it first.
+  t = IM_REGISTER_TEST(engine, "preview", "tab_switch_discards_pending");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_box");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // the preview
+
+    ui::AddPart(*s_App, "Part 2"); // stashes the first tab
+    ctx->Yield();
+    IM_CHECK(!ui::HasPendingFeature(*s_App));
+
+    ui::SetActivePart(*s_App, 0); // back to the tab that had the preview
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0); // not stranded
+    IM_CHECK(!s_App->commands->CanUndo());         // and never committed
+  };
+
   // Direct-manipulation preview handles (docs/ui/direct-manipulation.md):
   // drag the viewport arrow to set the pending extrude's distance.
   t = IM_REGISTER_TEST(engine, "handles", "extrude_arrow_drag_sets_distance");

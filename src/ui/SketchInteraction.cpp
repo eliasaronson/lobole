@@ -1421,7 +1421,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       }
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-      edit.pickingPlane = false;
+      // Reset the whole session state, not just the flag: `reattachSketchId`
+      // (and any future arming intent) would otherwise survive the cancel and
+      // hijack the next sketch.
+      edit = SketchEditState{};
     }
     return true;
   }

@@ -912,6 +912,7 @@ void EnsureParts(AppState& state, const std::string& firstName) {
 
 size_t AddPart(AppState& state, const std::string& name) {
   EnsureParts(state);
+  CancelPendingFeature(state); // before StashActive — see SetActivePart
   StashActive(state);
   // Create and activate the new part.
   state.document = std::make_unique<Document>();
@@ -936,6 +937,7 @@ size_t AddPart(AppState& state, const std::string& name) {
 
 size_t AddAssembly(AppState& state, const std::string& name) {
   EnsureParts(state);
+  CancelPendingFeature(state); // before StashActive — see SetActivePart
   StashActive(state);
   // Create and activate the new assembly. Occurrence undo is Phase 3, so an
   // assembly tab currently carries no CommandStack.
@@ -957,6 +959,7 @@ size_t AddAssembly(AppState& state, const std::string& name) {
 
 size_t AddDrawing(AppState& state, const std::string& name) {
   EnsureParts(state);
+  CancelPendingFeature(state); // before StashActive — see SetActivePart
   StashActive(state);
   // Create and activate the new drawing. Undo is a snapshot stack (the
   // assembly pattern), so a drawing tab carries no CommandStack.
@@ -1024,6 +1027,11 @@ void SetActivePart(AppState& state, size_t index) {
       index == static_cast<size_t>(state.activePart)) {
     return;
   }
+  // A pending preview feature was added straight to the Document (not through
+  // a command), so stashing the tab would strand it in that document forever,
+  // off the undo stack. Discard it while `state.document` still owns it —
+  // ResetActiveTabUiState only zeroes the id, which is too late.
+  CancelPendingFeature(state);
   StashActive(state);
   ActivateSlot(state, index);
   ResetActiveTabUiState(state);

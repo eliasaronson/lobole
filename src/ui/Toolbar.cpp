@@ -260,8 +260,9 @@ void DrawModelToolbar(AppState& state) {
 void DrawSketchModeToolbar(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
 
-  // Finish (accept) the sketch.
-  if (ToolButton(ICON_FA_CHECK, "Finish sketch (Esc)"))
+  // Finish (accept) the sketch. Stable id: the GUI tests (and remote
+  // click-driving) need to address this button.
+  if (ToolButton(ICON_FA_CHECK "###tb_sk_finish", "Finish sketch (Esc)"))
     edit = SketchEditState{};
   Divider();
 
