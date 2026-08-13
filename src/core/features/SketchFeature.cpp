@@ -1362,3 +1362,15 @@ SketchFeature::OffsetChain(const std::vector<uint32_t>& chainIds,
     gen.push_back(AddEntity(e));
   return gen;
 }
+
+bool HasUserGeometry(const SketchFeature& sketch) {
+  if (!sketch.derived.empty() || !sketch.images.empty())
+    return true;
+  std::set<uint32_t> generated;
+  for (const sketch::ExternalGeom& ex : sketch.external)
+    generated.insert(ex.genIds.begin(), ex.genIds.end());
+  for (const sketch::Entity& e : sketch.entities)
+    if (generated.find(sketch::EntityId(e)) == generated.end())
+      return true;
+  return false;
+}

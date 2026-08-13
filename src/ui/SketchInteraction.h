@@ -25,14 +25,19 @@ SketchFeature* ResolveActiveSketch(AppState& state, size_t* outIndex = nullptr);
 
 // Starts a new sketch on the given plane: pushes an AddFeatureCommand, enters
 // edit mode on it, and aligns the camera. Returns the new sketch's id.
+// `purpose` marks WHY the sketch exists (Hole = collecting hole centres for
+// the Hole tool); it is applied inside BeginSketch after that function's own
+// SketchEditState reset, so it cannot be set by the caller beforehand.
 uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
-                            const std::string& name);
+                            const std::string& name,
+                            SketchPurpose purpose = SketchPurpose::Freeform);
 
 // Starts a new sketch that tracks a datum plane: bakes the datum's current
 // plane and records planeRef, so the sketch re-derives its plane whenever the
 // datum regenerates. Returns the new sketch's id.
 uint64_t BeginSketchOnDatum(AppState& state, const DatumPlaneFeature& datum,
-                            const std::string& name);
+                            const std::string& name,
+                            SketchPurpose purpose = SketchPurpose::Freeform);
 
 // The stable element ref for a picked body face ({meshId, faceIndex}), or
 // nullopt if that face isn't named (only extrude-NewBody faces are, so far).
@@ -43,7 +48,16 @@ std::optional<ElementRef> FaceElementRef(AppState& state, uint32_t meshId,
 // face's current plane and records faceRef, so the sketch (and everything
 // built on it) follows edits to the base body. Returns the new sketch's id.
 uint64_t BeginSketchOnFace(AppState& state, const ElementRef& ref,
-                           const SketchPlane& plane, const std::string& name);
+                           const SketchPlane& plane, const std::string& name,
+                           SketchPurpose purpose = SketchPurpose::Freeform);
+
+// Opens a hole-centre sketch on a picked body face: refuses (returns false,
+// nothing created) unless the face is genuinely PLANAR per the B-Rep
+// (CADShape::FacePlane) — FaceSelector's normal is a tessellation average,
+// which would happily build a tangent plane on a cylinder. On success the
+// session is SketchPurpose::Hole with the Point tool armed.
+bool BeginHoleSketchOnFace(AppState& state, uint32_t meshId,
+                           uint32_t faceIndex);
 
 // Re-points an existing face-attached sketch at another face (one undoable
 // edit). Backs the "Reattach face…" flow.

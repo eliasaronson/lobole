@@ -1269,10 +1269,18 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       HandleEdit(state, feature, DragDim(state, "C'sink depth", &ho->csDepth),
                  index, commit);
     }
-    if (Feature* src = state.document->FindFeatureById(ho->sketchId))
-      ImGui::Text("Points: %s", src->GetName().c_str());
-    else
+    if (Feature* src = state.document->FindFeatureById(ho->sketchId)) {
+      // The centre count is the confirmation the user wants right here: it
+      // says how many holes this feature will drill.
+      size_t centres = 0;
+      if (const auto* psk = dynamic_cast<const SketchFeature*>(src))
+        for (const sketch::Entity& e : psk->entities)
+          if (std::get_if<sketch::Point>(&e) != nullptr)
+            centres++;
+      ImGui::Text("Points: %s (%zu centres)", src->GetName().c_str(), centres);
+    } else {
       ImGui::TextColored(ImVec4(0.9f, 0.4f, 0.4f, 1.0f), "Points: missing");
+    }
   } else if (auto* cv = dynamic_cast<CurveFeature*>(&feature)) {
     const char* kinds[] = {"Fit spline", "Helix", "Control poly"};
     int k = std::to_underlying(cv->kind);

@@ -535,6 +535,11 @@ void CreateRib(AppState& state);
 void CreateThread(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);
+// Arms the Hole tool: pick a FLAT face (or plane) to drill into, which opens
+// a point sketch on it with the Point tool ready; ✓/Enter then converts the
+// centres into a Hole preview. A single planar face already selected skips
+// the pick. No-op without a body (there would be nothing to cut).
+void StartHoleTool(AppState& state);
 
 // The stable ElementRef for a picked B-Rep edge (the body's createdBy + the
 // edge's MappedName); nullopt when the edge has no stable name.

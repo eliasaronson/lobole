@@ -910,3 +910,10 @@ private:
 // sketch-on-face (v16) and the up-to-face extrude end condition (M3.3).
 std::optional<SketchPlane> ResolveFacePlane(const RegenContext& ctx,
                                             const ElementRef& ref);
+
+// True when the sketch holds anything the USER made: any entity that is not
+// generated external geometry (a face-attached sketch arrives holding the
+// host face's projected outline), or any derived op / reference image.
+// The Hole tool uses it to decide whether cancelling should discard the
+// sketch it auto-created, or keep work the user actually did.
+bool HasUserGeometry(const SketchFeature& sketch);

@@ -427,7 +427,8 @@ SketchFeature* ResolveActiveSketch(AppState& state, size_t* outIndex) {
 // Commits a freshly-built sketch, enters edit mode on it, and aligns the
 // camera to its plane. Shared by the plane and datum entry points.
 static uint64_t BeginSketch(AppState& state, std::unique_ptr<SketchFeature> sk,
-                            const SketchPlane& plane, const std::string& name) {
+                            const SketchPlane& plane, const std::string& name,
+                            SketchPurpose purpose) {
   state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(sk)),
                           *state.document);
   const size_t index = state.document->FeatureCount() - 1;
@@ -435,6 +436,10 @@ static uint64_t BeginSketch(AppState& state, std::unique_ptr<SketchFeature> sk,
 
   state.sketchEdit = SketchEditState{};
   state.sketchEdit.activeSketchId = id;
+  // Applied AFTER the reset above — a caller cannot set these beforehand.
+  state.sketchEdit.purpose = purpose;
+  if (purpose == SketchPurpose::Hole)
+    state.sketchEdit.tool = SketchTool::Point; // the session's only job
   state.measure = MeasureState{}; // sketch mode replaces the measure tool
   SelectFeature(state, id);
   if (state.camera) {
@@ -445,18 +450,19 @@ static uint64_t BeginSketch(AppState& state, std::unique_ptr<SketchFeature> sk,
 }
 
 uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,
-                            const std::string& name) {
+                            const std::string& name, SketchPurpose purpose) {
   return BeginSketch(state, std::make_unique<SketchFeature>(name, plane), plane,
-                     name);
+                     name, purpose);
 }
 
 uint64_t BeginSketchOnDatum(AppState& state, const DatumPlaneFeature& datum,
-                            const std::string& name) {
+                            const std::string& name, SketchPurpose purpose) {
   // Bake the datum's current plane as the initial value and record the
   // reference so the sketch re-derives its plane on every regeneration.
   auto sketch = std::make_unique<SketchFeature>(name, datum.OutputPlane());
   sketch->planeRef = datum.GetId();
-  return BeginSketch(state, std::move(sketch), datum.OutputPlane(), name);
+  return BeginSketch(state, std::move(sketch), datum.OutputPlane(), name,
+                     purpose);
 }
 
 std::optional<ElementRef> FaceElementRef(AppState& state, uint32_t meshId,
@@ -475,7 +481,8 @@ std::optional<ElementRef> FaceElementRef(AppState& state, uint32_t meshId,
 }
 
 uint64_t BeginSketchOnFace(AppState& state, const ElementRef& ref,
-                           const SketchPlane& plane, const std::string& name) {
+                           const SketchPlane& plane, const std::string& name,
+                           SketchPurpose purpose) {
   // Bake the face's current plane and record the ElementRef so the sketch
   // re-derives its plane from the (possibly moved) face on every regeneration.
   auto sketch = std::make_unique<SketchFeature>(name, plane);
@@ -485,7 +492,33 @@ uint64_t BeginSketchOnFace(AppState& state, const ElementRef& ref,
   // references that now track the face when the body changes, instead of the
   // old one-shot Fixed-constraint bake. Materialises on the first regen.
   sketch->AddExternalGeometry(ref, sketch::ExternalKind::Face);
-  return BeginSketch(state, std::move(sketch), plane, name);
+  return BeginSketch(state, std::move(sketch), plane, name, purpose);
+}
+
+bool BeginHoleSketchOnFace(AppState& state, uint32_t meshId,
+                           uint32_t faceIndex) {
+  if (!state.document)
+    return false;
+  const auto& meshes = state.documentMeshes;
+  const auto it = std::find_if(
+      meshes.begin(), meshes.end(),
+      [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });
+  if (it == meshes.end() || it->bodyIndex >= state.document->GetBodies().size())
+    return false;
+  const Body& body = state.document->GetBodies()[it->bodyIndex];
+  // The B-Rep planarity gate: FacePlane fails on curved faces and hands back
+  // the exact frame for planar ones.
+  glm::vec3 origin, normal, uAxis;
+  if (!body.shape.FacePlane(static_cast<int>(faceIndex), origin, normal, uAxis))
+    return false;
+  const SketchPlane plane(origin, normal, uAxis);
+  const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+  const std::string name = "Hole points " + std::to_string(n);
+  if (auto ref = FaceElementRef(state, meshId, faceIndex))
+    BeginSketchOnFace(state, *ref, plane, name, SketchPurpose::Hole);
+  else
+    BeginSketchOnPlane(state, plane, name, SketchPurpose::Hole);
+  return true;
 }
 
 // Re-points an existing sketch's faceRef at a new face, as one undoable edit.
@@ -681,6 +714,8 @@ static void HandleSketchKeys(AppState& state) {
       BeginSketchExtrude(state); // Shift+E: extrude the sketch
     else if (ImGui::IsKeyPressed(ImGuiKey_R))
       BeginSketchRevolve(state); // Shift+R: revolve the sketch
+    else if (ImGui::IsKeyPressed(ImGuiKey_H))
+      BeginSketchHole(state); // Shift+H: drill the sketch's points
     else if (ImGui::IsKeyPressed(ImGuiKey_G))
       setTool(SketchTool::RectangleCenter); // Shift+G: centre rectangle
     return;
@@ -1396,6 +1431,11 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           }
           edit.pickingPlane = false;
           edit.reattachSketchId = 0;
+        } else if (hit.hit && edit.purpose == SketchPurpose::Hole) {
+          // Hole sessions demand a genuinely planar face; a refusal stays
+          // armed with an explanation rather than making a bad sketch.
+          if (!BeginHoleSketchOnFace(state, hit.meshId, hit.faceIndex))
+            edit.actionMsg = "Hole: that face is curved - pick a flat one.";
         } else if (hit.hit) {
           glm::vec3 c =
               state.faceSelector->GetFaceCenter(hit.meshId, hit.faceIndex);
@@ -1414,9 +1454,9 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         } else if (datumId != 0) {
           if (auto* dp = dynamic_cast<DatumPlaneFeature*>(
                   state.document->FindFeatureById(datumId)))
-            BeginSketchOnDatum(state, *dp, name);
+            BeginSketchOnDatum(state, *dp, name, edit.purpose);
         } else if (plane >= 0) {
-          BeginSketchOnPlane(state, DefaultPlane(plane), name);
+          BeginSketchOnPlane(state, DefaultPlane(plane), name, edit.purpose);
         }
       }
     }
@@ -1482,9 +1522,21 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       edit.selectedConstraint = -1; // deselect the constraint first
     } else if (!edit.selected.empty()) {
       edit.selected.clear();
+    } else if (edit.purpose == SketchPurpose::Hole) {
+      CancelHoleSession(state); // discards the sketch if nothing was drawn
     } else {
       edit = SketchEditState{}; // leave sketch edit
     }
+    return true;
+  }
+
+  // Enter ends centre placement and opens the hole options — the ✓ button's
+  // keyboard twin. Guarded like the Escape ladder: a live value field owns
+  // the key. (Sketch mode has no other global Enter binding.)
+  if (edit.purpose == SketchPurpose::Hole && !ImGui::GetIO().WantTextInput &&
+      edit.editingDim < 0 && !edit.dimOnCreateOpen &&
+      ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false)) {
+    BeginSketchHole(state);
     return true;
   }
 
@@ -2438,6 +2490,14 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
           " (Step " + std::to_string(step) + "/" + std::to_string(count) + ")";
     p.text += std::string(": ") + what;
   };
+  // A Hole session owns the prompt while placing centres, so the user is
+  // told how the session ENDS (Enter/✓) — the Point tool's own prompt does
+  // not mention that. Other tools inside the session keep theirs.
+  if (edit.purpose == SketchPurpose::Hole &&
+      (edit.tool == T::Point || edit.tool == T::Select)) {
+    set("Hole", 2, 3, "click the hole centres - Enter for the hole options");
+    return p;
+  }
   // For 3-click tools (arcs / ellipse), the current step from the pending
   // state.
   const int click3 = edit.hasPendingPoint2 ? 3 : (edit.hasPendingPoint ? 2 : 1);

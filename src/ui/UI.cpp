@@ -72,6 +72,14 @@ void DrawModelToolPrompt(AppState& state) {
   if (state.sketchEdit.IsEditing())
     return; // the sketch prompt bar owns this spot while sketching
   const char* prompt = ArmedPrompt(state);
+  // Plane/face picking has no armed CONTEXT (it is not a pick slot), so it
+  // never had a pill — name the step, especially for the Hole tool whose
+  // first stage is otherwise unexplained in the viewport.
+  if (prompt == nullptr && state.sketchEdit.pickingPlane) {
+    prompt = state.sketchEdit.purpose == SketchPurpose::Hole
+                 ? "Hole (Step 1/3): click the flat face to drill into"
+                 : "New Sketch: click a plane or a model face to sketch on";
+  }
   if (prompt == nullptr)
     return; // feedback shows only while its tool is armed
   // One shared pill renderer with the sketch prompt bar (U8b).

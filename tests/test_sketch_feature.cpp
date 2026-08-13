@@ -1003,3 +1003,21 @@ TEST_CASE("ProjectFaceBoundary maps face outlines to construction geometry",
   }
   CHECK(sawCircle);
 }
+
+TEST_CASE("HasUserGeometry ignores generated external geometry", "[sketch]") {
+  // A face-attached sketch arrives holding the host face's projected outline;
+  // that is not the user's work, so the Hole tool may discard such a sketch.
+  SketchFeature sk("S", SketchPlane(PlaneType::XY));
+  CHECK_FALSE(HasUserGeometry(sk)); // empty
+
+  sketch::ExternalGeom ex;
+  ex.ref = ElementRef{7, "2/cap0"};
+  ex.kind = sketch::ExternalKind::Face;
+  ex.genIds = {sk.AddEntity(sketch::Line{{0, 0}, {4, 0}}),
+               sk.AddEntity(sketch::Line{{4, 0}, {4, 2}})};
+  sk.external.push_back(ex);
+  CHECK_FALSE(HasUserGeometry(sk)); // only projected outline
+
+  sk.AddEntity(sketch::Point{{2.0f, 1.0f}}); // the user places a hole centre
+  CHECK(HasUserGeometry(sk));
+}

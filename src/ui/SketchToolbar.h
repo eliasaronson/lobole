@@ -30,6 +30,19 @@ void BeginExtrudeOfSketch(AppState& state, SketchFeature& sketch,
 void BeginRevolveOfSketch(AppState& state, SketchFeature& sketch,
                           std::vector<std::vector<uint32_t>> regions = {});
 
+// Turns the active sketch's Point entities into a Hole preview: exits sketch
+// mode, then BeginPreviewFeature (the BeginSketchExtrude recipe). No-ops with
+// an actionMsg when the sketch has no points. Shared by the sketch toolbar's
+// hole button (###tb_sk_hole / Shift+H), the ✓ of a Hole session, and Enter.
+void BeginSketchHole(AppState& state);
+bool CanBeginSketchHole(const AppState& state); // >= 1 Point (button gate)
+
+// Ends a Hole session (Escape). The sketch the session CREATED is removed —
+// one undoable step — when the user drew nothing in it; anything they did
+// draw is kept. Only ever called while purpose == Hole, which proves this
+// session created the sketch (###tb_sk_hole never sets the purpose).
+void CancelHoleSession(AppState& state);
+
 // The selected sketch if it has a closed profile, else the most recent one
 // that does; null when the document has none. Backs both the model-toolbar
 // Extrude/Revolve actions and their enable gates.

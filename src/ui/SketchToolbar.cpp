@@ -1,6 +1,7 @@
 #include "ui/SketchToolbar.h"
 
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/HoleFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h" // DocumentIO (break-link commit)
@@ -282,11 +283,14 @@ void DrawSketchToolWindow(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
 
   if (edit.pickingPlane) {
-    BeginToolWindowFrame(state, "New Sketch");
+    const bool hole = edit.purpose == SketchPurpose::Hole;
+    BeginToolWindowFrame(state, hole ? "Hole" : "New Sketch");
     ImGui::TextWrapped(
-        "Pick a plane or a model face to sketch on. (Esc to cancel)");
+        hole ? "Step 1 of 3 - pick the FLAT face to drill into. (Esc to "
+               "cancel)"
+             : "Pick a plane or a model face to sketch on. (Esc to cancel)");
     if (ImGui::Button("Cancel"))
-      edit.pickingPlane = false;
+      edit = SketchEditState{};
     ImGui::End();
     return;
   }
@@ -313,8 +317,36 @@ void DrawSketchToolWindow(AppState& state) {
       edit.tool == SketchTool::Pattern || edit.tool == SketchTool::Offset ||
       edit.tool == SketchTool::CalibrateImage ||
       edit.tool == SketchTool::Dimension || edit.tool == SketchTool::Image;
-  if (!hasSession)
+  if (!hasSession) {
+    // A Hole session gets a window of its own while placing centres — but
+    // only when no per-tool session owns the window, so switching to e.g.
+    // Pattern (to array the centres) still shows Pattern's options.
+    if (edit.purpose == SketchPurpose::Hole) {
+      size_t centres = 0;
+      for (const sketch::Entity& e : sketch->entities)
+        if (std::get_if<sketch::Point>(&e) != nullptr)
+          centres++;
+      BeginToolWindowFrame(state, "Hole");
+      ImGui::TextWrapped("Step 2 of 3 - click the hole centres on the face.");
+      ImGui::Text("Centres: %zu", centres);
+      bool toOptions = false, cancel = false;
+      ImGui::BeginDisabled(centres == 0);
+      if (ImGui::Button("Hole options (Enter)"))
+        toOptions = true;
+      ImGui::EndDisabled();
+      ImGui::SameLine();
+      if (ImGui::Button("Cancel"))
+        cancel = true;
+      ImGui::End();
+      // Both tear the session down, so act after End() (the image-session
+      // rule).
+      if (toOptions)
+        BeginSketchHole(state);
+      else if (cancel)
+        CancelHoleSession(state);
+    }
     return;
+  }
 
   // The image session needs its image; if it vanished (undo), close.
   if (edit.tool == SketchTool::Image) {
@@ -728,6 +760,57 @@ void BeginRevolveOfSketch(AppState& state, SketchFeature& sketch,
   rev->axis = axis;
   rev->regions = std::move(regions);
   BeginPreviewFeature(state, std::move(rev));
+}
+
+namespace {
+// Hole centres placed so far in `sketch`.
+size_t HolePointCount(const SketchFeature& sketch) {
+  size_t n = 0;
+  for (const sketch::Entity& e : sketch.entities)
+    if (std::get_if<sketch::Point>(&e) != nullptr)
+      n++;
+  return n;
+}
+} // namespace
+
+bool CanBeginSketchHole(const AppState& state) {
+  const auto* sk = dynamic_cast<const SketchFeature*>(
+      state.document
+          ? state.document->FindFeatureById(state.sketchEdit.activeSketchId)
+          : nullptr);
+  return sk != nullptr && HolePointCount(*sk) > 0;
+}
+
+void BeginSketchHole(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (sketch == nullptr)
+    return;
+  if (HolePointCount(*sketch) == 0) {
+    edit.actionMsg = "Hole: click at least one centre point first (Esc "
+                     "cancels).";
+    return;
+  }
+  const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+  const uint64_t sketchId = edit.activeSketchId;
+  edit = SketchEditState{}; // exit sketch mode so the preview + dialog show
+  auto hole = std::make_unique<HoleFeature>(
+      "Hole " + std::to_string(n), sketchId, HoleKind::Simple, 0.5, 1.0);
+  hole->through = true; // the bolt-hole default; the dialog offers a depth
+  BeginPreviewFeature(state, std::move(hole));
+}
+
+void CancelHoleSession(AppState& state) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  // Discard the auto-created sketch only when the user drew nothing in it —
+  // a face-attached sketch's projected outline does not count as their work.
+  const bool discard = sketch != nullptr && !HasUserGeometry(*sketch);
+  state.sketchEdit = SketchEditState{};
+  if (discard)
+    state.commands->Execute(std::make_unique<RemoveFeatureCommand>(index),
+                            *state.document);
+  state.selection.Clear();
 }
 
 void BeginSketchRevolve(AppState& state) {

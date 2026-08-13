@@ -51,6 +51,12 @@ struct DocumentRenderMesh {
 
 enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
 
+// Why a sketch session exists. Hole = the session is collecting hole centres
+// for the Hole tool, so ✓/Enter hand off to BeginSketchHole instead of just
+// exiting, and Escape discards the sketch the tool created if the user drew
+// nothing in it. Freeform = an ordinary sketch (never auto-discarded).
+enum class SketchPurpose { Freeform, Hole };
+
 enum class SketchTool {
   Select,
   Point,
@@ -84,6 +90,12 @@ struct SketchEditState {
   bool pickingPlane = false;   // "New Sketch" armed, waiting for a plane/face
   uint64_t activeSketchId = 0; // 0 = not editing a sketch
   SketchTool tool = SketchTool::Select;
+  // What this session is for. NOTE: BeginSketch() resets this whole struct,
+  // so the purpose is passed to BeginSketchOn*() as a PARAMETER and applied
+  // by BeginSketch AFTER its own reset — never stashed across the call.
+  // Every other reset site (tab switch, undo of the sketch, opening another
+  // sketch, Shift+E, File/New) SHOULD clear it, and does, for free.
+  SketchPurpose purpose = SketchPurpose::Freeform;
   bool hasPendingPoint = false; // first click of a two-click entity placed
   glm::vec2 pendingPoint{0.0f};
   bool hasPendingPoint2 = false; // second click of a 3-click tool (arcs)

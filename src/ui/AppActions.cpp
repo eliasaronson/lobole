@@ -45,6 +45,7 @@
 #include "core/sketch/SketchProfile.h"
 #include "ui/FeatureEditor.h" // PickSlot (thread face slot)
 #include "ui/PreviewFeature.h"
+#include "ui/SelectionPipeline.h" // ResolveFaceItem (Hole select-first)
 #include "ui/SketchInteraction.h" // SketchUVToScreen
 #include <nlohmann/json.hpp>
 
@@ -625,6 +626,26 @@ void CreateRib(AppState& state) {
 void StartNewSketch(AppState& state) {
   state.sketchEdit = SketchEditState{};
   state.sketchEdit.pickingPlane = true;
+}
+
+void StartHoleTool(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return; // a hole is a cut: nothing to cut into yet
+  // Select-first (U7b): one planar face already picked IS the face to drill.
+  std::string refusal;
+  if (const SelectionItem* item =
+          state.selection.First(SelectionItem::Kind::Face)) {
+    uint32_t meshId = 0, faceIndex = 0;
+    if (ResolveFaceItem(state, *item, meshId, faceIndex)) {
+      if (BeginHoleSketchOnFace(state, meshId, faceIndex))
+        return; // straight to placing centres
+      refusal = "Hole: that face is curved - pick a flat one.";
+    }
+  }
+  state.sketchEdit = SketchEditState{}; // reset FIRST, then arm
+  state.sketchEdit.pickingPlane = true;
+  state.sketchEdit.purpose = SketchPurpose::Hole;
+  state.sketchEdit.actionMsg = refusal;
 }
 
 // Whether datum quads should render this frame. Unlike base planes, datums are

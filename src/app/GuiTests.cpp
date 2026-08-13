@@ -20,6 +20,7 @@
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SketchInteraction.h"
+#include "ui/SketchToolbar.h"
 
 #include "imgui_te_context.h"
 #include "imgui_te_engine.h"
@@ -108,6 +109,17 @@ static void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId) {
 // what happens *inside* a sketch; the interactive toolbar -> viewport plane
 // pick that opens one is covered on its own by
 // sketch/toolbar_plane_pick_enters_edit.
+// A Hole session on a base plane: the deterministic way into stage B
+// (placing centres) without a face pick.
+static void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx) {
+  ui::BeginSketchOnPlane(*s_App, ui::DefaultPlane(planeIdx), "Hole points",
+                         ui::SketchPurpose::Hole);
+  ctx->Yield();
+  if (s_App->camera)
+    s_App->camera->FinishAnimation();
+  ctx->Yield();
+}
+
 static void EnterSketchOnPlane(ImGuiTestContext* ctx, int planeIdx) {
   const std::string name =
       "Sketch " + std::to_string(Doc()->FeatureCount() + 1);
@@ -778,6 +790,256 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0); // not stranded
     IM_CHECK(!s_App->commands->CanUndo());         // and never committed
+  };
+
+  // U9: the Hole tool. A hole is NOT sugar for an extruded cut (its tool is
+  // built from primitives, so counterbore/countersink are impossible as a
+  // cut), and before this it could only be created over the script API.
+  t = IM_REGISTER_TEST(engine, "hole", "sk_hole_button_on_existing_points");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box"); // something to drill into
+    ctx->Yield();
+    const double before = Doc()->GetBodies()[0].shape.Volume();
+
+    // A plain (Freeform) sketch with two points, then the sketch-toolbar
+    // Hole button — the "I already have a point sketch" path.
+    EnterSketchOnPlane(ctx, 2); // right/YZ: UV is (y, z), drilling -X
+    auto* sketch = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json b4 = DocumentIO::FeatureToJson(*sketch);
+    // The default box sits at negative x, so a hole drilled along -X from the
+    // YZ plane runs through it; centre it on the box's y/z.
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    sketch->AddEntity(sketch::Point{{mid.y - 0.3f, mid.z - 0.3f}});
+    sketch->AddEntity(sketch::Point{{mid.y + 0.3f, mid.z + 0.3f}});
+    nlohmann::json af = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                                 Doc()->FeatureCount() - 1, b4, af),
+                             *Doc());
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_sk_hole");
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->TypeName() ==
+             "Hole");
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < before - 1e-6);
+  };
+
+  // Enter opens the params window; it must NOT also accept it (the pending
+  // preview survives the same frame's keypress).
+  t = IM_REGISTER_TEST(engine, "hole", "enter_opens_params_without_accepting");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+
+    EnterHoleSketchOnPlane(ctx, 2);
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Hole);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Point);
+    auto* sketch = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    nlohmann::json b4 = DocumentIO::FeatureToJson(*sketch);
+    sketch->AddEntity(sketch::Point{{1.0f, 1.0f}});
+    nlohmann::json af = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(std::make_unique<ModifyFeatureCommand>(
+                                 Doc()->FeatureCount() - 1, b4, af),
+                             *Doc());
+    ctx->Yield();
+
+    const size_t features = Doc()->FeatureCount();
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(3);
+    IM_CHECK(ui::HasPendingFeature(*s_App));          // params are open
+    IM_CHECK_EQ(Doc()->FeatureCount(), features + 1); // the preview only
+    ui::CancelPendingFeature(*s_App);
+  };
+
+  // Cancelling discards the sketch the tool created when the user drew
+  // nothing, and keeps it once they did — undoably either way.
+  t = IM_REGISTER_TEST(engine, "hole", "escape_discards_empty_keeps_drawn");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const size_t base = Doc()->FeatureCount();
+
+    EnterHoleSketchOnPlane(ctx, 2); // empty session
+    IM_CHECK_EQ(Doc()->FeatureCount(), base + 1);
+    ui::CancelHoleSession(*s_App);
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+    IM_CHECK_EQ(Doc()->FeatureCount(), base); // discarded
+    ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), base + 1); // and undoable
+    ui::GlobalRedo(*s_App);
+    ctx->Yield();
+
+    EnterHoleSketchOnPlane(ctx, 2); // this time the user draws
+    const size_t withSketch = Doc()->FeatureCount();
+    auto* sketch =
+        dynamic_cast<SketchFeature*>(Doc()->GetFeature(withSketch - 1));
+    nlohmann::json b4 = DocumentIO::FeatureToJson(*sketch);
+    sketch->AddEntity(sketch::Point{{1.0f, 1.0f}});
+    nlohmann::json af = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(withSketch - 1, b4, af), *Doc());
+    ctx->Yield();
+    ui::CancelHoleSession(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), withSketch); // kept
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Freeform);
+  };
+
+  // The model toolbar arms a face pick; a curved face is refused (and the
+  // tool stays armed) while a flat one opens the centre-placing session.
+  t = IM_REGISTER_TEST(engine, "hole", "curved_face_refused_flat_accepted");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_cylinder");
+    ctx->Yield();
+    const size_t base = Doc()->FeatureCount();
+
+    ToolbarClick(ctx, "###tb_hole");
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.pickingPlane);
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Hole);
+
+    // The default cylinder stands on +Y at x = -4 (NextSpot): radius 0.8,
+    // spanning y -1..1. Look at it from +Z so the lateral face fills the
+    // middle of the view (a model face always outranks the base planes).
+    const glm::vec3 axis(-4.0f, 0.0f, 0.0f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(axis);
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    s_App->camera->SetPosition(axis + glm::vec3(0, 0, 10));
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(axis + glm::vec3(0.0f, 0.0f, 0.8f)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.pickingPlane); // still armed
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+    IM_CHECK_EQ(Doc()->FeatureCount(), base);       // nothing created
+    IM_CHECK(!s_App->sketchEdit.actionMsg.empty()); // and it says why
+
+    // The flat top cap is accepted.
+    s_App->camera->SetTarget(axis + glm::vec3(0, 1, 0));
+    s_App->camera->SetUp(glm::vec3(0, 0, -1));
+    s_App->camera->SetPosition(axis + glm::vec3(0, 11, 0));
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(axis + glm::vec3(0.0f, 1.0f, 0.0f)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.pickingPlane);
+    IM_CHECK(s_App->sketchEdit.IsEditing());
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Hole);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Point);
+  };
+
+  // The whole clicks-only flow the GUI dogfood could not do at all: arm the
+  // tool, pick the face, click centres, Enter, Accept — and one Ctrl+Z takes
+  // the hole back out.
+  t = IM_REGISTER_TEST(engine, "hole", "face_pick_to_accept");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const double solid = Doc()->GetBodies()[0].shape.Volume();
+
+    // Straight down at the middle of the box's top face. Primitives are
+    // placed by their min corner, so this must come from the bounding box —
+    // a guessed centre lands on a corner edge, which outranks the face.
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 top((lo.x + hi.x) * 0.5f, hi.y, (lo.z + hi.z) * 0.5f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(top);
+    s_App->camera->SetUp(glm::vec3(0, 0, -1));
+    s_App->camera->SetPosition(top + glm::vec3(0, 10, 0));
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_hole");
+    ctx->Yield();
+    ctx->MouseMoveToPos(WorldToWindow(top));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.IsEditing());
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Point);
+    const size_t withSketch = Doc()->FeatureCount();
+
+    // Two centres, well clear of the face's edges so nothing snaps to them.
+    ctx->MouseMoveToPos(WorldToWindow(top + glm::vec3(-0.35f, 0.0f, 0.3f)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    ctx->MouseMoveToPos(WorldToWindow(top + glm::vec3(0.35f, 0.0f, -0.3f)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(3);
+    IM_CHECK(!s_App->sketchEdit.IsEditing()); // handed off to the preview
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+
+    IM_CHECK_EQ(Doc()->FeatureCount(), withSketch + 1);
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->TypeName() ==
+             "Hole");
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < solid - 1e-6);
+
+    ctx->MenuClick("Edit/Undo"); // one step, not two
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), withSketch);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - solid) < 1e-6);
+  };
+
+  // Select-first is the house convention: with a planar face already picked,
+  // the tool skips straight to placing centres.
+  t = IM_REGISTER_TEST(engine, "hole", "preselected_face_skips_pick");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 top((lo.x + hi.x) * 0.5f, hi.y, (lo.z + hi.z) * 0.5f);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(top);
+    s_App->camera->SetUp(glm::vec3(0, 0, -1));
+    s_App->camera->SetPosition(top + glm::vec3(0, 10, 0));
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(top));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(s_App->faceSelector->GetSelectedFace() != nullptr);
+
+    ToolbarClick(ctx, "###tb_hole");
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.pickingPlane); // no second pick asked for
+    IM_CHECK(s_App->sketchEdit.IsEditing());
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Hole);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Point);
   };
 
   // Direct-manipulation preview handles (docs/ui/direct-manipulation.md):

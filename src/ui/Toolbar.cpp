@@ -227,6 +227,9 @@ void DrawModelToolbar(AppState& state) {
   if (ToolButton(ICON_FA_BARS_STAGGERED "###tb_rib",
                  "Rib (thin web from an open sketch)", hasBody && idle))
     CreateRib(state);
+  if (ToolButton(ICON_FA_BULLSEYE "###tb_hole",
+                 "Hole: pick a flat face, click the centres", hasBody && idle))
+    StartHoleTool(state);
   if (ToolButton(ICON_FA_CIRCLE_NOTCH "###tb_thread",
                  "Thread (cosmetic; pick a cyl. face)", hasBody && idle))
     CreateThread(state);
@@ -280,9 +283,18 @@ void DrawSketchModeToolbar(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
 
   // Finish (accept) the sketch. Stable id: the GUI tests (and remote
-  // click-driving) need to address this button.
-  if (ToolButton(ICON_FA_CHECK "###tb_sk_finish", "Finish sketch (Esc)"))
-    edit = SketchEditState{};
+  // click-driving) need to address this button. In a Hole session the ✓ is
+  // the hand-off to the hole options rather than a plain exit.
+  const bool holeSession = edit.purpose == SketchPurpose::Hole;
+  bool finishHole = false;
+  if (ToolButton(ICON_FA_CHECK "###tb_sk_finish",
+                 holeSession ? "Hole options (Enter) - Esc cancels the hole"
+                             : "Finish sketch (Esc)")) {
+    if (holeSession)
+      finishHole = true; // acted on after the toolbar, see below
+    else
+      edit = SketchEditState{};
+  }
   Divider();
 
   // Switch to a sketch tool, resetting the transient per-tool edit state.
@@ -517,7 +529,21 @@ void DrawSketchModeToolbar(AppState& state) {
       ImGui::SetTooltip("Revolve the sketch (Shift+R)");
     ImGui::EndDisabled();
     ImGui::SameLine();
+    // Drill the sketch's points. The only GUI path to a hole on a sketch you
+    // already have (e.g. a patterned bolt circle), and the visible twin of
+    // the ✓ hand-off in a Hole session.
+    ImGui::BeginDisabled(!CanBeginSketchHole(state));
+    if (ImGui::Button(ICON_FA_BULLSEYE "###tb_sk_hole"))
+      finishHole = true;
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("Drill holes at the sketch's points (Shift+H)");
+    ImGui::SameLine();
   }
+  // BeginSketchHole tears down the sketch session, so it must run after the
+  // toolbar's widgets are done touching `edit` (the CalibrateImage rule).
+  if (finishHole)
+    BeginSketchHole(state);
   Divider();
 
   if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)"))

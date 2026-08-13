@@ -73,6 +73,8 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
       [](AppState& s) { CreateChamfer(s); });
   add("Create: Rib", nullptr, idle && hasBody,
       [](AppState& s) { CreateRib(s); });
+  add("Create: Hole", nullptr, idle && hasBody,
+      [](AppState& s) { StartHoleTool(s); });
   add("Create: Thread", nullptr, idle && hasBody,
       [](AppState& s) { CreateThread(s); });
   const size_t sketches =
