@@ -378,6 +378,42 @@ ImVec2 FractionToPos(const json& params, const char* xKey = "x",
                 pos.y + params.value(yKey, yDef) * size.y);
 }
 
+// A widget addressed either by test-engine path ({ref}) or by the numeric id
+// {id} that `ui_items` reports. Ids are the only handle on widgets whose
+// label is hidden ("##Type" — every LabeledCombo), which no path can reach.
+struct ItemTarget {
+  std::string path;
+  ImGuiID id = 0;
+
+  ItemTarget(const json& params, const std::string& method) {
+    path = params.value("ref", std::string());
+    id = params.value("id", ImGuiID(0));
+    if (path.empty() && id == 0) {
+      throw std::runtime_error(method + " needs {ref} or {id} (ids come from "
+                                        "ui_items)");
+    }
+  }
+  // Valid while this object lives — the actions hold it by value.
+  ImGuiTestRef Ref() const {
+    return path.empty() ? ImGuiTestRef(id) : ImGuiTestRef(path.c_str());
+  }
+
+  // A disabled widget swallows clicks silently, so a script "pressing
+  // Accept" on a tool that is not ready got a success and no feature. Say so
+  // instead — LogError fails the action, which becomes the RPC error.
+  bool RefuseIfDisabled(ImGuiTestContext* ctx) const {
+    const ImGuiTestItemInfo info = ctx->ItemInfo(Ref());
+    if (info.ID != 0 && (info.ItemFlags & ImGuiItemFlags_Disabled) != 0) {
+      // IM_ERRORF (not LogError) — only an engine error marks the action
+      // failed, which is what turns into the client's error response.
+      IM_ERRORF_NOHDR("item is disabled: %s",
+                      path.empty() ? info.DebugLabel : path.c_str());
+      return true;
+    }
+    return false;
+  }
+};
+
 // Why the last UI action failed, from the test engine's own log ("Unable to
 // locate item: '###tb_box'"). Without this the client got "see app log" and
 // nothing was ever written there.
@@ -521,14 +557,18 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\"."},
     {"key_press", "Send a key chord, e.g. \"Ctrl+Z\"."},
     {"item_click",
-     "UI test tier: click a widget by test-engine ref, e.g. "
+     "UI test tier: click a widget by {ref} or by the {id} ui_items reports "
+     "(the only handle on hidden-label widgets like a combo). Ref example: "
      "\"//##DockHost/**/###tb_box\" (//window, ** = any depth, ### = the "
      "widget's stable id); {button: 1} right-clicks."},
     {"item_double_click", "UI test tier: double-click a widget (same ref "
                           "grammar as item_click)."},
     {"item_input", "UI test tier: type into a widget {ref, value}."},
-    {"item_hover", "UI test tier: hover a widget {ref} — shows its tooltip "
-                   "and hover state without clicking."},
+    {"item_hover", "UI test tier: hover a widget {ref|id} — shows its "
+                   "tooltip and hover state without clicking."},
+    {"item_combo", "UI test tier: choose {value} in the combo {ref|id} "
+                   "(opens and picks in one action — the popup does not "
+                   "survive between RPCs)."},
     {"ui_items", "UI test tier: list the widgets under {ref} (default the "
                  "focused window, {depth}): label, id, window, disabled, "
                  "screen centre. The GUI, self-described."},
@@ -1032,31 +1072,54 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       ctx->MenuClick(path.c_str());
     };
   } else if (m == "item_click") {
-    const std::string ref = p.at("ref").get<std::string>();
+    const ItemTarget target(p, m);
     const int button = p.value("button", 0); // 1 = right-click (context menus)
-    m_uiAction = [ref, button](ImGuiTestContext* ctx) {
-      ctx->ItemClick(ref.c_str(), button);
+    m_uiAction = [target, button](ImGuiTestContext* ctx) {
+      if (target.RefuseIfDisabled(ctx))
+        return;
+      ctx->ItemClick(target.Ref(), button);
     };
   } else if (m == "item_double_click") {
-    const std::string ref = p.at("ref").get<std::string>();
-    m_uiAction = [ref](ImGuiTestContext* ctx) {
-      ctx->ItemDoubleClick(ref.c_str());
+    const ItemTarget target(p, m);
+    m_uiAction = [target](ImGuiTestContext* ctx) {
+      if (target.RefuseIfDisabled(ctx))
+        return;
+      ctx->ItemDoubleClick(target.Ref());
     };
   } else if (m == "item_input") {
-    const std::string ref = p.at("ref").get<std::string>();
+    const ItemTarget target(p, m);
     const json value = p.at("value");
     if (!value.is_number() && !value.is_string())
       throw std::runtime_error("item_input value must be a number or string");
-    m_uiAction = [ref, value](ImGuiTestContext* ctx) {
+    m_uiAction = [target, value](ImGuiTestContext* ctx) {
+      if (target.RefuseIfDisabled(ctx))
+        return;
       if (value.is_number()) {
-        ctx->ItemInputValue(ref.c_str(), value.get<float>());
+        ctx->ItemInputValue(target.Ref(), value.get<float>());
       } else {
-        ctx->ItemInputValue(ref.c_str(), value.get<std::string>().c_str());
+        ctx->ItemInputValue(target.Ref(), value.get<std::string>().c_str());
       }
     };
   } else if (m == "item_hover") {
-    const std::string ref = p.at("ref").get<std::string>();
-    m_uiAction = [ref](ImGuiTestContext* ctx) { ctx->MouseMove(ref.c_str()); };
+    const ItemTarget target(p, m);
+    m_uiAction = [target](ImGuiTestContext* ctx) {
+      ctx->MouseMove(target.Ref());
+    };
+  } else if (m == "item_combo") {
+    const ItemTarget target(p, m);
+    const std::string value = p.at("value").get<std::string>();
+    // Open + choose in ONE action: a queued action ends with its own frames,
+    // and the combo popup closes in between, so two RPCs cannot do this.
+    m_uiAction = [target, value](ImGuiTestContext* ctx) {
+      ctx->ItemClick(target.Ref());
+      ImGuiWindow* popup = ctx->GetWindowByRef("//$FOCUSED");
+      if (popup == nullptr) {
+        ctx->LogError("combo did not open a popup");
+        return;
+      }
+      ctx->ItemClick(
+          (std::string("//") + popup->Name + "/**/" + value).c_str());
+    };
   } else if (m == "ui_items") {
     const std::string ref = p.value("ref", "//$FOCUSED");
     const int depth = p.value("depth", -1);

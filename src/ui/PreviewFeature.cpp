@@ -235,7 +235,26 @@ void DrawToolWindow(AppState& state) {
   // that only happened because an EARLIER feature failed is not this
   // dialog's fault, so it is shown without blocking Accept.
   const std::string& err = feature->GetError();
-  const bool blocking = !err.empty() && !feature->ErrorAfterEarlierFailure();
+  bool blocking = !err.empty() && !feature->ErrorAfterEarlierFailure();
+
+  // A tool whose required slot is still empty is not ready either, and it
+  // usually does NOT report an error — an edge-less fillet regenerates
+  // happily and commits as a no-op feature nobody wanted. Name what is
+  // missing instead of letting Accept produce nothing.
+  const char* missing = nullptr;
+  for (const SlotSpec& spec : SlotSpecsFor(*feature)) {
+    if (spec.required && !SlotFilled(*feature, spec.slot)) {
+      missing = spec.label;
+      break;
+    }
+  }
+  if (missing != nullptr) {
+    blocking = true;
+    ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.40f, 1.0f),
+                       ICON_FA_TRIANGLE_EXCLAMATION " Pick %s to continue",
+                       missing);
+  }
+
   if (!err.empty()) {
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextColored(ImVec4(0.90f, 0.40f, 0.40f, 1.0f),

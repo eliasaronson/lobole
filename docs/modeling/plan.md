@@ -139,7 +139,9 @@ fillet as consumers.
 `FaceSelector::PickEdge` over `CADShape::GenerateEdgePolylines` (ray-to-
 polyline with occlusion), highlighted through the sketch-primitive line
 pipeline; toolbar/menu creation with preview, radius as an expression,
-dangling-ref error + "Pick edges…" repair. Format v17. Tests:
+dangling-ref error + "Pick edges…" repair (toolbar creation with preview —
+the "menu creation" this line used to claim died with the Create menu).
+Format v17. Tests:
 `test_fillet.cpp` + a `fillet_body_edge_via_click` GUI case.
 
 ### M8 — advanced solids
@@ -154,6 +156,13 @@ holes at a sketch's points, cut into the bodies below — a bolt pattern is
 one feature). *Shipped 2026-07-19:* rib + cosmetic thread (v36, thread-rib.md;
 modeled helical thread deferred as its opt-in flag). Draft on selected faces
 shipped earlier (M8 draft). Workstream complete.
+
+All of the above shipped as *features* — reachable over the script API and
+editable in the UI, but for a long time not **creatable** from the GUI: hole,
+shell, draft (and split/refine) had no toolbar button until UI **U9**
+(2026-08-13, [../ui/u9-gui-parity.md](../ui/u9-gui-parity.md)). Draft's
+`bodyId` was in fact unwritable from the UI at all. Worth remembering when
+this plan says "shipped": check that a human can reach it.
 
 ## Cross-cutting
 

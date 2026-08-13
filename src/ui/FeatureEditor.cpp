@@ -1320,6 +1320,19 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     if (LabeledCombo("Type", &k, kinds, 3)) {
       nlohmann::json before = DocumentIO::FeatureToJson(*ho);
       ho->kind = static_cast<HoleKind>(k);
+      // Size the head from the bore. The class defaults are absolute
+      // (Ø2 x 0.5), which on a Ø0.5 hole is a four-times-oversize crater —
+      // switching Type used to disfigure the part instead of previewing a
+      // head. Only re-seeds while the values are the untouched defaults.
+      const bool cbUntouched = ho->cbDiameter == 2.0 && ho->cbDepth == 0.5;
+      const bool csUntouched = ho->csDiameter == 2.0 && ho->csDepth == 0.5;
+      if (ho->kind == HoleKind::Counterbore && cbUntouched) {
+        ho->cbDiameter = ho->diameter * 2.0;
+        ho->cbDepth = ho->diameter;
+      } else if (ho->kind == HoleKind::Countersink && csUntouched) {
+        ho->csDiameter = ho->diameter * 2.0; // 90 deg included angle
+        ho->csDepth = ho->diameter * 0.5;
+      }
       CommitDiscrete(state, feature, before, index, commit);
     }
     ExprDim(state, feature, index, commit, "Diameter", ho->diameterExpr,

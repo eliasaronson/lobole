@@ -11,6 +11,7 @@
 #include <TopoDS_Face.hxx>
 
 #include <algorithm>
+#include <string>
 
 ShellFeature::ShellFeature(const std::string& name, uint64_t bodyId,
                            std::vector<ElementRef> openFaces, double thickness)
@@ -75,6 +76,17 @@ bool ShellFeature::Execute(RegenContext& ctx) {
     CADShape result(maker.Shape());
     if (!result.IsValid() || result.Volume() < 1e-9) {
       SetError("shell produced an invalid solid");
+      return false;
+    }
+    // OCC can report success and hand back the INPUT solid (a wall thicker
+    // than the geometry allows, or an offset that self-intersects around a
+    // hole). Opening a face always removes material, so a result that did
+    // not shrink is a silent failure — and it used to commit as a no-op
+    // feature that looked fine in the tree.
+    if (result.Volume() >= body->shape.Volume() - 1e-9) {
+      SetError("shell had no effect: thickness " + std::to_string(thickness) +
+               " is too large for this body (or self-intersects around a "
+               "hole/fillet) - try a thinner wall");
       return false;
     }
     // Topology is reorganized; give the result fresh primitive-style names so

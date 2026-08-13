@@ -146,7 +146,9 @@ bodies rows; axis triad + View > Standard Views; empty-state hint;
 View > Font Size (session, via the DPI rebuild path); multi-face highlight
 projection (per-instance; same-body faces still last-wins). Remaining:
 spacing/padding rhythm audit, error/suppressed tree BADGES beyond color,
-shaded region fill, whole-instance occurrence hover, tooltips audit.
+shaded region fill, whole-instance occurrence hover, tooltips audit. (Empty
+states were *shipped* here but still named affordances that had since been
+deleted; U9 made them honest.)
 Original scope:
 Make it look like a product, not a debug build: spacing/padding rhythm and
 consistent icon sizing in `Theme`/`Toolbar`; hierarchy in the feature tree
@@ -250,6 +252,19 @@ assemblies/stashed tabs read clean now). Still missing, roughly by value:
   (Onshape). Sketcher-side; bigger, belongs to a sketching follow-on.
 - **Unit display/entry in dimension fields** (deferred from variables C2).
 
+## U9 — GUI parity for script-only features
+
+**SHIPPED 2026-08-13** — [u9-gui-parity.md](u9-gui-parity.md).
+The first clicks-only dogfood found five features (Hole, Shell, Draft, Split,
+Refine) with no creation path outside the script API, Extrude reachable only
+from inside a sketch session, onboarding text naming two affordances that had
+been deleted, and an automation surface that could not report why an action
+failed. All fixed in one round (C1-C7): a staged Hole tool (pick a flat face
+→ click centres → options, with a tiered cancel), the four body ops on the
+toolbar, an error line in the tool window that also disables Accept, honest
+empty states + Help ▸ Keyboard Shortcuts, and real failure reasons /
+`ui_items` / `item_hover` / viewport-relative coordinates over the RPC.
+
 ## Tests
 
 GUI-test the behaviors, eyeball the aesthetics: every panel docked after
@@ -279,3 +294,6 @@ at 1080p and 4K-scaled.
 - **U7 (added 2026-07-27)** follows the v1 workstream: it consumes U1's
   filters and U3's slots and supersedes the "full dialog frame" remnant of
   U3 — see [u7-tool-sessions.md](u7-tool-sessions.md).
+- **U9 (added 2026-08-13)** is dogfooding residue, not planned scope: it is
+  what a clicks-only round found missing once U7/U8 made the tool pattern
+  uniform enough to notice the features that had never joined it.

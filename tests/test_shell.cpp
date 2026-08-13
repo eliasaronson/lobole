@@ -47,6 +47,22 @@ TEST_CASE("Shell without an open face errors", "[shell]") {
   CHECK(!doc.GetFeature(1)->GetError().empty());
 }
 
+// OCC reports success and hands back the input solid when the wall is too
+// thick for the geometry; the feature used to commit that as a silent no-op.
+// (Found by the 2026-08-13 clicks-only dogfood, where a shell of a slab with
+// a through hole "succeeded" and changed nothing.)
+TEST_CASE("Shell that removes no material errors", "[shell]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 4, 4, 4));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  const std::string face = AnyFace(doc.GetBodies()[0]);
+  doc.AddFeature(std::make_unique<ShellFeature>(
+      "TooThick", id, std::vector<ElementRef>{ElementRef{id, face}}, 2.5));
+  CHECK_FALSE(doc.Regenerate());
+  CHECK(doc.GetFeature(1)->GetError().find("no effect") != std::string::npos);
+  CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(64.0, 1e-9));
+}
+
 TEST_CASE("Shell errors on a missing body and round-trips (v20)", "[shell]") {
   Document doc;
   doc.AddFeature(std::make_unique<ShellFeature>(

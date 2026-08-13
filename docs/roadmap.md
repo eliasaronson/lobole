@@ -41,10 +41,12 @@ thirteen workstreams are v1-complete (see the table below). What that means conc
 **Modeling & core:** the full Onshape loop (sketch → extrude → sketch-on-a-face → cut)
 plus M1–M8 — datum planes/axes, revolve, loft, sweep, booleans, mirror/linear/circular
 patterns, **toponaming** (persistent face/edge references), fillet/chamfer, shell, hole
-wizard, and draft. The 2D sketcher is feature-complete. Parametric core: `Document`
+wizard, draft, split and refine — all of them creatable from the GUI as well as
+the script API since UI U9 (2026-08-13); several were script-only before that.
+The 2D sketcher is feature-complete. Parametric core: `Document`
 feature list with deterministic regeneration + a per-feature output-shape cache
 (incremental regen), stable ids, undo/redo, PlaneGCS solving. **Variables & expressions**
-everywhere, including unit-suffixed literals. Serialization is at **format v30** (a
+everywhere, including unit-suffixed literals. Serialization is at **format v53** (a
 diffable directory format, golden-corpus migrations).
 
 **Differentiators:** **checkpoints + rollback** and **git-backed history** (F4/F5);
@@ -83,7 +85,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Complete** (V1–V3 + C2 unit-suffixed literals, format v28; dimensional analysis + unit display deferred) |
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | **Complete** (S1 MCP, S2 headless+CI, S3 python client, S4 record/replay) |
 | 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | **Complete v1** (F1 spec+corpus, F2 autosave, F3 directory format, F4 checkpoints+rollback, F5 git); semantic merge later |
-| 7. UI & UX | [ui/plan.md](ui/plan.md) | Workbench shipped; selection UX + layout + polish remain |
+| 7. UI & UX | [ui/plan.md](ui/plan.md) | **U1–U9 shipped** — unified selection, dock-home enforcement, feature-dialog slots, sketch-region picking, command palette, one floating Tool window for every tool session (right Properties panel deleted), and U9 GUI parity ([ui/u9-gui-parity.md](ui/u9-gui-parity.md)): hole/shell/draft/split/refine reachable by click. Remain: visual-polish tail (spacing rhythm, tree badges, tooltips audit) |
 | 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | **v1 complete** — I1 measure (RPC + GUI tool), I2 mass properties (panel + CoG marker), I3 section (raster clip + filled caps), I4 interference. Deferred polish: hatching, angle/point measure, assembly caps |
 | 9. Rendering | [rendering/plan.md](rendering/plan.md) | **Raster polish shipped** (showcase arc R1–R4 + instancing + ghosts; 2026-07-19: key-light PCF shadows + SSAO, [rendering/ssao-soft-shadows.md](rendering/ssao-soft-shadows.md) — S3 quality settings/visual tuning remain). Real-time hybrid RT (6b) still gated on the `main.cpp` render-path cleanup |
 | 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1–A4 v1 shipped** — multi-part, occurrences (instanced), all six mate types (connector frames, direct-frame-alignment solve, mate tool + list), interactive manipulation (drag gizmo, drag-within-mate, hole-center snap), part→assembly propagation, BOM, in-context editing (ghosted assembly), exploded views (v27). Remain: assembly-level features + configurations (own designs), cross-part refs in-context, snap-marker UX polish |

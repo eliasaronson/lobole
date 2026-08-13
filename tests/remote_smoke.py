@@ -399,6 +399,25 @@ def main():
                "ui_items reports which widgets are disabled")
         d.call("item_hover", ref="//##DockHost/**/###tb_box")
 
+        # Hidden-label widgets (every LabeledCombo) have no path — the id
+        # from ui_items is the only handle, and item_combo opens+picks in one
+        # action because the popup does not survive between RPCs.
+        d.call("item_click", ref="//##DockHost/**/###tb_box")
+        hidden = sorted([i for i in d.call("ui_items", ref="//###ToolWindow")
+                         ["items"] if not i["label"]], key=lambda i: i["y"])
+        expect(hidden, "the tool window has hidden-label combos")
+        d.call("item_combo", id=hidden[0]["id"], value="Default")
+        d.call("cancel_pending")
+
+        # A disabled widget must refuse loudly: Extrude needs a sketch, and a
+        # script clicking it used to get a success and no feature.
+        d.call("new_project")
+        try:
+            d.call("item_click", ref="//##DockHost/**/###tb_extrude")
+            expect(False, "clicking a disabled toolbar button must fail")
+        except RuntimeError as e:
+            expect("disabled" in str(e), f"disabled widgets say so: {e}")
+
         # Constraint solving: two lines snap coincident
         d.call("new_project")
         sk = d.call("add_feature", feature={

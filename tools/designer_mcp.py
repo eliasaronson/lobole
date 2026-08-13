@@ -1584,8 +1584,8 @@ def list_drawing_dims() -> dict:
 # ---------------------------------------------------------------------------
 
 _UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
-               "item_hover", "ui_items", "viewport_click", "viewport_drag",
-               "key_press", "scroll")
+               "item_hover", "item_combo", "ui_items", "viewport_click",
+               "viewport_drag", "key_press", "scroll")
 
 
 @mcp.tool(description="Raw GUI event, for driving or testing the Designer "
@@ -1593,10 +1593,13 @@ _UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
           "A `ref` is a test-engine path: '//WindowName/**/###stable_id' "
           "(** = any depth; ### ids are stable across labels/icons); "
           "ui_items lists what is actually there. "
+          Widgets with hidden labels (combos) have no path — "
+          "address them by the {id} ui_items reports. "
           "action + params: menu_click {path: 'Edit/Undo'}; item_click "
-          "{ref, button?: 1 = right-click}; item_double_click {ref} (e.g. a "
-          "tree sketch → edit mode); item_input {ref, value}; item_hover "
-          "{ref}; ui_items {ref?, depth?} → {items: [{label, id, window, "
+          "{ref|id, button?: 1 = right-click}; item_double_click {ref|id} "
+          "(e.g. a tree sketch → edit mode); item_input {ref|id, value}; "
+          "item_combo {ref|id, value: 'Countersink'}; item_hover {ref|id}; "
+          "ui_items {ref?, depth?} → {items: [{label, id, window, "
           "disabled, x, y}]}; viewport_click {x, y (0-1 fractions OF THE 3D "
           "VIEWPORT), button?: 0/1/2, ctrl?}; viewport_drag {x0, y0, x1, "
           "y1, button?: 2=MMB orbit, ctrl?: pan, shift?: zoom}; key_press "
