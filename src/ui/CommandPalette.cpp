@@ -67,6 +67,14 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
       [](AppState& s) { CreateMirror(s); });
   add("Create: Pattern", nullptr, idle && producers >= 1,
       [](AppState& s) { CreatePattern(s); });
+  add("Create: Shell (hollow a body)", nullptr, idle && hasBody,
+      [](AppState& s) { CreateShell(s); });
+  add("Create: Draft (taper faces)", nullptr, idle && hasBody,
+      [](AppState& s) { CreateDraft(s); });
+  add("Create: Split (divide a body)", nullptr, idle && hasBody,
+      [](AppState& s) { CreateSplit(s); });
+  add("Create: Refine (merge faces/seams)", nullptr, idle && hasBody,
+      [](AppState& s) { CreateRefine(s); });
   add("Create: Fillet", nullptr, idle && hasBody,
       [](AppState& s) { CreateFillet(s); });
   add("Create: Chamfer", nullptr, idle && hasBody,

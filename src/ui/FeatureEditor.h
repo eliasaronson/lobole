@@ -32,6 +32,9 @@ enum class PickSlot : int {
   BlendEdges,     // U7: fillet/chamfer edge collection (Edge, multi)
   MateConnectorA, // U7c: mate session (assembly; not a feature slot)
   MateConnectorB,
+  SplitBody,      // Body to divide in two
+  SplitKnifeFace, // a planar Face of that body, used as the cutting plane
+  RefineBody,     // Body whose coplanar faces/seams get merged
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —

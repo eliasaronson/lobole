@@ -16,10 +16,12 @@
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
+#include "core/features/RefineFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/SplitFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
@@ -790,13 +792,56 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
   case PickSlot::ShellOpenFaces:
     if (auto* sh = dynamic_cast<ShellFeature*>(&f);
         sh != nullptr && item.kind == SelectionItem::Kind::Face) {
-      return ToggleRefInList(sh->openFaces, item.element);
+      // Execute demands every open face belong to `bodyId`. The first face
+      // therefore NAMES the body (overriding the default, since a face is the
+      // more specific statement); once a list exists, a face from elsewhere is
+      // refused rather than left to break regeneration.
+      if (sh->openFaces.empty())
+        sh->bodyId = item.element.featureId;
+      else if (item.element.featureId != sh->bodyId)
+        return false;
+      const bool changed = ToggleRefInList(sh->openFaces, item.element);
+      return changed;
     }
     return false;
   case PickSlot::DraftFaces:
     if (auto* dr = dynamic_cast<DraftFeature*>(&f);
         dr != nullptr && item.kind == SelectionItem::Kind::Face) {
-      return ToggleRefInList(dr->faces, item.element);
+      // Draft has no body slot at all, and Execute rejects faces whose
+      // featureId != bodyId — so the picks have to write it (nothing in the
+      // UI ever did, which is why the tool could not work from the GUI).
+      if (dr->faces.empty())
+        dr->bodyId = item.element.featureId;
+      else if (item.element.featureId != dr->bodyId)
+        return false;
+      const bool changed = ToggleRefInList(dr->faces, item.element);
+      if (dr->faces.empty())
+        dr->bodyId = 0; // emptied the list: the next pick re-chooses the body
+      return changed;
+    }
+    return false;
+  case PickSlot::SplitBody:
+    if (auto* sp = dynamic_cast<SplitFeature*>(&f);
+        sp != nullptr && item.kind == SelectionItem::Kind::Body) {
+      sp->bodyId = item.id;
+      return true;
+    }
+    return false;
+  case PickSlot::SplitKnifeFace:
+    if (auto* sp = dynamic_cast<SplitFeature*>(&f);
+        sp != nullptr && item.kind == SelectionItem::Kind::Face) {
+      // The knife face must be a face OF the body being split, so the pick
+      // sets both — picking a face on another body re-targets the split.
+      sp->face = item.element;
+      sp->bodyId = item.element.featureId;
+      return true;
+    }
+    return false;
+  case PickSlot::RefineBody:
+    if (auto* rf = dynamic_cast<RefineFeature*>(&f);
+        rf != nullptr && item.kind == SelectionItem::Kind::Body) {
+      rf->bodyId = item.id;
+      return true;
     }
     return false;
   case PickSlot::BlendEdges:
@@ -883,6 +928,19 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
     return {{PickSlot::ThreadFace, "Face", kFace, false,
              "Pick the cylindrical face to thread"}};
   }
+  if (auto* sp = dynamic_cast<const SplitFeature*>(&feature)) {
+    std::vector<SlotSpec> specs = {
+        {PickSlot::SplitBody, "Body", kBody, false, "Pick the body to split"}};
+    if (sp->knife == SplitKnifeKind::Face) {
+      specs.push_back({PickSlot::SplitKnifeFace, "Knife face", kFace, false,
+                       "Pick a flat face to cut along (its plane, extended)"});
+    }
+    return specs;
+  }
+  if (dynamic_cast<const RefineFeature*>(&feature) != nullptr) {
+    return {{PickSlot::RefineBody, "Body", kBody, false,
+             "Pick the body to refine"}};
+  }
   if (dynamic_cast<const FilletFeature*>(&feature) != nullptr) {
     return {{PickSlot::BlendEdges, "Edges", kEdge, true,
              "Click edges to add or remove them"}};
@@ -956,6 +1014,18 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
   case PickSlot::BlendEdges: {
     auto* fil = dynamic_cast<const FilletFeature*>(&feature);
     return fil != nullptr && !fil->edges.empty();
+  }
+  case PickSlot::SplitBody: {
+    auto* sp = dynamic_cast<const SplitFeature*>(&feature);
+    return sp != nullptr && sp->bodyId != 0;
+  }
+  case PickSlot::SplitKnifeFace: {
+    auto* sp = dynamic_cast<const SplitFeature*>(&feature);
+    return sp != nullptr && !sp->face.name.empty();
+  }
+  case PickSlot::RefineBody: {
+    auto* rf = dynamic_cast<const RefineFeature*>(&feature);
+    return rf != nullptr && rf->bodyId != 0;
   }
   }
   return false;
@@ -1472,6 +1542,27 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                     ? ""
                     : std::to_string(sh->openFaces.size()) + " picked");
     RefListRows(state, feature, index, commit, sh->openFaces);
+  } else if (auto* sp = dynamic_cast<SplitFeature*>(&feature)) {
+    const char* knives[] = {"Plane", "Face of the body"};
+    int knife = std::to_underlying(sp->knife);
+    if (LabeledCombo("Knife", &knife, knives, 2)) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*sp);
+      sp->knife = static_cast<SplitKnifeKind>(knife);
+      CommitDiscrete(state, feature, before, index, commit);
+    }
+    PickSlotRow(state, feature, PickSlot::SplitBody,
+                BodyRefLabel(state, sp->bodyId));
+    if (sp->knife == SplitKnifeKind::Plane) {
+      PlaneRefCombo(state, feature, sp->datumId, sp->basePlane, index, commit);
+      ExprDim(state, feature, index, commit, "Offset", sp->offsetExpr,
+              sp->offset);
+    } else {
+      PickSlotRow(state, feature, PickSlot::SplitKnifeFace,
+                  sp->face.name.empty() ? "" : sp->face.name);
+    }
+  } else if (auto* rf = dynamic_cast<RefineFeature*>(&feature)) {
+    PickSlotRow(state, feature, PickSlot::RefineBody,
+                BodyRefLabel(state, rf->bodyId));
   } else if (auto* fil = dynamic_cast<FilletFeature*>(&feature)) {
     const char* ops[] = {"Fillet", "Chamfer"};
     int op = std::to_underlying(fil->op);

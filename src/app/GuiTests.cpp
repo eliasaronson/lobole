@@ -7,11 +7,15 @@
 #include "core/Occurrence.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
+#include "core/features/RefineFeature.h"
+#include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/SplitFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -27,6 +31,7 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
 #include <string>
 #include <unordered_map>
 
@@ -1040,6 +1045,172 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->sketchEdit.IsEditing());
     IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Hole);
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Point);
+  };
+
+  // U9: Shell/Draft/Split/Refine had parameters (and mostly slots) but no
+  // creation path outside the script API — a human could not reach them.
+
+  // Shell defaults to the newest body, so the only pick needed is which face
+  // to open.
+  t = IM_REGISTER_TEST(engine, "shell", "open_face_pick_hollows_the_box");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t boxId = Doc()->GetFeature(0)->GetId();
+    const double solid = Doc()->GetBodies()[0].shape.Volume();
+
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    s_App->camera->SetPosition(
+        mid + glm::normalize(glm::vec3(0.4f, 0.9f, 0.7f)) * 12.0f);
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_shell");
+    ctx->Yield();
+    auto* sh = dynamic_cast<ShellFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(sh != nullptr);
+    IM_CHECK_EQ(sh->bodyId, boxId); // pre-targeted, no body pick needed
+
+    // The dialog says why it cannot finish yet, and Accept is refused until
+    // it can (the failure was only a red row in the feature tree before).
+    IM_CHECK(
+        !Doc()->FindFeatureById(s_App->pendingFeatureId)->GetError().empty());
+    IM_CHECK((ctx->ItemInfo("//Shell###ToolWindow/###tw_accept").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+
+    ctx->ItemClick("//Shell###ToolWindow/###slot5"); // Open faces
+    IM_CHECK(s_App->slotPick.Active());
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(mid.x, hi.y, mid.z)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(sh->openFaces.size(), (size_t)1);
+    IM_CHECK(
+        Doc()->FindFeatureById(s_App->pendingFeatureId)->GetError().empty());
+    IM_CHECK((ctx->ItemInfo("//Shell###ToolWindow/###tw_accept").ItemFlags &
+              ImGuiItemFlags_Disabled) == 0);
+
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    const double hollow = Doc()->GetBodies()[0].shape.Volume();
+    IM_CHECK(hollow > 0.1 && hollow < solid - 1e-3);
+  };
+
+  // Draft has no body slot, and nothing in the UI ever wrote bodyId — Execute
+  // rejects faces whose ref does not match it, so the pick must set it.
+  t = IM_REGISTER_TEST(engine, "draft", "face_pick_names_the_body");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t boxId = Doc()->GetFeature(0)->GetId();
+    const double before = Doc()->GetBodies()[0].shape.Volume();
+
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    s_App->camera->SetPosition(
+        mid + glm::normalize(glm::vec3(1.0f, 0.5f, 0.6f)) * 12.0f);
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_draft");
+    ctx->Yield();
+    auto* dr = dynamic_cast<DraftFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(dr != nullptr);
+    IM_CHECK_EQ(dr->bodyId, (uint64_t)0);
+    IM_CHECK(s_App->slotPick.Active()); // the face slot armed itself
+
+    // The +X side face: a face parallel to the XY neutral plane cannot be
+    // tapered, so the top/bottom are the wrong pick here.
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(hi.x, mid.y, mid.z)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK_EQ(dr->faces.size(), (size_t)1);
+    IM_CHECK_EQ(dr->bodyId, boxId); // derived from the pick
+
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - before) > 1e-3);
+  };
+
+  // Split's default knife is the XY plane at the body's mid-height, so the
+  // preview shows two pieces before the user touches anything.
+  t = IM_REGISTER_TEST(engine, "split", "default_plane_cuts_the_body_in_two");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const double solid = Doc()->GetBodies()[0].shape.Volume();
+
+    ToolbarClick(ctx, "###tb_split");
+    ctx->Yield();
+    auto* sp = dynamic_cast<SplitFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(sp != nullptr);
+    IM_CHECK(sp->bodyId != 0);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2); // live preview
+
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+    double total = 0.0;
+    for (const Body& b : Doc()->GetBodies())
+      total += b.shape.Volume();
+    IM_CHECK(std::abs(total - solid) < 1e-3); // split keeps every piece
+  };
+
+  // Refine's whole point is the seam a boolean leaves behind: count the
+  // B-Rep faces through the render mesh, which needs no naming.
+  t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    auto* box2 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(1));
+    IM_CHECK(box2 != nullptr);
+    box2->position = glm::vec3(-2.0f, 0.0f, 0.0f); // shares box 1's +X face
+    Doc()->Regenerate();
+    ctx->Yield();
+
+    ToolbarCreateAccept(ctx, "###tb_boolean"); // union of the two producers
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    const auto faceCount = [](const CADShape& shape) {
+      const CADShape::Mesh mesh = shape.GenerateMesh();
+      return mesh.triangleFaces.empty()
+                 ? (uint32_t)0
+                 : *std::max_element(mesh.triangleFaces.begin(),
+                                     mesh.triangleFaces.end()) +
+                       1;
+    };
+    const uint32_t seamed = faceCount(Doc()->GetBodies()[0].shape);
+    const double volume = Doc()->GetBodies()[0].shape.Volume();
+
+    ToolbarCreateAccept(ctx, "###tb_refine");
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(faceCount(Doc()->GetBodies()[0].shape) < seamed);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - volume) < 1e-3);
   };
 
   // Direct-manipulation preview handles (docs/ui/direct-manipulation.md):

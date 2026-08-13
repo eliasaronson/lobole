@@ -233,6 +233,20 @@ void DrawModelToolbar(AppState& state) {
   if (ToolButton(ICON_FA_CIRCLE_NOTCH "###tb_thread",
                  "Thread (cosmetic; pick a cyl. face)", hasBody && idle))
     CreateThread(state);
+  if (ToolButton(ICON_FA_BOX_OPEN "###tb_shell",
+                 "Shell (hollow a body; pick faces to open)", hasBody && idle))
+    CreateShell(state);
+  if (ToolButton(ICON_FA_ANGLES_RIGHT "###tb_draft",
+                 "Draft (taper faces for moulding)", hasBody && idle))
+    CreateDraft(state);
+  if (ToolButton(ICON_FA_SCISSORS "###tb_split",
+                 "Split a body with a plane or one of its faces",
+                 hasBody && idle))
+    CreateSplit(state);
+  if (ToolButton(ICON_FA_BROOM "###tb_refine",
+                 "Refine (merge coplanar faces and boolean seams)",
+                 hasBody && idle))
+    CreateRefine(state);
 
   Divider();
 

@@ -227,17 +227,35 @@ void DrawToolWindow(AppState& state) {
 
   ImGui::Separator();
   bool accept = false, cancel = false;
+
+  // Why the preview shows nothing / why Accept is refused. The feature knows
+  // ("shell needs a thinner wall", "hole sketch has no points", a dangling
+  // ref), but until now the only sign was a red row in the feature tree —
+  // easy to miss while looking at the dialog you are filling in. A failure
+  // that only happened because an EARLIER feature failed is not this
+  // dialog's fault, so it is shown without blocking Accept.
+  const std::string& err = feature->GetError();
+  const bool blocking = !err.empty() && !feature->ErrorAfterEarlierFailure();
+  if (!err.empty()) {
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(ImVec4(0.90f, 0.40f, 0.40f, 1.0f),
+                       ICON_FA_TRIANGLE_EXCLAMATION " %s", err.c_str());
+    ImGui::PopTextWrapPos();
+  }
+
+  ImGui::BeginDisabled(blocking);
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.55f, 0.25f, 1.0f));
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                         ImVec4(0.25f, 0.65f, 0.30f, 1.0f));
-  if (ImGui::Button(ICON_FA_CHECK " Accept"))
+  if (ImGui::Button(ICON_FA_CHECK " Accept###tw_accept"))
     accept = true;
   ImGui::PopStyleColor(2);
+  ImGui::EndDisabled();
   ImGui::SameLine();
   ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.60f, 0.22f, 0.22f, 1.0f));
   ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                         ImVec4(0.72f, 0.27f, 0.27f, 1.0f));
-  if (ImGui::Button(ICON_FA_XMARK " Cancel"))
+  if (ImGui::Button(ICON_FA_XMARK " Cancel###tw_cancel"))
     cancel = true;
   ImGui::PopStyleColor(2);
 
@@ -250,8 +268,9 @@ void DrawToolWindow(AppState& state) {
   static int idleFrames = 0;
   idleFrames = ImGui::IsAnyItemActive() ? 0 : idleFrames + 1;
   if (idleFrames > 1 && !state.handleDrag.active) {
-    if (ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
-        ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, /*repeat=*/false))
+    if (!blocking && (ImGui::IsKeyPressed(ImGuiKey_Enter, /*repeat=*/false) ||
+                      ImGui::IsKeyPressed(ImGuiKey_KeypadEnter,
+                                          /*repeat=*/false)))
       accept = true;
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, /*repeat=*/false))
       cancel = true;

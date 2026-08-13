@@ -116,6 +116,10 @@ const char* FeatureIcon(const std::string& type) {
     return ICON_FA_BOX_OPEN;
   if (type == "Draft")
     return ICON_FA_ANGLES_RIGHT;
+  if (type == "Split")
+    return ICON_FA_SCISSORS;
+  if (type == "Refine")
+    return ICON_FA_BROOM;
   if (type == "Loft")
     return ICON_FA_BEZIER_CURVE;
   if (type == "Sweep")

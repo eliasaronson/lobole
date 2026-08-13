@@ -533,6 +533,15 @@ void CreateFillet(AppState& state);
 void CreateChamfer(AppState& state);
 void CreateRib(AppState& state);
 void CreateThread(AppState& state);
+
+// Body-modifying tools whose parameters/slots already existed but that had no
+// creation path outside the script API. Each opens the normal preview with
+// the most recent body pre-targeted (Draft takes its body from the first face
+// pick — it has no body slot); the required slots arm themselves.
+void CreateShell(AppState& state);
+void CreateDraft(AppState& state);
+void CreateSplit(AppState& state);
+void CreateRefine(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);
 // Arms the Hole tool: pick a FLAT face (or plane) to drill into, which opens

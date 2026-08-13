@@ -34,12 +34,16 @@
 #include "render/RayTracingRenderer.h"
 #include "render/SketchRenderer.h"
 
+#include "core/features/DraftFeature.h"
 #include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
+#include "core/features/RefineFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/RibFeature.h"
+#include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/features/SplitFeature.h"
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/sketch/SketchProfile.h"
@@ -555,6 +559,62 @@ void CreateThread(AppState& state) {
   BeginPreviewFeature(
       state, std::make_unique<ThreadFeature>(NextName(state, "Thread"),
                                              ElementRef{}, "M8", 1.25));
+}
+
+namespace {
+// The body a body-op tool should default to: the most recent producer, as
+// Pattern/Boolean do. 0 when the document has none.
+uint64_t NewestBody(const AppState& state) {
+  auto producers =
+      BodyProducers(*state.document, state.document->FeatureCount());
+  return producers.empty() ? 0 : producers.back().first;
+}
+} // namespace
+
+void CreateShell(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  // 0.25 on the ~2-unit default scene scale: thin enough that OCC accepts the
+  // offset on a small body, which "1.0" (the field default) does not.
+  BeginPreviewFeature(state, std::make_unique<ShellFeature>(
+                                 NextName(state, "Shell"), NewestBody(state),
+                                 std::vector<ElementRef>{}, 0.25));
+}
+
+void CreateDraft(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  // bodyId stays 0: Draft has no body slot, so the first face pick names it.
+  BeginPreviewFeature(
+      state, std::make_unique<DraftFeature>(NextName(state, "Draft"), 0,
+                                            std::vector<ElementRef>{}, 5.0));
+}
+
+void CreateSplit(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  auto split = std::make_unique<SplitFeature>(NextName(state, "Split"),
+                                              NewestBody(state));
+  // A base plane through the origin misses any body that does not sit there,
+  // and the feature fails with "the plane missed the body" before the user has
+  // touched anything. Offset the default XY knife to the body's mid-height so
+  // the preview shows an actual split.
+  for (const Body& b : state.document->GetBodies()) {
+    if (b.createdBy != split->bodyId)
+      continue;
+    glm::vec3 bmin, bmax;
+    b.shape.GetBoundingBox(bmin, bmax);
+    split->offset = (bmin.z + bmax.z) * 0.5;
+    break;
+  }
+  BeginPreviewFeature(state, std::move(split));
+}
+
+void CreateRefine(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state, std::make_unique<RefineFeature>(
+                                 NextName(state, "Refine"), NewestBody(state)));
 }
 
 void AppendThreadOverlays(AppState& state, std::vector<LineVertex3D>& lines) {
