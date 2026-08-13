@@ -202,8 +202,11 @@ void DrawEmptyStateHint(AppState& state) {
     return;
   }
   const char* line1 = "No features yet";
-  const char* line2 =
-      "Double-click a plane (or press S) to sketch - or Create > Box";
+  // Name affordances that exist: the Create menu was deleted in favour of the
+  // toolbar, and double-clicking a plane has never started a sketch (plane
+  // picking is arm-then-click).
+  const char* line2 = "Press S (or the toolbar's pencil), then click a plane "
+                      "- or add a box from the toolbar";
   ImDrawList* dl = ImGui::GetForegroundDrawList();
   const ImVec2 c(state.viewportPos.x + state.viewportSize.x * 0.5f,
                  state.viewportPos.y + state.viewportSize.y * 0.72f);

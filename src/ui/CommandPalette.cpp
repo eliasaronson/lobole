@@ -26,7 +26,8 @@ struct PaletteCommand {
   std::function<void(AppState&)> run;
 };
 
-// The command surface, mirrored from the menus (same gating, same actions).
+// The command surface: every toolbar/menu action, same gating, same
+// actions. Ctrl+K is the only way to reach some of them by keyboard.
 std::vector<PaletteCommand> BuildCommands(AppState& state) {
   const bool part = state.document != nullptr;
   const bool idle = part && !HasPendingFeature(state);

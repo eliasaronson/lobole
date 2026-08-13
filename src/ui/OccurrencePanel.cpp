@@ -395,7 +395,7 @@ void DrawOccurrencePanel(AppState& state) {
 
   ImGui::SeparatorText("Occurrences");
   if (asmDoc.OccurrenceCount() == 0)
-    ImGui::TextDisabled("Empty. Place parts with add_occurrence.");
+    ImGui::TextDisabled("Empty - use Insert part on the toolbar.");
 
   for (const Occurrence& o : asmDoc.GetOccurrences()) {
     ImGui::PushID(static_cast<int>(o.id));

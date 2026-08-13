@@ -12,7 +12,7 @@ Library:
 CLI:
     designer_remote.py <port> <method> ['<params-json>']
     designer_remote.py 8437 get_state
-    designer_remote.py 8437 menu_click '{"path": "Create/Box"}'
+    designer_remote.py 8437 menu_click '{"path": "File/New"}'
     designer_remote.py 8437 screenshot '{"path": "/tmp/shot.png"}'
 """
 import json

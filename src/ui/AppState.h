@@ -706,6 +706,10 @@ struct AppState {
   // None. 0 = Left (Alt+left), 1 = Right, 2 = Middle.
   int viewportDragButton = 2;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
+  // Help > Keyboard Shortcuts (Ctrl+/). In AppState rather than a static in
+  // the draw function so the between-test reset can close it — a stray
+  // floating window swallows the viewport clicks of every later GUI test.
+  bool showShortcuts = false;
   // Key-light shadow map (S1) — View > Shadows; session state only (no file
   // format / golden impact).
   bool showShadows = true;

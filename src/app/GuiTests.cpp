@@ -55,6 +55,7 @@ static void ResetAppForTest() {
     s_App->camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
   }
+  s_App->showShortcuts = false; // a stray window eats later viewport clicks
   s_App->selection.Clear();
   s_App->sketchEdit = {};
   s_App->sketchDrag = {};
@@ -1045,6 +1046,20 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->sketchEdit.IsEditing());
     IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Hole);
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Point);
+  };
+
+  // U9: the shortcut list. Ctrl+K (and the whole sketch keymap) was
+  // discoverable only by reading the source.
+  t = IM_REGISTER_TEST(engine, "help", "shortcuts_window_opens");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Help/Keyboard Shortcuts");
+    ctx->Yield();
+    IM_CHECK(ctx->ItemExists("//###ShortcutsWindow"));
+    IM_CHECK(s_App->showShortcuts);
+    ctx->WindowClose("//###ShortcutsWindow");
+    ctx->Yield();
+    IM_CHECK(!s_App->showShortcuts);
   };
 
   // U9: Shell/Draft/Split/Refine had parameters (and mostly slots) but no

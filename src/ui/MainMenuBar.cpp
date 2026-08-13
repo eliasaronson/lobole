@@ -281,12 +281,96 @@ void DrawViewMenu(AppState& state) {
   ImGui::EndMenu();
 }
 
-void DrawHelpMenu() {
+// Every binding the app actually has, grouped the way a user looks for one.
+// Ctrl+K was advertised nowhere, and the sketch keymap only in the source.
+void DrawShortcutsWindow(bool& open) {
+  if (!open)
+    return;
+  ImGui::SetNextWindowSize(ImVec2(520, 560), ImGuiCond_FirstUseEver);
+  if (!ImGui::Begin("Keyboard Shortcuts###ShortcutsWindow", &open)) {
+    ImGui::End();
+    return;
+  }
+  struct Row {
+    const char* keys;
+    const char* what;
+  };
+  const auto section = [](const char* title, const Row* rows, size_t count) {
+    ImGui::SeparatorText(title);
+    if (ImGui::BeginTable(
+            title, 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
+      ImGui::TableSetupColumn("Keys", ImGuiTableColumnFlags_WidthFixed,
+                              ImGui::GetFontSize() * 8.0f);
+      ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
+      for (size_t i = 0; i < count; i++) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(rows[i].keys);
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(rows[i].what);
+      }
+      ImGui::EndTable();
+    }
+  };
+
+  static const Row kGeneral[] = {
+      {"Ctrl+K", "Command palette - every action, by name"},
+      {"Ctrl+N / O / S", "New / Open / Save project"},
+      {"Ctrl+Shift+S", "Save Project As"},
+      {"Ctrl+I", "Import STEP / STL / BREP"},
+      {"Ctrl+Z / Ctrl+Y", "Undo / Redo"},
+      {"Esc", "Cancel the current tool, pick or preview"},
+      {"Enter", "Accept the open tool dialog"},
+      {"Delete", "Delete the selection"},
+  };
+  static const Row kView[] = {
+      {"F", "Fit the view to the model"},
+      {"Shift+F", "Zoom to the selection"},
+      {"N", "Look straight at the selected (or hovered) face"},
+      {"Shift+1..6", "Front / Back / Left / Right / Top / Bottom"},
+      {"Shift+7", "Isometric"},
+      {"Shift+P", "Show or hide the base planes"},
+      {"Arrows", "Orbit the camera"},
+  };
+  static const Row kModel[] = {
+      {"S", "New sketch - then click a plane or a flat face"},
+      {"Click", "Select; Ctrl+click adds; click again cycles what's behind"},
+      {"Shift+click", "Select a face and look straight at it"},
+  };
+  static const Row kSketch[] = {
+      {"L / C / A", "Line / Circle / 3-point arc"},
+      {"G / Shift+G", "Rectangle (corner / centre)"},
+      {"S / O / M", "Spline / Offset / Trim"},
+      {"X", "Project model edges into the sketch"},
+      {"D", "Dimension"},
+      {"Shift+F", "Fillet a corner"},
+      {"Q", "Toggle construction on the selection"},
+      {"Space", "Clear the selection"},
+      {"H / V / N", "Horizontal / Vertical / Coincident constraint"},
+      {"B / T / E", "Parallel / Tangent / Equal constraint"},
+      {"Shift+S", "Suspend constraint inferencing while drawing"},
+      {"Shift+E / Shift+R", "Extrude / Revolve this sketch"},
+      {"Shift+H", "Drill the sketch's points as holes"},
+      {"Esc", "Back to Select, then leave the sketch"},
+  };
+  section("General", kGeneral, IM_ARRAYSIZE(kGeneral));
+  section("View", kView, IM_ARRAYSIZE(kView));
+  section("Modeling", kModel, IM_ARRAYSIZE(kModel));
+  section("Sketching", kSketch, IM_ARRAYSIZE(kSketch));
+  ImGui::End();
+}
+
+void DrawHelpMenu(AppState& state) {
   if (ImGui::BeginMenu("Help")) {
+    if (ImGui::MenuItem("Keyboard Shortcuts", "Ctrl+/"))
+      state.showShortcuts = true;
     if (ImGui::MenuItem("About Designer"))
       ImGui::OpenPopup("About Designer");
     ImGui::EndMenu();
   }
+  if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Slash))
+    state.showShortcuts = !state.showShortcuts;
+  DrawShortcutsWindow(state.showShortcuts);
 
   if (ImGui::BeginPopupModal("About Designer", nullptr,
                              ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -350,7 +434,7 @@ void DrawMainMenuBar(AppState& state) {
   DrawFileMenu(state);
   DrawEditMenu(state);
   DrawViewMenu(state);
-  DrawHelpMenu();
+  DrawHelpMenu(state);
 
   ImGui::EndMainMenuBar();
 }

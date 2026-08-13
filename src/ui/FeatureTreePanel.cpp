@@ -403,7 +403,8 @@ void DrawFeatureTreePanel(AppState& state) {
       }
     }
     if (count == 0) {
-      ImGui::TextDisabled("No features yet - use the Create menu");
+      ImGui::TextDisabled("No features yet - start from the toolbar "
+                          "above (or Ctrl+K)");
     }
 
     ImGui::SeparatorText("Bodies");
