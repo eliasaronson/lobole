@@ -149,6 +149,25 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
+  // Turn a FINISHED sketch into a solid. The same operations live in the
+  // sketch toolbar (Shift+E/R) for a sketch you are still editing; without
+  // these, closing a sketch with ✓ left no way to extrude it at all.
+  const bool hasProfile = hasDoc && ClosedProfileSketch(state) != nullptr;
+  if (ToolButton(ICON_FA_UP_LONG "###tb_extrude",
+                 "Extrude a sketch (the selected one, else the last)",
+                 hasDoc && idle && hasProfile)) {
+    if (SketchFeature* sk = ClosedProfileSketch(state))
+      BeginExtrudeOfSketch(state, *sk);
+  }
+  if (ToolButton(ICON_FA_ROTATE "###tb_revolve",
+                 "Revolve a sketch (the selected one, else the last)",
+                 hasDoc && idle && hasProfile)) {
+    if (SketchFeature* sk = ClosedProfileSketch(state))
+      BeginRevolveOfSketch(state, *sk);
+  }
+
+  Divider();
+
   // Curve-driven features (curves-3d): a 3D curve, and the sweep/loft/pipe that
   // consume it. Gated on the references each needs (a Sweep wants a profile
   // sketch, a Loft two sections, a Pipe any curve/sketch to run along).

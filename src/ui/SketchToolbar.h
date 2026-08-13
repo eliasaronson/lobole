@@ -21,4 +21,18 @@ void DrawSketchModelSections(AppState& state);
 void BeginSketchExtrude(AppState& state);
 void BeginSketchRevolve(AppState& state);
 
+// The same previews for a sketch that is NOT being edited — the model
+// toolbar's Extrude/Revolve, which act on the selected (else most recent)
+// closed-profile sketch. `regions` empty = the whole sketch. Callers that
+// are in a sketch session must exit it first (BeginSketchExtrude does).
+void BeginExtrudeOfSketch(AppState& state, SketchFeature& sketch,
+                          std::vector<std::vector<uint32_t>> regions = {});
+void BeginRevolveOfSketch(AppState& state, SketchFeature& sketch,
+                          std::vector<std::vector<uint32_t>> regions = {});
+
+// The selected sketch if it has a closed profile, else the most recent one
+// that does; null when the document has none. Backs both the model-toolbar
+// Extrude/Revolve actions and their enable gates.
+SketchFeature* ClosedProfileSketch(AppState& state);
+
 } // namespace ui

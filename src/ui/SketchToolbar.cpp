@@ -662,36 +662,55 @@ RegionsFromSelection(const SketchFeature& sketch,
   return regions;
 }
 
+void BeginExtrudeOfSketch(AppState& state, SketchFeature& sketch,
+                          std::vector<std::vector<uint32_t>> regions) {
+  const int n = static_cast<int>(state.document->FeatureCount()) + 1;
+  auto ext = std::make_unique<ExtrudeFeature>("Extrude " + std::to_string(n),
+                                              sketch.GetId(), 1.0,
+                                              DefaultBodyMode(state));
+  ext->regions = std::move(regions);
+  BeginPreviewFeature(state, std::move(ext));
+}
+
+SketchFeature* ClosedProfileSketch(AppState& state) {
+  if (!state.document)
+    return nullptr;
+  const auto closed = [](Feature* f) -> SketchFeature* {
+    auto* sk = dynamic_cast<SketchFeature*>(f);
+    if (sk == nullptr || sketch::BuildLoops(sk->entities).empty())
+      return nullptr;
+    return sk;
+  };
+  // Select-first, then the most recent usable sketch (the CreateRib rule).
+  if (SketchFeature* sel = closed(SelectedFeature(state)))
+    return sel;
+  for (size_t i = state.document->FeatureCount(); i > 0; i--)
+    if (SketchFeature* sk = closed(state.document->GetFeature(i - 1)))
+      return sk;
+  return nullptr;
+}
+
 void BeginSketchExtrude(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   SketchFeature* sketch = ResolveActiveSketch(state);
   if (sketch == nullptr || sketch::BuildLoops(sketch->entities).empty())
     return;
-  const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-  const uint64_t sketchId = edit.activeSketchId;
   auto regions = RegionsFromSelection(*sketch, edit.selected);
+  SketchFeature& sk = *sketch;
   edit = SketchEditState{}; // exit sketch mode so the solid + dialog show
-  auto ext = std::make_unique<ExtrudeFeature>(
-      "Extrude " + std::to_string(n), sketchId, 1.0, DefaultBodyMode(state));
-  ext->regions = std::move(regions);
-  BeginPreviewFeature(state, std::move(ext));
+  BeginExtrudeOfSketch(state, sk, std::move(regions));
 }
 
-void BeginSketchRevolve(AppState& state) {
-  SketchEditState& edit = state.sketchEdit;
-  SketchFeature* sketch = ResolveActiveSketch(state);
-  if (sketch == nullptr || sketch::BuildLoops(sketch->entities).empty())
-    return;
+void BeginRevolveOfSketch(AppState& state, SketchFeature& sketch,
+                          std::vector<std::vector<uint32_t>> regions) {
   const int n = static_cast<int>(state.document->FeatureCount()) + 1;
-  const uint64_t sketchId = edit.activeSketchId;
-  auto regions = RegionsFromSelection(*sketch, edit.selected);
   // Default the axis to the sketch's sole construction line if it has
   // exactly one; else the global Y axis (changeable in the dialog).
   AxisRef axis;
   axis.kind = AxisRef::Kind::Y;
   uint32_t soleConstructionLine = 0;
   int constructionLines = 0;
-  for (const auto& e : sketch->entities) {
+  for (const auto& e : sketch.entities) {
     const auto* line = std::get_if<sketch::Line>(&e);
     if (line != nullptr && line->construction) {
       soleConstructionLine = line->id;
@@ -700,15 +719,26 @@ void BeginSketchRevolve(AppState& state) {
   }
   if (constructionLines == 1) {
     axis.kind = AxisRef::Kind::SketchLine;
-    axis.sketchId = sketchId;
+    axis.sketchId = sketch.GetId();
     axis.entityId = soleConstructionLine;
   }
-  edit = SketchEditState{};
-  auto rev = std::make_unique<RevolveFeature>(
-      "Revolve " + std::to_string(n), sketchId, 360.0, DefaultBodyMode(state));
+  auto rev = std::make_unique<RevolveFeature>("Revolve " + std::to_string(n),
+                                              sketch.GetId(), 360.0,
+                                              DefaultBodyMode(state));
   rev->axis = axis;
   rev->regions = std::move(regions);
   BeginPreviewFeature(state, std::move(rev));
+}
+
+void BeginSketchRevolve(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (sketch == nullptr || sketch::BuildLoops(sketch->entities).empty())
+    return;
+  auto regions = RegionsFromSelection(*sketch, edit.selected);
+  SketchFeature& sk = *sketch;
+  edit = SketchEditState{};
+  BeginRevolveOfSketch(state, sk, std::move(regions));
 }
 
 } // namespace ui

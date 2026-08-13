@@ -722,6 +722,40 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0);
   };
 
+  // The model toolbar can extrude a FINISHED sketch. Before U9 the only
+  // extrude button lived inside the sketch session, so closing a sketch with
+  // ✓ stranded it — the most standard flow in CAD was a dead end.
+  t = IM_REGISTER_TEST(engine, "sketch", "model_toolbar_extrudes_finished");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+    sketch->AddRectangle({0, 0}, {4, 2});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    // Finish the sketch — the state the user was previously stuck in.
+    ToolbarClick(ctx, "###tb_sk_finish");
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+
+    ToolbarClick(ctx, "###tb_extrude");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    IM_CHECK(Doc()->GetFeature(1)->TypeName() == "Extrude");
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+  };
+
   // A pending preview is added straight to the Document (not via a command),
   // so switching tabs used to stash it into the old part permanently — off
   // the undo stack, unremovable. The tab switch must discard it first.

@@ -4,6 +4,7 @@
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
+#include "ui/SketchToolbar.h"
 
 #include "imgui.h"
 
@@ -46,6 +47,16 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
   add("Create: Sphere", nullptr, idle, [](AppState& s) { CreateSphere(s); });
   add("Create: Cylinder", nullptr, idle,
       [](AppState& s) { CreateCylinder(s); });
+  add("Create: Extrude (from a sketch)", nullptr,
+      idle && ClosedProfileSketch(state) != nullptr, [](AppState& s) {
+        if (SketchFeature* sk = ClosedProfileSketch(s))
+          BeginExtrudeOfSketch(s, *sk);
+      });
+  add("Create: Revolve (from a sketch)", nullptr,
+      idle && ClosedProfileSketch(state) != nullptr, [](AppState& s) {
+        if (SketchFeature* sk = ClosedProfileSketch(s))
+          BeginRevolveOfSketch(s, *sk);
+      });
   add("Create: Datum Plane", nullptr, idle,
       [](AppState& s) { CreateDatumPlane(s); });
   add("Create: Datum Axis", nullptr, idle,
