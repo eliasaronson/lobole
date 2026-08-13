@@ -409,6 +409,25 @@ def main():
         d.call("item_combo", id=hidden[0]["id"], value="Default")
         d.call("cancel_pending")
 
+        # Popups (the tab bar's "+", context menus, combos) close when an
+        # action ends, so opening and choosing must happen in ONE action —
+        # without this a scripted human cannot add a part, assembly or
+        # drawing at all, since that menu is the only path.
+        r = d.call("popup_items", ref="//##PartTabs/+##addmenu")
+        labels = [i["label"] for i in r["items"]]
+        expect(any("addasm" in lb for lb in labels),
+               f"popup_items lists the + menu: {labels}")
+        before = len(d.call("list_parts")["parts"])
+        d.call("popup_click", ref="//##PartTabs/+##addmenu",
+               item="New Assembly##addasm")
+        expect(len(d.call("list_parts")["parts"]) == before + 1,
+               "popup_click added the assembly tab")
+        # …and the UI tier keeps working on a non-part tab (the guard that
+        # rejects part RPCs on an assembly must not swallow UI actions).
+        d.call("ui_items", ref="//##DockHost")
+        d.call("item_hover", ref="//##DockHost/**/###tb_insert_part")
+        d.call("new_project")
+
         # A disabled widget must refuse loudly: Extrude needs a sketch, and a
         # script clicking it used to get a success and no feature.
         d.call("new_project")

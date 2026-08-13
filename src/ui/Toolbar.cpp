@@ -250,8 +250,8 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
-  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)",
-                 hasDoc))
+  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_fit",
+                 "Fit view (F)", hasDoc))
     FitCameraToDocument(state);
   if (ToolButton(ICON_FA_TABLE_CELLS, "Toggle planes (Shift+P)", hasDoc))
     state.showPlanes = !state.showPlanes;
@@ -565,12 +565,48 @@ void DrawSketchModeToolbar(AppState& state) {
   ImGui::NewLine();
 }
 
+namespace {
+// X to drop the next occurrence at: just past the right edge of everything
+// already placed, plus a gap, minus the new part's own left overhang (so the
+// gap is between the SHAPES, whatever local origin each part models around).
+double NextInsertX(AppState& state, uint64_t partId) {
+  const auto partSpan = [&](uint64_t id, float& lo, float& hi) {
+    lo = FLT_MAX;
+    hi = -FLT_MAX;
+    Document* doc = PartDocById(state, id);
+    if (doc == nullptr)
+      return false;
+    for (const Body& b : doc->GetBodies()) {
+      glm::vec3 bmin, bmax;
+      b.shape.GetBoundingBox(bmin, bmax);
+      lo = std::min(lo, bmin.x);
+      hi = std::max(hi, bmax.x);
+    }
+    return lo <= hi;
+  };
+  float placedRight = -FLT_MAX;
+  for (const Occurrence& o : state.assembly->GetOccurrences()) {
+    float lo = 0.0f, hi = 0.0f;
+    if (partSpan(o.partId, lo, hi))
+      placedRight = std::max(placedRight, hi + o.position.x);
+  }
+  if (placedRight == -FLT_MAX)
+    return 0.0; // first occurrence keeps the part's own coordinates
+  float lo = 0.0f, hi = 0.0f;
+  if (!partSpan(partId, lo, hi))
+    return 0.0;
+  const float gap = std::max(1.0f, (hi - lo) * 0.25f);
+  return placedRight + gap - lo;
+}
+} // namespace
+
 // The assembly-mode toolbar: mate-creation tools (A3). Shown when an assembly
 // tab is active (no part document). Fit reuses FitCameraToDocument.
 void DrawAssemblyToolbar(AppState& state) {
   // Insert part: place an occurrence of an existing part. Opens a picker of
   // the project's part tabs (the only GUI path to add an occurrence).
-  if (ToolButton(ICON_FA_CIRCLE_PLUS, "Insert part (place an occurrence)"))
+  if (ToolButton(ICON_FA_CIRCLE_PLUS "###tb_insert_part",
+                 "Insert part (place an occurrence)"))
     ImGui::OpenPopup("insert_part");
   if (ImGui::BeginPopup("insert_part")) {
     ImGui::TextDisabled("Insert part");
@@ -586,6 +622,11 @@ void DrawAssemblyToolbar(AppState& state) {
         occ.partId = s.id;
         occ.name = s.name;
         occ.fixed = state.assembly->OccurrenceCount() == 0; // first = anchor
+        // Every part models around its own origin, so inserting two of them
+        // buries the second inside the first — you had to drag them apart
+        // before you could even see what you inserted. Park each new one
+        // clear of what is already placed, along +X (mates move it anyway).
+        occ.position.x = NextInsertX(state, s.id);
         const uint64_t id = state.assembly->AddOccurrence(occ);
         SelectOccurrence(state, id);
         SolveActiveAssembly(state);
@@ -598,6 +639,9 @@ void DrawAssemblyToolbar(AppState& state) {
   ImGui::SameLine();
   Divider();
 
+  // Every button carries a stable "###tb_*" id like the model toolbar's, so
+  // tests and scripted humans address them by name rather than by icon
+  // codepoint (the assembly/drawing/simulation bars had none at all).
   auto mateBtn = [&](const char* icon, const char* tip, MateType t) {
     const bool active = state.mateTool.active && state.mateTool.type == t;
     if (active)
@@ -611,16 +655,21 @@ void DrawAssemblyToolbar(AppState& state) {
       ImGui::SetTooltip("%s", tip);
     ImGui::SameLine();
   };
-  mateBtn(ICON_FA_LOCK, "Fastened mate (rigid)", MateType::Fastened);
-  mateBtn(ICON_FA_ARROWS_SPIN, "Revolute mate (hinge)", MateType::Revolute);
-  mateBtn(ICON_FA_ARROWS_LEFT_RIGHT, "Slider mate", MateType::Slider);
-  mateBtn(ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT, "Cylindrical mate (spin + slide)",
-          MateType::Cylindrical);
-  mateBtn(ICON_FA_TABLE_CELLS_LARGE, "Planar mate (slide in a plane)",
-          MateType::Planar);
-  mateBtn(ICON_FA_CIRCLE_DOT, "Ball mate (free rotation)", MateType::Ball);
+  mateBtn(ICON_FA_LOCK "###tb_mate_fastened", "Fastened mate (rigid)",
+          MateType::Fastened);
+  mateBtn(ICON_FA_ARROWS_SPIN "###tb_mate_revolute", "Revolute mate (hinge)",
+          MateType::Revolute);
+  mateBtn(ICON_FA_ARROWS_LEFT_RIGHT "###tb_mate_slider", "Slider mate",
+          MateType::Slider);
+  mateBtn(ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT "###tb_mate_cylindrical",
+          "Cylindrical mate (spin + slide)", MateType::Cylindrical);
+  mateBtn(ICON_FA_TABLE_CELLS_LARGE "###tb_mate_planar",
+          "Planar mate (slide in a plane)", MateType::Planar);
+  mateBtn(ICON_FA_CIRCLE_DOT "###tb_mate_ball", "Ball mate (free rotation)",
+          MateType::Ball);
   Divider();
-  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit view (F)"))
+  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_asm_fit",
+                 "Fit view (F)"))
     FitCameraToDocument(state);
 
   // Measure across the assembly: same tool as the part tab — picks carry
@@ -631,7 +680,8 @@ void DrawAssemblyToolbar(AppState& state) {
   if (measureActive)
     ImGui::PushStyleColor(ImGuiCol_Button,
                           ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  if (ToolButton(ICON_FA_RULER, "Measure (pick 1-2 faces/edges; Esc to exit)",
+  if (ToolButton(ICON_FA_RULER "###tb_asm_measure",
+                 "Measure (pick 1-2 faces/edges; Esc to exit)",
                  state.assembly->OccurrenceCount() > 0)) {
     const bool wasActive = state.measure.active;
     state.measure = MeasureState{};    // clear any in-progress measurement
@@ -677,16 +727,17 @@ void DrawSimulationToolbar(AppState& state) {
     if (armed)
       ImGui::PopStyleColor();
   };
-  bcBtn(ICON_FA_LOCK, "Fixed support (click a face)",
+  bcBtn(ICON_FA_LOCK "###tb_sim_fixed", "Fixed support (click a face)",
         SimulationState::Tool::Fixed);
-  bcBtn(ICON_FA_BOLT, "Force load (click a face)",
+  bcBtn(ICON_FA_BOLT "###tb_sim_force", "Force load (click a face)",
         SimulationState::Tool::Force);
-  bcBtn(ICON_FA_DOWN_LONG, "Pressure load (click a face)",
+  bcBtn(ICON_FA_DOWN_LONG "###tb_sim_pressure", "Pressure load (click a face)",
         SimulationState::Tool::Pressure);
 
   Divider();
 
-  if (ToolButton(ICON_FA_PLAY, "Run study (mesh + solve)", hasStudy)) {
+  if (ToolButton(ICON_FA_PLAY "###tb_sim_run", "Run study (mesh + solve)",
+                 hasStudy)) {
     std::string err;
     if (!RunStudyAndCache(*doc, sim.activeStudyId, &err))
       LOG_WARN("run study failed: {}", err);
@@ -694,7 +745,8 @@ void DrawSimulationToolbar(AppState& state) {
 
   Divider();
 
-  if (ToolButton(ICON_FA_ARROW_RIGHT_FROM_BRACKET, "Exit Simulation (Esc)"))
+  if (ToolButton(ICON_FA_ARROW_RIGHT_FROM_BRACKET "###tb_sim_exit",
+                 "Exit Simulation (Esc)"))
     ExitSimulation(state);
 
   // Hint while a BC tool is armed.
@@ -718,7 +770,8 @@ void DrawDrawingToolbar(AppState& state) {
 
   // Add view: a picker of part/assembly sources, each with orientation
   // submenus — the sheet equivalent of inserting a part.
-  if (ToolButton(ICON_FA_CIRCLE_PLUS, "Add view (project a part/assembly)"))
+  if (ToolButton(ICON_FA_CIRCLE_PLUS "###tb_dwg_add_view",
+                 "Add view (project a part/assembly)"))
     ImGui::OpenPopup("add_view");
   if (ImGui::BeginPopup("add_view")) {
     ImGui::TextDisabled("Add view of");
@@ -761,7 +814,8 @@ void DrawDrawingToolbar(AppState& state) {
   ImGui::SameLine();
   Divider();
 
-  if (ToolButton(ICON_FA_ARROWS_ROTATE, "Update views (re-project)"))
+  if (ToolButton(ICON_FA_ARROWS_ROTATE "###tb_dwg_update",
+                 "Update views (re-project)"))
     UpdateDrawingRenders(state);
 
   Divider();
@@ -780,25 +834,32 @@ void DrawDrawingToolbar(AppState& state) {
     if (armed)
       ImGui::PopStyleColor();
   };
-  dimBtn(ICON_FA_LEFT_RIGHT, "Distance dimension", DrawingDimKind::Distance);
-  dimBtn(ICON_FA_RULER_HORIZONTAL, "Horizontal (X) distance",
+  dimBtn(ICON_FA_LEFT_RIGHT "###tb_dwg_dist", "Distance dimension",
+         DrawingDimKind::Distance);
+  dimBtn(ICON_FA_RULER_HORIZONTAL "###tb_dwg_distx", "Horizontal (X) distance",
          DrawingDimKind::DistanceX);
-  dimBtn(ICON_FA_UP_DOWN, "Vertical (Y) distance", DrawingDimKind::DistanceY);
-  dimBtn(ICON_FA_CIRCLE_NOTCH, "Radius dimension", DrawingDimKind::Radius);
-  dimBtn(ICON_FA_CIRCLE_HALF_STROKE, "Diameter dimension",
+  dimBtn(ICON_FA_UP_DOWN "###tb_dwg_disty", "Vertical (Y) distance",
+         DrawingDimKind::DistanceY);
+  dimBtn(ICON_FA_CIRCLE_NOTCH "###tb_dwg_radius", "Radius dimension",
+         DrawingDimKind::Radius);
+  dimBtn(ICON_FA_CIRCLE_HALF_STROKE "###tb_dwg_diameter", "Diameter dimension",
          DrawingDimKind::Diameter);
-  dimBtn(ICON_FA_ANGLE_LEFT, "Angle dimension", DrawingDimKind::Angle);
-  dimBtn(ICON_FA_BULLSEYE, "Hole callout (pick a drilled hole's circle)",
+  dimBtn(ICON_FA_ANGLE_LEFT "###tb_dwg_angle", "Angle dimension",
+         DrawingDimKind::Angle);
+  dimBtn(ICON_FA_BULLSEYE "###tb_dwg_hole_callout",
+         "Hole callout (pick a drilled hole's circle)",
          DrawingDimKind::HoleCallout);
-  dimBtn(ICON_FA_ELLIPSIS, "Pattern callout (pick 2+ circles, Enter finishes)",
+  dimBtn(ICON_FA_ELLIPSIS "###tb_dwg_pattern_callout",
+         "Pattern callout (pick 2+ circles, Enter finishes)",
          DrawingDimKind::PatternCallout);
 
   Divider();
 
-  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER, "Fit sheet (F)"))
+  if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_dwg_fit",
+                 "Fit sheet (F)"))
     state.sheetView.scale = 0.0; // refit on next paint
-  if (ToolButton(ICON_FA_FILE_EXPORT, "Export drawing (SVG / PDF)",
-                 !dwg.GetViews().empty()))
+  if (ToolButton(ICON_FA_FILE_EXPORT "###tb_dwg_export",
+                 "Export drawing (SVG / PDF)", !dwg.GetViews().empty()))
     ExportDialog(state);
 
   if (state.dimTool.active) {

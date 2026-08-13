@@ -414,6 +414,35 @@ struct ItemTarget {
   }
 };
 
+// One widget list as JSON: what a scripted human can see of a window.
+json ItemsToJson(const ImGuiTestItemList& items) {
+  json out = json::array();
+  for (const ImGuiTestItemInfo& it : items) {
+    json e{{"label", it.DebugLabel},
+           {"id", it.ID},
+           {"depth", it.Depth},
+           {"disabled", (it.ItemFlags & ImGuiItemFlags_Disabled) != 0},
+           {"x", it.RectFull.GetCenter().x},
+           {"y", it.RectFull.GetCenter().y}};
+    if (it.Window != nullptr)
+      e["window"] = it.Window->Name;
+    out.push_back(std::move(e));
+  }
+  return out;
+}
+
+// Clicks `target` and returns the popup it opened (a combo list, the tab
+// bar's "+" menu, a right-click context menu). Fails the action when nothing
+// opened, so callers can just check for null.
+ImGuiWindow* OpenPopupOf(ImGuiTestContext* ctx, const ItemTarget& target,
+                         int button) {
+  ctx->ItemClick(target.Ref(), button);
+  ImGuiWindow* popup = ctx->GetWindowByRef("//$FOCUSED");
+  if (popup == nullptr)
+    IM_ERRORF_NOHDR("%s", "that widget opened no popup");
+  return popup;
+}
+
 // Why the last UI action failed, from the test engine's own log ("Unable to
 // locate item: '###tb_box'"). Without this the client got "see app log" and
 // nothing was ever written there.
@@ -566,6 +595,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"item_input", "UI test tier: type into a widget {ref, value}."},
     {"item_hover", "UI test tier: hover a widget {ref|id} — shows its "
                    "tooltip and hover state without clicking."},
+    {"popup_click", "UI test tier: open the popup of {ref|id} ({button}: 1 "
+                    "= context menu) and click {item} in it — the only way "
+                    "to reach a menu that is not the main menu bar (the tab "
+                    "bar's '+', context menus)."},
+    {"popup_items", "UI test tier: list what the popup of {ref|id} holds, "
+                    "then close it. Makes those menus discoverable."},
     {"item_combo", "UI test tier: choose {value} in the combo {ref|id} "
                    "(opens and picks in one action — the popup does not "
                    "survive between RPCs)."},
@@ -1048,9 +1083,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 
 bool RemoteServer::IsUiAction(const std::string& method) {
   static const char* kActions[] = {
-      "menu_click", "item_click", "item_double_click", "item_input",
-      "item_hover", "ui_items",   "viewport_click",    "viewport_drag",
-      "key_press",  "scroll"};
+      "menu_click", "item_click",     "item_double_click", "item_input",
+      "item_hover", "item_combo",     "popup_click",       "popup_items",
+      "ui_items",   "viewport_click", "viewport_drag",     "key_press",
+      "scroll"};
   for (const char* a : kActions)
     if (method == a)
       return true;
@@ -1105,20 +1141,35 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     m_uiAction = [target](ImGuiTestContext* ctx) {
       ctx->MouseMove(target.Ref());
     };
-  } else if (m == "item_combo") {
+  } else if (m == "item_combo" || m == "popup_click") {
     const ItemTarget target(p, m);
-    const std::string value = p.at("value").get<std::string>();
-    // Open + choose in ONE action: a queued action ends with its own frames,
-    // and the combo popup closes in between, so two RPCs cannot do this.
-    m_uiAction = [target, value](ImGuiTestContext* ctx) {
-      ctx->ItemClick(target.Ref());
-      ImGuiWindow* popup = ctx->GetWindowByRef("//$FOCUSED");
-      if (popup == nullptr) {
-        ctx->LogError("combo did not open a popup");
+    // item_combo names the entry `value`; popup_click (menus, context menus)
+    // names it `item`. Same motion either way.
+    const std::string entry = m == "item_combo"
+                                  ? p.at("value").get<std::string>()
+                                  : p.at("item").get<std::string>();
+    const int button = p.value("button", 0); // 1 = a right-click menu
+    // Open + choose in ONE action: a queued action ends with its own frames
+    // and the popup closes in between, so two RPCs can never do this.
+    m_uiAction = [target, entry, button](ImGuiTestContext* ctx) {
+      ImGuiWindow* popup = OpenPopupOf(ctx, target, button);
+      if (popup == nullptr)
         return;
-      }
       ctx->ItemClick(
-          (std::string("//") + popup->Name + "/**/" + value).c_str());
+          (std::string("//") + popup->Name + "/**/" + entry).c_str());
+    };
+  } else if (m == "popup_items") {
+    const ItemTarget target(p, m);
+    const int button = p.value("button", 0);
+    m_uiAction = [this, target, button](ImGuiTestContext* ctx) {
+      ImGuiWindow* popup = OpenPopupOf(ctx, target, button);
+      if (popup == nullptr)
+        return;
+      ImGuiTestItemList items;
+      ctx->GatherItems(&items, (std::string("//") + popup->Name).c_str());
+      m_uiActionResult =
+          json{{"popup", popup->Name}, {"items", ItemsToJson(items)}};
+      ctx->KeyPress(ImGuiKey_Escape); // leave the UI as we found it
     };
   } else if (m == "ui_items") {
     const std::string ref = p.value("ref", "//$FOCUSED");
@@ -1126,19 +1177,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     m_uiAction = [this, ref, depth](ImGuiTestContext* ctx) {
       ImGuiTestItemList items;
       ctx->GatherItems(&items, ref.c_str(), depth);
-      json out = json::array();
-      for (const ImGuiTestItemInfo& it : items) {
-        json e{{"label", it.DebugLabel},
-               {"id", it.ID},
-               {"depth", it.Depth},
-               {"disabled", (it.ItemFlags & ImGuiItemFlags_Disabled) != 0},
-               {"x", it.RectFull.GetCenter().x},
-               {"y", it.RectFull.GetCenter().y}};
-        if (it.Window != nullptr)
-          e["window"] = it.Window->Name;
-        out.push_back(std::move(e));
-      }
-      m_uiActionResult = json{{"items", std::move(out)}};
+      m_uiActionResult = json{{"items", ItemsToJson(items)}};
     };
   } else if (m == "viewport_click") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
