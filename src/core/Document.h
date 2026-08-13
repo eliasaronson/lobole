@@ -117,6 +117,16 @@ public:
   }
   const SymbolTable* ProjectSymbols() const { return m_projectSymbols; }
 
+  // The project scope's parameter EXPRESSIONS (same owner as the symbols).
+  // Needed when a configuration overrides a project variable: derived project
+  // variables (`height = opening + 2*sec`) must re-evaluate under the
+  // override for THIS document, which requires their expressions, not just
+  // their project-level values. Null = overrides shadow the named variable
+  // only (dependents keep their project values — the pre-wiring behavior).
+  void SetProjectParameters(const std::vector<Parameter>* projectParameters) {
+    m_projectParameters = projectParameters;
+  }
+
   // Removes and returns the local parameter table without regenerating. Used
   // when a single loaded part is promoted to be the whole project (its params
   // become the project scope): the caller re-wires + regenerates.
@@ -323,6 +333,7 @@ private:
   SymbolTable m_symbols;
   // Non-owning; owned by AppState (Phase V). Null for a bare Document.
   const SymbolTable* m_projectSymbols = nullptr;
+  const std::vector<Parameter>* m_projectParameters = nullptr;
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;
   int m_rollback = -1;

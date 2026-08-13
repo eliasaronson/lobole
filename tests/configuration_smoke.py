@@ -167,6 +167,64 @@ def main():
         expect(areop["configurations"][0]["suppressed_occurrences"] == [o2],
                f"assembly suppression survived reopen: {areop}")
 
+        # --- Overriding a PROJECT variable re-derives its project-level
+        # dependents (the C-clamp split-brain bug): `h = w * 2` must follow
+        # an override of `w` for BOTH a constraint expr and an entity expr.
+        d.call("new_project")
+        d.call("set_variable", name="w", expression="10")   # project scope
+        d.call("set_variable", name="h", expression="w * 2")
+        skc = d.call("add_feature", feature={
+            "type": "Sketch", "name": "S",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [
+                {"type": "line", "a": [0, 0], "b": [9, 1]},
+                {"type": "line", "a": [9, 1], "b": [10, 19]},
+                {"type": "line", "a": [10, 19], "b": [1, 20]},
+                {"type": "line", "a": [1, 20], "b": [0, 0]},
+                # entity expr referencing the DERIVED project var:
+                {"type": "circle", "center": [5, 5], "radius": 2,
+                 "construction": True, "r_expr": "h / 8"}]})
+        l1, l2, l3, l4, circ = skc["entity_ids"]
+        for kind, refs, kw in [
+                ("coincident", [[l1, 1], [l2, 0]], {}),
+                ("coincident", [[l2, 1], [l3, 0]], {}),
+                ("coincident", [[l3, 1], [l4, 0]], {}),
+                ("coincident", [[l4, 1], [l1, 0]], {}),
+                ("horizontal", [[l1, 0]], {}), ("horizontal", [[l3, 0]], {}),
+                ("vertical", [[l2, 0]], {}), ("vertical", [[l4, 0]], {}),
+                ("coincident", [[l1, 0], [0xFFFFFF00, 0]], {}),
+                ("distance", [[l1, 0], [l1, 1]], {"expr": "w"}),
+                # constraint expr referencing the DERIVED project var:
+                ("distance", [[l2, 0], [l2, 1]], {"expr": "h"})]:
+            d.call("add_constraint", sketch_id=skc["id"], kind=kind,
+                   refs=refs, **kw)
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "P", "sketch_id": skc["id"],
+            "distance": 5.0, "mode": "new_body"})
+        b = d.call("get_state")["bodies"][0]
+        base_h = b["bbox_max"][1] - b["bbox_min"][1]
+        expect(abs(base_h - 20.0) < 1e-3, f"base h=20: {base_h}")
+        cfg2 = d.call("add_configuration", name="Wide")["id"]
+        d.call("set_configuration", id=cfg2,
+               parameter_overrides=[{"name": "w", "expression": "15"}])
+        d.call("set_active_configuration", id=cfg2)
+        st = d.call("get_state")
+        b = st["bodies"][0]
+        got_w = b["bbox_max"][0] - b["bbox_min"][0]
+        got_h = b["bbox_max"][1] - b["bbox_min"][1]
+        expect(abs(got_w - 15.0) < 1e-3, f"override drives w: {got_w}")
+        expect(abs(got_h - 30.0) < 1e-3,
+               f"override re-derives dependent h (constraint expr): {got_h}")
+        ent = next(e for e in st["features"][0]["entities"]
+                   if e["type"] == "circle")
+        expect(abs(ent["radius"] - 30.0 / 8) < 1e-3,
+               f"override re-derives dependent h (entity expr): {ent}")
+        d.call("set_active_configuration", id=0)
+        b = d.call("get_state")["bodies"][0]
+        expect(abs((b["bbox_max"][1] - b["bbox_min"][1]) - 20.0) < 1e-3,
+               "base config restores h=20")
+
         print("configuration_smoke: OK")
     finally:
         app.terminate()

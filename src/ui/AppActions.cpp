@@ -823,6 +823,7 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.projectParameters = state.document->TakeParameters();
   state.projectVarHistory = {};
   state.document->SetProjectSymbols(&state.projectSymbols);
+  state.document->SetProjectParameters(&state.projectParameters);
   EvaluateParameterTable(state.projectParameters, state.projectSymbols, nullptr,
                          {});
   state.document->Regenerate();
@@ -917,6 +918,7 @@ size_t AddPart(AppState& state, const std::string& name) {
   // Phase V: the new part shares the project scope (its features can reference
   // project variables immediately).
   state.document->SetProjectSymbols(&state.projectSymbols);
+  state.document->SetProjectParameters(&state.projectParameters);
   state.assembly = nullptr;
   state.drawing = nullptr;
   state.commands = std::make_unique<CommandStack>();
@@ -1143,6 +1145,7 @@ void SyncProjectScope(AppState& state) {
   for (size_t i = 0; i < state.parts.size(); i++) {
     if (Document* d = SlotDoc(state, i)) {
       d->SetProjectSymbols(&state.projectSymbols);
+      d->SetProjectParameters(&state.projectParameters);
       d->Regenerate();
     }
   }

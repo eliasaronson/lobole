@@ -464,14 +464,36 @@ void Document::EvaluateParameters() {
   // this part alone, leaving the shared project scope and every other part
   // untouched.
   std::vector<Parameter> augmented = m_parameters;
+  const auto isLocal = [&](const std::string& name) {
+    return std::any_of(m_parameters.begin(), m_parameters.end(),
+                       [&](const Parameter& p) { return p.name == name; });
+  };
+  bool overridesProject = false;
   for (const auto& [name, expr] : cfg->parameterOverrides) {
-    const bool isLocal =
-        std::any_of(m_parameters.begin(), m_parameters.end(),
-                    [&](const Parameter& p) { return p.name == name; });
     const bool isProject =
         m_projectSymbols != nullptr && m_projectSymbols->count(name) != 0;
-    if (!isLocal && isProject)
+    if (!isLocal(name) && isProject) {
+      overridesProject = true;
       augmented.push_back({name, expr, "", 0.0, {}});
+    }
+  }
+  // Overriding a project variable must also re-derive project variables
+  // computed FROM it (`height = opening + 2*sec`) — otherwise direct
+  // references see the override while derived ones keep the project value,
+  // splitting the document's geometry (the C-clamp configuration bug).
+  // Inject the whole project table as synthetic locals: the topological
+  // evaluation below re-derives exactly the affected subset, and unaffected
+  // entries evaluate to their project values anyway. Requires the project
+  // parameter EXPRESSIONS (wired by the app; without them, fall back to
+  // shadowing just the named variables).
+  if (overridesProject && m_projectParameters != nullptr) {
+    for (const Parameter& pp : *m_projectParameters) {
+      const bool alreadyIn =
+          std::any_of(augmented.begin(), augmented.end(),
+                      [&](const Parameter& a) { return a.name == pp.name; });
+      if (!alreadyIn && !isLocal(pp.name))
+        augmented.push_back({pp.name, pp.expression, "", pp.value, {}});
+    }
   }
   EvaluateParameterTable(
       augmented, m_symbols, m_projectSymbols,
