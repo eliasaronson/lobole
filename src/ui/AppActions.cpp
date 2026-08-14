@@ -1918,8 +1918,14 @@ void FitCameraToBox(AppState& state, const glm::vec3& min,
   // (U10). Treat the covered strip as unusable: the model fits the band that
   // is left, and the camera pans left by half the strip so it is centred in
   // THAT band rather than in the whole viewport.
+  // Ask the session state whether a window is open, not the rect: the remote
+  // `fit_view` runs before the UI draws, so the rect is always a frame behind
+  // and a just-closed window kept shoving the model aside.
+  const bool toolWindowOpen =
+      HasPendingFeature(state) || state.editFeatureId != 0 ||
+      state.measure.active || state.dimTool.active || state.mateTool.active;
   float coveredFrac = 0.0f;
-  if (state.viewportSize.x > 1.0f &&
+  if (toolWindowOpen && state.viewportSize.x > 1.0f &&
       state.toolWindowRect.z > state.toolWindowRect.x) {
     const float vpRight = state.viewportPos.x + state.viewportSize.x;
     const float overlap = std::max(
