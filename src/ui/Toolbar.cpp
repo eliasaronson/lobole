@@ -6,6 +6,7 @@
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
+#include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (U8a)
@@ -566,37 +567,33 @@ void DrawSketchModeToolbar(AppState& state) {
 }
 
 namespace {
-// X to drop the next occurrence at: just past the right edge of everything
-// already placed, plus a gap, minus the new part's own left overhang (so the
-// gap is between the SHAPES, whatever local origin each part models around).
+// X to drop the next occurrence at: clear of everything already placed, by
+// the shared rule (ui/Placement.h). Measured between the SHAPES, so the gap
+// looks right whatever local origin each part models around.
 double NextInsertX(AppState& state, uint64_t partId) {
-  const auto partSpan = [&](uint64_t id, float& lo, float& hi) {
-    lo = FLT_MAX;
-    hi = -FLT_MAX;
+  const auto spanOf = [&](uint64_t id, Span& out) {
     Document* doc = PartDocById(state, id);
-    if (doc == nullptr)
+    if (doc == nullptr || doc->GetBodies().empty())
       return false;
+    out = {1e30, -1e30};
     for (const Body& b : doc->GetBodies()) {
       glm::vec3 bmin, bmax;
       b.shape.GetBoundingBox(bmin, bmax);
-      lo = std::min(lo, bmin.x);
-      hi = std::max(hi, bmax.x);
+      out.lo = std::min(out.lo, static_cast<double>(bmin.x));
+      out.hi = std::max(out.hi, static_cast<double>(bmax.x));
     }
-    return lo <= hi;
+    return out.lo <= out.hi;
   };
-  float placedRight = -FLT_MAX;
+  std::vector<Span> taken;
   for (const Occurrence& o : state.assembly->GetOccurrences()) {
-    float lo = 0.0f, hi = 0.0f;
-    if (partSpan(o.partId, lo, hi))
-      placedRight = std::max(placedRight, hi + o.position.x);
+    Span s;
+    if (spanOf(o.partId, s))
+      taken.push_back({s.lo + o.position.x, s.hi + o.position.x});
   }
-  if (placedRight == -FLT_MAX)
-    return 0.0; // first occurrence keeps the part's own coordinates
-  float lo = 0.0f, hi = 0.0f;
-  if (!partSpan(partId, lo, hi))
+  Span incoming;
+  if (!spanOf(partId, incoming))
     return 0.0;
-  const float gap = std::max(1.0f, (hi - lo) * 0.25f);
-  return placedRight + gap - lo;
+  return ClearOffset(taken, incoming);
 }
 } // namespace
 

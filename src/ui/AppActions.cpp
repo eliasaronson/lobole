@@ -48,6 +48,7 @@
 #include "core/features/ThreadFeature.h"
 #include "core/sketch/SketchProfile.h"
 #include "ui/FeatureEditor.h" // PickSlot (thread face slot)
+#include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (Hole select-first)
 #include "ui/SketchInteraction.h" // SketchUVToScreen
@@ -311,6 +312,10 @@ void AppendCogMarker(const AppState& state, std::vector<LineVertex3D>& lines) {
 
 namespace {
 // Placement offset so successive primitives don't overlap.
+// Where a new primitive goes. Fixed-size primitives (every one is 2 units),
+// so this ladder is equivalent to the shared clear-spot rule; anything whose
+// size varies should use ui/Placement.h's ClearOffset instead of inventing a
+// fourth answer (U10).
 glm::vec3 NextSpot(const AppState& state) {
   const int n =
       state.document ? static_cast<int>(state.document->FeatureCount()) : 0;
@@ -2432,12 +2437,14 @@ void AddDrawingViewPlaced(AppState& state, DrawingView v) {
   }
 
   // Position: sheet centre for the first view, else clear to the right of
-  // everything already placed (wrapping below when the row is full). The
-  // sheet anchor maps model -> pos + scale * model, so the left edge lands at
-  // `x` when pos.x = x - scale * bboxMin.x.
+  // everything already placed by the shared rule (ui/Placement.h), wrapping
+  // below when the row is full. The sheet anchor maps model -> pos + scale *
+  // model, so a left edge at `x` means pos.x = x - scale * bboxMin.x.
   glm::dvec2 pos = ext * 0.5;
   if (measured) {
-    double right = -1e30, bottom = -1e30, firstMidY = ext.y * 0.5;
+    const SheetChrome chrome = ChromeOf(dwg.GetSheet());
+    std::vector<Span> takenX;
+    double lowest = 1e30, firstMidY = ext.y * 0.5;
     bool anyPlaced = false;
     for (const DrawingView& other : dwg.GetViews()) {
       const auto it = state.drawingRenders.find(other.id);
@@ -2446,19 +2453,31 @@ void AddDrawingViewPlaced(AppState& state, DrawingView v) {
       if (!anyPlaced)
         firstMidY = (it->second.bboxMin.y + it->second.bboxMax.y) * 0.5;
       anyPlaced = true;
-      right = std::max(right, it->second.bboxMax.x);
-      bottom = std::max(bottom, it->second.bboxMax.y);
+      takenX.push_back({it->second.bboxMin.x, it->second.bboxMax.x});
+      lowest = std::min(lowest, it->second.bboxMin.y);
     }
     const glm::dvec2 placed = size * v.scale;
+    const Span incoming{v.scale * sv.bboxMin.x, v.scale * sv.bboxMax.x};
     const double gap = std::max(8.0, std::max(placed.x, placed.y) * 0.15);
     if (!anyPlaced) {
       pos = ext * 0.5 - v.scale * (sv.bboxMin + sv.bboxMax) * 0.5;
-    } else if (right + gap + placed.x <= ext.x) {
-      pos.x = right + gap - v.scale * sv.bboxMin.x;
+    } else if (const double dx = ClearOffset(takenX, incoming, 8.0);
+               dx + v.scale * sv.bboxMax.x <= chrome.borderMax.x) {
+      pos.x = dx; // same row, to the right of everything placed
       pos.y = firstMidY - v.scale * (sv.bboxMin.y + sv.bboxMax.y) * 0.5;
-    } else { // new row under everything
-      pos.x = gap - v.scale * sv.bboxMin.x;
-      pos.y = bottom + gap - v.scale * sv.bboxMin.y;
+    } else {
+      // A new row BELOW the others (sheet Y grows upward), starting at the
+      // left margin — and stopping above the title block, which a wrapped
+      // row used to land on top of.
+      pos.x = chrome.borderMin.x + gap - v.scale * sv.bboxMin.x;
+      pos.y = lowest - gap - v.scale * sv.bboxMax.y;
+      const Span rowX{pos.x + v.scale * sv.bboxMin.x,
+                      pos.x + v.scale * sv.bboxMax.x};
+      const Span blockX{chrome.titleBlockMin.x, chrome.titleBlockMax.x};
+      const double floorY =
+          Overlaps(rowX, blockX) ? chrome.titleBlockMax.y : chrome.borderMin.y;
+      if (pos.y + v.scale * sv.bboxMin.y < floorY + gap)
+        pos.y = floorY + gap - v.scale * sv.bboxMin.y;
     }
   }
   v.position = pos;
