@@ -180,13 +180,22 @@ points opposite ways for each:
   shared renderer utilities) — opportunistically while touching code, not big-bang; gated
   on 6b hybrid RT (no forcing function until then — see the policy above).
 - ~~**CI**~~ — **done** (scripting S2): `.github/workflows/ci.yml` builds + runs
-  `ctest -LE gui` on every push. Still open: running the GUI-labeled tests under a
-  virtual display.
+  `ctest -LE gui` on every push.
 - **Build hygiene** — `-isystem` for OCC/ImGui headers, a PCH for the heavy common set,
   Ninja, ccache (see sketching plan cross-cutting).
 - ~~**Incremental regeneration**~~ — **done**: `Document` keeps a per-feature
   output-shape cache keyed by an input hash (`RegenCacheEntry` + `RegenStats`); it was
   the assemblies gate-1 and cleared before A1.
+- **Scale** — first measured 2026-08-14, [performance/scale-round.md](performance/scale-round.md):
+  a 148-feature part and a 50-occurrence assembly, with the benchmarks kept in
+  `scratch/scale_*.py`. Fixed there: hole cutters fused one at a time (480 holes
+  324 s → 7.9 s), interference without a bbox reject (7.5 s → 282 ms), drawing export
+  re-projecting the sheet (6.1 s → 19 ms). **Still open and the next big one:
+  opening a project rebuilds it from scratch** (259 s for that part, against 0.4 s to
+  save it) — persist the built geometry beside the recipe, keyed by the chain hash the
+  prefix cache already computes.
+- ~~**CI: GUI tests under a virtual display**~~ — **done** 2026-08-14: the gui-labeled
+  ctest entries run through `tools/xvfb-exec.sh`.
 
 ### Test coverage (state 2026-07-14)
 
