@@ -173,6 +173,32 @@ work the way a user works:
   reported ids, so the item actions now accept `{id}`, and `item_combo` opens
   and picks in one action because the popup does not survive between RPCs.
 
+## Rounds 2 and 3 (same week)
+
+The round-1 fixes made a second clicks-only pass possible, on the surfaces
+part modeling never touched. Findings and commits:
+
+- **Assemblies** (`eb6b025`): no popup was reachable at all — a queued UI
+  action ends with its own frames, so the tab bar's "+" menu (the ONLY way to
+  add an assembly) was gone before the next RPC arrived → `popup_items` /
+  `popup_click`, with submenu paths and `{button: 1}` for context menus. The
+  assembly/drawing/simulation toolbars had no `###tb_*` ids at all. Inserted
+  occurrences stacked at one origin.
+- **Drawings** (`9f877ac`): views stacked at the sheet centre at 1:1 (a 2 mm
+  part is a dot) → `AddDrawingViewPlaced` fits a standard scale and parks each
+  view clear of the others. That change exposed a **latent correctness bug**:
+  distance and radius dimensions reported SHEET millimetres, so a 2 mm box at
+  20:1 read "40". Only `HoleCallout` divided by the view scale. Invisible for
+  as long as every view sat at 1:1.
+- **Residue** (`7118604`): `menu_items` (the menu bar records its own
+  top-level names — the test engine cannot enumerate them), the feature tree
+  consumes an armed plane pick, a home corner on the nav cube, and Export
+  disabled-with-a-reason where no system save dialog exists.
+
+The recurring shape, worth looking for first in any new surface: **defaults
+that are valid but useless** (everything at one origin, one scale), and
+**values that are right in one coordinate space and read in another**.
+
 ## Deliberate non-additions
 
 - **No `viewport_double_click`.** The dogfood asked for one only because the
