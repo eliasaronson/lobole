@@ -25,6 +25,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 
 using nlohmann::json;
@@ -475,6 +476,10 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         continue;
       byId[std::stoull(entry.path().filename().string())] = entry.path();
     }
+    // One regeneration for the whole file, not one per feature (Document::
+    // BulkEdit). The guard is released explicitly below — BEFORE the topology
+    // results are stamped, since they must carry the settled version.
+    auto bulk = std::make_optional<Document::BulkEdit>(*doc);
     for (const auto& idJson : index.at("features")) {
       const uint64_t id = idJson.get<uint64_t>();
       const auto it = byId.find(id);
@@ -563,6 +568,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // it.
     doc->SetActiveConfiguration(
         index.value("active_configuration", uint64_t{0}));
+    bulk.reset(); // the one regeneration for everything loaded above
     // Now that regeneration has settled, stamp the persisted topology results
     // with the final version so they read as current (v33).
     for (auto& [id, rt] : pendingResults) {
@@ -922,8 +928,11 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
                         pj.at("expression").get<std::string>(),
                         pj.value("comment", std::string{}));
     }
-    for (const auto& fj : j.at("features")) {
-      doc->AddFeature(FeatureFromJson(fj));
+    {
+      Document::BulkEdit bulk(*doc); // one regeneration, not one per feature
+      for (const auto& fj : j.at("features")) {
+        doc->AddFeature(FeatureFromJson(fj));
+      }
     }
     // Reference-image bytes (v49): decode the base64 "assets" map into the doc
     // asset store.

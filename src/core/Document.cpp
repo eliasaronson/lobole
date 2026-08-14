@@ -29,7 +29,7 @@ void Document::InsertFeature(std::unique_ptr<Feature> feature, size_t index) {
     m_nextId = std::max(m_nextId, feature->GetId() + 1);
   }
   m_features.insert(m_features.begin() + index, std::move(feature));
-  Regenerate();
+  Regenerate(); // deferred while a BulkEdit guard is held
 }
 
 Feature* Document::FindFeatureById(uint64_t id, size_t* outIndex) {
@@ -51,7 +51,7 @@ std::unique_ptr<Feature> Document::RemoveFeature(size_t index) {
   }
   std::unique_ptr<Feature> removed = std::move(m_features[index]);
   m_features.erase(m_features.begin() + index);
-  Regenerate();
+  Regenerate(); // deferred while a BulkEdit guard is held
   return removed;
 }
 
@@ -79,6 +79,12 @@ bool Document::ReplaceFeature(size_t index, std::unique_ptr<Feature> feature) {
 }
 
 bool Document::Regenerate() {
+  // Deferred while a BulkEdit guard is held: a loader adds N features (and
+  // sets rollback, parameters, the active configuration) and gets exactly one
+  // regeneration when the guard releases, instead of one per mutation.
+  if (m_bulkDepth > 0)
+    return true;
+
   EvaluateParameters();
 
   m_version++;

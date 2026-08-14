@@ -259,6 +259,30 @@ public:
   // successful prefix.
   bool Regenerate();
 
+  // Suspends regeneration for a batch of edits (loading a file, importing an
+  // assembly), running exactly one Regenerate when the last guard releases.
+  //
+  // Every InsertFeature regenerates, which the prefix cache keeps cheap in
+  // EXECUTION — but not in bookkeeping: each pass re-serializes and re-hashes
+  // every feature so far, so loading N features costs N^2/2 feature-JSON
+  // dumps (about 11k of them for a 148-feature part, tens of seconds before
+  // any geometry is built). Adding the features first and regenerating once
+  // is the same result for a fraction of the work.
+  class BulkEdit {
+  public:
+    explicit BulkEdit(Document& doc) : m_doc(doc) { m_doc.m_bulkDepth++; }
+    ~BulkEdit() {
+      if (--m_doc.m_bulkDepth == 0)
+        m_doc.Regenerate();
+    }
+    BulkEdit(const BulkEdit&) = delete;
+    BulkEdit& operator=(const BulkEdit&) = delete;
+
+  private:
+    Document& m_doc;
+  };
+  bool InBulkEdit() const { return m_bulkDepth > 0; }
+
   const std::vector<Body>& GetBodies() const { return m_bodies; }
 
   // ---- Reference-image assets (v49) -------------------------------------
@@ -337,6 +361,7 @@ private:
   uint64_t m_version = 0;
   uint64_t m_nextId = 1;
   int m_rollback = -1;
+  int m_bulkDepth = 0; // >0 = a BulkEdit guard is deferring regeneration
 
   // Prefix cache (R3): per feature, the chain hash of everything up to and
   // including it, plus a snapshot of the body list after it executed. Body
