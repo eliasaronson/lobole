@@ -11,6 +11,7 @@
 #include <Standard_Version.hxx>
 #include <TopoDS_Shape.hxx>
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -49,6 +50,31 @@ ElementMap ElementMapFromJson(const json& j) {
   for (const auto& [key, value] : j.value("edges", json::object()).items())
     map.edgeNames[std::stoi(key)] = value.get<std::string>();
   return map;
+}
+
+// Do these two files hold the same bytes? Cheap next to writing a B-Rep, and
+// it is what keeps an unchanged shape's file untouched.
+bool SameBytes(const fs::path& a, const fs::path& b) {
+  std::error_code ec;
+  if (!fs::exists(b, ec) || fs::file_size(a, ec) != fs::file_size(b, ec))
+    return false;
+  std::ifstream fa(a, std::ios::binary), fb(b, std::ios::binary);
+  if (!fa || !fb)
+    return false;
+  constexpr size_t kChunk = 64 * 1024;
+  std::vector<char> bufA(kChunk), bufB(kChunk);
+  while (fa && fb) {
+    fa.read(bufA.data(), kChunk);
+    fb.read(bufB.data(), kChunk);
+    const auto got = fa.gcount();
+    if (got != fb.gcount())
+      return false;
+    if (std::memcmp(bufA.data(), bufB.data(), static_cast<size_t>(got)) != 0)
+      return false;
+    if (got == 0)
+      break;
+  }
+  return true;
 }
 
 // The hash already on disk, or 0. Lets an unchanged save skip the write
@@ -98,13 +124,24 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
     size_t i = 0;
     for (const Body& body : doc.GetBodies()) {
       const std::string file = std::to_string(i++) + ".brep";
+      const fs::path target = geom / file;
       const fs::path tmp = geom / (file + ".tmp");
       if (!BinTools::Write(body.shape.GetShape(), tmp.string().c_str())) {
         if (error)
           *error = "could not write " + file;
         return false;
       }
-      fs::rename(tmp, geom / file);
+      // Identical content keeps its mtime, like WriteTextAtomic: a cosmetic
+      // edit (renaming a feature) changes the chain hash and so lands here,
+      // but the SHAPE is unchanged, and rsync, backups and file watchers
+      // should see exactly what changed. Git already ignores it — content
+      // addressing means identical bytes add nothing to history.
+      if (SameBytes(tmp, target)) {
+        std::error_code rmEc;
+        fs::remove(tmp, rmEc);
+      } else {
+        fs::rename(tmp, target);
+      }
       json entry{{"brep", file},
                  {"name", body.name},
                  {"material", body.material},

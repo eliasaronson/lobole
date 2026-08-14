@@ -74,6 +74,30 @@ TEST_CASE("Baked geometry loads instead of rebuilding", "[baked]") {
   fs::remove_all(proj);
 }
 
+// A cosmetic edit changes the chain hash but not the shape. Git would ignore
+// the rewrite anyway (identical bytes are the same object), but rsync, backups
+// and file watchers should still see only what actually changed — the same
+// discipline WriteTextAtomic keeps for the recipe.
+TEST_CASE("Renaming a feature does not touch its baked shape", "[baked]") {
+  const fs::path proj = TempProject("baked-rename.dsgn");
+  auto doc = MakePart();
+  REQUIRE(testio::Save(*doc, proj.string()));
+  const fs::path brep = proj / "geometry" / "0.brep";
+  REQUIRE(fs::exists(brep));
+  const auto before = fs::last_write_time(brep);
+
+  doc->GetFeature(0)->SetName("Renamed plate");
+  doc->Regenerate();
+  REQUIRE(testio::Save(*doc, proj.string()));
+  CHECK(fs::last_write_time(brep) == before); // same shape, same file
+  // The index DOES change: it carries the new chain hash, which is what makes
+  // the blob still match the recipe on the next open.
+  auto loaded = testio::Load(proj.string());
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->LastRegenStats().executed == 0);
+  fs::remove_all(proj);
+}
+
 TEST_CASE("A recipe edited behind the app's back is rebuilt", "[baked]") {
   const fs::path proj = TempProject("baked-stale.dsgn");
   auto doc = MakePart();
