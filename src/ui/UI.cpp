@@ -181,7 +181,60 @@ void DrawViewCube(AppState& state) {
     return true;
   };
 
+  // Corner and edge hotspots, tested BEFORE the faces: viewed head-on the
+  // cube shows one face and the 45-degree directions are unreachable, so the
+  // only way to a three-quarter view was a drag. A corner is the sum of its
+  // three faces' normals, an edge the sum of its two (U10).
   ImDrawList* dl = ImGui::GetWindowDrawList();
+  glm::vec3 hotDir(0.0f);
+  bool hotIsCorner = false, hotAny = false;
+  if (hoveredWidget && !homeHot) {
+    const float grab = std::max(6.0f, h * 0.28f);
+    float bestD2 = grab * grab;
+    // The 8 corners.
+    for (int i = 0; i < 8; i++) {
+      if (cornerZ[i] <= 0.0f)
+        continue; // facing away
+      const float dx = mouse.x - corner2d[i].x, dy = mouse.y - corner2d[i].y;
+      const float d2 = dx * dx + dy * dy;
+      if (d2 > bestD2)
+        continue;
+      bestD2 = d2;
+      hotDir = glm::vec3((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f,
+                         (i & 4) ? 1.0f : -1.0f);
+      hotIsCorner = true;
+      hotAny = true;
+    }
+    // The 12 edges: pairs of corners differing in exactly one bit.
+    for (int i = 0; i < 8 && !hotIsCorner; i++) {
+      for (int bit = 1; bit <= 4; bit <<= 1) {
+        const int j = i ^ bit;
+        if (j < i || cornerZ[i] + cornerZ[j] <= 0.0f)
+          continue;
+        const ImVec2 mid((corner2d[i].x + corner2d[j].x) * 0.5f,
+                         (corner2d[i].y + corner2d[j].y) * 0.5f);
+        const float dx = mouse.x - mid.x, dy = mouse.y - mid.y;
+        const float d2 = dx * dx + dy * dy;
+        if (d2 > bestD2)
+          continue;
+        bestD2 = d2;
+        const glm::vec3 a((i & 1) ? 1.0f : -1.0f, (i & 2) ? 1.0f : -1.0f,
+                          (i & 4) ? 1.0f : -1.0f);
+        const glm::vec3 b((j & 1) ? 1.0f : -1.0f, (j & 2) ? 1.0f : -1.0f,
+                          (j & 4) ? 1.0f : -1.0f);
+        hotDir =
+            a + b; // the two shared components survive, the odd one cancels
+        hotAny = true;
+      }
+    }
+  }
+  if (hotAny) {
+    clicked = false; // the hotspot owns this click, not the face under it
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+      state.camera->AlignToFace(glm::vec3(0.0f), glm::normalize(hotDir));
+    ImGui::SetTooltip(hotIsCorner ? "Corner view" : "Edge view");
+  }
+
   for (const CubeFace& f : kFaces) {
     const glm::vec3 n = view * f.normal;
     if (n.z <= 0.02f)
@@ -231,6 +284,64 @@ void DrawViewCube(AppState& state) {
 
 // Empty-state hint (U5): a fresh part tells the user where to start instead
 // of showing three anonymous planes.
+// Which world direction a sketch axis points, as a label: "+X", "-Z"… The
+// sketch grid colours U red and V green, but nothing said what they MEAN, and
+// V = normal x uAxis makes the Right plane's V point along -Z, which has
+// surprised every person who has correlated a screenshot with coordinates
+// (see the V-axis note in the project memory). U10.
+const char* WorldAxisLabel(const glm::vec3& dir) {
+  const glm::vec3 a = glm::abs(dir);
+  if (a.x >= a.y && a.x >= a.z)
+    return dir.x >= 0.0f ? "+X" : "-X";
+  if (a.y >= a.z)
+    return dir.y >= 0.0f ? "+Y" : "-Y";
+  return dir.z >= 0.0f ? "+Z" : "-Z";
+}
+
+// Labels for the sketch's U and V axes, in the same red and green the grid
+// uses. Anchored a fixed screen distance from the sketch ORIGIN along each
+// axis rather than at the axes' far ends, which are off-screen at any working
+// zoom — a compass, not a ruler.
+void DrawSketchAxisLabels(AppState& state) {
+  SketchFeature* sketch = ResolveActiveSketch(state);
+  if (sketch == nullptr || !state.sketchEdit.IsEditing())
+    return;
+  const glm::vec2 origin = SketchUVToScreen(state, sketch->plane, {0.0f, 0.0f});
+  const glm::vec2 vp0 = state.viewportPos;
+  const glm::vec2 vp1 = state.viewportPos + state.viewportSize;
+  if (origin.x < vp0.x || origin.y < vp0.y || origin.x > vp1.x ||
+      origin.y > vp1.y) {
+    return; // the origin is off-screen; a compass with no needle helps nobody
+  }
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  const struct {
+    glm::vec2 uv;
+    glm::vec3 dir;
+    const char* axis;
+    ImU32 color;
+  } axes[2] = {
+      {{1.0f, 0.0f},
+       sketch->plane.GetUAxis(),
+       "U",
+       IM_COL32(217, 102, 107, 235)},
+      {{0.0f, 1.0f},
+       sketch->plane.GetVAxis(),
+       "V",
+       IM_COL32(115, 204, 128, 235)},
+  };
+  for (const auto& a : axes) {
+    const glm::vec2 out = SketchUVToScreen(state, sketch->plane, a.uv) - origin;
+    const float len = glm::length(out);
+    if (len < 1e-3f)
+      continue;
+    const glm::vec2 at = origin + out / len * 58.0f;
+    char label[16];
+    std::snprintf(label, sizeof(label), "%s %s", a.axis, WorldAxisLabel(a.dir));
+    const ImVec2 sz = ImGui::CalcTextSize(label);
+    dl->AddText(ImVec2(at.x - sz.x * 0.5f, at.y - sz.y * 0.5f), a.color, label);
+  }
+}
+
 void DrawEmptyStateHint(AppState& state) {
   if (!state.document || state.document->FeatureCount() > 0 ||
       state.sketchEdit.IsEditing() || state.sketchEdit.pickingPlane ||
@@ -562,6 +673,7 @@ void DrawUI(AppState& state) {
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);
   DrawModelToolPrompt(state);
+  DrawSketchAxisLabels(state);
   DrawEmptyStateHint(state);
   DrawViewCube(state);
   DrawCommandPalette(state);

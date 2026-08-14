@@ -1912,12 +1912,36 @@ void FitCameraToBox(AppState& state, const glm::vec3& min,
   const float tanHalfV = std::tan(0.5f * glm::radians(cam.GetFOV()));
   const float aspect =
       cam.GetAspectRatio() > 0.0f ? cam.GetAspectRatio() : 1.0f;
-  const float tanHalfLimit = tanHalfV * std::min(1.0f, aspect);
+
+  // An open tool window covers the right of the viewport, and fitting used to
+  // park the model underneath the very window that asked you to click it
+  // (U10). Treat the covered strip as unusable: the model fits the band that
+  // is left, and the camera pans left by half the strip so it is centred in
+  // THAT band rather than in the whole viewport.
+  float coveredFrac = 0.0f;
+  if (state.viewportSize.x > 1.0f &&
+      state.toolWindowRect.z > state.toolWindowRect.x) {
+    const float vpRight = state.viewportPos.x + state.viewportSize.x;
+    const float overlap = std::max(
+        0.0f, std::min(vpRight, state.toolWindowRect.z) -
+                  std::max(state.viewportPos.x, state.toolWindowRect.x));
+    coveredFrac = std::clamp(overlap / state.viewportSize.x, 0.0f, 0.45f);
+  }
+  const float usableX = 1.0f - coveredFrac;
+
+  const float tanHalfLimit = tanHalfV * std::min(1.0f, aspect * usableX);
   const float distance =
       std::max(1.05f * radius / std::max(tanHalfLimit, 0.05f), 1.0f);
   cam.SetTarget(center);
   cam.SetMaxDistance(std::max(20.0f * distance, 1000.0f)); // let it zoom out
   cam.SetDistance(distance);
+  if (coveredFrac > 0.01f) {
+    // Half the covered strip, in world units at the target's depth.
+    const glm::vec3 fwd = glm::normalize(center - cam.GetPosition());
+    const glm::vec3 right = glm::normalize(glm::cross(fwd, cam.GetUp()));
+    const float halfWidthWorld = distance * tanHalfV * aspect;
+    cam.SetTarget(center - right * (halfWidthWorld * coveredFrac));
+  }
 }
 } // namespace
 

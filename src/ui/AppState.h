@@ -717,6 +717,12 @@ struct AppState {
   // path reports — recorded by the code that draws them, never guessed.
   std::vector<std::string> menuBarTop;
 
+  // Screen rect of the floating tool window while a session is open (zero
+  // when closed). FitCameraToDocument keeps the model clear of it: fitting
+  // used to park geometry underneath the very window that asked you to click
+  // it (U10).
+  glm::vec4 toolWindowRect{0.0f}; // min.x, min.y, max.x, max.y
+
   // Help > Keyboard Shortcuts (Ctrl+/). In AppState rather than a static in
   // the draw function so the between-test reset can close it — a stray
   // floating window swallows the viewport clicks of every later GUI test.

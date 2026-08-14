@@ -137,6 +137,10 @@ void BeginToolWindowFrame(AppState& state, const std::string& title) {
   clamped.y = std::max(clamped.y, mainVp->WorkPos.y + 4.0f);
   if (clamped.x != wpos.x || clamped.y != wpos.y)
     ImGui::SetWindowPos(clamped);
+  // Publish the rect so the camera fit can keep the model out from under it.
+  const ImVec2 finalPos = ImGui::GetWindowPos();
+  state.toolWindowRect = glm::vec4(finalPos.x, finalPos.y, finalPos.x + wsize.x,
+                                   finalPos.y + wsize.y);
 }
 
 namespace {
