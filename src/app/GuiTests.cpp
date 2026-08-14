@@ -7,9 +7,11 @@
 #include "core/Occurrence.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/LoftFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
@@ -26,6 +28,7 @@
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
 
+#include "imgui_internal.h"
 #include "imgui_te_context.h"
 #include "imgui_te_engine.h"
 
@@ -116,6 +119,7 @@ static void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId) {
 enum class Needs {
   Nothing,
   Body,
+  BodyAndOpenSketch,
   TwoBodies,
   ClosedSketch,
   TwoSketches,
@@ -159,6 +163,7 @@ static const ToolCase kToolCases[] = {
     {"fillet", "###tb_fillet", Needs::Body, Expect::RefusesUntilPicked},
     {"chamfer", "###tb_chamfer", Needs::Body, Expect::RefusesUntilPicked},
     {"thread", "###tb_thread", Needs::Body, Expect::RefusesUntilPicked},
+    {"rib", "###tb_rib", Needs::BodyAndOpenSketch, Expect::Changes},
     {"hole", "###tb_hole", Needs::Body, Expect::ArmsAPick},
     {"new_sketch", "###tb_new_sketch", Needs::Nothing, Expect::ArmsAPick},
 };
@@ -262,6 +267,36 @@ static void SetupFor(ImGuiTestContext* ctx, Needs needs) {
     AddRectSketch(ctx, 1, 1.5f);
     AddRectSketch(ctx, 1, 1.0f);
     break;
+  case Needs::BodyAndOpenSketch: {
+    // A rib grows a thin web from an open profile down onto a body, so the
+    // gate needs both: the default box, and a line hanging above it.
+    ToolbarCreateAccept(ctx, "###tb_box");
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    // The web grows along the sketch plane's NORMAL, so the profile has to
+    // face the body: a plane hanging above the box, looking down at it.
+    const glm::vec3 over((lo.x + hi.x) * 0.5f, hi.y + 1.0f,
+                         (lo.z + hi.z) * 0.5f);
+    ui::BeginSketchOnPlane(
+        *s_App, SketchPlane(over, glm::vec3(0, -1, 0), glm::vec3(1, 0, 0)),
+        "Rib profile");
+    ctx->Yield();
+    if (s_App->camera)
+      s_App->camera->FinishAnimation();
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK_SILENT(sk != nullptr);
+    const size_t index = Doc()->FeatureCount() - 1;
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::Line{{-0.4f, 0.0f}, {0.4f, 0.0f}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_sk_finish");
+    break;
+  }
   case Needs::ProfileAndPath:
     AddRectSketch(ctx, 1, 1.0f); // profile on the top plane
     AddPathSketch(ctx, 0);       // path rising in the front plane
@@ -1347,6 +1382,198 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
   };
 
+  // Coverage gaps the U10 gate exposed: these tools were only ever proved to
+  // OPEN. A gate case says "it changes the document or refuses"; it does not
+  // say a human can finish the tool and get the geometry they meant.
+
+  // Loft collects its sections from a combo rather than a pick slot, so the
+  // gate can only watch it refuse — before this, nothing had ever built one
+  // through the GUI at all.
+  t = IM_REGISTER_TEST(engine, "loft", "two_profiles_via_the_section_combo");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // Two closed profiles on parallel planes, 6 apart.
+    AddRectSketch(ctx, 1, 1.5f);
+    auto* lower = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(lower != nullptr);
+    ui::BeginSketchOnPlane(
+        *s_App,
+        SketchPlane(glm::vec3(0, 6, 0), glm::vec3(0, 1, 0), glm::vec3(1, 0, 0)),
+        "Upper");
+    ctx->Yield();
+    if (s_App->camera)
+      s_App->camera->FinishAnimation();
+    auto* upper = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(upper != nullptr);
+    const size_t idx = Doc()->FeatureCount() - 1;
+    nlohmann::json b4 = DocumentIO::FeatureToJson(*upper);
+    upper->AddEntity(sketch::Line{{-0.75f, -0.75f}, {0.75f, -0.75f}});
+    upper->AddEntity(sketch::Line{{0.75f, -0.75f}, {0.75f, 0.75f}});
+    upper->AddEntity(sketch::Line{{0.75f, 0.75f}, {-0.75f, 0.75f}});
+    upper->AddEntity(sketch::Line{{-0.75f, 0.75f}, {-0.75f, -0.75f}});
+    nlohmann::json af = DocumentIO::FeatureToJson(*upper);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(idx, b4, af), *Doc());
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_sk_finish");
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_loft");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    // Empty, it refuses — the gate's half of the story.
+    IM_CHECK((ctx->ItemInfo("//###ToolWindow/###tw_accept").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+    // The "+ Add section" combo is how sections are collected.
+    // Open the combo, pick the section: two steps, because the popup only
+    // exists between them. The combo is addressable as "###Add" — see
+    // LabeledCombo on why it is "###" and not "##".
+    const auto addSection = [&](const char* name) {
+      ctx->ItemClick("//###ToolWindow/###Add");
+      ctx->Yield();
+      // Address the popup by its own window name, not "//$FOCUSED": a combo
+      // popup does not take window focus, so $FOCUSED is still the tool
+      // window and the entry is nowhere to be found under it.
+      IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+      ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+      IM_CHECK_SILENT(popup != nullptr);
+      ctx->ItemClick((std::string("//") + popup->Name + "/**/" + name).c_str());
+      ctx->Yield();
+    };
+    addSection("Sketch 1");
+    addSection("Upper");
+    auto* loft = dynamic_cast<LoftFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(loft != nullptr);
+    IM_CHECK_EQ(loft->sketchIds.size(), (size_t)2);
+
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    Feature* made = Doc()->GetFeature(Doc()->FeatureCount() - 1);
+    IM_CHECK(made->GetError().empty());
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    // A frustum between a 3x3 and a 1.5x1.5 square, 6 tall: the exact volume
+    // is h/3 * (A1 + A2 + sqrt(A1*A2)) = 2 * (9 + 2.25 + 4.5) = 31.5.
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 31.5) < 0.2);
+  };
+
+  // Revolve's default axis was wrong for a top-plane sketch until the gate
+  // caught it; this walks the whole tool and checks the solid it makes.
+  t = IM_REGISTER_TEST(engine, "revolve", "profile_beside_the_axis_rings");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddRectSketch(ctx, 1, 1.0f, /*centreU=*/3.0f); // 2x2 square at u = 3
+    ToolbarClick(ctx, "###tb_revolve");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    Feature* made = Doc()->GetFeature(Doc()->FeatureCount() - 1);
+    IM_CHECK(made->GetError().empty());
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    // Pappus: a 2x2 section whose centroid orbits at r = 3 sweeps
+    // 2*pi*3 * 4 = 75.4.
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 75.398) < 0.5);
+  };
+
+  // Sweep seeded its profile with "the most recent sketch" — which is the
+  // path — until the gate caught it. This finishes the tool.
+  t = IM_REGISTER_TEST(engine, "sweep", "profile_along_a_path_makes_a_bar");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddRectSketch(ctx, 1, 1.0f); // a 2x2 profile on the top plane
+    AddPathSketch(ctx, 0);       // a 6-long path rising in the front plane
+    ToolbarClick(ctx, "###tb_sweep");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    Feature* made = Doc()->GetFeature(Doc()->FeatureCount() - 1);
+    IM_CHECK(made->GetError().empty());
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    // 2x2 swept 6 = 24, give or take the end conditions.
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 24.0) < 1.0);
+  };
+
+  // Chamfer shares FilletFeature with op = Chamfer, so the geometry is well
+  // covered — its own button and edge slot were not.
+  t = IM_REGISTER_TEST(engine, "chamfer", "edge_via_click_makes_a_chamfer");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const double solid = Doc()->GetBodies()[0].shape.Volume();
+
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    s_App->camera->SetPosition(mid +
+                               glm::normalize(glm::vec3(1, 1, 1)) * 12.0f);
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_chamfer");
+    ctx->Yield();
+    // The near vertical edge of the box, dead centre of an iso view.
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(hi.x, mid.y, hi.z)));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    auto* blend = dynamic_cast<FilletFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(blend != nullptr);
+    IM_CHECK_EQ(blend->edges.size(), (size_t)1);
+    IM_CHECK(blend->TypeName() == "Chamfer"); // not a fillet in disguise
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() < solid - 1e-6);
+  };
+
+  // A datum plane is only useful if you can sketch on it — and with a plane
+  // pick armed, its row in the tree is a pick, like the base planes (U10).
+  t = IM_REGISTER_TEST(engine, "datum", "plane_offset_then_sketch_on_its_row");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_datum_plane");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ctx->ItemInputValue("//###ToolWindow/**/##Offset", 5.0f);
+    ctx->Yield();
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    auto* datum = dynamic_cast<DatumPlaneFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(datum != nullptr);
+    IM_CHECK(std::abs(datum->offset - 5.0) < 1e-6);
+
+    ToolbarClick(ctx, "###tb_new_sketch");
+    IM_CHECK(s_App->sketchEdit.pickingPlane);
+    ctx->ItemClick("//##DockHost/**/Plane 1##0"); // the datum's row
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.pickingPlane); // consumed
+    IM_CHECK(s_App->sketchEdit.IsEditing());
+    auto* sk = dynamic_cast<SketchFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(sk != nullptr);
+    // The sketch tracks the datum, so its plane sits at the datum's offset.
+    IM_CHECK(std::abs(sk->plane.GetOrigin().z - 5.0f) < 1e-3f);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+  };
+
   // U9: the shortcut list. Ctrl+K (and the whole sketch keymap) was
   // discoverable only by reading the source.
   t = IM_REGISTER_TEST(engine, "help", "shortcuts_window_opens");
@@ -1767,7 +1994,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(ui::HasPendingFeature(*s_App));
 
     ctx->SetRef("//Pattern###ToolWindow");
-    ctx->ComboClick("##Type/Circular");
+    ctx->ComboClick("###Type/Circular");
     ctx->Yield(2);
     {
       auto* pat =
@@ -1775,7 +2002,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       IM_CHECK(pat != nullptr);
       IM_CHECK_EQ((int)pat->kind, (int)PatternKind::Circular);
     }
-    ctx->ComboClick("##Axis/Z");
+    ctx->ComboClick("###Axis/Z");
     ctx->Yield(2);
     // Type into count/angle, then mouse-DRAG both (the per-frame regen path
     // the crash log showed: one resync per frame).

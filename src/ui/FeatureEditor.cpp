@@ -121,7 +121,12 @@ bool DragDim(AppState& state, const char* label, double* value,
 bool LabeledCombo(const char* label, int* sel, const char* const items[],
                   int count) {
   LeftLabel(label);
-  const std::string id = std::string("##") + label;
+  // "###" rather than "##": both hide the label, but "##" leaves the widget
+  // with no NAME, and a nameless widget cannot be addressed by a test ref or
+  // by a script — only by the numeric id ui_items reports. Every combo in the
+  // app was unreachable that way (the Hole type combo over the RPC, the Loft
+  // section combo in a GUI test). Same appearance, addressable as "###Type".
+  const std::string id = std::string("###") + label;
   return ImGui::Combo(id.c_str(), sel, items, count);
 }
 

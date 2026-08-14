@@ -1215,7 +1215,10 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       ctx->GatherItems(&items, (std::string("//") + popup->Name).c_str());
       m_uiActionResult =
           json{{"popup", popup->Name}, {"items", ItemsToJson(items)}};
-      ctx->KeyPress(ImGuiKey_Escape); // leave the UI as we found it
+      // Close it by clicking the opener again, NOT with Escape: Escape falls
+      // through to the app, where it cancels the tool session the popup
+      // belongs to — listing a Loft's sections used to close the Loft.
+      ctx->ItemClick(target.Ref(), button);
     };
   } else if (m == "ui_items") {
     const std::string ref = p.value("ref", "//$FOCUSED");

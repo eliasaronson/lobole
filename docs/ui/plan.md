@@ -279,6 +279,14 @@ never blocks, `Feature::WhyIncomplete()` enforced on the GUI *and* the script
 API, armed picks fillable from the tree, sketch U/V labels, nav-cube corner
 hotspots, and gui-labeled tests moved onto a virtual display.
 
+## GUI coverage
+
+**Audited 2026-08-14** — [gui-coverage.md](gui-coverage.md). Which features a
+test actually *clicks through to geometry*, feature by feature, and the four
+that are still only driven by script (Import's file dialog is a portal process
+outside ImGui; the rest are duplicate buttons and display toggles). Loft was
+the last part feature never once built through the GUI.
+
 ## Tests
 
 GUI-test the behaviors, eyeball the aesthetics: every panel docked after

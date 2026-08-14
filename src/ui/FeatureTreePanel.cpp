@@ -277,7 +277,16 @@ void DrawFeatureTreePanel(AppState& state) {
                             SelectedFeatureId(state) == feature->GetId(),
                             flags)) {
         SelectFeature(state, feature->GetId());
-        if (datum && ImGui::IsMouseDoubleClicked(0)) {
+        if (datum && state.sketchEdit.pickingPlane) {
+          // A datum row IS the pick while one is armed, exactly as the base
+          // planes are (U10) — a named plane in the tree beats hunting its
+          // quad in the viewport.
+          const SketchPurpose purpose = state.sketchEdit.purpose;
+          state.sketchEdit.pickingPlane = false;
+          const int n = static_cast<int>(doc->FeatureCount()) + 1;
+          BeginSketchOnDatum(state, *datum, "Sketch " + std::to_string(n),
+                             purpose);
+        } else if (datum && ImGui::IsMouseDoubleClicked(0)) {
           const int n = static_cast<int>(doc->FeatureCount()) + 1;
           BeginSketchOnDatum(state, *datum, "Sketch " + std::to_string(n));
         } else if (sketchFeat && ImGui::IsMouseDoubleClicked(0)) {
