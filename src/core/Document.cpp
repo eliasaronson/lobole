@@ -163,8 +163,10 @@ bool Document::Regenerate() {
   if (!m_bakedBodies.empty()) {
     std::vector<Body> baked = std::move(m_bakedBodies);
     const size_t bakedHash = m_bakedHash;
+    std::map<uint64_t, std::string> bakedWarnings = std::move(m_bakedWarnings);
     m_bakedBodies.clear();
     m_bakedHash = 0;
+    m_bakedWarnings.clear();
     if (bakedHash != 0 && bakedHash == m_tipHash && m_cache.empty()) {
       m_bodies = std::move(baked);
       m_lastStats.cached = upTo;
@@ -180,8 +182,15 @@ bool Document::Regenerate() {
         m_cache.push_back({hashes[i], {}, /*bodiesValid=*/false});
       if (upTo > 0)
         m_cache.push_back({hashes[upTo - 1], m_bodies, /*bodiesValid=*/true});
-      LOG_INFO("Loaded baked geometry ({} bodies): {} features executed 0",
-               m_bodies.size(), upTo);
+      // Restore the advice the features gave when this geometry was built:
+      // nothing executed, so nothing would have raised it again.
+      for (const auto& [id, text] : bakedWarnings) {
+        if (Feature* f = FindFeatureById(id))
+          f->SetWarning(text);
+      }
+      LOG_INFO("Loaded baked geometry ({} bodies): {} features executed 0, "
+               "{} advisories restored",
+               m_bodies.size(), upTo, bakedWarnings.size());
       return true;
     }
     LOG_INFO("Baked geometry does not match the recipe; rebuilding");

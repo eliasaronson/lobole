@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -120,6 +121,15 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
                {"chain_hash", hash},
                {"occ_version", std::string(OCC_VERSION_COMPLETE)},
                {"bodies", json::array()}};
+    // Advisories are products of execution, and a baked open executes
+    // nothing; carry them so a model does not lose its warnings on reopen.
+    json warnings = json::object();
+    for (const auto& feature : doc.GetFeatures()) {
+      if (!feature->GetWarning().empty())
+        warnings[std::to_string(feature->GetId())] = feature->GetWarning();
+    }
+    if (!warnings.empty())
+      index["warnings"] = std::move(warnings);
     std::vector<std::string> wanted;
     size_t i = 0;
     for (const Body& body : doc.GetBodies()) {
@@ -233,7 +243,11 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
     }
     if (bodies.empty())
       return false;
-    doc.AdoptBakedGeometry(std::move(bodies), j.value("chain_hash", size_t{0}));
+    std::map<uint64_t, std::string> warnings;
+    for (const auto& [key, value] : j.value("warnings", json::object()).items())
+      warnings[std::stoull(key)] = value.get<std::string>();
+    doc.AdoptBakedGeometry(std::move(bodies), j.value("chain_hash", size_t{0}),
+                           std::move(warnings));
     return true;
   } catch (const Standard_Failure& e) {
     // OCC signals a corrupt or foreign-version .brep by THROWING, not by

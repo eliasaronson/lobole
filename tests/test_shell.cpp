@@ -59,6 +59,45 @@ TEST_CASE("Shell without an open face errors", "[shell]") {
 // U10: inputs that are not there yet are refused at COMMIT time, on both
 // surfaces — the GUI disables Accept, the RPC throws. Regeneration itself
 // stays permissive so an empty tool can still open.
+// A draft that reshapes half the body is valid geometry and almost always a
+// mistake: 25 degrees sounds modest, but on a 2-unit wall it travels 0.93 —
+// four times the 0.25 wall it is tapering, so it cuts through into the shell
+// cavity. Found in a real model (scratch/shell_draft.dsgn), which looked like
+// a loft passing through the cut-out.
+TEST_CASE("A draft that reshapes the body warns with the numbers",
+          "[draft][warning]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 2, 2, 2));
+  const uint64_t boxId = doc.GetFeature(0)->GetId();
+  const std::string face = AnyFace(doc.GetBodies()[0]);
+  doc.AddFeature(std::make_unique<ShellFeature>(
+      "S", boxId, std::vector<ElementRef>{ElementRef{boxId, face}}, 0.25));
+
+  // A side face of the shelled body, tapered hard.
+  std::string side;
+  for (const auto& [index, name] : doc.GetBodies()[0].elementMap.names) {
+    glm::vec3 c, n, u;
+    if (doc.GetBodies()[0].shape.FacePlane(index, c, n, u) &&
+        std::abs(n.z) < 0.1f) {
+      side = name;
+      break;
+    }
+  }
+  REQUIRE(!side.empty());
+  auto steep = std::make_unique<DraftFeature>(
+      "Steep", boxId, std::vector<ElementRef>{ElementRef{boxId, side}}, 25.0);
+  DraftFeature* draft = steep.get();
+  doc.AddFeature(std::move(steep));
+  REQUIRE(doc.GetFeature(2)->GetError().empty()); // valid, just drastic
+  CHECK(draft->GetWarning().find("check the angle") != std::string::npos);
+  CHECK(draft->GetWarning().find("25") != std::string::npos);
+
+  // A sane angle on the same face says nothing.
+  draft->angleDeg = 3.0;
+  doc.Regenerate();
+  CHECK(draft->GetWarning().empty());
+}
+
 TEST_CASE("WhyIncomplete names the missing input", "[u10][incomplete]") {
   FilletFeature blend("F", {}, 0.5);
   CHECK(blend.WhyIncomplete().find("edge") != std::string::npos);

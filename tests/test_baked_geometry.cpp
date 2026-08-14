@@ -4,6 +4,7 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/features/BooleanFeature.h"
 #include "core/features/ShellFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/GeometryCache.h"
@@ -95,6 +96,31 @@ TEST_CASE("Renaming a feature does not touch its baked shape", "[baked]") {
   auto loaded = testio::Load(proj.string());
   REQUIRE(loaded != nullptr);
   CHECK(loaded->LastRegenStats().executed == 0);
+  fs::remove_all(proj);
+}
+
+// Warnings are a product of EXECUTION, and a baked open executes nothing —
+// without carrying them the model would silently lose its advice on reopen,
+// which is the same silence the warnings exist to break.
+TEST_CASE("Advice survives a baked open", "[baked]") {
+  const fs::path proj = TempProject("baked-warning.dsgn");
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 2, 2, 2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(10, 0, 0), 2, 2, 2));
+  // Subtracting a body that does not touch the target: valid, and warned.
+  doc.AddFeature(std::make_unique<BooleanFeature>(
+      "Cut", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  doc.Regenerate();
+  const std::string warning = doc.GetFeature(2)->GetWarning();
+  REQUIRE(!warning.empty());
+  REQUIRE(testio::Save(doc, proj.string()));
+
+  auto loaded = testio::Load(proj.string());
+  REQUIRE(loaded != nullptr);
+  CHECK(loaded->LastRegenStats().executed == 0); // it really was baked
+  CHECK(loaded->GetFeature(2)->GetWarning() == warning);
   fs::remove_all(proj);
 }
 

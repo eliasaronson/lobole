@@ -3,7 +3,9 @@
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
 
+#include <BRepBndLib.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
+#include <Bnd_Box.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
@@ -14,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 DraftFeature::DraftFeature(const std::string& name, uint64_t bodyId,
                            std::vector<ElementRef> faces, double angleDeg,
@@ -77,6 +80,12 @@ bool DraftFeature::Execute(RegenContext& ctx) {
   const glm::vec3 base = n * glm::dot(bmin, n); // point on the pull axis
   const gp_Pln neutral(gp_Pnt(base.x, base.y, base.z), pull);
   const double angleRad = angleDeg * M_PI / 180.0;
+  const double volumeBefore = body->shape.Volume();
+  // How far the taper actually travels: the face's extent along the pull axis
+  // times tan(angle). This is the number that explains a surprising result —
+  // 25 degrees sounds modest until you notice it moves the face nearly a
+  // millimetre on a 2 mm wall.
+  double maxTaper = 0.0;
 
   try {
     BRepOffsetAPI_DraftAngle draft(shape);
@@ -93,6 +102,18 @@ bool DraftFeature::Execute(RegenContext& ctx) {
         SetError("a drafted face is perpendicular to the pull direction "
                  "(pick a side face, or a different neutral plane)");
         return false;
+      }
+      {
+        // The face's span along the pull axis, from its own bounding box.
+        Bnd_Box fbox;
+        BRepBndLib::Add(ex.Current(), fbox);
+        if (!fbox.IsVoid()) {
+          double xmin, ymin, zmin, xmax, ymax, zmax;
+          fbox.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+          const glm::vec3 lo(xmin, ymin, zmin), hi(xmax, ymax, zmax);
+          const double span = std::abs(glm::dot(hi - lo, n));
+          maxTaper = std::max(maxTaper, span * std::tan(angleRad));
+        }
       }
       draft.Add(TopoDS::Face(ex.Current()), pull, angleRad, neutral);
       if (!draft.AddDone()) {
@@ -125,6 +146,26 @@ bool DraftFeature::Execute(RegenContext& ctx) {
     if (!result.IsValid() || result.Volume() < 1e-9) {
       SetError("draft produced an invalid solid");
       return false;
+    }
+    // A draft that reshapes a large part of the body is valid geometry and
+    // almost always a mistake: an angle that sounds modest travels a long way
+    // on a tall face, and on a shelled part the taper can cut clean through
+    // the wall into the cavity. Advise, with the two numbers that explain it,
+    // and let the model stand. (A 2 mm box with 0.25 mm walls drafted 25 deg
+    // loses 46% of its volume — the case that prompted this.)
+    const double volumeAfter = result.Volume();
+    const double changed =
+        volumeBefore > 1e-12
+            ? std::abs(volumeAfter - volumeBefore) / volumeBefore
+            : 0.0;
+    if (changed > 0.25) {
+      char msg[224];
+      std::snprintf(msg, sizeof(msg),
+                    "%.3g deg tapers the face by %.3g over its height and "
+                    "changes the body by %.0f%% — check the angle and the "
+                    "neutral plane",
+                    angleDeg, maxTaper, changed * 100.0);
+      SetWarning(msg);
     }
     ElementMap map;
     topo::NamePrimitiveElements(result, std::to_string(GetId()), map);

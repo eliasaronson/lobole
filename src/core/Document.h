@@ -297,9 +297,15 @@ public:
   bool CommitGeometry() const { return m_commitGeometry; }
   void SetCommitGeometry(bool on) { m_commitGeometry = on; }
 
-  void AdoptBakedGeometry(std::vector<Body> bodies, size_t tipHash) {
+  // `warnings` maps feature id -> the advisory that feature raised when the
+  // geometry was built. Warnings are a product of EXECUTION, and a baked open
+  // executes nothing — without carrying them the model would silently lose
+  // its advice ("this draft changes the body by 46%") on every open.
+  void AdoptBakedGeometry(std::vector<Body> bodies, size_t tipHash,
+                          std::map<uint64_t, std::string> warnings = {}) {
     m_bakedBodies = std::move(bodies);
     m_bakedHash = tipHash;
+    m_bakedWarnings = std::move(warnings);
   }
 
   // ---- Reference-image assets (v49) -------------------------------------
@@ -391,6 +397,7 @@ private:
   // hand-off, not a second source of truth.
   std::vector<Body> m_bakedBodies;
   size_t m_bakedHash = 0;
+  std::map<uint64_t, std::string> m_bakedWarnings;
   bool m_commitGeometry = true;
 
   // Prefix cache (R3): per feature, the chain hash of everything up to and
