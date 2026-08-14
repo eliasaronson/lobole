@@ -265,6 +265,20 @@ toolbar, an error line in the tool window that also disables Accept, honest
 empty states + Help ▸ Keyboard Shortcuts, and real failure reasons /
 `ui_items` / `item_hover` / viewport-relative coordinates over the RPC.
 
+## U10 — Defaults that do something, and refusals you can see
+
+**SHIPPED 2026-08-14** — [u10-defaults-and-refusals.md](u10-defaults-and-refusals.md).
+Three clicks-only rounds kept finding the same two shapes: hard-coded defaults
+that are valid but useless against any particular part (a countersink 4x the
+bore, a 2 mm view on A4, every occurrence at one origin, a revolve axis not in
+the sketch plane), and silence where a refusal belongs (an edge-less fillet
+committing a no-op). U10 makes the class fail loudly: a `defaults/*` gate over
+every creation tool (changes something, or refuses visibly — checked at the
+Accept button), one shared placement rule, a "Changes nothing" warning that
+never blocks, `Feature::WhyIncomplete()` enforced on the GUI *and* the script
+API, armed picks fillable from the tree, sketch U/V labels, nav-cube corner
+hotspots, and gui-labeled tests moved onto a virtual display.
+
 ## Tests
 
 GUI-test the behaviors, eyeball the aesthetics: every panel docked after
@@ -294,6 +308,8 @@ at 1080p and 4K-scaled.
 - **U7 (added 2026-07-27)** follows the v1 workstream: it consumes U1's
   filters and U3's slots and supersedes the "full dialog frame" remnant of
   U3 — see [u7-tool-sessions.md](u7-tool-sessions.md).
+- **U10 (added 2026-08-14)** generalises U9: same rounds, but the fixes are
+  a gate and a shared rule rather than five individual patches.
 - **U9 (added 2026-08-13)** is dogfooding residue, not planned scope: it is
   what a clicks-only round found missing once U7/U8 made the tool pattern
   uniform enough to notice the features that had never joined it.

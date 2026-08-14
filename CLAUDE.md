@@ -20,6 +20,15 @@ inside another (temp-dir failures) — the tool scripts already self-manage nix.
 which clang-formats-checks only the staged hunks — keeps new code formatted
 without forcing whole-file reflows.
 
+## Defaults
+
+A default carrying a unit — mm, degrees, a scale, a position — must be derived
+from what it acts on (the bore, the body's bbox, the sheet), never a literal.
+Hard-coded ones are correct in the abstract and wrong against any real part;
+the `defaults/*` GUI suite enforces this for creation tools (every tool must
+either change the document with its defaults or refuse visibly). See
+docs/ui/u10-defaults-and-refusals.md.
+
 ## Tests
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
