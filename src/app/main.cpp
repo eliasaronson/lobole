@@ -1271,7 +1271,16 @@ int main(int argc, char** argv) {
   // Remote control (opt-in)
   RemoteServer remoteServer;
   if (args.remotePort > 0) {
-    remoteServer.Start(static_cast<uint16_t>(args.remotePort), testEngine);
+    // Fail fast on a taken port, as the headless path does (HeadlessMain.cpp).
+    // This path ignored the result, so `--hidden --remote <taken>` — how every
+    // preview instance and dev-watch starts — came up looking healthy and
+    // served nothing, and the client just timed out with no reason given.
+    if (!remoteServer.Start(static_cast<uint16_t>(args.remotePort),
+                            testEngine)) {
+      LOG_ERROR("Cannot listen on port {} - is another instance using it?",
+                args.remotePort);
+      return 1;
+    }
     if (!args.recordPath.empty()) {
       remoteServer.StartRecording(args.recordPath);
     }

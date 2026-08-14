@@ -29,9 +29,56 @@ def free_port():
         return s.getsockname()[1]
 
 
+# Phase logging: this suite runs under `ctest -j`, where a rare failure used
+# to say only "headless_smoke ... Failed" with no clue which of its ~40 steps
+# gave way or how long it had waited. Every phase prints with its elapsed
+# time, so the next flake explains itself instead of costing an investigation.
+_T0 = time.time()
+_PHASE = "startup"
+
+
+def phase(name):
+    global _PHASE
+    print(f"  [{time.time() - _T0:6.1f}s] {name}", flush=True)
+    _PHASE = name
+
+
 def expect(condition, message):
     if not condition:
-        raise AssertionError(message)
+        raise AssertionError(f"[phase: {_PHASE}] {message}")
+
+
+def wait_for_file(path, timeout, what):
+    """Wait for a file, reporting how long it actually took.
+
+    Fixed short deadlines are the classic source of load flakes: this suite
+    shares a machine with a GPU topology solve and fifteen other tests. The
+    budget is generous and the elapsed time is printed, so a slow machine
+    passes and a genuinely broken one still fails.
+    """
+    deadline = time.time() + timeout
+    started = time.time()
+    while time.time() < deadline:
+        if os.path.exists(path):
+            print(f"      ({what} after {time.time() - started:.1f}s)",
+                  flush=True)
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def wait_exit(proc, timeout, what):
+    """proc.wait with the elapsed time reported (see wait_for_file)."""
+    started = time.time()
+    try:
+        code = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise AssertionError(
+            f"[phase: {_PHASE}] {what} did not exit within {timeout}s")
+    print(f"      ({what} exited {code} after {time.time() - started:.1f}s)",
+          flush=True)
+    return code
 
 
 def expect_error(d, method, fragment, **params):
@@ -58,6 +105,7 @@ def main():
         d = Designer.wait_for(port)
         expect(d.call("ping")["ok"], "ping")
 
+        phase("Strict params")
         # Strict params: a key no handler reads is a typo, rejected loudly
         # instead of silently ignored (the `named` vs `name` trap). A near
         # miss suggests the intended key; the corrected call still works.
@@ -66,6 +114,7 @@ def main():
                      name="tw", expression="1", coment="typo")
         d.call("set_variable", name="tw", expression="1", comment="ok")
 
+        phase("The S1 bracket")
         # The S1 bracket: variables -> constrained sketch -> extrude -> fillet
         d.call("new_project")
         d.call("set_variable", name="width", expression="40")
@@ -107,6 +156,7 @@ def main():
         expect(abs(state["bodies"][0]["volume"] - expected_volume) < 1e-2,
                "bracket volume")
 
+        phase("Mass properties")
         # Mass properties: aluminum bracket, analytic mass/CoM (I2)
         d.call("set_material", feature_id=pad["id"], material="aluminum")
         mp = d.call("mass_properties")
@@ -121,12 +171,14 @@ def main():
         inertia = b["inertia"]
         expect(len(inertia) == 3 and len(inertia[0]) == 3, "inertia is 3x3")
 
+        phase("Unassigned material -> mass is null, never guessed")
         # Unassigned material -> mass is null, never guessed
         d.call("set_material", feature_id=pad["id"], material="")
         mp = d.call("mass_properties")
         expect(mp["bodies"][0]["mass_g"] is None, "unknown density: no mass")
         expect(mp["total"]["mass_g"] is None, "unknown density: no total")
 
+        phase("Measure over element names")
         # Measure over element names (I1): the pad's cap face area, and a
         # top-face edge length.
         pels = d.call("list_elements")["bodies"][0]
@@ -147,6 +199,7 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Element names drive a 3D chamfer headless")
         # Element names drive a 3D chamfer headless (T5 consumer over RPC)
         els = d.call("list_elements")["bodies"][0]
         expect(els["created_by"] == pad["id"], "created_by is the pad")
@@ -178,6 +231,7 @@ def main():
         expect(state["bodies"][0]["volume"] < before, "chamfer removed volume")
         d.call("undo")
 
+        phase("Project round-trip + undo/redo")
         # Project round-trip + undo/redo
         project = os.path.join(tmp, "bracket.json")
         d.call("save_project", path=project)
@@ -208,6 +262,7 @@ def main():
         d.call("delete_part", index=idx)
         d.call("reset_layout")  # harmless no-op headless (flag only)
 
+        phase("Importing a broken STL")
         # Importing a broken STL (zero triangles) names the file and format
         # instead of a generic regeneration failure. (Valid STLs import as
         # sewn shells/solids — covered in the interchange section below.)
@@ -222,6 +277,7 @@ def main():
                f"STL import error is specific: {failed}")
         d.call("delete_feature", index=len(d.call("get_state")["features"]) - 1)
 
+        phase("A SECOND simultaneous client works")
         # A SECOND simultaneous client works (multi-client remote): both see
         # the same document and responses route to the right connection.
         d2 = Designer(port)
@@ -229,6 +285,7 @@ def main():
         expect(len(d.call("get_state")["bodies"]) == 1, "first client still ok")
         d2.close()
 
+        phase("Every GUI-dependent method degrades with its specific error")
         # Every GUI-dependent method degrades with its specific error
         expect_error(d, "screenshot", "requires the GUI", path="/tmp/x.png")
         expect_error(d, "menu_click", "unavailable in --headless",
@@ -263,6 +320,7 @@ def main():
                "rib regenerated clean")
         expect(state["bodies"][0]["volume"] > 1000.0 + 1.0, "rib added volume")
 
+        phase("Cosmetic thread")
         # Cosmetic thread (v36): annotates a cylindrical face, geometry
         # untouched.
         cyl = d.call("add_feature", feature={
@@ -285,6 +343,7 @@ def main():
         expect(abs(boss_after["volume"] - boss_before["volume"]) < 1e-9,
                "cosmetic thread left the volume untouched")
 
+        phase("Draft")
         # Draft (M8): taper a box's side faces; volume drops
         d.call("new_project")
         d.call("add_feature", feature={
@@ -315,6 +374,7 @@ def main():
                 pass
         expect(drafted, "at least one side face drafted")
 
+        phase("Hole wizard")
         # Hole wizard (M8): a 4-hole bolt pattern from one point sketch,
         # then interference (I4) between two boxes.
         d.call("new_project")
@@ -341,6 +401,7 @@ def main():
                    - (400.0 - 4.0 * _m3.pi * 0.25 * 4.0)) < 0.5,
                "4-hole plate volume")
 
+        phase("Multi-part project")
         # Multi-part project (assemblies A1): two parts, switch, save/load
         d.call("new_project")
         expect(d.call("list_parts")["parts"][0]["name"] == "Part 1",
@@ -393,6 +454,7 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Project-wide variables")
         # Project-wide variables (Phase V): ONE variable drives geometry in two
         # parts; editing it changes both; a part-scoped var shadows it locally;
         # an undefined variable is a loud feature error (not a silent literal).
@@ -478,6 +540,7 @@ def main():
                    for f in st["features"]),
                f"undefined variable is a loud feature error: {st['features']}")
 
+        phase("Section")
         # Section (I3): cross-section area of a plate at a mid-cut
         d.call("new_project")
         d.call("add_feature", feature={
@@ -492,6 +555,7 @@ def main():
         miss = d.call("section", base_plane="xy", offset=99.0)
         expect(abs(miss["area"]) < 1e-6, "section miss = 0 area")
 
+        phase("Interference")
         # Interference: two overlapping boxes clash; disjoint ones don't.
         d.call("new_project")
         d.call("add_feature", feature={
@@ -509,6 +573,7 @@ def main():
         expect(not d.call("interference", a=0, b=1)["clash"],
                "disjoint boxes do not clash")
 
+        phase("Assembly interference + cross-part queries")
         # Assembly interference + cross-part queries: two occurrences of one
         # cube part — overlapping placements clash; a flipped fastened mate
         # seats them flush (contact only) and the clash clears.
@@ -553,6 +618,7 @@ def main():
         d.call("checkpoint_list")
         expect(by_name["clash"], "occurrence-name interference works")
 
+        phase("Assembly mass_properties")
         # Assembly mass_properties (finding #5): aggregate both occurrences in
         # WORLD space. o1 (aluminum 2^3 cube) sits at the origin — local CoM
         # (1,1,1); CubeB is shifted +(1,1,1) — world CoM (2,2,2). The total
@@ -578,6 +644,7 @@ def main():
                f"hidden occurrence excluded: {amp2['total']}")
         d.call("set_occurrence_visible", id=o2, visible=True)
 
+        phase("Revolute axial offset")
         # Revolute axial offset (finding #6a) + sign (finding #6c): a positive
         # offset seats CubeB along +Z of a's connector normal (a's outward face
         # normal), not merely coinciding origins. The 2-cube's top face sits at
@@ -605,6 +672,7 @@ def main():
                f"negative offset seats CubeB at -Z (z=-3): {o2occ}")
         d.call("remove_mate", id=rev["id"])
 
+        phase("Cross-part list_elements/measure from the ASSEMBLY tab")
         # Cross-part list_elements/measure from the ASSEMBLY tab (no
         # set_active_part round-trip): same names, enriched fields.
         pels = d.call("list_elements", part="Part 1")["bodies"][0]
@@ -638,6 +706,7 @@ def main():
                      a={"feature_id": pels["created_by"],
                         "element": face["name"]})
 
+        phase("Mate the two cubes face-to-face")
         # Mate the two cubes face-to-face (flipped=True: flush, opposing
         # normals) — mated-apart occurrences no longer clash.
         planar = next(f["name"] for f in pels["faces"]
@@ -655,6 +724,7 @@ def main():
         expect(not seated["clash"] and seated["volume"] < 1e-6,
                f"mated-apart occurrences do not clash: {seated}")
 
+        phase("Mate-connector diagnostics")
         # Mate-connector diagnostics: a stale name that is a prefix of the
         # current names is called out per side, with suggestions.
         bad = d.call("add_mate", type="fastened", name="stale",
@@ -684,6 +754,7 @@ def main():
                f"stale-prefix error suggests current names: {err2}")
         d.call("remove_mate", id=bad2["id"])
 
+        phase("Expression-driven sketch entities")
         # Expression-driven sketch entities (Decision 2A, v38): a variable
         # drives a circle radius directly; the edit ripples through the
         # sketch into the extrude volume, and survives save/load.
@@ -722,6 +793,7 @@ def main():
         expect(abs(st["bodies"][0]["volume"] - math.pi * 4 * 2) < 1e-2,
                "reloaded entity expr still drives the geometry")
 
+        phase("Sweep")
         # Sweep (M8): circle along a straight path = a cylinder
         d.call("new_project")
         pf = d.call("add_feature", feature={
@@ -770,6 +842,7 @@ def main():
         expect(abs(st["bodies"][0]["volume"] - _m.pi * 2 * 13) < 1.0,
                "loft frustum volume")
 
+        phase("Shell")
         # Shell (M8): hollow a box into a bin via list_elements face name
         d.call("new_project")
         d.call("add_feature", feature={
@@ -786,6 +859,7 @@ def main():
                "shell regenerated clean")
         expect(abs(st["bodies"][0]["volume"] - 424.0) < 5.0, "bin volume ~424")
 
+        phase("Export STEP/STL/BREP")
         # Export STEP/STL/BREP (E1), then re-import the STEP to verify it
         # round-trips to the same volume.
         d.call("new_project")
@@ -818,6 +892,7 @@ def main():
         expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
                "re-imported STL is a solid with the original volume")
 
+        phase("Assembly import")
         # Assembly import (I2) into an UNSAVED project: it ADDS to the
         # current project (hand-modeled and imported parts mix); the .brep
         # sidecars stage under the app state dir until the next save adopts
@@ -854,6 +929,7 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Checkpoints")
         # Checkpoints (F4): create, list, mutate, restore, and error paths
         d.call("new_project")  # fresh document: no project path yet
         d.call("add_feature", feature={
@@ -887,6 +963,7 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Directory format + git history")
         # Directory format + git history (F3+F5): saves commit, checkpoints
         # tag, restore rewinds
         d.call("new_project")
@@ -924,6 +1001,7 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Autosave + crash recovery")
         # Autosave + crash recovery (F2): save clean, dirty the doc, let the
         # 1s autosave fire, SIGKILL (a real crash — no signal handler), then
         # prove a fresh instance sees and recovers the autosave.
@@ -935,14 +1013,14 @@ def main():
         d.call("add_feature", feature={
             "type": "Box", "name": "Unsaved work", "position": [50, 0, 0],
             "width": 2, "height": 2, "depth": 2})
-        deadline = time.time() + 10
-        while (not os.path.exists(crash_project + ".autosave")
-               and time.time() < deadline):
-            time.sleep(0.1)
-        expect(os.path.exists(crash_project + ".autosave"),
+        # The app's 1 s autosave timer is driven by its main loop, which a
+        # loaded machine starves; 60 s of budget, and the real elapsed time is
+        # printed so a creeping regression is visible before it fails.
+        expect(wait_for_file(crash_project + ".autosave", 60.0,
+                             "autosave sidecar"),
                "autosave sidecar written while dirty")
         app.send_signal(signal.SIGKILL)
-        app.wait(timeout=10)
+        wait_exit(app, 30, "SIGKILLed app")
 
         port2 = free_port()
         app2 = subprocess.Popen(
@@ -962,8 +1040,9 @@ def main():
                    "saving the recovery clears the sidecar")
         finally:
             app2.terminate()
-            app2.wait(timeout=10)
+            wait_exit(app2, 30, "recovery instance")
 
+        phase("Clean shutdown on SIGTERM")
         # Clean shutdown on SIGTERM (fresh instance; the first was SIGKILLed)
         port3 = free_port()
         app3 = subprocess.Popen(
@@ -971,8 +1050,9 @@ def main():
             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         Designer.wait_for(port3).close()
         app3.send_signal(signal.SIGTERM)
-        expect(app3.wait(timeout=10) == 0, "exit 0 on SIGTERM")
+        expect(wait_exit(app3, 30, "SIGTERMed app") == 0, "exit 0 on SIGTERM")
 
+        phase("A taken port must exit non-zero")
         # A taken port must exit non-zero (CI fail-fast), not serve nothing
         blocker = socket.socket()
         blocker.bind(("127.0.0.1", 0))
@@ -980,7 +1060,7 @@ def main():
         p = subprocess.run(
             [binary, "--headless", "--remote",
              str(blocker.getsockname()[1])],
-            env=env, capture_output=True, timeout=30)
+            env=env, capture_output=True, timeout=60)
         expect(p.returncode == 1, "taken port exits 1")
         blocker.close()
 

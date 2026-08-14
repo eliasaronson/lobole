@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
@@ -23,9 +24,24 @@ def free_port():
         return s.getsockname()[1]
 
 
+_T0 = time.time()
+_PHASE = "startup"
+
+
+def phase(name):
+    """Announce a section with its elapsed time (see headless_smoke).
+
+    This suite drives a real renderer under ctest; when it fails rarely and
+    under load, the phase line is what says where.
+    """
+    global _PHASE
+    print(f"  [{time.time() - _T0:6.1f}s] {name}", flush=True)
+    _PHASE = name
+
+
 def expect(condition, message):
     if not condition:
-        raise AssertionError(message)
+        raise AssertionError(f"[phase: {_PHASE}] {message}")
 
 
 def is_black(png_path):
@@ -88,6 +104,7 @@ def main():
 
         expect(d.call("ping")["ok"], "ping")
 
+        phase("Semantic tier")
         # Semantic tier: features as JSON
         d.call("new_project")
         d.call("add_feature", feature=BOX)
@@ -100,6 +117,7 @@ def main():
         state = d.call("get_state")
         expect(abs(state["bodies"][0]["volume"] - 20.0) < 1e-6, "volume 20")
 
+        phase("UI tier")
         # UI tier: same edit path a human uses
         d.call("menu_click", path="Edit/Undo")
         state = d.call("get_state")
@@ -111,18 +129,21 @@ def main():
         d.call("key_press", chord="Ctrl+Y")
         expect(len(d.call("get_state")["features"]) == 1, "redo via keyboard")
 
+        phase("Viewport")
         # Viewport: rotate the camera like a human drag
         before = d.call("get_state")["camera"]["position"]
         d.call("viewport_drag", x0=0.5, y0=0.5, x1=0.6, y1=0.6, button=2)
         after = d.call("get_state")["camera"]["position"]
         expect(before != after, "middle-drag rotated the camera")
 
+        phase("Select a face programmatically, then orient to it")
         # Select a face programmatically, then orient to it
         mesh_id = d.call("get_state")["bodies"][0]["mesh"]
         sel = d.call("select_face", mesh=mesh_id, face=0)
         expect(len(sel["normal"]) == 3, "face selected")
         d.call("orient_to_face")
 
+        phase("The same face by STABLE element name")
         # The same face by STABLE element name (no volatile mesh id): resolve
         # the name of face index 0 via list_elements and expect the same
         # geometry back.
@@ -131,6 +152,7 @@ def main():
         sel2 = d.call("select_face", element=name0)
         expect(sel2["center"] == sel["center"], "select_face by element name")
 
+        phase("Project save/load roundtrip")
         # Project save/load roundtrip
         project = os.path.join(tmp, "part.json")
         d.call("save_project", path=project)
@@ -139,6 +161,7 @@ def main():
         d.call("open_project", path=project)
         expect(len(d.call("get_state")["features"]) == 1, "reloaded")
 
+        phase("Sketch + extrude entirely over the RPC")
         # Sketch + extrude entirely over the RPC: add the sketch, reference it
         # from the extrude by the id the server assigns (add_feature returns it)
         d.call("new_project")
@@ -159,6 +182,7 @@ def main():
         expect(abs(state["bodies"][0]["volume"] - 24.0) < 1e-6,
                "extruded volume 24")
 
+        phase("Variables")
         # Variables: an expression-driven extrude follows a parameter edit,
         # undoably; rename rewrites expressions; referenced delete is refused.
         d.call("new_project")
@@ -222,6 +246,7 @@ def main():
         expect(abs(vol - math.pi * 3.0 * 3.0 * 2.0) < 0.2,
                "variable edit re-solves the sketch and rebuilds the rod")
 
+        phase("Datum plane")
         # Datum plane: an expression-driven offset datum, a sketch that tracks
         # it, and an extrude — editing the variable moves the whole stack.
         d.call("new_project")
@@ -254,6 +279,7 @@ def main():
         body = d.call("get_state")["bodies"][0]
         expect(abs(body["bbox_min"][2] - 3.0) < 1e-3, "datum edit is undoable")
 
+        phase("Revolve")
         # Revolve: an expression-driven angle sweeps a profile about the global
         # Y axis; editing the variable rebuilds the solid.
         d.call("new_project")
@@ -275,6 +301,7 @@ def main():
         expect(abs(vol - 12 * math.pi) < 0.1,
                "editing the angle variable rebuilds the revolve")
 
+        phase("Revolve about a DatumAxisFeature")
         # Revolve about a DatumAxisFeature (two points along Y).
         d.call("new_project")
         ax = d.call("add_feature", feature={
@@ -292,6 +319,7 @@ def main():
         vol = d.call("get_state")["bodies"][0]["volume"]
         expect(abs(vol - 24 * math.pi) < 0.1, "revolve about a datum axis")
 
+        phase("Boolean")
         # Boolean: two overlapping boxes combined into one body. Box A [0,2]^3,
         # box B [1,3]x[0,2]^2; overlap = 4, each volume 8.
         d.call("new_project")
@@ -315,6 +343,7 @@ def main():
         vol = d.call("get_state")["bodies"][0]["volume"]
         expect(abs(vol - 12.0) < 1e-4, "union = 8 + 8 - 4")
 
+        phase("Pattern")
         # Pattern: an expression-driven linear array of a box; editing the count
         # variable changes the number of bodies. A mirror across a base plane.
         d.call("new_project")
@@ -344,6 +373,7 @@ def main():
         total = sum(b["volume"] for b in st["bodies"])
         expect(abs(total - 16.0) < 1e-3, "mirror total volume 2x8")
 
+        phase("Ellipse round-trips through JSON and extrudes to an elliptic prism")
         # Ellipse round-trips through JSON and extrudes to an elliptic prism.
         d.call("new_project")
         ske = d.call("add_feature", feature={
@@ -362,6 +392,7 @@ def main():
         expect(abs(vol - math.pi * 2.0 * 1.0 * 3.0) < 0.05,
                "ellipse extrudes to pi*a*b*h")
 
+        phase("Preview -> accept/cancel feature flow")
         # Preview -> accept/cancel feature flow (driven from the model toolbar;
         # the "###tb_*" ids are stable button handles under the dock host).
         d.call("new_project")
@@ -377,6 +408,7 @@ def main():
         d.call("cancel_pending")
         expect(len(d.call("get_state")["features"]) == 1, "cancel discards")
 
+        phase("Driving the GUI as a scripted human")
         # Driving the GUI as a scripted human (U9): the failure says WHY, the
         # widgets can be enumerated instead of grepped for, and hover works.
         try:
@@ -399,6 +431,7 @@ def main():
                "ui_items reports which widgets are disabled")
         d.call("item_hover", ref="//##DockHost/**/###tb_box")
 
+        phase("Hidden-label widgets")
         # Hidden-label widgets (every LabeledCombo) have no path — the id
         # from ui_items is the only handle, and item_combo opens+picks in one
         # action because the popup does not survive between RPCs.
@@ -409,6 +442,7 @@ def main():
         d.call("item_combo", id=hidden[0]["id"], value="Default")
         d.call("cancel_pending")
 
+        phase("Popups")
         # Popups (the tab bar's "+", context menus, combos) close when an
         # action ends, so opening and choosing must happen in ONE action —
         # without this a scripted human cannot add a part, assembly or
@@ -440,6 +474,7 @@ def main():
                    f"add_feature names the missing input: {e}")
         d.call("new_project")
 
+        phase("The menu bar is the one surface the test engine cannot enumerate")
         # The menu bar is the one surface the test engine cannot enumerate
         # (its buttons live in an internal child), so the bar reports its own
         # names and menu_items opens each menu to list it.
@@ -452,6 +487,7 @@ def main():
         expect(any(i.get("submenu") for i in fileItems),
                "submenu entries are flagged as such")
 
+        phase("A disabled widget must refuse loudly")
         # A disabled widget must refuse loudly: Extrude needs a sketch, and a
         # script clicking it used to get a success and no feature.
         d.call("new_project")
@@ -461,6 +497,7 @@ def main():
         except RuntimeError as e:
             expect("disabled" in str(e), f"disabled widgets say so: {e}")
 
+        phase("Constraint solving")
         # Constraint solving: two lines snap coincident
         d.call("new_project")
         sk = d.call("add_feature", feature={
@@ -479,6 +516,7 @@ def main():
         dy = ents[0]["b"][1] - ents[1]["a"][1]
         expect(abs(dx) < 1e-3 and abs(dy) < 1e-3, "coincident solved")
 
+        phase("Deleting an entity removes it and its dependent constraint")
         # Deleting an entity removes it and its dependent constraint
         dr = d.call("delete_entity", sketch_id=sk["id"], entity_id=eid[1])
         ents2 = d.call("get_state")["features"][0]["entities"]
@@ -486,6 +524,7 @@ def main():
                "delete_entity removed the second line, kept the first")
         expect(dr["dropped_constraints"] == 0, "coincident is a trivial drop")
 
+        phase("Angle constraint over the wire")
         # Angle constraint over the wire: two lines forced to 45 degrees
         d.call("new_project")
         ska = d.call("add_feature", feature={
@@ -507,6 +546,7 @@ def main():
                              d0[0] * d1[0] + d0[1] * d1[1]))
         expect(abs(ang - 0.7853981634) < 1e-3, "angle solved to 45 degrees")
 
+        phase("Arc entity round-trips over the wire and takes a radius constraint")
         # Arc entity round-trips over the wire and takes a radius constraint.
         d.call("new_project")
         skc = d.call("add_feature", feature={
@@ -524,6 +564,7 @@ def main():
         arc1 = d.call("get_state")["features"][0]["entities"][0]
         expect(abs(arc1["radius"] - 2.5) < 1e-3, "arc radius constraint solved")
 
+        phase("Generative")
         # Generative: mirror a line across an axis, and fillet a rectangle corner.
         d.call("new_project")
         skg = d.call("add_feature", feature={
@@ -578,6 +619,7 @@ def main():
             except RuntimeError as e:
                 expect(why in str(e), f"fillet error explains: {why} ({e})")
 
+        phase("Linked linear pattern, then edit its count via modify_feature")
         # Linked linear pattern, then edit its count via modify_feature.
         d.call("new_project")
         skp = d.call("add_feature", feature={
@@ -597,6 +639,7 @@ def main():
         st2 = d.call("get_state")["features"][0]
         expect(len(st2["entities"]) == 6, "editing count regenerated the pattern")
 
+        phase("Offset a rectangle loop outward with rounded corners → 4 lines + 4 arcs")
         # Offset a rectangle loop outward with rounded corners → 4 lines + 4 arcs.
         d.call("new_project")
         sko = d.call("add_feature", feature={
@@ -615,6 +658,7 @@ def main():
         expect(newkinds.count("arc") == 4 and newkinds.count("line") == 4,
                "offset boundary is lines + rounded-corner arcs")
 
+        phase("Material")
         # Material: assign via RPC, stamped onto the body, survives save/load.
         d.call("new_project")
         mb = d.call("add_feature", feature=BOX)
@@ -660,6 +704,7 @@ def main():
         expect(d.call("get_state")["bodies"][0]["material"] == "brass",
                "material survives save/load")
 
+        phase("Screenshot")
         # Screenshot: the controller can see what the user sees
         d.call("new_project")
         sk = d.call("add_feature", feature={
@@ -673,6 +718,7 @@ def main():
         expect(os.path.exists(shot) and os.path.getsize(shot) > 1000,
                "screenshot written")
 
+        phase("Standard views")
         # Standard views: instant (no animation), fit + exact axis alignment
         d.call("new_project")
         d.call("add_feature", feature=BOX)
@@ -697,6 +743,7 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Offline raytraced still")
         # Offline raytraced still: build a body, render small + deterministic.
         # Skipped gracefully if the GPU has no ray tracing.
         d.call("new_project")
@@ -720,6 +767,7 @@ def main():
         else:
             print("remote_smoke: ray tracing unavailable, skipping render_still")
 
+        phase("Error handling")
         # Error handling
         try:
             d.call("delete_feature", index=99)
@@ -727,6 +775,7 @@ def main():
         except RuntimeError:
             pass
 
+        phase("A failing feature carries a SPECIFIC error, not the generic")
         # A failing feature carries a SPECIFIC error, not the generic
         # "regeneration failed" fallback: a cut into an empty document.
         d.call("new_project")
@@ -742,6 +791,7 @@ def main():
         expect("no bodies" in feats[1].get("error", ""),
                f"cut-with-no-bodies is a specific error: {feats[1].get('error')}")
 
+        phase("A profile-builder failure")
         # A profile-builder failure (axis-crossing revolve) surfaces the OCC
         # side's reason too.
         d.call("new_project")
@@ -757,6 +807,7 @@ def main():
         expect("cross the axis" in feats[1].get("error", ""),
                f"axis-crossing revolve names the reason: {feats[1].get('error')}")
 
+        phase("Mutating RPCs return a regen summary")
         # Mutating RPCs return a regen summary: failures arrive with the call
         # that caused them, root vs collateral distinguished.
         d.call("new_project")
@@ -854,6 +905,7 @@ def main():
                        f"described method '{name}' must dispatch: {e}")
         d.call("new_project")
 
+        phase("The reverse direction")
         # The reverse direction: every `m == "..."` literal dispatched in
         # src/remote/*.cpp must be described (screenshot is the one method
         # dispatched outside the if-chains, and it IS described).
@@ -874,6 +926,7 @@ def main():
         expect(not undispatched,
                f"described but never dispatched: {undispatched}")
 
+        phase("A missing REQUIRED parameter reports itself in caller terms, not as")
         # A missing REQUIRED parameter reports itself in caller terms, not as
         # nlohmann's "key 'x' not found" (the did-you-mean path only covers
         # keys that are present-but-unknown).
@@ -896,6 +949,7 @@ def main():
         except RuntimeError as e:
             expect("list_parts" in str(e), f"bad-name error is helpful: {e}")
 
+        phase("Explode activation")
         # Explode activation: factor-only set_explode auto-activates the only
         # view (was a silent visual no-op); errors helpfully with none.
         d.call("new_project")
@@ -929,6 +983,7 @@ def main():
         d.call("set_section", enabled=True, base_plane="yz", offset=5)
         d.call("set_section", enabled=False)
 
+        phase("Config methods on a drawing tab explain themselves instead of")
         # Config methods on a drawing tab explain themselves instead of
         # reporting "unknown method".
         d.call("new_project")
