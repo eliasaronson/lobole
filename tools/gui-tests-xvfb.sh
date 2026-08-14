@@ -37,8 +37,12 @@ if [ "${1:-}" = "-f" ]; then
     "cd '$ROOT/build' && ./designer --gui-tests --hidden --gui-test-filter '$2'"
 fi
 if [ "$#" -gt 0 ]; then
+  # This script already provides the display and holds the GPU lock, so the
+  # per-test tools/xvfb-exec.sh wrapper must not start a second Xvfb inside
+  # this one (DESIGNER_GUI_LOCKED already tells it to skip the lock).
   exec "$XVFB_RUN" -a -s '-screen 0 1600x1000x24' \
-    nix-shell "$ROOT/shell.nix" --run "cd '$ROOT/build' && ctest $* --output-on-failure"
+    nix-shell "$ROOT/shell.nix" --run \
+    "cd '$ROOT/build' && DESIGNER_NO_XVFB=1 ctest $* --output-on-failure"
 fi
 exec "$XVFB_RUN" -a -s '-screen 0 1600x1000x24' \
   nix-shell "$ROOT/shell.nix" --run "cd '$ROOT/build' && ./designer --gui-tests --hidden"

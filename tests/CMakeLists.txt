@@ -98,14 +98,19 @@ if(TARGET fem_gpu)
     catch_discover_tests(femgpu_tests PROPERTIES RESOURCE_LOCK gpu)
 endif()
 
-# GUI smoke tests drive the real app through ImGui Test Engine.
-# Needs a display (use `ctest -LE gui` on headless machines, or xvfb-run).
-add_test(NAME gui_smoke COMMAND designer --gui-tests)
+# GUI smoke tests drive the real app through ImGui Test Engine. They go
+# through tools/xvfb-exec.sh, which runs them on a virtual display and holds
+# the GPU lock: on a developer's own display they stall to ~1 fps whenever the
+# screen locks (FIFO present), which reads as a 600 s timeout and not as the
+# passing suite it is. Set DESIGNER_NO_XVFB=1 to watch them run for real.
+set(XVFB_EXEC ${CMAKE_CURRENT_SOURCE_DIR}/../tools/xvfb-exec.sh)
+
+add_test(NAME gui_smoke COMMAND ${XVFB_EXEC} $<TARGET_FILE:designer> --gui-tests)
 set_tests_properties(gui_smoke PROPERTIES LABELS gui TIMEOUT 600)
 
 # Drives a live app over the JSON-RPC remote interface (needs a display)
 add_test(NAME remote_smoke
-         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/remote_smoke.py
+         COMMAND ${XVFB_EXEC} python3 ${CMAKE_CURRENT_SOURCE_DIR}/remote_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(remote_smoke PROPERTIES LABELS gui TIMEOUT 600)
 
