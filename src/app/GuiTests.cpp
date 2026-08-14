@@ -32,6 +32,7 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 
@@ -109,6 +110,66 @@ static void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId) {
   ctx->Yield();
 }
 
+// --- U10 defaults gate: the tool table and its preconditions ----------------
+
+// What the document must contain before the tool's button is even enabled.
+enum class Needs {
+  Nothing,
+  Body,
+  TwoBodies,
+  ClosedSketch,
+  TwoSketches,
+  ProfileAndPath
+};
+// What must happen when the tool opens with its defaults and no picks.
+enum class Expect {
+  Changes,            // accept with defaults => the model is different
+  RefusesUntilPicked, // Accept is disabled and the window says what is missing
+  ArmsAPick,          // not a preview: the tool asks for a face/plane first
+  HarmlessNoOp,       // accepting cleanly changes nothing, and that is correct
+};
+struct ToolCase {
+  const char* name; // test name = the id without "###tb_"
+  const char* id;
+  Needs needs;
+  Expect expect;
+};
+
+static const ToolCase kToolCases[] = {
+    {"box", "###tb_box", Needs::Nothing, Expect::Changes},
+    {"sphere", "###tb_sphere", Needs::Nothing, Expect::Changes},
+    {"cylinder", "###tb_cylinder", Needs::Nothing, Expect::Changes},
+    {"curve3d", "###tb_curve3d", Needs::Nothing, Expect::Changes},
+    {"datum_plane", "###tb_datum_plane", Needs::Nothing, Expect::Changes},
+    {"datum_axis", "###tb_datum_axis", Needs::Nothing, Expect::Changes},
+    {"extrude", "###tb_extrude", Needs::ClosedSketch, Expect::Changes},
+    {"revolve", "###tb_revolve", Needs::ClosedSketch, Expect::Changes},
+    {"sweep", "###tb_sweep", Needs::ProfileAndPath, Expect::Changes},
+    {"pipe", "###tb_pipe", Needs::ProfileAndPath, Expect::Changes},
+    {"loft", "###tb_loft", Needs::TwoSketches, Expect::RefusesUntilPicked},
+    {"boolean", "###tb_boolean", Needs::TwoBodies, Expect::Changes},
+    {"mirror", "###tb_mirror", Needs::Body, Expect::Changes},
+    {"pattern", "###tb_pattern", Needs::Body, Expect::Changes},
+    {"split", "###tb_split", Needs::Body, Expect::Changes},
+    // Refine on an already-clean box has nothing to merge: no change here is
+    // the honest answer, so this case pins "accepts cleanly", not "changes".
+    {"refine", "###tb_refine", Needs::Body, Expect::HarmlessNoOp},
+    {"shell", "###tb_shell", Needs::Body, Expect::RefusesUntilPicked},
+    {"draft", "###tb_draft", Needs::Body, Expect::RefusesUntilPicked},
+    {"fillet", "###tb_fillet", Needs::Body, Expect::RefusesUntilPicked},
+    {"chamfer", "###tb_chamfer", Needs::Body, Expect::RefusesUntilPicked},
+    {"thread", "###tb_thread", Needs::Body, Expect::RefusesUntilPicked},
+    {"hole", "###tb_hole", Needs::Body, Expect::ArmsAPick},
+    {"new_sketch", "###tb_new_sketch", Needs::Nothing, Expect::ArmsAPick},
+};
+
+static const ToolCase* FindToolCase(const char* testName) {
+  for (const ToolCase& tc : kToolCases)
+    if (std::strcmp(tc.name, testName) == 0)
+      return &tc;
+  return nullptr;
+}
+
 // Enter a sketch on a base plane (0 = front/XY, 1 = top/XZ, 2 = right/YZ) via a
 // direct edit-mode entry — the same call the feature-tree "Default geometry"
 // double-click and the retired Create/Sketch menu used. These tests exercise
@@ -136,6 +197,76 @@ static void EnterSketchOnPlane(ImGuiTestContext* ctx, int planeIdx) {
   // snap tests were load-dependent flaky exactly because of this).
   if (s_App->camera)
     s_App->camera->FinishAnimation();
+  ctx->Yield();
+}
+
+// Builds the minimum document a tool needs before its button is enabled.
+// Sketches are drawn through the model, not the mouse: this suite is about
+// what the TOOL does with its defaults, not about drawing accuracy.
+static void AddRectSketch(ImGuiTestContext* ctx, int planeIdx, float half,
+                          float centreU = 0.0f) {
+  EnterSketchOnPlane(ctx, planeIdx);
+  auto* sk = dynamic_cast<SketchFeature*>(
+      Doc()->GetFeature(Doc()->FeatureCount() - 1));
+  IM_CHECK_SILENT(sk != nullptr);
+  const size_t index = Doc()->FeatureCount() - 1;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+  const float u0 = centreU - half, u1 = centreU + half;
+  sk->AddEntity(sketch::Line{{u0, -half}, {u1, -half}});
+  sk->AddEntity(sketch::Line{{u1, -half}, {u1, half}});
+  sk->AddEntity(sketch::Line{{u1, half}, {u0, half}});
+  sk->AddEntity(sketch::Line{{u0, half}, {u0, -half}});
+  nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+  s_App->commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+  ctx->Yield();
+  ToolbarClick(ctx, "###tb_sk_finish");
+  ctx->Yield();
+}
+
+static void AddPathSketch(ImGuiTestContext* ctx, int planeIdx) {
+  EnterSketchOnPlane(ctx, planeIdx);
+  auto* sk = dynamic_cast<SketchFeature*>(
+      Doc()->GetFeature(Doc()->FeatureCount() - 1));
+  IM_CHECK_SILENT(sk != nullptr);
+  const size_t index = Doc()->FeatureCount() - 1;
+  nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+  sk->AddEntity(sketch::Line{{0.0f, 0.0f}, {0.0f, 6.0f}}); // an open path
+  nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+  s_App->commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+  ctx->Yield();
+  ToolbarClick(ctx, "###tb_sk_finish");
+  ctx->Yield();
+}
+
+static void SetupFor(ImGuiTestContext* ctx, Needs needs) {
+  switch (needs) {
+  case Needs::Nothing:
+    break;
+  case Needs::Body:
+    ToolbarCreateAccept(ctx, "###tb_box");
+    break;
+  case Needs::TwoBodies:
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    break;
+  case Needs::ClosedSketch:
+    // Off the origin on purpose: a revolve whose profile STRADDLES its axis
+    // is geometrically impossible, and refusing it is correct behaviour, not
+    // a default worth testing. A user drawing a revolve puts the profile
+    // beside the axis, so the setup does too.
+    AddRectSketch(ctx, 1, 1.0f, /*centreU=*/3.0f);
+    break;
+  case Needs::TwoSketches:
+    AddRectSketch(ctx, 1, 1.5f);
+    AddRectSketch(ctx, 1, 1.0f);
+    break;
+  case Needs::ProfileAndPath:
+    AddRectSketch(ctx, 1, 1.0f); // profile on the top plane
+    AddPathSketch(ctx, 0);       // path rising in the front plane
+    break;
+  }
   ctx->Yield();
 }
 
@@ -1073,6 +1204,73 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     IM_CHECK(!s_App->sketchEdit.IsEditing());
   };
+
+  // U10 — the defaults-and-refusals gate.
+  //
+  // For EVERY creation tool, with its own defaults and no picks made, exactly
+  // one of two things must be true: it changes the document, or it refuses
+  // visibly. "Accepts and changes nothing" is the bug this suite exists to
+  // catch — five of them shipped and were found by hand months later (a hole
+  // whose countersink defaulted four times the bore, a split plane at the
+  // origin missing the body, drawing views stacked at 1:1, occurrences at one
+  // point, an edge-less fillet committing a no-op feature).
+  //
+  // One registered test per tool (named for its toolbar id) so a failure says
+  // WHICH tool regressed; the case is looked up by test name because
+  // ImGuiTest::TestFunc is a raw function pointer and cannot capture.
+  for (const ToolCase& tc : kToolCases) {
+    t = IM_REGISTER_TEST(engine, "defaults", tc.name);
+    t->TestFunc = [](ImGuiTestContext* ctx) {
+      const ToolCase* tc = FindToolCase(ctx->Test->Name);
+      IM_CHECK_SILENT(tc != nullptr);
+      ctx->SetRef("//##MainMenuBar");
+      ctx->MenuClick("File/New");
+      ctx->Yield();
+      SetupFor(ctx, tc->needs);
+      const ui::DocumentFingerprint before = ui::FingerprintOf(*Doc());
+
+      ToolbarClick(ctx, tc->id);
+      ctx->Yield();
+
+      if (tc->expect == Expect::ArmsAPick) {
+        // Not a preview at all: the tool asks for a face/plane first.
+        IM_CHECK(s_App->sketchEdit.pickingPlane);
+        ctx->KeyPress(ImGuiKey_Escape);
+        ctx->Yield(2);
+        return;
+      }
+
+      // Whatever else it is, the click must have DONE something. A toolbar
+      // button that is enabled and silently does nothing is the same bug in
+      // its earliest form.
+      IM_CHECK(ui::HasPendingFeature(*s_App));
+
+      if (tc->expect == Expect::RefusesUntilPicked) {
+        const ImGuiTestItemInfo accept =
+            ctx->ItemInfo("//###ToolWindow/###tw_accept");
+        IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+        ui::CancelPendingFeature(*s_App);
+        ctx->Yield();
+        return;
+      }
+
+      // Accept must be OFFERED, not just survivable: a tool that opens
+      // already failing (the revolve whose default axis was not in the
+      // sketch plane) is exactly what this suite is for. Check the button
+      // before taking the programmatic path.
+      const ImGuiTestItemInfo accept =
+          ctx->ItemInfo("//###ToolWindow/###tw_accept");
+      IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+
+      ui::AcceptPendingFeature(*s_App);
+      ctx->Yield();
+      Feature* made = Doc()->GetFeature(Doc()->FeatureCount() - 1);
+      IM_CHECK(made != nullptr);
+      IM_CHECK(made->GetError().empty());
+      if (tc->expect == Expect::Changes)
+        IM_CHECK(!(ui::FingerprintOf(*Doc()) == before));
+    };
+  }
 
   // U9: the shortcut list. Ctrl+K (and the whole sketch keymap) was
   // discoverable only by reading the source.

@@ -364,21 +364,37 @@ namespace {
 // Ids of earlier features usable as a sweep/loft profile or section (closed
 // sketches) resp. as a path/guide (a sketch chain or a Curve3D). Used to seed
 // Create* defaults; the editors offer the full combo.
-uint64_t LastSketchId(const AppState& state) {
+// The most recent sketch with a CLOSED loop. "The most recent sketch" (what
+// this used to be, despite the comment above) seeded a sweep's profile with
+// whatever was drawn last — which is the path the user just drew, so the
+// sweep opened reporting "profile has no single closed loop". Found by the
+// U10 defaults gate.
+uint64_t LastClosedSketchId(const AppState& state) {
   if (!state.document)
     return 0;
-  for (size_t i = state.document->FeatureCount(); i-- > 0;)
-    if (dynamic_cast<SketchFeature*>(state.document->GetFeature(i)))
-      return state.document->GetFeature(i)->GetId();
+  for (size_t i = state.document->FeatureCount(); i-- > 0;) {
+    auto* sk = dynamic_cast<SketchFeature*>(state.document->GetFeature(i));
+    if (sk != nullptr && !sketch::BuildLoops(sk->entities).empty())
+      return sk->GetId();
+  }
   return 0;
 }
-uint64_t LastPathId(const AppState& state) {
+// The most recent thing a sweep/pipe can follow: a 3D curve, or a sketch with
+// an open chain. `exclude` keeps a sweep from using its own profile as the
+// path when one sketch happens to qualify as both.
+uint64_t LastPathId(const AppState& state, uint64_t exclude = 0) {
   if (!state.document)
     return 0;
   for (size_t i = state.document->FeatureCount(); i-- > 0;) {
     Feature* f = state.document->GetFeature(i);
-    if (dynamic_cast<CurveFeature*>(f) || dynamic_cast<SketchFeature*>(f))
+    if (f->GetId() == exclude)
+      continue;
+    if (dynamic_cast<CurveFeature*>(f))
       return f->GetId();
+    if (auto* sk = dynamic_cast<SketchFeature*>(f)) {
+      if (!sketch::BuildOpenPathWire(sk->plane, sk->entities).IsNull())
+        return sk->GetId();
+    }
   }
   return 0;
 }
@@ -404,12 +420,12 @@ void CreatePipe(AppState& state) {
 }
 
 void CreateSweep(AppState& state) {
-  // Profile defaults to the latest sketch, path to the latest curve/sketch;
-  // both are editable in the properties panel via combos.
-  const uint64_t sketch = LastSketchId(state);
+  // Profile = the latest CLOSED sketch, path = the latest open chain or curve
+  // that is not that profile; both editable in the dialog's combos.
+  const uint64_t profile = LastClosedSketchId(state);
   BeginPreviewFeature(
-      state, std::make_unique<SweepFeature>(NextName(state, "Sweep"), sketch,
-                                            LastPathId(state)));
+      state, std::make_unique<SweepFeature>(NextName(state, "Sweep"), profile,
+                                            LastPathId(state, profile)));
 }
 
 void CreateLoft(AppState& state) {

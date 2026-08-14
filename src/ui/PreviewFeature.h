@@ -4,6 +4,7 @@
 #include "ui/AppState.h"
 
 #include <memory>
+#include <vector>
 
 namespace ui {
 
@@ -30,6 +31,18 @@ void CancelPendingFeature(AppState& state);
 // rows + params + accept/cancel, or the mate session's connector slots on
 // assembly tabs. No-op when no session is open.
 void DrawToolWindow(AppState& state);
+
+// A cheap "has the model changed?" summary: body count, each body's volume,
+// and the feature count. Two documents with the same fingerprint are the same
+// model as far as a user can tell — which is what makes it the right test for
+// "would accepting this feature actually do anything?" (U10). Compared with
+// ==; never serialized.
+struct DocumentFingerprint {
+  size_t features = 0;
+  std::vector<double> volumes; // one per body, in body order
+  bool operator==(const DocumentFingerprint&) const;
+};
+DocumentFingerprint FingerprintOf(const Document& doc);
 
 // Opens the shared session-window frame (top-right anchor, stable
 // "###ToolWindow" id). The caller draws the contents and calls ImGui::End().

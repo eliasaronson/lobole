@@ -34,6 +34,29 @@ uint64_t BeginPreviewFeature(AppState& state,
   return state.pendingFeatureId;
 }
 
+bool DocumentFingerprint::operator==(const DocumentFingerprint& o) const {
+  if (features != o.features || volumes.size() != o.volumes.size())
+    return false;
+  for (size_t i = 0; i < volumes.size(); i++) {
+    // A relative tolerance: OCC rebuilds the same solid to the last bit only
+    // by luck, and a change too small to see is not a change worth claiming.
+    const double scale =
+        std::max({1.0, std::abs(volumes[i]), std::abs(o.volumes[i])});
+    if (std::abs(volumes[i] - o.volumes[i]) > 1e-9 * scale)
+      return false;
+  }
+  return true;
+}
+
+DocumentFingerprint FingerprintOf(const Document& doc) {
+  DocumentFingerprint fp;
+  fp.features = doc.FeatureCount();
+  fp.volumes.reserve(doc.GetBodies().size());
+  for (const Body& b : doc.GetBodies())
+    fp.volumes.push_back(b.shape.Volume());
+  return fp;
+}
+
 bool HasPendingFeature(const AppState& state) {
   return state.pendingFeatureId != 0;
 }

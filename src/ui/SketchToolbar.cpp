@@ -737,9 +737,37 @@ void BeginRevolveOfSketch(AppState& state, SketchFeature& sketch,
                           std::vector<std::vector<uint32_t>> regions) {
   const int n = static_cast<int>(state.document->FeatureCount()) + 1;
   // Default the axis to the sketch's sole construction line if it has
-  // exactly one; else the global Y axis (changeable in the dialog).
+  // exactly one; else a world axis that LIES IN the sketch's plane.
+  //
+  // It used to default to Y unconditionally, which is not in the plane of a
+  // top-plane (XZ) sketch — so a revolve started there was born broken
+  // ("revolve axis is not in the sketch plane") with nothing picked wrong.
+  // Found by the U10 defaults gate.
   AxisRef axis;
-  axis.kind = AxisRef::Kind::Y;
+  {
+    const glm::vec3 n = sketch.plane.GetNormal();
+    // In-plane means perpendicular to the normal. Prefer the plane's own U
+    // direction, then V, then whichever world axis is most perpendicular.
+    const glm::vec3 candidates[3] = {glm::vec3(1, 0, 0), glm::vec3(0, 1, 0),
+                                     glm::vec3(0, 0, 1)};
+    const AxisRef::Kind kinds[3] = {AxisRef::Kind::X, AxisRef::Kind::Y,
+                                    AxisRef::Kind::Z};
+    int best = 1; // Y, the historical default
+    float bestScore = -1.0f;
+    for (int i = 0; i < 3; i++) {
+      if (std::abs(glm::dot(candidates[i], n)) > 1e-3f)
+        continue; // not in the plane
+      // Among in-plane axes, the one closest to the sketch's V direction
+      // makes the familiar "spin the profile about its vertical" default.
+      const float score =
+          std::abs(glm::dot(candidates[i], sketch.plane.GetVAxis()));
+      if (score > bestScore) {
+        bestScore = score;
+        best = i;
+      }
+    }
+    axis.kind = kinds[best];
+  }
   uint32_t soleConstructionLine = 0;
   int constructionLines = 0;
   for (const auto& e : sketch.entities) {
