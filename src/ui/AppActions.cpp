@@ -916,6 +916,7 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.assemblyHistory = {};
   state.drawingHistory = {};
   state.drawingRenders.clear();
+  state.drawingRendersVersion = 0;
   state.solvedPartVersions.clear();
   // Phase V: a wholesale replacement (File > New, Open flat, checkpoint/history
   // restore) collapses the project to this single part, so ITS parameters
@@ -949,6 +950,8 @@ void StashActive(AppState& state) {
   slot.drawingHistory = std::move(state.drawingHistory);
   slot.drawingRenders = std::move(state.drawingRenders);
   state.drawingRenders.clear(); // moved-from: guarantee empty
+  slot.drawingRendersVersion = state.drawingRendersVersion;
+  state.drawingRendersVersion = 0;
   slot.lastSavedVersion = state.lastSavedVersion;
   slot.solvedPartVersions = std::move(state.solvedPartVersions);
   state.solvedPartVersions.clear(); // moved-from: guarantee empty
@@ -965,6 +968,7 @@ void ActivateSlot(AppState& state, size_t index) {
   state.drawingHistory = std::move(slot.drawingHistory);
   state.drawingRenders = std::move(slot.drawingRenders);
   slot.drawingRenders.clear();
+  state.drawingRendersVersion = slot.drawingRendersVersion;
   state.lastSavedVersion = slot.lastSavedVersion;
   state.solvedPartVersions = std::move(slot.solvedPartVersions);
   slot.solvedPartVersions.clear();
@@ -2243,6 +2247,24 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
 // on the sheet at the view's scale + position, and joins the index-space
 // source refs to stable ElementRefs. A failure leaves `error` set and no
 // geometry (callers keep the previous SheetView so a stale view isn't blanked).
+// The current version of whatever document a view projects (a part or an
+// assembly); 0 when it cannot be resolved, which forces a re-projection.
+uint64_t SourceVersionOf(AppState& state, const DrawingView& view) {
+  if (Document* doc = PartDocById(state, view.sourceDocId))
+    return doc->Version();
+  for (const PartSlot& slot : state.parts) {
+    if (slot.id != view.sourceDocId || slot.kind != DocKind::Assembly)
+      continue;
+    if (state.assembly && state.activePart < state.parts.size() &&
+        state.parts[state.activePart].id == slot.id) {
+      return state.assembly->Version();
+    }
+    if (slot.assembly)
+      return slot.assembly->Version();
+  }
+  return 0;
+}
+
 drawing::SheetView ProjectDrawingView(AppState& state,
                                       const DrawingView& view) {
   drawing::SheetView result;
@@ -2520,8 +2542,27 @@ void AddDrawingViewPlaced(AppState& state, DrawingView v) {
 void UpdateDrawingRenders(AppState& state) {
   if (!state.drawing)
     return;
+  // Re-project only what can have gone stale. HLR is the expensive thing on a
+  // sheet (about half a second per view of a 50-occurrence assembly), and
+  // export calls this before writing so the file cannot be stale — which made
+  // exporting an unchanged 12-view sheet cost 6 s of pure recomputation. A
+  // view is still good when the drawing itself has not changed since the
+  // cache was built AND its source document is at the version it was
+  // projected from. (The drawing's version covers scale/orientation/position
+  // edits, which are properties of the view rather than of its source.)
+  const uint64_t drawingVersion = state.drawing->Version();
+  const bool drawingChanged = drawingVersion != state.drawingRendersVersion;
   std::map<uint64_t, drawing::SheetView> fresh;
   for (const DrawingView& view : state.drawing->GetViews()) {
+    if (!drawingChanged) {
+      const auto prev = state.drawingRenders.find(view.id);
+      if (prev != state.drawingRenders.end() && prev->second.hasGeometry &&
+          prev->second.error.empty() &&
+          prev->second.solvedSourceVersion == SourceVersionOf(state, view)) {
+        fresh[view.id] = prev->second;
+        continue;
+      }
+    }
     drawing::SheetView sv = ProjectDrawingView(state, view);
     // Keep last-good geometry on failure (design §1): a failed view shows its
     // previous curves with an error, rather than blanking the sheet.
@@ -2538,6 +2579,7 @@ void UpdateDrawingRenders(AppState& state) {
     fresh[view.id] = std::move(sv);
   }
   state.drawingRenders = std::move(fresh);
+  state.drawingRendersVersion = drawingVersion;
 }
 
 void SyncDocumentRenderers(AppState& state) {

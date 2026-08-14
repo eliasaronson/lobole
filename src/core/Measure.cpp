@@ -197,14 +197,26 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
   try {
     const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
     double total = 0.0;
+    // Bounding boxes first. A whole-assembly clash sweep is O(n^2) pairs, and
+    // almost all of them are nowhere near each other — a boolean intersection
+    // is thousands of times dearer than a box test. 50 occurrences took 7.5 s
+    // before this (1225 booleans); the scale round measured it.
+    const auto boxOf = [](const TopoDS_Shape& s) {
+      Bnd_Box box;
+      BRepBndLib::Add(s, box);
+      return box;
+    };
     for (const Body& a : bodiesA) {
       if (a.shape.GetShape().IsNull())
         continue;
       const TopoDS_Shape sa = a.shape.GetShape().Moved(la);
+      const Bnd_Box boxA = boxOf(sa);
       for (const Body& b : bodiesB) {
         if (b.shape.GetShape().IsNull())
           continue;
         const TopoDS_Shape sb = b.shape.GetShape().Moved(lb);
+        if (boxA.IsOut(boxOf(sb)))
+          continue; // cannot touch
         BRepAlgoAPI_Common common(sa, sb);
         if (!common.IsDone() || common.Shape().IsNull())
           continue;

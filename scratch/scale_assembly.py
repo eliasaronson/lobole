@@ -37,10 +37,10 @@ def main():
     d.call("set_active_part", index=1)
     d.call("add_feature", feature={
         "type": "Cylinder", "name": "Shank", "center": [0, 0, 0],
-        "axis": [0, 1, 0], "radius": 3, "height": 20})
+        "direction": [0, 1, 0], "radius": 3, "height": 20})
     parts = d.call("list_parts")["parts"]
-    plate_id = parts[0]["id"]
-    bolt_id = parts[1]["id"]
+    plate_name = parts[0]["name"]   # add_occurrence takes the part's NAME
+    bolt_name = parts[1]["name"]
 
     d.call("add_assembly", name="Rig")
     asm = len(d.call("list_parts")["parts"]) - 1
@@ -49,10 +49,10 @@ def main():
     print(f"inserting {count} occurrences")
     curve = []
     for i in range(count):
-        pid = plate_id if i % 5 == 0 else bolt_id
+        pname = plate_name if i % 5 == 0 else bolt_name
         t0 = time.time()
-        d.call("add_occurrence", part=pid,
-               position=[(i % 10) * 70.0, 0.0, (i // 10) * 50.0])
+        d.call("add_occurrence", part=pname, transform={
+            "position": [(i % 10) * 70.0, 0.0, (i // 10) * 50.0]})
         curve.append((i + 1, time.time() - t0))
     print("  growth: cost of one add_occurrence, by occurrence count")
     step = max(1, len(curve) // 8)
@@ -72,10 +72,10 @@ def main():
     _, _ = timed("open_project", lambda: d.call("open_project", path=out))
 
     print("\nthe operations a user waits on (drawing of that assembly)")
-    d.call("create_drawing", name="Sheet", size="A2")
+    d.call("create_drawing", name="Sheet", sheet={"size": "A2"})
     dwg = len(d.call("list_parts")["parts"]) - 1
     d.call("set_active_part", index=dwg)
-    src = d.call("list_parts")["parts"][asm]["id"]
+    src = d.call("list_parts")["parts"][asm]["name"]
     views = []
     for i, ori in enumerate(["front", "top", "right", "iso"] * 3):
         t0 = time.time()

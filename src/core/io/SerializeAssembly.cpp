@@ -32,9 +32,16 @@ Occurrence OccurrenceFromJson(const json& j) {
   o.partId = j.at("part_id").get<uint64_t>();
   if (j.contains("part_version") && !j.at("part_version").is_null())
     o.partVersion = j.at("part_version").get<std::string>();
+  // Both halves of the transform are optional: a caller placing a part by
+  // position alone should not have to spell out an identity quaternion, and
+  // omitting it used to surface as a raw "[json.exception.out_of_range.403]
+  // key 'orientation' not found" (found by the scale round, writing exactly
+  // that call).
   const json& t = j.at("transform");
-  o.position = Vec3FromJson(t.at("position"));
-  o.orientation = QuatFromJson(t.at("orientation"));
+  if (t.contains("position"))
+    o.position = Vec3FromJson(t.at("position"));
+  if (t.contains("orientation"))
+    o.orientation = QuatFromJson(t.at("orientation"));
   o.visible = j.value("visible", true);
   o.fixed = j.value("fixed", false);
   return o;

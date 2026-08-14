@@ -469,6 +469,9 @@ struct PartSlot {
   // switches so re-entering a drawing doesn't silently re-project — staleness
   // is only cleared by an explicit update (the FEM rule).
   std::map<uint64_t, drawing::SheetView> drawingRenders;
+  // The drawing document's version the renders above were built at, so
+  // UpdateDrawingRenders can skip views that cannot have changed (U11).
+  uint64_t drawingRendersVersion = 0;
   uint64_t lastSavedVersion = 0; // per-document dirty tracking
   // Assembly tabs only (A4): referenced parts' Document::Version() at this
   // assembly's last solve, stashed while inactive. See AppState field.
@@ -796,6 +799,11 @@ struct AppState {
   // UpdateDrawingRenders on tab entry and explicit update_drawing, never
   // serialized. Cleared on tab switch (ResetActiveTabUiState).
   std::map<uint64_t, drawing::SheetView> drawingRenders;
+  // The drawing document's version those renders were built at, so
+  // UpdateDrawingRenders can skip views that cannot have gone stale — HLR is
+  // half a second per view, and export re-projected everything every time
+  // (U11 scale round). Stashed with the renders, per tab.
+  uint64_t drawingRendersVersion = 0;
 
   // Dimension-placement tool (D4): armed from the panel with a kind, then the
   // user clicks projected edges/circles on the sheet to pick refs; the dim is
