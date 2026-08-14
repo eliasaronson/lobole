@@ -190,10 +190,12 @@ points opposite ways for each:
   a 148-feature part and a 50-occurrence assembly, with the benchmarks kept in
   `scratch/scale_*.py`. Fixed there: hole cutters fused one at a time (480 holes
   324 s → 7.9 s), interference without a bbox reject (7.5 s → 282 ms), drawing export
-  re-projecting the sheet (6.1 s → 19 ms). **Still open and the next big one:
-  opening a project rebuilds it from scratch** (259 s for that part, against 0.4 s to
-  save it) — persist the built geometry beside the recipe, keyed by the chain hash the
-  prefix cache already computes.
+  re-projecting the sheet (6.1 s → 19 ms). ~~Opening a project rebuilds it from
+  scratch~~ — **done** 2026-08-14: one regeneration per load instead of one per
+  feature, plus baked geometry beside the recipe
+  ([versioning/baked-geometry.md](versioning/baked-geometry.md)); **259 s → 0.04 s**.
+  Still slow at size: an edit early in a long history is a full rebuild by definition
+  (~28 s for that part), and check_geometry / list_elements are ~3 s.
 - ~~**CI: GUI tests under a virtual display**~~ — **done** 2026-08-14: the gui-labeled
   ctest entries run through `tools/xvfb-exec.sh`.
 

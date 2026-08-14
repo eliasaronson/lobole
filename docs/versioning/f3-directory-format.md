@@ -14,6 +14,10 @@ part.dsgn/                  # a directory IS a project
   features/
     1-sketch.json           # <id>-<kebab type>.json, one feature each
     2-extrude.json
+  geometry/                 # baked bodies (2026-08-14, additive)
+    index.json              # chain hash + per-body metadata
+    0.brep                  # one binary B-Rep per body
+  .gitattributes            # the B-Reps are binary and never merged
 ```
 
 - One file per feature, named by **stable id** (unique, never reused — the
@@ -28,6 +32,11 @@ part.dsgn/                  # a directory IS a project
   single-file, directory (or `.dsgn` suffix) → directory format.
 - Autosave sidecars and checkpoints keep using single-file snapshots (atomic
   rename of one file beats directory syncing for crash safety).
+- `geometry/` is the recipe's *derived* half — the built bodies, tagged with
+  the chain hash that says which recipe they came from, so opening is a load
+  rather than a rebuild (259 s → 0.04 s on a 148-feature part). It never
+  changes how the recipe is read: absent or stale, the document rebuilds
+  exactly as before. See [baked-geometry.md](baked-geometry.md).
 
 ## Implementation sketch
 
