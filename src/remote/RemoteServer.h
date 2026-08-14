@@ -95,6 +95,11 @@ private:
   int m_uiActionClient = -1;
   bool m_uiActionInFlight = false;
   std::function<void(ImGuiTestContext*)> m_uiAction;
+  // The live AppState, refreshed every ProcessPending tick: UI actions run
+  // on the main thread inside the engine's coroutine, so they can read it
+  // (menu_items reports the menu bar's own names). Null before the first tick.
+  ui::AppState* m_state = nullptr;
+
   // What the action wants to answer with (ui_items). Written inside the
   // action, on the main thread; sent when the engine's queue drains.
   nlohmann::json m_uiActionResult;

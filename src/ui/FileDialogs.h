@@ -27,6 +27,12 @@ void ExportDialog(AppState& state);
 // NFD or an active assembly.
 void ExportBomDialog(AppState& state);
 
+// Whether a native file dialog can actually open here (NFD compiled in AND a
+// usable backend — on Linux the XDG desktop portal). False in a bare session
+// or a container, where Export used to click into silence: callers gate their
+// buttons on this and say why instead.
+bool FileDialogsAvailable();
+
 // Draws the fallback browser window if it is open (no-op with NFD).
 void DrawFileBrowser(AppState& state);
 

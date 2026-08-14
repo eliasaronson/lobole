@@ -587,6 +587,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"list_parts", "List project tabs (parts, assemblies, drawings)."},
     {"rename_part", "Rename a part."},
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\"."},
+    {"menu_items", "List the menu bar's contents: no {path} = the top-level "
+                   "menus, {path: \"File\"} = that menu's items (submenu: "
+                   "true = walk deeper). The menu closes again."},
     {"key_press", "Send a key chord, e.g. \"Ctrl+Z\"."},
     {"item_click",
      "UI test tier: click a widget by {ref} or by the {id} ui_items reports "
@@ -1091,7 +1094,7 @@ bool RemoteServer::IsUiAction(const std::string& method) {
       "menu_click", "item_click",     "item_double_click", "item_input",
       "item_hover", "item_combo",     "popup_click",       "popup_items",
       "ui_items",   "viewport_click", "viewport_drag",     "key_press",
-      "scroll"};
+      "menu_items", "scroll"};
   for (const char* a : kActions)
     if (method == a)
       return true;
@@ -1168,6 +1171,38 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       } else {
         ctx->ItemClick((root + "**/" + entry).c_str());
       }
+    };
+  } else if (m == "menu_items") {
+    // The menu bar is the one surface ui_items/popup_items cannot describe:
+    // its entries only exist while the menu is open, and opening one needs a
+    // path you were supposed to know already. {path} omitted lists the top
+    // level; "File" lists that menu; "File/Recent" walks into a submenu.
+    const std::string path = p.value("path", std::string());
+    m_uiAction = [this, path](ImGuiTestContext* ctx) {
+      if (path.empty()) {
+        // GatherItems cannot see menu-bar buttons (they live in an internal
+        // child it does not walk), so the bar reports its own names —
+        // recorded by the code that draws them, in AppState::menuBarTop.
+        json out = json::array();
+        if (m_state == nullptr) {
+          IM_ERRORF_NOHDR("%s", "no app state yet");
+          return;
+        }
+        for (const std::string& name : m_state->menuBarTop)
+          out.push_back(json{{"label", name}, {"submenu", true}});
+        m_uiActionResult = json{{"menu", ""}, {"items", std::move(out)}};
+        return;
+      }
+      ctx->MenuClick(("//##MainMenuBar/" + path).c_str()); // opens it
+      ImGuiWindow* popup = ctx->GetWindowByRef("//$FOCUSED");
+      if (popup == nullptr) {
+        IM_ERRORF_NOHDR("%s", "that menu path opened nothing");
+        return;
+      }
+      ImGuiTestItemList items;
+      ctx->GatherItems(&items, (std::string("//") + popup->Name).c_str());
+      m_uiActionResult = json{{"menu", path}, {"items", ItemsToJson(items)}};
+      ctx->KeyPress(ImGuiKey_Escape); // close it again
     };
   } else if (m == "popup_items") {
     const ItemTarget target(p, m);
@@ -1250,6 +1285,8 @@ bool RemoteServer::QueueUiAction(const Request& request) {
 void RemoteServer::ProcessPending(ui::AppState& state) {
   if (!m_running)
     return;
+
+  m_state = &state; // UI actions read it from the engine's coroutine
 
   // Fractional viewport coordinates are resolved against the 3D viewport's
   // rect, so snapshot it while we are on the main thread with `state` in hand.

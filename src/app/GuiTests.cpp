@@ -1048,6 +1048,32 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Point);
   };
 
+  // Residue of the clicks-only rounds: with a plane pick armed, the named
+  // rows in the feature tree ARE pickable (they used to swallow the click).
+  t = IM_REGISTER_TEST(engine, "sketch", "tree_plane_row_consumes_pick");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    const size_t before = Doc()->FeatureCount();
+
+    ToolbarClick(ctx, "###tb_new_sketch");
+    IM_CHECK(s_App->sketchEdit.pickingPlane);
+    ctx->ItemClick("//##DockHost/**/Top Plane");
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.pickingPlane); // consumed
+    IM_CHECK(s_App->sketchEdit.IsEditing());
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+
+    // Unarmed, a single click still only selects (double-click opens) — the
+    // gesture must not change for ordinary browsing.
+    ctx->ItemClick("//##DockHost/**/Top Plane");
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+  };
+
   // U9: the shortcut list. Ctrl+K (and the whole sketch keymap) was
   // discoverable only by reading the source.
   t = IM_REGISTER_TEST(engine, "help", "shortcuts_window_opens");

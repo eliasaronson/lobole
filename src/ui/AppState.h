@@ -706,6 +706,12 @@ struct AppState {
   // None. 0 = Left (Alt+left), 1 = Right, 2 = Middle.
   int viewportDragButton = 2;
   bool showPlanes = true; // visible by default; auto-hidden once bodies exist
+  // The menu bar's top-level names, rebuilt every frame as it draws. The
+  // ImGui test engine cannot enumerate menu-bar buttons (they live in an
+  // internal child it does not gather), so this is what `menu_items` with no
+  // path reports — recorded by the code that draws them, never guessed.
+  std::vector<std::string> menuBarTop;
+
   // Help > Keyboard Shortcuts (Ctrl+/). In AppState rather than a static in
   // the draw function so the between-test reset can close it — a stray
   // floating window swallows the viewport clicks of every later GUI test.

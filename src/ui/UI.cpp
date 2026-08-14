@@ -145,10 +145,31 @@ void DrawViewCube(AppState& state) {
       {{0, 0, 1}, {4, 5, 7, 6}, "Front"}, {{0, 0, -1}, {0, 2, 3, 1}, "Back"},
   };
 
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
   ImGui::InvisibleButton("##cube", ImVec2(size, size));
   const ImVec2 mouse = ImGui::GetIO().MousePos;
   const bool hoveredWidget = ImGui::IsItemHovered();
-  const bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+  bool clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
+
+  // Home corner: viewed head-on the cube shows ONE face, so there is no
+  // corner left to click to get back to iso — the way out was Shift+7, which
+  // nothing on screen mentions. This little cube always is that way out.
+  const float homeSz = std::max(14.0f, size * 0.22f);
+  // Top-left of the widget square: the cube itself only covers the middle
+  // 60%, and the bottom edge is clipped by the window padding.
+  const ImVec2 homeMin(origin.x, origin.y);
+  const ImVec2 homeMax(origin.x + homeSz, origin.y + homeSz);
+  const bool homeHot = hoveredWidget && mouse.x >= homeMin.x &&
+                       mouse.x <= homeMax.x && mouse.y >= homeMin.y &&
+                       mouse.y <= homeMax.y;
+  if (homeHot) {
+    clicked = false; // the cube must not also swallow this click
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+      state.camera->AlignToFace(glm::vec3(0.0f),
+                                glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)));
+    }
+    ImGui::SetTooltip("Isometric view (Shift+7)");
+  }
 
   const auto pointInQuad = [&](const ImVec2* q, const ImVec2& p) {
     for (int i = 0; i < 4; i++) {
@@ -188,6 +209,21 @@ void DrawViewCube(AppState& state) {
     }
     if (hot && clicked)
       state.camera->AlignToFace(glm::vec3(0.0f), f.normal);
+  }
+
+  // Draw the home corner last so it sits above the cube's faces.
+  {
+    ImDrawList* d2 = ImGui::GetWindowDrawList();
+    d2->AddRectFilled(homeMin, homeMax,
+                      homeHot ? IM_COL32(90, 140, 210, 235)
+                              : IM_COL32(60, 66, 78, 200),
+                      3.0f);
+    const char* glyph = "\xef\x80\x95"; // ICON_FA_HOUSE
+    const ImVec2 gs = ImGui::CalcTextSize(glyph);
+    const ImVec2 hc((homeMin.x + homeMax.x) * 0.5f,
+                    (homeMin.y + homeMax.y) * 0.5f);
+    d2->AddText(ImVec2(hc.x - gs.x * 0.5f, hc.y - gs.y * 0.5f),
+                homeHot ? IM_COL32_WHITE : IM_COL32(205, 215, 230, 230), glyph);
   }
   ImGui::End();
   ImGui::PopStyleVar();

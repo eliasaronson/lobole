@@ -23,8 +23,16 @@ namespace ui {
 
 namespace {
 
+// BeginMenu for a TOP-LEVEL menu: records the name for menu_items (the test
+// engine cannot enumerate the bar itself), then behaves exactly like
+// ImGui::BeginMenu.
+bool BeginTopMenu(AppState& state, const char* label) {
+  state.menuBarTop.push_back(label);
+  return ImGui::BeginMenu(label);
+}
+
 void DrawFileMenu(AppState& state) {
-  if (!ImGui::BeginMenu("File"))
+  if (!BeginTopMenu(state, "File"))
     return;
 
   if (ImGui::MenuItem("New", "Ctrl+N")) {
@@ -89,7 +97,10 @@ void DrawFileMenu(AppState& state) {
       (state.document && !state.document->GetBodies().empty()) ||
       (state.assembly && state.assembly->OccurrenceCount() > 0) ||
       (state.drawing && !state.drawing->GetViews().empty());
-  if (ImGui::MenuItem("Export...", nullptr, false, canExport)) {
+  // Grey it out where no system save dialog exists rather than letting the
+  // click vanish (FileDialogs.h).
+  if (ImGui::MenuItem("Export...", nullptr, false,
+                      canExport && FileDialogsAvailable())) {
     ExportDialog(state);
   }
   ImGui::Separator();
@@ -100,7 +111,7 @@ void DrawFileMenu(AppState& state) {
 }
 
 void DrawEditMenu(AppState& state) {
-  if (!ImGui::BeginMenu("Edit"))
+  if (!BeginTopMenu(state, "Edit"))
     return;
 
   const bool pending = HasPendingFeature(state);
@@ -123,7 +134,7 @@ void DrawEditMenu(AppState& state) {
 // GUI tests, which enter sketches via those paths.
 
 void DrawViewMenu(AppState& state) {
-  if (!ImGui::BeginMenu("View"))
+  if (!BeginTopMenu(state, "View"))
     return;
 
   if (ImGui::MenuItem("Reset Camera")) {
@@ -361,7 +372,7 @@ void DrawShortcutsWindow(bool& open) {
 }
 
 void DrawHelpMenu(AppState& state) {
-  if (ImGui::BeginMenu("Help")) {
+  if (BeginTopMenu(state, "Help")) {
     if (ImGui::MenuItem("Keyboard Shortcuts", "Ctrl+/"))
       state.showShortcuts = true;
     if (ImGui::MenuItem("About Designer"))
@@ -430,6 +441,7 @@ void DrawMainMenuBar(AppState& state) {
 
   if (!ImGui::BeginMainMenuBar())
     return;
+  state.menuBarTop.clear(); // rebuilt by the BeginTopMenu calls below
 
   DrawFileMenu(state);
   DrawEditMenu(state);

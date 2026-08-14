@@ -237,6 +237,12 @@ void DrawFileBrowser(AppState& state) {
 }
 
 #ifdef HAVE_NATIVEFILEDIALOG
+bool FileDialogsAvailable() { return NativeDialogsSafe(); }
+#else
+bool FileDialogsAvailable() { return false; }
+#endif
+
+#ifdef HAVE_NATIVEFILEDIALOG
 
 void ImportFileDialog(AppState& state) {
   if (!NativeDialogsSafe()) {

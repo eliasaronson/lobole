@@ -854,8 +854,14 @@ void DrawDrawingToolbar(AppState& state) {
   if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_dwg_fit",
                  "Fit sheet (F)"))
     state.sheetView.scale = 0.0; // refit on next paint
+  // Export needs a native save dialog; without one (bare session, container)
+  // the click used to do nothing at all. Say so on the button instead.
+  const bool canSave = FileDialogsAvailable();
   if (ToolButton(ICON_FA_FILE_EXPORT "###tb_dwg_export",
-                 "Export drawing (SVG / PDF)", !dwg.GetViews().empty()))
+                 canSave ? "Export drawing (SVG / PDF)"
+                         : "Export needs a system file dialog (unavailable "
+                           "here) - use export_drawing over the script API",
+                 !dwg.GetViews().empty() && canSave))
     ExportDialog(state);
 
   if (state.dimTool.active) {

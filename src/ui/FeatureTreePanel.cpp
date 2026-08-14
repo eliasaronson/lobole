@@ -160,16 +160,27 @@ void DrawFeatureTreePanel(AppState& state) {
     ImGui::SeparatorText("Default geometry");
     static const char* kPlaneNames[3] = {"Front Plane", "Top Plane",
                                          "Right Plane"};
+    // While a plane pick is armed (New Sketch, the Hole tool), these rows are
+    // the pick: a single click on the NAMED plane is easier than hunting the
+    // right quad in the viewport, and it used to do nothing at all.
+    const bool armedForPlane = state.sketchEdit.pickingPlane;
     for (int i = 0; i < 3; i++) {
       if (ImGui::Selectable(kPlaneNames[i], false,
                             ImGuiSelectableFlags_AllowDoubleClick)) {
-        if (ImGui::IsMouseDoubleClicked(0)) {
-          const int n = static_cast<int>(doc->FeatureCount()) + 1;
+        const int n = static_cast<int>(doc->FeatureCount()) + 1;
+        if (armedForPlane) {
+          const SketchPurpose purpose = state.sketchEdit.purpose;
+          state.sketchEdit.pickingPlane = false;
+          BeginSketchOnPlane(state, DefaultPlane(i),
+                             "Sketch " + std::to_string(n), purpose);
+        } else if (ImGui::IsMouseDoubleClicked(0)) {
           BeginSketchOnPlane(state, DefaultPlane(i),
                              "Sketch " + std::to_string(n));
         }
       }
     }
+    if (armedForPlane)
+      ImGui::TextDisabled("  ^ or click a plane / flat face in the viewport");
 
     ImGui::SeparatorText("Features");
     // Transient refusal shown when a drag-reorder would dangle a reference

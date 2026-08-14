@@ -428,6 +428,18 @@ def main():
         d.call("item_hover", ref="//##DockHost/**/###tb_insert_part")
         d.call("new_project")
 
+        # The menu bar is the one surface the test engine cannot enumerate
+        # (its buttons live in an internal child), so the bar reports its own
+        # names and menu_items opens each menu to list it.
+        top = [i["label"] for i in d.call("menu_items")["items"]]
+        expect({"File", "Edit", "View", "Help"} <= set(top),
+               f"menu_items lists the menu bar: {top}")
+        fileItems = d.call("menu_items", path="File")["items"]
+        labels = [i["label"] for i in fileItems]
+        expect("Save Project" in labels, f"File menu enumerates: {labels}")
+        expect(any(i.get("submenu") for i in fileItems),
+               "submenu entries are flagged as such")
+
         # A disabled widget must refuse loudly: Extrude needs a sketch, and a
         # script clicking it used to get a success and no feature.
         d.call("new_project")

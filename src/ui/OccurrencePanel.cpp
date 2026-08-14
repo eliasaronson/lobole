@@ -381,8 +381,15 @@ void DrawBomSection(AppState& state) {
       ImGui::TextDisabled("?");
     ImGui::EndTable();
   }
+  const bool canSave = FileDialogsAvailable();
+  ImGui::BeginDisabled(!canSave);
   if (ImGui::Button("Export CSV"))
     ExportBomDialog(state);
+  ImGui::EndDisabled();
+  if (!canSave && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Needs a system file dialog (unavailable here) - use "
+                      "export_bom over the script API");
+  }
 }
 
 void DrawOccurrencePanel(AppState& state) {
