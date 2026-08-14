@@ -447,8 +447,20 @@ void DrawFeatureTreePanel(AppState& state) {
       if (hidden)
         ImGui::PushStyleColor(ImGuiCol_Text,
                               ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-      ImGui::Selectable((bodyName + "##body").c_str(), false,
-                        ImGuiSelectableFlags_AllowOverlap);
+      // With a Body slot armed (Shell, Boolean, Pattern, Split, Refine…),
+      // this named row IS a pick — the same rule the plane rows follow.
+      // Clicking a body here used to do nothing at all, so the viewport was
+      // the only way to fill a slot.
+      const bool armedForBody =
+          state.slotPick.Active() &&
+          (state.slotPick.kinds &
+           SelectionKindBit(SelectionItem::Kind::Body)) != 0;
+      if (ImGui::Selectable((bodyName + "##body").c_str(), false,
+                            ImGuiSelectableFlags_AllowOverlap) &&
+          armedForBody) {
+        SlotPickClicked(state, {SelectionItem::Kind::Body, createdBy, {}},
+                        /*meshId=*/0, /*index=*/0);
+      }
       if (hidden)
         ImGui::PopStyleColor();
       ImGui::OpenPopupOnItemClick("##bodyctx",

@@ -308,6 +308,13 @@ void DrawToolWindow(AppState& state) {
       break;
     }
   }
+  if (!state.slotPick.miss.empty() &&
+      state.slotPick.featureId == feature->GetId()) {
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.40f, 1.0f), "%s",
+                       state.slotPick.miss.c_str());
+    ImGui::PopTextWrapPos();
+  }
   if (missing != nullptr) {
     blocking = true;
     ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.40f, 1.0f),

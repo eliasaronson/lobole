@@ -419,8 +419,18 @@ void HandleSelectionInput(AppState& state, bool overViewport,
 
   // An armed tool consumes the pick; the Selection itself is untouched.
   if (armed) {
-    if (!candidates.empty())
+    if (!candidates.empty()) {
+      state.slotPick.miss.clear();
       armed->consume(state, candidates.front());
+    } else if (state.slotPick.Active()) {
+      // Nothing the tool accepts was under the cursor. Saying so beats the
+      // silence that made a missed pick indistinguishable from a broken tool.
+      state.slotPick.miss =
+          "Nothing there - " + (state.slotPick.prompt.empty()
+                                    ? std::string("the tool wants something "
+                                                  "else")
+                                    : state.slotPick.prompt);
+    }
     return;
   }
 

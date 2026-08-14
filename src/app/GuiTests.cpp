@@ -1302,6 +1302,51 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
   };
 
+  // U10: a Body slot is fillable from the named row in the tree, not only
+  // from the viewport — and a pick that lands on nothing says so.
+  t = IM_REGISTER_TEST(engine, "slots", "body_row_fills_an_armed_slot");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t firstBody = Doc()->GetFeature(0)->GetId();
+
+    ToolbarClick(ctx, "###tb_shell"); // Body defaults to the NEWEST producer
+    ctx->Yield();
+    auto* sh = dynamic_cast<ShellFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(sh != nullptr);
+    IM_CHECK(sh->bodyId != firstBody);
+
+    ctx->ItemClick("//###ToolWindow/###slot4"); // arm the Body slot
+    ctx->Yield();
+    IM_CHECK(s_App->slotPick.Active());
+    ctx->ItemClick("//##DockHost/**/Box 1##body"); // the row, not the viewport
+    ctx->Yield();
+    IM_CHECK_EQ(sh->bodyId, firstBody);
+
+    // A pick that hits nothing explains itself instead of vanishing.
+    ctx->ItemClick("//###ToolWindow/###slot5"); // Open faces (Face kind)
+    ctx->Yield();
+    // Aim at empty space so the click certainly hits nothing, and use the
+    // viewport's own centre so it certainly IS over the viewport.
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f, 400.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 400.0f, 40.0f));
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + s_App->viewportSize.x * 0.5f,
+               s_App->viewportPos.y + s_App->viewportSize.y * 0.5f));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    IM_CHECK(!s_App->slotPick.miss.empty());
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
   // U9: the shortcut list. Ctrl+K (and the whole sketch keymap) was
   // discoverable only by reading the source.
   t = IM_REGISTER_TEST(engine, "help", "shortcuts_window_opens");

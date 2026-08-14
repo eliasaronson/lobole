@@ -298,6 +298,11 @@ struct SlotPickState {
   uint32_t kinds = 0;     // SelectionItem::Kind bitmask accepted
   bool multi = false;
   std::string prompt; // status pill while armed
+  // Why the last pick did not land (empty = nothing to report). An armed
+  // tool used to swallow a click on empty space or the wrong kind of thing
+  // in complete silence; the tool window shows this under the slot rows and
+  // the next good pick clears it (U10).
+  std::string miss;
   bool Active() const { return featureId != 0; }
 };
 
