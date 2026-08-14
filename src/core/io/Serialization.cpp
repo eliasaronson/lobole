@@ -1,4 +1,5 @@
 #include "core/io/Serialization.h"
+#include "core/io/GeometryCache.h"
 #include "core/io/SerializationInternal.h"
 
 #include "common/Logger.h"
@@ -73,6 +74,11 @@ json DocumentEnvelope(const Document& doc) {
   j["version"] = kVersion;
   if (doc.Rollback() >= 0) {
     j["rollback"] = doc.Rollback();
+  }
+  // Omitted at the default (true) so existing projects re-save byte-identically
+  // and the goldens stay valid — the recipe format is untouched by baking.
+  if (!doc.CommitGeometry()) {
+    j["commit_geometry"] = false;
   }
   if (!doc.GetParameters().empty()) {
     j["parameters"] = json::array();
@@ -342,6 +348,19 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           !wanted.contains(entry.path().filename().string()))
         fs::remove(entry.path(), ec);
     }
+    // Baked geometry (docs/versioning/baked-geometry.md): the built bodies
+    // beside the recipe, so the next open is a load. Best-effort — a project
+    // that cannot bake is still a valid project, just a slower one to open.
+    if (doc.CommitGeometry()) {
+      std::string bakeError;
+      if (!SaveGeometry(doc, dirPath, &bakeError))
+        LOG_WARN("Could not bake geometry: {}", bakeError);
+    } else {
+      RemoveGeometry(dirPath);
+    }
+    // The app creates and commits the project's repo itself (GitVault), so it
+    // is the app's job to say how the blob should be treated there.
+    WriteRepositoryHints(dirPath, doc.CommitGeometry());
     // FEM studies (v29): file-per-study under studies/, id list in the index.
     // Both the key and the directory stay absent when there are no studies, so
     // a pre-v29 document re-saves byte-identically (the exploded-views v27
@@ -461,6 +480,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     }
 
     auto doc = std::make_unique<Document>();
+    doc->SetCommitGeometry(index.value("commit_geometry", true));
     for (const auto& pj : index.value("parameters", json::array())) {
       doc->SetParameter(pj.at("name").get<std::string>(),
                         pj.at("expression").get<std::string>(),
@@ -568,6 +588,9 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // it.
     doc->SetActiveConfiguration(
         index.value("active_configuration", uint64_t{0}));
+    // Adopt the baked bodies BEFORE the regeneration below: it is that
+    // regeneration which decides whether they still describe the recipe.
+    LoadGeometry(*doc, dirPath);
     bulk.reset(); // the one regeneration for everything loaded above
     // Now that regeneration has settled, stamp the persisted topology results
     // with the final version so they read as current (v33).
@@ -921,6 +944,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     }
 
     auto doc = std::make_unique<Document>();
+    doc->SetCommitGeometry(j.value("commit_geometry", true));
     // Parameters first: features' expressions evaluate against them on the
     // regeneration each AddFeature triggers.
     for (const auto& pj : j.value("parameters", json::array())) {

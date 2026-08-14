@@ -153,10 +153,50 @@ bool Document::Regenerate() {
         (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));
     hashes[i] = chain;
   }
+  m_tipHash = upTo > 0 ? hashes[upTo - 1] : 0;
+
+  // Baked geometry: if the blob the loader adopted describes exactly this
+  // feature list, install it and execute nothing. The prefix cache stays
+  // empty, so the first edit rebuilds from the start — the trade recorded in
+  // docs/versioning/baked-geometry.md. Either way the hand-off is consumed
+  // here, so a later edit can never resurrect it.
+  if (!m_bakedBodies.empty()) {
+    std::vector<Body> baked = std::move(m_bakedBodies);
+    const size_t bakedHash = m_bakedHash;
+    m_bakedBodies.clear();
+    m_bakedHash = 0;
+    if (bakedHash != 0 && bakedHash == m_tipHash && m_cache.empty()) {
+      m_bodies = std::move(baked);
+      m_lastStats.cached = upTo;
+      // Seed the prefix cache so a LATER regeneration (the UI syncs, the RPC
+      // layer, an unrelated document-version bump) is free too — without it,
+      // the next Regenerate found an empty cache and rebuilt everything the
+      // blob had just saved us. Only the tip entry carries bodies; the rest
+      // are hashes with bodiesValid=false, which is what makes an edit
+      // anywhere in the history fall back to a full rebuild.
+      m_cache.clear();
+      m_cache.reserve(upTo);
+      for (size_t i = 0; i + 1 < upTo; i++)
+        m_cache.push_back({hashes[i], {}, /*bodiesValid=*/false});
+      if (upTo > 0)
+        m_cache.push_back({hashes[upTo - 1], m_bodies, /*bodiesValid=*/true});
+      LOG_INFO("Loaded baked geometry ({} bodies): {} features executed 0",
+               m_bodies.size(), upTo);
+      return true;
+    }
+    LOG_INFO("Baked geometry does not match the recipe; rebuilding");
+  }
+
   size_t divergence = 0;
   while (divergence < upTo && divergence < m_cache.size() &&
          m_cache[divergence].hash == hashes[divergence]) {
     divergence++;
+  }
+  // A divergence that resumes from a placeholder entry (baked geometry) has
+  // no bodies to resume FROM: rebuild the whole list instead.
+  if (divergence > 0 && !m_cache[divergence - 1].bodiesValid) {
+    divergence = 0;
+    m_cache.clear();
   }
   m_lastStats.cached = divergence;
   m_bodies = divergence > 0 ? m_cache[divergence - 1].bodiesAfter

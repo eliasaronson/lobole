@@ -125,26 +125,46 @@ TEST_CASE("Directory format: editing one feature touches one file",
   std::string error;
   REQUIRE(testio::Save(doc, proj.string()));
 
-  auto mtimes = [&] {
+  // The recipe and the baked geometry are counted apart: the property F3
+  // exists for is that an edit rewrites only the files it must, and the
+  // geometry blob legitimately changes whenever the geometry does.
+  auto mtimes = [&](bool geometry) {
     std::map<std::string, fs::file_time_type> m;
     for (const auto& e : fs::recursive_directory_iterator(proj))
-      if (e.is_regular_file())
+      if (e.is_regular_file() &&
+          (e.path().parent_path().filename() == "geometry") == geometry)
         m[e.path().string()] = fs::last_write_time(e.path());
     return m;
   };
-  const auto before = mtimes();
+  const auto countChanged = [](const auto& before, const auto& after) {
+    int changed = 0;
+    for (const auto& [path, t] : after)
+      if (!before.contains(path) || before.at(path) != t)
+        changed++;
+    return changed;
+  };
+
+  // A save that changes nothing must touch nothing at all — including the
+  // megabytes of baked geometry, which would otherwise churn git history on
+  // every Ctrl+S (docs/versioning/baked-geometry.md).
+  const auto idleRecipe = mtimes(false);
+  const auto idleGeometry = mtimes(true);
+  REQUIRE(testio::Save(doc, proj.string()));
+  CHECK(countChanged(idleRecipe, mtimes(false)) <= 1); // the index is rewritten
+  CHECK(countChanged(idleGeometry, mtimes(true)) == 0);
+
+  const auto before = mtimes(false);
+  const auto beforeGeometry = mtimes(true);
   dynamic_cast<BoxFeature*>(doc.GetFeature(1))->width = 3.0;
   doc.Regenerate();
   REQUIRE(testio::Save(doc, proj.string()));
-  const auto after = mtimes();
+  const auto after = mtimes(false);
   REQUIRE(before.size() == after.size());
-  int changed = 0;
-  for (const auto& [path, t] : after)
-    if (before.at(path) != t)
-      changed++;
   // The edited feature's file and the (always-rewritten) index. This is the
   // git-friendliness property that justifies F3.
-  CHECK(changed <= 2);
+  CHECK(countChanged(before, after) <= 2);
+  // …and the geometry it produced is rebaked, because it really did change.
+  CHECK(countChanged(beforeGeometry, mtimes(true)) >= 1);
 
   // Deleting a feature removes its file.
   doc.RemoveFeature(0);

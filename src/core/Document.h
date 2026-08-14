@@ -285,6 +285,23 @@ public:
 
   const std::vector<Body>& GetBodies() const { return m_bodies; }
 
+  // Baked geometry (docs/versioning/baked-geometry.md): bodies read from the
+  // saved project, to be used INSTEAD of executing the feature list — but
+  // only if they still describe it. The next Regenerate compares `tipHash`
+  // against the chain hash it computes and either installs these bodies
+  // (executing nothing) or ignores them and rebuilds. Loaders adopt inside a
+  // BulkEdit, so that comparison happens exactly once.
+  // Whether saving bakes the geometry beside the recipe (default true).
+  // Persisted with the project; turning it off also writes a .gitignore, for
+  // people who would rather keep the repo small and pay the rebuild.
+  bool CommitGeometry() const { return m_commitGeometry; }
+  void SetCommitGeometry(bool on) { m_commitGeometry = on; }
+
+  void AdoptBakedGeometry(std::vector<Body> bodies, size_t tipHash) {
+    m_bakedBodies = std::move(bodies);
+    m_bakedHash = tipHash;
+  }
+
   // ---- Reference-image assets (v49) -------------------------------------
   // Raw pixel bytes for sketch reference images (docs/sketch/reference-image-
   // plan.md), keyed by asset name. Kept at document scope — NOT on the sketch
@@ -314,6 +331,12 @@ public:
     size_t cached = 0;
   };
   const RegenStats& LastRegenStats() const { return m_lastStats; }
+
+  // The chain hash of the whole feature list as of the last regeneration —
+  // the same value the prefix cache keys its last entry on, exposed so the
+  // saved geometry can be tagged with it (and a load can ask "is this blob
+  // still the answer?"). 0 before the first regeneration or with no features.
+  size_t TipChainHash() const { return m_tipHash; }
   void ClearRegenCache() { m_cache.clear(); }
 
   // The body list as it stood after feature `index` executed, from the regen
@@ -362,6 +385,13 @@ private:
   uint64_t m_nextId = 1;
   int m_rollback = -1;
   int m_bulkDepth = 0; // >0 = a BulkEdit guard is deferring regeneration
+  size_t m_tipHash = 0; // chain hash of the last regenerated feature list
+  // Bodies loaded from the project's geometry blob, awaiting the hash check
+  // in the next Regenerate. Cleared once used or rejected — this is a
+  // hand-off, not a second source of truth.
+  std::vector<Body> m_bakedBodies;
+  size_t m_bakedHash = 0;
+  bool m_commitGeometry = true;
 
   // Prefix cache (R3): per feature, the chain hash of everything up to and
   // including it, plus a snapshot of the body list after it executed. Body
@@ -370,6 +400,11 @@ private:
   struct RegenCacheEntry {
     size_t hash = 0;
     std::vector<Body> bodiesAfter;
+    // False for the placeholder entries baked geometry installs: the blob
+    // carries only the TIP bodies, so intermediate entries know their hash
+    // but not the body list at that point. A divergence landing on one of
+    // those cannot resume from it — Regenerate falls back to a full rebuild.
+    bool bodiesValid = true;
   };
   std::vector<RegenCacheEntry> m_cache;
   RegenStats m_lastStats;

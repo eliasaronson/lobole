@@ -206,6 +206,7 @@ set(core_sources
     src/core/io/Format.cpp
     src/core/Command.cpp
     src/core/Expression.cpp
+    src/core/io/GeometryCache.cpp
     src/core/io/Serialization.cpp
     src/core/io/SerializeFeatures.cpp
     src/core/io/SerializeStudies.cpp
