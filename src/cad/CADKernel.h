@@ -53,6 +53,17 @@ public:
   void Mirror(const glm::vec3& point, const glm::vec3& normal);
   void Scale(double factor);
 
+  // Gathers disjoint solids into one shape WITHOUT fusing them (a compound).
+  //
+  // Fusing is what a caller reaches for when it wants "all of these as one
+  // tool", and for disjoint solids it is pure waste: BRepAlgoAPI_Fuse
+  // re-processes the whole accumulated shape on every call, so building a
+  // 480-cylinder cutter one Union at a time cost 245 s where the compound
+  // costs milliseconds (the U11 scale round measured it). Booleans accept a
+  // compound as an operand, so this is a drop-in replacement wherever the
+  // pieces are known not to touch.
+  static CADShape CompoundOf(const std::vector<CADShape>& parts);
+
   // Splits into its connected solids (one entry when the shape is a single
   // solid, several when it is a compound of disjoint solids). Empty if
   // invalid. Used to turn a fused pattern back into per-instance bodies.

@@ -59,6 +59,7 @@
 #include <TopLoc_Location.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Solid.hxx>
@@ -251,6 +252,22 @@ void CADShape::Mirror(const glm::vec3& point, const glm::vec3& normal) {
   if (transformer.IsDone()) {
     m_shape = transformer.Shape();
   }
+}
+
+CADShape CADShape::CompoundOf(const std::vector<CADShape>& parts) {
+  TopoDS_Compound compound;
+  BRep_Builder builder;
+  builder.MakeCompound(compound);
+  int added = 0;
+  for (const CADShape& p : parts) {
+    if (!p.IsValid())
+      continue;
+    builder.Add(compound, p.GetShape());
+    added++;
+  }
+  if (added == 0)
+    return CADShape();
+  return CADShape(compound);
 }
 
 std::vector<CADShape> CADShape::SplitSolids() const {
