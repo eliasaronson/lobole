@@ -428,6 +428,18 @@ def main():
         d.call("item_hover", ref="//##DockHost/**/###tb_insert_part")
         d.call("new_project")
 
+        # U10: the script API refuses the same incomplete tools the GUI does.
+        d.call("new_project")
+        d.call("add_feature", feature=BOX)
+        try:
+            d.call("add_feature", feature={"type": "Fillet", "name": "F",
+                                           "edges": [], "radius": 0.5})
+            expect(False, "an edge-less fillet must be refused")
+        except RuntimeError as e:
+            expect("incomplete" in str(e) and "edge" in str(e),
+                   f"add_feature names the missing input: {e}")
+        d.call("new_project")
+
         # The menu bar is the one surface the test engine cannot enumerate
         # (its buttons live in an internal child), so the bar reports its own
         # names and menu_items opens each menu to list it.

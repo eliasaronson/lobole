@@ -4,7 +4,12 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/features/BooleanFeature.h"
+#include "core/features/DraftFeature.h"
+#include "core/features/FilletFeature.h"
+#include "core/features/PatternFeature.h"
 #include "core/features/ShellFeature.h"
+#include "core/features/SplitFeature.h"
 #include "core/io/Serialization.h"
 
 #include <filesystem>
@@ -51,6 +56,34 @@ TEST_CASE("Shell without an open face errors", "[shell]") {
 // thick for the geometry; the feature used to commit that as a silent no-op.
 // (Found by the 2026-08-13 clicks-only dogfood, where a shell of a slab with
 // a through hole "succeeded" and changed nothing.)
+// U10: inputs that are not there yet are refused at COMMIT time, on both
+// surfaces — the GUI disables Accept, the RPC throws. Regeneration itself
+// stays permissive so an empty tool can still open.
+TEST_CASE("WhyIncomplete names the missing input", "[u10][incomplete]") {
+  FilletFeature blend("F", {}, 0.5);
+  CHECK(blend.WhyIncomplete().find("edge") != std::string::npos);
+  FilletFeature ready("F", {ElementRef{1, "1/face0;U0"}}, 0.5);
+  CHECK(ready.WhyIncomplete().empty());
+
+  DraftFeature draft("D", 1, {}, 5.0);
+  CHECK(draft.WhyIncomplete().find("face") != std::string::npos);
+
+  SplitFeature split("S", 0);
+  CHECK(split.WhyIncomplete().find("body") != std::string::npos);
+  SplitFeature knife("S", 7);
+  knife.knife = SplitKnifeKind::Face;
+  CHECK(knife.WhyIncomplete().find("face") != std::string::npos);
+
+  BooleanFeature boo("B", 0, 0, BooleanOp::Union);
+  CHECK(!boo.WhyIncomplete().empty());
+  PatternFeature pat("P", PatternKind::Linear, 0);
+  CHECK(!pat.WhyIncomplete().empty());
+
+  // A healthy feature says nothing, and the base class default is silence.
+  BoxFeature box("B", glm::vec3(0), 1, 1, 1);
+  CHECK(box.WhyIncomplete().empty());
+}
+
 TEST_CASE("Shell that removes no material errors", "[shell]") {
   Document doc;
   doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 4, 4, 4));

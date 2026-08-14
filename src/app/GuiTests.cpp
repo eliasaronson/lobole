@@ -1272,6 +1272,36 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     };
   }
 
+  // U10: a tool that runs cleanly and changes nothing says so — and is still
+  // acceptable, because Refine on an already-clean body is a fair answer.
+  t = IM_REGISTER_TEST(engine, "defaults", "no_op_warns_without_blocking");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box"); // a clean box: nothing to merge
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_refine");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    // The warning is a draw-list line, so assert what it is derived from:
+    // the feature changed no body volume, and Accept is NOT disabled.
+    size_t idx = 0;
+    IM_CHECK(ui::ResolvePendingFeature(*s_App, &idx) != nullptr);
+    const std::vector<Body>* after = Doc()->CachedBodiesAfter(idx);
+    const std::vector<Body>* before = Doc()->CachedBodiesAfter(idx - 1);
+    IM_CHECK(after != nullptr && before != nullptr);
+    IM_CHECK_EQ(after->size(), before->size());
+    IM_CHECK(std::abs((*after)[0].shape.Volume() -
+                      (*before)[0].shape.Volume()) < 1e-9);
+    const ImGuiTestItemInfo accept =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
   // U9: the shortcut list. Ctrl+K (and the whole sketch keymap) was
   // discoverable only by reading the source.
   t = IM_REGISTER_TEST(engine, "help", "shortcuts_window_opens");

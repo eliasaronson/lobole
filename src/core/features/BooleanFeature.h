@@ -22,6 +22,14 @@ public:
   [[nodiscard]] std::string TypeName() const override { return "Boolean"; }
   bool Execute(RegenContext& ctx) override;
 
+  [[nodiscard]] std::string WhyIncomplete() const override {
+    if (targetId == 0)
+      return "pick the target body";
+    if (toolId == 0)
+      return "pick the tool body";
+    return "";
+  }
+
   uint64_t targetId = 0; // producing-feature id of operand A
   uint64_t toolId = 0;   // producing-feature id of operand B
   BooleanOp op = BooleanOp::Union;

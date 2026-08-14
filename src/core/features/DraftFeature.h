@@ -26,6 +26,10 @@ public:
   std::string TypeName() const override { return "Draft"; }
   bool Execute(RegenContext& ctx) override;
 
+  [[nodiscard]] std::string WhyIncomplete() const override {
+    return faces.empty() ? "pick at least one face to taper" : "";
+  }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(angleExpr, angleDeg);
   }

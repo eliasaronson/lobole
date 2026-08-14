@@ -43,6 +43,14 @@ public:
   [[nodiscard]] std::string TypeName() const override { return "Split"; }
   bool Execute(RegenContext& ctx) override;
 
+  [[nodiscard]] std::string WhyIncomplete() const override {
+    if (bodyId == 0)
+      return "pick the body to split";
+    if (knife == SplitKnifeKind::Face && face.name.empty())
+      return "pick the flat face to cut along";
+    return "";
+  }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(offsetExpr, offset);
   }

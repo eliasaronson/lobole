@@ -112,6 +112,16 @@ bool DraftFeature::Execute(RegenContext& ctx) {
       return false;
     }
     CADShape result(draft.Shape());
+    // OCC can report success and hand back the input solid (the same trap
+    // ShellFeature hit): tapering a face always moves material, so an
+    // unchanged volume means the draft did not happen.
+    if (result.IsValid() &&
+        std::abs(result.Volume() - body->shape.Volume()) <
+            1e-9 * std::max(1.0, std::abs(body->shape.Volume()))) {
+      SetError("draft had no effect: the angle is too small, or these faces "
+               "cannot tilt about this neutral plane");
+      return false;
+    }
     if (!result.IsValid() || result.Volume() < 1e-9) {
       SetError("draft produced an invalid solid");
       return false;

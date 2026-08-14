@@ -30,6 +30,13 @@ public:
   }
   bool Execute(RegenContext& ctx) override;
 
+  [[nodiscard]] std::string WhyIncomplete() const override {
+    return edges.empty()
+               ? std::string("pick at least one edge to ") +
+                     (op == EdgeBlendOp::Chamfer ? "chamfer" : "fillet")
+               : std::string();
+  }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(radiusExpr, radius);
   }

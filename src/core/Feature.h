@@ -95,6 +95,14 @@ public:
   using ExprVisitor = std::function<void(std::string& text, double& value)>;
   virtual void VisitExprs(const ExprVisitor& visit) { (void)visit; }
 
+  // Why this feature cannot be COMMITTED as it stands (empty = fine).
+  // Distinct from GetError(), which reports a regeneration failure: a fillet
+  // with no edges regenerates perfectly happily and does nothing, so only the
+  // feature itself can say that its inputs are not there yet. Checked when a
+  // preview is accepted and when `add_feature` arrives over the RPC — NOT
+  // during regeneration, because an empty tool must still be able to open.
+  [[nodiscard]] virtual std::string WhyIncomplete() const { return {}; }
+
   // Why this feature's last regeneration failed (empty = healthy). Transient
   // (never serialized), like Parameter::error: Document::Regenerate clears it
   // before each Execute and sets a generic message if Execute fails silently;

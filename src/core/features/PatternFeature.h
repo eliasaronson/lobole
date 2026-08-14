@@ -29,6 +29,10 @@ public:
   [[nodiscard]] std::string TypeName() const override { return "Pattern"; }
   bool Execute(RegenContext& ctx) override;
 
+  [[nodiscard]] std::string WhyIncomplete() const override {
+    return sourceId == 0 ? "pick the body to pattern" : "";
+  }
+
   void VisitExprs(const ExprVisitor& visit) override {
     visit(spacingExpr, spacing);
     visit(angleExpr, angleDeg);

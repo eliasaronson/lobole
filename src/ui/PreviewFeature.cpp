@@ -2,9 +2,13 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
-#include "core/Occurrence.h"              // occurrence names (measure rows)
+#include "core/Occurrence.h"
 #include "core/drawing/DrawingDocument.h" // DrawingDimKind (dim session)
-#include "ui/AppActions.h"                // SelectFeature
+#include "core/features/CurveFeature.h"
+#include "core/features/DatumAxisFeature.h"
+#include "core/features/DatumPlaneFeature.h"
+#include "core/features/SketchFeature.h" // occurrence names (measure rows)
+#include "ui/AppActions.h"               // SelectFeature
 #include "ui/FeatureEditor.h"
 #include "ui/SketchToolbar.h" // DrawSketchToolWindow (U8a)
 
@@ -74,6 +78,11 @@ void AcceptPendingFeature(AppState& state) {
     state.pendingFeatureId = 0;
     return;
   }
+  // A tool whose inputs are not there yet must not commit. The UI disables
+  // Accept for the same reason (the slot gate), but keyboard paths, scripts
+  // and future callers all land here.
+  if (!f->WhyIncomplete().empty())
+    return;
   // Remove (id preserved) then re-add through a command, so accept is a single
   // undoable action and downstream id references stay valid.
   const uint64_t id = f->GetId();
@@ -260,10 +269,38 @@ void DrawToolWindow(AppState& state) {
   const std::string& err = feature->GetError();
   bool blocking = !err.empty() && !feature->ErrorAfterEarlierFailure();
 
-  // A tool whose required slot is still empty is not ready either, and it
-  // usually does NOT report an error — an edge-less fillet regenerates
-  // happily and commits as a no-op feature nobody wanted. Name what is
-  // missing instead of letting Accept produce nothing.
+  // Would accepting this change anything? The regen cache already holds the
+  // bodies before and after each feature, so this costs a comparison rather
+  // than a rebuild: CachedBodiesAfter(idx - 1) is this feature's input, and
+  // CachedBodiesAfter(idx) is what it made of it.
+  //
+  // A tool that runs cleanly and leaves the part identical is USUALLY a
+  // mistake (an edge-less blend, a draft angle of zero, a split plane that
+  // misses) — but not always: Refine on an already-clean body has nothing to
+  // merge, and that is a fine answer. So this warns and never blocks (U10):
+  // the silence was the bug, not the permissiveness.
+  const bool touchesBodies =
+      dynamic_cast<SketchFeature*>(feature) == nullptr &&
+      dynamic_cast<DatumPlaneFeature*>(feature) == nullptr &&
+      dynamic_cast<DatumAxisFeature*>(feature) == nullptr &&
+      dynamic_cast<CurveFeature*>(feature) == nullptr;
+  bool noChange = false;
+  if (!blocking && touchesBodies && state.document) {
+    static const std::vector<Body> kNoBodies;
+    const std::vector<Body>* after = state.document->CachedBodiesAfter(idx);
+    const std::vector<Body>* before =
+        idx == 0 ? &kNoBodies : state.document->CachedBodiesAfter(idx - 1);
+    if (after != nullptr && before != nullptr) {
+      noChange = after->size() == before->size();
+      for (size_t i = 0; noChange && i < after->size(); i++) {
+        const double a = (*after)[i].shape.Volume();
+        const double b = (*before)[i].shape.Volume();
+        noChange =
+            std::abs(a - b) <= 1e-9 * std::max({1.0, std::abs(a), std::abs(b)});
+      }
+    }
+  }
+
   const char* missing = nullptr;
   for (const SlotSpec& spec : SlotSpecsFor(*feature)) {
     if (spec.required && !SlotFilled(*feature, spec.slot)) {
@@ -278,6 +315,14 @@ void DrawToolWindow(AppState& state) {
                        missing);
   }
 
+  if (noChange) {
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(ImVec4(0.90f, 0.75f, 0.35f, 1.0f),
+                       ICON_FA_TRIANGLE_EXCLAMATION
+                       " Changes nothing - the model would be identical "
+                       "without this feature");
+    ImGui::PopTextWrapPos();
+  }
   if (!err.empty()) {
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextColored(ImVec4(0.90f, 0.40f, 0.40f, 1.0f),

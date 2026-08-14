@@ -160,6 +160,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "add_feature") {
     auto feature = DocumentIO::FeatureFromJson(p.at("feature"));
+    // The GUI refuses a tool with missing inputs; the script API used to
+    // accept one and commit a feature that does nothing (a fillet with no
+    // edges regenerates happily). Same rule, both surfaces.
+    if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
+      throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
+    }
     state.commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(feature)), *doc);
     const size_t index = doc->FeatureCount() - 1;
