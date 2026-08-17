@@ -102,7 +102,16 @@ def main():
     try:
         d = Designer.wait_for(port)
 
-        expect(d.call("ping")["ok"], "ping")
+        pong = d.call("ping")
+        expect(pong["ok"], "ping")
+        # ping says WHICH instance answered — the port, whether this build can
+        # screenshot, the open project and whether it has unsaved changes. A
+        # client that silently attaches to the wrong window is the failure
+        # this exists to prevent.
+        expect(pong["port"] == port, f"ping reports its port ({pong})")
+        expect(pong["mode"] in ("gui", "headless"), f"ping mode ({pong})")
+        expect("project" in pong and "dirty" in pong,
+               f"ping reports the document ({pong})")
 
         phase("Semantic tier")
         # Semantic tier: features as JSON

@@ -24,6 +24,41 @@
 The server connects lazily — registering before the app is running is fine;
 tools error with the remedy until it is reachable.
 
+## Finding the app (no port to guess)
+
+Every instance that opens a remote port announces itself in
+`$XDG_STATE_HOME/designer/instances/<port>.json` (`pid`, `port`, `mode`,
+`started` — see `src/remote/InstanceRegistry.h`) and withdraws on exit. A
+crash leaves the file, so the **pid is the truth**: readers skip entries whose
+process is gone and delete them as they pass.
+
+The MCP server resolves what to talk to in that order:
+
+1. **`--port` / `$DESIGNER_PORT`** — a pin. It never falls back to discovery,
+   so a client told to drive one app cannot drift onto another.
+2. **Exactly one running instance** → attach to it.
+3. **Several** → refuse and list them. Guessing would answer questions about
+   a document you are not looking at.
+4. **None** → an error naming the exact command to start one, including the
+   headless variant and what it cannot do (screenshots).
+
+`describe` reports what it attached to (`attached`: *"Designer on port 8799:
+bracket.dsgn (unsaved changes), gui"*), and the `instances` tool lists what is
+running. That line comes from `ping`, live, not from the file — the file
+carries only what does not change while the app runs.
+
+Before this, the server assumed 8437 and reported "Designer is not reachable"
+whenever the app was on another port; this repo's own `.mcp.json` hardcoded
+8799 to work around it. It no longer passes a port at all.
+
+**Autostart is deliberately not implemented.** Spawning a window from an MCP
+server would create a *second* instance while the user has one open, and the
+agent would silently inspect a different document; a headless spawn cannot
+screenshot, which is the main reason to use MCP over a script. The automated
+case is already served by `designer --headless --remote <port>` in a script.
+If it is ever added it must be opt-in, headless-only, and tied to the server's
+lifetime (a spawned instance that outlives its parent sits on a port forever).
+
 ## What's exposed (revised 2026-08-17)
 
 **Two dozen tools, plus a door to everything else.** Until August 2026 every

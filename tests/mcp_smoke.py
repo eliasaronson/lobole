@@ -15,6 +15,7 @@ import math
 import os
 import socket
 import subprocess
+import tempfile
 import sys
 
 try:
@@ -220,15 +221,29 @@ async def run(port):
 def main():
     binary = sys.argv[1]
     port = free_port()
+    # A scratch state dir: the app announces itself there (instance
+    # discovery), and a test must never write into the developer's real
+    # ~/.local/state/designer or see the instances they have open.
+    state = tempfile.mkdtemp(prefix="designer-mcp-smoke-")
+    env = dict(os.environ, XDG_STATE_HOME=state)
     app = subprocess.Popen([binary, "--remote", str(port), "--hidden"],
                            stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+                           stderr=subprocess.DEVNULL, env=env)
     try:
         # The MCP server fails fast when the app is unreachable (that is the
         # behavior an agent should see), so wait for startup here instead.
         sys.path.insert(0, TOOLS_DIR)
         from designer_remote import Designer
         Designer.wait_for(port).close()
+
+        # Discovery: the running app announced itself, so a client can find
+        # it without being told the port (the failure this replaced was
+        # "Designer is not reachable" while the app was running happily).
+        os.environ["XDG_STATE_HOME"] = state
+        found = Designer.instances()
+        expect([i for i in found if i["port"] == port],
+               f"the running instance announced itself ({found})")
+
         asyncio.run(run(port))
     finally:
         app.terminate()

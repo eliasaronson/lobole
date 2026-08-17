@@ -293,7 +293,83 @@ mcp = FastMCP(
 )
 
 _client = None
-_port = int(os.environ.get("DESIGNER_PORT", "8437"))
+# An EXPLICIT port (flag or env) is an instruction, not a guess: it pins the
+# instance and never falls back to discovery, so a client told to drive one
+# app cannot silently start driving another.
+_pinned_port = os.environ.get("DESIGNER_PORT")
+_port = int(_pinned_port) if _pinned_port else None
+_attached = None  # what ping said about the instance we are talking to
+
+DEFAULT_PORT = 8437
+
+
+def _running_instances():
+    try:
+        return Designer.instances()
+    except Exception:
+        return []  # discovery is a convenience, never a failure mode
+
+
+def _resolve_port():
+    """Which app to talk to — found, not assumed.
+
+    The old behaviour was to assume 8437 and report "not reachable" when the
+    app was running on any other port; this repo's own .mcp.json hardcoded
+    8799 to work around it. Instances announce themselves now
+    (src/remote/InstanceRegistry.h), so: a pinned port wins, one running
+    instance is obvious, several are ambiguous and get asked about rather
+    than guessed between.
+    """
+    if _port is not None:
+        return _port
+    live = _running_instances()
+    if len(live) == 1:
+        return int(live[0]["port"])
+    if not live:
+        raise RuntimeError(
+            "No running Designer found. Start one with:  designer --remote "
+            f"{DEFAULT_PORT}   (or `designer --headless --remote "
+            f"{DEFAULT_PORT}` for no window — modeling and measurement work, "
+            "screenshots do not). If it is already running, it is on a build "
+            "older than instance discovery: pass --port/DESIGNER_PORT.")
+    listed = ", ".join(
+        f"{i['port']} ({i.get('mode', '?')})" for i in live)
+    raise RuntimeError(
+        f"{len(live)} Designer instances are running: {listed}. Which one? "
+        "Set DESIGNER_PORT (or --port) — attaching to the wrong window would "
+        "answer questions about a document you are not looking at.")
+
+
+def _connect():
+    global _client, _attached
+    port = _resolve_port()
+    try:
+        # Generous timeout: render_still runs synchronously in-app.
+        _client = Designer(port, timeout=600.0)
+    except OSError as e:
+        raise RuntimeError(
+            f"Designer announced port {port} but is not answering there "
+            f"({e}). If it just exited, start it again with: designer "
+            f"--remote {port}") from e
+    try:
+        _attached = _client.call("ping")
+    except Exception:
+        _attached = {"port": port}  # older build: no enriched ping
+
+
+def attached_to():
+    """One line naming the instance in use — surfaced by the tools that
+    matter, so nobody discovers halfway through that the agent was looking at
+    a different window than they were."""
+    if _attached is None:
+        return None
+    where = f"port {_attached.get('port', '?')}"
+    mode = _attached.get("mode")
+    project = _attached.get("project") or "unsaved project"
+    if mode is None:
+        return f"Designer on {where}"
+    dirty = " (unsaved changes)" if _attached.get("dirty") else ""
+    return f"Designer on {where}: {project}{dirty}, {mode}"
 
 
 def _call(method, **params):
@@ -301,14 +377,7 @@ def _call(method, **params):
     global _client
     for attempt in (1, 2):
         if _client is None:
-            try:
-                # Generous timeout: render_still runs synchronously in-app.
-                _client = Designer(_port, timeout=600.0)
-            except OSError as e:
-                raise RuntimeError(
-                    f"Designer is not reachable on port {_port}. Start it "
-                    f"with: designer --remote {_port}  (or set "
-                    f"DESIGNER_PORT / --port to where it listens)") from e
+            _connect()
         try:
             return _client.call(method, **params)
         except (ConnectionError, BrokenPipeError, OSError):
@@ -363,6 +432,7 @@ _EXPOSED = {
     "render_still", "view", "set_camera", "set_section", "set_render_options",
     "new_project", "open_project", "save_project", "export_stl", "export_step",
     "add_feature", "modify_feature", "delete_feature", "undo", "rpc", "help",
+    "instances",
 }
 
 @mcp.tool(description="API introspection — call this FIRST to learn the "
@@ -373,7 +443,11 @@ _EXPOSED = {
           "document_format_version. The authoritative companion to the "
           "format prose in this server's tool descriptions.")
 def describe() -> dict:
-    return _call("describe")
+    out = _call("describe")
+    # Which instance answered. Everything below describes an app; this says
+    # WHICH app, so a session cannot quietly be about the wrong window.
+    out["attached"] = attached_to()
+    return out
 
 
 @mcp.tool(description="Full document state: features (with ids and per-type "
@@ -1692,6 +1766,20 @@ def rpc(method: str, params: dict | None = None) -> dict:
     return _call(method, **(params or {}))
 
 
+@mcp.tool(description="Which Designer instances are running, and which one "
+          "these tools are talking to. Instances announce themselves when "
+          "they open a remote port, so no port has to be guessed. Use this "
+          "when a call reports several instances (set DESIGNER_PORT to "
+          "choose) or nothing reachable.")
+def instances() -> dict:
+    live = _running_instances()
+    return {"attached": attached_to(),
+            "instances": live,
+            "hint": ("Start one with `designer --remote 8437`."
+                     if not live else
+                     "Pin one with DESIGNER_PORT=<port> if several are up.")}
+
+
 @mcp.tool(description="Documentation for one RPC: what it does, its "
           "arguments, and the traps. Call with no argument for the index of "
           "everything reachable through rpc(). This is the prose that used "
@@ -1727,10 +1815,12 @@ def modeling_workflow() -> str:
 def main():
     global _port
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=_port,
-                        help="port of the running `designer --remote <port>`")
+    parser.add_argument("--port", type=int, default=None,
+                        help="pin a port; omit to attach to the running "
+                             "instance that announced itself")
     args = parser.parse_args()
-    _port = args.port
+    if args.port is not None:
+        _port = args.port
     mcp.run()  # stdio
 
 

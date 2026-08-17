@@ -187,6 +187,9 @@ set(core_sources
     src/cad/SketchManager.cpp
     src/cad/FaceSelector.cpp
     src/core/io/Autosaver.cpp
+    # Pure logic despite living under remote/: a JSON file per open port,
+    # no sockets and no ImGui, so the tests can link and exercise it.
+    src/remote/InstanceRegistry.cpp
     src/core/io/Checkpoints.cpp
     src/core/io/GitVault.cpp
     src/core/io/ImportAssembly.cpp

@@ -50,6 +50,39 @@ class Designer:
         self.sock.close()
 
     @staticmethod
+    def instances():
+        """Running instances that announced themselves, newest first.
+
+        Each is {"pid", "port", "mode": "gui"|"headless", "started"}. The app
+        writes one file per open remote port under
+        $XDG_STATE_HOME/designer/instances (see src/remote/InstanceRegistry.h);
+        a crash leaves the file behind, so the pid is the truth. Entries whose
+        process is gone are skipped, and removed when we own them.
+        """
+        import os
+        import pathlib
+        state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser(
+            "~/.local/state")
+        directory = pathlib.Path(state) / "designer" / "instances"
+        found = []
+        for path in sorted(directory.glob("*.json")) if (
+                directory.is_dir()) else []:
+            try:
+                info = json.loads(path.read_text())
+                pid = int(info.get("pid", 0))
+                os.kill(pid, 0)  # liveness, not a signal
+            except PermissionError:
+                pass  # someone else's process: alive, just not ours to poke
+            except (OSError, ValueError, json.JSONDecodeError):
+                try:
+                    path.unlink()  # stale or unreadable: it announces nothing
+                except OSError:
+                    pass
+                continue
+            found.append(info)
+        return sorted(found, key=lambda i: i.get("started", 0), reverse=True)
+
+    @staticmethod
     def wait_for(port, timeout=30.0):
         """Connect, retrying while the app starts up."""
         deadline = time.time() + timeout

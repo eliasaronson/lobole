@@ -33,6 +33,9 @@ public:
   ~RemoteServer();
 
   bool Start(uint16_t port, ImGuiTestEngine* engine);
+  // The port this instance is serving (0 = not serving). Also what it
+  // announced itself as in the instance registry.
+  uint16_t Port() const { return m_port; }
   void Stop();
   bool IsRunning() const { return m_running; }
 
@@ -77,6 +80,7 @@ private:
   ImGuiTestEngine* m_engine = nullptr;
   std::thread m_thread;
   std::atomic<bool> m_running{false};
+  uint16_t m_port = 0;
   int m_listenFd = -1;
 
   std::mutex m_clientsMutex;

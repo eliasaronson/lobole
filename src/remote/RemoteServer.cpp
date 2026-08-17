@@ -1,5 +1,7 @@
 #include "remote/RemoteServer.h"
 
+#include "remote/InstanceRegistry.h"
+
 #include "cad/CADKernel.h"
 #include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
@@ -132,7 +134,13 @@ bool RemoteServer::Start(uint16_t port, ImGuiTestEngine* engine) {
   }
 
   m_running = true;
+  m_port = port;
   m_thread = std::thread([this] { ReaderThread(); });
+  // Announce it so a client can FIND this instance rather than be told which
+  // port to assume (remote/InstanceRegistry.h). `engine != nullptr` is the
+  // capability split that matters to a caller: a renderer and a test engine,
+  // so screenshots and ui_action work.
+  remote::AnnounceInstance(port, engine != nullptr);
   LOG_INFO("Remote control listening on 127.0.0.1:{}", port);
   return true;
 }
@@ -151,6 +159,11 @@ void RemoteServer::Stop() {
   if (!m_running)
     return;
   m_running = false;
+  if (m_port != 0) {
+    remote::WithdrawInstance(
+        m_port); // a crash leaves it; readers check the pid
+    m_port = 0;
+  }
   {
     std::lock_guard<std::mutex> lock(m_clientsMutex);
     for (int fd : m_clients)
@@ -702,7 +715,18 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   }
 
   if (m == "ping") {
-    return {{"ok", true}, {"app", "designer"}};
+    // Enough for a client to say WHICH instance it just attached to, live
+    // rather than from a file: the port, whether this build can screenshot,
+    // the open project and whether it has unsaved changes. A client that
+    // silently attaches to the wrong window is the failure this prevents.
+    const std::string project =
+        state.projectPath.empty() ? std::string{} : state.projectPath;
+    return {{"ok", true},
+            {"app", "designer"},
+            {"port", m_port},
+            {"mode", m_engine != nullptr ? "gui" : "headless"},
+            {"project", project},
+            {"dirty", ui::ProjectDirty(state)}};
   }
   if (m == "get_state") {
     json features = json::array();
