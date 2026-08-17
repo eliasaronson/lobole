@@ -279,6 +279,18 @@ never blocks, `Feature::WhyIncomplete()` enforced on the GUI *and* the script
 API, armed picks fillable from the tree, sketch U/V labels, nav-cube corner
 hotspots, and gui-labeled tests moved onto a virtual display.
 
+## U11 — Simulation setup: directions that come from the part
+
+**SHIPPED 2026-08-17** — [u11-simulation-setup.md](u11-simulation-setup.md).
+The first clicks-only round on the FEM workspace, and the first one on a
+workspace that emits numbers a person acts on. Gravity pulled along -Z while
+world up is +Y (a cantilever sagged sideways, bending about the wrong axis); a
+force took a world literal instead of the face it was placed on; the magnitude
+defaulted to 0 N; the first Run of every new part failed on the DEFAULT
+material with the fix living outside simulation mode; a fixed support drew as
+a single stick; File > New left the mode. Verified against beam theory: a
+steel cantilever under self-weight now sags 2.05e-4 mm vs 2.08e-4 analytic.
+
 ## GUI coverage
 
 **Audited 2026-08-14** — [gui-coverage.md](gui-coverage.md). Which features a

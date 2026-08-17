@@ -4,6 +4,7 @@
 #include "cad/CADKernel.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
@@ -540,6 +541,37 @@ struct BarDoc {
   uint64_t createdBy = 0;
 };
 } // namespace
+
+// A force's direction decides the answer, so it cannot come from a world
+// literal chosen before the face was even picked: the GUI placement and
+// add_load without an explicit direction both take it from the face.
+TEST_CASE("A force defaults to pushing into the face it is placed on",
+          "[fem][run]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("Bar", glm::vec3(0, 0, 0), 100.0,
+                                              10.0, 10.0));
+  const uint64_t createdBy = doc.GetBodies()[0].createdBy;
+  // Every face of an axis-aligned box: the default is the negated outward
+  // normal, so a load placed on the top face pushes down and one placed on
+  // the side pushes sideways.
+  int checked = 0;
+  for (const auto& [index, name] : doc.GetBodies()[0].elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(doc.GetBodies()[0], index);
+    REQUIRE(info.has_value());
+    const auto dir =
+        fem::DefaultForceDirection(doc, ElementRef{createdBy, name});
+    REQUIRE(dir.has_value());
+    CHECK_THAT(glm::dot(glm::dvec3(info->normal), *dir),
+               WithinAbs(-1.0, 1e-6)); // exactly opposite the outward normal
+    ++checked;
+  }
+  CHECK(checked == 6);
+
+  // A ref that no longer resolves has no face to ask, so there is no default
+  // to give — the caller keeps whatever it had rather than inventing one.
+  CHECK_FALSE(fem::DefaultForceDirection(doc, ElementRef{createdBy, "1/face99"})
+                  .has_value());
+}
 
 TEST_CASE("RunStudy errors when the body material has no stiffness data",
           "[fem][run]") {

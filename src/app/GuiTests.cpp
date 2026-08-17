@@ -1,5 +1,6 @@
 #include "app/GuiTests.h"
 
+#include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
 #include "core/Document.h"
 #include "core/Feature.h"
@@ -19,6 +20,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
 #include "core/features/ThreadFeature.h"
+#include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "ui/AppActions.h"
@@ -658,6 +660,117 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // into the next test's camera framing (it overrides setters until done).
     s_App->camera->StopAnimation();
     ctx->Yield();
+  };
+
+  // Simulation is the one workspace that emits numbers a person would act on,
+  // and its setup defaults were world literals: gravity along -Z (sideways,
+  // since world up is +Y), a force direction chosen before the face was
+  // picked, and a magnitude of 0 N that places a load doing nothing.
+
+  t = IM_REGISTER_TEST(engine, "sim", "gravity_pulls_down");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarClick(ctx, "###tb_simulation"); // the button had no id before this
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.active);
+    ctx->ItemClick("//Model/Gravity (self-weight)");
+    ctx->Yield();
+    const fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr);
+    // -Y. World up is +Y here, so self-weight along -Z sagged the part
+    // sideways and bent it about the wrong axis.
+    IM_CHECK(std::abs(study->gravity.y + 9.81) < 1e-9);
+    IM_CHECK(study->gravity.x == 0.0 && study->gravity.z == 0.0);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  t = IM_REGISTER_TEST(engine, "sim", "force_pushes_into_the_picked_face");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    // A study needs stiffness data, and a new body has none: the panel says
+    // so and offers the fix in place, rather than sending the user out of
+    // simulation mode to find the feature's Material combo.
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield();
+    const uint64_t createdBy = Doc()->GetBodies()[0].createdBy;
+    const std::string materialRef =
+        "//Model/###material_" + std::to_string(createdBy);
+    IM_CHECK(ctx->ItemExists(materialRef.c_str()));
+    // Two steps, and the popup addressed by its own window name: a combo
+    // popup does not take focus, and ComboClick wants one that does. Same
+    // dance as loft/two_profiles_via_the_section_combo.
+    ctx->ItemClick(materialRef.c_str());
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Steel").c_str());
+    ctx->Yield();
+    // The pick landed on the body's creating feature, so the study can solve.
+    IM_CHECK(!Doc()->GetBodies()[0].material.empty());
+    IM_CHECK(CADMaterials::MaterialLibrary::GetMaterial(
+                 CADMaterials::MaterialLibrary::FromSlug(
+                     Doc()->GetBodies()[0].material))
+                 .youngGPa > 0.0f);
+
+    // Arm the force tool: the magnitude seeds from the part's own weight, so
+    // the click cannot place a silent 0 N load.
+    ToolbarClick(ctx, "###tb_sim_force");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.pendingMagnitude > 0.0);
+
+    glm::vec3 lo(0.0f), hi(0.0f);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    s_App->camera->SetPosition(
+        mid + glm::normalize(glm::vec3(0.9f, 0.5f, 0.4f)) * 12.0f);
+    ctx->Yield(2);
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(hi.x, mid.y, mid.z)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    const fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr);
+    IM_CHECK_EQ(study->loads.size(), (size_t)1);
+    const fem::Load& load = study->loads[0];
+    IM_CHECK(load.type == fem::LoadType::Force);
+    IM_CHECK(load.magnitude > 0.0);
+    // Into the face, not the old (0,0,-1) world literal.
+    IM_CHECK(std::abs(load.direction.x + 1.0) < 1e-6);
+    IM_CHECK(std::abs(load.direction.y) < 1e-6);
+    IM_CHECK(std::abs(load.direction.z) < 1e-6);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // Simulation is a mode, and its studies belong to the document. File > New
+  // used to leave the simulation toolbar up over a brand-new part.
+  t = IM_REGISTER_TEST(engine, "sim", "new_document_leaves_the_mode");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ToolbarClick(ctx, "###tb_simulation");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.active);
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK(!s_App->simulation.active);
+    ctx->SetRef("//##DockHost");
+    IM_CHECK(ctx->ItemExists("**/###tb_box")); // the model toolbar is back
+    ctx->SetRef("//##MainMenuBar");
   };
 
   t = IM_REGISTER_TEST(engine, "viewport", "click_selects_facing_face");

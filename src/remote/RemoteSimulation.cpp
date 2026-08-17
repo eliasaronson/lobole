@@ -34,7 +34,9 @@ static constexpr MethodDoc SimulationMethods[] = {
     {"set_study",
      "Edit study settings (mesh size, materials, solver options)."},
     {"add_load",
-     "Add a load/fixture to a study {study, kind, element, magnitude...}."},
+     "Add a load/fixture to a study {study, type, face, magnitude, "
+     "direction?}. An omitted force `direction` pushes into the picked face "
+     "(the same default a GUI placement takes)."},
     {"remove_load", "Remove a load by index."},
     {"add_refinement", "Add a local mesh refinement on an element."},
     {"remove_refinement", "Remove a refinement."},
@@ -258,6 +260,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document& document,
       const auto& d = p.at("direction");
       l.direction = glm::dvec3(d.at(0).get<double>(), d.at(1).get<double>(),
                                d.at(2).get<double>());
+    } else if (l.type == fem::LoadType::Force) {
+      // No direction given: push into the face, exactly as a GUI placement
+      // does. The alternative was the struct's literal, which is a world
+      // direction that knows nothing about the face it was applied to.
+      if (const auto into = fem::DefaultForceDirection(*doc, l.face))
+        l.direction = *into;
     }
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
     return json{{"id", l.id}};

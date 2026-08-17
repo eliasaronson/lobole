@@ -933,6 +933,14 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.selection.Clear();
   state.pendingFeatureId = 0;
   state.sketchEdit = SketchEditState{};
+  // Simulation is a MODE, and the studies it edits belonged to the document
+  // that just went away. File > New in simulation mode used to leave the
+  // simulation toolbar up over a brand-new part, editing the new document's
+  // (empty) study list — the same half-switched UI the assembly/drawing
+  // clearing above exists to prevent.
+  if (state.simulation.active)
+    ExitSimulation(state);
+  state.measure = MeasureState{};
   // Force a resync even if the version counters happen to collide
   state.syncedDocumentVersion = UINT64_MAX;
 }

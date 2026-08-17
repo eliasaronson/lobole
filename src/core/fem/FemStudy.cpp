@@ -2,6 +2,7 @@
 
 #include "cad/CADMaterials.h"
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemTopo.h"
 
@@ -114,6 +115,23 @@ bool ResolveFace(const Document& doc, const ElementRef& ref,
   if (error)
     *error = what + ": face '" + ref.name + "' no longer exists";
   return false;
+}
+
+std::optional<glm::dvec3> DefaultForceDirection(const Document& doc,
+                                                const ElementRef& face) {
+  ResolvedFace resolved;
+  if (!ResolveFace(doc, face, "force", resolved, nullptr))
+    return std::nullopt;
+  const auto info = Measure::DescribeFaceAt(doc.GetBodies()[resolved.bodyIndex],
+                                            resolved.faceIndex);
+  if (!info)
+    return std::nullopt;
+  const glm::vec3 n = info->normal;
+  if (glm::dot(n, n) < 1e-12f)
+    return std::nullopt;
+  // Into the face: pushing on a face is what placing a force on it means.
+  const glm::vec3 into = -glm::normalize(n);
+  return glm::dvec3(into.x, into.y, into.z);
 }
 
 bool MeshStudy(const Document& doc, Study& study,

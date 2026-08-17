@@ -347,9 +347,17 @@ struct SimulationState {
   // Keep (topology) freezes the picked face solid during optimization.
   enum class Tool { None, Fixed, Force, Pressure, Keep };
   Tool tool = Tool::None;
-  // Params applied to the load placed by the next face pick.
+  // Params applied to the load placed by the next face pick. The direction
+  // is only used when `directionOverridden` — otherwise the load takes the
+  // inward normal of the face that is clicked (fem::DefaultForceDirection),
+  // because a direction is a default with a unit and belongs to the face, not
+  // to the world. The magnitude is seeded from the part's own weight when the
+  // tool is armed (SimulationArmTool): a 0 N force is a load that silently
+  // does nothing, which is the class docs/ui/u10-defaults-and-refusals.md
+  // exists to stop.
   double pendingMagnitude = 0.0;
-  glm::dvec3 pendingDirection{0.0, 0.0, -1.0};
+  glm::dvec3 pendingDirection{0.0, -1.0, 0.0};
+  bool directionOverridden = false;
 
   // Result overlay display. VonMises/Displacement are static/modal fields;
   // Shape (the optimized iso-surface as a grey body) and Density (a colormap

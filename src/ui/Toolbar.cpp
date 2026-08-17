@@ -254,12 +254,13 @@ void DrawModelToolbar(AppState& state) {
   if (ToolButton(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_fit",
                  "Fit view (F)", hasDoc))
     FitCameraToDocument(state);
-  if (ToolButton(ICON_FA_TABLE_CELLS, "Toggle planes (Shift+P)", hasDoc))
+  if (ToolButton(ICON_FA_TABLE_CELLS "###tb_planes", "Toggle planes (Shift+P)",
+                 hasDoc))
     state.showPlanes = !state.showPlanes;
 
   // Enter the FEM simulation workspace (needs a body to analyze).
-  if (ToolButton(ICON_FA_GAUGE_HIGH, "Simulation (FEM stress study)",
-                 hasBody && idle))
+  if (ToolButton(ICON_FA_GAUGE_HIGH "###tb_simulation",
+                 "Simulation (FEM stress study)", hasBody && idle))
     EnterSimulation(state);
 
   // Measure tool (C3): a viewport mode — pick a face/edge for its own measure,
@@ -271,8 +272,8 @@ void DrawModelToolbar(AppState& state) {
   if (measureActive)
     ImGui::PushStyleColor(ImGuiCol_Button,
                           ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  if (ToolButton(ICON_FA_RULER, "Measure (pick 1-2 faces/edges; Esc to exit)",
-                 hasBody)) {
+  if (ToolButton(ICON_FA_RULER "###tb_measure",
+                 "Measure (pick 1-2 faces/edges; Esc to exit)", hasBody)) {
     const bool wasActive = state.measure.active;
     state.measure = MeasureState{};    // clear any in-progress measurement
     state.measure.active = !wasActive; // toggle
@@ -284,7 +285,7 @@ void DrawModelToolbar(AppState& state) {
 
   // Offline path-traced still (KeyShot-style). Opens the render dialog.
   const bool rtReady = state.rayTracer && state.rayTracer->IsInitialized();
-  if (ToolButton(ICON_FA_CAMERA, "Render (offline raytrace)",
+  if (ToolButton(ICON_FA_CAMERA "###tb_render", "Render (offline raytrace)",
                  hasDoc && rtReady))
     ImGui::OpenPopup("Render Still");
   DrawRenderModal(state);
@@ -719,8 +720,8 @@ void DrawSimulationToolbar(AppState& state) {
     if (armed)
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ToolButton(icon, tip, hasStudy))
-      sim.tool = armed ? SimulationState::Tool::None : t; // toggle
+    if (ToolButton(icon, tip, hasStudy)) // toggle
+      SimulationArmTool(state, armed ? SimulationState::Tool::None : t);
     if (armed)
       ImGui::PopStyleColor();
   };

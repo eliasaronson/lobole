@@ -48,10 +48,13 @@ defensible — that is the net that catches a new tool born broken.
   not.
 - **Reference images** (`###tb_sk_image`) and the two display toggles
   (`###tb_sk_autocon`, `###tb_sk_glyphs`).
-- **Assembly mates, drawing dimensions and the simulation toolbar** have their
-  own click-through coverage in `assembly/*` and `drawing/*`, but not
-  button-by-button; the mate and dimension tests reach them through the tool
-  window rather than every toolbar id.
+- **Assembly mates and drawing dimensions** have their own click-through
+  coverage in `assembly/*` and `drawing/*`, but not button-by-button; those
+  tests reach the tools through the tool window rather than every toolbar id.
+- **The simulation toolbar** is covered by `sim/*` since U11
+  (docs/ui/u11-simulation-setup.md): entering the mode, the material fix, a
+  force placed by clicking a face, gravity, and leaving the mode on File >
+  New. Pressure and Fixed are placed but not asserted to the same depth.
 
 ## The trap this round turned up
 
@@ -70,5 +73,9 @@ Two related gotchas, since they cost time too:
   `RemoteServer`'s `popup_click` does.
 - `popup_items` used to close the popup with **Escape**, which falls straight
   through to the app, where Escape cancels the tool session the popup belongs
-  to. Listing a Loft's sections closed the Loft. It clicks the opener again
-  now.
+  to. Listing a Loft's sections closed the Loft. Clicking the opener again is
+  no fix either — a combo popup is drawn OVER its opener, so the click lands
+  on the popup (found in U11). It closes the stack directly now.
+- An **`ImGui::PushID` scope** has the same effect as a hidden label: the
+  widget inside it can only be reached by numeric id. Give a repeated widget a
+  unique name (`"Material###material_<feature>"`) instead of wrapping it.

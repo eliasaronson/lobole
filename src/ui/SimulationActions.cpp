@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/MassProps.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 #include "render/Camera.h"
@@ -266,6 +267,39 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
                           std::chrono::steady_clock::now() - job->started)
                           .count();
   return st;
+}
+
+void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
+  SimulationState& sim = state.simulation;
+  sim.tool = tool;
+  if (tool != SimulationState::Tool::Force &&
+      tool != SimulationState::Tool::Pressure)
+    return;
+  if (sim.pendingMagnitude != 0.0)
+    return; // the user's own number survives re-arming
+  // Seed from the part itself. A 0 N force is placeable, solvable and
+  // meaningless — the study runs and reports zero stress everywhere, which
+  // looks like an answer. Self-weight is a real number derived from what the
+  // load acts on: "this part's own weight" is a scale a user can reason about
+  // and edit (docs/ui/u10-defaults-and-refusals.md).
+  Document* doc = state.document.get();
+  if (!doc)
+    return;
+  const auto mass = Measure::MassOfBodies(doc->GetBodies());
+  if (!mass || !mass->massKnown || mass->massG <= 0.0)
+    return; // no material yet: the panel says so, and says why
+  const double weightN = mass->massG * 0.001 * 9.81;
+  if (tool == SimulationState::Tool::Force) {
+    sim.pendingMagnitude = weightN;
+    return;
+  }
+  // Pressure is MPa over the part's surface: the same weight spread over the
+  // area it would press on.
+  double areaMm2 = 0.0;
+  for (const auto& b : mass->bodies)
+    areaMm2 += b.surfaceArea;
+  if (areaMm2 > 0.0)
+    sim.pendingMagnitude = weightN / areaMm2; // N/mm^2 == MPa
 }
 
 void EnterSimulation(AppState& state) {

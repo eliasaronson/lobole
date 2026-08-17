@@ -248,6 +248,11 @@ bool ExportActiveDrawing(AppState& state, const std::string& path,
 // Enter/exit the FEM simulation workspace (a mode, like sketch mode). Enter
 // arms `state.simulation.active` and selects (creating if none) a study; exit
 // restores any hidden body instances and clears the mode.
+// Arms a boundary-condition tool (the panel and the toolbar share this so
+// they cannot drift): seeds an unset Force/Pressure magnitude from the part's
+// own weight, so the tool never places a load of 0 that silently does
+// nothing.
+void SimulationArmTool(AppState& state, SimulationState::Tool tool);
 void EnterSimulation(AppState& state);
 void ExitSimulation(AppState& state);
 

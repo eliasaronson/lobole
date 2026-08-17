@@ -1215,10 +1215,13 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       ctx->GatherItems(&items, (std::string("//") + popup->Name).c_str());
       m_uiActionResult =
           json{{"popup", popup->Name}, {"items", ItemsToJson(items)}};
-      // Close it by clicking the opener again, NOT with Escape: Escape falls
-      // through to the app, where it cancels the tool session the popup
-      // belongs to — listing a Loft's sections used to close the Loft.
-      ctx->ItemClick(target.Ref(), button);
+      // Close it directly. Neither input gesture works: Escape falls through
+      // to the app and cancels the tool session the popup belongs to (listing
+      // a Loft's sections closed the Loft), and clicking the opener again
+      // cannot reach it — a combo popup is drawn OVER its own opener, so the
+      // click lands on the popup.
+      if (ctx->UiContext->OpenPopupStack.Size > 0)
+        ImGui::ClosePopupToLevel(0, true);
     };
   } else if (m == "ui_items") {
     const std::string ref = p.value("ref", "//$FOCUSED");

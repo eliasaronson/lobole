@@ -13,6 +13,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,7 +47,11 @@ struct Load {
   ElementRef face;
   double magnitude = 0.0;
   std::string magnitudeExpr;
-  glm::dvec3 direction{0.0, 0.0, -1.0};
+  // Down, for a load whose face could not be resolved. Every path that HAS a
+  // face derives this from it (DefaultForceDirection): a force pushes into
+  // the face you picked. World up is +Y here — a -Z literal was "down" in no
+  // coordinate system this app uses.
+  glm::dvec3 direction{0.0, -1.0, 0.0};
 };
 
 // What a study solves for.
@@ -123,6 +128,16 @@ struct ResolvedFace {
 bool ResolveFace(const Document& doc, const ElementRef& ref,
                  const std::string& what, ResolvedFace& out,
                  std::string* error);
+
+// The direction a force placed on `face` should push: INTO the part, i.e.
+// the negated outward normal of that face. A force default is a direction
+// with a unit attached, so it has to come from what it acts on rather than
+// from a world literal (docs/ui/u10-defaults-and-refusals.md) — the GUI
+// placement and add_load without an explicit `direction` both call this, so
+// clicking and scripting cannot drift apart. nullopt when the ref does not
+// resolve or the surface has no usable normal.
+std::optional<glm::dvec3> DefaultForceDirection(const Document& doc,
+                                                const ElementRef& face);
 
 // One meshed body of a study.
 struct StudyBodyMesh {

@@ -1,6 +1,8 @@
+#include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
 #include "common/Logger.h"
 #include "core/Command.h"
+#include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "ui/AppActions.h"
@@ -75,6 +77,56 @@ void DrawStudyList(AppState& state) {
   }
 }
 
+// Every new body starts with the DEFAULT material, which deliberately carries
+// no stiffness data (CADMaterials.h: fail rather than guess). So the FIRST Run
+// on any new part fails — and it used to fail only after the click, as a
+// tooltip on a small triangle. Say it up front, and offer the fix here rather
+// than sending the user out of simulation mode to find the feature's Material
+// combo.
+void DrawMaterialCheck(AppState& state) {
+  using CADMaterials::MaterialLibrary;
+  Document* doc = state.document.get();
+  if (!doc || !state.commands)
+    return;
+  const auto& types = MaterialLibrary::AllTypes();
+  for (const Body& body : doc->GetBodies()) {
+    const auto& mp =
+        MaterialLibrary::GetMaterial(MaterialLibrary::FromSlug(body.material));
+    if (mp.youngGPa > 0.0f)
+      continue;
+    size_t index = 0;
+    Feature* owner = doc->FindFeatureById(body.createdBy, &index);
+    if (!owner)
+      continue;
+    // A VISIBLE label, and no PushID: an ID scope or a hidden label leaves the
+    // widget addressable only by the numeric id ui_items prints, and this is
+    // the control that unblocks a user's first study. One combo per body, so
+    // the id carries the feature it edits.
+    const std::string comboId =
+        "Material###material_" + std::to_string(body.createdBy);
+    ImGui::TextColored(kError,
+                       ICON_FA_TRIANGLE_EXCLAMATION " %s has no "
+                                                    "material",
+                       body.name.c_str());
+    ImGui::TextDisabled("A study needs stiffness data to solve.");
+    std::vector<const char*> labels;
+    labels.reserve(types.size() + 1);
+    labels.push_back("Assign a material...");
+    for (auto t : types)
+      labels.push_back(MaterialLibrary::GetMaterial(t).name.c_str());
+    int sel = 0;
+    if (ImGui::Combo(comboId.c_str(), &sel, labels.data(),
+                     static_cast<int>(labels.size())) &&
+        sel > 0) {
+      nlohmann::json before = DocumentIO::FeatureToJson(*owner);
+      owner->SetMaterial(MaterialLibrary::Slug(types[sel - 1]));
+      nlohmann::json after = DocumentIO::FeatureToJson(*owner);
+      state.commands->Execute(
+          std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    }
+  }
+}
+
 void DrawLoads(AppState& state, const fem::Study& s) {
   SimulationState& sim = state.simulation;
 
@@ -86,7 +138,7 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
     if (ImGui::Button(label))
-      sim.tool = armed ? SimulationState::Tool::None : t;
+      SimulationArmTool(state, armed ? SimulationState::Tool::None : t);
     if (armed)
       ImGui::PopStyleColor();
   };
@@ -105,11 +157,19 @@ void DrawLoads(AppState& state, const fem::Study& s) {
                                                              : "Pressure (MPa)",
                     &sim.pendingMagnitude, "%.1f");
     if (sim.tool == SimulationState::Tool::Force) {
-      float dir[3] = {(float)sim.pendingDirection.x,
-                      (float)sim.pendingDirection.y,
-                      (float)sim.pendingDirection.z};
-      if (ImGui::InputFloat3("Direction", dir))
-        sim.pendingDirection = glm::dvec3(dir[0], dir[1], dir[2]);
+      // Off by default: the force pushes INTO whichever face is clicked, which
+      // is what placing a force on a face means. A world-space vector typed
+      // before the face is even picked can only be right by luck.
+      ImGui::Checkbox("Custom direction", &sim.directionOverridden);
+      if (sim.directionOverridden) {
+        float dir[3] = {(float)sim.pendingDirection.x,
+                        (float)sim.pendingDirection.y,
+                        (float)sim.pendingDirection.z};
+        if (ImGui::InputFloat3("Direction", dir))
+          sim.pendingDirection = glm::dvec3(dir[0], dir[1], dir[2]);
+      } else {
+        ImGui::TextDisabled("Direction: into the face you click");
+      }
     }
   }
 
@@ -125,6 +185,14 @@ void DrawLoads(AppState& state, const fem::Study& s) {
       std::snprintf(buf, sizeof(buf), "  (%.1f%s)", l.magnitude,
                     l.type == fem::LoadType::Force ? " N" : " MPa");
       line += buf;
+    }
+    if (l.type == fem::LoadType::Force) {
+      // A force's direction decides the answer; showing only its magnitude
+      // hid the one number most likely to be wrong.
+      char dir[64];
+      std::snprintf(dir, sizeof(dir), "  [%.2g, %.2g, %.2g]", l.direction.x,
+                    l.direction.y, l.direction.z);
+      line += dir;
     }
     ImGui::TextUnformatted(line.c_str());
     ImGui::SameLine();
@@ -451,7 +519,10 @@ void DrawStudyPanel(AppState& state) {
     // Static: an optional gravity / self-weight load.
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
     if (ImGui::Checkbox("Gravity (self-weight)", &on)) {
-      const glm::dvec3 g = on ? glm::dvec3(0, 0, -9.81) : glm::dvec3(0, 0, 0);
+      // -Y, not -Z: world up is +Y here (Camera::Up, the XZ "top" plane, the
+      // height axis of every primitive). Self-weight pointing along -Z sagged
+      // the part sideways.
+      const glm::dvec3 g = on ? glm::dvec3(0, -9.81, 0) : glm::dvec3(0, 0, 0);
       ModifyStudy(state, s->id, "Toggle gravity",
                   [&](fem::Study& cs) { cs.gravity = g; });
     }
@@ -466,6 +537,7 @@ void DrawStudyPanel(AppState& state) {
     }
   }
 
+  DrawMaterialCheck(state);
   DrawLoads(state, *s);
   DrawResults(state, *s);
 
@@ -597,19 +669,23 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
       continue;
     switch (load.type) {
     case fem::LoadType::Fixed: {
-      // Anchor hatch: short strokes fanning "into the ground" off the face.
+      // Anchor hatch: a ground line with strokes fanning off it, in BOTH
+      // in-plane axes. It used to draw along `side` only — `other` was
+      // computed and discarded with a (void) cast — so from most angles a
+      // fixed support was a single red stick lying on the face.
       glm::vec3 side =
           glm::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
       side = glm::normalize(glm::cross(n, side));
       const glm::vec3 other = glm::normalize(glm::cross(n, side));
-      ui::AppendPrimLine(c - side * len * 0.4f, c + side * len * 0.4f, 2.4f,
-                         kFixed, out);
-      for (int i = -1; i <= 1; i++) {
-        const glm::vec3 base = c + side * (len * 0.3f * i);
-        ui::AppendPrimLine(base, base - n * len * 0.3f - side * len * 0.15f,
-                           1.8f, kFixed, out);
+      for (const glm::vec3& axis : {side, other}) {
+        ui::AppendPrimLine(c - axis * len * 0.4f, c + axis * len * 0.4f, 2.4f,
+                           kFixed, out);
+        for (int i = -1; i <= 1; i++) {
+          const glm::vec3 base = c + axis * (len * 0.3f * i);
+          ui::AppendPrimLine(base, base - n * len * 0.3f - axis * len * 0.15f,
+                             1.8f, kFixed, out);
+        }
       }
-      (void)other;
       break;
     }
     case fem::LoadType::Force: {
@@ -673,8 +749,13 @@ void SimulationApplyToFace(AppState& state, const ElementRef& face) {
   load.face = face;
   if (load.type != fem::LoadType::Fixed)
     load.magnitude = sim.pendingMagnitude;
-  if (load.type == fem::LoadType::Force)
-    load.direction = sim.pendingDirection;
+  if (load.type == fem::LoadType::Force) {
+    // The face decides the direction unless the user asked for a specific
+    // one: a force placed on a face pushes into it.
+    const auto into = fem::DefaultForceDirection(*doc, face);
+    load.direction =
+        sim.directionOverridden || !into ? sim.pendingDirection : *into;
+  }
 
   ModifyStudy(state, s->id,
               std::string("Add ") + LoadLabel(load.type) + " load",
