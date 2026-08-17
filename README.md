@@ -75,6 +75,14 @@ container on every push so this stays honest:
   removes no material…`). The application itself works; these are the
   assertions, not the features.
 
+These are deterministic, not flaky: the same four fail on every run against
+7.6.3 and none of them fails against 7.9.3. **You do not need to build
+OpenCASCADE yourself** to work on Designer — the distro package is a supported
+configuration and CI keeps it that way. If you want exact parity with
+development (PLY export, all 586 tests), the cheap routes are Nix or the
+Flatpak, both of which pin 7.9.x; compiling OCC from source takes far longer
+than either and leaves you maintaining it.
+
 Vendored dependencies (Dear ImGui, Dear ImGui Test Engine, nativefiledialog)
 are git submodules — clone with `--recurse-submodules`, or:
 
@@ -233,6 +241,19 @@ not obligated to do so. This exception does not modify any other term of the
 AGPL, and does not grant any rights in Dear ImGui Test Engine itself beyond
 those in its own license. The distributable notice is also available as
 [`ADDITIONAL_PERMISSION.md`](ADDITIONAL_PERMISSION.md).
+
+### Trademarks
+
+Onshape is a trademark of PTC Inc.; SolidWorks and CATIA of Dassault
+Systèmes; Fusion 360 and AutoCAD of Autodesk, Inc.; FreeCAD is a trademark of
+the FreeCAD project. Designer is **not affiliated with, endorsed by, or
+sponsored by** any of them.
+
+Those names appear here only to say true things that cannot be said without
+them: which workflow this application is modelled on, which file formats and
+APIs it interoperates with, and which prior art a design decision came from.
+No third-party logos or branding are used, and no compatibility or
+certification is claimed.
 
 ### Third-party components
 

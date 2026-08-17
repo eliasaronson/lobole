@@ -35,6 +35,22 @@ a missing executable rather than a passing suite.
 Do not nest `nix-shell` inside another one; the tool scripts manage it
 themselves.
 
+### Faster builds
+
+- **ccache** is picked up automatically when installed (`apt install ccache`,
+  or it is already in `shell.nix`) and is shared machine-wide, so a rebuild
+  after `git checkout` of a branch you have built before is close to free.
+  CMake prints `ccache enabled: …` at configure time when it found it.
+- **Ninja** over Make: `-G Ninja`. Every command here assumes it.
+- **Build one target while iterating**: `ninja designer` for the app,
+  `ninja designer_tests` for the unit tests. The full `ninja` is only needed
+  the first time (and after touching CMakeLists).
+- A **precompiled header** already covers the heavy common set
+  (`CADKernel.h`, glm, nlohmann/json) for `designer_core`; nothing to enable.
+- A cold full build is ~2 minutes on 24 threads, ~15 on 4. If it is slower
+  than that, check that ccache is actually being used — see the `FAILED`
+  caveat in [CLAUDE.md](CLAUDE.md#build--run--always-through-nix).
+
 **Without Nix**: the apt list in the [README](README.md#requirements) is what
 CI installs, so it is kept honest by every push.
 

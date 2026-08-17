@@ -1,5 +1,7 @@
 #include "core/Measure.h"
 
+#include <Standard_Failure.hxx>
+
 #include "common/Logger.h"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -229,6 +231,15 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
   } catch (const std::exception& e) {
     LOG_ERROR("Interference check failed: {}", e.what());
     return std::nullopt;
+  } catch (const Standard_Failure& e) {
+    // OCC throws Standard_Failure, which does NOT derive from
+    // std::exception, so the catch above never sees it. On OCC 7.6
+    // these calls do throw for transformed shapes, and the escape
+    // reached the RPC boundary as an "unknown exception".
+    LOG_ERROR("Interference check failed: {}", e.GetMessageString()
+                                                   ? e.GetMessageString()
+                                                   : "OpenCASCADE failure");
+    return std::nullopt;
   }
 }
 
@@ -454,6 +465,15 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
   } catch (const std::exception& e) {
     LOG_ERROR("Cross-section failed: {}", e.what());
     return std::nullopt;
+  } catch (const Standard_Failure& e) {
+    // OCC throws Standard_Failure, which does NOT derive from
+    // std::exception, so the catch above never sees it. On OCC 7.6
+    // these calls do throw for transformed shapes, and the escape
+    // reached the RPC boundary as an "unknown exception".
+    LOG_ERROR("Cross-section failed: {}", e.GetMessageString()
+                                              ? e.GetMessageString()
+                                              : "OpenCASCADE failure");
+    return std::nullopt;
   }
 }
 
@@ -487,6 +507,15 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
     }
   } catch (const std::exception& e) {
     LOG_ERROR("Section caps failed: {}", e.what());
+    caps.clear();
+  } catch (const Standard_Failure& e) {
+    // OCC throws Standard_Failure, which does NOT derive from
+    // std::exception, so the catch above never sees it. On OCC 7.6
+    // these calls do throw for transformed shapes, and the escape
+    // reached the RPC boundary as an "unknown exception".
+    LOG_ERROR("Section caps failed: {}", e.GetMessageString()
+                                             ? e.GetMessageString()
+                                             : "OpenCASCADE failure");
     caps.clear();
   }
   return caps;
@@ -529,6 +558,15 @@ DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
     return out;
   } catch (const std::exception& e) {
     LOG_ERROR("Measure distance failed: {}", e.what());
+    return std::nullopt;
+  } catch (const Standard_Failure& e) {
+    // OCC throws Standard_Failure, which does NOT derive from
+    // std::exception, so the catch above never sees it. On OCC 7.6
+    // these calls do throw for transformed shapes, and the escape
+    // reached the RPC boundary as an "unknown exception".
+    LOG_ERROR("Measure distance failed: {}", e.GetMessageString()
+                                                 ? e.GetMessageString()
+                                                 : "OpenCASCADE failure");
     return std::nullopt;
   }
 }

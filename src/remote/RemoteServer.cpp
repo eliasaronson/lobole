@@ -2,6 +2,8 @@
 
 #include "remote/InstanceRegistry.h"
 
+#include <Standard_Failure.hxx>
+
 #include "cad/CADKernel.h"
 #include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
@@ -1476,6 +1478,17 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
                    "unknown method: " + request.method);
     } catch (const std::exception& e) {
       RespondError(request.client, request.id, e.what());
+    } catch (const Standard_Failure& e) {
+      // The last line of defence. OCC reports failure by throwing
+      // Standard_Failure, which does NOT derive from std::exception, so a
+      // kernel throw from any handler that forgot its own guard would escape
+      // every catch and terminate the process — one bad measure taking the
+      // whole application down. Individual features guard themselves; this
+      // makes a miss cost an error response instead of the app.
+      RespondError(request.client, request.id,
+                   std::string("OpenCASCADE error: ") +
+                       (e.GetMessageString() ? e.GetMessageString()
+                                             : "unspecified failure"));
     }
   }
 }
