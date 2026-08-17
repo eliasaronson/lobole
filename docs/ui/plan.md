@@ -291,6 +291,13 @@ material with the fix living outside simulation mode; a fixed support drew as
 a single stick; File > New left the mode. Verified against beam theory: a
 steel cantilever under self-weight now sags 2.05e-4 mm vs 2.08e-4 analytic.
 
+## Settings window (designed, not built)
+
+[settings.md](settings.md) — where user preferences live, how they are stored
+and applied, and the three-bucket rule that keeps them apart from project
+settings and session state. Written because GPU device selection has nowhere
+to live; deliberately not implemented yet.
+
 ## GUI coverage
 
 **Audited 2026-08-14** — [gui-coverage.md](gui-coverage.md). Which features a

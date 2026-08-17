@@ -1,0 +1,158 @@
+# Settings — a home for preferences, and a rule for where things live
+
+> Status: **DESIGN, not built.** Written 2026-08-17 because GPU device
+> selection has nowhere to live. Implementation deliberately deferred.
+
+## Why now
+
+Nothing in this app remembers what a *person* prefers. Render quality is
+session state that `set_render_options` mutates and forgets; `showPlanes` and
+friends are flags on `AppState`; the dock layout lives in `imgui.ini`; and
+project-level choices like `commit_geometry` correctly live in the project.
+The gap is the middle: preferences that belong to the user, survive a restart,
+and apply to every project.
+
+GPU selection is the forcing function. Rendering picks its device with
+`ImGui_ImplVulkanH_SelectPhysicalDevice` (`main.cpp:249`, prefers discrete) and
+FEM compute ranks its own (`femgpu/ComputeContext.cpp:101`, needs
+`VK_EXT_shader_atomic_float`). Neither is controllable, and on a dual-GPU
+machine the right answer is the user's, not ours.
+
+## The rule: three buckets
+
+1. **Project settings** — belong to the model and travel with it in git.
+   `commit_geometry`, sheet defaults, the material assigned to a body. These
+   stay in the project's `index.json`. *Not this doc.*
+2. **User preferences** — belong to the person, survive restarts, apply to
+   every project. GPU device, render quality, navigation style, autosave
+   interval. *This doc.*
+3. **Session state** — belongs to the moment. Dock layout, camera, armed
+   tools, the section plane. Stays exactly where it is; never persisted here.
+
+The test for bucket 2: *would the user be annoyed to set it again tomorrow,
+and would they expect the same answer in every project?* If a project could
+reasonably disagree, it belongs in bucket 1.
+
+## Storage
+
+`$XDG_CONFIG_HOME/designer/settings.json`, falling back to
+`~/.config/designer/settings.json` — a sibling of the `onshape.env` already
+there. **Config, not state**: `~/.local/state/designer` (where the autosave
+lives) is for things the app can regenerate; this is for things the user
+chose. The path helper mirrors `Autosaver::StateDir()`.
+
+```json
+{ "settings_format": 1, "gpu_device": "", "shadows": true, "ssao": "half", … }
+```
+
+Rules that matter more than the schema:
+
+- **Written with `WriteTextAtomic`** (already in `Serialization.cpp`). An
+  interrupted save must never leave a truncated file that silently resets
+  someone's preferences.
+- **Unknown keys are preserved on write, not dropped.** An older build must
+  not delete a newer build's settings just by running once. This is the
+  opposite of the recipe format, where an unknown key is a hard error —
+  because there, silence would corrupt geometry; here, silence would corrupt
+  the user's choices.
+- **Absent file = defaults**, no complaint. **Corrupt file = defaults**, a log
+  line, and the bad file renamed `.bak` rather than overwritten — the one
+  copy of a hand-edited config is not ours to destroy.
+- **No live reload.** Read at startup, write on change (debounced ~1 s so a
+  slider drag is one write).
+
+## Shape in code
+
+One `struct Settings` with its defaults in the struct itself, living beside
+`AppState` (`src/ui/Settings.{h,cpp}`), and exactly one live copy at
+`AppState::settings`. Nothing else caches a copy — two sources of truth for a
+preference is how "it reverted when I opened a second project" bugs happen.
+
+Worth the small effort up front: drive the field list, the JSON round trip and
+the window rows from **one table** (name, member, default, tier, blurb), so
+adding a setting is one line rather than three edits that can drift. A dozen
+settings do not need reflection machinery, but they do need a single list.
+
+## Applying: three tiers, and the window says which
+
+- **Live** — the next frame reads the field: shadows, SSAO, theme, navigation
+  style. No Apply button anywhere in this window.
+- **Next time** — autosave interval (rearm the timer), default material for
+  new parts.
+- **Restart** — the *render* GPU. The swapchain and every renderer are built
+  at startup, so the row states it and shows the device currently in use
+  beside the one chosen, making a pending change visible rather than a lie.
+  Note the asymmetry worth documenting on that row: the FEM **compute**
+  context is recreated per run, so the same setting takes effect there
+  immediately.
+
+## The window
+
+Edit ▸ Preferences (Ctrl+,) opens one floating window, `###SettingsWindow` —
+not a dock tab; it is not part of the workspace. Collapsing-header sections in
+one scroll: **General**, **Appearance**, **Viewport & Navigation**,
+**Performance** (GPU, shadows, SSAO, shadow map), **Simulation**, **Advanced**
+(remote port, logging).
+
+Three properties it must have, all learned the hard way this month:
+
+- **Every control carries a stable `###id`, and no `PushID` scopes.** A hidden
+  label or an ID scope leaves a widget reachable only by the numeric id
+  `ui_items` prints — which is exactly what made the Hole type combo, the Loft
+  section combo and the study material combo unreachable to scripts and tests
+  (docs/ui/gui-coverage.md).
+- **Each row explains itself** in one muted line: what it costs, what it
+  affects. A settings window that does not explain its settings moves the
+  confusion rather than removing it.
+- **"Reset section to defaults"** per section, and a global reset in Advanced.
+  A user who has broken their config should not have to find the JSON.
+
+No search field in v1; a dozen rows do not need one.
+
+## The script surface
+
+Two RPCs, not one per setting: `get_settings` returns the whole struct;
+`set_settings {…}` validates, applies, persists, and returns the new state.
+That keeps the assistant and the human on the same interface (roadmap goal 5)
+and makes every setting testable headlessly.
+
+`set_render_options` stays, as a thin alias over the same fields — it is used
+by scripts and the MCP today, and it already mutates three of what become
+settings.
+
+## Tests
+
+- **`ResetAppForTest` must reset `settings` to defaults.** Otherwise the
+  developer's own config decides whether a GUI test passes, and CI and the
+  desk disagree. (Precedent from this month: a function-local `static bool`
+  for the shortcuts window leaked into five later tests.)
+- **Tests point `XDG_CONFIG_HOME` at a scratch dir**, so no test run can write
+  the developer's real preferences.
+- Headless: defaults → set → save → load → identical; unknown keys survive a
+  round trip; a corrupt file falls back to defaults and leaves a `.bak`.
+- GUI: `settings/toggle_persists_across_a_reload`, and one asserting a
+  restart-tier row *says* it needs a restart instead of pretending to apply.
+
+## First tenants
+
+GPU device (render + compute), shadows, SSAO quality, shadow-map size,
+navigation style, autosave interval, default remote port. Deliberately short:
+the deliverable of v1 is the store, the rule and the window — not the list.
+
+## Not in v1, and why
+
+- **Keybindings.** Needs its own model (conflicts, chords, per-mode maps); a
+  row of text fields would be worse than the current fixed set.
+- **Per-project overrides of user preferences.** A project that forces a GPU
+  on whoever opens it is wrong.
+- **Synced/cloud settings.** No account system, and no reason to invent one.
+- **Live reload of the file.** Watching config files earns a class of
+  half-applied-state bugs for a benefit nobody asked for.
+
+## Open question to settle when it is built
+
+**Display units (mm/inch).** The model is always millimetres, so a unit is a
+display choice — bucket 2. But a drawing's dimensions are part of the
+document, so their units are bucket 1. The likely answer is "both, and they
+are different settings", which is worth deciding deliberately rather than
+discovering. Flagged for the units workstream, not for this window's v1.
