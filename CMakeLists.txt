@@ -61,9 +61,26 @@ find_package(spdlog REQUIRED)
 set(IMGUI_DIR deps/imgui)
 include_directories(SYSTEM ${IMGUI_DIR} ${IMGUI_DIR}/backends ..)
 
-# Dear ImGui Test Engine (GUI testing)
+# Dear ImGui Test Engine (GUI testing + the remote UI-parity tier).
+#
+# OPTIONAL, and the only dependency here that is not open source: it is free
+# for individuals, non-profits, entities under 2M USD turnover, and for
+# building open-source derivative works (which Designer is) — but a larger
+# company that wants to build or ship it needs a paid license from DISCO
+# HELLO. -DENABLE_TEST_ENGINE=OFF removes the dependency entirely: no
+# sources, no headers, no IMGUI_ENABLE_TEST_ENGINE hooks in imgui.cpp.
+#
+# What that costs: `--gui-tests` (the GUI suite) and the remote `ui_action`
+# tier — clicking the app's own widgets. Modeling, sketching, FEM, drawings,
+# assemblies, export, the renderer, screenshots and every semantic RPC are
+# unaffected, so an agent can still drive the whole application.
+option(ENABLE_TEST_ENGINE
+       "Build with Dear ImGui Test Engine (GUI tests + remote ui_action)" ON)
+
 set(IMGUI_TEST_ENGINE_DIR deps/imgui_test_engine/imgui_test_engine)
-include_directories(SYSTEM ${IMGUI_TEST_ENGINE_DIR})
+if(ENABLE_TEST_ENGINE)
+  include_directories(SYSTEM ${IMGUI_TEST_ENGINE_DIR})
+endif()
 set(IMGUI_TEST_ENGINE_SOURCES
     ${IMGUI_TEST_ENGINE_DIR}/imgui_capture_tool.cpp
     ${IMGUI_TEST_ENGINE_DIR}/imgui_te_context.cpp
@@ -412,6 +429,12 @@ include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/brown_photostudio_02_1k.hdr
      DESTINATION ${CMAKE_BINARY_DIR}/assets/hdri)
 
+if(NOT ENABLE_TEST_ENGINE)
+  # No engine: drop its sources and the suite written against it.
+  set(IMGUI_TEST_ENGINE_SOURCES "")
+  list(REMOVE_ITEM app_sources src/app/GuiTests.cpp)
+endif()
+
 add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 target_compile_definitions(designer PRIVATE DESIGNER_VERSION="${PROJECT_VERSION}")
 if(HAVE_STDCXX_STACKTRACE)
@@ -424,11 +447,19 @@ else()
 endif()
 set_target_properties(designer PROPERTIES INSTALL_RPATH "${DESIGNER_INSTALL_RPATH}")
 
-# imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks
-target_compile_definitions(designer PRIVATE
-    IMGUI_ENABLE_TEST_ENGINE
-    IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
-)
+# imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks.
+# HAVE_TEST_ENGINE is ours: the app's own code switches on it (matching the
+# HAVE_NETGEN / HAVE_FEM_GPU convention).
+if(ENABLE_TEST_ENGINE)
+  target_compile_definitions(designer PRIVATE
+      HAVE_TEST_ENGINE
+      IMGUI_ENABLE_TEST_ENGINE
+      IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+  )
+else()
+  message(STATUS "Dear ImGui Test Engine DISABLED: no --gui-tests, no remote "
+                 "ui_action; everything else builds")
+endif()
 
 target_link_libraries(designer designer_core ${LIBRARIES})
 

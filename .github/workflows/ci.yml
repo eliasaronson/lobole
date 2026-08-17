@@ -45,3 +45,20 @@ jobs:
       - name: Test (headless — everything without the gui label)
         # Parallel is safe: GPU-contending tests hold a shared RESOURCE_LOCK.
         run: ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure
+
+      # The build without Dear ImGui Test Engine — the configuration for
+      # anyone who cannot take that dependency's license (it is free for
+      # individuals, non-profits, open-source derivatives and companies under
+      # 2M USD turnover; larger companies pay). A configuration nobody
+      # compiles breaks silently, so CI compiles it on every push and proves
+      # the app still models headlessly without it.
+      - name: Build without the test engine
+        run: |
+          cmake -S . -B build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DENABLE_TEST_ENGINE=OFF
+          cmake --build build-no-te -j"$(nproc)"
+
+      - name: Smoke the engine-free build
+        run: |
+          python3 tests/headless_smoke.py build-no-te/designer
+          ! build-no-te/designer --gui-tests --hidden 2>/dev/null

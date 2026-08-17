@@ -12,7 +12,9 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
+#ifdef HAVE_TEST_ENGINE
 #include "imgui_te_engine.h"
+#endif
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
@@ -909,6 +911,14 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
         exit(1);
       }
     } else if (arg == "--gui-tests") {
+#ifndef HAVE_TEST_ENGINE
+      // Fail on the flag, not four seconds later after Vulkan is up: a
+      // configuration error should cost nothing to discover.
+      std::cerr << "--gui-tests needs the ImGui Test Engine, and this build "
+                   "was configured with -DENABLE_TEST_ENGINE=OFF"
+                << std::endl;
+      exit(1);
+#endif
       args.runGuiTests = true;
     } else if (arg == "--gui-test-filter") {
       if (i + 1 < argc) {
@@ -1251,6 +1261,9 @@ int main(int argc, char** argv) {
 
   // GUI test engine: always started so tests can also be run interactively;
   // --gui-tests queues the whole suite and exits with a pass/fail code.
+  // Absent in a -DENABLE_TEST_ENGINE=OFF build (see CMakeLists) — the app is
+  // whole without it, minus its own GUI tests and the remote ui_action tier.
+#ifdef HAVE_TEST_ENGINE
   ImGuiTestEngine* testEngine = ImGuiTestEngine_CreateContext();
   ImGuiTestEngineIO& testEngineIO = ImGuiTestEngine_GetIO(testEngine);
   testEngineIO.ConfigVerboseLevel = ImGuiTestVerboseLevel_Info;
@@ -1267,6 +1280,7 @@ int main(int argc, char** argv) {
     ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests,
                                args.guiTestFilter.c_str());
   }
+#endif
 
   // Remote control (opt-in)
   RemoteServer remoteServer;
@@ -1275,12 +1289,18 @@ int main(int argc, char** argv) {
     // This path ignored the result, so `--hidden --remote <taken>` — how every
     // preview instance and dev-watch starts — came up looking healthy and
     // served nothing, and the client just timed out with no reason given.
+    // This path always has a renderer (that is what distinguishes it from
+    // HeadlessMain), so screenshots work; whether the GUI can be DRIVEN is
+    // the separate question SetTestEngine answers.
     if (!remoteServer.Start(static_cast<uint16_t>(args.remotePort),
-                            testEngine)) {
+                            /*hasRenderer=*/true)) {
       LOG_ERROR("Cannot listen on port {} - is another instance using it?",
                 args.remotePort);
       return 1;
     }
+#ifdef HAVE_TEST_ENGINE
+    remoteServer.SetTestEngine(testEngine);
+#endif
     if (!args.recordPath.empty()) {
       remoteServer.StartRecording(args.recordPath);
     }
@@ -1477,7 +1497,9 @@ int main(int argc, char** argv) {
       wd->ClearValue.color.float32[3] = clear_color.w;
       FrameRender(wd, draw_data);
       FramePresent(wd);
+#ifdef HAVE_TEST_ENGINE
       ImGuiTestEngine_PostSwap(testEngine);
+#endif
 
       // In uncapped test mode, cap the frame rate so the GPU isn't driven to
       // a timeout device-lost by the fast test-engine loop. 60 fps keeps the
@@ -1524,9 +1546,11 @@ int main(int argc, char** argv) {
       }
     }
 
+#ifdef HAVE_TEST_ENGINE
     if (args.runGuiTests && ImGuiTestEngine_IsTestQueueEmpty(testEngine)) {
       glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
+#endif
   }
 
   remoteServer.Stop();
@@ -1539,6 +1563,7 @@ int main(int argc, char** argv) {
 
   // Collect GUI test results before teardown
   int exitCode = 0;
+#ifdef HAVE_TEST_ENGINE
   if (args.runGuiTests) {
     int countTested = 0, countSuccess = 0;
     ImGuiTestEngine_GetResult(testEngine, countTested, countSuccess);
@@ -1546,6 +1571,7 @@ int main(int argc, char** argv) {
     exitCode = (countTested > 0 && countTested == countSuccess) ? 0 : 1;
   }
   ImGuiTestEngine_Stop(testEngine);
+#endif
 
   // Cleanup
   err = vkDeviceWaitIdle(g_Device);
@@ -1576,8 +1602,10 @@ int main(int argc, char** argv) {
   ImGui_ImplVulkan_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
+#ifdef HAVE_TEST_ENGINE
   // Test engine context must outlive the ImGui context it hooks
   ImGuiTestEngine_DestroyContext(testEngine);
+#endif
 
   CleanupVulkanWindow();
   CleanupVulkan();

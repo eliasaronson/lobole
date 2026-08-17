@@ -39,8 +39,10 @@
 #include <map>
 
 #include "imgui.h"
+#ifdef HAVE_TEST_ENGINE
 #include "imgui_te_context.h"
 #include "imgui_te_engine.h"
+#endif
 
 #include <cstring>
 
@@ -86,31 +88,26 @@ inline long SockWrite(int fd, const void* b, size_t n) {
 using nlohmann::json;
 
 static RemoteServer* s_Instance = nullptr;
+#ifdef HAVE_TEST_ENGINE
 static ImGuiTest* s_UiActionTest = nullptr;
+#endif
 
 // TestFunc of the reusable "remote action" test: runs whatever UI action is
 // currently queued. Runs inside the test engine's coroutine, so it can span
 // frames (menu navigation, drags) exactly like a scripted human.
+#ifdef HAVE_TEST_ENGINE
 void RemoteServerRunUiAction(ImGuiTestContext* ctx) {
   if (s_Instance && s_Instance->m_uiAction) {
     s_Instance->m_uiAction(ctx);
   }
 }
+#endif
 
 RemoteServer::~RemoteServer() { Stop(); }
 
-bool RemoteServer::Start(uint16_t port, ImGuiTestEngine* engine) {
-  m_engine = engine;
+bool RemoteServer::Start(uint16_t port, bool hasRenderer) {
+  m_hasRenderer = hasRenderer;
   s_Instance = this;
-
-  // Headless (--headless) passes no engine: UI actions and screenshots then
-  // degrade with specific errors in ProcessPending.
-  if (engine) {
-    s_UiActionTest = IM_REGISTER_TEST(engine, "remote", "action");
-    s_UiActionTest->TestFunc = [](ImGuiTestContext* ctx) {
-      RemoteServerRunUiAction(ctx);
-    };
-  }
 
   // Bind synchronously so a taken/privileged port fails Start (headless CI
   // must exit non-zero, not serve nothing); the thread only accepts.
@@ -137,12 +134,38 @@ bool RemoteServer::Start(uint16_t port, ImGuiTestEngine* engine) {
   m_port = port;
   m_thread = std::thread([this] { ReaderThread(); });
   // Announce it so a client can FIND this instance rather than be told which
-  // port to assume (remote/InstanceRegistry.h). `engine != nullptr` is the
-  // capability split that matters to a caller: a renderer and a test engine,
-  // so screenshots and ui_action work.
-  remote::AnnounceInstance(port, engine != nullptr);
+  // port to assume (remote/InstanceRegistry.h). The registry records the
+  // RENDERER, which is what decides whether a screenshot is possible;
+  // whether the GUI can be driven is per-build and `ping` reports it.
+  remote::AnnounceInstance(port, hasRenderer);
   LOG_INFO("Remote control listening on 127.0.0.1:{}", port);
   return true;
+}
+
+void RemoteServer::SetTestEngine(ImGuiTestEngine* engine) {
+#ifdef HAVE_TEST_ENGINE
+  m_engine = engine;
+  if (engine == nullptr)
+    return;
+  // One reusable test carries every queued UI action (ProcessPending queues
+  // it; the engine runs it between frames, where clicks are legal).
+  s_UiActionTest = IM_REGISTER_TEST(engine, "remote", "action");
+  s_UiActionTest->TestFunc = [](ImGuiTestContext* ctx) {
+    RemoteServerRunUiAction(ctx);
+  };
+#else
+  // Built with -DENABLE_TEST_ENGINE=OFF: the UI-parity tier does not exist,
+  // and every ui_action refuses with that reason rather than a silent no-op.
+  (void)engine;
+#endif
+}
+
+bool RemoteServer::UiActionsAvailable() const {
+#ifdef HAVE_TEST_ENGINE
+  return m_engine != nullptr;
+#else
+  return false;
+#endif
 }
 
 bool RemoteServer::StartRecording(const std::string& path) {
@@ -321,6 +344,7 @@ std::string UnknownParamError(const std::string& method,
   return msg;
 }
 
+#ifdef HAVE_TEST_ENGINE
 ImGuiKeyChord ParseChord(const std::string& text, std::string* error) {
   ImGuiKeyChord chord = 0;
   size_t start = 0;
@@ -491,6 +515,7 @@ std::string UiActionFailureReason(ImGuiTest* test) {
   }
   return out;
 }
+#endif
 
 // Snap the camera to a named standard view (optionally fitting first). Shared
 // by the `view` RPC and the raw `screenshot` handler so a raw screenshot(view=)
@@ -724,7 +749,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"ok", true},
             {"app", "designer"},
             {"port", m_port},
-            {"mode", m_engine != nullptr ? "gui" : "headless"},
+            {"mode", m_hasRenderer ? "gui" : "headless"},
+            {"ui_actions", UiActionsAvailable()},
             {"project", project},
             {"dirty", ui::ProjectDirty(state)}};
   }
@@ -1126,6 +1152,12 @@ bool RemoteServer::IsUiAction(const std::string& method) {
 }
 
 bool RemoteServer::QueueUiAction(const Request& request) {
+#ifndef HAVE_TEST_ENGINE
+  // No test engine in this build: nothing here can run, and the
+  // caller has already refused every ui_action with that reason.
+  (void)request;
+  return false;
+#else
   const std::string& m = request.method;
   const json p = request.params; // copy: captured by the action lambda
 
@@ -1308,8 +1340,11 @@ bool RemoteServer::QueueUiAction(const Request& request) {
   m_uiActionClient = request.client;
   m_uiActionResult = json::object();
   m_uiActionInFlight = true;
+#ifdef HAVE_TEST_ENGINE
   ImGuiTestEngine_QueueTest(m_engine, s_UiActionTest);
+#endif
   return true;
+#endif
 }
 
 void RemoteServer::ProcessPending(ui::AppState& state) {
@@ -1320,8 +1355,10 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
 
   // Fractional viewport coordinates are resolved against the 3D viewport's
   // rect, so snapshot it while we are on the main thread with `state` in hand.
+#ifdef HAVE_TEST_ENGINE
   s_ViewportPos = ImVec2(state.viewportPos.x, state.viewportPos.y);
   s_ViewportSize = ImVec2(state.viewportSize.x, state.viewportSize.y);
+#endif
 
   // Store a finished async topology run (TO2) even if the client never polls
   // study_status — this is the app's per-tick main-thread join point.
@@ -1331,6 +1368,7 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
   }
 
   // Finish an in-flight UI action once the engine is done with it
+#ifdef HAVE_TEST_ENGINE
   if (m_uiActionInFlight && ImGuiTestEngine_IsTestQueueEmpty(m_engine)) {
     m_uiActionInFlight = false;
     m_uiAction = nullptr;
@@ -1345,6 +1383,7 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
                                : "ui action failed: " + why);
     }
   }
+#endif
 
   // Serialize UI actions and screenshots: one at a time
   while (true) {
@@ -1393,9 +1432,9 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         continue;
       }
       if (request.method == "screenshot") {
-        if (!m_engine) {
+        if (!m_hasRenderer) {
           RespondError(request.client, request.id,
-                       "screenshot requires the GUI — start "
+                       "screenshot requires a rendered frame — start "
                        "designer without --headless");
           continue;
         }
@@ -1415,10 +1454,19 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         m_screenshotPending = true;
         return; // main loop captures after this frame renders
       }
-      if (!m_engine && IsUiAction(request.method)) {
-        RespondError(request.client, request.id,
-                     "UI actions are unavailable in --headless — "
-                     "start designer without it");
+      if (!UiActionsAvailable() && IsUiAction(request.method)) {
+        // Two different reasons, two different remedies: nothing to click
+        // (no GUI running) versus nothing to click WITH (this build has no
+        // test engine). Saying which is the difference between "run it
+        // differently" and "build it differently".
+        RespondError(
+            request.client, request.id,
+            m_hasRenderer
+                ? "UI actions need the ImGui Test Engine, and this build was "
+                  "configured with -DENABLE_TEST_ENGINE=OFF. The semantic "
+                  "RPCs (add_feature, measure, screenshot, …) all work."
+                : "UI actions are unavailable in --headless — start designer "
+                  "without it");
         continue;
       }
       if (QueueUiAction(request)) {

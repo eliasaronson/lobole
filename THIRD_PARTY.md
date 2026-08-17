@@ -85,6 +85,15 @@ automation uses it, not only the GUI test suite. Designer's AGPL grant includes
 a section-7 additional permission for this linkage; see
 `ADDITIONAL_PERMISSION.md` and the README.
 
+**Optional at build time.** `cmake -DENABLE_TEST_ENGINE=OFF` removes it
+entirely — no sources compiled, no headers included, no
+`IMGUI_ENABLE_TEST_ENGINE` hooks in imgui — producing a binary with no
+component under a non-open-source license. That build loses `--gui-tests` and
+the remote `ui_action` tier and nothing else; the semantic RPC surface,
+screenshots included, is unchanged. It is the configuration for anyone whose
+use falls outside the engine's free-license criteria. CI compiles it on every
+push so it cannot rot.
+
 ### nativefiledialog-extended
 
 - **Location:** `deps/nativefiledialog-extended` submodule

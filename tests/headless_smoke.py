@@ -287,7 +287,11 @@ def main():
 
         phase("Every GUI-dependent method degrades with its specific error")
         # Every GUI-dependent method degrades with its specific error
-        expect_error(d, "screenshot", "requires the GUI", path="/tmp/x.png")
+        # "a rendered frame", not "the GUI": with -DENABLE_TEST_ENGINE=OFF a
+        # windowed build has no test engine and still screenshots fine, so the
+        # two capabilities are named separately (docs/scripting/mcp.md).
+        expect_error(d, "screenshot", "requires a rendered frame",
+                     path="/tmp/x.png")
         expect_error(d, "menu_click", "unavailable in --headless",
                      path="Edit/Undo")
         expect_error(d, "viewport_drag", "unavailable in --headless")

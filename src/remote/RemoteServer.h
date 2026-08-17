@@ -32,7 +32,22 @@ class RemoteServer {
 public:
   ~RemoteServer();
 
-  bool Start(uint16_t port, ImGuiTestEngine* engine);
+  // Two capabilities, not one flag. `hasRenderer` = there is a rendered frame
+  // to capture and pick against (screenshots, viewport coordinates); false
+  // under --headless. Whether the UI-PARITY tier works is a separate
+  // question, answered by SetTestEngine — a build configured with
+  // -DENABLE_TEST_ENGINE=OFF has a renderer and no way to drive it.
+  bool Start(uint16_t port, bool hasRenderer);
+
+  // Enables the UI-parity tier (menu clicks, item input, viewport clicks).
+  // A no-op in a build without the ImGui Test Engine, so callers need no
+  // #ifdef of their own beyond obtaining the engine.
+  void SetTestEngine(ImGuiTestEngine* engine);
+
+  // Can this instance be driven through its GUI? False under --headless and
+  // in a build without the test engine — reported by `ping` so a client
+  // learns it before trying.
+  bool UiActionsAvailable() const;
   // The port this instance is serving (0 = not serving). Also what it
   // announced itself as in the instance registry.
   uint16_t Port() const { return m_port; }
@@ -80,6 +95,7 @@ private:
   ImGuiTestEngine* m_engine = nullptr;
   std::thread m_thread;
   std::atomic<bool> m_running{false};
+  bool m_hasRenderer = false;
   uint16_t m_port = 0;
   int m_listenFd = -1;
 

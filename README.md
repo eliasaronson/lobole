@@ -43,6 +43,27 @@ cmake --build . -j$(nproc)
 Works with OpenCASCADE 7.6 (Ubuntu packages) and 7.8+ (the STEP/STL library renaming is
 handled in CMakeLists.txt).
 
+### Building without Dear ImGui Test Engine
+
+```
+cmake -S . -B build -DENABLE_TEST_ENGINE=OFF
+```
+
+Every other dependency here is open source; the test engine is not. It is free
+for individuals, non-profit entities, educational use, open-source derivative
+works, and companies under 2M USD turnover — but a larger company that wants
+to build or ship Designer needs a paid license from DISCO HELLO. This flag
+removes the dependency outright: no sources, no headers, no
+`IMGUI_ENABLE_TEST_ENGINE` hooks compiled into imgui.
+
+What you lose is the ability to drive **the app's own widgets**: `--gui-tests`
+(the GUI suite) and the remote `ui_action` tier. Everything else is untouched
+— modeling, sketching, assemblies, drawings, FEM, import/export, the renderer,
+**screenshots**, and the whole semantic RPC/MCP surface — so scripts and AI
+agents can still drive the application end to end. `ping` reports
+`ui_actions: false` so a client knows before it tries, and CI builds this
+configuration on every push.
+
 To install the executable, shared PlaneGCS library, runtime assets, and Linux
 desktop metadata under a standard prefix:
 

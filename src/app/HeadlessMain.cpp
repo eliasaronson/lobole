@@ -48,7 +48,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   }
 
   RemoteServer server;
-  if (!server.Start(static_cast<uint16_t>(remotePort), /*engine=*/nullptr)) {
+  if (!server.Start(static_cast<uint16_t>(remotePort), /*hasRenderer=*/false)) {
     LOG_ERROR("Headless: cannot listen on port {} — exiting", remotePort);
     return 1; // CI must fail fast, not hang serving nothing
   }

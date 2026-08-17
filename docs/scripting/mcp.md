@@ -51,6 +51,11 @@ Before this, the server assumed 8437 and reported "Designer is not reachable"
 whenever the app was on another port; this repo's own `.mcp.json` hardcoded
 8799 to work around it. It no longer passes a port at all.
 
+`ui_action` (through `rpc`) needs the ImGui Test Engine, which is optional:
+a build configured with `-DENABLE_TEST_ENGINE=OFF` refuses those calls naming
+that reason, and `ping`/`describe` report `ui_actions: false` up front. Every
+other tool, screenshots included, works there.
+
 **Autostart is deliberately not implemented.** Spawning a window from an MCP
 server would create a *second* instance while the user has one open, and the
 agent would silently inspect a different document; a headless spawn cannot
