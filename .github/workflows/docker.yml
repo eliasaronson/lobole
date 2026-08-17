@@ -1,0 +1,71 @@
+# Publishes the headless container image to GHCR.
+#
+# The image is the document engine plus its JSON-RPC interface with no GPU and
+# no display server — the whole application minus the viewport. It is built
+# from the flake, so it carries the FULL feature set (OpenCASCADE 7.9, Netgen,
+# Spectra), unlike a distro-package build.
+#
+# Manual until there is something to release: publishing an image nobody can
+# pull is pointless while the repository is private. `workflow_dispatch` lets
+# you push one on demand; the tag trigger takes over once releases start.
+name: Container image
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+
+      # buildLayeredImage writes a tarball; `docker load` is the only step
+      # between it and a registry. No docker build, no Dockerfile — the image
+      # contents are exactly the package's runtime closure.
+      - name: Build the image
+        run: nix build .#dockerHeadless
+
+      - name: Load it
+        run: docker load < result
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Tag and push
+        run: |
+          repo="ghcr.io/${{ github.repository_owner }}/designer-headless"
+          repo="$(echo "$repo" | tr '[:upper:]' '[:lower:]')"   # GHCR is lowercase
+          version="${GITHUB_REF_NAME#v}"
+          [ "${{ github.ref_type }}" = "tag" ] || version="$(git rev-parse --short HEAD)"
+          docker tag designer-headless:latest "$repo:$version"
+          docker tag designer-headless:latest "$repo:latest"
+          docker push "$repo:$version"
+          docker push "$repo:latest"
+
+      # A published image that cannot model is worse than none: prove it runs
+      # before anyone pulls it.
+      - name: Smoke the published image
+        run: |
+          docker run -d --rm --name designer -p 8437:8437 designer-headless:latest
+          for i in $(seq 30); do
+            python3 tools/designer_remote.py 8437 ping > /dev/null 2>&1 && break
+            sleep 1
+          done
+          python3 tools/designer_remote.py 8437 add_feature \
+            '{"feature": {"type": "Box", "name": "B", "position": [0,0,0],
+                          "width": 4, "height": 4, "depth": 4}}'
+          python3 tools/designer_remote.py 8437 get_state | grep -q '"volume": 64'
+          docker rm -f designer

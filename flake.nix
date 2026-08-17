@@ -136,6 +136,60 @@
       packages.${system} = {
         default = designer;
         designer = designer;
+
+        # A headless image: the document engine and its JSON-RPC surface with
+        # no GPU, no display server and no desktop stack. That is the whole
+        # application minus the viewport — modelling, measurement, FEM,
+        # drawings, import/export — which is what CI, batch jobs and agents
+        # actually drive. A GUI image would need the host's GPU drivers
+        # inside it; use Nix or the Flatpak for that.
+        #
+        # Build and run:
+        #   nix build .#dockerHeadless && docker load < result
+        #   docker run --rm -p 8437:8437 designer-headless:latest
+        #   python3 tools/designer_remote.py 8437 get_state
+        #
+        # --remote-bind-all is what makes the published port reachable: the
+        # server is loopback-only by default because it is unauthenticated
+        # and touches files. Inside a container with a namespaced network
+        # that is the right trade; do not publish the port to a network you
+        # do not trust.
+        dockerHeadless = pkgs.dockerTools.buildLayeredImage {
+          name = "designer-headless";
+          tag = "latest";
+          # Layer the closure so a rebuild of the app does not re-push
+          # OpenCASCADE and Netgen.
+          maxLayers = 100;
+          contents = [
+            designer
+            pkgs.cacert  # TLS roots, for anything that reaches out
+            pkgs.busybox # a shell, so `docker exec` is useful
+          ];
+          # No python inside: clients drive the port from OUTSIDE the
+          # container, and it costs 200 MB.
+          #
+          # KNOWN FAT: the image is ~4 GB because designer's runtime closure
+          # is 1.8 GiB, and the top contributors are not CAD at all — numpy
+          # (443 MiB) and gfortran (382 MiB), pulled in transitively by
+          # Netgen's MPI and python bindings. Overriding Netgen to drop them
+          # would shrink this and every `nix profile install` alike; it needs
+          # a netgen rebuild to find out, so it is a follow-up rather than a
+          # blocker.
+          config = {
+            Entrypoint = [ "${designer}/bin/designer" ];
+            Cmd = [ "--headless" "--remote" "8437" "--remote-bind-all" ];
+            ExposedPorts = { "8437/tcp" = { }; };
+            WorkingDir = "/work";
+            Labels = {
+              "org.opencontainers.image.title" = "Designer (headless)";
+              "org.opencontainers.image.description" =
+                "Parametric B-Rep CAD engine with a JSON-RPC interface; no GUI.";
+              "org.opencontainers.image.licenses" = "AGPL-3.0-or-later";
+              "org.opencontainers.image.source" =
+                "https://github.com/eliasaronson/Designer";
+            };
+          };
+        };
       };
 
       checks.${system}.headless = designerHeadlessChecks;

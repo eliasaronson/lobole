@@ -107,7 +107,7 @@ void RemoteServerRunUiAction(ImGuiTestContext* ctx) {
 
 RemoteServer::~RemoteServer() { Stop(); }
 
-bool RemoteServer::Start(uint16_t port, bool hasRenderer) {
+bool RemoteServer::Start(uint16_t port, bool hasRenderer, bool bindAll) {
   m_hasRenderer = hasRenderer;
   s_Instance = this;
 
@@ -121,7 +121,9 @@ bool RemoteServer::Start(uint16_t port, bool hasRenderer) {
                reinterpret_cast<const char*>(&opt), sizeof(opt));
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // localhost only
+  // Loopback unless explicitly told otherwise: this interface can create,
+  // read, overwrite and export files with no authentication of any kind.
+  addr.sin_addr.s_addr = htonl(bindAll ? INADDR_ANY : INADDR_LOOPBACK);
   addr.sin_port = htons(port);
   if (::bind(m_listenFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) <
           0 ||
@@ -140,7 +142,14 @@ bool RemoteServer::Start(uint16_t port, bool hasRenderer) {
   // RENDERER, which is what decides whether a screenshot is possible;
   // whether the GUI can be driven is per-build and `ping` reports it.
   remote::AnnounceInstance(port, hasRenderer);
-  LOG_INFO("Remote control listening on 127.0.0.1:{}", port);
+  if (bindAll) {
+    LOG_WARN("Remote control listening on 0.0.0.0:{} — UNAUTHENTICATED, and "
+             "it can read and write files. Only do this inside a sandbox you "
+             "trust (a container with a published port, not a shared LAN).",
+             port);
+  } else {
+    LOG_INFO("Remote control listening on 127.0.0.1:{}", port);
+  }
   return true;
 }
 

@@ -24,7 +24,8 @@ void HandleStopSignal(int) { g_stopRequested = true; }
 } // namespace
 
 int RunHeadless(int remotePort, const std::string& fileToLoad,
-                double autosaveSeconds, const std::string& recordPath) {
+                double autosaveSeconds, const std::string& recordPath,
+                bool bindAll) {
   LOG_INFO("Headless mode: document engine + remote server, no GUI");
 
   // Same defaults as the GUI so view/fit_view/get_state.camera behave
@@ -48,7 +49,8 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   }
 
   RemoteServer server;
-  if (!server.Start(static_cast<uint16_t>(remotePort), /*hasRenderer=*/false)) {
+  if (!server.Start(static_cast<uint16_t>(remotePort), /*hasRenderer=*/false,
+                    bindAll)) {
     LOG_ERROR("Headless: cannot listen on port {} — exiting", remotePort);
     return 1; // CI must fail fast, not hang serving nothing
   }

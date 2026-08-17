@@ -37,7 +37,11 @@ public:
   // under --headless. Whether the UI-PARITY tier works is a separate
   // question, answered by SetTestEngine — a build configured with
   // -DENABLE_TEST_ENGINE=OFF has a renderer and no way to drive it.
-  bool Start(uint16_t port, bool hasRenderer);
+  // `bindAll` opens the port on 0.0.0.0 instead of 127.0.0.1. The RPC
+  // surface has no authentication and can read and write files, so loopback
+  // is the only safe default on a shared machine; a container with a
+  // namespaced network is the case this exists for.
+  bool Start(uint16_t port, bool hasRenderer, bool bindAll = false);
 
   // Enables the UI-parity tier (menu clicks, item input, viewport clicks).
   // A no-op in a build without the ImGui Test Engine, so callers need no

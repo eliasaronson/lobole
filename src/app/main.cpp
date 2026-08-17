@@ -863,6 +863,10 @@ void printUsage(const char* programName) {
   std::cout << "  --remote <port>      Enable JSON-RPC remote control on "
                "127.0.0.1:<port>"
             << std::endl;
+  std::cout << "  --remote-bind-all    Serve --remote on 0.0.0.0 instead of "
+               "127.0.0.1 (containers only:\n                       the "
+               "interface is unauthenticated and touches files)"
+            << std::endl;
   std::cout << "  --headless           No window/GPU: serve --remote with the "
                "document engine only"
             << std::endl;
@@ -885,6 +889,7 @@ struct CommandLineArgs {
   bool headless = false;
   bool hidden = false;
   int remotePort = 0;
+  bool remoteBindAll = false;
   double autosaveSeconds = 60.0;
   std::string recordPath;
 };
@@ -930,6 +935,10 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       }
     } else if (arg == "--headless") {
       args.headless = true;
+    } else if (arg == "--remote-bind-all") {
+      // For containers: the port is useless on loopback when the network is
+      // namespaced. Unauthenticated, so it is never the default.
+      args.remoteBindAll = true;
     } else if (arg == "--crash-test") {
       // Hidden: exercise the fatal-signal backtrace end-to-end (Phase 0
       // sanity). Installed handler prints the stack, then core-dumps.
@@ -999,7 +1008,7 @@ int main(int argc, char** argv) {
       return 2;
     }
     return RunHeadless(args.remotePort, args.fileToLoad, args.autosaveSeconds,
-                       args.recordPath);
+                       args.recordPath, args.remoteBindAll);
   }
 
 #ifdef HAVE_NATIVEFILEDIALOG
@@ -1293,7 +1302,7 @@ int main(int argc, char** argv) {
     // HeadlessMain), so screenshots work; whether the GUI can be DRIVEN is
     // the separate question SetTestEngine answers.
     if (!remoteServer.Start(static_cast<uint16_t>(args.remotePort),
-                            /*hasRenderer=*/true)) {
+                            /*hasRenderer=*/true, args.remoteBindAll)) {
       LOG_ERROR("Cannot listen on port {} - is another instance using it?",
                 args.remotePort);
       return 1;

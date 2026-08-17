@@ -137,6 +137,33 @@ cd build
 ./designer [-f path/to/file.step]
 ```
 
+### Container (headless)
+
+The document engine and its JSON-RPC interface with no GPU, no display server
+and no desktop stack — everything except the viewport. Built from the flake,
+so it carries the full feature set (OpenCASCADE 7.9, Netgen, Spectra) that a
+distro-package build cannot:
+
+```
+nix build .#dockerHeadless && docker load < result
+docker run --rm -p 8437:8437 designer-headless:latest
+python3 tools/designer_remote.py 8437 get_state
+```
+
+It models, measures, meshes, solves, and exports; `screenshot` and the
+UI-action tier need a renderer and are unavailable, as under `--headless`
+generally.
+
+The image's default command passes **`--remote-bind-all`**, without which a
+published port is unreachable — the server binds loopback otherwise, because
+the interface is **unauthenticated and can read and write files**. A container
+with a namespaced network is the case that is for; do not publish that port to
+a network you do not trust.
+
+The image is ~4 GB, most of which is not CAD: Netgen's MPI and Python
+bindings pull in numpy and gfortran transitively. Trimming that is a known
+follow-up.
+
 ## Testing
 
 ```
