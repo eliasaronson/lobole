@@ -19,7 +19,7 @@ continuously, and the rest is a matter of your distribution's package names.
 cannot rot:
 
 ```
-sudo apt install cmake ninja-build build-essential python3 \
+sudo apt install git cmake ninja-build build-essential python3 \
     libvulkan-dev glslc libglfw3-dev libglm-dev \
     libspdlog-dev libgtk-3-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
     libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-modeling-data-dev \
@@ -59,6 +59,21 @@ runs either way.
 So an apt-based build gives you the whole CAD application without the
 simulation workstream. If you want FEM, use Nix or the Flatpak, or build
 Netgen and Spectra yourself and re-run CMake.
+
+### OpenCASCADE version
+
+7.6 (Ubuntu 24.04) and 7.7+ both build; the project is developed against
+7.9.3. Two things differ on 7.6, and CI builds a stock `ubuntu:24.04`
+container on every push so this stays honest:
+
+- **PLY export is unavailable** — `RWPly_CafWriter` arrived in 7.7. glTF, GLB
+  and OBJ work; PLY refuses with a message naming the version.
+- **Four tests fail** on kernel behaviour that changed by 7.9: transformed-body
+  distance and interference (`Transformed distance…`, `InterferenceVolume over
+  transformed…`), XCAF STEP import placement (`Assembly import plan…`), and a
+  shell that 7.6 refuses outright where 7.9 completes as a no-op (`Shell that
+  removes no material…`). The application itself works; these are the
+  assertions, not the features.
 
 Vendored dependencies (Dear ImGui, Dear ImGui Test Engine, nativefiledialog)
 are git submodules — clone with `--recurse-submodules`, or:

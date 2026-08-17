@@ -46,9 +46,16 @@ json ElementMapToJson(const ElementMap& map) {
 
 ElementMap ElementMapFromJson(const json& j) {
   ElementMap map;
-  for (const auto& [key, value] : j.value("faces", json::object()).items())
+  // Bind the sub-objects to NAMED values first. `value()` returns a copy, and
+  // iterating `.items()` directly on that temporary reads freed memory once
+  // the full expression ends — undefined behaviour that happened to work with
+  // one nlohmann version and yielded nulls ("type must be string, but is
+  // null") with Ubuntu's 3.11.3, silently disabling baked geometry there.
+  const json faces = j.value("faces", json::object());
+  const json edges = j.value("edges", json::object());
+  for (const auto& [key, value] : faces.items())
     map.names[std::stoi(key)] = value.get<std::string>();
-  for (const auto& [key, value] : j.value("edges", json::object()).items())
+  for (const auto& [key, value] : edges.items())
     map.edgeNames[std::stoi(key)] = value.get<std::string>();
   return map;
 }
@@ -244,7 +251,8 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
     if (bodies.empty())
       return false;
     std::map<uint64_t, std::string> warnings;
-    for (const auto& [key, value] : j.value("warnings", json::object()).items())
+    const json warningsJson = j.value("warnings", json::object()); // see above
+    for (const auto& [key, value] : warningsJson.items())
       warnings[std::stoull(key)] = value.get<std::string>();
     doc.AdoptBakedGeometry(std::move(bodies), j.value("chain_hash", size_t{0}),
                            std::move(warnings));

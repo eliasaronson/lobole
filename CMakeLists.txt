@@ -133,7 +133,13 @@ if(OPENCASCADE_FOUND)
     if(TARGET TKDESTEP OR OCCT_TKDESTEP)
         list(APPEND OPENCASCADE_LIBS TKDESTEP TKDESTL TKDEGLTF TKDEOBJ TKDEPLY)
     else()
-        list(APPEND OPENCASCADE_LIBS TKSTEP TKSTEPBase TKSTEPAttr TKSTEP209 TKSTL)
+        # TKXDESTEP carries the XCAF-aware STEP reader/writer
+        # (STEPCAFControl_*, the named/coloured import path) through 7.7; in
+        # 7.8 it folded into TKDESTEP. Omitting it linked fine until the
+        # importer started using XCAF, then failed only on the older OCC —
+        # which is Ubuntu's, so nobody building here saw it.
+        list(APPEND OPENCASCADE_LIBS TKSTEP TKSTEPBase TKSTEPAttr TKSTEP209
+                                     TKXDESTEP TKSTL)
     endif()
 
     add_definitions(-DHAVE_OPENCASCADE)

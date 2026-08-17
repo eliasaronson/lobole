@@ -94,9 +94,18 @@ def main():
                "OBJ has vertices")
         expect("f " in obj_text, "OBJ has faces")
 
+        # RWPly_CafWriter arrived in OpenCASCADE 7.7; on an older kernel
+        # (Ubuntu 24.04 ships 7.6.3) the app refuses by design, naming the
+        # version. Skip only THIS assertion — the rest of the suite is
+        # kernel-version independent.
         ply = os.path.join(tmp, "widget.ply")
-        d.call("export_visual", path=ply)
-        expect(open(ply, "rb").read(3) == b"ply", "PLY magic")
+        try:
+            d.call("export_visual", path=ply)
+            expect(open(ply, "rb").read(3) == b"ply", "PLY magic")
+        except RuntimeError as e:
+            if "7.7" not in str(e):
+                raise
+            print(f"  PLY skipped: {e}")
 
         # --- an assembly: two occurrences of one part (instanced) + a second
         d.call("add_part", name="pin")

@@ -97,7 +97,12 @@ if(TARGET fem_gpu)
     # split for the TopologyOptimize case was tried and reverted: its flake
     # was fp32 run-to-run nondeterminism, not load — fixed by right-sizing
     # the test's compliance tolerance instead.)
-    catch_discover_tests(femgpu_tests PROPERTIES RESOURCE_LOCK gpu)
+    # SKIP_RETURN_CODE 4 is Catch2's SKIP(): every femgpu case self-skips when
+    # there is no usable compute device, but without this ctest reports those
+    # skips as FAILURES — which is what a GPU-less machine (a container, a CI
+    # runner) sees.
+    catch_discover_tests(femgpu_tests
+                         PROPERTIES RESOURCE_LOCK gpu SKIP_RETURN_CODE 4)
 endif()
 
 # GUI smoke tests drive the real app through ImGui Test Engine. They go

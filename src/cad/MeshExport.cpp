@@ -8,7 +8,16 @@
 #include <Quantity_ColorRGBA.hxx>
 #include <RWGltf_CafWriter.hxx>
 #include <RWObj_CafWriter.hxx>
+#include <Standard_Version.hxx>
+// RWPly_CafWriter arrived in OCC 7.7; Ubuntu 24.04 still ships 7.6.3, and
+// this include is what broke that build. PLY is the least-used of the three
+// visual formats, so it degrades to a clear refusal rather than costing the
+// whole distro path (same spirit as the STEP/STL library renaming handled in
+// CMakeLists.txt).
+#if OCC_VERSION_HEX >= 0x070700
+#define DESIGNER_HAVE_PLY_WRITER 1
 #include <RWPly_CafWriter.hxx>
+#endif
 #include <TColStd_IndexedDataMapOfStringString.hxx>
 #include <TDF_Label.hxx>
 #include <TDF_LabelSequence.hxx>
@@ -26,6 +35,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <string>
 
 namespace MeshExport {
 namespace {
@@ -128,8 +138,16 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
       RWObj_CafWriter writer(path.c_str());
       ok = writer.Perform(doc, fileInfo, progress);
     } else {
+#ifdef DESIGNER_HAVE_PLY_WRITER
       RWPly_CafWriter writer(path.c_str());
       ok = writer.Perform(doc, fileInfo, progress);
+#else
+      if (error) {
+        *error = "PLY export needs OpenCASCADE 7.7 or newer; this build has " +
+                 std::string(OCC_VERSION_COMPLETE) + ". glTF/GLB and OBJ work.";
+      }
+      return false;
+#endif
     }
     if (!ok && error)
       *error = "the " + ext + " writer failed (see log)";
