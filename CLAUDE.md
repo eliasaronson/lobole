@@ -49,7 +49,11 @@ docs/ui/u10-defaults-and-refusals.md.
   case). Runs `designer --gui-tests --hidden` under Xvfb; **flock-serialized**,
   so concurrent runs (parallel agents) are safe.
 - Known flakes — rerun, don't chase: femgpu "TopologyOptimize…", and
-  `headless_smoke` occasionally under load. Both pass on rerun.
+  `headless_smoke` under ~24-way load (~1 run in 3). The latter is pinned to
+  one assertion — the autosave sidecar not appearing within 60 s in the
+  "Autosave + crash recovery" phase — and the test now dumps the app's log,
+  liveness and state on that failure, so the next occurrence explains itself
+  instead of needing another hunt.
 - Format changes bump `kVersion` (src/core/io/SerializationInternal.h) AND add
   a golden `tests/golden/v<N>-<name>.json/.expect.json` — one per
   bump. No back-compat/migration is required (no users yet); fix any test that

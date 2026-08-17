@@ -1,5 +1,8 @@
 # Import workstream — plan
 
+> Using their API has terms and an annual call budget attached:
+> [onshape-terms.md](onshape-terms.md).
+
 Status: SIGNED OFF 2026-07-19 — I1+I2 approved to build now; I3 follows
 after a real-world STEP checkpoint.
 Scope: moving existing work INTO Designer. Three milestones: structured STEP

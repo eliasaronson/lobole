@@ -3,7 +3,7 @@
 [![CI](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml/badge.svg)](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml)
 
 Project to build an open-source parametric 3D CAD application using Vulkan, ImGui and
-OpenCASCADE — working similarly to professionally used CAD software (Onshape, SolidWorks),
+OpenCASCADE — working the way commercial parametric CAD applications do,
 with transformation checkpoints, global variables, a Python REPL/scripting API, git-based
 versioning, and an interface designed so that LLM assistants can use the same commands as
 human users.
@@ -244,16 +244,16 @@ those in its own license. The distributable notice is also available as
 
 ### Trademarks
 
-Onshape is a trademark of PTC Inc.; SolidWorks and CATIA of Dassault
-Systèmes; Fusion 360 and AutoCAD of Autodesk, Inc.; FreeCAD is a trademark of
-the FreeCAD project. Designer is **not affiliated with, endorsed by, or
-sponsored by** any of them.
+Onshape®, Onshape Full-Cloud CAD® and FeatureScript™ are trademarks of PTC
+Inc.; SolidWorks and CATIA of Dassault Systèmes; Fusion 360 and AutoCAD of
+Autodesk, Inc.; FreeCAD is a trademark of the FreeCAD project. Designer is
+**not affiliated with, endorsed by, or sponsored by** any of them.
 
-Those names appear here only to say true things that cannot be said without
-them: which workflow this application is modelled on, which file formats and
-APIs it interoperates with, and which prior art a design decision came from.
-No third-party logos or branding are used, and no compatibility or
-certification is claimed.
+Where a name is not needed it is not used — this project is described on its
+own terms, not by comparison. What remains is referential: the importer that
+reads Onshape documents, the file formats and APIs it interoperates with, and
+prior art cited in the design documents under `docs/`. No third-party logos or
+branding are used, and no compatibility or certification is claimed.
 
 ### Third-party components
 

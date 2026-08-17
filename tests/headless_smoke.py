@@ -97,10 +97,13 @@ def main():
     env.pop("WAYLAND_DISPLAY", None)
     tmp = tempfile.mkdtemp(prefix="designer_headless_")
     env["XDG_STATE_HOME"] = tmp  # keep unsaved-slot autosaves out of $HOME
+    # Keep the app's own stderr: when the autosave phase flakes under load,
+    # its log is the only witness to what the process was doing.
+    app_log = os.path.join(tmp, "app.log")
     app = subprocess.Popen([binary, "--headless", "--remote", str(port),
                             "--autosave", "1"],
                            env=env, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL)
+                           stderr=open(app_log, "w"))
     try:
         d = Designer.wait_for(port)
         expect(d.call("ping")["ok"], "ping")
@@ -1020,9 +1023,32 @@ def main():
         # The app's 1 s autosave timer is driven by its main loop, which a
         # loaded machine starves; 60 s of budget, and the real elapsed time is
         # printed so a creeping regression is visible before it fails.
-        expect(wait_for_file(crash_project + ".autosave", 60.0,
-                             "autosave sidecar"),
-               "autosave sidecar written while dirty")
+        if not wait_for_file(crash_project + ".autosave", 60.0,
+                             "autosave sidecar"):
+            # This is the suite's one known flake (it fires under 24-way
+            # parallel load, roughly one run in three). 60 s is already
+            # generous for a 1 s timer, so the interesting question is what
+            # the app was doing — answer it here instead of hunting again.
+            alive = app.poll() is None
+            state = {}
+            try:
+                state = d.call("get_state")
+            except Exception as e:  # noqa: BLE001 - diagnostics only
+                state = {"get_state failed": str(e)}
+            listing = sorted(os.listdir(os.path.dirname(crash_project)))
+            tail = ""
+            try:
+                with open(app_log) as fh:
+                    tail = "".join(fh.readlines()[-15:])
+            except OSError:
+                pass
+            expect(False,
+                   "autosave sidecar written while dirty\n"
+                   f"      app alive: {alive} (exit {app.poll()})\n"
+                   f"      features now: {len(state.get('features', []))}"
+                   f"  keys: {sorted(state)[:6]}\n"
+                   f"      dir: {listing}\n"
+                   f"      app log tail:\n{tail}")
         app.send_signal(signal.SIGKILL)
         wait_exit(app, 30, "SIGKILLed app")
 

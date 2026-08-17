@@ -5,7 +5,8 @@
 
 ## Vision
 
-An open-source parametric CAD application in the spirit of Onshape/SolidWorks, with five
+An open-source parametric CAD application in the spirit of the commercial parametric
+modellers, with five
 differentiating goals:
 
 1. **Transformation checkpoints** — named points in the model's regeneration history that
@@ -38,7 +39,7 @@ testability (geometry ops unit-testable without a GUI).
 The app is a working parametric CAD with simulation and drawings; twelve of the
 thirteen workstreams are v1-complete (see the table below). What that means concretely:
 
-**Modeling & core:** the full Onshape loop (sketch → extrude → sketch-on-a-face → cut)
+**Modeling & core:** the full modeling loop (sketch → extrude → sketch-on-a-face → cut)
 plus M1–M8 — datum planes/axes, revolve, loft, sweep, booleans, mirror/linear/circular
 patterns, **toponaming** (persistent face/edge references), fillet/chamfer, shell, hole
 wizard, draft, split and refine — all of them creatable from the GUI as well as
@@ -96,7 +97,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 
 Workstreams 1–2 make it a CAD program; 3 keeps it alive as one; 4–6 are the
 differentiators — the reason this project exists rather than being a worse
-SolidWorks. 7–9 make it pleasant; 10 makes it complete.
+version of a commercial modeller. 7–9 make it pleasant; 10 makes it complete.
 
 ## Sequencing
 

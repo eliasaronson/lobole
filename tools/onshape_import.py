@@ -7,7 +7,9 @@ dimensions, sketches keep their constraints) rather than as frozen geometry.
 
 Credentials: ~/.config/designer/onshape.env (ONSHAPE_ACCESS_KEY /
 ONSHAPE_SECRET_KEY; real environment variables win), sent as HTTP Basic —
-the personal-use path, no OAuth. Onshape wire units are METERS; conversion
+the personal-use path, no OAuth. Onshape meters API calls ANNUALLY (2,500/user
+on a free account) and a separate API Agreement governs non-browser access:
+read docs/interchange/onshape-terms.md before relying on this. Onshape wire units are METERS; conversion
 to mm happens in the mapping layer.
 
 Maps today: variables, sketches (lines/circles/arcs/points/splines + most

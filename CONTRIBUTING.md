@@ -78,7 +78,9 @@ run it before opening a PR if you touched anything in `src/ui`, `src/app` or
 `src/render`.
 
 Known flakes, worth a rerun rather than an investigation: the femgpu
-`TopologyOptimize` gate, and `headless_smoke` under heavy parallel load.
+`TopologyOptimize` gate, and `headless_smoke` under heavy parallel load —
+specifically its autosave-sidecar wait, which prints the app's log and state
+when it trips, so please paste that if you hit it.
 
 ## Formatting and commits
 
