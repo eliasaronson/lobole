@@ -12,6 +12,10 @@ Always wrap:
 nix-shell shell.nix --run "cd build && ninja designer designer_tests"
 ```
 
+That pair is the inner loop. A *fresh* build dir needs plain `ninja` — the
+pair skips `femgpu_tests`, and ctest then fails on a missing executable
+instead of running the suite.
+
 ccache is shared machine-wide, so rebuilds are fast. Do NOT nest a `nix-shell`
 inside another (temp-dir failures) — the tool scripts already self-manage nix.
 

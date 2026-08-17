@@ -63,3 +63,20 @@ result-*
 # Flatpak build state
 packaging/flatpak/.flatpak-builder/
 packaging/flatpak/.build/
+
+# Personal scratch: dogfooding projects, throwaway scripts, exported meshes.
+# Untracked by intent — a `git add -A` used to sweep the whole tree in
+# (it once landed in a commit and had to be reset back out).
+scratch/
+todo.txt
+
+# Locally built distribution artifacts (tens of MB of ELF; rebuild instead).
+# An old one of these is still sitting in this clone's reflog at 619 MB.
+designer-appimage
+*.AppImage
+
+# Assistant/agent working directories and their notes — machine-local
+# configuration, not project source.
+.codex/
+.pi-subagents/
+AGENTS.md
