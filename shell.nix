@@ -6,6 +6,11 @@
 # driver module) — without it the app builds but finds no Vulkan device.
 { pkgs ? import <nixpkgs> { } }:
 
+let
+  # The same trimmed netgen the flake builds against, so a dev build and a
+  # packaged build cannot diverge (nix/netgen-lean.nix explains the trim).
+  netgenLean = import ./nix/netgen-lean.nix pkgs;
+in
 pkgs.mkShell {
   packages = with pkgs; [
     # Toolchain
@@ -32,7 +37,7 @@ pkgs.mkShell {
     opencascade-occt # CAD kernel, found via find_package(OpenCASCADE)
     eigen # PlaneGCS constraint solver + FEM solver
     boost # PlaneGCS (headers only)
-    netgen # FEM tet mesher (nglib + OCC interface, LGPL); gated HAVE_NETGEN
+    netgenLean # FEM tet mesher (nglib + OCC interface, LGPL); HAVE_NETGEN
     spectra # sparse eigensolver for FEM modal analysis (header-only); HAVE_SPECTRA
     dbus # nativefiledialog-extended portal backend (xdg-desktop-portal)
     systemd # libsystemd.pc — dbus-1.pc's Requires.private needs it resolvable

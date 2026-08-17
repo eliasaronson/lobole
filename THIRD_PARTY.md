@@ -29,7 +29,10 @@ The modified source is included in every Designer source release.
 
 - **Version used by the current Nix build:** 6.2.2605
 - **License:** LGPL-2.1-or-later
-- **Linkage:** external, unmodified shared libraries (`nglib`, `ngcore`)
+- **Linkage:** external shared libraries (`nglib`, `ngcore`), unmodified
+  source; the Nix build configures it **without MPI, Python bindings or the
+  Tk GUI** (`nix/netgen-lean.nix`) — features Designer does not use, whose
+  dependencies otherwise account for two thirds of the runtime closure
 - **Source:** <https://github.com/NGSolve/netgen>
 
 Netgen is used by `src/core/fem/FemMesher.cpp`. Builds without Netgen remain

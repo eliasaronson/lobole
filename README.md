@@ -160,9 +160,10 @@ the interface is **unauthenticated and can read and write files**. A container
 with a namespaced network is the case that is for; do not publish that port to
 a network you do not trust.
 
-The image is ~4 GB, most of which is not CAD: Netgen's MPI and Python
-bindings pull in numpy and gfortran transitively. Trimming that is a known
-follow-up.
+The image is ~1.1 GB (169 MB compressed), nearly all of it the CAD kernel.
+Netgen is built without MPI, Python bindings and its Tk GUI — none of which
+Designer uses, and which together dragged numpy and a Fortran compiler into
+every runtime closure; see `nix/netgen-lean.nix`.
 
 ## Testing
 

@@ -35,10 +35,14 @@
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
 
+      # Netgen minus MPI/python/GUI — see the file for what that saves and
+      # why deleting the files afterwards does not work.
+      netgenLean = import ./nix/netgen-lean.nix pkgs;
+
       # Everything the app links against at build/run time. Mirrors the
       # `Libraries` block of shell.nix. Kept in a `let` so the package and the
       # dev shell share one list and can't drift.
-      runtimeDeps = with pkgs; [
+      runtimeDeps = (with pkgs; [
         vulkan-headers
         vulkan-loader
         glfw
@@ -48,13 +52,12 @@
         opencascade-occt # CAD kernel — find_package(OpenCASCADE)
         eigen # PlaneGCS + FEM solver
         boost # PlaneGCS (headers)
-        netgen # FEM tet mesher (HAVE_NETGEN), LGPL — dynamically linked
         spectra # sparse eigensolver (HAVE_SPECTRA), header-only
         dbus # nativefiledialog-extended xdg-desktop-portal backend
         systemd # libsystemd.pc — dbus-1.pc Requires.private needs it resolvable
         xorg.libX11 # non-blocking XMapWindow path (main.cpp)
         catch2_3 # find_package(Catch2) runs at configure even for the app target
-      ];
+      ]) ++ [ netgenLean ];
 
       designer = pkgs.stdenv.mkDerivation {
         pname = "designer";
