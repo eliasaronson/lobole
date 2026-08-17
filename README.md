@@ -12,20 +12,56 @@ See [docs/roadmap.md](docs/roadmap.md) for the current state and the long-term p
 
 ## Requirements
 
-System packages (Ubuntu 24.04):
+Designer builds on any Linux with the libraries below; two paths are verified
+continuously, and the rest is a matter of your distribution's package names.
+
+**Ubuntu 24.04** — this exact list is what CI installs on every push, so it
+cannot rot:
 
 ```
-sudo apt install cmake build-essential libvulkan-dev glslc libglfw3-dev libglm-dev \
+sudo apt install cmake ninja-build build-essential python3 \
+    libvulkan-dev glslc libglfw3-dev libglm-dev \
     libspdlog-dev libgtk-3-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
     libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-modeling-data-dev \
     libocct-foundation-dev libocct-ocaf-dev libocct-visualization-dev
 ```
 
-On NixOS, `shell.nix` provides everything instead: run `nix-shell` in the repo root.
-(The Vulkan ICD comes from the system config — `hardware.graphics.enable = true` plus
-your GPU driver module — not from the shell.)
+**NixOS / Nix** — `shell.nix` pins every dependency including the optional
+ones: `nix-shell` in the repo root, and nothing to install. (The Vulkan ICD
+comes from your system config — `hardware.graphics.enable = true` plus your
+GPU driver module — not from the shell.)
 
-Vendored dependencies (ImGui, nativefiledialog) are git submodules:
+**Flatpak** — distribution-independent, and the way to get a GPU-accelerated
+build without matching system libraries: `tools/flatpak-build.sh`
+(manifest in `packaging/flatpak/`).
+
+**Other distributions** — there is no curated package list, but the
+requirements are ordinary: a C++23 compiler, CMake ≥ 3.14, Vulkan headers +
+loader + `glslc`, GLFW, GLM, spdlog, nlohmann-json, Eigen 3.3+, Boost headers,
+GTK 3 (file dialogs) and OpenCASCADE 7.6+ (foundation, modeling data,
+modeling algorithms, data exchange, OCAF, visualization). The Ubuntu list
+above is the reference for *what*; your package manager decides the names.
+
+**Windows** cross-compiles from Linux (see `packaging/windows/`). **macOS** is
+not supported — no one has built it there.
+
+### Optional dependencies, and what you lose without them
+
+CMake finds these if present and prints a warning if not; the app builds and
+runs either way.
+
+| Missing | Effect |
+| --- | --- |
+| **Netgen** | No FEM meshing — the simulation workspace opens and `run_study` errors. Not in Ubuntu's repos; `shell.nix` and the Flatpak provide it. |
+| **Spectra** | No modal analysis (natural frequencies). Static stress still works. |
+| **Dear ImGui Test Engine** | Deliberate, via `-DENABLE_TEST_ENGINE=OFF`; see below. |
+
+So an apt-based build gives you the whole CAD application without the
+simulation workstream. If you want FEM, use Nix or the Flatpak, or build
+Netgen and Spectra yourself and re-run CMake.
+
+Vendored dependencies (Dear ImGui, Dear ImGui Test Engine, nativefiledialog)
+are git submodules — clone with `--recurse-submodules`, or:
 
 ```
 git submodule update --init --recursive
@@ -81,16 +117,18 @@ cd build
 ## Testing
 
 ```
-cd build
-ctest              # everything (unit + GUI)
-ctest -LE gui      # unit tests only (safe on headless machines)
-./designer --gui-tests   # GUI suite directly, with verbose log
+ctest --test-dir build -LE gui -j$(nproc)   # headless: no GPU, no display
+./tools/gui-tests-xvfb.sh                   # the GUI suite on a virtual display
+./tools/gui-tests-xvfb.sh -f <pattern>      # ...one case
 ```
 
-Unit tests are Catch2 against the GUI-free `designer_core` library. GUI tests
-drive the real application through
+The headless suite is Catch2 against the GUI-free `designer_core` library plus
+Python integration smokes driving `designer --headless`; it is what CI runs on
+every push. The GUI suite drives the real application through
 [ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) (simulated
-mouse/keyboard on the actual UI) and need a display.
+mouse and keyboard on the actual UI) and needs a GPU — `gui-tests-xvfb.sh`
+supplies the display and serializes concurrent runs with a lock. Plain `ctest`
+with no `-LE gui` will try to run the display-gated tests too.
 
 ## Sanitizers & static analysis
 
@@ -136,11 +174,24 @@ python3 tools/designer_remote.py 8437 screenshot '{"path": "/tmp/view.png"}'
 
 Two tiers share the same underlying command layer as the GUI: semantic
 methods (`get_state`, `add/modify/delete_feature` using the project-file JSON
-format, `undo`/`redo`, project I/O, `import_step`, `select_face`, `fit_view`)
-and human-parity UI actions executed through the embedded test engine
-(`menu_click`, `item_click`, `item_input`, `viewport_click`, `viewport_drag`,
-`key_press`, `scroll`), plus `screenshot`. See `tools/designer_remote.py` and
-`tests/remote_smoke.py` for reference usage.
+format, `undo`/`redo`, project I/O, `import_step`, `select_face`, `fit_view`,
+`measure`, `mass_properties`) and human-parity UI actions executed through the
+embedded test engine (`menu_click`, `item_click`, `item_input`,
+`viewport_click`, `viewport_drag`, `key_press`, `scroll`), plus `screenshot`.
+See `tools/designer_remote.py` and `tests/remote_smoke.py` for reference usage.
+
+`--headless` runs the whole semantic tier with no GPU and no display — full
+modeling, measurement and export — which is what CI and scripted work use:
+
+```
+./designer --headless --remote 8437
+```
+
+Running instances **announce themselves**, so a client finds the app rather
+than being told a port; `ping` reports which project is open, whether it has
+unsaved changes, and whether the UI-action tier is available in this build.
+MCP clients (Claude and others) get the same surface through
+`tools/designer_mcp.py` — see [`docs/scripting/mcp.md`](docs/scripting/mcp.md).
 
 ## License
 

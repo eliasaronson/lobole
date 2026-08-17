@@ -19,6 +19,14 @@ instead of running the suite.
 ccache is shared machine-wide, so rebuilds are fast. Do NOT nest a `nix-shell`
 inside another (temp-dir failures) — the tool scripts already self-manage nix.
 
+**Grep build output for `FAILED`, not just `error:`.** A nix GC can collect the
+ccache derivation the CMake cache points at; every compile then dies with
+`ccache: No such file or directory`, which an `error:`-only filter reads as
+success. Fix: `nix-shell shell.nix --run "cd build && cmake -UCCACHE_PROGRAM
+-UCMAKE_CXX_COMPILER_LAUNCHER -UCMAKE_C_COMPILER_LAUNCHER ."`. The same GC
+leaves binaries linked against collected store paths (`libnglib.so` missing) —
+relink to fix.
+
 **Formatting:** `.clang-format` (LLVM, 2-space, 80-col) governs C/C++. Run
 `tools/setup-hooks.sh` once per clone to enable the `.githooks/pre-commit` hook,
 which clang-formats-checks only the staged hunks — keeps new code formatted
@@ -36,7 +44,7 @@ docs/ui/u10-defaults-and-refusals.md.
 ## Tests
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  (~60s; the SIMP topology-optimization gate dominates the wall-clock).
+  (~2 min for 586 tests; the SIMP topology-optimization gate dominates).
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` (`-f <pattern>` filters a
   case). Runs `designer --gui-tests --hidden` under Xvfb; **flock-serialized**,
   so concurrent runs (parallel agents) are safe.
@@ -57,6 +65,10 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   runs the real renderer offscreen under Xvfb (full materials/shadows/SSAO). Use
   a scratch port (NOT 8799). One-shot: `headless-preview.sh --render PROJECT OUT.png <port>`.
 - **Non-visual checks need no GPU**: `build/designer --headless --remote <port>`.
+- **Don't guess ports**: every instance announces itself in
+  `~/.local/state/designer/instances/<port>.json` (`Designer.instances()` in
+  the python client). `ping` reports the port, the open project, whether it is
+  dirty, and whether ui_action is available in that build.
 - Drive any of them with `python3` importing `Designer` from
   `tools/designer_remote.py`, or the `designer` MCP tools. Screenshots come back
   as images — actually look at them; verify volumes with real numbers.
