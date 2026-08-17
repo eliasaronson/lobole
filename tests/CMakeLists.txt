@@ -230,6 +230,22 @@ add_test(NAME replay_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(replay_smoke PROPERTIES TIMEOUT 300)
 
+# The MCP server has to at least COMPILE, in every run and in CI. mcp_smoke
+# below is gui-labeled (it needs a live app and the python mcp SDK), so a
+# plain syntax error in the server shipped undetected for four days in August
+# 2026 — nothing on the default path ever imported the file. This costs
+# milliseconds and needs neither a display nor the SDK.
+add_test(NAME mcp_server_compiles
+         COMMAND python3 -m py_compile
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer_mcp.py)
+set_tests_properties(mcp_server_compiles PROPERTIES TIMEOUT 60)
+
+# Same for the python client every script and smoke test imports.
+add_test(NAME py_client_compiles
+         COMMAND python3 -m py_compile
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer_remote.py)
+set_tests_properties(py_client_compiles PROPERTIES TIMEOUT 60)
+
 # Models a bracket through the MCP server (stdio) over the same live app.
 # Skips (77) when the python mcp SDK is not installed.
 add_test(NAME mcp_smoke

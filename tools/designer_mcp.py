@@ -283,9 +283,13 @@ see every knob, and an explicit offer to adjust any of them.
 
 mcp = FastMCP(
     "designer",
-    instructions="Tools for driving a running Designer CAD instance. "
-    "Read the modeling-workflow prompt before modeling. Semantic tools are "
-    "the interface; ui_action is only for driving/testing the GUI itself.",
+    instructions="Tools for driving a running Designer CAD instance. Read the "
+    "modeling-workflow prompt before modeling. The listed tools are the "
+    "conversational surface; EVERY other RPC (assemblies, drawings, studies, "
+    "configurations, sketch constraints, exports, raw GUI actions) is reached "
+    "with rpc('method', {...}) and documented by help('method'). For building "
+    "a part with loops or computed arguments, a Python script against "
+    "tools/designer_remote.py beats a tool call per step.",
 )
 
 _client = None
@@ -316,6 +320,50 @@ def _call(method, **params):
 # ---------------------------------------------------------------------------
 # Inspect
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# The exposed surface, and the reference behind it
+#
+# Every RPC the app serves used to be its own MCP tool: 118 of them, ~34k
+# characters of descriptions that every client loaded before asking a single
+# question. Most were thin wrappers around one `_call`, and the ones an
+# assistant reaches for in a conversation are a couple of dozen — the rest are
+# authoring calls that a script does better (a loop with logic between the
+# steps, which a tool call per step cannot express).
+#
+# So the tool list is now the conversational surface plus two meta tools:
+#
+#   rpc(method, params)  — call ANY of the app's RPCs, including every one
+#                          that used to be a tool. Where a wrapper exists it
+#                          still runs, so the argument massaging and the
+#                          friendly defaults are unchanged.
+#   help(method)         — the prose that used to sit in that tool's
+#                          description, on demand instead of always.
+#
+# Nothing was deleted: @_reference keeps the wrapper and its documentation,
+# it just does not spend context announcing itself.
+# ---------------------------------------------------------------------------
+
+_REFERENCE = {}  # method -> {"doc": str, "fn": callable}
+
+
+def _reference(description):
+    """Keep a wrapper and its prose, without registering it as an MCP tool."""
+    def wrap(fn):
+        _REFERENCE[fn.__name__] = {"doc": description, "fn": fn}
+        return fn
+    return wrap
+
+
+# The tools this server announces, for help()'s index. Kept next to the
+# meta tools rather than derived from the FastMCP registry, which is private.
+_EXPOSED = {
+    "describe", "get_state", "check_geometry", "measure", "mass_properties",
+    "list_elements", "list_variables", "set_variable", "screenshot",
+    "render_still", "view", "set_camera", "set_section", "set_render_options",
+    "new_project", "open_project", "save_project", "export_stl", "export_step",
+    "add_feature", "modify_feature", "delete_feature", "undo", "rpc", "help",
+}
 
 @mcp.tool(description="API introspection — call this FIRST to learn the "
           "surface. Top-level keys: methods (name + one-line doc + "
@@ -366,7 +414,7 @@ def set_section(enabled: bool = True, base_plane: str = "xy",
                  offset=offset)
 
 
-@mcp.tool(description="Cross-section area where a plane cuts through all "
+@_reference(description="Cross-section area where a plane cuts through all "
           "bodies (inspection). Plane: base_plane 'xy'|'xz'|'yz' + offset, "
           "or explicit origin+normal. Returns {area}. Use to check wall "
           "thickness / material at a cut.")
@@ -377,7 +425,7 @@ def section(base_plane: str = "xy", offset: float = 0.0,
     return _call("section", base_plane=base_plane, offset=offset)
 
 
-@mcp.tool(description="Interference (clash) check: returns {clash: bool, "
+@_reference(description="Interference (clash) check: returns {clash: bool, "
           "volume} — the volume of the overlap. On a PART tab a/b are body "
           "indices. On an active ASSEMBLY tab a/b are occurrence ids (int) "
           "or occurrence names (str); each occurrence's part bodies are "
@@ -416,7 +464,7 @@ def check_geometry(body: int = -1) -> dict:
     return _call("check_geometry", **({"body": body} if body >= 0 else {}))
 
 
-@mcp.tool(description="Project external geometry into a sketch (FreeCAD's "
+@_reference(description="Project external geometry into a sketch (FreeCAD's "
           "ShapeBinder): reference a FACE or EDGE of a body earlier in the "
           "history, projected onto the sketch plane as LOCKED construction "
           "geometry that tracks the source when it moves. Returns "
@@ -503,7 +551,7 @@ def delete_feature(index: int) -> dict:
     return _call("delete_feature", index=index)
 
 
-@mcp.tool(description="Assign a render material. Target ONE of: feature_id "
+@_reference(description="Assign a render material. Target ONE of: feature_id "
           "(the body's created_by from get_state/list_elements) or body (an "
           "index into get_state's bodies — add/cut keep the original creator, "
           "so this recolors everything fused into that body). Slugs: "
@@ -518,7 +566,7 @@ def set_material(material: str, feature_id: int = -1, body: int = -1) -> dict:
 # Sketch
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Add a constraint to a sketch (by feature id), solve, "
+@_reference(description="Add a constraint to a sketch (by feature id), solve, "
           "and regenerate. The solve may move geometry — read positions back "
           "via get_state, never assume.\n\n" + CONSTRAINT_FORMATS)
 def add_constraint(sketch_id: int, kind: str, refs: list,
@@ -530,13 +578,13 @@ def add_constraint(sketch_id: int, kind: str, refs: list,
     return _call("add_constraint", **params)
 
 
-@mcp.tool(description="Delete a sketch entity by id; constraints referencing "
+@_reference(description="Delete a sketch entity by id; constraints referencing "
           "it are dropped (count returned as dropped_constraints).")
 def delete_entity(sketch_id: int, entity_id: int) -> dict:
     return _call("delete_entity", sketch_id=sketch_id, entity_id=entity_id)
 
 
-@mcp.tool(description="Mirror sketch entities across a line entity. sources: "
+@_reference(description="Mirror sketch entities across a line entity. sources: "
           "entity ids; axis: the mirror line's entity id (construction lines "
           "work). link=true keeps mirrors following their sources. Returns "
           "generated entity ids.")
@@ -546,14 +594,14 @@ def mirror(sketch_id: int, sources: list, axis: int,
                  link=link)
 
 
-@mcp.tool(description="Fillet the corner where two sketch lines meet with an "
+@_reference(description="Fillet the corner where two sketch lines meet with an "
           "arc of the given radius. Returns the arc's entity id (arc_id).")
 def fillet(sketch_id: int, line1: int, line2: int, radius: float) -> dict:
     return _call("fillet", sketch_id=sketch_id, line1=line1, line2=line2,
                  radius=radius)
 
 
-@mcp.tool(description="Repeat sketch entities in a linear or circular "
+@_reference(description="Repeat sketch entities in a linear or circular "
           "pattern. sources: entity ids; count includes the originals. "
           "Linear: step=[du,dv] spacing. Circular: circular=true, "
           "center=[u,v], angle = total sweep in degrees. link=true keeps "
@@ -572,7 +620,7 @@ def pattern(sketch_id: int, sources: list, count: int,
     return _call("pattern", **params)
 
 
-@mcp.tool(description="Offset a connected chain of sketch entities by a "
+@_reference(description="Offset a connected chain of sketch entities by a "
           "distance (sign picks the side). chain: entity ids in order. "
           "join_arc=true rounds convex corners. Returns generated entity ids.")
 def offset(sketch_id: int, chain: list, distance: float,
@@ -585,7 +633,7 @@ def offset(sketch_id: int, chain: list, distance: float,
 # Reference images (sketch underlays)
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Import a raster image (PNG/JPEG/BMP) into a sketch (by "
+@_reference(description="Import a raster image (PNG/JPEG/BMP) into a sketch (by "
           "feature id) as a reference underlay to trace geometry over. path is "
           "read by the running app (must be reachable by it). The image is "
           "centered on 'at' (default plane origin [0,0]) at a default scale; "
@@ -602,7 +650,7 @@ def add_reference_image(sketch_id: int, path: str, at: list | None = None,
     return _call("add_reference_image", **params)
 
 
-@mcp.tool(description="Scale a sketch reference image so its two picked "
+@_reference(description="Scale a sketch reference image so its two picked "
           "plane-UV points p1,p2 are 'distance' plane units apart (p1 held "
           "fixed). This is how you match an image's printed dimension: click "
           "the two ends of a dimension line, pass its real length. "
@@ -616,7 +664,7 @@ def calibrate_reference_image(sketch_id: int, image_id: int, p1: list,
                  align=align)
 
 
-@mcp.tool(description="Edit a sketch reference image (by image_id): pass any "
+@_reference(description="Edit a sketch reference image (by image_id): pass any "
           "of opacity (0..1), hidden (bool), rotation (radians), "
           "units_per_pixel, or origin [u,v] (plane-UV of the image's (0,0) "
           "pixel corner). Only the fields you pass change.")
@@ -640,7 +688,7 @@ def set_reference_image(sketch_id: int, image_id: int,
     return _call("set_reference_image", **params)
 
 
-@mcp.tool(description="Remove a sketch reference image by image_id.")
+@_reference(description="Remove a sketch reference image by image_id.")
 def delete_reference_image(sketch_id: int, image_id: int) -> dict:
     return _call("delete_reference_image", sketch_id=sketch_id,
                  image_id=image_id)
@@ -667,7 +715,7 @@ def set_variable(name: str, expression: str, comment: str = "",
     return _call("set_variable", **params)
 
 
-@mcp.tool(description="Rename a variable and rewrite every expression that "
+@_reference(description="Rename a variable and rewrite every expression that "
           "references it (a project variable's references span all parts). "
           "scope auto-detects (project first, then the active part's local) "
           "when omitted.")
@@ -678,7 +726,7 @@ def rename_variable(name: str, new_name: str, scope: str = "") -> dict:
     return _call("rename_variable", **params)
 
 
-@mcp.tool(description="Delete a variable. Refused (with the referencing fields "
+@_reference(description="Delete a variable. Refused (with the referencing fields "
           "listed) while anything still uses it — a project variable checks "
           "every part. scope auto-detects (project first, then the active "
           "part's local) when omitted.")
@@ -693,7 +741,7 @@ def delete_variable(name: str, scope: str = "") -> dict:
 # Configurations (parametric variants of the active part OR assembly)
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Add a configuration to the active part or assembly — a "
+@_reference(description="Add a configuration to the active part or assembly — a "
           "named variant. On a part it overrides variables / suppresses "
           "features; on an assembly it suppresses occurrences. Empty until you "
           "set_configuration it. Returns its id.")
@@ -701,20 +749,20 @@ def add_configuration(name: str = "") -> dict:
     return _call("add_configuration", **({"name": name} if name else {}))
 
 
-@mcp.tool(description="Remove a configuration by id (falls back to base if it "
+@_reference(description="Remove a configuration by id (falls back to base if it "
           "was active).")
 def remove_configuration(id: int) -> dict:
     return _call("remove_configuration", id=id)
 
 
-@mcp.tool(description="List the active part's configurations with each one's "
+@_reference(description="List the active part's configurations with each one's "
           "parameter overrides and suppressed feature ids, and which is active "
           "(0 = base, the model as authored).")
 def list_configurations() -> dict:
     return _call("list_configurations")
 
 
-@mcp.tool(description="Edit a configuration (by id). On a PART: "
+@_reference(description="Edit a configuration (by id). On a PART: "
           "parameter_overrides = a list of {name, expression} replacing the "
           "config's variable overrides (e.g. {'name':'depth','expression':"
           "'12'}); suppressed_features = feature ids to suppress. On an "
@@ -737,7 +785,7 @@ def set_configuration(id: int, name: str = "",
     return _call("set_configuration", **params)
 
 
-@mcp.tool(description="Switch the active configuration of the part (0 = base). "
+@_reference(description="Switch the active configuration of the part (0 = base). "
           "Regenerates against it — subsequent geometry, export, drawings and "
           "FEM all reflect the active configuration. Returns the resulting body "
           "count and volumes.")
@@ -749,7 +797,7 @@ def set_active_configuration(id: int) -> dict:
 # History & project
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Suppress or unsuppress a feature (by feature id): "
+@_reference(description="Suppress or unsuppress a feature (by feature id): "
           "suppressed features are skipped by regeneration but keep their "
           "parameters; anything referencing their outputs errors like a "
           "deleted reference. One undoable edit.")
@@ -758,7 +806,7 @@ def suppress_feature(feature_id: int, suppressed: bool) -> dict:
                  suppressed=suppressed)
 
 
-@mcp.tool(description="Move the rollback bar: regeneration executes only "
+@_reference(description="Move the rollback bar: regeneration executes only "
           "features [0, index); -1 = end. Features after the bar keep their "
           "params but contribute nothing — use it to inspect intermediate "
           "history states. Not undoable (a view, not an edit); "
@@ -773,7 +821,7 @@ def undo() -> dict:
     return _call("undo")
 
 
-@mcp.tool(description="Redo the last undone edit.")
+@_reference(description="Redo the last undone edit.")
 def redo() -> dict:
     return _call("redo")
 
@@ -816,14 +864,14 @@ def export_stl(path: str, body: int = -1, deflection: float = 0.1) -> dict:
                  **({"body": body} if body >= 0 else {}))
 
 
-@mcp.tool(description="Export to native OCC BREP text (exact, no "
+@_reference(description="Export to native OCC BREP text (exact, no "
           "tessellation) — useful for kernel bug reports.")
 def export_brep(path: str, body: int = -1) -> dict:
     return _call("export_brep", path=path,
                  **({"body": body} if body >= 0 else {}))
 
 
-@mcp.tool(description="Export the tessellated mesh to glTF (.glb/.gltf), OBJ, "
+@_reference(description="Export the tessellated mesh to glTF (.glb/.gltf), OBJ, "
           "or PLY, chosen by the path extension — for viewers (Blender, web, "
           "engines), not CAD round-trips. Materials carry through (glTF is "
           "PBR). Works on a part OR the active assembly (all occurrences at "
@@ -832,31 +880,31 @@ def export_visual(path: str, deflection: float = 0.1) -> dict:
     return _call("export_visual", path=path, deflection=deflection)
 
 
-@mcp.tool(description="List the project's tabs (parts and assemblies) with "
+@_reference(description="List the project's tabs (parts and assemblies) with "
           "each one's type and stable id, and which is active. Modeling tools "
           "act on the active part; assembly tools on the active assembly.")
 def list_parts() -> dict:
     return _call("list_parts")
 
 
-@mcp.tool(description="Add a new empty part to the project and switch to it "
+@_reference(description="Add a new empty part to the project and switch to it "
           "(subsequent modeling goes into it). Returns its index.")
 def add_part(name: str = "") -> dict:
     return _call("add_part", **({"name": name} if name else {}))
 
 
-@mcp.tool(description="Switch the active part by index (from list_parts). "
+@_reference(description="Switch the active part by index (from list_parts). "
           "The document tools then act on that part.")
 def set_active_part(index: int) -> dict:
     return _call("set_active_part", index=index)
 
 
-@mcp.tool(description="Delete a part by index (never the last one).")
+@_reference(description="Delete a part by index (never the last one).")
 def delete_part(index: int) -> dict:
     return _call("delete_part", index=index)
 
 
-@mcp.tool(description="Rename an existing part/assembly/drawing tab so the "
+@_reference(description="Rename an existing part/assembly/drawing tab so the "
           "default 'Part 1' isn't permanent (it feeds BOM + add_occurrence). "
           "`part` is a name, stable id, or slot index (from list_parts). "
           "Occurrences reference parts by stable id, so the rename is safe.")
@@ -869,7 +917,7 @@ def rename_part(part, new_name: str) -> dict:
 # parts. list_parts reports each tab's type ("part"/"assembly") and stable id.
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Add a new empty ASSEMBLY tab to the project and switch "
+@_reference(description="Add a new empty ASSEMBLY tab to the project and switch "
           "to it. An assembly places copies (occurrences) of parts by "
           "transform. Part-editing tools do not act on an assembly tab — use "
           "add_occurrence. Returns its index and stable id.")
@@ -877,7 +925,7 @@ def add_assembly(name: str = "") -> dict:
     return _call("add_assembly", **({"name": name} if name else {}))
 
 
-@mcp.tool(description="Place a part into the ACTIVE assembly as an occurrence. "
+@_reference(description="Place a part into the ACTIVE assembly as an occurrence. "
           "part = the part's name (referenced by stable id, so renames are "
           "safe). transform = {position:[x,y,z], orientation:[x,y,z,w] "
           "quaternion}; omitted = identity. fixed=true grounds it as the "
@@ -892,42 +940,42 @@ def add_occurrence(part: str, name: str = "", transform: dict | None = None,
     return _call("add_occurrence", **params)
 
 
-@mcp.tool(description="Remove an occurrence from the active assembly by id.")
+@_reference(description="Remove an occurrence from the active assembly by id.")
 def remove_occurrence(id: int) -> dict:
     return _call("remove_occurrence", id=id)
 
 
-@mcp.tool(description="Reposition an occurrence. transform = {position:[x,y,z], "
+@_reference(description="Reposition an occurrence. transform = {position:[x,y,z], "
           "orientation:[x,y,z,w] quaternion}. Undoable. Returns the occurrence.")
 def set_occurrence_transform(id: int, transform: dict) -> dict:
     return _call("set_occurrence_transform", id=id, transform=transform)
 
 
-@mcp.tool(description="Show or hide an occurrence (hidden ones are not "
+@_reference(description="Show or hide an occurrence (hidden ones are not "
           "rendered or pickable). Undoable.")
 def set_occurrence_visible(id: int, visible: bool) -> dict:
     return _call("set_occurrence_visible", id=id, visible=visible)
 
 
-@mcp.tool(description="Ground an occurrence (fixed=true) or free it. A fixed "
+@_reference(description="Ground an occurrence (fixed=true) or free it. A fixed "
           "occurrence is the assembly's immovable anchor. Undoable.")
 def set_occurrence_fixed(id: int, fixed: bool) -> dict:
     return _call("set_occurrence_fixed", id=id, fixed=fixed)
 
 
-@mcp.tool(description="Rename an occurrence (its display label; the referenced "
+@_reference(description="Rename an occurrence (its display label; the referenced "
           "part is unchanged). Undoable.")
 def rename_occurrence(id: int, name: str) -> dict:
     return _call("rename_occurrence", id=id, name=name)
 
 
-@mcp.tool(description="List the active assembly's occurrences: id, name, "
+@_reference(description="List the active assembly's occurrences: id, name, "
           "part_id, transform, visible, fixed.")
 def list_occurrences() -> dict:
     return _call("list_occurrences")
 
 
-@mcp.tool(description="Add a MATE between two occurrences of the active "
+@_reference(description="Add a MATE between two occurrences of the active "
           "assembly (A3). type is 'fastened' (rigid), 'revolute' (rotate "
           "about Z), 'slider' (slide along Z), 'cylindrical' (rotate AND "
           "slide), 'planar' (slide in-plane via dx/dy + spin), or 'ball' "
@@ -963,7 +1011,7 @@ def add_mate(type: str, a: dict, b: dict, name: str = "",
     return _call("add_mate", **params)
 
 
-@mcp.tool(description="Adjust a mate (by id) and re-solve — how you MOVE a "
+@_reference(description="Adjust a mate (by id) and re-solve — how you MOVE a "
           "mechanism numerically. rotation (revolute/cylindrical angle, "
           "radians), offset (slide along +Z of a's connector normal: "
           "slider/cylindrical DOF, revolute axial seat depth, planar gap; "
@@ -984,20 +1032,20 @@ def set_mate(id: int, rotation: float | None = None, offset: float | None = None
     return _call("set_mate", **params)
 
 
-@mcp.tool(description="Remove a mate (by id) and re-solve. Occurrences it "
+@_reference(description="Remove a mate (by id) and re-solve. Occurrences it "
           "positioned keep their last solved pose.")
 def remove_mate(id: int) -> dict:
     return _call("remove_mate", id=id)
 
 
-@mcp.tool(description="List the active assembly's mates: id, name, type, the "
+@_reference(description="List the active assembly's mates: id, name, type, the "
           "two connectors, DOF pose, and a per-mate 'error' when a connector "
           "ref is dangling or the mate is over-constrained.")
 def list_mates() -> dict:
     return _call("list_mates")
 
 
-@mcp.tool(description="Re-solve the active assembly's mates (place every "
+@_reference(description="Re-solve the active assembly's mates (place every "
           "mated, non-fixed occurrence by frame alignment). Returns the "
           "count of errored mates and each mate's status. Solves run "
           "automatically after mate/occurrence edits; call this to inspect.")
@@ -1005,25 +1053,25 @@ def solve_assembly() -> dict:
     return _call("solve_assembly")
 
 
-@mcp.tool(description="Add a named exploded view to the active assembly "
+@_reference(description="Add a named exploded view to the active assembly "
           "(A4). Returns its id. Views are persistent; apply one with "
           "set_explode.")
 def add_exploded_view(name: str = "Exploded") -> dict:
     return _call("add_exploded_view", name=name)
 
 
-@mcp.tool(description="Remove an exploded view by id.")
+@_reference(description="Remove an exploded view by id.")
 def remove_exploded_view(id: int) -> dict:
     return _call("remove_exploded_view", id=id)
 
 
-@mcp.tool(description="List the active assembly's exploded views (id, name, "
+@_reference(description="List the active assembly's exploded views (id, name, "
           "per-occurrence offsets) plus the applied view id and factor.")
 def list_exploded_views() -> dict:
     return _call("list_exploded_views")
 
 
-@mcp.tool(description="Set one occurrence's world-space offset in an "
+@_reference(description="Set one occurrence's world-space offset in an "
           "exploded view (creates the step if missing). offset is [x,y,z] "
           "at factor 1.")
 def set_explode_step(view: int, occurrence: int, offset: list) -> dict:
@@ -1031,7 +1079,7 @@ def set_explode_step(view: int, occurrence: int, offset: list) -> dict:
                  offset=offset)
 
 
-@mcp.tool(description="Seed an exploded view radially: every occurrence "
+@_reference(description="Seed an exploded view radially: every occurrence "
           "pushed away from the assembly centroid, scaled by assembly size. "
           "A starting point to refine with set_explode_step. Omit `view` (or "
           "pass 0) to auto-create a fresh exploded view; the returned `view` "
@@ -1040,7 +1088,7 @@ def auto_explode(view: int = 0) -> dict:
     return _call("auto_explode", **({"view": view} if view else {}))
 
 
-@mcp.tool(description="Apply an exploded view to the display (transient, "
+@_reference(description="Apply an exploded view to the display (transient, "
           "never saved): view id (0 = none) and/or factor 0..1. The solved "
           "transforms are untouched — screenshot an exploded assembly with "
           "set_explode + screenshot.")
@@ -1053,7 +1101,7 @@ def set_explode(view: int = -1, factor: float = -1.0) -> dict:
     return _call("set_explode", **args)
 
 
-@mcp.tool(description="Bill of materials for the active assembly (A4): one "
+@_reference(description="Bill of materials for the active assembly (A4): one "
           "row per referenced part with quantity, material, unit/total mass "
           "(grams; null when a body has no material density) and a mass "
           "total. Derived fresh from the document on every call.")
@@ -1061,45 +1109,45 @@ def bom() -> dict:
     return _call("bom")
 
 
-@mcp.tool(description="Write the active assembly's bill of materials to a "
+@_reference(description="Write the active assembly's bill of materials to a "
           "CSV file at `path` (same rows as `bom`).")
 def export_bom(path: str) -> dict:
     return _call("export_bom", path=path)
 
 
-@mcp.tool(description="Import a STEP file's bodies as an Import feature.")
+@_reference(description="Import a STEP file's bodies as an Import feature.")
 def import_step(path: str) -> dict:
     return _call("import_step", path=path)
 
 
-@mcp.tool(description="Snapshot the current document as a named checkpoint "
+@_reference(description="Snapshot the current document as a named checkpoint "
           "(stored beside the project — save_project first). Checkpoint "
           "before risky multi-step edits; restore beats reconstructing.")
 def checkpoint_create(name: str) -> dict:
     return _call("checkpoint_create", name=name)
 
 
-@mcp.tool(description="List the project's checkpoints (name + modified "
+@_reference(description="List the project's checkpoints (name + modified "
           "unix time, newest first).")
 def checkpoint_list() -> dict:
     return _call("checkpoint_list")
 
 
-@mcp.tool(description="Replace the current document with a checkpoint's "
+@_reference(description="Replace the current document with a checkpoint's "
           "state (same project path; the restored state is unsaved until "
           "you save_project).")
 def checkpoint_restore(name: str) -> dict:
     return _call("checkpoint_restore", name=name)
 
 
-@mcp.tool(description="Git history of a directory (.dsgn) project: every "
+@_reference(description="Git history of a directory (.dsgn) project: every "
           "save is a commit, checkpoints are tags (cp/<name>). Returns "
           "{log: [{hash, subject, unix}]}, newest first.")
 def history_log(limit: int = 20) -> dict:
     return _call("history_log", limit=limit)
 
 
-@mcp.tool(description="Restore the project to a commit (hash, tag like "
+@_reference(description="Restore the project to a commit (hash, tag like "
           "'cp/v1', or any git rev) and reload it. History stays linear — "
           "the restored state becomes a new commit on the next save.")
 def history_restore(commit: str) -> dict:
@@ -1129,7 +1177,7 @@ def view(name: str, fit: bool = True) -> dict:
     return _call("view", name=name, fit=fit)
 
 
-@mcp.tool(description="Frame the whole model at the current orientation.")
+@_reference(description="Frame the whole model at the current orientation.")
 def fit_view() -> dict:
     return _call("fit_view")
 
@@ -1152,7 +1200,7 @@ def set_render_options(shadows: bool | None = None, ssao: str | None = None,
     return _call("set_render_options", **params)
 
 
-@mcp.tool(description="Select a B-Rep face. Preferred: by STABLE element name "
+@_reference(description="Select a B-Rep face. Preferred: by STABLE element name "
           "(list_elements), e.g. element='2/g4' — survives regeneration. "
           "Legacy: by render mesh id + face index (get_state bodies[].mesh; "
           "ids change every regeneration). Returns the face normal and "
@@ -1182,14 +1230,14 @@ def set_camera(target: list | None = None, direction: list | None = None,
     return _call("set_camera", **params)
 
 
-@mcp.tool(description="Rebuild the default panel layout (Model left, "
+@_reference(description="Rebuild the default panel layout (Model left, "
           "Properties right, 3D center) — recovery for a wedged or "
           "misdocked panel arrangement, without restarting the app.")
 def reset_layout() -> dict:
     return _call("reset_layout")
 
 
-@mcp.tool(description="Orient the camera to look squarely at the selected "
+@_reference(description="Orient the camera to look squarely at the selected "
           "face (select_face first).")
 def orient_to_face() -> dict:
     return _call("orient_to_face")
@@ -1224,7 +1272,7 @@ def render_still(width: int = 640, height: int = 480, samples: int = 64,
 # re-run explicitly. The whole loop is headless: no GUI needed.
 
 
-@mcp.tool(description="Create a FEM study on the active part. kind = "
+@_reference(description="Create a FEM study on the active part. kind = "
           "'static' (default) | 'modal' | 'topology'. Returns {id, name, "
           "kind}. A study fixes/loads faces and solves for stress.")
 def add_study(name: str = "", kind: str = "") -> dict:
@@ -1236,19 +1284,19 @@ def add_study(name: str = "", kind: str = "") -> dict:
     return _call("add_study", **params)
 
 
-@mcp.tool(description="Delete a study (by id) and its cached results.")
+@_reference(description="Delete a study (by id) and its cached results.")
 def remove_study(study: int) -> dict:
     return _call("remove_study", study=study)
 
 
-@mcp.tool(description="List studies: id, name, evaluated mesh_size, loads, "
+@_reference(description="List studies: id, name, evaluated mesh_size, loads, "
           "refinement count, has_results, and stale (results outdated by an "
           "edit).")
 def list_studies() -> dict:
     return _call("list_studies")
 
 
-@mcp.tool(description="Set a study's name, global mesh size, analysis type, or "
+@_reference(description="Set a study's name, global mesh size, analysis type, or "
           "loads. mesh_size (mm; 0 = auto) may be a number or an expression "
           "string. type is 'static' (stress), 'modal' (natural frequencies), or "
           "'topology' (generative shape). num_modes sets how many modes a modal "
@@ -1272,32 +1320,32 @@ def set_study(study: int, name: str | None = None, mesh_size=None,
     return _call("set_study", **params)
 
 
-@mcp.tool(description="Add a KEEP FACE to a topology study (frozen solid, so a "
+@_reference(description="Add a KEEP FACE to a topology study (frozen solid, so a "
           "bolt boss or bearing seat survives the optimization). face is "
           "{feature_id, element}.")
 def add_keep_face(study: int, face: dict) -> dict:
     return _call("add_keep_face", study=study, face=face)
 
 
-@mcp.tool(description="Remove a keep face ({feature_id, element}) from a "
+@_reference(description="Remove a keep face ({feature_id, element}) from a "
           "topology study.")
 def remove_keep_face(study: int, face: dict) -> dict:
     return _call("remove_keep_face", study=study, face=face)
 
 
-@mcp.tool(description="Add a per-face mesh refinement (smaller elements on one "
+@_reference(description="Add a per-face mesh refinement (smaller elements on one "
           "face). face is {feature_id, element}; size is mm (number or "
           "expression).")
 def add_refinement(study: int, face: dict, size) -> dict:
     return _call("add_refinement", study=study, face=face, size=size)
 
 
-@mcp.tool(description="Remove the refinement on a face ({feature_id, element}).")
+@_reference(description="Remove the refinement on a face ({feature_id, element}).")
 def remove_refinement(study: int, face: dict) -> dict:
     return _call("remove_refinement", study=study, face=face)
 
 
-@mcp.tool(description="Add a boundary condition to a study. type is 'fixed' "
+@_reference(description="Add a boundary condition to a study. type is 'fixed' "
           "(zero displacement), 'force' (a total vector in N over the face), "
           "or 'pressure' (MPa along the inward normal). face is {feature_id, "
           "element}. magnitude is N/MPa (number or expression); direction is "
@@ -1313,18 +1361,18 @@ def add_load(study: int, type: str, face: dict, magnitude=None,
     return _call("add_load", **params)
 
 
-@mcp.tool(description="Remove a load (by id) from a study.")
+@_reference(description="Remove a load (by id) from a study.")
 def remove_load(study: int, load: int) -> dict:
     return _call("remove_load", study=study, load=load)
 
 
-@mcp.tool(description="Mesh a study's bodies without solving (a quick check). "
+@_reference(description="Mesh a study's bodies without solving (a quick check). "
           "Returns per-body node/element counts and worst element quality.")
 def mesh_study(study: int) -> dict:
     return _call("mesh_study", study=study)
 
 
-@mcp.tool(description="Mesh + solve a study now (explicit; never automatic). "
+@_reference(description="Mesh + solve a study now (explicit; never automatic). "
           "A static study returns nodes, elements, max_von_mises_mpa {value, "
           "at, body}, max_displacement_mm, factor_of_safety (vs yield), and "
           "stale:false. A modal study returns per-body frequencies_hz (the "
@@ -1341,7 +1389,7 @@ def run_study(study: int, async_run: bool = False) -> dict:
     return _call("run_study", study=study)
 
 
-@mcp.tool(description="Poll an async topology run. While running, returns "
+@_reference(description="Poll an async topology run. While running, returns "
           "{running:true, iteration, max_iterations, compliance, "
           "volume_fraction}. Once done, {running:false, has_results, converged, "
           "cancelled, iterations, stale}.")
@@ -1349,20 +1397,20 @@ def study_status(study: int) -> dict:
     return _call("study_status", study=study)
 
 
-@mcp.tool(description="Cancel an in-progress topology run (keeps the best "
+@_reference(description="Cancel an in-progress topology run (keeps the best "
           "shape found so far as a 'cancelled' result). Returns {cancelled}.")
 def cancel_study(study: int) -> dict:
     return _call("cancel_study", study=study)
 
 
-@mcp.tool(description="Read a study's cached results (never solves). Same "
+@_reference(description="Read a study's cached results (never solves). Same "
           "summary as run_study plus the current stale flag. For topology: "
           "iterations, converged, volume_fraction, compliance.")
 def study_results(study: int) -> dict:
     return _call("study_results", study=study)
 
 
-@mcp.tool(description="Export a topology study's optimized shape (the "
+@_reference(description="Export a topology study's optimized shape (the "
           "iso-surface, Taubin-smoothed) to a binary STL for 3D printing. "
           "threshold (0..1, 0 = auto volume-matched) sets how much material to "
           "keep; smooth is the number of smoothing passes (default 3). The "
@@ -1376,7 +1424,7 @@ def export_topo_stl(study: int, path: str, threshold: float = 0.0,
                  threshold=threshold, smooth=smooth)
 
 
-@mcp.tool(description="Toggle the topology SHAPE GUIDE: a translucent overlay "
+@_reference(description="Toggle the topology SHAPE GUIDE: a translucent overlay "
           "of a study's optimized shape in the normal modeling workspace, to "
           "re-model clean geometry against. on=false hides it. The opaque "
           "body can hide the guide from most angles — to LOOK at a result, "
@@ -1385,7 +1433,7 @@ def set_topo_ghost(study: int, on: bool = True) -> dict:
     return _call("set_topo_ghost", study=study, on=on)
 
 
-@mcp.tool(description="Show a study's result overlay in the viewport (for a "
+@_reference(description="Show a study's result overlay in the viewport (for a "
           "screenshot). field is 'von_mises', 'displacement', or 'none' for a "
           "static/modal study, or 'shape' (grey optimized iso-surface) / "
           "'density' (colormap) for a topology study. deform_scale exaggerates "
@@ -1414,7 +1462,7 @@ def set_result_display(study: int | None = None, field: str = "von_mises",
 # of a part or assembly. list_parts reports drawing tabs with type "drawing".
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Add a new DRAWING tab (a 2D sheet) and switch to it. "
+@_reference(description="Add a new DRAWING tab (a 2D sheet) and switch to it. "
           "Optional sheet = {size: 'a4'|'a3'|'a2'|'a1'|'a0'|'letter', "
           "landscape: bool, title_block: {project, document, author, date}}. "
           "Views and dimensions are added in later tools. Returns its index, "
@@ -1428,13 +1476,13 @@ def create_drawing(name: str = "", sheet: dict | None = None) -> dict:
     return _call("create_drawing", **params)
 
 
-@mcp.tool(description="List the project's drawing tabs with each one's stable "
+@_reference(description="List the project's drawing tabs with each one's stable "
           "id, index, and view/dimension counts.")
 def list_drawings() -> dict:
     return _call("list_drawings")
 
 
-@mcp.tool(description="Add a projected VIEW of a part to the ACTIVE drawing. "
+@_reference(description="Add a projected VIEW of a part to the ACTIVE drawing. "
           "source = the part's name. orientation = 'front'|'back'|'left'|"
           "'right'|'top'|'bottom'|'iso' (default front). scale = drawing:model "
           "ratio, e.g. 0.5 for 1:2 (default 1.0). position = [x,y] sheet mm "
@@ -1456,12 +1504,12 @@ def add_drawing_view(source: str, orientation: str = "", scale: float = 1.0,
     return _call("add_drawing_view", **params)
 
 
-@mcp.tool(description="Remove a view (by id) from the active drawing.")
+@_reference(description="Remove a view (by id) from the active drawing.")
 def remove_drawing_view(id: int) -> dict:
     return _call("remove_drawing_view", id=id)
 
 
-@mcp.tool(description="Edit a view in place: position [x,y] sheet mm, scale, "
+@_reference(description="Edit a view in place: position [x,y] sheet mm, scale, "
           "name, show_hidden, base_view (0 clears folding). Re-projects. A "
           "folded child's shared axis follows its base — the reply's "
           "effective_position/folded_axes say when a requested coordinate "
@@ -1483,7 +1531,7 @@ def set_drawing_view(id: int, position: list | None = None, scale: float = 0,
     return _call("set_drawing_view", **params)
 
 
-@mcp.tool(description="Edit the active drawing's sheet after creation: size "
+@_reference(description="Edit the active drawing's sheet after creation: size "
           "('a4'..'a0'|'letter', case-insensitive — unknown sizes ERROR), "
           "landscape, title_block fields. Views keep their positions; run "
           "check_drawing to see what no longer fits.")
@@ -1499,7 +1547,7 @@ def set_drawing_sheet(size: str = "", landscape: int = -1,
     return _call("set_drawing_sheet", **params)
 
 
-@mcp.tool(description="Validate the active drawing's sheet layout — the "
+@_reference(description="Validate the active drawing's sheet layout — the "
           "checks a drafter does by eye: every view inside the border, no "
           "view/view or view/title-block overlaps, dimensions on the paper, "
           "nothing dangling or stale. Returns {ok, issues:[{kind, detail, "
@@ -1510,7 +1558,7 @@ def check_drawing(update: bool = True) -> dict:
     return _call("check_drawing", update=update)
 
 
-@mcp.tool(description="Re-project every view of the active drawing (the "
+@_reference(description="Re-project every view of the active drawing (the "
           "explicit hidden-line-removal pass — expensive, never automatic). "
           "Returns per-view curve counts (visible/hidden/silhouettes) and any "
           "projection error. Run after adding views or editing the source part.")
@@ -1518,14 +1566,14 @@ def update_drawing() -> dict:
     return _call("update_drawing")
 
 
-@mcp.tool(description="List the active drawing's views with their orientation, "
+@_reference(description="List the active drawing's views with their orientation, "
           "scale, position, projected curve count, and whether each is stale "
           "(source changed since last projection).")
 def list_drawing_views() -> dict:
     return _call("list_drawing_views")
 
 
-@mcp.tool(description="Export the active drawing to a vector file (path ending "
+@_reference(description="Export the active drawing to a vector file (path ending "
           ".svg or .pdf). Re-projects first so the file reflects the current "
           "geometry, then writes the sheet — border, title block, every view's "
           "visible (solid)/hidden (dashed) edges, and each resolved dimension. "
@@ -1535,7 +1583,7 @@ def export_drawing(path: str) -> dict:
     return _call("export_drawing", path=path)
 
 
-@mcp.tool(description="List a projected view's dimensionable geometry: each "
+@_reference(description="List a projected view's dimensionable geometry: each "
           "distinct source edge / silhouette with the `ref` to pass to "
           "add_drawing_dim, its type (line/circle/curve), sheet-mm endpoints "
           "or circle centre+radius, `visible`, `closed` (a full circle = a "
@@ -1546,7 +1594,7 @@ def list_drawing_geometry(view: int) -> dict:
     return _call("list_drawing_geometry", view=view)
 
 
-@mcp.tool(description="Add a driven dimension to a view of the active drawing. "
+@_reference(description="Add a driven dimension to a view of the active drawing. "
           "kind = 'distance'|'distance_x'|'distance_y'|'radius'|'diameter'|"
           "'angle'|'hole_callout'|'pattern_callout'. refs = a list of {edge OR "
           "sil_face: {feature_id, element} (from list_drawing_geometry), "
@@ -1567,12 +1615,12 @@ def add_drawing_dim(view: int, kind: str, refs: list,
     return _call("add_drawing_dim", **params)
 
 
-@mcp.tool(description="Remove a dimension (by id) from the active drawing.")
+@_reference(description="Remove a dimension (by id) from the active drawing.")
 def remove_drawing_dim(id: int) -> dict:
     return _call("remove_drawing_dim", id=id)
 
 
-@mcp.tool(description="List the active drawing's dimensions with each one's "
+@_reference(description="List the active drawing's dimensions with each one's "
           "kind, measured value + formatted text, and whether it resolved "
           "(false = a ref dangles after a source edit).")
 def list_drawing_dims() -> dict:
@@ -1588,12 +1636,12 @@ _UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
                "viewport_drag", "key_press", "scroll")
 
 
-@mcp.tool(description="Raw GUI event, for driving or testing the Designer "
+@_reference(description="Raw GUI event, for driving or testing the Designer "
           "GUI itself — for modeling, use the semantic tools instead. "
           "A `ref` is a test-engine path: '//WindowName/**/###stable_id' "
           "(** = any depth; ### ids are stable across labels/icons); "
           "ui_items lists what is actually there. "
-          Widgets with hidden labels (combos) have no path — "
+          "Widgets with hidden labels (combos) have no path — "
           "address them by the {id} ui_items reports. "
           "action + params: menu_click {path: 'Edit/Undo'}; item_click "
           "{ref|id, button?: 1 = right-click}; item_double_click {ref|id} "
@@ -1609,6 +1657,66 @@ def ui_action(action: str, params: dict | None = None) -> dict:
         raise ValueError(f"unknown action {action!r}; one of {_UI_ACTIONS}")
     return _call(action, **(params or {}))
 
+
+
+
+# ---------------------------------------------------------------------------
+# Meta: reach everything, and read the manual for it
+# ---------------------------------------------------------------------------
+
+@mcp.tool(description="Call any Designer RPC by name — the whole API, not "
+          "just the tools listed here. Assemblies, drawings, studies, "
+          "configurations, sketch constraints, patterns, checkpoints, "
+          "exports and the GUI-driving actions are all reached this way: "
+          "rpc('add_mate', {...}). Use describe() for the method list and "
+          "help('add_mate') for its arguments and gotchas. Prefer this over "
+          "guessing; a wrong method name returns the list of close matches.")
+def rpc(method: str, params: dict | None = None) -> dict:
+    entry = _REFERENCE.get(method)
+    if entry is not None:
+        # Route through the wrapper so its defaults and argument shaping
+        # still apply — rpc() is a smaller door to the same room.
+        return entry["fn"](**(params or {}))
+    known = sorted(_REFERENCE) + sorted(_EXPOSED)
+    if method not in known:
+        import difflib
+        near = difflib.get_close_matches(method, known, n=5)
+        hint = f" Did you mean: {', '.join(near)}?" if near else ""
+        # Not a hard error: the app serves RPCs this file has never heard of
+        # (it is the older half of the pair). Try it, and only complain if
+        # the app disagrees.
+        try:
+            return _call(method, **(params or {}))
+        except Exception as e:
+            raise RuntimeError(f"{e}{hint}") from e
+    return _call(method, **(params or {}))
+
+
+@mcp.tool(description="Documentation for one RPC: what it does, its "
+          "arguments, and the traps. Call with no argument for the index of "
+          "everything reachable through rpc(). This is the prose that used "
+          "to be preloaded as 118 tool descriptions — same words, fetched "
+          "when they matter.")
+def help(method: str = "") -> dict:
+    if not method:
+        return {"methods": sorted(_REFERENCE),
+                "exposed_as_tools": sorted(_EXPOSED),
+                "hint": "help('add_mate') for one; describe() for the "
+                        "app's own authoritative type tables."}
+    entry = _REFERENCE.get(method)
+    if entry is None:
+        if method in _EXPOSED:
+            return {"method": method,
+                    "doc": "Exposed directly as the MCP tool of the same "
+                           "name — see its tool description."}
+        import difflib
+        near = difflib.get_close_matches(method, sorted(_REFERENCE), n=5)
+        raise ValueError(f"no such method {method!r}" +
+                         (f"; close: {', '.join(near)}" if near else ""))
+    import inspect
+    return {"method": method,
+            "doc": entry["doc"],
+            "arguments": str(inspect.signature(entry["fn"]))}
 
 @mcp.prompt(name="modeling-workflow",
             description="How to model a part in Designer with these tools")

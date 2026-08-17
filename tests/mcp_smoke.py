@@ -64,7 +64,28 @@ async def run(port):
             await session.initialize()
 
             tools = (await session.list_tools()).tools
-            expect(len(tools) >= 118, f"tool count ({len(tools)})")
+            names = {t.name for t in tools}
+            # The surface is deliberately SMALL — a couple of dozen
+            # conversational tools plus rpc/help, not one tool per RPC (the
+            # 118-tool version cost ~8.5k tokens of descriptions before a
+            # client asked anything). Both bounds matter: too many means the
+            # diet regressed, too few means something failed to register.
+            expect(15 <= len(tools) <= 40, f"tool count ({len(tools)})")
+            expect({"rpc", "help", "describe", "get_state", "add_feature"}
+                   <= names, f"core tools present ({sorted(names)})")
+
+            # Everything else is still reachable, and still documented.
+            index = result(await session.call_tool("help", {}))
+            expect("add_mate" in index["methods"], "help indexes add_mate")
+            doc = result(await session.call_tool("help", {"method":
+                                                          "add_mate"}))
+            expect(len(doc["doc"]) > 200 and "type" in doc["arguments"],
+                   "help('add_mate') carries the prose and the signature")
+            try:
+                result(await session.call_tool("help", {"method": "add_mat"}))
+                raise RuntimeError("a typo should not resolve")
+            except RuntimeError as e:
+                expect("add_mate" in str(e), f"typo suggests a match ({e})")
             prompts = (await session.list_prompts()).prompts
             expect(any(p.name == "modeling-workflow" for p in prompts),
                    "workflow prompt registered")
@@ -117,9 +138,12 @@ async def run(port):
                 ]})
             sk_id, (bot, right, top, left) = sk["id"], sk["entity_ids"]
 
+            # Through rpc(), the door every non-exposed RPC uses now — and
+            # the wrapper behind it still shapes the arguments.
             async def constrain(kind, refs, **kw):
-                await call("add_constraint", sketch_id=sk_id, kind=kind,
-                           refs=refs, **kw)
+                await call("rpc", method="add_constraint",
+                           params=dict(sketch_id=sk_id, kind=kind, refs=refs,
+                                       **kw))
 
             await constrain("coincident", [[bot, 1], [right, 0]])
             await constrain("coincident", [[right, 1], [top, 0]])
@@ -152,8 +176,9 @@ async def run(port):
                    "pad volume 4000")
 
             # Round one corner; the volume drop pins the arc really extruded
-            await call("fillet", sketch_id=sk_id, line1=top, line2=left,
-                       radius=4.0)
+            await call("rpc", method="fillet",
+                       params=dict(sketch_id=sk_id, line1=top, line2=left,
+                                   radius=4.0))
             state = await call("get_state")
             expected = 40 * 20 * 5 - (16 - math.pi * 4) * 5
             expect(abs(state["bodies"][0]["volume"] - expected) < 1e-2,

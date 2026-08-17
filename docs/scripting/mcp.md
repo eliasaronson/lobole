@@ -24,22 +24,46 @@
 The server connects lazily — registering before the app is running is fine;
 tools error with the remedy until it is reachable.
 
-## What's exposed
+## What's exposed (revised 2026-08-17)
 
-The full JSON-RPC remote surface as same-named tools (call the `describe`
-tool for the authoritative list): document state
-(`get_state`), features (`add_feature`, `modify_feature`, …), sketch
-constraints and ops (`add_constraint`, `fillet`, `mirror`, `pattern`,
-`offset`), variables, undo/redo, project I/O, and the verification loop —
-`mass_properties` (volume/CoM/inertia/mass) and `list_elements` (stable
-face/edge names for Fillet/Chamfer refs) as the geometry oracles;
-`screenshot` and `render_still` return inline images; `view` snaps standard
-views and `set_camera` gives direct target/direction/distance control;
-`select_face` prefers stable element names (`element="2/g4"`) over volatile
-mesh ids; `reset_layout` rebuilds the default panel arrangement. Topology
-`study_status`/`study_results` report the solve's provenance (`solver`:
-`gpu: <device>` or `cpu (...)`, plus elapsed seconds). `ui_action` exposes
-raw GUI events (menus, clicks, keys) for driving/testing the GUI itself.
+**Two dozen tools, plus a door to everything else.** Until August 2026 every
+RPC was its own tool: 118 of them, ~34k characters of descriptions that every
+client loaded before asking a single question (~8.5k tokens, before parameter
+schemas). Most were one-line wrappers, and the ones that earn their place in a
+*conversation* are far fewer — the rest are authoring calls that a script does
+better, because a loop with logic between the steps is not expressible as one
+tool call per step.
+
+The exposed set is what a person asks an assistant for:
+
+| Group | Tools |
+|---|---|
+| Meta | `describe`, `help`, `rpc` |
+| Inspect | `get_state`, `check_geometry`, `measure`, `mass_properties`, `list_elements` |
+| Variables | `list_variables`, `set_variable` |
+| Look at it | `screenshot`, `render_still`, `view`, `set_camera`, `set_section`, `set_render_options` |
+| Project | `new_project`, `open_project`, `save_project`, `export_stl`, `export_step` |
+| Author | `add_feature`, `modify_feature`, `delete_feature`, `undo` |
+
+Everything else — assemblies, drawings, studies, configurations, sketch
+constraints and ops, checkpoints, topology, reference images, the raw GUI
+actions — is reached through **`rpc(method, params)`**, and documented through
+**`help(method)`**, which returns the same prose that used to sit in that
+tool's description plus the wrapper's signature. Nothing was removed: the
+wrappers still exist and `rpc` routes through them, so their argument shaping
+and defaults are unchanged. A mistyped method suggests near matches.
+
+`mass_properties` and `list_elements` remain the geometry oracles;
+`screenshot`/`render_still` return inline images; `view` snaps standard views
+and `set_camera` gives direct control. Topology `study_status`/`study_results`
+(via `rpc`) report the solve's provenance (`solver`: `gpu: <device>` or
+`cpu (...)`, plus elapsed seconds).
+
+**When to use which.** MCP is for conversation: look at the model, measure it,
+change one thing, show the user. For *building* a part — a parametric grid of
+holes, a swept profile, anything with a loop or a computed argument — write a
+Python script against `tools/designer_remote.py` and run it. The same RPCs,
+one round trip, and arithmetic between the calls.
 
 The remote server accepts several concurrent clients (e.g. the MCP server
 plus a hand-driven `tools/designer_remote.py` shell); requests interleave
@@ -61,3 +85,9 @@ feature type must be added to the describe table beside the dispatch chain
 `ctest -R mcp_smoke` models a dimensioned bracket end-to-end through the MCP
 layer (skips if the `mcp` SDK is missing). `remote_smoke` covers the RPC
 underneath.
+
+`mcp_smoke` is **gui-labeled**, so neither CI nor `ctest -LE gui` runs it —
+which is how a plain syntax error in `designer_mcp.py` shipped on 2026-08-13
+and went unnoticed for four days, with the server unloadable the whole time.
+`mcp_server_compiles` and `py_client_compiles` now `py_compile` both files on
+the default test path: milliseconds, no display, no SDK.
