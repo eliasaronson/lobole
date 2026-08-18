@@ -83,6 +83,39 @@ def main():
         except RuntimeError as e:
             expect("not both" in str(e), f"wrong error: {e}")
 
+        # --- decision-complete errors: measured state + vocabulary --------
+        d.call("set_active_part", index=0)
+        try:
+            d.call("delete_feature", index=99)
+            raise AssertionError("index 99 should error")
+        except RuntimeError as e:
+            expect("out of range" in str(e) and "0.." in str(e)
+                   and "get_state" in str(e), f"ranged index error: {e}")
+        sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Probe",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [2, 2], "radius": 1}]})
+        try:
+            d.call("add_constraint", sketch_id=9999, kind="radius",
+                   refs=[0], value=2)
+            raise AssertionError("bad sketch id should error")
+        except RuntimeError as e:
+            expect("9999" in str(e) and str(sk["id"]) in str(e),
+                   f"names the given AND the candidates: {e}")
+        try:
+            d.call("view", name="isometric")
+            raise AssertionError("bad view should error")
+        except RuntimeError as e:
+            expect("iso" in str(e) and "front" in str(e),
+                   f"lists the accepted views: {e}")
+        try:
+            d.call("bom")
+            raise AssertionError("bom on a part tab should error")
+        except RuntimeError as e:
+            expect("set_active_part" in str(e), f"carries the remedy: {e}")
+        d.call("set_active_part", name="Rig")
+
         # --- render_still errors honestly on an assembly tab --------------
         try:
             d.call("render_still", path=os.path.join(tmp, "x.png"))

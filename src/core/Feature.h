@@ -6,8 +6,23 @@
 
 #include <functional>
 #include <glm/glm.hpp>
+#include <optional>
 #include <string>
 #include <vector>
+
+// A visual override SEPARATE from the physical material
+// (docs/rendering/appearance-plan.md): every unset field inherits from the
+// material, so physics (density, FEM, BOM) never sees this. Persisted on the
+// creating feature (v54), stamped onto its bodies each regeneration, and
+// STRIPPED from the regen chain hash — recoloring never rebuilds B-Rep.
+struct Appearance {
+  std::optional<glm::vec3> color; // sRGB base color
+  std::optional<float> roughness; // 0..1
+  std::optional<float> metallic;  // 0..1
+  bool Any() const {
+    return color.has_value() || roughness.has_value() || metallic.has_value();
+  }
+};
 
 // A named solid produced by regenerating the feature list. `material` is a slug
 // into the render-layer material library (empty = default); it is transient
@@ -36,6 +51,11 @@ struct Body {
   // Last on purpose: existing aggregate inits stop at createdBy.
   bool hasDisplayColor = false;
   glm::vec3 displayColor{0.0f};
+
+  // User appearance override, stamped from the creating feature after each
+  // regeneration (Document::Regenerate post-pass keyed on createdBy).
+  // Renderers prefer: appearance > material > displayColor > palette.
+  Appearance appearance;
 };
 
 class Feature;
@@ -73,6 +93,13 @@ public:
   // untouched.
   const std::string& GetMaterial() const { return m_material; }
   void SetMaterial(const std::string& material) { m_material = material; }
+
+  // Visual override applied to this feature's bodies on top of the material
+  // (persistent + serialized, v54). Empty (no field set) = pure material.
+  const Appearance& GetAppearance() const { return m_appearance; }
+  void SetAppearance(const Appearance& appearance) {
+    m_appearance = appearance;
+  }
 
   // Stable identity for feature->feature references (an extrude names its
   // sketch by id, which survives reordering and undo). 0 = unassigned; the
@@ -148,6 +175,7 @@ public:
 protected:
   std::string m_name;
   std::string m_material;
+  Appearance m_appearance;
   uint64_t m_id = 0;
   std::string m_error;
   std::string m_warning;

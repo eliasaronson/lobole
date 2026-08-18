@@ -727,6 +727,28 @@ def main():
         expect(os.path.exists(shot) and os.path.getsize(shot) > 1000,
                "screenshot written")
 
+        phase("Screenshot postconditions")
+        # A capture that "succeeds" but shows a wall of nothing must SAY so.
+        # The classic incident: the camera INSIDE the geometry (the dock
+        # round's inside-a-barrel shots) — a near-uniform frame. (An empty
+        # scene shows the environment, and emptiness is get_state's job.)
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Room", "position": [0, 0, 0],
+            "width": 500, "height": 500, "depth": 500})
+        d.call("set_camera", eye=[250, 250, 250], target=[250, 250, 260])
+        blank = os.path.join(tmp, "inside.png")
+        r = d.call("screenshot", path=blank)
+        expect(any("single color" in w for w in r.get("warnings", [])),
+               f"inside-geometry frame must warn: {r}")
+        r = d.call("screenshot", path=blank)
+        expect(any("pixel-identical" in w for w in r.get("warnings", [])),
+               f"unchanged frame must warn: {r}")
+        # ...and a properly framed shot warns about neither.
+        d.call("view", name="iso")
+        r = d.call("screenshot", path=os.path.join(tmp, "framed.png"))
+        expect(not r.get("warnings"), f"framed shot is clean: {r}")
+
         phase("render_sheet")
         # V3: multi-view sheet with the numeric footer. One box -> footer
         # carries body count + bbox; the PNG is a real composite (bigger

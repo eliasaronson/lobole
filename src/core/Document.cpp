@@ -91,6 +91,17 @@ bool Document::Regenerate() {
   bool allOk = true;
   m_lastStats = {};
 
+  // Appearance stamp (v54): each body carries its creating feature's visual
+  // override. A POST-pass keyed on createdBy (rather than plumbing through
+  // every Execute signature) — run at every successful exit below, so cached
+  // and baked bodies re-stamp too. This is what lets the chain hash STRIP
+  // appearance: a recolor re-stamps here without rebuilding any B-Rep.
+  const auto stampAppearance = [this] {
+    for (Body& b : m_bodies)
+      if (const Feature* f = FindFeatureById(b.createdBy))
+        b.appearance = f->GetAppearance();
+  };
+
   // Rollback bar: only the prefix regenerates; the tail keeps its params but
   // contributes nothing (and holds no stale errors).
   const size_t upTo =
@@ -148,6 +159,9 @@ bool Document::Regenerate() {
     nlohmann::json fj = DocumentIO::FeatureToJson(*m_features[i]);
     fj.erase("images");
     fj.erase("next_image_id");
+    // Appearance is cosmetic (the stamp pass reapplies it after any cache
+    // hit): keep it out of the hash so a recolor never rebuilds geometry.
+    fj.erase("appearance");
     chain = std::hash<std::string>{}(
         std::to_string(chain) + fj.dump() +
         (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));
@@ -191,6 +205,7 @@ bool Document::Regenerate() {
       LOG_INFO("Loaded baked geometry ({} bodies): {} features executed 0, "
                "{} advisories restored",
                m_bodies.size(), upTo, bakedWarnings.size());
+      stampAppearance();
       return true;
     }
     LOG_INFO("Baked geometry does not match the recipe; rebuilding");
@@ -262,6 +277,7 @@ bool Document::Regenerate() {
       allOk = false;
     }
   }
+  stampAppearance();
   return allOk;
 }
 

@@ -1530,6 +1530,12 @@ int main(int argc, char** argv) {
       if (remoteServer.WantsScreenshot(shotPath)) {
         vkQueueWaitIdle(g_Queue); // frame resources must be reusable
         std::string shotError;
+        FrameStats shotStats;
+        // Postconditions judge the 3D viewport, not the panel chrome.
+        shotStats.x = static_cast<int>(g_App.viewportPos.x);
+        shotStats.y = static_cast<int>(g_App.viewportPos.y);
+        shotStats.w = static_cast<int>(g_App.viewportSize.x);
+        shotStats.h = static_cast<int>(g_App.viewportSize.y);
         const bool ok = CaptureScreenshot(
             g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, wd->RenderPass,
             wd->SurfaceFormat.format, static_cast<uint32_t>(wd->Width),
@@ -1550,8 +1556,10 @@ int main(int argc, char** argv) {
             shotPath, &shotError, g_MSAASamples,
             [&](VkCommandBuffer cb) {
               RecordScenePrepasses(cb, wd->FrameIndex);
-            });
-        remoteServer.ScreenshotDone(ok, shotError);
+            },
+            &shotStats);
+        remoteServer.ScreenshotDone(ok, shotError, shotStats.dominantFraction,
+                                    shotStats.hash);
       }
     }
 

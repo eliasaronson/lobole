@@ -1,6 +1,20 @@
 # Appearance override — visual look separate from physical material — plan
 
-> Status: **planned, not started.** Written 2026-08-18, triggered by the
+> Status: **SHIPPED (2026-08-18, format v54).** As planned below, with two
+> improvements found during implementation: (1) appearance is STAMPED in a
+> Document::Regenerate post-pass keyed on createdBy (no Execute-signature
+> plumbing) and STRIPPED from the regen chain hash — a recolor executes
+> zero features (appearance_smoke asserts executed == 0), which also makes
+> baked-geometry changes unnecessary (the stamp pass re-applies on load);
+> (2) a color-only override on a material-less body resolves against a
+> neutral dielectric, not DEFAULT's metal. Surface: set_appearance RPC
+> (validates 0..1 with a 0..255-slip error), get_state echo, Appearance
+> submenu in the body context menu (derived values, one undo per widget
+> release). Acceptance passed: the Marsliden dock's barrels are blue
+> (scratch/build_dock.py), mass unchanged, contact gates green.
+>
+> Original plan:
+> Written 2026-08-18, triggered by the
 > Marsliden floating-dock model (`scratch/build_dock.py`): its 220 L barrels
 > are physically plastic but *blue*, and the only lever we have is the
 > material slug — so they render white. Adding a `plastic_blue` slug was

@@ -901,6 +901,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                     {"material", body.material},
                     {"bbox_min", Vec3ToJson(min)},
                     {"bbox_max", Vec3ToJson(max)}};
+      if (body.appearance.Any()) { // v54 visual override, set_appearance
+        json a = json::object();
+        if (body.appearance.color)
+          a["color"] = Vec3ToJson(*body.appearance.color);
+        if (body.appearance.roughness)
+          a["roughness"] = *body.appearance.roughness;
+        if (body.appearance.metallic)
+          a["metallic"] = *body.appearance.metallic;
+        entry["appearance"] = std::move(a);
+      }
       // Render/picking mesh id (used by select_face); ids change on
       // regeneration, so always read them fresh from here
       if (i < state.documentMeshes.size()) {
@@ -1118,7 +1128,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // params: {name: front|back|left|right|top|bottom|iso, fit?: true}
     const std::string name = p.at("name").get<std::string>();
     if (!ApplyStandardView(state, name, p.value("fit", true)))
-      throw std::runtime_error("unknown view: " + name);
+      throw std::runtime_error(
+          "unknown view: " + name +
+          "; views: front, back, left, right, top, bottom, iso");
     return {{"position", Vec3ToJson(state.camera->GetPosition())},
             {"target", Vec3ToJson(state.camera->GetTarget())},
             {"distance", state.camera->GetDistance()}};
@@ -1539,7 +1551,8 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
     if (m_sheet.nextView < m_sheet.views.size()) {
       if (!ApplyStandardView(state, m_sheet.views[m_sheet.nextView], true)) {
         RespondError(m_sheet.client, m_sheet.id,
-                     "unknown view: " + m_sheet.views[m_sheet.nextView]);
+                     "unknown view: " + m_sheet.views[m_sheet.nextView] +
+                         "; views: front, back, left, right, top, bottom, iso");
         for (const std::string& tile : m_sheet.tilePaths)
           std::filesystem::remove(tile);
         m_sheet = SheetJob{};
@@ -1559,10 +1572,12 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
       spec.cropH = m_sheet.cropH;
       std::string err;
       if (rendersheet::Composite(spec, m_sheet.outPath, &err)) {
-        Respond(m_sheet.client, m_sheet.id,
-                {{"path", m_sheet.outPath},
-                 {"views", m_sheet.views},
-                 {"footer", m_sheet.footer}});
+        json resp = {{"path", m_sheet.outPath},
+                     {"views", m_sheet.views},
+                     {"footer", m_sheet.footer}};
+        if (!m_sheet.warnings.empty())
+          resp["warnings"] = m_sheet.warnings;
+        Respond(m_sheet.client, m_sheet.id, resp);
       } else {
         RespondError(m_sheet.client, m_sheet.id, err);
       }
@@ -1631,7 +1646,10 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
           const std::string view = request.params.at("view").get<std::string>();
           if (!ApplyStandardView(state, view,
                                  request.params.value("fit", true))) {
-            RespondError(request.client, request.id, "unknown view: " + view);
+            RespondError(
+                request.client, request.id,
+                "unknown view: " + view +
+                    "; views: front, back, left, right, top, bottom, iso");
             continue;
           }
         }
@@ -1729,8 +1747,27 @@ bool RemoteServer::WantsScreenshot(std::string& path) {
   return true;
 }
 
-void RemoteServer::ScreenshotDone(bool ok, const std::string& error) {
+void RemoteServer::ScreenshotDone(bool ok, const std::string& error,
+                                  float dominant, uint64_t frameHash) {
   m_screenshotPending = false;
+  // Frame postconditions: a capture that "succeeded" but shows nothing (or
+  // shows the same thing again) is the trap — warn in the same response.
+  std::vector<std::string> warnings;
+  if (ok) {
+    char buf[160];
+    if (dominant > 0.95f) {
+      snprintf(buf, sizeof buf,
+               "%.0f%% of the frame is a single color — is the camera aimed "
+               "at the model? (fit_view, or render_sheet for framed views)",
+               dominant * 100.0f);
+      warnings.push_back(buf);
+    }
+    if (frameHash != 0 && frameHash == m_lastFrameHash)
+      warnings.push_back(
+          "frame is pixel-identical to the previous capture — did the scene "
+          "or camera actually change?");
+    m_lastFrameHash = frameHash;
+  }
   if (m_sheet.active) {
     // A sheet tile: progress (and the final response) belong to the pump.
     if (!ok) {
@@ -1739,11 +1776,21 @@ void RemoteServer::ScreenshotDone(bool ok, const std::string& error) {
       for (const std::string& tile : m_sheet.tilePaths)
         std::filesystem::remove(tile);
       m_sheet = SheetJob{};
+      return;
     }
+    const size_t tile = m_sheet.nextView - 1; // the tile just captured
+    for (const std::string& w : warnings)
+      m_sheet.warnings.push_back((tile < m_sheet.views.size()
+                                      ? "view '" + m_sheet.views[tile] + "': "
+                                      : "") +
+                                 w);
     return;
   }
   if (ok) {
-    Respond(m_screenshotClient, m_screenshotId, {{"path", m_screenshotPath}});
+    json resp = {{"path", m_screenshotPath}};
+    if (!warnings.empty())
+      resp["warnings"] = warnings;
+    Respond(m_screenshotClient, m_screenshotId, resp);
   } else {
     RespondError(m_screenshotClient, m_screenshotId, error);
   }

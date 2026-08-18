@@ -32,7 +32,8 @@ bool CaptureScreenshot(
     const std::function<void(VkCommandBuffer)>& recordScene,
     const std::string& outputPath, std::string* error,
     VkSampleCountFlagBits samples,
-    const std::function<void(VkCommandBuffer)>& recordPrepass) {
+    const std::function<void(VkCommandBuffer)>& recordPrepass,
+    FrameStats* stats) {
   auto fail = [&](const char* what) {
     if (error)
       *error = what;
@@ -257,6 +258,41 @@ bool CaptureScreenshot(
     rgb[i * 3 + 2] = src[i * 4 + (bgra ? 0 : 2)];
   }
   vkUnmapMemory(device, bufferMemory);
+
+  if (stats != nullptr) {
+    // ~10k samples over the requested rect (the viewport): enough for a
+    // stable modal-color fraction and a hash that changes when anything
+    // visible changes.
+    int rx = stats->x, ry = stats->y, rw = stats->w, rh = stats->h;
+    if (rw <= 0 || rh <= 0) {
+      rx = ry = 0;
+      rw = static_cast<int>(width);
+      rh = static_cast<int>(height);
+    }
+    rx = std::clamp(rx, 0, static_cast<int>(width) - 1);
+    ry = std::clamp(ry, 0, static_cast<int>(height) - 1);
+    rw = std::clamp(rw, 1, static_cast<int>(width) - rx);
+    rh = std::clamp(rh, 1, static_cast<int>(height) - ry);
+    const size_t total = size_t(rw) * rh;
+    const size_t stride = std::max<size_t>(1, total / 10000);
+    std::vector<uint32_t> counts(1u << 15, 0);
+    uint32_t modal = 0;
+    uint64_t h = 1469598103934665603ull;
+    size_t sampled = 0;
+    for (size_t s = 0; s < total; s += stride, sampled++) {
+      const size_t i = (size_t(ry) + s / rw) * width + rx + s % rw;
+      const uint8_t r = rgb[i * 3 + 0], g = rgb[i * 3 + 1], b = rgb[i * 3 + 2];
+      const uint32_t bucket =
+          (uint32_t(r >> 3) << 10) | (uint32_t(g >> 3) << 5) | uint32_t(b >> 3);
+      modal = std::max(modal, ++counts[bucket]);
+      for (const uint8_t c : {r, g, b}) {
+        h ^= c;
+        h *= 1099511628211ull;
+      }
+    }
+    stats->dominantFraction = sampled ? float(modal) / sampled : 0.0f;
+    stats->hash = h;
+  }
 
   const bool ok = stbi_write_png(outputPath.c_str(), (int)width, (int)height, 3,
                                  rgb.data(), (int)width * 3) != 0;

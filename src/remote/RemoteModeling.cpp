@@ -63,6 +63,19 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
                              accepted + ".");
   }
 }
+
+// Error-audit round: "no such feature/sketch" names the candidates that DO
+// exist, id + name, so the correction is one edit away.
+std::string FeatureCandidates(Document& doc, bool sketchesOnly) {
+  std::vector<std::string> known;
+  for (size_t i = 0; i < doc.FeatureCount(); i++) {
+    Feature* f = doc.GetFeature(i);
+    if (sketchesOnly && dynamic_cast<SketchFeature*>(f) == nullptr)
+      continue;
+    known.push_back(std::to_string(f->GetId()) + " (" + f->GetName() + ")");
+  }
+  return KnownList(known);
+}
 } // namespace
 
 // Modeling / feature-tree RPCs (select_feature..list_variables) carved out of
@@ -117,6 +130,12 @@ static constexpr MethodDoc ModelingMethods[] = {
      "Assign a material slug (see material_slugs) to a body's creating "
      "feature, by feature_id (its created_by) or by body index; '' restores "
      "default."},
+    {"set_appearance",
+     "Visual override SEPARATE from the physical material (v54): "
+     "{feature_id|body, color?: [r,g,b] sRGB 0..1, roughness?: 0..1, "
+     "metallic?: 0..1}. Unset fields inherit from the material; passing NO "
+     "optional fields clears the override. Never affects mass/FEM/BOM, and "
+     "recoloring rebuilds no geometry."},
     {"set_rollback",
      "Move the rollback bar: only features [0, index) regenerate; -1 = end."},
     {"suppress_feature", "Toggle suppression by feature_id; suppressed "
@@ -225,7 +244,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     const size_t index = p.at("index").get<size_t>();
     Feature* feature = doc->GetFeature(index);
     if (!feature)
-      throw std::runtime_error("no feature at index");
+      throw std::runtime_error(IndexError("feature", index, doc->FeatureCount(),
+                                          "get_state lists features with "
+                                          "their indices"));
     // Build a throwaway from the request first: validates the JSON AND lets
     // the round-trip unknown-field check run before anything is committed.
     RejectUnknownFeatureFields(p.at("feature"),
@@ -235,7 +256,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (!state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
                                      index, before, p.at("feature")),
                                  *doc)) {
-      throw std::runtime_error("modify failed");
+      throw std::runtime_error(
+          "modify failed — the replacement feature did not apply and the "
+          "document is unchanged (its regeneration failed where the original "
+          "succeeded). Check the JSON against describe feature_types[].params");
     }
     return json{{"regen", RegenSummaryJson(*doc)},
                 {"digest", DigestJson(preDigest, *doc)}};
@@ -258,12 +282,18 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (byId) {
       f = doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
       if (!f)
-        throw std::runtime_error("no such feature");
+        throw std::runtime_error(
+            "no feature with id " +
+            std::to_string(p.at("feature_id").get<uint64_t>()) +
+            " (must be a body's created_by — get_state lists bodies). "
+            "Features here: " +
+            FeatureCandidates(*doc, false));
     } else {
       const auto& bodies = doc->GetBodies();
       const int body = p.at("body").get<int>();
       if (body < 0 || body >= static_cast<int>(bodies.size()))
-        throw std::runtime_error("body index out of range");
+        throw std::runtime_error(
+            IndexError("body", body, bodies.size(), "get_state lists bodies"));
       // Add/Cut keep the original creator, so this recolors everything
       // fused into that body.
       f = doc->FindFeatureById(bodies[body].createdBy, &index);
@@ -289,6 +319,77 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     state.syncedDocumentVersion = UINT64_MAX;
     return json{{"regen", RegenSummaryJson(*doc)}};
   }
+  if (m == "set_appearance") {
+    // V-appearance: a visual override on a body's creating feature, separate
+    // from the physical material (docs/rendering/appearance-plan.md). Same
+    // addressing as set_material: {feature_id | body}. Optional fields
+    // color [r,g,b] (sRGB 0..1), roughness, metallic; passing none clears
+    // the override. Appearance is stripped from the regen chain hash, so
+    // this never rebuilds geometry — just restamps and resyncs.
+    const bool byId = p.contains("feature_id");
+    const bool byBody = p.contains("body");
+    if (byId == byBody)
+      throw std::runtime_error(
+          "set_appearance needs exactly one of feature_id (the body's "
+          "created_by) or body (an index into get_state's bodies)");
+    size_t index = 0;
+    Feature* f = nullptr;
+    if (byId) {
+      f = doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
+      if (!f)
+        throw std::runtime_error(
+            "no feature with id " +
+            std::to_string(p.at("feature_id").get<uint64_t>()) +
+            ". Features here: " + FeatureCandidates(*doc, false));
+    } else {
+      const auto& bodies = doc->GetBodies();
+      const int body = p.at("body").get<int>();
+      if (body < 0 || body >= static_cast<int>(bodies.size()))
+        throw std::runtime_error(
+            IndexError("body", body, bodies.size(), "get_state lists bodies"));
+      f = doc->FindFeatureById(bodies[body].createdBy, &index);
+      if (!f)
+        throw std::runtime_error("body has no creating feature");
+    }
+    Appearance ap;
+    const auto unit = [&](const char* field) {
+      const double v = p.at(field).get<double>();
+      if (v < 0.0 || v > 1.0)
+        throw std::runtime_error(std::string(field) + " is " +
+                                 std::to_string(v) +
+                                 " — appearance fields are 0..1 (sRGB / "
+                                 "PBR fractions), not 0..255");
+      return static_cast<float>(v);
+    };
+    if (p.contains("color")) {
+      const json& c = p.at("color");
+      const glm::vec3 col(c.at(0).get<float>(), c.at(1).get<float>(),
+                          c.at(2).get<float>());
+      if (col.x < 0 || col.x > 1 || col.y < 0 || col.y > 1 || col.z < 0 ||
+          col.z > 1)
+        throw std::runtime_error(
+            "color components are sRGB 0..1, not 0..255 — got [" +
+            std::to_string(col.x) + ", " + std::to_string(col.y) + ", " +
+            std::to_string(col.z) + "]");
+      ap.color = col;
+    }
+    if (p.contains("roughness"))
+      ap.roughness = unit("roughness");
+    if (p.contains("metallic"))
+      ap.metallic = unit("metallic");
+    json before = DocumentIO::FeatureToJson(*f);
+    f->SetAppearance(ap);
+    doc->Regenerate(); // full cache hit (hash-stripped): restamps only
+    json after = DocumentIO::FeatureToJson(*f);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
+    // Colors changed but no meshes did — force the renderer resync (the
+    // same nudge set_material needs).
+    state.syncedDocumentVersion = UINT64_MAX;
+    json resp = {{"regen", RegenSummaryJson(*doc)}};
+    resp["cleared"] = !ap.Any();
+    return resp;
+  }
   if (m == "set_rollback") {
     // Move the rollback bar: regeneration executes features [0, index) only;
     // -1 (or >= count) = end. Not undoable — it is a view of the history,
@@ -305,7 +406,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     Feature* f =
         doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
     if (!f)
-      throw std::runtime_error("no such feature");
+      throw std::runtime_error(
+          "no feature with id " +
+          std::to_string(p.at("feature_id").get<uint64_t>()) +
+          ". Features here: " + FeatureCandidates(*doc, false));
     json before = DocumentIO::FeatureToJson(*f);
     const json preDigest = BodyDigestJson(*doc);
     f->SetSuppressed(p.at("suppressed").get<bool>());
@@ -321,7 +425,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (!state.commands->Execute(
             std::make_unique<RemoveFeatureCommand>(p.at("index").get<size_t>()),
             *doc)) {
-      throw std::runtime_error("no feature at index");
+      throw std::runtime_error(IndexError(
+          "feature", p.at("index").get<size_t>(), doc->FeatureCount(),
+          "get_state lists features with "
+          "their indices"));
     }
     return json{{"regen", RegenSummaryJson(*doc)},
                 {"digest", DigestJson(preDigest, *doc)}};
@@ -336,7 +443,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
     if (!sk)
-      throw std::runtime_error("no such sketch");
+      throw std::runtime_error(
+          "no sketch with id " +
+          std::to_string(p.at("sketch_id").get<uint64_t>()) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
     json before = DocumentIO::FeatureToJson(*sk);
     const sketch::ExternalKind kind =
         p.value("kind", std::string("face")) == "edge"
@@ -372,7 +483,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
     if (!sk)
-      throw std::runtime_error("no such sketch");
+      throw std::runtime_error(
+          "no sketch with id " +
+          std::to_string(p.at("sketch_id").get<uint64_t>()) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
 
     const auto& kinds = ConstraintKindTable();
 
@@ -437,7 +552,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
     if (!sk)
-      throw std::runtime_error("no such sketch");
+      throw std::runtime_error(
+          "no sketch with id " +
+          std::to_string(p.at("sketch_id").get<uint64_t>()) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
 
     json before = DocumentIO::FeatureToJson(*sk);
     json result = json::object();
@@ -503,7 +622,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
     if (!sk)
-      throw std::runtime_error("no such sketch");
+      throw std::runtime_error(
+          "no sketch with id " +
+          std::to_string(p.at("sketch_id").get<uint64_t>()) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
     json before = DocumentIO::FeatureToJson(*sk);
     json result = json::object();
 
@@ -600,7 +723,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         doc->FindFeatureById(p.at("sketch_id").get<uint64_t>(), &index);
     auto* sk = dynamic_cast<SketchFeature*>(f);
     if (!sk)
-      throw std::runtime_error("no such sketch");
+      throw std::runtime_error(
+          "no sketch with id " +
+          std::to_string(p.at("sketch_id").get<uint64_t>()) +
+          ". Sketches here: " + FeatureCandidates(*doc, true) +
+          " (ids come from add_feature results / get_state)");
     json before = DocumentIO::FeatureToJson(*sk);
     const size_t dropped = sk->DeleteEntity(p.at("entity_id").get<uint32_t>());
     sketch::Solver solver;
@@ -706,11 +833,19 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (scope == "part") {
       if (!state.commands->Execute(
               std::make_unique<RenameVariableCommand>(name, newName), *doc))
-        throw std::runtime_error("rename failed (unknown, invalid, or taken)");
+        throw std::runtime_error(
+            "rename failed: '" + name + "' -> '" + newName +
+            "'. Either the source does not exist, the new name is not a "
+            "valid identifier, or it is already taken — list_variables "
+            "shows what exists in each scope");
       return json::object();
     }
     if (!ui::RenameProjectVariable(state, name, newName))
-      throw std::runtime_error("rename failed (unknown, invalid, or taken)");
+      throw std::runtime_error(
+          "rename failed: '" + name + "' -> '" + newName +
+          "'. Either the source does not exist, the new name is not a "
+          "valid identifier, or it is already taken — list_variables "
+          "shows what exists in each scope");
     return json::object();
   }
   if (m == "list_variables") {

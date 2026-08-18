@@ -511,6 +511,17 @@ json FeatureToJson(const Feature& feature) {
   if (!feature.GetMaterial().empty()) { // omit default to keep JSON compact
     j["material"] = feature.GetMaterial();
   }
+  if (feature.GetAppearance().Any()) { // v54; omit when pure material
+    json a = json::object();
+    const Appearance& ap = feature.GetAppearance();
+    if (ap.color)
+      a["color"] = {ap.color->x, ap.color->y, ap.color->z};
+    if (ap.roughness)
+      a["roughness"] = *ap.roughness;
+    if (ap.metallic)
+      a["metallic"] = *ap.metallic;
+    j["appearance"] = std::move(a);
+  }
   if (feature.IsSuppressed()) { // v19; omit when active
     j["suppressed"] = true;
   }
@@ -1376,6 +1387,20 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       j.value("id", uint64_t{0})); // v1 files have no id; Document assigns
   out->SetMaterial(
       j.value("material", std::string{})); // absent (pre-v10) = default
+  if (j.contains("appearance")) {          // absent (pre-v54) = pure material
+    const json& a = j.at("appearance");
+    Appearance ap;
+    if (a.contains("color")) {
+      const json& c = a.at("color");
+      ap.color = glm::vec3(c.at(0).get<float>(), c.at(1).get<float>(),
+                           c.at(2).get<float>());
+    }
+    if (a.contains("roughness"))
+      ap.roughness = a.at("roughness").get<float>();
+    if (a.contains("metallic"))
+      ap.metallic = a.at("metallic").get<float>();
+    out->SetAppearance(ap);
+  }
   out->SetSuppressed(j.value("suppressed", false)); // absent (pre-v19) = active
   return out;
 }

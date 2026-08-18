@@ -2666,15 +2666,36 @@ void SyncDocumentRenderers(AppState& state) {
                            ? body.displayColor
                            : kBodyPalette[palette++ % std::size(kBodyPalette)];
     state.meshRenderer->SetMeshColor(meshId, albedo);
-    if (!body.material.empty()) {
-      const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
-          CADMaterials::MaterialLibrary::FromSlug(body.material));
+    // Resolve order: appearance > material > displayColor > palette. The
+    // override edits the CPU-resolved params, so the 128-byte push constant
+    // never grows (the appearance-plan constraint).
+    if (!body.material.empty() || body.appearance.Any()) {
+      CADMaterials::MaterialProperties mat =
+          CADMaterials::MaterialLibrary::GetMaterial(
+              CADMaterials::MaterialLibrary::FromSlug(body.material));
+      if (body.material.empty()) {
+        // No physical material: a neutral dielectric carrying the palette
+        // color, so a color-only override doesn't inherit DEFAULT's metal.
+        mat.baseColor = albedo;
+        mat.metallic = 0.0f;
+        mat.roughness = 0.6f;
+        mat.specular = 0.5f;
+        mat.reflectance = 0.04f;
+        mat.procPattern = 0;
+      }
+      if (body.appearance.color)
+        mat.baseColor = *body.appearance.color;
+      if (body.appearance.roughness)
+        mat.roughness = *body.appearance.roughness;
+      if (body.appearance.metallic)
+        mat.metallic = *body.appearance.metallic;
       state.meshRenderer->SetMeshMaterial(meshId, mat.baseColor,
                                           glm::vec4(mat.metallic, mat.roughness,
                                                     mat.specular,
                                                     mat.reflectance));
       // Procedural wood/plywood grain (pattern 0 = flat, so non-wood materials
-      // pass through unchanged).
+      // pass through unchanged). An overridden color KEEPS the grain — that
+      // is stained wood, the desired reading.
       state.meshRenderer->SetMeshProcedural(meshId, mat.procPattern,
                                             mat.grainScale, mat.grainContrast);
       albedo = mat.baseColor;
@@ -2786,7 +2807,23 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
         body.material.empty()
             ? CADMaterials::MaterialType::DEFAULT
             : CADMaterials::MaterialLibrary::FromSlug(body.material);
-    const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(mt);
+    CADMaterials::MaterialProperties mat =
+        CADMaterials::MaterialLibrary::GetMaterial(mt);
+    // Appearance override, same merge as the raster paths.
+    if (body.appearance.Any()) {
+      if (body.material.empty()) {
+        mat.metallic = 0.0f;
+        mat.roughness = 0.6f;
+        mat.specular = 0.5f;
+        mat.procPattern = 0;
+      }
+      if (body.appearance.color)
+        mat.baseColor = *body.appearance.color;
+      if (body.appearance.roughness)
+        mat.roughness = *body.appearance.roughness;
+      if (body.appearance.metallic)
+        mat.metallic = *body.appearance.metallic;
+    }
 
     std::vector<Vertex3D> vertices =
         CADMeshConverter::ConvertCADMeshToVertices(cadMesh);

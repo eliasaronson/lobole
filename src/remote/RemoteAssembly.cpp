@@ -84,6 +84,15 @@ json NormalizeTransform(json t) {
   t.erase("rotate");
   return t;
 }
+
+// Error-audit round: "no such occurrence" names what DOES exist (id + name)
+// so the correction needs no list_occurrences round-trip.
+std::string OccurrenceCandidates(const AssemblyDocument& asmDoc) {
+  std::vector<std::string> known;
+  for (const Occurrence& o : asmDoc.GetOccurrences())
+    known.push_back(std::to_string(o.id) + " (" + o.name + ")");
+  return KnownList(known);
+}
 } // namespace
 
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
@@ -93,7 +102,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // to its stable id); optional `transform` = {position:[x,y,z],
     // orientation:[x,y,z,w] OR rotate:{axis, angle_deg}}.
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     const std::string partName = p.at("part").get<std::string>();
     const uint64_t partId = ui::PartIdByName(state, partName);
     if (partId == 0)
@@ -116,18 +127,25 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "remove_occurrence") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     ui::SnapshotAssembly(state);
     if (!state.assembly->RemoveOccurrence(p.at("id").get<uint64_t>())) {
       state.assemblyHistory.undo
           .pop_back(); // nothing changed; drop the snapshot
-      throw std::runtime_error("no such occurrence");
+      throw std::runtime_error(
+          "no occurrence with id " +
+          std::to_string(p.at("id").get<uint64_t>()) +
+          ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     }
     return json::object();
   }
   if (m == "list_occurrences") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     json arr = json::array();
     for (const Occurrence& o : state.assembly->GetOccurrences())
       arr.push_back(DocumentIO::OccurrenceToJson(o));
@@ -138,10 +156,15 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   if (m == "set_occurrence_transform" || m == "set_occurrence_visible" ||
       m == "set_occurrence_fixed" || m == "rename_occurrence") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     Occurrence* occ = state.assembly->FindById(p.at("id").get<uint64_t>());
     if (!occ)
-      throw std::runtime_error("no such occurrence");
+      throw std::runtime_error(
+          "no occurrence with id " +
+          std::to_string(p.at("id").get<uint64_t>()) +
+          ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     ui::SnapshotAssembly(state);
     if (m == "set_occurrence_transform") {
       const json t = NormalizeTransform(p.at("transform"));
@@ -171,7 +194,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   // shape and parsed by DocumentIO::MateFromJson.
   if (m == "add_mate") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     auto connToJson = [](const json& c) -> json {
       json anchor;
       if (c.value("origin", false))
@@ -231,7 +256,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "set_mate") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     Mate* mate = state.assembly->FindMateById(p.at("id").get<uint64_t>());
     if (!mate)
       throw std::runtime_error("no such mate");
@@ -262,7 +289,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "remove_mate") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     ui::SnapshotAssembly(state);
     if (!state.assembly->RemoveMate(p.at("id").get<uint64_t>())) {
       state.assemblyHistory.undo.pop_back(); // nothing changed; drop snapshot
@@ -273,7 +302,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "list_mates") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     json arr = json::array();
     for (const Mate& mate : state.assembly->GetMates()) {
       json mj = DocumentIO::MateToJson(mate);
@@ -285,7 +316,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "select_mate") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     const uint64_t id = p.value("id", uint64_t{0}); // 0 clears the selection
     if (id && !state.assembly->FindMateById(id))
       throw std::runtime_error("no such mate");
@@ -294,16 +327,22 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "select_occurrence") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     const uint64_t id = p.value("id", uint64_t{0}); // 0 clears the selection
     if (id && !state.assembly->FindById(id))
-      throw std::runtime_error("no such occurrence");
+      throw std::runtime_error(
+          "no occurrence with id " + std::to_string(id) +
+          ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     ui::SelectOccurrence(state, id); // highlights + shows the drag gizmo
     return json{{"selected", id}};
   }
   if (m == "solve_assembly") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     const int errored = ui::SolveActiveAssembly(state);
     json arr = json::array();
     for (const Mate& mate : state.assembly->GetMates()) {
@@ -317,7 +356,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   if (m == "add_exploded_view") {
     // params: {name?} — appends an empty view. Returns its id.
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     ui::SnapshotAssembly(state);
     ExplodedView v;
     v.name = p.value("name", std::string{"Exploded"});
@@ -326,7 +367,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "remove_exploded_view") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     const uint64_t id = p.at("id").get<uint64_t>();
     ui::SnapshotAssembly(state);
     if (!state.assembly->RemoveExplodedView(id))
@@ -340,7 +383,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "list_exploded_views") {
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     json views = json::array();
     for (const ExplodedView& v : state.assembly->GetExplodedViews())
       views.push_back(DocumentIO::ExplodedViewToJson(v));
@@ -351,14 +396,18 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   if (m == "set_explode_step") {
     // params: {view, occurrence, offset: [x,y,z]} — find-or-create the step.
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     ExplodedView* v =
         state.assembly->FindExplodedViewById(p.at("view").get<uint64_t>());
     if (!v)
       throw std::runtime_error("no such exploded view");
     const uint64_t occId = p.at("occurrence").get<uint64_t>();
     if (!state.assembly->FindById(occId))
-      throw std::runtime_error("no such occurrence");
+      throw std::runtime_error(
+          "no occurrence with id " + std::to_string(occId) +
+          ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     const auto& o = p.at("offset");
     const glm::vec3 offset(o.at(0).get<float>(), o.at(1).get<float>(),
                            o.at(2).get<float>());
@@ -382,7 +431,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // With no `view` (or view 0), create a fresh exploded view first so the
     // common "just explode this" call doesn't fault on a missing view.
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     uint64_t id = p.value("view", uint64_t{0});
     const bool created = id == 0;
     if (created) {
@@ -415,7 +466,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // far. params: {view?, factor?} — view omitted keeps the current view;
     // view 0 explicitly = none.
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     if (p.contains("view")) {
       const uint64_t id = p.at("view").get<uint64_t>();
       if (id && !state.assembly->FindExplodedViewById(id))
@@ -447,7 +500,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // Bill of materials (A4): derived, one row per referenced part.
     // Unknown masses (a body without a density) are null and taint the total.
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     const ui::BomTable bom = ui::ComputeBom(state);
     json rows = json::array();
     for (const ui::BomRow& r : bom.rows) {
@@ -472,12 +527,15 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   if (m == "export_bom") {
     // params: {path} — writes the BOM as CSV. Same rows as `bom`.
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     const std::string path = p.at("path").get<std::string>();
     const ui::BomTable bom = ui::ComputeBom(state);
     std::ofstream out(path);
     if (!out)
-      throw std::runtime_error("cannot write " + path);
+      throw std::runtime_error("cannot write " + path +
+                               " — does the parent directory exist?");
     out << ui::BomToCsv(bom);
     return json{{"path", path}, {"rows", bom.rows.size()}};
   }
@@ -503,7 +561,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // assembly ghosted around it. Exit with set_active_part. params:
     // {occurrence}
     if (!state.assembly)
-      throw std::runtime_error("the active document is not an assembly");
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
     if (!ui::EnterInContextEdit(state, p.at("occurrence").get<uint64_t>()))
       throw std::runtime_error("no such occurrence (or its part is missing)");
     return json{{"active", state.activePart},

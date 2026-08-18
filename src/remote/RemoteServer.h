@@ -67,9 +67,13 @@ public:
   bool StartRecording(const std::string& path);
 
   // Screenshot handshake with the frame loop (capture needs the frame's
-  // draw data, so main.cpp performs it and reports back).
+  // draw data, so main.cpp performs it and reports back). dominant/frameHash
+  // are the capture's FrameStats: the response WARNS when a frame is almost
+  // one flat color or pixel-identical to the previous capture — a confident
+  // picture of nothing is the failure mode being caught.
   bool WantsScreenshot(std::string& path);
-  void ScreenshotDone(bool ok, const std::string& error);
+  void ScreenshotDone(bool ok, const std::string& error, float dominant = 0.0f,
+                      uint64_t frameHash = 0);
 
   // V3 render_sheet: a staged multi-view capture job. The handler stages it
   // and the ProcessPending pump captures ONE named view per frame through
@@ -81,6 +85,7 @@ public:
     std::vector<std::string> views;
     std::vector<std::string> tilePaths; // temp per-view captures
     std::vector<std::string> footer;    // digest lines, built at request time
+    std::vector<std::string> warnings;  // per-tile frame postconditions
     std::string outPath;
     size_t nextView = 0;
     int cropX = 0, cropY = 0, cropW = 0, cropH = 0;
@@ -150,6 +155,7 @@ private:
   int m_screenshotClient = -1;
   std::string m_screenshotPath;
   bool m_screenshotPending = false;
+  uint64_t m_lastFrameHash = 0; // unchanged-frame postcondition
   SheetJob m_sheet;
 
   friend void RemoteServerRunUiAction(ImGuiTestContext* ctx);

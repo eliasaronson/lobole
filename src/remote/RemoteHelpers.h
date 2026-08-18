@@ -28,6 +28,33 @@ inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});
 }
 
+// Decision-complete identity errors (error-audit round): the first
+// rejection carries the measured state and the known vocabulary, so the
+// correction needs no discovery round-trip.
+inline std::string KnownList(const std::vector<std::string>& known,
+                             size_t cap = 10) {
+  if (known.empty())
+    return "none exist yet";
+  std::string out;
+  const size_t shown = std::min(known.size(), cap);
+  for (size_t i = 0; i < shown; i++)
+    out += (i ? ", " : "") + known[i];
+  if (known.size() > shown)
+    out += ", +" + std::to_string(known.size() - shown) + " more";
+  return out;
+}
+
+inline std::string IndexError(const char* what, long long given, size_t count,
+                              const char* discovery) {
+  std::string msg = std::string(what) + " index " + std::to_string(given) +
+                    " out of range — there " + (count == 1 ? "is " : "are ") +
+                    std::to_string(count) + (count == 1 ? " " : " ") + what +
+                    (count == 1 ? "" : "s");
+  if (count > 0)
+    msg += " (0.." + std::to_string(count - 1) + ")";
+  return msg + "; " + discovery;
+}
+
 // Compact regeneration outcome, appended as "regen" to every mutating RPC's
 // response (and merged into get_state's regen block) so clients learn about
 // failures from the call that caused them instead of having to poll:

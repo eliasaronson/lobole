@@ -178,7 +178,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const auto area = Measure::CrossSectionArea(
         RequirePartDoc(doc, "section").GetBodies(), origin, normal);
     if (!area)
-      throw std::runtime_error("section failed");
+      throw std::runtime_error(
+          "section failed — the plane may cut no body at all; check the "
+          "bodies' bbox_min/bbox_max in get_state against the plane");
     return json{{"area", *area}};
   }
   if (m == "interference") {
@@ -213,7 +215,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             pa->GetBodies(), ui::OccurrenceMatrix(oa), pb->GetBodies(),
             ui::OccurrenceMatrix(ob));
         if (!v)
-          throw std::runtime_error("interference check failed (see log)");
+          throw std::runtime_error(
+              "interference check failed — an OpenCASCADE boolean/extrema "
+              "threw, usually on an invalid or empty body; run "
+              "check_geometry on both sides");
         return *v;
       };
       if (!p.contains("a") && !p.contains("b")) {
@@ -250,7 +255,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           Measure::ContactBetween(pa->GetBodies(), ui::OccurrenceMatrix(oa),
                                   pb->GetBodies(), ui::OccurrenceMatrix(ob));
       if (!c)
-        throw std::runtime_error("interference check failed (see log)");
+        throw std::runtime_error(
+            "interference check failed — an OpenCASCADE boolean/extrema "
+            "threw, usually on an invalid or empty body; run "
+            "check_geometry on both sides");
       return json{{"clash", c->volume > 1e-9},
                   {"volume", c->volume},
                   {"distance", c->distance},
@@ -264,14 +272,19 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const int ib = p.at("b").get<int>();
     if (ia < 0 || ib < 0 || ia >= static_cast<int>(bodies.size()) ||
         ib >= static_cast<int>(bodies.size()))
-      throw std::runtime_error("body index out of range");
+      throw std::runtime_error(IndexError(
+          "body", ia < 0 || ia >= static_cast<int>(bodies.size()) ? ia : ib,
+          bodies.size(), "get_state lists bodies"));
     std::vector<Body> va(1), vb(1);
     va[0].shape = bodies[ia].shape;
     vb[0].shape = bodies[ib].shape;
     const auto c =
         Measure::ContactBetween(va, glm::mat4(1.0f), vb, glm::mat4(1.0f));
     if (!c)
-      throw std::runtime_error("interference check failed (see log)");
+      throw std::runtime_error(
+          "interference check failed — an OpenCASCADE boolean/extrema "
+          "threw, usually on an invalid or empty body; run "
+          "check_geometry on both sides");
     return json{{"clash", c->volume > 1e-9},
                 {"volume", c->volume},
                 {"distance", c->distance},
@@ -291,7 +304,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                            : RequirePartDoc(doc, "query_geometry").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
-      throw std::runtime_error("body index out of range");
+      throw std::runtime_error(IndexError("body", p.value("body", -1),
+                                          bodies.size(),
+                                          "get_state lists bodies"));
     const std::string elementType = p.value("element_type", "face");
     if (elementType != "face" && elementType != "edge")
       throw std::runtime_error("element_type must be face or edge");
@@ -484,7 +499,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const int ia = p.at("a").get<int>(), ib = p.at("b").get<int>();
       if (ia < 0 || ib < 0 || ia >= static_cast<int>(bodies.size()) ||
           ib >= static_cast<int>(bodies.size()))
-        throw std::runtime_error("body index out of range");
+        throw std::runtime_error(IndexError(
+            "body", ia < 0 || ia >= static_cast<int>(bodies.size()) ? ia : ib,
+            bodies.size(), "get_state lists bodies"));
       refA.emplace_back().shape = bodies[ia].shape;
       candB.emplace_back().shape = bodies[ib].shape;
     } else if (state.assembly) {
@@ -525,7 +542,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                  wantMissing ? &missingShape : nullptr,
                                  wantExtra ? &extraShape : nullptr);
     if (!c)
-      throw std::runtime_error("compare failed (see log)");
+      throw std::runtime_error(
+          "compare failed — an OpenCASCADE boolean threw, usually on an "
+          "invalid or empty body; run check_geometry on both sides");
 
     const double unionV = c->volumeA + c->volumeB - c->common;
     const double iou = unionV > 1e-9 ? c->common / unionV : 0.0;
@@ -604,13 +623,15 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (wantMissing) {
       const std::string path = p.at("missing_path").get<std::string>();
       if (!CADKernel::Instance().SaveBREP(path, missingShape))
-        throw std::runtime_error("cannot write " + path);
+        throw std::runtime_error("cannot write " + path +
+                                 " — does the parent directory exist?");
       out["missing_path"] = path;
     }
     if (wantExtra) {
       const std::string path = p.at("extra_path").get<std::string>();
       if (!CADKernel::Instance().SaveBREP(path, extraShape))
-        throw std::runtime_error("cannot write " + path);
+        throw std::runtime_error("cannot write " + path +
+                                 " — does the parent directory exist?");
       out["extra_path"] = path;
     }
     return out;
@@ -772,7 +793,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const auto& bodies = RequirePartDoc(doc, "mass_properties").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
-      throw std::runtime_error("body index out of range");
+      throw std::runtime_error(IndexError("body", p.value("body", -1),
+                                          bodies.size(),
+                                          "get_state lists bodies"));
     // The math is shared with the BOM (A4): Measure::MassOfBodies. A single
     // body's Body copy is cheap (the shape is a refcounted OCC handle).
     std::vector<Body> subset;
@@ -828,7 +851,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const auto& bodies = part.GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
-      throw std::runtime_error("body index out of range");
+      throw std::runtime_error(IndexError("body", p.value("body", -1),
+                                          bodies.size(),
+                                          "get_state lists bodies"));
     json rows = json::array();
     bool allValid = true;
     for (size_t i = 0; i < bodies.size(); i++) {
@@ -900,7 +925,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                            : RequirePartDoc(doc, "list_elements").GetBodies();
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
-      throw std::runtime_error("body index out of range");
+      throw std::runtime_error(IndexError("body", p.value("body", -1),
+                                          bodies.size(),
+                                          "get_state lists bodies"));
     json out = json::array();
     for (size_t i = 0; i < bodies.size(); i++) {
       if (only >= 0 && i != static_cast<size_t>(only))

@@ -996,9 +996,26 @@ void SyncAssemblyRenderers(AppState& state) {
                          ? body.displayColor
                          : kBodyPalette[palette++ % std::size(kBodyPalette)];
         sb.assetId = state.meshRenderer->CreateAsset(sb.vertices, sb.indices);
-        if (!body.material.empty()) {
-          const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
-              CADMaterials::MaterialLibrary::FromSlug(body.material));
+        // Resolve order: appearance > material > displayColor > palette
+        // (same merge as the part-tab draw loop in AppActions).
+        if (!body.material.empty() || body.appearance.Any()) {
+          CADMaterials::MaterialProperties mat =
+              CADMaterials::MaterialLibrary::GetMaterial(
+                  CADMaterials::MaterialLibrary::FromSlug(body.material));
+          if (body.material.empty()) {
+            mat.baseColor = sb.palette;
+            mat.metallic = 0.0f;
+            mat.roughness = 0.6f;
+            mat.specular = 0.5f;
+            mat.reflectance = 0.04f;
+            mat.procPattern = 0;
+          }
+          if (body.appearance.color)
+            mat.baseColor = *body.appearance.color;
+          if (body.appearance.roughness)
+            mat.roughness = *body.appearance.roughness;
+          if (body.appearance.metallic)
+            mat.metallic = *body.appearance.metallic;
           sb.hasMaterial = true;
           sb.albedo = mat.baseColor;
           sb.pbr = glm::vec4(mat.metallic, mat.roughness, mat.specular,

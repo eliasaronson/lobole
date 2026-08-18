@@ -16,6 +16,19 @@
 // `recordPrepass` (optional) records scene prepasses — e.g. the shadow map —
 // into the same command buffer BEFORE the render pass begins, mirroring
 // FrameRender's pass order so screenshots show identical shadows.
+// Screenshot postconditions (error-audit follow-up): cheap statistics from
+// the readback, so callers can WARN when a capture is blank or unchanged
+// instead of returning a confident picture of nothing.
+struct FrameStats {
+  float dominantFraction = 0.0f; // share of sampled pixels in the modal
+                                 // 5-bit/channel color bucket (1.0 = flat)
+  uint64_t hash = 0;             // FNV-1a over the sampled pixels
+  // Input: restrict sampling to this rect (the 3D viewport — panel chrome
+  // and text would otherwise dilute a flat frame below any threshold).
+  // w/h 0 = the whole frame.
+  int x = 0, y = 0, w = 0, h = 0;
+};
+
 bool CaptureScreenshot(
     VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue,
     VkCommandPool commandPool, VkRenderPass renderPass, VkFormat format,
@@ -23,4 +36,5 @@ bool CaptureScreenshot(
     const std::function<void(VkCommandBuffer)>& recordScene,
     const std::string& outputPath, std::string* error = nullptr,
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT,
-    const std::function<void(VkCommandBuffer)>& recordPrepass = {});
+    const std::function<void(VkCommandBuffer)>& recordPrepass = {},
+    FrameStats* stats = nullptr);

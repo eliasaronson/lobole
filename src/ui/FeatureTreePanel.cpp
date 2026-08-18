@@ -513,6 +513,75 @@ void DrawFeatureTreePanel(AppState& state) {
           }
           ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Appearance")) {
+          // V-appearance (v54): a visual override on top of the material.
+          // Widgets show DERIVED values (the material's own color/roughness/
+          // metallic where nothing is overridden — the U10 rule); edits go
+          // live per tick and land as ONE undo step when the widget
+          // releases.
+          size_t creatorIndex = 0;
+          Feature* creator = doc->FindFeatureById(createdBy, &creatorIndex);
+          if (creator != nullptr) {
+            static nlohmann::json s_before;
+            static uint64_t s_editing = 0;
+            const Appearance ap = creator->GetAppearance();
+            const auto& mat = CADMaterials::MaterialLibrary::GetMaterial(
+                CADMaterials::MaterialLibrary::FromSlug(
+                    creator->GetMaterial()));
+            glm::vec3 color = ap.color.value_or(mat.baseColor);
+            float rough = ap.roughness.value_or(mat.roughness);
+            float metal = ap.metallic.value_or(mat.metallic);
+            const auto apply = [&](const Appearance& next) {
+              if (s_editing != createdBy) {
+                s_before = DocumentIO::FeatureToJson(*creator);
+                s_editing = createdBy;
+              }
+              creator->SetAppearance(next);
+              doc->Regenerate(); // cache hit: restamp + resync only
+              state.syncedDocumentVersion = UINT64_MAX;
+              committed = true; // bodies vector rebuilt: restart the loop
+            };
+            const auto endEdit = [&] {
+              if (s_editing != createdBy)
+                return;
+              nlohmann::json after = DocumentIO::FeatureToJson(*creator);
+              if (after != s_before)
+                state.commands->PushApplied(
+                    std::make_unique<ModifyFeatureCommand>(creatorIndex,
+                                                           s_before, after));
+              s_editing = 0;
+            };
+            if (ImGui::ColorEdit3("Color", &color.x,
+                                  ImGuiColorEditFlags_NoInputs)) {
+              Appearance next = ap;
+              next.color = color;
+              apply(next);
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit())
+              endEdit();
+            if (ImGui::SliderFloat("Roughness", &rough, 0.0f, 1.0f)) {
+              Appearance next = ap;
+              next.roughness = rough;
+              apply(next);
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit())
+              endEdit();
+            if (ImGui::SliderFloat("Metallic", &metal, 0.0f, 1.0f)) {
+              Appearance next = ap;
+              next.metallic = metal;
+              apply(next);
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit())
+              endEdit();
+            ImGui::BeginDisabled(!ap.Any());
+            if (ImGui::MenuItem("Reset to material")) {
+              apply(Appearance{});
+              endEdit();
+            }
+            ImGui::EndDisabled();
+          }
+          ImGui::EndMenu();
+        }
         ImGui::EndPopup();
       }
       ImGui::PopID();
