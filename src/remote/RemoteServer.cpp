@@ -679,8 +679,8 @@ static const std::set<std::string> kNoPartDoc = {
     // contact_report IS assembly-only (V1 connectivity gate);
     // list_elements/measure work there when given an explicit `part`;
     // mass_properties aggregates occurrence masses in world space.
-    "interference", "contact_report", "compare_geometry", "list_elements",
-    "measure", "mass_properties", "render_sheet",
+    "interference", "contact_report", "compare_geometry", "query_geometry",
+    "list_elements", "measure", "mass_properties", "render_sheet",
     // set_section only writes the global viewport clip plane (per-frame UBO,
     // world space) — it clips assembly occurrences too. The `section` AREA
     // query stays part-only (computes on one document's bodies).

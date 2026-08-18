@@ -109,6 +109,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "connected structure), per-pair state/distance, near_misses (gap <= "
      "near_tol, default 1.0 mm), clashes, and intended-vs-realized mate "
      "diffs when mates exist."},
+    {"query_geometry",
+     "Declarative element query with a built-in assertion: filter faces/"
+     "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
+     "(+radius_tol), area/length bounds, near_point (+max_distance); "
+     "expected_count makes the result carry ok true/false. Covers UNNAMED "
+     "elements too; matches carry stable names where they exist."},
     {"compare_geometry",
      "Boolean-diff similarity: {golden_path} (STEP/BREP reference) vs the "
      "active doc, or {a, b} bodies/occurrences. Returns iou/dice/precision/"
@@ -270,6 +276,155 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"volume", c->volume},
                 {"distance", c->distance},
                 {"state", ContactState(*c, touchTol)}};
+  }
+  if (m == "query_geometry") {
+    // Declarative geometry predicates with an assertion built in (survey
+    // round 2, the expected_count idea): "there are 4 cylinder faces of
+    // radius 3±0.01 with axis ±Z" is ONE call returning ok true/false —
+    // instead of a zoo of named finders or measure-probing every element.
+    // params: {part?, body?, element_type?: face|edge, geometry_type?,
+    // normal? + angle_tol_deg?, axis? + angle_tol_deg?, radius? +
+    // radius_tol?, min_area?/max_area?, min_length?/max_length?,
+    // near_point? + max_distance?, expected_count?, max_results? (50)}
+    const auto& bodies =
+        p.contains("part") ? ResolvePartParam(state, p.at("part"))->GetBodies()
+                           : RequirePartDoc(doc, "query_geometry").GetBodies();
+    const int only = p.value("body", -1);
+    if (only >= static_cast<int>(bodies.size()))
+      throw std::runtime_error("body index out of range");
+    const std::string elementType = p.value("element_type", "face");
+    if (elementType != "face" && elementType != "edge")
+      throw std::runtime_error("element_type must be face or edge");
+    const bool wantFaces = elementType == "face";
+    const std::string geomType = p.value("geometry_type", "");
+    const double angleTol = glm::radians(p.value("angle_tol_deg", 5.0));
+    const double radiusTol = p.value("radius_tol", 0.01);
+    const size_t maxResults = p.value("max_results", 50u);
+    const auto vec3 = [](const json& a) {
+      return glm::vec3(a.at(0).get<float>(), a.at(1).get<float>(),
+                       a.at(2).get<float>());
+    };
+    std::optional<glm::vec3> wantNormal, wantAxis, nearPoint;
+    if (p.contains("normal"))
+      wantNormal = glm::normalize(vec3(p.at("normal")));
+    if (p.contains("axis"))
+      wantAxis = glm::normalize(vec3(p.at("axis")));
+    if (p.contains("near_point"))
+      nearPoint = vec3(p.at("near_point"));
+    const double maxDistance = p.value("max_distance", 1e30);
+    std::optional<double> wantRadius, minArea, maxArea, minLength, maxLength;
+    if (p.contains("radius"))
+      wantRadius = p.at("radius").get<double>();
+    if (p.contains("min_area"))
+      minArea = p.at("min_area").get<double>();
+    if (p.contains("max_area"))
+      maxArea = p.at("max_area").get<double>();
+    if (p.contains("min_length"))
+      minLength = p.at("min_length").get<double>();
+    if (p.contains("max_length"))
+      maxLength = p.at("max_length").get<double>();
+
+    size_t count = 0;
+    json matches = json::array();
+    constexpr int kElementCap = 20000; // runaway guard, not a real limit
+    for (size_t bi = 0; bi < bodies.size(); bi++) {
+      if (only >= 0 && bi != static_cast<size_t>(only))
+        continue;
+      // Stable names where toponaming assigned one; unnamed elements still
+      // match (patterns aren't named yet) and are addressable by index.
+      std::map<int, std::string> names;
+      if (wantFaces)
+        for (const auto& [idx, name] : bodies[bi].elementMap.names)
+          names[idx] = name;
+      else
+        for (const auto& [idx, name] : bodies[bi].elementMap.edgeNames)
+          names[idx] = name;
+      for (int idx = 0; idx < kElementCap; idx++) {
+        std::string kind;
+        double area = 0.0, length = 0.0, radius = 0.0;
+        bool hasRadius = false, hasAxis = false;
+        glm::vec3 point(0.0f), normal(0.0f), axis(0.0f);
+        if (wantFaces) {
+          const auto fi = Measure::DescribeFaceAt(bodies[bi], idx);
+          if (!fi)
+            break;
+          kind = fi->kind;
+          area = fi->area;
+          point = fi->centroid;
+          normal = fi->normal;
+          radius = fi->radius;
+          hasRadius = fi->hasRadius;
+          axis = fi->axis;
+          hasAxis = fi->hasAxis;
+        } else {
+          const auto ei = Measure::DescribeEdgeAt(bodies[bi], idx);
+          if (!ei)
+            break;
+          kind = ei->kind;
+          length = ei->length;
+          point = ei->midpoint;
+          radius = ei->radius;
+          hasRadius = ei->hasRadius;
+          axis = ei->axis;
+          hasAxis = ei->hasAxis;
+        }
+        if (!geomType.empty() && kind != geomType)
+          continue;
+        if (wantNormal && (glm::length(normal) < 0.5f ||
+                           glm::dot(glm::normalize(normal), *wantNormal) <
+                               std::cos(angleTol)))
+          continue;
+        // Axis sign is arbitrary (a cylinder axis has no outward), so |dot|.
+        if (wantAxis &&
+            (!hasAxis || std::abs(glm::dot(glm::normalize(axis), *wantAxis)) <
+                             std::cos(angleTol)))
+          continue;
+        if (wantRadius &&
+            (!hasRadius || std::abs(radius - *wantRadius) > radiusTol))
+          continue;
+        if (minArea && area < *minArea)
+          continue;
+        if (maxArea && area > *maxArea)
+          continue;
+        if (minLength && length < *minLength)
+          continue;
+        if (maxLength && length > *maxLength)
+          continue;
+        if (nearPoint && glm::length(point - *nearPoint) > maxDistance)
+          continue;
+        count++;
+        if (matches.size() >= maxResults)
+          continue; // keep counting, stop listing
+        json entry = {
+            {"body", bi},
+            {"index", idx},
+            {"kind", kind},
+            {"created_by", bodies[bi].createdBy},
+            {wantFaces ? "centroid" : "midpoint", {point.x, point.y, point.z}}};
+        if (wantFaces) {
+          entry["area"] = area;
+          entry["normal"] = {normal.x, normal.y, normal.z};
+        } else {
+          entry["length"] = length;
+        }
+        if (hasRadius)
+          entry["radius"] = radius;
+        if (hasAxis)
+          entry["axis"] = {axis.x, axis.y, axis.z};
+        if (const auto it = names.find(idx); it != names.end())
+          entry["element"] = it->second;
+        matches.push_back(std::move(entry));
+      }
+    }
+    json out = {{"count", count},
+                {"matches", std::move(matches)},
+                {"truncated", count > maxResults}};
+    if (p.contains("expected_count")) {
+      const size_t expected = p.at("expected_count").get<size_t>();
+      out["expected_count"] = expected;
+      out["ok"] = count == expected;
+    }
+    return out;
   }
   if (m == "compare_geometry") {
     // V4: boolean-diff similarity, the numeric "same shape?" oracle. The

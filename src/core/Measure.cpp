@@ -141,18 +141,31 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
       }
     }
   }
-  switch (BRepAdaptor_Surface(TopoDS::Face(f)).GetType()) {
+  BRepAdaptor_Surface surf(TopoDS::Face(f));
+  switch (surf.GetType()) {
   case GeomAbs_Plane:
     out.kind = "plane";
     break;
-  case GeomAbs_Cylinder:
+  case GeomAbs_Cylinder: {
     out.kind = "cylinder";
+    out.radius = surf.Cylinder().Radius();
+    out.hasRadius = true;
+    const gp_Dir a = surf.Cylinder().Axis().Direction();
+    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
+    out.hasAxis = true;
     break;
-  case GeomAbs_Cone:
+  }
+  case GeomAbs_Cone: {
     out.kind = "cone";
+    const gp_Dir a = surf.Cone().Axis().Direction();
+    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
+    out.hasAxis = true;
     break;
+  }
   case GeomAbs_Sphere:
     out.kind = "sphere";
+    out.radius = surf.Sphere().Radius();
+    out.hasRadius = true;
     break;
   default:
     out.kind = "other";
@@ -188,6 +201,9 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex) {
     out.kind = sweep >= 2.0 * M_PI - 1e-6 ? "circle" : "arc";
     out.radius = curve.Circle().Radius();
     out.hasRadius = true;
+    const gp_Dir a = curve.Circle().Axis().Direction();
+    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
+    out.hasAxis = true;
     break;
   }
   default:

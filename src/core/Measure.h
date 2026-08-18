@@ -34,6 +34,12 @@ struct FaceInfo {
   double area = 0.0;
   glm::vec3 centroid{0.0f}; // face center of mass, world space
   glm::vec3 normal{0.0f};   // outward unit surface normal at the centroid UV
+  // Analytic extras for query_geometry: cylinders/spheres carry a radius,
+  // cylinders/cones an axis DIRECTION (sign is arbitrary — compare |dot|).
+  double radius = 0.0;
+  bool hasRadius = false;
+  glm::vec3 axis{0.0f};
+  bool hasAxis = false;
 };
 struct EdgeInfo {
   std::string kind; // "line" | "circle" | "arc" | "other"
@@ -41,6 +47,8 @@ struct EdgeInfo {
   double radius = 0.0; // circular edges ("circle" / "arc") only
   bool hasRadius = false;
   glm::vec3 midpoint{0.0f}; // curve midpoint (parametric mid), world space
+  glm::vec3 axis{0.0f};     // circular edges: the circle's axis direction
+  bool hasAxis = false;
 };
 std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex);
 std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex);

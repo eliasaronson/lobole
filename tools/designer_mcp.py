@@ -255,7 +255,11 @@ The loop that works — follow it every time:
    The full pre-delivery list: docs/inspect/review-checklist.md (one RPC
    per box, plus a symptom->cause->fix table for the classic traps).
 5. For 3D fillets/chamfers: list_elements to get stable edge names, then
-   add_feature with type Fillet/Chamfer referencing them.
+   add_feature with type Fillet/Chamfer referencing them. To FIND geometry
+   (or assert it): query_geometry takes declarative predicates —
+   geometry_type/normal/axis/radius±tol/area/near_point — and an
+   expected_count that turns the query into a one-call assertion
+   ("exactly 4 Ø6 bores with axis Z" -> ok true/false).
 6. Iterate. A wrong step is one undo away — prefer undo over compensating
    edits; checkpoint_create before risky multi-step changes and
    checkpoint_restore instead of reconstructing. A feature that errors no
