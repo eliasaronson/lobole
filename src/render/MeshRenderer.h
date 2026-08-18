@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
@@ -116,6 +118,24 @@ struct MeshInstance {
   // opaque instances. baseColor.a carries the opacity.
   bool ghost = false;
 };
+
+// gl_FragCoord -> AO-map uv, as a pure function so it can be tested without a
+// GPU. The scene is drawn into a sub-rect of the framebuffer (panels take the
+// rest) while every screen-space prepass fills its own target, so a lookup
+// that divides by the FRAMEBUFFER size reads the wrong texel — the SSAO
+// ghosting bug. Returns .xy = scale, .zw = offset: uv = coord * scale + off.
+//
+// Any future full-screen effect that consumes a prepass belongs here too; the
+// invariant is that viewport origin maps to uv 0 and its far corner to uv 1,
+// whatever the framebuffer around it.
+inline glm::vec4 ViewportToTargetUV(int32_t viewportX, int32_t viewportY,
+                                    uint32_t viewportWidth,
+                                    uint32_t viewportHeight) {
+  const glm::vec2 size(std::max(viewportWidth, 1u),
+                       std::max(viewportHeight, 1u));
+  const glm::vec2 scale = 1.0f / size;
+  return glm::vec4(scale, -glm::vec2(viewportX, viewportY) * scale);
+}
 
 class MeshRenderer {
 public:

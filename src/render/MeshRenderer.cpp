@@ -309,11 +309,8 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
   // affine remap between those rectangles aligns them exactly, whatever the
   // aspect or AO resolution. xy = scale, zw = offset; the enable flag rides
   // in aoParams2.x.
-  const glm::vec2 vpSize(std::max(m_viewportWidth, 1u),
-                         std::max(m_viewportHeight, 1u));
-  const glm::vec2 aoScale = 1.0f / vpSize;
-  const glm::vec2 aoOffset = -glm::vec2(m_viewportX, m_viewportY) * aoScale;
-  ubo.aoParams = glm::vec4(aoScale, aoOffset);
+  ubo.aoParams = ViewportToTargetUV(m_viewportX, m_viewportY, m_viewportWidth,
+                                    m_viewportHeight);
   ubo.aoParams2 = glm::vec4(m_aoEnabled ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
 
   // Set viewport to the central region (excludes the side panels)
