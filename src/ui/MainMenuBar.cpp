@@ -7,6 +7,7 @@
 #include "core/Feature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Checkpoints.h"
+#include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "render/OutlineRenderer.h"
@@ -16,6 +17,8 @@
 #include "ui/SketchInteraction.h"
 
 #include "imgui.h"
+
+#include <filesystem>
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -29,6 +32,58 @@ namespace {
 bool BeginTopMenu(AppState& state, const char* label) {
   state.menuBarTop.push_back(label);
   return ImGui::BeginMenu(label);
+}
+// File > Open Recent. The list is the app's own history (RecentProjects),
+// kept in the state dir, and it INCLUDES paths that are missing right now —
+// an unplugged drive is not a reason to forget a project you had open. Those
+// entries are disabled and say why, with a one-click way to drop them.
+void DrawOpenRecentMenu(AppState& state) {
+  const std::vector<std::string> recent = RecentProjects::List();
+  if (!ImGui::BeginMenu("Open Recent", !recent.empty()))
+    return;
+  std::string forget;
+  size_t index = 0;
+  for (const std::string& path : recent) {
+    const bool exists = std::filesystem::exists(path);
+    // The basename is what a person recognises; the full path is the
+    // tooltip, because two "bracket.dsgn" in different folders are common.
+    std::string label = std::filesystem::path(path).filename().string();
+    if (label.empty())
+      label = path;
+    ImGui::BeginDisabled(!exists);
+    // "###" and an INDEX, not the path: "##" would fold the visible name
+    // into the id (so a renamed project moves), and a path contains slashes,
+    // which a menu ref parses as further submenu levels.
+    if (ImGui::MenuItem(
+            (label + "###recent" + std::to_string(index)).c_str())) {
+      std::string error;
+      if (OpenProject(state, path, &error)) {
+        MarkProjectOpened(state, path);
+      } else {
+        LOG_ERROR("Could not open {}: {}", path, error);
+        forget = path; // it is in the list but no longer openable
+      }
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::SetTooltip("%s%s", path.c_str(),
+                        exists ? ""
+                               : "\n(not found — the file has moved or "
+                                 "its drive is not mounted)");
+    }
+    index++;
+    if (!exists && ImGui::BeginPopupContextItem(("###rctx" + path).c_str())) {
+      if (ImGui::MenuItem("Remove from list"))
+        forget = path;
+      ImGui::EndPopup();
+    }
+  }
+  ImGui::Separator();
+  if (ImGui::MenuItem("Clear list"))
+    RecentProjects::Clear();
+  ImGui::EndMenu();
+  if (!forget.empty())
+    RecentProjects::Forget(forget);
 }
 
 void DrawFileMenu(AppState& state) {
@@ -46,6 +101,7 @@ void DrawFileMenu(AppState& state) {
   if (ImGui::MenuItem("Open Project...", "Ctrl+O")) {
     OpenProjectDialog(state);
   }
+  DrawOpenRecentMenu(state);
   if (ImGui::MenuItem("Save Project", "Ctrl+S")) {
     SaveProjectAction(state);
   }

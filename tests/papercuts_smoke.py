@@ -116,12 +116,24 @@ def main():
             expect("set_active_part" in str(e), f"carries the remedy: {e}")
         d.call("set_active_part", name="Rig")
 
-        # --- render_still errors honestly on an assembly tab --------------
+        # --- render_still on an assembly tab ------------------------------
+        # It used to refuse as "part-only", which was never true of the RT
+        # scene sync — that walks every visible occurrence at its solved
+        # placement. What must still fail is a tab with nothing in it, which
+        # otherwise "succeeds" with a picture of the environment alone.
+        # (Headless has no renderer at all, so that is the error here; the
+        # rendering itself is exercised where there is a GPU.)
+        r = d.call("render_still", path=os.path.join(tmp, "x.png"))
+        expect(not r["ok"] and "part-only" not in r.get("error", ""),
+               f"an assembly is no longer refused as part-only "
+               f"(headless has no renderer: {r.get('error', '')})")
+        d.call("add_assembly", name="Empty rig")
         try:
-            d.call("render_still", path=os.path.join(tmp, "x.png"))
-            raise AssertionError("render_still on assembly should error")
+            d.call("render_still", path=os.path.join(tmp, "y.png"))
+            raise AssertionError("render_still on an empty assembly should "
+                                 "error")
         except RuntimeError as e:
-            expect("part-only" in str(e), f"wrong error: {e}")
+            expect("no occurrences" in str(e), f"names the real problem: {e}")
 
         print("papercuts_smoke: all checks passed")
         return 0

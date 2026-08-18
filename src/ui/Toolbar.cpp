@@ -688,6 +688,20 @@ void DrawAssemblyToolbar(AppState& state) {
   if (measureActive)
     ImGui::PopStyleColor();
 
+  Divider();
+
+  // Offline path-traced still, same as the part tab. SyncRayTracingScene has
+  // walked assembly occurrences at their solved placements since the RT work
+  // landed; only the buttons and the RPC guard said otherwise, so an assembly
+  // could be modelled, mated and exploded but never rendered.
+  if (ToolButton(ICON_FA_CAMERA "###tb_asm_render",
+                 "Render (offline "
+                 "raytrace)",
+                 state.rayTracer != nullptr &&
+                     state.assembly->OccurrenceCount() > 0))
+    ImGui::OpenPopup("Render Still");
+  DrawRenderModal(state);
+
   if (state.mateTool.active && !state.mateTool.message.empty()) {
     ImGui::SameLine();
     ImGui::TextDisabled("%s", state.mateTool.message.c_str());

@@ -25,6 +25,7 @@
 #include "core/fem/FemTopo.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
+#include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
@@ -1839,6 +1840,7 @@ std::string WindowTitle(AppState& state) {
 void MarkProjectSaved(AppState& state, const std::string& path,
                       const std::string& message) {
   state.projectPath = path;
+  RecentProjects::Remember(path);
   StampAllSaved(state);
   // The save supersedes both possible sidecars: this project's, and the
   // unsaved slot if the document lived there before its first save.
@@ -1859,6 +1861,7 @@ void MarkProjectSaved(AppState& state, const std::string& path,
 
 void MarkProjectOpened(AppState& state, const std::string& path) {
   state.projectPath = path;
+  RecentProjects::Remember(path); // ignores "" (the unsaved slot)
   StampAllSaved(state);
 }
 

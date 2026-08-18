@@ -20,6 +20,7 @@ add_executable(designer_tests
     test_baked_geometry.cpp
     test_instance_registry.cpp
     test_screen_space_mapping.cpp
+    test_recent_projects.cpp
     test_golden.cpp
     test_assembly.cpp
     test_assembly_solve.cpp

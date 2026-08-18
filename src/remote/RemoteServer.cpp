@@ -995,13 +995,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"has_tlas", state.rayTracer && state.rayTracer->HasTLAS()}};
   }
   if (m == "render_still") {
-    // Part-only for now: the RT scene holds the active part's meshes, so an
-    // assembly tab used to "succeed" with a render of just the environment —
-    // the dock round's silently-wrong papercut. Fail with the remedy instead.
-    if (doc == nullptr && state.assembly)
+    // Assemblies render too: SyncRayTracingScene walks every visible
+    // occurrence at its solved placement. What must still fail loudly is a
+    // tab with nothing in it, which used to "succeed" with a picture of the
+    // environment alone — the dock round's silently-wrong papercut.
+    if (state.assembly && state.assembly->OccurrenceCount() == 0)
       throw std::runtime_error(
-          "render_still is part-only (the ray-traced scene skips assembly "
-          "occurrences) — use screenshot or render_sheet on an assembly tab");
+          "this assembly has no occurrences — there is nothing to render");
     // Offline path-traced still to a PNG. Runs synchronously on the main thread
     // (ProcessPending) using the same idle-queue one-shot submits as the AS
     // build, so it needs no swapchain interaction. Parameters default to a

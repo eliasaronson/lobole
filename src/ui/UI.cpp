@@ -22,6 +22,7 @@
 #include "ui/VariablesPanel.h"
 #include "ui/ViewportInput.h"
 
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -395,6 +396,34 @@ void DrawControlsHelpOverlay(AppState& state) {
 
 // Part tabs pinned to the bottom of the screen (assemblies A1): one tab per
 // part + a "+" to add. Clicking a tab switches the active part.
+// What kind of document a tab holds, at a glance. The bar showed names only,
+// so "Bracket" and "Bracket drawing" and a folder of them were three
+// identical-looking buttons — you found out by clicking. Folders carry their
+// own glyph plus a count.
+const char* TabGlyph(DocKind kind) {
+  switch (kind) {
+  case DocKind::Part:
+    return ICON_FA_CUBE;
+  case DocKind::Assembly:
+    return ICON_FA_CUBES;
+  case DocKind::Drawing:
+    return ICON_FA_FILE_LINES;
+  }
+  return ICON_FA_CUBE;
+}
+
+const char* TabKindName(DocKind kind) {
+  switch (kind) {
+  case DocKind::Part:
+    return "Part";
+  case DocKind::Assembly:
+    return "Assembly";
+  case DocKind::Drawing:
+    return "Drawing";
+  }
+  return "Part";
+}
+
 void DrawPartTabs(AppState& state) {
   EnsureParts(state);
   const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -494,11 +523,17 @@ void DrawPartTabs(AppState& state) {
       if (active)
         ImGui::PushStyleColor(ImGuiCol_Button,
                               ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-      if (ImGui::Button(
-              (state.parts[i].name + "##part" + std::to_string(i)).c_str()))
+      // "###": the id must not move when the label gains a glyph or the
+      // document is renamed — that is what tests and scripts address.
+      if (ImGui::Button((std::string(TabGlyph(state.parts[i].kind)) + "  " +
+                         state.parts[i].name + "###part" + std::to_string(i))
+                            .c_str()))
         SetActivePart(state, i);
       if (active)
         ImGui::PopStyleColor();
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s: %s", TabKindName(state.parts[i].kind),
+                          state.parts[i].name.c_str());
       docDragSource(i);
       acceptDocDrop(""); // dropping on a top-level tab = out of its folder
       // Right-click a tab: move to a folder, or delete it (never the last).
@@ -523,8 +558,9 @@ void DrawPartTabs(AppState& state) {
       if (activeInside)
         ImGui::PushStyleColor(ImGuiCol_Button,
                               ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-      const std::string label =
-          folder + " (" + std::to_string(count) + ")##folder" + folder;
+      const std::string label = std::string(ICON_FA_FOLDER) + "  " + folder +
+                                " (" + std::to_string(count) + ")###folder" +
+                                folder;
       if (ImGui::Button(label.c_str()))
         ImGui::OpenPopup(("##folderpop" + folder).c_str());
       if (activeInside)
@@ -553,9 +589,11 @@ void DrawPartTabs(AppState& state) {
           if (state.parts[i].folder != folder)
             continue;
           const bool active = static_cast<int>(i) == state.activePart;
-          if (ImGui::Selectable(
-                  (state.parts[i].name + "##fpart" + std::to_string(i)).c_str(),
-                  active)) {
+          if (ImGui::Selectable((std::string(TabGlyph(state.parts[i].kind)) +
+                                 "  " + state.parts[i].name + "###fpart" +
+                                 std::to_string(i))
+                                    .c_str(),
+                                active)) {
             SetActivePart(state, i);
           }
           docDragSource(i); // draggable out to the bar / another folder

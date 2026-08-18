@@ -210,6 +210,7 @@ set(core_sources
     src/cad/SketchManager.cpp
     src/cad/FaceSelector.cpp
     src/core/io/Autosaver.cpp
+    src/core/io/RecentProjects.cpp
     # Pure logic despite living under remote/: a JSON file per open port,
     # no sockets and no ImGui, so the tests can link and exercise it.
     src/remote/InstanceRegistry.cpp

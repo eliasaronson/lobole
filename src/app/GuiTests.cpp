@@ -21,6 +21,7 @@
 #include "core/features/SplitFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/fem/FemStudy.h"
+#include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
 #include "ui/AppActions.h"
@@ -30,6 +31,7 @@
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
 
+#include "IconsFontAwesome6.h"
 #include "imgui_internal.h"
 #include "imgui_te_context.h"
 #include "imgui_te_engine.h"
@@ -4553,9 +4555,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(2);
 
     // One flyout button for the folder; clicking lists the parts.
-    ctx->ItemClick("//##PartTabs/Imported (2)##folderImported");
+    ctx->ItemClick("//##PartTabs/###folderImported");
     ctx->Yield();
-    ctx->ItemClick("//$FOCUSED/Nut##fpart2");
+    ctx->ItemClick("//$FOCUSED/###fpart2");
     ctx->Yield();
     IM_CHECK_EQ(s_App->activePart, 2);
     IM_CHECK_EQ(s_App->parts[2].name, "Nut");
@@ -4581,6 +4583,74 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   };
 
   // The bottom-bar "+" collapses the three add buttons into one menu.
+  // A tab bar of names alone made a part, its drawing and a folder of them
+  // look identical until you clicked. Each tab now carries its kind's glyph,
+  // and the ids are "###" so they do not move when the label gains one.
+  t = IM_REGISTER_TEST(engine, "tabs", "kind_glyphs_and_stable_ids");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ui::AddAssembly(*s_App, "Rig");
+    ui::AddPart(*s_App, "Bolt");
+    s_App->parts.back().folder = "Hardware";
+    ctx->Yield(2);
+
+    // Addressable by id whatever the label says.
+    IM_CHECK(ctx->ItemExists("//##PartTabs/###part0"));
+    IM_CHECK(ctx->ItemExists("//##PartTabs/###part1"));
+    IM_CHECK(ctx->ItemExists("//##PartTabs/###folderHardware"));
+
+    // And the labels carry the kind glyph — a part is a cube, an assembly is
+    // cubes, a folder is a folder.
+    ImGuiTestItemInfo part = ctx->ItemInfo("//##PartTabs/###part0");
+    ImGuiTestItemInfo asm_ = ctx->ItemInfo("//##PartTabs/###part1");
+    ImGuiTestItemInfo folder = ctx->ItemInfo("//##PartTabs/###folderHardware");
+    IM_CHECK(strstr(part.DebugLabel, ICON_FA_CUBE) != nullptr);
+    IM_CHECK(strstr(asm_.DebugLabel, ICON_FA_CUBES) != nullptr);
+    IM_CHECK(strstr(folder.DebugLabel, ICON_FA_FOLDER) != nullptr);
+    // The glyphs must be DIFFERENT, or the indicator indicates nothing.
+    IM_CHECK(strcmp(part.DebugLabel, asm_.DebugLabel) != 0);
+  };
+
+  // File > Open Recent: the app's own history, kept in the state dir. The
+  // menu is disabled when empty, lists what was opened, and keeps entries
+  // whose file has since gone (disabled, with the reason).
+  t = IM_REGISTER_TEST(engine, "file", "open_recent_lists_what_was_opened");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_recent_gui";
+    std::filesystem::remove_all(dir);
+    RecentProjects::Clear();
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "test");
+    ctx->Yield();
+
+    // Saving is what puts it there — the same hook as opening.
+    const auto recent = RecentProjects::List();
+    IM_CHECK_EQ(recent.size(), (size_t)1);
+    IM_CHECK(recent[0].find("designer_recent_gui") != std::string::npos);
+
+    // The menu shows it, and clicking it opens that project.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0); // a fresh document
+    ctx->MenuClick("File/Open Recent/###recent0");
+    ctx->Yield(2);
+    IM_CHECK(Doc()->FeatureCount() > 0); // the box came back
+    IM_CHECK_EQ(s_App->projectPath, dir.string());
+
+    std::filesystem::remove_all(dir);
+    RecentProjects::Clear();
+  };
+
   t = IM_REGISTER_TEST(engine, "tabs", "add_menu");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -4638,8 +4708,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(s_App->tabFolders[0], std::string("Fasteners"));
 
     // The empty folder is a live drop target.
-    ctx->ItemDragAndDrop("//##PartTabs/Bolt##part1",
-                         "//##PartTabs/Fasteners (0)##folderFasteners");
+    ctx->ItemDragAndDrop("//##PartTabs/###part1",
+                         "//##PartTabs/###folderFasteners");
     ctx->Yield();
     IM_CHECK_EQ(s_App->parts[1].folder, std::string("Fasteners"));
     std::filesystem::remove_all(dir);
@@ -4663,8 +4733,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(2);
 
     // Rename the folder via right-click > Rename.
-    ctx->ItemClick("//##PartTabs/Imported (2)##folderImported",
-                   ImGuiMouseButton_Right);
+    ctx->ItemClick("//##PartTabs/###folderImported", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Rename...");
     ctx->Yield(2);
     ctx->KeyCharsReplaceEnter("Hardware");
@@ -4674,7 +4743,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(ui::ProjectDirty(*s_App));
 
     // Move the top-level part into a NEW folder via its context menu.
-    ctx->ItemClick("//##PartTabs/Part 1##part0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//##PartTabs/###part0", ImGuiMouseButton_Right);
     ctx->MenuClick("//$FOCUSED/Move to folder/New folder...##mvnew");
     ctx->Yield(2);
     ctx->KeyCharsReplaceEnter("Misc");
@@ -4682,15 +4751,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(s_App->parts[0].folder, std::string("Misc"));
 
     // ...and back out of it via the flyout entry's context menu.
-    ctx->ItemClick("//##PartTabs/Misc (1)##folderMisc");
-    ctx->ItemClick("//$FOCUSED/Part 1##fpart0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//##PartTabs/###folderMisc");
+    ctx->ItemClick("//$FOCUSED/###fpart0", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Move out of folder");
     ctx->Yield();
     IM_CHECK_EQ(s_App->parts[0].folder, std::string(""));
 
     // Drag the top-level tab onto the folder button to file it.
-    ctx->ItemDragAndDrop("//##PartTabs/Part 1##part0",
-                         "//##PartTabs/Hardware (2)##folderHardware");
+    ctx->ItemDragAndDrop("//##PartTabs/###part0",
+                         "//##PartTabs/###folderHardware");
     ctx->Yield();
     IM_CHECK_EQ(s_App->parts[0].folder, std::string("Hardware"));
 
@@ -4699,9 +4768,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // window to resolve it, which closes the flyout mid-drag.
     const ImVec2 tailPos =
         ctx->ItemInfo("//##PartTabs/##tabsdroptail").RectFull.GetCenter();
-    ctx->ItemClick("//##PartTabs/Hardware (3)##folderHardware");
+    ctx->ItemClick("//##PartTabs/###folderHardware");
     const ImVec2 nutPos =
-        ctx->ItemInfo("//$FOCUSED/Nut##fpart2").RectFull.GetCenter();
+        ctx->ItemInfo("//$FOCUSED/###fpart2").RectFull.GetCenter();
     ctx->MouseMoveToPos(nutPos);
     ctx->MouseDown(ImGuiMouseButton_Left);
     ctx->MouseMoveToPos(tailPos);
@@ -4711,8 +4780,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(s_App->parts[2].folder, std::string(""));
 
     // Dissolve the folder: contents move to the top level, nothing deleted.
-    ctx->ItemClick("//##PartTabs/Hardware (2)##folderHardware",
-                   ImGuiMouseButton_Right);
+    ctx->ItemClick("//##PartTabs/###folderHardware", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Dissolve folder");
     ctx->Yield();
     IM_CHECK_EQ(s_App->parts.size(), (size_t)3);
