@@ -202,6 +202,20 @@ add_test(NAME papercuts_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(papercuts_smoke PROPERTIES TIMEOUT 120)
 
+# Blind-spot suite: tests/blindspots/NN_*.py, one file per known agent
+# mistake — the wrong pattern must be caught loudly, the right one works.
+# Add a file per new trap; never delete one. Headless.
+add_test(NAME blindspot_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/blindspot_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(blindspot_smoke PROPERTIES TIMEOUT 120)
+
+# query_geometry: declarative element predicates + expected_count. Headless.
+add_test(NAME query_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/query_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(query_smoke PROPERTIES TIMEOUT 120)
+
 # Variables C2 units: unit-suffixed expressions resolve, unit names reserved,
 # v28 round-trip. Headless (no display).
 add_test(NAME units_smoke
