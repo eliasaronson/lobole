@@ -84,6 +84,53 @@ const char* ContactState(const Measure::SetContact& c, double touchTol) {
   return c.distance <= touchTol ? "touching" : "clear";
 }
 
+// Round-8 retro: connected components of a part's bodies (largest first) —
+// the compact core of contact_report's body scope, reused by
+// check_geometry's automatic floating-bodies warning so the class is
+// opt-OUT instead of opt-in.
+std::vector<std::vector<std::string>>
+BodyComponentNames(const Document& doc, double touchTol, double window) {
+  struct Ent {
+    const Body* body;
+    std::vector<Body> single;
+    glm::vec3 min, max;
+  };
+  std::vector<Ent> ents;
+  for (const Body& b : doc.GetBodies()) {
+    Ent e{&b, {}, {}, {}};
+    e.single.push_back(b);
+    if (Measure::WorldBounds(e.single, glm::mat4(1.0f), e.min, e.max))
+      ents.push_back(std::move(e));
+  }
+  std::vector<size_t> parent(ents.size());
+  for (size_t i = 0; i < parent.size(); ++i)
+    parent[i] = i;
+  const std::function<size_t(size_t)> find = [&](size_t i) -> size_t {
+    return parent[i] == i ? i : parent[i] = find(parent[i]);
+  };
+  for (size_t i = 0; i < ents.size(); ++i)
+    for (size_t j = i + 1; j < ents.size(); ++j) {
+      const glm::vec3 gap = glm::max(
+          glm::max(ents[i].min - ents[j].max, ents[j].min - ents[i].max),
+          glm::vec3(0.0f));
+      if (glm::length(gap) > window)
+        continue;
+      const auto c = Measure::ContactBetween(ents[i].single, glm::mat4(1.0f),
+                                             ents[j].single, glm::mat4(1.0f));
+      if (c && (c->volume > 1e-9 || c->distance <= touchTol))
+        parent[find(i)] = find(j);
+    }
+  std::map<size_t, std::vector<std::string>> comps;
+  for (size_t i = 0; i < ents.size(); ++i)
+    comps[find(i)].push_back(ents[i].body->name);
+  std::vector<std::vector<std::string>> out;
+  for (auto& [root, names] : comps)
+    out.push_back(std::move(names));
+  std::sort(out.begin(), out.end(),
+            [](const auto& a, const auto& b) { return a.size() > b.size(); });
+  return out;
+}
+
 } // namespace
 
 // Inspection RPCs (section clip, interference, mass properties, measure,
@@ -959,11 +1006,35 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     json featureErrors = RegenSummaryJson(part)["failed"];
     const bool ok = allValid && featureErrors.empty();
-    return json{{"valid", allValid},
+    json out = {{"valid", allValid},
                 {"bodies", rows},
                 {"body_count", bodies.size()},
                 {"feature_errors", std::move(featureErrors)},
                 {"ok", ok}};
+    // Round-8 retro: floating geometry INSIDE a part warns by default —
+    // the ladder's mount plate passed every opt-in gate because nobody
+    // thought to ask. `ok` is untouched (disjoint multi-body parts can be
+    // legitimate); scripts assert `connected` where it matters.
+    if (bodies.size() >= 2 && only < 0) {
+      const auto comps = BodyComponentNames(part, 1e-3, 1.0);
+      out["body_components"] = comps;
+      out["connected"] = comps.size() <= 1;
+      if (comps.size() > 1) {
+        json warnings = json::array();
+        for (size_t i = 1; i < comps.size(); i++) {
+          std::string names;
+          for (const std::string& n : comps[i])
+            names += (names.empty() ? "" : ", ") + n;
+          warnings.push_back(
+              "bodies [" + names +
+              "] touch nothing else in this part — floating geometry inside "
+              "a part is usually a mistake (contact_report on this tab lists "
+              "the gaps)");
+        }
+        out["warnings"] = std::move(warnings);
+      }
+    }
+    return out;
   }
   if (m == "measure") {
     // Geometry queries over stable element names (I1). params:

@@ -450,6 +450,9 @@ std::string WindowTitle(AppState& state);
 
 // Frames the camera on the document's combined bounding box.
 void FitCameraToDocument(AppState& state);
+// Frames the camera on an explicit world-space box (render_sheet focus).
+void FitCameraToWorldBox(AppState& state, const glm::vec3& min,
+                         const glm::vec3& max);
 // Frames the camera on the selection's combined bounding box (faces/edges/
 // bodies/features by their geometry; occurrences by their placed part).
 // Falls back to the whole document when nothing is selected/resolvable.

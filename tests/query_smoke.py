@@ -96,6 +96,22 @@ def main():
                    max_distance=4, expected_count=1)
         expect(r["ok"], f"one rim near the top of hole 1: {r}")
 
+        # Torus faces are assertable (round-8 retro: bent tubes were
+        # "other"). A half-donut: circle 20 off the z axis, swept 180.
+        sk2 = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Bend",
+            "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "circle", "center": [20, 40],
+                          "radius": 4}]})
+        r = d.call("add_feature", feature={
+            "type": "Revolve", "name": "Half donut", "sketch_id": sk2["id"],
+            "axis": {"kind": "z"}, "angle_deg": 180, "mode": "new_body"})
+        expect(r["regen"]["ok"], f"half donut: {r['regen']}")
+        r = d.call("query_geometry", geometry_type="torus", radius=4,
+                   axis=[0, 0, 1], expected_count=1)
+        expect(r["ok"], f"one torus face, minor radius 4: {r}")
+
         # max_results caps the listing, never the count.
         r = d.call("query_geometry", geometry_type="cylinder", radius=3,
                    max_results=1)

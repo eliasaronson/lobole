@@ -30,7 +30,7 @@ std::optional<Element> Describe(const std::vector<Body>& bodies,
 // the element maps key on (faces = TopExp_Explorer order, edges = MapShapes
 // order, both 0-based) — and classify the underlying surface / curve.
 struct FaceInfo {
-  std::string kind; // "plane" | "cylinder" | "cone" | "sphere" | "other"
+  std::string kind; // "plane"|"cylinder"|"cone"|"sphere"|"torus"|"other"
   double area = 0.0;
   glm::vec3 centroid{0.0f}; // face center of mass, world space
   glm::vec3 normal{0.0f};   // outward unit surface normal at the centroid UV

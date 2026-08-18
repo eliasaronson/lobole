@@ -2006,6 +2006,11 @@ void FitCameraToDocument(AppState& state) {
   FitCameraToBox(state, min, max);
 }
 
+void FitCameraToWorldBox(AppState& state, const glm::vec3& min,
+                         const glm::vec3& max) {
+  FitCameraToBox(state, min, max);
+}
+
 void FitCameraToSelection(AppState& state) {
   if (!state.camera)
     return;

@@ -766,6 +766,16 @@ def main():
         expect(any("BBOX 20 X 10 X 5" in line for line in r["footer"]),
                f"sheet footer bbox: {r['footer']}")
         expect(r["views"] == ["iso", "front"], f"sheet views: {r['views']}")
+        # Focused sheet (round-8 retro): frame ONE occurrence large.
+        part = d.call("list_parts")["parts"][0]["name"]
+        d.call("add_assembly", name="SheetRig")
+        d.call("set_active_part", name="SheetRig")
+        d.call("add_occurrence", part=part, name="Solo", fixed=True)
+        focus = os.path.join(tmp, "focus.png")
+        r = d.call("render_sheet", path=focus, views=["iso"], focus="Solo")
+        expect(os.path.exists(focus), "focused sheet written")
+        expect(r["footer"] and r["footer"][0] == "FOCUS: Solo",
+               f"focus named in the footer: {r['footer']}")
 
         phase("Standard views")
         # Standard views: instant (no animation), fit + exact axis alignment

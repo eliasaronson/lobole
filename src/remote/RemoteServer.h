@@ -89,6 +89,10 @@ public:
     std::string outPath;
     size_t nextView = 0;
     int cropX = 0, cropY = 0, cropW = 0, cropH = 0;
+    // Focus (round-8 retro): frame ONE occurrence large in every view
+    // instead of the whole document — close-ups become automatic.
+    bool hasFocus = false;
+    glm::vec3 focusMin{0.0f}, focusMax{0.0f};
     nlohmann::json id;
     int client = -1;
   };

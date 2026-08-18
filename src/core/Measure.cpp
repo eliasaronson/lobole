@@ -167,6 +167,18 @@ std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex) {
     out.radius = surf.Sphere().Radius();
     out.hasRadius = true;
     break;
+  case GeomAbs_Torus: {
+    // Round-8 retro: bent tubes are toruses; "other" made them
+    // unassertable. radius = the MINOR (tube) radius — what a bent-rod
+    // query wants; the axis is the ring's.
+    out.kind = "torus";
+    out.radius = surf.Torus().MinorRadius();
+    out.hasRadius = true;
+    const gp_Dir a = surf.Torus().Axis().Direction();
+    out.axis = glm::vec3(a.X(), a.Y(), a.Z());
+    out.hasAxis = true;
+    break;
+  }
   default:
     out.kind = "other";
     break;

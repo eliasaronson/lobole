@@ -901,7 +901,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "flip?, axis?, angle_deg? (+_expr)"},
     {"Revolve", 1,
      "sketch_id, axis {kind: x|y|z|sketch_line|datum_axis, ...}, angle_deg "
-     "(+_expr), mode: new_body|add|cut, symmetric?, reversed?"},
+     "(+_expr), mode: new_body|add|cut, symmetric?, reversed?. Positive "
+     "angles sweep RIGHT-HANDED about the axis direction starting from the "
+     "sketch position (about +x, a point at +z rotates toward -y) — confirm "
+     "partial-sweep orientation from the digest bbox, not a render tile"},
     {"DatumAxis", 1, "kind, points?/sketch_id?/entity_id?"},
     {"Curve3D", 42,
      "kind: fit_spline|control_poly|helix; points [[x,y,z]...], degree?, "

@@ -72,6 +72,14 @@ def main():
         sizes = sorted(len(c) for c in rep["components"])
         expect(sizes == [1, 2], f"components: {rep['components']}")
 
+        # ...and check_geometry warns about it BY DEFAULT (round-8 retro:
+        # the floating-plate class must be opt-out, not opt-in).
+        cg = d.call("check_geometry")
+        expect(cg["ok"], "geometry itself is valid")
+        expect(not cg["connected"], f"floating body flagged: {cg}")
+        expect(any("touch nothing" in w for w in cg.get("warnings", [])),
+               f"warning names the island: {cg.get('warnings')}")
+
         # --- Assembly: bolted / floating / near-miss / clash ---------------
         part = d.call("list_parts")["parts"][0]["name"]
         d.call("add_assembly", name="Rig")

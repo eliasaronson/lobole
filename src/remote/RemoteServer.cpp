@@ -543,7 +543,11 @@ std::string UiActionFailureReason(ImGuiTest* test) {
 // orients the same way the MCP wrapper does. Returns false for an unknown name.
 // Directions follow the default planes (Front = XY, normal +Z, Y up);
 // top/bottom pick the up the camera reaches by tilting over from front.
-bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit) {
+// boxMin/boxMax (both or neither) fit the camera to that WORLD box instead
+// of the whole document — the render_sheet focus path.
+bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit,
+                       const glm::vec3* boxMin = nullptr,
+                       const glm::vec3* boxMax = nullptr) {
   static const std::map<std::string, std::pair<glm::vec3, glm::vec3>> kViews = {
       {"front", {{0, 0, 1}, {0, 1, 0}}},
       {"back", {{0, 0, -1}, {0, 1, 0}}},
@@ -555,10 +559,14 @@ bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit) {
   auto it = kViews.find(name);
   if (it == kViews.end())
     return false;
-  // Fit runs first: it re-aims at the document center (SetTarget), so the snap
-  // must set the orientation last.
-  if (fit)
-    ui::FitCameraToDocument(state);
+  // Fit runs first: it re-aims at the target (SetTarget), so the snap must
+  // set the orientation last.
+  if (fit) {
+    if (boxMin != nullptr && boxMax != nullptr)
+      ui::FitCameraToWorldBox(state, *boxMin, *boxMax);
+    else
+      ui::FitCameraToDocument(state);
+  }
   state.camera->SnapToView(it->second.first, it->second.second);
   return true;
 }
@@ -728,7 +736,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"render_sheet",
      "One PNG: tiled named views (default iso/front/right/top, up to 6 via "
      "{views}) with a numeric footer — bbox, mass, volume, and on an "
-     "assembly the contact_report summary. Needs a renderer."},
+     "assembly the contact_report summary. {focus: occurrence name|id} "
+     "frames that one occurrence large in every view (close-ups without "
+     "camera math). Needs a renderer."},
     {"render_still",
      "Path-traced still to {path} (ray tracing; needs GPU support)."},
     {"rt_build", "Build ray-tracing acceleration structures."},
@@ -1549,7 +1559,9 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
   state.sheetCapture = m_sheet.active; // hide viewport chrome in the tiles
   if (m_sheet.active && !m_screenshotPending) {
     if (m_sheet.nextView < m_sheet.views.size()) {
-      if (!ApplyStandardView(state, m_sheet.views[m_sheet.nextView], true)) {
+      if (!ApplyStandardView(state, m_sheet.views[m_sheet.nextView], true,
+                             m_sheet.hasFocus ? &m_sheet.focusMin : nullptr,
+                             m_sheet.hasFocus ? &m_sheet.focusMax : nullptr)) {
         RespondError(m_sheet.client, m_sheet.id,
                      "unknown view: " + m_sheet.views[m_sheet.nextView] +
                          "; views: front, back, left, right, top, bottom, iso");
@@ -1698,6 +1710,45 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         m_sheet.cropY = static_cast<int>(state.viewportPos.y);
         m_sheet.cropW = static_cast<int>(state.viewportSize.x);
         m_sheet.cropH = static_cast<int>(state.viewportSize.y);
+        if (request.params.contains("focus")) {
+          // Round-8 retro: frame ONE occurrence large in every view — the
+          // bend-direction misread happened because the interesting part
+          // was 40 pixels tall in a whole-dock tile.
+          if (state.assembly == nullptr) {
+            RespondError(request.client, request.id,
+                         "focus frames an occurrence, so it needs an "
+                         "assembly tab (see list_parts)");
+            continue;
+          }
+          const nlohmann::json& f = request.params.at("focus");
+          const Occurrence* found = nullptr;
+          if (f.is_string()) {
+            for (const Occurrence& o : state.assembly->GetOccurrences())
+              if (o.name == f.get<std::string>())
+                found = &o;
+          } else {
+            found = state.assembly->FindById(f.get<uint64_t>());
+          }
+          if (found == nullptr) {
+            RespondError(request.client, request.id,
+                         "no occurrence " + f.dump() +
+                             " to focus (see list_occurrences)");
+            continue;
+          }
+          Document* pd = ui::PartDocById(state, found->partId);
+          if (pd == nullptr ||
+              !Measure::WorldBounds(pd->GetBodies(),
+                                    ui::OccurrenceMatrix(*found),
+                                    m_sheet.focusMin, m_sheet.focusMax)) {
+            RespondError(request.client, request.id,
+                         "occurrence '" + found->name +
+                             "' has no geometry to frame");
+            continue;
+          }
+          m_sheet.hasFocus = true;
+          m_sheet.footer.insert(m_sheet.footer.begin(),
+                                "FOCUS: " + found->name);
+        }
         m_sheet.id = request.id;
         m_sheet.client = request.client;
         m_sheet.active = true;
