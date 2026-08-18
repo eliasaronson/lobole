@@ -105,10 +105,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "touching from clear; the no-pair assembly sweep stays clash-only — use "
      "contact_report for the full picture."},
     {"contact_report",
-     "Whole-assembly contact graph: connected components (len 1 = one "
-     "connected structure), per-pair state/distance, near_misses (gap <= "
-     "near_tol, default 1.0 mm), clashes, and intended-vs-realized mate "
-     "diffs when mates exist."},
+     "Contact graph: connected components (len 1 = one connected "
+     "structure), per-pair state/distance, near_misses (gap <= near_tol, "
+     "default 1.0 mm), clashes. Assembly tab: over occurrences, plus "
+     "intended-vs-realized mate diffs when mates exist. Part tab: over the "
+     "part's BODIES — catches a bracket floating inside one part, which "
+     "the occurrence-level sweep cannot see."},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
@@ -641,8 +643,94 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // visible, unsuppressed occurrence pair; exact contact on candidates;
     // union-find over touching/clashing edges. A scripted build asserts
     // len(components) == 1 and near_misses == [] the way it asserts a BOM.
-    if (state.assembly == nullptr || doc != nullptr)
-      throw std::runtime_error("contact_report needs an active assembly tab");
+    //
+    // Round-7 finding: on a PART tab the same sweep runs over the part's
+    // BODIES — the occurrence-level gate structurally cannot see a bracket
+    // floating INSIDE one part (the ladder mount plate that touched
+    // nothing), so multi-body parts get their own connectivity check.
+    if (doc != nullptr) {
+      const double touchTol = p.value("touch_tol", 1e-3);
+      const double nearTol = p.value("near_tol", 1.0);
+      struct BEnt {
+        const Body* body;
+        std::vector<Body> single; // ContactBetween takes body sets
+        glm::vec3 min, max;
+      };
+      std::vector<BEnt> ents;
+      json skipped = json::array();
+      for (const Body& b : doc->GetBodies()) {
+        BEnt e{&b, {}, {}, {}};
+        e.single.push_back(b);
+        if (!Measure::WorldBounds(e.single, glm::mat4(1.0f), e.min, e.max)) {
+          skipped.push_back(b.name);
+          continue;
+        }
+        ents.push_back(std::move(e));
+      }
+      const auto boxGap = [](const BEnt& a, const BEnt& b) {
+        const glm::vec3 gap =
+            glm::max(glm::max(a.min - b.max, b.min - a.max), glm::vec3(0.0f));
+        return static_cast<double>(glm::length(gap));
+      };
+      std::vector<size_t> parent(ents.size());
+      for (size_t i = 0; i < parent.size(); ++i)
+        parent[i] = i;
+      const std::function<size_t(size_t)> find = [&](size_t i) -> size_t {
+        return parent[i] == i ? i : parent[i] = find(parent[i]);
+      };
+      json pairs = json::array(), nearMisses = json::array(),
+           clashes = json::array();
+      for (size_t i = 0; i < ents.size(); ++i)
+        for (size_t j = i + 1; j < ents.size(); ++j) {
+          if (boxGap(ents[i], ents[j]) > nearTol)
+            continue;
+          const auto c = Measure::ContactBetween(
+              ents[i].single, glm::mat4(1.0f), ents[j].single, glm::mat4(1.0f));
+          if (!c)
+            continue;
+          const char* st = ContactState(*c, touchTol);
+          pairs.push_back({{"a", ents[i].body->name},
+                           {"b", ents[j].body->name},
+                           {"state", st},
+                           {"distance", c->distance},
+                           {"volume", c->volume}});
+          if (std::string_view(st) != "clear")
+            parent[find(i)] = find(j);
+          if (std::string_view(st) == "clash")
+            clashes.push_back({{"a", ents[i].body->name},
+                               {"b", ents[j].body->name},
+                               {"volume", c->volume}});
+          else if (c->distance > touchTol && c->distance <= nearTol)
+            nearMisses.push_back({{"a", ents[i].body->name},
+                                  {"b", ents[j].body->name},
+                                  {"distance", c->distance}});
+        }
+      std::map<size_t, std::vector<std::string>> comps;
+      for (size_t i = 0; i < ents.size(); ++i)
+        comps[find(i)].push_back(ents[i].body->name);
+      std::vector<std::vector<std::string>> componentList;
+      for (auto& [root, names] : comps)
+        componentList.push_back(std::move(names));
+      std::sort(
+          componentList.begin(), componentList.end(),
+          [](const auto& a, const auto& b) { return a.size() > b.size(); });
+      json out = {{"scope", "bodies"},
+                  {"bodies", ents.size()},
+                  {"connected", componentList.size() <= 1},
+                  {"components", componentList},
+                  {"pairs", pairs},
+                  {"near_misses", nearMisses},
+                  {"clashes", clashes},
+                  {"touch_tol", touchTol},
+                  {"near_tol", nearTol}};
+      if (!skipped.empty())
+        out["skipped"] = skipped;
+      return out;
+    }
+    if (state.assembly == nullptr)
+      throw std::runtime_error(
+          "contact_report needs a part or assembly tab — switch tabs with "
+          "set_active_part (see list_parts)");
     const double touchTol = p.value("touch_tol", 1e-3);
     const double nearTol = p.value("near_tol", 1.0);
     struct Ent {

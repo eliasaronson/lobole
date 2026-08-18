@@ -64,6 +64,14 @@ def main():
         expect(r["state"] == "clear", f"apart boxes: {r}")
         expect(abs(r["distance"] - 5.0) < 1e-6, f"apart distance: {r}")
 
+        # Round 7: BODY-level connectivity on a part tab — the class the
+        # occurrence sweep cannot see (a bracket floating inside one part).
+        rep = d.call("contact_report")
+        expect(rep["scope"] == "bodies", f"part scope: {rep}")
+        expect(not rep["connected"], "C floats 5 mm off: two components")
+        sizes = sorted(len(c) for c in rep["components"])
+        expect(sizes == [1, 2], f"components: {rep['components']}")
+
         # --- Assembly: bolted / floating / near-miss / clash ---------------
         part = d.call("list_parts")["parts"][0]["name"]
         d.call("add_assembly", name="Rig")
