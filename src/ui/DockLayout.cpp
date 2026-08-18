@@ -9,14 +9,19 @@
 
 namespace ui {
 
+float PartTabsBarHeight() { return ImGui::GetFrameHeightWithSpacing() + 4.0f; }
+
 void BeginDockspace(AppState& state) {
   ImGuiViewport* vp = ImGui::GetMainViewport();
 
   // Fullscreen, transparent host window covering the work area (below the
-  // main menu bar). It holds the toolbar row and the dockspace so the toolbar
-  // sits above all docked panels.
+  // main menu bar, above the part-tabs bar — that strip is reserved, not
+  // overlaid, so a docked panel's bottom stays reachable). It holds the
+  // toolbar row and the dockspace so the toolbar sits above all docked
+  // panels.
+  const ImVec2 hostSize(vp->WorkSize.x, vp->WorkSize.y - PartTabsBarHeight());
   ImGui::SetNextWindowPos(vp->WorkPos);
-  ImGui::SetNextWindowSize(vp->WorkSize);
+  ImGui::SetNextWindowSize(hostSize);
   ImGui::SetNextWindowViewport(vp->ID);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -105,7 +110,7 @@ void BeginDockspace(AppState& state) {
     ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
     ImVec2 avail = ImGui::GetContentRegionAvail();
     if (avail.x < 1.0f || avail.y < 1.0f)
-      avail = vp->WorkSize; // first frame: content region not yet sized
+      avail = hostSize; // first frame: content region not yet sized
     ImGui::DockBuilderSetNodeSize(dockspaceId, avail);
     ImGuiID center = dockspaceId;
     // U7e: one docked side panel — the right node is gone (feature editing

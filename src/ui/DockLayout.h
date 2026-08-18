@@ -9,4 +9,8 @@ namespace ui {
 // saved one. Call after the main menu bar, before any panels.
 void BeginDockspace(AppState& state);
 
+// Height of the bottom part-tabs bar. The dockspace reserves this strip so
+// docked panels end above the bar instead of running beneath it.
+float PartTabsBarHeight();
+
 } // namespace ui
