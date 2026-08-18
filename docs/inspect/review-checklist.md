@@ -19,6 +19,12 @@ these boxes each cost a review cycle.
       be an expression.
 - [ ] `render_sheet`: one call, four views + the numeric footer. Check the
       pixels AGAINST the footer numbers in the same image.
+- [ ] Orientation of any new swept/revolved feature read from the
+      DIGEST BBOX, never from a render tile (the round-7 bend lesson:
+      small tiles lie, the bbox does not).
+- [ ] Multi-body parts: body-scope `contact_report` says ONE component
+      (intra-part overlaps count as welds; do not assert clashes empty
+      at body scope).
 
 ## Assemblies
 

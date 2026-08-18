@@ -79,6 +79,42 @@ feature-JSON path does not validate *field* names.
   manual "sit above the bar" offset was the tell. The dockspace now
   reserves the strip (`PartTabsBarHeight()`).
 
+## Round 7-8 addendum (gangway + ladder, first rounds through the loop)
+
+What worked: rotate{axis,angle_deg} (rotated ladder placed first-try),
+set_camera eye (zero inside-geometry shots), decision-complete errors
+(each of three gate-caught hinge mistakes was one edit from its
+message), body-level contact_report (shipped mid-round after Elias found
+the floating mount plate; caught pin-float, pin-clash, and leaf-reach in
+succession before any render).
+
+The floating-plate post-mortem, in layers: (1) the occurrence-level gate
+structurally could not see an intra-part break — no tool, so nothing was
+asserted, so nothing was caught; (2) the "interesting" contact (arm-tube
+tangency) got hand-verified while the "obvious" one (arm-plate, 35 mm
+apart) got skipped; (3) at render distance a 35 mm depth gap is
+invisible and confirmation bias filled it in. The durable fix was the
+tool, not a resolution to look harder.
+
+The render_sheet betrayal: bend direction was misjudged from a small
+tile ("arches" that were dips) while the add_feature DIGEST already
+carried the answer (the bends body's bbox sat below the axis). Measure
+before render applies to orientation too.
+
+New items:
+- Revolve params row: document the sweep direction convention
+  (right-hand rule about the axis from the sketch plane) — the 50/50
+  should not exist.
+- render_sheet {focus: occurrence|body}: auto-frame one thing large;
+  the close-up should be automatic, not a camera dance.
+- query_geometry: add "torus" (+ radii) to the face classifier — bends
+  currently classify "other" and cannot be asserted.
+- check_geometry: warn by default on disconnected multi-body parts
+  (make the floating-part class opt-out, not opt-in).
+- Convention, documented: intra-part overlaps are welds — body-scope
+  contact_report counts them as connecting "clash" edges; never assert
+  clashes == [] at body scope on welded-look parts.
+
 ## Standing gap (planned elsewhere)
 
 Barrels render white: no blue material, and color-per-slug was rejected —
