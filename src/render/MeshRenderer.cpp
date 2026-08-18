@@ -304,7 +304,17 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
 
   // SSAO (S2): the blurred AO map multiplies only the ambient/IBL term in
   // the shader — direct light is handled by the shadow map, not AO.
-  ubo.aoParams = glm::vec4(m_aoInvSize, m_aoEnabled ? 1.0f : 0.0f, 0.0f);
+  // Both images are the same projection stretched to fill a rectangle — the
+  // scene fills the viewport sub-rect, the AO target fills itself — so the
+  // affine remap between those rectangles aligns them exactly, whatever the
+  // aspect or AO resolution. xy = scale, zw = offset; the enable flag rides
+  // in aoParams2.x.
+  const glm::vec2 vpSize(std::max(m_viewportWidth, 1u),
+                         std::max(m_viewportHeight, 1u));
+  const glm::vec2 aoScale = 1.0f / vpSize;
+  const glm::vec2 aoOffset = -glm::vec2(m_viewportX, m_viewportY) * aoScale;
+  ubo.aoParams = glm::vec4(aoScale, aoOffset);
+  ubo.aoParams2 = glm::vec4(m_aoEnabled ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
 
   // Set viewport to the central region (excludes the side panels)
   VkViewport viewport{};

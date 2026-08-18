@@ -21,6 +21,7 @@ layout(location = 12) in float fragClipDist;
 layout(location = 13) in vec4 fragShadowCoord;
 layout(location = 14) in vec4 fragShadowParams;
 layout(location = 15) in vec4 fragAOParams;
+layout(location = 18) in vec4 fragAOParams2;
 layout(location = 16) in vec3 fragLocalPos;  // object space, for procedural grain
 
 layout(location = 0) out vec4 outColor;
@@ -165,8 +166,14 @@ void main() {
     // matching texel of the (normalized-uv) AO target; the MSAA fragments of
     // one pixel share the single 1x AO value (accepted by design).
     float ao = 1.0;
-    if (fragAOParams.z > 0.5) {
-        ao = texture(uAO, gl_FragCoord.xy * fragAOParams.xy).r;
+    if (fragAOParams2.x > 0.5) {
+        // Map the fragment through the 3D VIEWPORT rect, not the framebuffer:
+        // the scene occupies a sub-rect (panels take the rest) while the SSAO
+        // prepass fills its whole target, so a plain gl_FragCoord/framebuffer
+        // divide sampled the wrong texel and ghosted nearby geometry onto
+        // flat faces (visible as rails smeared across a deck).
+        vec2 aoUV = gl_FragCoord.xy * fragAOParams.xy + fragAOParams.zw;
+        ao = texture(uAO, aoUV).r;
     }
     // Specular occlusion (Lagarde/Frostbite): rough surfaces lose ambient
     // specular in occluded areas faster than smooth ones; identity when

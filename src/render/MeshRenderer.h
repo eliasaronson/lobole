@@ -46,7 +46,10 @@ struct UniformBufferObject {
   glm::vec4 shadowParams;
   // SSAO params (S2): xy = 1 / framebuffer size (gl_FragCoord -> AO uv),
   // z = enable (0/1), w = unused.
+  // xy = gl_FragCoord -> AO uv scale, zw = its offset (the viewport rect).
   glm::vec4 aoParams;
+  // x = AO enabled, yzw unused.
+  glm::vec4 aoParams2;
 };
 
 // One opaque instance's draw data for the shadow pass (ShadowRenderer): the
@@ -244,11 +247,16 @@ public:
   void RebindAOMap(VkImageView aoMap);
   // Same for the shadow map after ShadowRenderer::SetResolution.
   void RebindShadowMap(VkImageView shadowMap);
-  // View > Ambient Occlusion toggle; off zeroes aoParams.z so the shader
+  // View > Ambient Occlusion toggle; off zeroes aoParams2.x so the shader
   // skips the lookup (the map may then hold stale contents — harmless).
   void SetAOEnabled(bool enabled) { m_aoEnabled = enabled; }
-  // Per-frame from SSAORenderer: 1 / full framebuffer size, mapping
-  // gl_FragCoord to the (half-res, normalized-uv) AO texture.
+  // Per-frame from SSAORenderer: 1 / full framebuffer size. The AO lookup
+  // does NOT use it directly — see UpdateUniformBuffer, which maps
+  // gl_FragCoord through the 3D VIEWPORT rect instead. The scene is drawn
+  // into that sub-rect of the framebuffer (panels take the rest) while the
+  // SSAO prepass draws the same projection across its whole target, so
+  // dividing gl_FragCoord by the framebuffer size read the wrong texel and
+  // painted displaced ghosts of nearby geometry onto flat faces.
   void SetAOState(const glm::vec2& invFullResolution) {
     m_aoInvSize = invFullResolution;
   }

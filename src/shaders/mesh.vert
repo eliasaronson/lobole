@@ -26,6 +26,7 @@ layout(binding = 0) uniform UniformBufferObject {
     // SSAO (S2): xy = 1 / framebuffer size (gl_FragCoord -> AO uv),
     // z = enable, w = unused. Forwarded as a varying like shadowParams.
     vec4 aoParams;
+    vec4 aoParams2;
 } ubo;
 
 layout(push_constant) uniform PushConstants {
@@ -57,6 +58,7 @@ layout(location = 12) out float fragClipDist;
 layout(location = 13) out vec4 fragShadowCoord;
 layout(location = 14) out vec4 fragShadowParams;
 layout(location = 15) out vec4 fragAOParams;
+layout(location = 18) out vec4 fragAOParams2;
 // Local (object-space) position, for procedural grain that stays glued to the
 // part under any model/assembly transform (see mesh.frag).
 layout(location = 16) out vec3 fragLocalPos;
@@ -91,6 +93,7 @@ void main() {
                       vec4(worldPos.xyz + fragNormal * ubo.shadowParams.y, 1.0);
     fragShadowParams = ubo.shadowParams;
     fragAOParams = ubo.aoParams;
+    fragAOParams2 = ubo.aoParams2;
 
     // Albedo from the per-instance push constant, plus camera position
     fragColor = pc.baseColor.rgb;
