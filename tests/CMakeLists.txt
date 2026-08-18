@@ -122,6 +122,17 @@ add_test(NAME remote_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(remote_smoke PROPERTIES LABELS gui TIMEOUT 600)
 
+# Screen-space rendering invariants on a real GPU: ambient occlusion must land
+# on the geometry that causes it. The renderers have no other pixel-level
+# coverage, and that gap let the SSAO map be sampled through the framebuffer
+# instead of the 3D viewport rect. Skips (77) without pillow.
+add_test(NAME render_ao_smoke
+         COMMAND ${XVFB_EXEC} python3
+                 ${CMAKE_CURRENT_SOURCE_DIR}/render_ao_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(render_ao_smoke PROPERTIES LABELS gui TIMEOUT 300
+                     SKIP_RETURN_CODE 77)
+
 # Drives designer --headless --remote: no window, GPU, or display server
 # needed, so no gui label — this one runs on CI.
 add_test(NAME headless_smoke

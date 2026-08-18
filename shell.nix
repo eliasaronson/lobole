@@ -19,7 +19,9 @@ pkgs.mkShell {
     gcc
     pkg-config
     ccache # auto-detected by CMakeLists, no-op if absent
-    (python3.withPackages (ps: [ ps.mcp ])) # tools/*.py + remote/mcp ctests
+    # tools/*.py + the remote/mcp ctests; pillow for render_ao_smoke, which
+    # compares pixels and would otherwise skip itself into uselessness.
+    (python3.withPackages (ps: [ ps.mcp ps.pillow ]))
     git # submodules
 
     # Vulkan

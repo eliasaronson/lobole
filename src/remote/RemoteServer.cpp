@@ -1839,6 +1839,16 @@ void RemoteServer::ScreenshotDone(bool ok, const std::string& error,
   }
   if (ok) {
     json resp = {{"path", m_screenshotPath}};
+    // Where the 3D view sits inside the captured framebuffer. A caller that
+    // wants to reason about PIXELS — a render regression test, a diffing
+    // script — otherwise has to guess which part of the image is the model
+    // and which is panel chrome, and guesses go stale with the layout.
+    if (m_state) {
+      resp["viewport"] = {{"x", (int)m_state->viewportPos.x},
+                          {"y", (int)m_state->viewportPos.y},
+                          {"width", (int)m_state->viewportSize.x},
+                          {"height", (int)m_state->viewportSize.y}};
+    }
     if (!warnings.empty())
       resp["warnings"] = warnings;
     Respond(m_screenshotClient, m_screenshotId, resp);
