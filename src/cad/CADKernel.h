@@ -22,6 +22,9 @@ public:
   bool IsValid() const;
   double Volume() const;
   void GetBoundingBox(glm::vec3& min, glm::vec3& max) const;
+  // Disjoint-lump count (V2 digest): a body that silently split into two
+  // solids is invisible in a volume total but not in this.
+  int SolidCount() const;
 
   // Mass properties at unit density: volume, surface area, center of mass,
   // and the inertia matrix about the center of mass (multiply by density
@@ -215,6 +218,7 @@ public:
   CADShape() = default;
   bool IsValid() const { return false; }
   double Volume() const { return 0.0; }
+  int SolidCount() const { return 0; }
   void GetBoundingBox(glm::vec3& min, glm::vec3& max) const {
     min = max = glm::vec3(0);
   }

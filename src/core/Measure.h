@@ -54,6 +54,44 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
                                          const std::vector<Body>& bodiesB,
                                          const glm::mat4& xfB);
 
+// Contact probe between two rigidly placed body sets (V1): total pairwise
+// intersection volume plus the exact minimum separation. distance is 0
+// whenever the sets overlap; a touching pair reports volume 0 and distance
+// ~0. Boxes prune both the booleans and the extrema work. nullopt on an OCC
+// failure or when either set has no valid shapes.
+struct SetContact {
+  double volume = 0.0;   // total pairwise intersection volume
+  double distance = 0.0; // min body-to-body separation, 0 when overlapping
+};
+std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
+                                         const glm::mat4& xfA,
+                                         const std::vector<Body>& bodiesB,
+                                         const glm::mat4& xfB);
+
+// Axis-aligned world bounds of a placed body set — the cheap prefilter the
+// assembly contact_report sweep runs before paying for ContactBetween.
+// False when the set has no valid shapes.
+bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
+                 glm::vec3& min, glm::vec3& max);
+
+// V4 compare_geometry: boolean diff between two placed body sets. missing =
+// vol(A − B) (reference not covered), extra = vol(B − A) (beyond the
+// reference); the derived similarity metrics (IoU, precision/recall, ...) are
+// arithmetic over these and live at the RPC layer. missingOut/extraOut, when
+// non-null, receive the diff SOLIDS so callers can export/render the delta.
+struct SetCompare {
+  double volumeA = 0.0, volumeB = 0.0;
+  double common = 0.0, missing = 0.0, extra = 0.0;
+  double surfaceA = 0.0, surfaceB = 0.0;
+  glm::dvec3 comA{0.0}, comB{0.0};
+  glm::vec3 minA{0.0f}, maxA{0.0f}, minB{0.0f}, maxB{0.0f};
+  int facesA = 0, facesB = 0, edgesA = 0, edgesB = 0;
+};
+std::optional<SetCompare>
+CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
+                const std::vector<Body>& bodiesB, const glm::mat4& xfB,
+                CADShape* missingOut = nullptr, CADShape* extraOut = nullptr);
+
 // Watertightness report for mesh export: shell count and free (naked) edge
 // count of a shape about to be tessellated. A shape is watertight when it has
 // at least one shell and no non-degenerate edge is used by fewer than two

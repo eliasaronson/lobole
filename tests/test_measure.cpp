@@ -327,6 +327,53 @@ TEST_CASE("InterferenceVolume over transformed body sets",
   CHECK_THAT(*v, WithinAbs(0.0, 1e-9));
 }
 
+TEST_CASE("ContactBetween separates clash, touching and clear",
+          "[measure][assembly]") {
+  // One unit-box part in three relative placements: overlapping (volume,
+  // distance 0), face-tangent (no volume, distance 0), and 5 apart (clear).
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1, 1, 1));
+  const auto& bodies = doc.GetBodies();
+  const glm::mat4 xfA(1.0f);
+
+  auto c = Measure::ContactBetween(
+      bodies, xfA, bodies,
+      glm::translate(glm::mat4(1.0f), glm::vec3(0.5f, 0.0f, 0.0f)));
+  REQUIRE(c.has_value());
+  CHECK_THAT(c->volume, WithinRel(0.5, 1e-6));
+  CHECK_THAT(c->distance, WithinAbs(0.0, 1e-9));
+
+  c = Measure::ContactBetween(
+      bodies, xfA, bodies,
+      glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f)));
+  REQUIRE(c.has_value());
+  CHECK_THAT(c->volume, WithinAbs(0.0, 1e-9));
+  CHECK_THAT(c->distance, WithinAbs(0.0, 1e-6));
+
+  c = Measure::ContactBetween(
+      bodies, xfA, bodies,
+      glm::translate(glm::mat4(1.0f), glm::vec3(6.0f, 0.0f, 0.0f)));
+  REQUIRE(c.has_value());
+  CHECK_THAT(c->volume, WithinAbs(0.0, 1e-9));
+  CHECK_THAT(c->distance, WithinRel(5.0, 1e-6));
+
+  // Diagonal offset: the exact distance is corner-to-corner, shorter than
+  // any single-axis reading — catches a box-distance-only shortcut.
+  c = Measure::ContactBetween(
+      bodies, xfA, bodies,
+      glm::translate(glm::mat4(1.0f), glm::vec3(4.0f, 4.0f, 0.0f)));
+  REQUIRE(c.has_value());
+  CHECK_THAT(c->distance, WithinRel(3.0 * std::sqrt(2.0), 1e-6));
+
+  // WorldBounds places the box for the report's prefilter.
+  glm::vec3 mn, mx;
+  REQUIRE(Measure::WorldBounds(
+      bodies, glm::translate(glm::mat4(1.0f), glm::vec3(2.0f, 0.0f, 0.0f)), mn,
+      mx));
+  CHECK_THAT(mn.x, WithinAbs(2.0, 1e-4));
+  CHECK_THAT(mx.x, WithinAbs(3.0, 1e-4));
+}
+
 TEST_CASE("AnalyzeWatertight reports closed solids and open faces",
           "[measure]") {
   Document doc;

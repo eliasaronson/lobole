@@ -727,6 +727,24 @@ def main():
         expect(os.path.exists(shot) and os.path.getsize(shot) > 1000,
                "screenshot written")
 
+        phase("render_sheet")
+        # V3: multi-view sheet with the numeric footer. One box -> footer
+        # carries body count + bbox; the PNG is a real composite (bigger
+        # than a single tile's worth of black).
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "B", "position": [0, 0, 0],
+            "width": 20, "height": 10, "depth": 5})
+        sheet = os.path.join(tmp, "sheet.png")
+        r = d.call("render_sheet", path=sheet, views=["iso", "front"])
+        expect(os.path.exists(sheet) and os.path.getsize(sheet) > 5000,
+               "sheet written")
+        expect(any("1 BODIES" in line for line in r["footer"]),
+               f"sheet footer body count: {r['footer']}")
+        expect(any("BBOX 20 X 10 X 5" in line for line in r["footer"]),
+               f"sheet footer bbox: {r['footer']}")
+        expect(r["views"] == ["iso", "front"], f"sheet views: {r['views']}")
+
         phase("Standard views")
         # Standard views: instant (no animation), fit + exact axis alignment
         d.call("new_project")
@@ -916,8 +934,9 @@ def main():
 
         phase("The reverse direction")
         # The reverse direction: every `m == "..."` literal dispatched in
-        # src/remote/*.cpp must be described (screenshot is the one method
-        # dispatched outside the if-chains, and it IS described).
+        # src/remote/*.cpp must be described (screenshot and render_sheet are
+        # the methods dispatched outside the if-chains, and they ARE
+        # described).
         import glob
         import re
         remote_src = os.path.join(os.path.dirname(__file__), "..", "src",
@@ -931,6 +950,7 @@ def main():
         expect(not undescribed,
                f"dispatched but missing from describe tables: {undescribed}")
         undispatched = sorted(set(names) - dispatched - {"screenshot",
+                                                         "render_sheet",
                                                          "describe"})
         expect(not undispatched,
                f"described but never dispatched: {undispatched}")

@@ -31,12 +31,14 @@
 #include "render/Camera.h"
 #include "render/MeshRenderer.h"
 #include "render/RayTracingRenderer.h"
+#include "render/RenderSheet.h"
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (U1b)
 #include "ui/SketchInteraction.h" // FaceElementRef
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <map>
 
@@ -391,6 +393,14 @@ ImGuiKeyChord ParseChord(const std::string& text, std::string* error) {
       chord |= ImGuiKey_UpArrow;
     else if (token == "Down")
       chord |= ImGuiKey_DownArrow;
+    else if (token == "PageUp")
+      chord |= ImGuiKey_PageUp;
+    else if (token == "PageDown")
+      chord |= ImGuiKey_PageDown;
+    else if (token == "Home")
+      chord |= ImGuiKey_Home;
+    else if (token == "End")
+      chord |= ImGuiKey_End;
     else {
       if (error)
         *error = "unknown key token: " + token;
@@ -553,6 +563,90 @@ bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit) {
   return true;
 }
 
+// V3 render_sheet footer: the kernel digest burned under the view grid, so
+// the eyeball pass and the numbers live in the same image. Reuses the
+// mass_properties and contact_report handlers rather than re-deriving.
+std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
+  std::vector<std::string> out;
+  char buf[192];
+  const nlohmann::json empty = nlohmann::json::object();
+  try {
+    double volume = 0.0;
+    bool massKnown = false;
+    double massG = 0.0;
+    {
+      remote::RpcParams p{empty};
+      if (auto r =
+              remote::HandleInspectionRpc(state, doc, "mass_properties", p)) {
+        const nlohmann::json& total = r->at("total");
+        volume = total.value("volume", 0.0);
+        if (total.contains("mass_g") && !total.at("mass_g").is_null()) {
+          massKnown = true;
+          massG = total.at("mass_g").get<double>();
+        }
+      }
+    }
+    glm::vec3 mn(0.0f), mx(0.0f);
+    bool haveBox = false;
+    int count = 0;
+    if (doc != nullptr) {
+      for (const Body& b : doc->GetBodies()) {
+        glm::vec3 bmn(0.0f), bmx(0.0f);
+        b.shape.GetBoundingBox(bmn, bmx);
+        mn = haveBox ? glm::min(mn, bmn) : bmn;
+        mx = haveBox ? glm::max(mx, bmx) : bmx;
+        haveBox = true;
+        count++;
+      }
+      snprintf(buf, sizeof buf, "%d BODIES", count);
+    } else if (state.assembly) {
+      for (const Occurrence& o : state.assembly->GetOccurrences()) {
+        if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
+          continue;
+        Document* pd = ui::PartDocById(state, o.partId);
+        glm::vec3 bmn(0.0f), bmx(0.0f);
+        if (pd == nullptr ||
+            !Measure::WorldBounds(pd->GetBodies(), ui::OccurrenceMatrix(o), bmn,
+                                  bmx))
+          continue;
+        mn = haveBox ? glm::min(mn, bmn) : bmn;
+        mx = haveBox ? glm::max(mx, bmx) : bmx;
+        haveBox = true;
+        count++;
+      }
+      snprintf(buf, sizeof buf, "%d OCCURRENCES", count);
+    } else {
+      return out;
+    }
+    std::string head = buf;
+    if (massKnown)
+      snprintf(buf, sizeof buf, "%s   MASS %.2f KG", head.c_str(),
+               massG / 1000.0);
+    else
+      snprintf(buf, sizeof buf, "%s   MASS UNKNOWN", head.c_str());
+    out.push_back(buf);
+    if (haveBox) {
+      snprintf(buf, sizeof buf, "BBOX %.0f X %.0f X %.0f MM   VOL %.0f CM3",
+               mx.x - mn.x, mx.y - mn.y, mx.z - mn.z, volume / 1000.0);
+      out.push_back(buf);
+    }
+    if (doc == nullptr && state.assembly) {
+      remote::RpcParams p{empty};
+      if (auto r =
+              remote::HandleInspectionRpc(state, doc, "contact_report", p)) {
+        snprintf(buf, sizeof buf,
+                 "CONTACT: %zu COMPONENTS, %zu CLASHES, %zu NEAR-MISSES",
+                 r->at("components").size(), r->at("clashes").size(),
+                 r->at("near_misses").size());
+        out.push_back(buf);
+      }
+    }
+  } catch (const std::exception& e) {
+    out.push_back(std::string("DIGEST UNAVAILABLE: ") + e.what());
+  }
+  return out;
+}
+
 } // namespace
 
 // Methods that act on the project container or the active assembly tab, not
@@ -582,9 +676,11 @@ static const std::set<std::string> kNoPartDoc = {
     // export_visual works on a part OR an assembly (occurrence walk).
     "export_visual",
     // interference runs on occurrence pairs on an assembly tab;
+    // contact_report IS assembly-only (V1 connectivity gate);
     // list_elements/measure work there when given an explicit `part`;
     // mass_properties aggregates occurrence masses in world space.
-    "interference", "list_elements", "measure", "mass_properties",
+    "interference", "contact_report", "compare_geometry", "list_elements",
+    "measure", "mass_properties", "render_sheet",
     // set_section only writes the global viewport clip plane (per-frame UBO,
     // world space) — it clips assembly occurrences too. The `section` AREA
     // query stays part-only (computes on one document's bodies).
@@ -619,13 +715,20 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Orient the camera to a named view {name: front|back|left|right|top|"
      "bottom|iso}."},
     {"fit_view", "Frame the geometry in the viewport."},
-    {"set_camera", "Set camera {position, target, up?} explicitly."},
+    {"set_camera",
+     "Direct camera control {target?, eye?, direction?, up?, distance?}. "
+     "NOTE: direction points from target TOWARD the camera (a view-from "
+     "vector); passing eye [x,y,z] derives direction+distance instead."},
     {"orient_to_face", "Look straight at the selected face."},
     {"select_face",
      "Select a face by {mesh, face} or stable {element}/{feature_id, "
      "element}; returns normal/center."},
     {"screenshot", "Write the rendered viewport to {path} (needs a renderer "
                    "— not available under --headless)."},
+    {"render_sheet",
+     "One PNG: tiled named views (default iso/front/right/top, up to 6 via "
+     "{views}) with a numeric footer — bbox, mass, volume, and on an "
+     "assembly the contact_report summary. Needs a renderer."},
     {"render_still",
      "Path-traced still to {path} (ray tracing; needs GPU support)."},
     {"rt_build", "Build ray-tracing acceleration structures."},
@@ -711,8 +814,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     addDocs(remote::SimulationMethodDocs());
     json featureTypes = json::array();
     for (const auto& ft : DocumentIO::FeatureTypes())
-      featureTypes.push_back(
-          {{"type", ft.type}, {"since_version", ft.sinceVersion}});
+      featureTypes.push_back({{"type", ft.type},
+                              {"since_version", ft.sinceVersion},
+                              {"params", ft.params}});
     return json{
         {"app", "designer"},
         {"document_format_version", DocumentIO::DocumentFormatVersion()},
@@ -871,6 +975,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             {"has_tlas", state.rayTracer && state.rayTracer->HasTLAS()}};
   }
   if (m == "render_still") {
+    // Part-only for now: the RT scene holds the active part's meshes, so an
+    // assembly tab used to "succeed" with a render of just the environment —
+    // the dock round's silently-wrong papercut. Fail with the remedy instead.
+    if (doc == nullptr && state.assembly)
+      throw std::runtime_error(
+          "render_still is part-only (the ray-traced scene skips assembly "
+          "occurrences) — use screenshot or render_sheet on an assembly tab");
     // Offline path-traced still to a PNG. Runs synchronously on the main thread
     // (ProcessPending) using the same idle-queue one-shot submits as the AS
     // build, so it needs no swapchain interaction. Parameters default to a
@@ -1107,6 +1218,19 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     };
     if (p.contains("target"))
       cam.SetTarget(vec3(p["target"]));
+    if (p.contains("eye")) {
+      // V5: an explicit camera position — the intuitive form. Derives the
+      // (target -> camera) direction and the distance, so it composes with
+      // an earlier `target` in the same call.
+      const glm::vec3 eye = vec3(p["eye"]);
+      const glm::vec3 offset = eye - cam.GetTarget();
+      if (glm::length(offset) < 1e-6f)
+        throw std::runtime_error("eye must not equal the target");
+      const glm::vec3 up =
+          p.contains("up") ? vec3(p["up"]) : glm::vec3(0.0f, 1.0f, 0.0f);
+      cam.SnapToView(glm::normalize(offset), up);
+      cam.SetDistance(glm::length(offset));
+    }
     if (p.contains("direction")) {
       const glm::vec3 dir = vec3(p["direction"]);
       if (glm::length(dir) < 1e-9f)
@@ -1340,6 +1464,17 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     m_uiAction = [chord](ImGuiTestContext* ctx) { ctx->KeyPress(chord); };
   } else if (m == "scroll") {
     m_uiAction = [p](ImGuiTestContext* ctx) {
+      if (p.contains("window")) {
+        // V5: scroll a PANEL by {window, dy} pixels (dy > 0 = down) — the
+        // remote surface had no way to reach a panel's lower sections.
+        ImGuiWindow* w =
+            ImGui::FindWindowByName(p.at("window").get<std::string>().c_str());
+        IM_CHECK_SILENT(w != nullptr);
+        ImGui::SetScrollY(
+            w, ImClamp(w->Scroll.y + static_cast<float>(p.value("dy", 0.0)),
+                       0.0f, w->ScrollMax.y));
+        return;
+      }
       ctx->MouseMoveToPos(FractionToPos(p));
       ctx->MouseWheelY(p.value("amount", 1.0f));
     };
@@ -1396,6 +1531,47 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
   }
 #endif
 
+  // V3 sheet pump: one captured view per frame. Runs before the request
+  // loop so the camera write for the next tile lands ahead of this frame's
+  // scene update, and requests stay queued while a job is active.
+  state.sheetCapture = m_sheet.active; // hide viewport chrome in the tiles
+  if (m_sheet.active && !m_screenshotPending) {
+    if (m_sheet.nextView < m_sheet.views.size()) {
+      if (!ApplyStandardView(state, m_sheet.views[m_sheet.nextView], true)) {
+        RespondError(m_sheet.client, m_sheet.id,
+                     "unknown view: " + m_sheet.views[m_sheet.nextView]);
+        for (const std::string& tile : m_sheet.tilePaths)
+          std::filesystem::remove(tile);
+        m_sheet = SheetJob{};
+      } else {
+        m_screenshotPath = m_sheet.tilePaths[m_sheet.nextView];
+        m_screenshotPending = true;
+        m_sheet.nextView++;
+      }
+    } else {
+      rendersheet::Spec spec;
+      spec.tilePaths = m_sheet.tilePaths;
+      spec.labels = m_sheet.views;
+      spec.footer = m_sheet.footer;
+      spec.cropX = m_sheet.cropX;
+      spec.cropY = m_sheet.cropY;
+      spec.cropW = m_sheet.cropW;
+      spec.cropH = m_sheet.cropH;
+      std::string err;
+      if (rendersheet::Composite(spec, m_sheet.outPath, &err)) {
+        Respond(m_sheet.client, m_sheet.id,
+                {{"path", m_sheet.outPath},
+                 {"views", m_sheet.views},
+                 {"footer", m_sheet.footer}});
+      } else {
+        RespondError(m_sheet.client, m_sheet.id, err);
+      }
+      for (const std::string& tile : m_sheet.tilePaths)
+        std::filesystem::remove(tile);
+      m_sheet = SheetJob{};
+    }
+  }
+
   // Serialize UI actions and screenshots: one at a time
   while (true) {
     Request request;
@@ -1403,7 +1579,7 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
       std::lock_guard<std::mutex> lock(m_queueMutex);
       if (m_requests.empty())
         return;
-      if ((m_uiActionInFlight || m_screenshotPending))
+      if ((m_uiActionInFlight || m_screenshotPending || m_sheet.active))
         return; // wait for completion before the next request
       request = std::move(m_requests.front());
       m_requests.pop_front();
@@ -1465,6 +1641,50 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         m_screenshotPending = true;
         return; // main loop captures after this frame renders
       }
+      if (request.method == "render_sheet") {
+        // V3: stage a multi-view sheet job; the ProcessPending pump captures
+        // one view per frame and composites when all tiles are in.
+        if (!m_hasRenderer) {
+          RespondError(request.client, request.id,
+                       "render_sheet requires a rendered frame — start "
+                       "designer without --headless");
+          continue;
+        }
+        const std::string outPath =
+            request.params.at("path").get<std::string>();
+        std::vector<std::string> views = {"iso", "front", "right", "top"};
+        if (request.params.contains("views")) {
+          views.clear();
+          for (const auto& v : request.params.at("views"))
+            views.push_back(v.get<std::string>());
+        }
+        if (views.empty() || views.size() > 6) {
+          RespondError(request.client, request.id,
+                       "render_sheet takes 1..6 views");
+          continue;
+        }
+        m_sheet = SheetJob{};
+        m_sheet.views = views;
+        m_sheet.outPath = outPath;
+        m_sheet.footer = BuildSheetFooter(state, state.document.get());
+        for (size_t i = 0; i < views.size(); i++)
+          m_sheet.tilePaths.push_back(
+              (std::filesystem::temp_directory_path() /
+               ("designer-sheet-" + std::to_string(m_port) + "-" +
+                std::to_string(i) + ".png"))
+                  .string());
+        // Crop each tile to the 3D viewport (panel chrome stays out of the
+        // sheet). Framebuffer scale is 1 on this platform; Composite clamps
+        // a stale rect instead of failing.
+        m_sheet.cropX = static_cast<int>(state.viewportPos.x);
+        m_sheet.cropY = static_cast<int>(state.viewportPos.y);
+        m_sheet.cropW = static_cast<int>(state.viewportSize.x);
+        m_sheet.cropH = static_cast<int>(state.viewportSize.y);
+        m_sheet.id = request.id;
+        m_sheet.client = request.client;
+        m_sheet.active = true;
+        return; // the pump kicks tile 0 next frame; requests queue behind
+      }
       if (!UiActionsAvailable() && IsUiAction(request.method)) {
         // Two different reasons, two different remedies: nothing to click
         // (no GUI running) versus nothing to click WITH (this build has no
@@ -1511,6 +1731,17 @@ bool RemoteServer::WantsScreenshot(std::string& path) {
 
 void RemoteServer::ScreenshotDone(bool ok, const std::string& error) {
   m_screenshotPending = false;
+  if (m_sheet.active) {
+    // A sheet tile: progress (and the final response) belong to the pump.
+    if (!ok) {
+      RespondError(m_sheet.client, m_sheet.id,
+                   "render_sheet capture failed: " + error);
+      for (const std::string& tile : m_sheet.tilePaths)
+        std::filesystem::remove(tile);
+      m_sheet = SheetJob{};
+    }
+    return;
+  }
   if (ok) {
     Respond(m_screenshotClient, m_screenshotId, {{"path", m_screenshotPath}});
   } else {

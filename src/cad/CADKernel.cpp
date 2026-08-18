@@ -92,6 +92,15 @@ double CADShape::Volume() const {
   return props.Mass();
 }
 
+int CADShape::SolidCount() const {
+  if (m_shape.IsNull())
+    return 0;
+  int count = 0;
+  for (TopExp_Explorer ex(m_shape, TopAbs_SOLID); ex.More(); ex.Next())
+    count++;
+  return count;
+}
+
 bool CADShape::ComputeMassProps(MassProps& out) const {
   if (!IsValid())
     return false;

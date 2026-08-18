@@ -381,6 +381,9 @@ void DrawBomSection(AppState& state) {
       ImGui::TextDisabled("?");
     ImGui::EndTable();
   }
+  // V2: name the reason for every "?" so a null total explains itself.
+  for (const std::string& w : cache.warnings)
+    ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "%s", w.c_str());
   const bool canSave = FileDialogsAvailable();
   ImGui::BeginDisabled(!canSave);
   if (ImGui::Button("Export CSV"))

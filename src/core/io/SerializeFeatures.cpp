@@ -871,12 +871,65 @@ int DocumentFormatVersion() { return kVersion; }
 // Keep in lockstep with the FeatureFromJson chain below (one entry per
 // `type ==` branch; Fillet/Chamfer share a branch but are distinct types).
 static constexpr FeatureTypeInfo kFeatureTypes[] = {
-    {"Sketch", 1},    {"Extrude", 1},  {"Box", 1},        {"Sphere", 1},
-    {"Cylinder", 1},  {"Import", 1},   {"DatumPlane", 1}, {"Revolve", 1},
-    {"DatumAxis", 1}, {"Curve3D", 42}, {"Boolean", 1},    {"Split", 39},
-    {"Refine", 47},   {"Fillet", 17},  {"Chamfer", 17},   {"Shell", 20},
-    {"Loft", 20},     {"Sweep", 20},   {"Pipe", 43},      {"Rib", 36},
-    {"Thread", 36},   {"Hole", 21},    {"Draft", 22},     {"Pattern", 1},
+    {"Sketch", 1,
+     "plane {origin, normal, uAxis} (in-plane V = normal x uAxis!), entities "
+     "[{type: line|circle|arc|ellipse|spline|point|rect, ...}], name?"},
+    {"Extrude", 1,
+     "sketch_id, distance (+_expr), mode: new_body|add|cut, end_mode?: "
+     "blind|symmetric|two_sided|up_to_face|through_all, distance2? (+_expr), "
+     "reversed?, regions?, end_target?; extrudes along +plane normal"},
+    {"Box", 1,
+     "position [x,y,z] = MIN corner, width/height/depth = X/Y/Z extents mm"},
+    {"Sphere", 1, "center [x,y,z], radius"},
+    {"Cylinder", 1,
+     "center [x,y,z] (base), direction [x,y,z], radius, "
+     "height"},
+    {"Import", 1, "path (STEP/STL/BREP file)"},
+    {"DatumPlane", 1,
+     "kind: offset|angle, base_plane: xy|xz|yz or parent_id, offset (+_expr), "
+     "flip?, axis?, angle_deg? (+_expr)"},
+    {"Revolve", 1,
+     "sketch_id, axis {kind: x|y|z|sketch_line|datum_axis, ...}, angle_deg "
+     "(+_expr), mode: new_body|add|cut, symmetric?, reversed?"},
+    {"DatumAxis", 1, "kind, points?/sketch_id?/entity_id?"},
+    {"Curve3D", 42,
+     "kind: fit_spline|control_poly|helix; points [[x,y,z]...], degree?, "
+     "closed?; helix: origin, axis, radius (+_expr), pitch (+_expr), turns "
+     "(+_expr), left_handed?"},
+    {"Boolean", 1,
+     "target_id, tool_id (body created_by ids), op: "
+     "union|subtract|intersect"},
+    {"Split", 39,
+     "body_id, knife: {face {feature_id, element}} or "
+     "{datum_id} or {base_plane, offset (+_expr)}"},
+    {"Refine", 47, "body_id (heals/simplifies the B-Rep)"},
+    {"Fillet", 17, "edges [{feature_id, element}], radius (+_expr)"},
+    {"Chamfer", 17,
+     "edges [{feature_id, element}], radius (+_expr) = "
+     "setback distance"},
+    {"Shell", 20, "open_faces [{feature_id, element}], thickness (+_expr)"},
+    {"Loft", 20, "sketch_ids [id...] (section order), mode, guide_id?"},
+    {"Sweep", 20,
+     "profile_id (sketch), path_id (sketch or curve), mode, "
+     "guide_id?, frame?"},
+    {"Pipe", 43,
+     "path_id (curve), outer_diameter (+_expr), wall_thickness "
+     "(+_expr), mode"},
+    {"Rib", 36, "sketch_id (open profile), thickness (+_expr), flip?"},
+    {"Thread", 36,
+     "face {feature_id, element} (cylindrical), designation (e.g. \"M8\"), "
+     "pitch?, thread_class?, length (+_expr), modeled?"},
+    {"Hole", 21,
+     "hole_kind: simple|counterbore|countersink, sketch_id (point centres; "
+     "drills along -plane normal), diameter (+_expr), depth (+_expr), "
+     "through?, cb_diameter?, cb_depth?, cs_diameter?, cs_depth?"},
+    {"Draft", 22,
+     "faces [{feature_id, element}], angle_deg (+_expr), "
+     "neutral_plane, body_id?"},
+    {"Pattern", 1,
+     "kind: linear|circular, source_id (feature to repeat), count (+_expr), "
+     "linear: base_plane/axis + spacing (+_expr); circular: axis + angle_deg "
+     "(+_expr)"},
 };
 std::span<const FeatureTypeInfo> FeatureTypes() { return kFeatureTypes; }
 

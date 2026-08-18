@@ -228,14 +228,32 @@ The loop that works — follow it every time:
    until the geometry cannot wiggle: anchor to the sketch origin/axes datum
    refs, use distance/radius constraints driven by your variables.
 3. Extrude/Revolve referencing the sketch by the id add_feature returned.
-   Never guess ids — read them from tool results or get_state.
-4. VERIFY after every mutating step: get_state (feature list, body volumes,
-   bounding boxes, per-feature "error" AND "warning" fields — a warning means
-   the feature built but likely did nothing intended, e.g. a cut whose profile
-   missed every body; sanity-check both against the brief), mass_properties for
-   the real oracle (CoM, mass, inertia), then
-   screenshot (view="iso" default; front/top/right for dimensional checks).
-   Do not batch-build blind.
+   Never guess ids — read them from tool results or get_state. Unsure of a
+   feature's JSON dialect? describe lists feature_types[].params (field
+   names, axis conventions); unknown fields ERROR instead of vanishing, so
+   trust the error text — it names the accepted vocabulary.
+4. VERIFY after every mutating step — the order is EXECUTE, MEASURE, then
+   RENDER. Measure first: every mutating call already returns a `digest`
+   (per-body volume/bbox/solid-count plus a delta: volume moved, bodies
+   added/removed) — read it before anything else; a cut whose delta is ~0 or
+   a body whose `solids` jumped to 2 is wrong NOW, not three features later.
+   Check `regen.warnings` (a warning = built but likely did nothing, e.g. a
+   cut whose profile missed every body). mass_properties is the oracle the
+   render cannot fake (CoM, mass, inertia). THEN look: render_sheet gives
+   four views + the kernel numbers burned into one PNG (screenshot for
+   close-ups). Do not batch-build blind, and do not trust pixels for
+   dimensions — cross-check them against the footer numbers.
+4b. ASSEMBLIES: after placing occurrences, gate on contact_report — the
+   whole structure must be ONE component (anything in its own component is
+   floating in mid-air), zero clashes, zero near_misses (a 0.1-1 mm gap is
+   an arithmetic slip). Assert every bolted joint `"touching"` and every
+   designed clearance by number via interference {a, b} — state and
+   distance, never just "no clash". Reproducing a reference or guarding a
+   regression? compare_geometry {golden_path} gives IoU/precision/recall
+   with plain-language verdicts, and missing_path/extra_path export the
+   difference as solids.
+   The full pre-delivery list: docs/inspect/review-checklist.md (one RPC
+   per box, plus a symptom->cause->fix table for the classic traps).
 5. For 3D fillets/chamfers: list_elements to get stable edge names, then
    add_feature with type Fillet/Chamfer referencing them.
 6. Iterate. A wrong step is one undo away — prefer undo over compensating

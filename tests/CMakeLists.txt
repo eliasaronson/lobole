@@ -174,6 +174,34 @@ add_test(NAME measure_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(measure_smoke PROPERTIES TIMEOUT 120)
 
+# V1 contact & connectivity: interference distance/state + contact_report
+# components/near-misses/clashes. Headless (no display).
+add_test(NAME contact_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/contact_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(contact_smoke PROPERTIES TIMEOUT 120)
+
+# V2 strict inputs + digests: unknown feature fields error, mutating
+# responses carry body digests with deltas, bom warnings. Headless.
+add_test(NAME strict_inputs_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/strict_inputs_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(strict_inputs_smoke PROPERTIES TIMEOUT 120)
+
+# V4 compare_geometry: boolean-diff metrics, golden-file compare, diff-solid
+# export, occurrence compare. Headless.
+add_test(NAME compare_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/compare_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(compare_smoke PROPERTIES TIMEOUT 120)
+
+# V5 papercuts: set_camera eye, occurrence rotate, feature param docs,
+# honest render_still assembly error. Headless.
+add_test(NAME papercuts_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/papercuts_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(papercuts_smoke PROPERTIES TIMEOUT 120)
+
 # Variables C2 units: unit-suffixed expressions resolve, unit names reserved,
 # v28 round-trip. Headless (no display).
 add_test(NAME units_smoke

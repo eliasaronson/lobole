@@ -37,6 +37,9 @@ int DocumentFormatVersion(); // == kVersion without exposing the internal hdr
 struct FeatureTypeInfo {
   const char* type; // FeatureFromJson dispatch string, e.g. "Extrude"
   int sinceVersion; // document format version it arrived in (1 = original)
+  // One-line JSON dialect for the describe endpoint (V5): field names, axis
+  // conventions, defaults. `?` marks optional, `(+_expr)` an expression twin.
+  const char* params;
 };
 std::span<const FeatureTypeInfo> FeatureTypes();
 std::span<const char* const> SketchEntityTypes();

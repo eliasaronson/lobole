@@ -549,6 +549,11 @@ struct Selection {
 };
 
 struct AppState {
+  // V3 render_sheet capture in flight: viewport overlays (the view cube)
+  // hide so the composited tiles show geometry only. Driven per-frame by
+  // RemoteServer::ProcessPending.
+  bool sheetCapture = false;
+
   // Owned: the ACTIVE tab's model. For a part tab, `document`/`commands` are
   // live and `assembly` is null; for an assembly tab, `assembly` is live and
   // `document`/`commands` are null. They are mutually exclusive.

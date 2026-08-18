@@ -360,6 +360,9 @@ struct BomTable {
   std::vector<BomRow> rows;
   bool massKnown = true;   // false when any row's mass is unknown
   double totalMassG = 0.0; // valid when massKnown
+  // V2: WHY a mass is unknown ("part 'X': body 'Y' has no material"), so a
+  // null total explains itself instead of silently tainting the table.
+  std::vector<std::string> warnings;
 };
 BomTable ComputeBom(AppState& state); // empty without an active assembly
 // The table as CSV (quoted where needed); unknown masses are empty cells.

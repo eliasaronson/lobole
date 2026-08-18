@@ -93,17 +93,14 @@ void DrawModelToolPrompt(AppState& state) {
 // to it (same orientations as Shift+1..7). Lives in its own tiny ImGui
 // window so clicks are captured instead of leaking into viewport picking.
 void DrawViewCube(AppState& state) {
-  if (!state.camera || state.drawing)
+  if (!state.camera || state.drawing || state.sheetCapture)
     return;
   const float size = 108.0f;
-  // Sit ABOVE the bottom part-tabs bar (same height formula as DrawPartTabs
-  // — it overlays the viewport's bottom edge, and clicking it raised it
-  // over the cube).
-  const float tabsBarH = ImGui::GetFrameHeightWithSpacing() + 4.0f;
+  // The central node ends above the part-tabs bar (the dockspace reserves
+  // that strip), so anchoring to the viewport bottom already clears it.
   ImGui::SetNextWindowPos(
       ImVec2(state.viewportPos.x + state.viewportSize.x - size - 8.0f,
-             state.viewportPos.y + state.viewportSize.y - size - 8.0f -
-                 tabsBarH),
+             state.viewportPos.y + state.viewportSize.y - size - 8.0f),
       ImGuiCond_Always);
   ImGui::SetNextWindowSize(ImVec2(size, size), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.0f);
@@ -401,7 +398,7 @@ void DrawControlsHelpOverlay(AppState& state) {
 void DrawPartTabs(AppState& state) {
   EnsureParts(state);
   const ImGuiViewport* vp = ImGui::GetMainViewport();
-  const float h = ImGui::GetFrameHeightWithSpacing() + 4.0f;
+  const float h = PartTabsBarHeight();
   ImGui::SetNextWindowPos(
       ImVec2(vp->WorkPos.x, vp->WorkPos.y + vp->WorkSize.y - h));
   ImGui::SetNextWindowSize(ImVec2(vp->WorkSize.x, h));

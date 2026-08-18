@@ -412,6 +412,7 @@ set(app_sources
     src/ui/CommandPalette.cpp
     src/ui/SketchInteraction.cpp
     src/ui/Toolbar.cpp
+    src/render/RenderSheet.cpp
     src/render/Screenshot.cpp
     src/remote/RemoteServer.cpp
     src/remote/RemoteConfigurations.cpp

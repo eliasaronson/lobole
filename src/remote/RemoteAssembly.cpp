@@ -8,6 +8,7 @@
 #include "ui/AppState.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <functional>
@@ -29,7 +30,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Insert an occurrence of a part into the assembly {part, transform?}."},
     {"remove_occurrence", "Remove an occurrence by id."},
     {"list_occurrences", "List occurrences with transforms and state."},
-    {"set_occurrence_transform", "Set an occurrence's world transform."},
+    {"set_occurrence_transform",
+     "Set an occurrence's world transform {id, transform: {position, "
+     "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}."},
     {"set_occurrence_visible", "Show/hide an occurrence."},
     {"set_occurrence_fixed", "Fix/free an occurrence for the solver."},
     {"rename_occurrence", "Rename an occurrence."},
@@ -58,12 +61,37 @@ static constexpr MethodDoc AssemblyMethods[] = {
 };
 std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
 
+namespace {
+// V5: {rotate: {axis: [x,y,z], angle_deg}} as a friendlier alternative to a
+// raw quaternion in occurrence transforms — the hand-derived-quaternion
+// error class from the dock round. Converted here so the document loader
+// (and the file format) still see orientation only.
+json NormalizeTransform(json t) {
+  if (!t.is_object() || !t.contains("rotate"))
+    return t;
+  if (t.contains("orientation"))
+    throw std::runtime_error(
+        "pass either transform.orientation or transform.rotate, not both");
+  const json& r = t.at("rotate");
+  const json& ax = r.at("axis");
+  const glm::vec3 axis(ax.at(0).get<float>(), ax.at(1).get<float>(),
+                       ax.at(2).get<float>());
+  if (glm::length(axis) < 1e-9f)
+    throw std::runtime_error("rotate.axis must be non-zero");
+  const float rad = glm::radians(r.at("angle_deg").get<float>());
+  const glm::quat q = glm::angleAxis(rad, glm::normalize(axis));
+  t["orientation"] = {q.x, q.y, q.z, q.w};
+  t.erase("rotate");
+  return t;
+}
+} // namespace
+
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
   if (m == "add_occurrence") {
     // Places a part in the active assembly. `part` is the part's NAME (resolved
     // to its stable id); optional `transform` = {position:[x,y,z],
-    // orientation:[x,y,z,w]}.
+    // orientation:[x,y,z,w] OR rotate:{axis, angle_deg}}.
     if (!state.assembly)
       throw std::runtime_error("the active document is not an assembly");
     const std::string partName = p.at("part").get<std::string>();
@@ -78,7 +106,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
          {"name", p.value("name", partName)},
          {"part_id", partId},
          {"part_version", nullptr},
-         {"transform", p.value("transform", identityTransform)},
+         {"transform",
+          NormalizeTransform(p.value("transform", identityTransform))},
          {"visible", p.value("visible", true)},
          {"fixed", p.value("fixed", false)}});
     ui::SnapshotAssembly(state);
@@ -115,7 +144,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("no such occurrence");
     ui::SnapshotAssembly(state);
     if (m == "set_occurrence_transform") {
-      const json& t = p.at("transform");
+      const json t = NormalizeTransform(p.at("transform"));
       const json& pos = t.at("position");
       occ->position = glm::vec3(pos.at(0).get<float>(), pos.at(1).get<float>(),
                                 pos.at(2).get<float>());
@@ -432,10 +461,13 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           r.massKnown ? json(r.unitMassG * r.quantity) : json(nullptr);
       rows.push_back(row);
     }
-    return json{
+    json out = {
         {"rows", rows},
         {"total",
          {{"mass_g", bom.massKnown ? json(bom.totalMassG) : json(nullptr)}}}};
+    if (!bom.warnings.empty())
+      out["warnings"] = bom.warnings; // V2: WHY a mass went null
+    return out;
   }
   if (m == "export_bom") {
     // params: {path} — writes the BOM as CSV. Same rows as `bom`.

@@ -189,6 +189,8 @@ BomTable ComputeBom(AppState& state) {
     const Document* part = PartDocById(state, occ.partId);
     if (!part) {
       fresh.partName = "(missing part)"; // dangling reference — mass unknown
+      table.warnings.push_back("occurrence '" + occ.name +
+                               "' references a missing part — mass unknown");
     } else if (const auto mass = Measure::MassOfBodies(part->GetBodies())) {
       fresh.unitVolume = mass->volume;
       fresh.massKnown = mass->massKnown;
@@ -201,6 +203,12 @@ BomTable ComputeBom(AppState& state) {
           break;
         }
       }
+      for (const Measure::BodyMass& bm : mass->bodies)
+        if (!bm.massKnown)
+          table.warnings.push_back(
+              "part '" + fresh.partName + "': body '" + bm.name + "' has " +
+              (bm.material.empty() ? "no material" : "no density") +
+              " — mass unknown");
     }
     table.rows.push_back(std::move(fresh));
   }

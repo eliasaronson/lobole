@@ -1,5 +1,6 @@
 #include "remote/RemoteInspection.h"
 
+#include "cad/CADKernel.h"
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
 #include "core/MassProps.h"
@@ -12,7 +13,14 @@
 
 #include <glm/glm.hpp>
 
+#include <algorithm>
+#include <filesystem>
+#include <functional>
+#include <map>
+#include <set>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 using nlohmann::json;
@@ -68,6 +76,14 @@ Document& RequirePartDoc(Document* doc, const char* what) {
   return *doc;
 }
 
+// V1 contact classification: a pair either overlaps (clash), sits within the
+// touch tolerance (touching — a boltable joint), or is clear by `distance`.
+const char* ContactState(const Measure::SetContact& c, double touchTol) {
+  if (c.volume > 1e-9)
+    return "clash";
+  return c.distance <= touchTol ? "touching" : "clear";
+}
+
 } // namespace
 
 // Inspection RPCs (section clip, interference, mass properties, measure,
@@ -84,7 +100,21 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"list_elements", "Stable face/edge names per body (the toponaming handles "
                       "measure/fillet/mates use)."},
     {"interference",
-     "Pairwise interference (clash) check between bodies or occurrences."},
+     "Pairwise check between bodies or occurrences: {clash, volume, distance, "
+     "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
+     "touching from clear; the no-pair assembly sweep stays clash-only — use "
+     "contact_report for the full picture."},
+    {"contact_report",
+     "Whole-assembly contact graph: connected components (len 1 = one "
+     "connected structure), per-pair state/distance, near_misses (gap <= "
+     "near_tol, default 1.0 mm), clashes, and intended-vs-realized mate "
+     "diffs when mates exist."},
+    {"compare_geometry",
+     "Boolean-diff similarity: {golden_path} (STEP/BREP reference) vs the "
+     "active doc, or {a, b} bodies/occurrences. Returns iou/dice/precision/"
+     "recall, volume_ratio, center_offset, bbox_iou, topology counts and "
+     "plain-language verdicts; {missing_path}/{extra_path} export the diff "
+     "solids as BREP."},
     {"section", "Raster cross-section preview of the bodies at a plane."},
     {"set_section",
      "Enable/disable the live section clip {base_plane|origin+normal, "
@@ -205,19 +235,343 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const Occurrence& ob = occOf(p.at("b"));
       if (oa.id == ob.id)
         throw std::runtime_error("pick two different occurrences");
-      const double v = pairVolume(oa, ob);
-      return json{
-          {"clash", v > 1e-9}, {"volume", v}, {"a", oa.name}, {"b", ob.name}};
+      const double touchTol = p.value("touch_tol", 1e-3);
+      Document* pa = ui::PartDocById(state, oa.partId);
+      Document* pb = ui::PartDocById(state, ob.partId);
+      if (pa == nullptr || pb == nullptr)
+        throw std::runtime_error("an occurrence's part document is missing");
+      const auto c =
+          Measure::ContactBetween(pa->GetBodies(), ui::OccurrenceMatrix(oa),
+                                  pb->GetBodies(), ui::OccurrenceMatrix(ob));
+      if (!c)
+        throw std::runtime_error("interference check failed (see log)");
+      return json{{"clash", c->volume > 1e-9},
+                  {"volume", c->volume},
+                  {"distance", c->distance},
+                  {"state", ContactState(*c, touchTol)},
+                  {"a", oa.name},
+                  {"b", ob.name}};
     }
     const auto& bodies = RequirePartDoc(doc, "interference").GetBodies();
+    const double touchTol = p.value("touch_tol", 1e-3);
     const int ia = p.at("a").get<int>();
     const int ib = p.at("b").get<int>();
     if (ia < 0 || ib < 0 || ia >= static_cast<int>(bodies.size()) ||
         ib >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
-    CADShape common = bodies[ia].shape.Intersection(bodies[ib].shape);
-    const double v = common.IsValid() ? common.Volume() : 0.0;
-    return json{{"clash", v > 1e-9}, {"volume", v}};
+    std::vector<Body> va(1), vb(1);
+    va[0].shape = bodies[ia].shape;
+    vb[0].shape = bodies[ib].shape;
+    const auto c =
+        Measure::ContactBetween(va, glm::mat4(1.0f), vb, glm::mat4(1.0f));
+    if (!c)
+      throw std::runtime_error("interference check failed (see log)");
+    return json{{"clash", c->volume > 1e-9},
+                {"volume", c->volume},
+                {"distance", c->distance},
+                {"state", ContactState(*c, touchTol)}};
+  }
+  if (m == "compare_geometry") {
+    // V4: boolean-diff similarity, the numeric "same shape?" oracle. The
+    // REFERENCE (A) is the golden file when given, else body/occurrence `a`;
+    // the CANDIDATE (B) is the active doc, else `b`. Metrics are arithmetic
+    // over vol(A), vol(B), vol(A∩B); the verdict strings are what makes
+    // them actionable for an agent.
+    const auto bodiesOfDoc = [&]() -> std::vector<Body> {
+      if (doc != nullptr)
+        return doc->GetBodies();
+      std::vector<Body> placed;
+      if (state.assembly) {
+        for (const Occurrence& o : state.assembly->GetOccurrences()) {
+          if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
+            continue;
+          Document* pd = ui::PartDocById(state, o.partId);
+          if (pd == nullptr)
+            continue;
+          const glm::mat4 xf = ui::OccurrenceMatrix(o);
+          for (const Body& b : pd->GetBodies()) {
+            Body nb;
+            nb.shape = b.shape.Transformed(xf);
+            placed.push_back(std::move(nb));
+          }
+        }
+      }
+      return placed;
+    };
+    const auto loadGolden = [](const std::string& path) -> std::vector<Body> {
+      std::vector<Body> out;
+      const auto ext = std::filesystem::path(path).extension().string();
+      if (ext == ".brep" || ext == ".brp") {
+        CADShape s;
+        if (!CADKernel::Instance().LoadBREP(path, s))
+          throw std::runtime_error("cannot read BREP " + path);
+        Body b;
+        b.shape = s;
+        out.push_back(std::move(b));
+      } else {
+        std::vector<CADShape> shapes;
+        if (!CADKernel::Instance().LoadSTEP(path, shapes) || shapes.empty())
+          throw std::runtime_error("cannot read STEP " + path);
+        for (CADShape& s : shapes) {
+          Body b;
+          b.shape = s;
+          out.push_back(std::move(b));
+        }
+      }
+      return out;
+    };
+    std::vector<Body> refA, candB;
+    if (p.contains("golden_path")) {
+      refA = loadGolden(p.at("golden_path").get<std::string>());
+      candB = bodiesOfDoc();
+    } else if (doc != nullptr) {
+      const auto& bodies = doc->GetBodies();
+      const int ia = p.at("a").get<int>(), ib = p.at("b").get<int>();
+      if (ia < 0 || ib < 0 || ia >= static_cast<int>(bodies.size()) ||
+          ib >= static_cast<int>(bodies.size()))
+        throw std::runtime_error("body index out of range");
+      refA.emplace_back().shape = bodies[ia].shape;
+      candB.emplace_back().shape = bodies[ib].shape;
+    } else if (state.assembly) {
+      const auto occBodies = [&](const json& v) {
+        const Occurrence* found = nullptr;
+        if (v.is_string()) {
+          for (const Occurrence& o : state.assembly->GetOccurrences())
+            if (o.name == v.get<std::string>())
+              found = &o;
+        } else {
+          found = state.assembly->FindById(v.get<uint64_t>());
+        }
+        if (found == nullptr)
+          throw std::runtime_error("occurrence " + v.dump() + " not found");
+        Document* pd = ui::PartDocById(state, found->partId);
+        if (pd == nullptr)
+          throw std::runtime_error("occurrence part document is missing");
+        std::vector<Body> placed;
+        const glm::mat4 xf = ui::OccurrenceMatrix(*found);
+        for (const Body& b : pd->GetBodies()) {
+          Body nb;
+          nb.shape = b.shape.Transformed(xf);
+          placed.push_back(std::move(nb));
+        }
+        return placed;
+      };
+      refA = occBodies(p.at("a"));
+      candB = occBodies(p.at("b"));
+    }
+    if (refA.empty() || candB.empty())
+      throw std::runtime_error("compare_geometry needs {golden_path} or "
+                               "{a, b} with geometry on both sides");
+    CADShape missingShape, extraShape;
+    const bool wantMissing = p.contains("missing_path");
+    const bool wantExtra = p.contains("extra_path");
+    const auto c =
+        Measure::CompareBodySets(refA, glm::mat4(1.0f), candB, glm::mat4(1.0f),
+                                 wantMissing ? &missingShape : nullptr,
+                                 wantExtra ? &extraShape : nullptr);
+    if (!c)
+      throw std::runtime_error("compare failed (see log)");
+
+    const double unionV = c->volumeA + c->volumeB - c->common;
+    const double iou = unionV > 1e-9 ? c->common / unionV : 0.0;
+    const double dice = (c->volumeA + c->volumeB) > 1e-9
+                            ? 2.0 * c->common / (c->volumeA + c->volumeB)
+                            : 0.0;
+    const double precision = c->volumeB > 1e-9 ? c->common / c->volumeB : 0.0;
+    const double recall = c->volumeA > 1e-9 ? c->common / c->volumeA : 0.0;
+    const double volumeRatio =
+        c->volumeA > 1e-9 ? c->volumeB / c->volumeA : 0.0;
+    const double centerOffset =
+        glm::length(glm::dvec3(c->comA) - glm::dvec3(c->comB));
+    const auto boxVol = [](const glm::vec3& mn, const glm::vec3& mx) {
+      const glm::vec3 d = glm::max(mx - mn, glm::vec3(0.0f));
+      return double(d.x) * d.y * d.z;
+    };
+    const glm::vec3 imn = glm::max(c->minA, c->minB);
+    const glm::vec3 imx = glm::min(c->maxA, c->maxB);
+    const double boxInter = boxVol(imn, imx);
+    const double boxUnion =
+        boxVol(c->minA, c->maxA) + boxVol(c->minB, c->maxB) - boxInter;
+    const double bboxIou = boxUnion > 1e-9 ? boxInter / boxUnion : 0.0;
+
+    std::vector<std::string> verdicts;
+    char buf[160];
+    if (iou > 0.99)
+      verdicts.push_back("identical within tolerance");
+    else if (iou > 0.95)
+      verdicts.push_back("excellent match");
+    else if (iou > 0.8)
+      verdicts.push_back("good match");
+    else if (iou > 0.5)
+      verdicts.push_back("partial match");
+    else
+      verdicts.push_back("poor match");
+    if (precision < recall - 0.05) {
+      snprintf(buf, sizeof buf,
+               "over-generating: %.1f%% of the candidate is extra geometry",
+               (1.0 - precision) * 100.0);
+      verdicts.push_back(buf);
+    } else if (recall < precision - 0.05) {
+      snprintf(buf, sizeof buf,
+               "under-generating: %.1f%% of the reference is missing",
+               (1.0 - recall) * 100.0);
+      verdicts.push_back(buf);
+    }
+    if (volumeRatio > 1e-9 && (volumeRatio < 0.95 || volumeRatio > 1.05)) {
+      snprintf(buf, sizeof buf, "%s by %.1f%%",
+               volumeRatio < 1.0 ? "undersized" : "oversized",
+               std::abs(1.0 - volumeRatio) * 100.0);
+      verdicts.push_back(buf);
+    }
+    if (centerOffset > 1.0) {
+      snprintf(buf, sizeof buf, "center of mass offset by %.1f mm",
+               centerOffset);
+      verdicts.push_back(buf);
+    }
+
+    json out = {{"iou", iou},
+                {"dice", dice},
+                {"precision", precision},
+                {"recall", recall},
+                {"volume_ratio", volumeRatio},
+                {"center_offset", centerOffset},
+                {"bbox_iou", bboxIou},
+                {"volume_reference", c->volumeA},
+                {"volume_candidate", c->volumeB},
+                {"volume_common", c->common},
+                {"volume_missing", c->missing},
+                {"volume_extra", c->extra},
+                {"surface_reference", c->surfaceA},
+                {"surface_candidate", c->surfaceB},
+                {"faces", {{"reference", c->facesA}, {"candidate", c->facesB}}},
+                {"edges", {{"reference", c->edgesA}, {"candidate", c->edgesB}}},
+                {"verdicts", verdicts}};
+    if (wantMissing) {
+      const std::string path = p.at("missing_path").get<std::string>();
+      if (!CADKernel::Instance().SaveBREP(path, missingShape))
+        throw std::runtime_error("cannot write " + path);
+      out["missing_path"] = path;
+    }
+    if (wantExtra) {
+      const std::string path = p.at("extra_path").get<std::string>();
+      if (!CADKernel::Instance().SaveBREP(path, extraShape))
+        throw std::runtime_error("cannot write " + path);
+      out["extra_path"] = path;
+    }
+    return out;
+  }
+  if (m == "contact_report") {
+    // V1: the whole-assembly connectivity gate. Box prefilter over every
+    // visible, unsuppressed occurrence pair; exact contact on candidates;
+    // union-find over touching/clashing edges. A scripted build asserts
+    // len(components) == 1 and near_misses == [] the way it asserts a BOM.
+    if (state.assembly == nullptr || doc != nullptr)
+      throw std::runtime_error("contact_report needs an active assembly tab");
+    const double touchTol = p.value("touch_tol", 1e-3);
+    const double nearTol = p.value("near_tol", 1.0);
+    struct Ent {
+      const Occurrence* occ;
+      Document* part;
+      glm::mat4 xf;
+      glm::vec3 min, max;
+    };
+    std::vector<Ent> ents;
+    json skipped = json::array();
+    for (const Occurrence& o : state.assembly->GetOccurrences()) {
+      if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
+        continue;
+      Document* pd = ui::PartDocById(state, o.partId);
+      Ent e{&o, pd, pd ? ui::OccurrenceMatrix(o) : glm::mat4(1.0f), {}, {}};
+      if (pd == nullptr ||
+          !Measure::WorldBounds(pd->GetBodies(), e.xf, e.min, e.max)) {
+        skipped.push_back(o.name); // no part doc / no valid shapes
+        continue;
+      }
+      ents.push_back(e);
+    }
+    // AABB gap: 0 when the boxes overlap; a lower bound on exact distance.
+    const auto boxGap = [](const Ent& a, const Ent& b) {
+      const glm::vec3 gap =
+          glm::max(glm::max(a.min - b.max, b.min - a.max), glm::vec3(0.0f));
+      return static_cast<double>(glm::length(gap));
+    };
+    std::vector<size_t> parent(ents.size());
+    for (size_t i = 0; i < parent.size(); ++i)
+      parent[i] = i;
+    const std::function<size_t(size_t)> find = [&](size_t i) -> size_t {
+      return parent[i] == i ? i : parent[i] = find(parent[i]);
+    };
+    json pairs = json::array(), nearMisses = json::array(),
+         clashes = json::array();
+    std::set<std::pair<uint64_t, uint64_t>> touchingIds;
+    for (size_t i = 0; i < ents.size(); ++i)
+      for (size_t j = i + 1; j < ents.size(); ++j) {
+        if (boxGap(ents[i], ents[j]) > nearTol)
+          continue; // provably clear by more than the near window
+        const auto c =
+            Measure::ContactBetween(ents[i].part->GetBodies(), ents[i].xf,
+                                    ents[j].part->GetBodies(), ents[j].xf);
+        if (!c)
+          continue;
+        const char* st = ContactState(*c, touchTol);
+        pairs.push_back({{"a", ents[i].occ->name},
+                         {"b", ents[j].occ->name},
+                         {"state", st},
+                         {"distance", c->distance},
+                         {"volume", c->volume}});
+        if (std::string_view(st) != "clear") {
+          parent[find(i)] = find(j);
+          touchingIds.insert({std::min(ents[i].occ->id, ents[j].occ->id),
+                              std::max(ents[i].occ->id, ents[j].occ->id)});
+        }
+        if (std::string_view(st) == "clash")
+          clashes.push_back({{"a", ents[i].occ->name},
+                             {"b", ents[j].occ->name},
+                             {"volume", c->volume}});
+        else if (c->distance > touchTol && c->distance <= nearTol)
+          nearMisses.push_back({{"a", ents[i].occ->name},
+                                {"b", ents[j].occ->name},
+                                {"distance", c->distance}});
+      }
+    std::map<size_t, std::vector<std::string>> comps;
+    for (size_t i = 0; i < ents.size(); ++i)
+      comps[find(i)].push_back(ents[i].occ->name);
+    std::vector<std::vector<std::string>> componentList;
+    for (auto& [root, names] : comps)
+      componentList.push_back(std::move(names));
+    std::sort(componentList.begin(), componentList.end(),
+              [](const auto& a, const auto& b) { return a.size() > b.size(); });
+    json out = {
+        {"occurrences", ents.size()},  {"connected", componentList.size() <= 1},
+        {"components", componentList}, {"pairs", pairs},
+        {"near_misses", nearMisses},   {"clashes", clashes},
+        {"touch_tol", touchTol},       {"near_tol", nearTol}};
+    if (!skipped.empty())
+      out["skipped"] = skipped;
+    // Intended vs realized: only meaningful when the assembly HAS mates —
+    // in a fixed-occurrence assembly every touching pair is "unmated".
+    if (!state.assembly->GetMates().empty()) {
+      json unrealized = json::array(), unmated = json::array();
+      std::set<std::pair<uint64_t, uint64_t>> mated;
+      for (const Mate& mt : state.assembly->GetMates()) {
+        const auto key =
+            std::make_pair(std::min(mt.a.occurrenceId, mt.b.occurrenceId),
+                           std::max(mt.a.occurrenceId, mt.b.occurrenceId));
+        mated.insert(key);
+        if (touchingIds.find(key) == touchingIds.end())
+          unrealized.push_back({{"mate", mt.name}, {"id", mt.id}});
+      }
+      for (const auto& [ia, ib] : touchingIds)
+        if (mated.find({ia, ib}) == mated.end()) {
+          const Occurrence* a = state.assembly->FindById(ia);
+          const Occurrence* b = state.assembly->FindById(ib);
+          if (a != nullptr && b != nullptr)
+            unmated.push_back({{"a", a->name}, {"b", b->name}});
+        }
+      out["unrealized_mates"] = unrealized;
+      out["unmated_contacts"] = unmated;
+    }
+    return out;
   }
   if (m == "mass_properties") {
     // Volume, surface area, center of mass, and inertia (about the CoM) per

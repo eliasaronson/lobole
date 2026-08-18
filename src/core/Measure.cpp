@@ -7,6 +7,8 @@
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
@@ -28,13 +30,16 @@
 #include <TopLoc_Location.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Trsf.hxx>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <set>
 
 namespace Measure {
@@ -239,6 +244,212 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
     LOG_ERROR("Interference check failed: {}", e.GetMessageString()
                                                    ? e.GetMessageString()
                                                    : "OpenCASCADE failure");
+    return std::nullopt;
+  }
+}
+
+bool WorldBounds(const std::vector<Body>& bodies, const glm::mat4& xf,
+                 glm::vec3& min, glm::vec3& max) {
+  try {
+    const TopLoc_Location loc(ToTrsf(xf));
+    Bnd_Box box;
+    for (const Body& b : bodies) {
+      if (b.shape.GetShape().IsNull())
+        continue;
+      BRepBndLib::Add(b.shape.GetShape().Moved(loc), box);
+    }
+    if (box.IsVoid())
+      return false;
+    Standard_Real x0, y0, z0, x1, y1, z1;
+    box.Get(x0, y0, z0, x1, y1, z1);
+    min = glm::vec3(x0, y0, z0);
+    max = glm::vec3(x1, y1, z1);
+    return true;
+  } catch (const Standard_Failure&) {
+    return false;
+  }
+}
+
+std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
+                                         const glm::mat4& xfA,
+                                         const std::vector<Body>& bodiesB,
+                                         const glm::mat4& xfB) {
+  try {
+    const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
+    struct Placed {
+      TopoDS_Shape shape;
+      Bnd_Box box;
+    };
+    const auto place = [](const std::vector<Body>& bodies,
+                          const TopLoc_Location& loc) {
+      std::vector<Placed> out;
+      for (const Body& b : bodies) {
+        if (b.shape.GetShape().IsNull())
+          continue;
+        Placed p;
+        p.shape = b.shape.GetShape().Moved(loc);
+        BRepBndLib::Add(p.shape, p.box);
+        out.push_back(std::move(p));
+      }
+      return out;
+    };
+    const std::vector<Placed> pa = place(bodiesA, la);
+    const std::vector<Placed> pb = place(bodiesB, lb);
+    if (pa.empty() || pb.empty())
+      return std::nullopt;
+
+    // Volume pass: only box-overlapping pairs can intersect (same pruning
+    // rationale as InterferenceVolume — a boolean is thousands of box tests).
+    SetContact out;
+    struct Cand {
+      double boxDist;
+      size_t i, j;
+    };
+    std::vector<Cand> cands;
+    cands.reserve(pa.size() * pb.size());
+    for (size_t i = 0; i < pa.size(); ++i)
+      for (size_t j = 0; j < pb.size(); ++j) {
+        const double d = pa[i].box.Distance(pb[j].box);
+        cands.push_back({d, i, j});
+        if (d > 0.0)
+          continue;
+        BRepAlgoAPI_Common common(pa[i].shape, pb[j].shape);
+        if (!common.IsDone() || common.Shape().IsNull())
+          continue;
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(common.Shape(), props);
+        out.volume += std::max(0.0, props.Mass());
+      }
+    if (out.volume > 0.0)
+      return out; // overlapping sets: separation is 0 by definition
+
+    // Distance pass: probe in ascending box-distance order and stop once a
+    // pair's box bound (a lower bound on its exact distance) can no longer
+    // beat the best exact distance found.
+    std::sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) {
+      return a.boxDist < b.boxDist;
+    });
+    double best = std::numeric_limits<double>::infinity();
+    for (const Cand& c : cands) {
+      if (c.boxDist >= best)
+        break;
+      BRepExtrema_DistShapeShape dist(pa[c.i].shape, pb[c.j].shape);
+      if (dist.IsDone() && dist.NbSolution() >= 1)
+        best = std::min(best, dist.Value());
+    }
+    if (!std::isfinite(best))
+      return std::nullopt;
+    out.distance = best;
+    return out;
+  } catch (const std::exception& e) {
+    LOG_ERROR("Contact check failed: {}", e.what());
+    return std::nullopt;
+  } catch (const Standard_Failure& e) {
+    // OCC throws Standard_Failure, which does NOT derive from std::exception
+    // (same trap as the siblings above).
+    LOG_ERROR("Contact check failed: {}", e.GetMessageString()
+                                              ? e.GetMessageString()
+                                              : "OpenCASCADE failure");
+    return std::nullopt;
+  }
+}
+
+std::optional<SetCompare>
+CompareBodySets(const std::vector<Body>& bodiesA, const glm::mat4& xfA,
+                const std::vector<Body>& bodiesB, const glm::mat4& xfB,
+                CADShape* missingOut, CADShape* extraOut) {
+  try {
+    const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
+    // Each side is FUSED, not compounded: with overlapping bodies a compound
+    // double-counts the overlap in GProp volumes and every derived metric
+    // (IoU, precision, ...) silently breaks. Fusing makes vol(side) mean
+    // "occupied space" — dearer than CompoundOf, but a compare op runs once,
+    // not per frame.
+    const auto fuse = [](const std::vector<Body>& bodies,
+                         const TopLoc_Location& loc) -> TopoDS_Shape {
+      TopTools_ListOfShape placed;
+      for (const Body& b : bodies)
+        if (!b.shape.GetShape().IsNull())
+          placed.Append(b.shape.GetShape().Moved(loc));
+      if (placed.IsEmpty())
+        return TopoDS_Shape();
+      if (placed.Extent() == 1)
+        return placed.First();
+      BRepAlgoAPI_Fuse op;
+      TopTools_ListOfShape args, tools;
+      args.Append(placed.First());
+      bool first = true;
+      for (const TopoDS_Shape& s : placed) {
+        if (first) {
+          first = false;
+          continue;
+        }
+        tools.Append(s);
+      }
+      op.SetArguments(args);
+      op.SetTools(tools);
+      op.Build();
+      if (!op.IsDone() || op.Shape().IsNull())
+        return TopoDS_Shape();
+      return op.Shape();
+    };
+    const CADShape a(fuse(bodiesA, la));
+    const CADShape b(fuse(bodiesB, lb));
+    if (a.GetShape().IsNull() || b.GetShape().IsNull())
+      return std::nullopt;
+
+    SetCompare out;
+    const auto measure = [](const CADShape& s, double& vol, double& surf,
+                            glm::dvec3& com, glm::vec3& mn, glm::vec3& mx,
+                            int& faces, int& edges) {
+      CADShape::MassProps mp;
+      if (s.ComputeMassProps(mp)) {
+        vol = mp.volume;
+        surf = mp.surfaceArea;
+        com = glm::dvec3(mp.centerOfMass);
+      }
+      s.GetBoundingBox(mn, mx);
+      for (TopExp_Explorer ex(s.GetShape(), TopAbs_FACE); ex.More(); ex.Next())
+        faces++;
+      TopTools_IndexedMapOfShape edgeMap;
+      TopExp::MapShapes(s.GetShape(), TopAbs_EDGE, edgeMap);
+      edges = edgeMap.Extent();
+    };
+    measure(a, out.volumeA, out.surfaceA, out.comA, out.minA, out.maxA,
+            out.facesA, out.edgesA);
+    measure(b, out.volumeB, out.surfaceB, out.comB, out.minB, out.maxB,
+            out.facesB, out.edgesB);
+
+    const auto volumeOf = [](const TopoDS_Shape& s) {
+      if (s.IsNull())
+        return 0.0;
+      GProp_GProps props;
+      BRepGProp::VolumeProperties(s, props);
+      return std::max(0.0, props.Mass());
+    };
+    BRepAlgoAPI_Common common(a.GetShape(), b.GetShape());
+    if (common.IsDone())
+      out.common = volumeOf(common.Shape());
+    BRepAlgoAPI_Cut missing(a.GetShape(), b.GetShape());
+    if (missing.IsDone()) {
+      out.missing = volumeOf(missing.Shape());
+      if (missingOut != nullptr)
+        *missingOut = CADShape(missing.Shape());
+    }
+    BRepAlgoAPI_Cut extra(b.GetShape(), a.GetShape());
+    if (extra.IsDone()) {
+      out.extra = volumeOf(extra.Shape());
+      if (extraOut != nullptr)
+        *extraOut = CADShape(extra.Shape());
+    }
+    return out;
+  } catch (const std::exception& e) {
+    LOG_ERROR("Shape compare failed: {}", e.what());
+    return std::nullopt;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Shape compare failed: {}", e.GetMessageString()
+                                              ? e.GetMessageString()
+                                              : "OpenCASCADE failure");
     return std::nullopt;
   }
 }

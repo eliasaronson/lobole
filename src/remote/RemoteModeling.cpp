@@ -30,6 +30,41 @@ using nlohmann::json;
 
 namespace remote {
 
+namespace {
+// V2 strict inputs: the feature dialect used to IGNORE unknown fields — a
+// Box with mode:"add" was accepted and the mode silently dropped (the dock
+// dogfooding round's silent-failure class). Rather than maintain a per-type
+// schema table, round-trip the built feature: any top-level request key that
+// neither serializes back nor sits in the small allowlist cannot have been
+// consumed, so reject it with the accepted vocabulary. File loading stays
+// tolerant — only the RPC path is strict.
+void RejectUnknownFeatureFields(const json& request, const Feature& built) {
+  if (!request.is_object())
+    return;
+  json out;
+  try {
+    out = DocumentIO::FeatureToJson(built);
+  } catch (...) {
+    return; // unserializable type: cannot validate, stay permissive
+  }
+  // "type" is the FromJson dispatch key; the rest are the get_state envelope
+  // (index/error state stamped AROUND the dialect), so a read-modify-write of
+  // a get_state feature entry — a legitimate agent pattern — stays valid.
+  static const std::set<std::string> kAllow = {
+      "type", "index", "error", "warning", "after_earlier_failure"};
+  for (auto it = request.begin(); it != request.end(); ++it) {
+    if (out.contains(it.key()) || kAllow.count(it.key()) != 0)
+      continue;
+    std::string accepted;
+    for (auto o = out.begin(); o != out.end(); ++o)
+      accepted += (accepted.empty() ? "" : ", ") + o.key();
+    throw std::runtime_error("unknown field '" + it.key() + "' for " +
+                             built.TypeName() + ". Accepted: type, " +
+                             accepted + ".");
+  }
+}
+} // namespace
+
 // Modeling / feature-tree RPCs (select_feature..list_variables) carved out of
 // RemoteServer::HandleSemantic. All act on the active part document.
 // Sketch constraint kinds accepted by add_constraint(s), also served by the
@@ -160,12 +195,14 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "add_feature") {
     auto feature = DocumentIO::FeatureFromJson(p.at("feature"));
+    RejectUnknownFeatureFields(p.at("feature"), *feature);
     // The GUI refuses a tool with missing inputs; the script API used to
     // accept one and commit a feature that does nothing (a fillet with no
     // edges regenerates happily). Same rule, both surfaces.
     if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
       throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
     }
+    const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(feature)), *doc);
     const size_t index = doc->FeatureCount() - 1;
@@ -181,6 +218,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       resp["entity_ids"] = ids;
     }
     resp["regen"] = RegenSummaryJson(*doc);
+    resp["digest"] = DigestJson(preDigest, *doc);
     return resp;
   }
   if (m == "modify_feature") {
@@ -188,13 +226,19 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     Feature* feature = doc->GetFeature(index);
     if (!feature)
       throw std::runtime_error("no feature at index");
+    // Build a throwaway from the request first: validates the JSON AND lets
+    // the round-trip unknown-field check run before anything is committed.
+    RejectUnknownFeatureFields(p.at("feature"),
+                               *DocumentIO::FeatureFromJson(p.at("feature")));
     json before = DocumentIO::FeatureToJson(*feature);
+    const json preDigest = BodyDigestJson(*doc);
     if (!state.commands->Execute(std::make_unique<ModifyFeatureCommand>(
                                      index, before, p.at("feature")),
                                  *doc)) {
       throw std::runtime_error("modify failed");
     }
-    return json{{"regen", RegenSummaryJson(*doc)}};
+    return json{{"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
   }
   if (m == "set_material") {
     // Assign a material to a body-creating feature — by feature_id (the
@@ -263,20 +307,24 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (!f)
       throw std::runtime_error("no such feature");
     json before = DocumentIO::FeatureToJson(*f);
+    const json preDigest = BodyDigestJson(*doc);
     f->SetSuppressed(p.at("suppressed").get<bool>());
     doc->Regenerate();
     json after = DocumentIO::FeatureToJson(*f);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
-    return json{{"regen", RegenSummaryJson(*doc)}};
+    return json{{"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
   }
   if (m == "delete_feature") {
+    const json preDigest = BodyDigestJson(*doc);
     if (!state.commands->Execute(
             std::make_unique<RemoveFeatureCommand>(p.at("index").get<size_t>()),
             *doc)) {
       throw std::runtime_error("no feature at index");
     }
-    return json{{"regen", RegenSummaryJson(*doc)}};
+    return json{{"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
   }
   if (m == "project_geometry") {
     // Add LIVE external (projected) geometry to a sketch: a face or edge of a

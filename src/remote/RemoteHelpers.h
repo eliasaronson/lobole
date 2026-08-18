@@ -5,7 +5,9 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include <map>
 #include <span>
+#include <string>
 
 // Small helpers shared by the RemoteServer RPC domain modules (RemoteModeling,
 // RemoteInspection, RemoteView, ...). Each module is
@@ -37,6 +39,65 @@ inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
 // scripts should surface it without treating the edit as failed.
 // Computed from the features' transient error state — regeneration has always
 // completed synchronously by the time a handler builds its response.
+// V2 digest: per-body kernel numbers (volume, bbox, disjoint-solid count)
+// attached to every geometry-mutating response — the "measure" rung of the
+// execute -> measure -> render loop, without a follow-up RPC. Bodies key on
+// created_by (stable across regeneration) so DigestDeltaJson can say what an
+// edit actually did: net volume change, bodies added, bodies removed. A
+// zero-delta add/cut or a body that silently split into two lumps is visible
+// in the same call that caused it.
+inline nlohmann::json BodyDigestJson(const Document& doc) {
+  nlohmann::json arr = nlohmann::json::array();
+  for (const Body& b : doc.GetBodies()) {
+    glm::vec3 mn(0.0f), mx(0.0f);
+    b.shape.GetBoundingBox(mn, mx);
+    arr.push_back({{"name", b.name},
+                   {"created_by", b.createdBy},
+                   {"volume", b.shape.Volume()},
+                   {"bbox_min", Vec3ToJson(mn)},
+                   {"bbox_max", Vec3ToJson(mx)},
+                   {"solids", b.shape.SolidCount()}});
+  }
+  return arr;
+}
+
+inline nlohmann::json DigestDeltaJson(const nlohmann::json& before,
+                                      const nlohmann::json& after) {
+  auto total = [](const nlohmann::json& bodies) {
+    double v = 0.0;
+    for (const auto& b : bodies)
+      v += b.at("volume").get<double>();
+    return v;
+  };
+  auto names = [](const nlohmann::json& bodies) {
+    std::map<uint64_t, std::string> out;
+    for (const auto& b : bodies)
+      out[b.at("created_by").get<uint64_t>()] = b.at("name").get<std::string>();
+    return out;
+  };
+  const auto pre = names(before), post = names(after);
+  nlohmann::json added = nlohmann::json::array(),
+                 removed = nlohmann::json::array();
+  for (const auto& [id, name] : post)
+    if (pre.find(id) == pre.end())
+      added.push_back(name);
+  for (const auto& [id, name] : pre)
+    if (post.find(id) == post.end())
+      removed.push_back(name);
+  return {{"volume", total(after) - total(before)},
+          {"added", std::move(added)},
+          {"removed", std::move(removed)}};
+}
+
+// Digest + delta in the shape mutating handlers attach: capture
+// BodyDigestJson(doc) BEFORE the edit, pass it here after.
+inline nlohmann::json DigestJson(const nlohmann::json& before,
+                                 const Document& doc) {
+  nlohmann::json bodies = BodyDigestJson(doc);
+  nlohmann::json delta = DigestDeltaJson(before, bodies);
+  return {{"bodies", std::move(bodies)}, {"delta", std::move(delta)}};
+}
+
 inline nlohmann::json RegenSummaryJson(const Document& doc) {
   nlohmann::json failed = nlohmann::json::array();
   nlohmann::json warnings = nlohmann::json::array();

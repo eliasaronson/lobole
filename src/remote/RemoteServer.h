@@ -71,6 +71,23 @@ public:
   bool WantsScreenshot(std::string& path);
   void ScreenshotDone(bool ok, const std::string& error);
 
+  // V3 render_sheet: a staged multi-view capture job. The handler stages it
+  // and the ProcessPending pump captures ONE named view per frame through
+  // the ordinary screenshot handshake (temp tile PNGs), then composites
+  // tiles + numeric footer into one sheet and responds. Requests queue
+  // behind an active job the same way they do behind a screenshot.
+  struct SheetJob {
+    bool active = false;
+    std::vector<std::string> views;
+    std::vector<std::string> tilePaths; // temp per-view captures
+    std::vector<std::string> footer;    // digest lines, built at request time
+    std::string outPath;
+    size_t nextView = 0;
+    int cropX = 0, cropY = 0, cropW = 0, cropH = 0;
+    nlohmann::json id;
+    int client = -1;
+  };
+
 private:
   struct Request {
     nlohmann::json id;
@@ -133,6 +150,7 @@ private:
   int m_screenshotClient = -1;
   std::string m_screenshotPath;
   bool m_screenshotPending = false;
+  SheetJob m_sheet;
 
   friend void RemoteServerRunUiAction(ImGuiTestContext* ctx);
 };
