@@ -255,6 +255,14 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
     vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
     LOG_INFO("Selected GPU: {} (type {})", props.deviceName,
              static_cast<int>(props.deviceType));
+    // Keep it for Help > About: which GPU answered is the first thing worth
+    // knowing about a rendering bug, and the log is gone by the time someone
+    // writes the report.
+    g_App.gpuName = props.deviceName;
+    g_App.gpuApiVersion =
+        std::to_string(VK_API_VERSION_MAJOR(props.apiVersion)) + "." +
+        std::to_string(VK_API_VERSION_MINOR(props.apiVersion)) + "." +
+        std::to_string(VK_API_VERSION_PATCH(props.apiVersion));
   }
 
   // Select graphics queue family

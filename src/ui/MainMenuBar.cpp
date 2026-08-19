@@ -2,6 +2,7 @@
 #include <utility>
 
 #include "cad/FaceSelector.h"
+#include "common/BuildInfo.h"
 #include "common/DesignerVersion.h"
 #include "common/Logger.h"
 #include "core/Feature.h"
@@ -427,28 +428,111 @@ void DrawShortcutsWindow(bool& open) {
   ImGui::End();
 }
 
+// The third-party components a user is entitled to know about — the LGPL and
+// MPL ones require the notice, and the Test Engine's terms decide whether a
+// company may use this build at all. Licenses verified against each project's
+// own LICENSE file or its nixpkgs metadata, not from memory; when in doubt the
+// project's own text governs, which is what the closing line says.
+struct Attribution {
+  const char* name;
+  const char* license;
+};
+constexpr Attribution kThirdParty[] = {
+    {"OpenCASCADE", "LGPL-2.1 with exception"},
+    {"Dear ImGui", "MIT"},
+    {"Dear ImGui Test Engine", "Dear ImGui Test Engine License (DISCO HELLO)"},
+    {"PlaneGCS (FreeCAD)", "LGPL-2.1-or-later"},
+    {"Netgen", "LGPL-2.1-or-later"},
+    {"Eigen", "MPL-2.0"},
+    {"Spectra", "MPL-2.0"},
+    {"GLFW", "Zlib"},
+    {"nativefiledialog-extended", "Zlib"},
+    {"glm", "MIT"},
+    {"spdlog / fmt", "MIT"},
+    {"nlohmann/json", "MIT"},
+    {"FreeType", "FTL or GPL-2.0-or-later"},
+    {"Boost", "BSL-1.0"},
+    {"Font Awesome 6 Free", "SIL OFL 1.1"},
+};
+
+void DrawAboutWindow(AppState& state) {
+  if (!state.showAbout)
+    return;
+  ImGui::SetNextWindowSize(ImVec2(560, 0), ImGuiCond_Appearing);
+  if (!ImGui::Begin("About Designer###AboutDesigner", &state.showAbout,
+                    ImGuiWindowFlags_AlwaysAutoResize |
+                        ImGuiWindowFlags_NoDocking)) {
+    ImGui::End();
+    return;
+  }
+
+  ImGui::Text("Designer %s", BuildInfo::Version().c_str());
+  ImGui::TextUnformatted("Open-source parametric 3D CAD");
+  ImGui::TextUnformatted("Licensed under AGPL-3.0-or-later");
+  ImGui::Separator();
+
+  // The block a bug report needs. Laid out as label/value rows rather than
+  // prose so the copy below reads the same as the screen.
+  const auto row = [](const char* label, const std::string& value) {
+    ImGui::TextDisabled("%-12s", label);
+    ImGui::SameLine();
+    ImGui::TextUnformatted(value.c_str());
+  };
+  row("Commit", BuildInfo::Commit() + "  (at configure time)");
+  row("Build", BuildInfo::Configuration());
+  row("Kernel", "OpenCASCADE " + BuildInfo::KernelVersion());
+  row("Renderer",
+      state.gpuName.empty()
+          ? std::string("(no renderer)")
+          : state.gpuName + (state.gpuApiVersion.empty()
+                                 ? ""
+                                 : "  Vulkan " + state.gpuApiVersion));
+
+  ImGui::Separator();
+  if (ImGui::TreeNode("Third-party components")) {
+    if (ImGui::BeginTable("###about_thirdparty", 2,
+                          ImGuiTableFlags_SizingStretchProp)) {
+      for (const Attribution& a : kThirdParty) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(a.name);
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("%s", a.license);
+      }
+      ImGui::EndTable();
+    }
+    ImGui::TextWrapped(
+        "Each project's own license text governs; see its repository.");
+    ImGui::TreePop();
+  }
+
+  ImGui::Separator();
+  if (ImGui::Button("Copy build info###about_copy")) {
+    ImGui::SetClipboardText(
+        BuildInfo::Summary(state.gpuName, state.gpuApiVersion).c_str());
+  }
+  ImGui::SameLine();
+  ImGui::TextDisabled("(paste this into a bug report)");
+  ImGui::SameLine();
+  if (ImGui::Button("Close###about_close"))
+    state.showAbout = false;
+  ImGui::End();
+}
+
 void DrawHelpMenu(AppState& state) {
   if (BeginTopMenu(state, "Help")) {
     if (ImGui::MenuItem("Keyboard Shortcuts", "Ctrl+/"))
       state.showShortcuts = true;
+    // Sets a flag; see AppState::showAbout for why this cannot open the
+    // popup from in here.
     if (ImGui::MenuItem("About Designer"))
-      ImGui::OpenPopup("About Designer");
+      state.showAbout = true;
     ImGui::EndMenu();
   }
   if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Slash))
     state.showShortcuts = !state.showShortcuts;
   DrawShortcutsWindow(state.showShortcuts);
-
-  if (ImGui::BeginPopupModal("About Designer", nullptr,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::Text("Designer %s", DESIGNER_VERSION);
-    ImGui::Separator();
-    ImGui::TextUnformatted("Open-source parametric 3D CAD");
-    ImGui::TextUnformatted("Licensed under AGPL-3.0-or-later");
-    if (ImGui::Button("Close"))
-      ImGui::CloseCurrentPopup();
-    ImGui::EndPopup();
-  }
+  DrawAboutWindow(state);
 }
 
 // Global keyboard shortcuts. Registered every frame; ImGui's routing lets a

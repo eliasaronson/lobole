@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "TestIO.h"
+#include "common/BuildInfo.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Feature.h"
@@ -287,4 +288,21 @@ TEST_CASE("Downstream failures are tagged after-earlier-failure",
   CHECK(doc.GetFeature(1)->GetError().empty());
   CHECK(doc.GetFeature(2)->GetError().empty());
   CHECK_FALSE(doc.GetFeature(2)->ErrorAfterEarlierFailure());
+}
+
+// Help > About and any bug report quote the same block; if it stops naming
+// the build, a report stops being reproducible. (The version and commit are
+// injected by CMake, so this checks the shape, not the values.)
+TEST_CASE("Build info names the version and the kernel", "[buildinfo]") {
+  const std::string summary = BuildInfo::Summary("Test GPU", "1.3.0");
+  INFO(summary);
+  CHECK(summary.find(BuildInfo::Version()) != std::string::npos);
+  CHECK(summary.find(BuildInfo::KernelVersion()) != std::string::npos);
+  CHECK(summary.find("Test GPU") != std::string::npos);
+  CHECK(summary.find("Vulkan 1.3.0") != std::string::npos);
+  // Headless has no renderer, and must not claim one.
+  CHECK(BuildInfo::Summary().find("GPU:") == std::string::npos);
+  // OpenCASCADE is what decides what a model does; never "none" in a build
+  // that has it.
+  CHECK(BuildInfo::KernelVersion() != "none");
 }

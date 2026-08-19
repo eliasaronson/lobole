@@ -750,6 +750,17 @@ struct AppState {
   // the draw function so the between-test reset can close it — a stray
   // floating window swallows the viewport clicks of every later GUI test.
   bool showShortcuts = false;
+  // Help > About Designer. A flag rather than a bare ImGui popup id for the
+  // same reason as showShortcuts, plus one specific to popups: OpenPopup()
+  // called INSIDE a BeginMenu scope registers the id against the menu's
+  // window, and the matching BeginPopupModal() outside it never finds it —
+  // which is why About did nothing at all until 2026-08-19.
+  bool showAbout = false;
+  // What the renderer picked, for Help > About and bug reports. Filled in by
+  // main() after device selection; empty in headless builds, which have no
+  // renderer to report.
+  std::string gpuName;
+  std::string gpuApiVersion;
   // Key-light shadow map (S1) — View > Shadows; session state only (no file
   // format / golden impact).
   bool showShadows = true;

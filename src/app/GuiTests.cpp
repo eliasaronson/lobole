@@ -1889,6 +1889,29 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
   };
 
+  // Help > About did nothing for as long as it had existed: OpenPopup() was
+  // called inside the BeginMenu scope, so the id was registered against the
+  // menu window and the BeginPopupModal outside never matched it. Nothing
+  // caught it because "a menu item opens a window" had no test.
+  t = IM_REGISTER_TEST(engine, "help", "about_opens_and_names_the_build");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    IM_CHECK(!s_App->showAbout);
+    ctx->MenuClick("Help/About Designer");
+    ctx->Yield();
+    IM_CHECK(s_App->showAbout);
+    // It is a real window with the build in it, not just a flag flip.
+    ctx->SetRef("//###AboutDesigner");
+    IM_CHECK(ctx->ItemExists("###about_copy"));
+    // The attributions are a tree node, collapsed by default; open it so the
+    // test covers the table actually building.
+    ctx->ItemClick("Third-party components");
+    ctx->Yield();
+    ctx->ItemClick("###about_close");
+    ctx->Yield();
+    IM_CHECK(!s_App->showAbout);
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");

@@ -207,6 +207,7 @@ endif()
 # Vulkan/GLFW/ImGui so it can be unit-tested and scripted headlessly.
 set(core_sources
     src/render/Camera.cpp
+    src/common/BuildInfo.cpp
     src/common/Logger.cpp
     src/render/Scene.cpp
     src/render/OutlineEdges.cpp
@@ -334,7 +335,18 @@ else()
     message(WARNING "Netgen not found: FEM meshing disabled (app runs; run_study errors)")
 endif()
 
+# What this build IS, for Help > About and for bug reports (src/common/BuildInfo).
+# The commit is read at CONFIGURE time — it names the commit the build tree was
+# configured on, which is why About says so rather than implying it is live.
+execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEAD
+                OUTPUT_VARIABLE DESIGNER_GIT_COMMIT
+                OUTPUT_STRIP_TRAILING_WHITESPACE
+                ERROR_QUIET)
+
 add_library(designer_core STATIC ${core_sources})
+target_compile_definitions(designer_core PUBLIC
+    DESIGNER_VERSION="${PROJECT_VERSION}"
+    DESIGNER_GIT_COMMIT="${DESIGNER_GIT_COMMIT}")
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json fem_mesher)
 if(HAVE_NETGEN)
@@ -455,7 +467,6 @@ if(NOT ENABLE_TEST_ENGINE)
 endif()
 
 add_executable(designer ${SANITIZER_DEFAULTS_SRC} ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
-target_compile_definitions(designer PRIVATE DESIGNER_VERSION="${PROJECT_VERSION}")
 if(HAVE_STDCXX_STACKTRACE)
     target_compile_definitions(designer PRIVATE HAVE_STDCXX_STACKTRACE)
 endif()
