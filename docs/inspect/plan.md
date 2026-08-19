@@ -3,8 +3,14 @@
 > **Status 2026-07-14: v1 complete.** I1 measure (RPC + GUI tool, C3), I2 mass
 > properties (RPC + panel + CoG marker, C3), I3 section (geometry + raster
 > clip + filled caps, C4), I4 interference — all shipped. Deferred polish:
-> hatched cut faces, angle/point measure, bbox readout, assembly section
-> caps, measurement-driven variables, curvature/thickness maps.
+> hatched cut faces, angle/point measure, bbox readout,
+> measurement-driven variables, curvature/thickness maps.
+>
+> **2026-08-19:** assembly section caps shipped, along with a fix for the
+> cutter being aimed at the world origin (any model built away from 0,0,0 cut
+> nothing). The section UI is being replaced wholesale — one plane in a View
+> menu becomes a tool with a list, drag arrows and angles: see
+> [section-tool-design.md](section-tool-design.md), awaiting sign-off.
 
 The "is it right?" toolset: measuring geometry, mass/volume properties, and
 seeing inside a part. Small, high-value, and disproportionately useful to the
