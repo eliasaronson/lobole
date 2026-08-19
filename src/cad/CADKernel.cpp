@@ -9,6 +9,7 @@
 #ifdef HAVE_OPENCASCADE
 #pragma message("Compiling with OpenCASCADE support")
 
+#include "cad/XcafDocument.h"
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
@@ -65,6 +66,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Solid.hxx>
+
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -889,8 +891,7 @@ bool CADKernel::LoadSTEPStructured(const std::string& filename,
   if (!std::filesystem::exists(filename))
     return false;
 
-  Handle(TDocStd_Document) doc;
-  XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
+  XcafDocument doc;
   STEPCAFControl_Reader reader;
   reader.SetNameMode(Standard_True);
   reader.SetColorMode(Standard_True);
@@ -1055,8 +1056,7 @@ bool CADKernel::SaveSTEPStructured(const std::string& filename,
   if (model.products.empty() || model.instances.empty())
     return false;
 
-  Handle(TDocStd_Document) doc;
-  XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
+  XcafDocument doc;
   Handle(XCAFDoc_ShapeTool) shapes =
       XCAFDoc_DocumentTool::ShapeTool(doc->Main());
   Handle(XCAFDoc_ColorTool) colors =

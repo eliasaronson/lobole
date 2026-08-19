@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "cad/CADKernel.h"
+#include "cad/MeshExport.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -180,7 +181,8 @@ TEST_CASE("STEP save/load roundtrip preserves volume", "[kernel][io]") {
   std::vector<CADShape> out;
   out.push_back(k.CreateBox(2.0, 3.0, 4.0));
 
-  fs::path path = fs::temp_directory_path() / "designer_test_roundtrip.step";
+  fs::path path =
+      std::filesystem::temp_directory_path() / "designer_test_roundtrip.step";
   REQUIRE(k.SaveSTEP(path.string(), out));
 
   std::vector<CADShape> in;
@@ -197,7 +199,8 @@ TEST_CASE("STL save/load roundtrip yields a SOLID with the box volume",
   CADKernel& k = CADKernel::Instance();
 
   CADShape box = k.CreateBox(2.0, 3.0, 4.0);
-  fs::path path = fs::temp_directory_path() / "designer_test_roundtrip.stl";
+  fs::path path =
+      std::filesystem::temp_directory_path() / "designer_test_roundtrip.stl";
   REQUIRE(k.SaveSTL(path.string(), box, 0.1));
 
   // A watertight mesh must come back as a closed solid (LoadSTL promotes the
@@ -333,6 +336,36 @@ std::filesystem::path WriteRigStep() {
   return path;
 }
 } // namespace
+
+// Every import and export used to open an XCAF document and never close it.
+// TDocStd_Application holds each one for the life of the process — with its
+// shapes and (after a mesh export) their triangulations — so the memory grew
+// with every file operation. LeakSanitizer cannot see it: the documents are
+// still REACHABLE from the application singleton. NbDocuments() can.
+TEST_CASE("Import and export leave no XCAF document open", "[kernel][import]") {
+  const auto path = WriteRigStep();
+  const Standard_Integer before =
+      XCAFApp_Application::GetApplication()->NbDocuments();
+
+  CADKernel::ImportedModel model;
+  REQUIRE(CADKernel::Instance().LoadSTEPStructured(path.string(), model));
+
+  const auto out = std::filesystem::temp_directory_path() /
+                   ("designer_xcaf_" + std::to_string(::getpid()) + ".step");
+  REQUIRE(CADKernel::Instance().SaveSTEPStructured(out.string(), model, "Rig"));
+
+  std::vector<MeshExport::Item> items;
+  for (const auto& product : model.products)
+    items.push_back({product.shape, product.name, glm::mat4(1.0f)});
+  const auto glb = std::filesystem::temp_directory_path() /
+                   ("designer_xcaf_" + std::to_string(::getpid()) + ".glb");
+  REQUIRE(MeshExport::SaveVisual(glb.string(), items, 0.1));
+
+  CHECK(XCAFApp_Application::GetApplication()->NbDocuments() == before);
+  std::filesystem::remove(out);
+  std::filesystem::remove(glb);
+  std::filesystem::remove(path);
+}
 
 TEST_CASE("Structured STEP import reads names, colors, and instances",
           "[kernel][import]") {

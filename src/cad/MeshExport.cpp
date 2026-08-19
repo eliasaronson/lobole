@@ -18,6 +18,7 @@
 #define DESIGNER_HAVE_PLY_WRITER 1
 #include <RWPly_CafWriter.hxx>
 #endif
+#include "cad/XcafDocument.h"
 #include <TColStd_IndexedDataMapOfStringString.hxx>
 #include <TDF_Label.hxx>
 #include <TDF_LabelSequence.hxx>
@@ -25,6 +26,7 @@
 #include <TDocStd_Document.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Compound.hxx>
+
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
@@ -82,8 +84,7 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
 
     // The shape→XCAF bridge: one assembly whose components are the placed
     // items, each carrying a name, a display color, and a PBR material.
-    Handle(TDocStd_Document) doc;
-    XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
+    XcafDocument doc;
     Handle(XCAFDoc_ShapeTool) shapes =
         XCAFDoc_DocumentTool::ShapeTool(doc->Main());
     Handle(XCAFDoc_ColorTool) colors =
