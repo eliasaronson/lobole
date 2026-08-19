@@ -682,8 +682,17 @@ TopoDS_Face BuildSectionCutter(const std::vector<Body>& bodies,
     hi = glm::max(hi, bmax);
   }
   const float s = glm::length(hi - lo) + 1.0f;
+  // Center the quad on the BODIES, projected onto the plane — not on the
+  // plane's origin. Sizing it from the bodies' diagonal while centering it
+  // at the origin only works for a model that sits near the origin: a part
+  // built a metre out (or any assembly occurrence placed away from it) was
+  // missed entirely by the cutter, so the cross-section area came back zero
+  // and the section view had no cap faces. Same rule the split tool uses to
+  // place its knife.
+  const glm::vec3 c = (lo + hi) * 0.5f;
+  const glm::vec3 center = c - n * glm::dot(c - origin, n);
   auto pt = [&](float su, float sv) {
-    const glm::vec3 w = origin + u * su + v * sv;
+    const glm::vec3 w = center + u * su + v * sv;
     return gp_Pnt(w.x, w.y, w.z);
   };
   BRepBuilderAPI_MakePolygon poly(pt(-s, -s), pt(s, -s), pt(s, s), pt(-s, s),

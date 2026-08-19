@@ -418,3 +418,35 @@ TEST_CASE("Section caps fill the cut face (C4)", "[measure][section]") {
   REQUIRE(missCaps.size() == 1);
   CHECK_FALSE(missCaps[0].IsValid());
 }
+
+// Every section test above cuts a body sitting on the origin, and that is
+// exactly why this went unnoticed: the cutter face was SIZED from the bodies'
+// bounding box but CENTERED on the plane's origin, so a model built away from
+// the origin fell outside it. The area came back 0 and the section view drew
+// no caps — a hollow-looking cut, on real projects (which are rarely modeled
+// at 0,0,0) and on every assembly occurrence placed away from it.
+TEST_CASE("Sections work on a body far from the origin", "[measure][section]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(1000, -500, 250), 2, 3, 4));
+
+  // Cut along Z, halfway up: a 2x3 rectangle, wherever the box is.
+  const glm::vec3 n(0, 0, 1);
+  const glm::vec3 origin(0, 0, 252); // ONLY the normal component matters
+  auto area = Measure::CrossSectionArea(doc.GetBodies(), origin, n);
+  REQUIRE(area);
+  CHECK_THAT(*area, WithinRel(6.0, 1e-6));
+
+  auto caps = Measure::SectionCaps(doc.GetBodies(), origin, n);
+  REQUIRE(caps.size() == 1);
+  REQUIRE(caps[0].IsValid());
+  CADShape::MassProps mp;
+  REQUIRE(caps[0].ComputeMassProps(mp));
+  CHECK_THAT(mp.surfaceArea, WithinRel(6.0, 1e-6));
+
+  // ...and the cap is where the body is, not out at the origin.
+  glm::vec3 lo, hi;
+  caps[0].GetBoundingBox(lo, hi);
+  CHECK_THAT(lo.x, WithinAbs(1000.0, 1e-6));
+  CHECK_THAT(hi.y, WithinAbs(-497.0, 1e-6));
+}
