@@ -219,14 +219,31 @@ CADShape CADShape::Transformed(const glm::mat4& m) const {
   } catch (const Standard_Failure&) {
     return CADShape(m_shape); // sheared matrix: OCC can't represent it
   }
-  try {
-    return CADShape(m_shape.Moved(TopLoc_Location(t)));
-  } catch (const Standard_Failure&) {
-    // Moved() is the call that enforces "no scaling", and it throws a
-    // Standard_Failure, which is NOT a std::exception — uncaught, it took
-    // the whole application down rather than one operation.
-    return CADShape(m_shape);
+  if (rigid) {
+    // A pure placement: attach it as a LOCATION, which copies no geometry.
+    try {
+      return CADShape(m_shape.Moved(TopLoc_Location(t)));
+    } catch (const Standard_Failure&) {
+      // Moved() enforces "no scaling" and throws Standard_Failure, which is
+      // NOT a std::exception — uncaught, it took the whole application down
+      // rather than one operation.
+      return CADShape(m_shape);
+    }
   }
+  // Mirrors and anything else non-rigid: APPLY the transform to the geometry.
+  // A location cannot carry them — Moved() refuses any scale factor that is
+  // not 1, and a mirror's is -1, so OCC 7.6 threw and this returned the shape
+  // UNMIRRORED. Silently: a mirrored part came back the wrong handedness and
+  // nothing noticed until a drawing looked wrong. (7.9.3 accepts -1 there,
+  // which is why it only broke on Ubuntu.)
+  try {
+    BRepBuilderAPI_Transform xform(m_shape, t, /*copy=*/Standard_True);
+    if (xform.IsDone())
+      return CADShape(xform.Shape());
+  } catch (const Standard_Failure&) {
+    // fall through
+  }
+  return CADShape(m_shape);
 }
 
 void CADShape::Translate(const glm::vec3& offset) {

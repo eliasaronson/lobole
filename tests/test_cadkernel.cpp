@@ -431,12 +431,25 @@ TEST_CASE("A rigid placement reaches the kernel unscaled",
     mirror[0][0] = -1.0f;
     const CADShape flipped = box.Transformed(mirror);
     REQUIRE(flipped.IsValid());
-    // OCC's volume is SIGNED: a mirrored solid reports -1000, which is the
-    // kernel saying the orientation flipped. Same size, opposite handedness.
-    CHECK(flipped.Volume() < 0.0);
+    // Same size, opposite handedness. Note what is NOT asserted: the SIGN of
+    // the volume. OCC 7.9.3 reports -1000 for a mirrored solid and 7.6.3
+    // reports +1000, so requiring one of them would be pinning an incidental
+    // difference rather than the property we care about — which is that the
+    // transform arrived as a mirror instead of being flattened into a
+    // rotation by the rigid shortcut above.
     CHECK_THAT(std::abs(flipped.Volume()), WithinRel(box.Volume(), 1e-9));
-    const gp_Trsf t = flipped.GetShape().Location().Transformation();
-    CHECK(t.IsNegative()); // a mirror, not a rotation
+    // Ask WHERE THE GEOMETRY IS, not how OCC chose to record the transform.
+    // A location's determinant, gp_Trsf::IsNegative() and the sign of the
+    // volume all answer differently across 7.6.3/7.9.3 and across
+    // implementations (a location versus baked-in vertices) — three
+    // incidentals I asserted in turn before landing on the one that is the
+    // actual property: the box spanned x 0..10 and must now span -10..0.
+    glm::vec3 lo(0.0f), hi(0.0f);
+    flipped.GetBoundingBox(lo, hi); // void: fills lo/hi
+    INFO("bbox x " << lo.x << " .. " << hi.x);
+    CHECK_THAT(lo.x, WithinAbs(-10.0, 1e-6));
+    CHECK_THAT(hi.x, WithinAbs(0.0, 1e-6));
+    CHECK_THAT(hi.y, WithinAbs(10.0, 1e-6)); // untouched axes stay put
   }
 }
 
