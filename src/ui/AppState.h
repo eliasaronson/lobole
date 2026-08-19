@@ -774,6 +774,13 @@ struct AppState {
   // Section view (I3): a world-space clip plane {xyz=normal, w=dist};
   // fragments past it are discarded. Zero = disabled.
   glm::vec4 sectionPlane = glm::vec4(0.0f);
+  // What the View > Section View menu shows. Here rather than in statics
+  // inside the draw function so that (a) an agent's set_section is reflected
+  // in the menu instead of the two disagreeing, and (b) the offset is not
+  // silently shared between tabs of wildly different size.
+  int sectionBasePlane = 0;         // 0 = XY (cut along Z), 1 = XZ, 2 = YZ
+  float sectionOffset = 0.0f;       // world distance along that normal
+  bool sectionOffsetSeeded = false; // has it been derived for this scene yet
   // Section cap fills (I3 v2, C4): the section plane at the last cap rebuild,
   // and the cap instance ids (separate from documentMeshes so body↔index
   // alignment holds; removed on the next resync). A cap rebuild is triggered

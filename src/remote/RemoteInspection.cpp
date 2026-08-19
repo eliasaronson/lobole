@@ -170,11 +170,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "recall, volume_ratio, center_offset, bbox_iou, topology counts and "
      "plain-language verdicts; {missing_path}/{extra_path} export the diff "
      "solids as BREP."},
-    {"section", "Raster cross-section preview of the bodies at a plane."},
+    {"section",
+     "Cross-section area where a plane cuts the bodies; on an assembly tab, "
+     "every visible occurrence in place. Omit `offset` to cut through the "
+     "middle of what is shown (the chosen offset comes back)."},
     {"set_section",
      "Enable/disable the live section clip {base_plane|origin+normal, "
-     "offset}. Works on part AND assembly tabs (assemblies clip per "
-     "occurrence but have no filled cut caps — the section reads hollow)."},
+     "offset}. Works on part AND assembly tabs, with filled cut caps on "
+     "both; omit `offset` to cut through the middle of what is shown."},
 };
 std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
 
@@ -187,16 +190,26 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // {enabled, base_plane: "xy"|"xz"|"yz", offset?} or {enabled, origin,
     // normal}. Disabled clears it.
     if (!p.value("enabled", true)) {
-      state.sectionPlane = glm::vec4(0.0f);
+      ui::DisableSection(state);
       return json::object();
     }
     glm::vec3 nrm(0, 0, 1), origin(0.0f);
     if (p.contains("base_plane")) {
       const std::string bp = p.at("base_plane").get<std::string>();
-      nrm = bp == "xz"   ? glm::vec3(0, 1, 0)
-            : bp == "yz" ? glm::vec3(1, 0, 0)
-                         : glm::vec3(0, 0, 1);
-      origin = nrm * static_cast<float>(p.value("offset", 0.0));
+      const int basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
+      nrm = basePlane == 1   ? glm::vec3(0, 1, 0)
+            : basePlane == 2 ? glm::vec3(1, 0, 0)
+                             : glm::vec3(0, 0, 1);
+      // No offset given: cut through the middle of what the tab shows, the
+      // same derivation the menu uses. Zero would be the world origin, which
+      // for a model built anywhere else cuts nothing or everything.
+      const double offset = p.contains("offset")
+                                ? p.at("offset").get<double>()
+                                : static_cast<double>(ui::CenteredSectionOffset(
+                                      state, basePlane));
+      origin = nrm * static_cast<float>(offset);
+      ui::SetSectionPlane(state, basePlane, static_cast<float>(offset));
+      return json{{"offset", offset}};
     } else {
       const auto& o = p.at("origin");
       const auto& n = p.at("normal");
@@ -212,25 +225,65 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // {base_plane: "xy"|"xz"|"yz", offset?: 0} OR {origin: [x,y,z],
     // normal: [x,y,z]}.
     glm::vec3 origin(0.0f), normal(0.0f, 0.0f, 1.0f);
+    double usedOffset = 0.0;
+    bool derived = false;
     if (p.contains("base_plane")) {
       const std::string bp = p.at("base_plane").get<std::string>();
-      normal = bp == "xz"   ? glm::vec3(0, 1, 0)
-               : bp == "yz" ? glm::vec3(1, 0, 0)
-                            : glm::vec3(0, 0, 1);
-      origin = normal * static_cast<float>(p.value("offset", 0.0));
+      const int basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
+      normal = basePlane == 1   ? glm::vec3(0, 1, 0)
+               : basePlane == 2 ? glm::vec3(1, 0, 0)
+                                : glm::vec3(0, 0, 1);
+      // Omitting `offset` means the same here as in set_section: the middle
+      // of what this tab shows. Two readings of one word would be worse than
+      // either.
+      derived = !p.contains("offset");
+      usedOffset =
+          derived
+              ? static_cast<double>(ui::CenteredSectionOffset(state, basePlane))
+              : p.at("offset").get<double>();
+      origin = normal * static_cast<float>(usedOffset);
     } else {
       const auto& o = p.at("origin");
       const auto& nrm = p.at("normal");
       origin = {o[0].get<float>(), o[1].get<float>(), o[2].get<float>()};
       normal = {nrm[0].get<float>(), nrm[1].get<float>(), nrm[2].get<float>()};
     }
-    const auto area = Measure::CrossSectionArea(
-        RequirePartDoc(doc, "section").GetBodies(), origin, normal);
+    // On an ASSEMBLY tab the same question is about the assembled thing, so
+    // every visible occurrence's bodies are placed by its solved transform
+    // and the area is the sum over all of them. Refusing here (which it used
+    // to do) makes "how much material does this cut cross?" unanswerable for
+    // exactly the models where it matters most.
+    std::vector<Body> placed;
+    const std::vector<Body>* bodies = nullptr;
+    if (doc != nullptr) {
+      bodies = &doc->GetBodies();
+    } else if (state.assembly) {
+      for (const Occurrence& o : state.assembly->GetOccurrences()) {
+        if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
+          continue;
+        Document* pd = ui::PartDocById(state, o.partId);
+        if (pd == nullptr)
+          continue;
+        const glm::mat4 xf = ui::OccurrenceMatrix(o);
+        for (const Body& b : pd->GetBodies()) {
+          Body nb = b;
+          nb.shape = b.shape.Transformed(xf);
+          placed.push_back(std::move(nb));
+        }
+      }
+      bodies = &placed;
+    } else {
+      RequirePartDoc(doc, "section"); // throws with the standard message
+    }
+    const auto area = Measure::CrossSectionArea(*bodies, origin, normal);
     if (!area)
       throw std::runtime_error(
           "section failed — the plane may cut no body at all; check the "
           "bodies' bbox_min/bbox_max in get_state against the plane");
-    return json{{"area", *area}};
+    json out{{"area", *area}};
+    if (derived)
+      out["offset"] = usedOffset; // say where it chose to cut
+    return out;
   }
   if (m == "interference") {
     // Clash detection (inspection I4). Part tab: two bodies interfere when

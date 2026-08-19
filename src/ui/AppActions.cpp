@@ -2051,21 +2051,19 @@ void FitCameraToBox(AppState& state, const glm::vec3& min,
 }
 } // namespace
 
-void FitCameraToDocument(AppState& state) {
-  if (!state.camera)
-    return;
-
-  glm::vec3 min(FLT_MAX), max(-FLT_MAX);
+bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
+  min = glm::vec3(FLT_MAX);
+  max = glm::vec3(-FLT_MAX);
   bool any = false;
   if (state.assembly) {
-    // Bound every visible occurrence's part bodies, transformed into place.
+    // Every visible occurrence's part bodies, transformed into place.
     for (const Occurrence& occ : state.assembly->GetOccurrences()) {
       if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
         continue;
       Document* part = PartDocById(state, occ.partId);
       if (!part)
         continue;
-      const glm::mat4 xf = DisplayMatrix(state, occ); // fit exploded extents
+      const glm::mat4 xf = DisplayMatrix(state, occ); // exploded extents too
       for (const auto& body : part->GetBodies()) {
         glm::vec3 bmin, bmax;
         body.shape.GetBoundingBox(bmin, bmax);
@@ -2089,7 +2087,49 @@ void FitCameraToDocument(AppState& state) {
       any = true;
     }
   }
-  if (!any)
+  return any;
+}
+
+namespace {
+// 0 = XY (cut along Z), 1 = XZ (along Y), 2 = YZ (along X).
+glm::vec3 SectionNormal(int basePlane) {
+  switch (basePlane) {
+  case 1:
+    return {0, 1, 0};
+  case 2:
+    return {1, 0, 0};
+  default:
+    return {0, 0, 1};
+  }
+}
+} // namespace
+
+float CenteredSectionOffset(AppState& state, int basePlane) {
+  glm::vec3 min, max;
+  if (!VisibleSceneBounds(state, min, max))
+    return 0.0f;
+  return glm::dot((min + max) * 0.5f, SectionNormal(basePlane));
+}
+
+void SetSectionPlane(AppState& state, int basePlane, float offset) {
+  state.sectionBasePlane = basePlane;
+  state.sectionOffset = offset;
+  state.sectionOffsetSeeded = true;
+  // w = dot(origin, n); with an axis normal that is just the offset.
+  state.sectionPlane = glm::vec4(SectionNormal(basePlane), offset);
+}
+
+void DisableSection(AppState& state) {
+  state.sectionPlane = glm::vec4(0.0f);
+  state.sectionOffsetSeeded =
+      false; // re-derive for whatever it is next used on
+}
+
+void FitCameraToDocument(AppState& state) {
+  if (!state.camera)
+    return;
+  glm::vec3 min, max;
+  if (!VisibleSceneBounds(state, min, max))
     return;
   FitCameraToBox(state, min, max);
 }
@@ -2203,15 +2243,12 @@ namespace {
 // discard it, its winding is made consistent so back-face culling can't hide
 // it, and its normal faces the viewer for correct lighting. Cap instance ids
 // go in state.sectionCapMeshes (removed on the next resync).
-void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
-                       const std::vector<glm::vec3>& bodyColors) {
-  const glm::vec3 nRaw(state.sectionPlane);
-  if (glm::length(nRaw) < 1e-6f)
-    return; // no active section
-  const glm::vec3 n = glm::normalize(nRaw);
-  const glm::vec3 planeOrigin = n * state.sectionPlane.w; // dot(origin,n)=w
-  const std::vector<CADShape> caps =
-      Measure::SectionCaps(bodies, planeOrigin, n);
+} // namespace
+
+void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
+                     const std::vector<glm::vec3>& colors, const glm::mat4& xf,
+                     const glm::vec3& worldNormal) {
+  const glm::vec3 n = worldNormal;
   const float eps = 1e-3f; // nudge to the kept side; invisible at mm scale
   for (size_t bi = 0; bi < caps.size(); bi++) {
     if (!caps[bi].IsValid())
@@ -2219,8 +2256,13 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
     CADShape::Mesh cm = caps[bi].GenerateMesh(0.05);
     if (cm.vertices.empty())
       continue;
-    const std::vector<Vertex3D> base =
-        CADMeshConverter::ConvertCADMeshToVertices(cm);
+    std::vector<Vertex3D> base = CADMeshConverter::ConvertCADMeshToVertices(cm);
+    // The caps are computed in the body's own space; an occurrence places
+    // them. Baked into the vertices rather than carried as an instance
+    // transform because the nudge and the winding below are decided in WORLD
+    // space, against the plane.
+    for (Vertex3D& v : base)
+      v.position = glm::vec3(xf * glm::vec4(v.position, 1.0f));
     // Double-sided: the cut is viewed from the open (removed) side, but the
     // user can orbit either way, so emit both faces. Front copy carries +n,
     // back copy -n; back-face culling then draws exactly the side facing the
@@ -2262,9 +2304,21 @@ void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
     }
     const uint32_t capId = state.meshRenderer->AddMesh(vs, idx);
     state.meshRenderer->SetMeshColor(
-        capId, bi < bodyColors.size() ? bodyColors[bi] : glm::vec3(0.7f));
+        capId, bi < colors.size() ? colors[bi] : glm::vec3(0.7f));
     state.sectionCapMeshes.push_back(capId);
   }
+}
+
+namespace {
+void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
+                       const std::vector<glm::vec3>& bodyColors) {
+  const glm::vec3 nRaw(state.sectionPlane);
+  if (glm::length(nRaw) < 1e-6f)
+    return; // no active section
+  const glm::vec3 n = glm::normalize(nRaw);
+  const glm::vec3 planeOrigin = n * state.sectionPlane.w; // dot(origin,n)=w
+  AppendCapMeshes(state, Measure::SectionCaps(bodies, planeOrigin, n),
+                  bodyColors, glm::mat4(1.0f), n);
 }
 } // namespace
 

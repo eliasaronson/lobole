@@ -689,10 +689,10 @@ static const std::set<std::string> kNoPartDoc = {
     // mass_properties aggregates occurrence masses in world space.
     "interference", "contact_report", "compare_geometry", "query_geometry",
     "list_elements", "measure", "mass_properties", "render_sheet",
-    // set_section only writes the global viewport clip plane (per-frame UBO,
-    // world space) — it clips assembly occurrences too. The `section` AREA
-    // query stays part-only (computes on one document's bodies).
-    "set_section",
+    // set_section writes the global viewport clip plane (per-frame UBO,
+    // world space); `section` sums the cut area over a part's bodies or,
+    // on an assembly tab, over every visible occurrence in place.
+    "set_section", "section",
     // undo/redo route to the assembly's snapshot history on an assembly tab.
     "undo", "redo",
     // Project-level reads (git vault / checkpoint list act on projectPath,

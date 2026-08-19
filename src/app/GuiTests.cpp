@@ -1912,6 +1912,56 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->showAbout);
   };
 
+  // Section view on an ASSEMBLY tab. Two things were wrong and both read as
+  // "section view does not work": the cut had no filled caps (the shader
+  // clipped the geometry, so you saw the inside of hollow shells), and the
+  // plane defaulted to the world origin, which for a model built anywhere
+  // else either removes everything or does nothing.
+  t = IM_REGISTER_TEST(engine, "section",
+                       "assembly_cut_is_capped_and_centered");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // Modeled a metre from the origin: a world-origin plane misses it.
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "Block", glm::vec3(1000, 0, 0), 40, 20, 20));
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Rig");
+    ui::SetActivePart(*s_App, asmIdx);
+    for (int i = 0; i < 2; i++) {
+      Occurrence occ;
+      occ.name = i ? "B2" : "B1";
+      occ.partId = s_App->parts[0].id;
+      occ.fixed = true;
+      occ.position = glm::vec3(0.0f, i * 100.0f, 0.0f);
+      s_App->assembly->AddOccurrence(occ);
+    }
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)0);
+
+    // Cut along X (YZ plane) from the menu, exactly as a user would.
+    ctx->MenuClick("View/###view_section/###section_enabled");
+    ctx->Yield(3);
+    IM_CHECK(s_App->sectionPlane != glm::vec4(0.0f));
+    // Derived, not zero: the plane sits inside the model's own span.
+    glm::vec3 bmin, bmax;
+    IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
+    const glm::vec3 n = glm::vec3(s_App->sectionPlane);
+    const float d = s_App->sectionPlane.w;
+    IM_CHECK(d > glm::dot(bmin, n) && d < glm::dot(bmax, n));
+
+    // One cap per cut body per occurrence — the whole point.
+    IM_CHECK_GT(s_App->sectionCapMeshes.size(), (size_t)0);
+    const size_t capped = s_App->sectionCapMeshes.size();
+    IM_CHECK_EQ(capped, (size_t)2); // one body, two occurrences
+
+    // Turning it off takes the caps with it.
+    ctx->MenuClick("View/###view_section/###section_enabled");
+    ctx->Yield(3);
+    IM_CHECK(s_App->sectionPlane == glm::vec4(0.0f));
+    IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)0);
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");

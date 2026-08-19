@@ -964,6 +964,24 @@ struct SharedBody {
 
 // Renders an assembly: one asset per referenced part body, one instance per
 // occurrence. Assets are shared across occurrences of the same part.
+namespace {
+// The section plane in ONE occurrence's part space. A world plane
+// {n, d} and a rigid placement M = [R|t] give n' = Rᵀn and d' = d - n·t:
+// caps are computed on the part's own bodies (which is where its geometry
+// lives) and placed by M afterwards.
+bool SectionPlaneInPartSpace(const glm::vec4& world, const glm::mat4& xf,
+                             glm::vec3& localOrigin, glm::vec3& localNormal) {
+  const glm::vec3 n(world);
+  if (glm::length(n) < 1e-6f)
+    return false;
+  const glm::mat3 basis(xf);
+  const glm::vec3 t(xf[3]);
+  localNormal = glm::normalize(glm::transpose(basis) * n);
+  localOrigin = localNormal * (world.w - glm::dot(n, t));
+  return true;
+}
+} // namespace
+
 void SyncAssemblyRenderers(AppState& state) {
   std::unordered_map<uint64_t, std::vector<SharedBody>>
       byPart; // partId -> bodies
@@ -1054,6 +1072,24 @@ void SyncAssemblyRenderers(AppState& state) {
         state.faceSelector->AddMesh(meshId, sb.vertices, sb.indices,
                                     sb.triangleFaces, xf, sb.edges);
       state.documentMeshes.push_back({meshId, outlineId, bi, occ.id, sb.edges});
+    }
+
+    // Section caps (I3). Without these an assembly section shows the inside
+    // of hollow shells — the geometry is clipped by the shader but the cut
+    // has no surface, which reads as "section view is broken" rather than as
+    // a section. One call per occurrence: the plane lands somewhere different
+    // in each part's own space.
+    glm::vec3 localOrigin, localNormal;
+    if (SectionPlaneInPartSpace(state.sectionPlane, xf, localOrigin,
+                                localNormal)) {
+      std::vector<glm::vec3> capColors;
+      capColors.reserve(it->second.size());
+      for (const SharedBody& sb : it->second)
+        capColors.push_back(sb.hasMaterial ? sb.albedo : sb.palette);
+      AppendCapMeshes(
+          state,
+          Measure::SectionCaps(part->GetBodies(), localOrigin, localNormal),
+          capColors, xf, glm::normalize(glm::vec3(state.sectionPlane)));
     }
   }
   // (Highlights re-apply themselves: they are a per-frame projection of the

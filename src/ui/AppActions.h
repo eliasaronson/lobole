@@ -450,6 +450,35 @@ bool ProjectDirty(AppState& state);
 std::string WindowTitle(AppState& state);
 
 // Frames the camera on the document's combined bounding box.
+// The world-space box around everything the active tab shows: a part's
+// bodies, or an assembly's visible (unsuppressed) occurrences in place.
+// False when there is nothing to bound. Camera fit and the section plane
+// both need it — a view feature positioned in absolute coordinates is wrong
+// for any model that is not sitting on the origin.
+bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max);
+
+// Section view (I3). `basePlane` is 0=XY, 1=XZ, 2=YZ; `offset` is the signed
+// distance along that plane's normal. Writes both the shader clip plane and
+// the menu's fields, so the GUI and set_section cannot drift apart.
+void SetSectionPlane(AppState& state, int basePlane, float offset);
+
+// Emits the filled cut faces for one set of cap shapes, placed by `xf` and
+// facing `worldNormal`. Shared by the part path (identity transform) and the
+// assembly path (one call per occurrence) so both cuts look the same — the
+// double-sided emit and the nudge onto the kept side are fiddly enough that a
+// second copy would drift.
+void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
+                     const std::vector<glm::vec3>& colors, const glm::mat4& xf,
+                     const glm::vec3& worldNormal);
+void DisableSection(AppState& state);
+
+// The offset that puts the cut through the MIDDLE of what the tab is showing,
+// along `basePlane`'s normal. A section defaults to the world origin
+// otherwise, which for a model built anywhere else is either a cut that
+// removes everything or one that does nothing — both read as "section view is
+// broken". Returns 0 when the scene is empty.
+float CenteredSectionOffset(AppState& state, int basePlane);
+
 void FitCameraToDocument(AppState& state);
 // Frames the camera on an explicit world-space box (render_sheet focus).
 void FitCameraToWorldBox(AppState& state, const glm::vec3& min,
