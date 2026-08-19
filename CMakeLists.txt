@@ -36,8 +36,19 @@ if(ENABLE_SANITIZERS)
   add_link_options(-fsanitize=address,undefined)
   # Note: GCC 15 in this toolchain rejects -fsanitize-ignorelist/-blacklist, so
   # the OpenCASCADE UBSan `alignment` false positives are filtered at RUNTIME via
-  # tools/ubsan-suppressions.txt (UBSAN_OPTIONS=suppressions=...) instead of a
-  # compile-time ignore-list. See tools/run-sanitized-tests.sh.
+  # tools/ubsan-suppressions.txt instead of a compile-time ignore-list.
+  #
+  # src/common/SanitizerDefaults.cpp carries the runtime options (including
+  # that suppressions path) inside each executable, so a sanitized binary
+  # behaves the same however it is launched — no wrapper required. It is added
+  # to the EXECUTABLES rather than designer_core: the callbacks are only ever
+  # called by the runtime, so nothing references them and the linker would
+  # drop the object from a static library.
+  set(SANITIZER_DEFAULTS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/common/SanitizerDefaults.cpp)
+  # Where the UBSan suppression file lives. Global (sanitizer builds only)
+  # rather than a source-file property, because the same file is compiled into
+  # targets in two different CMake directory scopes.
+  add_compile_definitions(DESIGNER_SANITIZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   message(STATUS "Sanitizers enabled (ASan + UBSan)")
 endif()
 
@@ -443,7 +454,7 @@ if(NOT ENABLE_TEST_ENGINE)
   list(REMOVE_ITEM app_sources src/app/GuiTests.cpp)
 endif()
 
-add_executable(designer ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+add_executable(designer ${SANITIZER_DEFAULTS_SRC} ${app_sources} ${NFD_SOURCES} ${IMGUI_TEST_ENGINE_SOURCES} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 target_compile_definitions(designer PRIVATE DESIGNER_VERSION="${PROJECT_VERSION}")
 if(HAVE_STDCXX_STACKTRACE)
     target_compile_definitions(designer PRIVATE HAVE_STDCXX_STACKTRACE)

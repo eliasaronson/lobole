@@ -206,15 +206,21 @@ single-process run costs. It is also what the weekly GitHub `sanitizers` job
 runs (weekly and on demand, not per push — the sanitizer flags miss the normal
 build's ccache).
 
-The wrappers bake in the workarounds our prebuilt (non-instrumented)
-dependencies require, all in `tools/sanitizer-env.sh`:
-`ASAN_OPTIONS=detect_container_overflow=0` for the std-container/OpenCASCADE
-boundary, `tools/ubsan-suppressions.txt` for benign UBSan reports from
-OpenCASCADE and the Dear ImGui Vulkan backend, and
-`tools/lsan-suppressions.txt` for two OpenCASCADE singletons that are
-allocated once and never freed. The leak suppressions name individual frames
-rather than the library, so a leak of OUR making inside an OpenCASCADE call
-still fails the run. Run them inside `nix-shell`. The app build catches CPU-side memory bugs in the live render
+The workarounds our prebuilt (non-instrumented) dependencies require are
+compiled INTO a sanitized binary (`src/common/SanitizerDefaults.cpp`), so
+`build-asan/designer` behaves the same however you launch it — no wrapper, no
+environment to remember. It sets `detect_container_overflow=0` for the
+std-container/OpenCASCADE boundary, points UBSan at
+`tools/ubsan-suppressions.txt`, and suppresses a short list of
+dependency-owned allocations for the leak checker. Those leak suppressions
+name individual frames, never a library: everything we forget to free in a
+CAD operation is allocated inside OpenCASCADE too. Setting any of the
+`*SAN_OPTIONS` variables still overrides the built-in default. Run inside
+`nix-shell`.
+
+Leak detection is on, for the app as well as the tests — it is what found a
+per-body buffer leak in the ray tracer and three XCAF documents that every
+import and export was retaining. The app build catches CPU-side memory bugs in the live render
 / UI / interaction paths that the headless tests never exercise; it does not see
 GPU memory (use the Vulkan validation layers for that).
 

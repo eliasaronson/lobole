@@ -13,6 +13,10 @@ if(NOT Catch2_FOUND)
 endif()
 
 add_executable(designer_tests
+    # The sanitizer runtime options, in the binary rather than in the caller's
+    # environment (empty unless ENABLE_SANITIZERS=ON). See the top-level
+    # CMakeLists for why this is per-executable.
+    ${SANITIZER_DEFAULTS_SRC}
     test_cadkernel.cpp
     test_sketch.cpp
     test_document.cpp
