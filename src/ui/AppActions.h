@@ -58,7 +58,10 @@ size_t AddPart(AppState& state, const std::string& name);
 size_t AddAssembly(AppState& state, const std::string& name);
 size_t AddDrawing(AppState& state, const std::string& name);
 void SetActivePart(AppState& state, size_t index);
-bool DeletePart(AppState& state, size_t index);
+// Closes a tab. Refused (with the reason in `why`) for the last tab, or
+// while any assembly still places this part or assembly — a dangling
+// reference is not something to create on purpose.
+bool DeletePart(AppState& state, size_t index, std::string* why = nullptr);
 
 // Tab-bar folders (display grouping only — storage stays flat, ids and
 // references are unaffected). Folders live in state.tabFolders and may be

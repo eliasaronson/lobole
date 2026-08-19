@@ -1249,10 +1249,43 @@ std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId) {
 
 // ---- Simulation mode (FEM) ------------------------------------------------
 
-bool DeletePart(AppState& state, size_t index) {
+namespace {
+// Declared here, defined with its siblings further down: anonymous namespaces
+// merge within a translation unit, so this is the same function.
+AssemblyDocument* SlotAssembly(AppState& state, size_t i);
+} // namespace
+
+bool DeletePart(AppState& state, size_t index, std::string* why) {
   EnsureParts(state);
   if (state.parts.size() <= 1 || index >= state.parts.size()) {
+    if (why)
+      *why = "cannot delete the last (or a missing) tab";
     return false; // never delete the last tab
+  }
+  // Refused while something references it — which `describe` has claimed
+  // since A2 while nothing actually checked, so deleting a placed part left
+  // every assembly holding a dangling reference. A5 widens the same question:
+  // an assembly can now be referenced too.
+  const uint64_t doomedId = state.parts[index].id;
+  std::string referencedBy;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (i == index || state.parts[i].kind != DocKind::Assembly)
+      continue;
+    const AssemblyDocument* asmDoc = SlotAssembly(state, i);
+    if (asmDoc == nullptr)
+      continue;
+    for (const Occurrence& occ : asmDoc->GetOccurrences()) {
+      if (occ.partId != doomedId)
+        continue;
+      referencedBy += (referencedBy.empty() ? "" : ", ") + state.parts[i].name;
+      break;
+    }
+  }
+  if (!referencedBy.empty()) {
+    if (why)
+      *why = "'" + state.parts[index].name + "' is placed in " + referencedBy +
+             " — remove those occurrences first";
+    return false;
   }
   const bool deletingActive = index == static_cast<size_t>(state.activePart);
   if (deletingActive) {

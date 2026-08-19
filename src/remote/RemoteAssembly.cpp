@@ -98,24 +98,68 @@ std::string OccurrenceCandidates(const AssemblyDocument& asmDoc) {
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
   if (m == "add_occurrence") {
-    // Places a part in the active assembly. `part` is the part's NAME (resolved
-    // to its stable id); optional `transform` = {position:[x,y,z],
-    // orientation:[x,y,z,w] OR rotate:{axis, angle_deg}}.
+    // Places a part OR another assembly (A5) in the active assembly. `part`
+    // is its NAME, resolved to a stable slot id; optional `transform` =
+    // {position:[x,y,z], orientation:[x,y,z,w] OR rotate:{axis, angle_deg}}.
     if (!state.assembly)
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
-    const std::string partName = p.at("part").get<std::string>();
-    const uint64_t partId = ui::PartIdByName(state, partName);
-    if (partId == 0)
-      throw std::runtime_error("no part named '" + partName + "'");
+    // A5: `part` names a part OR another assembly. Parts are tried first (the
+    // overwhelmingly common case and the pre-A5 meaning); an assembly of the
+    // same name would need renaming, which is a better problem than silently
+    // resolving to the wrong kind.
+    const std::string refName = p.at("part").get<std::string>();
+    uint64_t refId = ui::PartIdByName(state, refName);
+    OccurrenceRef refKind = OccurrenceRef::Part;
+    if (refId == 0) {
+      for (const ui::PartSlot& slot : state.parts) {
+        if (slot.kind == ui::DocKind::Assembly && slot.name == refName) {
+          refId = slot.id;
+          refKind = OccurrenceRef::Assembly;
+          break;
+        }
+      }
+    }
+    if (refId == 0) {
+      // Both vocabularies, because "no part named X" sends someone looking
+      // for a typo when what they wanted was an assembly (error-style.md).
+      std::string parts, assemblies;
+      for (const ui::PartSlot& slot : state.parts) {
+        std::string& into =
+            slot.kind == ui::DocKind::Assembly ? assemblies : parts;
+        if (slot.kind != ui::DocKind::Part &&
+            slot.kind != ui::DocKind::Assembly)
+          continue;
+        into += (into.empty() ? "" : ", ") + slot.name;
+      }
+      throw std::runtime_error(
+          "no part or assembly named '" + refName +
+          "'. parts: " + (parts.empty() ? "(none)" : parts) +
+          "; assemblies: " + (assemblies.empty() ? "(none)" : assemblies));
+    }
+    // An assembly cannot contain itself, directly or through any chain — a
+    // cycle renders forever, so it is refused here rather than discovered at
+    // render time.
+    if (refKind == OccurrenceRef::Assembly) {
+      uint64_t hostId = 0;
+      for (const ui::PartSlot& slot : state.parts)
+        if (slot.kind == ui::DocKind::Assembly &&
+            ui::AssemblyDocById(state, slot.id) == state.assembly.get())
+          hostId = slot.id;
+      std::string why;
+      if (assembly::WouldCycle(*state.assembly, hostId, refId, refKind,
+                               ui::AssemblyResolverFor(state), &why))
+        throw std::runtime_error("cannot place '" + refName + "' here: " + why);
+    }
     const json identityTransform = {{"position", {0.0, 0.0, 0.0}},
                                     {"orientation", {0.0, 0.0, 0.0, 1.0}}};
     // Build one occurrence-JSON and reuse the loader (id is reassigned on add).
     Occurrence occ = DocumentIO::OccurrenceFromJson(
         {{"id", 0},
-         {"name", p.value("name", partName)},
-         {"part_id", partId},
+         {"name", p.value("name", refName)},
+         {"part_id", refId},
+         {"ref_kind", refKind == OccurrenceRef::Assembly ? "assembly" : "part"},
          {"part_version", nullptr},
          {"transform",
           NormalizeTransform(p.value("transform", identityTransform))},
@@ -123,7 +167,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
          {"fixed", p.value("fixed", false)}});
     ui::SnapshotAssembly(state);
     const uint64_t id = state.assembly->AddOccurrence(occ);
-    return json{{"id", id}, {"part_id", partId}};
+    return json{
+        {"id", id},
+        {"part_id", refId},
+        {"ref_kind", refKind == OccurrenceRef::Assembly ? "assembly" : "part"}};
   }
   if (m == "remove_occurrence") {
     if (!state.assembly)
@@ -571,8 +618,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                 {"occurrence", state.inContext.occurrenceId}};
   }
   if (m == "delete_part") {
-    if (!ui::DeletePart(state, p.at("index").get<size_t>()))
-      throw std::runtime_error("cannot delete the last (or a missing) part");
+    std::string why;
+    if (!ui::DeletePart(state, p.at("index").get<size_t>(), &why))
+      throw std::runtime_error(why.empty() ? "cannot delete that tab" : why);
     return json{{"active", state.activePart}};
   }
   return std::nullopt;

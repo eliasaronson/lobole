@@ -135,7 +135,12 @@ struct AssemblyMass {
 // Aggregate every visible, non-suppressed occurrence's part mass into world
 // space. Reuses Measure::MassOfBodies per part, then transforms each CoM by the
 // occurrence matrix. Does not touch the document (a pure read).
+// `asmById` (A5) makes this see through sub-assemblies: without it, an
+// occurrence that references an assembly resolves to no part and its whole
+// subtree weighs nothing. Pass a resolver that returns nullptr for everything
+// to get the pre-A5, top-level-only behaviour.
 AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
-                            const PartResolver& partById);
+                            const PartResolver& partById,
+                            const AssemblyResolver& asmById = nullptr);
 
 } // namespace assembly

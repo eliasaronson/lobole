@@ -172,6 +172,15 @@ add_test(NAME assembly_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(assembly_smoke PROPERTIES TIMEOUT 120)
 
+# Assemblies A5 sub-assemblies: an assembly placed inside another. Checks the
+# claims that only hold if the whole TREE is walked — combined BOM, mass,
+# section area over leaves — plus the two refusals (cycle, deleting a
+# referenced tab) and a save/reopen round-trip.
+add_test(NAME nested_assembly_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/nested_assembly_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(nested_assembly_smoke PROPERTIES TIMEOUT 180)
+
 # Assemblies A3 mates: add/set/remove/list/solve over RPC, error reporting,
 # undo, and a save -> reopen round-trip. Headless (no display).
 add_test(NAME assembly_mates_smoke

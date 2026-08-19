@@ -260,14 +260,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (doc != nullptr) {
       bodies = &doc->GetBodies();
     } else if (state.assembly) {
-      for (const Occurrence& o : state.assembly->GetOccurrences()) {
-        if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
+      // A5: the leaf parts of the whole tree, placed.
+      for (const assembly::FlatInstance& inst :
+           ui::FlattenActiveAssembly(state)) {
+        if (!inst.visible)
           continue;
-        Document* pd = ui::PartDocById(state, o.partId);
-        if (pd == nullptr)
-          continue;
-        const glm::mat4 xf = ui::OccurrenceMatrix(o);
-        for (const Body& b : pd->GetBodies()) {
+        const glm::mat4 xf = inst.world;
+        for (const Body& b : inst.part->GetBodies()) {
           Body nb = b;
           nb.shape = b.shape.Transformed(xf);
           placed.push_back(std::move(nb));
@@ -556,16 +555,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         return doc->GetBodies();
       std::vector<Body> placed;
       if (state.assembly) {
-        for (const Occurrence& o : state.assembly->GetOccurrences()) {
-          if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
+        // A5: leaf parts of the whole tree, placed.
+        for (const assembly::FlatInstance& inst :
+             ui::FlattenActiveAssembly(state)) {
+          if (!inst.visible)
             continue;
-          Document* pd = ui::PartDocById(state, o.partId);
-          if (pd == nullptr)
-            continue;
-          const glm::mat4 xf = ui::OccurrenceMatrix(o);
-          for (const Body& b : pd->GetBodies()) {
+          for (const Body& b : inst.part->GetBodies()) {
             Body nb;
-            nb.shape = b.shape.Transformed(xf);
+            nb.shape = b.shape.Transformed(inst.world);
             placed.push_back(std::move(nb));
           }
         }
@@ -955,8 +952,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const assembly::PartResolver resolve = [&](uint64_t id) {
         return ui::PartDocById(state, id);
       };
-      const assembly::AssemblyMass am =
-          assembly::MassProperties(*state.assembly, resolve);
+      const assembly::AssemblyMass am = assembly::MassProperties(
+          *state.assembly, resolve, ui::AssemblyResolverFor(state));
       json rows = json::array();
       for (const assembly::OccurrenceMass& om : am.occurrences) {
         json entry = {

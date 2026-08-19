@@ -465,34 +465,42 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
 }
 
 AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
-                            const PartResolver& partById) {
+                            const PartResolver& partById,
+                            const AssemblyResolver& asmById) {
   AssemblyMass out;
   glm::dvec3 weightedCom(0.0);
-  for (const Occurrence& o : asmDoc.GetOccurrences()) {
-    if (!o.visible || asmDoc.OccurrenceSuppressed(o.id))
+  // A5: aggregate over the LEAF parts of the tree. A resolver that finds no
+  // assemblies flattens to exactly the top-level occurrences, which is the
+  // pre-A5 behaviour.
+  const AssemblyResolver none = [](uint64_t) -> const AssemblyDocument* {
+    return nullptr;
+  };
+  auto flat = Flatten(asmDoc, partById, asmById ? asmById : none);
+  if (!flat) {
+    out.skipped.push_back(flat.error());
+    out.massKnown = false;
+    return out;
+  }
+  for (const FlatInstance& inst : *flat) {
+    if (!inst.visible)
       continue; // BOM convention: hidden/suppressed occurrences don't count
-    const Document* part = partById(o.partId);
-    if (!part) {
-      out.skipped.push_back(o.name + " (part not loaded)");
-      out.massKnown = false;
-      continue;
-    }
     std::string err;
-    const auto mass = Measure::MassOfBodies(part->GetBodies(), &err);
+    const auto mass = Measure::MassOfBodies(inst.part->GetBodies(), &err);
     if (!mass) {
-      out.skipped.push_back(o.name + " (" + err + ")");
+      out.skipped.push_back(inst.path + " (" + err + ")");
       out.massKnown = false;
       continue;
     }
-    // World placement of this occurrence (translate + orientation, no scale).
-    const glm::dmat4 xf = glm::dmat4(OccMatrix(o));
+    const glm::dmat4 xf = glm::dmat4(inst.world);
     const glm::dvec3 worldCom =
         glm::dvec3(xf * glm::dvec4(mass->centerOfMass, 1.0));
 
     OccurrenceMass om;
-    om.occurrenceId = o.id;
-    om.name = o.name;
-    om.partId = o.partId;
+    // The TOP-LEVEL occurrence: a sub-assembly reports as one line, which is
+    // the same choice contact and drawings make.
+    om.occurrenceId = inst.rootOccurrenceId;
+    om.name = inst.path;
+    om.partId = inst.partId;
     om.volume = mass->volume; // volume is rigid-transform invariant
     om.centerOfMass = worldCom;
     om.massKnown = mass->massKnown; // mass is rigid-transform invariant
