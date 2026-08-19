@@ -1021,11 +1021,15 @@ def add_assembly(name: str = "") -> dict:
     return _call("add_assembly", **({"name": name} if name else {}))
 
 
-@_reference(description="Place a part into the ACTIVE assembly as an occurrence. "
-          "part = the part's name (referenced by stable id, so renames are "
-          "safe). transform = {position:[x,y,z], orientation:[x,y,z,w] "
+@_reference(description="Place a part OR ANOTHER ASSEMBLY into the ACTIVE assembly "
+          "as an occurrence (A5 sub-assemblies). part = the name of either, "
+          "resolved to a stable id, so renames are safe; parts are matched "
+          "first. transform = {position:[x,y,z], orientation:[x,y,z,w] "
           "quaternion}; omitted = identity. fixed=true grounds it as the "
-          "assembly anchor; visible=false hides it. Returns the occurrence id.")
+          "assembly anchor; visible=false hides it. A sub-assembly is one "
+          "rigid unit: it contributes its whole subtree to the BOM, mass and "
+          "clash checks, and a reference that would close a cycle is refused. "
+          "Returns {id, part_id, ref_kind}.")
 def add_occurrence(part: str, name: str = "", transform: dict | None = None,
                    fixed: bool = False, visible: bool = True) -> dict:
     params = {"part": part, "fixed": fixed, "visible": visible}

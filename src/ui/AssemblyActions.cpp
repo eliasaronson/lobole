@@ -55,6 +55,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <set>
 #include <unordered_map>
 
@@ -895,31 +896,33 @@ bool AutoExplode(AppState& state, uint64_t viewId) {
   };
   std::vector<OccCenter> centers;
   glm::vec3 lo(FLT_MAX), hi(-FLT_MAX);
-  for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-    Document* part = PartDocById(state, occ.partId);
-    if (!part)
+  // A5: bound each TOP-LEVEL occurrence's whole subtree. A sub-assembly
+  // explodes as one unit — spacing it by the bounds of its first part would
+  // send a gangway the distance a single board deserves.
+  std::map<uint64_t, std::pair<glm::vec3, glm::vec3>> boxes;
+  for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+    if (!inst.visible)
       continue;
-    const glm::mat4 xf = OccurrenceMatrix(occ);
-    glm::vec3 bmin(FLT_MAX), bmax(-FLT_MAX);
-    bool any = false;
-    for (const auto& body : part->GetBodies()) {
+    for (const auto& body : inst.part->GetBodies()) {
       glm::vec3 mn, mx;
       body.shape.GetBoundingBox(mn, mx);
       for (int c = 0; c < 8; c++) {
         const glm::vec3 corner((c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y,
                                (c & 4) ? mx.z : mn.z);
-        const glm::vec3 w = glm::vec3(xf * glm::vec4(corner, 1.0f));
-        bmin = glm::min(bmin, w);
-        bmax = glm::max(bmax, w);
-        any = true;
+        const glm::vec3 w = glm::vec3(inst.world * glm::vec4(corner, 1.0f));
+        auto [it, fresh] =
+            boxes.try_emplace(inst.rootOccurrenceId, std::make_pair(w, w));
+        if (!fresh) {
+          it->second.first = glm::min(it->second.first, w);
+          it->second.second = glm::max(it->second.second, w);
+        }
+        lo = glm::min(lo, w);
+        hi = glm::max(hi, w);
       }
     }
-    if (!any)
-      continue;
-    centers.push_back({occ.id, (bmin + bmax) * 0.5f});
-    lo = glm::min(lo, bmin);
-    hi = glm::max(hi, bmax);
   }
+  for (const auto& [occId, box] : boxes)
+    centers.push_back({occId, (box.first + box.second) * 0.5f});
   if (centers.size() < 2)
     return false; // nothing to spread apart
 
@@ -1191,13 +1194,21 @@ void SyncInContextGhosts(AppState& state) {
   // minus everything a ghost doesn't need: outlines, picking, materials.
   const glm::vec3 kGhostTint(0.55f, 0.60f, 0.68f);
   std::unordered_map<uint64_t, std::vector<uint32_t>> byPart; // partId->assets
-  for (const Occurrence& occ : asmDoc.GetOccurrences()) {
-    if (!occ.visible || occ.id == edited->id)
+  // A5: ghost the whole tree. Editing INTO a sub-assembly is still a non-goal
+  // (open its own tab), but the CONTEXT around the part you are editing has
+  // to look like the assembly does — a gangway that vanished while you worked
+  // would be worse than no context at all.
+  auto flat = assembly::Flatten(asmDoc, PartResolverFor(state),
+                                AssemblyResolverFor(state));
+  if (!flat)
+    return; // a cycle: the resync that draws the real thing already said so
+  for (const assembly::FlatInstance& inst : *flat) {
+    if (!inst.visible || inst.rootOccurrenceId == edited->id)
       continue;
-    Document* part = PartDocById(state, occ.partId);
+    Document* part = PartDocById(state, inst.partId);
     if (!part)
       continue;
-    auto it = byPart.find(occ.partId);
+    auto it = byPart.find(inst.partId);
     if (it == byPart.end()) {
       std::vector<uint32_t> assets;
       for (const auto& body : part->GetBodies()) {
@@ -1210,9 +1221,9 @@ void SyncInContextGhosts(AppState& state) {
             CADMeshConverter::ConvertCADMeshToVertices(cadMesh),
             cadMesh.indices));
       }
-      it = byPart.emplace(occ.partId, std::move(assets)).first;
+      it = byPart.emplace(inst.partId, std::move(assets)).first;
     }
-    const glm::mat4 xf = inv * OccurrenceMatrix(occ);
+    const glm::mat4 xf = inv * inst.world;
     for (size_t bi = 0; bi < it->second.size(); bi++) {
       if (it->second[bi] == 0)
         continue; // empty body
@@ -1220,7 +1231,8 @@ void SyncInContextGhosts(AppState& state) {
           state.meshRenderer->AddInstance(it->second[bi], xf);
       state.meshRenderer->SetInstanceColor(meshId, kGhostTint);
       state.meshRenderer->SetInstanceGhost(meshId); // after color: sets alpha
-      state.documentMeshes.push_back({meshId, /*outlineId=*/0, bi, occ.id, {}});
+      state.documentMeshes.push_back(
+          {meshId, /*outlineId=*/0, bi, inst.rootOccurrenceId, {}});
     }
   }
 }

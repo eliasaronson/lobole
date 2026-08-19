@@ -308,15 +308,36 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                    " not found (see list_occurrences)");
         return *o;
       };
+      // A5: an occurrence's body set is its whole flattened subtree, placed —
+      // so a sub-assembly is ONE clash node ("is the gangway hitting the
+      // dock"), not thirty. The cost, stated because it is easy to misread as
+      // a clean bill: a clash BETWEEN two parts inside the gangway is
+      // invisible from here. Check that on the gangway's own tab.
+      const auto bodiesOf = [&](const Occurrence& o) -> std::vector<Body> {
+        std::vector<Body> out;
+        for (const assembly::FlatInstance& inst :
+             ui::FlattenActiveAssembly(state)) {
+          if (!inst.visible || inst.rootOccurrenceId != o.id)
+            continue;
+          for (const Body& b : inst.part->GetBodies()) {
+            Body nb = b;
+            nb.shape = b.shape.Transformed(inst.world);
+            out.push_back(std::move(nb));
+          }
+        }
+        return out;
+      };
       const auto pairVolume = [&](const Occurrence& oa,
                                   const Occurrence& ob) -> double {
-        Document* pa = ui::PartDocById(state, oa.partId);
-        Document* pb = ui::PartDocById(state, ob.partId);
-        if (pa == nullptr || pb == nullptr)
-          throw std::runtime_error("an occurrence's part document is missing");
-        const auto v = Measure::InterferenceVolume(
-            pa->GetBodies(), ui::OccurrenceMatrix(oa), pb->GetBodies(),
-            ui::OccurrenceMatrix(ob));
+        const std::vector<Body> ba = bodiesOf(oa);
+        const std::vector<Body> bb = bodiesOf(ob);
+        if (ba.empty() || bb.empty())
+          throw std::runtime_error(
+              "an occurrence resolves to no geometry (its part or "
+              "sub-assembly is missing, hidden or empty)");
+        // Already in world space, so the placements here are identities.
+        const auto v = Measure::InterferenceVolume(ba, glm::mat4(1.0f), bb,
+                                                   glm::mat4(1.0f));
         if (!v)
           throw std::runtime_error(
               "interference check failed — an OpenCASCADE boolean/extrema "

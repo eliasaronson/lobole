@@ -24,6 +24,29 @@ std::string PartNameById(const AppState& state, uint64_t partId) {
   return "(missing part)";
 }
 
+// A5: an occurrence references a part OR an assembly, so the panel resolves
+// both — and says which, since "Gangway" placed as a unit behaves differently
+// from a part (it is one row, one selection, one explode step).
+std::string RefNameById(const AppState& state, const Occurrence& o) {
+  const DocKind want =
+      o.refKind == OccurrenceRef::Assembly ? DocKind::Assembly : DocKind::Part;
+  for (const PartSlot& s : state.parts)
+    if (s.kind == want && s.id == o.partId)
+      return s.name;
+  return o.refKind == OccurrenceRef::Assembly ? "(missing assembly)"
+                                              : "(missing part)";
+}
+
+// The tab index of an occurrence's referenced document, for "Open".
+std::optional<size_t> RefSlotIndex(const AppState& state, const Occurrence& o) {
+  const DocKind want =
+      o.refKind == OccurrenceRef::Assembly ? DocKind::Assembly : DocKind::Part;
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].kind == want && state.parts[i].id == o.partId)
+      return i;
+  return std::nullopt;
+}
+
 const char* MateTypeLabel(MateType t) {
   switch (t) {
   case MateType::Fastened:
@@ -417,7 +440,8 @@ void DrawOccurrencePanel(AppState& state) {
     }
     ImGui::SameLine();
     const std::string label =
-        (o.name.empty() ? PartNameById(state, o.partId) : o.name) +
+        (o.name.empty() ? RefNameById(state, o) : o.name) +
+        (o.refKind == OccurrenceRef::Assembly ? "  [assembly]" : "") +
         (o.fixed ? "  (fixed)" : "");
     if (ImGui::Selectable(label.c_str(), SelectedOccurrenceId(state) == o.id))
       SelectOccurrence(state, o.id);
@@ -429,7 +453,16 @@ void DrawOccurrencePanel(AppState& state) {
                         : nullptr;
   if (sel) {
     ImGui::SeparatorText("Selected occurrence");
-    ImGui::Text("Part: %s", PartNameById(state, sel->partId).c_str());
+    const bool isSub = sel->refKind == OccurrenceRef::Assembly;
+    ImGui::Text("%s: %s", isSub ? "Assembly" : "Part",
+                RefNameById(state, *sel).c_str());
+    // v1 does not expand a sub-assembly in place: its own tab IS the editor,
+    // and in-context editing there already works.
+    if (const auto slot = RefSlotIndex(state, *sel)) {
+      ImGui::SameLine();
+      if (ImGui::SmallButton(isSub ? "Open###open_ref" : "Edit###open_ref"))
+        SetActivePart(state, *slot);
+    }
 
     char name[128];
     std::snprintf(name, sizeof(name), "%s", sel->name.c_str());

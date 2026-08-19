@@ -25,11 +25,15 @@ namespace remote {
 // describe: one row per `m ==` branch below — extend together.
 static constexpr MethodDoc AssemblyMethods[] = {
     {"set_active_part", "Switch the active tab by name or index."},
-    {"delete_part", "Delete a part (refused while referenced by an assembly)."},
+    {"delete_part",
+     "Delete a part or assembly tab (refused while any assembly places it)."},
     {"add_occurrence",
-     "Insert an occurrence of a part into the assembly {part, transform?}."},
+     "Place a part OR another assembly in the active assembly {part: name of "
+     "either, transform?}. Returns {id, part_id, ref_kind}; a reference that "
+     "would close a cycle is refused."},
     {"remove_occurrence", "Remove an occurrence by id."},
-    {"list_occurrences", "List occurrences with transforms and state."},
+    {"list_occurrences",
+     "List occurrences with transforms, state and ref_kind (part|assembly)."},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}."},
