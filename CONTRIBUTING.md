@@ -80,9 +80,10 @@ run it before opening a PR if you touched anything in `src/ui`, `src/app` or
 ### Running CI on your own machine
 
 ```
-tools/ci-local.sh              # everything CI does, here
+tools/ci-local.sh              # everything CI does on a push, here
 tools/ci-local.sh --nix        # just the headless suite, ~2 min
 tools/ci-local.sh --image ubuntu:26.04
+tools/ci-local.sh --asan       # the ASan + UBSan job, ~6 min warm
 ```
 
 It reproduces both CI jobs, including the stock-Ubuntu containers that check
@@ -91,6 +92,11 @@ the container images and the excluded tests from
 `.github/workflows/ci.yml`, so the two cannot drift. Build trees live in
 `.ci-local/` and are reused, so a second run is a rebuild of what changed
 (~1 minute) rather than a fresh compile.
+
+`--asan` is separate because the sanitized build is its own ~4-minute compile.
+On GitHub that job runs weekly and on demand rather than per push, so if you
+are touching lifetimes — caches, the regen prefix cache, anything holding a
+`Feature*` — run it locally rather than waiting for Monday.
 
 Worth having whether or not you are watching a minutes budget: a red build
 found here costs a coffee, and found on the runner costs a round trip.

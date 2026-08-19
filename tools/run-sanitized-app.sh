@@ -16,10 +16,14 @@ if [[ ! -x "$bin" ]]; then
   echo "build it: cmake -B build-asan -G Ninja -DENABLE_SANITIZERS=ON && ninja -C build-asan designer" >&2
   exit 1
 fi
-# detect_leaks=0: the Vulkan driver / OCC / ImGui leave thousands of still-reachable
-# allocations at exit; without this ASan dumps a huge, useless leak report on quit.
-# detect_container_overflow=0 + the UBSan suppressions: same dep-boundary reasons
-# as the test wrapper (see tools/run-sanitized-tests.sh).
-export ASAN_OPTIONS="detect_container_overflow=0:detect_leaks=0:halt_on_error=0${ASAN_OPTIONS:+:$ASAN_OPTIONS}"
-export UBSAN_OPTIONS="suppressions=$here/tools/ubsan-suppressions.txt:print_stacktrace=1:halt_on_error=0${UBSAN_OPTIONS:+:$UBSAN_OPTIONS}"
+# The shared options (see tools/sanitizer-env.sh), plus two the interactive
+# app needs and the test runs do not:
+#   detect_leaks=0   the Vulkan driver / OCC / ImGui leave thousands of
+#     still-reachable allocations at exit; without this, quitting dumps a huge,
+#     useless report. (The HEADLESS suite keeps leak detection on — no driver.)
+#   halt_on_error=0  keep the session alive after the first report, so one
+#     find does not end the exploration.
+export ASAN_OPTIONS="detect_leaks=0:halt_on_error=0"
+export UBSAN_OPTIONS="halt_on_error=0"
+source "$here/tools/sanitizer-env.sh"
 exec "$bin" "$@"

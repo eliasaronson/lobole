@@ -8,6 +8,7 @@
 #   tools/ci-local.sh --nix        # just the local (nix) suite, ~2 min
 #   tools/ci-local.sh --containers # just the stock-Ubuntu containers
 #   tools/ci-local.sh --image ubuntu:26.04
+#   tools/ci-local.sh --asan       # ASan+UBSan build and suite, ~6 min warm
 #
 # Build trees live in .ci-local/ (gitignored) and are reused, so the second
 # run of a container is a rebuild of what changed rather than a fresh compile.
@@ -27,11 +28,16 @@ cd "$root"
 
 run_nix=1
 run_containers=1
+run_asan=0
 only_image=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --nix) run_containers=0 ;;
     --containers) run_nix=0 ;;
+    # Opt-in, like the GitHub job it mirrors: an ASan build is a separate
+    # ~4-minute compile, which is too much to put in front of every
+    # "did I break the build?" run.
+    --asan) run_asan=1; run_nix=0; run_containers=0 ;;
     --image) only_image="$2"; shift ;;
     -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -74,6 +80,25 @@ step() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m   %s\033[0m\n' "$*"; }
 fail() { printf '\033[1;31m   %s\033[0m\n' "$*"; }
 
+# Run a test command, keeping its whole output in .ci-local/<name>.log: three
+# lines on success (the ctest summary), the last 40 plus the path on failure.
+# The first version piped straight to `tail -3`, which meant a red run showed
+# a count and threw the diagnosis away — the opposite of what a failure needs.
+#   run_tests <name> <human label> <command...>
+run_tests() {
+  local name="$1" label="$2"; shift 2
+  local log="$root/.ci-local/$name.log"
+  mkdir -p "$root/.ci-local"
+  if "$@" > "$log" 2>&1; then
+    tail -3 "$log"
+    ok "$label passed"
+  else
+    tail -40 "$log"
+    fail "$label FAILED — full log: $log"
+    failures=$((failures+1))
+  fi
+}
+
 started=$SECONDS
 failures=0
 
@@ -82,8 +107,8 @@ if [ "$run_nix" = 1 ]; then
   step "build-and-test (local toolchain)"
   nix-shell shell.nix --run "cmake -S . -B .ci-local/build -G Ninja -DCMAKE_BUILD_TYPE=Release" > /dev/null
   nix-shell shell.nix --run "cmake --build .ci-local/build -j$(nproc)" > /dev/null
-  if nix-shell shell.nix --run "ctest --test-dir .ci-local/build -LE gui -j$(nproc) --output-on-failure" \
-       | tail -3; then ok "headless suite passed"; else fail "headless suite FAILED"; failures=$((failures+1)); fi
+  run_tests headless "headless suite" \
+    nix-shell shell.nix --run "ctest --test-dir .ci-local/build -LE gui -j$(nproc) --output-on-failure"
 
   step "build without the test engine"
   nix-shell shell.nix --run "cmake -S . -B .ci-local/build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TEST_ENGINE=OFF" > /dev/null
@@ -94,6 +119,18 @@ if [ "$run_nix" = 1 ]; then
   else
     fail "engine-free build FAILED"; failures=$((failures+1))
   fi
+fi
+
+# ---- the sanitizer job (opt-in here, weekly/manual on GitHub) --------------
+if [ "$run_asan" = 1 ]; then
+  step "sanitizers (ASan + UBSan)"
+  # build-asan, not .ci-local/: the same tree tools/run-sanitized-tests.sh
+  # uses, so an incremental developer build and this share their objects.
+  source "$root/tools/sanitizer-env.sh"
+  nix-shell shell.nix --run "cmake -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON" > /dev/null
+  nix-shell shell.nix --run "cmake --build build-asan -j$(nproc) --target designer designer_tests" > /dev/null
+  run_tests asan "sanitized suite" \
+    nix-shell shell.nix --run "ctest --test-dir build-asan -LE gui -j$(nproc) --output-on-failure -E '$SANITIZER_TEST_EXCLUDE'"
 fi
 
 # ---- job 2: the stock-Ubuntu containers ------------------------------------
@@ -118,14 +155,11 @@ if [ "$run_containers" = 1 ]; then
     [ -n "$exclude" ] && ctest_cmd="$ctest_cmd -E \"$exclude\""
     # `set -o pipefail`: without it the pipe to tail swallows ctest's exit
     # status and every run looks green.
-    if docker run --rm -v "$root:/src:ro" -v "$root/$build_dir:/b" "$tag" bash -c "
+    run_tests "${image//[:.]/-}" "$image" \
+      docker run --rm -v "$root:/src:ro" -v "$root/$build_dir:/b" "$tag" bash -c "
          set -o pipefail
          cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release > /dev/null &&
-         cmake --build /b -j\$(nproc) > /dev/null && $ctest_cmd | tail -3"; then
-      ok "$image passed"
-    else
-      fail "$image FAILED"; failures=$((failures+1))
-    fi
+         cmake --build /b -j\$(nproc) > /dev/null && $ctest_cmd"
   done
 fi
 

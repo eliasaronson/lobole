@@ -195,16 +195,26 @@ tree so it doesn't clobber your regular one:
 cmake -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON   # ASan + UBSan
 ninja -C build-asan designer designer_tests
 
-tools/run-sanitized-tests.sh            # unit tests under the sanitizers
-tools/run-sanitized-tests.sh '[thread]' # ...filtered (Catch2 tag/name)
+tools/ci-local.sh --asan                # the WHOLE headless suite, ~2.5 min
+tools/run-sanitized-tests.sh '[thread]' # one filter, in one process
 tools/run-sanitized-app.sh              # the windowed app (needs a display)
 ```
 
+`ci-local.sh --asan` is the one to reach for: it runs the sanitized build
+through `ctest -j`, so the suite takes minutes instead of the half hour a
+single-process run costs. It is also what the weekly GitHub `sanitizers` job
+runs (weekly and on demand, not per push — the sanitizer flags miss the normal
+build's ccache).
+
 The wrappers bake in the workarounds our prebuilt (non-instrumented)
-dependencies require: `ASAN_OPTIONS=detect_container_overflow=0` for the
-std-container/OpenCASCADE boundary, and `tools/ubsan-suppressions.txt` to silence
-benign UBSan reports from OpenCASCADE and the Dear ImGui Vulkan backend. Run them
-inside `nix-shell`. The app build catches CPU-side memory bugs in the live render
+dependencies require, all in `tools/sanitizer-env.sh`:
+`ASAN_OPTIONS=detect_container_overflow=0` for the std-container/OpenCASCADE
+boundary, `tools/ubsan-suppressions.txt` for benign UBSan reports from
+OpenCASCADE and the Dear ImGui Vulkan backend, and
+`tools/lsan-suppressions.txt` for two OpenCASCADE singletons that are
+allocated once and never freed. The leak suppressions name individual frames
+rather than the library, so a leak of OUR making inside an OpenCASCADE call
+still fails the run. Run them inside `nix-shell`. The app build catches CPU-side memory bugs in the live render
 / UI / interaction paths that the headless tests never exercise; it does not see
 GPU memory (use the Vulkan validation layers for that).
 

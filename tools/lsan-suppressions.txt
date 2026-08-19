@@ -1,0 +1,21 @@
+# LeakSanitizer suppressions — OpenCASCADE singletons that are allocated once
+# and intentionally never freed. Deliberately NARROW (named frames, not
+# "leak:libTK*"): a blanket module suppression would also hide OUR leaks,
+# since anything we forget to free in a CAD operation is allocated inside
+# these same libraries.
+#
+# Add a line only for an allocation whose whole stack is library-internal
+# static initialization, and say which test surfaced it.
+
+# XCAFApp_Application::GetApplication() — the XCAF document application,
+# reached from CADKernel::LoadSTEPStructured. Surfaced by "ImportFeature
+# loads a STEP file centered at origin" and the two other STEP import tests.
+leak:XCAFApp_Application
+leak:TPrsStd_DriverTable
+
+# Poly_MergeNodesTool's internal node map, allocated inside
+# RWStl_Reader::ReadBinary and never freed. Our frame is a plain
+# StlAPI_Reader::Read with a stack-local reader (CADKernel::LoadSTL), so
+# there is nothing on our side to free. Surfaced by "STL save/load roundtrip
+# yields a SOLID with the box volume".
+leak:Poly_MergeNodesTool
