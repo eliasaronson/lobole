@@ -3,6 +3,10 @@
 
 #include "cad/CADKernel.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <unistd.h>
@@ -374,6 +378,68 @@ TEST_CASE("Structured STEP import reads names, colors, and instances",
   std::filesystem::remove(path);
 }
 
+// The invariant that would have caught the OCC 7.6 failure without needing a
+// second OpenCASCADE to find it for us.
+//
+// glm placements are FLOAT. `(float)cos(pi/4)` squared twice gives
+// 0.99999997, so gp_Trsf::SetValues — which infers a uniform scale from the
+// 3x3 block — read every rotation we produced as a transform scaled by
+// 1 - 1.1e-8. TopoDS_Shape::Moved() refuses to move a shape by a scaled
+// location; 7.9.3 tolerates that deviation and 7.6.3 does not, so the same
+// code worked here and threw on Ubuntu ("Moving with scaling transformation
+// is forbidden"). Measured on both, with identical input.
+//
+// A placement is rigid by construction, so assert it arrives that way rather
+// than relying on any kernel's tolerance.
+TEST_CASE("A rigid placement reaches the kernel unscaled",
+          "[cadkernel][transform]") {
+  const CADShape box = CADKernel::Instance().CreateBox(10.0, 10.0, 10.0);
+  REQUIRE(box.IsValid());
+
+  const auto scaleOf = [](const CADShape& s) {
+    return s.GetShape().Location().Transformation().ScaleFactor();
+  };
+
+  SECTION("rotations at every angle, however the quaternion was built") {
+    for (int deg = 0; deg <= 360; deg += 15) {
+      const float rad = glm::radians(static_cast<float>(deg));
+      // The app's own angle-axis path...
+      const glm::mat4 viaAxis = glm::mat4_cast(
+          glm::angleAxis(rad, glm::normalize(glm::vec3(0.3f, 1.0f, -0.2f))));
+      // ...and a quaternion a script posted by hand, which is where the
+      // float error is worst.
+      const glm::mat4 viaHand = glm::mat4_cast(
+          glm::quat(std::cos(rad * 0.5f), 0.0f, std::sin(rad * 0.5f), 0.0f));
+      for (const glm::mat4& m : {viaAxis, viaHand}) {
+        const CADShape moved = box.Transformed(
+            glm::translate(glm::mat4(1.0f), glm::vec3(3, -4, 5)) * m);
+        INFO("angle " << deg << " deg, scale " << scaleOf(moved));
+        REQUIRE(moved.IsValid());
+        CHECK(scaleOf(moved) == 1.0);
+        // And it really moved: a scaled location that OCC refused used to
+        // leave the shape at the origin.
+        CHECK_THAT(moved.Volume(), WithinRel(box.Volume(), 1e-9));
+      }
+    }
+  }
+
+  SECTION("a mirror still goes through the general path") {
+    // Determinant -1: not a rotation, and OCC represents it fine. The rigid
+    // shortcut must not swallow it (a mirrored part would come back
+    // unmirrored, which no test would notice until a drawing looked wrong).
+    glm::mat4 mirror(1.0f);
+    mirror[0][0] = -1.0f;
+    const CADShape flipped = box.Transformed(mirror);
+    REQUIRE(flipped.IsValid());
+    // OCC's volume is SIGNED: a mirrored solid reports -1000, which is the
+    // kernel saying the orientation flipped. Same size, opposite handedness.
+    CHECK(flipped.Volume() < 0.0);
+    CHECK_THAT(std::abs(flipped.Volume()), WithinRel(box.Volume(), 1e-9));
+    const gp_Trsf t = flipped.GetShape().Location().Transformation();
+    CHECK(t.IsNegative()); // a mirror, not a rotation
+  }
+}
+
 TEST_CASE("ImportFeature carries names and colors onto bodies",
           "[feature][import]") {
   const auto path = WriteRigStep();
@@ -422,9 +488,6 @@ TEST_CASE("ImportFeature carries names and colors onto bodies",
 // ---------------------------------------------------------------------------
 
 #include "core/io/ImportAssembly.h"
-
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/quaternion.hpp>
 
 TEST_CASE("Assembly import plan extracts centered parts + placed occurrences",
           "[kernel][import][assembly]") {

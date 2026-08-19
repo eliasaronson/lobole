@@ -103,9 +103,11 @@ gp_Trsf ToTrsf(const glm::mat4& m) {
   // Built from a NORMALIZED quaternion rather than by handing OCC the float
   // matrix. SetValues infers a scale factor from the 3x3 block, and the
   // rounding in a float rotation is enough for it to infer one that is not
-  // exactly 1 — after which OpenCASCADE 7.6 refuses the transform outright
-  // ("Moving with scaling transformation is forbidden") where 7.9 tolerates
-  // it. An occurrence placement is rigid by construction, so say so.
+  // exactly 1 (0.99999998859 for 45 degrees). TopoDS_Shape::Moved() then
+  // refuses to move by that location on OpenCASCADE 7.6 — 7.9 accepts the
+  // identical input. An occurrence placement is rigid by construction, so
+  // say so, and no version has to forgive us. Pinned by
+  // "A rigid placement reaches the kernel unscaled" in test_cadkernel.cpp.
   const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(m)));
   gp_Trsf t;
   t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));

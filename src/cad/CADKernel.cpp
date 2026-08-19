@@ -198,10 +198,16 @@ CADShape CADShape::Transformed(const glm::mat4& m) const {
     if (rigid) {
       // Hand OCC an EXACTLY orthonormal rotation. Routed through SetValues,
       // the rounding in a float rotation makes OCC infer a scale factor a
-      // hair off 1 — and TopLoc_Location refuses to move a shape with any
-      // scaling at all ("Moving with scaling transformation is forbidden").
-      // OpenCASCADE 7.6 rejects inputs that 7.9 accepts, so an assembly
-      // comparison worked here and failed on Ubuntu.
+      // hair off 1 — measured: 0.99999998859 for a 45-degree rotation — and
+      // TopoDS_Shape::Moved() refuses to move a shape by a scaled location
+      // ("Moving with scaling transformation is forbidden").
+      //
+      // Which version you have decides whether that matters: constructing the
+      // TopLoc_Location succeeds on both 7.6.3 and 7.9.3, and 7.9.3 then
+      // MOVES by it happily, while 7.6.3 throws on the same input. Both were
+      // measured with the same matrix. So this is not the kernel being picky;
+      // it is us having always produced a technically-scaled placement that
+      // one version forgave.
       const glm::quat q = glm::normalize(glm::quat_cast(basis));
       t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));
       t.SetTranslationPart(gp_Vec(m[3][0], m[3][1], m[3][2]));

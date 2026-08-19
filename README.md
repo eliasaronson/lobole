@@ -72,9 +72,12 @@ container on every push so this stays honest:
   placement (`Assembly import plan…`) and a shell that 7.6 refuses outright
   where 7.9 completes as a no-op (`Shell that removes no material…`). The
   application itself works; these are the assertions, not the features.
-  (Two further failures turned out to be ours rather than the kernel's — a
-  float rotation matrix that 7.6 reads as *scaled* and then refuses to apply.
-  Fixed by building rigid placements from a normalized quaternion.)
+  (Two further failures turned out to be ours rather than the kernel's. A
+  float rotation matrix makes OCC infer a scale factor of 0.99999998859
+  instead of 1, and `TopoDS_Shape::Moved()` refuses a scaled location — 7.6
+  throws where 7.9 accepts the identical input. Fixed by building rigid
+  placements from a normalized quaternion, so neither version has to forgive
+  it.)
 
 These are deterministic, not flaky: the same two fail on every run against
 7.6.3 and neither fails against 7.9.x. **You do not need to build OpenCASCADE
