@@ -303,15 +303,22 @@ set_tests_properties(replay_smoke PROPERTIES TIMEOUT 300)
 # plain syntax error in the server shipped undetected for four days in August
 # 2026 — nothing on the default path ever imported the file. This costs
 # milliseconds and needs neither a display nor the SDK.
+# `python3 -m py_compile` writes __pycache__ NEXT TO THE SOURCE, which fails
+# against a read-only checkout (tools/ci-local.sh mounts one) and litters the
+# tree otherwise. Compile to an explicit path in the build dir instead.
 add_test(NAME mcp_server_compiles
-         COMMAND python3 -m py_compile
-                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer_mcp.py)
+         COMMAND python3 -c
+                 "import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)"
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer_mcp.py
+                 ${CMAKE_CURRENT_BINARY_DIR}/designer_mcp.pyc)
 set_tests_properties(mcp_server_compiles PROPERTIES TIMEOUT 60)
 
 # Same for the python client every script and smoke test imports.
 add_test(NAME py_client_compiles
-         COMMAND python3 -m py_compile
-                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer_remote.py)
+         COMMAND python3 -c
+                 "import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)"
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer_remote.py
+                 ${CMAKE_CURRENT_BINARY_DIR}/designer_remote.pyc)
 set_tests_properties(py_client_compiles PROPERTIES TIMEOUT 60)
 
 # Models a bracket through the MCP server (stdio) over the same live app.

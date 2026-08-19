@@ -77,6 +77,28 @@ the test engine off. The GUI suite needs a GPU, so it is local-only — please
 run it before opening a PR if you touched anything in `src/ui`, `src/app` or
 `src/render`.
 
+### Running CI on your own machine
+
+```
+tools/ci-local.sh              # everything CI does, here
+tools/ci-local.sh --nix        # just the headless suite, ~2 min
+tools/ci-local.sh --image ubuntu:26.04
+```
+
+It reproduces both CI jobs, including the stock-Ubuntu containers that check
+the README's package list is complete — and it **derives** the package list,
+the container images and the excluded tests from
+`.github/workflows/ci.yml`, so the two cannot drift. Build trees live in
+`.ci-local/` and are reused, so a second run is a rebuild of what changed
+(~1 minute) rather than a fresh compile.
+
+Worth having whether or not you are watching a minutes budget: a red build
+found here costs a coffee, and found on the runner costs a round trip.
+
+(`act` runs the workflow YAML itself, which is more faithful but pulls
+multi-GB runner images. Reach for it when the workflow *file* is what you are
+debugging.)
+
 Known flakes, worth a rerun rather than an investigation: the femgpu
 `TopologyOptimize` gate, and `headless_smoke` under heavy parallel load —
 specifically its autosave-sidecar wait, which prints the app's log and state
