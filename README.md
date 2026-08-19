@@ -76,13 +76,14 @@ container on every push so this stays honest:
   float rotation matrix that 7.6 reads as *scaled* and then refuses to apply.
   Fixed by building rigid placements from a normalized quaternion.)
 
-These are deterministic, not flaky: the same four fail on every run against
-7.6.3 and none of them fails against 7.9.3. **You do not need to build
-OpenCASCADE yourself** to work on Designer — the distro package is a supported
-configuration and CI keeps it that way. If you want exact parity with
-development (PLY export, all 586 tests), the cheap routes are Nix or the
-Flatpak, both of which pin 7.9.x; compiling OCC from source takes far longer
-than either and leaves you maintaining it.
+These are deterministic, not flaky: the same two fail on every run against
+7.6.3 and neither fails against 7.9.x. **You do not need to build OpenCASCADE
+yourself** to work on Designer — every distro package listed above is a
+supported configuration and CI keeps 26.04 and 24.04 that way. On an older
+release, the cheap routes to full parity are Ubuntu 26.04, Nix or the Flatpak; compiling OCC from source takes far longer
+than either and leaves you maintaining it — the OCCT project publishes source
+archives and Windows binaries only, so there is nothing prebuilt to drop in
+on Linux.
 
 Vendored dependencies (Dear ImGui, Dear ImGui Test Engine, nativefiledialog)
 are git submodules — clone with `--recurse-submodules`, or:

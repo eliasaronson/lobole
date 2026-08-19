@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <unistd.h>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -316,7 +317,12 @@ std::filesystem::path WriteRigStep() {
   TDataStd_Name::Set(cylLabel, "Pin");
 
   std::filesystem::path path =
-      std::filesystem::temp_directory_path() / "designer_test_rig.step";
+      // Per-process: catch_discover_tests runs each TEST_CASE in its own
+      // process and ctest runs those in parallel, so a fixed filename is two
+      // tests writing and reading one file at once (an intermittent import
+      // failure that only appears under -j).
+      std::filesystem::temp_directory_path() /
+      ("designer_test_rig_" + std::to_string(::getpid()) + ".step");
   STEPCAFControl_Writer writer;
   REQUIRE(writer.Transfer(doc, STEPControl_AsIs));
   REQUIRE(writer.Write(path.string().c_str()) == IFSelect_RetDone);

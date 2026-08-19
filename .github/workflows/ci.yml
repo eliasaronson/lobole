@@ -72,12 +72,28 @@ jobs:
 
   # The job above runs on GitHub's runner image, which carries hundreds of
   # preinstalled packages — so it cannot tell whether the README's apt list is
-  # COMPLETE. A stock ubuntu:24.04 container can, and when this was first tried
+  # COMPLETE. A stock container can, and when this was first tried
   # (2026-08-17) the list was missing libtbb-dev and git, and the build failed
-  # to link against Ubuntu's older OpenCASCADE. This job is the guard.
+  # to link against Ubuntu's older OpenCASCADE. These jobs are the guard.
+  #
+  # 26.04 LTS ships OpenCASCADE 7.9.2 — parity with the kernel this project is
+  # developed against, so it runs the WHOLE suite with no exclusions. 24.04
+  # LTS ships 7.6.3 and is kept as a second, stricter oracle: it has already
+  # caught three bugs that were ours rather than the kernel's.
   stock-ubuntu:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:26.04
+            exclude_tests: ""
+          - image: ubuntu:24.04
+            # XCAF STEP import placement, and a shell 7.6 refuses where 7.9
+            # makes a no-op. See the README's OpenCASCADE section.
+            exclude_tests: "Assembly import plan|Shell that removes no material"
+    name: stock-ubuntu (${{ matrix.image }})
     runs-on: ubuntu-24.04
-    container: ubuntu:24.04
+    container: ${{ matrix.image }}
     steps:
       # ca-certificates is a CONTAINER prerequisite, not a Designer one: a
       # bare ubuntu:24.04 has no CA roots, so actions/checkout cannot verify
@@ -108,11 +124,11 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
 
-      # Ubuntu 24.04 ships OpenCASCADE 7.6.3, and two cases depend on kernel
-      # behaviour that changed by 7.9 (XCAF STEP import placement, and a shell
-      # 7.6 refuses where 7.9 makes a no-op). The app works; these assertions
-      # do not hold on that kernel. See the README's OpenCASCADE section.
       - name: Test
         run: |
-          ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure \
-            -E "Assembly import plan|Shell that removes no material"
+          if [ -n "${{ matrix.exclude_tests }}" ]; then
+            ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure \
+              -E "${{ matrix.exclude_tests }}"
+          else
+            ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure
+          fi
