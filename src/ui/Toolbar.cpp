@@ -81,14 +81,21 @@ void DrawRenderModal(AppState& state) {
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("Catch soft shadows on an invisible floor plane");
 
+    // What the ray tracer will actually be given: a part's bodies, or — on an
+    // assembly tab, where `document` is null — its visible occurrences. The
+    // part-only test left this button dead behind a working Render entry.
     const bool hasBodies =
-        state.document && !state.document->GetBodies().empty();
+        state.assembly
+            ? state.assembly->OccurrenceCount() > 0
+            : (state.document && !state.document->GetBodies().empty());
     const bool rtReady = state.rayTracer && state.rayTracer->IsInitialized();
     const bool canRender = hasBodies && rtReady;
 
     ImGui::Spacing();
     ImGui::BeginDisabled(!canRender);
-    if (ImGui::Button(ICON_FA_CAMERA " Render", ImVec2(150, 0))) {
+    // "###" ids: the visible label starts with an icon glyph, which no test
+    // or script should have to spell in a ref.
+    if (ImGui::Button(ICON_FA_CAMERA " Render###render_go", ImVec2(150, 0))) {
       job = RenderJob{};
       job.active = true;
       job.width = kRes[resIdx].w;
@@ -100,13 +107,14 @@ void DrawRenderModal(AppState& state) {
     }
     ImGui::EndDisabled();
     ImGui::SameLine();
-    if (ImGui::Button("Close", ImVec2(120, 0)))
+    if (ImGui::Button("Close###render_close", ImVec2(120, 0)))
       ImGui::CloseCurrentPopup();
 
     if (!rtReady)
       ImGui::TextDisabled("Ray tracing not available on this GPU.");
     else if (!hasBodies)
-      ImGui::TextDisabled("Add a body to render.");
+      ImGui::TextDisabled(state.assembly ? "Insert a part to render."
+                                         : "Add a body to render.");
   }
   ImGui::EndPopup();
 }

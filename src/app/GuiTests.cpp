@@ -24,6 +24,7 @@
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
+#include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/PreviewFeature.h"
@@ -4583,6 +4584,55 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   };
 
   // The bottom-bar "+" collapses the three add buttons into one menu.
+  // The Render modal on an assembly tab. Its own Render button carried a
+  // part-only test (state.document && bodies), so on an assembly — where
+  // `document` is null — it sat greyed out behind a working Render entry,
+  // saying "Add a body to render" about an assembly full of parts.
+  t = IM_REGISTER_TEST(engine, "render", "modal_enabled_on_an_assembly");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box"); // a part with a body
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Rig");
+    ui::SetActivePart(*s_App, asmIdx);
+    ctx->Yield(2);
+    IM_CHECK(s_App->assembly != nullptr);
+
+    // Empty assembly: the TOOLBAR button refuses — there is nothing to trace,
+    // and opening a modal to say so would be theatre.
+    ctx->SetRef("//##DockHost");
+    IM_CHECK((ctx->ItemInfo("**/###tb_asm_render").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+
+    // With an occurrence in it, the modal opens AND its own Render button is
+    // live. That button used to test `state.document && bodies`, which is
+    // false on every assembly tab, so it sat greyed behind a working entry
+    // saying "Add a body to render" about an assembly full of parts.
+    Occurrence occ;
+    occ.name = "Block";
+    occ.partId = s_App->parts[0].id;
+    occ.fixed = true;
+    s_App->assembly->AddOccurrence(occ);
+    ctx->Yield(2);
+    IM_CHECK(s_App->assembly->OccurrenceCount() > 0);
+    ToolbarClick(ctx, "###tb_asm_render");
+    ctx->Yield(2);
+    IM_CHECK(ctx->UiContext->OpenPopupStack.Size > 0); // the modal is up
+    const bool rtReady =
+        s_App->rayTracer != nullptr && s_App->rayTracer->IsInitialized();
+    if (rtReady) {
+      IM_CHECK((ctx->ItemInfo("//Render Still/###render_go").ItemFlags &
+                ImGuiItemFlags_Disabled) == 0);
+    } else {
+      // No ray tracing on this GPU: the modal must blame the GPU, not the
+      // model for being empty.
+      IM_CHECK(ctx->ItemExists("//Render Still/###render_close"));
+    }
+    ctx->ItemClick("//Render Still/###render_close");
+    ctx->Yield();
+  };
+
   // A tab bar of names alone made a part, its drawing and a folder of them
   // look identical until you clicked. Each tab now carries its kind's glyph,
   // and the ids are "###" so they do not move when the label gains one.
