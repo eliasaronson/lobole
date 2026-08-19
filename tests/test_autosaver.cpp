@@ -9,13 +9,20 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
 namespace {
 
-fs::path TempDir() {
-  auto dir = fs::temp_directory_path() / "designer_autosave_test";
+// One directory per case, per process. `catch_discover_tests` gives every
+// TEST_CASE its own process and ctest -j runs them at once, so a shared fixed
+// path means one case's remove_all() deletes the directory another case is
+// mid-save into — a failure that looks like an autosave bug and is a test bug.
+fs::path TempDir(const char* name) {
+  auto dir =
+      fs::temp_directory_path() / ("designer_autosave_" + std::string(name) +
+                                   "_" + std::to_string(::getpid()));
   fs::remove_all(dir);
   fs::create_directories(dir);
   return dir;
@@ -37,7 +44,7 @@ TEST_CASE("Sidecar paths", "[autosave]") {
 }
 
 TEST_CASE("MaybeSave fires only when dirty, changed, and due", "[autosave]") {
-  const fs::path dir = TempDir();
+  const fs::path dir = TempDir("maybesave");
   const std::string project = (dir / "part.json").string();
   Document doc = MakeDoc();
   const uint64_t v = doc.Version();
@@ -71,8 +78,40 @@ TEST_CASE("MaybeSave fires only when dirty, changed, and due", "[autosave]") {
   CHECK_FALSE(off.MaybeSave(doc, project, 0, 1e9));
 }
 
+// The headless smoke suite's one known flake, and a way to lose real work:
+// open a project, edit, let an autosave fire, then replace the document (new
+// project, open, history restore). Versions restart at 0, so the new
+// document's version eventually EQUALS the version the autosaver last saved
+// from — and it concluded "unchanged since the last autosave" and stopped
+// saving. Under parallel load the earlier autosave lands at a different
+// version each run, which is why it looked like a timing flake rather than
+// what it is: a version number used as an identity.
+TEST_CASE("A different document at the same version still autosaves",
+          "[autosave]") {
+  const fs::path dir = TempDir("newdoc");
+  const std::string first = (dir / "first.json").string();
+  const std::string second = (dir / "second.json").string();
+
+  Autosaver saver(1.0);
+  saver.Prime(0.0);
+  Document a = MakeDoc();
+  REQUIRE(saver.MaybeSave(a, first, a.Version() - 1, 10.0));
+  const uint64_t collidingVersion = a.Version();
+
+  // A different document that happens to reach the same version.
+  Document b = MakeDoc();
+  while (b.Version() < collidingVersion)
+    b.AddFeature(
+        std::make_unique<BoxFeature>("Filler", glm::vec3(0), 1.0, 1.0, 1.0));
+  REQUIRE(b.Version() == collidingVersion);
+  REQUIRE(b.InstanceId() != a.InstanceId());
+
+  CHECK(saver.MaybeSave(b, second, b.Version() - 1, 20.0));
+  CHECK(fs::exists(Autosaver::SidecarPath(second)));
+}
+
 TEST_CASE("HasNewerAutosave and Clear", "[autosave]") {
-  const fs::path dir = TempDir();
+  const fs::path dir = TempDir("hasnewer");
   const std::string project = (dir / "part.json").string();
   Document doc = MakeDoc();
 

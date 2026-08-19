@@ -4,10 +4,18 @@
 #include "core/io/Serialization.h" // FeatureToJson: the regen-cache hash input
 
 #include <algorithm>
+#include <atomic>
 #include <deque>
 #include <functional>
 #include <string>
 #include <unordered_map>
+
+// Monotonic for the life of the process: identity must never be reused, or
+// the consumers of InstanceId() are back to guessing.
+uint64_t Document::NextInstanceId() {
+  static std::atomic<uint64_t> next{1};
+  return next.fetch_add(1, std::memory_order_relaxed);
+}
 
 Feature* Document::GetFeature(size_t index) {
   return index < m_features.size() ? m_features[index].get() : nullptr;

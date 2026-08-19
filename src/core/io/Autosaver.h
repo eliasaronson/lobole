@@ -47,5 +47,8 @@ public:
 private:
   double m_interval;
   double m_lastSaveTime = 0.0;
+  // WHICH document was at that version, not just the number: versions restart
+  // at 0 on every document replacement, so a version alone is not an identity.
+  uint64_t m_lastSavedDocInstance = 0;
   uint64_t m_lastSavedDocVersion = 0;
 };

@@ -330,6 +330,17 @@ public:
   // render meshes without observing individual edits.
   uint64_t Version() const { return m_version; }
 
+  // Which document this is, as opposed to how far it has been edited. Unique
+  // per instance for the life of the process and never reused.
+  //
+  // Anyone who remembers "I already handled version N" needs it, because
+  // Version() restarts at 0 every time the document is replaced (new project,
+  // open, history restore). Autosaver learned that the hard way: it skipped
+  // saving a freshly opened document whose version happened to match the
+  // version it had autosaved from the PREVIOUS one — silently, for the rest
+  // of the session.
+  uint64_t InstanceId() const { return m_instanceId; }
+
   // Incremental regeneration (R3): how much of the last Regenerate came
   // from the prefix cache vs. actually executed. Observable, not vibes.
   struct RegenStats {
@@ -381,6 +392,8 @@ private:
   // Transient per-study mesh+results (never serialized); keyed by study id.
   std::map<uint64_t, fem::StudyRuntime> m_studyRuntime;
   uint64_t m_studyResultsEpoch = 0;
+  static uint64_t NextInstanceId();
+
   std::vector<Configuration> m_configurations;
   uint64_t m_activeConfiguration = 0; // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
@@ -388,9 +401,11 @@ private:
   const SymbolTable* m_projectSymbols = nullptr;
   const std::vector<Parameter>* m_projectParameters = nullptr;
   uint64_t m_version = 0;
+  // Handed out once per instance by NextInstanceId(); see InstanceId().
+  const uint64_t m_instanceId = NextInstanceId();
   uint64_t m_nextId = 1;
   int m_rollback = -1;
-  int m_bulkDepth = 0; // >0 = a BulkEdit guard is deferring regeneration
+  int m_bulkDepth = 0;  // >0 = a BulkEdit guard is deferring regeneration
   size_t m_tipHash = 0; // chain hash of the last regenerated feature list
   // Bodies loaded from the project's geometry blob, awaiting the hash check
   // in the next Regenerate. Cleared once used or rejected — this is a
