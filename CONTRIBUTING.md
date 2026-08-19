@@ -100,9 +100,10 @@ multi-GB runner images. Reach for it when the workflow *file* is what you are
 debugging.)
 
 Known flakes, worth a rerun rather than an investigation: the femgpu
-`TopologyOptimize` gate, and `headless_smoke` under heavy parallel load —
-specifically its autosave-sidecar wait, which prints the app's log and state
-when it trips, so please paste that if you hit it.
+`TopologyOptimize` gate. (`headless_smoke` used to be on this list; it turned
+out to be a real autosave bug that load only made intermittent, so a rerun is
+the first move but a mechanism is worth looking for before anything earns the
+"flaky" label.)
 
 ## Formatting and commits
 

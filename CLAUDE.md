@@ -48,12 +48,12 @@ docs/ui/u10-defaults-and-refusals.md.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` (`-f <pattern>` filters a
   case). Runs `designer --gui-tests --hidden` under Xvfb; **flock-serialized**,
   so concurrent runs (parallel agents) are safe.
-- Known flakes — rerun, don't chase: femgpu "TopologyOptimize…", and
-  `headless_smoke` under ~24-way load (~1 run in 3). The latter is pinned to
-  one assertion — the autosave sidecar not appearing within 60 s in the
-  "Autosave + crash recovery" phase — and the test now dumps the app's log,
-  liveness and state on that failure, so the next occurrence explains itself
-  instead of needing another hunt.
+- Known flakes — rerun, don't chase: femgpu "TopologyOptimize…". The
+  `headless_smoke` autosave flake was a real bug, fixed 2026-08-19 (a document
+  version number used as a document identity, ee247f9) — a "flaky under load"
+  test is worth one look for a mechanism before it earns that label.
+- `tools/ci-local.sh` runs both CI jobs here (headless suite + the stock-Ubuntu
+  containers), deriving the package list and test exclusions from ci.yml.
 - Format changes bump `kVersion` (src/core/io/SerializationInternal.h) AND add
   a golden `tests/golden/v<N>-<name>.json/.expect.json` — one per
   bump. No back-compat/migration is required (no users yet); fix any test that

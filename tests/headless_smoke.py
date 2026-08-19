@@ -1025,10 +1025,11 @@ def main():
         # printed so a creeping regression is visible before it fails.
         if not wait_for_file(crash_project + ".autosave", 60.0,
                              "autosave sidecar"):
-            # This is the suite's one known flake (it fires under 24-way
-            # parallel load, roughly one run in three). 60 s is already
-            # generous for a 1 s timer, so the interesting question is what
-            # the app was doing — answer it here instead of hunting again.
+            # This tripped for months under parallel load and was written off
+            # as a flake; the cause was the autosaver treating a version
+            # number as a document identity (fixed 2026-08-19). 60 s is
+            # generous for a 1 s timer, so if it trips again the interesting
+            # question is what the app was doing — answer it here.
             alive = app.poll() is None
             state = {}
             try:
