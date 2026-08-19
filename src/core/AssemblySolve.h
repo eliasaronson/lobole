@@ -5,12 +5,14 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <expected>
 #include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
 class Document;
+class AssemblyDocument;
 
 // The A3 assembly placement pass ("the solve"): given occurrences and mates,
 // position each mated occurrence relative to its neighbours by direct frame
@@ -50,6 +52,54 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
 // transient error. Does NOT bump the assembly version — the caller does that
 // to trigger a renderer resync (so a no-op solve doesn't churn the renderer).
 SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById);
+
+// ---- Flatten: the one tree walk (A5) --------------------------------------
+//
+// An assembly may place other assemblies. Every consumer that wants GEOMETRY
+// — render, BOM, mass, contact, export, drawings, ray tracing, section caps —
+// wants the same thing from that tree: the leaf PARTS, each with a world
+// transform. Flatten is that answer, and it exists so those consumers do not
+// each grow their own recursion (which is how they would drift apart).
+//
+// v1 sub-assemblies are RIGID: a placed assembly is one solid unit at
+// whatever placements its own document stores. Flatten never solves.
+struct FlatInstance {
+  uint64_t partId = 0;            // always a PART: the leaves of the tree
+  const Document* part = nullptr; // resolved, regenerated
+  glm::mat4 world{1.0f};          // composed down the tree
+  std::string path;               // "Gangway/Board 03" — display, not a key
+  uint64_t rootOccurrenceId = 0;  // the TOP-LEVEL occurrence this belongs to
+  bool visible = true;            // every level's visibility, ANDed
+};
+
+// Resolves a slot id to an assembly document (nullptr when it is not one).
+using AssemblyResolver =
+    std::function<const AssemblyDocument*(uint64_t slotId)>;
+
+// The leaf parts of `top`, in document order, depth first.
+//
+// Fails (rather than rendering something plausible) on a reference cycle,
+// naming the path that closes it, and on exceeding `maxDepth` — a runaway
+// backstop, not a modelling limit. A reference that resolves to nothing is
+// SKIPPED, not an error: a dangling occurrence is already how a deleted part
+// behaves, and the tree should still show what remains.
+std::expected<std::vector<FlatInstance>, std::string>
+Flatten(const AssemblyDocument& top, const PartResolver& partById,
+        const AssemblyResolver& asmById, int maxDepth = 8);
+
+// Would placing `refId` (of kind `kind`) into `host` close a cycle? Used to
+// refuse the occurrence at add time instead of discovering it at render time.
+bool WouldCycle(const AssemblyDocument& host, uint64_t hostSlotId,
+                uint64_t refId, OccurrenceRef kind,
+                const AssemblyResolver& asmById, std::string* why = nullptr);
+
+// Every document version in `top`'s subtree, so a caller can tell whether
+// anything below it changed. Keyed by slot id: part versions and, for nested
+// assemblies, their own document versions too. A top-level assembly that
+// stamps only its DIRECT parts cannot see an edit inside a sub-assembly.
+std::vector<std::pair<uint64_t, uint64_t>>
+SubtreeVersions(const AssemblyDocument& top, const PartResolver& partById,
+                const AssemblyResolver& asmById, int maxDepth = 8);
 
 // ---- Assembly mass aggregation (finding #5) -------------------------------
 // One placed occurrence's mass contribution, in WORLD space. Volume and mass

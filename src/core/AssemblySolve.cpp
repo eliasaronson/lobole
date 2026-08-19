@@ -15,6 +15,177 @@
 namespace assembly {
 
 namespace {
+// The same composition ui::OccurrenceMatrix does; duplicated here (four
+// lines) rather than pulling the UI layer into core, which is where every
+// other assembly walk already lives.
+glm::mat4 PlacementOf(const Occurrence& o) {
+  return glm::translate(glm::mat4(1.0f), o.position) *
+         glm::mat4_cast(o.orientation);
+}
+
+struct FlattenCtx {
+  const PartResolver& partById;
+  const AssemblyResolver& asmById;
+  int maxDepth;
+  std::vector<uint64_t> stack; // assembly slot ids on the current path
+  std::vector<std::string> names;
+  std::vector<FlatInstance> out;
+  std::string error;
+};
+
+bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
+                 const glm::mat4& parentWorld, uint64_t rootOccurrenceId,
+                 bool parentVisible, int depth);
+
+bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
+                       const glm::mat4& world, uint64_t rootOccurrenceId,
+                       bool visible, int depth) {
+  const AssemblyDocument* sub = ctx.asmById(occ.partId);
+  if (sub == nullptr)
+    return true; // dangling: the tree still shows what remains
+  // A cycle renders forever; say which reference closes it.
+  for (const uint64_t onPath : ctx.stack) {
+    if (onPath == occ.partId) {
+      std::string chain;
+      for (const std::string& n : ctx.names)
+        chain += n + " -> ";
+      ctx.error = "assembly reference cycle: " + chain + occ.name;
+      return false;
+    }
+  }
+  ctx.stack.push_back(occ.partId);
+  ctx.names.push_back(occ.name);
+  const bool ok =
+      FlattenInto(ctx, *sub, world, rootOccurrenceId, visible, depth + 1);
+  ctx.names.pop_back();
+  ctx.stack.pop_back();
+  return ok;
+}
+
+bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
+                 const glm::mat4& parentWorld, uint64_t rootOccurrenceId,
+                 bool parentVisible, int depth) {
+  if (depth > ctx.maxDepth) {
+    ctx.error = "assemblies nested deeper than " +
+                std::to_string(ctx.maxDepth) + " levels";
+    return false;
+  }
+  for (const Occurrence& occ : asmDoc.GetOccurrences()) {
+    // Suppression and visibility compose down the tree: hiding a
+    // sub-assembly hides everything in it.
+    const bool visible =
+        parentVisible && occ.visible && !asmDoc.OccurrenceSuppressed(occ.id);
+    const glm::mat4 world = parentWorld * PlacementOf(occ);
+    // The TOP-LEVEL occurrence owns everything below it — that is what makes
+    // a sub-assembly one contact node, one explode step, one drawing ref.
+    const uint64_t root = rootOccurrenceId ? rootOccurrenceId : occ.id;
+    const std::string prefix = ctx.names.empty() ? std::string{} : [&] {
+      std::string p;
+      for (const std::string& n : ctx.names)
+        p += n + "/";
+      return p;
+    }();
+
+    if (occ.refKind == OccurrenceRef::Assembly) {
+      if (!DescendOccurrence(ctx, occ, world, root, visible, depth))
+        return false;
+      continue;
+    }
+    const Document* part = ctx.partById(occ.partId);
+    if (part == nullptr)
+      continue; // dangling part reference, as today
+    FlatInstance fi;
+    fi.partId = occ.partId;
+    fi.part = part;
+    fi.world = world;
+    fi.path = prefix + occ.name;
+    fi.rootOccurrenceId = root;
+    fi.visible = visible;
+    ctx.out.push_back(std::move(fi));
+  }
+  return true;
+}
+} // namespace
+
+std::expected<std::vector<FlatInstance>, std::string>
+Flatten(const AssemblyDocument& top, const PartResolver& partById,
+        const AssemblyResolver& asmById, int maxDepth) {
+  FlattenCtx ctx{partById, asmById, maxDepth, {}, {}, {}, {}};
+  if (!FlattenInto(ctx, top, glm::mat4(1.0f), 0, true, 0))
+    return std::unexpected(ctx.error);
+  return ctx.out;
+}
+
+bool WouldCycle(const AssemblyDocument& host, uint64_t hostSlotId,
+                uint64_t refId, OccurrenceRef kind,
+                const AssemblyResolver& asmById, std::string* why) {
+  if (kind != OccurrenceRef::Assembly)
+    return false;
+  if (refId == hostSlotId) {
+    if (why)
+      *why = "an assembly cannot contain itself";
+    return true;
+  }
+  // Does the candidate already reach the host, anywhere below it?
+  std::vector<uint64_t> stack{refId};
+  std::vector<uint64_t> seen;
+  while (!stack.empty()) {
+    const uint64_t id = stack.back();
+    stack.pop_back();
+    if (std::find(seen.begin(), seen.end(), id) != seen.end())
+      continue;
+    seen.push_back(id);
+    const AssemblyDocument* doc = asmById(id);
+    if (doc == nullptr)
+      continue;
+    for (const Occurrence& occ : doc->GetOccurrences()) {
+      if (occ.refKind != OccurrenceRef::Assembly)
+        continue;
+      if (occ.partId == hostSlotId) {
+        if (why)
+          *why = "that assembly already contains this one, so placing it here "
+                 "would close a cycle";
+        return true;
+      }
+      stack.push_back(occ.partId);
+    }
+  }
+  return false;
+}
+
+std::vector<std::pair<uint64_t, uint64_t>>
+SubtreeVersions(const AssemblyDocument& top, const PartResolver& partById,
+                const AssemblyResolver& asmById, int maxDepth) {
+  std::vector<std::pair<uint64_t, uint64_t>> out;
+  std::vector<std::pair<const AssemblyDocument*, int>> stack{{&top, 0}};
+  std::vector<uint64_t> visited;
+  while (!stack.empty()) {
+    const auto [doc, depth] = stack.back();
+    stack.pop_back();
+    if (depth > maxDepth)
+      continue;
+    for (const Occurrence& occ : doc->GetOccurrences()) {
+      if (occ.refKind == OccurrenceRef::Assembly) {
+        const AssemblyDocument* sub = asmById(occ.partId);
+        if (sub == nullptr)
+          continue;
+        // The sub's OWN version: an occurrence moved inside it changes
+        // nothing about its parts, and must still restale the top.
+        out.emplace_back(occ.partId, sub->Version());
+        if (std::find(visited.begin(), visited.end(), occ.partId) ==
+            visited.end()) {
+          visited.push_back(occ.partId);
+          stack.push_back({sub, depth + 1});
+        }
+      } else if (const Document* part = partById(occ.partId)) {
+        out.emplace_back(occ.partId, part->Version());
+      }
+    }
+  }
+  return out;
+}
+
+namespace {
 
 // The occurrence's own placement matrix (translation + orientation). Mirrors
 // ui::OccurrenceMatrix, kept here so the solver has no UI dependency.

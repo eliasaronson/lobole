@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 54; // v54: per-feature appearance override
+inline constexpr int kVersion = 55; // v55: occurrence ref_kind (sub-assemblies)
                                     // (v52: extrude through_all)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {

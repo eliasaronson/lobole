@@ -166,6 +166,48 @@ TEST_CASE("Frozen v23 assembly golden loads at the exact schema",
   CHECK(*arm2->partVersion == "abc123");
 }
 
+// v55 froze the occurrence reference KIND. A file written before it has no
+// `ref_kind` and means "part" — that default is what keeps every existing
+// project loading, so it is pinned here rather than left to the loader's
+// value() call.
+TEST_CASE("Frozen v55 sub-assembly golden loads at the exact schema",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v55-subassembly.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(asmDoc->OccurrenceCount() == 3);
+
+  const Occurrence* dock = asmDoc->FindById(1);
+  REQUIRE(dock != nullptr);
+  CHECK(dock->refKind == OccurrenceRef::Assembly);
+  CHECK(dock->partId == 7); // a SLOT id, resolved against assemblies
+
+  const Occurrence* gangway = asmDoc->FindById(2);
+  REQUIRE(gangway != nullptr);
+  CHECK(gangway->refKind == OccurrenceRef::Assembly);
+  CHECK_THAT(gangway->position.x, WithinAbs(3000.0f, 1e-6f));
+
+  // No ref_kind at all ⇒ a part, which is what every pre-v55 file means.
+  const Occurrence* ladder = asmDoc->FindById(3);
+  REQUIRE(ladder != nullptr);
+  CHECK(ladder->refKind == OccurrenceRef::Part);
+}
+
+// A pre-v55 golden must still read as parts — the compatibility claim above,
+// checked against a file that predates the field entirely.
+TEST_CASE("A pre-v55 assembly golden reads as part references",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v26-assembly.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc != nullptr);
+  for (const Occurrence& o : asmDoc->GetOccurrences())
+    CHECK(o.refKind == OccurrenceRef::Part);
+}
+
 // ---- Mates (A3, v24) ------------------------------------------------------
 
 namespace {

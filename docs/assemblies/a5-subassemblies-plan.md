@@ -133,16 +133,16 @@ kinds. Adding an occurrence that would create a cycle is refused at
 add_occurrence time by a dry-run Flatten, not discovered later at
 render time.
 
-**Format: v55.** `ref_kind` on occurrences + kVersion bump. DEVIATION
-from the golden-file policy, recorded here: the golden corpus is
-single-document files, and a nested assembly is only meaningful as a
-multi-doc project (the reference must resolve). So v55's regression
-anchor is a PROJECT fixture — `tests/fixtures/nested-dock/` (small:
-one part, one sub-assembly, one top) — exercised by the new smoke's
-save -> reopen -> flatten -> BOM round-trip, instead of a
-`tests/golden/v55-*.json` pair the harness cannot host. If a
-single-doc-expressible v55 change lands later, it adds the classic
-golden then.
+**Format: v55.** `ref_kind` on occurrences + kVersion bump. **No deviation
+after all** (the draft reserved one): `ref_kind` is a field on an occurrence,
+so it IS expressible in one document — the reference not resolving inside a
+lone file does not matter, because a golden pins the SCHEMA, not the
+resolution. `tests/golden/assembly/v55-subassembly.json` is the classic frozen
+golden, in the assembly subdirectory the harness already has, plus a companion
+test asserting a pre-v55 golden still reads as part references (the
+compatibility claim, checked rather than asserted). The multi-document
+behaviour — save, reopen, flatten, BOM — is the nested smoke's job in A5.4;
+that is coverage the golden cannot give, not a replacement for it.
 
 ## Phases
 

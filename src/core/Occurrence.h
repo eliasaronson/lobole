@@ -16,10 +16,18 @@
 // on its own; A3 mates will re-solve over non-`fixed` occurrences on load
 // (the literal-plus-`_expr` pattern applied to placement). See
 // docs/assemblies/a2-design.md.
+// What an occurrence places (A5). The field it qualifies is `partId`, whose
+// SHAPE does not change — a slot id is a slot id — but whose resolution
+// widens from "a part document" to "a part or an assembly document". Stored
+// explicitly rather than inferred from whatever the id currently resolves to,
+// so a DANGLING reference still knows what it was looking for and can say so.
+enum class OccurrenceRef { Part, Assembly };
+
 struct Occurrence {
   uint64_t id = 0;     // stable, unique within the assembly, never reused
   std::string name;    // display label (cosmetic)
-  uint64_t partId = 0; // stable id of the referenced part document
+  uint64_t partId = 0; // stable id of the referenced part or assembly document
+  OccurrenceRef refKind = OccurrenceRef::Part;
   std::optional<std::string> partVersion; // reserved: git-commit pin (F5)
 
   // Placement: translation + orientation (quaternion). Diffable, shear-free,

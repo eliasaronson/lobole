@@ -17,6 +17,9 @@ json OccurrenceToJson(const Occurrence& o) {
   j["id"] = o.id;
   j["name"] = o.name;
   j["part_id"] = o.partId;
+  // v55: what part_id points at. Absent in v54 and older ⇒ "part", which is
+  // what every existing file means.
+  j["ref_kind"] = o.refKind == OccurrenceRef::Assembly ? "assembly" : "part";
   j["part_version"] = o.partVersion ? json(*o.partVersion) : json(nullptr);
   j["transform"] = {{"position", Vec3ToJson(o.position)},
                     {"orientation", QuatToJson(o.orientation)}};
@@ -30,6 +33,9 @@ Occurrence OccurrenceFromJson(const json& j) {
   o.id = j.at("id").get<uint64_t>();
   o.name = j.value("name", std::string{});
   o.partId = j.at("part_id").get<uint64_t>();
+  o.refKind = j.value("ref_kind", std::string("part")) == "assembly"
+                  ? OccurrenceRef::Assembly
+                  : OccurrenceRef::Part;
   if (j.contains("part_version") && !j.at("part_version").is_null())
     o.partVersion = j.at("part_version").get<std::string>();
   // Both halves of the transform are optional: a caller placing a part by

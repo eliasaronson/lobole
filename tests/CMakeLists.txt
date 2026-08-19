@@ -17,6 +17,7 @@ add_executable(designer_tests
     # environment (empty unless ENABLE_SANITIZERS=ON). See the top-level
     # CMakeLists for why this is per-executable.
     ${SANITIZER_DEFAULTS_SRC}
+    test_assembly_flatten.cpp
     test_cadkernel.cpp
     test_sketch.cpp
     test_document.cpp
