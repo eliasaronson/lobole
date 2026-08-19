@@ -143,37 +143,28 @@ void RayTracingRenderer::Shutdown() {
   DestroyStillResources();
   m_stillActive = false;
 
-  // Cleanup acceleration structures
-  if (m_rtFunctions.vkDestroyAccelerationStructureKHR) {
-    if (m_bottomLevelAS.handle != VK_NULL_HANDLE) {
-      m_rtFunctions.vkDestroyAccelerationStructureKHR(
-          m_device, m_bottomLevelAS.handle, nullptr);
-    }
-    if (m_topLevelAS.handle != VK_NULL_HANDLE) {
-      m_rtFunctions.vkDestroyAccelerationStructureKHR(
-          m_device, m_topLevelAS.handle, nullptr);
-    }
-  }
+  // The scene: the top-level AS, and every geometry's BLAS + vertex/index
+  // buffers. This was an empty loop with a note saying MeshRenderer owned
+  // these — it does not. AddGeometry allocates the vertex/index buffers here
+  // and CreateBottomLevelAS allocates the BLAS here, so both leaked on every
+  // exit; ASan put the number on it (~108 KB of host allocations still live,
+  // and a BLAS per body of device memory behind them).
+  //
+  // ClearGeometry() FIRST and alone: it is the one owner of the TLAS and the
+  // per-geometry resources, and it nulls what it frees. The by-hand pass that
+  // used to sit here destroyed the TLAS without clearing the handles, so
+  // adding this call after it would have freed each one twice.
+  ClearGeometry();
 
-  // Cleanup buffers
-  if (m_bottomLevelAS.buffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(m_device, m_bottomLevelAS.buffer, nullptr);
-    vkFreeMemory(m_device, m_bottomLevelAS.memory, nullptr);
-  }
-  if (m_topLevelAS.buffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(m_device, m_topLevelAS.buffer, nullptr);
-    vkFreeMemory(m_device, m_topLevelAS.memory, nullptr);
-  }
+  // The legacy single-BLAS member, which predates the per-geometry ones and
+  // is not part of m_geometries.
+  DestroyAccelerationStructure(m_bottomLevelAS);
+
   if (m_shaderBindingTableBuffer != VK_NULL_HANDLE) {
     vkDestroyBuffer(m_device, m_shaderBindingTableBuffer, nullptr);
     vkFreeMemory(m_device, m_shaderBindingTableMemory, nullptr);
-  }
-
-  // Cleanup geometry buffers
-  for (auto& geometry : m_geometries) {
-    if (geometry && geometry->vertexBuffer != VK_NULL_HANDLE) {
-      // Note: These buffers are managed by MeshRenderer, don't destroy here
-    }
+    m_shaderBindingTableBuffer = VK_NULL_HANDLE;
+    m_shaderBindingTableMemory = VK_NULL_HANDLE;
   }
 
   // Cleanup Vulkan objects
