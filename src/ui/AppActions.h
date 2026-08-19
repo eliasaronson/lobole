@@ -1,6 +1,7 @@
 #pragma once
 
-#include "cad/MeshExport.h"                // MeshExport::Item
+#include "cad/MeshExport.h" // MeshExport::Item
+#include "core/AssemblySolve.h"
 #include "core/ElementMap.h"               // ElementRef
 #include "core/drawing/DrawingDimension.h" // drawing::ResolvedDim
 #include "render/SketchRenderer.h"         // Vertex3D, PrimVertex
@@ -84,6 +85,18 @@ Document* PartDocById(AppState& state, uint64_t partId);
 // An occurrence's solved placement as a model matrix (translate ∘ rotate) —
 // the transform assembly measure / interference place part bodies with.
 glm::mat4 OccurrenceMatrix(const Occurrence& o);
+
+// A5 resolution: an occurrence's stable id names a part OR an assembly slot,
+// per its refKind.
+AssemblyDocument* AssemblyDocById(AppState& state, uint64_t slotId);
+assembly::PartResolver PartResolverFor(AppState& state);
+assembly::AssemblyResolver AssemblyResolverFor(AppState& state);
+
+// The active assembly's leaf parts, placed in world space — the one walk
+// every geometry consumer uses (render, BOM, mass, contact, export, drawings,
+// ray tracing, section caps). Empty when the tree cannot be walked, with the
+// reason logged.
+std::vector<assembly::FlatInstance> FlattenActiveAssembly(AppState& state);
 
 // Assembly occurrence-edit undo (snapshot-based; A2 phase 3). Call
 // SnapshotAssembly *before* mutating the active assembly's occurrences; Undo/

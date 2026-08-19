@@ -142,23 +142,29 @@ int SolveActiveAssembly(AppState& state) {
   // Stamp the referenced parts' versions (A4): AssemblyPartsStale compares
   // against these, so a later part edit re-solves on tab activation. Stamped
   // at solve (not render sync) so propagation also works headless.
+  //
+  // A5: TRANSITIVELY. Resolving through PartDocById alone returns null for an
+  // assembly reference, so a sub-assembly never read as stale and the top tab
+  // kept rendering yesterday's geometry after an edit inside it — a
+  // correct-looking wrong answer. SubtreeVersions stamps every part below,
+  // plus each nested assembly's own version (moving an occurrence inside a
+  // sub changes no part at all, and must still restale the top).
   state.solvedPartVersions.clear();
-  for (const Occurrence& occ : state.assembly->GetOccurrences())
-    if (const Document* part = PartDocById(state, occ.partId))
-      state.solvedPartVersions[occ.partId] = part->Version();
+  for (const auto& [slotId, version] : assembly::SubtreeVersions(
+           *state.assembly, PartResolverFor(state), AssemblyResolverFor(state)))
+    state.solvedPartVersions[slotId] = version;
   return rep.erroredMates;
 }
 
 bool AssemblyPartsStale(AppState& state) {
   if (!state.assembly)
     return false;
-  for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-    const Document* part = PartDocById(state, occ.partId);
-    if (!part)
-      continue; // dangling reference — nothing to compare (solve won't fix it)
-    const auto it = state.solvedPartVersions.find(occ.partId);
-    if (it == state.solvedPartVersions.end() || it->second != part->Version())
-      return true; // never stamped, or the part regenerated since the stamp
+  for (const auto& [slotId, version] :
+       assembly::SubtreeVersions(*state.assembly, PartResolverFor(state),
+                                 AssemblyResolverFor(state))) {
+    const auto it = state.solvedPartVersions.find(slotId);
+    if (it == state.solvedPartVersions.end() || it->second != version)
+      return true; // never stamped, or something below regenerated since
   }
   return false;
 }
@@ -167,12 +173,15 @@ BomTable ComputeBom(AppState& state) {
   BomTable table;
   if (!state.assembly)
     return table;
-  for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-    if (state.assembly->OccurrenceSuppressed(occ.id))
-      continue; // suppressed by the active config: out of the BOM
+  // A5: aggregate over the LEAF parts of the whole tree, so a sub-assembly
+  // placed twice doubles its parts' quantities. The per-unit BOM needs no
+  // code of its own — it is this same function on that assembly's tab.
+  for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+    if (!inst.visible)
+      continue; // hidden or suppressed, here or above: out of the BOM
     BomRow* row = nullptr;
     for (BomRow& r : table.rows)
-      if (r.partId == occ.partId) {
+      if (r.partId == inst.partId) {
         row = &r;
         break;
       }
@@ -181,15 +190,15 @@ BomTable ComputeBom(AppState& state) {
       continue;
     }
     BomRow fresh;
-    fresh.partId = occ.partId;
+    fresh.partId = inst.partId;
     fresh.quantity = 1;
     for (const PartSlot& slot : state.parts)
-      if (slot.kind == DocKind::Part && slot.id == occ.partId)
+      if (slot.kind == DocKind::Part && slot.id == inst.partId)
         fresh.partName = slot.name;
-    const Document* part = PartDocById(state, occ.partId);
+    const Document* part = PartDocById(state, inst.partId);
     if (!part) {
       fresh.partName = "(missing part)"; // dangling reference — mass unknown
-      table.warnings.push_back("occurrence '" + occ.name +
+      table.warnings.push_back("'" + inst.path +
                                "' references a missing part — mass unknown");
     } else if (const auto mass = Measure::MassOfBodies(part->GetBodies())) {
       fresh.unitVolume = mass->volume;
@@ -987,14 +996,26 @@ void SyncAssemblyRenderers(AppState& state) {
       byPart; // partId -> bodies
   size_t palette = 0;
 
-  for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-    if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
-      continue; // hidden (or suppressed by the active config): not rendered
-    Document* part = PartDocById(state, occ.partId);
+  // A5: the LEAF parts of the tree, placed. A top-level part occurrence is a
+  // one-element subtree, so this loop is unchanged for a flat assembly — and
+  // instancing survives nesting, because a FlatInstance still carries its
+  // partId and the mesh-asset cache is keyed on that (six barrels in two
+  // nested assemblies remain one asset).
+  for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+    if (!inst.visible)
+      continue; // hidden here, or inside a hidden sub-assembly
+    Document* part = PartDocById(state, inst.partId);
     if (!part)
       continue; // dangling reference (part deleted) — skip
+    // The occurrence this leaf belongs to at the TOP level: what selection,
+    // explode and picking address. A leaf inside a sub-assembly reports its
+    // sub-assembly's occurrence, which is what makes it one unit.
+    const Occurrence* rootOcc = state.assembly->FindById(inst.rootOccurrenceId);
+    if (rootOcc == nullptr)
+      continue;
+    const Occurrence& occ = *rootOcc;
 
-    auto it = byPart.find(occ.partId);
+    auto it = byPart.find(inst.partId);
     if (it == byPart.end()) {
       // First time we see this part: tessellate its bodies + create assets.
       std::vector<SharedBody> shared;
@@ -1044,10 +1065,15 @@ void SyncAssemblyRenderers(AppState& state) {
         }
         shared.push_back(std::move(sb));
       }
-      it = byPart.emplace(occ.partId, std::move(shared)).first;
+      it = byPart.emplace(inst.partId, std::move(shared)).first;
     }
 
-    const glm::mat4 xf = DisplayMatrix(state, occ); // solved ∘ explode offset
+    // The flattened world transform, offset by the TOP-LEVEL occurrence's
+    // explode vector — exploding a sub-assembly moves the whole unit, not
+    // each of its parts to its own corner.
+    const glm::mat4 xf =
+        glm::translate(glm::mat4(1.0f), ExplodeOffset(state, occ.id)) *
+        inst.world;
     for (size_t bi = 0; bi < it->second.size(); bi++) {
       const SharedBody& sb = it->second[bi];
       if (sb.assetId == 0)
@@ -1077,8 +1103,9 @@ void SyncAssemblyRenderers(AppState& state) {
     // Section caps (I3). Without these an assembly section shows the inside
     // of hollow shells — the geometry is clipped by the shader but the cut
     // has no surface, which reads as "section view is broken" rather than as
-    // a section. One call per occurrence: the plane lands somewhere different
-    // in each part's own space.
+    // a section. One call per LEAF instance: the plane lands somewhere
+    // different in each part's own space, and a part nested two levels down
+    // gets there through its composed world transform.
     const ClipPlaneArray planes = SectionPlanes(state);
     std::vector<glm::vec3> capColors;
     for (size_t i = 0; i < planes.size(); i++) {
@@ -1226,23 +1253,22 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
     // (never exploded — an export is the real assembly). Occurrences of one
     // part reuse the part's shapes, so the shared TShapes let the writers
     // instance the geometry rather than copy it.
-    for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-      if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
+    for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+      if (!inst.visible)
         continue;
-      Document* part = PartDocById(state, occ.partId);
-      if (!part)
-        continue;
-      const glm::mat4 xf = OccurrenceMatrix(occ); // solved, not exploded
-      const auto& bodies = part->GetBodies();
+      const auto& bodies = inst.part->GetBodies();
       for (size_t bi = 0; bi < bodies.size(); bi++) {
         if (!bodies[bi].shape.IsValid())
           continue;
         MeshExport::Item item;
         item.shape = bodies[bi].shape;
+        // The tree path names the item ("Gangway/Board 03"), which is what a
+        // glTF/STEP consumer needs to tell two identical boards apart.
         const std::string label =
-            occ.name.empty() ? ("occ" + std::to_string(occ.id)) : occ.name;
+            inst.path.empty() ? ("occ" + std::to_string(inst.rootOccurrenceId))
+                              : inst.path;
         item.name = bodies.size() > 1 ? label + "-" + bodies[bi].name : label;
-        item.transform = xf;
+        item.transform = inst.world; // solved, not exploded
         FillItemAppearance(bodies[bi], palette++, item);
         items.push_back(std::move(item));
       }

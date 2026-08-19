@@ -1994,6 +1994,46 @@ Document* PartDocById(AppState& state, uint64_t partId) {
   return nullptr;
 }
 
+// The ASSEMBLY document an occurrence references (A5), by the same stable slot
+// id — an occurrence's `partId` resolves against parts or assemblies
+// depending on its refKind. Null when the id is not an assembly slot.
+AssemblyDocument* AssemblyDocById(AppState& state, uint64_t slotId) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (state.parts[i].kind == DocKind::Assembly && state.parts[i].id == slotId)
+      return SlotAssembly(state, i);
+  return nullptr;
+}
+
+// The two resolvers Flatten wants, bound to this AppState. Every walker that
+// needs the leaf parts of the active assembly goes through here, so none of
+// them has to know how slots are stored.
+assembly::PartResolver PartResolverFor(AppState& state) {
+  return [&state](uint64_t id) -> const Document* {
+    return PartDocById(state, id);
+  };
+}
+assembly::AssemblyResolver AssemblyResolverFor(AppState& state) {
+  return [&state](uint64_t id) -> const AssemblyDocument* {
+    return AssemblyDocById(state, id);
+  };
+}
+
+// The leaf parts of the active assembly, placed. Empty (with the reason
+// logged once) when the tree cannot be walked — a cycle, or nesting past the
+// depth cap. Callers render/aggregate what they get; refusing to draw
+// anything at all would hide the model AND the message.
+std::vector<assembly::FlatInstance> FlattenActiveAssembly(AppState& state) {
+  if (!state.assembly)
+    return {};
+  auto flat = assembly::Flatten(*state.assembly, PartResolverFor(state),
+                                AssemblyResolverFor(state));
+  if (!flat) {
+    LOG_ERROR("Assembly cannot be walked: {}", flat.error());
+    return {};
+  }
+  return *flat;
+}
+
 namespace {
 // Aim the camera at a world-space box: the shared tail of the document and
 // selection fits.
@@ -2056,14 +2096,19 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max) {
   max = glm::vec3(-FLT_MAX);
   bool any = false;
   if (state.assembly) {
-    // Every visible occurrence's part bodies, transformed into place.
-    for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-      if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
+    // Every visible leaf part of the tree, placed (A5). Bounding only the
+    // top level would put a new section's default cut, and the camera, in
+    // the wrong place for a nested model.
+    for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+      if (!inst.visible)
         continue;
-      Document* part = PartDocById(state, occ.partId);
-      if (!part)
-        continue;
-      const glm::mat4 xf = DisplayMatrix(state, occ); // exploded extents too
+      const Document* part = inst.part;
+      // The top-level occurrence's explode offset moves the whole subtree,
+      // so exploded extents are bounded too.
+      const glm::mat4 xf =
+          glm::translate(glm::mat4(1.0f),
+                         ExplodeOffset(state, inst.rootOccurrenceId)) *
+          inst.world;
       for (const auto& body : part->GetBodies()) {
         glm::vec3 bmin, bmax;
         body.shape.GetBoundingBox(bmin, bmax);
@@ -2435,13 +2480,23 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
         return false;
       }
       *sourceVersion = asmDoc->Version();
-      for (const Occurrence& occ : asmDoc->GetOccurrences()) {
-        if (!occ.visible || asmDoc->OccurrenceSuppressed(occ.id))
+      // A5: project the leaf parts of the whole tree. Every projected body is
+      // stamped with its TOP-LEVEL occurrence id, not the leaf's — a leaf
+      // inside a sub-assembly has an id belonging to the SUB's document,
+      // which this drawing's dimension refs could never resolve. So a
+      // sub-assembly dimensions as one unit, and no ref can dangle; to
+      // dimension an inner part, draw that assembly.
+      auto flat = assembly::Flatten(*asmDoc, PartResolverFor(state),
+                                    AssemblyResolverFor(state));
+      if (!flat) {
+        *error = flat.error();
+        return false;
+      }
+      for (const assembly::FlatInstance& inst : *flat) {
+        if (!inst.visible)
           continue;
-        const Document* part = PartDocById(state, occ.partId);
-        if (!part)
-          continue; // dangling part reference — skip
-        AppendBodies(*part, glm::dmat4(OccurrenceMatrix(occ)), occ.id, out);
+        AppendBodies(*inst.part, glm::dmat4(inst.world), inst.rootOccurrenceId,
+                     out);
       }
       return true;
     }
@@ -2979,15 +3034,13 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   };
   std::vector<RTItem> rtItems;
   if (state.assembly) {
-    for (const Occurrence& occ : state.assembly->GetOccurrences()) {
-      if (!occ.visible || state.assembly->OccurrenceSuppressed(occ.id))
+    // A5: the leaf parts of the whole tree — a nested assembly must appear in
+    // the path-traced still as well as the viewport.
+    for (const assembly::FlatInstance& inst : FlattenActiveAssembly(state)) {
+      if (!inst.visible)
         continue;
-      Document* part = PartDocById(state, occ.partId);
-      if (!part)
-        continue;
-      const glm::mat4 xf = OccurrenceMatrix(occ);
-      for (const auto& body : part->GetBodies())
-        rtItems.push_back({&body, xf});
+      for (const auto& body : inst.part->GetBodies())
+        rtItems.push_back({&body, inst.world});
     }
   } else {
     for (const auto& body : state.document->GetBodies())
