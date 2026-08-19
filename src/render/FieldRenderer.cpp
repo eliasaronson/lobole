@@ -260,7 +260,9 @@ void FieldRenderer::Render(VkCommandBuffer commandBuffer,
     return;
   const uint32_t frame = currentFrame % kFramesInFlight;
 
-  Ubo ubo{m_view, m_proj, m_clipPlane};
+  Ubo ubo{m_view, m_proj, {}};
+  for (int i = 0; i < kMaxClipPlanes; i++)
+    ubo.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
   std::memcpy(m_uniformBuffers[frame].mapped, &ubo, sizeof(ubo));
 
   const VkDeviceSize vbytes = m_vertices.size() * sizeof(FieldVertex);

@@ -1079,17 +1079,28 @@ void SyncAssemblyRenderers(AppState& state) {
     // has no surface, which reads as "section view is broken" rather than as
     // a section. One call per occurrence: the plane lands somewhere different
     // in each part's own space.
-    glm::vec3 localOrigin, localNormal;
-    if (SectionPlaneInPartSpace(state.sectionPlane, xf, localOrigin,
-                                localNormal)) {
-      std::vector<glm::vec3> capColors;
-      capColors.reserve(it->second.size());
-      for (const SharedBody& sb : it->second)
-        capColors.push_back(sb.hasMaterial ? sb.albedo : sb.palette);
-      AppendCapMeshes(
-          state,
-          Measure::SectionCaps(part->GetBodies(), localOrigin, localNormal),
-          capColors, xf, glm::normalize(glm::vec3(state.sectionPlane)));
+    const ClipPlaneArray planes = SectionPlanes(state);
+    std::vector<glm::vec3> capColors;
+    for (size_t i = 0; i < planes.size(); i++) {
+      glm::vec3 localOrigin, localNormal;
+      if (!SectionPlaneInPartSpace(planes[i], xf, localOrigin, localNormal))
+        continue;
+      if (capColors.empty()) {
+        capColors.reserve(it->second.size());
+        for (const SharedBody& sb : it->second)
+          capColors.push_back(sb.hasMaterial ? sb.albedo : sb.palette);
+      }
+      // The other sections, also in this part's space, trim this cap.
+      std::vector<glm::vec4> trim;
+      for (size_t j = 0; j < planes.size(); j++) {
+        glm::vec3 to, tn;
+        if (j != i && SectionPlaneInPartSpace(planes[j], xf, to, tn))
+          trim.push_back(glm::vec4(tn, glm::dot(to, tn)));
+      }
+      AppendCapMeshes(state,
+                      Measure::SectionCaps(part->GetBodies(), localOrigin,
+                                           localNormal, trim),
+                      capColors, xf, glm::normalize(glm::vec3(planes[i])));
     }
   }
   // (Highlights re-apply themselves: they are a per-frame projection of the

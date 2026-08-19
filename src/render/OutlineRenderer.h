@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/ClipPlanes.h"
+
 #include "render/OutlineEdges.h"
 #include <chrono>
 #include <glm/glm.hpp>
@@ -70,7 +72,7 @@ public:
 
   // Section clip plane (world): xyz = normal, w = distance; edges past it
   // are discarded. Zero = disabled (default).
-  void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
+  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
   void SetViewport(int32_t x, int32_t y, uint32_t width, uint32_t height);
 
   bool IsInitialized() const { return m_isInitialized; }
@@ -124,7 +126,7 @@ private:
     glm::vec4 wireframeColor;
     float lineWidth;
     float _padding[3];
-    glm::vec4 clipPlane; // section clip (world): xyz=normal, w=dist
+    glm::vec4 clipPlanes[kMaxClipPlanes]; // section clips (world)
   };
 
   // Initialization helpers
@@ -207,7 +209,7 @@ private:
 
   // Settings
   OutlineSettings m_settings;
-  glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
+  ClipPlaneArray m_clipPlanes = NoClipPlanes(); // section view
 
   // State
   bool m_isInitialized = false;

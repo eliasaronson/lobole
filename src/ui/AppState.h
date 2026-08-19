@@ -8,6 +8,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchSolver.h"
+#include "render/ClipPlanes.h"
 #include "ui/TopoJob.h"
 
 #include <glm/glm.hpp>
@@ -675,6 +676,10 @@ struct AppState {
     glm::vec3 axisDir{0, 0, 1};
     double startValue = 0.0; // the parameter at grab (Esc restores this)
     float startParam = 0.0f; // axis coordinate / arc angle at grab
+    // Non-zero when the handle belongs to a SECTION rather than a pending
+    // feature — sections are view state, so there is no feature to resolve
+    // and no regeneration to run.
+    uint64_t sectionId = 0;
   };
 
   // In-context editing (A4): non-zero while a part tab is being edited with
@@ -771,22 +776,36 @@ struct AppState {
   // descriptor rebind.
   bool ssaoFullRes = false; // full-res AO target instead of half-res
   int shadowMapSize = 2048; // key-light shadow map texels (1024 | 2048)
-  // Section view (I3): a world-space clip plane {xyz=normal, w=dist};
-  // fragments past it are discarded. Zero = disabled.
-  glm::vec4 sectionPlane = glm::vec4(0.0f);
-  // What the View > Section View menu shows. Here rather than in statics
-  // inside the draw function so that (a) an agent's set_section is reflected
-  // in the menu instead of the two disagreeing, and (b) the offset is not
-  // silently shared between tabs of wildly different size.
-  int sectionBasePlane = 0;         // 0 = XY (cut along Z), 1 = XZ, 2 = YZ
-  float sectionOffset = 0.0f;       // world distance along that normal
-  bool sectionOffsetSeeded = false; // has it been derived for this scene yet
-  // Section cap fills (I3 v2, C4): the section plane at the last cap rebuild,
-  // and the cap instance ids (separate from documentMeshes so body↔index
+  // Section views (I3, tool round): up to kMaxClipPlanes cuts at once, which
+  // INTERSECT — a fragment survives only where every enabled section keeps
+  // it, so two sections give a quarter cut.
+  //
+  // View state, not model state: not saved with the project (neither is the
+  // camera), applies to whatever the active tab shows, and references no
+  // geometry so nothing can dangle. Owned here rather than in the tool's draw
+  // function so that an agent's set_section and the tool window are the same
+  // thing — the menu this replaces kept its plane and offset in function
+  // statics, and the two silently disagreed.
+  struct SectionView {
+    uint64_t id = 0;      // stable while the app runs; row identity for tests
+    int basePlane = 0;    // 0 = XY (cut along Z), 1 = XZ, 2 = YZ
+    float offset = 0.0f;  // signed distance along that normal
+    bool reverse = false; // keep the other side of the cut
+    bool visible = true;  // unchecked = the row stays, the cut stops
+  };
+  std::vector<SectionView> sections;
+  uint64_t nextSectionId = 1;
+  // The Section tool window is open. The sections outlive it: closing the
+  // tool does not undo the cut you set up.
+  bool sectionToolOpen = false;
+  // Which row owns the viewport drag arrow (0 = the first section).
+  uint64_t sectionActiveId = 0;
+  // Section cap fills (I3 v2, C4): the planes at the last cap rebuild, and
+  // the cap instance ids (separate from documentMeshes so body↔index
   // alignment holds; removed on the next resync). A cap rebuild is triggered
-  // when sectionPlane changes and no widget is being dragged (so caps settle
-  // on slider release while the shader clip previews live).
-  glm::vec4 syncedSectionPlane = glm::vec4(0.0f);
+  // when the planes change and no widget is being dragged (so caps settle on
+  // release while the shader clip previews live).
+  ClipPlaneArray syncedSectionPlanes = NoClipPlanes();
   std::vector<uint32_t> sectionCapMeshes;
   // Topology shape-guide ghost (TO4): a translucent render of a topology
   // study's optimized iso-surface, shown in the normal modeling workspace so

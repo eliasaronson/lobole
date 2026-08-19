@@ -27,6 +27,7 @@
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/DragMath.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SketchInteraction.h"
@@ -70,6 +71,13 @@ static void ResetAppForTest() {
   s_App->sketchDrag = {};
   s_App->slotPick = {};
   s_App->measure = {};
+  // Sections are view state that deliberately outlives its tool window, so
+  // nothing in the app clears them — which makes them exactly the kind of
+  // leak this reset exists for: a predecessor's open tool turns the next
+  // test's "click the section button" into a click that CLOSES it.
+  ui::ClearSections(*s_App);
+  s_App->sectionToolOpen = false;
+  s_App->handleDrag = {};
 }
 
 // Original TestFunc for each registered test, keyed by the test; the wrapper
@@ -1912,11 +1920,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->showAbout);
   };
 
-  // Section view on an ASSEMBLY tab. Two things were wrong and both read as
-  // "section view does not work": the cut had no filled caps (the shader
-  // clipped the geometry, so you saw the inside of hollow shells), and the
-  // plane defaulted to the world origin, which for a model built anywhere
-  // else either removes everything or does nothing.
+  // Section view on an ASSEMBLY tab, through the tool. The bugs this pins:
+  // the cut had no filled caps (you saw the inside of hollow shells), the
+  // plane defaulted to the world origin (a model built elsewhere lost
+  // everything or nothing), and a second cut was impossible.
   t = IM_REGISTER_TEST(engine, "section",
                        "assembly_cut_is_capped_and_centered");
   t->TestFunc = [](ImGuiTestContext* ctx) {
@@ -1939,27 +1946,97 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)0);
 
-    // Cut along X (YZ plane) from the menu, exactly as a user would.
-    ctx->MenuClick("View/###view_section/###section_enabled");
+    // The toolbar button opens the tool AND seeds the first cut.
+    ToolbarClick(ctx, "###tb_section");
     ctx->Yield(3);
-    IM_CHECK(s_App->sectionPlane != glm::vec4(0.0f));
+    IM_CHECK(s_App->sectionToolOpen);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
+
     // Derived, not zero: the plane sits inside the model's own span.
     glm::vec3 bmin, bmax;
     IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
-    const glm::vec3 n = glm::vec3(s_App->sectionPlane);
-    const float d = s_App->sectionPlane.w;
-    IM_CHECK(d > glm::dot(bmin, n) && d < glm::dot(bmax, n));
+    const glm::vec4 p0 = ui::SectionPlaneOf(s_App->sections[0]);
+    const glm::vec3 n = glm::vec3(p0);
+    IM_CHECK(p0.w > glm::dot(bmin, n) && p0.w < glm::dot(bmax, n));
 
     // One cap per cut body per occurrence — the whole point.
-    IM_CHECK_GT(s_App->sectionCapMeshes.size(), (size_t)0);
-    const size_t capped = s_App->sectionCapMeshes.size();
-    IM_CHECK_EQ(capped, (size_t)2); // one body, two occurrences
+    IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)2);
 
-    // Turning it off takes the caps with it.
-    ctx->MenuClick("View/###view_section/###section_enabled");
+    // Reverse keeps the other side: same surface, opposite half-space.
+    const uint64_t firstId = s_App->sections[0].id;
+    ctx->SetRef("//Section###ToolWindow");
+    ctx->ItemClick("**/###reverse");
     ctx->Yield(3);
-    IM_CHECK(s_App->sectionPlane == glm::vec4(0.0f));
+    IM_CHECK(s_App->sections[0].reverse);
+    const glm::vec4 p1 = ui::SectionPlaneOf(s_App->sections[0]);
+    IM_CHECK(glm::dot(glm::vec3(p1), n) < 0.0f);            // flipped normal
+    IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)2); // still capped
+
+    // A second cut, which must intersect the first (and trim its caps).
+    ctx->ItemClick("###add");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)2);
+    IM_CHECK(s_App->sections[1].id != firstId);
+    IM_CHECK_GT(s_App->sectionCapMeshes.size(), (size_t)0);
+
+    // Deleting a row takes its cut with it.
+    ctx->ItemClick("###clear");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)0);
     IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)0);
+  };
+
+  // The drag arrow. Sections are view state, so this exercises the one handle
+  // path that resolves no feature and runs no regeneration — and the only one
+  // allowed on an assembly tab, where ComputeHandleSpec refuses outright.
+  t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_the_cut");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_section");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
+    const float before = s_App->sections[0].offset;
+
+    // Aim a ray straight down the arrow: anchor + dir * half its length.
+    glm::vec3 bmin, bmax;
+    IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
+    const glm::vec4 plane = ui::SectionPlaneOf(s_App->sections[0]);
+    const glm::vec3 n = glm::normalize(glm::vec3(plane));
+    const glm::vec3 c = (bmin + bmax) * 0.5f;
+    const glm::vec3 anchor = c - n * (glm::dot(c, n) - plane.w);
+    // WorldToScreen is absolute; ScreenToWorldRay wants viewport-local.
+    const glm::vec2 grab =
+        ui::WorldToScreen(*s_App,
+                          anchor + n * (0.45f * ui::GizmoScale(*s_App))) -
+        s_App->viewportPos;
+    const Ray ray = s_App->faceSelector->ScreenToWorldRay(
+        grab.x, grab.y, static_cast<int>(s_App->viewportSize.x),
+        static_cast<int>(s_App->viewportSize.y), *s_App->camera);
+    IM_CHECK(ui::HandlePreviewHandleInput(*s_App, ray, /*clicked=*/true,
+                                          /*down=*/true, /*released=*/false));
+    IM_CHECK(s_App->handleDrag.active);
+    IM_CHECK(s_App->handleDrag.sectionId == s_App->sections[0].id);
+    IM_CHECK(s_App->handleDrag.featureId == 0); // no feature is involved
+
+    // Drag along the axis: a ray aimed further along the normal moves the cut.
+    const glm::vec2 moved =
+        ui::WorldToScreen(*s_App,
+                          anchor + n * (2.0f * ui::GizmoScale(*s_App))) -
+        s_App->viewportPos;
+    const Ray ray2 = s_App->faceSelector->ScreenToWorldRay(
+        moved.x, moved.y, static_cast<int>(s_App->viewportSize.x),
+        static_cast<int>(s_App->viewportSize.y), *s_App->camera);
+    ui::HandlePreviewHandleInput(*s_App, ray2, /*clicked=*/false,
+                                 /*down=*/true, /*released=*/false);
+    IM_CHECK(std::abs(s_App->sections[0].offset - before) > 1e-3f);
+    ui::HandlePreviewHandleInput(*s_App, ray2, /*clicked=*/false,
+                                 /*down=*/false, /*released=*/true);
+    IM_CHECK(!s_App->handleDrag.active);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // the document is untouched
   };
 
   // Refine's whole point is the seam a boolean leaves behind: count the
@@ -2325,9 +2402,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(3);
     s_App->showShadows = true;
     ctx->Yield(3);
-    s_App->sectionPlane = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f); // cut on XY
+    ui::AddSection(*s_App, 0); // cut on XY
     ctx->Yield(5);
-    s_App->sectionPlane = glm::vec4(0.0f);
+    ui::ClearSections(*s_App);
     ctx->Yield(3);
     IM_CHECK(s_App->showShadows);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // app + body survived
@@ -2344,11 +2421,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->showAmbientOcclusion = false;
     ctx->Yield(3);
-    s_App->sectionPlane = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f); // cut on XY
+    ui::AddSection(*s_App, 0); // cut on XY
     ctx->Yield(3);
     s_App->showAmbientOcclusion = true;
     ctx->Yield(5);
-    s_App->sectionPlane = glm::vec4(0.0f);
+    ui::ClearSections(*s_App);
     ctx->Yield(3);
     IM_CHECK(s_App->showAmbientOcclusion);
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // app + body survived

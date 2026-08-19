@@ -18,6 +18,7 @@
 #include <BRepCheck_Result.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
+#include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
@@ -738,7 +739,8 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
 
 std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
                                   const glm::vec3& origin,
-                                  const glm::vec3& normal) {
+                                  const glm::vec3& normal,
+                                  const std::vector<glm::vec4>& trimPlanes) {
   std::vector<CADShape> caps;
   if (bodies.empty())
     return caps;
@@ -755,10 +757,39 @@ std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
       // null); keep a cap only when it has real area, so callers can test
       // IsValid() to mean "there is a cut face here".
       if (common.IsDone() && !common.Shape().IsNull()) {
+        // Cut the cap back to the kept side of every other section. Each is
+        // a half-space solid built from the same oversized quad the cutter
+        // uses, with its reference point on the DISCARDED side.
+        TopoDS_Shape capShape = common.Shape();
+        for (const glm::vec4& t : trimPlanes) {
+          const glm::vec3 tn = glm::vec3(t);
+          if (glm::length(tn) < 1e-6f)
+            continue;
+          const glm::vec3 tnu = glm::normalize(tn);
+          const glm::vec3 tOrigin = tnu * t.w;
+          const TopoDS_Face trimFace = BuildSectionCutter(bodies, tOrigin, tnu);
+          // A point well past the plane on the removed side. The distance is
+          // the model's own size, so it scales with the part.
+          glm::vec3 lo(1e30f), hi(-1e30f);
+          for (const auto& bb : bodies) {
+            glm::vec3 bmin, bmax;
+            bb.shape.GetBoundingBox(bmin, bmax);
+            lo = glm::min(lo, bmin);
+            hi = glm::max(hi, bmax);
+          }
+          const glm::vec3 ref = tOrigin + tnu * (glm::length(hi - lo) + 1.0f);
+          BRepPrimAPI_MakeHalfSpace halfSpace(trimFace,
+                                              gp_Pnt(ref.x, ref.y, ref.z));
+          if (!halfSpace.IsDone())
+            continue;
+          BRepAlgoAPI_Cut trimmed(capShape, halfSpace.Solid());
+          if (trimmed.IsDone() && !trimmed.Shape().IsNull())
+            capShape = trimmed.Shape();
+        }
         GProp_GProps props;
-        BRepGProp::SurfaceProperties(common.Shape(), props);
+        BRepGProp::SurfaceProperties(capShape, props);
         if (props.Mass() > 1e-9) {
-          caps.emplace_back(common.Shape());
+          caps.emplace_back(capShape);
           continue;
         }
       }

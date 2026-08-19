@@ -1,7 +1,7 @@
 #version 450
 
 layout(location = 0) in float fragScalar;
-layout(location = 1) in float fragClipDist;
+layout(location = 1) in vec4 fragClipDist;
 
 layout(location = 0) out vec4 outColor;
 
@@ -23,6 +23,6 @@ vec3 turbo(float x) {
 }
 
 void main() {
-    if (fragClipDist > 0.0) discard; // section plane
+    if (any(greaterThan(fragClipDist, vec4(0.0)))) discard; // section planes
     outColor = vec4(turbo(fragScalar), 1.0);
 }

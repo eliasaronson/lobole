@@ -3,10 +3,10 @@
 // Depth-only: no color output. Exists solely to apply the section-clip
 // discard (mesh.frag's fragClipDist convention) so cut-away material does
 // not cast shadows.
-layout(location = 0) in float fragClipDist;
+layout(location = 0) in vec4 fragClipDist;
 
 void main() {
-    if (fragClipDist > 0.0) {
+    if (any(greaterThan(fragClipDist, vec4(0.0)))) {
         discard;
     }
 }

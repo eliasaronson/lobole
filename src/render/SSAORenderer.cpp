@@ -15,7 +15,7 @@ namespace {
 struct PrepassUBO {
   glm::mat4 view;
   glm::mat4 proj;
-  glm::vec4 clipPlane;
+  glm::vec4 clipPlanes[kMaxClipPlanes];
 };
 
 struct SSAOParamsUBO {
@@ -192,7 +192,8 @@ void SSAORenderer::RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
   PrepassUBO pre{};
   pre.view = view;
   pre.proj = proj;
-  pre.clipPlane = m_clipPlane;
+  for (int i = 0; i < kMaxClipPlanes; i++)
+    pre.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
   memcpy(m_prepassUBOMapped[frame], &pre, sizeof(pre));
 
   SSAOParamsUBO ao{};

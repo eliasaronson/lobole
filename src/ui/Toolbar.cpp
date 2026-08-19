@@ -137,6 +137,27 @@ void Divider() {
 }
 
 // The model-mode toolbar: create features, fit, planes.
+// The Section tool button. Shared by the part and assembly toolbars — a
+// section is a property of the VIEW, so it means the same thing on either,
+// and one id (###tb_section) is what tests and agents address. Only one
+// toolbar is drawn at a time, so the shared id is unambiguous.
+void SectionToolButton(AppState& state) {
+  const bool active = state.sectionToolOpen;
+  if (active)
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  if (ToolButton(ICON_FA_SCISSORS "###tb_section",
+                 "Section view (up to four cut planes at once)", true)) {
+    state.sectionToolOpen = !state.sectionToolOpen;
+    // A tool window with an empty list is a dead end: seed a cut through the
+    // middle of whatever this tab shows.
+    if (state.sectionToolOpen && state.sections.empty())
+      AddSection(state, 0);
+  }
+  if (active)
+    ImGui::PopStyleColor();
+}
+
 void DrawModelToolbar(AppState& state) {
   const bool hasDoc = state.document != nullptr;
   const bool idle = !HasPendingFeature(state); // no creation while previewing
@@ -276,6 +297,8 @@ void DrawModelToolbar(AppState& state) {
   // Snapshot the armed state: the button toggles state.measure.active, so
   // guarding the pop on the live value (which the click just flipped) would
   // unbalance the style stack and trip ImGui's PopStyleColor assert.
+  SectionToolButton(state);
+
   const bool measureActive = state.measure.active;
   if (measureActive)
     ImGui::PushStyleColor(ImGuiCol_Button,
@@ -682,6 +705,8 @@ void DrawAssemblyToolbar(AppState& state) {
   // their occurrence, so distances span occurrences in world space. Snapshot
   // the armed state so the toggling click can't unbalance the style stack (see
   // the model-toolbar measure button).
+  SectionToolButton(state);
+
   const bool measureActive = state.measure.active;
   if (measureActive)
     ImGui::PushStyleColor(ImGuiCol_Button,

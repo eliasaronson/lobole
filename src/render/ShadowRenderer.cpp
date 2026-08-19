@@ -169,20 +169,34 @@ void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene) {
     vkCmdSetScissor(cb, 0, 1, &sc);
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
 
-    // World section plane as vec4 P with signed dist = dot(P, (wp, 1)):
+    // World section planes as vec4 P with signed dist = dot(P, (wp, 1)):
     // mesh.vert's dot(n, wp) - w convention gives P = (n, -w). The
-    // object-space plane per instance is then transpose(model) * P.
-    const glm::vec4 worldPlane(glm::vec3(m_clipPlane), -m_clipPlane.w);
+    // object-space plane per instance is then transpose(model) * P. Disabled
+    // slots stay all-zero and the shader skips them.
+    ClipPlaneArray worldPlanes = NoClipPlanes();
+    for (int i = 0; i < kMaxClipPlanes; i++) {
+      const glm::vec4& p = m_clipPlanes[static_cast<size_t>(i)];
+      if (glm::dot(glm::vec3(p), glm::vec3(p)) > 0.0f)
+        worldPlanes[static_cast<size_t>(i)] = glm::vec4(glm::vec3(p), -p.w);
+    }
 
+    // 64 + 64 = 128 bytes, the guaranteed push-constant minimum; this is why
+    // kMaxClipPlanes is 4 (see render/ClipPlanes.h).
     struct Push {
       glm::mat4 lightMVP;
-      glm::vec4 objClipPlane;
+      glm::vec4 objClipPlanes[kMaxClipPlanes];
     } push;
+    static_assert(sizeof(Push) == 128, "shadow push constants must fit 128 B");
 
     VkBuffer boundVertexBuffer = VK_NULL_HANDLE;
     for (const ShadowCaster& caster : m_casters) {
       push.lightMVP = m_lightViewProj * caster.transform;
-      push.objClipPlane = glm::transpose(caster.transform) * worldPlane;
+      for (int i = 0; i < kMaxClipPlanes; i++) {
+        const glm::vec4& wp = worldPlanes[static_cast<size_t>(i)];
+        push.objClipPlanes[i] = glm::dot(glm::vec3(wp), glm::vec3(wp)) > 0.0f
+                                    ? glm::transpose(caster.transform) * wp
+                                    : glm::vec4(0.0f);
+      }
       vkCmdPushConstants(cb, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                          sizeof(push), &push);
 
@@ -437,7 +451,7 @@ bool ShadowRenderer::CreatePipeline() {
   VkPushConstantRange pushRange{};
   pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
   pushRange.offset = 0;
-  pushRange.size = sizeof(glm::mat4) + sizeof(glm::vec4);
+  pushRange.size = sizeof(glm::mat4) + sizeof(glm::vec4) * kMaxClipPlanes;
 
   VkPipelineLayoutCreateInfo layoutInfo{
       VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};

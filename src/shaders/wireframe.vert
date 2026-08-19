@@ -9,7 +9,7 @@ layout(binding = 0) uniform UniformBufferObject {
     float lineWidth;
     // std140 auto-pads lineWidth's 16-byte slot; clipPlane lands at the next
     // vec4 boundary, matching the C++ struct's explicit _padding[3].
-    vec4 clipPlane; // section clip (world): xyz=normal, w=dist
+    vec4 clipPlanes[4]; // section clips (world); all-zero slot = off
 } ubo;
 
 // Per-mesh model matrix (A2.5): the UBO's `model` is left as legacy padding so

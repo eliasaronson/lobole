@@ -174,8 +174,16 @@ std::optional<double> CrossSectionArea(const std::vector<Body>& bodies,
 // filled cut face so a sectioned part reads solid. Same plane as
 // CrossSectionArea. The returned vector aligns with `bodies` (a body that
 // doesn't meet the plane yields an empty/invalid CADShape); empty on failure.
-std::vector<CADShape> SectionCaps(const std::vector<Body>& bodies,
-                                  const glm::vec3& origin,
-                                  const glm::vec3& normal);
+// The filled cut faces where `normal`/`origin`'s plane crosses each body,
+// one entry per body (invalid where that body is not cut).
+//
+// `trimPlanes` are the OTHER active sections, in the same space as `bodies`,
+// each {xyz = normal, w = distance} keeping dot(n,p) <= w. A cap must be cut
+// back to their kept side or it juts out past the neighbouring cut — the
+// "floating lid" you get when two sections meet.
+std::vector<CADShape>
+SectionCaps(const std::vector<Body>& bodies, const glm::vec3& origin,
+            const glm::vec3& normal,
+            const std::vector<glm::vec4>& trimPlanes = {});
 
 } // namespace Measure

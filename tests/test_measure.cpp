@@ -419,6 +419,43 @@ TEST_CASE("Section caps fill the cut face (C4)", "[measure][section]") {
   CHECK_FALSE(missCaps[0].IsValid());
 }
 
+// Two sections at once INTERSECT, so each one's cap must be cut back to the
+// other's kept side. Without that the fill juts out past the neighbouring cut
+// and hangs in space — the "floating lid".
+TEST_CASE("A cap is trimmed by the other section", "[measure][section]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 10, 10, 10));
+
+  // Cut A: z = 5, keeping z <= 5. Its cap is the full 10x10 square...
+  auto full = Measure::SectionCaps(doc.GetBodies(), glm::vec3(0, 0, 5),
+                                   glm::vec3(0, 0, 1));
+  REQUIRE(full.size() == 1);
+  REQUIRE(full[0].IsValid());
+  CADShape::MassProps mp;
+  REQUIRE(full[0].ComputeMassProps(mp));
+  CHECK_THAT(mp.surfaceArea, WithinRel(100.0, 1e-6));
+
+  // ...until cut B (x = 5, keeping x <= 5) takes half of it away.
+  const std::vector<glm::vec4> trim{glm::vec4(1, 0, 0, 5)};
+  auto trimmed = Measure::SectionCaps(doc.GetBodies(), glm::vec3(0, 0, 5),
+                                      glm::vec3(0, 0, 1), trim);
+  REQUIRE(trimmed.size() == 1);
+  REQUIRE(trimmed[0].IsValid());
+  REQUIRE(trimmed[0].ComputeMassProps(mp));
+  CHECK_THAT(mp.surfaceArea, WithinRel(50.0, 1e-6));
+  glm::vec3 lo, hi;
+  trimmed[0].GetBoundingBox(lo, hi);
+  CHECK_THAT(hi.x, WithinAbs(5.0, 1e-6));  // stops at the other cut
+  CHECK_THAT(hi.y, WithinAbs(10.0, 1e-6)); // untouched across
+
+  // A trim plane that removes the cap entirely leaves no cap, not a sliver.
+  auto gone =
+      Measure::SectionCaps(doc.GetBodies(), glm::vec3(0, 0, 5),
+                           glm::vec3(0, 0, 1), {glm::vec4(1, 0, 0, -1)});
+  REQUIRE(gone.size() == 1);
+  CHECK_FALSE(gone[0].IsValid());
+}
+
 // Every section test above cuts a body sitting on the origin, and that is
 // exactly why this went unnoticed: the cutter face was SIZED from the bodies'
 // bounding box but CENTERED on the plane's origin, so a model built away from

@@ -15,7 +15,8 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
-#include <algorithm> // std::min/max (session-window clamp)
+#include <algorithm>
+#include <cfloat> // std::min/max (session-window clamp)
 
 namespace ui {
 
@@ -177,6 +178,93 @@ void DrawMeasureToolWindow(AppState& state) {
   ImGui::End();
 }
 
+// Section tool: the list of cuts, one row each. Replaces the old
+// View > Section View menu, which held ONE plane in function statics — so an
+// agent's set_section and the menu disagreed, and the offset followed you
+// between tabs of wildly different size. Works the same on part and assembly
+// tabs; the sections themselves are view state and outlive the window.
+void DrawSectionToolWindow(AppState& state) {
+  BeginToolWindowFrame(state, "Section");
+  const char* planes[] = {"Front (XY)", "Top (XZ)", "Right (YZ)"};
+
+  glm::vec3 bmin, bmax;
+  const bool haveScene = VisibleSceneBounds(state, bmin, bmax);
+  const float extent = haveScene ? glm::length(bmax - bmin) : 1.0f;
+
+  uint64_t removeId = 0;
+  for (AppState::SectionView& sec : state.sections) {
+    ImGui::PushID(static_cast<int>(sec.id));
+    // Radio-ish: the active row owns the viewport drag arrow.
+    bool active = state.sectionActiveId == sec.id;
+    if (ImGui::RadioButton("###active", active))
+      state.sectionActiveId = sec.id;
+    ImGui::SetItemTooltip("The arrow in the viewport drags this one");
+    ImGui::SameLine();
+    ImGui::Checkbox("###visible", &sec.visible);
+    ImGui::SetItemTooltip("Show this cut");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(120.0f);
+    if (ImGui::Combo("###plane", &sec.basePlane, planes, 3))
+      sec.offset = CenteredSectionOffset(
+          state, sec.basePlane); // new normal,
+                                 // old offset means nothing
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(90.0f);
+    // Step from the model's own size: 0.1 fixed units was invisible on a
+    // 3-metre assembly and enormous on a 2 mm part.
+    ImGui::DragFloat("###offset", &sec.offset, std::max(1e-4f, extent * 0.01f));
+    ImGui::SameLine();
+    if (ImGui::Button("Flip###reverse"))
+      sec.reverse = !sec.reverse;
+    ImGui::SetItemTooltip("Keep the other side");
+    ImGui::SameLine();
+    if (ImGui::Button("x###remove"))
+      removeId = sec.id;
+    ImGui::PopID();
+  }
+  if (removeId)
+    RemoveSection(state, removeId);
+
+  if (state.sections.empty())
+    ImGui::TextDisabled("No cuts yet.");
+  ImGui::Separator();
+  const bool full =
+      state.sections.size() >= static_cast<size_t>(kMaxClipPlanes);
+  ImGui::BeginDisabled(full);
+  if (ImGui::Button("+ Add section###add"))
+    AddSection(state, state.sections.empty() ? 0 : 1);
+  ImGui::EndDisabled();
+  if (full) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("(%d is the limit)", kMaxClipPlanes);
+  }
+  if (haveScene && state.sectionActiveId != 0) {
+    // Where the model is along the active cut's normal, so an offset that
+    // cuts nothing is visibly out of range rather than a mystery.
+    if (const AppState::SectionView* sec =
+            FindSection(state, state.sectionActiveId)) {
+      const glm::vec3 n = glm::vec3(SectionPlaneOf(*sec));
+      float lo = FLT_MAX, hi = -FLT_MAX;
+      for (int c = 0; c < 8; c++) {
+        const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
+                               (c & 2) ? bmax.y : bmin.y,
+                               (c & 4) ? bmax.z : bmin.z);
+        const float d = glm::dot(corner, n);
+        lo = std::min(lo, d);
+        hi = std::max(hi, d);
+      }
+      ImGui::TextDisabled("model spans %.3g to %.3g along this normal", lo, hi);
+    }
+  }
+  ImGui::Separator();
+  if (ImGui::Button("Clear all###clear"))
+    ClearSections(state);
+  ImGui::SameLine();
+  if (ImGui::Button("Done###done"))
+    state.sectionToolOpen = false; // the cuts stay; only the window closes
+  ImGui::End();
+}
+
 // Drawing-dimension session (U7d): armed kind, the refs picked so far (each
 // removable — was accumulate-only), cancel. The 2D pick loop itself stays in
 // HandleDimTool (sheet space; the 3D pipeline doesn't run there).
@@ -254,6 +342,8 @@ void DrawToolWindow(AppState& state) {
     }
     if (state.measure.active)
       DrawMeasureToolWindow(state); // measure never coexists with a preview
+    else if (state.sectionToolOpen)
+      DrawSectionToolWindow(state);
     return;
   }
 

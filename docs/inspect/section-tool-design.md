@@ -1,7 +1,7 @@
 # Section views — from a menu toggle to a tool — design
 
-> Status: **awaiting sign-off** (the seven decisions below carry
-> recommendations). Supersedes the I3 raster section UI in
+> Status: **P1 shipped 2026-08-19**; P2/P3 below still open. The decisions
+> carry their outcomes. Supersedes the I3 raster section UI in
 > [plan.md](plan.md): `View > Section View` is **deleted**, not kept
 > alongside. Two competing UIs for one feature is how the offset in the menu
 > and the offset an agent set through `set_section` came to disagree in the
@@ -77,9 +77,14 @@ views.)
 like the camera. Saving them means a `kVersion` bump and a golden pair, which
 should not gate the tool.
 
-**7. Eight sections maximum.** The clip planes travel as a `vec4[8]` in two
-UBOs — 128 bytes, a natural std140 stride. Nobody needs nine, and an
-unbounded array costs a descriptor rework.
+**7. FOUR sections maximum** (revised from eight while building). The planes
+travel as a `vec4[4]` through five passes — mesh, wireframe, SSAO prepass,
+field overlay and the shadow map. The shadow pass is the binding constraint:
+it carries its planes in push constants next to a `mat4`, and Vulkan only
+guarantees 128 bytes, so four planes fill it exactly (there is a
+`static_assert`). Eight would have meant either a descriptor rework for the
+shadow pass or a different limit there than everywhere else. SolidWorks
+offers three.
 
 ## Does the angle complicate things? No — and here is the evidence
 
@@ -131,13 +136,22 @@ so `t` stays "distance from the model's middle", whatever the angles are.
 
 ## Phases
 
-**P1 — the tool (~1 day).** `vec4 clipPlanes[8]` + count through
-`MeshRenderer`/`OutlineRenderer` and the five shaders; `std::vector<Section>`
-in `AppState` replacing `sectionPlane`; the toolbar button and tool window
-with add/delete/edit rows; the drag arrow (which means teaching
-`ComputeHandleSpec` a non-feature target — it currently resolves a *pending
-feature* and returns false outright on assembly tabs); caps per section, each
-trimmed by the other enabled sections; `View > Section View` deleted.
+**P1 — the tool — SHIPPED 2026-08-19.** `vec4 clipPlanes[4]` through all five
+passes (an all-zero slot is off, so no count is needed); `std::vector<SectionView>`
+in `AppState` replacing `sectionPlane`; `###tb_section` on BOTH the part and
+assembly toolbars (one id — only one toolbar draws at a time) opening the
+tool window with per-row plane / offset / Flip / visible / delete plus Add,
+Clear all and the model's span along the active normal; the drag arrow, which
+took a non-feature path through `PreviewHandles` (`ComputeHandleSpec`
+resolves a *pending feature* and refuses assembly tabs outright, so a section
+drag resolves nothing, regenerates nothing, and is the one handle that works
+on an assembly); caps per section, each trimmed by the others;
+`View > Section View` deleted, with a "Tool: Section" command-palette entry
+in its place.
+
+Reverse shipped in P1 rather than P2 — it is one sign flip on the plane
+(`{-n, -d}` is the same surface, the other half-space) and it is what makes a
+cut usable when you guessed the direction wrong.
 
 **P2 — plane sources and angles (~half a day).** Base plane / datum plane
 (`PlaneRefCombo`, as Split uses) / picked planar face (`PickSlot`), the two
@@ -174,8 +188,8 @@ Everything else in P1 is plumbing.
   equals the analytic quarter-section); cap area equals `CrossSectionArea` at
   an angle, not just on axis; the definition→plane math keeps `t` measured
   from the scene centre as angles change.
-- **Scale**: the floating dock (76 occurrences) with three sections, timed —
-  the number goes in this doc when P1 lands.
+- **Scale**: the floating dock (76 occurrences), one section, 0.08 s for the
+  area pass; cap rebuilds only fire when a drag settles.
 - Both suites per commit; `tools/ci-local.sh` before pushing.
 
 ## Not in scope

@@ -6,7 +6,7 @@
 layout(binding = 0) uniform PrepassUBO {
     mat4 view;
     mat4 proj;
-    vec4 clipPlane; // section clip (world): xyz = normal, w = dist; 0 = off
+    vec4 clipPlanes[4]; // section clips (world); an all-zero slot is off
 } ubo;
 
 layout(push_constant) uniform PushConstants {
@@ -17,7 +17,7 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec3 inNormal;
 
 layout(location = 0) out vec3 fragViewNormal;
-layout(location = 1) out float fragClipDist;
+layout(location = 1) out vec4 fragClipDist;
 
 void main() {
     vec4 worldPos = pc.model * vec4(inPosition, 1.0);
@@ -30,5 +30,10 @@ void main() {
 
     // Same sign convention as mesh.vert; the fragment stage discards > 0 so
     // sectioned-away material does not occlude.
-    fragClipDist = dot(ubo.clipPlane.xyz, worldPos.xyz) - ubo.clipPlane.w;
+    for (int i = 0; i < 4; i++) {
+        fragClipDist[i] =
+            dot(ubo.clipPlanes[i].xyz, ubo.clipPlanes[i].xyz) > 0.0
+                ? dot(ubo.clipPlanes[i].xyz, worldPos.xyz) - ubo.clipPlanes[i].w
+                : -1e9;
+    }
 }

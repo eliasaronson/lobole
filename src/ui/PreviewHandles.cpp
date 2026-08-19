@@ -1,5 +1,7 @@
 #include "ui/PreviewHandles.h"
 
+#include "ui/AppActions.h" // section helpers, VisibleSceneBounds
+
 #include "cad/FaceSelector.h"
 #include "core/AxisRef.h"
 #include "core/Document.h"
@@ -206,6 +208,41 @@ bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
 
 // Writes the dragged value into whichever supported feature is pending and
 // regenerates — byte-identical to what the preview dialog's widget does.
+// The active section's drag arrow. Sections are VIEW state, so this path
+// shares the arrow, the ray-axis math and the readout with the feature
+// handles but touches no document: no feature to resolve, no regeneration,
+// no undo entry. It is also the only handle allowed on an assembly tab —
+// ComputeHandleSpec refuses those outright, because every feature handle
+// edits a part document.
+bool ComputeSectionHandleSpec(AppState& state, HandleSpec& spec,
+                              uint64_t* outId) {
+  if (!state.sectionToolOpen || state.sections.empty())
+    return false;
+  AppState::SectionView* sec = FindSection(state, state.sectionActiveId);
+  if (sec == nullptr)
+    sec = &state.sections.front();
+  if (!sec->visible)
+    return false;
+  glm::vec3 bmin, bmax;
+  if (!VisibleSceneBounds(state, bmin, bmax))
+    return false;
+  const glm::vec4 plane = SectionPlaneOf(*sec);
+  const glm::vec3 n = glm::normalize(glm::vec3(plane));
+  // Anchor where the cut actually is: the scene centre projected onto the
+  // plane, so the arrow sits on the cut face rather than out at the origin.
+  const glm::vec3 c = (bmin + bmax) * 0.5f;
+  spec.anchor = c - n * (glm::dot(c, n) - plane.w);
+  spec.dir = n;
+  // The value the drag edits is the section's own offset, which is measured
+  // along the UNREVERSED normal — reversing flips the arrow, not the number.
+  spec.value = sec->offset;
+  spec.rotate = false;
+  spec.degrees = false;
+  if (outId)
+    *outId = sec->id;
+  return true;
+}
+
 void ApplyHandleValue(AppState& state, Feature& f, double v) {
   if (auto* ext = dynamic_cast<ExtrudeFeature*>(&f))
     ext->distance = std::max(v, kMinLength);
@@ -245,9 +282,31 @@ void AppendArrow(std::vector<LineVertex3D>& lines, const glm::vec3& base,
 void BuildPreviewHandleOverlay(AppState& state,
                                std::vector<LineVertex3D>& lines) {
   HandleSpec spec;
-  if (!ComputeHandleSpec(state, spec))
-    return;
+  bool isSection = false;
+  if (!ComputeHandleSpec(state, spec)) {
+    isSection = ComputeSectionHandleSpec(state, spec, nullptr);
+    if (!isSection)
+      return;
+  }
   const float L = 0.9f * GizmoScale(state);
+
+  // Where the cut plane is, as a square outline around the arrow's base —
+  // an offset typed into the tool window is otherwise invisible until it
+  // crosses geometry.
+  if (isSection) {
+    const glm::vec3 u = PerpTo(spec.dir), v = glm::cross(spec.dir, u);
+    glm::vec3 bmin, bmax;
+    const float r = VisibleSceneBounds(state, bmin, bmax)
+                        ? 0.5f * glm::length(bmax - bmin)
+                        : L;
+    const glm::vec3 corners[4] = {
+        spec.anchor + (u + v) * r, spec.anchor + (u - v) * r,
+        spec.anchor - (u + v) * r, spec.anchor - (u - v) * r};
+    for (int i = 0; i < 4; i++) {
+      lines.push_back(LineVertex(corners[i], kHandleColor));
+      lines.push_back(LineVertex(corners[(i + 1) % 4], kHandleColor));
+    }
+  }
 
   if (!spec.rotate) {
     AppendArrow(lines, spec.anchor, spec.dir, L);
@@ -295,6 +354,23 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
                               bool down, bool released) {
   auto& h = state.handleDrag;
 
+  // A section drag: the same ray-axis projection, writing the section's
+  // offset instead of a feature field.
+  if (h.active && h.sectionId != 0) {
+    AppState::SectionView* sec = FindSection(state, h.sectionId);
+    if (released || !down || sec == nullptr) {
+      h.active = false;
+      h.sectionId = 0;
+      return true;
+    }
+    const float t =
+        RayAxisParam(ray.origin, ray.direction, h.axisOrigin, h.axisDir);
+    // Reversed sections drag with the arrow, which points the other way.
+    const float sign = sec->reverse ? -1.0f : 1.0f;
+    sec->offset = static_cast<float>(h.startValue) + (t - h.startParam) * sign;
+    return true;
+  }
+
   if (h.active) {
     Feature* f = ResolvePendingFeature(state);
     if (released || !down || !f || f->GetId() != h.featureId) {
@@ -329,8 +405,11 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
   if (!clicked)
     return false;
   HandleSpec spec;
+  uint64_t sectionId = 0;
   if (!ComputeHandleSpec(state, spec)) {
-    return false;
+    // No feature handle: the section arrow gets the click instead.
+    if (!ComputeSectionHandleSpec(state, spec, &sectionId))
+      return false;
   }
   const float scale = GizmoScale(state);
   const float grab = 0.14f * scale, L = 0.9f * scale;
@@ -358,14 +437,20 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
   if (!hit)
     return false; // let selection and armed tools consume a missed click
 
-  Feature* f = ResolvePendingFeature(state);
   h.active = true;
-  h.featureId = f->GetId();
   h.rotate = spec.rotate;
   h.axisOrigin = spec.anchor;
   h.axisDir = spec.dir;
-  h.startValue = CurrentHandleValue(*f);
   h.startParam = startParam;
+  h.sectionId = sectionId;
+  if (sectionId != 0) {
+    h.featureId = 0;
+    h.startValue = spec.value; // the section's offset; no document involved
+  } else {
+    Feature* f = ResolvePendingFeature(state);
+    h.featureId = f->GetId();
+    h.startValue = CurrentHandleValue(*f);
+  }
   return true; // consumed: don't also run picking on this click
 }
 

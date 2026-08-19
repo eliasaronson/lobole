@@ -105,6 +105,13 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
   add("Tool: Simulation", nullptr, hasBody,
       [](AppState& s) { EnterSimulation(s); });
 
+  // Replaces the old View > Section View menu (deleted with the tool round).
+  add("Tool: Section", nullptr, true, [](AppState& s) {
+    s.sectionToolOpen = !s.sectionToolOpen;
+    if (s.sectionToolOpen && s.sections.empty())
+      AddSection(s, 0);
+  });
+
   add("Edit: Undo", "Ctrl+Z", true, [](AppState& s) { GlobalUndo(s); });
   add("Edit: Redo", "Ctrl+Y", true, [](AppState& s) { GlobalRedo(s); });
 

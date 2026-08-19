@@ -6,18 +6,22 @@
 // pre-transformed into object space on the CPU, so per-draw state fits in 80
 // bytes of push constants and no UBO is needed.
 layout(push_constant) uniform PushConstants {
-    mat4 lightMVP;      // lightViewProj * instance model
-    vec4 objClipPlane;  // section plane in object space; 0 = off
-} pc;
+    mat4 lightMVP;          // lightViewProj * instance model
+    vec4 objClipPlanes[4];  // section planes in object space; 0 = off
+} pc;                       // 128 bytes exactly: the guaranteed minimum
 
 layout(location = 0) in vec3 inPosition;
 
-layout(location = 0) out float fragClipDist;
+layout(location = 0) out vec4 fragClipDist;
 
 void main() {
     gl_Position = pc.lightMVP * vec4(inPosition, 1.0);
     // Signed distance past the section plane (same sign convention as
     // mesh.vert); the fragment stage discards where it is > 0 so
     // sectioned-away material does not cast.
-    fragClipDist = dot(pc.objClipPlane, vec4(inPosition, 1.0));
+    for (int i = 0; i < 4; i++) {
+        fragClipDist[i] = dot(pc.objClipPlanes[i].xyz, pc.objClipPlanes[i].xyz) > 0.0
+                              ? dot(pc.objClipPlanes[i], vec4(inPosition, 1.0))
+                              : -1e9;
+    }
 }

@@ -8,6 +8,7 @@
 #include "core/Occurrence.h"
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
+#include "render/ClipPlanes.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 
@@ -186,39 +187,40 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                         const RpcParams& p) {
   Document* doc = docIn;
   if (m == "set_section") {
-    // Toggle/position the viewport section clip plane (I3 raster). params:
-    // {enabled, base_plane: "xy"|"xz"|"yz", offset?} or {enabled, origin,
-    // normal}. Disabled clears it.
+    // The viewport section cut. params: {enabled, base_plane: "xy"|"xz"|"yz",
+    // offset?, reverse?} or {enabled, origin, normal}. Disabled clears every
+    // section. This edits the SAME list the Section tool shows, so a script
+    // and the tool window are never two different truths.
     if (!p.value("enabled", true)) {
-      ui::DisableSection(state);
+      ui::ClearSections(state);
       return json::object();
     }
-    glm::vec3 nrm(0, 0, 1), origin(0.0f);
     if (p.contains("base_plane")) {
       const std::string bp = p.at("base_plane").get<std::string>();
       const int basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
-      nrm = basePlane == 1   ? glm::vec3(0, 1, 0)
-            : basePlane == 2 ? glm::vec3(1, 0, 0)
-                             : glm::vec3(0, 0, 1);
-      // No offset given: cut through the middle of what the tab shows, the
-      // same derivation the menu uses. Zero would be the world origin, which
-      // for a model built anywhere else cuts nothing or everything.
-      const double offset = p.contains("offset")
-                                ? p.at("offset").get<double>()
-                                : static_cast<double>(ui::CenteredSectionOffset(
-                                      state, basePlane));
-      origin = nrm * static_cast<float>(offset);
-      ui::SetSectionPlane(state, basePlane, static_cast<float>(offset));
-      return json{{"offset", offset}};
-    } else {
-      const auto& o = p.at("origin");
-      const auto& n = p.at("normal");
-      origin = {o[0].get<float>(), o[1].get<float>(), o[2].get<float>()};
-      nrm = glm::normalize(
-          glm::vec3(n[0].get<float>(), n[1].get<float>(), n[2].get<float>()));
+      // One section unless asked otherwise: scripts that toggle a cut on and
+      // off should not stack four of them up.
+      const bool add = p.value("add", false);
+      if (!add)
+        ui::ClearSections(state);
+      const uint64_t id = ui::AddSection(state, basePlane);
+      if (id == 0)
+        throw std::runtime_error(
+            "at most " + std::to_string(kMaxClipPlanes) +
+            " sections at once; remove one first (set_section enabled=false "
+            "clears them)");
+      ui::AppState::SectionView* sec = ui::FindSection(state, id);
+      // No offset given: AddSection already centered it on what the tab
+      // shows, which is the only offset guaranteed to cut something.
+      if (p.contains("offset"))
+        sec->offset = p.at("offset").get<float>();
+      sec->reverse = p.value("reverse", false);
+      return json{
+          {"id", id}, {"offset", sec->offset}, {"reverse", sec->reverse}};
     }
-    state.sectionPlane = glm::vec4(nrm, glm::dot(origin, nrm));
-    return json::object();
+    throw std::runtime_error(
+        "set_section wants base_plane (\"xy\"|\"xz\"|\"yz\") with an "
+        "optional offset/reverse, or enabled=false to clear");
   }
   if (m == "section") {
     // Cross-section area where a plane cuts through all bodies (I3). Plane:

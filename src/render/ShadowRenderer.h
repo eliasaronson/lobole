@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/ClipPlanes.h"
+
 #include "render/MeshRenderer.h"
 
 #include <glm/glm.hpp>
@@ -28,7 +30,7 @@ public:
   // Section clip plane (world): xyz = normal, w = distance; 0 = off. Same
   // convention as MeshRenderer::SetClipPlane — sectioned-away material must
   // not cast.
-  void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
+  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
 
   // Records the depth-only shadow pass: fits the light frustum to `scene`'s
   // combined bounds and draws every opaque (visible, non-ghost) instance.
@@ -79,7 +81,7 @@ private:
   VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
   VkPipeline m_pipeline = VK_NULL_HANDLE;
 
-  glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
+  ClipPlaneArray m_clipPlanes = NoClipPlanes(); // section view
   glm::mat4 m_lightViewProj = glm::mat4(1.0f);
   float m_texelWorld = 0.0f; // world size of one shadow-map texel
   uint32_t m_resolution = kDefaultResolution;

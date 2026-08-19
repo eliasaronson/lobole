@@ -3,7 +3,7 @@
 layout(binding = 0) uniform UniformBufferObject {
     mat4 view;
     mat4 proj;
-    vec4 clipPlane; // xyz = normal, w = dist; 0 = off
+    vec4 clipPlanes[4]; // section clips (world); an all-zero slot is off
 } ubo;
 
 layout(push_constant) uniform Push {
@@ -15,7 +15,7 @@ layout(location = 1) in vec3 inDisplacement;
 layout(location = 2) in float inScalar;
 
 layout(location = 0) out float fragScalar;
-layout(location = 1) out float fragClipDist;
+layout(location = 1) out vec4 fragClipDist;
 
 void main() {
     vec3 world = inPosition + pc.deformScale * inDisplacement;
@@ -23,5 +23,10 @@ void main() {
     fragScalar = inScalar;
     // Section clip (shared with the mesh pipeline): fragments past the plane
     // are discarded in the fragment shader.
-    fragClipDist = dot(ubo.clipPlane.xyz, world) - ubo.clipPlane.w;
+    for (int i = 0; i < 4; i++) {
+        fragClipDist[i] =
+            dot(ubo.clipPlanes[i].xyz, ubo.clipPlanes[i].xyz) > 0.0
+                ? dot(ubo.clipPlanes[i].xyz, world) - ubo.clipPlanes[i].w
+                : -1e9;
+    }
 }

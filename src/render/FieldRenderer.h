@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/ClipPlanes.h"
+
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 
@@ -43,7 +45,7 @@ public:
     m_view = view;
     m_proj = proj;
   }
-  void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
+  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
   void SetDeformScale(float scale) { m_deformScale = scale; }
   void SetViewport(int32_t x, int32_t y, uint32_t w, uint32_t h) {
     m_vx = x;
@@ -66,7 +68,7 @@ private:
   struct Ubo {
     glm::mat4 view;
     glm::mat4 proj;
-    glm::vec4 clipPlane; // xyz = normal, w = dist; 0 = off
+    glm::vec4 clipPlanes[kMaxClipPlanes]; // section clips (world)
   };
 
   bool CreateDescriptors();
@@ -102,7 +104,7 @@ private:
 
   glm::mat4 m_view = glm::mat4(1.0f);
   glm::mat4 m_proj = glm::mat4(1.0f);
-  glm::vec4 m_clipPlane = glm::vec4(0.0f);
+  ClipPlaneArray m_clipPlanes = NoClipPlanes();
   float m_deformScale = 0.0f;
   int32_t m_vx = 0, m_vy = 0;
   uint32_t m_vw = 1280, m_vh = 720;

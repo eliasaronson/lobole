@@ -292,7 +292,8 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
 
   // Section clip plane is global (same for every instance), so it rides in
   // the shared UBO rather than per-draw push constants.
-  ubo.clipPlane = m_clipPlane;
+  for (int i = 0; i < kMaxClipPlanes; i++)
+    ubo.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
 
   // Key-light shadow map (S1): per-frame light fit from the ShadowRenderer
   // (via SetShadowState). Strength 0.75 and a ~1.5-texel normal-offset bias

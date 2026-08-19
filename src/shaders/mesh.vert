@@ -13,10 +13,11 @@ layout(binding = 0) uniform UniformBufferObject {
     Light fillLight;    // Fill light
     Light rimLight;     // Rim light
     vec4 ambientColor;  // rgb = ambient color, a = intensity
-    // Section clip plane (world space): xyz = normal, w = distance. Global for
-    // the frame, so it lives here rather than in per-draw push constants.
-    // Disabled when xyz == 0 (fragClipDist is then 0 and nothing is clipped).
-    vec4 clipPlane;
+    // Section clip planes (world space): xyz = normal, w = distance. Global
+    // for the frame, so they live here rather than in per-draw push
+    // constants. An all-zero slot is disabled. Sections INTERSECT: a fragment
+    // survives only where it is on the kept side of every enabled plane.
+    vec4 clipPlanes[4];
     // Key-light shadow map (S1): world -> light clip space, and params
     // x = strength, y = normal-offset world distance, z = texel size (UV),
     // w = enable. Forwarded to the fragment stage as varyings (this UBO is
@@ -54,7 +55,10 @@ layout(location = 6) out Light fragFillLight;
 layout(location = 8) out Light fragRimLight;
 layout(location = 10) out vec3 fragAmbientColor;
 layout(location = 11) out float fragHighlight;
-layout(location = 12) out float fragClipDist;
+// One signed distance per plane. Each is linear in world position, so
+// interpolation is exact — taking a max here instead would clip wrong along
+// the crease where two sections meet.
+layout(location = 12) out vec4 fragClipDist;
 layout(location = 13) out vec4 fragShadowCoord;
 layout(location = 14) out vec4 fragShadowParams;
 layout(location = 15) out vec4 fragAOParams;
@@ -85,7 +89,12 @@ void main() {
 
     // Signed distance past the section plane (linear in world pos, so the
     // interpolated value is exact); frag discards where it is > 0.
-    fragClipDist = dot(ubo.clipPlane.xyz, worldPos.xyz) - ubo.clipPlane.w;
+    for (int i = 0; i < 4; i++) {
+        fragClipDist[i] =
+            dot(ubo.clipPlanes[i].xyz, ubo.clipPlanes[i].xyz) > 0.0
+                ? dot(ubo.clipPlanes[i].xyz, worldPos.xyz) - ubo.clipPlanes[i].w
+                : -1e9; // disabled slot: never clips
+    }
 
     // Key-light shadow lookup position, offset along the normal to fight
     // acne (normal-offset bias, ~1.5 shadow texels in world units).

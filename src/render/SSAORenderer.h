@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/ClipPlanes.h"
+
 #include "render/MeshRenderer.h"
 
 #include <glm/glm.hpp>
@@ -43,7 +45,7 @@ public:
 
   // Section clip plane (world): matches MeshRenderer::SetClipPlane —
   // sectioned-away material must not occlude.
-  void SetClipPlane(const glm::vec4& plane) { m_clipPlane = plane; }
+  void SetClipPlanes(const ClipPlaneArray& planes) { m_clipPlanes = planes; }
 
   // Records prepass + AO + blur. Camera matrices are read from `scene`
   // (guaranteed identical to what the main pass will use); the AO radius is
@@ -138,7 +140,7 @@ private:
   std::vector<VkDeviceMemory> m_aoUBOMemory;
   std::vector<void*> m_aoUBOMapped;
 
-  glm::vec4 m_clipPlane = glm::vec4(0.0f); // section view; 0 = disabled
+  ClipPlaneArray m_clipPlanes = NoClipPlanes(); // section view
 
   // Scratch reused across frames (avoids per-frame allocations).
   std::vector<ShadowCaster> m_casters;

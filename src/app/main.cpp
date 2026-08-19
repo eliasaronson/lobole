@@ -722,7 +722,7 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame) {
   if (g_ShadowRenderer) {
     g_MeshRenderer->SetShadowsEnabled(g_App.showShadows);
     if (g_App.showShadows) {
-      g_ShadowRenderer->SetClipPlane(g_App.sectionPlane);
+      g_ShadowRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
       g_ShadowRenderer->RecordShadowPass(cb, *g_MeshRenderer);
       g_MeshRenderer->SetShadowState(g_ShadowRenderer->LightViewProj(),
                                      g_ShadowRenderer->TexelWorldSize(),
@@ -732,7 +732,7 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame) {
   if (g_SSAORenderer) {
     g_MeshRenderer->SetAOEnabled(g_App.showAmbientOcclusion);
     if (g_App.showAmbientOcclusion) {
-      g_SSAORenderer->SetClipPlane(g_App.sectionPlane);
+      g_SSAORenderer->SetClipPlanes(ui::SectionPlanes(g_App));
       g_SSAORenderer->RecordSSAOPasses(cb, currentFrame, *g_MeshRenderer);
       g_MeshRenderer->SetAOState(g_SSAORenderer->InvFullResolution());
     }
@@ -1457,11 +1457,11 @@ int main(int argc, char** argv) {
 
     // Section view (I3): push the clip plane to the renderers each frame.
     if (g_MeshRenderer)
-      g_MeshRenderer->SetClipPlane(g_App.sectionPlane);
+      g_MeshRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
     if (g_OutlineRenderer)
-      g_OutlineRenderer->SetClipPlane(g_App.sectionPlane);
+      g_OutlineRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
     if (g_FieldRenderer) {
-      g_FieldRenderer->SetClipPlane(g_App.sectionPlane);
+      g_FieldRenderer->SetClipPlanes(ui::SectionPlanes(g_App));
       g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
     }
 

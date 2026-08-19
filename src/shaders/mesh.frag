@@ -17,7 +17,7 @@ layout(location = 6) in Light fragFillLight;
 layout(location = 8) in Light fragRimLight;
 layout(location = 10) in vec3 fragAmbientColor;
 layout(location = 11) in float fragHighlight;
-layout(location = 12) in float fragClipDist;
+layout(location = 12) in vec4 fragClipDist;
 layout(location = 13) in vec4 fragShadowCoord;
 layout(location = 14) in vec4 fragShadowParams;
 layout(location = 15) in vec4 fragAOParams;
@@ -112,9 +112,10 @@ vec3 calculateLight(Light light, vec3 normal, vec3 viewDir, vec3 albedo, float m
 }
 
 void main() {
-    // Section view: clip fragments past the plane. The signed distance comes
-    // interpolated from the vertex stage (0 everywhere when clipping is off).
-    if (fragClipDist > 0.0) {
+    // Section view: clip fragments past ANY enabled plane (sections
+    // intersect). Distances come interpolated from the vertex stage;
+    // disabled planes carry a large negative value.
+    if (any(greaterThan(fragClipDist, vec4(0.0)))) {
         discard;
     }
     // Normalize vectors

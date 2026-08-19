@@ -457,10 +457,19 @@ std::string WindowTitle(AppState& state);
 // for any model that is not sitting on the origin.
 bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max);
 
-// Section view (I3). `basePlane` is 0=XY, 1=XZ, 2=YZ; `offset` is the signed
-// distance along that plane's normal. Writes both the shader clip plane and
-// the menu's fields, so the GUI and set_section cannot drift apart.
-void SetSectionPlane(AppState& state, int basePlane, float offset);
+// Section views (I3). `basePlane` is 0=XY, 1=XZ, 2=YZ; `offset` is the signed
+// distance along that plane's normal; `reverse` keeps the other side. ONE
+// list, shared by the tool window and the RPCs, so they cannot drift apart —
+// the menu this replaces kept its own copy in function statics.
+glm::vec4 SectionPlaneOf(const AppState::SectionView& s);
+ClipPlaneArray SectionPlanes(const AppState& state); // enabled ones, padded
+bool SectionActive(const AppState& state);
+AppState::SectionView* FindSection(AppState& state, uint64_t id);
+// Adds a section cutting through the middle of what the tab shows, and
+// returns its id; 0 when the list is full (kMaxClipPlanes).
+uint64_t AddSection(AppState& state, int basePlane);
+void RemoveSection(AppState& state, uint64_t id);
+void ClearSections(AppState& state);
 
 // Emits the filled cut faces for one set of cap shapes, placed by `xf` and
 // facing `worldNormal`. Shared by the part path (identity transform) and the
@@ -470,7 +479,6 @@ void SetSectionPlane(AppState& state, int basePlane, float offset);
 void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
                      const std::vector<glm::vec3>& colors, const glm::mat4& xf,
                      const glm::vec3& worldNormal);
-void DisableSection(AppState& state);
 
 // The offset that puts the cut through the MIDDLE of what the tab is showing,
 // along `basePlane`'s normal. A section defaults to the world origin

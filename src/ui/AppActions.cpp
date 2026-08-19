@@ -2111,18 +2111,63 @@ float CenteredSectionOffset(AppState& state, int basePlane) {
   return glm::dot((min + max) * 0.5f, SectionNormal(basePlane));
 }
 
-void SetSectionPlane(AppState& state, int basePlane, float offset) {
-  state.sectionBasePlane = basePlane;
-  state.sectionOffset = offset;
-  state.sectionOffsetSeeded = true;
-  // w = dot(origin, n); with an axis normal that is just the offset.
-  state.sectionPlane = glm::vec4(SectionNormal(basePlane), offset);
+glm::vec4 SectionPlaneOf(const AppState::SectionView& s) {
+  const glm::vec3 n = SectionNormal(s.basePlane);
+  // Reverse keeps the other side: the same surface, the opposite half-space,
+  // which is exactly {-n, -d}.
+  return s.reverse ? glm::vec4(-n, -s.offset) : glm::vec4(n, s.offset);
 }
 
-void DisableSection(AppState& state) {
-  state.sectionPlane = glm::vec4(0.0f);
-  state.sectionOffsetSeeded =
-      false; // re-derive for whatever it is next used on
+ClipPlaneArray SectionPlanes(const AppState& state) {
+  ClipPlaneArray planes = NoClipPlanes();
+  size_t slot = 0;
+  for (const AppState::SectionView& s : state.sections) {
+    if (!s.visible || slot >= planes.size())
+      continue;
+    planes[slot++] = SectionPlaneOf(s);
+  }
+  return planes;
+}
+
+bool SectionActive(const AppState& state) {
+  for (const AppState::SectionView& s : state.sections)
+    if (s.visible)
+      return true;
+  return false;
+}
+
+AppState::SectionView* FindSection(AppState& state, uint64_t id) {
+  for (AppState::SectionView& s : state.sections)
+    if (s.id == id)
+      return &s;
+  return nullptr;
+}
+
+uint64_t AddSection(AppState& state, int basePlane) {
+  if (state.sections.size() >= static_cast<size_t>(kMaxClipPlanes))
+    return 0; // the renderer carries four; see render/ClipPlanes.h
+  AppState::SectionView s;
+  s.id = state.nextSectionId++;
+  s.basePlane = basePlane;
+  // Through the middle of what the tab shows, so a new section always cuts
+  // something. Zero would be the world origin, which for a model built
+  // anywhere else removes everything or nothing.
+  s.offset = CenteredSectionOffset(state, basePlane);
+  state.sections.push_back(s);
+  state.sectionActiveId = s.id;
+  return s.id;
+}
+
+void RemoveSection(AppState& state, uint64_t id) {
+  std::erase_if(state.sections,
+                [&](const AppState::SectionView& s) { return s.id == id; });
+  if (state.sectionActiveId == id)
+    state.sectionActiveId = state.sections.empty() ? 0 : state.sections[0].id;
+}
+
+void ClearSections(AppState& state) {
+  state.sections.clear();
+  state.sectionActiveId = 0;
 }
 
 void FitCameraToDocument(AppState& state) {
@@ -2312,13 +2357,22 @@ void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
 namespace {
 void AppendSectionCaps(AppState& state, const std::vector<Body>& bodies,
                        const std::vector<glm::vec3>& bodyColors) {
-  const glm::vec3 nRaw(state.sectionPlane);
-  if (glm::length(nRaw) < 1e-6f)
-    return; // no active section
-  const glm::vec3 n = glm::normalize(nRaw);
-  const glm::vec3 planeOrigin = n * state.sectionPlane.w; // dot(origin,n)=w
-  AppendCapMeshes(state, Measure::SectionCaps(bodies, planeOrigin, n),
-                  bodyColors, glm::mat4(1.0f), n);
+  const ClipPlaneArray planes = SectionPlanes(state);
+  for (size_t i = 0; i < planes.size(); i++) {
+    const glm::vec3 nRaw(planes[i]);
+    if (glm::length(nRaw) < 1e-6f)
+      continue;
+    const glm::vec3 n = glm::normalize(nRaw);
+    const glm::vec3 planeOrigin = n * planes[i].w; // dot(origin,n) = w
+    // Every OTHER section trims this cap; without that, two cuts leave each
+    // other's fill hanging in space past the corner.
+    std::vector<glm::vec4> trim;
+    for (size_t j = 0; j < planes.size(); j++)
+      if (j != i && glm::length(glm::vec3(planes[j])) > 1e-6f)
+        trim.push_back(planes[j]);
+    AppendCapMeshes(state, Measure::SectionCaps(bodies, planeOrigin, n, trim),
+                    bodyColors, glm::mat4(1.0f), n);
+  }
 }
 } // namespace
 
@@ -2754,9 +2808,9 @@ void SyncDocumentRenderers(AppState& state) {
   // filled cut faces follow it. Gated on no widget being active so caps
   // settle when the offset slider is released, not every drag frame (the
   // shader clip itself previews live regardless).
-  if (state.sectionPlane != state.syncedSectionPlane &&
+  if (SectionPlanes(state) != state.syncedSectionPlanes &&
       !ImGui::IsAnyItemActive()) {
-    state.syncedSectionPlane = state.sectionPlane;
+    state.syncedSectionPlanes = SectionPlanes(state);
     state.syncedDocumentVersion = UINT64_MAX; // force the rebuild below
   }
   if (activeVersion == state.syncedDocumentVersion)

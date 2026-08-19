@@ -281,61 +281,6 @@ void DrawViewMenu(AppState& state) {
     ImGui::EndMenu();
   }
 
-  // Section view (I3): a viewport clipping plane over whatever the tab shows
-  // — a part's bodies or an assembly's occurrences. Zero sectionPlane = off.
-  if (ImGui::BeginMenu("Section View###view_section")) {
-    bool on = state.sectionPlane != glm::vec4(0.0f);
-    if (ImGui::MenuItem("Enabled###section_enabled", nullptr, &on)) {
-      if (!on) {
-        DisableSection(state);
-      } else {
-        // Cut through the middle of the model, and step in a hundredth of
-        // its size. Both derived: the old version started at the world
-        // origin and dragged in fixed 0.1 units, so enabling a section on a
-        // 3-metre assembly removed everything and moving the slider did
-        // nothing you could see.
-        SetSectionPlane(state, state.sectionBasePlane,
-                        CenteredSectionOffset(state, state.sectionBasePlane));
-      }
-    }
-    const char* planes[] = {"XY (cut along Z)", "XZ (cut along Y)",
-                            "YZ (cut along X)"};
-    int planeIdx = state.sectionBasePlane;
-    if (ImGui::Combo("Plane###section_plane", &planeIdx, planes, 3)) {
-      // A new normal makes the old offset meaningless — re-center on it,
-      // the same rule the split tool follows for its knife plane.
-      SetSectionPlane(state, planeIdx, CenteredSectionOffset(state, planeIdx));
-      on = true;
-    }
-    glm::vec3 bmin, bmax;
-    const bool haveScene = VisibleSceneBounds(state, bmin, bmax);
-    const float extent = haveScene ? glm::length(bmax - bmin) : 1.0f;
-    float offset = state.sectionOffset;
-    if (ImGui::DragFloat("Offset###section_offset", &offset,
-                         std::max(1e-4f, extent * 0.01f))) {
-      SetSectionPlane(state, state.sectionBasePlane, offset);
-      on = true;
-    }
-    if (haveScene) {
-      // Where the model actually is along this normal, so an offset that
-      // cuts nothing is visibly out of range rather than a mystery.
-      const glm::vec3 axis = state.sectionBasePlane == 1   ? glm::vec3(0, 1, 0)
-                             : state.sectionBasePlane == 2 ? glm::vec3(1, 0, 0)
-                                                           : glm::vec3(0, 0, 1);
-      float lo = FLT_MAX, hi = -FLT_MAX;
-      for (int c = 0; c < 8; c++) {
-        const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
-                               (c & 2) ? bmax.y : bmin.y,
-                               (c & 4) ? bmax.z : bmin.z);
-        const float d = glm::dot(corner, axis);
-        lo = std::min(lo, d);
-        hi = std::max(hi, d);
-      }
-      ImGui::TextDisabled("model spans %.3g to %.3g here", lo, hi);
-    }
-    ImGui::EndMenu();
-  }
-
   if (ImGui::MenuItem("Reset Layout")) {
     // Rebuild the default docking layout next frame — recovers from a panel
     // dragged huge or a stale imgui.ini.
