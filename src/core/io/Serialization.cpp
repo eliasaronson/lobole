@@ -451,6 +451,84 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
   }
 }
 
+namespace {
+
+// "features/3-sketch.json", for messages: the bare filename is ambiguous
+// across features/, studies/, views/… and the absolute path is noise.
+std::string ProjectRelative(const std::filesystem::path& path) {
+  return (path.parent_path().filename() / path.filename()).string();
+}
+
+// Reads and parses one project file, saying WHICH file when it cannot.
+//
+// nlohmann reports a line and column and no filename, and in a project that
+// is a git repository the usual cause is not a typo: a merge left conflict
+// markers in the file. The directory format merges well precisely so people
+// WILL merge these projects (one file per feature, one key per line), which
+// makes "unresolved markers" a first-class failure worth naming.
+json ParseProjectFile(const std::filesystem::path& path) {
+  std::ifstream in(path);
+  if (!in)
+    throw std::runtime_error("cannot read " + ProjectRelative(path));
+  const std::string text((std::istreambuf_iterator<char>(in)),
+                         std::istreambuf_iterator<char>());
+  if (text.starts_with("<<<<<<<") ||
+      text.find("\n<<<<<<<") != std::string::npos) {
+    throw std::runtime_error(
+        ProjectRelative(path) +
+        " still has merge conflict markers — finish the merge (git status "
+        "shows what is unresolved), then open the project again");
+  }
+  try {
+    return json::parse(text);
+  } catch (const std::exception& e) {
+    throw std::runtime_error(ProjectRelative(path) + ": " + e.what());
+  }
+}
+
+// Records `path` under the id its filename starts with, REFUSING a second
+// file that claims the same id.
+//
+// This used to be `byId[std::stoull(name)] = path`, which silently kept the
+// last one. Two files never share an id when the app writes them — but a
+// merge makes it easily: git takes both "15-box.json" and "15-hole.json"
+// without a word when two people each added a feature offline and the id
+// counter handed them both 15. The overwrite then dropped one person's work
+// and left the document with two entries claiming one id, which every
+// reference (sketch_id, body ids, mates, configuration overrides) then
+// resolves ambiguously. Loudly refusing is the only safe answer; the fix in
+// the file is to renumber one of them.
+void InsertIdFile(std::map<uint64_t, std::filesystem::path>& byId,
+                  const std::filesystem::path& path, const char* what) {
+  const uint64_t id = std::stoull(path.filename().string());
+  const auto [it, inserted] = byId.emplace(id, path);
+  if (!inserted) {
+    throw std::runtime_error(
+        "two " + std::string(what) + " files claim id " + std::to_string(id) +
+        " (" + ProjectRelative(it->second) + " and " + ProjectRelative(path) +
+        ") — a merge kept both; renumber one of them (its \"id\" field and "
+        "its filename) and reopen");
+  }
+}
+
+// The index lists the ids, in order. A duplicate there means the same file
+// loads twice — two features, one id — which is the other half of the merge
+// hazard above and just as ambiguous downstream.
+void CheckIndexIdsUnique(const json& ids, const char* what) {
+  std::set<uint64_t> seen;
+  for (const auto& idJson : ids) {
+    const uint64_t id = idJson.get<uint64_t>();
+    if (!seen.insert(id).second) {
+      throw std::runtime_error(
+          "index.json lists " + std::string(what) + " id " +
+          std::to_string(id) +
+          " twice — a merge kept both sides; keep one and reopen");
+    }
+  }
+}
+
+} // namespace
+
 std::unique_ptr<Document> LoadDir(const std::string& dirPath,
                                   std::string* error) {
   namespace fs = std::filesystem;
@@ -461,7 +539,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         *error = "Not a designer project directory: " + dirPath;
       return nullptr;
     }
-    json index = json::parse(in);
+    json index = ParseProjectFile(fs::path(dirPath) / "index.json");
     if (index.value("format", "") != kFormat) {
       if (error)
         *error = "Not a designer document: " + dirPath;
@@ -494,12 +572,13 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
          fs::directory_iterator(fs::path(dirPath) / "features", ec)) {
       if (entry.path().extension() != ".json")
         continue;
-      byId[std::stoull(entry.path().filename().string())] = entry.path();
+      InsertIdFile(byId, entry.path(), "feature");
     }
     // One regeneration for the whole file, not one per feature (Document::
     // BulkEdit). The guard is released explicitly below — BEFORE the topology
     // results are stamped, since they must carry the settled version.
     auto bulk = std::make_optional<Document::BulkEdit>(*doc);
+    CheckIndexIdsUnique(index.at("features"), "feature");
     for (const auto& idJson : index.at("features")) {
       const uint64_t id = idJson.get<uint64_t>();
       const auto it = byId.find(id);
@@ -509,7 +588,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         return nullptr;
       }
       std::ifstream fin(it->second);
-      doc->AddFeature(FeatureFromJson(json::parse(fin)));
+      doc->AddFeature(FeatureFromJson(ParseProjectFile(it->second)));
     }
     // Reference-image bytes (v49) from assets/ into the doc store (absent dir ⇒
     // nothing to do). Only assets an image references are loaded.
@@ -536,10 +615,11 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         // A topology result file is "<id>-<slug>.result.json": its stem ends
         // ".result" — route it to the result map, not the study-def map.
         if (stem.size() > 7 && stem.compare(stem.size() - 7, 7, ".result") == 0)
-          resultById[std::stoull(stem)] = entry.path();
+          InsertIdFile(resultById, entry.path(), "study result");
         else
-          studyById[std::stoull(stem)] = entry.path();
+          InsertIdFile(studyById, entry.path(), "study");
       }
+      CheckIndexIdsUnique(index.value("studies", json::array()), "study");
       for (const auto& idJson : index.value("studies", json::array())) {
         const uint64_t id = idJson.get<uint64_t>();
         const auto it = studyById.find(id);
@@ -549,7 +629,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
           return nullptr;
         }
         std::ifstream sin(it->second);
-        doc->RestoreStudy(StudyFromJson(json::parse(sin)));
+        doc->RestoreStudy(StudyFromJson(ParseProjectFile(it->second)));
         // A persisted topology result loads into the transient runtime cache.
         // Defer storing it until after the final regeneration below so it can
         // be stamped with the settled document version (else the rollback /
@@ -557,8 +637,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         const auto rit = resultById.find(id);
         if (rit != resultById.end()) {
           std::ifstream rin(rit->second);
-          pendingResults.emplace_back(id,
-                                      StudyResultFromJson(json::parse(rin)));
+          pendingResults.emplace_back(
+              id, StudyResultFromJson(ParseProjectFile(rit->second)));
         }
       }
     }
@@ -569,8 +649,10 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
            fs::directory_iterator(fs::path(dirPath) / "configurations", ec)) {
         if (entry.path().extension() != ".json")
           continue;
-        cfgById[std::stoull(entry.path().filename().string())] = entry.path();
+        InsertIdFile(cfgById, entry.path(), "configuration");
       }
+      CheckIndexIdsUnique(index.value("configurations", json::array()),
+                          "configuration");
       for (const auto& idJson : index.value("configurations", json::array())) {
         const auto it = cfgById.find(idJson.get<uint64_t>());
         if (it == cfgById.end()) {
@@ -580,7 +662,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
           return nullptr;
         }
         std::ifstream cin(it->second);
-        doc->RestoreConfiguration(ConfigurationFromJson(json::parse(cin)));
+        doc->RestoreConfiguration(
+            ConfigurationFromJson(ParseProjectFile(it->second)));
       }
     }
     doc->SetRollback(index.value("rollback", -1));
@@ -731,7 +814,7 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         *error = "Not a designer project directory: " + dirPath;
       return nullptr;
     }
-    json index = json::parse(in);
+    json index = ParseProjectFile(fs::path(dirPath) / "index.json");
     if (index.value("format", "") != kFormat) {
       if (error)
         *error = "Not a designer document: " + dirPath;
@@ -756,9 +839,11 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
          fs::directory_iterator(fs::path(dirPath) / "occurrences", ec)) {
       if (entry.path().extension() != ".json")
         continue;
-      byId[std::stoull(entry.path().filename().string())] = entry.path();
+      InsertIdFile(byId, entry.path(), "occurrence");
     }
     std::vector<json> occJsons;
+    CheckIndexIdsUnique(index.value("occurrences", json::array()),
+                        "occurrence");
     for (const auto& idJson : index.value("occurrences", json::array())) {
       const uint64_t id = idJson.get<uint64_t>();
       const auto it = byId.find(id);
@@ -768,7 +853,7 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         return nullptr;
       }
       std::ifstream fin(it->second);
-      occJsons.push_back(json::parse(fin));
+      occJsons.push_back(ParseProjectFile(it->second));
     }
     auto asmDoc = std::make_unique<AssemblyDocument>();
     LoadOccurrences(*asmDoc, occJsons);
@@ -780,9 +865,10 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
          fs::directory_iterator(fs::path(dirPath) / "mates", ec)) {
       if (entry.path().extension() != ".json")
         continue;
-      mateById[std::stoull(entry.path().filename().string())] = entry.path();
+      InsertIdFile(mateById, entry.path(), "mate");
     }
     std::vector<json> mateJsons;
+    CheckIndexIdsUnique(index.value("mates", json::array()), "mate");
     for (const auto& idJson : index.value("mates", json::array())) {
       const uint64_t id = idJson.get<uint64_t>();
       const auto it = mateById.find(id);
@@ -792,7 +878,7 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         return nullptr;
       }
       std::ifstream fin(it->second);
-      mateJsons.push_back(json::parse(fin));
+      mateJsons.push_back(ParseProjectFile(it->second));
     }
     LoadMates(*asmDoc, mateJsons);
 
@@ -803,7 +889,7 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
          fs::directory_iterator(fs::path(dirPath) / "exploded", ec)) {
       if (entry.path().extension() != ".json")
         continue;
-      viewById[std::stoull(entry.path().filename().string())] = entry.path();
+      InsertIdFile(viewById, entry.path(), "view");
     }
     std::vector<json> viewJsons;
     for (const auto& idJson : index.value("exploded", json::array())) {
@@ -815,7 +901,7 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
         return nullptr;
       }
       std::ifstream fin(it->second);
-      viewJsons.push_back(json::parse(fin));
+      viewJsons.push_back(ParseProjectFile(it->second));
     }
     LoadExplodedViews(*asmDoc, viewJsons);
 
@@ -826,8 +912,10 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
            fs::directory_iterator(fs::path(dirPath) / "configurations", ec)) {
         if (entry.path().extension() != ".json")
           continue;
-        cfgById[std::stoull(entry.path().filename().string())] = entry.path();
+        InsertIdFile(cfgById, entry.path(), "configuration");
       }
+      CheckIndexIdsUnique(index.value("configurations", json::array()),
+                          "configuration");
       for (const auto& idJson : index.value("configurations", json::array())) {
         const auto it = cfgById.find(idJson.get<uint64_t>());
         if (it == cfgById.end()) {
@@ -837,7 +925,8 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
           return nullptr;
         }
         std::ifstream cin(it->second);
-        asmDoc->RestoreConfiguration(ConfigurationFromJson(json::parse(cin)));
+        asmDoc->RestoreConfiguration(
+            ConfigurationFromJson(ParseProjectFile(it->second)));
       }
     }
     asmDoc->SetActiveConfiguration(
@@ -924,7 +1013,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
         *error = "Cannot open file: " + path;
       return nullptr;
     }
-    json j = json::parse(in);
+    json j = ParseProjectFile(path);
 
     if (j.value("format", "") != kFormat) {
       if (error)
@@ -1041,7 +1130,7 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
         *error = "Cannot open file: " + path;
       return nullptr;
     }
-    json j = json::parse(in);
+    json j = ParseProjectFile(path);
     if (j.value("format", "") != kFormat) {
       if (error)
         *error = "Not a designer document: " + path;
@@ -1288,7 +1377,7 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
         *error = "Not a designer project directory: " + dirPath;
       return nullptr;
     }
-    json index = json::parse(in);
+    json index = ParseProjectFile(fs::path(dirPath) / "index.json");
     if (index.value("format", "") != kFormat) {
       if (error)
         *error = "Not a designer document: " + dirPath;
@@ -1313,15 +1402,16 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
     for (const auto& entry :
          fs::directory_iterator(fs::path(dirPath) / "views", ec)) {
       if (entry.path().extension() == ".json")
-        viewById[std::stoull(entry.path().filename().string())] = entry.path();
+        InsertIdFile(viewById, entry.path(), "view");
     }
     uint64_t maxId = 0;
+    CheckIndexIdsUnique(index.value("views", json::array()), "view");
     for (const auto& idJson : index.value("views", json::array())) {
       const auto it = viewById.find(idJson.get<uint64_t>());
       if (it == viewById.end())
         continue;
       std::ifstream vin(it->second);
-      DrawingView v = DrawingViewFromJson(json::parse(vin));
+      DrawingView v = DrawingViewFromJson(ParseProjectFile(it->second));
       maxId = std::max(maxId, v.id);
       dwg->GetViews().push_back(std::move(v));
     }
@@ -1330,14 +1420,14 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
     for (const auto& entry :
          fs::directory_iterator(fs::path(dirPath) / "dims", ec)) {
       if (entry.path().extension() == ".json")
-        dimById[std::stoull(entry.path().filename().string())] = entry.path();
+        InsertIdFile(dimById, entry.path(), "dimension");
     }
     for (const auto& idJson : index.value("dims", json::array())) {
       const auto it = dimById.find(idJson.get<uint64_t>());
       if (it == dimById.end())
         continue;
       std::ifstream din(it->second);
-      DrawingDim d = DrawingDimFromJson(json::parse(din));
+      DrawingDim d = DrawingDimFromJson(ParseProjectFile(it->second));
       maxId = std::max(maxId, d.id);
       dwg->GetDims().push_back(std::move(d));
     }
@@ -1399,7 +1489,7 @@ static std::unique_ptr<DrawingDocument> LoadDrawingImpl(const std::string& path,
         *error = "Cannot open file: " + path;
       return nullptr;
     }
-    json j = json::parse(in);
+    json j = ParseProjectFile(path);
     if (j.value("format", "") != kFormat) {
       if (error)
         *error = "Not a designer document: " + path;

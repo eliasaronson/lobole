@@ -10,7 +10,10 @@
 #include "cad/CADKernel.h"
 
 #include <filesystem>
+#include <nlohmann/json.hpp>
+
 #include <fstream>
+#include <unistd.h>
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -367,4 +370,94 @@ TEST_CASE("Modal analysis type + gravity round-trip (v32)",
   CHECK(g.type == fem::AnalysisType::Static);
   CHECK(g.gravity.z == -9.81);
   fs::remove(path);
+}
+
+// --- Merge hazards ----------------------------------------------------------
+//
+// The directory format merges well on purpose — one file per feature named by
+// a stable id, one key per line — so people WILL merge these projects. Two
+// cases that git resolves "cleanly" are not clean at all, and both used to
+// load without a word: two files claiming one id (the id counter hands the
+// same number to two people working offline, and git keeps both files when
+// the type suffix differs), and an index that lists one id twice. Either way
+// the document ends up with two features sharing an id, every reference to it
+// resolves ambiguously, and one person's work is silently replaced by a copy
+// of the other's.
+namespace {
+fs::path MergeCaseProject(const std::string& name) {
+  const fs::path dir =
+      fs::temp_directory_path() /
+      ("designer_merge_" + name + "_" + std::to_string(::getpid()) + ".dsgn");
+  fs::remove_all(dir);
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("A", glm::vec3(0), 2, 2, 2));
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("B", glm::vec3(5, 0, 0), 2, 2, 2));
+  REQUIRE(testio::Save(doc, dir.string())); // .dsgn ⇒ the directory format
+  return dir;
+}
+} // namespace
+
+TEST_CASE("Two feature files claiming one id are refused", "[io][merge]") {
+  const fs::path dir = MergeCaseProject("dupfile");
+  // What a merge leaves behind: a second file with the same id prefix. The
+  // app never writes this; git does, and it used to win silently.
+  fs::path first;
+  for (const auto& e : fs::directory_iterator(dir / "features"))
+    if (e.path().filename().string().starts_with("2-"))
+      first = e.path();
+  REQUIRE(!first.empty());
+  fs::copy_file(first, dir / "features" / "2-hole.json");
+
+  auto loaded = DocumentIO::Load(dir.string());
+  REQUIRE_FALSE(loaded); // refused, not "last file wins"
+  const std::string err = loaded.error();
+  INFO(err);
+  CHECK(err.find("claim id 2") != std::string::npos);
+  CHECK(err.find("2-hole.json") != std::string::npos); // names BOTH files
+  fs::remove_all(dir);
+}
+
+TEST_CASE("An index listing one id twice is refused", "[io][merge]") {
+  const fs::path dir = MergeCaseProject("dupindex");
+  nlohmann::json index;
+  {
+    std::ifstream in(dir / "index.json");
+    index = nlohmann::json::parse(in);
+  }
+  index["features"].push_back(index["features"].back()); // both sides kept
+  std::ofstream(dir / "index.json", std::ios::trunc) << index.dump(2);
+
+  auto loaded = DocumentIO::Load(dir.string());
+  REQUIRE_FALSE(loaded);
+  const std::string err = loaded.error();
+  INFO(err);
+  CHECK(err.find("twice") != std::string::npos);
+  fs::remove_all(dir);
+}
+
+TEST_CASE("Unresolved conflict markers name the file", "[io][merge]") {
+  const fs::path dir = MergeCaseProject("markers");
+  fs::path victim;
+  for (const auto& e : fs::directory_iterator(dir / "features"))
+    if (e.path().filename().string().starts_with("1-"))
+      victim = e.path();
+  REQUIRE(!victim.empty());
+  const std::string body = [&] {
+    std::ifstream in(victim);
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+  }();
+  std::ofstream(victim, std::ios::trunc) << "<<<<<<< HEAD\n"
+                                         << body << "=======\n"
+                                         << body << ">>>>>>> theirs\n";
+
+  auto loaded = DocumentIO::Load(dir.string());
+  REQUIRE_FALSE(loaded);
+  const std::string err = loaded.error();
+  INFO(err);
+  // A line and column number is not a diagnosis; the file and the cause are.
+  CHECK(err.find(victim.filename().string()) != std::string::npos);
+  CHECK(err.find("conflict markers") != std::string::npos);
+  fs::remove_all(dir);
 }
