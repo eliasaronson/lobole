@@ -71,3 +71,16 @@ public:
   // plane. ref.featureId must be bodyId.
   ElementRef face;
 };
+
+// The offset that lands the knife on the body's midpoint along the plane's
+// normal — the only offset that is guaranteed to cut a body the plane's
+// direction crosses at all.
+//
+// This exists because "offset" is measured FROM THE CHOSEN PLANE, so a value
+// derived for one plane is meaningless for the next: 1.0 above XY is
+// mid-body, and 1.0 above a datum that already sits on the body's top face is
+// a knife in mid-air. Both the tool's initial default and its re-derivation
+// on a plane change go through here.
+double CenteredSplitOffset(const glm::vec3& planeOrigin,
+                           const glm::vec3& planeNormal, const glm::vec3& bmin,
+                           const glm::vec3& bmax);

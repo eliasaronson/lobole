@@ -1834,6 +1834,61 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(std::abs(total - solid) < 1e-3); // split keeps every piece
   };
 
+  // The bug this guards: the offset is measured FROM the chosen plane, and
+  // it used to be derived once (as the body's mid-HEIGHT) when the tool
+  // opened. Pick a datum plane afterwards and that number means something
+  // else — a user's datum sat on the box's top face, the stale 1.0 put the
+  // knife above the body, and the split refused while the default plane had
+  // cut it cleanly.
+  t = IM_REGISTER_TEST(engine, "split",
+                       "switching_the_plane_re_centers_the_knife");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    // A datum plane on the box's top face — the worst case, and the one hit
+    // in practice: tangent, so any offset in the wrong direction misses.
+    ToolbarClick(ctx, "###tb_datum_plane");
+    ctx->Yield();
+    auto* dp = dynamic_cast<DatumPlaneFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(dp != nullptr);
+    glm::vec3 bmin, bmax;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(bmin, bmax);
+    dp->offset = bmax.z; // exactly the top face
+    Doc()->Regenerate();
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_split");
+    ctx->Yield();
+    auto* sp = dynamic_cast<SplitFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(sp != nullptr);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2); // default plane cuts
+
+    // Switch the knife to the datum. Same two-step combo dance as the loft
+    // sections: the popup only exists between the clicks, and it does not
+    // take window focus.
+    ctx->ItemClick("//###ToolWindow/###Plane");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick(
+        (std::string("//") + popup->Name + "/**/" + dp->GetName()).c_str());
+    ctx->Yield();
+
+    IM_CHECK(sp->datumId == dp->GetId());
+    IM_CHECK(sp->GetError().empty()); // ...not "does not divide"
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2); // still two pieces
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");

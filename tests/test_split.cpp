@@ -81,8 +81,44 @@ TEST_CASE("Each split piece names its own faces", "[split]") {
 TEST_CASE("A plane that misses the body fails to split", "[split]") {
   Document doc;
   const uint64_t b = AddBox(doc);
-  AddPlaneSplit(doc, b, 5.0); // z = 5 is outside [0,2]
+  auto* sp = AddPlaneSplit(doc, b, 5.0); // z = 5 is outside [0,2]
   CHECK_FALSE(doc.Regenerate());
+  // The message has to say WHERE, or the user is left guessing which way and
+  // how far to move a plane they cannot see edge-on. A dogfooding session lost
+  // several minutes to "does not divide the body into separate pieces".
+  INFO(sp->GetError());
+  CHECK(sp->GetError().find("5.000") != std::string::npos); // the knife
+  CHECK(sp->GetError().find("2.000") != std::string::npos); // the body's top
+}
+
+// The offset is measured from the CHOSEN plane, so the tool re-derives it
+// whenever the plane changes. A user hit the consequence of it not doing so:
+// their datum plane sat exactly on the box's top face, the stale offset put
+// the knife a further 1.0 above that, and the split refused — while the
+// default XY plane, with the same offset, cut cleanly through the middle.
+TEST_CASE("The centered offset cuts from any plane, wherever it sits",
+          "[split]") {
+  Document doc;
+  const uint64_t b = AddBox(doc); // [0,2]^3
+
+  // From the XY base plane at z = 0, and from a datum sitting on the top face.
+  for (const glm::vec3 planeOrigin :
+       {glm::vec3(0, 0, 0), glm::vec3(0, 0, 2), glm::vec3(0, 0, -7.5)}) {
+    const double offset = CenteredSplitOffset(planeOrigin, glm::vec3(0, 0, 1),
+                                              glm::vec3(0), glm::vec3(2));
+    CHECK_THAT(offset, WithinRel(1.0 - planeOrigin.z, 1e-9));
+    // ...and it is an offset that actually cuts.
+    Document cut;
+    const uint64_t cb = AddBox(cut);
+    AddPlaneSplit(cut, cb, static_cast<double>(planeOrigin.z) + offset);
+    REQUIRE(cut.GetBodies().size() == 2);
+  }
+
+  // A normal that is not z: the derivation follows the plane, not an axis.
+  CHECK_THAT(CenteredSplitOffset(glm::vec3(0), glm::vec3(1, 0, 0), glm::vec3(0),
+                                 glm::vec3(2)),
+             WithinRel(1.0, 1e-9));
+  (void)b;
 }
 
 TEST_CASE("A split with a missing body fails", "[split]") {

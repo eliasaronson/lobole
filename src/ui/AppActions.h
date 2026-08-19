@@ -14,6 +14,7 @@
 #include <vector>
 
 class SketchPlane;
+class SplitFeature;
 class FilletFeature; // defined in core/features/FilletFeature.h
 struct RTStillDesc;  // defined in RayTracingRenderer.h
 struct Ray;          // defined in FaceSelector.h
@@ -559,6 +560,20 @@ void CreateThread(AppState& state);
 void CreateShell(AppState& state);
 void CreateDraft(AppState& state);
 void CreateSplit(AppState& state);
+
+// The plane a plane-referencing feature points at (a base plane, or an
+// earlier DatumPlane by id), as the UI sees it: the datum's last regenerated
+// output. nullopt when the id does not resolve. The regen path has
+// ResolveParentPlane for the same job; this is its caller-side twin, for
+// tools that must know where a plane IS while the user is picking it.
+std::optional<SketchPlane>
+ResolvePlaneForTool(AppState& state, uint64_t datumId, PlaneType basePlane);
+
+// Re-derives a split's offset so the knife lands mid-body on its CURRENT
+// plane. Called when the plane changes: an offset measured from the old
+// plane means something else on the new one. Leaves a user-typed expression
+// alone — that is theirs.
+void RecenterSplitOffset(AppState& state, SplitFeature& split);
 void CreateRefine(AppState& state);
 // Arms plane-picking for a new sketch.
 void StartNewSketch(AppState& state);

@@ -68,6 +68,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <set>
 #include <unordered_map>
 
@@ -351,10 +352,39 @@ void CreateCylinder(AppState& state) {
 void CreateDatumPlane(AppState& state) {
   auto dp = std::make_unique<DatumPlaneFeature>(NextName(state, "Plane"),
                                                 DatumPlaneKind::Offset);
-  dp->offset = 2.0; // scene scale (~2-unit boxes, half-extent-3 plane quads)
   // Build on the selected datum if one is selected, else the XY base plane.
   if (auto* parent = dynamic_cast<DatumPlaneFeature*>(SelectedFeature(state)))
     dp->parentId = parent->GetId();
+
+  // Clear of the model, along the PARENT's normal — not a fixed 2.0, which
+  // is right only for a 2-unit box and lands on a face, inside a part, or
+  // out of sight for anything else. (A plane coincident with a face is the
+  // pathological case: it looks placed and refuses to cut.) A margin of a
+  // quarter of the model's own extent keeps it visibly separate at any size.
+  if (const auto parentPlane =
+          ResolvePlaneForTool(state, dp->parentId, dp->basePlane)) {
+    const glm::vec3 n = parentPlane->GetNormal();
+    const glm::vec3 o = parentPlane->GetOrigin();
+    float lo = std::numeric_limits<float>::max();
+    float hi = std::numeric_limits<float>::lowest();
+    for (const Body& b :
+         state.document ? state.document->GetBodies() : std::vector<Body>{}) {
+      glm::vec3 bmin, bmax;
+      b.shape.GetBoundingBox(bmin, bmax);
+      for (int c = 0; c < 8; c++) {
+        const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
+                               (c & 2) ? bmax.y : bmin.y,
+                               (c & 4) ? bmax.z : bmin.z);
+        const float d = glm::dot(corner - o, n);
+        lo = std::min(lo, d);
+        hi = std::max(hi, d);
+      }
+    }
+    if (hi > lo)
+      dp->offset = static_cast<double>(hi + 0.25f * (hi - lo));
+    // else: an empty document has no size to derive from, so the feature's
+    // own default (a base-plane grid square) stands.
+  }
   BeginPreviewFeature(state, std::move(dp));
 }
 
@@ -612,23 +642,61 @@ void CreateDraft(AppState& state) {
                                             std::vector<ElementRef>{}, 5.0));
 }
 
+std::optional<SketchPlane>
+ResolvePlaneForTool(AppState& state, uint64_t datumId, PlaneType basePlane) {
+  if (!state.document)
+    return std::nullopt;
+  if (datumId == 0)
+    return SketchPlane(basePlane);
+  for (const auto& f : state.document->GetFeatures()) {
+    if (f && f->GetId() == datumId) {
+      if (auto* dp = dynamic_cast<DatumPlaneFeature*>(f.get()))
+        return dp->OutputPlane();
+      return std::nullopt;
+    }
+  }
+  return std::nullopt;
+}
+
+void RecenterSplitOffset(AppState& state, SplitFeature& split) {
+  if (!state.document || !split.offsetExpr.empty())
+    return; // an expression is the user's, not ours to overwrite
+  const auto plane = ResolvePlaneForTool(state, split.datumId, split.basePlane);
+  if (!plane)
+    return;
+  // What to measure against depends on whether the split is CURRENTLY
+  // cutting: on success the source body is gone, replaced by pieces stamped
+  // with this feature's id (together they are the source); on failure the
+  // source is still there untouched. Take the bounds over either, or a plane
+  // change from a working split would find nothing to center on.
+  glm::vec3 bmin(std::numeric_limits<float>::max());
+  glm::vec3 bmax(std::numeric_limits<float>::lowest());
+  bool found = false;
+  for (const Body& b : state.document->GetBodies()) {
+    if (b.createdBy != split.bodyId && b.createdBy != split.GetId())
+      continue;
+    glm::vec3 lo, hi;
+    b.shape.GetBoundingBox(lo, hi);
+    bmin = glm::min(bmin, lo);
+    bmax = glm::max(bmax, hi);
+    found = true;
+  }
+  if (found)
+    split.offset =
+        CenteredSplitOffset(plane->GetOrigin(), plane->GetNormal(), bmin, bmax);
+}
+
 void CreateSplit(AppState& state) {
   if (!state.document || state.document->GetBodies().empty())
     return;
   auto split = std::make_unique<SplitFeature>(NextName(state, "Split"),
                                               NewestBody(state));
-  // A base plane through the origin misses any body that does not sit there,
-  // and the feature fails with "the plane missed the body" before the user has
-  // touched anything. Offset the default XY knife to the body's mid-height so
-  // the preview shows an actual split.
-  for (const Body& b : state.document->GetBodies()) {
-    if (b.createdBy != split->bodyId)
-      continue;
-    glm::vec3 bmin, bmax;
-    b.shape.GetBoundingBox(bmin, bmax);
-    split->offset = (bmin.z + bmax.z) * 0.5;
-    break;
-  }
+  // A plane through the origin misses any body that does not sit there, and
+  // the feature would fail before the user has touched anything. Land the
+  // knife mid-body instead — along the PLANE'S normal, not along z: the same
+  // derivation runs again whenever the plane changes (RecenterSplitOffset),
+  // because an offset only means something relative to a given plane.
+  RecenterSplitOffset(state, *split);
   BeginPreviewFeature(state, std::move(split));
 }
 

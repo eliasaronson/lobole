@@ -15,6 +15,15 @@
 #include <gp_Pnt.hxx>
 
 #include <algorithm>
+#include <cstdio>
+#include <limits>
+
+double CenteredSplitOffset(const glm::vec3& planeOrigin,
+                           const glm::vec3& planeNormal, const glm::vec3& bmin,
+                           const glm::vec3& bmax) {
+  const glm::vec3 center = (bmin + bmax) * 0.5f;
+  return static_cast<double>(glm::dot(center - planeOrigin, planeNormal));
+}
 
 SplitFeature::SplitFeature(const std::string& name, uint64_t bodyId)
     : bodyId(bodyId) {
@@ -94,7 +103,34 @@ bool SplitFeature::Execute(RegenContext& ctx) {
     CADShape resultShape(splitter.Shape());
     std::vector<CADShape> pieces = resultShape.SplitSolids();
     if (pieces.size() < 2) {
-      SetError("the plane does not divide the body into separate pieces");
+      // "It didn't work" is not enough here: the two ways to fail look
+      // identical in the viewport when the plane is edge-on. Say where the
+      // knife is, in the one number that matters — distance along its own
+      // normal — so the offset to type is arithmetic, not trial and error.
+      float lo = std::numeric_limits<float>::max();
+      float hi = std::numeric_limits<float>::lowest();
+      for (int c = 0; c < 8; c++) {
+        const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
+                               (c & 2) ? bmax.y : bmin.y,
+                               (c & 4) ? bmax.z : bmin.z);
+        const float d = glm::dot(corner, normal);
+        lo = std::min(lo, d);
+        hi = std::max(hi, d);
+      }
+      const float knife = glm::dot(origin, normal);
+      char msg[192];
+      if (knife <= lo || knife >= hi) {
+        std::snprintf(msg, sizeof(msg),
+                      "the knife plane misses the body: it sits at %.3f along "
+                      "its normal, and the body spans %.3f to %.3f",
+                      knife, lo, hi);
+      } else {
+        std::snprintf(msg, sizeof(msg),
+                      "the plane crosses the body at %.3f but does not "
+                      "separate it into pieces",
+                      knife);
+      }
+      SetError(msg);
       return false;
     }
 

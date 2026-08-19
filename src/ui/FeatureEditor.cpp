@@ -1,4 +1,5 @@
 #include "ui/FeatureEditor.h"
+#include <functional>
 #include <utility>
 
 #include "cad/CADMaterials.h"
@@ -667,8 +668,12 @@ void SourceBodyCombo(AppState& state, Feature& owner, uint64_t& sourceId,
 
 // A plane picker (base planes + earlier datum planes); sets planeId/basePlane
 // the same way DrawDatumPlaneParams' parent combo does.
+// `onChanged` runs after the new plane is stored and BEFORE the commit, so
+// anything derived from the plane (a split's offset) is part of the same
+// edit rather than a second, uncommitted one.
 void PlaneRefCombo(AppState& state, Feature& owner, uint64_t& planeId,
-                   PlaneType& basePlane, size_t index, bool commit) {
+                   PlaneType& basePlane, size_t index, bool commit,
+                   const std::function<void()>& onChanged = {}) {
   std::vector<const char*> labels = {"Front (XY)", "Top (XZ)", "Right (YZ)"};
   std::vector<uint64_t> ids = {0, 0, 0};
   std::vector<PlaneType> bases = {PlaneType::XY, PlaneType::XZ, PlaneType::YZ};
@@ -693,6 +698,8 @@ void PlaneRefCombo(AppState& state, Feature& owner, uint64_t& planeId,
     nlohmann::json before = DocumentIO::FeatureToJson(owner);
     planeId = ids[static_cast<size_t>(sel)];
     basePlane = bases[static_cast<size_t>(sel)];
+    if (onChanged)
+      onChanged();
     CommitDiscrete(state, owner, before, index, commit);
   }
 }
@@ -1571,7 +1578,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     PickSlotRow(state, feature, PickSlot::SplitBody,
                 BodyRefLabel(state, sp->bodyId));
     if (sp->knife == SplitKnifeKind::Plane) {
-      PlaneRefCombo(state, feature, sp->datumId, sp->basePlane, index, commit);
+      PlaneRefCombo(state, feature, sp->datumId, sp->basePlane, index, commit,
+                    [&] { RecenterSplitOffset(state, *sp); });
       ExprDim(state, feature, index, commit, "Offset", sp->offsetExpr,
               sp->offset);
     } else {
