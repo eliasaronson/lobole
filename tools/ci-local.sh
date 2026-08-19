@@ -151,6 +151,9 @@ if [ "$run_containers" = 1 ]; then
       "$image" "$PACKAGES" > "$build_dir/Dockerfile"
     docker build -q -t "$tag" "$build_dir" > /dev/null
 
+    # No '> /dev/null' on the build: run_tests keeps the whole log and prints
+    # it only on failure, and a compile error with its output discarded leaves
+    # an eleven-line log that says nothing (which is exactly what happened).
     ctest_cmd="ctest --test-dir /b -LE gui -j\$(nproc) --output-on-failure"
     [ -n "$exclude" ] && ctest_cmd="$ctest_cmd -E \"$exclude\""
     # `set -o pipefail`: without it the pipe to tail swallows ctest's exit
@@ -158,8 +161,8 @@ if [ "$run_containers" = 1 ]; then
     run_tests "${image//[:.]/-}" "$image" \
       docker run --rm -v "$root:/src:ro" -v "$root/$build_dir:/b" "$tag" bash -c "
          set -o pipefail
-         cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release > /dev/null &&
-         cmake --build /b -j\$(nproc) > /dev/null && $ctest_cmd"
+         cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release &&
+         cmake --build /b -j\$(nproc) && $ctest_cmd"
   done
 fi
 

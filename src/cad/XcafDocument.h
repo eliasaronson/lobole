@@ -34,8 +34,12 @@ public:
   XcafDocument(const XcafDocument&) = delete;
   XcafDocument& operator=(const XcafDocument&) = delete;
 
-  const Handle(TDocStd_Document) & Get() const { return m_doc; }
-  operator const Handle(TDocStd_Document) & () const { return m_doc; }
+  // NON-const, deliberately: OpenCASCADE 7.6's
+  // STEPCAFControl_Reader::Transfer takes `Handle(TDocStd_Document)&`, so a
+  // const-only conversion does not compile there (7.9 relaxed it to const).
+  // The guard owns the handle either way; callers only fill it in.
+  Handle(TDocStd_Document) & Get() { return m_doc; }
+  operator Handle(TDocStd_Document) & () { return m_doc; }
   TDocStd_Document* operator->() const { return m_doc.get(); }
 
 private:
