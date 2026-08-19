@@ -1,6 +1,9 @@
 # A5 — sub-assemblies (assemblies in assemblies) — plan
 
-> Status: **in progress.** Reviewed 2026-08-19 against the code (the walker
+> Status: **A5.1-A5.4 shipped 2026-08-19** (4ce026a, 7d01be6, 4485c45,
+> 5278440). What remains is A5.5, the dock restructure, which is an
+> acceptance exercise on a real model rather than code — and the deferrals
+> listed at the bottom. Reviewed 2026-08-19 against the code (the walker
 > inventory below was checked with grep, not memory) and extended: six more
 > geometry walkers, one mechanism promoted out of "risks" because it does not
 > exist yet, and the three open design questions answered. Written 2026-08-18,
@@ -146,17 +149,21 @@ that is coverage the golden cannot give, not a replacement for it.
 
 ## Phases
 
-- **A5.1 core**: ref_kind + serialization, resolution helpers, Flatten
+- **A5.1 core — SHIPPED**: ref_kind + serialization, resolution helpers, Flatten
   with cycle/depth guards, kVersion 55. Headless-testable alone.
-- **A5.2 walker ports**: the eight sites above, each verified as it
+- **A5.2 walker ports — SHIPPED** (all thirteen, including the six the
+  review added): the eight sites above, each verified as it
   lands (render by screenshot, the rest by smoke assertions).
-- **A5.3 surface**: add_occurrence assembly resolution + candidate
+- **A5.3 surface — SHIPPED**: add_occurrence assembly resolution + candidate
   lists in errors, list_occurrences/get_state carry ref_kind and path,
   delete/cycle guards, describe rows, GUI row + Open.
-- **A5.4 tests**: nested_assembly_smoke (build sub + top, combined BOM
+- **A5.4 tests — SHIPPED** (tests/nested_assembly_smoke.py + five Flatten
+  unit tests + two goldens; the fixture directory proved unnecessary once the
+  golden turned out to be expressible): nested_assembly_smoke (build sub + top, combined BOM
   quantities, contact through a sub-assembly, cycle refusal, dangling
   ref honesty, save/reload) + the nested-dock fixture.
-- **A5.5 acceptance — restructure the dock**: `build_dock.py` splits
+- **A5.5 acceptance — restructure the dock — NOT DONE** (it edits
+  scratch/build_dock.py, which is the user's own artifact): `build_dock.py` splits
   into "Dock" (frame/deck/barrels/cradle/moorings) and "Gangway"
   (stringers/noggins/boards/roller carriage) assemblies composed in a
   top-level "Marsliden dock" with the ladder and the two HINGES — the
