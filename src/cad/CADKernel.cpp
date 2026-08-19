@@ -1,7 +1,9 @@
 #include "cad/CADKernel.h"
+
 #include <cmath>
 #include <filesystem>
 #include <functional>
+#include <glm/gtc/quaternion.hpp>
 #include <map>
 
 #ifdef HAVE_OPENCASCADE
@@ -72,6 +74,7 @@
 #include <gp_Circ.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Pnt2d.hxx>
+#include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
 
 // CADShape implementation
@@ -182,14 +185,42 @@ CADShape CADShape::Transformed(const glm::mat4& m) const {
   if (m_shape.IsNull())
     return CADShape();
   gp_Trsf t;
+  const glm::mat3 basis(m);
+  // Is this a plain rotation+translation? Columns unit-length and a positive
+  // determinant. Occurrence placements always are; mirrors and anything
+  // exotic take the general path below.
+  const float det = glm::determinant(basis);
+  const bool rigid = det > 0.0f && std::abs(det - 1.0f) < 1e-3f &&
+                     std::abs(glm::length(basis[0]) - 1.0f) < 1e-3f &&
+                     std::abs(glm::length(basis[1]) - 1.0f) < 1e-3f &&
+                     std::abs(glm::length(basis[2]) - 1.0f) < 1e-3f;
   try {
-    // glm is column-major (m[col][row]); SetValues wants row-major 3x4.
-    t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1],
-                m[3][1], m[0][2], m[1][2], m[2][2], m[3][2]);
+    if (rigid) {
+      // Hand OCC an EXACTLY orthonormal rotation. Routed through SetValues,
+      // the rounding in a float rotation makes OCC infer a scale factor a
+      // hair off 1 — and TopLoc_Location refuses to move a shape with any
+      // scaling at all ("Moving with scaling transformation is forbidden").
+      // OpenCASCADE 7.6 rejects inputs that 7.9 accepts, so an assembly
+      // comparison worked here and failed on Ubuntu.
+      const glm::quat q = glm::normalize(glm::quat_cast(basis));
+      t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));
+      t.SetTranslationPart(gp_Vec(m[3][0], m[3][1], m[3][2]));
+    } else {
+      // glm is column-major (m[col][row]); SetValues wants row-major 3x4.
+      t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1],
+                  m[3][1], m[0][2], m[1][2], m[2][2], m[3][2]);
+    }
   } catch (const Standard_Failure&) {
     return CADShape(m_shape); // sheared matrix: OCC can't represent it
   }
-  return CADShape(m_shape.Moved(TopLoc_Location(t)));
+  try {
+    return CADShape(m_shape.Moved(TopLoc_Location(t)));
+  } catch (const Standard_Failure&) {
+    // Moved() is the call that enforces "no scaling", and it throws a
+    // Standard_Failure, which is NOT a std::exception — uncaught, it took
+    // the whole application down rather than one operation.
+    return CADShape(m_shape);
+  }
 }
 
 void CADShape::Translate(const glm::vec3& offset) {

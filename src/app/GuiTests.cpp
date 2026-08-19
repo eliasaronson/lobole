@@ -4584,6 +4584,107 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   };
 
   // The bottom-bar "+" collapses the three add buttons into one menu.
+  // Opening a project must frame what it opened. The fit was guarded on
+  // `state.document`, which is null when the active tab is an ASSEMBLY, so a
+  // 5 m dock opened with the camera at its default — inside the geometry.
+  // It read as an empty scene, and the first thing you did was press F.
+  t = IM_REGISTER_TEST(engine, "camera", "opening_an_assembly_frames_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // A part far bigger than the default camera distance, in an assembly.
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Beam", glm::vec3(0), 4000, 200, 300));
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Rig");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence occ;
+    occ.name = "Beam";
+    occ.partId = s_App->parts[0].id;
+    occ.fixed = true;
+    s_App->assembly->AddOccurrence(occ);
+    ctx->Yield(2);
+
+    const std::string dir =
+        (std::filesystem::temp_directory_path() / "designer_open_frame")
+            .string();
+    std::filesystem::remove_all(dir);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir, &err));
+
+    // Reopen from scratch with the camera somewhere useless.
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetDistance(5.0f); // inside anything of this size
+    ctx->Yield();
+    IM_CHECK(ui::OpenProject(*s_App, dir, &err));
+    ctx->Yield(2);
+    s_App->camera->FinishAnimation();
+    ctx->Yield();
+
+    // Framed: the camera stands off by something like the model's size,
+    // rather than sitting inside it.
+    IM_CHECK(s_App->assembly != nullptr);
+    IM_CHECK(s_App->camera->GetDistance() > 1000.0f);
+    std::filesystem::remove_all(dir);
+  };
+
+  // The camera is global, so arriving at a tab far bigger than the last one
+  // used to put you inside it. The first visit to a tab frames it; after
+  // that the framing is the user's.
+  t = IM_REGISTER_TEST(engine, "camera", "first_visit_to_a_tab_frames_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // A small part in tab 0 and a six-metre one in tab 1, saved and reopened
+    // so both arrive unvisited — the state a project always opens in.
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Chip", glm::vec3(0), 8, 8, 8));
+    const size_t big = ui::AddPart(*s_App, "Girder");
+    ui::SetActivePart(*s_App, big);
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Span", glm::vec3(0), 6000, 300, 300));
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+
+    const std::string dir =
+        (std::filesystem::temp_directory_path() / "designer_tab_frame")
+            .string();
+    std::filesystem::remove_all(dir);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir, &err));
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK(ui::OpenProject(*s_App, dir, &err));
+    ctx->Yield(2);
+    s_App->camera->FinishAnimation();
+
+    // Tab 0 (the 8 mm chip) was framed by the open: close in.
+    const float small = s_App->camera->GetDistance();
+    IM_CHECK(small < 500.0f);
+
+    // Switching to the girder frames it rather than leaving us inside.
+    ui::SetActivePart(*s_App, 1);
+    ctx->Yield(2);
+    s_App->camera->FinishAnimation();
+    IM_CHECK(s_App->camera->GetDistance() > 1000.0f);
+
+    // Coming back a second time keeps whatever framing the user set.
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    s_App->camera->FinishAnimation();
+    s_App->camera->SetDistance(42.0f);
+    ui::SetActivePart(*s_App, 1);
+    ctx->Yield(2);
+    s_App->camera->FinishAnimation();
+    IM_CHECK(std::abs(s_App->camera->GetDistance() - 42.0f) < 1.0f);
+    std::filesystem::remove_all(dir);
+  };
+
   // The Render modal on an assembly tab. Its own Render button carried a
   // part-only test (state.document && bodies), so on an assembly — where
   // `document` is null — it sat greyed out behind a working Render entry,

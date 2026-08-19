@@ -1,5 +1,7 @@
 #include "core/Measure.h"
 
+#include <glm/gtc/quaternion.hpp>
+
 #include <Standard_Failure.hxx>
 
 #include "common/Logger.h"
@@ -35,6 +37,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
@@ -97,10 +100,16 @@ TopoDS_Shape ResolveShape(const std::vector<Body>& bodies,
 // A rigid glm placement (rotation + translation, as occurrence transforms
 // are) as an OCC gp_Trsf. glm is column-major: m[col][row].
 gp_Trsf ToTrsf(const glm::mat4& m) {
+  // Built from a NORMALIZED quaternion rather than by handing OCC the float
+  // matrix. SetValues infers a scale factor from the 3x3 block, and the
+  // rounding in a float rotation is enough for it to infer one that is not
+  // exactly 1 — after which OpenCASCADE 7.6 refuses the transform outright
+  // ("Moving with scaling transformation is forbidden") where 7.9 tolerates
+  // it. An occurrence placement is rigid by construction, so say so.
+  const glm::quat q = glm::normalize(glm::quat_cast(glm::mat3(m)));
   gp_Trsf t;
-  t.SetValues(m[0][0], m[1][0], m[2][0], m[3][0], //
-              m[0][1], m[1][1], m[2][1], m[3][1], //
-              m[0][2], m[1][2], m[2][2], m[3][2]);
+  t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));
+  t.SetTranslationPart(gp_Vec(m[3][0], m[3][1], m[3][2]));
   return t;
 }
 

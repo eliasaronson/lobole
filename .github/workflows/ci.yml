@@ -43,15 +43,15 @@ jobs:
         run: cmake --build build -j"$(nproc)"
 
       # Ubuntu 24.04 ships OpenCASCADE 7.6.3 and the project is developed
-      # against 7.9.3. Four cases assert behaviour that changed between them
-      # (transformed-shape measurement and interference, XCAF STEP import
-      # placement, and a shell 7.6 refuses where 7.9 makes a no-op). The
-      # application works on both; see the README's OpenCASCADE section.
+      # against 7.9.3. Two cases differ: XCAF STEP import placement, and a
+      # shell 7.6 refuses where 7.9 makes a no-op. (Two more were OURS, not
+      # the kernel's — a float rotation OCC read as scaled; fixed in
+      # CADShape::Transformed.) See the README's OpenCASCADE section.
       - name: Test (headless — everything without the gui label)
         # Parallel is safe: GPU-contending tests hold a shared RESOURCE_LOCK.
         run: |
           ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure \
-            -E "Assembly import plan|Transformed distance|InterferenceVolume over transformed|Shell that removes no material"
+            -E "Assembly import plan|Shell that removes no material"
 
       # The build without Dear ImGui Test Engine — the configuration for
       # anyone who cannot take that dependency's license (it is free for
@@ -108,12 +108,11 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
 
-      # Ubuntu 24.04 ships OpenCASCADE 7.6.3, and four cases depend on kernel
-      # behaviour that changed by 7.9 (transformed-shape measurement and
-      # interference, XCAF STEP import placement, and a shell that 7.6 refuses
-      # where 7.9 makes a no-op). The app works; these assertions do not hold
-      # on that kernel. Documented in the README's optional-dependency table.
+      # Ubuntu 24.04 ships OpenCASCADE 7.6.3, and two cases depend on kernel
+      # behaviour that changed by 7.9 (XCAF STEP import placement, and a shell
+      # 7.6 refuses where 7.9 makes a no-op). The app works; these assertions
+      # do not hold on that kernel. See the README's OpenCASCADE section.
       - name: Test
         run: |
           ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure \
-            -E "Assembly import plan|Transformed distance|InterferenceVolume over transformed|Shell that removes no material"
+            -E "Assembly import plan|Shell that removes no material"

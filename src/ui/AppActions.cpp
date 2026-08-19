@@ -1161,6 +1161,15 @@ void SetActivePart(AppState& state, size_t index) {
   if (state.drawing && state.drawingRenders.empty() &&
       state.drawing->ViewCount() > 0)
     UpdateDrawingRenders(state);
+
+  // First look at this tab: frame it. The camera is global, so arriving at a
+  // 5 m assembly with a 20 mm part's framing puts you inside the geometry —
+  // which reads as an empty scene, not as "you are too close". Only the first
+  // visit; after that the framing is the user's.
+  if (index < state.parts.size() && !state.parts[index].everFramed) {
+    state.parts[index].everFramed = true;
+    FitCameraToDocument(state);
+  }
 }
 
 std::optional<size_t> SlotIndexById(const AppState& state, uint64_t slotId) {
@@ -1775,8 +1784,16 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
     if (state.drawing && state.drawing->ViewCount() > 0)
       UpdateDrawingRenders(
           state); // re-project on first view of an opened drawing
-    if (state.document)
+    // Frame whatever the opened project put in front of us. This tested
+    // `state.document` alone, which is null when the active tab is an
+    // ASSEMBLY — so opening an assembly project left the camera at its
+    // default, inside a 5 m dock, and the app looked empty.
+    if (state.document || state.assembly) {
       FitCameraToDocument(state);
+      if (state.activePart >= 0 &&
+          static_cast<size_t>(state.activePart) < state.parts.size())
+        state.parts[state.activePart].everFramed = true;
+    }
     return true;
   } catch (const std::exception& e) {
     if (error)

@@ -467,6 +467,11 @@ struct PartSlot {
   // stays flat, ids/references are unaffected.
   std::string folder;
   DocKind kind = DocKind::Part;
+  // Has this tab ever been framed? A camera is global, not per-tab, so
+  // switching from a 20 mm bracket to a 5 m dock used to leave you INSIDE the
+  // dock — an assembly full of parts looking like an empty scene. The first
+  // time a tab is shown it gets a fit; after that its framing is yours.
+  bool everFramed = false;
   std::unique_ptr<Document> doc; // part: null while this tab is active
   std::unique_ptr<AssemblyDocument> assembly; // assembly: null while active
   std::unique_ptr<DrawingDocument> drawing;   // drawing: null while active
