@@ -237,6 +237,11 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex) {
   return out;
 }
 
+// Boolean fuzz for contact checks, in millimetres. Big enough to swallow the
+// sliver two coincident faces produce, far below any interference a designer
+// could intend.
+constexpr double kContactFuzz = 1.0e-3;
+
 std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
                                          const glm::mat4& xfA,
                                          const std::vector<Body>& bodiesB,
@@ -264,7 +269,28 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
         const TopoDS_Shape sb = b.shape.GetShape().Moved(lb);
         if (boxA.IsOut(boxOf(sb)))
           continue; // cannot touch
-        BRepAlgoAPI_Common common(sa, sb);
+        // FUZZY, not exact. Two solids designed to TOUCH share a face, and
+        // an exact boolean over coincident faces returns a sliver whose
+        // volume is the contact area times the modelling tolerance — for the
+        // dock's ladder resting on its end joist that is 0.134 mm3 of
+        // nothing, which then read as a clash. Measured: backing the part
+        // out by 0.0001 mm left the volume unchanged (a real overlap would
+        // shrink continuously) and 0.001 mm took it to exactly zero.
+        //
+        // A micron of fuzz makes coincident faces cancel while leaving any
+        // interference a designer meant — the smallest real one here is a
+        // 15 mm standoff — untouched.
+        // The two-shape constructor builds immediately, so the fuzz has to
+        // go in through the arguments/tools form or it is set too late to
+        // matter (it silently was, on the first attempt at this fix).
+        BRepAlgoAPI_Common common;
+        TopTools_ListOfShape args, tools;
+        args.Append(sa);
+        tools.Append(sb);
+        common.SetArguments(args);
+        common.SetTools(tools);
+        common.SetFuzzyValue(kContactFuzz);
+        common.Build();
         if (!common.IsDone() || common.Shape().IsNull())
           continue;
         GProp_GProps props;
@@ -353,7 +379,20 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
         cands.push_back({d, i, j});
         if (d > 0.0)
           continue;
-        BRepAlgoAPI_Common common(pa[i].shape, pb[j].shape);
+        // Fuzzy, for the reason kContactFuzz documents: parts DESIGNED to
+        // touch share a face, and an exact boolean over coincident faces
+        // returns a sliver of contact-area x tolerance, which then reads as
+        // an interference. This is the path the named-pair `interference`
+        // RPC and contact_report take — InterferenceVolume above is the
+        // whole-assembly sweep, and both need the same answer.
+        BRepAlgoAPI_Common common;
+        TopTools_ListOfShape args, tools;
+        args.Append(pa[i].shape);
+        tools.Append(pb[j].shape);
+        common.SetArguments(args);
+        common.SetTools(tools);
+        common.SetFuzzyValue(kContactFuzz);
+        common.Build();
         if (!common.IsDone() || common.Shape().IsNull())
           continue;
         GProp_GProps props;

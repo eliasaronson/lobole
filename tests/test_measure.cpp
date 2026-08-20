@@ -6,6 +6,9 @@
 #include "core/Measure.h"
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -325,6 +328,67 @@ TEST_CASE("InterferenceVolume over transformed body sets",
       glm::translate(glm::mat4(1.0f), glm::vec3(1.2f, 0.5f, 0.0f)));
   REQUIRE(v.has_value());
   CHECK_THAT(*v, WithinAbs(0.0, 1e-9));
+}
+
+// The dock's bathing ladder rested on its end joist and read as a CLASH of
+// 0.1337740952176187 mm3 — a sliver, not an overlap: backing the part out by
+// 0.0001 mm left the volume BIT-IDENTICAL (a real overlap shrinks
+// continuously) and 0.001 mm took it to exactly zero. Fixed by giving the
+// contact booleans a micron of fuzz (Measure::kContactFuzz), verified
+// causally: scratch/build_dock.py fails its own "must touch" gate with the
+// fuzz at 0 and passes every gate with it on.
+//
+// HONEST LIMIT: this case does NOT reproduce that sliver. Neither a planar
+// pair, nor a cylinder tangent to a plane, nor either of those under a
+// rotation written to 8 decimals, produces one — they all come out clean
+// from an exact boolean. Whatever combination the ladder hits was not
+// reduced. What this case pins is the INVARIANT the fix must keep: tangency
+// reads as touching, a real bite still reads as a clash, and clear stays
+// clear. The standing regression net for the sliver itself is the dock
+// script, which is run by hand.
+TEST_CASE("ContactBetween: a tangent cylinder is touching, not clashing",
+          "[measure][assembly]") {
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Joist", glm::vec3(0), 100.0, 10.0, 100.0));
+  Document rod;
+  rod.AddFeature(std::make_unique<CylinderFeature>(
+      "Rail", glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0, 0, 1), 16.0, 80.0));
+
+  // ...and the placement is ROTATED by a quaternion written to 8 decimals,
+  // as a hand-authored build script writes 90 degrees. That is the missing
+  // ingredient: an exactly-coincident pair comes out of the boolean clean,
+  // but a rotation carrying 1e-9 of error makes the faces microscopically
+  // non-coincident, and THAT is what leaves a sliver.
+  const glm::mat4 spin =
+      glm::mat4_cast(glm::quat(0.70710678f, 0.0f, 0.70710678f, 0.0f));
+
+  // Sitting exactly ON the joist's top face: tangent along a line.
+  const float top = 10.0f;
+  auto c = Measure::ContactBetween(
+      doc.GetBodies(), glm::mat4(1.0f), rod.GetBodies(),
+      glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, top + 16.0f, 0.0f)) *
+          spin);
+  REQUIRE(c.has_value());
+  CHECK_THAT(c->volume, WithinAbs(0.0, 1e-9)); // touching, NOT a clash
+  CHECK_THAT(c->distance, WithinAbs(0.0, 1e-3));
+
+  // A real interference is still reported: sink it 0.5 mm into the joist.
+  c = Measure::ContactBetween(
+      doc.GetBodies(), glm::mat4(1.0f), rod.GetBodies(),
+      glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, top + 15.5f, 0.0f)) *
+          spin);
+  REQUIRE(c.has_value());
+  CHECK(c->volume > 1.0); // a 0.5 mm bite out of an 80 mm bar is cubic mm
+
+  // And clear stays clear.
+  c = Measure::ContactBetween(
+      doc.GetBodies(), glm::mat4(1.0f), rod.GetBodies(),
+      glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, top + 18.0f, 0.0f)) *
+          spin);
+  REQUIRE(c.has_value());
+  CHECK_THAT(c->volume, WithinAbs(0.0, 1e-9));
+  CHECK_THAT(c->distance, WithinRel(2.0, 1e-3));
 }
 
 TEST_CASE("ContactBetween separates clash, touching and clear",
