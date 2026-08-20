@@ -468,7 +468,7 @@ def main():
         # …and the UI tier keeps working on a non-part tab (the guard that
         # rejects part RPCs on an assembly must not swallow UI actions).
         d.call("ui_items", ref="//##DockHost")
-        d.call("item_hover", ref="//##DockHost/**/###tb_insert_part")
+        d.call("item_hover", ref="//##DockHost/**/###tb_insert")
         d.call("new_project")
 
         # U10: the script API refuses the same incomplete tools the GUI does.

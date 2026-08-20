@@ -602,28 +602,59 @@ namespace {
 // X to drop the next occurrence at: clear of everything already placed, by
 // the shared rule (ui/Placement.h). Measured between the SHAPES, so the gap
 // looks right whatever local origin each part models around.
-double NextInsertX(AppState& state, uint64_t partId) {
-  const auto spanOf = [&](uint64_t id, Span& out) {
+double NextInsertX(AppState& state, uint64_t slotId, OccurrenceRef kind) {
+  // A5: a slot is a part OR an assembly, and an assembly's span is its whole
+  // flattened subtree. Resolving only parts meant a placed sub-assembly did
+  // not count as occupied, so the next insert could land inside it.
+  const auto spanOf = [&](uint64_t id, OccurrenceRef k, Span& out) {
+    out = {1e30, -1e30};
+    const auto addBox = [&](const glm::vec3& bmin, const glm::vec3& bmax) {
+      out.lo = std::min(out.lo, static_cast<double>(bmin.x));
+      out.hi = std::max(out.hi, static_cast<double>(bmax.x));
+    };
+    if (k == OccurrenceRef::Assembly) {
+      const AssemblyDocument* sub = AssemblyDocById(state, id);
+      if (sub == nullptr)
+        return false;
+      auto flat = assembly::Flatten(*sub, PartResolverFor(state),
+                                    AssemblyResolverFor(state));
+      if (!flat)
+        return false;
+      for (const assembly::FlatInstance& inst : *flat) {
+        if (!inst.visible)
+          continue;
+        for (const Body& b : inst.part->GetBodies()) {
+          glm::vec3 bmin, bmax;
+          b.shape.GetBoundingBox(bmin, bmax);
+          for (int c = 0; c < 8; c++) {
+            const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,
+                                   (c & 2) ? bmax.y : bmin.y,
+                                   (c & 4) ? bmax.z : bmin.z);
+            const glm::vec3 w = glm::vec3(inst.world * glm::vec4(corner, 1.0f));
+            addBox(w, w);
+          }
+        }
+      }
+      return out.lo <= out.hi;
+    }
     Document* doc = PartDocById(state, id);
     if (doc == nullptr || doc->GetBodies().empty())
       return false;
-    out = {1e30, -1e30};
     for (const Body& b : doc->GetBodies()) {
       glm::vec3 bmin, bmax;
       b.shape.GetBoundingBox(bmin, bmax);
-      out.lo = std::min(out.lo, static_cast<double>(bmin.x));
-      out.hi = std::max(out.hi, static_cast<double>(bmax.x));
+      addBox(bmin, bmax);
     }
     return out.lo <= out.hi;
   };
   std::vector<Span> taken;
   for (const Occurrence& o : state.assembly->GetOccurrences()) {
     Span s;
-    if (spanOf(o.partId, s))
+    if (spanOf(o.partId, o.refKind, s))
       taken.push_back({s.lo + o.position.x, s.hi + o.position.x});
   }
   Span incoming;
-  if (!spanOf(partId, incoming))
+  if (!spanOf(slotId, kind, incoming))
     return 0.0;
   return ClearOffset(taken, incoming);
 }
@@ -632,37 +663,90 @@ double NextInsertX(AppState& state, uint64_t partId) {
 // The assembly-mode toolbar: mate-creation tools (A3). Shown when an assembly
 // tab is active (no part document). Fit reuses FitCameraToDocument.
 void DrawAssemblyToolbar(AppState& state) {
-  // Insert part: place an occurrence of an existing part. Opens a picker of
-  // the project's part tabs (the only GUI path to add an occurrence).
-  if (ToolButton(ICON_FA_CIRCLE_PLUS "###tb_insert_part",
-                 "Insert part (place an occurrence)"))
-    ImGui::OpenPopup("insert_part");
-  if (ImGui::BeginPopup("insert_part")) {
-    ImGui::TextDisabled("Insert part");
-    ImGui::Separator();
-    bool any = false;
+  // Insert: place an occurrence of a part OR of another assembly (A5). ONE
+  // button, because "insert" is one intent — you know the NAME of what you
+  // want, and making the user classify it first is backwards. Two labelled
+  // sections rather than a submenu: a submenu costs a click and hides the
+  // smaller group, which is usually the assemblies, and those are the more
+  // consequential insert. Assemblies come first for the same reason, each
+  // with the part count you are about to place.
+  if (ToolButton(ICON_FA_CIRCLE_PLUS "###tb_insert",
+                 "Insert a part or sub-assembly (place an occurrence)"))
+    ImGui::OpenPopup("insert_occurrence");
+  if (ImGui::BeginPopup("insert_occurrence")) {
+    const auto place = [&](const PartSlot& slot, OccurrenceRef kind) {
+      SnapshotAssembly(state);
+      Occurrence occ;
+      occ.partId = slot.id;
+      occ.refKind = kind;
+      occ.name = slot.name;
+      occ.fixed = state.assembly->OccurrenceCount() == 0; // first = anchor
+      // Everything models around its own origin, so inserting two of them
+      // buries the second inside the first — you had to drag them apart
+      // before you could even see what you inserted. Park each new one clear
+      // of what is already placed, along +X (mates move it anyway).
+      occ.position.x = NextInsertX(state, slot.id, kind);
+      const uint64_t id = state.assembly->AddOccurrence(occ);
+      SelectOccurrence(state, id);
+      SolveActiveAssembly(state);
+    };
+
+    // Which slot is the assembly being edited? It can never contain itself.
+    uint64_t selfId = 0;
+    for (const PartSlot& s : state.parts)
+      if (s.kind == DocKind::Assembly &&
+          AssemblyDocById(state, s.id) == state.assembly.get())
+        selfId = s.id;
+
+    bool anyAsm = false;
+    for (const PartSlot& s : state.parts) {
+      if (s.kind != DocKind::Assembly || s.id == selfId)
+        continue;
+      if (!anyAsm) {
+        ImGui::TextDisabled("Assemblies");
+        ImGui::Separator();
+        anyAsm = true;
+      }
+      // A reference that would close a cycle is shown DISABLED with the
+      // reason, not hidden: hiding it reads as the app forgetting the
+      // assembly exists.
+      std::string why;
+      const bool cycles = assembly::WouldCycle(
+          *state.assembly, selfId, s.id, OccurrenceRef::Assembly,
+          AssemblyResolverFor(state), &why);
+      int leaves = 0;
+      if (const AssemblyDocument* sub = AssemblyDocById(state, s.id)) {
+        auto flat = assembly::Flatten(*sub, PartResolverFor(state),
+                                      AssemblyResolverFor(state));
+        if (flat)
+          leaves = static_cast<int>(flat->size());
+      }
+      const std::string label =
+          s.name + "  (" + std::to_string(leaves) + " parts)";
+      ImGui::BeginDisabled(cycles);
+      if (ImGui::MenuItem(label.c_str()))
+        place(s, OccurrenceRef::Assembly);
+      ImGui::EndDisabled();
+      if (cycles && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", why.c_str());
+    }
+
+    bool anyPart = false;
     for (const PartSlot& s : state.parts) {
       if (s.kind != DocKind::Part)
         continue;
-      any = true;
-      if (ImGui::MenuItem(s.name.c_str())) {
-        SnapshotAssembly(state);
-        Occurrence occ;
-        occ.partId = s.id;
-        occ.name = s.name;
-        occ.fixed = state.assembly->OccurrenceCount() == 0; // first = anchor
-        // Every part models around its own origin, so inserting two of them
-        // buries the second inside the first — you had to drag them apart
-        // before you could even see what you inserted. Park each new one
-        // clear of what is already placed, along +X (mates move it anyway).
-        occ.position.x = NextInsertX(state, s.id);
-        const uint64_t id = state.assembly->AddOccurrence(occ);
-        SelectOccurrence(state, id);
-        SolveActiveAssembly(state);
+      if (!anyPart) {
+        if (anyAsm)
+          ImGui::Spacing();
+        ImGui::TextDisabled("Parts");
+        ImGui::Separator();
+        anyPart = true;
       }
+      if (ImGui::MenuItem(s.name.c_str()))
+        place(s, OccurrenceRef::Part);
     }
-    if (!any)
-      ImGui::TextDisabled("No parts yet — add a part with +Part first.");
+    if (!anyAsm && !anyPart)
+      ImGui::TextDisabled("Nothing to insert yet — add a part first.");
     ImGui::EndPopup();
   }
   ImGui::SameLine();

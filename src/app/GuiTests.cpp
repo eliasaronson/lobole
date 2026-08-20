@@ -2036,6 +2036,56 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // the document is untouched
   };
 
+  // Inserting a SUB-ASSEMBLY through the UI. Until this landed the only way
+  // to nest an assembly was the RPC — the insert popup filtered to
+  // DocKind::Part and silently skipped everything else.
+  t = IM_REGISTER_TEST(engine, "assembly", "insert_places_a_sub_assembly");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    // A unit holding that part, then a top assembly to place it in.
+    const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
+    ui::SetActivePart(*s_App, unitIdx);
+    Occurrence inner;
+    inner.name = "Inner";
+    inner.partId = s_App->parts[0].id;
+    inner.fixed = true;
+    s_App->assembly->AddOccurrence(inner);
+    const size_t topIdx = ui::AddAssembly(*s_App, "Top");
+    ui::SetActivePart(*s_App, topIdx);
+    ctx->Yield(2);
+
+    ToolbarClick(ctx, "###tb_insert");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    // The assembly is offered with its part count, in its own section.
+    ctx->ItemClick(
+        (std::string("//") + popup->Name + "/**/Unit  (1 parts)").c_str());
+    ctx->Yield(3);
+
+    IM_CHECK_EQ(s_App->assembly->OccurrenceCount(), (size_t)1);
+    const Occurrence& placed = s_App->assembly->GetOccurrences()[0];
+    IM_CHECK(placed.refKind == OccurrenceRef::Assembly);
+    IM_CHECK(placed.partId == s_App->parts[unitIdx].id);
+    // ...and it renders: the leaf inside it reaches the scene.
+    ctx->Yield(2);
+    IM_CHECK_GT(s_App->documentMeshes.size(), (size_t)0);
+
+    // The assembly being edited is never offered — it cannot contain itself.
+    ToolbarClick(ctx, "###tb_insert");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK(!ctx->ItemExists(
+        (std::string("//") + popup->Name + "/**/Top  (1 parts)").c_str()));
+    ctx->KeyPress(ImGuiKey_Escape);
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");
