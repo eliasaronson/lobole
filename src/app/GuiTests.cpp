@@ -5648,6 +5648,72 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     std::filesystem::remove_all(dir);
   };
 
+  // The panel's rows must stay INSIDE the panel. The first version reserved
+  // room for its buttons with pixel literals (70 for "Name", 58 for the
+  // Restore column); the style scales with the display's content scale and
+  // the font-size setting, so on a HiDPI screen those literals were about
+  // half a button short — the buttons hung off the right edge and the panel
+  // scrolled sideways. The trigger is FONT SIZE, not window width, so that
+  // is what this drives.
+  t = IM_REGISTER_TEST(engine, "history", "rows_fit_at_a_large_font");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    if (!GitVault::Available()) {
+      ctx->LogWarning("git not on PATH — skipping");
+      return;
+    }
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_history_fit.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    s_App->historyStamp = -1.0;
+
+    ctx->MenuClick("View/Font Size/Extra Large");
+    ctx->Yield(4); // the atlas rebuild happens between frames
+    ctx->MenuClick("File/###file_history");
+
+    // Wait for the state the assertions need rather than guessing a frame
+    // count: the tab takes a bounded number of frames to come forward (see
+    // HistoryPanel), and the row list is only read once the panel is up.
+    // Yielding a fixed 4 passed alone and failed in the full suite, where
+    // the preceding tests leave a different tab selected.
+    ImGuiWindow* panel = nullptr;
+    for (int i = 0; i < 90; i++) {
+      panel = ImGui::FindWindowByName("History");
+      if (panel != nullptr && panel->DockNode != nullptr &&
+          panel->DockNode->SelectedTabId == panel->TabId &&
+          !s_App->historyLog.empty())
+        break;
+      ctx->Yield();
+    }
+    IM_CHECK(panel != nullptr);
+    IM_CHECK(!s_App->historyLog.empty());
+    const float rightEdge = panel->InnerRect.Max.x;
+    // 1 px of slack: rounding, not a missing button.
+    IM_CHECK_LE(ctx->ItemInfo("//History/###hist_name_go").RectFull.Max.x,
+                rightEdge + 1.0f);
+    IM_CHECK_LE(ctx->ItemInfo("//History/**/###hist_restore0").RectFull.Max.x,
+                rightEdge + 1.0f);
+    // And nothing else pushed the content wider than the panel, which is
+    // what the sideways scroll was.
+    IM_CHECK_LE(panel->ContentSize.x, panel->InnerRect.GetWidth() + 1.0f);
+
+    // Put the font back directly. The size is session state every later test
+    // inherits, but restoring it is cleanup, not the thing under test — and
+    // driving the menu for it failed in the full suite ("Unable to locate
+    // item: //View###Menu_00/Font Size") while every assertion above passed.
+    s_App->uiFontScale = 1.0f;
+    s_App->fontRebuildRequested = true;
+    ctx->Yield(4);
+    std::filesystem::remove_all(dir);
+  };
+
   // Wrap every registered test so ResetAppForTest() runs before it — this is
   // what makes the suite order-independent. Done once here rather than per
   // test.

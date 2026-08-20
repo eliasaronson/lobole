@@ -100,7 +100,22 @@ indicator, and the guard on restore.
 - Without git, `Checkpoints::` remains as the fallback, and the panel says so
   in one line: *"Version history needs git on PATH."* No silent no-op.
 
-## Two things found while building it
+## Three things found while building it
+
+**Reserved widths must be measured, never pixel literals.** The first version
+reserved room for its buttons with `-70.0f` (the Name button) and `58.0f`
+(the Restore column). The ImGui style scales with the display's content scale
+*and* the Font Size setting, so on a HiDPI screen both were about half a
+button short: the buttons hung off the right edge and the panel scrolled
+sideways. Both now come from `CalcTextSize` plus the style's own padding, and
+the status line puts its button on the next line when the row will not fit.
+This is the [defaults rule](../../CLAUDE.md) — a number carrying a unit is
+derived from what it acts on — applied to pixels rather than millimetres.
+Guarded by `history/rows_fit_at_a_large_font`, which drives View > Font Size
+> Extra Large and asserts no item passes the panel's inner right edge (it
+fails with the literals restored: Restore lands at 233 against an edge of
+218).
+
 
 **`AddPart`/`DeletePart` never marked the project dirty.** Which documents a
 project *has* lives in `project.json`, not in any document's version, and

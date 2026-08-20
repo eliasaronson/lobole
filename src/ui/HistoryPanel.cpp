@@ -218,19 +218,32 @@ void DrawHistoryPanel(AppState& state) {
   // Save state. `ProjectDirty` is the app's own answer (free); the git-level
   // check catches a state that reached disk but not the history — an
   // external edit, or a save while git was unavailable.
+  const ImGuiStyle& style = ImGui::GetStyle();
+  // Status line + its action. The button goes beside the text when there is
+  // room for it and on its own line when there is not — a panel dragged
+  // narrow (or a large font) must not push the button off the edge.
+  const auto statusButton = [&style](const char* label,
+                                     const char* id) -> bool {
+    const float width =
+        ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f;
+    const float used = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
+                       ImGui::GetScrollX();
+    if (ImGui::GetContentRegionMax().x - used - style.ItemSpacing.x >= width)
+      ImGui::SameLine();
+    return ImGui::SmallButton((std::string(label) + id).c_str());
+  };
+
   const bool dirty = ProjectDirty(state);
   if (dirty) {
     ImGui::TextUnformatted("Unsaved changes");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Save###hist_save")) {
+    if (statusButton("Save", "###hist_save")) {
       SaveProjectAction(state);
       state.historyStamp = -1.0;
       actionError.clear();
     }
   } else if (state.historyUncommitted) {
     ImGui::TextUnformatted("Saved, not yet a version");
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Add to history###hist_commit")) {
+    if (statusButton("Add to history", "###hist_commit")) {
       MarkProjectSaved(state, state.projectPath, "save");
       state.historyStamp = -1.0;
     }
@@ -241,7 +254,12 @@ void DrawHistoryPanel(AppState& state) {
   ImGui::Separator();
 
   // Name the current state. Saves first — a name refers to a state on disk.
-  ImGui::SetNextItemWidth(-70.0f);
+  // The room the button needs is MEASURED, never a pixel literal: the style
+  // scales with the display's content scale, so a hard-coded 70 reserved
+  // half a button on a HiDPI screen and pushed the row past the panel edge.
+  const float nameButtonWidth =
+      ImGui::CalcTextSize("Name").x + style.FramePadding.x * 2.0f;
+  ImGui::SetNextItemWidth(-(nameButtonWidth + style.ItemSpacing.x));
   const bool entered = ImGui::InputTextWithHint(
       "###hist_name", "Name this version...", nameBuf, sizeof(nameBuf),
       ImGuiInputTextFlags_EnterReturnsTrue);
@@ -278,14 +296,22 @@ void DrawHistoryPanel(AppState& state) {
   // rebuilds the very list being walked.
   std::string restoreHash, restoreLabel;
 
+  // No ScrollY: that wraps the rows in a scrolling child, and a child whose
+  // columns do not fit is what let the panel scroll SIDEWAYS. The window
+  // scrolls vertically on its own, and the two flexible columns clip their
+  // text instead of widening the content.
   if (ImGui::BeginTable("##versions", 3,
-                        ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                        ImGuiTableFlags_RowBg |
                             ImGuiTableFlags_SizingStretchProp)) {
+    // Measured, not literal — see the Name button above.
+    const float restoreWidth = ImGui::CalcTextSize("Restore").x +
+                               style.FramePadding.x * 2.0f +
+                               style.CellPadding.x * 2.0f;
     ImGui::TableSetupColumn("Version", ImGuiTableColumnFlags_WidthStretch,
                             1.6f);
     ImGui::TableSetupColumn("When", ImGuiTableColumnFlags_WidthStretch, 0.9f);
     ImGui::TableSetupColumn("##restore", ImGuiTableColumnFlags_WidthFixed,
-                            58.0f);
+                            restoreWidth);
     for (int i = 0; i < static_cast<int>(state.historyLog.size()); i++) {
       const GitVault::LogEntry& e = state.historyLog[i];
       ImGui::TableNextRow();
