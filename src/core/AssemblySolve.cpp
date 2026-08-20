@@ -344,7 +344,8 @@ constexpr float kConsistencyTol = 1e-3f;
 std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
                                              const AssemblyDocument& asmDoc,
                                              const PartResolver& partById,
-                                             std::string* whyNot) {
+                                             std::string* whyNot,
+                                             const AssemblyResolver& asmById) {
   const auto fail = [&](std::string why) {
     if (whyNot)
       *whyNot = std::move(why);
@@ -357,7 +358,37 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
   if (c.anchor.origin)
     return glm::mat4(1.0f); // the part's coordinate origin
 
-  const Document* part = partById(occ->partId);
+  // A5/v57: walk into the sub-assembly to the part the anchor means, keeping
+  // the transform from the UNIT's frame down to that part. Everything below
+  // then works on a part exactly as it always did, and the frame comes back
+  // pre-multiplied — so the caller still just composes the occurrence matrix.
+  glm::mat4 innerXf(1.0f);
+  const Document* partForFace = nullptr;
+  if (!c.innerPath.empty()) {
+    if (occ->refKind != OccurrenceRef::Assembly)
+      return fail("it has a path into a sub-assembly but places a part");
+    const AssemblyDocument* doc = asmById ? asmById(occ->partId) : nullptr;
+    if (doc == nullptr)
+      return fail("its sub-assembly is not loaded");
+    const Occurrence* inner = nullptr;
+    for (size_t i = 0; i < c.innerPath.size(); i++) {
+      if (doc == nullptr)
+        return fail("its path goes deeper than the assembly does");
+      inner = doc->FindById(c.innerPath[i]);
+      if (inner == nullptr)
+        return fail("the part it points at inside the sub-assembly is gone");
+      innerXf = innerXf * OccMatrix(*inner);
+      doc = inner->refKind == OccurrenceRef::Assembly && asmById
+                ? asmById(inner->partId)
+                : nullptr;
+    }
+    const Document* innerPart = partById(inner->partId);
+    if (innerPart == nullptr)
+      return fail("the part inside the sub-assembly is not loaded");
+    partForFace = innerPart; // resolve the face on the part the path names
+  }
+
+  const Document* part = partForFace ? partForFace : partById(occ->partId);
   if (!part) {
     // A5: distinguish "gone" from "it is a sub-assembly". A face anchor
     // names a face of a PART; a placed assembly has no faces of its own, and
@@ -416,13 +447,17 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
           origin = snap;
       }
     }
-    return FrameMatrix(origin, xHint, /*z=*/primary);
+    // innerXf is identity unless the anchor reached into a sub-assembly, in
+    // which case the frame comes back in the UNIT's space — which is what
+    // the solve composes with the occurrence matrix.
+    return innerXf * FrameMatrix(origin, xHint, /*z=*/primary);
   }
   return fail("no body created by feature " + std::to_string(ref.featureId) +
               " on its part (feature deleted or contributing nothing?)");
 }
 
-SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
+SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
+                  const AssemblyResolver& asmById) {
   SolveReport report;
 
   // Pre-derive both connector frames for every mate; a mate whose connectors
@@ -440,8 +475,10 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById) {
     Mate& mate = asmDoc.GetMates()[i];
     mate.error.clear();
     std::string whyA, whyB;
-    const auto fa = ConnectorLocalFrame(mate.a, asmDoc, partById, &whyA);
-    const auto fb = ConnectorLocalFrame(mate.b, asmDoc, partById, &whyB);
+    const auto fa =
+        ConnectorLocalFrame(mate.a, asmDoc, partById, &whyA, asmById);
+    const auto fb =
+        ConnectorLocalFrame(mate.b, asmDoc, partById, &whyB, asmById);
     if (!fa || !fb) {
       // Name WHICH side failed (occurrence + why), so a stale toponame is
       // fixable without probing both connectors.

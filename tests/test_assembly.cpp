@@ -227,6 +227,40 @@ TEST_CASE("A pre-v56 assembly golden means 'the active configuration'",
     CHECK(o.configurationId == 0);
 }
 
+// v57 froze the connector path into a sub-assembly: "the face of the part
+// two levels down, in the unit placed here". The chain is ids, not names,
+// because it has to survive a rename and be unambiguous when one unit is
+// placed twice.
+TEST_CASE("Frozen v57 inner-path mate golden", "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v57-inner-mate.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(asmDoc->GetMates().size() == 1);
+  const Mate& m = asmDoc->GetMates()[0];
+  REQUIRE(m.a.innerPath.size() == 2); // two levels down
+  CHECK(m.a.innerPath[0] == 4);
+  CHECK(m.a.innerPath[1] == 11);
+  CHECK(m.a.anchor.face.name == "2/face3");
+  CHECK(m.b.innerPath.empty()); // the ordinary side is untouched
+  CHECK(m.b.anchor.origin);
+}
+
+// An older mate has no path and must stay a plain part anchor — the field is
+// additive, and its absence is the overwhelmingly common case.
+TEST_CASE("A pre-v57 mate golden has no inner path", "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v24-assembly.json";
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(!asmDoc->GetMates().empty());
+  for (const Mate& m : asmDoc->GetMates()) {
+    CHECK(m.a.innerPath.empty());
+    CHECK(m.b.innerPath.empty());
+  }
+}
+
 // A pre-v55 golden must still read as parts — the compatibility claim above,
 // checked against a file that predates the field entirely.
 TEST_CASE("A pre-v55 assembly golden reads as part references",

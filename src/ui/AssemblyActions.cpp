@@ -138,7 +138,8 @@ int SolveActiveAssembly(AppState& state) {
       [&state](uint64_t partId) -> const Document* {
     return PartDocById(state, partId);
   };
-  const assembly::SolveReport rep = assembly::Solve(*state.assembly, resolve);
+  const assembly::SolveReport rep =
+      assembly::Solve(*state.assembly, resolve, AssemblyResolverFor(state));
   state.assembly->BumpVersion(); // solved transforms changed → renderer resync
   // Stamp the referenced parts' versions (A4): AssemblyPartsStale compares
   // against these, so a later part edit re-solves on tab activation. Stamped
@@ -1177,7 +1178,7 @@ void SyncInContextGhosts(AppState& state) {
     }
   }
   if (stale) {
-    assembly::Solve(asmDoc, resolve);
+    assembly::Solve(asmDoc, resolve, AssemblyResolverFor(state));
     asmDoc.BumpVersion();
     asmSlot->solvedPartVersions.clear();
     for (const Occurrence& occ : asmDoc.GetOccurrences())

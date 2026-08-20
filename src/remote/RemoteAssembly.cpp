@@ -325,12 +325,18 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           for (const Occurrence& cand : state.assembly->GetOccurrences())
             if (cand.name == c.at("occurrence").get<std::string>())
               o = &cand;
-        if (o != nullptr && o->refKind == OccurrenceRef::Assembly)
+        // v57: a face anchor on a sub-assembly is fine WITH a path naming the
+        // part inside it whose face is meant — "bolt this bracket to the
+        // flange of the pump inside the pump unit". Without one there is
+        // still nothing to anchor to: a placed assembly has no faces.
+        if (o != nullptr && o->refKind == OccurrenceRef::Assembly &&
+            !c.contains("inner_path"))
           throw std::runtime_error(
               "'" + o->name +
-              "' is a sub-assembly, which has no faces of its own: mate it by "
-              "origin ({occurrence, origin: true}), or open that assembly and "
-              "mate the part inside it");
+              "' is a sub-assembly, which has no faces of its own: add "
+              "inner_path (the occurrence ids inside it, down to the part "
+              "whose face you mean — list_occurrences on that tab), mate it "
+              "by origin, or open that assembly and mate the part there");
       }
       if (c.value("origin", false))
         anchor = {{"origin", true}};
@@ -345,7 +351,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       } else
         throw std::runtime_error(
             "connector needs 'origin:true' or 'face:{feature_id,element}'");
-      return json{{"occurrence", c.at("occurrence")}, {"anchor", anchor}};
+      json out{{"occurrence", c.at("occurrence")}, {"anchor", anchor}};
+      if (c.contains("inner_path"))
+        out["inner_path"] = c.at("inner_path");
+      return out;
     };
     json mateJson = {{"id", 0},
                      {"name", p.value("name", std::string{"Mate"})},

@@ -28,6 +28,12 @@ namespace assembly {
 // passes ui::PartDocById; tests pass a lambda over locally-built documents.
 using PartResolver = std::function<const Document*(uint64_t partId)>;
 
+// Resolves a slot id to an assembly document (nullptr when it is not one).
+// Declared beside PartResolver because everything from mate connectors to
+// Flatten needs both to see through a sub-assembly.
+using AssemblyResolver =
+    std::function<const AssemblyDocument*(uint64_t slotId)>;
+
 struct SolveReport {
   int placed = 0;       // occurrences positioned by a mate (excludes anchors)
   int erroredMates = 0; // mates left in an error state this solve
@@ -41,17 +47,24 @@ struct SolveReport {
 // near-miss face names when the referenced name is a stale prefix of a
 // current one (the modified-by-a-later-feature case, e.g. "6/g1;M6" ->
 // "6/g1;M6;M7").
-std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
-                                             const AssemblyDocument& asmDoc,
-                                             const PartResolver& partById,
-                                             std::string* whyNot = nullptr);
+// `asmById` (A5/v57) lets a face anchor reach a part INSIDE a placed
+// sub-assembly, via the connector's innerPath. The returned frame is always
+// in the TOP-LEVEL occurrence's space, so the solve composes it exactly as
+// before — a rigid unit's inner face sits at a known place in the unit.
+std::optional<glm::mat4>
+ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
+                    const PartResolver& partById, std::string* whyNot = nullptr,
+                    const AssemblyResolver& asmById = nullptr);
 
 // Re-places every mated, non-`fixed` occurrence and writes the result back to
 // its transform (position + orientation). `fixed` occurrences and occurrences
 // in no mate keep their stored transforms. Clears then re-stamps each mate's
 // transient error. Does NOT bump the assembly version — the caller does that
 // to trigger a renderer resync (so a no-op solve doesn't churn the renderer).
-SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById);
+// `asmById` (A5) is needed only for connectors whose anchor reaches into a
+// sub-assembly; omit it and those mates report that they cannot resolve.
+SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
+                  const AssemblyResolver& asmById = nullptr);
 
 // ---- Flatten: the one tree walk (A5) --------------------------------------
 //
@@ -71,10 +84,6 @@ struct FlatInstance {
   uint64_t rootOccurrenceId = 0;  // the TOP-LEVEL occurrence this belongs to
   bool visible = true;            // every level's visibility, ANDed
 };
-
-// Resolves a slot id to an assembly document (nullptr when it is not one).
-using AssemblyResolver =
-    std::function<const AssemblyDocument*(uint64_t slotId)>;
 
 // The leaf parts of `top`, in document order, depth first.
 //

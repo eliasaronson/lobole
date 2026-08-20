@@ -183,6 +183,42 @@ def main(binary):
             expect("placed in" in str(e),
                    f"a referenced tab cannot be deleted: {str(e)[:60]}")
 
+        # --- mate onto a face INSIDE a placed unit --------------------------
+        # "Bolt this to the flange of the pump inside the pump unit": the
+        # anchor reaches through the boundary, and the frame comes back
+        # composed, so the mate places the bolt in world space.
+        el = d.call("list_elements", part="Board")
+        top_face = [f for f in el["bodies"][0]["faces"] if f["normal"][1] > 0.9][0]
+        inner_ids = [o["id"] for o in
+                     (d.call("set_active_part", name="Gangway"),
+                      d.call("list_occurrences"))[1]["occurrences"]]
+        d.call("set_active_part", name="Dock")
+        gangs = [o for o in d.call("list_occurrences")["occurrences"]
+                 if o.get("ref_kind") == "assembly"]
+        loose = [o for o in d.call("list_occurrences")["occurrences"]
+                 if o.get("ref_kind", "part") == "part"][0]
+        r = d.call("add_mate", type="fastened",
+                   a={"occurrence": gangs[0]["id"], "inner_path": [inner_ids[0]],
+                      "face": {"feature_id": int(top_face["name"].split("/")[0]),
+                               "element": top_face["name"]}},
+                   b={"occurrence": loose["id"], "origin": True})
+        mates = d.call("list_mates")["mates"]
+        expect(all(not m.get("error") for m in mates),
+               f"a mate onto an inner face solves ({[m.get('error') for m in mates]})")
+        # Without a path there is still nothing to anchor to, and the message
+        # has to say what to add.
+        try:
+            d.call("add_mate", type="fastened",
+                   a={"occurrence": gangs[1]["id"],
+                      "face": {"feature_id": 1, "element": top_face["name"]}},
+                   b={"occurrence": loose["id"], "origin": True})
+            expect(False, "a pathless face anchor on a unit must be refused")
+        except RuntimeError as e:
+            expect("inner_path" in str(e),
+                   f"the refusal names the fix: {str(e)[:70]}")
+        for m in mates:
+            d.call("remove_mate", id=m["id"])
+
         # --- one document, two placements, different configurations --------
         # What makes a sub-assembly reusable rather than merely tidy.
         d.call("set_active_part", name="Gangway")

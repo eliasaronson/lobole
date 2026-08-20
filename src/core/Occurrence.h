@@ -71,6 +71,18 @@ struct ConnectorAnchor {
 struct Connector {
   uint64_t occurrenceId = 0;
   ConnectorAnchor anchor;
+
+  // A5/v57: when `occurrenceId` names a SUB-ASSEMBLY, the chain of
+  // occurrence ids from inside it down to the part whose face the anchor
+  // means. Empty for the ordinary case.
+  //
+  // A placed assembly has no faces of its own, so before this the only way
+  // to mate onto one was to open that assembly — which cannot express "bolt
+  // this bracket to the flange of the pump inside the pump unit". The mate
+  // still positions the TOP-LEVEL occurrence: the anchor only reads
+  // geometry, and the unit is rigid, so a face inside it is at a known place
+  // in the unit's frame.
+  std::vector<uint64_t> innerPath;
 };
 
 // The DOF a mate leaves open between its two connector frames. The classical

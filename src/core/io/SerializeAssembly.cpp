@@ -96,6 +96,10 @@ MateType MateTypeFromString(const std::string& s) {
 json ConnectorToJson(const Connector& c) {
   json j;
   j["occurrence"] = c.occurrenceId;
+  // v57: the chain into a sub-assembly, omitted in the ordinary case so
+  // every existing mate serializes byte-identically.
+  if (!c.innerPath.empty())
+    j["inner_path"] = c.innerPath;
   if (c.anchor.origin) {
     j["anchor"] = {{"origin", true}};
   } else {
@@ -113,6 +117,8 @@ json ConnectorToJson(const Connector& c) {
 Connector ConnectorFromJson(const json& j) {
   Connector c;
   c.occurrenceId = j.at("occurrence").get<uint64_t>();
+  if (j.contains("inner_path"))
+    c.innerPath = j.at("inner_path").get<std::vector<uint64_t>>();
   const json& a = j.at("anchor");
   if (a.value("origin", false)) {
     c.anchor.origin = true;
