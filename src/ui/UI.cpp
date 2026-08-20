@@ -15,6 +15,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/HistoryPanel.h"
 #include "ui/MainMenuBar.h"
+#include "ui/PerfHud.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SelectionPipeline.h"
@@ -711,6 +712,7 @@ void DrawUI(AppState& state) {
   // drawing tab (F6).
   DrawHistoryPanel(state);
   DrawSettingsWindow(state);
+  DrawPerfHud(state);
   DrawToolWindow(state);
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);

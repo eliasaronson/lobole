@@ -43,6 +43,7 @@ add_executable(designer_tests
     test_hole.cpp
     test_draft.cpp
     test_autosaver.cpp
+    test_frame_timer.cpp
     test_command_modify.cpp
     test_reorder.cpp
     test_expression.cpp

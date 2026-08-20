@@ -25,6 +25,7 @@
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
+#include "render/FrameTimer.h"
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
@@ -868,6 +869,48 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(std::abs(study->loads[0].magnitude - 100.0) < 1e-6);
     ui::ExitSimulation(*s_App);
     ctx->Yield();
+  };
+
+  // Frame timing is always measured; the HUD is not shown unless asked for
+  // (docs/rendering/frame-timing.md). Both halves asserted here — a
+  // measurement nobody can reach and an overlay nobody asked for are the two
+  // ways this feature goes wrong.
+  // Category "frametime", NOT "perf": the test engine routes a category of
+  // exactly "perf" into ImGuiTestGroup_Perfs, which this suite never queues
+  // (it queues ImGuiTestGroup_Tests) — the test would list but never run.
+  t = IM_REGISTER_TEST(engine, "frametime",
+                       "frame_stats_measure_hud_stays_hidden");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield(5); // some frames to measure
+
+    // Measured: the app has run frames, and the phases account for all of
+    // each one (an unattributed sliver would read as "fast phases, slow
+    // frame").
+    const render::FrameTimer::Stats fs = s_App->frameTimer.Snapshot();
+    IM_CHECK(fs.frames > 0);
+    IM_CHECK(s_App->frameTimer.TotalFrames() >= fs.frames);
+    IM_CHECK(fs.avgMs > 0.0 && fs.fps > 0.0);
+    IM_CHECK(fs.maxMs >= fs.p95Ms && fs.p95Ms >= fs.p50Ms);
+    double phaseSum = 0.0;
+    for (size_t i = 0; i < render::kPhaseCount; i++)
+      phaseSum += fs.phaseMs[i];
+    IM_CHECK(std::abs(phaseSum - fs.avgMs) < 0.05 * fs.avgMs + 0.05);
+
+    // Hidden: nothing in the UI opened it, and the window does not exist.
+    IM_CHECK(!s_App->perfHudOpen);
+    IM_CHECK(ctx->WindowInfo("//Frame time###PerfHud").Window == nullptr);
+
+    // The undocumented chord is the door.
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F);
+    ctx->Yield(2);
+    IM_CHECK(s_App->perfHudOpen);
+    ImGuiWindow* hud = ctx->WindowInfo("//Frame time###PerfHud").Window;
+    IM_CHECK(hud != nullptr);
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->perfHudOpen); // and it closes again
   };
 
   // Simulation is a mode, and its studies belong to the document. File > New

@@ -853,6 +853,10 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
     err = vkResetFences(g_Device, 1, &fd->Fence);
     check_vk_result(err);
   }
+  // The acquire and that fence are the frame's GPU/vsync wait; everything
+  // after is our recording (docs/rendering/frame-timing.md).
+  g_App.frameTimer.Mark(render::FramePhase::Wait, glfwGetTime());
+
   {
     err = vkResetCommandPool(g_Device, fd->CommandPool, 0);
     check_vk_result(err);
@@ -919,6 +923,7 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
     err = vkQueueSubmit(g_Queue, 1, &info, fd->Fence);
     check_vk_result(err);
   }
+  g_App.frameTimer.Mark(render::FramePhase::Record, glfwGetTime());
 }
 
 static void FramePresent(ImGui_ImplVulkanH_Window* wd) {
@@ -980,6 +985,10 @@ void printUsage(const char* programName) {
   std::cout << "  --hidden             Never show the window (offscreen "
                "--remote sessions, e.g. automated tests)"
             << std::endl;
+  std::cout << "  --perf-hud           Show the frame-time overlay from "
+               "launch (also Ctrl+Shift+F, or the\n                       "
+               "frame_stats RPC; off by default)"
+            << std::endl;
 }
 
 struct CommandLineArgs {
@@ -994,6 +1003,7 @@ struct CommandLineArgs {
   bool remoteBindAll = false;
   double autosaveSeconds = 60.0;
   std::string recordPath;
+  bool perfHud = false;
 };
 
 CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
@@ -1047,6 +1057,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       // Hidden: exercise the fatal-signal backtrace end-to-end (Phase 0
       // sanity). Installed handler prints the stack, then core-dumps.
       CrashHandlerSelfTest();
+    } else if (arg == "--perf-hud") {
+      args.perfHud = true;
     } else if (arg == "--hidden") {
       args.hidden = true;
     } else if (arg == "--record") {
@@ -1220,6 +1232,7 @@ int main(int argc, char** argv) {
     g_App.buildDefaultDockLayout = !std::filesystem::exists("imgui.ini");
   }
   g_App.runGuiTests = args.runGuiTests;
+  g_App.perfHudOpen = args.perfHud;
 
   // Theme, scaled for the display's content scale (HiDPI). A monitor change
   // (window dragged to a display with another scale) re-applies it between
@@ -1474,6 +1487,7 @@ int main(int argc, char** argv) {
 
   // Main loop
   while (!glfwWindowShouldClose(window)) {
+    g_App.frameTimer.BeginFrame(glfwGetTime());
     glfwPollEvents();
 
     // Monitor content scale changed (window moved to another display) or the
@@ -1618,6 +1632,10 @@ int main(int argc, char** argv) {
     // shows progress; runs on the main thread with its own one-shot submits).
     ui::PumpRenderJob(g_App);
 
+    // Everything above is per-frame CPU work on the document and renderers;
+    // the ImGui build is measured on its own (docs/rendering/frame-timing.md).
+    g_App.frameTimer.Mark(render::FramePhase::Update, glfwGetTime());
+
     // Start ImGui frame
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
@@ -1653,6 +1671,7 @@ int main(int argc, char** argv) {
 
     // Rendering
     ImGui::Render();
+    g_App.frameTimer.Mark(render::FramePhase::BuildUI, glfwGetTime());
     ImDrawData* draw_data = ImGui::GetDrawData();
     const bool is_minimized =
         (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
@@ -1663,6 +1682,9 @@ int main(int argc, char** argv) {
       wd->ClearValue.color.float32[3] = clear_color.w;
       FrameRender(wd, draw_data);
       FramePresent(wd);
+      // Before the uncapped-mode sleep below: the frame is over when the
+      // image is presented, not when we have finished idling.
+      g_App.frameTimer.EndFrame(glfwGetTime());
 #ifdef HAVE_TEST_ENGINE
       ImGuiTestEngine_PostSwap(testEngine);
 #endif

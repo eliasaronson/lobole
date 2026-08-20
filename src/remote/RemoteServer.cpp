@@ -29,7 +29,9 @@
 #include "remote/RemoteProject.h"
 #include "remote/RemoteSimulation.h"
 #include "remote/RpcParams.h"
+
 #include "render/Camera.h"
+#include "render/FrameTimer.h"
 #include "render/MeshRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/RenderSheet.h"
@@ -705,7 +707,10 @@ static const std::set<std::string> kNoPartDoc = {
     // work on an assembly tab too. render_still's RT scene sync does the
     // occurrence walk itself.
     "view", "fit_view", "screenshot", "set_render_options", "set_camera",
-    "render_still"};
+    "render_still",
+    // frame_stats measures the LOOP, which has no opinion about which tab is
+    // open — and the frames worth measuring are usually an assembly's.
+    "frame_stats"};
 
 // The methods RemoteServer dispatches itself (viewport, camera, selection,
 // project tabs, UI events). describe: one row per `m ==` branch — extend
@@ -745,6 +750,13 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Path-traced still to {path} (ray tracing; needs GPU support)."},
     {"rt_build", "Build ray-tracing acceleration structures."},
     {"set_render_options", "Toggle shadows/SSAO/quality options."},
+    {"frame_stats",
+     "Frame-time statistics over the last {window} frames (default 240): "
+     "fps, avg/p50/p95/max ms and the update|ui|wait|record|present split. "
+     "{hud: true|false} toggles the overlay (off by default; also "
+     "Ctrl+Shift+F). cpu_ms vs display_ms is the read: which of "
+     "wait/present holds the vsync idle is driver-dependent. Needs a "
+     "renderer — --headless runs no frame loop."},
     {"get_settings", "Read the user preferences (docs/ui/settings.md)."},
     {"set_settings", "Change user preferences {key: value, ...}; persists."},
     {"reset_layout", "Reset the dock layout."},
@@ -1148,6 +1160,40 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"position", Vec3ToJson(state.camera->GetPosition())},
             {"target", Vec3ToJson(state.camera->GetTarget())},
             {"distance", state.camera->GetDistance()}};
+  }
+  if (m == "frame_stats") {
+    // The door that matters for agents and CI: a HUD nobody is looking at
+    // proves nothing (docs/rendering/frame-timing.md).
+    if (p.contains("hud"))
+      state.perfHudOpen = p.at("hud").get<bool>();
+    const size_t window = p.value("window", render::FrameTimer::kHistory);
+    const render::FrameTimer::Stats fs = state.frameTimer.Snapshot(window);
+    if (fs.frames == 0)
+      throw std::runtime_error(
+          m_hasRenderer ? "no frames measured yet (the window may be minimised)"
+                        : "no frame loop under --headless: run the GUI (or "
+                          "tools/headless-preview.sh) to measure frame time");
+    json phases = json::object();
+    for (size_t i = 0; i < render::kPhaseCount; i++)
+      phases[render::PhaseName(static_cast<render::FramePhase>(i))] =
+          fs.phaseMs[i];
+    // The conclusion, not just the ingredients: which of wait/present holds
+    // the vsync idle is a driver detail, so a caller reading one of them
+    // alone would draw the wrong one.
+    const double display =
+        fs.phaseMs[static_cast<size_t>(render::FramePhase::Wait)] +
+        fs.phaseMs[static_cast<size_t>(render::FramePhase::Present)];
+    return {{"frames", fs.frames},
+            {"total_frames", state.frameTimer.TotalFrames()},
+            {"fps", fs.fps},
+            {"avg_ms", fs.avgMs},
+            {"p50_ms", fs.p50Ms},
+            {"p95_ms", fs.p95Ms},
+            {"max_ms", fs.maxMs},
+            {"phases_ms", phases},
+            {"cpu_ms", fs.avgMs - display},
+            {"display_ms", display},
+            {"hud", state.perfHudOpen}};
   }
   if (m == "get_settings") {
     // The whole struct, not one method per setting: the assistant and the

@@ -11,6 +11,7 @@
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchSolver.h"
 #include "render/ClipPlanes.h"
+#include "render/FrameTimer.h"
 #include "ui/TopoJob.h"
 #include "ui/ViewportHandle.h"
 
@@ -940,6 +941,15 @@ struct AppState {
   // before the panel existed) left floating — see BeginDockspace.
   bool dockHomesEnforced = false;
   bool runGuiTests = false;
+
+  // Frame-time accounting (docs/rendering/frame-timing.md). Always measured —
+  // it costs five clock reads a frame — but the HUD is off unless asked for
+  // by --perf-hud, Ctrl+Shift+F, or the frame_stats RPC. Deliberately session
+  // state and not a preference: it belongs to the debugging session, and a
+  // preference would have to be either visible in the Preferences window or a
+  // key that window cannot edit.
+  render::FrameTimer frameTimer;
+  bool perfHudOpen = false;
   nlohmann::json
       editBaseline; // parameter-edit snapshot while a widget is active
 
