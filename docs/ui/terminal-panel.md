@@ -1,6 +1,10 @@
 # A terminal inside the app — design
 
-> Status: **design, awaiting sign-off** (2026-08-20). From `todo.txt`:
+> Status: **built 2026-08-20** (T1–T4; T5 polish outstanding — see the phase
+> table). Signed off with three changes from the design, all from the user:
+> the panel is **off by default behind a preference**, it docks **right**
+> rather than at the bottom, and the keyboard gate is **hover**, not focus.
+> From `todo.txt`:
 > *"terminal in the program for cc?"* — the goal is running Claude Code in the
 > same window as the model it is editing, rather than alt-tabbing between a
 > terminal and the app.
@@ -174,13 +178,29 @@ exit reads as a crash of the *app*.
 
 | | scope | done when |
 |---|---|---|
-| **T1** | `PtySession` + `TerminalScreen` + headless tests | `bash -c 'printf ...'` renders into the expected grid; a resize reflows; exit status is reported |
-| **T2** | The panel: grid rendering, monospace font, scrollback, resize→`TIOCSWINSZ` | `$SHELL` is usable in the panel; `claude` renders correctly (the spike's screen, live) |
-| **T3** | Input: keys, control chars, paste, and the focus gate | GUI test: Ctrl+Z in the terminal reaches the process, Ctrl+Z outside it undoes |
-| **T4** | The Claude Code launch (port, cwd, MCP config) + empty/exited states | `claude` started from the button can `get_state` this instance with no setup |
-| **T5** | Polish: theme colours, font size from Preferences, copy/paste selection, `Tools ▸ Open terminal here` (option D) | — |
+| **T1** | `PtySession` + `TerminalScreen` + headless tests | **done** — 14 headless tests |
+| **T2** | The panel: grid rendering, monospace font, scrollback, resize→`TIOCSWINSZ` | **done** — a live `bash` and a live Claude Code, screenshotted |
+| **T3** | Input: keys, control chars, paste, and the hover gate | **done** — GUI test asserts both directions of the gate |
+| **T4** | The Claude Code launch (port, cwd, MCP config) + empty/exited states | **done** — the button starts `claude` bound to this instance |
+| **T5** | Polish: selection + copy, a font-size control, `Tools ▸ Open terminal here` (option D) | outstanding |
 
-T1–T2 are the risk; T3–T4 are the value.
+T1–T2 were the risk; T3–T4 the value. What shipped, concretely:
+
+- **Off by default**, behind `terminal_panel` in Preferences ▸ General. Turning
+  it on creates the panel *and* the right-hand dock node; turning it off ends
+  the session rather than hiding it.
+- Per-cell glyph placement rather than flowing runs of text: even a monospace
+  font's rasterised advance does not land exactly on the cell width, and the
+  drift is visible as ragged columns within a few characters. Backgrounds are
+  still batched into runs. A live Claude Code costs **0.43 ms** of the `ui`
+  phase (measured with `frame_stats` — see [../rendering/frame-timing.md](../rendering/frame-timing.md)).
+- The session's colours come from the app: `Screen::SetDefaultColors` pushes
+  the theme's fg/bg into libvterm, so unstyled cells arrive already themed and
+  the renderer can skip a background rect for every default cell.
+- One trap worth recording: **ImGui hashes window names from the last `###`**,
+  so `FindWindowByName("Terminal")` finds nothing when the window is
+  `Terminal###TerminalPanel` — silently. That is why the panel first appeared
+  floating over the model tree instead of docked.
 
 ## Deferred, with reasons
 
@@ -190,6 +210,10 @@ T1–T2 are the risk; T3–T4 are the value.
 - **Multiple terminal tabs.** One session covers the request. The panel's
   session ownership is a `std::unique_ptr`, so a vector is a later change,
   not a redesign.
+- **Selection and copy-out.** Paste in works (Ctrl+Shift+V, bracketed when the
+  program asked for it); selecting text with the mouse to copy it does not.
+  It needs a selection model over the grid and is the largest single item in
+  T5.
 - **Mouse reporting.** Claude Code does not use it, and neither do git or
   ninja. If someone runs `htop` in there, they can use an external terminal.
 - **Sixel/kitty graphics, ligatures, bidi.** No.

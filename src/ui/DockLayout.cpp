@@ -105,6 +105,27 @@ void BeginDockspace(AppState& state) {
     }
   }
 
+  // Turning the terminal on mid-session: its window has no dock entry in any
+  // saved layout, so without this it floats over the viewport forever (which
+  // is exactly how the Configurations panel shipped once). Split a right node
+  // out of the dockspace and put it there; the DockId check makes this fire
+  // once, not every frame.
+  if (state.settings.terminalPanel && !state.buildDefaultDockLayout) {
+    // The FULL name: ImGui hashes from the "###", so looking up "Terminal"
+    // finds nothing at all — silently, which is how this first shipped
+    // floating over the model tree.
+    ImGuiWindow* term = ImGui::FindWindowByName("Terminal###TerminalPanel");
+    if (term != nullptr && term->DockId == 0) {
+      ImGuiID right = ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Right,
+                                                  0.28f, nullptr, nullptr);
+      ImGui::DockBuilderFinish(dockspaceId);
+      // SetWindowDock, not DockBuilderDockWindow: the latter only takes
+      // effect for a window that has not been created yet, and by the time
+      // the preference is flipped this one has been drawing for a frame.
+      ImGui::SetWindowDock(term, right, ImGuiCond_Always);
+    }
+  }
+
   if (state.buildDefaultDockLayout) {
     state.buildDefaultDockLayout = false;
     ImGui::DockBuilderRemoveNode(dockspaceId);
@@ -119,6 +140,14 @@ void BeginDockspace(AppState& state) {
     // viewport gets everything right of the tree.
     ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.17f,
                                                nullptr, &center);
+    // U7e removed the right node; the terminal panel brings one back, but
+    // only when it is enabled — an empty right column would otherwise eat
+    // viewport width for a feature the user turned off.
+    if (state.settings.terminalPanel) {
+      ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f,
+                                                  nullptr, &center);
+      ImGui::DockBuilderDockWindow("Terminal###TerminalPanel", right);
+    }
     ImGui::DockBuilderDockWindow("Model", left);
     ImGui::DockBuilderDockWindow("Variables", left);      // tabbed behind Model
     ImGui::DockBuilderDockWindow("Configurations", left); // tabbed behind Model

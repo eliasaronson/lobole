@@ -22,6 +22,7 @@
 #include "ui/SettingsWindow.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
+#include "ui/TerminalPanel.h"
 #include "ui/VariablesPanel.h"
 #include "ui/ViewportInput.h"
 
@@ -711,6 +712,7 @@ void DrawUI(AppState& state) {
   // PROJECT, so the history reads the same from a part, an assembly or a
   // drawing tab (F6).
   DrawHistoryPanel(state);
+  DrawTerminalPanel(state);
   DrawSettingsWindow(state);
   DrawPerfHud(state);
   DrawToolWindow(state);

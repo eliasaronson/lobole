@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <set>
@@ -40,6 +41,8 @@ class IBLTextures;
 struct GLFWwindow;
 
 namespace ui {
+
+struct TerminalState; // ui/TerminalPanel.cpp — keeps libvterm out of here
 
 // A document body mirrored into the renderers. For a part tab, one per body.
 // For an assembly tab, one per (occurrence × referenced-part body): meshId is
@@ -941,6 +944,17 @@ struct AppState {
   // before the panel existed) left floating — see BeginDockspace.
   bool dockHomesEnforced = false;
   bool runGuiTests = false;
+
+  // The terminal panel (docs/ui/terminal-panel.md). Off by default via
+  // settings.terminalPanel; the state is created the first time it draws, so
+  // an app that never opens it never allocates a terminal.
+  std::shared_ptr<TerminalState> terminal;
+  // This window's remote port (0 = the app was started without --remote), and
+  // a way to open one on demand — a Claude Code launched from the terminal is
+  // useless if the app it is inside cannot be reached. Installed by main.cpp,
+  // which owns the server.
+  int remotePort = 0;
+  std::function<int()> ensureRemotePort;
 
   // Frame-time accounting (docs/rendering/frame-timing.md). Always measured —
   // it costs five clock reads a frame — but the HUD is off unless asked for

@@ -46,6 +46,14 @@ public:
   Screen(const Screen&) = delete;
   Screen& operator=(const Screen&) = delete;
 
+  // The colours a cell has when the program has not set any. Setting them to
+  // the panel's own theme is what keeps the terminal from being a black
+  // rectangle pasted into the app — and it lets the renderer skip drawing a
+  // background for every default cell.
+  void SetDefaultColors(uint32_t fg, uint32_t bg);
+  [[nodiscard]] uint32_t DefaultBg() const { return m_defaultBg; }
+  [[nodiscard]] uint32_t DefaultFg() const { return m_defaultFg; }
+
   // Feed output from the process.
   void Write(const char* bytes, size_t n);
   void Write(std::string_view s) { Write(s.data(), s.size()); }
@@ -125,6 +133,8 @@ private:
   bool m_cursorVisible = true;
   std::string m_title;
   std::string m_pendingOutput;
+  uint32_t m_defaultFg = 0xD5D8DEu;
+  uint32_t m_defaultBg = 0x0F1115u;
   std::vector<std::vector<Cell>> m_scrollback;
 
   friend struct ScreenCallbacks;

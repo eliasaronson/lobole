@@ -36,6 +36,7 @@
 #include "ui/SettingsWindow.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
+#include "ui/TerminalPanel.h"
 
 #include "IconsFontAwesome6.h"
 #include "imgui_internal.h"
@@ -870,6 +871,121 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::ExitSimulation(*s_App);
     ctx->Yield();
   };
+
+#ifdef HAVE_TERMINAL
+  // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked
+  // right when on, and — the part that decides whether it feels safe — the
+  // keyboard goes to it ONLY while the pointer is over it.
+  t = IM_REGISTER_TEST(engine, "terminal", "off_by_default_docks_right_on");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield(2);
+
+    // Off by default: the window does not exist at all.
+    IM_CHECK(!s_App->settings.terminalPanel);
+    IM_CHECK(ctx->WindowInfo("//Terminal###TerminalPanel").Window == nullptr);
+
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(6); // appear, then get docked
+    ImGuiWindow* win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
+    IM_CHECK(win != nullptr);
+    IM_CHECK(win->DockId != 0); // docked, not floating over the model tree
+    // On the RIGHT: its left edge is past the middle of the viewport.
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    IM_CHECK(win->Pos.x > vp->Pos.x + vp->Size.x * 0.5f);
+
+    s_App->settings.terminalPanel = false;
+    ctx->Yield(3);
+  };
+
+  t = IM_REGISTER_TEST(engine, "terminal", "runs_a_command_and_shows_output");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(6);
+
+    ui::StartTerminalCommand(*s_App, "/bin/sh",
+                             {"-c", "printf 'hello-from-panel'; sleep 30"});
+    // Frames are what pump the session, so this is also the proof that the
+    // panel drains its PTY while drawing.
+    bool seen = false;
+    for (int i = 0; i < 200 && !seen; i++) {
+      ctx->Yield();
+      const term::Screen* screen = ui::TerminalScreenOf(*s_App);
+      if (screen != nullptr)
+        seen = screen->Line(0).find("hello-from-panel") != std::string::npos;
+    }
+    IM_CHECK(seen);
+    IM_CHECK(ui::TerminalRunning(*s_App));
+
+    // Turning the preference off ends the session — a process kept alive
+    // behind a closed panel is one nobody can see or stop.
+    s_App->settings.terminalPanel = false;
+    ctx->Yield(3);
+    IM_CHECK(!ui::TerminalRunning(*s_App));
+  };
+
+  t = IM_REGISTER_TEST(engine, "terminal", "hover_decides_who_gets_the_keys");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box"); // one undoable feature
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
+
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(6);
+    ui::StartTerminalCommand(
+        *s_App, "/bin/sh",
+        {"-c", "read line; printf 'got:%s' \"$line\"; sleep 30"});
+    ctx->Yield(10);
+
+    ImGuiWindow* win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
+    IM_CHECK(win != nullptr);
+    const ImVec2 inside(win->Pos.x + win->Size.x * 0.5f,
+                        win->Pos.y + win->Size.y * 0.6f);
+    ctx->MouseMoveToPos(inside);
+    ctx->Yield(2);
+    IM_CHECK(ui::TerminalCapturesKeys(*s_App));
+
+    // Typing reaches the process...
+    ctx->KeyChars("hi");
+    ctx->KeyPress(ImGuiKey_Enter);
+    bool echoed = false;
+    for (int i = 0; i < 200 && !echoed; i++) {
+      ctx->Yield();
+      const term::Screen* screen = ui::TerminalScreenOf(*s_App);
+      if (screen == nullptr)
+        continue;
+      for (int r = 0; r < screen->Rows() && !echoed; r++)
+        echoed = screen->Line(r).find("got:hi") != std::string::npos;
+    }
+    IM_CHECK(echoed);
+
+    // ...and Ctrl+Z here suspends a job rather than undoing a feature. This
+    // is the whole reason the gate exists: one chord, two meanings, and the
+    // pointer is what says which.
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z);
+    ctx->Yield(4);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // the box is still there
+
+    // Pointer over the viewport: the app has its shortcuts back.
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + s_App->viewportSize.x * 0.5f,
+               s_App->viewportPos.y + s_App->viewportSize.y * 0.5f));
+    ctx->Yield(2);
+    IM_CHECK(!ui::TerminalCapturesKeys(*s_App));
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_Z);
+    ctx->Yield(4);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0); // undone
+
+    s_App->settings.terminalPanel = false;
+    ctx->Yield(3);
+    IM_CHECK(!ui::TerminalRunning(*s_App));
+  };
+#endif // HAVE_TERMINAL
 
   // Frame timing is always measured; the HUD is not shown unless asked for
   // (docs/rendering/frame-timing.md). Both halves asserted here — a

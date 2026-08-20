@@ -23,8 +23,12 @@ sudo apt install git cmake ninja-build build-essential python3 \
     libvulkan-dev glslc libglfw3-dev libglm-dev \
     libspdlog-dev libgtk-3-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
     libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-modeling-data-dev \
-    libocct-foundation-dev libocct-ocaf-dev libocct-visualization-dev
+    libocct-foundation-dev libocct-ocaf-dev libocct-visualization-dev \
+    libvterm-dev
 ```
+
+(`libvterm-dev` is optional — without it the app builds without the terminal
+panel, and the preference for it disappears.)
 
 **NixOS / Nix** — `shell.nix` pins every dependency including the optional
 ones: `nix-shell` in the repo root, and nothing to install. (The Vulkan ICD

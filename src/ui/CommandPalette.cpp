@@ -5,6 +5,7 @@
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchToolbar.h"
+#include "ui/TerminalPanel.h"
 
 #include "imgui.h"
 
@@ -183,7 +184,8 @@ int FuzzyScore(const std::string& text, const std::string& query) {
 
 void DrawCommandPalette(AppState& state) {
   // Ctrl+K toggles from anywhere (a focused text field keeps its Ctrl+K).
-  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_K, ImGuiInputFlags_RouteGlobal))
+  if (!TerminalCapturesKeys(state) &&
+      ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_K, ImGuiInputFlags_RouteGlobal))
     state.paletteOpen = !state.paletteOpen;
   if (!state.paletteOpen)
     return;

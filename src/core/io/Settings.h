@@ -38,6 +38,9 @@ struct Settings {
 
   // General
   double autosaveInterval = 60.0; // seconds; 0 disables
+  // Off by default: a CAD app should not open with a shell in it, and the
+  // panel costs a process the moment it is used (docs/ui/terminal-panel.md).
+  bool terminalPanel = false;
 
   // Keys this build does not know, kept verbatim so an older build cannot
   // delete a newer build's preferences just by running once.

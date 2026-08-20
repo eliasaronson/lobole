@@ -126,6 +126,17 @@ Screen::~Screen() {
   }
 }
 
+void Screen::SetDefaultColors(uint32_t fg, uint32_t bg) {
+  m_defaultFg = fg;
+  m_defaultBg = bg;
+  VTermColor vfg, vbg;
+  vterm_color_rgb(&vfg, static_cast<uint8_t>(fg >> 16),
+                  static_cast<uint8_t>(fg >> 8), static_cast<uint8_t>(fg));
+  vterm_color_rgb(&vbg, static_cast<uint8_t>(bg >> 16),
+                  static_cast<uint8_t>(bg >> 8), static_cast<uint8_t>(bg));
+  vterm_state_set_default_colors(vterm_obtain_state(m_impl->vt), &vfg, &vbg);
+}
+
 void Screen::Write(const char* bytes, size_t n) {
   vterm_input_write(m_impl->vt, bytes, n);
 }

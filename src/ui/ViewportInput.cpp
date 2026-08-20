@@ -11,6 +11,7 @@
 #include "ui/PreviewHandles.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
+#include "ui/TerminalPanel.h"
 
 #include "imgui.h"
 
@@ -179,7 +180,7 @@ void HandleViewportInput(AppState& state) {
   // SolidWorks keyboard navigation (when the UI isn't capturing keys):
   // arrows rotate (Shift = 90 degree steps), Ctrl+arrows pan, Alt+left/right
   // roll, Z / Shift+Z zoom out/in
-  if (!io.WantCaptureKeyboard) {
+  if (!io.WantCaptureKeyboard && !TerminalCapturesKeys(state)) {
     // 15 degrees per press (90 with Shift); orbit is 0.005 rad per "pixel"
     const double step = (io.KeyShift ? 1.5707963 : 0.2617994) / 0.005;
     const double panStep = 40.0;

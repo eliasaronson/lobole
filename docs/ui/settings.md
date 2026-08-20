@@ -119,7 +119,8 @@ Edit ▸ Preferences (Ctrl+,) opens one floating window, `###SettingsWindow` —
 not a dock tab; it is not part of the workspace. Collapsing-header sections in
 one scroll, generated from the table's `section` column, so a section exists
 exactly when a setting is in it. **Shipped: Appearance** (font size),
-**Performance** (GPU, shadows, SSAO, shadow map) and **General** (autosave).
+**Performance** (GPU, shadows, SSAO, shadow map) and **General** (autosave,
+**terminal panel**).
 The design's Viewport & Navigation, Simulation and Advanced sections have no
 tenants yet and are therefore absent rather than empty.
 
@@ -199,6 +200,14 @@ their dispatch chain, or the introspection test fails — the repo enforces
 GPU device (render + compute), shadows, SSAO quality, shadow-map size,
 **UI font size**, autosave interval. Deliberately short: the deliverable of v1
 is the store, the rule and the window — not the list.
+
+*(2026-08-20)* **Terminal panel** joined General, and is the first setting
+whose job is to keep a feature *out* of the way: it is off by default, and
+turning it on is what makes the panel and its right-hand dock node exist at
+all ([terminal-panel.md](terminal-panel.md)). Live tier — it appears on the
+next frame — and turning it off ends the running session rather than hiding
+it, because a process kept alive behind a closed panel is one nobody can see
+or stop.
 
 *(added on review)* **Font size was the omission.** `View > Font Size` already
 exists and writes `AppState::uiFontScale`, which nothing persists — it resets

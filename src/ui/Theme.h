@@ -1,5 +1,7 @@
 #pragma once
 
+struct ImFont;
+
 namespace ui {
 
 // Applies the application theme: colors, metrics, and font, scaled for the
@@ -12,5 +14,10 @@ struct ClearColor {
   float r, g, b;
 };
 ClearColor ViewportClearColor();
+
+// The monospace font the terminal panel draws in, or null when it could not
+// be loaded — the panel then says so rather than drawing a TUI in a
+// proportional font. Valid until the next ApplyTheme (a font-size change).
+ImFont* MonoFont();
 
 } // namespace ui

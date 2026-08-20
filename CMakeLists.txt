@@ -453,6 +453,7 @@ set(app_sources
     src/ui/HistoryPanel.cpp
     src/ui/SettingsWindow.cpp
     src/ui/PerfHud.cpp
+    src/ui/TerminalPanel.cpp
     src/ui/SketchToolbar.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp
@@ -489,6 +490,12 @@ file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf
 # a TUI drawn in a proportional font is unreadable (docs/ui/terminal-panel.md).
 file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
+# The MCP server and its client, beside the assets: the terminal panel points
+# a Claude Code session at THIS instance by generating a config that names
+# this file, so it has to exist in a dev tree and in an install alike.
+file(COPY ${CMAKE_SOURCE_DIR}/tools/designer_mcp.py
+          ${CMAKE_SOURCE_DIR}/tools/designer_remote.py
+     DESTINATION ${CMAKE_BINARY_DIR}/assets/tools)
 include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 
 # Studio HDRI for image-based lighting, loaded at runtime relative to the

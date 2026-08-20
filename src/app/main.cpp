@@ -35,6 +35,7 @@
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/SettingsWindow.h"
+#include "ui/TerminalPanel.h"
 #include "ui/Theme.h"
 #include "ui/UI.h"
 #include <algorithm>
@@ -1475,7 +1476,28 @@ int main(int argc, char** argv) {
     if (!args.recordPath.empty()) {
       remoteServer.StartRecording(args.recordPath);
     }
+    g_App.remotePort = args.remotePort;
   }
+
+  // The terminal panel binds a Claude Code session to THIS window by port
+  // (docs/ui/terminal-panel.md), which is useless if the app was started
+  // without --remote. main.cpp owns the server, so it hands the panel a way
+  // to open one on demand — starting from the documented default and walking
+  // up past ports another instance already holds.
+  g_App.ensureRemotePort = [&remoteServer]() -> int {
+    if (remoteServer.Port() != 0)
+      return remoteServer.Port();
+    for (int port = 8437; port < 8457; port++) {
+      if (remoteServer.Start(static_cast<uint16_t>(port), /*hasRenderer=*/true,
+                             /*bindAll=*/false)) {
+        LOG_INFO("Terminal panel opened the remote interface on port {}", port);
+        g_App.remotePort = port;
+        return port;
+      }
+    }
+    LOG_WARN("Could not open a remote port for the terminal panel");
+    return 0;
+  };
 
   // Autosave (F2). GUI tests force it off: a mid-test autosave would break
   // their determinism (and there is nothing worth recovering).
@@ -1749,6 +1771,8 @@ int main(int argc, char** argv) {
 #endif
   }
 
+  // Never orphan a child process: the panel's session dies with the app.
+  ui::ShutdownTerminal(g_App);
   remoteServer.Stop();
 
   // Clean exit with nothing unsaved: the sidecar has no recovery value.

@@ -16,6 +16,7 @@
 #include "ui/PreviewFeature.h"
 #include "ui/SettingsWindow.h"
 #include "ui/SketchInteraction.h"
+#include "ui/TerminalPanel.h"
 
 #include "imgui.h"
 
@@ -454,6 +455,13 @@ void DrawHelpMenu(AppState& state) {
 // Global keyboard shortcuts. Registered every frame; ImGui's routing lets a
 // focused text field claim chords like Ctrl+Z for itself first.
 void HandleShortcuts(AppState& state) {
+  // The terminal owns the keyboard while the pointer is over it
+  // (docs/ui/terminal-panel.md). Without this gate Ctrl+Z would mean two
+  // things at once — undo a feature AND suspend the job — and which one you
+  // got would depend on invisible focus state.
+  if (TerminalCapturesKeys(state))
+    return;
+
   const ImGuiInputFlags route = ImGuiInputFlags_RouteGlobal;
 
   // Preferences: the platform-conventional chord, and it works mid-preview

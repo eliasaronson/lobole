@@ -134,6 +134,25 @@ void ApplyMetrics(ImGuiStyle& style) {
 
 } // namespace
 
+// The terminal font, or null when it could not be loaded (the panel then
+// says so rather than drawing a TUI in a proportional font).
+static ImFont* s_MonoFont = nullptr;
+
+// Latin + the box-drawing/block/arrow ranges a TUI actually draws in. The
+// full BMP would quadruple the atlas for glyphs nothing here emits.
+static const ImWchar kMonoRanges[] = {
+    0x0020, 0x00FF, // Latin + Latin-1
+    0x2010, 0x203A, // dashes, quotes, bullet, ellipsis
+    0x2190, 0x21FF, // arrows
+    0x2500, 0x259F, // box drawing + block elements
+    0x25A0, 0x25FF, // geometric shapes (spinners)
+    0x2713, 0x2718, // check marks and crosses
+    0x276C, 0x2771, // the heavy angle brackets Claude Code prompts with
+    0,
+};
+
+ImFont* MonoFont() { return s_MonoFont; }
+
 void ApplyTheme(float scale) {
   ImGuiStyle& style = ImGui::GetStyle();
   style = ImGuiStyle(); // reset so repeated calls don't compound scaling
@@ -161,6 +180,20 @@ void ApplyTheme(float scale) {
                                    kIconRange);
     } else {
       LOG_WARN("Icon font not found at {}", iconPath);
+    }
+
+    // The terminal panel's font, as a SEPARATE atlas entry rather than a
+    // merge: a terminal needs every glyph at one advance width, and merging
+    // it into a proportional font would give it Roboto's metrics
+    // (docs/ui/terminal-panel.md). Loaded even when the panel is off — it is
+    // 260 KB and the alternative is rebuilding the atlas on a preference.
+    const std::string monoPath = (dir / "JetBrainsMono-Regular.ttf").string();
+    if (std::filesystem::exists(monoPath)) {
+      s_MonoFont = io.Fonts->AddFontFromFileTTF(monoPath.c_str(), 14.0f * scale,
+                                                nullptr, kMonoRanges);
+    } else {
+      s_MonoFont = nullptr;
+      LOG_WARN("Monospace font not found at {}", monoPath);
     }
   } else {
     LOG_WARN("Font not found at {}, using ImGui default", fontPath);
