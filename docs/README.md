@@ -19,7 +19,7 @@ which is usually the part worth reading later.
 | [variables/](variables/plan.md) | parameters + expressions | |
 | [scripting/](scripting/plan.md) | the LLM/automation interface | `mcp.md`, `s1-mcp.md`, `s2-headless.md`, `error-style.md` (what a failed call must tell an agent) |
 | [versioning/](versioning/plan.md) | format, autosave, git | `f1-f2.md`, `f3-directory-format.md`, `f6-history-ui.md`, `baked-geometry.md`, `format.md` |
-| [ui/](ui/plan.md) | selection, tools, layout | `u7`–`u11` rounds, `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `gui-coverage.md` |
+| [ui/](ui/plan.md) | selection, tools, layout | `u7`–`u11` rounds, `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `terminal-panel.md` (an embedded terminal for Claude Code — design), `gui-coverage.md` |
 | [inspect/](inspect/plan.md) | measure, mass properties, sections | `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
 | [interchange/](interchange/plan.md) | import + export | `import-plan.md`, `feature-gaps-plan.md`, `onshape-terms.md` |
 | [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md`, `frame-timing.md`, `outline-perf.md` |
