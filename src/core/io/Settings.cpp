@@ -46,8 +46,7 @@ const Field kFields[] = {
      "Performance",
      "Graphics device",
      "Which GPU renders the viewport. Empty picks a discrete card "
-     "automatically. Simulation picks it up on the next run; the viewport "
-     "needs a restart.",
+     "automatically. Simulation picks it up on its next run.",
      Tier::Restart,
      &Settings::gpuDevice,
      {},

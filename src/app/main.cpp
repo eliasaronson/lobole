@@ -174,7 +174,8 @@ IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties,
   return false;
 }
 
-static void SetupVulkan(ImVector<const char*> instance_extensions) {
+static void SetupVulkan(ImVector<const char*> instance_extensions,
+                        GLFWwindow* window) {
   VkResult err;
 
   // Create Vulkan Instance
@@ -257,17 +258,48 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
     vkEnumeratePhysicalDevices(g_Instance, &count, nullptr);
     std::vector<VkPhysicalDevice> devices(count);
     vkEnumeratePhysicalDevices(g_Instance, &count, devices.data());
+
+    // Throwaway surface, purely so each device can be asked whether it can
+    // present to THIS window. A device that cannot is ineligible however the
+    // user feels about it: choosing one aborts startup with "no WSI support
+    // on physical device 0", and the only way back would be hand-editing
+    // settings.json. Measured here — the Arc iGPU cannot present under Xvfb,
+    // and glfwGetPhysicalDevicePresentationSupport says it CAN (it asks the X
+    // server, which answers before Mesa finds no DRI3), so only the real
+    // surface query is trustworthy. The app's own surface does not exist
+    // until after device selection, hence this one.
+    VkSurfaceKHR probe = VK_NULL_HANDLE;
+    if (window == nullptr ||
+        glfwCreateWindowSurface(g_Instance, window, g_Allocator, &probe) !=
+            VK_SUCCESS)
+      probe = VK_NULL_HANDLE;
+
     std::vector<std::string> names;
     std::vector<int> scores;
     for (VkPhysicalDevice pd : devices) {
       VkPhysicalDeviceProperties props;
       vkGetPhysicalDeviceProperties(pd, &props);
       names.emplace_back(props.deviceName);
+      bool canPresent = probe == VK_NULL_HANDLE; // unknown: do not exclude
+      uint32_t families = 0;
+      vkGetPhysicalDeviceQueueFamilyProperties(pd, &families, nullptr);
+      std::vector<VkQueueFamilyProperties> qprops(families);
+      vkGetPhysicalDeviceQueueFamilyProperties(pd, &families, qprops.data());
+      for (uint32_t q = 0; q < families && !canPresent; q++) {
+        if (!(qprops[q].queueFlags & VK_QUEUE_GRAPHICS_BIT))
+          continue;
+        VkBool32 supported = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(pd, q, probe, &supported);
+        canPresent = supported == VK_TRUE;
+      }
       scores.push_back(
-          props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU     ? 2
+          !canPresent                                                  ? -1
+          : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU   ? 2
           : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 1
                                                                        : 0);
     }
+    if (probe != VK_NULL_HANDLE)
+      vkDestroySurfaceKHR(g_Instance, probe, g_Allocator);
     // The list is what the Preferences combo offers; the preference itself is
     // matched by the shared rule both device-picking sites use.
     g_App.gpuDevices = names;
@@ -275,6 +307,18 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
         devicepref::Choose(names, scores, g_App.settings.gpuDevice);
     if (pick >= 0)
       g_PhysicalDevice = devices[static_cast<size_t>(pick)];
+    // Say so rather than silently doing something else: a preference that
+    // cannot be honoured is exactly the case a user reads the log for.
+    if (!g_App.settings.gpuDevice.empty() && pick >= 0 &&
+        names[static_cast<size_t>(pick)].find(g_App.settings.gpuDevice) ==
+            std::string::npos) {
+      g_App.gpuPreferenceNote = "'" + g_App.settings.gpuDevice +
+                                "' cannot display a window on this system (or "
+                                "is not present), so it was not used.";
+      LOG_WARN("Preferred GPU '{}' cannot present here (or is absent); "
+               "rendering on {} instead.",
+               g_App.settings.gpuDevice, names[static_cast<size_t>(pick)]);
+    }
   }
   IM_ASSERT(g_PhysicalDevice != VK_NULL_HANDLE);
   {
@@ -1130,7 +1174,7 @@ int main(int argc, char** argv) {
       glfwGetRequiredInstanceExtensions(&extensions_count);
   for (uint32_t i = 0; i < extensions_count; i++)
     extensions.push_back(glfw_extensions[i]);
-  SetupVulkan(extensions);
+  SetupVulkan(extensions, window);
 
   VkSurfaceKHR surface;
   VkResult err =

@@ -5,7 +5,9 @@
 
 #include "imgui.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -114,17 +116,12 @@ bool DrawField(AppState& state, const settings::Field& f) {
         return s.*(*dm);
       return 0.0;
     }();
+    // "%g", not to_string + trimming: 0.85f * 100 is 85.000002 in float, and
+    // a combo offering "85.000002%" reads as a bug.
     const auto text = [&f](double v) {
-      v *= f.displayScale;
-      std::string out = std::to_string(v);
-      // Trim the trailing zeros std::to_string insists on.
-      if (out.find('.') != std::string::npos) {
-        while (!out.empty() && out.back() == '0')
-          out.pop_back();
-        if (!out.empty() && out.back() == '.')
-          out.pop_back();
-      }
-      return out + f.unit;
+      char buf[64];
+      std::snprintf(buf, sizeof(buf), "%g%s", v * f.displayScale, f.unit);
+      return std::string(buf);
     };
     if (ImGui::BeginCombo(id.c_str(), text(current).c_str())) {
       for (float option : f.choices) {
@@ -165,7 +162,14 @@ void ApplySettings(AppState& state) {
 }
 
 void MarkSettingsChanged(AppState& state) {
+  // The font atlas is rebuilt BETWEEN frames, not during one, so a scale
+  // change has to ask for it — ApplySettings only moves the number. Without
+  // this, changing Font size in the window did nothing at all: only the old
+  // View > Font Size menu ever set the flag.
+  const bool fontChanged = state.uiFontScale != state.settings.uiFontScale;
   ApplySettings(state);
+  if (fontChanged)
+    state.fontRebuildRequested = true;
   state.settingsDirtyAt = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0.0;
 }
 
@@ -187,9 +191,24 @@ void FlushSettings(AppState& state, double now) {
 void DrawSettingsWindow(AppState& state) {
   if (!state.settingsWindowOpen)
     return;
-  ImGui::SetNextWindowSize(
-      ImVec2(ImGui::GetFontSize() * 34.0f, ImGui::GetFontSize() * 30.0f),
-      ImGuiCond_FirstUseEver);
+  // Sized in FONT UNITS, not pixels — this window owns the font-size setting,
+  // so a literal is wrong the moment someone uses it — and re-applied on
+  // every APPEARING rather than FirstUseEver: the first version shipped too
+  // small, and FirstUseEver would leave everyone who had already opened it
+  // stuck with that size forever in imgui.ini. Centred for the same reason a
+  // remembered position is wrong after a resize: it can be off-screen.
+  //
+  // NOT AlwaysAutoResize: the blurbs wrap to the content region, so letting
+  // content set the width makes each blurb one long line, which then sets the
+  // width — the window grew past the screen edge.
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const float em = ImGui::GetFontSize();
+  ImGui::SetNextWindowSize(ImVec2(std::min(em * 30.0f, vp->WorkSize.x * 0.9f),
+                                  std::min(em * 28.0f, vp->WorkSize.y * 0.85f)),
+                           ImGuiCond_Appearing);
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
+                                 vp->WorkPos.y + vp->WorkSize.y * 0.5f),
+                          ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
   if (!ImGui::Begin("Preferences###SettingsWindow",
                     &state.settingsWindowOpen)) {
     ImGui::End();
@@ -209,12 +228,29 @@ void DrawSettingsWindow(AppState& state) {
     if (!sectionOpen)
       continue;
     changed |= DrawField(state, f);
-    // The GPU row states what is actually in use, so a pending restart-tier
-    // change is visible rather than a lie.
+    // The GPU row says what is actually in use, and says so LOUDLY when the
+    // choice no longer matches it — "nothing happened" is the correct
+    // behaviour for a restart-tier setting, but only if the window admits it.
     if (std::string(f.key) == "gpu_device" && !state.gpuName.empty()) {
-      const std::string inUse =
-          "Currently rendering on: " + state.gpuName + ".";
+      const std::string& want = state.settings.gpuDevice;
+      const bool pending =
+          !want.empty() && state.gpuName.find(want) == std::string::npos;
+      const std::string inUse = "Rendering on: " + state.gpuName + ".";
       DrawBlurb(f, inUse.c_str());
+      if (!state.gpuPreferenceNote.empty() &&
+          state.gpuPreferenceNote.find(want) != std::string::npos) {
+        // Startup already tried and could not: promising a restart here
+        // would be a lie, and the user would take it.
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s",
+                           state.gpuPreferenceNote.c_str());
+        ImGui::PopTextWrapPos();
+      } else if (pending) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                           "Restart Designer to render on %s.", want.c_str());
+        ImGui::PopTextWrapPos();
+      }
     } else {
       DrawBlurb(f);
     }

@@ -192,40 +192,10 @@ void DrawViewMenu(AppState& state) {
     FitCameraToSelection(state);
   }
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
-  // Render quality writes the PREFERENCE, not the live field: these used to be
-  // session state that reset on every launch. AppState::settings is the one
-  // source of truth and ApplySettings pushes it onto the renderer's fields, so
-  // the menu and Edit > Preferences cannot disagree.
-  if (ImGui::MenuItem("Shadows", nullptr, state.settings.shadows)) {
-    state.settings.shadows = !state.settings.shadows;
-    MarkSettingsChanged(state);
-  }
-  if (ImGui::BeginMenu("Render Quality")) {
-    if (ImGui::BeginMenu("Shadow Map")) {
-      for (int size : {1024, 2048}) {
-        if (ImGui::MenuItem(std::to_string(size).c_str(), nullptr,
-                            state.settings.shadowMap == size)) {
-          state.settings.shadowMap = size;
-          MarkSettingsChanged(state);
-        }
-      }
-      ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("SSAO")) {
-      const std::pair<const char*, const char*> options[] = {
-          {"off", "Off"},
-          {"half", "Half Resolution"},
-          {"full", "Full Resolution"}};
-      for (const auto& [value, label] : options) {
-        if (ImGui::MenuItem(label, nullptr, state.settings.ssao == value)) {
-          state.settings.ssao = value;
-          MarkSettingsChanged(state);
-        }
-      }
-      ImGui::EndMenu();
-    }
-    ImGui::EndMenu();
-  }
+  // Render quality (shadows, SSAO, shadow map) and font size used to live
+  // here as session flags that reset every launch. They are USER PREFERENCES
+  // now — Edit > Preferences owns them, and duplicating a control is how the
+  // two ends of it drift apart.
   ImGui::MenuItem("Show Element Names", nullptr, &state.showElementNames);
   ImGui::MenuItem("Viewport Controls", nullptr, &state.showControlsHelp);
   if (state.topoGhostStudyId != 0 && ImGui::MenuItem("Hide Topology Ghost")) {
@@ -248,22 +218,6 @@ void DrawViewMenu(AppState& state) {
     view("Top", {0, 1, 0}, "Shift+5");
     view("Bottom", {0, -1, 0}, "Shift+6");
     view("Isometric", glm::normalize(glm::vec3(1, 1, 1)), "Shift+7");
-    ImGui::EndMenu();
-  }
-
-  // Session font-size setting (U5); applied via the DPI rescale path.
-  if (ImGui::BeginMenu("Font Size")) {
-    const auto size = [&](const char* name, float scale) {
-      if (ImGui::MenuItem(name, nullptr, state.settings.uiFontScale == scale)) {
-        state.settings.uiFontScale = scale;
-        MarkSettingsChanged(state); // it is a preference now, not session state
-        state.fontRebuildRequested = true;
-      }
-    };
-    size("Small", 0.85f);
-    size("Default", 1.0f);
-    size("Large", 1.2f);
-    size("Extra Large", 1.4f);
     ImGui::EndMenu();
   }
 

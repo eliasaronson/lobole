@@ -968,9 +968,12 @@ struct AppState {
   settings::Settings settingsSaved;
   double settingsDirtyAt = -1.0; // ImGui time of the last edit; <0 = clean
   bool settingsWindowOpen = false;
-  // Render devices this machine offers, for the Preferences combo, and the
-  // one actually in use (which differs from the preference until a restart).
+  // Render devices this machine offers, for the Preferences combo. When the
+  // preferred one could not be honoured, startup records WHY here — the
+  // window must not promise that a restart will fix something a restart
+  // cannot fix (a device that cannot present to a window).
   std::vector<std::string> gpuDevices;
+  std::string gpuPreferenceNote;
 };
 
 } // namespace ui

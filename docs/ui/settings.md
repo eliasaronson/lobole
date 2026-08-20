@@ -131,6 +131,20 @@ Three properties it must have, all learned the hard way this month:
   confusion rather than removing it.
 - **"Reset section to defaults"** per section, and a global reset in Advanced.
   A user who has broken their config should not have to find the JSON.
+- *(learned building it)* **The View menu's copies are gone.** Render quality
+  and font size lived there as session flags that reset every launch; they are
+  preferences now, and one control per setting is the only way the two ends
+  cannot drift. What stays in View is genuinely session state: Show Planes,
+  Show Element Names, Viewport Controls.
+- *(learned building it)* **A restart-tier row must not promise what a restart
+  cannot deliver.** Choosing a GPU that cannot present to a window aborted
+  startup outright ("no WSI support on physical device 0") — recoverable only
+  by hand-editing settings.json. Startup now scores such devices ineligible,
+  falls back, and records WHY, and the row shows that reason instead of
+  "restart to use it". Note `glfwGetPhysicalDevicePresentationSupport` is NOT
+  sufficient: it asks the X server, which said yes for a device Mesa then
+  refused. Only `vkGetPhysicalDeviceSurfaceSupportKHR` against a real surface
+  is trustworthy, so selection creates a throwaway one.
 - *(added on review)* **Every width is measured, never a pixel literal.**
   `CalcTextSize` plus the style's own padding — the style scales with the
   display's content scale *and* with the font-size row this very window owns.

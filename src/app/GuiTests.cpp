@@ -5683,7 +5683,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
     s_App->historyStamp = -1.0;
 
-    ctx->MenuClick("View/Font Size/Extra Large");
+    // Font size is a PREFERENCE now (Edit > Preferences); the View > Font Size
+    // submenu this used to click is gone. Set it directly — driving the
+    // Preferences window would be testing that window, not these widths.
+    s_App->settings.uiFontScale = 1.4f;
+    ui::MarkSettingsChanged(*s_App);
     ctx->Yield(4); // the atlas rebuild happens between frames
 
     ImGuiWindow* panel = ImGui::FindWindowByName("History");
@@ -5710,12 +5714,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // what the sideways scroll was.
     IM_CHECK_LE(panel->ContentSize.x, panel->InnerRect.GetWidth() + 1.0f);
 
-    // Put the font back directly. The size is session state every later test
-    // inherits, but restoring it is cleanup, not the thing under test — and
-    // driving the menu for it failed in the full suite ("Unable to locate
-    // item: //View###Menu_00/Font Size") while every assertion above passed.
-    s_App->uiFontScale = 1.0f;
-    s_App->fontRebuildRequested = true;
+    // Put the font back. ResetAppForTest restores the preference for the next
+    // test, but the ATLAS is rebuilt by the main loop, so leaving it large
+    // would follow this test into the next one.
+    s_App->settings.uiFontScale = 1.0f;
+    ui::MarkSettingsChanged(*s_App);
     ctx->Yield(4);
     std::filesystem::remove_all(dir);
   };
@@ -5740,13 +5743,22 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->settings.shadows);
     IM_CHECK(!s_App->showShadows); // ApplySettings pushed it through
 
-    // The same preference from the View menu, which used to own a separate
-    // session-only flag.
-    ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("View/Shadows");
+    // Back on, from the same control: the View menu's duplicate is gone —
+    // render quality was session state there, resetting every launch, and two
+    // controls over one preference is how the ends drift apart.
+    ctx->ItemClick("//###SettingsWindow/###set_shadows");
     ctx->Yield(2);
     IM_CHECK(s_App->settings.shadows);
     IM_CHECK(s_App->showShadows);
+    // And the View menu really has no duplicate left.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuAction(ImGuiTestAction_Open, "View");
+    ctx->Yield();
+    IM_CHECK(!ctx->ItemExists("//$FOCUSED/Shadows"));
+    IM_CHECK(!ctx->ItemExists("//$FOCUSED/Render Quality"));
+    IM_CHECK(!ctx->ItemExists("//$FOCUSED/Font Size"));
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
 
     // An enum row is a combo, and its id is stable.
     ctx->ItemClick("//###SettingsWindow/###set_ssao");
@@ -5775,10 +5787,13 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       if (std::string(f.key) != "gpu_device")
         continue;
       sawGpuRow = true;
+      // The TIER is the contract: the window turns it into the "(needs a
+      // restart)" note. The blurb deliberately does NOT repeat the word —
+      // that read as "...the viewport needs a restart. (needs a restart)".
       saidRestart = f.tier == settings::Tier::Restart;
-      // And the blurb tells the user the asymmetry that matters: simulation
-      // builds its device per run, so it takes effect immediately there.
-      IM_CHECK(strstr(f.blurb, "restart") != nullptr);
+      // It does carry the asymmetry the note cannot: simulation builds its
+      // device per run, so the same setting lands immediately there.
+      IM_CHECK(strstr(f.blurb, "next run") != nullptr);
     }
     IM_CHECK(sawGpuRow);
     IM_CHECK(saidRestart);
