@@ -43,6 +43,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"set_occurrence_visible", "Show/hide an occurrence."},
     {"set_occurrence_fixed", "Fix/free an occurrence for the solver."},
     {"rename_occurrence", "Rename an occurrence."},
+    {"set_occurrence_configuration",
+     "Choose which configuration of a placed SUB-ASSEMBLY this occurrence "
+     "uses {id, configuration: name|id|null}; null = that document's active "
+     "one. Two placements of one assembly can differ."},
     {"select_occurrence", "Select an occurrence in the UI."},
     {"add_mate",
      "Add a mate {type: fastened|revolute|slider|cylindrical|planar|ball, "
@@ -225,7 +229,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   // Occurrence property edits. All snapshot for undo, then bump the assembly
   // version so the renderer resyncs. `id` names the occurrence.
   if (m == "set_occurrence_transform" || m == "set_occurrence_visible" ||
-      m == "set_occurrence_fixed" || m == "rename_occurrence") {
+      m == "set_occurrence_fixed" || m == "rename_occurrence" ||
+      m == "set_occurrence_configuration") {
     if (!state.assembly)
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
@@ -249,6 +254,42 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       occ->visible = p.at("visible").get<bool>();
     } else if (m == "set_occurrence_fixed") {
       occ->fixed = p.at("fixed").get<bool>();
+    } else if (m == "set_occurrence_configuration") {
+      // A5/v56: which configuration of the REFERENCED document this
+      // placement uses. Named or by id; 0 / "" goes back to that document's
+      // active one.
+      uint64_t cfgId = 0;
+      if (p.contains("configuration") && !p.at("configuration").is_null()) {
+        const json& c = p.at("configuration");
+        if (c.is_number()) {
+          cfgId = c.get<uint64_t>();
+        } else {
+          const std::string want = c.get<std::string>();
+          const AssemblyDocument* sub =
+              occ->refKind == OccurrenceRef::Assembly
+                  ? ui::AssemblyDocById(state, occ->partId)
+                  : nullptr;
+          if (sub == nullptr)
+            throw std::runtime_error(
+                "'" + occ->name +
+                "' places a part, and per-occurrence PART configurations are "
+                "not supported (a part configuration changes geometry, which "
+                "would mean regenerating it per configuration) — configure "
+                "sub-assemblies, or set the part document's own active "
+                "configuration");
+          std::string known;
+          for (const Configuration& cfg : sub->GetConfigurations()) {
+            known += (known.empty() ? "" : ", ") + cfg.name;
+            if (cfg.name == want)
+              cfgId = cfg.id;
+          }
+          if (cfgId == 0)
+            throw std::runtime_error(
+                "no configuration '" + want + "' in '" + occ->name +
+                "'. Known: " + (known.empty() ? "(none)" : known));
+        }
+      }
+      occ->configurationId = cfgId;
     } else { // rename_occurrence
       occ->name = p.at("name").get<std::string>();
     }

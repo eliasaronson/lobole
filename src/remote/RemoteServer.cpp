@@ -678,9 +678,9 @@ static const std::set<std::string> kNoPartDoc = {
     "list_occurrences", "set_occurrence_transform", "set_occurrence_visible",
     "set_occurrence_fixed", "rename_occurrence", "add_mate", "set_mate",
     "remove_mate", "list_mates", "select_mate", "select_occurrence",
-    "solve_assembly", "bom", "export_bom", "edit_in_context",
-    "add_exploded_view", "remove_exploded_view", "list_exploded_views",
-    "set_explode_step", "auto_explode", "set_explode",
+    "set_occurrence_configuration", "solve_assembly", "bom", "export_bom",
+    "edit_in_context", "add_exploded_view", "remove_exploded_view",
+    "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
     // export_visual works on a part OR an assembly (occurrence walk).
     "export_visual",
     // interference runs on occurrence pairs on an assembly tab;

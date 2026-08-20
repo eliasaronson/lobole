@@ -37,6 +37,18 @@ struct Occurrence {
 
   bool visible = true;
   bool fixed = false; // Onshape-style grounded flag; anchor for the A3 solve
+
+  // Which CONFIGURATION of the referenced document this placement uses
+  // (A5, v56); 0 = whatever that document's active configuration is, which
+  // is the behaviour every existing file means.
+  //
+  // This is what makes a sub-assembly reusable rather than merely tidy: one
+  // Gangway placed "short" beside another placed "long". Scoped to ASSEMBLY
+  // configurations, which are a suppression set the walk can simply consult
+  // — a PART configuration changes geometry, so honouring it per occurrence
+  // would mean regenerating that part once per configuration, and stays
+  // deferred (it was already deferred in C0-C4).
+  uint64_t configurationId = 0;
 };
 
 // Where on its part a connector frame is anchored (A3 mates,
@@ -218,6 +230,13 @@ public:
   // `visible` flag is separate; this is the config layer). Render/solve/BOM
   // skip an occurrence that is suppressed OR not visible.
   bool OccurrenceSuppressed(uint64_t occurrenceId) const;
+
+  // The same question against a NAMED configuration (A5): 0 means the active
+  // one, and an id that no longer resolves also falls back to it — a
+  // configuration deleted out from under a placement should not silently
+  // un-suppress half of it, but it must not break the model either.
+  bool OccurrenceSuppressedIn(uint64_t configurationId,
+                              uint64_t occurrenceId) const;
 
   // Monotonic change counter — bumped on every add/remove/mutate — so the
   // renderer can skip resyncing an unchanged assembly (mirrors Document).

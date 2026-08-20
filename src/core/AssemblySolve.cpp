@@ -35,7 +35,7 @@ struct FlattenCtx {
 
 bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
                  const glm::mat4& parentWorld, uint64_t rootOccurrenceId,
-                 bool parentVisible, int depth);
+                 bool parentVisible, int depth, uint64_t configurationId);
 
 bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
                        const glm::mat4& world, uint64_t rootOccurrenceId,
@@ -55,8 +55,10 @@ bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
   }
   ctx.stack.push_back(occ.partId);
   ctx.names.push_back(occ.name);
-  const bool ok =
-      FlattenInto(ctx, *sub, world, rootOccurrenceId, visible, depth + 1);
+  // The placement chooses the sub-assembly's configuration (v56): two
+  // Gangways, one "short", one "long", from one document.
+  const bool ok = FlattenInto(ctx, *sub, world, rootOccurrenceId, visible,
+                              depth + 1, occ.configurationId);
   ctx.names.pop_back();
   ctx.stack.pop_back();
   return ok;
@@ -64,7 +66,7 @@ bool DescendOccurrence(FlattenCtx& ctx, const Occurrence& occ,
 
 bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
                  const glm::mat4& parentWorld, uint64_t rootOccurrenceId,
-                 bool parentVisible, int depth) {
+                 bool parentVisible, int depth, uint64_t configurationId) {
   if (depth > ctx.maxDepth) {
     ctx.error = "assemblies nested deeper than " +
                 std::to_string(ctx.maxDepth) + " levels";
@@ -73,8 +75,11 @@ bool FlattenInto(FlattenCtx& ctx, const AssemblyDocument& asmDoc,
   for (const Occurrence& occ : asmDoc.GetOccurrences()) {
     // Suppression and visibility compose down the tree: hiding a
     // sub-assembly hides everything in it.
+    // `configurationId` is the one the PLACEMENT asked for (v56); 0 means
+    // this document's active one, so a top-level walk is unchanged.
     const bool visible =
-        parentVisible && occ.visible && !asmDoc.OccurrenceSuppressed(occ.id);
+        parentVisible && occ.visible &&
+        !asmDoc.OccurrenceSuppressedIn(configurationId, occ.id);
     const glm::mat4 world = parentWorld * PlacementOf(occ);
     // The TOP-LEVEL occurrence owns everything below it — that is what makes
     // a sub-assembly one contact node, one explode step, one drawing ref.
@@ -111,7 +116,8 @@ std::expected<std::vector<FlatInstance>, std::string>
 Flatten(const AssemblyDocument& top, const PartResolver& partById,
         const AssemblyResolver& asmById, int maxDepth) {
   FlattenCtx ctx{partById, asmById, maxDepth, {}, {}, {}, {}};
-  if (!FlattenInto(ctx, top, glm::mat4(1.0f), 0, true, 0))
+  // The top itself uses its own active configuration (nobody placed it).
+  if (!FlattenInto(ctx, top, glm::mat4(1.0f), 0, true, 0, 0))
     return std::unexpected(ctx.error);
   return ctx.out;
 }

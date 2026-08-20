@@ -160,3 +160,14 @@ bool AssemblyDocument::OccurrenceSuppressed(uint64_t occurrenceId) const {
   const Configuration* c = ActiveConfig();
   return c != nullptr && c->Suppresses(occurrenceId);
 }
+
+bool AssemblyDocument::OccurrenceSuppressedIn(uint64_t configurationId,
+                                              uint64_t occurrenceId) const {
+  if (configurationId == 0)
+    return OccurrenceSuppressed(occurrenceId);
+  const Configuration* c = FindConfiguration(configurationId);
+  if (c == nullptr)
+    return OccurrenceSuppressed(
+        occurrenceId); // deleted: fall back, don't break
+  return c->Suppresses(occurrenceId);
+}

@@ -183,6 +183,44 @@ def main(binary):
             expect("placed in" in str(e),
                    f"a referenced tab cannot be deleted: {str(e)[:60]}")
 
+        # --- one document, two placements, different configurations --------
+        # What makes a sub-assembly reusable rather than merely tidy.
+        d.call("set_active_part", name="Gangway")
+        gcfg = d.call("add_configuration", name="short")
+        inner = d.call("list_occurrences")["occurrences"]
+        d.call("set_configuration", id=gcfg["id"],
+               suppressed_occurrences=[inner[-1]["id"]])
+        d.call("set_active_configuration", id=0)  # the base stays the default
+        d.call("set_active_part", name="Dock")
+        before = sum(r["quantity"] for r in d.call("bom")["rows"])
+        gangs = [o for o in d.call("list_occurrences")["occurrences"]
+                 if o.get("ref_kind") == "assembly"]
+        d.call("set_occurrence_configuration", id=gangs[0]["id"],
+               configuration="short")
+        after = sum(r["quantity"] for r in d.call("bom")["rows"])
+        expect(after == before - 1,
+               f"one placement goes short, the other does not "
+               f"({before} -> {after})")
+        # The other placement is untouched — that is the whole claim.
+        leaves = {o["id"]: o["leaf_count"]
+                  for o in d.call("list_occurrences")["occurrences"]
+                  if o.get("ref_kind") == "assembly"}
+        expect(sorted(leaves.values()) == [1, 2],
+               f"the placements differ ({sorted(leaves.values())})")
+        # A PART occurrence cannot take one: a part configuration changes
+        # geometry, and honouring it per placement means regenerating it.
+        part_occ = [o for o in d.call("list_occurrences")["occurrences"]
+                    if o.get("ref_kind", "part") == "part"][0]
+        try:
+            d.call("set_occurrence_configuration", id=part_occ["id"],
+                   configuration="short")
+            expect(False, "a part occurrence must refuse a configuration")
+        except RuntimeError as e:
+            expect("not supported" in str(e),
+                   f"parts refuse with the reason: {str(e)[:60]}")
+        d.call("set_occurrence_configuration", id=gangs[0]["id"],
+               configuration=None)  # back to base for the round-trip below
+
         # --- save, reopen, and the tree is still a tree ---------------------
         proj = os.path.join(tmp, "nested.dsgn")
         d.call("save_project", path=proj)

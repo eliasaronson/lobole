@@ -195,6 +195,38 @@ TEST_CASE("Frozen v55 sub-assembly golden loads at the exact schema",
   CHECK(ladder->refKind == OccurrenceRef::Part);
 }
 
+// v56 froze the per-occurrence configuration. Two placements of ONE document
+// differing only by which configuration they use is the whole point — a
+// Gangway "long" beside a Gangway "short" — so the field is pinned per
+// occurrence, and its absence (every older file) means "that document's
+// active one".
+TEST_CASE("Frozen v56 per-occurrence configuration golden",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v56-occurrence-config.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc != nullptr);
+  REQUIRE(asmDoc->OccurrenceCount() == 2);
+  const Occurrence* lng = asmDoc->FindById(1);
+  const Occurrence* shrt = asmDoc->FindById(2);
+  REQUIRE(lng != nullptr);
+  REQUIRE(shrt != nullptr);
+  CHECK(lng->partId == shrt->partId); // ONE document, two placements
+  CHECK(lng->configurationId == 0);   // its active configuration
+  CHECK(shrt->configurationId == 42); // a named one
+}
+
+TEST_CASE("A pre-v56 assembly golden means 'the active configuration'",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+                          "assembly" / "v55-subassembly.json";
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc != nullptr);
+  for (const Occurrence& o : asmDoc->GetOccurrences())
+    CHECK(o.configurationId == 0);
+}
+
 // A pre-v55 golden must still read as parts — the compatibility claim above,
 // checked against a file that predates the field entirely.
 TEST_CASE("A pre-v55 assembly golden reads as part references",

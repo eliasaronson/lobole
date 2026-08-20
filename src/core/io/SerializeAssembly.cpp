@@ -25,6 +25,9 @@ json OccurrenceToJson(const Occurrence& o) {
                     {"orientation", QuatToJson(o.orientation)}};
   j["visible"] = o.visible;
   j["fixed"] = o.fixed;
+  // v56: which configuration of the reference this placement uses; 0 (and
+  // absent, in every older file) = that document's active one.
+  j["configuration_id"] = o.configurationId;
   return j;
 }
 
@@ -36,6 +39,7 @@ Occurrence OccurrenceFromJson(const json& j) {
   o.refKind = j.value("ref_kind", std::string("part")) == "assembly"
                   ? OccurrenceRef::Assembly
                   : OccurrenceRef::Part;
+  o.configurationId = j.value("configuration_id", uint64_t{0});
   if (j.contains("part_version") && !j.at("part_version").is_null())
     o.partVersion = j.at("part_version").get<std::string>();
   // Both halves of the transform are optional: a caller placing a part by

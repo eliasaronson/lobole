@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "core/AssemblySolve.h"
+#include "core/Configuration.h"
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Occurrence.h"
@@ -188,4 +189,58 @@ TEST_CASE("Subtree versions see through a sub-assembly",
   w.assemblies[2]->BumpVersion();
   CHECK(assembly::SubtreeVersions(top, w.PartById(), w.AsmById()) !=
         beforeMove);
+}
+
+// v56: which configuration a PLACEMENT uses. Two occurrences of one
+// sub-assembly, one showing all its parts and one with a configuration that
+// suppresses some — the thing that makes a sub-assembly reusable rather than
+// merely tidy.
+TEST_CASE("A placement chooses the sub-assembly's configuration",
+          "[assembly][flatten]") {
+  World w;
+  w.parts[1] = BoxPart();
+  auto sub = std::make_unique<AssemblyDocument>();
+  const uint64_t keep =
+      sub->AddOccurrence(Place("Keep", 1, OccurrenceRef::Part, {0, 0, 0}));
+  const uint64_t drop =
+      sub->AddOccurrence(Place("Drop", 1, OccurrenceRef::Part, {10, 0, 0}));
+  Configuration shortCfg;
+  shortCfg.id = 7;
+  shortCfg.name = "short";
+  shortCfg.suppressedFeatures = {drop}; // assembly configs suppress occurrences
+  sub->GetConfigurations().push_back(shortCfg);
+  w.assemblies[2] = std::move(sub);
+  (void)keep;
+
+  AssemblyDocument top;
+  Occurrence full = Place("Full", 2, OccurrenceRef::Assembly, {0, 0, 0});
+  Occurrence lean = Place("Lean", 2, OccurrenceRef::Assembly, {100, 0, 0});
+  lean.configurationId = 7;
+  top.AddOccurrence(full);
+  top.AddOccurrence(lean);
+
+  const auto flat = assembly::Flatten(top, w.PartById(), w.AsmById());
+  REQUIRE(flat);
+  int visibleFull = 0, visibleLean = 0;
+  for (const assembly::FlatInstance& inst : *flat) {
+    if (!inst.visible)
+      continue;
+    (inst.path.starts_with("Full/") ? visibleFull : visibleLean)++;
+  }
+  CHECK(visibleFull == 2); // no configuration named: everything
+  CHECK(visibleLean == 1); // "short" drops one, in THIS placement only
+
+  // A configuration that no longer exists falls back to the document's
+  // active one rather than breaking the model.
+  AssemblyDocument top2;
+  Occurrence stale = Place("Stale", 2, OccurrenceRef::Assembly, {0, 0, 0});
+  stale.configurationId = 999;
+  top2.AddOccurrence(stale);
+  const auto flat2 = assembly::Flatten(top2, w.PartById(), w.AsmById());
+  REQUIRE(flat2);
+  int visible2 = 0;
+  for (const assembly::FlatInstance& inst : *flat2)
+    if (inst.visible)
+      visible2++;
+  CHECK(visible2 == 2);
 }

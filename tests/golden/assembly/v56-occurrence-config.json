@@ -1,0 +1,41 @@
+{
+  "format": "designer-document",
+  "version": 56,
+  "kind": "assembly",
+  "occurrences": [
+    {
+      "type": "Occurrence",
+      "id": 1,
+      "name": "Gangway long",
+      "part_id": 8,
+      "ref_kind": "assembly",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": true,
+      "fixed": true
+    },
+    {
+      "type": "Occurrence",
+      "id": 2,
+      "name": "Gangway short",
+      "part_id": 8,
+      "ref_kind": "assembly",
+      "configuration_id": 42,
+      "part_version": null,
+      "transform": {
+        "position": [0.0, 0.0, 1500.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": true,
+      "fixed": false
+    }
+  ],
+  "mates": [],
+  "exploded_views": [],
+  "configurations": [],
+  "active_configuration": 0
+}
