@@ -69,7 +69,7 @@ Two suites, and both matter:
 nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"
 
 # GUI: the real app on a virtual display, driving its own widgets.
-./tools/gui-tests-xvfb.sh            # 148 tests, 4 shards, ~80 s
+./tools/gui-tests-xvfb.sh            # 150 tests, 4 shards, ~80 s
 ./tools/gui-tests-xvfb.sh --fast     # ...minus the 5 slowest, ~70 s
 ./tools/gui-tests-xvfb.sh -f section # ...one case, ~11 s
 ```
@@ -98,7 +98,7 @@ The suite is not slow; one test is. Those gates check real numerics and stay
 in `ci-local` and CI — they just do not belong in the check you run after
 every edit. Run the full suite before you commit.
 
-The GUI suite (`tools/gui-tests-xvfb.sh`) needs a real GPU and runs **148
+The GUI suite (`tools/gui-tests-xvfb.sh`) needs a real GPU and runs **150
 tests in ~80 s**, as four parallel shards; one process takes 335 s. It is
 CPU-bound (real OCC geometry, real frames) with no per-test overhead to trim
 — the fastest case is 0.09 s — so running several at once is the only lever.

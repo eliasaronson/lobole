@@ -143,7 +143,7 @@ Original design:
 
 **Core items SHIPPED 2026-07-18**: feature-tree per-kind icons + styled
 bodies rows; axis triad + View > Standard Views; empty-state hint;
-View > Font Size (session, via the DPI rebuild path); multi-face highlight
+View > Font Size (session, via the DPI rebuild path — MOVED to Edit > Preferences and made persistent on 2026-08-20, [settings.md](settings.md)); multi-face highlight
 projection (per-instance; same-body faces still last-wins). Remaining:
 spacing/padding rhythm audit, error/suppressed tree BADGES beyond color,
 shaded region fill, whole-instance occurrence hover, tooltips audit. (Empty

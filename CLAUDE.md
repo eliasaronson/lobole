@@ -44,10 +44,10 @@ docs/ui/u10-defaults-and-refusals.md.
 ## Tests
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  — 81 s for 622 tests, of which the SIMP gate alone is 89 s of CPU and the
+  — ~75 s for 638 tests, of which the SIMP gate alone is ~90 s of CPU and the
   next four topology/FEM gates 12-14 s each. **Inner loop: `tools/test-fast.sh`
-  (8 s, 603 tests)**; full suite before committing.
-- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 148 tests in **80 s**
+  (8 s, 619 tests)**; full suite before committing.
+- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 150 tests in **80 s**
   across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
   (69 s), `-j 8` more shards, `--fast -j 8` = 48 s, `-f <pattern>` one case
   (11 s), `--serial` for debugging. Still **flock-serialized** machine-wide,
@@ -70,7 +70,10 @@ docs/ui/u10-defaults-and-refusals.md.
 The app must own a real renderer to screenshot; true `--headless` has none.
 - **The human's instance is `dev-watch.sh` on port 8799** — a windowed build in
   their display session that relaunches on rebuild. It is the build under review.
-  Read from it (get_state) freely; do NOT mutate their open document.
+  Read from it (get_state) freely; do NOT mutate their open document — or their
+  preferences (`set_settings` writes `~/.config/designer/settings.json`).
+  `headless-preview.sh` gives its instance a scratch config dir for exactly
+  that reason, seeded from the real one so it still looks like their app.
 - **Agents/CI get their OWN instance**: `./tools/headless-preview.sh <scratch-port>`
   runs the real renderer offscreen under Xvfb (full materials/shadows/SSAO). Use
   a scratch port (NOT 8799). One-shot: `headless-preview.sh --render PROJECT OUT.png <port>`.

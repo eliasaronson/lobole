@@ -13,11 +13,12 @@ project-level choices like `commit_geometry` correctly live in the project.
 The gap is the middle: preferences that belong to the user, survive a restart,
 and apply to every project.
 
-GPU selection is the forcing function. Rendering picks its device with
-`ImGui_ImplVulkanH_SelectPhysicalDevice` (`main.cpp:249`, prefers discrete) and
-FEM compute ranks its own (`femgpu/ComputeContext.cpp:101`, needs
-`VK_EXT_shader_atomic_float`). Neither is controllable, and on a dual-GPU
-machine the right answer is the user's, not ours.
+GPU selection was the forcing function. Rendering *used* to call
+`ImGui_ImplVulkanH_SelectPhysicalDevice` (prefers discrete) while FEM compute
+ranked its own (needs `VK_EXT_shader_atomic_float`); neither was controllable,
+and on a dual-GPU machine the right answer is the user's, not ours. Both now
+go through one shared rule (`common/DevicePreference.h`) that honours the
+preference — see the two findings at the end of "The window".
 
 ## The rule: three buckets
 
@@ -100,10 +101,11 @@ settings do not need reflection machinery, but they do need a single list.
 
 ## Applying: three tiers, and the window says which
 
-- **Live** — the next frame reads the field: shadows, SSAO, theme, navigation
-  style. No Apply button anywhere in this window.
-- **Next time** — autosave interval (rearm the timer), default material for
-  new parts.
+- **Live** — the next frame reads the field: shadows, SSAO, shadow map, font
+  size. No Apply button anywhere in this window. (Font size is live but not
+  free: the atlas is rebuilt between frames, so the change ASKS for a rebuild
+  rather than just moving the number — see the findings below.)
+- **Next time** — autosave interval (rearms the timer on the next tick).
 - **Restart** — the *render* GPU. The swapchain and every renderer are built
   at startup, so the row states it and shows the device currently in use
   beside the one chosen, making a pending change visible rather than a lie.
@@ -115,9 +117,11 @@ settings do not need reflection machinery, but they do need a single list.
 
 Edit ▸ Preferences (Ctrl+,) opens one floating window, `###SettingsWindow` —
 not a dock tab; it is not part of the workspace. Collapsing-header sections in
-one scroll: **General**, **Appearance**, **Viewport & Navigation**,
-**Performance** (GPU, shadows, SSAO, shadow map), **Simulation**, **Advanced**
-(remote port, logging).
+one scroll, generated from the table's `section` column, so a section exists
+exactly when a setting is in it. **Shipped: Appearance** (font size),
+**Performance** (GPU, shadows, SSAO, shadow map) and **General** (autosave).
+The design's Viewport & Navigation, Simulation and Advanced sections have no
+tenants yet and are therefore absent rather than empty.
 
 Three properties it must have, all learned the hard way this month:
 
@@ -129,8 +133,10 @@ Three properties it must have, all learned the hard way this month:
 - **Each row explains itself** in one muted line: what it costs, what it
   affects. A settings window that does not explain its settings moves the
   confusion rather than removing it.
-- **"Reset section to defaults"** per section, and a global reset in Advanced.
-  A user who has broken their config should not have to find the JSON.
+- **A reset that does not need the JSON.** Shipped as one "Reset all to
+  defaults" at the foot of the window, beside the config file's path; the
+  design's per-section resets wait for a window big enough to need them.
+  Resetting keeps unknown keys — they belong to another build, not to us.
 - *(learned building it)* **The View menu's copies are gone.** Render quality
   and font size lived there as session flags that reset every launch; they are
   preferences now, and one control per setting is the only way the two ends

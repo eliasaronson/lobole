@@ -91,7 +91,7 @@ MSAA fragment invocations. Silhouette-edge AO can alias slightly; the
 bilateral blur plus the fact that AO modulates only ambient makes this
 invisible in practice, and it avoids per-sample SSAO entirely.
 
-**Controls:** View menu toggles for SSAO and Shadows (default on) + a quality
+**Controls:** since 2026-08-20 these are USER PREFERENCES in Edit > Preferences > Performance ([../ui/settings.md](../ui/settings.md)), not View-menu session toggles that reset every launch. Originally: View menu toggles for SSAO and Shadows (default on) + a quality
 setting (Off / Half-res / Full-res SSAO; shadow map 1024/2048). Session/ini
 state only — **no file-format change, no golden bumps**.
 

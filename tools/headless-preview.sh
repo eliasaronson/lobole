@@ -55,6 +55,22 @@ wait_ready() {
   return 1
 }
 
+# A scratch instance must not write the HUMAN's preferences. Settings live in
+# $XDG_CONFIG_HOME/designer (docs/ui/settings.md), and an agent calling
+# set_settings — or just toggling shadows to compare a render — would
+# otherwise change the config of the windowed instance on 8799. Point it at a
+# per-port scratch dir, seeded from the real one so the preview still LOOKS
+# like the user's app. Same reasoning as the per-shard isolation in
+# gui-tests-xvfb.sh. Override by exporting XDG_CONFIG_HOME yourself.
+if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
+  DESIGNER_PREVIEW_CONFIG="${TMPDIR:-/tmp}/designer-preview-config-$$"
+  mkdir -p "$DESIGNER_PREVIEW_CONFIG/designer"
+  REAL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/designer/settings.json"
+  [ -f "$REAL_CONFIG" ] &&
+    cp "$REAL_CONFIG" "$DESIGNER_PREVIEW_CONFIG/designer/settings.json"
+fi
+export XDG_CONFIG_HOME="$DESIGNER_PREVIEW_CONFIG"
+
 if [ "${1:-}" = "--render" ]; then
   PROJECT="$2"; OUT="$3"; PORT="${4:-8798}"
   # One-shot: serve, drive, tear down. The Xvfb + app die with the subshell.

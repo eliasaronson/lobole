@@ -9,10 +9,10 @@ app. `src/ui/` calls exactly one GitVault function — `CommitAll`, from
 `MarkProjectSaved` — so the history exists, silently, and is reachable only
 over RPC (`history_log`, `history_restore`) or from a terminal.
 
-The visible consequence is `File > Checkpoints`, which predates git and still
-uses the F4 mechanism: full-document JSON copies under
+The visible consequence was `File > Checkpoints` (deleted by this work),
+which predated git and used the F4 mechanism: full-document JSON copies under
 `<project>.checkpoints/`. On a multi-part project that mechanism is now
-**wrong, not merely old** — it snapshots `*state.document`, the *active part*,
+**wrong, not merely old** — it snapshotted `*state.document`, the *active part*,
 so "create checkpoint" on the dock project saves whichever tab happens to be
 open and silently omits the assembly, the other 48 parts and the drawings.
 Restore then replaces that one part. The same bug sits in the
@@ -114,10 +114,12 @@ sideways. Both now come from `CalcTextSize` plus the style's own padding, and
 the status line puts its button on the next line when the row will not fit.
 This is the [defaults rule](../../CLAUDE.md) — a number carrying a unit is
 derived from what it acts on — applied to pixels rather than millimetres.
-Guarded by `history/rows_fit_at_a_large_font`, which drives View > Font Size
-> Extra Large and asserts no item passes the panel's inner right edge (it
-fails with the literals restored: Restore lands at 233 against an edge of
-218).
+Guarded by `history/rows_fit_at_a_large_font`, which raises the font scale to
+1.4 and asserts no item passes the panel's inner right edge (it fails with
+the literals restored: Restore lands at 233 against an edge of 218). It drove
+View > Font Size until that menu moved into Edit > Preferences
+([../ui/settings.md](../ui/settings.md)); it now sets the preference
+directly, since driving that window would be testing the window.
 
 
 **`AddPart`/`DeletePart` never marked the project dirty.** Which documents a
