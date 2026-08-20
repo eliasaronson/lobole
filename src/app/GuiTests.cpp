@@ -2048,6 +2048,59 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // the document is untouched
   };
 
+  // The same drag on an ASSEMBLY tab. It highlighted on hover and then did
+  // nothing: the section arrow is the only direct-manipulation handle an
+  // assembly has, and the block that routes clicks to it lived only in the
+  // part path — so the click fell through to the picker.
+  t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_on_an_assembly");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ui::AddAssembly(*s_App, "Rig");
+    ctx->Yield();
+    Occurrence occ;
+    occ.name = "Block";
+    occ.partId = s_App->parts[0].id;
+    s_App->assembly->AddOccurrence(occ);
+    ctx->Yield(2);
+    IM_CHECK(s_App->assembly != nullptr); // we really are on an assembly tab
+
+    ToolbarClick(ctx, "###tb_section");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
+    const float before = s_App->sections[0].offset;
+    s_App->selection.Clear();
+    ui::SelectOccurrence(*s_App, 0); // no gizmo to compete for the click
+    ctx->Yield();
+
+    glm::vec3 bmin, bmax;
+    IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
+    const glm::vec4 plane = ui::SectionPlaneOf(s_App->sections[0]);
+    const glm::vec3 n = glm::normalize(glm::vec3(plane));
+    const glm::vec3 c = (bmin + bmax) * 0.5f;
+    const glm::vec3 anchor = c - n * (glm::dot(c, n) - plane.w);
+    const float L = 0.9f * ui::GizmoScale(*s_App);
+    const glm::vec2 grab = ui::WorldToScreen(*s_App, anchor + n * (0.5f * L));
+    const glm::vec2 to = ui::WorldToScreen(*s_App, anchor + n * (2.0f * L));
+
+    // Hover first: the highlight and the grab must agree about what is there.
+    ctx->MouseMoveToPos(ImVec2(grab.x, grab.y));
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::OwnerOf(s_App->hoveredHandle), ui::HandleOwner::Section);
+
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(to.x, to.y));
+    ctx->Yield();
+    IM_CHECK(s_App->handleDrag.active);
+    IM_CHECK_EQ(s_App->handleDrag.sectionId, s_App->sections[0].id);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK(std::abs(s_App->sections[0].offset - before) > 1e-3f);
+    IM_CHECK(s_App->selection.Empty()); // the arrow took it, not the part
+  };
+
   // Inserting a SUB-ASSEMBLY through the UI. Until this landed the only way
   // to nest an assembly was the RPC — the insert popup filtered to
   // DocKind::Part and silently skipped everything else.

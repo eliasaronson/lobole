@@ -94,6 +94,21 @@ Simulation loads still draw through `ArrowGlyph` and are still not draggable.
 Making them draggable is now a matter of emitting handles and writing one
 grab payload, which is the point of the seam.
 
+## Found immediately after, by the hover it added
+
+The section arrow **highlighted on an assembly tab and then did nothing when
+dragged**. The handle was published and drawn there (it is the one handle an
+assembly has), so hover worked — but the block that routes clicks to handles
+lived only in the part path, and the assembly branch ends with
+`HandleSelectionInput(...); return;`. The click never reached it and fell
+through to the picker.
+
+That asymmetry existed before this change and was invisible: with no hover,
+"the arrow does nothing on assemblies" and "there is no arrow on assemblies"
+look identical. Routing is now one `RouteHandleInput` called from both tab
+kinds, and the new test drags the arrow on an assembly — verified to fail
+with the routing removed.
+
 ## Verification
 
 - The existing drag GUI tests are the safety net: `section` (the arrow takes

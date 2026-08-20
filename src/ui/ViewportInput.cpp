@@ -22,6 +22,33 @@ namespace {
 // running (docs/ui/viewport-handles.md). Before this, the handle hit test ran
 // ONLY on click, so nothing could know what the pointer was over until the
 // button went down — which is exactly the feedback that was missing.
+// Routes a click/drag to the direct-manipulation handles (the pending
+// feature's, and the active section's). Returns true when it consumed the
+// event.
+//
+// Called from BOTH the assembly branch and the part path: the section arrow
+// is the one handle that exists on an assembly tab, and this block used to
+// live only in the part path, so dragging it there fell through to the picker
+// — it highlighted on hover and then did nothing.
+bool RouteHandleInput(AppState& state, bool overViewport) {
+  if (!HasViewportHandle(state))
+    return false;
+  const ImGuiIO& io = ImGui::GetIO();
+  const bool clicked =
+      overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+  const bool down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+  const bool released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+  if (!state.handleDrag.active && !clicked)
+    return false;
+  if (!state.faceSelector || !state.camera)
+    return false;
+  Ray ray = state.faceSelector->ScreenToWorldRay(
+      io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
+      static_cast<int>(state.viewportSize.x),
+      static_cast<int>(state.viewportSize.y), *state.camera);
+  return HandlePreviewHandleInput(state, ray, clicked, down, released);
+}
+
 void UpdateHandleHover(AppState& state, bool overViewport) {
   const bool dragging = state.handleDrag.active || state.gizmoDrag.active;
   if (dragging || !overViewport || state.viewportHandles.empty() ||
@@ -320,6 +347,13 @@ void HandleViewportInput(AppState& state) {
       }
     }
 
+    // The section arrow, which is the only direct-manipulation handle an
+    // assembly tab has. After the gizmo (the assembly's own handle wins a
+    // tie) and before selection, or the click reaches the picker and selects
+    // whatever part sits behind the arrow.
+    if (RouteHandleInput(state, overViewport))
+      return;
+
     // Double-click enters in context: the first click of the pair already
     // selected the occurrence via the pipeline; consume the second so it
     // doesn't also cycle. Not while measuring — those clicks are picks.
@@ -345,21 +379,8 @@ void HandleViewportInput(AppState& state) {
   // pending feature: the section arrow belongs to no feature, and this gate
   // used to route every attempt to drag it into the picker, which selected
   // whatever part was behind the arrow.
-  if (HasViewportHandle(state)) {
-    const bool clicked =
-        overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-    const bool down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-    const bool released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
-    if (state.handleDrag.active || clicked) {
-      Ray ray = state.faceSelector->ScreenToWorldRay(
-          io.MousePos.x - state.viewportPos.x,
-          io.MousePos.y - state.viewportPos.y,
-          static_cast<int>(state.viewportSize.x),
-          static_cast<int>(state.viewportSize.y), *state.camera);
-      if (HandlePreviewHandleInput(state, ray, clicked, down, released))
-        return;
-    }
-  }
+  if (RouteHandleInput(state, overViewport))
+    return;
 
   // The unified pick pipeline (U1b/U1c): default selection — edges/faces/
   // bodies, hover preview, Ctrl multi-select, same-spot cycling — or, while
