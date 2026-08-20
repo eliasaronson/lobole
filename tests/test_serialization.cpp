@@ -461,3 +461,42 @@ TEST_CASE("Unresolved conflict markers name the file", "[io][merge]") {
   CHECK(err.find("conflict markers") != std::string::npos);
   fs::remove_all(dir);
 }
+
+// A project saved from the GUI must always be the directory form. The flat
+// single-file form still LOADS, but saving one created a project File > Open
+// Project could not return: that dialog picks folders, so a flat `foo.json`
+// was reachable only through Open Recent.
+TEST_CASE("A picked save target is always the directory form", "[io]") {
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge.dsgn") == "/tmp/hinge.dsgn");
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge") == "/tmp/hinge.dsgn");
+  // The flat form is replaced, not appended to.
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge.json") == "/tmp/hinge.dsgn");
+  // A dot inside the NAME is not an extension to overwrite — "hinge v2" must
+  // not come back as "hinge v.dsgn".
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge v2") == "/tmp/hinge v2.dsgn");
+  CHECK(DocumentIO::ProjectSaveTarget("/tmp/hinge v1.2") ==
+        "/tmp/hinge v1.2.dsgn");
+  // Nothing picked stays nothing.
+  CHECK(DocumentIO::ProjectSaveTarget("").empty());
+}
+
+// And what it produces is openable by the path the folder picker returns.
+TEST_CASE("The directory form round-trips through a folder pick", "[io]") {
+  namespace fs = std::filesystem;
+  const fs::path picked =
+      fs::temp_directory_path() /
+      ("designer-savetarget-" + std::to_string(::getpid()) + ".json");
+  fs::remove_all(fs::path(DocumentIO::ProjectSaveTarget(picked.string())));
+
+  const std::string target = DocumentIO::ProjectSaveTarget(picked.string());
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Base", glm::vec3(0), 10.0, 10.0, 10.0));
+  REQUIRE(DocumentIO::Save(doc, target));
+  // A DIRECTORY: what a folder picker can hand back, unlike a flat file.
+  CHECK(fs::is_directory(target));
+  auto loaded = DocumentIO::Load(target);
+  REQUIRE(loaded);
+  CHECK((*loaded)->FeatureCount() == 1);
+  fs::remove_all(target);
+}

@@ -1549,6 +1549,21 @@ Load(const std::string& path) {
   return std::unexpected(error);
 }
 
+std::string ProjectSaveTarget(const std::string& picked) {
+  if (picked.empty())
+    return picked;
+  const std::filesystem::path p(picked);
+  const std::string ext = p.extension().string();
+  if (ext == ".dsgn")
+    return picked;
+  // ".json" is REPLACED (it is the flat form we are steering away from);
+  // anything else is APPENDED to, so "hinge v2" keeps its dot and becomes
+  // "hinge v2.dsgn" rather than losing the ".2".
+  if (ext == ".json")
+    return std::filesystem::path(picked).replace_extension(".dsgn").string();
+  return picked + ".dsgn";
+}
+
 std::expected<void, std::string> SaveAssembly(const AssemblyDocument& asmDoc,
                                               const std::string& path) {
   std::string error;

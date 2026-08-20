@@ -25,6 +25,14 @@ namespace DocumentIO {
 [[nodiscard]] std::expected<std::unique_ptr<Document>, std::string>
 Load(const std::string& path);
 
+// Where a NEW project picked in a save dialog should actually be written:
+// always the `.dsgn` directory form (F3). A flat single-file project is
+// still LOADED (legacy files, the RPC, tests), but saving one from the GUI
+// created a project the folder-picking open dialog could never return —
+// pickers hand back folders, so a flat `foo.json` was only reachable through
+// Open Recent. Empty stays empty (nothing was picked).
+std::string ProjectSaveTarget(const std::string& picked);
+
 // Single-feature (de)serialization; also used for parameter-edit snapshots
 // (ModifyFeatureCommand). FeatureToJson throws on unserializable types;
 // FeatureFromJson throws on malformed/unknown input.

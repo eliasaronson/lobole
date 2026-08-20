@@ -317,14 +317,17 @@ void SaveProjectDialog(AppState& state) {
   if (!NativeDialogsSafe())
     return;
   nfdu8char_t* outPath = nullptr;
-  const nfdu8filteritem_t filters[] = {{"Designer project", "dsgn,json"}};
+  // `.dsgn` ONLY — a project saved from the GUI is always the directory form.
+  // The flat single-file form is still loaded (legacy files, the RPC, tests),
+  // but offering it here created projects that File > Open Project could
+  // never return: it is a FOLDER picker, so a flat `foo.json` was reachable
+  // only through Open Recent. ProjectSaveTarget enforces it for a name typed
+  // by hand, which the filter alone does not.
+  const nfdu8filteritem_t filters[] = {{"Designer project", "dsgn"}};
   if (NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "project.dsgn") ==
       NFD_OKAY) {
-    std::string path(outPath);
+    std::string path = DocumentIO::ProjectSaveTarget(outPath);
     NFD_FreePathU8(outPath);
-    if (std::filesystem::path(path).extension().empty()) {
-      path += ".dsgn"; // directory format is the default for new saves (F3)
-    }
     // SaveProject, not DocumentIO::Save: a multi-document project writes the
     // container form; a lone part still lands in the flat form.
     std::string error;
