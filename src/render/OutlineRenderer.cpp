@@ -1,6 +1,8 @@
 #include "render/OutlineRenderer.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "render/FramesInFlight.h"
 #include "render/MeshRenderer.h"
 #include <algorithm>
 #include <array>
@@ -684,19 +686,11 @@ uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices,
   mesh->edgeIndices = mesh->adjacency.staticIndices;
   mesh->staticIndexCount = static_cast<uint32_t>(mesh->edgeIndices.size());
 
-  const VkDeviceSize edgeCapacityBytes =
-      sizeof(uint32_t) * mesh->adjacency.MaxIndexCount();
-  if (edgeCapacityBytes > 0) {
-    for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
-      mesh->edgeIndexBuffers[f] =
-          CreateBuffer(edgeCapacityBytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                       mesh->edgeIndexBufferMemory[f]);
-      vkMapMemory(m_device, mesh->edgeIndexBufferMemory[f], 0,
-                  edgeCapacityBytes, 0, &mesh->edgeIndexMapped[f]);
-    }
-  }
+  // Slot buffers are created ON DEMAND (EnsureEdgeBuffer, in the upload
+  // path), not one per slot here: there are kMaxFramesInFlight slots for
+  // capacity, but a real swapchain only ever touches 2-3 of them, and this
+  // runs per MESH — eagerly filling all eight would multiply the index memory
+  // of a large assembly for slots nothing will ever bind.
   m_silhouettesDirty = true;
 
   uint32_t meshId = m_nextMeshId++;
@@ -745,7 +739,8 @@ void OutlineRenderer::Render(VkCommandBuffer commandBuffer,
   // passes the swapchain image index (0..ImageCount-1), which exceeds that on
   // a >2-image swapchain. Wrap to stay in bounds (matches SSAORenderer); the
   // raw index overruns the uniform-buffer/descriptor-set arrays otherwise.
-  const uint32_t frame = currentFrame % MAX_FRAMES_IN_FLIGHT;
+  // One slot per swapchain image, indexed directly (FramesInFlight.h).
+  const uint32_t frame = render::FrameSlot(currentFrame, "OutlineRenderer");
 
   // Update uniform buffers for current frame
   UpdateUniformBuffers(frame);
@@ -938,6 +933,24 @@ void OutlineRenderer::SetViewport(int32_t x, int32_t y, uint32_t width,
   m_viewportHeight = height;
 }
 
+void OutlineRenderer::EnsureEdgeBuffer(OutlineMesh& mesh, uint32_t slot) {
+  if (mesh.edgeIndexBuffers[slot] != VK_NULL_HANDLE)
+    return;
+  const VkDeviceSize bytes = sizeof(uint32_t) * mesh.adjacency.MaxIndexCount();
+  if (bytes == 0)
+    return;
+  mesh.edgeIndexBuffers[slot] =
+      CreateBuffer(bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                   mesh.edgeIndexBufferMemory[slot]);
+  vkMapMemory(m_device, mesh.edgeIndexBufferMemory[slot], 0, bytes, 0,
+              &mesh.edgeIndexMapped[slot]);
+  // Nothing uploaded into it yet; the caller's version check fills it.
+  mesh.uploadedVersion[slot] = 0;
+  mesh.uploadedIndexCount[slot] = 0;
+}
+
 void OutlineRenderer::DropToStaticEdges() {
   for (auto& mesh : m_meshes) {
     if (mesh && mesh->edgeIndices.size() != mesh->staticIndexCount) {
@@ -997,6 +1010,8 @@ void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
   // frame loop has already fence-waited this slot, so writing the mapped
   // buffer here cannot race an in-flight read.
   for (auto& mesh : m_meshes) {
+    if (mesh)
+      EnsureEdgeBuffer(*mesh, currentFrame);
     if (mesh && mesh->edgeIndexBuffers[currentFrame] != VK_NULL_HANDLE &&
         mesh->uploadedVersion[currentFrame] != mesh->edgeVersion) {
       memcpy(mesh->edgeIndexMapped[currentFrame], mesh->edgeIndices.data(),

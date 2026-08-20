@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/FramesInFlight.h"
+
 #include "render/ClipPlanes.h"
 
 #include "render/MeshRenderer.h"
@@ -145,5 +147,7 @@ private:
   // Scratch reused across frames (avoids per-frame allocations).
   std::vector<ShadowCaster> m_casters;
 
-  static const int MAX_FRAMES_IN_FLIGHT = 2;
+  // One slot per swapchain image, not per "frame in flight" — the caller
+  // passes the image index. See render/FramesInFlight.h.
+  static const int MAX_FRAMES_IN_FLIGHT = render::kMaxFramesInFlight;
 };

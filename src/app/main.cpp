@@ -20,6 +20,7 @@
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
+#include "render/FramesInFlight.h"
 #include "render/IBL.h"
 #include "render/IBLTextures.h"
 #include "render/MeshRenderer.h"
@@ -635,13 +636,26 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window* wd) {
     sub.pDepthStencilAttachment = &depthRef;
     if (msaa)
       sub.pResolveAttachments = &resolveRef;
+    // Every framebuffer shares ONE depth image (and one MSAA colour image),
+    // which is legal — frames run in order on one queue — only if this
+    // dependency says so. It used to leave srcAccessMask at 0 and name only
+    // EARLY_FRAGMENT_TESTS as the source stage, so nothing waited for the
+    // PREVIOUS frame's depth write, which completes at LATE_FRAGMENT_TESTS.
+    // Sync validation flags it as WRITE_AFTER_WRITE the moment the swapchain
+    // has more than two images: a 2-image swapchain (this NVIDIA) never
+    // overlapped enough to show it, a 3-image one (Mesa/Intel) does.
+    // docs/rendering/frames-in-flight.md
     VkSubpassDependency dep{};
     dep.srcSubpass = VK_SUBPASS_EXTERNAL;
     dep.dstSubpass = 0;
     dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                       VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+                       VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                       VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
                         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
@@ -740,6 +754,11 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
                                          wd, g_QueueFamily, g_Allocator, width,
                                          height, g_MinImageCount);
   SetupDepthBuffer(wd);
+  // Logged because a driver-dependent image count is exactly what made the
+  // "camera shakes on Intel" report impossible to guess at: this NVIDIA
+  // reports 2, Mesa reports 3+. See docs/rendering/frames-in-flight.md.
+  LOG_INFO("Swapchain: {} images, {} per-frame slots", wd->ImageCount,
+           render::kMaxFramesInFlight);
 }
 
 static void CleanupVulkan() {

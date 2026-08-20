@@ -1,6 +1,8 @@
 #include "render/SSAORenderer.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "render/FramesInFlight.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -185,7 +187,8 @@ void SSAORenderer::RecordSSAOPasses(VkCommandBuffer cb, uint32_t currentFrame,
       haveGeometry ? std::max(glm::length(bbMax - bbMin), 1e-3f) : 1.0f;
   const float radius = std::min(kRadiusFraction * diag, kRadiusMax);
 
-  const uint32_t frame = currentFrame % MAX_FRAMES_IN_FLIGHT;
+  // One slot per swapchain image, indexed directly (FramesInFlight.h).
+  const uint32_t frame = render::FrameSlot(currentFrame, "SSAORenderer");
   const glm::mat4& view = scene.ViewMatrix();
   const glm::mat4& proj = scene.ProjectionMatrix();
 

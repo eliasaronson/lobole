@@ -1,6 +1,8 @@
 #include "render/MeshRenderer.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "render/FramesInFlight.h"
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -339,12 +341,10 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
   scissor.extent = {m_viewportWidth, m_viewportHeight};
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-  // Per-frame resources are sized to MAX_FRAMES_IN_FLIGHT, but the caller
-  // passes the swapchain image index (0..ImageCount-1), which exceeds that on
-  // a >2-image swapchain — wrap it to stay in bounds (matches SSAORenderer's
-  // convention). Without this the UBO memcpy writes through an out-of-bounds
-  // (garbage) pointer: heap corruption, caught by ASan on Intel Arc.
-  const uint32_t frame = currentFrame % MAX_FRAMES_IN_FLIGHT;
+  // One slot per swapchain image, indexed directly — see
+  // render/FramesInFlight.h for why the old "% 2" made the viewport
+  // shake on a 3-image swapchain.
+  const uint32_t frame = render::FrameSlot(currentFrame, "MeshRenderer");
 
   // Shared UBO (camera + lights + clip plane); one write serves every draw
   // this frame — everything per-instance rides in push constants

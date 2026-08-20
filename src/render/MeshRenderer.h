@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/FramesInFlight.h"
+
 #include "render/ClipPlanes.h"
 
 #include <algorithm>
@@ -365,7 +367,9 @@ private:
   uint32_t m_viewportHeight = 600;
 
   // Constants
-  static const int MAX_FRAMES_IN_FLIGHT = 2;
+  // One slot per swapchain image, not per "frame in flight" — the caller
+  // passes the image index. See render/FramesInFlight.h.
+  static const int MAX_FRAMES_IN_FLIGHT = render::kMaxFramesInFlight;
 
   // Helper functions
   bool CreateDescriptorSetLayout();

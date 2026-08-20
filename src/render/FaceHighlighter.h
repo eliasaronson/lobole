@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/FramesInFlight.h"
+
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>
@@ -109,5 +111,7 @@ private:
 
   // State
   bool m_isInitialized = false;
-  static const int MAX_FRAMES_IN_FLIGHT = 2;
+  // One slot per swapchain image, not per "frame in flight" — the caller
+  // passes the image index. See render/FramesInFlight.h.
+  static const int MAX_FRAMES_IN_FLIGHT = render::kMaxFramesInFlight;
 };

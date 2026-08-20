@@ -1,5 +1,7 @@
 #pragma once
 
+#include "render/FramesInFlight.h"
+
 #include "render/ClipPlanes.h"
 
 #include "render/OutlineEdges.h"
@@ -78,7 +80,9 @@ public:
   bool IsInitialized() const { return m_isInitialized; }
 
 private:
-  static const int MAX_FRAMES_IN_FLIGHT = 2;
+  // One slot per swapchain image, not per "frame in flight" — the caller
+  // passes the image index. See render/FramesInFlight.h.
+  static const int MAX_FRAMES_IN_FLIGHT = render::kMaxFramesInFlight;
 
   struct OutlineMesh {
     VkBuffer vertexBuffer = VK_NULL_HANDLE;
@@ -136,6 +140,11 @@ private:
   bool CreateUniformBuffers();
   bool CreateDescriptorPool();
   bool CreateDescriptorSets();
+
+  // Creates and maps this slot's edge index buffer the first time the slot is
+  // used. Slots exist for capacity (kMaxFramesInFlight); a real swapchain
+  // touches 2-3, and this is per MESH — so they are filled on demand.
+  void EnsureEdgeBuffer(OutlineMesh& mesh, uint32_t slot);
 
   // Edge classification state (see OutlineEdges.h for the algorithm)
   void RefreshSilhouettes();
