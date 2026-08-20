@@ -6,7 +6,6 @@
 #include "ui/FileDialogs.h"
 
 #include "imgui.h"
-#include "imgui_internal.h" // dock node tab selection; see DrawHistoryPanel
 
 #include <ctime>
 #include <string>
@@ -145,31 +144,8 @@ bool RestoreVersion(AppState& state, const std::string& commit,
 }
 
 void DrawHistoryPanel(AppState& state) {
-  // File > History asks for this tab. Honouring it takes REPEATING the
-  // request for a short while, not issuing it once: the menu's own focus is
-  // undone when the popup closes, and ImGui's Begin returns true a frame
-  // before an about-to-be-selected tab is actually up — so "we are visible,
-  // stop asking" drops the request one frame early and the tab never comes
-  // forward (measured: 2 frames of asking does nothing, ~1 s works). The
-  // frame budget is the safety valve, so a request that can never be
-  // satisfied does not fight the user for the tab forever.
-  if (state.focusHistoryFrames > 0) {
-    state.focusHistoryFrames--;
-    ImGui::SetNextWindowFocus();
-    // ...and select the TAB explicitly. ImGui::FocusWindow deliberately does
-    // not ("For #2304 we avoid applying focus immediately before the tabbar
-    // is visible", imgui.cpp), so focus alone can leave the panel behind
-    // whichever sibling the saved layout had selected. This is the same
-    // request a click on the tab queues.
-    ImGuiWindow* w = ImGui::FindWindowByName("History");
-    if (w != nullptr && w->DockNode != nullptr &&
-        w->DockNode->TabBar != nullptr) {
-      if (ImGuiTabItem* tab =
-              ImGui::TabBarFindTabByID(w->DockNode->TabBar, w->TabId)) {
-        ImGui::TabBarQueueFocus(w->DockNode->TabBar, tab);
-      }
-    }
-  }
+  // The panel is reached by clicking its tab, like Variables and
+  // Configurations — there is no menu entry to focus it from.
   // A secondary tab must not steal the shared dock node when it first
   // appears (see the Variables panel).
   const bool visible =

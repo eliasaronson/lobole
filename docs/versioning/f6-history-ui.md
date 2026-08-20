@@ -90,8 +90,11 @@ indicator, and the guard on restore.
 
 ### 3. Checkpoints become named versions, in both paths
 
-- The `File > Checkpoints` submenu is replaced by a `File > History` item that
-  focuses the panel. The part-only JSON snapshot path is retired.
+- The `File > Checkpoints` submenu is deleted and the part-only JSON snapshot
+  path retired. Nothing replaces it in the menu: the panel is a permanent tab
+  beside Model, exactly like Variables and Configurations, and a File item
+  that only selects an already-visible tab earns nothing. (One did ship
+  briefly — see below for what it cost.)
 - `checkpoint_create` saves the **project** (`ui::SaveProject`) rather than
   `DocumentIO::Save(*doc, …)`, then tags. `checkpoint_list` returns tags.
   `checkpoint_restore` restores the tagged commit. The RPC names stay — they
@@ -124,20 +127,24 @@ project reading "saved", and closing lost it with no prompt. It surfaced here
 because the panel's save indicator and its restore guard both ask
 `ProjectDirty`; a version feature is only as honest as that answer.
 
-**Bringing a docked tab forward takes a repeated request.** `File > History`
-has to select the panel's tab, and neither `SetWindowFocus` nor one
-`TabBarQueueFocus` does it: ImGui's `FocusWindow` deliberately skips dock-tab
-selection (`// For #2304 we avoid applying focus immediately before the
-tabbar is visible`), and `Begin` returns **true one frame before** an
-about-to-be-selected tab is actually up — so the obvious "stop asking once we
-are visible" drops the request a frame early and the tab never appears.
-Measured directly: 2 frames of asking does nothing, ~1 s works. The panel
-therefore re-issues the request for a bounded 60 frames.
+**Focusing a docked tab from code is a fight, and it bought nothing.** The
+first version shipped a `File > History` item to select the panel's tab.
+Neither `SetWindowFocus` nor one `TabBarQueueFocus` does that: ImGui's
+`FocusWindow` deliberately skips dock-tab selection (`// For #2304 we avoid
+applying focus immediately before the tabbar is visible`), and `Begin`
+returns **true one frame before** an about-to-be-selected tab is actually up,
+so the obvious "stop asking once we are visible" drops the request a frame
+early and the tab never appears. Measured: 2 frames of asking does nothing,
+~1 s works. It took a 60-frame repeating request to work at all — for a menu
+item that only selected a tab already sitting in the tab bar. It was
+removed; the machinery went with it, and the tests now click the tab, which
+is what a user does. **A tab item's id IS the window's `TabId`**, so a test
+addresses it directly.
 
-Worth knowing because the first version passed a GUI test while doing nothing
-in the running app. The test only became honest once it asserted the *tab
-selection* (`DockNode->SelectedTabId == TabId`) before and after the click,
-rather than "the window exists".
+Worth recording because the menu item passed a GUI test while doing nothing
+in the running app for four builds. The test only became honest once it
+asserted the *tab selection* (`DockNode->SelectedTabId == TabId`) before and
+after the click, rather than "the window exists".
 
 ## Deferred, with reasons
 

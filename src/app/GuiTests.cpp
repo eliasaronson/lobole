@@ -5571,7 +5571,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
 
-    // The menu points at the panel (the F4 "Checkpoints" submenu is gone).
     // Before: Model owns the shared node. Without this the check below is a
     // false positive — the default layout docks History last, and the last
     // window docked is the one the node selects.
@@ -5579,14 +5578,14 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(model != nullptr && model->DockNode != nullptr);
     IM_CHECK_EQ(model->DockNode->SelectedTabId, model->TabId);
 
-    ctx->MenuClick("File/###file_history");
-    ctx->Yield(2);
+    // Reach the panel the way a user does: click its dock tab. (A tab item's
+    // id IS the window's TabId, so it addresses directly — ImGui::FocusWindow
+    // deliberately does not select dock tabs, so neither a menu item nor the
+    // test engine's WindowFocus can stand in for the click.)
     ImGuiWindow* panel = ImGui::FindWindowByName("History");
-    IM_CHECK(panel != nullptr);
-    // Not just "the window exists": it is the SELECTED dock tab. Focusing it
-    // from inside the menu silently did nothing — the popup handed focus
-    // back on close, and the user got no panel.
-    IM_CHECK(panel->DockNode != nullptr);
+    IM_CHECK(panel != nullptr && panel->DockNode != nullptr);
+    ctx->ItemClick(panel->TabId);
+    ctx->Yield(2);
     IM_CHECK_EQ(panel->DockNode->SelectedTabId, panel->TabId);
 
     std::string err;
@@ -5676,23 +5675,20 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     ctx->MenuClick("View/Font Size/Extra Large");
     ctx->Yield(4); // the atlas rebuild happens between frames
-    ctx->MenuClick("File/###file_history");
+
+    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    IM_CHECK(panel != nullptr && panel->DockNode != nullptr);
+    ctx->ItemClick(panel->TabId); // the tab, as a user would
 
     // Wait for the state the assertions need rather than guessing a frame
-    // count: the tab takes a bounded number of frames to come forward (see
-    // HistoryPanel), and the row list is only read once the panel is up.
-    // Yielding a fixed 4 passed alone and failed in the full suite, where
-    // the preceding tests leave a different tab selected.
-    ImGuiWindow* panel = nullptr;
+    // count — the row list is only read once the panel is actually up, and a
+    // fixed Yield(4) passed alone while failing in the full suite.
     for (int i = 0; i < 90; i++) {
-      panel = ImGui::FindWindowByName("History");
-      if (panel != nullptr && panel->DockNode != nullptr &&
-          panel->DockNode->SelectedTabId == panel->TabId &&
+      if (panel->DockNode->SelectedTabId == panel->TabId &&
           !s_App->historyLog.empty())
         break;
       ctx->Yield();
     }
-    IM_CHECK(panel != nullptr);
     IM_CHECK(!s_App->historyLog.empty());
     const float rightEdge = panel->InnerRect.Max.x;
     // 1 px of slack: rounding, not a missing button.

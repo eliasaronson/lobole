@@ -957,11 +957,6 @@ struct AppState {
   std::string historyPath;
   double historyStamp = -1.0; // ImGui time of the last refresh; <0 = never
   bool historyUncommitted = false;
-  // File > History asks for the panel's tab. Deferred to the panel's own
-  // Begin, and held for a few frames: a SetWindowFocus issued from inside
-  // the menu is undone when the popup closes and hands focus back, and the
-  // hand-back can land a frame AFTER the request.
-  int focusHistoryFrames = 0;
 };
 
 } // namespace ui

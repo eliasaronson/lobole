@@ -109,13 +109,12 @@ void DrawFileMenu(AppState& state) {
     SaveProjectDialog(state);
   }
 #endif
-  // Version history (F6) replaced the F4 "Checkpoints" submenu, which
-  // snapshotted only the ACTIVE PART — on a multi-part project it silently
-  // left out the assembly, the other parts and the drawings. The panel is
-  // the one home for versions now, and it covers the whole project.
-  if (ImGui::MenuItem("History...###file_history")) {
-    state.focusHistoryFrames = 60; // the panel focuses itself; see AppState
-  }
+  // No version-history entry here. F6 removed the F4 "Checkpoints" submenu
+  // (it snapshotted only the ACTIVE PART, silently leaving out the assembly,
+  // the other parts and the drawings) and the History panel replaced it —
+  // but the panel is a permanent tab beside Model, exactly like Variables
+  // and Configurations, neither of which has a menu entry either. A File
+  // item that only selects an already-visible tab earns nothing.
   ImGui::Separator();
   // One import for STEP/STL/BREP: an assembly-structured STEP becomes part
   // tabs + an assembly tab in the CURRENT project (imported and hand-modeled
