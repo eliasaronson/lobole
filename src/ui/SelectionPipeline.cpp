@@ -36,6 +36,7 @@ constexpr uint32_t kDefaultKinds = KindBit(SelectionItem::Kind::Edge) |
 struct AssemblyElementHit {
   uint64_t occurrenceId = 0;
   ElementRef ref;
+  std::vector<uint64_t> innerPath; // empty unless the hit is inside a unit
 };
 std::optional<AssemblyElementHit>
 AssemblyElementAt(AppState& state, uint32_t meshId, uint32_t index, bool edge) {
@@ -49,7 +50,12 @@ AssemblyElementAt(AppState& state, uint32_t meshId, uint32_t index, bool edge) {
     const Occurrence* occ = state.assembly->FindById(m.occurrenceId);
     if (!occ)
       return std::nullopt;
-    Document* part = PartDocById(state, occ->partId);
+    // A5: the face belongs to the LEAF part, which for a sub-assembly
+    // occurrence is not occ->partId — that resolves to an assembly, has no
+    // bodies, and used to make this return nullopt, so clicking anything
+    // inside a placed unit produced no pick at all.
+    Document* part =
+        PartDocById(state, m.leafPartId ? m.leafPartId : occ->partId);
     if (!part || m.bodyIndex >= part->GetBodies().size())
       return std::nullopt;
     const Body& body = part->GetBodies()[m.bodyIndex];
@@ -58,8 +64,8 @@ AssemblyElementAt(AppState& state, uint32_t meshId, uint32_t index, bool edge) {
              : body.elementMap.NameOf(static_cast<int>(index));
     if (!name)
       return std::nullopt;
-    return AssemblyElementHit{m.occurrenceId,
-                              ElementRef{body.createdBy, *name}};
+    return AssemblyElementHit{m.occurrenceId, ElementRef{body.createdBy, *name},
+                              m.innerPath};
   }
   return std::nullopt;
 }
@@ -109,6 +115,7 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
       c.item.id = pick.occurrenceId;
       c.item.element = pick.face;
       c.item.snapElement = pick.snapEdge;
+      c.item.innerPath = pick.innerPath;
       c.snapMidpoint =
           pick.snapType == AssemblyFacePick::SnapType::EdgeMidpoint;
       out.push_back(c);
@@ -401,6 +408,10 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       state.mateTool.hover.occurrenceId = top.item.id;
       state.mateTool.hover.anchor.face = top.item.element;
       state.mateTool.hover.anchor.snapEdge = top.item.snapElement;
+      // A face inside a placed unit: the connector records the way down to
+      // it, so the mate anchors on that face while still positioning the
+      // unit (v57).
+      state.mateTool.hover.innerPath = top.item.innerPath;
       state.mateTool.hoverSnapIsMidpoint = top.snapMidpoint;
     } else if (top.item.kind == SelectionItem::Kind::Face ||
                top.item.kind == SelectionItem::Kind::Occurrence) {

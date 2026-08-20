@@ -82,7 +82,11 @@ struct FlatInstance {
   glm::mat4 world{1.0f};          // composed down the tree
   std::string path;               // "Gangway/Board 03" — display, not a key
   uint64_t rootOccurrenceId = 0;  // the TOP-LEVEL occurrence this belongs to
-  bool visible = true;            // every level's visibility, ANDed
+  // The occurrence ids BELOW the root, down to this leaf — the key form of
+  // `path`, and exactly what a mate connector's innerPath needs. Empty when
+  // the root places this part directly.
+  std::vector<uint64_t> innerIds;
+  bool visible = true; // every level's visibility, ANDed
 };
 
 // The leaf parts of `top`, in document order, depth first.

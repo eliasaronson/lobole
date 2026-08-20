@@ -290,7 +290,11 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   const Occurrence* occ = state.assembly->FindById(rm->occurrenceId);
   if (!occ)
     return false;
-  Document* part = PartDocById(state, occ->partId);
+  // A5: the face belongs to the LEAF part. For a sub-assembly occurrence
+  // occ->partId is an assembly — no bodies, no faces — so resolving through
+  // it returned false and a click inside a placed unit picked nothing.
+  Document* part =
+      PartDocById(state, rm->leafPartId ? rm->leafPartId : occ->partId);
   if (!part || rm->bodyIndex >= part->GetBodies().size())
     return false;
 
@@ -302,6 +306,7 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
     return false; // an unnamed face (e.g. a pattern output) can't be mated
 
   out.occurrenceId = rm->occurrenceId;
+  out.innerPath = rm->innerPath;
   out.face = ElementRef{body.createdBy, *name};
   out.snapEdge = ElementRef{};
   out.snapType = AssemblyFacePick::SnapType::FaceCenter;
@@ -386,6 +391,9 @@ Connector ConnectorFromItem(const SelectionItem& item) {
   c.anchor.origin = false;
   c.anchor.face = item.element;
   c.anchor.snapEdge = item.snapElement;
+  // A5/v57: a face inside a placed unit. The mate still positions the
+  // top-level occurrence; the path just says which face it anchors on.
+  c.innerPath = item.innerPath;
   return c;
 }
 } // namespace
@@ -1115,7 +1123,8 @@ void SyncAssemblyRenderers(AppState& state) {
       // it per frame without a resync.
       state.documentMeshes.push_back(
           {meshId, outlineId, bi, occ.id,
-           glm::inverse(OccurrenceMatrix(occ)) * inst.world, sb.edges});
+           glm::inverse(OccurrenceMatrix(occ)) * inst.world, inst.partId,
+           inst.innerIds, sb.edges});
     }
 
     // Section caps (I3). Without these an assembly section shows the inside

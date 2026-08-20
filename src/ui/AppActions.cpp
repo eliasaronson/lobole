@@ -3003,8 +3003,13 @@ void SyncDocumentRenderers(AppState& state) {
       state.faceSelector->AddMesh(meshId, vertices, cadMesh.indices,
                                   cadMesh.triangleFaces, glm::mat4(1.0f),
                                   edges);
-    state.documentMeshes.push_back({meshId, outlineId, bi,
-                                    /*occurrenceId=*/0, glm::mat4(1.0f),
+    state.documentMeshes.push_back({meshId,
+                                    outlineId,
+                                    bi,
+                                    /*occurrenceId=*/0,
+                                    glm::mat4(1.0f),
+                                    /*leafPartId=*/0,
+                                    {},
                                     std::move(edges)});
   }
 

@@ -77,6 +77,29 @@ the test engine off. The GUI suite needs a GPU, so it is local-only — please
 run it before opening a PR if you touched anything in `src/ui`, `src/app` or
 `src/render`.
 
+### The inner loop
+
+```
+tools/test-fast.sh        # the headless suite minus the long numeric gates
+```
+
+Measured on a 24-thread machine, 2026-08-20:
+
+| | |
+|---|---|
+| full headless suite (622 tests) | 81 s |
+| the SIMP topology gate, alone | 89 s of CPU — the long pole |
+| the next four topology/FEM gates | 12-14 s each |
+| **everything else (603 tests)** | **8 s** |
+
+The suite is not slow; one test is. Those gates check real numerics and stay
+in `ci-local` and CI — they just do not belong in the check you run after
+every edit. Run the full suite before you commit.
+
+The GUI suite (`tools/gui-tests-xvfb.sh`) is ~3 minutes for 145 tests on a
+real GPU and is flock-serialized, so filter it while iterating:
+`./tools/gui-tests-xvfb.sh -f section`.
+
 ### Running CI on your own machine
 
 ```

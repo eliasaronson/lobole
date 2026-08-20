@@ -158,6 +158,10 @@ struct AssemblyFacePick {
   // center or a straight/curved edge midpoint; unset means face center.
   ElementRef snapEdge;
   SnapType snapType = SnapType::FaceCenter;
+  // A5: when the face belongs to a part INSIDE the picked occurrence, the
+  // ids down to it. A connector built from this pick carries it, so a mate
+  // can anchor on geometry inside a placed unit.
+  std::vector<uint64_t> innerPath;
 };
 bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out);
 

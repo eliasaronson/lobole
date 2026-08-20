@@ -2147,6 +2147,55 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(std::abs(std::min(worldX[0], worldX[1]) - 1000.0f) < 1e-3f);
   };
 
+  // Mating onto a face INSIDE a placed unit, through the viewport. The core
+  // could express it (Connector::innerPath, v57) but nothing could produce
+  // one: both pickers resolved the hit occurrence through PartDocById, which
+  // is null for a sub-assembly, so a click inside a placed unit returned no
+  // candidate at all and the mate tool simply ignored it.
+  t = IM_REGISTER_TEST(engine, "assembly", "mate_picks_a_face_inside_a_unit");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
+    ui::SetActivePart(*s_App, unitIdx);
+    Occurrence inner;
+    inner.name = "Inner";
+    inner.partId = s_App->parts[0].id;
+    inner.fixed = true;
+    const uint64_t innerId = s_App->assembly->AddOccurrence(inner);
+    const size_t topIdx = ui::AddAssembly(*s_App, "Top");
+    ui::SetActivePart(*s_App, topIdx);
+    Occurrence unit;
+    unit.name = "Unit1";
+    unit.partId = s_App->parts[unitIdx].id;
+    unit.refKind = OccurrenceRef::Assembly;
+    unit.fixed = true;
+    s_App->assembly->AddOccurrence(unit);
+    ctx->Yield(3);
+
+    // Aim at the unit's geometry and ask the mate picker what is there.
+    glm::vec3 bmin, bmax;
+    IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
+    const glm::vec2 screen =
+        ui::WorldToScreen(*s_App,
+                          glm::vec3(bmax.x, bmax.y, (bmin.z + bmax.z) * 0.5f) -
+                              glm::vec3(0.1f, 0.1f, 0.0f)) -
+        s_App->viewportPos;
+    const Ray ray = s_App->faceSelector->ScreenToWorldRay(
+        screen.x, screen.y, static_cast<int>(s_App->viewportSize.x),
+        static_cast<int>(s_App->viewportSize.y), *s_App->camera);
+    ui::AssemblyFacePick pick;
+    IM_CHECK(ui::PickAssemblyFace(*s_App, ray, pick)); // was false: no pick
+    IM_CHECK(pick.occurrenceId == s_App->assembly->GetOccurrences()[0].id);
+    IM_CHECK(!pick.face.name.empty());
+    // ...and it says WHICH leaf, which is what the connector needs.
+    IM_CHECK_EQ(pick.innerPath.size(), (size_t)1);
+    IM_CHECK(pick.innerPath[0] == innerId);
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");

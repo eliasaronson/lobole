@@ -51,6 +51,13 @@ struct DocumentRenderMesh {
   // a live drag can move the unit without collapsing its contents onto the
   // unit's origin (which is exactly what it did before this existed).
   glm::mat4 localXf{1.0f};
+  // Which PART this mesh's geometry came from, and where that leaf sits in
+  // the occurrence's tree. For a direct part occurrence: the occurrence's own
+  // part and an empty path. For a leaf inside a sub-assembly these are the
+  // only way a viewport pick can name what it hit — the occurrence resolves
+  // to an assembly, which has no bodies and no faces of its own.
+  uint64_t leafPartId = 0;
+  std::vector<uint64_t> innerPath;
   // B-Rep edge polylines (world space, edgeIndex order — the ElementMap /
   // PickEdge convention). Cached here for edge highlighting.
   std::vector<std::vector<glm::vec3>> edgePolylines;
@@ -520,12 +527,16 @@ struct SelectionItem {
   // Connector only: the snapped edge (hole center / edge midpoint) refining
   // the face anchor. Empty for every other kind.
   ElementRef snapElement;
+  // Connector only (A5): the occurrence ids inside `id` down to the leaf
+  // whose face this is. Empty when the occurrence places that part directly
+  // — which is every pick that is not inside a sub-assembly.
+  std::vector<uint64_t> innerPath;
 
   bool operator==(const SelectionItem& o) const {
     return kind == o.kind && id == o.id &&
            element.featureId == o.element.featureId &&
            element.name == o.element.name &&
-           snapElement.name == o.snapElement.name;
+           snapElement.name == o.snapElement.name && innerPath == o.innerPath;
   }
 };
 

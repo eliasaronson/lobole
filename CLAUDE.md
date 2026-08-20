@@ -44,7 +44,9 @@ docs/ui/u10-defaults-and-refusals.md.
 ## Tests
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`
-  (~2 min for 586 tests; the SIMP topology-optimization gate dominates).
+  — 81 s for 622 tests, of which the SIMP gate alone is 89 s of CPU and the
+  next four topology/FEM gates 12-14 s each. **Inner loop: `tools/test-fast.sh`
+  (8 s, 603 tests)**; full suite before committing.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` (`-f <pattern>` filters a
   case). Runs `designer --gui-tests --hidden` under Xvfb; **flock-serialized**,
   so concurrent runs (parallel agents) are safe.
