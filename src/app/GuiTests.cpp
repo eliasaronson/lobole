@@ -1986,9 +1986,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)0);
   };
 
-  // The drag arrow. Sections are view state, so this exercises the one handle
-  // path that resolves no feature and runs no regeneration — and the only one
-  // allowed on an assembly tab, where ComputeHandleSpec refuses outright.
+  // The drag arrow, driven THROUGH THE VIEWPORT — a real mouse press at the
+  // arrow's screen position, not a direct call into the handler.
+  //
+  // The first version of this test called ui::HandlePreviewHandleInput
+  // itself and passed while the feature was broken for every user:
+  // ViewportInput only routed clicks to the handle layer when a pending
+  // FEATURE existed, so a section drag fell through to the picker and
+  // selected whatever part sat behind the arrow. Testing the handler is not
+  // testing the path.
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_the_cut");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -2000,42 +2006,33 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(3);
     IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
     const float before = s_App->sections[0].offset;
+    s_App->selection.Clear();
 
-    // Aim a ray straight down the arrow: anchor + dir * half its length.
+    // Where the arrow is on screen: anchor + half its length along the normal.
     glm::vec3 bmin, bmax;
     IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
     const glm::vec4 plane = ui::SectionPlaneOf(s_App->sections[0]);
     const glm::vec3 n = glm::normalize(glm::vec3(plane));
     const glm::vec3 c = (bmin + bmax) * 0.5f;
     const glm::vec3 anchor = c - n * (glm::dot(c, n) - plane.w);
-    // WorldToScreen is absolute; ScreenToWorldRay wants viewport-local.
-    const glm::vec2 grab =
-        ui::WorldToScreen(*s_App,
-                          anchor + n * (0.45f * ui::GizmoScale(*s_App))) -
-        s_App->viewportPos;
-    const Ray ray = s_App->faceSelector->ScreenToWorldRay(
-        grab.x, grab.y, static_cast<int>(s_App->viewportSize.x),
-        static_cast<int>(s_App->viewportSize.y), *s_App->camera);
-    IM_CHECK(ui::HandlePreviewHandleInput(*s_App, ray, /*clicked=*/true,
-                                          /*down=*/true, /*released=*/false));
-    IM_CHECK(s_App->handleDrag.active);
-    IM_CHECK(s_App->handleDrag.sectionId == s_App->sections[0].id);
-    IM_CHECK(s_App->handleDrag.featureId == 0); // no feature is involved
+    const float L = 0.9f * ui::GizmoScale(*s_App);
+    const glm::vec2 grab = ui::WorldToScreen(*s_App, anchor + n * (0.5f * L));
+    const glm::vec2 to = ui::WorldToScreen(*s_App, anchor + n * (2.0f * L));
 
-    // Drag along the axis: a ray aimed further along the normal moves the cut.
-    const glm::vec2 moved =
-        ui::WorldToScreen(*s_App,
-                          anchor + n * (2.0f * ui::GizmoScale(*s_App))) -
-        s_App->viewportPos;
-    const Ray ray2 = s_App->faceSelector->ScreenToWorldRay(
-        moved.x, moved.y, static_cast<int>(s_App->viewportSize.x),
-        static_cast<int>(s_App->viewportSize.y), *s_App->camera);
-    ui::HandlePreviewHandleInput(*s_App, ray2, /*clicked=*/false,
-                                 /*down=*/true, /*released=*/false);
+    ctx->MouseMoveToPos(ImVec2(grab.x, grab.y));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(to.x, to.y));
+    ctx->Yield();
+    IM_CHECK(s_App->handleDrag.active); // the arrow took the click
+    IM_CHECK(s_App->handleDrag.sectionId == s_App->sections[0].id);
+    IM_CHECK(s_App->handleDrag.featureId == 0); // no feature involved
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+
     IM_CHECK(std::abs(s_App->sections[0].offset - before) > 1e-3f);
-    ui::HandlePreviewHandleInput(*s_App, ray2, /*clicked=*/false,
-                                 /*down=*/false, /*released=*/true);
     IM_CHECK(!s_App->handleDrag.active);
+    // ...and the click went to the ARROW, not through it to the geometry.
+    IM_CHECK(s_App->selection.Empty());
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1); // the document is untouched
   };
 

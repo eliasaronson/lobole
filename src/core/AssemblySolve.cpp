@@ -271,8 +271,16 @@ std::optional<glm::mat4> ConnectorLocalFrame(const Connector& c,
     return glm::mat4(1.0f); // the part's coordinate origin
 
   const Document* part = partById(occ->partId);
-  if (!part)
+  if (!part) {
+    // A5: distinguish "gone" from "it is a sub-assembly". A face anchor
+    // names a face of a PART; a placed assembly has no faces of its own, and
+    // saying "not loaded" sends someone looking for a missing file.
+    if (occ->refKind == OccurrenceRef::Assembly)
+      return fail("it references a sub-assembly, which has no faces of its "
+                  "own — mate to its origin instead, or open that assembly "
+                  "and mate the part inside it");
     return fail("the part document is not loaded");
+  }
 
   const ElementRef& ref = c.anchor.face;
   for (const Body& body : part->GetBodies()) {

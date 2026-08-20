@@ -89,6 +89,27 @@ def main(binary):
         kinds = sorted(o.get("ref_kind", "part") for o in occs)
         expect(kinds == ["assembly", "assembly", "part"],
                f"list_occurrences reports the reference kinds ({kinds})")
+        # An agent must be able to see INSIDE a placed unit without switching
+        # tabs, or it cannot tell an empty sub-assembly from a full one.
+        sub = next(o for o in occs if o.get("ref_kind") == "assembly")
+        expect(sub.get("leaf_count") == 2 and len(sub.get("leaves", [])) == 2,
+               f"a sub-assembly reports its leaves ({sub.get('leaves')})")
+        expect(all("/" in p for p in sub.get("leaves", [])),
+               "leaf paths name the tree (Gangway/Board)")
+
+        # A face anchor names a face of a PART; a placed assembly has none.
+        # Refused at add time, not stored and left failing to solve.
+        try:
+            d.call("add_mate", type="fastened",
+                   a={"occurrence": sub["id"],
+                      "face": {"feature_id": 1, "element": "1/face0"}},
+                   b={"occurrence": [o for o in occs
+                                     if o.get("ref_kind", "part") == "part"][0]["id"],
+                      "origin": True})
+            expect(False, "a face anchor on a sub-assembly must be refused")
+        except RuntimeError as e:
+            expect("no faces of its own" in str(e),
+                   f"face anchor refused with the way out: {str(e)[:70]}")
 
         # 2 gangways x 2 boards + 1 loose board = 5 leaves.
         top_bom = d.call("bom")

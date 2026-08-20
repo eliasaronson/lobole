@@ -302,11 +302,16 @@ void HandleViewportInput(AppState& state) {
     return;
   }
 
-  // Direct-manipulation handle on the pending preview feature: first shot at
-  // clicks, exactly like the assembly gizmo above — a live drag continues
-  // even off-viewport, a hit consumes the click, and a miss falls through to
-  // the pipeline so armed slots / picking are untouched.
-  if (HasPendingFeature(state)) {
+  // Direct-manipulation handles: first shot at clicks, exactly like the
+  // assembly gizmo above — a live drag continues even off-viewport, a hit
+  // consumes the click, and a miss falls through to the pipeline so armed
+  // slots / picking are untouched.
+  //
+  // Asks the handle layer whether a handle EXISTS rather than testing for a
+  // pending feature: the section arrow belongs to no feature, and this gate
+  // used to route every attempt to drag it into the picker, which selected
+  // whatever part was behind the arrow.
+  if (HasViewportHandle(state)) {
     const bool clicked =
         overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
     const bool down = ImGui::IsMouseDown(ImGuiMouseButton_Left);

@@ -5,7 +5,9 @@
 #include "core/io/Serialization.h"
 #include "remote/RemoteHelpers.h"
 #include "ui/AppActions.h"
+
 #include "ui/AppState.h"
+#include <map>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -33,7 +35,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "would close a cycle is refused."},
     {"remove_occurrence", "Remove an occurrence by id."},
     {"list_occurrences",
-     "List occurrences with transforms, state and ref_kind (part|assembly)."},
+     "List occurrences with transforms, state and ref_kind (part|assembly); a "
+     "sub-assembly also reports leaf_count and the leaves' paths."},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}."},
@@ -197,9 +200,26 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
+    // A5: what is INSIDE a placed sub-assembly, so an agent can see the tree
+    // without switching tabs. Paths are display/diagnostic strings — RPCs
+    // still address top-level occurrences, which is why `leaves` is a plain
+    // list and not a set of handles.
+    std::map<uint64_t, std::vector<std::string>> leavesByRoot;
+    for (const assembly::FlatInstance& inst : ui::FlattenActiveAssembly(state))
+      if (inst.visible)
+        leavesByRoot[inst.rootOccurrenceId].push_back(inst.path);
     json arr = json::array();
-    for (const Occurrence& o : state.assembly->GetOccurrences())
-      arr.push_back(DocumentIO::OccurrenceToJson(o));
+    for (const Occurrence& o : state.assembly->GetOccurrences()) {
+      json oj = DocumentIO::OccurrenceToJson(o);
+      if (o.refKind == OccurrenceRef::Assembly) {
+        const auto it = leavesByRoot.find(o.id);
+        oj["leaf_count"] =
+            it == leavesByRoot.end() ? 0 : static_cast<int>(it->second.size());
+        if (it != leavesByRoot.end())
+          oj["leaves"] = it->second;
+      }
+      arr.push_back(std::move(oj));
+    }
     return json{{"occurrences", arr}};
   }
   // Occurrence property edits. All snapshot for undo, then bump the assembly
@@ -248,8 +268,29 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "the active document is not an assembly — switch tabs with "
           "set_active_part (see list_parts)");
-    auto connToJson = [](const json& c) -> json {
+    auto connToJson = [&state](const json& c) -> json {
       json anchor;
+      // A5: a face anchor names a face of a PART. A placed sub-assembly has
+      // none of its own, so refuse it HERE rather than storing a mate that
+      // can only ever fail to solve (which is what it used to do, reporting
+      // "the part document is not loaded" — a missing-file message for a
+      // file that is not missing).
+      if (!c.value("origin", false) && c.contains("face") &&
+          state.assembly != nullptr && c.contains("occurrence")) {
+        const Occurrence* o = nullptr;
+        if (c.at("occurrence").is_number())
+          o = state.assembly->FindById(c.at("occurrence").get<uint64_t>());
+        else
+          for (const Occurrence& cand : state.assembly->GetOccurrences())
+            if (cand.name == c.at("occurrence").get<std::string>())
+              o = &cand;
+        if (o != nullptr && o->refKind == OccurrenceRef::Assembly)
+          throw std::runtime_error(
+              "'" + o->name +
+              "' is a sub-assembly, which has no faces of its own: mate it by "
+              "origin ({occurrence, origin: true}), or open that assembly and "
+              "mate the part inside it");
+      }
       if (c.value("origin", false))
         anchor = {{"origin", true}};
       else if (c.contains("face")) {

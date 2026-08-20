@@ -350,6 +350,12 @@ void BuildPreviewHandleOverlay(AppState& state,
   }
 }
 
+bool HasViewportHandle(AppState& state) {
+  HandleSpec spec;
+  return ComputeHandleSpec(state, spec) ||
+         ComputeSectionHandleSpec(state, spec, nullptr);
+}
+
 bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
                               bool down, bool released) {
   auto& h = state.handleDrag;
