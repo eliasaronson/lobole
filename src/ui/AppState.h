@@ -6,6 +6,7 @@
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/GitVault.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchSolver.h"
 #include "render/ClipPlanes.h"
@@ -947,6 +948,20 @@ struct AppState {
   bool showFileBrowser = false;
   std::string currentPath = "../CAD_files";
   std::vector<std::string> directoryContents;
+
+  // Version history (F6). Every read shells out to `git`, so the panel works
+  // off this cache: refreshed when it is visible and stale (~1 Hz), and
+  // immediately after any action that changes the history. `historyPath`
+  // guards the cache against a project switch.
+  std::vector<GitVault::LogEntry> historyLog;
+  std::string historyPath;
+  double historyStamp = -1.0; // ImGui time of the last refresh; <0 = never
+  bool historyUncommitted = false;
+  // File > History asks for the panel's tab. Deferred to the panel's own
+  // Begin, and held for a few frames: a SetWindowFocus issued from inside
+  // the menu is undone when the popup closes and hands focus back, and the
+  // hand-back can land a frame AFTER the request.
+  int focusHistoryFrames = 0;
 };
 
 } // namespace ui

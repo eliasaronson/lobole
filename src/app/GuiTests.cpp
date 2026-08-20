@@ -21,6 +21,7 @@
 #include "core/features/SplitFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/fem/FemStudy.h"
+#include "core/io/GitVault.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -28,6 +29,7 @@
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/DragMath.h"
+#include "ui/HistoryPanel.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SketchInteraction.h"
@@ -5549,6 +5551,101 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
     IM_CHECK(!s_App->measure.active);
+  };
+
+  // Version history (F6): the panel is the one home for versions, it reads
+  // the whole PROJECT (so it works from any tab kind), naming a state adds a
+  // version, and restoring is refused while there are unsaved changes.
+  t = IM_REGISTER_TEST(engine, "history", "name_and_restore_a_version");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    if (!GitVault::Available()) {
+      ctx->LogWarning("git not on PATH — skipping");
+      return;
+    }
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_history_gui.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+
+    // The menu points at the panel (the F4 "Checkpoints" submenu is gone).
+    // Before: Model owns the shared node. Without this the check below is a
+    // false positive — the default layout docks History last, and the last
+    // window docked is the one the node selects.
+    ImGuiWindow* model = ImGui::FindWindowByName("Model");
+    IM_CHECK(model != nullptr && model->DockNode != nullptr);
+    IM_CHECK_EQ(model->DockNode->SelectedTabId, model->TabId);
+
+    ctx->MenuClick("File/###file_history");
+    ctx->Yield(2);
+    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    IM_CHECK(panel != nullptr);
+    // Not just "the window exists": it is the SELECTED dock tab. Focusing it
+    // from inside the menu silently did nothing — the popup handed focus
+    // back on close, and the user got no panel.
+    IM_CHECK(panel->DockNode != nullptr);
+    IM_CHECK_EQ(panel->DockNode->SelectedTabId, panel->TabId);
+
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    // The panel caches the log (reading it spawns `git`) and refreshes on a
+    // ~1 s timer; a test's frames are far quicker than that, so a save made
+    // around the panel rather than through it has to invalidate the cache.
+    s_App->historyStamp = -1.0;
+    ctx->Yield(2);
+    IM_CHECK(ui::ProjectHasHistory(*s_App));
+
+    // Name the state we just saved. It is unchanged, so this only works
+    // because a name gets a version of its own.
+    ctx->SetRef("//History");
+    ctx->ItemClick("###hist_name");
+    ctx->KeyCharsReplace("before the lid");
+    ctx->ItemClick("###hist_name_go");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->historyLog.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->historyLog[0].subject, std::string("before the lid"));
+    IM_CHECK(s_App->historyLog[0].named);
+    IM_CHECK(!s_App->historyLog[1].named); // the plain save under it
+
+    // A second part, saved: the version above predates it.
+    ui::AddPart(*s_App, "Lid");
+    ctx->Yield();
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    s_App->historyStamp = -1.0;
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)2);
+    IM_CHECK(s_App->historyLog.size() >= 3);
+
+    // Unsaved changes: restoring would discard them, so it is refused.
+    ui::AddPart(*s_App, "Scratch");
+    ctx->Yield(2);
+    IM_CHECK(ui::ProjectDirty(*s_App));
+    IM_CHECK((ctx->ItemInfo("//History/**/###hist_restore1").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+    ctx->ItemClick("//History/###hist_save");
+    ctx->Yield(2);
+    IM_CHECK(!ui::ProjectDirty(*s_App));
+
+    // Restore the named version: the parts added after it are gone, and the
+    // restore is itself a version (nothing is lost).
+    const size_t before = s_App->historyLog.size();
+    int named = -1;
+    for (int i = 0; i < static_cast<int>(s_App->historyLog.size()); i++)
+      if (s_App->historyLog[i].named)
+        named = i;
+    IM_CHECK(named >= 0);
+    ctx->ItemClick(
+        ("//History/**/###hist_restore" + std::to_string(named)).c_str());
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->parts.size(), (size_t)1);
+    IM_CHECK(s_App->historyLog.size() > before);
+
+    std::filesystem::remove_all(dir);
   };
 
   // Wrap every registered test so ResetAppForTest() runs before it — this is

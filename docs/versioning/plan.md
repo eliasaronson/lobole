@@ -1,11 +1,12 @@
 # Versioning — file format, autosave, checkpoints, git — plan
 
-> **Status 2026-07-14: v1 complete.** F1 format spec + golden corpus, F2
-> autosave/recovery, F3 diffable directory format, F4 checkpoints + rollback
-> bar, and F5 git integration are all shipped. The only recorded later work is
-> **semantic feature-list merge** (a separate project — do not promise it in
-> v1) and **insert-feature-at-marker** (F4 v2). Nothing here blocks other
-> workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
+> **Status 2026-08-20.** F1 format spec + golden corpus, F2 autosave/recovery,
+> F3 diffable directory format, F4 checkpoints + rollback bar are shipped; F5
+> shipped git as an *engine* only, and the 2026-07-14 banner here read that as
+> "v1 complete" for four weeks while the app had no way to show a history.
+> [F6](f6-history-ui.md) builds that half. Later work: **semantic
+> feature-list merge** (a separate project — do not promise it in v1) and
+> **insert-feature-at-marker** (F4 v2). Nothing here blocks other workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
 > history — the number has moved well past this doc's original snapshot as
 > later workstreams added features/assemblies/units).
 
@@ -62,16 +63,30 @@ Two related things, built together:
   copy under `.checkpoints/`. Checkpoint list panel: view (read-only open),
   roll back to, branch from.
 
-### F5 — Git integration — **shipped (July 2026, v1: linear history)**
+### F5 — Git integration — **engine shipped (July 2026, v1: linear history); UI in [F6](f6-history-ui.md)**
 Repo-per-project. **Shell out to `git`** rather than embedding libgit2 —
 simpler, and this product's audience has git. Features, in order:
 - init-on-create (optional), commit-on-save with a generated or prompted
-  message; checkpoints = tags.
+  message; checkpoints = tags. — **shipped**, except that the *prompted*
+  message and the GUI half of "checkpoints = tags" were not: the File menu
+  still wrote F4's part-only JSON copies. Closed by F6.
 - History panel: log, open-read-only at a commit, restore, branch + switch.
+  — **not built in F5.** `GitVault::Log`/`RestoreTo` exist and are reachable
+  over RPC, but `src/ui/` called only `CommitAll`. F6 builds the panel with
+  log + restore; open-read-only and branch/switch are deferred there, with
+  reasons.
 - Merge: with F3's feature-per-file layout, git's own merge handles disjoint
   edits; a conflict falls back to "pick mine/theirs per feature" UI. A true
   semantic feature-list merge is a later, separate project — do not promise
-  it in v1.
+  it in v1. — **the conflict UI was not built.** The 2026-08-19 merge-safety
+  work (duplicate-id refusal, named parse errors) is the current answer:
+  refuse loudly rather than resolve quietly.
+
+### F6 — Version history in the app — [design: f6-history-ui.md](f6-history-ui.md)
+The user-visible half of F5: a History panel (named versions, restore),
+checkpoints as project-wide named commits, and the `RestoreTo` fix — it used
+`git checkout <commit> -- .`, which leaves files added *after* the target
+commit in place, so restoring past a part's creation kept the part.
 
 ## Recommended order
 

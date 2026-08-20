@@ -1008,6 +1008,44 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Versions cover the whole project")
+        # F6: a named version is the WHOLE project. The F4 checkpoint it
+        # replaced snapshotted `state.document` — the ACTIVE PART — so a part
+        # that exists in the version but not now could never come back, and
+        # on a multi-part project the other tabs were simply not in the file.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Base", "position": [0, 0, 0],
+            "width": 4, "height": 4, "depth": 4})
+        d.call("add_part", name="Lid")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Plate", "position": [0, 0, 0],
+            "width": 4, "height": 1, "depth": 4})
+        multi = os.path.join(tmp, "multipart.dsgn")
+        d.call("save_project", path=multi)
+        d.call("checkpoint_create", name="both parts")
+        expect([c["name"] for c in d.call("checkpoint_list")["checkpoints"]]
+               == ["both parts"], "named version listed")
+
+        # Delete a whole part AND edit the survivor, then go back.
+        d.call("set_active_part", index=0)
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Wart", "position": [20, 0, 0],
+            "width": 1, "height": 1, "depth": 1})
+        d.call("delete_part", index=1)
+        d.call("save_project", path=multi)
+        expect(len(d.call("list_parts")["parts"]) == 1, "part deleted")
+
+        d.call("checkpoint_restore", name="both parts")
+        names = [pp["name"] for pp in d.call("list_parts")["parts"]]
+        expect(names == ["Part 1", "Lid"],
+               f"the deleted part came back: {names}")
+        expect(len(d.call("get_state")["features"]) == 1,
+               "and the survivor's later edit is gone")
+        # Linear history: the state we left is still reachable.
+        expect(len(d.call("history_log")["log"]) >= 4,
+               "the restore is itself a version")
+
         phase("Autosave + crash recovery")
         # Autosave + crash recovery (F2): save clean, dirty the doc, let the
         # 1s autosave fire, SIGKILL (a real crash — no signal handler), then

@@ -7,7 +7,6 @@
 #include "common/Logger.h"
 #include "core/Feature.h"
 #include "core/features/SketchFeature.h"
-#include "core/io/Checkpoints.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -110,36 +109,12 @@ void DrawFileMenu(AppState& state) {
     SaveProjectDialog(state);
   }
 #endif
-  // Checkpoints (F4 v1): snapshot/restore full document states beside the
-  // project. Disabled until the project has been saved somewhere.
-  if (ImGui::BeginMenu("Checkpoints", !state.projectPath.empty())) {
-    const auto list = Checkpoints::List(state.projectPath);
-    if (ImGui::MenuItem(
-            ("Create \"checkpoint-" + std::to_string(list.size() + 1) + "\"")
-                .c_str())) {
-      std::string error;
-      if (state.document &&
-          !Checkpoints::Create(*state.document, state.projectPath,
-                               "checkpoint-" + std::to_string(list.size() + 1),
-                               &error)) {
-        LOG_ERROR("Checkpoint failed: {}", error);
-      }
-    }
-    if (!list.empty())
-      ImGui::Separator();
-    for (const auto& info : list) {
-      if (ImGui::MenuItem(("Restore " + info.name).c_str())) {
-        if (auto loaded = DocumentIO::Load(
-                Checkpoints::PathOf(state.projectPath, info.name))) {
-          ReplaceDocument(state, std::move(*loaded));
-          FitCameraToDocument(state);
-          MarkProjectRecovered(state, state.projectPath);
-        } else {
-          LOG_ERROR("Checkpoint restore failed: {}", loaded.error());
-        }
-      }
-    }
-    ImGui::EndMenu();
+  // Version history (F6) replaced the F4 "Checkpoints" submenu, which
+  // snapshotted only the ACTIVE PART — on a multi-part project it silently
+  // left out the assembly, the other parts and the drawings. The panel is
+  // the one home for versions now, and it covers the whole project.
+  if (ImGui::MenuItem("History...###file_history")) {
+    state.focusHistoryFrames = 60; // the panel focuses itself; see AppState
   }
   ImGui::Separator();
   // One import for STEP/STL/BREP: an assembly-structured STEP becomes part

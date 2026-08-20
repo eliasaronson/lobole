@@ -13,6 +13,7 @@
 #include "remote/RemoteHelpers.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/HistoryPanel.h"
 
 #include <glm/glm.hpp>
 
@@ -42,11 +43,11 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"export_visual", "Export a visual-quality mesh (glTF/OBJ by extension) of "
                       "the part or whole assembly."},
     {"checkpoint_create",
-     "Create a named checkpoint (git vault) of the project."},
-    {"checkpoint_list", "List checkpoints."},
-    {"checkpoint_restore", "Restore a checkpoint by id."},
-    {"history_log", "List the project's git history."},
-    {"history_restore", "Restore the project to a git revision."},
+     "Name the current state of the whole project a version {name}."},
+    {"checkpoint_list", "List named versions."},
+    {"checkpoint_restore", "Put the project back to a named version {name}."},
+    {"history_log", "List the project's versions (every save)."},
+    {"history_restore", "Put the project back to a version {commit}."},
 };
 std::span<const MethodDoc> ProjectMethodDocs() { return ProjectMethods; }
 
@@ -86,33 +87,55 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                 {"autosave_path", Autosaver::SidecarPath(path)}};
   }
   if (m == "checkpoint_create") {
-    // Snapshot the live document under <project>.checkpoints/<name>.json.
-    // Needs a saved project (the checkpoints live beside it). params: {name}
+    // A checkpoint is a NAMED VERSION of the whole project (F6): save, then
+    // tag. It used to snapshot `*doc` alone — on a multi-part project that
+    // silently left out the assembly, the other parts and the drawings.
+    // params: {name}
     const std::string name = p.at("name").get<std::string>();
     std::string error;
+    if (ui::CanVersionProject(state)) {
+      if (!ui::NameCurrentVersion(state, name, &error))
+        throw std::runtime_error(error);
+      return json{{"name", name}, {"ref", GitVault::TagRef(name)}};
+    }
+    // No git: fall back to F4's file snapshot, which is part-only — say so
+    // rather than pretending the whole project was captured.
+    if (!doc)
+      throw std::runtime_error("no active part to snapshot (and git, which "
+                               "would version the whole project, is missing)");
     if (!Checkpoints::Create(*doc, state.projectPath, name, &error))
       throw std::runtime_error(error);
-    // Git-backed projects (F5): a checkpoint is also a commit + tag of the
-    // live state.
-    if (state.projectPath.ends_with(".dsgn") && GitVault::Available()) {
-      if (DocumentIO::Save(*doc, state.projectPath)) {
-        ui::MarkProjectSaved(state, state.projectPath, "checkpoint: " + name);
-        GitVault::Tag(state.projectPath, "cp/" + name);
-      }
-    }
-    return json{{"path", Checkpoints::PathOf(state.projectPath, name)}};
+    return json{{"name", name},
+                {"path", Checkpoints::PathOf(state.projectPath, name)},
+                {"part_only", true}};
   }
   if (m == "checkpoint_list") {
     json list = json::array();
-    for (const auto& info : Checkpoints::List(state.projectPath))
-      list.push_back(
-          {{"name", info.name}, {"modified_unix", info.modifiedUnix}});
+    if (ui::ProjectHasHistory(state)) {
+      for (const auto& e : GitVault::Log(state.projectPath, 200))
+        if (e.named)
+          list.push_back({{"name", e.subject},
+                          {"ref", GitVault::TagRef(e.subject)},
+                          {"modified_unix", e.unixTime}});
+    } else {
+      for (const auto& info : Checkpoints::List(state.projectPath))
+        list.push_back(
+            {{"name", info.name}, {"modified_unix", info.modifiedUnix}});
+    }
     return json{{"checkpoints", list}};
   }
   if (m == "checkpoint_restore") {
-    // Load the checkpoint as the current document: same project path,
-    // deliberately dirty (the restored state is unsaved until saved).
     const std::string name = p.at("name").get<std::string>();
+    std::string error;
+    if (ui::ProjectHasHistory(state)) {
+      // The whole project goes back to the tagged version, and the restore
+      // is committed on top so history stays linear.
+      const std::string ref = GitVault::TagRef(name);
+      if (ref.empty() || !ui::RestoreVersion(state, ref, name, &error))
+        throw std::runtime_error(error.empty() ? "no such version: " + name
+                                               : error);
+      return json::object();
+    }
     const std::string path = Checkpoints::PathOf(state.projectPath, name);
     if (path.empty())
       throw std::runtime_error("no such checkpoint: " + name);
@@ -130,24 +153,22 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // Git history of a directory project (F5). params: {limit?: 20}
     json entries = json::array();
     for (const auto& e : GitVault::Log(state.projectPath, p.value("limit", 20)))
-      entries.push_back(
-          {{"hash", e.hash}, {"subject", e.subject}, {"unix", e.unixTime}});
+      entries.push_back({{"hash", e.hash},
+                         {"subject", e.subject},
+                         {"unix", e.unixTime},
+                         {"named", e.named}});
     return json{{"log", entries}};
   }
   if (m == "history_restore") {
-    // Check out a commit's tree over the project and reload it; history
-    // stays linear (the restored state commits on the next save).
+    // Put the WHOLE project back to a revision and reopen it; the restore is
+    // committed on top, so history stays linear. It used to reload only the
+    // active document, which on a multi-part project left the other tabs
+    // showing pre-restore geometry.
     // params: {commit} (hash, tag like "cp/v1", or any git rev)
     const std::string commit = p.at("commit").get<std::string>();
     std::string error;
-    if (!GitVault::RestoreTo(state.projectPath, commit, &error))
+    if (!ui::RestoreVersion(state, commit, commit, &error))
       throw std::runtime_error(error);
-    auto loaded = DocumentIO::Load(state.projectPath);
-    if (!loaded)
-      throw std::runtime_error(loaded.error());
-    ui::ReplaceDocument(state, std::move(*loaded));
-    ui::FitCameraToDocument(state);
-    ui::MarkProjectRecovered(state, state.projectPath);
     return json::object();
   }
   if (m == "export_step" || m == "export_stl" || m == "export_brep") {

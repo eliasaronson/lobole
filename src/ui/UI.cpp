@@ -13,6 +13,7 @@
 #include "ui/DockLayout.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h"
+#include "ui/HistoryPanel.h"
 #include "ui/MainMenuBar.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
@@ -704,6 +705,10 @@ void DrawUI(AppState& state) {
   } else if (state.drawing) {
     DrawSheetPanel(state); // sheet settings + title block in the Model panel
   }
+  // Outside the tab-kind branches on purpose: a version is a property of the
+  // PROJECT, so the history reads the same from a part, an assembly or a
+  // drawing tab (F6).
+  DrawHistoryPanel(state);
   DrawToolWindow(state);
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);

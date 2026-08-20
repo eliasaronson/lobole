@@ -421,6 +421,7 @@ set(app_sources
     src/ui/DrawingPanel.cpp
     src/ui/ConfigurationsPanel.cpp
     src/ui/VariablesPanel.cpp
+    src/ui/HistoryPanel.cpp
     src/ui/SketchToolbar.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp

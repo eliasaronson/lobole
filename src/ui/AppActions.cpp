@@ -1114,6 +1114,10 @@ size_t AddPart(AppState& state, const std::string& name) {
   slot.kind = DocKind::Part;
   state.parts.push_back(std::move(slot));
   state.activePart = static_cast<int>(state.parts.size()) - 1;
+  // Which documents the project HAS lives in project.json, not in any
+  // document version — so without this the project reads clean with a brand
+  // new (still empty) tab in it, and closing loses the tab with no prompt.
+  state.projectMetaDirty = true;
   ResetActiveTabUiState(state);
   return state.parts.size() - 1;
 }
@@ -1136,6 +1140,10 @@ size_t AddAssembly(AppState& state, const std::string& name) {
   slot.kind = DocKind::Assembly;
   state.parts.push_back(std::move(slot));
   state.activePart = static_cast<int>(state.parts.size()) - 1;
+  // Which documents the project HAS lives in project.json, not in any
+  // document version — so without this the project reads clean with a brand
+  // new (still empty) tab in it, and closing loses the tab with no prompt.
+  state.projectMetaDirty = true;
   ResetActiveTabUiState(state);
   return state.parts.size() - 1;
 }
@@ -1158,6 +1166,10 @@ size_t AddDrawing(AppState& state, const std::string& name) {
   slot.kind = DocKind::Drawing;
   state.parts.push_back(std::move(slot));
   state.activePart = static_cast<int>(state.parts.size()) - 1;
+  // Which documents the project HAS lives in project.json, not in any
+  // document version — so without this the project reads clean with a brand
+  // new (still empty) tab in it, and closing loses the tab with no prompt.
+  state.projectMetaDirty = true;
   ResetActiveTabUiState(state);
   return state.parts.size() - 1;
 }
@@ -1296,6 +1308,9 @@ bool DeletePart(AppState& state, size_t index, std::string* why) {
   // Fix up the active index after the erase.
   if (static_cast<size_t>(state.activePart) > index)
     state.activePart--;
+  // As in AddPart: the deletion lives in project.json alone, and an unsaved
+  // one would otherwise come back on the next open with nothing said.
+  state.projectMetaDirty = true;
   return true;
 }
 

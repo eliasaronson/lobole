@@ -1220,36 +1220,36 @@ def import_step(path: str) -> dict:
     return _call("import_step", path=path)
 
 
-@_reference(description="Snapshot the current document as a named checkpoint "
-          "(stored beside the project — save_project first). Checkpoint "
-          "before risky multi-step edits; restore beats reconstructing.")
+@_reference(description="Save the WHOLE project and name this state a "
+          "version (save_project to a .dsgn project first). Name a version "
+          "before risky multi-step edits; restoring beats reconstructing.")
 def checkpoint_create(name: str) -> dict:
     return _call("checkpoint_create", name=name)
 
 
-@_reference(description="List the project's checkpoints (name + modified "
-          "unix time, newest first).")
+@_reference(description="List the project's named versions (name + unix "
+          "time, newest first).")
 def checkpoint_list() -> dict:
     return _call("checkpoint_list")
 
 
-@_reference(description="Replace the current document with a checkpoint's "
-          "state (same project path; the restored state is unsaved until "
-          "you save_project).")
+@_reference(description="Put the WHOLE project back to a named version and "
+          "reopen it. The restore is itself recorded, so the state you left "
+          "stays in history_log.")
 def checkpoint_restore(name: str) -> dict:
     return _call("checkpoint_restore", name=name)
 
 
-@_reference(description="Git history of a directory (.dsgn) project: every "
-          "save is a commit, checkpoints are tags (cp/<name>). Returns "
-          "{log: [{hash, subject, unix}]}, newest first.")
+@_reference(description="History of a directory (.dsgn) project: every save "
+          "is a version, named ones are tagged. Returns {log: [{hash, "
+          "subject, unix, named}]}, newest first.")
 def history_log(limit: int = 20) -> dict:
     return _call("history_log", limit=limit)
 
 
-@_reference(description="Restore the project to a commit (hash, tag like "
-          "'cp/v1', or any git rev) and reload it. History stays linear — "
-          "the restored state becomes a new commit on the next save.")
+@_reference(description="Put the WHOLE project back to a version (hash, tag "
+          "like 'cp/v1', or any git rev) and reopen it. History stays linear "
+          "— the restore is recorded on top, so nothing is lost.")
 def history_restore(commit: str) -> dict:
     return _call("history_restore", commit=commit)
 

@@ -6,10 +6,13 @@
 
 class Document;
 
-// Named checkpoints (versioning F4, pre-git v1): each is a full project-JSON
-// copy under `<project>.checkpoints/<name>.json` beside the project file.
-// With git (F5) a checkpoint becomes a commit/tag; this layout is the
-// stepping stone, and restore is just an open_project on the returned path.
+// Named checkpoints (versioning F4) — the NO-GIT FALLBACK since F6. Each is
+// a copy of ONE document under `<project>.checkpoints/<name>.json`: the
+// active part, not the project, so on a multi-part project it captures
+// neither the assembly nor the other tabs. Where git is available a version
+// is a commit + tag of the whole project (ui/HistoryPanel.h), which is what
+// the History panel and the checkpoint_* RPCs use; this remains only so a
+// machine without git still gets something.
 namespace Checkpoints {
 
 struct Info {
