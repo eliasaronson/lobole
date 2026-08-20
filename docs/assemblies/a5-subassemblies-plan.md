@@ -1,6 +1,8 @@
 # A5 — sub-assemblies (assemblies in assemblies) — plan
 
-> Status: **A5 COMPLETE 2026-08-20** — A5.1-A5.4 on the 19th (4ce026a, 7d01be6, 4485c45,
+> Status: **A5 COMPLETE 2026-08-20**, including the three gaps the scoping
+> pass below identified (path queries, per-occurrence configuration,
+> inner-face mates — e895025, fad902f, 431b85f; formats v56 and v57) — A5.1-A5.4 on the 19th (4ce026a, 7d01be6, 4485c45,
 > 5278440). What remains is A5.5, the dock restructure, which is an
 > acceptance exercise on a real model rather than code — and the deferrals
 > listed at the bottom. Reviewed 2026-08-19 against the code (the walker
