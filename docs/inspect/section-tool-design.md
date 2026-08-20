@@ -200,3 +200,22 @@ Everything else in P1 is plumbing.
 - **Hatched cut faces** — a drawing convention; drawing views already section
   independently.
 - **Section in drawings** — `docs/drawings/` owns that.
+
+## Dragging the arrow on an assembly (2026-08-20)
+
+Two bugs, both found by dogfooding after hover highlighting landed:
+
+- **The arrow did not drag on assembly tabs at all.** It was published and
+  drawn there (so it highlighted), but the block routing clicks to handles
+  lived only in the part path; the assembly branch returns after selection.
+  Now one `RouteHandleInput`, called from both.
+- **The drag was unusably slow on assemblies, on any GPU.** The cap rebuild is
+  gated on `!ImGui::IsAnyItemActive()` so caps settle when the tool window's
+  offset SLIDER is released. The viewport arrow is not an ImGui item, so that
+  gate never fired for it: every frame of an arrow drag removed and re-added
+  every mesh and recomputed `Measure::SectionCaps` — an OCC half-space
+  boolean — for every body. One body on a part: invisible. Every part of an
+  assembly at 60 Hz: a crawl. The gate now also asks `handleDrag.active`.
+  The shader clip previews live either way (main.cpp pushes `SectionPlanes`
+  every frame), so only the filled cut face waits for release — which is
+  exactly what the slider already did.

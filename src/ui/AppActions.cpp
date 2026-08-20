@@ -2912,11 +2912,20 @@ void SyncDocumentRenderers(AppState& state) {
   else
     return;
   // Section caps (C4): a change to the clip plane forces a rebuild so the
-  // filled cut faces follow it. Gated on no widget being active so caps
-  // settle when the offset slider is released, not every drag frame (the
-  // shader clip itself previews live regardless).
-  if (SectionPlanes(state) != state.syncedSectionPlanes &&
-      !ImGui::IsAnyItemActive()) {
+  // filled cut faces follow it. Gated on nothing being INTERACTED with, so
+  // caps settle on release rather than every drag frame — the shader clip
+  // previews live regardless (main.cpp pushes SectionPlanes every frame), so
+  // the only thing deferred is the filled cut face.
+  //
+  // `IsAnyItemActive` covers the tool window's offset slider, which is what
+  // this gate was written for. It does NOT cover the viewport ARROW: that is
+  // not an ImGui item, so an arrow drag rebuilt every frame — and a rebuild
+  // removes and re-adds every mesh and recomputes SectionCaps (an OCC
+  // half-space boolean) for every body. One body on a part tab: unnoticeable.
+  // Every part of an assembly, sixty times a second: the drag crawled, on any
+  // GPU.
+  const bool interacting = ImGui::IsAnyItemActive() || state.handleDrag.active;
+  if (SectionPlanes(state) != state.syncedSectionPlanes && !interacting) {
     state.syncedSectionPlanes = SectionPlanes(state);
     state.syncedDocumentVersion = UINT64_MAX; // force the rebuild below
   }

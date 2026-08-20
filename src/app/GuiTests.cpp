@@ -2090,15 +2090,27 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(2);
     IM_CHECK_EQ(ui::OwnerOf(s_App->hoveredHandle), ui::HandleOwner::Section);
 
+    // A rebuild removes and re-adds every mesh (and recomputes an OCC
+    // half-space boolean per body), so mesh ids moving mid-drag IS the lag:
+    // on an assembly that ran for every part, every frame.
+    IM_CHECK(!s_App->documentMeshes.empty());
+    const uint32_t meshIdBefore = s_App->documentMeshes[0].meshId;
+
     ctx->MouseDown(ImGuiMouseButton_Left);
     ctx->MouseMoveToPos(ImVec2(to.x, to.y));
     ctx->Yield();
     IM_CHECK(s_App->handleDrag.active);
     IM_CHECK_EQ(s_App->handleDrag.sectionId, s_App->sections[0].id);
+    // Mid-drag: the cut previews through the shader clip, and NOTHING was
+    // rebuilt. The caps settle on release, exactly as they already did for
+    // the tool window's offset slider.
+    IM_CHECK_EQ(s_App->documentMeshes[0].meshId, meshIdBefore);
     ctx->MouseUp(ImGuiMouseButton_Left);
-    ctx->Yield(2);
+    ctx->Yield(3);
     IM_CHECK(std::abs(s_App->sections[0].offset - before) > 1e-3f);
     IM_CHECK(s_App->selection.Empty()); // the arrow took it, not the part
+    // ...and on release the caps DO follow: the rebuild happened.
+    IM_CHECK(s_App->documentMeshes[0].meshId != meshIdBefore);
   };
 
   // Inserting a SUB-ASSEMBLY through the UI. Until this landed the only way
