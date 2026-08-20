@@ -135,6 +135,35 @@ def main(binary):
         expect(abs(sec["area"] - 600.0) < 1.0,
                f"a section cuts nested geometry ({sec['area']:.0f} mm^2, want 600)")
 
+        # --- reading INTO a unit: the query no tab can answer ---------------
+        # The loose Board sits at y=200; the near Gangway's boards are at
+        # y=0..10, so an inner board is 190 mm clear of it. Neither the Dock
+        # tab nor the Gangway tab can ask this: one side lives in each.
+        gang_id = sub["id"]
+        inner = sub["leaves"][0].split("/")[-1]
+        r = d.call("interference", a=f"{gang_id}/1", b="Board")
+        expect(r["state"] == "clear" and abs(r["distance"] - 190.0) < 1.0,
+               f"a path query crosses the boundary ({r['state']}, "
+               f"{r.get('distance', 0):.0f} mm, want clear 190)")
+
+        # Both Gangways are named "Gangway", so a NAME path is ambiguous by
+        # construction — it must say so and point at the id, not guess.
+        try:
+            d.call("interference", a=f"Gangway/{inner}", b="Board")
+            expect(False, "an ambiguous name path must be refused")
+        except RuntimeError as e:
+            expect("more than one" in str(e),
+                   f"ambiguity names the fix: {str(e)[:60]}")
+        # A typo INSIDE an unambiguous unit says where it looked. (Reaching
+        # for "Gangway/Nope" would report the ambiguity above first, which is
+        # also right: the first bad step is the one worth naming.)
+        try:
+            d.call("interference", a=f"{gang_id}/Nope", b="Board")
+            expect(False, "a bad path must be refused")
+        except RuntimeError as e:
+            expect("no occurrence 'Nope'" in str(e),
+                   f"a typo inside the unit says where it looked: {str(e)[:60]}")
+
         # --- cycles are refused, not rendered -------------------------------
         d.call("set_active_part", name="Gangway")
         try:

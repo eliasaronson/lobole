@@ -87,6 +87,36 @@ std::expected<std::vector<FlatInstance>, std::string>
 Flatten(const AssemblyDocument& top, const PartResolver& partById,
         const AssemblyResolver& asmById, int maxDepth = 8);
 
+// One occurrence somewhere in the tree, addressed by a PATH (A5, read-only).
+//
+// Reading into a sub-assembly is supported; writing into one is not — it is
+// edited on its own tab. So this hands back const pointers and a composed
+// transform, and there is deliberately no mutable twin.
+//
+// The only thing it makes possible: a query ACROSS the boundary. "Is
+// Gangway/Board 19 touching Gang hinge 1" cannot be asked on either tab —
+// the board lives in the sub-assembly's document, the hinge at the top.
+struct PathHit {
+  const AssemblyDocument* owner = nullptr; // the document holding it
+  const Occurrence* occ = nullptr;
+  glm::mat4 world{1.0f}; // composed placement, in the top's space
+  uint64_t rootId = 0;   // the top-level occurrence it belongs to
+  std::string path;      // canonical id chain, e.g. "12/47"
+};
+
+// Resolves "12/47" (ids) or "Gangway/Board 19" (names, when unambiguous).
+// A bare "12" or "Gangway" resolves to a top-level occurrence, so callers can
+// route every reference through here.
+//
+// Fails with a message rather than a null: an ambiguous name path says WHICH
+// names collided, because occurrence names are not unique and the same
+// sub-assembly can be placed twice.
+std::expected<PathHit, std::string> ResolvePath(const AssemblyDocument& top,
+                                                const std::string& ref,
+                                                const PartResolver& partById,
+                                                const AssemblyResolver& asmById,
+                                                int maxDepth = 8);
+
 // Would placing `refId` (of kind `kind`) into `host` close a cycle? Used to
 // refuse the occurrence at add time instead of discovering it at render time.
 bool WouldCycle(const AssemblyDocument& host, uint64_t hostSlotId,

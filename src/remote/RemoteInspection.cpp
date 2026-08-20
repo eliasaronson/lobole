@@ -151,7 +151,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Pairwise check between bodies or occurrences: {clash, volume, distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
      "touching from clear; the no-pair assembly sweep stays clash-only — use "
-     "contact_report for the full picture."},
+     "contact_report for the full picture. A part INSIDE a sub-assembly is "
+     "addressed by path — \"Gangway/Board 19\", or the id chain \"2/17\" "
+     "when a name repeats — which is the only way to ask a question that "
+     "spans the boundary (read-only; a sub-assembly is edited on its tab)."},
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
      "structure), per-pair state/distance, near_misses (gap <= near_tol, "
@@ -293,31 +296,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // occurrence's part bodies are placed by its solved occurrence transform
     // and the same check runs in world space. Headless-safe (pure geometry).
     if (doc == nullptr && state.assembly) {
-      auto occOf = [&](const json& v) -> const Occurrence& {
-        if (v.is_string()) {
-          const std::string name = v.get<std::string>();
-          for (const Occurrence& o : state.assembly->GetOccurrences())
-            if (o.name == name)
-              return o;
-          throw std::runtime_error("occurrence '" + name +
-                                   "' not found (see list_occurrences)");
-        }
-        const Occurrence* o = state.assembly->FindById(v.get<uint64_t>());
-        if (o == nullptr)
-          throw std::runtime_error("occurrence id " + v.dump() +
-                                   " not found (see list_occurrences)");
-        return *o;
+      // A resolved side of the question: which occurrence, and its geometry
+      // already placed in world space.
+      struct Target {
+        const Occurrence* occ = nullptr;
+        std::vector<Body> bodies;
+        std::string label;
       };
-      // A5: an occurrence's body set is its whole flattened subtree, placed —
-      // so a sub-assembly is ONE clash node ("is the gangway hitting the
-      // dock"), not thirty. The cost, stated because it is easy to misread as
-      // a clean bill: a clash BETWEEN two parts inside the gangway is
-      // invisible from here. Check that on the gangway's own tab.
-      const auto bodiesOf = [&](const Occurrence& o) -> std::vector<Body> {
+      const auto subtreeOf = [&](uint64_t rootId) {
         std::vector<Body> out;
         for (const assembly::FlatInstance& inst :
              ui::FlattenActiveAssembly(state)) {
-          if (!inst.visible || inst.rootOccurrenceId != o.id)
+          if (!inst.visible || inst.rootOccurrenceId != rootId)
             continue;
           for (const Body& b : inst.part->GetBodies()) {
             Body nb = b;
@@ -327,17 +317,76 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         }
         return out;
       };
-      const auto pairVolume = [&](const Occurrence& oa,
-                                  const Occurrence& ob) -> double {
-        const std::vector<Body> ba = bodiesOf(oa);
-        const std::vector<Body> bb = bodiesOf(ob);
-        if (ba.empty() || bb.empty())
+      auto targetOf = [&](const json& v) -> Target {
+        Target t;
+        if (v.is_number()) {
+          t.occ = state.assembly->FindById(v.get<uint64_t>());
+          if (t.occ == nullptr)
+            throw std::runtime_error("occurrence id " + v.dump() +
+                                     " not found (see list_occurrences)");
+          t.label = t.occ->name;
+          t.bodies = subtreeOf(t.occ->id);
+          return t;
+        }
+        const std::string name = v.get<std::string>();
+        for (const Occurrence& o : state.assembly->GetOccurrences())
+          if (o.name == name) {
+            t.occ = &o;
+            t.label = o.name;
+            t.bodies = subtreeOf(o.id); // a unit is its whole subtree
+            return t;
+          }
+        // A5: a PATH into a sub-assembly ("Gangway/Board 19", or the id
+        // chain "2/17"). Read-only, and the only way to ask a question that
+        // spans the boundary — the board lives in the sub-assembly's
+        // document and the hinge at the top, so no tab holds both.
+        if (name.find('/') != std::string::npos) {
+          auto hit = assembly::ResolvePath(*state.assembly, name,
+                                           ui::PartResolverFor(state),
+                                           ui::AssemblyResolverFor(state));
+          if (!hit)
+            throw std::runtime_error(hit.error());
+          t.occ = hit->occ;
+          t.label = name;
+          // Its own geometry, at the COMPOSED transform the resolver
+          // returned. Never re-derived from the id: ids are unique per
+          // document, so an inner id collides with a top-level one.
+          if (hit->occ->refKind == OccurrenceRef::Assembly) {
+            if (const AssemblyDocument* sub =
+                    ui::AssemblyDocById(state, hit->occ->partId)) {
+              auto flat = assembly::Flatten(*sub, ui::PartResolverFor(state),
+                                            ui::AssemblyResolverFor(state));
+              if (flat)
+                for (const assembly::FlatInstance& inst : *flat)
+                  for (const Body& b : inst.part->GetBodies()) {
+                    Body nb = b;
+                    nb.shape = b.shape.Transformed(hit->world * inst.world);
+                    t.bodies.push_back(std::move(nb));
+                  }
+            }
+          } else if (const Document* pd =
+                         ui::PartDocById(state, hit->occ->partId)) {
+            for (const Body& b : pd->GetBodies()) {
+              Body nb = b;
+              nb.shape = b.shape.Transformed(hit->world);
+              t.bodies.push_back(std::move(nb));
+            }
+          }
+          return t;
+        }
+        throw std::runtime_error(
+            "occurrence '" + name +
+            "' not found (see list_occurrences; a part inside a "
+            "sub-assembly is addressed by path, e.g. \"Gangway/Board 19\")");
+      };
+      const auto pairVolume = [&](const Target& ta,
+                                  const Target& tb) -> double {
+        if (ta.bodies.empty() || tb.bodies.empty())
           throw std::runtime_error(
-              "an occurrence resolves to no geometry (its part or "
-              "sub-assembly is missing, hidden or empty)");
-        // Already in world space, so the placements here are identities.
-        const auto v = Measure::InterferenceVolume(ba, glm::mat4(1.0f), bb,
-                                                   glm::mat4(1.0f));
+              "'" + (ta.bodies.empty() ? ta.label : tb.label) +
+              "' resolves to no geometry (missing, hidden or empty)");
+        const auto v = Measure::InterferenceVolume(ta.bodies, glm::mat4(1.0f),
+                                                   tb.bodies, glm::mat4(1.0f));
         if (!v)
           throw std::runtime_error(
               "interference check failed — an OpenCASCADE boolean/extrema "
@@ -348,39 +397,42 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (!p.contains("a") && !p.contains("b")) {
         // No pair named: sweep EVERY visible, unsuppressed pair — the
         // whole-assembly clash check a design review actually wants.
-        std::vector<const Occurrence*> occs;
-        for (const Occurrence& o : state.assembly->GetOccurrences())
-          if (o.visible && !state.assembly->OccurrenceSuppressed(o.id))
-            occs.push_back(&o);
+        std::vector<Target> occs;
+        for (const Occurrence& o : state.assembly->GetOccurrences()) {
+          if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
+            continue;
+          Target t;
+          t.occ = &o;
+          t.label = o.name;
+          t.bodies = subtreeOf(o.id);
+          if (!t.bodies.empty())
+            occs.push_back(std::move(t));
+        }
         json pairs = json::array();
         bool any = false;
         for (size_t i = 0; i < occs.size(); ++i)
           for (size_t j = i + 1; j < occs.size(); ++j) {
-            const double v = pairVolume(*occs[i], *occs[j]);
+            const double v = pairVolume(occs[i], occs[j]);
             if (v > 1e-9)
               any = true;
-            pairs.push_back({{"a", occs[i]->name},
-                             {"b", occs[j]->name},
+            pairs.push_back({{"a", occs[i].label},
+                             {"b", occs[j].label},
                              {"clash", v > 1e-9},
                              {"volume", v}});
           }
         return json{{"clash", any}, {"pairs", pairs}};
       }
-      const Occurrence& oa = occOf(p.at("a"));
-      const Occurrence& ob = occOf(p.at("b"));
-      if (oa.id == ob.id)
+      const Target ta = targetOf(p.at("a"));
+      const Target tb = targetOf(p.at("b"));
+      if (ta.occ == tb.occ)
         throw std::runtime_error("pick two different occurrences");
       const double touchTol = p.value("touch_tol", 1e-3);
-      // A5: each side is its whole flattened subtree, so naming a
-      // sub-assembly asks about the unit ("does the hinge reach the dock").
-      const std::vector<Body> ba = bodiesOf(oa);
-      const std::vector<Body> bb = bodiesOf(ob);
-      if (ba.empty() || bb.empty())
+      if (ta.bodies.empty() || tb.bodies.empty())
         throw std::runtime_error(
-            "an occurrence resolves to no geometry (its part or "
-            "sub-assembly is missing, hidden or empty)");
-      const auto c =
-          Measure::ContactBetween(ba, glm::mat4(1.0f), bb, glm::mat4(1.0f));
+            "'" + (ta.bodies.empty() ? ta.label : tb.label) +
+            "' resolves to no geometry (missing, hidden or empty)");
+      const auto c = Measure::ContactBetween(ta.bodies, glm::mat4(1.0f),
+                                             tb.bodies, glm::mat4(1.0f));
       if (!c)
         throw std::runtime_error(
             "interference check failed — an OpenCASCADE boolean/extrema "
@@ -390,8 +442,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                   {"volume", c->volume},
                   {"distance", c->distance},
                   {"state", ContactState(*c, touchTol)},
-                  {"a", oa.name},
-                  {"b", ob.name}};
+                  {"a", ta.label},
+                  {"b", tb.label}};
     }
     const auto& bodies = RequirePartDoc(doc, "interference").GetBodies();
     const double touchTol = p.value("touch_tol", 1e-3);

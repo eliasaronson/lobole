@@ -116,6 +116,87 @@ Flatten(const AssemblyDocument& top, const PartResolver& partById,
   return ctx.out;
 }
 
+namespace {
+// One step of a path: match an occurrence in `doc` by id (all digits) or by
+// name. Returns nullptr when absent; sets `ambiguous` when a NAME matches
+// more than one, which is possible because names are not unique.
+const Occurrence* StepInto(const AssemblyDocument& doc, const std::string& step,
+                           bool& ambiguous) {
+  ambiguous = false;
+  const bool numeric = !step.empty() && step.find_first_not_of("0123456789") ==
+                                            std::string::npos;
+  if (numeric) {
+    const uint64_t id = std::stoull(step);
+    for (const Occurrence& o : doc.GetOccurrences())
+      if (o.id == id)
+        return &o;
+    return nullptr;
+  }
+  const Occurrence* hit = nullptr;
+  for (const Occurrence& o : doc.GetOccurrences()) {
+    if (o.name != step)
+      continue;
+    if (hit != nullptr) {
+      ambiguous = true;
+      return nullptr;
+    }
+    hit = &o;
+  }
+  return hit;
+}
+} // namespace
+
+std::expected<PathHit, std::string> ResolvePath(const AssemblyDocument& top,
+                                                const std::string& ref,
+                                                const PartResolver& partById,
+                                                const AssemblyResolver& asmById,
+                                                int maxDepth) {
+  std::vector<std::string> steps;
+  size_t start = 0;
+  while (start <= ref.size()) {
+    const size_t slash = ref.find('/', start);
+    steps.push_back(ref.substr(
+        start, slash == std::string::npos ? std::string::npos : slash - start));
+    if (slash == std::string::npos)
+      break;
+    start = slash + 1;
+  }
+  if (steps.empty() || steps.front().empty())
+    return std::unexpected("empty occurrence path");
+  if (static_cast<int>(steps.size()) > maxDepth + 1)
+    return std::unexpected("occurrence path is deeper than " +
+                           std::to_string(maxDepth) + " levels");
+
+  const AssemblyDocument* doc = &top;
+  PathHit hit;
+  std::string canonical;
+  for (size_t i = 0; i < steps.size(); i++) {
+    if (doc == nullptr)
+      return std::unexpected("'" + steps[i - 1] +
+                             "' is a part, so nothing is inside it");
+    bool ambiguous = false;
+    const Occurrence* occ = StepInto(*doc, steps[i], ambiguous);
+    if (ambiguous)
+      return std::unexpected("'" + steps[i] +
+                             "' names more than one occurrence here — use its "
+                             "id instead (list_occurrences shows them)");
+    if (occ == nullptr)
+      return std::unexpected("no occurrence '" + steps[i] + "'" +
+                             (i ? " inside '" + steps[i - 1] + "'" : ""));
+    hit.owner = doc;
+    hit.occ = occ;
+    hit.world = hit.world * PlacementOf(*occ);
+    if (i == 0)
+      hit.rootId = occ->id;
+    canonical += (canonical.empty() ? "" : "/") + std::to_string(occ->id);
+    doc = occ->refKind == OccurrenceRef::Assembly ? asmById(occ->partId)
+                                                  : nullptr;
+  }
+  hit.path = canonical;
+  (void)partById; // resolution is structural; bodies are the caller's job
+  return hit;
+}
+
 bool WouldCycle(const AssemblyDocument& host, uint64_t hostSlotId,
                 uint64_t refId, OccurrenceRef kind,
                 const AssemblyResolver& asmById, std::string* why) {
