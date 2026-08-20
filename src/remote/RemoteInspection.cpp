@@ -371,13 +371,16 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (oa.id == ob.id)
         throw std::runtime_error("pick two different occurrences");
       const double touchTol = p.value("touch_tol", 1e-3);
-      Document* pa = ui::PartDocById(state, oa.partId);
-      Document* pb = ui::PartDocById(state, ob.partId);
-      if (pa == nullptr || pb == nullptr)
-        throw std::runtime_error("an occurrence's part document is missing");
+      // A5: each side is its whole flattened subtree, so naming a
+      // sub-assembly asks about the unit ("does the hinge reach the dock").
+      const std::vector<Body> ba = bodiesOf(oa);
+      const std::vector<Body> bb = bodiesOf(ob);
+      if (ba.empty() || bb.empty())
+        throw std::runtime_error(
+            "an occurrence resolves to no geometry (its part or "
+            "sub-assembly is missing, hidden or empty)");
       const auto c =
-          Measure::ContactBetween(pa->GetBodies(), ui::OccurrenceMatrix(oa),
-                                  pb->GetBodies(), ui::OccurrenceMatrix(ob));
+          Measure::ContactBetween(ba, glm::mat4(1.0f), bb, glm::mat4(1.0f));
       if (!c)
         throw std::runtime_error(
             "interference check failed — an OpenCASCADE boolean/extrema "
@@ -853,25 +856,45 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           "set_active_part (see list_parts)");
     const double touchTol = p.value("touch_tol", 1e-3);
     const double nearTol = p.value("near_tol", 1.0);
+    // A5: one node per TOP-LEVEL occurrence, whose geometry is its whole
+    // flattened subtree in world space. That is what makes "is the gangway
+    // attached to the dock" a question about two nodes and the hinges
+    // between them, instead of thirty parts — and the reason a clash BETWEEN
+    // two parts inside one sub-assembly does not appear here: it belongs to
+    // that assembly's own report, on its own tab.
     struct Ent {
       const Occurrence* occ;
-      Document* part;
-      glm::mat4 xf;
+      std::vector<Body> bodies; // already placed in world space
+      glm::mat4 xf{1.0f};       // identity: `bodies` carry the placement
       glm::vec3 min, max;
     };
     std::vector<Ent> ents;
     json skipped = json::array();
+    std::map<uint64_t, std::vector<Body>> byRoot;
+    for (const assembly::FlatInstance& inst :
+         ui::FlattenActiveAssembly(state)) {
+      if (!inst.visible)
+        continue;
+      for (const Body& b : inst.part->GetBodies()) {
+        Body nb = b;
+        nb.shape = b.shape.Transformed(inst.world);
+        byRoot[inst.rootOccurrenceId].push_back(std::move(nb));
+      }
+    }
     for (const Occurrence& o : state.assembly->GetOccurrences()) {
       if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
         continue;
-      Document* pd = ui::PartDocById(state, o.partId);
-      Ent e{&o, pd, pd ? ui::OccurrenceMatrix(o) : glm::mat4(1.0f), {}, {}};
-      if (pd == nullptr ||
-          !Measure::WorldBounds(pd->GetBodies(), e.xf, e.min, e.max)) {
-        skipped.push_back(o.name); // no part doc / no valid shapes
+      const auto it = byRoot.find(o.id);
+      Ent e;
+      e.occ = &o;
+      if (it != byRoot.end())
+        e.bodies = it->second;
+      if (e.bodies.empty() ||
+          !Measure::WorldBounds(e.bodies, e.xf, e.min, e.max)) {
+        skipped.push_back(o.name); // nothing resolvable under this occurrence
         continue;
       }
-      ents.push_back(e);
+      ents.push_back(std::move(e));
     }
     // AABB gap: 0 when the boxes overlap; a lower bound on exact distance.
     const auto boxGap = [](const Ent& a, const Ent& b) {
@@ -892,9 +915,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       for (size_t j = i + 1; j < ents.size(); ++j) {
         if (boxGap(ents[i], ents[j]) > nearTol)
           continue; // provably clear by more than the near window
-        const auto c =
-            Measure::ContactBetween(ents[i].part->GetBodies(), ents[i].xf,
-                                    ents[j].part->GetBodies(), ents[j].xf);
+        const auto c = Measure::ContactBetween(ents[i].bodies, ents[i].xf,
+                                               ents[j].bodies, ents[j].xf);
         if (!c)
           continue;
         const char* st = ContactState(*c, touchTol);
