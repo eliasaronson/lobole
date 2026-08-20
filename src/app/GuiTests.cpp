@@ -776,6 +776,100 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
   };
 
+  // The force arrow must POINT the way the force pushes, and be draggable to
+  // change its magnitude (docs/ui/viewport-handles.md). Both asserted on the
+  // drawn primitives and the study, not on pixels.
+  t = IM_REGISTER_TEST(engine, "sim", "force_arrow_points_along_the_force");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr);
+
+    // A force on a known face, pushing -Y.
+    const Body& body = Doc()->GetBodies()[0];
+    IM_CHECK(!body.elementMap.names.empty());
+    fem::Load load;
+    load.id = Doc()->AllocateId();
+    load.type = fem::LoadType::Force;
+    load.face =
+        ElementRef{body.createdBy, body.elementMap.names.begin()->second};
+    load.magnitude = 100.0;
+    load.direction = glm::dvec3(0.0, -1.0, 0.0);
+    study->loads.push_back(load);
+    ctx->Yield(2);
+
+    // The glyph: the arrow's HEAD is the end the force points toward, so
+    // head-minus-tail must run along the force direction. (The head is drawn
+    // as two barbs at the far end; the shaft is the first primitive pair.)
+    std::vector<PrimVertex> prims;
+    s_App->viewportHandles.clear();
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    const glm::vec3 shaftA = prims[0].posThis, shaftB = prims[0].posOther;
+    const glm::vec3 along = glm::normalize(shaftB - shaftA);
+    IM_CHECK(std::abs(along.y + 1.0f) < 1e-3f); // points -Y, like the force
+    IM_CHECK(std::abs(along.x) < 1e-3f);
+    IM_CHECK(std::abs(along.z) < 1e-3f);
+
+    // And it published a draggable handle, whose axis is the same direction.
+    const ui::ViewportHandle* h = nullptr;
+    for (const ui::ViewportHandle& v : s_App->viewportHandles)
+      if (ui::OwnerOf(v.id) == ui::HandleOwner::Load)
+        h = &v;
+    IM_CHECK(h != nullptr);
+    IM_CHECK_EQ(ui::SubOf(h->id), load.id);
+    IM_CHECK(std::abs(h->dir.y + 1.0f) < 1e-3f);
+
+    // Drag it along the force: the magnitude grows, as ONE undo entry.
+    // (Creating the box is itself an undo entry, so "can undo" is already
+    // true here — what matters is that the DRAG adds exactly one more.)
+    s_App->camera->StopAnimation();
+    glm::vec3 lo(0.0f), hi(0.0f);
+    body.shape.GetBoundingBox(lo, hi);
+    const glm::vec3 mid = (lo + hi) * 0.5f;
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    s_App->camera->SetPosition(mid + glm::vec3(0.0f, 0.0f, 1.0f) * 14.0f);
+    ctx->Yield(2);
+    s_App->viewportHandles.clear();
+    prims.clear();
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    for (const ui::ViewportHandle& v : s_App->viewportHandles)
+      if (ui::OwnerOf(v.id) == ui::HandleOwner::Load)
+        h = &v;
+    IM_CHECK(h != nullptr);
+    const glm::vec2 grab =
+        ui::WorldToScreen(*s_App, h->origin + h->dir * (h->length * 0.5f));
+    const glm::vec2 pull =
+        ui::WorldToScreen(*s_App, h->origin + h->dir * (h->length * 1.4f));
+    ctx->MouseMoveToPos(ImVec2(grab.x, grab.y));
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::OwnerOf(s_App->hoveredHandle), ui::HandleOwner::Load);
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(ImVec2(pull.x, pull.y));
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.loadDrag.active);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr && !study->loads.empty());
+    IM_CHECK(study->loads[0].magnitude > 100.0); // pulling grew it
+    // ONE undo restores the grab-time magnitude — not a step per frame.
+    IM_CHECK(s_App->commands->CanUndo());
+    s_App->commands->Undo(*Doc());
+    ctx->Yield();
+    study = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK(study != nullptr && !study->loads.empty());
+    IM_CHECK(std::abs(study->loads[0].magnitude - 100.0) < 1e-6);
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
   // Simulation is a mode, and its studies belong to the document. File > New
   // used to leave the simulation toolbar up over a brand-new part.
   t = IM_REGISTER_TEST(engine, "sim", "new_document_leaves_the_mode");

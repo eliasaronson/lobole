@@ -15,7 +15,7 @@ one of those is not interactive at all:
 | extrude / fillet / revolve | preview handles | `HandleDrag` | inline in `HandlePreviewHandleInput` | `BuildPreviewHandleOverlay` |
 | assembly move, mate DOF, explode offset | gizmo | `GizmoDrag` | `GizmoHitTest` | `BuildGizmoOverlay` |
 | section offset | *grafted onto the preview handle* — `HandleDrag::sectionId` | same | same |
-| simulation force / pressure | **none** — `ArrowGlyph` in `StudyPanel.cpp` draws them, nothing picks them | | |
+| simulation force / pressure | force: `SimulationState::LoadDrag` (added 2026-08-20); pressure: none | inline in `HandleLoadDragInput` | `AppendSimulationBCGlyphs` |
 
 So: the *math* is already shared (`ui/DragMath.h` — `RayAxisParam`,
 `PointRayDist`, `RayPlane`, `RotateAngle`, `GizmoScale`; 10 uses in
@@ -90,9 +90,25 @@ gain the request asked for. The shared list answers "which handle", which is
 all hover needs; the two tests use the same geometry and the same grab radius,
 so the highlight cannot promise a grab the click would miss.
 
-Simulation loads still draw through `ArrowGlyph` and are still not draggable.
-Making them draggable is now a matter of emitting handles and writing one
-grab payload, which is the point of the seam.
+Simulation loads shipped one round later and were exactly the promised size:
+`AppendSimulationBCGlyphs` publishes one handle per force load and draws it
+through `HandleTint`, and `HandleLoadDragInput` is the grab payload — about
+50 lines. No shared code changed to accommodate a fourth owner, which is the
+evidence the seam was cut in the right place.
+
+The drag maps arrow *length* to magnitude relatively: `magnitude = start * (1
++ (t - startParam) / length)`, clamped at zero. Not absolute (the arrow's
+length is a view-scaled glyph, not a Newton ruler, so "drag to 2x the drawn
+length" is the only reading with a meaning), and not additive (an absolute
+step would behave differently on a 5 N and a 5 kN load). One
+`ModifyStudyCommand` is pushed on release from a snapshot taken at grab, so
+the whole drag is one undo entry, and the load's `magnitudeExpr` is cleared —
+dragging a value that a variable drives has to break that link or the next
+regeneration silently reverts the drag.
+
+Pressure loads deliberately stay undraggable: their glyph is a *field* of
+short arrows over the face rather than one arrow with a tip, so there is no
+shaft to grab. They would need a different affordance, not this one.
 
 ## Found immediately after, by the hover it added
 

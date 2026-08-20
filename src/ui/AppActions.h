@@ -361,6 +361,13 @@ void SimulationApplyToFace(AppState& state, const ElementRef& face);
 // anchor hatches on fixed faces, diamonds on keep faces.
 void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out);
 
+// Dragging a force arrow to change its magnitude. Its own grab payload
+// (SimulationState::loadDrag), like the gizmo's and the section arrow's —
+// the shared layer answers WHICH handle, not what happens to it
+// (docs/ui/viewport-handles.md). Returns true when it consumed the event.
+bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
+                         bool down, bool released);
+
 // A world-space cross at the peak of the displayed result field (max von Mises
 // or max displacement), warped by the deform scale. Pushed into the no-depth
 // gizmo channel like the CoG marker. Defined in AppActions.cpp.

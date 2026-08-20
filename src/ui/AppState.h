@@ -364,6 +364,19 @@ struct SimulationState {
   // Keep (topology) freezes the picked face solid during optimization.
   enum class Tool { None, Fixed, Force, Pressure, Keep };
   Tool tool = Tool::None;
+
+  // Dragging a force arrow in the viewport to change its MAGNITUDE
+  // (docs/ui/viewport-handles.md — this owner keeps its own grab payload,
+  // like the gizmo and the section arrow). Snapshot at grab, mutate live,
+  // one ModifyStudyCommand on release.
+  struct LoadDrag {
+    bool active = false;
+    uint64_t loadId = 0;
+    double startMagnitude = 0.0;
+    float startParam = 0.0f;
+    std::string beforeJson; // the study at grab, for the undo entry
+  };
+  LoadDrag loadDrag;
   // Params applied to the load placed by the next face pick. The direction
   // is only used when `directionOverridden` — otherwise the load takes the
   // inward normal of the face that is clicked (fem::DefaultForceDirection),

@@ -30,6 +30,7 @@ enum class HandleOwner : uint8_t {
   Feature = 1, // the pending preview feature's headline scalar
   Section = 2, // the active section's offset
   Gizmo = 3,   // an occurrence / mate DOF / explode offset axis
+  Load = 4,    // a simulation force arrow (drags its magnitude)
 };
 
 // A handle id: the owner plus whatever that owner needs to tell its own

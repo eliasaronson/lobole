@@ -9,6 +9,7 @@
 #include "ui/AppState.h"
 #include "ui/ExprInput.h"         // expression-capable numeric fields
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
+#include "ui/ViewportHandle.h"
 #include <utility>
 
 #include "IconsFontAwesome6.h"
@@ -634,6 +635,82 @@ void ArrowGlyph(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color,
 }
 } // namespace
 
+// Dragging a force arrow changes its MAGNITUDE. The mapping is relative, not
+// absolute: pulling one arrow-length doubles the force, pushing back toward
+// the face shrinks it to zero. An absolute mapping would need the arrow's
+// length to mean newtons, and it cannot — the glyph is view-scaled so it
+// stays visible on a 90 mm part and a 3 m dock alike.
+//
+// Snapshot at grab, mutate live, one ModifyStudyCommand on release: the
+// gizmo's contract, so a drag is one undo step and the solved results go
+// stale exactly once.
+bool HandleLoadDragInput(AppState& state, const Ray& ray, bool clicked,
+                         bool down, bool released) {
+  SimulationState& sim = state.simulation;
+  Document* doc = state.document.get();
+  if (!sim.IsActive() || doc == nullptr)
+    return false;
+  fem::Study* study = doc->FindStudy(sim.activeStudyId);
+  if (study == nullptr)
+    return false;
+
+  const auto findLoad = [&](uint64_t id) -> fem::Load* {
+    for (fem::Load& l : study->loads)
+      if (l.id == id)
+        return &l;
+    return nullptr;
+  };
+
+  if (sim.loadDrag.active) {
+    fem::Load* load = findLoad(sim.loadDrag.loadId);
+    if (released || !down || load == nullptr) {
+      sim.loadDrag.active = false;
+      if (load != nullptr && !sim.loadDrag.beforeJson.empty()) {
+        // One undo entry for the whole drag: replay the before/after pair
+        // the command stack expects.
+        const nlohmann::json after = DocumentIO::StudyToJson(*study);
+        const nlohmann::json before =
+            nlohmann::json::parse(sim.loadDrag.beforeJson, nullptr, false);
+        if (!before.is_discarded() && before != after && state.commands)
+          state.commands->Execute(
+              std::make_unique<ModifyStudyCommand>("Drag force", before, after),
+              *doc);
+      }
+      return true;
+    }
+    const glm::vec3 dir = glm::normalize(
+        glm::vec3(load->direction.x, load->direction.y, load->direction.z));
+    const float len = state.camera
+                          ? std::max(0.055f * state.camera->GetDistance(), 1.2f)
+                          : 1.2f;
+    const float t =
+        RayAxisParam(ray.origin, ray.direction, glm::vec3(0.0f), dir);
+    const double scale =
+        1.0 + static_cast<double>(t - sim.loadDrag.startParam) / len;
+    load->magnitude = std::max(0.0, sim.loadDrag.startMagnitude * scale);
+    load->magnitudeExpr.clear(); // a dragged value is a number, not a formula
+    // No staleness bump mid-drag: the ModifyStudyCommand on release is what
+    // moves the document version, so results go stale exactly once — the
+    // gizmo's solve-on-release contract.
+    return true;
+  }
+
+  if (!clicked || OwnerOf(state.hoveredHandle) != HandleOwner::Load)
+    return false;
+  fem::Load* load = findLoad(SubOf(state.hoveredHandle));
+  if (load == nullptr)
+    return false;
+  const glm::vec3 dir = glm::normalize(
+      glm::vec3(load->direction.x, load->direction.y, load->direction.z));
+  sim.loadDrag.active = true;
+  sim.loadDrag.loadId = load->id;
+  sim.loadDrag.startMagnitude = load->magnitude;
+  sim.loadDrag.startParam =
+      RayAxisParam(ray.origin, ray.direction, glm::vec3(0.0f), dir);
+  sim.loadDrag.beforeJson = DocumentIO::StudyToJson(*study).dump();
+  return true; // consumed: do not also re-pick the face behind the arrow
+}
+
 void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
   SimulationState& sim = state.simulation;
   Document* doc = state.document.get();
@@ -691,7 +768,23 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
     case fem::LoadType::Force: {
       const glm::vec3 dir = glm::normalize(
           glm::vec3(load.direction.x, load.direction.y, load.direction.z));
-      ArrowGlyph(c - dir * len, c, kForce, out); // arrow INTO the face point
+      // The arrow flies ALONG the force and lands on the face: tail behind,
+      // head at the face point. A force that pushes -Y draws pointing -Y.
+      const glm::vec3 tail = c - dir * len;
+      // Draggable (docs/ui/viewport-handles.md): the shaft is the handle, so
+      // what highlights is exactly what a click grabs.
+      ViewportHandle vh;
+      vh.id = HandleId(HandleOwner::Load, load.id);
+      vh.kind = HandleKind::Linear;
+      vh.origin = tail;
+      vh.dir = dir;
+      vh.length = len;
+      vh.color = glm::vec3(kForce);
+      state.viewportHandles.push_back(vh);
+      const glm::vec3 tint = HandleTint(
+          vh, state.hoveredHandle,
+          sim.loadDrag.active && sim.loadDrag.loadId == load.id ? vh.id : 0);
+      ArrowGlyph(tail, c, glm::vec4(tint, kForce.a), out);
       break;
     }
     case fem::LoadType::Pressure: {

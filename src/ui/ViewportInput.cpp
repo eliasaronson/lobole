@@ -379,6 +379,26 @@ void HandleViewportInput(AppState& state) {
   // pending feature: the section arrow belongs to no feature, and this gate
   // used to route every attempt to drag it into the picker, which selected
   // whatever part was behind the arrow.
+  // Simulation force arrows first: in simulation mode they are the handles
+  // on screen, and a missed grab must still fall through to face picking
+  // (that is how a load gets placed at all).
+  if (state.simulation.IsActive() && state.camera && state.faceSelector) {
+    const bool clicked =
+        overViewport && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    if (state.simulation.loadDrag.active || clicked) {
+      const ImGuiIO& io2 = ImGui::GetIO();
+      Ray ray = state.faceSelector->ScreenToWorldRay(
+          io2.MousePos.x - state.viewportPos.x,
+          io2.MousePos.y - state.viewportPos.y,
+          static_cast<int>(state.viewportSize.x),
+          static_cast<int>(state.viewportSize.y), *state.camera);
+      if (HandleLoadDragInput(state, ray, clicked,
+                              ImGui::IsMouseDown(ImGuiMouseButton_Left),
+                              ImGui::IsMouseReleased(ImGuiMouseButton_Left)))
+        return;
+    }
+  }
+
   if (RouteHandleInput(state, overViewport))
     return;
 
