@@ -193,6 +193,16 @@ void MeshRenderer::SetInstanceTransform(uint32_t instanceId,
   }
 }
 
+std::optional<glm::mat4>
+MeshRenderer::GetInstanceTransform(uint32_t instanceId) const {
+  // Same indexing as GetInstance: ids are 1-based slots, and a removed
+  // instance leaves a null.
+  if (instanceId == 0 || instanceId > m_instances.size())
+    return std::nullopt;
+  const MeshInstance* inst = m_instances[instanceId - 1].get();
+  return inst ? std::optional<glm::mat4>(inst->transform) : std::nullopt;
+}
+
 void MeshRenderer::SetInstanceColor(uint32_t instanceId,
                                     const glm::vec3& albedo) {
   if (MeshInstance* instance = GetInstance(instanceId)) {

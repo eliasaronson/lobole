@@ -2086,6 +2086,67 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->KeyPress(ImGuiKey_Escape);
   };
 
+  // Dragging a SUB-ASSEMBLY: its parts must move WITH it, keeping their
+  // places inside the unit. PushOccurrenceLive used to set every mesh of the
+  // dragged occurrence to the occurrence's own matrix — true when a mesh IS
+  // the part, but for a unit's leaves it collapsed them all onto its origin
+  // for the length of the drag; they snapped back only because releasing
+  // triggers a resync that recomposes them.
+  t = IM_REGISTER_TEST(engine, "assembly", "dragging_a_unit_keeps_its_shape");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    // A unit with two parts 500 mm apart, so a collapse is unmistakable.
+    const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
+    ui::SetActivePart(*s_App, unitIdx);
+    for (int i = 0; i < 2; i++) {
+      Occurrence inner;
+      inner.name = i ? "Far" : "Near";
+      inner.partId = s_App->parts[0].id;
+      inner.fixed = true;
+      inner.position = glm::vec3(i * 500.0f, 0.0f, 0.0f);
+      s_App->assembly->AddOccurrence(inner);
+    }
+    const size_t topIdx = ui::AddAssembly(*s_App, "Top");
+    ui::SetActivePart(*s_App, topIdx);
+    Occurrence unit;
+    unit.name = "Unit1";
+    unit.partId = s_App->parts[unitIdx].id;
+    unit.refKind = OccurrenceRef::Assembly;
+    s_App->assembly->AddOccurrence(unit);
+    ctx->Yield(3);
+
+    // Each leaf knows where it sits inside the unit — 0 and 500 apart.
+    std::vector<float> localX;
+    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes)
+      localX.push_back(m.localXf[3].x);
+    IM_CHECK_EQ(localX.size(), (size_t)2);
+    IM_CHECK(std::abs(std::abs(localX[0] - localX[1]) - 500.0f) < 1e-3f);
+
+    // Move the unit the way a drag does, and the composed transforms must
+    // stay 500 apart rather than both landing on the new origin.
+    Occurrence* placed =
+        s_App->assembly->FindById(s_App->assembly->GetOccurrences()[0].id);
+    placed->position = glm::vec3(1000.0f, 0.0f, 0.0f);
+    ui::PushOccurrenceLive(*s_App, placed->id);
+    ctx->Yield();
+    // Ask the RENDERER what it is drawing, not the arithmetic this test
+    // could do itself — the first version of this check recomputed
+    // base * localXf and passed with the fix reverted.
+    std::vector<float> worldX;
+    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes) {
+      const auto xf = s_App->meshRenderer->GetInstanceTransform(m.meshId);
+      IM_CHECK_SILENT(xf.has_value());
+      worldX.push_back((*xf)[3].x);
+    }
+    IM_CHECK_EQ(worldX.size(), (size_t)2);
+    IM_CHECK(std::abs(std::abs(worldX[0] - worldX[1]) - 500.0f) < 1e-3f);
+    IM_CHECK(std::abs(std::min(worldX[0], worldX[1]) - 1000.0f) < 1e-3f);
+  };
+
   // Refine's whole point is the seam a boolean leaves behind: count the
   // B-Rep faces through the render mesh, which needs no naming.
   t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");

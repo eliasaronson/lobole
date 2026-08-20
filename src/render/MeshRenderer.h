@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <vulkan/vulkan.h>
 
@@ -163,6 +164,10 @@ public:
                        const glm::mat4& transform = glm::mat4(1.0f));
   void RemoveInstance(uint32_t instanceId);
   void SetInstanceTransform(uint32_t instanceId, const glm::mat4& transform);
+  // What an instance is actually rendering at. Exists so a test can assert
+  // the RENDERER's state rather than recomputing the caller's arithmetic —
+  // the difference between testing the path and testing the test.
+  std::optional<glm::mat4> GetInstanceTransform(uint32_t instanceId) const;
   void SetInstanceColor(uint32_t instanceId, const glm::vec3& albedo);
   // Albedo + PBR params in one shot. params is (metallic, roughness,
   // specular, reflectance).

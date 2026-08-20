@@ -45,6 +45,12 @@ struct DocumentRenderMesh {
   uint32_t outlineId;
   size_t bodyIndex; // index into the source part's GetBodies() (element names)
   uint64_t occurrenceId = 0; // assembly: the occurrence; 0 for a part body
+  // Where this mesh sits INSIDE its occurrence (A5). Identity when the
+  // occurrence places a part — the mesh is the part. For a leaf inside a
+  // sub-assembly it is the chain from the unit's frame down to that leaf, so
+  // a live drag can move the unit without collapsing its contents onto the
+  // unit's origin (which is exactly what it did before this existed).
+  glm::mat4 localXf{1.0f};
   // B-Rep edge polylines (world space, edgeIndex order — the ElementMap /
   // PickEdge convention). Cached here for edge highlighting.
   std::vector<std::vector<glm::vec3>> edgePolylines;

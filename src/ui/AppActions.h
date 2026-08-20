@@ -197,6 +197,16 @@ void BuildMateToolOverlay(AppState& state, std::vector<LineVertex3D>& lines);
 // and returns true when it consumed the viewport (so the caller skips
 // pick/orbit).
 void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines);
+// Pushes an occurrence's current placement to the renderers WITHOUT a resync
+// — the live-drag path. Composes each mesh's place inside the occurrence, so
+// dragging a sub-assembly moves the unit rather than collapsing its parts
+// onto its origin.
+void PushOccurrenceLive(AppState& state, uint64_t occId);
+
+// The placement a mesh renders at (solved ∘ explode), exposed for tests and
+// for anything that has to reproduce the live-drag composition.
+glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);
+
 bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,
                       bool released);
 

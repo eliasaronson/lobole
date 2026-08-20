@@ -684,22 +684,31 @@ bool GizmoHitTest(const AppState& state, const GizmoSpec& spec, const Ray& ray,
   return found;
 }
 
+} // namespace
+
 // Push a dragged occurrence's live transform straight to the renderers (no
 // version bump / resync) for every render mesh of the occurrence.
 void PushOccurrenceLive(AppState& state, uint64_t occId) {
   const Occurrence* occ = state.assembly->FindById(occId);
   if (!occ)
     return;
-  const glm::mat4 xf = DisplayMatrix(state, *occ);
+  const glm::mat4 base = DisplayMatrix(state, *occ);
   for (const DocumentRenderMesh& m : state.documentMeshes) {
     if (m.occurrenceId != occId)
       continue;
+    // A5: compose the leaf's place INSIDE the unit. Pushing the occurrence
+    // matrix alone piled every part of a dragged sub-assembly onto its
+    // origin mid-drag — they snapped back only because the resync on release
+    // recomputed the composition.
+    const glm::mat4 xf = base * m.localXf;
     if (state.meshRenderer)
       state.meshRenderer->SetInstanceTransform(m.meshId, xf);
     if (state.outlineRenderer)
       state.outlineRenderer->SetMeshTransform(m.outlineId, xf);
   }
 }
+
+namespace {
 
 // Appends one axis's handles (arrow and/or arc) per the spec.
 void AppendGizmoHandles(const GizmoSpec& spec, float L,
@@ -1101,7 +1110,12 @@ void SyncAssemblyRenderers(AppState& state) {
       if (state.faceSelector)
         state.faceSelector->AddMesh(meshId, sb.vertices, sb.indices,
                                     sb.triangleFaces, xf, sb.edges);
-      state.documentMeshes.push_back({meshId, outlineId, bi, occ.id, sb.edges});
+      // localXf: the leaf's place inside the unit. xf = DisplayMatrix(occ) *
+      // localXf by construction, which is what lets the drag path recompose
+      // it per frame without a resync.
+      state.documentMeshes.push_back(
+          {meshId, outlineId, bi, occ.id,
+           glm::inverse(OccurrenceMatrix(occ)) * inst.world, sb.edges});
     }
 
     // Section caps (I3). Without these an assembly section shows the inside
@@ -1232,8 +1246,10 @@ void SyncInContextGhosts(AppState& state) {
           state.meshRenderer->AddInstance(it->second[bi], xf);
       state.meshRenderer->SetInstanceColor(meshId, kGhostTint);
       state.meshRenderer->SetInstanceGhost(meshId); // after color: sets alpha
+      // Ghosts are never dragged, so their localXf is unused; keep it
+      // honest anyway rather than leaving a lie in the record.
       state.documentMeshes.push_back(
-          {meshId, /*outlineId=*/0, bi, inst.rootOccurrenceId, {}});
+          {meshId, /*outlineId=*/0, bi, inst.rootOccurrenceId, inst.world, {}});
     }
   }
 }

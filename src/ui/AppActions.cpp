@@ -2019,6 +2019,10 @@ glm::mat4 DisplayMatrix(const AppState& state, const Occurrence& o) {
          OccurrenceMatrix(o);
 }
 
+glm::mat4 DisplayMatrixOf(const AppState& state, const Occurrence& o) {
+  return DisplayMatrix(state, o);
+}
+
 // The part document an occurrence references, by stable id (active or stashed).
 Document* PartDocById(AppState& state, uint64_t partId) {
   for (size_t i = 0; i < state.parts.size(); i++)
@@ -2999,8 +3003,9 @@ void SyncDocumentRenderers(AppState& state) {
       state.faceSelector->AddMesh(meshId, vertices, cadMesh.indices,
                                   cadMesh.triangleFaces, glm::mat4(1.0f),
                                   edges);
-    state.documentMeshes.push_back(
-        {meshId, outlineId, bi, /*occurrenceId=*/0, std::move(edges)});
+    state.documentMeshes.push_back({meshId, outlineId, bi,
+                                    /*occurrenceId=*/0, glm::mat4(1.0f),
+                                    std::move(edges)});
   }
 
   AppendSectionCaps(state, bodies, bodyColors);
