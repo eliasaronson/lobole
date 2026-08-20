@@ -25,6 +25,16 @@
 > per-frame-in-flight edge buffers — 131-mesh Waveshare assembly reclassifies
 > in 0.8 ms, only on camera settle. Plan + numbers:
 > [outline-perf.md](outline-perf.md).
+>
+> **2026-08-20: frames-in-flight + frame timing — SHIPPED.** Rotating the
+> camera wobbled on the Intel GPU because per-frame GPU resources were sized
+> to 2 while Mesa gives 3 swapchain images
+> ([frames-in-flight.md](frames-in-flight.md)). And the class of question
+> behind it — "is this frame slow because of us or because we are waiting?" —
+> is now answerable: a phase split (update | ui | wait | record | present)
+> with avg/p50/p95/max, reachable by `--perf-hud`, Ctrl+Shift+F or the
+> `frame_stats` RPC, and **off by default**
+> ([frame-timing.md](frame-timing.md)).
 
 Most open-source CAD looks cheap, and that alone makes it unpleasant to use. The fix is
 mostly *not* raytracing — it's a modern raster pipeline done properly. Ordered by

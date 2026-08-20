@@ -22,7 +22,7 @@ which is usually the part worth reading later.
 | [ui/](ui/plan.md) | selection, tools, layout | `u7`–`u11` rounds, `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `gui-coverage.md` |
 | [inspect/](inspect/plan.md) | measure, mass properties, sections | `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
 | [interchange/](interchange/plan.md) | import + export | `import-plan.md`, `feature-gaps-plan.md`, `onshape-terms.md` |
-| [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md` |
+| [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md`, `frame-timing.md`, `outline-perf.md` |
 | [assemblies/](assemblies/plan.md) | multi-part, mates, sub-assemblies | `a1`–`a5` designs |
 | [simulation/](simulation/plan.md) | FEM | see also `ui/u11-simulation-setup.md` |
 | [drawings/](drawings/plan.md) | 2D drafting | `guide.md` (the workflow) |

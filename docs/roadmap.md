@@ -34,10 +34,12 @@ history), variables (an expression pass during regeneration), scripting (the com
 *is* the API), git (text format), LLM interface (same command layer + headless mode), and
 testability (geometry ops unit-testable without a GUI).
 
-## Current state (2026-07-14)
+## Current state (2026-08-20)
 
-The app is a working parametric CAD with simulation and drawings; twelve of the
-thirteen workstreams are v1-complete (see the table below). What that means concretely:
+The app is a working parametric CAD with assemblies, simulation and drawings;
+**all sixteen workstreams are v1-complete** (see the table below), and the
+work since mid-July has been breadth-then-hardening rather than new pillars.
+What that means concretely:
 
 **Modeling & core:** the full modeling loop (sketch → extrude → sketch-on-a-face → cut)
 plus M1–M8 — datum planes/axes, revolve, loft, sweep, booleans, mirror/linear/circular
@@ -47,27 +49,45 @@ the script API since UI U9 (2026-08-13); several were script-only before that.
 The 2D sketcher is feature-complete. Parametric core: `Document`
 feature list with deterministic regeneration + a per-feature output-shape cache
 (incremental regen), stable ids, undo/redo, PlaneGCS solving. **Variables & expressions**
-everywhere, including unit-suffixed literals. Serialization is at **format v53** (a
-diffable directory format, golden-corpus migrations).
+everywhere, including unit-suffixed literals. Serialization is at **format v57** (a
+diffable directory format, golden-corpus migrations, with built geometry baked
+beside the recipe so opening a project is a load, not a rebuild).
 
-**Differentiators:** **checkpoints + rollback** and **git-backed history** (F4/F5);
+**Differentiators:** **checkpoints + rollback**, **git-backed history** (F4/F5)
+and the **History panel** that makes both usable without a terminal (F6);
 the **scripting stack** — JSON-RPC remote, an **MCP server**, **headless mode**, a Python
 client, and record/replay session tests; **CI** runs `ctest -LE gui` on every push.
 
-**Beyond the core:** **assemblies** A1–A4 (occurrences + instancing, all six mate types,
+**Beyond the core:** **assemblies** A1–A5 (occurrences + instancing, all six mate types,
 drag gizmo + drag-within-mate, part→assembly propagation, BOM, in-context edit, exploded
-views); **inspection** (measure, mass properties, section views, interference);
+views, sub-assemblies); **inspection** (measure, mass properties, section views,
+interference, contact reports);
 **interchange** (STEP/STL/BREP + glTF/OBJ/PLY export, STEP import) via menu/RPC/MCP;
-**FEM** single-part linear static (Netgen meshing, in-house Eigen solver, colormapped
-results); **drawings** (HLR views of parts/assemblies, driven dimensions, SVG + PDF).
-**Rendering:** MSAA + ACES + IBL/PBR, per-instance transparency, an offline path-traced
-Render button.
+**FEM** single-part linear static plus modal and self-weight (Netgen meshing,
+in-house Eigen/Spectra solvers, colormapped results) and **topology
+optimization** on the same mesh; **drawings** (HLR views of parts/assemblies, driven dimensions, SVG + PDF).
+**Rendering:** MSAA + ACES + IBL/PBR, per-instance transparency, PCF shadows +
+SSAO (persisted as user preferences), an offline path-traced Render button.
 
-**Thin or missing:** **UI/UX polish** (unified selection, command palette, a
-consistent feature-dialog pattern) — the natural next workstream; assembly-level
-features; per-occurrence part-config selection (the one configurations follow-on);
-modeling's thread/rib; rendering's SSAO + soft shadows + real-time hybrid RT (gated on
-the `main.cpp` render-path cleanup); semantic (three-way) merge for the git format.
+**Thin or missing:** the UI/UX visual-polish tail (spacing rhythm, tree badges,
+a tooltips audit); assembly-level features; per-occurrence part-config
+selection (the one configurations follow-on); real-time hybrid RT (gated on
+the `main.cpp` render-path cleanup); semantic (three-way) merge for the git
+format; assembly/thermal/buckling FEM.
+
+**Where the defects actually come from (evidence, 2026-08-19/20).**
+`known-bugs.md` is empty and the suite is ~800 tests, yet a single evening of
+a person *using* the app surfaced six real defects — the section arrow dead on
+assembly tabs, the section drag rebuilding every mesh per frame, point picking
+highlighting an adjacent line, the Intel camera wobble (per-frame resources
+sized to 2 swapchain images, not 3), a font-size preference that did nothing,
+and a GPU preference that could brick startup. **None were found by tests**;
+all were in the interactive path, which is the half the RPC-driven smokes
+cannot reach. Two structural lessons were folded back in: the section arrow
+had a part-tab test and no assembly-tab test (asymmetric coverage hides
+whole-tab-kind failures), and "it feels laggy" cost real time twice — once a
+genuine bug, once a suspended laptop — which is why frame timing is now
+measurable ([rendering/frame-timing.md](rendering/frame-timing.md)).
 **The three large logic files were split (July 2026):** `RemoteServer` 2164→663 (seven
 `remote::Handle*Rpc` domain modules), `Serialization` 2268→1135 (`Serialize{Features,
 Assembly,Studies,Configurations}` TUs + `SerializationInternal.h`), `AppActions`
@@ -86,12 +106,12 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Complete** (V1–V3 + C2 unit-suffixed literals, format v28; dimensional analysis + unit display deferred) |
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | **Complete** (S1 MCP, S2 headless+CI, S3 python client, S4 record/replay) |
 | 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | **Complete v1** (F1 spec+corpus, F2 autosave, F3 directory format, F4 checkpoints+rollback, F5 git engine, **F6 the history UI** — [versioning/f6-history-ui.md](versioning/f6-history-ui.md): a History panel of named versions + restore, checkpoints promoted from part-only JSON copies to project-wide named commits); semantic merge later |
-| 7. UI & UX | [ui/plan.md](ui/plan.md) | **U1–U9 shipped** — unified selection, dock-home enforcement, feature-dialog slots, sketch-region picking, command palette, one floating Tool window for every tool session (right Properties panel deleted), and U9 GUI parity ([ui/u9-gui-parity.md](ui/u9-gui-parity.md)): hole/shell/draft/split/refine reachable by click. **2026-08-20: user preferences** ([ui/settings.md](ui/settings.md)) — Edit > Preferences over a persisted settings file (GPU device, font size, render quality, autosave), which took render quality and font size out of the View menu where they reset every launch. Remain: visual-polish tail (spacing rhythm, tree badges, tooltips audit) |
-| 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | **v1 complete** — I1 measure (RPC + GUI tool), I2 mass properties (panel + CoG marker), I3 section (raster clip + filled caps), I4 interference. Deferred polish: hatching, angle/point measure, assembly caps |
-| 9. Rendering | [rendering/plan.md](rendering/plan.md) | **Raster polish shipped** (showcase arc R1–R4 + instancing + ghosts; 2026-07-19: key-light PCF shadows + SSAO, [rendering/ssao-soft-shadows.md](rendering/ssao-soft-shadows.md) — S3 quality settings now PERSIST as user preferences ([ui/settings.md](ui/settings.md)); visual tuning remains). Real-time hybrid RT (6b) still gated on the `main.cpp` render-path cleanup |
-| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1–A4 v1 shipped** — multi-part, occurrences (instanced), all six mate types (connector frames, direct-frame-alignment solve, mate tool + list), interactive manipulation (drag gizmo, drag-within-mate, hole-center snap), part→assembly propagation, BOM, in-context editing (ghosted assembly), exploded views (v27). Remain: assembly-level features + configurations (own designs), cross-part refs in-context, snap-marker UX polish |
+| 7. UI & UX | [ui/plan.md](ui/plan.md) | **U1–U9 shipped** — unified selection, dock-home enforcement, feature-dialog slots, sketch-region picking, command palette, one floating Tool window for every tool session (right Properties panel deleted), and U9 GUI parity ([ui/u9-gui-parity.md](ui/u9-gui-parity.md)): hole/shell/draft/split/refine reachable by click. **2026-08-20: user preferences** ([ui/settings.md](ui/settings.md)) — Edit > Preferences over a persisted settings file (GPU device, font size, render quality, autosave), which took render quality and font size out of the View menu where they reset every launch. Also 2026-08-20: **one hover for every viewport drag handle** ([ui/viewport-handles.md](ui/viewport-handles.md)) — one `ViewportHandle` list shared by the preview-handle, section, gizmo and simulation-load owners, which immediately exposed the section arrow being dead on assembly tabs; a project saved from the GUI is always a `.dsgn` directory (so git history survives a Save As); and point picking no longer highlights an adjacent line. Remain: visual-polish tail (spacing rhythm, tree badges, tooltips audit) |
+| 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | **v1 complete** — I1 measure (RPC + GUI tool), I2 mass properties (panel + CoG marker), I3 section (raster clip + filled caps), I4 interference. 2026-08-20: contact checks run the boolean with a 1 µm fuzz, so parts *designed* to touch report contact instead of a sliver-sized "clash" (`scratch/floating-dock.json`'s six sub-0.14 mm³ lap-joint overlaps were this, not bad geometry). Deferred polish: hatching, angle/point measure, assembly caps |
+| 9. Rendering | [rendering/plan.md](rendering/plan.md) | **Raster polish shipped** (showcase arc R1–R4 + instancing + ghosts; 2026-07-19: key-light PCF shadows + SSAO, [rendering/ssao-soft-shadows.md](rendering/ssao-soft-shadows.md) — S3 quality settings now PERSIST as user preferences ([ui/settings.md](ui/settings.md)); visual tuning remains). 2026-08-20: per-frame GPU resources are sized to the actual swapchain image count ([rendering/frames-in-flight.md](rendering/frames-in-flight.md)) — the Intel camera wobble was 2-vs-3 aliasing — and the loop is now measurable: `--perf-hud` / Ctrl+Shift+F / the `frame_stats` RPC report cpu-vs-display and an avg/p50/p95/max split, off by default ([rendering/frame-timing.md](rendering/frame-timing.md)). Real-time hybrid RT (6b) still gated on the `main.cpp` render-path cleanup |
+| 10. Assemblies | [assemblies/plan.md](assemblies/plan.md) | **A1–A5 v1 shipped** — multi-part, occurrences (instanced), all six mate types (connector frames, direct-frame-alignment solve, mate tool + list), interactive manipulation (drag gizmo, drag-within-mate, hole-center snap), part→assembly propagation, BOM, in-context editing (ghosted assembly), exploded views (v27), and **sub-assemblies** (A5, format v55: an occurrence references a part *or* an assembly, with `assembly::Flatten` as the one tree walk). Remain: assembly-level features + configurations (own designs), cross-part refs in-context, snap-marker UX polish |
 | 11. Interchange: export/import | [interchange/plan.md](interchange/plan.md) | **v1 complete** — X1 STEP/STL/BREP + X2 glTF/OBJ/PLY (parts + assemblies, PBR materials, instanced), all via menu/RPC/MCP. X3 (IGES/mesh-import/DXF) + 3MF demand-driven |
-| 12. Simulation: FEM | [simulation/plan.md](simulation/plan.md) | **v1 + v2 shipped** — v1: single-part linear static (Netgen tet10, in-house Eigen solver, face BCs via toponaming, von Mises + displacement + factor of safety, Simulation-mode GUI, MCP, `fem_smoke`). v2: **modal analysis** (Spectra generalized eigensolver, consistent mass matrix, natural-frequency list + mode-shape overlay; cantilever f₁ 0.18%) and **gravity/self-weight** (0.03% vs beam theory), format v32. **Setup round U11 (2026-08-17)**: gravity pulled along -Z while world up is +Y, a force took a world literal instead of the face it was placed on, the default magnitude was 0 N, and the first Run of every new part failed on the unassigned material — all fixed, verified against beam theory ([ui/u11-simulation-setup.md](ui/u11-simulation-setup.md)). Remain: assembly/contact, thermal, buckling, nonlinear, VTU export (deferred by design; v2 modal requires a fixed support — free-free later) |
+| 12. Simulation: FEM | [simulation/plan.md](simulation/plan.md) | **v1 + v2 shipped** — v1: single-part linear static (Netgen tet10, in-house Eigen solver, face BCs via toponaming, von Mises + displacement + factor of safety, Simulation-mode GUI, MCP, `fem_smoke`). v2: **modal analysis** (Spectra generalized eigensolver, consistent mass matrix, natural-frequency list + mode-shape overlay; cantilever f₁ 0.18%) and **gravity/self-weight** (0.03% vs beam theory), format v32. **Setup round U11 (2026-08-17)**: gravity pulled along -Z while world up is +Y, a force took a world literal instead of the face it was placed on, the default magnitude was 0 N, and the first Run of every new part failed on the unassigned material — all fixed, verified against beam theory ([ui/u11-simulation-setup.md](ui/u11-simulation-setup.md)). 2026-08-20: force arrows are **draggable** (relative magnitude, one undo entry per drag) and a test asserts the drawn arrow runs along `load.direction`. Remain: assembly/contact, thermal, buckling, nonlinear, VTU export (deferred by design; v2 modal requires a fixed support — free-free later) |
 | 13. Drawings: 2D drafting | [drawings/plan.md](drawings/plan.md) + [guide.md](drawings/guide.md) | **v1 complete (D0–D4)** — drawing doc kind (format v30), HLR-projected views of parts + assemblies with projected-child folding, six driven dimensions via toponaming refs, title block, SVG + PDF export; GUI picking + headless/MCP. Deferred to own designs: section/detail views, on-sheet BOM/balloons, exploded drawing views, multi-sheet, GD&T, DXF (→ interchange) |
 | 14. Configurations | [configurations/plan.md](configurations/plan.md) | **v1 complete (C0–C4; format v31)** — parametric families: part configs (variable overrides as expressions + feature suppression, applied by regenerating against an override symbol table) and assembly configs (occurrence suppression); persisted active config; RPC/MCP (`remote/RemoteConfigurations.cpp`) + GUI panels. Follow-on: per-occurrence part-config selection |
 | 15. Topology optimization | [topopt/plan.md](topopt/plan.md) + [guide.md](topopt/guide.md) | **v1 complete + GPU0–GPU4** — SIMP density optimization on the tet10 mesh, multigrid V-cycle by default, GPU energies and a warm-solve cap (0.55 s/iter at 13.6k tets, ~6x the CPU path); results persist (format v33) with a re-modeling ghost overlay. GPU design notes in `gpu-plan.md`, `gpu3-plan.md`, `gpu4-plan.md` |
@@ -106,11 +126,12 @@ less — 16 is what lets anyone else run this at all.
 
 ## Sequencing
 
-> **Largely executed** (this was the plan as of early 2026; kept as the
-> rationale record). Variables, modeling M1–M8, toponaming, scripting,
-> versioning, inspection, interchange, rendering's showcase arc, assemblies
-> A1–A4, FEM, and drawings have all shipped in roughly this order. What
-> remains is configurations (next), UI/UX polish, and the rendering tail.
+> **Executed** (this was the plan as of early 2026; kept as the rationale
+> record). Everything in it has shipped — variables, modeling M1–M8,
+> toponaming, scripting, versioning, inspection, interchange, rendering's
+> showcase arc, assemblies A1–A5, FEM, drawings, configurations — in roughly
+> this order. Sequencing is no longer the open question; see **What's next**
+> below, which is driven by use rather than by a pre-planned order.
 
 The recommended interleaving, with the rationale:
 
@@ -146,6 +167,31 @@ The recommended interleaving, with the rationale:
     drag-within-mate, since they share the interactive-drag + per-mesh-model
     infrastructure — build it once, not before A3.
 
+## What's next (2026-08-20)
+
+There is no unshipped pillar, so priority comes from evidence rather than
+from the sequencing list above:
+
+1. **Keep dogfooding through the GUI, on real objects.** Every defect found in
+   the last two rounds came from a person or an agent *building something*,
+   not from the suite — and the GUI-driven half found the ones the RPC-driven
+   half structurally cannot. [dogfooding.md](dogfooding.md) records each
+   round; the practice is the deliverable, not any single round.
+2. **Close the coverage asymmetries it keeps exposing.** A feature tested on a
+   part tab and not an assembly tab is the recurring shape (the section arrow,
+   twice). Worth a deliberate pass: for each interactive tool, does a test
+   exercise it on every tab kind it claims to support?
+3. **The visual-polish tail** (workstream 7) — spacing rhythm, tree badges,
+   tooltips audit. Small, independently shippable, and the thing a new user
+   sees first.
+4. **Then the deferred follow-ons**, in demand order: per-occurrence
+   part-config selection, assembly-level features, drawing section/detail
+   views, FEM assembly contact, deb/rpm packaging.
+
+Deliberately *not* raised in priority: hybrid RT (still gated on the
+`main.cpp` cleanup, no forcing function) and semantic merge (the directory
+format already merges cleanly line-by-line).
+
 ## Continuous
 
 ### Refactoring policy: split what the next feature extends, not big-bang
@@ -153,24 +199,16 @@ The recommended interleaving, with the rationale:
 The large files fall into two kinds, and the "add tests before you refactor" rule
 points opposite ways for each:
 
-- **Testable-logic files — refactor freely, guarded by the existing smokes.**
-  `RemoteServer.cpp` (~2120 LOC: 108 RPC handlers in one `HandleSemantic` if-chain),
-  `AppActions.cpp` (~3170 LOC: grab-bag free functions), `Serialization.cpp`
-  (~2100, grows every format bump). These are pure logic that the 16 Python smokes
-  already characterize end-to-end, so splitting them is *verifiable today* without new
-  tests. FEM **and** Drawings both shipped since this note was written and piled
-  straight into all three (a new document kind, ~a dozen RPCs, new AppActions helpers
-  each) **without** the split — so the debt is now acute, not hypothetical. **Do the
-  split as the first step of the next workstream (Configurations), not a standalone
-  pass:** the best time to refactor a file is the moment before you extend it.
-  - `RemoteServer` → domain modules (part / assembly / inspection / export / project /
-    view). An 83-branch dispatch is exactly what a new workstream's RPCs make worse.
-  - `AppActions` → carve out the assembly + section + measure + gizmo code into their
-    own TUs (the extraction is also what makes some of it unit-testable).
-  - Backfill tests **opportunistically** — when you extract a chunk, add a test for that
-    chunk then; don't run a separate test-backfill sprint. (The two genuinely thin
-    unit spots, `GitVault` + `ElementHistory`, are worth a direct test each regardless,
-    ~an hour — a small aside, not a phase.)
+- ~~**Testable-logic files — refactor freely, guarded by the existing smokes.**~~
+  **Done (July 2026), as the policy prescribed — at the moment before extending
+  them, not as a standalone pass.** `RemoteServer` 2164→663 (seven
+  `remote::Handle*Rpc` domain modules), `Serialization` 2268→1135
+  (`Serialize{Features,Assembly,Studies,Configurations}` + an internal header),
+  `AppActions` 3191→2056 (`AssemblyActions` + `SimulationActions`). The rule
+  the split leaves behind: **edit the domain module, not the monolith** — a new
+  RPC goes in `Remote<Domain>.cpp`, a new persisted field in the matching
+  `Serialize*.cpp`. Tests were backfilled opportunistically per extracted
+  chunk rather than in a separate sprint.
 - **Untestable files — leave them until a feature forces it.** `main.cpp` (~1330 LOC
   Vulkan) and the renderers (~4000) can't be unit-tested (need a GPU), so "test first"
   isn't a real gate and a refactor is pure regression risk. There is **no forcing
@@ -204,19 +242,33 @@ points opposite ways for each:
   (~28 s for that part), and check_geometry / list_elements are ~3 s.
 - ~~**CI: GUI tests under a virtual display**~~ — **done** 2026-08-14: the gui-labeled
   ctest entries run through `tools/xvfb-exec.sh`.
+- ~~**GUI suite too slow to run per commit**~~ — **done** 2026-08-20: the suite
+  is CPU-bound in one process, so `tools/gui-tests-xvfb.sh` partitions it into
+  four sharded processes by recorded per-test time (335 s → ~70 s; `--fast`
+  drops the handful of multi-second cases). The partition comes from the
+  suite's own `--gui-test-list`, so a new test cannot be silently dropped.
+- **Performance measurement is now first-class**: `frame_stats` / the hidden
+  frame-time HUD ([rendering/frame-timing.md](rendering/frame-timing.md)) for
+  the interactive loop, `scratch/scale_*.py` for model size. Reach for a
+  number before a refactor — one "regression" this month was a laptop lid
+  closed mid-benchmark.
 
-### Test coverage (state 2026-07-14)
+### Test coverage (state 2026-08-20)
 
-374 tests pass under `ctest -LE gui` (360 C++ Catch2 cases + 14 headless Python
-integration smokes), plus `gui_smoke`'s ImGui-test-engine cases and the display-gated
-smokes (remote/mcp); CI runs the headless subset every push. **Strong:** the
+**643 tests pass under `ctest -LE gui` in ~80 s** (619 C++ Catch2 cases + 24
+headless Python integration smokes) and **156 ImGui-test-engine GUI cases in
+~70 s** via `tools/gui-tests-xvfb.sh`; CI runs the headless subset every push. **Strong:** the
 headless core — geometry/features, format+golden-corpus migrations, expression engine,
 and the full RPC surface via smokes (every feature since assemblies shipped with a test).
 **By-construction untested:** renderers + `main.cpp` (need a GPU — verified via gui_smoke
 + dev-watch screenshots) and much of the UI interaction layer (partial via gui_smoke +
 `viewport_drag` smokes). **The real exposure is the GPU/GUI gap** — bugs like the A2.5
-device-lost and the C4 back-face-culling surfaced on-screen, not in tests. No coverage
+device-lost and the C4 back-face-culling surfaced on-screen, not in tests, and
+the 2026-08-19/20 round confirmed it with six more. No coverage
 gate in CI; new-feature coverage is by author discipline, not enforced threshold.
+One trap worth knowing when adding GUI cases: a test whose category is exactly
+`perf` lands in the test engine's Perfs group, which this suite never queues —
+it will list and never run.
 
 ## Explicitly not planned (conscious decisions, not omissions)
 
