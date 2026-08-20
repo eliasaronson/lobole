@@ -115,7 +115,7 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
       edit.selected.clear();
       if (edit.opPickSources)
         for (uint32_t sid : op.sourceIds)
-          edit.selected.push_back({sid, 0});
+          edit.selected.push_back({sid, sketch::kWholeEntity});
     }
   };
 

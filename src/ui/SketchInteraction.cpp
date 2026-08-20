@@ -976,7 +976,8 @@ bool RefineLinePlacement(AppState& state, const SketchFeature& sketch,
     const glm::vec2 u = glm::normalize(*da), v = glm::normalize(*db);
     const float cross = u.x * v.y - u.y * v.x;
     // Keep the accumulation in sync so an Esc drops back to the two targets.
-    edit.selected = {{lineId, 0}, {pick.ref.entity, 0}};
+    edit.selected = {{lineId, sketch::kWholeEntity},
+                     {pick.ref.entity, sketch::kWholeEntity}};
     edit.dimPickBody = {true, true};
     if (std::abs(cross) < 0.01f) {
       const auto p = TargetUV(sketch, {lineId, 0});
@@ -997,7 +998,7 @@ bool RefineLinePlacement(AppState& state, const SketchFeature& sketch,
   if (!pick.body) { // a point target → perpendicular point-line distance
     const auto p = TargetUV(sketch, pick.ref);
     const double dist = p ? PointToLineDistance(sketch, *p, lineId) : 0.0;
-    edit.selected = {pick.ref, {lineId, 0}};
+    edit.selected = {pick.ref, {lineId, sketch::kWholeEntity}};
     edit.dimPickBody = {false, true};
     StartDimensionPlacement(state, /*pair=*/false, K::DistancePL, pick.ref,
                             {lineId, 0}, dist);
@@ -1171,8 +1172,9 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
       edit.selected[0].which == pick.ref.which)
     return;
 
-  edit.selected.push_back(lineTarget ? sketch::PointRef{pick.ref.entity, 0}
-                                     : pick.ref);
+  edit.selected.push_back(
+      lineTarget ? sketch::PointRef{pick.ref.entity, sketch::kWholeEntity}
+                 : pick.ref);
   edit.dimPickBody.push_back(lineTarget);
   if (edit.selected.size() < 2) {
     // A single LINE goes straight to length placement (B): the ghost is up
@@ -1259,7 +1261,7 @@ static void HandleCollectPhase(AppState& state, SketchFeature& sketch,
           removed = true;
         }
       if (!removed)
-        edit.selected.push_back({hoverEntity, 0});
+        edit.selected.push_back({hoverEntity, sketch::kWholeEntity});
     } else {
       edit.boxActive = true;
       edit.boxStart = edit.boxEnd = mousePos;
@@ -1282,7 +1284,7 @@ static void HandleCollectPhase(AppState& state, SketchFeature& sketch,
         for (const auto& r : edit.selected)
           seen |= (r.entity == id);
         if (!seen)
-          edit.selected.push_back({id, 0});
+          edit.selected.push_back({id, sketch::kWholeEntity});
       }
     }
     edit.boxActive = false;
@@ -1760,7 +1762,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         if (!add)
           edit.selected.clear();
         for (uint32_t id : ids)
-          edit.selected.push_back({id, 0});
+          edit.selected.push_back({id, sketch::kWholeEntity});
       }
       edit.boxActive = false;
     }
@@ -3628,7 +3630,7 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
                              SketchUVToScreen(state, sketch.plane, uv[k + 1])));
     }
     if (d < tolPx)
-      bodies.push_back({d, SketchPick{true, true, {id, 0}}});
+      bodies.push_back({d, SketchPick{true, true, {id, sketch::kWholeEntity}}});
   }
 
   // Datum axes are pickable (e.g. as a mirror axis) but rank below real

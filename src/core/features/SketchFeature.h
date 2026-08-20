@@ -538,6 +538,16 @@ struct PointRef {
   uint8_t which = 0;
 };
 
+// `which` for a SELECTION that means the whole entity rather than one of its
+// points. Picking a line's endpoint and picking the line itself both used to
+// store {id, 0}, so the drawing code — which could only compare the entity —
+// highlighted the whole line whenever a vertex of it was selected. Real point
+// indices are small (0, 1, 2), so a top-of-range sentinel separates them.
+//
+// SELECTION only. A constraint that references a line still uses {id, 0} and
+// {id, 1} for its endpoints.
+inline constexpr uint8_t kWholeEntity = 0xFF;
+
 // Datum geometry: the sketch origin + X/Y axes. These are always available as
 // constraint / mirror / snap references but are NOT stored in the entity list —
 // they live in a reserved id block above any real entity id (which grow from

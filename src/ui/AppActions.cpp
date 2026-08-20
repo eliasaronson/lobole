@@ -3462,9 +3462,13 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     return prims;
   const SketchEditState& edit = state.sketchEdit;
 
+  // The ENTITY itself, not merely something that mentions it: a selected
+  // vertex used to light its whole line, because a body pick and a vertex-0
+  // pick both stored {id, 0} and this could only compare the entity. Clicking
+  // a rectangle corner therefore highlighted the corner AND one of its lines.
   auto selectedEntity = [&](uint32_t id) {
     for (const auto& r : edit.selected)
-      if (r.entity == id)
+      if (r.entity == id && r.which == sketch::kWholeEntity)
         return true;
     return false;
   };

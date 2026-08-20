@@ -2858,12 +2858,16 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->sketchDrag.mode == ui::SketchDragSession::Mode::Point);
 
     // Same spot again: cycles to the dimensioned line body, which translates
-    // the sketch rather than trying to resize the driving dimension.
+    // the sketch rather than trying to resize the driving dimension. The body
+    // records kWholeEntity, NOT 0 — a body pick and a vertex-0 pick both used
+    // to store {id, 0}, so highlighting could not tell them apart and lit the
+    // whole line whenever a vertex of it was picked.
     ctx->MouseClick(ImGuiMouseButton_Left);
     ctx->Yield();
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)1);
     IM_CHECK_EQ(s_App->sketchEdit.selected[0].entity, l0);
-    IM_CHECK_EQ((int)s_App->sketchEdit.selected[0].which, 0);
+    IM_CHECK_EQ((int)s_App->sketchEdit.selected[0].which,
+                (int)sketch::kWholeEntity);
     IM_CHECK(s_App->sketchDrag.mode ==
              ui::SketchDragSession::Mode::SketchTranslate);
 
@@ -5972,6 +5976,59 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         IM_CHECK(hoveredX[i].color.r > hoveredX[i].color.g);
       }
     IM_CHECK(brighter > 0);
+  };
+
+  // Reported: clicking a POINT in a sketch highlighted the point and one of
+  // the lines next to it. A body pick and a vertex pick both stored {id, 0},
+  // so the drawing code — which could only compare the entity — lit the whole
+  // line whenever one of its vertices was selected.
+  t = IM_REGISTER_TEST(engine, "sketch",
+                       "picking_a_point_does_not_light_its_line");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    EnterSketchOnPlane(ctx, 0);
+    size_t index = 0;
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App, &index);
+    IM_CHECK(sk != nullptr);
+    // A rectangle: its corners are shared by two lines, which is where the
+    // report came from.
+    const auto ids = sk->AddRectangle({0.0f, 0.0f}, {3.0f, 2.0f});
+    IM_CHECK(ids.size() >= 4);
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    ctx->Yield(2);
+
+    // params.y is the primitive's shape: 0 = line, 1 = dot. Counting them
+    // separately is the report in one assertion — "it highlights both the
+    // point and one of the lines next to it".
+    const glm::vec4 sel(1.00f, 0.62f, 0.20f, 1.0f);
+    const auto litCounts = [&]() {
+      const std::vector<PrimVertex> prims = ui::BuildActiveSketchPrimitives(
+          *s_App, s_App->sketchEdit.activeSketchId);
+      int lines = 0, dots = 0;
+      for (const PrimVertex& v : prims) {
+        if (glm::length(v.color - sel) > 0.01f)
+          continue;
+        (v.params.y > 0.5f ? dots : lines)++;
+      }
+      return std::pair<int, int>(lines, dots);
+    };
+    IM_CHECK_EQ(litCounts().first, 0); // nothing selected yet
+    IM_CHECK_EQ(litCounts().second, 0);
+
+    // The LINE BODY selected: its shaft is lit.
+    s_App->sketchEdit.selected = {{ids[0], sketch::kWholeEntity}};
+    ctx->Yield();
+    IM_CHECK(litCounts().first > 0);
+
+    // One of that line's ENDPOINTS instead: the dot lights, the line does
+    // NOT. That second half is the bug.
+    s_App->sketchEdit.selected = {{ids[0], 1}};
+    ctx->Yield();
+    IM_CHECK(litCounts().second > 0);  // the point itself is highlighted
+    IM_CHECK_EQ(litCounts().first, 0); // and no line is
+    s_App->sketchEdit.selected.clear();
   };
 
   // Wrap every registered test so ResetAppForTest() runs before it — this is
