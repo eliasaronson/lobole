@@ -1,5 +1,12 @@
 # Assemblies — plan
 
+> **Status: A1–A5 shipped** — multi-part projects, instanced occurrences, all
+> six mate types, the drag gizmo, propagation, BOM, in-context editing,
+> exploded views, and sub-assemblies
+> ([a5-subassemblies-plan.md](a5-subassemblies-plan.md)). The prose below is
+> the original architecture argument, which is why it still reads as
+> forward-looking.
+
 Multiple parts, positioned and constrained relative to each other. The last
 major workstream — deliberately: it multiplies every cost (regeneration,
 memory, rendering, references), so its prerequisites are other plans'

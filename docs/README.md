@@ -1,58 +1,51 @@
 # Designer docs
 
-Planning and design docs, grouped by area. The [roadmap](roadmap.md) is the
-top-level vision + workstream index and holds the recommended sequencing.
+A map of what lives where. **[roadmap.md](roadmap.md) is authoritative for
+status** — it holds the vision, the numbered workstream table and the
+sequencing. This file says where to look; it deliberately does not repeat the
+statuses, because two lists of the same thing drift apart.
 
-## Areas
+Each area directory has a `plan.md` (the design and its decisions) plus
+per-milestone designs beside it. A plan is written before the work and updated
+after it with what actually happened — including what was tried and rejected,
+which is usually the part worth reading later.
 
-- **[roadmap.md](roadmap.md)** — vision (checkpoints, variables, scripting,
-  git, LLM-parity), the headless-core architecture, current state, the
-  workstream table, and sequencing.
-- **[known-bugs.md](known-bugs.md)** — running list of confirmed, unfixed
-  defects (symptom + root cause + likely fix); cleared as fixes land.
-- **[sketching/](sketching/plan.md)** — the 2D constraint sketcher. **Complete**
-  (A–N + follow-ups; B-splines deferred). `phase-*.md` are the per-phase
-  implementation plans.
-- **[modeling/](modeling/plan.md)** — 3D modeling: datum planes, revolve,
-  booleans, 3D mirror/pattern, richer extrude, fillets; regeneration-failure
-  UX. **Next frontier.** [toponaming.md](modeling/toponaming.md) is the
-  persistent face/edge reference design study that gates the
-  edge/face-referencing features.
-- **[variables/](variables/plan.md)** — parameters + expressions on every
-  numeric input, evaluated during regeneration. **Do early** — new modeling
-  features should be expression-driven from birth.
-- **[scripting/](scripting/plan.md)** — the LLM/automation interface: JSON-RPC
-  remote (shipped) → MCP server, headless mode, Python package, recorded
-  sessions as tests. Includes the OpenSCAD/build123d ecosystem survey.
-- **[versioning/](versioning/plan.md)** — format spec + golden files, autosave,
-  diffable on-disk layout, checkpoints/rollback bar, git integration.
-- **[ui/](ui/plan.md)** — unified selection, sketch-region picking for
-  extrude, the feature-dialog pattern, DPI/layout correctness, visual polish,
-  command palette.
-- **[inspect/](inspect/plan.md)** — measure tool, mass properties (volume/
-  CoG/mass from material density), section views.
-- **[interchange/](interchange/plan.md)** — export: STEP/STL (kernel writers
-  exist, unexposed), BREP, glTF via an XCAF bridge; import widening (IGES,
-  mesh bodies) later. 3MF and DXF consciously deferred.
-- **[rendering/](rendering/plan.md)** — visual fidelity: real normals, AA, PBR
-  materials, SSAO, tone-mapping, IBL, then raytracing (offline render, then
-  hybrid RT lighting).
-- **[assemblies/](assemblies/plan.md)** — multi-part projects, occurrences +
-  instancing, mate connectors; the prerequisites gate (incremental regen,
-  instancing, toponaming) and the memory/performance strategy.
-- **[simulation/](simulation/plan.md)** — FEM structural analysis: Netgen tet
-  meshing, in-house linear-static solver on Eigen, face BCs via toponaming
-  refs, colormapped results. **Shipped** (FEM0–FEM4; single-part linear static).
-  Modal / assembly-contact / thermal deferred.
-- **[drawings/](drawings/plan.md)** — 2D drafting: a third document kind with
-  HLR-projected views, driven dimensions via toponaming refs, title block,
-  SVG/PDF export. **Shipped** (D0–D4). See [guide.md](drawings/guide.md) for
-  the workflow; `plan.md` is the design.
-- **[configurations/](configurations/plan.md)** — parametric part/assembly
-  families: a doc-level named object (the FEM Study pattern) that overrides
-  parameters + suppresses features (parts) or suppresses occurrences
-  (assemblies), applied by regenerating against an override symbol table.
-  **Shipped** (C0–C4; format v31). Per-occurrence part-config selection is the
-  one follow-on.
+## Workstreams
 
-Project-level files (`README.md`, `THIRD_PARTY.md`) stay at the repo root.
+| Area | Start at | Also inside |
+|---|---|---|
+| [sketching/](sketching/plan.md) | the 2D constraint sketcher | `phase-*.md` per phase; `copy-links.md`, `reference-image-plan.md` |
+| [modeling/](modeling/plan.md) | 3D features | `toponaming.md` + `toponaming-design.md` (persistent face/edge refs), `m3-extrude.md`, `curves-3d-plan.md`, `thread-rib.md`, `regeneration.md` |
+| [variables/](variables/plan.md) | parameters + expressions | |
+| [scripting/](scripting/plan.md) | the LLM/automation interface | `mcp.md`, `s1-mcp.md`, `s2-headless.md`, `error-style.md` (what a failed call must tell an agent) |
+| [versioning/](versioning/plan.md) | format, autosave, git | `f1-f2.md`, `f3-directory-format.md`, `f6-history-ui.md`, `baked-geometry.md`, `format.md` |
+| [ui/](ui/plan.md) | selection, tools, layout | `u7`–`u11` rounds, `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `gui-coverage.md` |
+| [inspect/](inspect/plan.md) | measure, mass properties, sections | `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
+| [interchange/](interchange/plan.md) | import + export | `import-plan.md`, `feature-gaps-plan.md`, `onshape-terms.md` |
+| [rendering/](rendering/plan.md) | visual fidelity | `instancing-design.md`, `ssao-soft-shadows.md`, `r4-offline-render.md`, `appearance-plan.md`, `frames-in-flight.md` |
+| [assemblies/](assemblies/plan.md) | multi-part, mates, sub-assemblies | `a1`–`a5` designs |
+| [simulation/](simulation/plan.md) | FEM | see also `ui/u11-simulation-setup.md` |
+| [drawings/](drawings/plan.md) | 2D drafting | `guide.md` (the workflow) |
+| [configurations/](configurations/plan.md) | part + assembly families | |
+| [topopt/](topopt/plan.md) | topology optimization | `guide.md`, `gpu-plan.md`, `gpu3-plan.md`, `gpu4-plan.md` |
+| [packaging/](packaging/plan.md) | shipping it to other machines | |
+
+## Cross-cutting
+
+- **[known-bugs.md](known-bugs.md)** — confirmed, unfixed defects (symptom +
+  root cause + likely fix). Cleared as fixes land.
+- **[dogfooding.md](dogfooding.md)** — every self-driven round that built a
+  real object end-to-end, what each found, and what was done about it. The
+  richest source of real bugs in this repo.
+- **[performance/scale-round.md](performance/scale-round.md)** — the
+  measured-at-size round (open 259 s → 0.04 s, and what was slow and why).
+- **[tier1-closeout.md](tier1-closeout.md)** — the 2026-07-14 sign-off that
+  closed out five workstreams' remainders at once.
+- **[cpp23-modernization.md](cpp23-modernization.md)** — the toolchain bump
+  and what it bought.
+- **[ai-cad-survey-2026-08-18.md](ai-cad-survey-2026-08-18.md)** — how other
+  AI-facing CAD tools and the research literature approach this.
+
+Project-level files (`README.md`, `CONTRIBUTING.md`, `THIRD_PARTY.md`) stay at
+the repo root, as does `CLAUDE.md` — the working notes loaded into every
+assistant session.

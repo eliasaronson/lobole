@@ -1,5 +1,12 @@
 # UI & UX — plan
 
+> **Status: U1–U11 shipped**, plus user preferences
+> ([settings.md](settings.md)) and one hover for every drag handle
+> ([viewport-handles.md](viewport-handles.md)). What remains is the
+> visual-polish tail (spacing rhythm, tree badges, a tooltip audit). The
+> prose below is the original plan; per-round designs are the `u*.md` files
+> beside it.
+
 The workbench shell shipped (docking layout, dark theme, icon toolbar,
 preview→accept, default planes, origin gizmo — roadmap "CAD UI"). What remains
 is the difference between "has a UI" and "is pleasant": a real selection model,

@@ -1,5 +1,9 @@
 # Sketch constraints v2 — plan (rev. 2026-07-06)
 
+> **Status: complete** (phases A–N + follow-ups; B-splines deferred). Each
+> phase has its own `phase-*.md` beside this file with what was actually
+> built.
+
 The constraints v1 milestone (coincident, H/V, parallel, perpendicular, equal,
 distance, radius; picking + endpoint drag-solve; a constraints toolbar) shipped.
 This revision folds in two things:

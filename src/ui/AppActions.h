@@ -425,9 +425,10 @@ void ApplyExplodeTransforms(AppState& state);
 bool SaveProject(AppState& state, const std::string& path, std::string* error);
 bool OpenProject(AppState& state, const std::string& path, std::string* error);
 
-// ---- Project-wide variables (Phase V, docs/plan-caster-backlog.md) ---------
-// The project parameter table lives in AppState and is shared by every part via
-// Document::SetProjectSymbols; set_variable defaults to this scope.
+// ---- Project-wide variables (Phase V, docs/dogfooding.md, caster round)
+// --------- The project parameter table lives in AppState and is shared by
+// every part via Document::SetProjectSymbols; set_variable defaults to this
+// scope.
 
 // Re-evaluate the project table into state.projectSymbols and regenerate every
 // part against it (wiring each slot's Document to the project symbols first).
@@ -567,7 +568,7 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 // the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`
 // (p1 fixed; alignAxis also rotates p1->p2 onto the U axis); Delete removes it.
 // All commit one undoable ModifyFeatureCommand. See
-// docs/sketch/reference-image-plan.md.
+// docs/sketching/reference-image-plan.md.
 uint32_t AddReferenceImageToSketch(AppState& state, const std::string& path);
 void CalibrateReferenceImageAction(AppState& state, uint32_t imageId,
                                    glm::vec2 p1, glm::vec2 p2, double distance,

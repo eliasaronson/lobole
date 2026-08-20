@@ -610,7 +610,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "add_reference_image" || m == "calibrate_reference_image" ||
       m == "set_reference_image" || m == "delete_reference_image") {
-    // Sketch reference underlays (v49, docs/sketch/reference-image-plan.md).
+    // Sketch reference underlays (v49, docs/sketching/reference-image-plan.md).
     // add:       {sketch_id, path, [at:[u,v]], [units_per_pixel], [opacity]}
     // calibrate: {sketch_id, image_id, p1:[u,v], p2:[u,v], distance,
     //             [align:"none"|"horizontal"|"vertical"]}

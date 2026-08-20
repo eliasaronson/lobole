@@ -3,7 +3,7 @@
 The V6 companion to the modeling-workflow prompt: run this list against the
 model BEFORE showing it to anyone. Every box is one RPC call — none of this
 is eyeball-only anymore. Seeded by the floating-dock dogfooding round
-(docs/backlog-dock-dogfood-2026-08-18.md), where the unchecked versions of
+(docs/dogfooding.md, the 2026-08-18 round), where the unchecked versions of
 these boxes each cost a review cycle.
 
 ## Every model

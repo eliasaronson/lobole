@@ -1,5 +1,10 @@
 # Scripting & the LLM interface — plan
 
+> **Status: complete** (S1 MCP server, S2 headless + CI, S3 Python client,
+> S4 record/replay). Later work lives beside this file:
+> [mcp.md](mcp.md) and [error-style.md](error-style.md), the standard a failed
+> call is held to.
+
 Goals 3 + 5 of the [roadmap](../roadmap.md): expose the command layer as an API
 so humans and LLMs are genuinely equivalent clients, and every scripted session
 is a replayable test case.

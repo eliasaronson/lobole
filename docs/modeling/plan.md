@@ -1,5 +1,12 @@
 # 3D modeling — plan
 
+> **Status: complete** (M1–M8 + rib + cosmetic thread, format v36; see
+> [thread-rib.md](thread-rib.md), [curves-3d-plan.md](curves-3d-plan.md)).
+> A modelled helical thread is the one deliberate remainder. The prose below
+> is the original plan, kept for its sequencing argument and the toponaming
+> fork it turns on — read it as history, and [roadmap.md](../roadmap.md) for
+> what is true now.
+
 The sketcher is feature-complete (see [sketching/plan.md](../sketching/plan.md));
 3D modeling is the next frontier. Today the solid side is thin — this plan
 sequences it, with one fork (**topological naming**) deciding the order.

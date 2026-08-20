@@ -1,13 +1,12 @@
 # Topology optimization (generative) — design
 
-> Status: **design, for sign-off.** Nothing is built. v1 = SIMP compliance
-> minimization on a single part, run as a new kind of Study on top of the
-> shipped FEM stack (Netgen tet10 mesh + Eigen solver), producing a persisted
-> density-field result, an iso-surface preview body, smoothed STL export, and
-> a "shape guide" ghost for re-modeling. Parametric B-Rep *reconstruction* of
-> the organic result is explicitly out of scope (see "The parametric
-> question" — the honest industry answer is re-model-over-a-ghost, which v1
-> supports; auto-reconstruction is a research tar pit we are not entering).
+> **Status: v1 complete, plus GPU0–GPU4.** SIMP compliance minimization runs
+> as a Study on the tet10 mesh, with a multigrid V-cycle by default, GPU
+> energies and a warm-solve cap (0.55 s/iter at 13.6k tets, ~6x the CPU
+> path); results persist (format v33) and leave a ghost overlay to re-model
+> against. See [guide.md](guide.md) for the workflow and `gpu*-plan.md` for
+> the GPU work. The text below is the original design, written before any of
+> it existed — "nothing is built" was true when it was signed off
 
 ## Why (and why now)
 

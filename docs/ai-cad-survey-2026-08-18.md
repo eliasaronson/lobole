@@ -1,6 +1,6 @@
 # What other AI-CAD systems can teach us — survey (2026-08-18)
 
-Companion to `backlog-dock-dogfood-2026-08-18.md`. Three parallel research
+Companion to `dogfooding.md` (the 2026-08-18 round). Three parallel research
 sweeps: the two skills Elias found, the agent-interface landscape
 (MCP servers, Zoo, Onshape, startups), and the research literature on
 validating LLM-generated CAD. Full agent reports are summarized here;

@@ -105,13 +105,14 @@ public:
   // (local shadows project), so downstream reads are unchanged by Phase V.
   const SymbolTable& Symbols() const { return m_symbols; }
 
-  // Project-wide variables (Phase V, docs/plan-caster-backlog.md). A Document
-  // keeps its own m_parameters as the PART-LOCAL scope and borrows a non-owning
-  // pointer to the project scope's evaluated symbols; regeneration resolves
-  // expressions local-first, then project. AppState owns the project table and
-  // points every slot's Document here (on load, part add, activate). Headless
-  // and core tests inject the pointer directly, so the core stays self-
-  // contained. Null = no project scope (a bare Document evaluates local-only).
+  // Project-wide variables (Phase V, docs/dogfooding.md, caster round). A
+  // Document keeps its own m_parameters as the PART-LOCAL scope and borrows a
+  // non-owning pointer to the project scope's evaluated symbols; regeneration
+  // resolves expressions local-first, then project. AppState owns the project
+  // table and points every slot's Document here (on load, part add, activate).
+  // Headless and core tests inject the pointer directly, so the core stays
+  // self- contained. Null = no project scope (a bare Document evaluates
+  // local-only).
   void SetProjectSymbols(const SymbolTable* projectSymbols) {
     m_projectSymbols = projectSymbols;
   }
@@ -309,12 +310,13 @@ public:
   }
 
   // ---- Reference-image assets (v49) -------------------------------------
-  // Raw pixel bytes for sketch reference images (docs/sketch/reference-image-
-  // plan.md), keyed by asset name. Kept at document scope — NOT on the sketch
-  // feature — so they survive undo/redo (which rebuilds features from JSON,
-  // and JSON never carries the bytes) and so the renderer decodes each asset
-  // into a texture once no matter how many images reference it. Serialization
-  // persists only the assets an image actually references.
+  // Raw pixel bytes for sketch reference images (see
+  // docs/sketching/reference-image-plan.md), keyed by asset name. Kept at
+  // document scope — NOT on the sketch feature — so they survive undo/redo
+  // (which rebuilds features from JSON, and JSON never carries the bytes) and
+  // so the renderer decodes each asset into a texture once no matter how many
+  // images reference it. Serialization persists only the assets an image
+  // actually references.
   void SetAsset(const std::string& name, std::vector<unsigned char> bytes) {
     m_assets[name] = std::move(bytes);
   }

@@ -1,5 +1,9 @@
 # Variables & expressions — plan
 
+> **Status: complete** (V1–V3 + unit-suffixed literals, format v28; project
+> scope added in the caster round — see [../dogfooding.md](../dogfooding.md)).
+> Dimensional analysis and unit display are the deliberate remainder.
+
 Dimensions as expressions over named parameters (`length = width * 2`),
 evaluated during regeneration. Differentiator #2 in the [roadmap](../roadmap.md),
 and the roadmap's own assessment holds: *cheap once the document model exists,

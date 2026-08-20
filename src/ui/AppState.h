@@ -610,9 +610,9 @@ struct AppState {
   // load/import; only Dissolve removes an entry. Persisted in project.json.
   std::vector<std::string> tabFolders;
 
-  // Project-wide variables (Phase V, docs/plan-caster-backlog.md). THE project
-  // scope: an ordered parameter table shared by every part, and its evaluated
-  // symbols. Every slot's Document borrows &projectSymbols
+  // Project-wide variables (Phase V, docs/dogfooding.md, caster round). THE
+  // project scope: an ordered parameter table shared by every part, and its
+  // evaluated symbols. Every slot's Document borrows &projectSymbols
   // (SetProjectSymbols); a feature expression resolves local-first then here.
   // set_variable defaults to this scope. Persisted in project.json (multi-part)
   // or the lone part file (single-part = the whole project). projectSymbols is

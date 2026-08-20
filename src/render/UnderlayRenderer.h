@@ -19,12 +19,12 @@ struct UnderlayDraw {
   float opacity = 0.5f;
 };
 
-// Draws sketch reference-image underlays (docs/sketch/reference-image-plan.md):
-// textured quads on the active sketch plane, drawn before the sketch lines so
-// geometry sits on top. Kept separate from SketchRenderer because it owns
-// PERSISTENT device-local textures (decoded once per asset) rather than
-// SketchRenderer's per-frame host-visible line buffers. Depth test on / write
-// off, like the rest of the sketch overlay.
+// Draws sketch reference-image underlays
+// (docs/sketching/reference-image-plan.md): textured quads on the active sketch
+// plane, drawn before the sketch lines so geometry sits on top. Kept separate
+// from SketchRenderer because it owns PERSISTENT device-local textures (decoded
+// once per asset) rather than SketchRenderer's per-frame host-visible line
+// buffers. Depth test on / write off, like the rest of the sketch overlay.
 class UnderlayRenderer {
 public:
   UnderlayRenderer() = default;

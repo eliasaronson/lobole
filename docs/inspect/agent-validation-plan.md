@@ -17,7 +17,7 @@
 > Original plan (for the record):
 
 > Consolidates
-> `docs/backlog-dock-dogfood-2026-08-18.md` (retro P1–P5) and
+> `docs/dogfooding.md (2026-08-18 round)` (retro P1–P5) and
 > `docs/ai-cad-survey-2026-08-18.md` (external adoption list) into one
 > workstream. Theme: the agent loop must be *execute → measure → render*,
 > and today the measure rung is missing exactly where it matters — a

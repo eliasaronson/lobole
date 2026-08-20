@@ -3866,7 +3866,8 @@ void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
 // Reference images (v49): read + decode dims, append a centered ReferenceImage
 // to `sk`, and stash the raw bytes in the document asset store. Returns the new
 // image id, or 0 on read failure. The pixel bytes live on the Document (not the
-// feature) so they survive undo/redo; see docs/sketch/reference-image-plan.md.
+// feature) so they survive undo/redo; see
+// docs/sketching/reference-image-plan.md.
 static uint32_t AppendReferenceImage(AppState& state, SketchFeature* sk,
                                      const std::string& path) {
   std::ifstream in(path, std::ios::binary);
