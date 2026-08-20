@@ -120,8 +120,8 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
     const char* pref = std::getenv("DESIGNER_TOPO_GPU");
     if (!pref || std::string(pref) != "0") {
       std::string gerr;
-      auto gs =
-          gpu::TopoGpuSolver::Create(pref && std::string(pref) == "1", &gerr);
+      auto gs = gpu::TopoGpuSolver::Create(pref && std::string(pref) == "1",
+                                           &gerr, state.settings.gpuDevice);
       if (gs) {
         LOG_INFO("topology: GPU solver on {}", gs->DeviceName());
         job->solverName = "gpu: " + gs->DeviceName();

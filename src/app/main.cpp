@@ -6,9 +6,11 @@
 #include "app/HeadlessMain.h"
 #include "cad/FaceSelector.h"
 #include "common/DesignerVersion.h"
+#include "common/DevicePreference.h"
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "core/io/Autosaver.h"
+#include "core/io/Settings.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
@@ -31,6 +33,7 @@
 #include "render/UnderlayRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/SettingsWindow.h"
 #include "ui/Theme.h"
 #include "ui/UI.h"
 #include <algorithm>
@@ -244,11 +247,35 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
 #endif
   }
 
-  // Select Physical Device (GPU). ImGui prefers a discrete GPU, which on this
-  // dual-GPU machine is the RT-capable RTX 4060 (not the Arc iGPU). Log it so a
-  // wrong pick (e.g. a headless llvmpipe) is obvious — RT needs the discrete
-  // GPU.
-  g_PhysicalDevice = ImGui_ImplVulkanH_SelectPhysicalDevice(g_Instance);
+  // Select Physical Device (GPU). Prefer a discrete card — on this dual-GPU
+  // machine that is the RT-capable RTX 4060, not the Arc iGPU — unless the
+  // user named one in Preferences, which is why this no longer just calls
+  // ImGui_ImplVulkanH_SelectPhysicalDevice. Log it so a wrong pick (e.g. a
+  // headless llvmpipe) is obvious: RT needs the discrete GPU.
+  {
+    uint32_t count = 0;
+    vkEnumeratePhysicalDevices(g_Instance, &count, nullptr);
+    std::vector<VkPhysicalDevice> devices(count);
+    vkEnumeratePhysicalDevices(g_Instance, &count, devices.data());
+    std::vector<std::string> names;
+    std::vector<int> scores;
+    for (VkPhysicalDevice pd : devices) {
+      VkPhysicalDeviceProperties props;
+      vkGetPhysicalDeviceProperties(pd, &props);
+      names.emplace_back(props.deviceName);
+      scores.push_back(
+          props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU     ? 2
+          : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 1
+                                                                       : 0);
+    }
+    // The list is what the Preferences combo offers; the preference itself is
+    // matched by the shared rule both device-picking sites use.
+    g_App.gpuDevices = names;
+    const int pick =
+        devicepref::Choose(names, scores, g_App.settings.gpuDevice);
+    if (pick >= 0)
+      g_PhysicalDevice = devices[static_cast<size_t>(pick)];
+  }
   IM_ASSERT(g_PhysicalDevice != VK_NULL_HANDLE);
   {
     VkPhysicalDeviceProperties props;
@@ -1027,6 +1054,22 @@ int main(int argc, char** argv) {
 #endif
   }
 
+  // User preferences, before anything reads them: the GPU choice is consumed
+  // by device selection below, and the font scale by the first theme apply.
+  // GUI tests deliberately run on DEFAULTS — otherwise the developer's own
+  // config decides whether a test passes, and CI and the desk disagree.
+  if (!args.runGuiTests) {
+    g_App.settings = settings::Load();
+    g_App.settingsSaved = g_App.settings;
+  }
+  // A preference must not silently override an explicit flag, so the command
+  // line wins where the two overlap.
+  bool autosaveFromFlag = false;
+  for (int i = 1; i < argc; i++)
+    autosaveFromFlag = autosaveFromFlag || std::string(argv[i]) == "--autosave";
+  if (!autosaveFromFlag)
+    args.autosaveSeconds = g_App.settings.autosaveInterval;
+
   g_DisableVSync = args.runGuiTests;
 
   // Initialize logger with specified level
@@ -1121,7 +1164,11 @@ int main(int argc, char** argv) {
   // records the new scale (U4).
   float scaleX = 1.0f, scaleY = 1.0f;
   glfwGetWindowContentScale(window, &scaleX, &scaleY);
-  ui::ApplyTheme(std::max(1.0f, std::max(scaleX, scaleY)));
+  // The font-size preference scales the theme exactly as the DPI rescale path
+  // does later — one multiplication in both places, or the first frame and
+  // every frame after it would disagree.
+  ui::ApplySettings(g_App);
+  ui::ApplyTheme(std::max(1.0f, std::max(scaleX, scaleY)) * g_App.uiFontScale);
   static float s_pendingContentScale = 0.0f; // 0 = no change pending
   glfwSetWindowContentScaleCallback(
       window, [](GLFWwindow*, float sx, float sy) {
@@ -1455,6 +1502,14 @@ int main(int argc, char** argv) {
     if (g_App.document) {
       autosaver.MaybeSave(*g_App.document, g_App.projectPath,
                           g_App.lastSavedVersion, glfwGetTime());
+    }
+    // Preferences: debounced so dragging a control is one write, and never
+    // during GUI tests (they run on defaults and must not touch the
+    // developer's config).
+    if (!args.runGuiTests) {
+      if (autosaver.Interval() != g_App.settings.autosaveInterval)
+        autosaver.SetInterval(g_App.settings.autosaveInterval);
+      ui::FlushSettings(g_App, glfwGetTime());
     }
 
     // Window title tracks the project name + a dirty marker.

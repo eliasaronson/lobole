@@ -29,9 +29,10 @@ const std::string& TopoGpuSolver::DeviceName() const {
   return m_impl->ctx->DeviceName();
 }
 
-std::unique_ptr<TopoGpuSolver> TopoGpuSolver::Create(bool allowSoftware,
-                                                     std::string* error) {
-  auto ctx = ComputeContext::Create(error);
+std::unique_ptr<TopoGpuSolver>
+TopoGpuSolver::Create(bool allowSoftware, std::string* error,
+                      const std::string& preferredDevice) {
+  auto ctx = ComputeContext::Create(error, preferredDevice);
   if (!ctx)
     return nullptr;
   if (ctx->IsSoftwareDevice() && !allowSoftware) {

@@ -1,5 +1,7 @@
 #include "femgpu/ComputeContext.h"
 
+#include "common/DevicePreference.h"
+
 #include <cstring>
 
 namespace gpu {
@@ -81,7 +83,8 @@ bool SetError(std::string* error, const std::string& msg) {
 
 } // namespace
 
-std::unique_ptr<ComputeContext> ComputeContext::Create(std::string* error) {
+std::unique_ptr<ComputeContext>
+ComputeContext::Create(std::string* error, const std::string& preferredDevice) {
   auto fail = [&](const std::string& m) -> std::unique_ptr<ComputeContext> {
     if (error)
       *error = m;
@@ -102,12 +105,20 @@ std::unique_ptr<ComputeContext> ComputeContext::Create(std::string* error) {
   vkEnumeratePhysicalDevices(ctx->m_instance, &nd, nullptr);
   std::vector<VkPhysicalDevice> pds(nd);
   vkEnumeratePhysicalDevices(ctx->m_instance, &nd, pds.data());
-  DevicePick best;
+  // Rank every device, then let the SHARED rule choose — so a preference set
+  // in Preferences means the same thing here as it does for the viewport.
+  std::vector<DevicePick> picks;
+  std::vector<std::string> names;
+  std::vector<int> scores;
   for (VkPhysicalDevice pd : pds) {
-    DevicePick p = RankDevice(pd);
-    if (p.score > best.score)
-      best = p;
+    picks.push_back(RankDevice(pd));
+    names.push_back(picks.back().name);
+    scores.push_back(picks.back().score);
   }
+  const int chosen = devicepref::Choose(names, scores, preferredDevice);
+  DevicePick best;
+  if (chosen >= 0)
+    best = picks[static_cast<size_t>(chosen)];
   if (best.score < 0)
     return fail("no Vulkan device with a compute queue and float32 buffer "
                 "atomicAdd (VK_EXT_shader_atomic_float)");

@@ -169,39 +169,6 @@ void LoadExplodedViews(AssemblyDocument& asmDoc,
   asmDoc.EnsureNextIdAtLeast(maxId + 1);
 }
 
-bool WriteTextAtomic(const std::filesystem::path& target,
-                     const std::string& text, std::string* error) {
-  // Skip identical content: an untouched feature keeps its mtime, so git
-  // status, rsync, and build tools see exactly the files that changed.
-  {
-    std::ifstream existing(target, std::ios::binary);
-    if (existing) {
-      std::string current((std::istreambuf_iterator<char>(existing)),
-                          std::istreambuf_iterator<char>());
-      if (current == text)
-        return true;
-    }
-  }
-  const std::filesystem::path tmp = target.string() + ".tmp";
-  {
-    std::ofstream out(tmp);
-    if (!out) {
-      if (error)
-        *error = "Cannot open file for writing: " + tmp.string();
-      return false;
-    }
-    out << text;
-  }
-  std::error_code ec;
-  std::filesystem::rename(tmp, target, ec);
-  if (ec) {
-    if (error)
-      *error = "rename failed: " + ec.message();
-    return false;
-  }
-  return true;
-}
-
 // Binary sibling of WriteTextAtomic for reference-image pixel files (v49):
 // same temp+rename + identical-content skip, but byte-exact (no text-mode
 // translation).

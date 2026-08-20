@@ -7,6 +7,7 @@
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/GitVault.h"
+#include "core/io/Settings.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchSolver.h"
 #include "render/ClipPlanes.h"
@@ -957,6 +958,19 @@ struct AppState {
   std::string historyPath;
   double historyStamp = -1.0; // ImGui time of the last refresh; <0 = never
   bool historyUncommitted = false;
+
+  // User preferences (docs/ui/settings.md). Exactly ONE live copy — nothing
+  // else caches a field, or "it reverted when I opened a second project"
+  // becomes possible. `settingsSaved` is the last state written to disk, so a
+  // save only overwrites the keys THIS instance changed (another instance may
+  // be running). `settingsWindowOpen` is session state, not a preference.
+  settings::Settings settings;
+  settings::Settings settingsSaved;
+  double settingsDirtyAt = -1.0; // ImGui time of the last edit; <0 = clean
+  bool settingsWindowOpen = false;
+  // Render devices this machine offers, for the Preferences combo, and the
+  // one actually in use (which differs from the preference until a restart).
+  std::vector<std::string> gpuDevices;
 };
 
 } // namespace ui

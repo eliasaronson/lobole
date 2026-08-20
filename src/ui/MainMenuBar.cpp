@@ -14,6 +14,7 @@
 #include "ui/AppActions.h"
 #include "ui/FileDialogs.h"
 #include "ui/PreviewFeature.h"
+#include "ui/SettingsWindow.h"
 #include "ui/SketchInteraction.h"
 
 #include "imgui.h"
@@ -156,6 +157,12 @@ void DrawEditMenu(AppState& state) {
   if (ImGui::MenuItem("Redo", "Ctrl+Y", false, canRedo)) {
     GlobalRedo(state);
   }
+  ImGui::Separator();
+  // A floating window that does not otherwise exist — unlike History, whose
+  // menu item only re-selected an always-visible tab and was removed.
+  if (ImGui::MenuItem("Preferences...###edit_preferences", "Ctrl+,")) {
+    state.settingsWindowOpen = true;
+  }
   ImGui::EndMenu();
 }
 
@@ -185,31 +192,35 @@ void DrawViewMenu(AppState& state) {
     FitCameraToSelection(state);
   }
   ImGui::MenuItem("Show Planes", nullptr, &state.showPlanes);
-  ImGui::MenuItem("Shadows", nullptr, &state.showShadows);
-  ImGui::MenuItem("Ambient Occlusion", nullptr, &state.showAmbientOcclusion);
-  // S3 quality settings; session state, mirrored by set_render_options.
-  // The main loop recreates the GPU targets when these change.
+  // Render quality writes the PREFERENCE, not the live field: these used to be
+  // session state that reset on every launch. AppState::settings is the one
+  // source of truth and ApplySettings pushes it onto the renderer's fields, so
+  // the menu and Edit > Preferences cannot disagree.
+  if (ImGui::MenuItem("Shadows", nullptr, state.settings.shadows)) {
+    state.settings.shadows = !state.settings.shadows;
+    MarkSettingsChanged(state);
+  }
   if (ImGui::BeginMenu("Render Quality")) {
     if (ImGui::BeginMenu("Shadow Map")) {
-      if (ImGui::MenuItem("1024", nullptr, state.shadowMapSize == 1024))
-        state.shadowMapSize = 1024;
-      if (ImGui::MenuItem("2048", nullptr, state.shadowMapSize == 2048))
-        state.shadowMapSize = 2048;
+      for (int size : {1024, 2048}) {
+        if (ImGui::MenuItem(std::to_string(size).c_str(), nullptr,
+                            state.settings.shadowMap == size)) {
+          state.settings.shadowMap = size;
+          MarkSettingsChanged(state);
+        }
+      }
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("SSAO")) {
-      const bool on = state.showAmbientOcclusion;
-      if (ImGui::MenuItem("Off", nullptr, !on))
-        state.showAmbientOcclusion = false;
-      if (ImGui::MenuItem("Half Resolution", nullptr,
-                          on && !state.ssaoFullRes)) {
-        state.showAmbientOcclusion = true;
-        state.ssaoFullRes = false;
-      }
-      if (ImGui::MenuItem("Full Resolution", nullptr,
-                          on && state.ssaoFullRes)) {
-        state.showAmbientOcclusion = true;
-        state.ssaoFullRes = true;
+      const std::pair<const char*, const char*> options[] = {
+          {"off", "Off"},
+          {"half", "Half Resolution"},
+          {"full", "Full Resolution"}};
+      for (const auto& [value, label] : options) {
+        if (ImGui::MenuItem(label, nullptr, state.settings.ssao == value)) {
+          state.settings.ssao = value;
+          MarkSettingsChanged(state);
+        }
       }
       ImGui::EndMenu();
     }
@@ -243,8 +254,9 @@ void DrawViewMenu(AppState& state) {
   // Session font-size setting (U5); applied via the DPI rescale path.
   if (ImGui::BeginMenu("Font Size")) {
     const auto size = [&](const char* name, float scale) {
-      if (ImGui::MenuItem(name, nullptr, state.uiFontScale == scale)) {
-        state.uiFontScale = scale;
+      if (ImGui::MenuItem(name, nullptr, state.settings.uiFontScale == scale)) {
+        state.settings.uiFontScale = scale;
+        MarkSettingsChanged(state); // it is a preference now, not session state
         state.fontRebuildRequested = true;
       }
     };
@@ -489,6 +501,11 @@ void DrawHelpMenu(AppState& state) {
 // focused text field claim chords like Ctrl+Z for itself first.
 void HandleShortcuts(AppState& state) {
   const ImGuiInputFlags route = ImGuiInputFlags_RouteGlobal;
+
+  // Preferences: the platform-conventional chord, and it works mid-preview
+  // (opening a window changes nothing about the pending feature).
+  if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, route))
+    state.settingsWindowOpen = true;
 
   // While a feature preview is pending, freeze the undo stack: Ctrl+Z / Escape
   // cancel the preview instead of touching history.

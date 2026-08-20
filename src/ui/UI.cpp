@@ -18,6 +18,7 @@
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SelectionPipeline.h"
+#include "ui/SettingsWindow.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
 #include "ui/VariablesPanel.h"
@@ -709,6 +710,7 @@ void DrawUI(AppState& state) {
   // PROJECT, so the history reads the same from a part, an assembly or a
   // drawing tab (F6).
   DrawHistoryPanel(state);
+  DrawSettingsWindow(state);
   DrawToolWindow(state);
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);

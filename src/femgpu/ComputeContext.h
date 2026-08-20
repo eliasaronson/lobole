@@ -55,7 +55,12 @@ public:
   // first, then integrated, then anything else (llvmpipe software fallback).
   // Returns null with *error set when no usable device exists — the tests'
   // skip signal, and the app's stay-on-CPU signal.
-  static std::unique_ptr<ComputeContext> Create(std::string* error);
+  // `preferredDevice` is the user's GPU preference (settings.gpu_device),
+  // matched by the shared rule in common/DevicePreference.h — the same one
+  // the renderer uses. Empty means "best available". A named device that
+  // cannot do float32 atomics is ignored rather than obeyed.
+  static std::unique_ptr<ComputeContext>
+  Create(std::string* error, const std::string& preferredDevice = "");
   ~ComputeContext();
 
   ComputeContext(const ComputeContext&) = delete;

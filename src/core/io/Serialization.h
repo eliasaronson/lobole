@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <expected>
+#include <filesystem>
 #include <memory>
 #include <span>
 #include <string>
@@ -24,6 +25,14 @@ namespace DocumentIO {
 // already regenerated.
 [[nodiscard]] std::expected<std::unique_ptr<Document>, std::string>
 Load(const std::string& path);
+
+// Write `text` to `target` via a temp file + rename, so an interrupted write
+// can never leave a truncated file. Identical content is skipped entirely, so
+// an untouched file keeps its mtime and git/rsync see only what changed.
+// (Defined in AtomicWrite.cpp — it used to hide in Serialization.cpp's
+// anonymous namespace, where the settings store could not reach it.)
+bool WriteTextAtomic(const std::filesystem::path& target,
+                     const std::string& text, std::string* error = nullptr);
 
 // Where a NEW project picked in a save dialog should actually be written:
 // always the `.dsgn` directory form (F3). A flat single-file project is

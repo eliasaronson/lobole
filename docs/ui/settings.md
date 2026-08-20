@@ -1,7 +1,8 @@
 # Settings — a home for preferences, and a rule for where things live
 
-> Status: **DESIGN, not built.** Written 2026-08-17 because GPU device
-> selection has nowhere to live. Implementation deliberately deferred.
+> Status: written 2026-08-17 as a design because GPU device selection had
+> nowhere to live; **built 2026-08-20**, with the gaps found on review folded
+> in below (they are marked *added on review*).
 
 ## Why now
 
@@ -60,13 +61,37 @@ Rules that matter more than the schema:
   copy of a hand-edited config is not ours to destroy.
 - **No live reload.** Read at startup, write on change (debounced ~1 s so a
   slider drag is one write).
+- *(added on review)* **A save re-reads and merges first.** Preserving unknown
+  keys covers an old build meeting a new file; it does nothing about two
+  instances running at once, which is the normal case here — a windowed
+  `dev-watch` on 8799 while agents drive `headless-preview` on scratch ports.
+  Without a merge the last writer wins and an agent silently reverts the
+  human's preferences. Save therefore re-reads the file, overwrites only the
+  keys this instance actually changed, and writes that.
+- *(added on review)* **A newer `settings_format` is read, not refused.** The
+  recipe format refuses a future version because guessing would corrupt
+  geometry; here the whole design is that unknown keys survive and missing
+  ones default, so refusing would only lock a user out of their own
+  preferences. The number is for humans reading the file: nothing in the
+  current design requires it to move, and a bump means "we changed what an
+  existing key MEANS", which is the only case worth a migration.
+- *(added on review)* **No `kVersion` bump, no golden file.** This is not the
+  document format. The repo's reflex — a format change bumps `kVersion` and
+  adds a golden pair — does not apply, and saying so here saves the next
+  person the question.
 
 ## Shape in code
 
-One `struct Settings` with its defaults in the struct itself, living beside
-`AppState` (`src/ui/Settings.{h,cpp}`), and exactly one live copy at
-`AppState::settings`. Nothing else caches a copy — two sources of truth for a
-preference is how "it reverted when I opened a second project" bugs happen.
+One `struct Settings` with its defaults in the struct itself and exactly one
+live copy at `AppState::settings`. Nothing else caches a copy — two sources of
+truth for a preference is how "it reverted when I opened a second project"
+bugs happen.
+
+*(added on review)* It lives in **`src/core/io/Settings.{h,cpp}`**, not
+`src/ui/`, for one reason: `designer_tests` links `designer_core` alone, so
+anything in `src/ui/` cannot be unit-tested. The store is pure IO and belongs
+in core anyway; only the window is UI. (Same call as `ProjectSaveTarget` the
+same day.)
 
 Worth the small effort up front: drive the field list, the JSON round trip and
 the window rows from **one table** (name, member, default, tier, blurb), so
@@ -106,6 +131,13 @@ Three properties it must have, all learned the hard way this month:
   confusion rather than removing it.
 - **"Reset section to defaults"** per section, and a global reset in Advanced.
   A user who has broken their config should not have to find the JSON.
+- *(added on review)* **Every width is measured, never a pixel literal.**
+  `CalcTextSize` plus the style's own padding — the style scales with the
+  display's content scale *and* with the font-size row this very window owns.
+  The History panel shipped with `-70.0f` and `58.0f` the same week and its
+  buttons hung off the edge on a HiDPI screen; a window that is nothing but
+  label-and-control rows, and that can change its own metrics, cannot afford
+  that mistake.
 
 No search field in v1; a dozen rows do not need one.
 
@@ -120,6 +152,10 @@ and makes every setting testable headlessly.
 by scripts and the MCP today, and it already mutates three of what become
 settings.
 
+*(added on review)* Both new methods need a row in the `describe` table beside
+their dispatch chain, or the introspection test fails — the repo enforces
+"one row per RPC".
+
 ## Tests
 
 - **`ResetAppForTest` must reset `settings` to defaults.** Otherwise the
@@ -128,6 +164,11 @@ settings.
   for the shortcuts window leaked into five later tests.)
 - **Tests point `XDG_CONFIG_HOME` at a scratch dir**, so no test run can write
   the developer's real preferences.
+- *(added on review)* **Per SHARD, not per suite.** `gui-tests-xvfb.sh` now
+  runs four app processes at once, and already gives each its own
+  `XDG_STATE_HOME` because the recent-projects list is machine-global and
+  broke `file/open_recent`. `XDG_CONFIG_HOME` needs the same treatment the
+  moment settings exist, or the shards race on one `settings.json`.
 - Headless: defaults → set → save → load → identical; unknown keys survive a
   round trip; a corrupt file falls back to defaults and leaves a `.bak`.
 - GUI: `settings/toggle_persists_across_a_reload`, and one asserting a
@@ -136,8 +177,20 @@ settings.
 ## First tenants
 
 GPU device (render + compute), shadows, SSAO quality, shadow-map size,
-navigation style, autosave interval, default remote port. Deliberately short:
-the deliverable of v1 is the store, the rule and the window — not the list.
+**UI font size**, autosave interval. Deliberately short: the deliverable of v1
+is the store, the rule and the window — not the list.
+
+*(added on review)* **Font size was the omission.** `View > Font Size` already
+exists and writes `AppState::uiFontScale`, which nothing persists — it resets
+to 1.0 on every launch. It passes this doc's own test more cleanly than
+anything else in the app: an accessibility choice nobody wants to re-make
+daily, and identical in every project. It is a first tenant, and the View
+submenu now points here rather than owning it.
+
+Navigation style is dropped from v1: there is no discrete flag to persist —
+trackpad-friendliness is Alt+drag being accepted everywhere, not a mode. The
+remote port is dropped too; it is a launch flag (`--remote`), and a preference
+that silently disagrees with the command line would be worse than neither.
 
 ## Not in v1, and why
 

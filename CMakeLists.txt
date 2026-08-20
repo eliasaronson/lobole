@@ -246,6 +246,8 @@ set(core_sources
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/io/GeometryCache.cpp
+    src/core/io/AtomicWrite.cpp
+    src/core/io/Settings.cpp
     src/core/io/Serialization.cpp
     src/core/io/SerializeFeatures.cpp
     src/core/io/SerializeStudies.cpp
@@ -422,6 +424,7 @@ set(app_sources
     src/ui/ConfigurationsPanel.cpp
     src/ui/VariablesPanel.cpp
     src/ui/HistoryPanel.cpp
+    src/ui/SettingsWindow.cpp
     src/ui/SketchToolbar.cpp
     src/ui/FileDialogs.cpp
     src/ui/AppActions.cpp

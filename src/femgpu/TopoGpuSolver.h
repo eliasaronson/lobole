@@ -21,8 +21,12 @@ public:
   // Null + *error when no usable compute device exists. `allowSoftware`
   // admits llvmpipe-style software devices (tests); the app leaves it false —
   // a software "GPU" loses to the CPU Eigen path.
-  static std::unique_ptr<TopoGpuSolver> Create(bool allowSoftware,
-                                               std::string* error);
+  // `preferredDevice` is the user's GPU preference (settings.gpu_device),
+  // honoured through the same rule the renderer uses. Unlike the viewport,
+  // this context is built per run, so a change takes effect immediately.
+  static std::unique_ptr<TopoGpuSolver>
+  Create(bool allowSoftware, std::string* error,
+         const std::string& preferredDevice = "");
   ~TopoGpuSolver() override;
 
   const std::string& DeviceName() const;

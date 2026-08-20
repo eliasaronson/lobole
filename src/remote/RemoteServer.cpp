@@ -18,6 +18,7 @@
 #include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
 #include "core/io/Serialization.h"
+#include "core/io/Settings.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteAssembly.h"
 #include "remote/RemoteConfigurations.h"
@@ -35,6 +36,7 @@
 #include "ui/AppActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (U1b)
+#include "ui/SettingsWindow.h"    // ApplySettings / the save debounce
 #include "ui/SketchInteraction.h" // FaceElementRef
 
 #include <algorithm>
@@ -743,6 +745,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Path-traced still to {path} (ray tracing; needs GPU support)."},
     {"rt_build", "Build ray-tracing acceleration structures."},
     {"set_render_options", "Toggle shadows/SSAO/quality options."},
+    {"get_settings", "Read the user preferences (docs/ui/settings.md)."},
+    {"set_settings", "Change user preferences {key: value, ...}; persists."},
     {"reset_layout", "Reset the dock layout."},
     {"add_part", "Add a new empty part tab."},
     {"add_assembly", "Add an assembly tab."},
@@ -1144,6 +1148,30 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return {{"position", Vec3ToJson(state.camera->GetPosition())},
             {"target", Vec3ToJson(state.camera->GetTarget())},
             {"distance", state.camera->GetDistance()}};
+  }
+  if (m == "get_settings") {
+    // The whole struct, not one method per setting: the assistant and the
+    // human stay on the same interface, and every setting is testable
+    // headlessly.
+    json j = settings::ToJson(state.settings);
+    j["path"] = settings::ConfigPath();
+    j["devices"] = state.gpuDevices; // what gpu_device may be set to
+    return j;
+  }
+  if (m == "set_settings") {
+    // Validates first: a rejected value leaves nothing half-applied.
+    std::string error;
+    if (!settings::ApplyJson(state.settings, p.raw(), &error))
+      throw std::runtime_error(error);
+    ui::ApplySettings(state);
+    // Persist NOW rather than arming the window's debounce: that debounce is
+    // pumped by the GUI main loop, which a --headless instance does not run,
+    // so a scripted change would apply and then never reach the file.
+    if (!settings::Save(state.settings, state.settingsSaved, &error))
+      throw std::runtime_error("could not save settings: " + error);
+    state.settingsSaved = state.settings;
+    state.settingsDirtyAt = -1.0;
+    return settings::ToJson(state.settings);
   }
   if (m == "set_render_options") {
     // Viewport render quality (S3): shadows on/off, SSAO off|half|full,

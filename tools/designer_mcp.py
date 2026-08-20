@@ -1282,6 +1282,24 @@ def fit_view() -> dict:
     return _call("fit_view")
 
 
+@_reference(description="Read the user's preferences: GPU device, font size, "
+          "shadows/SSAO/shadow map, autosave interval. Also returns `path` "
+          "(the settings file) and `devices` (what gpu_device may be set to). "
+          "These are per-USER and persist; a project's own settings do not "
+          "live here.")
+def get_settings() -> dict:
+    return _call("get_settings")
+
+
+@_reference(description="Change user preferences, e.g. "
+          "{\"ssao\": \"full\", \"ui_font_scale\": 1.2}. Validates first "
+          "— a bad value changes nothing and names itself — then applies and "
+          "writes the file. The viewport GPU needs a restart; everything else "
+          "is immediate.")
+def set_settings(**values) -> dict:
+    return _call("set_settings", **values)
+
+
 @mcp.tool(description="Viewport render-quality options; all fields optional, "
           "returns the resulting state (call with no arguments to just "
           "read). shadows: key-light shadow map on/off. ssao: 'off'|'half'|"

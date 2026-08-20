@@ -32,6 +32,7 @@
 #include "ui/HistoryPanel.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
+#include "ui/SettingsWindow.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
 
@@ -68,6 +69,15 @@ static void ResetAppForTest() {
     s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
   }
   s_App->showShortcuts = false; // a stray window eats later viewport clicks
+  // Preferences are DEFAULTS for every test: otherwise the developer's own
+  // config decides whether a test passes and CI disagrees with the desk. The
+  // app already skips loading them under --gui-tests; this covers a test that
+  // changed one.
+  s_App->settings = settings::Settings{};
+  s_App->settingsSaved = s_App->settings;
+  s_App->settingsDirtyAt = -1.0;
+  s_App->settingsWindowOpen = false;
+  ui::ApplySettings(*s_App);
   s_App->selection.Clear();
   s_App->sketchEdit = {};
   s_App->sketchDrag = {};
@@ -5708,6 +5718,71 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     s_App->fontRebuildRequested = true;
     ctx->Yield(4);
     std::filesystem::remove_all(dir);
+  };
+
+  // Preferences (docs/ui/settings.md): one window over one Settings struct,
+  // every control addressable, and a change reaching the renderer's own
+  // fields — the "it reverted when I opened a second project" class of bug
+  // starts with two copies of a preference.
+  t = IM_REGISTER_TEST(engine, "settings", "a_change_reaches_the_renderer");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/###edit_preferences");
+    ctx->Yield();
+    IM_CHECK(s_App->settingsWindowOpen);
+
+    // Shadows are on by default and the renderer agrees.
+    IM_CHECK(s_App->settings.shadows);
+    IM_CHECK(s_App->showShadows);
+
+    ctx->ItemClick("//###SettingsWindow/###set_shadows");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->settings.shadows);
+    IM_CHECK(!s_App->showShadows); // ApplySettings pushed it through
+
+    // The same preference from the View menu, which used to own a separate
+    // session-only flag.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("View/Shadows");
+    ctx->Yield(2);
+    IM_CHECK(s_App->settings.shadows);
+    IM_CHECK(s_App->showShadows);
+
+    // An enum row is a combo, and its id is stable.
+    ctx->ItemClick("//###SettingsWindow/###set_ssao");
+    ctx->ItemClick("//$FOCUSED/full");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->settings.ssao, std::string("full"));
+    IM_CHECK(s_App->showAmbientOcclusion);
+    IM_CHECK(s_App->ssaoFullRes);
+
+    // Reset puts everything back, so a broken config never needs the JSON.
+    ctx->ItemClick("//###SettingsWindow/###set_reset_all");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->settings.ssao, std::string("half"));
+    IM_CHECK(s_App->settings.shadows);
+  };
+
+  // A restart-tier row must SAY so rather than pretending to apply: the
+  // swapchain and every renderer are built once, at startup.
+  t = IM_REGISTER_TEST(engine, "settings", "a_restart_row_says_restart");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    s_App->settingsWindowOpen = true;
+    ctx->Yield(2);
+    bool sawGpuRow = false;
+    bool saidRestart = false;
+    for (const settings::Field& f : settings::Fields()) {
+      if (std::string(f.key) != "gpu_device")
+        continue;
+      sawGpuRow = true;
+      saidRestart = f.tier == settings::Tier::Restart;
+      // And the blurb tells the user the asymmetry that matters: simulation
+      // builds its device per run, so it takes effect immediately there.
+      IM_CHECK(strstr(f.blurb, "restart") != nullptr);
+    }
+    IM_CHECK(sawGpuRow);
+    IM_CHECK(saidRestart);
+    IM_CHECK(ctx->ItemExists("//###SettingsWindow/###set_gpu_device"));
   };
 
   // Wrap every registered test so ResetAppForTest() runs before it — this is

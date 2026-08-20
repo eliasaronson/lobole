@@ -55,17 +55,19 @@ SCREEN='-screen 0 1600x1000x24'
 # One test process. $1 = X display number, $2 = --gui-test-filter argument,
 # $3 = a private state directory.
 #
-# XDG_STATE_HOME is per shard because parts of the app keep MACHINE-global
-# state there: the recent-projects list above all. Sharing it made
-# file/open_recent_lists_what_was_opened fail — it clears the list, saves one
-# project and expects to find exactly that one, which is not true while three
-# other processes are saving projects of their own.
+# XDG_STATE_HOME and XDG_CONFIG_HOME are per shard because parts of the app
+# keep MACHINE-global state there: the recent-projects list and the user's
+# preferences. Sharing state made file/open_recent_lists_what_was_opened fail
+# — it clears the list, saves one project and expects to find exactly that
+# one, which is not true while three other processes are saving projects of
+# their own. Config is isolated for the same reason, and so that no test run
+# can write the developer's real preferences.
 run_shard() {
   mkdir -p "$3"
   "$XVFB_RUN" -n "$1" -s "$SCREEN" \
     nix-shell "$ROOT/shell.nix" --run \
-    "cd '$ROOT/build' && XDG_STATE_HOME='$3' ./designer --gui-tests --hidden \
-     --gui-test-filter '$2'"
+    "cd '$ROOT/build' && XDG_STATE_HOME='$3' XDG_CONFIG_HOME='$3/config' \
+     ./designer --gui-tests --hidden --gui-test-filter '$2'"
 }
 
 SHARDS=4
