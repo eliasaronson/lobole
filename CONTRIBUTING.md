@@ -69,7 +69,9 @@ Two suites, and both matter:
 nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"
 
 # GUI: the real app on a virtual display, driving its own widgets.
-./tools/gui-tests-xvfb.sh            # -f <pattern> filters to one case
+./tools/gui-tests-xvfb.sh            # 148 tests, 4 shards, ~80 s
+./tools/gui-tests-xvfb.sh --fast     # ...minus the 5 slowest, ~70 s
+./tools/gui-tests-xvfb.sh -f section # ...one case, ~11 s
 ```
 
 CI runs the headless suite on every push (a PR must pass it) plus a build with
@@ -96,9 +98,19 @@ The suite is not slow; one test is. Those gates check real numerics and stay
 in `ci-local` and CI — they just do not belong in the check you run after
 every edit. Run the full suite before you commit.
 
-The GUI suite (`tools/gui-tests-xvfb.sh`) is ~3 minutes for 145 tests on a
-real GPU and is flock-serialized, so filter it while iterating:
-`./tools/gui-tests-xvfb.sh -f section`.
+The GUI suite (`tools/gui-tests-xvfb.sh`) needs a real GPU and runs **148
+tests in ~80 s**, as four parallel shards; one process takes 335 s. It is
+CPU-bound (real OCC geometry, real frames) with no per-test overhead to trim
+— the fastest case is 0.09 s — so running several at once is the only lever.
+`--fast` skips the 5 tests recorded at 4 s or more (69 s), `-j 8` shards
+further (`--fast -j 8` = 48 s), and `-f <pattern>` runs one case in ~11 s.
+
+The whole suite is still flock-serialized machine-wide: the shards are one
+suite, not several, and a second run waits its turn rather than fighting for
+the GPU. Balance comes from `tools/gui-test-times.txt`, refreshed with
+`--record-times`; a test missing from it still runs (at a default weight), so
+a stale file costs speed, never coverage. The runner asserts that the shards
+ran every test the binary lists, so a mis-partition fails loudly.
 
 ### Running CI on your own machine
 

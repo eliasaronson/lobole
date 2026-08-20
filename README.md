@@ -175,6 +175,7 @@ every runtime closure; see `nix/netgen-lean.nix`.
 ```
 ctest --test-dir build -LE gui -j$(nproc)   # headless: no GPU, no display
 ./tools/gui-tests-xvfb.sh                   # the GUI suite on a virtual display
+./tools/gui-tests-xvfb.sh --fast            # ...minus the slowest cases
 ./tools/gui-tests-xvfb.sh -f <pattern>      # ...one case
 ```
 
@@ -183,7 +184,8 @@ Python integration smokes driving `designer --headless`; it is what CI runs on
 every push. The GUI suite drives the real application through
 [ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) (simulated
 mouse and keyboard on the actual UI) and needs a GPU — `gui-tests-xvfb.sh`
-supplies the display and serializes concurrent runs with a lock. Plain `ctest`
+supplies the display, splits the suite across four parallel shards (~80 s
+rather than 335 s) and serializes concurrent runs with a lock. Plain `ctest`
 with no `-LE gui` will try to run the display-gated tests too.
 
 ## Sanitizers & static analysis

@@ -868,6 +868,9 @@ void printUsage(const char* programName) {
   std::cout << "  --gui-test-filter <pattern>  Run only matching GUI tests "
                "(e.g. \"fillet\", \"selection_,tree_\"; implies --gui-tests)"
             << std::endl;
+  std::cout << "  --gui-test-list      List GUI tests as category/name and "
+               "exit (no GPU needed)"
+            << std::endl;
   std::cout << "  --remote <port>      Enable JSON-RPC remote control on "
                "127.0.0.1:<port>"
             << std::endl;
@@ -893,6 +896,7 @@ struct CommandLineArgs {
   std::string fileToLoad;
   spdlog::level::level_enum logLevel = spdlog::level::info;
   bool runGuiTests = false;
+  bool listGuiTests = false;
   std::string guiTestFilter = "all";
   bool headless = false;
   bool hidden = false;
@@ -941,6 +945,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
         std::cerr << "--gui-test-filter requires a pattern" << std::endl;
         exit(1);
       }
+    } else if (arg == "--gui-test-list") {
+      args.listGuiTests = true;
     } else if (arg == "--headless") {
       args.headless = true;
     } else if (arg == "--remote-bind-all") {
@@ -996,6 +1002,31 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
 int main(int argc, char** argv) {
   InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
+
+  // --gui-test-list: the suite's own inventory, for the sharding runner.
+  // Registration only stores the AppState pointer and fills the engine's
+  // table, so this needs neither a window nor Vulkan — and the runner must
+  // not need a GPU (or an X display) merely to decide who runs what.
+  // Scraping the source for IM_REGISTER_TEST would drift; asking the binary
+  // cannot, and a test missing from the list would be silently skipped.
+  if (args.listGuiTests) {
+#ifdef HAVE_TEST_ENGINE
+    ImGui::CreateContext();
+    ImGuiTestEngine* engine = ImGuiTestEngine_CreateContext();
+    RegisterGuiTests(engine, &g_App);
+    ImVector<ImGuiTest*> tests;
+    ImGuiTestEngine_GetTestList(engine, &tests);
+    for (const ImGuiTest* test : tests)
+      std::cout << test->Category << "/" << test->Name << "\n";
+    return 0;
+#else
+    std::cerr << "--gui-test-list needs the ImGui Test Engine, and this build "
+                 "was configured with -DENABLE_TEST_ENGINE=OFF"
+              << std::endl;
+    return 1;
+#endif
+  }
+
   g_DisableVSync = args.runGuiTests;
 
   // Initialize logger with specified level

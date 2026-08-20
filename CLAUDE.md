@@ -47,9 +47,13 @@ docs/ui/u10-defaults-and-refusals.md.
   — 81 s for 622 tests, of which the SIMP gate alone is 89 s of CPU and the
   next four topology/FEM gates 12-14 s each. **Inner loop: `tools/test-fast.sh`
   (8 s, 603 tests)**; full suite before committing.
-- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` (`-f <pattern>` filters a
-  case). Runs `designer --gui-tests --hidden` under Xvfb; **flock-serialized**,
-  so concurrent runs (parallel agents) are safe.
+- GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 148 tests in **80 s**
+  across 4 parallel shards (335 s serial). `--fast` drops the 5 slowest
+  (69 s), `-j 8` more shards, `--fast -j 8` = 48 s, `-f <pattern>` one case
+  (11 s), `--serial` for debugging. Still **flock-serialized** machine-wide,
+  so concurrent runs (parallel agents) are safe — the shards are one suite.
+  The runner asserts every listed test ran, so a bad partition fails loudly
+  instead of skipping tests. `--record-times` refreshes the balance data.
 - Known flakes — rerun, don't chase: femgpu "TopologyOptimize…". The
   `headless_smoke` autosave flake was a real bug, fixed 2026-08-19 (a document
   version number used as a document identity, ee247f9) — a "flaky under load"
