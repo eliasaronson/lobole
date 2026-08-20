@@ -12,6 +12,7 @@
 #include "core/sketch/SketchSolver.h"
 #include "render/ClipPlanes.h"
 #include "ui/TopoJob.h"
+#include "ui/ViewportHandle.h"
 
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
@@ -738,6 +739,13 @@ struct AppState {
   PickState pick;
   MateToolState mateTool;
   GizmoDrag gizmoDrag;
+
+  // Every draggable arrow/arc in the viewport this frame, from all three
+  // owners (docs/ui/viewport-handles.md). Rebuilt each frame by the overlay
+  // pass, then used for BOTH hover and click hit-testing — one list, so what
+  // highlights is exactly what a click would grab.
+  std::vector<ViewportHandle> viewportHandles;
+  uint64_t hoveredHandle = 0; // 0 = nothing under the cursor
   HandleDrag handleDrag;
   // Feature being previewed (in the document + rendered, but NOT on the undo
   // stack until accepted). 0 = none. See PreviewFeature.

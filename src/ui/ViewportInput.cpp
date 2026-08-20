@@ -5,6 +5,7 @@
 #include "render/Camera.h"
 #include "render/MeshRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/DragMath.h"      // GizmoScale — the click's grab radius
 #include "ui/FeatureEditor.h" // kMateSessionSlot (U7c)
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
@@ -14,6 +15,35 @@
 #include "imgui.h"
 
 namespace ui {
+
+namespace {
+
+// Which handle is under the cursor, recomputed every frame that no drag is
+// running (docs/ui/viewport-handles.md). Before this, the handle hit test ran
+// ONLY on click, so nothing could know what the pointer was over until the
+// button went down — which is exactly the feedback that was missing.
+void UpdateHandleHover(AppState& state, bool overViewport) {
+  const bool dragging = state.handleDrag.active || state.gizmoDrag.active;
+  if (dragging || !overViewport || state.viewportHandles.empty() ||
+      !state.camera || !state.faceSelector) {
+    if (!dragging)
+      state.hoveredHandle = 0;
+    return;
+  }
+  const ImGuiIO& io = ImGui::GetIO();
+  const Ray ray = state.faceSelector->ScreenToWorldRay(
+      io.MousePos.x - state.viewportPos.x, io.MousePos.y - state.viewportPos.y,
+      static_cast<int>(state.viewportSize.x),
+      static_cast<int>(state.viewportSize.y), *state.camera);
+  // The same grab radius the click uses, so the highlight cannot promise a
+  // grab the click would miss.
+  const int hit =
+      HitTestHandles(state.viewportHandles, ray, 0.14f * GizmoScale(state));
+  state.hoveredHandle =
+      hit >= 0 ? state.viewportHandles[static_cast<size_t>(hit)].id : 0;
+}
+
+} // namespace
 
 void HandleViewportInput(AppState& state) {
   // A drawing tab drives a 2D sheet, not the orbit camera.
@@ -269,6 +299,8 @@ void HandleViewportInput(AppState& state) {
       escUsed = true;
     }
 
+    UpdateHandleHover(state, overViewport);
+
     // The drag gizmo gets first shot: a live drag continues even off-viewport,
     // and a click on a handle starts one (consuming the click so it doesn't
     // also re-select). Built each frame from the current mouse ray.
@@ -301,6 +333,8 @@ void HandleViewportInput(AppState& state) {
     HandleSelectionInput(state, overViewport, /*allowEscapeClear=*/!escUsed);
     return;
   }
+
+  UpdateHandleHover(state, overViewport);
 
   // Direct-manipulation handles: first shot at clicks, exactly like the
   // assembly gizmo above — a live drag continues even off-viewport, a hit

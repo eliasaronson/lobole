@@ -718,13 +718,34 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
 
 namespace {
 
-// Appends one axis's handles (arrow and/or arc) per the spec.
-void AppendGizmoHandles(const GizmoSpec& spec, float L,
+// Appends one axis's handles (arrow and/or arc) per the spec, and publishes
+// each as a ViewportHandle for the shared hover + click hit test
+// (docs/ui/viewport-handles.md). Per-axis ids and per-axis colour, so
+// hovering X highlights X rather than the whole gizmo.
+void AppendGizmoHandles(AppState& state, const GizmoSpec& spec, float L,
                         std::vector<LineVertex3D>& lines) {
   const float R = 0.78f * L, head = 0.18f * L;
+  const uint64_t activeId =
+      state.gizmoDrag.active
+          ? HandleId(HandleOwner::Gizmo,
+                     GizmoSub(state.gizmoDrag.axis, state.gizmoDrag.rotate))
+          : 0;
+  const auto publish = [&](int axis, bool rotate, float len) {
+    ViewportHandle vh;
+    vh.id = HandleId(HandleOwner::Gizmo, GizmoSub(axis, rotate));
+    vh.kind = rotate ? HandleKind::Rotate : HandleKind::Linear;
+    vh.origin = spec.origin;
+    vh.dir = spec.axis[axis];
+    vh.length = len;
+    vh.color = kGizmoColor[axis];
+    state.viewportHandles.push_back(vh);
+    return HandleTint(vh, state.hoveredHandle, activeId);
+  };
   for (int i = 0; i < 3; i++) {
-    const glm::vec3 A = spec.axis[i], col = kGizmoColor[i], C = spec.origin;
+    const glm::vec3 A = spec.axis[i], C = spec.origin;
+    glm::vec3 col = kGizmoColor[i];
     if (spec.trans[i]) {
+      col = publish(i, false, L);
       const glm::vec3 tip = C + A * L, side = PerpTo(A);
       lines.push_back(LineVertex(C, col));
       lines.push_back(LineVertex(tip, col));
@@ -734,6 +755,7 @@ void AppendGizmoHandles(const GizmoSpec& spec, float L,
       lines.push_back(LineVertex(tip - A * head - side * head, col));
     }
     if (spec.rot[i]) {
+      col = publish(i, true, R);
       const glm::vec3 b1 = PerpTo(A), b2 = glm::cross(A, b1);
       const int seg = 40;
       glm::vec3 prev = C + b1 * R;
@@ -757,7 +779,7 @@ void BuildGizmoOverlay(AppState& state, std::vector<LineVertex3D>& lines) {
   Mate* mate = nullptr;
   if (!BuildGizmoSpec(state, occ, spec, mate))
     return;
-  AppendGizmoHandles(spec, GizmoScale(state), lines);
+  AppendGizmoHandles(state, spec, GizmoScale(state), lines);
 }
 
 bool HandleGizmoInput(AppState& state, const Ray& ray, bool clicked, bool down,

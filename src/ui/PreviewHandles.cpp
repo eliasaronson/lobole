@@ -266,7 +266,7 @@ double CurrentHandleValue(const Feature& f) {
 }
 
 void AppendArrow(std::vector<LineVertex3D>& lines, const glm::vec3& base,
-                 const glm::vec3& A, float L) {
+                 const glm::vec3& A, float L, const glm::vec3& kHandleColor) {
   const float head = 0.18f * L;
   const glm::vec3 tip = base + A * L, side = PerpTo(A);
   lines.push_back(LineVertex(base, kHandleColor));
@@ -283,12 +283,30 @@ void BuildPreviewHandleOverlay(AppState& state,
                                std::vector<LineVertex3D>& lines) {
   HandleSpec spec;
   bool isSection = false;
+  uint64_t sectionId = 0;
   if (!ComputeHandleSpec(state, spec)) {
-    isSection = ComputeSectionHandleSpec(state, spec, nullptr);
+    isSection = ComputeSectionHandleSpec(state, spec, &sectionId);
     if (!isSection)
       return;
   }
   const float L = 0.9f * GizmoScale(state);
+
+  // Publish this handle for the shared hover + click hit test
+  // (docs/ui/viewport-handles.md): one list, so what highlights under the
+  // cursor is exactly what a click would grab.
+  ViewportHandle vh;
+  vh.id = isSection ? HandleId(HandleOwner::Section, sectionId)
+                    : HandleId(HandleOwner::Feature);
+  vh.kind = spec.rotate ? HandleKind::Rotate : HandleKind::Linear;
+  vh.origin = spec.anchor;
+  vh.dir = spec.dir;
+  vh.length = spec.rotate ? spec.arcRadius : L;
+  vh.color = kHandleColor;
+  state.viewportHandles.push_back(vh);
+  // Shadow the file-scope colour so every line below draws in the hover /
+  // drag tint without threading a parameter through each push_back.
+  const glm::vec3 kHandleColor =
+      HandleTint(vh, state.hoveredHandle, state.handleDrag.active ? vh.id : 0);
 
   // Where the cut plane is, as a square outline around the arrow's base —
   // an offset typed into the tool window is otherwise invisible until it
@@ -309,7 +327,7 @@ void BuildPreviewHandleOverlay(AppState& state,
   }
 
   if (!spec.rotate) {
-    AppendArrow(lines, spec.anchor, spec.dir, L);
+    AppendArrow(lines, spec.anchor, spec.dir, L, kHandleColor);
     // A blend/short-arrow base tick so the grab point reads on the geometry.
     const glm::vec3 s1 = PerpTo(spec.dir) * (0.09f * L);
     const glm::vec3 s2 = glm::cross(spec.dir, PerpTo(spec.dir)) * (0.09f * L);

@@ -764,6 +764,10 @@ void DrawUI(AppState& state) {
     // stay visible/grabbable through geometry (A2.5). The preview-feature
     // handles share the channel (part tabs, where the gizmo is empty).
     std::vector<LineVertex3D> gizmo;
+    // Rebuilt every frame by the two owners as they draw: the shared list is
+    // what hover and clicks hit-test against, so it must describe THIS
+    // frame's handles (docs/ui/viewport-handles.md).
+    state.viewportHandles.clear();
     BuildGizmoOverlay(state, gizmo);
     BuildPreviewHandleOverlay(state, gizmo);
     AppendCogMarker(state, gizmo);   // mass-props CoG cross (no-depth channel)

@@ -5800,6 +5800,115 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(ctx->ItemExists("//###SettingsWindow/###set_gpu_device"));
   };
 
+  // Viewport handles (docs/ui/viewport-handles.md): the three owners publish
+  // into one list, so hover can say WHICH arrow is under the cursor — before
+  // this, the hit test ran only on click and nothing knew until you pressed.
+  t = IM_REGISTER_TEST(engine, "handles", "hover_highlights_the_arrow");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // A pending FILLET has the direct-manipulation handle (its radius); a
+    // pending box does not — ComputeHandleSpec only serves features with a
+    // headline scalar (extrude distance, blend radius, revolve angle).
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const Body& body = Doc()->GetBodies()[0];
+    IM_CHECK(!body.elementMap.edgeNames.empty());
+    const ElementRef ref{body.createdBy,
+                         body.elementMap.edgeNames.begin()->second};
+    ui::BeginPreviewFeature(*s_App,
+                            std::make_unique<FilletFeature>(
+                                "Fillet", std::vector<ElementRef>{ref}, 0.4));
+    ctx->Yield(2);
+    IM_CHECK(ui::HasViewportHandle(*s_App));
+    IM_CHECK(!s_App->viewportHandles.empty());
+    const ui::ViewportHandle h = s_App->viewportHandles[0];
+    IM_CHECK_EQ(ui::OwnerOf(h.id), ui::HandleOwner::Feature);
+
+    // Nothing under the cursor to start with (the mouse is not on the arrow).
+    ctx->MouseMoveToPos(WorldToWindow(h.origin - h.dir * (h.length * 6.0f)));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->hoveredHandle, (uint64_t)0);
+
+    // On the shaft: hovered, and it is THIS handle, not merely "something".
+    ctx->MouseMoveToPos(WorldToWindow(h.origin + h.dir * (h.length * 0.6f)));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->hoveredHandle, h.id);
+
+    // Moving off clears it — a highlight that never turns off is worse than
+    // none, because it stops meaning "you can grab this".
+    ctx->MouseMoveToPos(WorldToWindow(h.origin - h.dir * (h.length * 6.0f)));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->hoveredHandle, (uint64_t)0);
+    ui::CancelPendingFeature(*s_App);
+  };
+
+  // Per-axis, which is the whole reason the shared handle carries its own
+  // colour: hovering the gizmo's X arrow must identify X.
+  t = IM_REGISTER_TEST(engine, "handles", "gizmo_hover_names_the_axis");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ui::AddAssembly(*s_App, "Rig");
+    ctx->Yield();
+    Occurrence occ;
+    occ.name = "Block";
+    occ.partId = s_App->parts[0].id;
+    s_App->assembly->AddOccurrence(occ);
+    ctx->Yield(2);
+    ui::SelectOccurrence(*s_App, s_App->assembly->GetOccurrences()[0].id);
+    ctx->Yield(2);
+
+    // Three translate arrows (and their arcs) are published, one per axis.
+    IM_CHECK(s_App->viewportHandles.size() >= 3);
+    int axesSeen = 0;
+    for (const ui::ViewportHandle& h : s_App->viewportHandles)
+      if (ui::OwnerOf(h.id) == ui::HandleOwner::Gizmo &&
+          h.kind == ui::HandleKind::Linear)
+        axesSeen++;
+    IM_CHECK_EQ(axesSeen, 3);
+
+    for (const ui::ViewportHandle& h : s_App->viewportHandles) {
+      if (ui::OwnerOf(h.id) != ui::HandleOwner::Gizmo ||
+          h.kind != ui::HandleKind::Linear)
+        continue;
+      ctx->MouseMoveToPos(WorldToWindow(h.origin + h.dir * (h.length * 0.6f)));
+      ctx->Yield(2);
+      // The axis under the cursor is the one reported — not the first one.
+      IM_CHECK_EQ(ui::GizmoAxisOf(ui::SubOf(s_App->hoveredHandle)),
+                  ui::GizmoAxisOf(ui::SubOf(h.id)));
+    }
+
+    // And the highlight reaches the DRAWN output, not just the state: the
+    // same overlay, built with and without a hover, must differ — and only
+    // in the hovered axis's own lines.
+    const uint64_t xId =
+        ui::HandleId(ui::HandleOwner::Gizmo, ui::GizmoSub(0, /*rotate=*/false));
+    const auto overlayWith = [&](uint64_t hovered) {
+      s_App->hoveredHandle = hovered;
+      std::vector<LineVertex3D> lines;
+      s_App->viewportHandles.clear(); // rebuilt by the call below
+      ui::BuildGizmoOverlay(*s_App, lines);
+      return lines;
+    };
+    const std::vector<LineVertex3D> plain = overlayWith(0);
+    const std::vector<LineVertex3D> hoveredX = overlayWith(xId);
+    IM_CHECK_EQ(plain.size(), hoveredX.size()); // geometry is untouched
+    int brighter = 0;
+    for (size_t i = 0; i < plain.size(); i++)
+      if (plain[i].color != hoveredX[i].color) {
+        brighter++;
+        // Brighter, and still recognisably the axis's own colour: X stays
+        // red rather than turning into one shared accent.
+        IM_CHECK(hoveredX[i].color.r > plain[i].color.r);
+        IM_CHECK(hoveredX[i].color.r > hoveredX[i].color.g);
+      }
+    IM_CHECK(brighter > 0);
+  };
+
   // Wrap every registered test so ResetAppForTest() runs before it — this is
   // what makes the suite order-independent. Done once here rather than per
   // test.
