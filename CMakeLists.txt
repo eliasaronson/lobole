@@ -345,12 +345,39 @@ execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEA
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET)
 
+# libvterm: the terminal panel's VT emulation (docs/ui/terminal-panel.md).
+# Optional — without it the panel compiles out and the preference hides,
+# because a CAD app must still build on a machine that has no terminal
+# library. Ubuntu: libvterm-dev; nix: libvterm-neovim (in shell.nix).
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND AND NOT WIN32)
+    pkg_check_modules(VTERM QUIET vterm)
+endif()
+if(VTERM_FOUND)
+    set(HAVE_TERMINAL ON)
+    list(APPEND core_sources src/common/TerminalScreen.cpp
+                             src/common/PtySession.cpp)
+    message(STATUS "libvterm found - terminal panel enabled")
+else()
+    message(STATUS "libvterm not found - terminal panel disabled")
+endif()
+
 add_library(designer_core STATIC ${core_sources})
 target_compile_definitions(designer_core PUBLIC
     DESIGNER_VERSION="${PROJECT_VERSION}"
     DESIGNER_GIT_COMMIT="${DESIGNER_GIT_COMMIT}")
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json fem_mesher)
+if(HAVE_TERMINAL)
+    target_compile_definitions(designer_core PUBLIC HAVE_TERMINAL)
+    target_include_directories(designer_core PUBLIC ${VTERM_INCLUDE_DIRS})
+    target_link_libraries(designer_core PUBLIC ${VTERM_LINK_LIBRARIES})
+    # forkpty lives in libutil on older glibc, in libc since 2.34.
+    find_library(UTIL_LIBRARY util)
+    if(UTIL_LIBRARY)
+        target_link_libraries(designer_core PUBLIC ${UTIL_LIBRARY})
+    endif()
+endif()
 if(HAVE_NETGEN)
     # Lets core sources (and tests, transitively) switch on FEM availability
     # without pulling in any Netgen header.
@@ -457,6 +484,10 @@ set(app_sources
 file(COPY ${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf
+     DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
+# Monospace for the terminal panel: the UI font has no box-drawing glyphs, and
+# a TUI drawn in a proportional font is unreadable (docs/ui/terminal-panel.md).
+file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
 include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 

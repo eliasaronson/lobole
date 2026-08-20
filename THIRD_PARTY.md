@@ -115,6 +115,7 @@ push so it cannot rot.
 | Font Awesome 6 Free Solid | `deps/fonts/fa-solid-900.ttf` | SIL Open Font License 1.1 |
 | IconFontCppHeaders declarations | `deps/fonts/IconsFontAwesome6.h` | zlib license |
 | Roboto Medium | `deps/imgui/misc/fonts/Roboto-Medium.ttf` | Apache-2.0 |
+| JetBrains Mono Regular | `deps/fonts/JetBrainsMono-Regular.ttf` | SIL Open Font License 1.1 |
 
 ## Build- and test-only dependencies
 

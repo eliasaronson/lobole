@@ -44,6 +44,7 @@ pkgs.mkShell {
     dbus # nativefiledialog-extended portal backend (xdg-desktop-portal)
     systemd # libsystemd.pc — dbus-1.pc's Requires.private needs it resolvable
     libx11 # non-blocking XMapWindow path (see main.cpp)
+    libvterm-neovim # VT emulation for the terminal panel (docs/ui/terminal-panel.md)
     catch2_3 # unit tests (FetchContent fallback needs network otherwise)
   ];
 
