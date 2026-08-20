@@ -1,6 +1,6 @@
 # A5 — sub-assemblies (assemblies in assemblies) — plan
 
-> Status: **A5.1-A5.4 shipped 2026-08-19** (4ce026a, 7d01be6, 4485c45,
+> Status: **A5 COMPLETE 2026-08-20** — A5.1-A5.4 on the 19th (4ce026a, 7d01be6, 4485c45,
 > 5278440). What remains is A5.5, the dock restructure, which is an
 > acceptance exercise on a real model rather than code — and the deferrals
 > listed at the bottom. Reviewed 2026-08-19 against the code (the walker
@@ -162,8 +162,27 @@ that is coverage the golden cannot give, not a replacement for it.
   golden turned out to be expressible): nested_assembly_smoke (build sub + top, combined BOM
   quantities, contact through a sub-assembly, cycle refusal, dangling
   ref honesty, save/reload) + the nested-dock fixture.
-- **A5.5 acceptance — restructure the dock — NOT DONE** (it edits
-  scratch/build_dock.py, which is the user's own artifact): `build_dock.py` splits
+- **A5.5 acceptance — DONE 2026-08-20** as a new script and a new project
+  (`scratch/restructure_dock_nested.py` -> `scratch/marsliden-dock.json`),
+  leaving build_dock.py and floating-dock.json untouched. Written as a
+  RESTRUCTURING of the flat project rather than a second copy of the build
+  script, so equivalence is provable rather than hoped for: every part
+  document and world placement comes from the flat source.
+  **Results:** Dock 49 parts / 261.0 kg, Gangway 24 / 82.0 kg (in its OWN
+  coordinates, occurrence at x=-2410, so the composed transform is what puts
+  it back), top 76 items / 385.2 kg — identical to the flat build to the
+  gram. Both hinges touch BOTH units; Dock vs Gangway clear at exactly
+  10.0 mm, the articulation gap, through the composition. It found the last
+  two unported walkers (contact_report, named-pair interference).
+  **It also surfaced something pre-existing:** the flat project carries six
+  sub-0.14 mm³ overlaps at lap joints (End right/Post right 1 and 2, three
+  mooring/frame pairs, End right/Ladder). They are NOT from the restructure —
+  the flat source reports the identical set — so the script asserts
+  equivalence with the source instead of an absolute zero the source never
+  met. Worth a look: build_dock.py's own `clashes == []` gate would fail on
+  the saved project today.
+
+  The original A5.5 sketch (edit build_dock.py in place): `build_dock.py` splits
   into "Dock" (frame/deck/barrels/cradle/moorings) and "Gangway"
   (stringers/noggins/boards/roller carriage) assemblies composed in a
   top-level "Marsliden dock" with the ladder and the two HINGES — the
