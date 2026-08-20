@@ -219,6 +219,42 @@ one unit, and no ref can dangle. Dimensioning an inner part means opening
 that assembly's own drawing — or the path key, deferred with the rest of
 inner addressing.
 
+## Scope decision 2026-08-20: reading in, never writing in
+
+Asked what the remaining gaps would cost, and the answer reshaped them:
+
+**Editing a sub-assembly's contents from the parent is OUT OF SCOPE**, not
+deferred. A sub-assembly is edited on its own tab — the line A5 drew from the
+start. The consequence is that path addressing is READ-ONLY, which removes the
+expensive half of it: no undo problem (`SnapshotAssembly` snapshots the ACTIVE
+assembly, so an edit into another document would have escaped it silently),
+and no need to explain that moving `Gangway/Board 03` moves it in both placed
+Gangways.
+
+That last point was overstated when it was first written here. Editing a
+document placed twice changes both placements — which is exactly how a PART
+placed sixteen times already behaves. It is the live-reference rule, one level
+up, and it is not a surprise.
+
+**What read-only addressing buys**, and the only thing it buys: a query ACROSS
+the boundary. "Is `Gangway/Board 19` touching `Gang hinge 1`?" cannot be asked
+on any tab — the board lives in the Gangway document, the hinge at the top.
+The dock's own gates were rewritten around this when it was restructured
+(`Gang hinge 1 vs Gangway`), which is coarser but honest.
+
+**Key format:** an id chain (`"12/47"`), with a name path (`"Gangway/Board
+19"`) accepted when it is unambiguous. Not names alone: occurrence names are
+not enforced unique and the same sub-assembly can be placed twice, so
+`"Gangway/Board 03"` is ambiguous by construction.
+
+**Configurations reaching into a sub-assembly is DROPPED** in favour of
+per-occurrence configuration selection, which answers the same need one level
+up and makes a sub-assembly reusable rather than merely tidy: two Gangways,
+one "short", one "long". Scoped to ASSEMBLY configurations (a suppression set,
+which Flatten simply consults) — per-occurrence PART configs stay deferred,
+because a part configuration changes geometry and would mean regenerating a
+part once per configuration.
+
 ## Risks / open questions
 
 - The render-sync port is the risky one (instancing cache, outline
