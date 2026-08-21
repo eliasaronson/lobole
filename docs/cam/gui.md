@@ -1,12 +1,13 @@
-# CAM for someone who has never done CAM — plan
+# CAM for someone who has never done CAM
 
-> Status: **design, awaiting sign-off** (2026-08-21). From: *"make the GUI
-> more intuitive — selecting the top face visually, immediately
-> understandable for someone who has never done CAM, as few clicks, settings
-> and writes as possible."*
+> Status: **BUILT** (2026-08-21), G1–G4. From: *"make the GUI more intuitive —
+> selecting the top face visually, immediately understandable for someone who
+> has never done CAM, as few clicks, settings and writes as possible."*
 >
-> The engine ([plan.md](plan.md)) is built and tested. This is only about how
-> a person reaches it.
+> The engine ([plan.md](plan.md)) was built and tested first. This was only
+> about how a person reaches it. What follows is the design as written, with
+> an [as-built section](#as-built) at the end recording what changed and what
+> the first screenshots caught.
 
 ## What is wrong with the panel today
 
@@ -118,13 +119,13 @@ yet. Verification stops being a thing you remember to run.
 
 ## Phases
 
-| | scope | size |
-|---|---|---|
-| **G1** | `Pick top face` → Z zero / stock top / work origin, and the tool drawn to scale at the pick | ~1 session — *the two mistakes that break tools* |
-| **G2** | The verbs (`Clear a pocket`, `Cut it out`, `Face the top`) on the Tool-window pattern, with derived depths | ~1 session |
-| **G3** | Removed-volume ghost, hover preview, depth label, stock box | ~1 session |
-| **G4** | Plain-language verdict + leftover painted on the part | ~half a session |
-| later | Per-op "Advanced" disclosure tidy-up · a second setup for flip jobs · toolpath playback | on demand |
+| | scope | size | |
+|---|---|---|---|
+| **G1** | `Pick top face` → Z zero / stock top / work origin, and the tool drawn to scale at the pick | ~1 session — *the two mistakes that break tools* | **done** `6ca9351` `6bf67a4` |
+| **G2** | The verbs (`Clear a pocket`, `Cut it out`, `Face the top`) on the Tool-window pattern, with derived depths | ~1 session | **done** `8d71991` `43ef325` |
+| **G3** | Removed-volume ghost, hover preview, depth label, stock box | ~1 session | **done** `43ef325` |
+| **G4** | Plain-language verdict + leftover painted on the part | ~half a session | **done** `43ef325` |
+| later | A second setup for flip jobs · toolpath playback · arcs (G2/G3) instead of polygonised curves | on demand | |
 
 G1 first: picking the top face is the highest-value single click in CAM, and
 the tool-to-scale drawing prevents the most common beginner surprise.
@@ -149,3 +150,50 @@ Two papercuts already owed from using the panel, both of which evaporate:
   tools + two operations, after `3c873a7`).
 - The verdict text is asserted against a job with a known gouge, so the words
   cannot drift from what the verifier reports.
+
+*As built:* `tests/test_cam.cpp` holds the derivation tests (a clicked floor
+gives every depth; an island in that floor is machined around; each verb that
+cannot apply says why; leftover means unreachable, not unprogrammed) and
+`GuiTests.cpp` `cam/verbs_two_clicks_to_a_pocket` walks the whole path
+including the ghost's Z span and the session close.
+
+## As-built
+
+Everything above shipped. What the design did not anticipate:
+
+**Three defects the first screenshot found**, none of which a test was
+looking for:
+
+1. **Safe Z was a bare 5 mm** — an absolute Z, so it sat *inside* any stock
+   taller than 5 mm, and the first job made by clicking rapided straight
+   through the block. The verifier reported it ("rapid through material at
+   line 11") the moment G4 started running automatically, which is the whole
+   argument for G4 in one line. Now `cam::DeriveSafeZ` puts it above the
+   stock top, and picking the top face re-derives it because the stock just
+   changed shape.
+2. **Leftover was measured over the whole stock.** A job that clears one
+   pocket in a block leaves the rest of the block untouched *correctly*, and
+   the verdict called all of it "22 mm of material left" and painted the part
+   solid red. Leftover is now measured only where the tool actually went
+   (`Inspection::touched`); the separate signal — a program that machines
+   nothing at all — moved to `Verdict::untouchedFraction`.
+3. **The UI font stopped at Latin-1.** Every em-dash and ellipsis in the
+   app's own prose rendered as `?`, in CAM's refusals and equally in the
+   section tool's "source missing — this cut is off". Fixed in `Theme.cpp`
+   for the whole app rather than by policing strings; verdict ticks use the
+   already-merged icon font, which the text font still has no glyph for.
+
+**One the GUI suite found:** the CAM panel was the only panel tabbed into the
+left dock node without `NoFocusOnAppearing`, so on first launch it took the
+tab from the model tree. Three unrelated tests had been failing on it
+("unable to hover Model"); a user would have said their tree was gone.
+
+**A convention worth knowing:** CAM's Z is the spindle axis, but the view
+cube's *Top* is +Y — the app renders Y as up. The plan view for a milling job
+is therefore **Front**. Nothing here assumes otherwise (every depth comes
+from the face you clicked), but the names disagree, and picking "the top
+face" from the Top view will land on a wall and be refused.
+
+Deliberately still open: pockets too small to ramp into want a helix entry;
+the ~0.4 % cut-length overcount at the ramp seam; arcs in the posted file
+instead of polygonised curves.

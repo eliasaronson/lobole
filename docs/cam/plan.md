@@ -256,9 +256,23 @@ those files eventually moves a machine.
 
 ## Making it usable
 
-The engine is done; reaching it is a parameter editor today. The redesign —
-verbs on a Tool-window session, a picked top face, derived depths and a
-visualisation ladder — is [gui.md](gui.md), awaiting sign-off.
+The engine was done while reaching it was still a parameter editor. The
+redesign — verbs on a Tool-window session, a picked top face, derived depths
+and a visualisation ladder — is [gui.md](gui.md), and it **shipped**
+(G1–G4, 2026-08-21). Two clicks make a pocket, nothing is typed, and Generate
+verifies without being asked.
+
+Two things it changed here, because they were engine bugs rather than
+presentation:
+
+- `Setup::safeZ` is an absolute Z that defaulted to 5 mm — inside any stock
+  taller than that. `cam::DeriveSafeZ` puts it above the stock top, and the
+  verifier is what noticed (a rapid through material on the very first job
+  made by clicking).
+- Leftover is measured only over the cells the tool actually swept
+  (`Inspection::touched`). Measuring it over the whole stock made every
+  partial job report the unmachined remainder as a failure, which is the
+  fastest way to teach someone to ignore a verdict.
 
 ## Turning it off
 

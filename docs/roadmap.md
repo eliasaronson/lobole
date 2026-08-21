@@ -72,8 +72,9 @@ SSAO (persisted as user preferences), an offline path-traced Render button.
 **Thin or missing:** the UI/UX visual-polish tail (spacing rhythm, tree badges,
 a tooltips audit); assembly-level features; per-occurrence part-config
 selection (the one configurations follow-on); real-time hybrid RT (gated on
-the `main.cpp` render-path cleanup); semantic (three-way) merge for the git
-format; assembly/thermal/buckling FEM.
+the `main.cpp` render-path cleanup); branch/merge/conflict handling for the
+git format (F7 — the engine is linear-only today, so goal 4's "mergeable"
+half is unexercised by the app itself); assembly/thermal/buckling FEM.
 
 **Where the defects actually come from (evidence, 2026-08-19/20).**
 `known-bugs.md` is empty and the suite is ~800 tests, yet a single evening of
@@ -105,7 +106,7 @@ Each workstream has its own plan doc and ships in independent milestones.
 | 3. Topological naming | [modeling/toponaming.md](modeling/toponaming.md) | **Complete** (T1–T5; consumers: sketch-on-face, fillet/chamfer, up-to-face extrude) |
 | 4. Variables & expressions | [variables/plan.md](variables/plan.md) | **Complete** (V1–V3 + C2 unit-suffixed literals, format v28; dimensional analysis + unit display deferred) |
 | 5. Scripting & LLM interface | [scripting/plan.md](scripting/plan.md) | **Complete** (S1 MCP, S2 headless+CI, S3 python client, S4 record/replay) |
-| 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | **Complete v1** (F1 spec+corpus, F2 autosave, F3 directory format, F4 checkpoints+rollback, F5 git engine, **F6 the history UI** — [versioning/f6-history-ui.md](versioning/f6-history-ui.md): a History panel of named versions + restore, checkpoints promoted from part-only JSON copies to project-wide named commits); semantic merge later |
+| 6. Versioning: format, autosave, checkpoints, git | [versioning/plan.md](versioning/plan.md) | **Complete v1** (F1 spec+corpus, F2 autosave, F3 directory format, F4 checkpoints+rollback, F5 git engine, **F6 the history UI** — [versioning/f6-history-ui.md](versioning/f6-history-ui.md): a History panel of named versions + restore, checkpoints promoted from part-only JSON copies to project-wide named commits); **merge/conflict handling is scoped but not built** — [versioning/f7-merge-and-conflicts.md](versioning/f7-merge-and-conflicts.md): the git engine is linear-only, so the app cannot reach a conflict at all, and the resolution UI needs branch+merge under it first (5–9 days; non-sequential feature ids are a prerequisite, and ~1 day of *triage* — the existing refusals made useful — is the recommended first move) |
 | 7. UI & UX | [ui/plan.md](ui/plan.md) | **U1–U9 shipped** — unified selection, dock-home enforcement, feature-dialog slots, sketch-region picking, command palette, one floating Tool window for every tool session (right Properties panel deleted), and U9 GUI parity ([ui/u9-gui-parity.md](ui/u9-gui-parity.md)): hole/shell/draft/split/refine reachable by click. **2026-08-20: user preferences** ([ui/settings.md](ui/settings.md)) — Edit > Preferences over a persisted settings file (GPU device, font size, render quality, autosave), which took render quality and font size out of the View menu where they reset every launch. Also 2026-08-20: **one hover for every viewport drag handle** ([ui/viewport-handles.md](ui/viewport-handles.md)) — one `ViewportHandle` list shared by the preview-handle, section, gizmo and simulation-load owners, which immediately exposed the section arrow being dead on assembly tabs; a project saved from the GUI is always a `.dsgn` directory (so git history survives a Save As); and point picking no longer highlights an adjacent line. **2026-08-20: a terminal panel** ([ui/terminal-panel.md](ui/terminal-panel.md)) — libvterm + a PTY behind a dockable right-hand panel, off by default, so Claude Code (or a shell, or git) runs beside the model and is bound to THIS instance's remote port with no wiring. **2026-08-21:** the terminal gained drag-select, double-click word select and Ctrl+Shift+C copy-out. Remain: visual-polish tail (spacing rhythm, tree badges, tooltips audit) |
 | 8. Inspection: measure, mass properties, sections | [inspect/plan.md](inspect/plan.md) | **v1 complete** — I1 measure (RPC + GUI tool), I2 mass properties (panel + CoG marker), I3 section (raster clip + filled caps), I4 interference. 2026-08-20: contact checks run the boolean with a 1 µm fuzz, so parts *designed* to touch report contact instead of a sliver-sized "clash" (`scratch/floating-dock.json`'s six sub-0.14 mm³ lap-joint overlaps were this, not bad geometry). **2026-08-21: the section tool completed (P2+P3)** — datum/face sources resolved live, tilt angles, and cuts that persist with the project instead of vanishing on save, plus `add/list/update/remove_section` ([inspect/section-tool-design.md](inspect/section-tool-design.md)). Deferred polish: hatching, angle/point measure, face-sourced cuts on an assembly tab |
 | 9. Rendering | [rendering/plan.md](rendering/plan.md) | **Raster polish shipped** (showcase arc R1–R4 + instancing + ghosts; 2026-07-19: key-light PCF shadows + SSAO, [rendering/ssao-soft-shadows.md](rendering/ssao-soft-shadows.md) — S3 quality settings now PERSIST as user preferences ([ui/settings.md](ui/settings.md)); visual tuning remains). 2026-08-20: per-frame GPU resources are sized to the actual swapchain image count ([rendering/frames-in-flight.md](rendering/frames-in-flight.md)) — the Intel camera wobble was 2-vs-3 aliasing — and the loop is now measurable: `--perf-hud` / Ctrl+Shift+F / the `frame_stats` RPC report cpu-vs-display and an avg/p50/p95/max split, off by default ([rendering/frame-timing.md](rendering/frame-timing.md)). Real-time hybrid RT (6b) still gated on the `main.cpp` render-path cleanup |
@@ -283,10 +284,14 @@ it will list and never run.
 - ~~**2D drawings / drafting output**~~ — was "deliberately out of scope until after
   assemblies; revisit then". Assemblies shipped, revisited July 2026: now workstream 13,
   see [drawings/plan.md](drawings/plan.md).
-- ~~**CAM**~~ — **reversed and BUILT 2026-08-21** (C1–C5): 2.5D milling — profile with tabs,
-  pocket, face, drill — on Clipper2, posting to Mach3 and LinuxCNC, with a
-  backplot, setups that persist with the part (format v58), and a dependency-
-  free verifier that simulates the POSTED file and reports gouge/leftover. See
+- ~~**CAM**~~ — **reversed and BUILT 2026-08-21** (C1–C5, then G1–G4): 2.5D milling
+  — profile with tabs, pocket, face, drill — on Clipper2, posting to Mach3 and
+  LinuxCNC, with a backplot, setups that persist with the part (format v58),
+  and a dependency-free verifier that simulates the POSTED file and reports
+  gouge/leftover. Reached by three verbs on a tool session rather than by a
+  parameter editor: two clicks make a pocket, every depth is derived from the
+  face you clicked, the removed volume is ghosted before you commit, and
+  Generate verifies without being asked ([cam/gui.md](cam/gui.md)). See
   [cam/plan.md](cam/plan.md). The proposal that preceded it, kept because the
   survey numbers are the reason the scope is narrow:
   [cam/plan.md](cam/plan.md) costs it out (2026-08-21, after the user bought a
