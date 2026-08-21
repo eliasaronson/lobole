@@ -80,10 +80,16 @@ void AppendToolGlyph(const AppState& state, const cam::Setup& setup,
   const double r = tool->diameter * 0.5;
   constexpr int kSegments = 32;
   const glm::vec4 color(1.0f, 0.85f, 0.35f, 0.85f);
+  // Built in setup space (where the tool is) and shown in model space (where
+  // the part is): for an indexed setup the cutter leans with the table.
+  const auto shown = [&](const glm::dvec3& p) {
+    return glm::vec3(cam::FromSetupSpace(setup, p));
+  };
   glm::vec3 prev(0.0f);
   for (int i = 0; i <= kSegments; i++) {
     const double a = 2.0 * 3.14159265358979 * i / kSegments;
-    const glm::vec3 p(at.x + r * std::cos(a), at.y + r * std::sin(a), at.z);
+    const glm::vec3 p =
+        shown({at.x + r * std::cos(a), at.y + r * std::sin(a), at.z});
     if (i > 0)
       AppendPrimLine(prev, p, 1.4f, color, out);
     prev = p;
@@ -92,8 +98,8 @@ void AppendToolGlyph(const AppState& state, const cam::Setup& setup,
   const double shank = std::max(2.0, tool->diameter);
   for (int i = 0; i < 4; i++) {
     const double a = 3.14159265358979 * 0.5 * i;
-    const glm::vec3 base(at.x + r * std::cos(a), at.y + r * std::sin(a), at.z);
-    AppendPrimLine(base, base + glm::vec3(0.0f, 0.0f, (float)shank), 1.0f,
+    const glm::dvec3 base(at.x + r * std::cos(a), at.y + r * std::sin(a), at.z);
+    AppendPrimLine(shown(base), shown(base + glm::dvec3(0.0, 0.0, shank)), 1.0f,
                    color, out);
   }
 }
@@ -103,6 +109,12 @@ void AppendToolGlyph(const AppState& state, const cam::Setup& setup,
 void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
   if (!state.camShowToolpath || state.camToolpaths.empty())
     return;
+  const cam::Setup* active = ActiveCamSetup(state);
+  // Moves are in SETUP space (C9). Drawn straight, an indexed job's backplot
+  // floats beside the part instead of on it.
+  const auto shown = [&](const glm::dvec3& p) {
+    return active != nullptr ? cam::FromSetupSpace(*active, p) : p;
+  };
   for (const cam::Toolpath& tp : state.camToolpaths) {
     glm::dvec3 from(0.0);
     bool have = false;
@@ -112,7 +124,7 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
                                 : m.kind == cam::Move::Kind::Plunge
                                     ? kPlungeColor
                                     : kCutColor;
-        AppendPrimLine(glm::vec3(from), glm::vec3(m.to),
+        AppendPrimLine(glm::vec3(shown(from)), glm::vec3(shown(m.to)),
                        m.kind == cam::Move::Kind::Rapid ? 1.0f : 1.6f, color,
                        out);
       }

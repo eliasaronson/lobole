@@ -51,8 +51,10 @@ struct Loop {
 [[nodiscard]] std::vector<Toolpath>
 GenerateAll(const Setup& setup, const std::vector<Body>& bodies);
 
-// The stock box for a setup, derived from the model bounds plus margins.
-// Returns false when there is nothing to derive it from.
+// The stock box for a setup, derived from the model bounds plus margins, IN
+// SETUP SPACE (C9) — so an indexed job gets the box the machine will see.
+// Pass model-space bodies; the framing happens here. Returns false when
+// there is nothing to derive it from.
 bool StockBounds(const Setup& setup, const std::vector<Body>& bodies,
                  glm::dvec3& min, glm::dvec3& max);
 
@@ -69,6 +71,9 @@ struct FaceRegion {
   std::string why; // when !ok: what to click instead, in words
 };
 
+// NOTE: this one takes no Setup, so it cannot frame anything — the loops and
+// the z come back in whatever space `bodies` are in. Callers working on an
+// indexed setup pass BodiesInSetupFrame's output (C9).
 [[nodiscard]] FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
                                           const ElementRef& ref,
                                           double deflection = 0.02);
@@ -107,6 +112,13 @@ struct DerivedOp {
 // a rotation about X, and saying so beats rotating to the nearest wrong
 // thing.
 [[nodiscard]] bool SolveIndexA(const glm::dvec3& normal, double& degrees);
+
+// A point in setup space, back in model space — for DRAWING. Toolpaths,
+// stock and ghosts are all computed where the machine works; the viewport
+// shows the part where the user put it. Without this the backplot of an
+// indexed job floats beside the model it belongs to.
+[[nodiscard]] glm::dvec3 FromSetupSpace(const Setup& setup,
+                                        const glm::dvec3& p);
 
 // The rapid height for this job: clear of the stock, in absolute Z (which is
 // what the toolpath emits). The default in the struct is a bare 5 mm, which

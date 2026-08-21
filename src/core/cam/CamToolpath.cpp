@@ -415,8 +415,10 @@ std::vector<double> DepthPasses(const Operation& op) {
   return zs;
 }
 
-bool StockBounds(const Setup& setup, const std::vector<Body>& bodies,
-                 glm::dvec3& min, glm::dvec3& max) {
+// Assumes `bodies` are ALREADY in setup space. The public StockBounds frames
+// first; internal callers that framed once do not want it done twice.
+bool StockBoundsFramed(const Setup& setup, const std::vector<Body>& bodies,
+                       glm::dvec3& min, glm::dvec3& max) {
   bool any = false;
   glm::vec3 lo(0.0f), hi(0.0f);
   for (const Body& b : bodies) {
@@ -434,6 +436,19 @@ bool StockBounds(const Setup& setup, const std::vector<Body>& bodies,
   min = glm::dvec3(lo) - glm::dvec3(s.margin.x, s.margin.y, s.bottomMargin);
   max = glm::dvec3(hi) + glm::dvec3(s.margin.x, s.margin.y, s.margin.z);
   return true;
+}
+
+bool StockBounds(const Setup& setup, const std::vector<Body>& bodies,
+                 glm::dvec3& min, glm::dvec3& max) {
+  return StockBoundsFramed(setup, BodiesInSetupFrame(setup, bodies), min, max);
+}
+
+glm::dvec3 FromSetupSpace(const Setup& setup, const glm::dvec3& p) {
+  if (std::abs(setup.rotationA) < 1e-9)
+    return p;
+  const double a = glm::radians(setup.rotationA);
+  const double c = std::cos(a), s = std::sin(a);
+  return {p.x, p.y * c - p.z * s, p.y * s + p.z * c};
 }
 
 FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
@@ -503,8 +518,12 @@ FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
   return out;
 }
 
-DerivedOp DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
-                          OpType type, const ElementRef& target) {
+DerivedOp DeriveOperation(const Setup& setup,
+                          const std::vector<Body>& rawBodies, OpType type,
+                          const ElementRef& target) {
+  // Depths are read in the frame the machine cuts in, or an indexed setup
+  // derives them from the wrong axis (C9).
+  const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
   DerivedOp out;
   if (setup.tools.empty()) {
     out.why = "add a tool first — every depth here comes from its diameter";
@@ -512,7 +531,7 @@ DerivedOp DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
   }
   const Tool& tool = setup.tools.front();
   glm::dvec3 lo(0.0), hi(0.0);
-  if (!StockBounds(setup, bodies, lo, hi)) {
+  if (!StockBoundsFramed(setup, bodies, lo, hi)) {
     out.why = "there is no solid in this part yet, so there is no stock";
     return out;
   }
@@ -896,7 +915,7 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
 void GenerateFace(const Setup& setup, const Operation& op, const Tool& tool,
                   const std::vector<Body>& bodies, Toolpath& tp) {
   glm::dvec3 lo(0.0), hi(0.0);
-  if (!StockBounds(setup, bodies, lo, hi)) {
+  if (!StockBoundsFramed(setup, bodies, lo, hi)) {
     tp.error = "no bodies, so there is no stock to face";
     return;
   }
@@ -960,12 +979,8 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
 
 } // namespace
 
-Toolpath Generate(const Setup& setup, const Operation& op,
-                  const std::vector<Body>& rawBodies) {
-  // Everything below runs in setup space (C9). At A = 0 this is the identity
-  // and costs a vector copy of the body handles.
-  const std::vector<Body> framed = BodiesInSetupFrame(setup, rawBodies);
-  const std::vector<Body>& bodies = framed;
+Toolpath GenerateFramed(const Setup& setup, const Operation& op,
+                        const std::vector<Body>& bodies) {
   Toolpath tp;
   tp.operationId = op.id;
   tp.toolNumber = op.toolNumber;
@@ -1014,12 +1029,21 @@ Toolpath Generate(const Setup& setup, const Operation& op,
   return tp;
 }
 
+Toolpath Generate(const Setup& setup, const Operation& op,
+                  const std::vector<Body>& bodies) {
+  return GenerateFramed(setup, op, BodiesInSetupFrame(setup, bodies));
+}
+
 std::vector<Toolpath> GenerateAll(const Setup& setup,
                                   const std::vector<Body>& bodies) {
+  // Framed ONCE for the whole setup: the transform is an OCC operation per
+  // body, and doing it per operation was both slower and a place for two
+  // operations to disagree.
+  const std::vector<Body> framed = BodiesInSetupFrame(setup, bodies);
   std::vector<Toolpath> out;
   for (const Operation& op : setup.operations)
     if (op.enabled)
-      out.push_back(Generate(setup, op, bodies));
+      out.push_back(GenerateFramed(setup, op, framed));
   return out;
 }
 

@@ -367,10 +367,14 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
 }
 
 Inspection Inspect(const std::string& gcode, const Setup& setup,
-                   const std::vector<Body>& bodies, double res) {
+                   const std::vector<Body>& rawBodies, double res) {
   Inspection out;
+  // The G-code is in SETUP space, so the model it is compared against has to
+  // be too (C9). Verifying an indexed job against the unrotated part
+  // compares a program with a part that is not in front of it.
+  const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
   glm::dvec3 lo(0.0), hi(0.0);
-  if (!StockBounds(setup, bodies, lo, hi))
+  if (!StockBounds(setup, rawBodies, lo, hi))
     return out;
 
   const GProgram program = ParseGcode(gcode);

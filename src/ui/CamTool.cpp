@@ -65,7 +65,9 @@ void LoopWalls(const std::vector<glm::dvec2>& pts, double zLow, double zHigh,
 void OperationGhost(AppState& state, const cam::Setup& setup,
                     const cam::Operation& op, std::vector<PrimVertex>& prims,
                     std::vector<LineVertex3D>& quads) {
-  const std::vector<Body>& bodies = state.document->GetBodies();
+  // Setup space: op.topZ/bottomZ are, so the boundary must be too (C9).
+  const std::vector<Body> bodies =
+      cam::BodiesInSetupFrame(setup, state.document->GetBodies());
   std::vector<cam::Loop> loops;
   if (!op.targets.empty()) {
     const cam::FaceRegion region = cam::PickedFaceRegion(bodies, op.targets[0]);
@@ -181,8 +183,9 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
       state.slotPick.miss = "add a setup first";
       return;
     }
-    const cam::FaceRegion region =
-        cam::PickedFaceRegion(state.document->GetBodies(), item.element);
+    const cam::FaceRegion region = cam::PickedFaceRegion(
+        cam::BodiesInSetupFrame(*setup, state.document->GetBodies()),
+        item.element);
     if (!region.ok) {
       state.slotPick.miss = region.why;
       return;
@@ -353,10 +356,11 @@ void DrawCamToolWindow(AppState& state) {
         state.camGhostOp = ghosted ? 0 : op.id;
       ImGui::SetItemTooltip("Show what this one removes");
       ImGui::SameLine();
-      ImGui::Text("%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s",
+      ImGui::Text("%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s%s",
                   op.name.c_str(), tool != nullptr ? tool->diameter : 0.0,
                   depth, passes, passes == 1 ? "" : "es",
-                  op.climb ? "climb" : "conventional");
+                  op.climb ? "climb" : "conventional",
+                  op.type == cam::OpType::Adaptive ? ", adaptive" : "");
       ImGui::PopID();
     }
   }
@@ -436,7 +440,8 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
   if (session && state.slotPick.featureId == kCamToolSlot &&
       state.pick.hoverFace.IsSet()) {
     const cam::FaceRegion region = cam::PickedFaceRegion(
-        state.document->GetBodies(), state.pick.hoverFace);
+        cam::BodiesInSetupFrame(*setup, state.document->GetBodies()),
+        state.pick.hoverFace);
     if (region.ok)
       for (const cam::Loop& loop : region.loops)
         LoopLines(loop.pts, region.z, 2.4f, kHoverLine, prims);
@@ -457,8 +462,9 @@ void DrawCamLabels(AppState& state) {
   const cam::Operation* op = FindOp(*setup, state.camGhostOp);
   if (op == nullptr || op->targets.empty())
     return;
-  const cam::FaceRegion region =
-      cam::PickedFaceRegion(state.document->GetBodies(), op->targets[0]);
+  const cam::FaceRegion region = cam::PickedFaceRegion(
+      cam::BodiesInSetupFrame(*setup, state.document->GetBodies()),
+      op->targets[0]);
   if (!region.ok || region.loops.empty() || region.loops[0].pts.empty())
     return;
 
@@ -469,7 +475,9 @@ void DrawCamLabels(AppState& state) {
     centre += p;
   centre /= static_cast<double>(region.loops[0].pts.size());
   const glm::vec2 at = WorldToScreen(
-      state, glm::vec3(centre.x, centre.y, (op->topZ + op->bottomZ) * 0.5));
+      state,
+      glm::vec3(cam::FromSetupSpace(
+          *setup, {centre.x, centre.y, (op->topZ + op->bottomZ) * 0.5})));
   char text[64];
   std::snprintf(text, sizeof(text), "%.3g mm deep", op->topZ - op->bottomZ);
   ImDrawList* dl = ImGui::GetForegroundDrawList();

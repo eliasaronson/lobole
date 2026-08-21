@@ -1019,6 +1019,59 @@ TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
   CHECK(sawIndexAtSafeZ);
 }
 
+TEST_CASE("cam: an indexed job is verified in its own frame", "[cam]") {
+  // The gap C9 opened and this closes: the posted file is in SETUP space, so
+  // everything it is compared against has to be. Verifying an indexed job
+  // against the unrotated part compares a program with a part that is not in
+  // front of it — and reports a fictional gouge through the whole block.
+  auto turned = std::make_unique<Document>();
+  turned->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  {
+    std::vector<Body>& bodies = const_cast<std::vector<Body>&>(
+        static_cast<const Document&>(*turned).GetBodies());
+    glm::mat4 m(1.0f);
+    m[1][1] = 0.0f;
+    m[1][2] = 1.0f;
+    m[2][1] = -1.0f;
+    m[2][2] = 0.0f; // +90 about X
+    for (Body& b : bodies)
+      b.shape = b.shape.Transformed(m);
+  }
+
+  cam::Setup indexed = BasicSetup();
+  indexed.rotationA = 90.0;
+  // Derived, not typed: the depths must come from the frame the cut happens
+  // in, which is the other half of the same bug.
+  indexed.safeZ = cam::DeriveSafeZ(indexed, turned->GetBodies());
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  glm::dvec3 lo(0.0), hi(0.0);
+  REQUIRE(cam::StockBounds(indexed, turned->GetBodies(), lo, hi));
+  op.topZ = hi.z;
+  op.bottomZ = lo.z;
+  op.stepdown = 8.0;
+  indexed.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(indexed, turned->GetBodies());
+  REQUIRE(paths.size() == 1);
+  REQUIRE(paths[0].error.empty());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", indexed, paths, {}, gcode, &error));
+
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, indexed, turned->GetBodies(), 0.5);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover << " rapids "
+                << v.rapidsThroughStock);
+  REQUIRE(v.cells > 0);
+  // Profiling outside the part removes the margin and must not touch it.
+  CHECK(v.maxGouge < 0.6);
+  CHECK(v.rapidsThroughStock == 0);
+}
+
 TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
   double degrees = 0.0;
   // Straight up already: A = 0.
