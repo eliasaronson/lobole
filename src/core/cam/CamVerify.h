@@ -99,10 +99,42 @@ struct Verdict {
 [[nodiscard]] Verdict Compare(const HeightMap& machined,
                               const HeightMap& designed);
 
+// Everything the check produced, for a caller that wants to SHOW it rather
+// than just pass or fail (docs/cam/gui.md G4 paints the leftover on the part).
+struct Inspection {
+  Verdict verdict;
+  HeightMap machined;
+  HeightMap designed;
+  bool ok = false; // false = there was nothing to check (no stock, no bodies)
+};
+
+[[nodiscard]] Inspection Inspect(const std::string& gcode, const Setup& setup,
+                                 const std::vector<Body>& bodies,
+                                 double res = 0.25);
+
+// Where the tool could not reach: cell centres whose machined height is more
+// than `tolerance` above the designed surface, as 3D points sitting on the
+// machined surface. Capped at `maxPoints` (evenly sampled) so a fine grid
+// cannot flood the overlay.
+[[nodiscard]] std::vector<glm::dvec3> LeftoverPoints(const Inspection& insp,
+                                                     double tolerance,
+                                                     size_t maxPoints = 4000);
+
 // The whole loop, for callers that just want the answer: post text in,
 // verdict out.
 [[nodiscard]] Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
                                   const std::vector<Body>& bodies,
                                   double res = 0.25);
+
+// The verdict in the words a person needs, one line each, most severe first
+// (docs/cam/gui.md). Empty only when there is nothing to say.
+struct VerdictLine {
+  enum class Level { Good, Warn, Bad };
+  Level level = Level::Good;
+  std::string text;
+};
+
+[[nodiscard]] std::vector<VerdictLine>
+Explain(const Verdict& v, double tolerance, double minutes);
 
 } // namespace cam

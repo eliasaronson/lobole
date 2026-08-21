@@ -19,6 +19,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
+#include <string>
 
 #include <glm/trigonometric.hpp>
 
@@ -354,7 +356,204 @@ bool StockBounds(const Setup& setup, const std::vector<Body>& bodies,
   return true;
 }
 
+FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
+                            const ElementRef& ref, double deflection) {
+  FaceRegion out;
+  if (!ref.IsSet()) {
+    out.why = "nothing picked";
+    return out;
+  }
+  for (const Body& body : bodies) {
+    if (body.createdBy != ref.featureId || !body.shape.IsValid())
+      continue;
+    const std::optional<int> idx = body.elementMap.Resolve(ref.name);
+    if (!idx) {
+      out.why = "that face is gone from the model";
+      return out;
+    }
+    glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
+    if (!body.shape.FacePlane(*idx, centre, normal, uAxis)) {
+      out.why = "pick a flat face — that one is curved";
+      return out;
+    }
+    // A 2.5D job cuts in Z, so a face it can machine to is level. A tilted
+    // face has no single depth, and guessing one puts the cut somewhere the
+    // user did not point at.
+    if (std::abs(normal.z) < 0.99f) {
+      out.why = "pick a level face — a tilted one has no single depth";
+      return out;
+    }
+    // Walk to the face in the same explorer order FacePlane uses.
+    TopoDS_Face face;
+    int i = 0;
+    for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next(), i++)
+      if (i == *idx) {
+        face = TopoDS::Face(ex.Current());
+        break;
+      }
+    if (face.IsNull()) {
+      out.why = "that face is gone from the model";
+      return out;
+    }
+    const TopoDS_Wire outer = BRepTools::OuterWire(face);
+    for (TopExp_Explorer wx(face, TopAbs_WIRE); wx.More(); wx.Next()) {
+      const TopoDS_Wire wire = TopoDS::Wire(wx.Current());
+      Loop loop;
+      loop.pts = WireToLoop(wire, deflection);
+      if (loop.pts.size() < 3)
+        continue;
+      // Inner wires are islands: material standing in the pocket, which the
+      // clearing region has to go around rather than through.
+      loop.hole = !wire.IsSame(outer);
+      if (loop.hole)
+        out.loops.push_back(std::move(loop));
+      else
+        out.loops.insert(out.loops.begin(), std::move(loop));
+    }
+    if (out.loops.empty()) {
+      out.why = "that face has no usable boundary";
+      return out;
+    }
+    out.z = centre.z;
+    out.ok = true;
+    return out;
+  }
+  out.why = "that face is not on a body this job can machine";
+  return out;
+}
+
+DerivedOp DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
+                          OpType type, const ElementRef& target) {
+  DerivedOp out;
+  if (setup.tools.empty()) {
+    out.why = "add a tool first — every depth here comes from its diameter";
+    return out;
+  }
+  const Tool& tool = setup.tools.front();
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, bodies, lo, hi)) {
+    out.why = "there is no solid in this part yet, so there is no stock";
+    return out;
+  }
+
+  Operation op;
+  op.type = type;
+  op.toolNumber = tool.number;
+  // Half the cutter per pass and 45% of it per step-over: the rule of thumb
+  // every 2.5D job starts from, expressed in the tool rather than in
+  // millimetres so it stays right for a 1 mm cutter and a 12 mm one.
+  op.stepdown = tool.diameter * 0.5;
+  op.stepover = 0.45;
+
+  switch (type) {
+  case OpType::Pocket: {
+    const FaceRegion region = PickedFaceRegion(bodies, target);
+    if (!region.ok) {
+      out.why = region.why;
+      return out;
+    }
+    op.name = "Clear pocket";
+    op.targets = {target};
+    op.bottomZ = region.z;  // the floor is the face you clicked
+    op.topZ = hi.z;         // …down from the top of the stock
+    op.side = Side::Inside; // a pocket is cut from inside its own boundary
+    if (op.bottomZ >= op.topZ - 1e-9) {
+      out.why = "that face is already the top of the stock — there is "
+                "nothing above it to clear";
+      return out;
+    }
+    break;
+  }
+  case OpType::Profile: {
+    op.name = "Cut out";
+    op.side = Side::Outside;
+    op.topZ = hi.z;
+    if (target.IsSet()) {
+      const FaceRegion region = PickedFaceRegion(bodies, target);
+      if (!region.ok) {
+        out.why = region.why;
+        return out;
+      }
+      op.targets = {target};
+    }
+    // Through the part and a whisker into the spoilboard, which is what
+    // "cut it out" means — a profile that stops on the last skin leaves the
+    // part welded to the stock.
+    op.bottomZ = lo.z;
+    // Tabs, so the part does not break free under the cutter on the last
+    // pass. Sized from the tool (a tab narrower than the cutter is cut away
+    // as the tool passes) and from the depth, with a floor so a shallow part
+    // still gets a tab rather than a scratch.
+    op.tabCount = 4;
+    op.tabWidth = tool.diameter * 2.0;
+    op.tabHeight = std::max(0.5, (op.topZ - op.bottomZ) * 0.2);
+    break;
+  }
+  case OpType::Face: {
+    op.name = "Face top";
+    op.topZ = hi.z;
+    op.bottomZ = hi.z - setup.stock.margin.z; // the part's own top
+    if (setup.stock.margin.z <= 1e-9) {
+      out.why = "there is no stock above the part to face — the top of the "
+                "part is already the top of the stock (Advanced sets how "
+                "much material sits above it)";
+      return out;
+    }
+    break;
+  }
+  case OpType::Drill: {
+    out.why = "drilling picks cylindrical faces, not a verb";
+    return out;
+  }
+  }
+
+  out.op = op;
+  out.ok = true;
+  return out;
+}
+
+double CuttingMinutes(const Setup& setup, const std::vector<Toolpath>& paths) {
+  double minutes = 0.0;
+  for (const Toolpath& tp : paths) {
+    for (size_t i = 1; i < tp.moves.size(); i++) {
+      const double len = glm::length(tp.moves[i].to - tp.moves[i - 1].to);
+      if (len < 1e-12)
+        continue;
+      double feed = tp.moves[i].feed;
+      if (tp.moves[i].kind == Move::Kind::Rapid)
+        feed = setup.rapidFeed; // 0 = not stated, so not counted
+      if (feed > 1e-9)
+        minutes += len / feed;
+    }
+  }
+  return minutes;
+}
+
 namespace {
+
+// The XY contour(s) a profile follows, and the region a pocket clears, when
+// the operation was made by clicking a face: the face's own wires, the same
+// at every depth. Empty when the operation has no target, which is the
+// caller's signal to fall back to sectioning the model.
+Clipper2Lib::Paths64 TargetPaths(const Operation& op,
+                                 const std::vector<Body>& bodies, bool holesToo,
+                                 std::string& error) {
+  if (op.targets.empty())
+    return {};
+  const FaceRegion region = PickedFaceRegion(bodies, op.targets.front());
+  if (!region.ok) {
+    error = region.why;
+    return {};
+  }
+  Clipper2Lib::Paths64 outer, islands;
+  for (const Loop& l : region.loops)
+    (l.hole ? islands : outer).push_back(ToClipper(l.pts));
+  if (!holesToo || islands.empty())
+    return outer;
+  return Clipper2Lib::Difference(outer, islands,
+                                 Clipper2Lib::FillRule::NonZero);
+}
 
 // Profile: offset the section outward (or inward) by the tool radius and
 // follow it, once per depth pass.
@@ -363,22 +562,35 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   const double radius = tool.diameter * 0.5;
   const double bottom = op.bottomZ + op.stockToLeave;
   const std::vector<double> passes = DepthPasses(op);
+  std::string why;
+  const Clipper2Lib::Paths64 picked =
+      TargetPaths(op, bodies, /*holesToo=*/false, why);
+  if (!why.empty()) {
+    tp.error = why;
+    return;
+  }
   for (size_t pass = 0; pass < passes.size(); pass++) {
     const double z = passes[pass];
-    // Section slightly ABOVE the pass depth: exactly at the bottom face of a
-    // through-cut the section is degenerate or empty.
-    const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
-    if (loops.empty())
-      continue;
     std::vector<Loop> solid;
-    for (const Loop& l : loops)
-      if (!l.hole)
-        solid.push_back(l);
+    if (picked.empty()) {
+      // Section slightly ABOVE the pass depth: exactly at the bottom face of
+      // a through-cut the section is degenerate or empty.
+      const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
+      if (loops.empty())
+        continue;
+      for (const Loop& l : loops)
+        if (!l.hole)
+          solid.push_back(l);
+    }
     const double delta = op.side == Side::Inside ? -(radius + op.stockToLeave)
                          : op.side == Side::On   ? 0.0
                                                  : radius + op.stockToLeave;
+    const Clipper2Lib::Paths64 contour =
+        picked.empty() ? ToClipper(solid) : picked;
+    if (contour.empty())
+      continue;
     Clipper2Lib::Paths64 paths =
-        delta == 0.0 ? ToClipper(solid) : Offset(ToClipper(solid), delta);
+        delta == 0.0 ? contour : Offset(contour, delta);
     const bool lastPass = pass + 1 == passes.size();
     for (Clipper2Lib::Path64& path : paths) {
       Orient(path, op.climb, op.side == Side::Inside);
@@ -396,19 +608,31 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
                     const std::vector<Body>& bodies, Toolpath& tp) {
   const double radius = tool.diameter * 0.5;
   const double step = std::max(0.05, op.stepover) * tool.diameter;
+  // A clicked floor face IS the region to clear, at every depth: its outer
+  // wire is the pocket wall and its inner wires are islands (docs/cam/gui.md).
+  std::string why;
+  const Clipper2Lib::Paths64 picked =
+      TargetPaths(op, bodies, /*holesToo=*/true, why);
+  if (!why.empty()) {
+    tp.error = why;
+    return;
+  }
   double entryZ = op.topZ;
   for (const double z : DepthPasses(op)) {
-    const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
-    if (loops.empty())
-      continue;
-    Clipper2Lib::Paths64 outers, holes;
-    for (const Loop& l : loops)
-      (l.hole ? holes : outers).push_back(ToClipper(l.pts));
-    if (holes.empty())
-      continue; // nothing enclosed at this level
-    // The void = what the outline encloses minus the material.
-    Clipper2Lib::Paths64 region = Clipper2Lib::Difference(
-        holes, Clipper2Lib::Paths64{}, Clipper2Lib::FillRule::NonZero);
+    Clipper2Lib::Paths64 region = picked;
+    if (region.empty()) {
+      const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
+      if (loops.empty())
+        continue;
+      Clipper2Lib::Paths64 outers, holes;
+      for (const Loop& l : loops)
+        (l.hole ? holes : outers).push_back(ToClipper(l.pts));
+      if (holes.empty())
+        continue; // nothing enclosed at this level
+      // The void = what the outline encloses minus the material.
+      region = Clipper2Lib::Difference(holes, Clipper2Lib::Paths64{},
+                                       Clipper2Lib::FillRule::NonZero);
+    }
     // First ring sits one radius in from the wall (plus finishing stock).
     double inset = radius + op.stockToLeave;
     Clipper2Lib::Paths64 ring = Offset(region, -inset);

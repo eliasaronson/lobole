@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 namespace cam {
@@ -259,12 +260,12 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed) {
   return v;
 }
 
-Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
-                    const std::vector<Body>& bodies, double res) {
+Inspection Inspect(const std::string& gcode, const Setup& setup,
+                   const std::vector<Body>& bodies, double res) {
+  Inspection out;
   glm::dvec3 lo(0.0), hi(0.0);
-  Verdict bad;
   if (!StockBounds(setup, bodies, lo, hi))
-    return bad;
+    return out;
 
   const GProgram program = ParseGcode(gcode);
   HeightMap machined = MakeStock(lo, hi, res);
@@ -272,6 +273,8 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
   // Rapids through material: checked BEFORE the cut is applied, because a
   // rapid is only safe over air. This is the check a shape comparison cannot
   // make — the part can come out perfect and the tool still be broken.
+  int rapidsThroughStock = 0;
+  int firstBadLine = 0;
   {
     HeightMap probe = machined;
     glm::dvec3 from(0.0);
@@ -287,9 +290,30 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
         const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
         const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
         const double zLow = std::min(from.z, m.to.z);
+        // Only the cells the swept tool can touch, exactly as Simulate does.
+        // Scanning the whole grid per rapid was O(moves x cells) and made
+        // verification too slow to run on every Generate — which is the
+        // difference between a check you remember to run and one you cannot
+        // avoid.
+        const int i0 = std::max(
+            0, static_cast<int>((std::min(a.x, b.x) - radius - probe.x0) /
+                                probe.res));
+        const int i1 =
+            std::min(probe.nx - 1,
+                     static_cast<int>((std::max(a.x, b.x) + radius - probe.x0) /
+                                      probe.res) +
+                         1);
+        const int j0 = std::max(
+            0, static_cast<int>((std::min(a.y, b.y) - radius - probe.y0) /
+                                probe.res));
+        const int j1 =
+            std::min(probe.ny - 1,
+                     static_cast<int>((std::max(a.y, b.y) + radius - probe.y0) /
+                                      probe.res) +
+                         1);
         bool hit = false;
-        for (int j = 0; j < probe.ny && !hit; j++) {
-          for (int i = 0; i < probe.nx && !hit; i++) {
+        for (int j = j0; j <= j1 && !hit; j++) {
+          for (int i = i0; i <= i1 && !hit; i++) {
             double t = 0.0;
             const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
             if (DistToSegment(c, a, b, t) > radius)
@@ -299,9 +323,9 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
           }
         }
         if (hit) {
-          bad.rapidsThroughStock++;
-          if (bad.firstBadLine == 0)
-            bad.firstBadLine = m.line;
+          rapidsThroughStock++;
+          if (firstBadLine == 0)
+            firstBadLine = m.line;
         }
       }
       // Apply every move (cuts remove material; rapids over air do nothing).
@@ -314,11 +338,97 @@ Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
     machined = probe;
   }
 
-  const HeightMap designed = SampleModel(bodies, machined, lo.z);
-  Verdict v = Compare(machined, designed);
-  v.rapidsThroughStock = bad.rapidsThroughStock;
-  v.firstBadLine = bad.firstBadLine;
-  return v;
+  out.designed = SampleModel(bodies, machined, lo.z);
+  out.verdict = Compare(machined, out.designed);
+  out.verdict.rapidsThroughStock = rapidsThroughStock;
+  out.verdict.firstBadLine = firstBadLine;
+  out.machined = std::move(machined);
+  out.ok = true;
+  return out;
+}
+
+std::vector<glm::dvec3> LeftoverPoints(const Inspection& insp, double tolerance,
+                                       size_t maxPoints) {
+  std::vector<glm::dvec3> pts;
+  if (!insp.ok || insp.machined.nx != insp.designed.nx ||
+      insp.machined.ny != insp.designed.ny)
+    return pts;
+  // Two passes: count first, then take every nth. Sampling on the fly would
+  // paint the near corner of the part densely and the far one not at all.
+  size_t total = 0;
+  for (int j = 0; j < insp.machined.ny; j++)
+    for (int i = 0; i < insp.machined.nx; i++)
+      if (insp.machined.At(i, j) - insp.designed.At(i, j) > tolerance)
+        total++;
+  if (total == 0)
+    return pts;
+  // Round the stride UP, or the cap is not a cap: total/max truncates and
+  // hands back one or two more points than asked for.
+  const size_t stride =
+      maxPoints > 0 ? std::max<size_t>(1, (total + maxPoints - 1) / maxPoints)
+                    : 1;
+  size_t seen = 0;
+  for (int j = 0; j < insp.machined.ny; j++)
+    for (int i = 0; i < insp.machined.nx; i++) {
+      if (insp.machined.At(i, j) - insp.designed.At(i, j) <= tolerance)
+        continue;
+      if (seen++ % stride != 0)
+        continue;
+      pts.emplace_back(insp.machined.CellX(i), insp.machined.CellY(j),
+                       insp.machined.At(i, j));
+    }
+  return pts;
+}
+
+Verdict VerifyGcode(const std::string& gcode, const Setup& setup,
+                    const std::vector<Body>& bodies, double res) {
+  return Inspect(gcode, setup, bodies, res).verdict;
+}
+
+std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
+                                 double minutes) {
+  std::vector<VerdictLine> out;
+  char buf[256];
+
+  if (v.cells == 0) {
+    out.push_back({VerdictLine::Level::Warn,
+                   "Nothing was checked — this job has no stock to cut."});
+    return out;
+  }
+  // Gouging first: it is the one that scraps the part, and the only one a
+  // backplot genuinely cannot show you.
+  if (v.maxGouge > tolerance) {
+    std::snprintf(buf, sizeof(buf),
+                  "Cuts %.2f mm INTO the part at X%.1f Y%.1f — that is scrap. "
+                  "Check the depths and the tool diameter.",
+                  v.maxGouge, v.gougeAt.x, v.gougeAt.y);
+    out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (v.rapidsThroughStock > 0) {
+    std::snprintf(buf, sizeof(buf),
+                  "Rapid through material at line %d — raise Safe Z, or start "
+                  "the job higher.",
+                  v.firstBadLine);
+    out.push_back({VerdictLine::Level::Bad, buf});
+  }
+  if (v.maxLeftover > tolerance) {
+    std::snprintf(buf, sizeof(buf),
+                  "Leaves %.2f mm of material at X%.1f Y%.1f — usually an "
+                  "inside corner the cutter cannot reach. A smaller tool gets "
+                  "in there.",
+                  v.maxLeftover, v.leftoverAt.x, v.leftoverAt.y);
+    out.push_back({VerdictLine::Level::Warn, buf});
+  }
+  if (out.empty())
+    out.push_back({VerdictLine::Level::Good,
+                   "Machines the part. No gouges, nothing "
+                   "left over."});
+  if (minutes > 0.0) {
+    std::snprintf(buf, sizeof(buf), "~%.0f min of cutting at these feeds.",
+                  std::max(1.0, minutes));
+    out.push_back({VerdictLine::Level::Good, buf});
+  }
+  return out;
 }
 
 } // namespace cam

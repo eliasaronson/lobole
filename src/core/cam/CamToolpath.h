@@ -56,4 +56,43 @@ GenerateAll(const Setup& setup, const std::vector<Body>& bodies);
 bool StockBounds(const Setup& setup, const std::vector<Body>& bodies,
                  glm::dvec3& min, glm::dvec3& max);
 
+// --- picking a face, and what it implies (docs/cam/gui.md G2) -------------
+
+// A planar horizontal face of the model, as the region it bounds: the outer
+// wire plus any inner wires (islands standing in a pocket). This is what a
+// click on a pocket floor MEANS — the boundary to clear and the depth to
+// clear it to — so it lives in the engine where a headless test can reach it.
+struct FaceRegion {
+  std::vector<Loop> loops; // outer (hole=false) first, then islands
+  double z = 0.0;          // the face's own height, in setup space
+  bool ok = false;
+  std::string why; // when !ok: what to click instead, in words
+};
+
+[[nodiscard]] FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
+                                          const ElementRef& ref,
+                                          double deflection = 0.02);
+
+// The operation a verb produces from a picked face. Every depth here is
+// derived — from the face, the stock and the tool — which is the whole point:
+// the `2 -> -0` failure the panel used to allow cannot be expressed.
+//
+// `target` may be unset for the verbs that need no pick (Face the top, and
+// "cut out the whole part").
+struct DerivedOp {
+  bool ok = false;
+  std::string why; // when !ok: why this verb cannot apply here
+  Operation op;    // id left 0 — the caller owns id allocation
+};
+
+[[nodiscard]] DerivedOp DeriveOperation(const Setup& setup,
+                                        const std::vector<Body>& bodies,
+                                        OpType type, const ElementRef& target);
+
+// Time spent CUTTING, from each move's own feed. Rapids are counted only when
+// the setup states a rapid feed — inventing one would be a guess about the
+// machine, and this number exists to be trusted.
+[[nodiscard]] double CuttingMinutes(const Setup& setup,
+                                    const std::vector<Toolpath>& paths);
+
 } // namespace cam
