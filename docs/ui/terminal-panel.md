@@ -165,14 +165,36 @@ The instance file (`$XDG_STATE_HOME/designer/instances/<port>.json`) already
 exists and already carries port/pid/project, so this is wiring, not new
 machinery.
 
-### What the panel does when there is no session
+### Opening the panel opens a shell
 
-An empty terminal panel with a blinking cursor is a worse blank than an
-explicit one: the panel's empty state offers two buttons — `Shell` ($SHELL)
-and `Claude Code` — and says which directory it will start in. The same
-applies when the process exits: the panel keeps the final screen, shows the
-exit status, and offers to restart. A terminal that silently goes blank on
-exit reads as a crash of the *app*.
+The first version put a chooser here — `Claude Code` or `Shell` — and it was
+wrong in a way that only showed up in use: it is a **one-shot menu**. Once you
+picked, the panel had a session, and the only route back to the choice was
+restarting the app. The decision it was asking about is really just "what do I
+type first", which is a question terminals already answer.
+
+So the panel opens `$SHELL` in the project directory, and `Claude Code` is a
+button in the header for the whole session. It **types the command into the
+shell** rather than running it behind your back:
+
+- what the button does is legible — you can see the command it ran, and
+  re-run or edit it;
+- Claude Code becomes a child of *your* shell, so quitting it returns you to a
+  prompt instead of a dead panel;
+- and it stays available, so the panel is never in a mode.
+
+Every session — not just Claude Code — is started with `DESIGNER_PORT`
+exported, so typing `claude` yourself, or `python3 tools/designer_remote.py`,
+also reaches this window without being told which instance to attach to. The
+button adds only the `--mcp-config` that gives Claude Code the `designer`
+tools bound to that same port.
+
+The header names the process that actually holds the terminal, read from
+`tcgetpgrp` + `/proc`, so it says `claude` while Claude Code is in front and
+`bash` at the prompt — a header that keeps saying "bash" while a TUI has the
+keyboard is telling the user the wrong thing. When the session exits the panel
+keeps the final screen, shows the status, and offers `New shell`: a terminal
+that silently goes blank on exit reads as a crash of the *app*.
 
 ## Phases
 
@@ -181,7 +203,7 @@ exit reads as a crash of the *app*.
 | **T1** | `PtySession` + `TerminalScreen` + headless tests | **done** — 14 headless tests |
 | **T2** | The panel: grid rendering, monospace font, scrollback, resize→`TIOCSWINSZ` | **done** — a live `bash` and a live Claude Code, screenshotted |
 | **T3** | Input: keys, control chars, paste, and the hover gate | **done** — GUI test asserts both directions of the gate |
-| **T4** | The Claude Code launch (port, cwd, MCP config) + empty/exited states | **done** — the button starts `claude` bound to this instance |
+| **T4** | The Claude Code launch (port, cwd, MCP config) + exited state | **done** — the button types `claude` bound to this instance into the shell |
 | **T5** | Polish: selection + copy, a font-size control, `Tools ▸ Open terminal here` (option D) | outstanding |
 
 T1–T2 were the risk; T3–T4 the value. What shipped, concretely:

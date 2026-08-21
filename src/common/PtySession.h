@@ -56,6 +56,12 @@ public:
   // SIGHUP, then SIGKILL if it is still there. Safe to call twice.
   void Terminate();
 
+  // The name of the process currently in the FOREGROUND of this terminal —
+  // "claude" while Claude Code runs inside the shell, "bash" at the prompt.
+  // Empty if it cannot be determined. The header would otherwise keep saying
+  // "bash" while something else has the keyboard.
+  [[nodiscard]] std::string ForegroundName() const;
+
 private:
   int m_fd = -1;
   int m_pid = -1;

@@ -891,6 +891,12 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ImGuiWindow* win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
     IM_CHECK(win != nullptr);
     IM_CHECK(win->DockId != 0); // docked, not floating over the model tree
+    // And it opened a shell by itself: the chooser it used to show was a
+    // one-shot menu you could only get back to by restarting the app.
+    IM_CHECK(ui::TerminalRunning(*s_App));
+    // The Claude Code action stays available for the whole session, rather
+    // than being a mode chosen once.
+    IM_CHECK(ctx->ItemExists("//Terminal###TerminalPanel/###term_claude"));
     // On the RIGHT: its left edge is past the middle of the viewport.
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     IM_CHECK(win->Pos.x > vp->Pos.x + vp->Size.x * 0.5f);

@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -173,6 +174,27 @@ void PtySession::Resize(int rows, int cols) {
   ioctl(m_fd, TIOCSWINSZ, &ws);
   // forkpty gave the child its own session, so the kernel delivers SIGWINCH
   // to the foreground process group on TIOCSWINSZ; no explicit kill needed.
+}
+
+std::string PtySession::ForegroundName() const {
+  if (m_fd < 0)
+    return {};
+  const pid_t pg = tcgetpgrp(m_fd);
+  if (pg <= 0)
+    return {};
+  // /proc is Linux-specific and so is this whole file; a platform without it
+  // simply gets no name, and the caller falls back to the session's label.
+  const std::string path = "/proc/" + std::to_string(pg) + "/comm";
+  FILE* f = std::fopen(path.c_str(), "rb");
+  if (f == nullptr)
+    return {};
+  char buf[64] = {};
+  const size_t n = std::fread(buf, 1, sizeof buf - 1, f);
+  std::fclose(f);
+  std::string name(buf, n);
+  while (!name.empty() && (name.back() == '\n' || name.back() == '\r'))
+    name.pop_back();
+  return name;
 }
 
 void PtySession::Terminate() {

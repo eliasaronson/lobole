@@ -88,12 +88,13 @@ struct TerminalState {
   std::unique_ptr<term::Screen> screen;
   int rows = 24;
   int cols = 80;
-  std::string label;      // what is running, for the header
+  std::string label;      // the session's program, for the header
   std::string startError; // why the last start failed, if it did
   int exitStatus = -1;    // of the last session
   bool everStarted = false;
   int scrollBack = 0;     // lines scrolled up into history; 0 = live
   bool capturing = false; // the pointer is over us and a session is running
+  std::string foreground; // process with the terminal, refreshed on output
 };
 
 namespace {
@@ -165,49 +166,61 @@ std::string FindMcpServer() {
   return {};
 }
 
-// Claude Code, bound to THIS instance. That binding is the entire reason for
-// running it in here rather than in a terminal beside the app: cwd is the
-// project, DESIGNER_PORT names this window's remote port (opening one if the
-// app was started without --remote), and the generated MCP config points the
-// `designer` tools at that port. Nothing to wire up by hand, and no chance of
-// attaching to the other instance you have open.
-void StartClaude(AppState& state, TerminalState& t) {
-  term::PtySession::Options opts;
-  opts.program = "claude";
-
-  int port = state.remotePort;
-  if (port <= 0 && state.ensureRemotePort)
-    port = state.ensureRemotePort();
-  if (port > 0)
-    opts.env.emplace_back("DESIGNER_PORT", std::to_string(port));
-
-  const std::string server = FindMcpServer();
-  if (port > 0 && !server.empty()) {
-    // A config file rather than `claude mcp add`: this is per-session, it
-    // must not edit the user's global MCP registration, and a project
-    // .mcp.json belongs to the project, not to us.
-    const std::filesystem::path cfg =
-        std::filesystem::temp_directory_path() /
-        ("designer-mcp-" + std::to_string(port) + ".json");
-    std::string json = "{\"mcpServers\":{\"designer\":{\"command\":"
-                       "\"python3\",\"args\":[\"" +
-                       server + "\",\"--port\",\"" + std::to_string(port) +
-                       "\"]}}}";
-    std::error_code ec;
-    FILE* f = std::fopen(cfg.string().c_str(), "wb");
-    if (f != nullptr) {
-      std::fwrite(json.data(), 1, json.size(), f);
-      std::fclose(f);
-      opts.args.push_back("--mcp-config");
-      opts.args.push_back(cfg.string());
-    }
-    (void)ec;
-  }
-  StartSession(state, t, opts, "Claude Code");
+// This window's remote port, opening one on demand. A terminal inside the app
+// is only better than a terminal beside it if what runs here can reach the
+// model on screen, and that reach is a port.
+int InstancePort(AppState& state) {
+  if (state.remotePort > 0)
+    return state.remotePort;
+  if (state.ensureRemotePort)
+    return state.ensureRemotePort();
+  return 0;
 }
 
+// Writes a per-session MCP config naming this instance's port and returns its
+// path (empty when there is nothing to point at). A file rather than `claude
+// mcp add`: this is per session, it must not edit the user's global MCP
+// registration, and a project .mcp.json belongs to the project, not to us.
+std::string WriteMcpConfig(int port) {
+  const std::string server = FindMcpServer();
+  if (port <= 0 || server.empty())
+    return {};
+  const std::filesystem::path cfg =
+      std::filesystem::temp_directory_path() /
+      ("designer-mcp-" + std::to_string(port) + ".json");
+  const std::string json = "{\"mcpServers\":{\"designer\":{\"command\":"
+                           "\"python3\",\"args\":[\"" +
+                           server + "\",\"--port\",\"" + std::to_string(port) +
+                           "\"]}}}";
+  FILE* f = std::fopen(cfg.string().c_str(), "wb");
+  if (f == nullptr)
+    return {};
+  std::fwrite(json.data(), 1, json.size(), f);
+  std::fclose(f);
+  return cfg.string();
+}
+
+// The command that starts Claude Code bound to THIS window. It is typed into
+// the shell rather than run behind the user's back: what the button does is
+// then legible, repeatable, and the session it starts is a child of their
+// shell — so exiting it returns them to a prompt, not to a dead panel.
+std::string ClaudeCommand(AppState& state) {
+  const std::string cfg = WriteMcpConfig(InstancePort(state));
+  std::string cmd = "claude";
+  if (!cfg.empty())
+    cmd += " --mcp-config " + cfg;
+  return cmd;
+}
+
+// $SHELL, with this window's port already exported: typing `claude` — or
+// `python3 tools/designer_remote.py`, or anything else that reads
+// DESIGNER_PORT — then talks to the model on screen without being told which
+// instance to attach to.
 void StartShell(AppState& state, TerminalState& t) {
   term::PtySession::Options opts; // empty program = $SHELL
+  const int port = InstancePort(state);
+  if (port > 0)
+    opts.env.emplace_back("DESIGNER_PORT", std::to_string(port));
   const char* shell = std::getenv("SHELL");
   StartSession(state, t, opts,
                shell != nullptr && *shell != '\0'
@@ -223,6 +236,9 @@ void PumpSession(TerminalState& t) {
   if (!out.empty()) {
     t.screen->Write(out.data(), out.size());
     t.scrollBack = 0; // new output snaps back to live, as a terminal does
+    // Output is exactly when what-is-in-front can have changed, so the /proc
+    // read happens then rather than every frame.
+    t.foreground = t.pty.ForegroundName();
   }
   const std::string reply = t.screen->TakeOutput();
   if (!reply.empty())
@@ -370,25 +386,6 @@ void DrawRow(ImDrawList* dl, ImVec2 origin, float cellW, float cellH, int row,
   }
 }
 
-void DrawEmptyState(AppState& state, TerminalState& t) {
-  ImGui::Spacing();
-  ImGui::TextWrapped(
-      "Run Claude Code, a shell, or git beside the model. Typing goes here "
-      "only while the pointer is over this panel.");
-  ImGui::Spacing();
-  ImGui::TextDisabled("%s", StartDirectory(state).c_str());
-  ImGui::Spacing();
-  if (ImGui::Button("Claude Code###term_claude"))
-    StartClaude(state, t);
-  ImGui::SameLine();
-  if (ImGui::Button("Shell###term_shell"))
-    StartShell(state, t);
-  if (!t.startError.empty()) {
-    ImGui::Spacing();
-    ImGui::TextWrapped("Could not start: %s", t.startError.c_str());
-  }
-}
-
 } // namespace
 
 bool TerminalCapturesKeys(const AppState& state) {
@@ -451,25 +448,47 @@ void DrawTerminalPanel(AppState& state) {
     return;
   }
 
+  // Opening the panel opens a shell. There WAS a chooser here — "Claude Code"
+  // or "Shell" — and it was a one-shot menu: once you picked, the only way
+  // back to it was restarting the app. That is a bad trade for a decision
+  // that is really just "what do I type first", so the panel now answers it
+  // the way a terminal does and leaves the rest to the prompt.
+  if (t.screen == nullptr && !t.everStarted)
+    StartShell(state, t);
+
   // --- header -----------------------------------------------------------
   if (t.pty.Running()) {
-    ImGui::TextDisabled("%s", t.label.c_str());
+    ImGui::TextDisabled("%s", t.foreground.empty() ? t.label.c_str()
+                                                   : t.foreground.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Claude Code###term_claude")) {
+      const std::string cmd = ClaudeCommand(state) + "\n";
+      t.pty.Write(cmd.data(), cmd.size());
+    }
+    if (ImGui::IsItemHovered()) {
+      const int port = state.remotePort;
+      if (port > 0)
+        ImGui::SetTooltip("Types `claude` into this shell, wired to THIS "
+                          "window (port %d) — so it edits the model you are "
+                          "looking at.",
+                          port);
+      else
+        ImGui::SetTooltip("Types `claude` into this shell, wired to THIS "
+                          "window (opens a remote port for it).");
+    }
     ImGui::SameLine();
     if (ImGui::SmallButton("Stop###term_stop"))
       t.pty.Terminate();
-  } else if (t.everStarted) {
+  } else {
     ImGui::TextDisabled("%s exited (%d)", t.label.c_str(), t.exitStatus);
     ImGui::SameLine();
-    if (ImGui::SmallButton("Restart###term_restart")) {
-      if (t.label == "Claude Code")
-        StartClaude(state, t);
-      else
-        StartShell(state, t);
-    }
+    if (ImGui::SmallButton("New shell###term_shell"))
+      StartShell(state, t);
+    if (!t.startError.empty())
+      ImGui::TextWrapped("Could not start: %s", t.startError.c_str());
   }
 
   if (t.screen == nullptr) {
-    DrawEmptyState(state, t);
     ImGui::End();
     return;
   }

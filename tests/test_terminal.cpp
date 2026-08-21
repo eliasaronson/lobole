@@ -254,6 +254,27 @@ TEST_CASE("pty: the child sees the size, and sees it change",
   CHECK_FALSE(pty.Running());
 }
 
+TEST_CASE("pty: the header can name what is actually in front",
+          "[terminal][pty]") {
+  // The session is a shell, but what has the keyboard may be something the
+  // shell started — Claude Code, usually. A header that keeps saying "bash"
+  // while a TUI is running is telling the user the wrong thing.
+  Screen screen(10, 40);
+  PtySession pty;
+  PtySession::Options opts;
+  opts.program = "/bin/sh";
+  opts.args = {"-c", "printf 'ready'; sleep 5"};
+  std::string error;
+  REQUIRE(pty.Start(opts, &error));
+  REQUIRE(PumpUntil(pty, screen, [&] {
+    return screen.Line(0).find("ready") != std::string::npos;
+  }));
+  const std::string front = pty.ForegroundName();
+  CHECK((front == "sh" || front == "sleep")); // whichever holds the terminal
+  pty.Terminate();
+  CHECK(pty.ForegroundName().empty()); // nothing running, nothing claimed
+}
+
 TEST_CASE("pty: terminate is safe twice and kills the child",
           "[terminal][pty]") {
   PtySession pty;
