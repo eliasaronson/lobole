@@ -265,6 +265,52 @@ def main():
         d.call("delete_part", index=idx)
         d.call("reset_layout")  # harmless no-op headless (flag only)
 
+        phase("A project that moved on disk refuses to be overwritten")
+        # F8. The scenario is the terminal panel: you run a git command (or
+        # another editor writes, or a second instance saves) while the app
+        # holds the documents in memory. Before this, the next Ctrl+S replaced
+        # it all with no message.
+        moved = os.path.join(tmp, "moved.dsgn")
+        d.call("new_project")
+        d.call("add_feature", feature={"type": "Box", "name": "Box 1",
+                                       "position": [0, 0, 0],
+                                       "width": 2, "height": 2, "depth": 2})
+        d.call("save_project", path=moved)
+        expect(not d.call("project_changed_on_disk")["changed"],
+               "a project just saved has not moved")
+        # A save with nothing external in between still works — the app's own
+        # writes must never read as somebody else's.
+        d.call("save_project", path=moved)
+
+        # Now somebody else writes. A new file is the least ambiguous form.
+        with open(os.path.join(moved, "NOTES.txt"), "w") as f:
+            f.write("written by something that is not this app\n")
+        expect(d.call("project_changed_on_disk")["changed"],
+               "an external write is noticed")
+        expect_error(d, "save_project", "changed on disk", path=moved)
+        expect(os.path.exists(os.path.join(moved, "NOTES.txt")),
+               "the refused save left the external write alone")
+
+        # force is the way through for a caller that did the changing.
+        d.call("save_project", path=moved, force=True)
+        expect(not d.call("project_changed_on_disk")["changed"],
+               "saving re-stamps, so the same change is not reported twice")
+
+        # Reopening also re-stamps: the app and the disk agree again.
+        with open(os.path.join(moved, "NOTES2.txt"), "w") as f:
+            f.write("and again\n")
+        expect(d.call("project_changed_on_disk")["changed"], "noticed again")
+        d.call("open_project", path=moved)
+        expect(not d.call("project_changed_on_disk")["changed"],
+               "opening agrees with what is on disk")
+
+        # A Save As to a path we have never seen has nothing to compare
+        # against, and must not be blocked by the stamp of a different project.
+        elsewhere = os.path.join(tmp, "elsewhere.dsgn")
+        with open(os.path.join(moved, "NOTES3.txt"), "w") as f:
+            f.write("moved again\n")
+        d.call("save_project", path=elsewhere)
+
         phase("Importing a broken STL")
         # Importing a broken STL (zero triangles) names the file and format
         # instead of a generic regeneration failure. (Valid STLs import as

@@ -36,6 +36,7 @@
 #include "ui/ConflictsPanel.h"
 #include "ui/DragMath.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot
+#include "ui/FileDialogs.h"
 #include "ui/HistoryPanel.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
@@ -6310,6 +6311,135 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->measure.active);
   };
 
+  // F8: the project moved on disk while the app held it in memory. This is
+  // the terminal-panel scenario — the panel ships inside the app and starts
+  // in the project's directory, so a `git checkout` there is a normal thing
+  // to do. Before this, the next Ctrl+S replaced it with no message.
+  t = IM_REGISTER_TEST(engine, "disk", "a_moved_project_refuses_to_be_saved");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_disk_gui.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(2);
+    // A project we just wrote has not moved, and saving again is fine — the
+    // app's own writes must never read as somebody else's.
+    IM_CHECK(!ui::ProjectChangedOnDisk(*s_App));
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(2);
+
+    // Somebody else writes.
+    {
+      std::ofstream(dir / "NOTES.txt") << "not this app\n";
+    }
+    IM_CHECK(ui::ProjectChangedOnDisk(*s_App));
+
+    // The save refuses and raises the modal rather than overwriting.
+    ui::SaveProjectAction(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(s_App->diskChangeBlockedSave);
+    IM_CHECK(std::filesystem::exists(dir / "NOTES.txt"));
+
+    // Cancel leaves the project moved: dismissing a save does not un-move it.
+    ctx->SetRef("//Project changed on disk");
+    ctx->ItemClick("Cancel###disk_cancel");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->diskChangeBlockedSave);
+    IM_CHECK(s_App->diskChanged);
+    IM_CHECK(std::filesystem::exists(dir / "NOTES.txt"));
+
+    // Save anyway goes through, and re-stamps — the same change must not be
+    // reported twice.
+    ui::SaveProjectAction(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(s_App->diskChangeBlockedSave);
+    ctx->SetRef("//Project changed on disk");
+    ctx->ItemClick("Save anyway###disk_overwrite");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->diskChangeBlockedSave);
+    IM_CHECK(!ui::ProjectChangedOnDisk(*s_App));
+    // A save is not a delete: an unrelated external file is still there.
+    IM_CHECK(std::filesystem::exists(dir / "NOTES.txt"));
+  };
+
+  // The banner is the half that makes the refusal rarely the first news. It
+  // shows on any saved project, git or not — "something else wrote to your
+  // project" is true either way.
+  t = IM_REGISTER_TEST(engine, "disk", "the_history_panel_says_it_moved");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_disk_banner.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(2);
+
+    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    IM_CHECK(panel != nullptr && panel->DockNode != nullptr);
+    ctx->ItemClick(panel->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//History");
+    // Nothing has happened: no banner.
+    IM_CHECK(!s_App->diskChanged);
+
+    // Go back to the model, which is where a person actually is when
+    // somebody else writes to their project.
+    ImGuiWindow* model = ImGui::FindWindowByName("Model");
+    IM_CHECK(model != nullptr);
+    ctx->ItemClick(model->TabId);
+    ctx->Yield(2);
+
+    {
+      std::ofstream(dir / "NOTES.txt") << "not this app\n";
+    }
+    // The poll is deliberately slow (a directory walk), so drive it rather
+    // than yielding for three seconds of test time.
+    s_App->diskCheckStamp = -1.0;
+    ctx->Yield(3);
+    // Noticed with the History panel BEHIND another tab: the poll runs from
+    // the top of the frame, not from inside the panel, which would only ever
+    // have caught changes made while you were looking at the History tab.
+    IM_CHECK(s_App->diskChanged);
+    // The menu-bar notice this flag drives (MainMenuBar's ###disk_notice) is
+    // NOT asserted here: a disabled MenuItem in the main menu bar does not
+    // resolve through the test engine's item paths, and three ways of asking
+    // failed. What matters and IS covered is the flag being true while
+    // another tab owns the dock node — the notice is fifteen lines of ImGui
+    // reading it.
+
+    // Now go read it.
+    ctx->ItemClick(panel->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//History");
+    ctx->ItemClick("Reload###hist_disk_reload");
+    ctx->Yield(3);
+    // Reloading agrees with the disk again, so the banner goes.
+    IM_CHECK(!s_App->diskChanged);
+    IM_CHECK(!ui::ProjectChangedOnDisk(*s_App));
+
+    // Put Model back in front: these panels share one dock node, and a test
+    // that leaves its own tab selected changes what the next test starts from.
+    if (ImGuiWindow* model = ImGui::FindWindowByName("Model")) {
+      ctx->ItemClick(model->TabId);
+      ctx->Yield(2);
+    }
+  };
+
   // Conflicts (F7): two lines of work that changed the same thing, brought
   // together through the panel. The whole point is that the row reads as a
   // FEATURE — "Box 'Box 1' ... width 5 vs 9" — and not as a path.
@@ -6497,8 +6627,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Before: Model owns the shared node. Without this the check below is a
     // false positive — the default layout docks History last, and the last
     // window docked is the one the node selects.
+    //
+    // SELECTED, not merely asserted: this used to read the incoming state and
+    // check it, which held only because no earlier test had left another tab
+    // of this node in front. The disk/* cases do exactly that, and the
+    // precondition then failed in whichever shard ran them first.
     ImGuiWindow* model = ImGui::FindWindowByName("Model");
     IM_CHECK(model != nullptr && model->DockNode != nullptr);
+    ctx->ItemClick(model->TabId);
+    ctx->Yield(2);
     IM_CHECK_EQ(model->DockNode->SelectedTabId, model->TabId);
 
     // Reach the panel the way a user does: click its dock tab. (A tab item's

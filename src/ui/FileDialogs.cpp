@@ -5,6 +5,7 @@
 #include "core/io/Autosaver.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
+#include "ui/HistoryPanel.h"
 
 #include "imgui.h"
 
@@ -142,6 +143,68 @@ void DrawRecoveryModal(AppState& state) {
   }
 }
 
+// F8: a save was refused because the project moved on disk. The user pressed
+// Ctrl+S and something has to happen, so this is modal — and it names what
+// each way out costs, because both of them lose something.
+void DrawDiskChangeModal(AppState& state) {
+  if (!state.diskChangeBlockedSave)
+    return;
+  if (!ImGui::IsPopupOpen("Project changed on disk"))
+    ImGui::OpenPopup("Project changed on disk");
+  if (!ImGui::BeginPopupModal("Project changed on disk", nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+
+  const std::string name =
+      std::filesystem::path(state.projectPath).filename().string();
+  ImGui::TextWrapped(
+      "Something else wrote to %s — a command in the terminal, another "
+      "editor, or a second Designer window.",
+      name.c_str());
+  ImGui::Spacing();
+  ImGui::TextWrapped("Saving now would replace it with what is open here.");
+  // Only a git-backed project can promise this, so only it says so.
+  const bool recoverable = ProjectHasHistory(state);
+  if (recoverable) {
+    ImGui::TextWrapped("The version on disk is already in your History, so "
+                       "that is recoverable.");
+  }
+  ImGui::Spacing();
+
+  if (ImGui::Button("Reload from disk###disk_reload")) {
+    std::string error;
+    if (!OpenProject(state, state.projectPath, &error))
+      LOG_ERROR("Could not reload the project: {}", error);
+    state.diskChangeBlockedSave = false;
+    state.diskChanged = false;
+    ImGui::CloseCurrentPopup();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Throw away what is open here and open what is on disk.");
+  ImGui::SameLine();
+  if (ImGui::Button("Save anyway###disk_overwrite")) {
+    std::string error;
+    if (SaveProject(state, state.projectPath, &error, /*overwrite=*/true))
+      MarkProjectSaved(state, state.projectPath);
+    else
+      LOG_ERROR("Failed to save project: {}", error);
+    state.diskChangeBlockedSave = false;
+    ImGui::CloseCurrentPopup();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip(recoverable
+                          ? "Replace what is on disk. The History keeps it."
+                          : "Replace what is on disk. It is not kept.");
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel###disk_cancel")) {
+    // The banner stays: the project HAS moved, and dismissing the save does
+    // not un-move it.
+    state.diskChangeBlockedSave = false;
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
 void DrawBrowserWindow(AppState& state) {
   if (!state.showFileBrowser)
     return;
@@ -233,6 +296,7 @@ bool NativeDialogsSafe() {
 
 void DrawFileBrowser(AppState& state) {
   DrawRecoveryModal(state);
+  DrawDiskChangeModal(state);
   DrawBrowserWindow(state);
 }
 

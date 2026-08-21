@@ -429,7 +429,25 @@ void ApplyExplodeTransforms(AppState& state);
 // index + one `parts/<name>/` directory each; a single-part project stays
 // the flat `.dsgn` (index.json + features/) form for backward compatibility.
 // Open detects project.json to load all parts, else loads one part.
-bool SaveProject(AppState& state, const std::string& path, std::string* error);
+// Save the project. Refuses when the project on disk changed since we last
+// read or wrote it (F8) — the write would replace someone else's work with
+// no way back — unless `overwriteExternalChanges` says to do it anyway.
+// Every save funnels through here: Ctrl+S, Save As, naming a version, and
+// the save_project RPC, so this is the one guard that covers them all.
+bool SaveProject(AppState& state, const std::string& path, std::string* error,
+                 bool overwriteExternalChanges = false);
+
+// Record what the project directory at `path` looks like NOW, as the thing
+// later saves compare against. Called wherever the app and the disk are known
+// to agree: after LOADING one (we just read it), and after saving one
+// (including the commit that save makes).
+void StampDiskState(AppState& state, const std::string& path);
+
+// Has someone else written to the project since StampDiskState? Walks the
+// directory, so it is a save-time / poll-time question, not a per-frame one.
+// False when there is no stamp to compare (a project never saved, or a Save
+// As to a path we have not seen).
+bool ProjectChangedOnDisk(AppState& state);
 bool OpenProject(AppState& state, const std::string& path, std::string* error);
 
 // ---- Project-wide variables (Phase V, docs/dogfooding.md, caster round)

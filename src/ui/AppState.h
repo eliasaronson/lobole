@@ -10,6 +10,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/GitVault.h"
 #include "core/io/ProjectMerge.h"
+#include "core/io/ProjectStamp.h"
 #include "core/io/Settings.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchSolver.h"
@@ -1050,6 +1051,20 @@ struct AppState {
   std::string historyPath;
   double historyStamp = -1.0; // ImGui time of the last refresh; <0 = never
   bool historyUncommitted = false;
+
+  // Did the project change on disk under us? (F8) `diskStamp` is what the
+  // directory looked like when we last read or wrote it; anything else is
+  // somebody else's write — a command in the terminal panel, another editor,
+  // a second instance. `diskChanged` is the poll's answer (the banner);
+  // `diskChangeBlockedSave` means a save was refused and the modal owes the
+  // user a choice.
+  DocumentIO::ProjectStamp diskStamp;
+  std::string diskStampPath;
+  std::string diskStampHead; // git HEAD when stamped — the cheap pre-check
+  bool diskChanged = false;
+  bool diskChangeBlockedSave = false;
+  double diskCheckStamp = -1.0; // ImGui time of the last poll; <0 = never
+  bool windowFocused = true;    // main.cpp mirrors GLFW_FOCUSED here
 
   // Conflicts (F7), cached on the same terms as the log: scanning spawns
   // `git` AND walks the project for the duplicate ids git cannot see, so it

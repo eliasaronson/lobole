@@ -1583,6 +1583,10 @@ int main(int argc, char** argv) {
       ImGui_ImplGlfw_Sleep(10);
       continue;
     }
+    // F8: focus coming back is the moment to ask whether the project moved.
+    // It is the shape of the workflow — switch to a terminal, run a git
+    // command, switch back — and it costs nothing while you are working.
+    g_App.windowFocused = glfwGetWindowAttrib(window, GLFW_FOCUSED) != 0;
 
     // Update application
     static float lastTime = 0.0f;

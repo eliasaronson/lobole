@@ -36,7 +36,9 @@ namespace remote {
 static constexpr MethodDoc ProjectMethods[] = {
     {"new_project", "Reset to an empty project (one empty part)."},
     {"open_project", "Open a project {path} (.json file or .dsgn directory)."},
-    {"save_project", "Save the project to {path}."},
+    {"save_project",
+     "Save the project to {path, message?, force?}. Refuses when the project "
+     "changed on disk since it was opened; {force:true} saves over it."},
     {"import_step", "Import a STEP file into the current project (XCAF: names, "
                     "colors, real assemblies)."},
     {"export_step", "Export the active part (or {part}) to STEP {path}."},
@@ -65,6 +67,9 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"merge_finish", "Verify the merged project LOADS AND REGENERATES, then "
                      "keep it. Refuses with {broken} when it does not."},
     {"merge_abort", "Throw an in-progress merge away."},
+    {"project_changed_on_disk",
+     "Has anything else written to the project since it was opened or last "
+     "saved? (a terminal command, another editor, a second instance)"},
 };
 std::span<const MethodDoc> ProjectMethodDocs() { return ProjectMethods; }
 
@@ -81,11 +86,13 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     return json::object();
   }
   if (m == "save_project") {
-    // params: {path, message?} — message becomes the git commit subject for
-    // directory (.dsgn) projects (F5); ignored otherwise.
+    // params: {path, message?, force?} — message becomes the git commit
+    // subject for directory (.dsgn) projects (F5); ignored otherwise. `force`
+    // saves over a project that changed on disk (F8), which an agent that
+    // just did the changing may legitimately want.
     const std::string path = p.at("path").get<std::string>();
     std::string error;
-    if (!ui::SaveProject(state, path, &error)) // multi-part aware (A1)
+    if (!ui::SaveProject(state, path, &error, p.value("force", false)))
       throw std::runtime_error(error);
     // Also clears the autosave sidecar and commits git-backed projects.
     ui::MarkProjectSaved(state, path, p.value("message", "save"));
@@ -188,6 +195,10 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (!ui::RestoreVersion(state, commit, commit, &error))
       throw std::runtime_error(error);
     return json::object();
+  }
+  if (m == "project_changed_on_disk") {
+    return json{{"changed", ui::ProjectChangedOnDisk(state)},
+                {"path", state.projectPath}};
   }
   if (m == "branch_list") {
     json names = json::array();

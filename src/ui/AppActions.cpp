@@ -25,6 +25,7 @@
 #include "core/fem/FemTopo.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
+#include "core/io/ProjectStamp.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -1680,8 +1681,23 @@ void AdoptStagedImports(AppState& state, const std::filesystem::path& dir) {
 }
 } // namespace
 
-bool SaveProject(AppState& state, const std::string& path, std::string* error) {
+bool SaveProject(AppState& state, const std::string& path, std::string* error,
+                 bool overwriteExternalChanges) {
   namespace fs = std::filesystem;
+  // F8: the project moved under us. Writing now would replace whatever landed
+  // there — a `git checkout` in the terminal panel, another editor, a second
+  // instance — with what happens to be in memory, silently. Only guards a
+  // save back to the path we opened; a Save As to a new home has nothing to
+  // compare against.
+  if (!overwriteExternalChanges && path == state.projectPath &&
+      ProjectChangedOnDisk(state)) {
+    state.diskChanged = true;
+    state.diskChangeBlockedSave = true;
+    if (error)
+      *error = "the project changed on disk since you opened it — reload it, "
+               "or save anyway to replace what is there";
+    return false;
+  }
   EnsureParts(state);
   // Directory-form targets can own import sidecars; adopt any still staged
   // before the write so the saved features point inside the project.
@@ -1827,6 +1843,7 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
     state.tabFolders.clear();
     state.nextPartId = 1;
     EnsureParts(state, fs::path(path).stem().string());
+    StampDiskState(state, path); // F8 — see the container branch below
     return true;
   }
   try {
@@ -1964,6 +1981,13 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
           static_cast<size_t>(state.activePart) < state.parts.size())
         state.parts[state.activePart].everFramed = true;
     }
+    // F8: we just READ this from disk, so memory and disk agree by
+    // definition. Stamping here rather than in each caller is what makes
+    // every reload path — restore, branch switch, finishing a merge, the
+    // "changed on disk" banner's own Reload — clear the flag without having
+    // to remember to. BOTH success paths need it: a single-part project
+    // returns from the branch above without ever reaching this one.
+    StampDiskState(state, path);
     return true;
   } catch (const std::exception& e) {
     if (error)
@@ -2044,12 +2068,36 @@ void MarkProjectSaved(AppState& state, const std::string& path,
       LOG_WARN("Git commit failed: {}", error);
     }
   }
+  // LAST, and after the commit: everything above is our own write, and a
+  // stamp taken before it would read as an external change on the next save.
+  StampDiskState(state, path);
 }
 
 void MarkProjectOpened(AppState& state, const std::string& path) {
   state.projectPath = path;
   RecentProjects::Remember(path); // ignores "" (the unsaved slot)
   StampAllSaved(state);
+  StampDiskState(state, path); // F8: memory and disk agree as of now
+}
+
+void StampDiskState(AppState& state, const std::string& path) {
+  state.diskStampPath = path;
+  state.diskStamp = DocumentIO::StampProject(path);
+  state.diskStampHead.clear();
+  if (GitVault::IsRepo(path)) {
+    const auto head = GitVault::Log(path, 1);
+    if (!head.empty())
+      state.diskStampHead = head[0].hash;
+  }
+  state.diskChanged = false;
+  state.diskCheckStamp = -1.0; // let the poll re-answer from the new baseline
+}
+
+bool ProjectChangedOnDisk(AppState& state) {
+  if (state.projectPath.empty() || !state.diskStamp.valid ||
+      state.diskStampPath != state.projectPath)
+    return false; // nothing to compare against is not a change
+  return !DocumentIO::StampProject(state.projectPath).Matches(state.diskStamp);
 }
 
 void MarkProjectRecovered(AppState& state, const std::string& path) {

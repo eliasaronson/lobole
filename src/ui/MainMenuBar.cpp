@@ -504,6 +504,40 @@ void HandleShortcuts(AppState& state) {
   }
 }
 
+// F8: the project changed on disk, said where it is always visible.
+//
+// Text, not a button. The actions this state needs — reload, or save over it
+// — both throw something away, and the menu bar is the one place in the app
+// you can hit by accident. They live where they can be read first: the
+// History panel's banner, and the modal the next save raises.
+void DrawDiskChangeNotice(const AppState& state) {
+  if (!state.diskChanged)
+    return;
+  const char* label = "Changed on disk";
+  const ImGuiStyle& style = ImGui::GetStyle();
+  // Measured, never a pixel literal — the style scales with the display's
+  // content scale and the Font Size setting.
+  const float width = ImGui::CalcTextSize(label).x + style.ItemSpacing.x * 2.0f;
+  const float x = ImGui::GetWindowWidth() - width;
+  if (x <= ImGui::GetCursorPosX())
+    return; // a narrow window: the menus themselves come first
+  ImGui::SetCursorPosX(x);
+  // A DISABLED menu item rather than plain text: it cannot be clicked by
+  // accident, and unlike a Text widget it has an id, so it is addressable
+  // from a gui test — "the notice is visible" is the whole assertion.
+  // Disabled items draw in TextDisabled, so that is the colour to override.
+  ImGui::PushStyleColor(ImGuiCol_TextDisabled,
+                        ImVec4(0.95f, 0.75f, 0.35f, 1.0f));
+  ImGui::MenuItem("Changed on disk###disk_notice", nullptr, false, false);
+  ImGui::PopStyleColor();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Something else wrote to this project — a command in "
+                      "the terminal, another editor, or a second window.\n"
+                      "The History panel can reload it, and saving will ask "
+                      "before replacing it.");
+  }
+}
+
 } // namespace
 
 void DrawMainMenuBar(AppState& state) {
@@ -517,6 +551,7 @@ void DrawMainMenuBar(AppState& state) {
   DrawEditMenu(state);
   DrawViewMenu(state);
   DrawHelpMenu(state);
+  DrawDiskChangeNotice(state);
 
   ImGui::EndMainMenuBar();
 }

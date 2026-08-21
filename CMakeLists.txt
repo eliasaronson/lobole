@@ -230,6 +230,7 @@ set(core_sources
     src/core/io/Checkpoints.cpp
     src/core/io/GitVault.cpp
     src/core/io/ProjectMerge.cpp
+    src/core/io/ProjectStamp.cpp
     src/core/io/ImportAssembly.cpp
     src/core/Measure.cpp
     src/core/ThreadStandards.cpp

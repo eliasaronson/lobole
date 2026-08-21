@@ -2,6 +2,7 @@
 
 #include "common/Logger.h"
 #include "core/io/GitVault.h"
+#include "core/io/ProjectStamp.h"
 #include "ui/AppActions.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/FileDialogs.h"
@@ -62,6 +63,46 @@ void RefreshHistory(AppState& state, bool force) {
   state.historyLog = GitVault::Log(state.projectPath, kVersionsShown);
   state.historyUncommitted = GitVault::Dirty(state.projectPath);
 }
+
+// How often the project directory is re-examined. Slow on purpose: the walk
+// is cheap per file but a 48-part project is thousands of them, and the
+// question "did somebody else write to this" does not need a fast answer —
+// it needs a certain one before the next save.
+constexpr double kDiskPollSeconds = 3.0;
+
+} // namespace
+
+// Has the project moved under us? (F8) Two cheap gates before the walk:
+// focus coming back (the terminal-and-back workflow), and — for a git
+// project — whether HEAD moved, which every checkout/merge/pull does and
+// which costs one `git` call instead of a directory walk.
+//
+// Neither gate is sufficient alone, which is why both are here: HEAD does not
+// move for a working-tree edit, and focus does not change when a headless
+// agent writes while you keep working.
+void PollDiskState(AppState& state) {
+  if (state.projectPath.empty() || state.diskChanged)
+    return; // already known — the banner is up
+  const double now = ImGui::GetTime();
+  static bool wasFocused = true;
+  const bool focusReturned = state.windowFocused && !wasFocused;
+  wasFocused = state.windowFocused;
+  if (!focusReturned && state.diskCheckStamp >= 0.0 &&
+      now - state.diskCheckStamp < kDiskPollSeconds)
+    return;
+  state.diskCheckStamp = now;
+
+  if (!state.diskStampHead.empty()) {
+    const auto head = GitVault::Log(state.projectPath, 1);
+    if (!head.empty() && head[0].hash != state.diskStampHead) {
+      state.diskChanged = true;
+      return;
+    }
+  }
+  state.diskChanged = ProjectChangedOnDisk(state);
+}
+
+namespace {
 
 void RefreshBranches(AppState& state, bool force) {
   if (!force && !state.branches.empty() &&
@@ -216,6 +257,31 @@ void DrawHistoryPanel(AppState& state) {
     ImGui::End();
     return;
   }
+  // F8: the project moved under us. This sits above the save status because
+  // it changes what saving means — and it stays until the project and the
+  // disk agree again.
+  //
+  // When the change left CONFLICTS, F7's panel owns the message: it appears
+  // on its own for exactly that state, and two panels shouting about one
+  // event is worse than one.
+  if (state.diskChanged && state.conflicts.Empty()) {
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                       "This project changed on disk — something else wrote "
+                       "to it.");
+    ImGui::PopTextWrapPos();
+    if (ImGui::SmallButton("Reload###hist_disk_reload")) {
+      std::string reloadError;
+      if (OpenProject(state, state.projectPath, &reloadError))
+        actionError.clear();
+      else
+        actionError = reloadError;
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Open what is on disk. Unsaved changes here are lost.");
+    ImGui::Separator();
+  }
+
   if (!GitVault::Available()) {
     // The one place the storage engine is named: the user has to act on it.
     ImGui::TextWrapped("Version history needs `git` on your PATH. Saving "
@@ -233,7 +299,6 @@ void DrawHistoryPanel(AppState& state) {
   }
 
   RefreshHistory(state, false);
-
   // Save state. `ProjectDirty` is the app's own answer (free); the git-level
   // check catches a state that reached disk but not the history — an
   // external edit, or a save while git was unavailable.
