@@ -114,6 +114,36 @@ int CountTokens(const std::string& line) {
   return n;
 }
 
+// Runs a NETWORK git command. Two differences from RunGitVerbose, both about
+// never hanging a frame:
+//   GIT_TERMINAL_PROMPT=0  git asks on the terminal for a username/password
+//                          when it has no credential helper. There is no
+//                          terminal here, so without this the child waits
+//                          forever and the app waits with it.
+//   GIT_ASKPASS / SSH_ASKPASS empty + SSH BatchMode
+//                          the same for the graphical and ssh prompts.
+// The result is that unconfigured auth FAILS, quickly, with git's own message
+// — which someone who understands git can act on.
+int RunGitNetwork(const std::string& dir, const std::string& args,
+                  std::string* output) {
+  const std::string cmd = "GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= "
+                          "GIT_SSH_COMMAND='ssh -o BatchMode=yes' "
+                          "git -C " +
+                          Quote(dir) + " " + args + " 2>&1";
+  FILE* pipe = ::popen(cmd.c_str(), "r");
+  if (!pipe)
+    return -1;
+  std::array<char, 4096> chunk{};
+  std::string captured;
+  size_t n = 0;
+  while ((n = ::fread(chunk.data(), 1, chunk.size(), pipe)) > 0)
+    captured.append(chunk.data(), n);
+  const int status = ::pclose(pipe);
+  if (output)
+    *output = captured;
+  return status == -1 ? -1 : GIT_EXIT_STATUS(status);
+}
+
 // The last-resort identity: commits must work on CI and on a fresh machine
 // with no git config at all. Only used for a field nothing else supplies.
 constexpr const char* kFallbackName = "Designer";
@@ -234,24 +264,56 @@ std::string TagRef(const std::string& name) {
 }
 
 bool Tag(const std::string& dir, const std::string& name) {
-  const std::string ref = TagRef(name);
-  return Available() && !ref.empty() &&
-         RunGit(dir, "tag -f " + Quote(ref)) == 0;
+  const std::string base = TagRef(name);
+  if (!Available() || base.empty())
+    return false;
+  // NOT `tag -f`. Two people naming a version the same thing is ordinary —
+  // "before the hinge rework" is what anyone would call it — and forcing
+  // would silently move theirs onto our commit, locally and then on push.
+  //
+  // F6 already separated the two halves this needs: the NAME is the commit
+  // subject, and the ref is only an address. So on collision we disambiguate
+  // the ADDRESS and leave the person's prose alone; both names survive,
+  // each pointing at its own commit.
+  // ANNOTATED, not lightweight. Two reasons: `push --follow-tags` carries
+  // annotated tags along with their commits and silently ignores lightweight
+  // ones, so a name would never reach a teammate; and an annotated tag
+  // records who named the version and when, which is the same question C1
+  // answers for commits. The message is the person's prose.
+  const std::string annotate =
+      IdentityArgs(dir) + " tag -a -m " + Quote(name) + " ";
+  if (RunGit(dir, annotate + Quote(base)) == 0)
+    return true;
+  std::string head;
+  if (RunGit(dir, "rev-parse --short HEAD", &head) != 0)
+    return false;
+  const std::string unique = base + "-" + FirstLine(head);
+  // Already ours (naming the same state twice) is success, not a collision.
+  std::string existing;
+  if (RunGit(dir, "rev-parse " + Quote(unique), &existing) == 0)
+    return true;
+  return RunGit(dir, annotate + Quote(unique)) == 0;
 }
 
 namespace {
 
-// `%D` decorations -> "is one of the tags ours?". Git formats the field as
-// "HEAD -> main, tag: cp/before-hinges, origin/main". Only a "cp/" tag marks
-// a named version; the name itself is the commit subject (see TagRef).
-bool HasVersionTag(const std::string& decorations) {
+// `%D` decorations -> the "cp/" ref on this commit, or "". Git formats the
+// field as "HEAD -> main, tag: cp/before-hinges, origin/main". Only a "cp/"
+// tag marks a named version; the name itself is the commit subject (TagRef).
+std::string VersionTagRef(const std::string& decorations) {
   size_t pos = 0;
   while ((pos = decorations.find("tag: ", pos)) != std::string::npos) {
     pos += 5;
-    if (decorations.compare(pos, 3, "cp/") == 0)
-      return true;
+    if (decorations.compare(pos, 3, "cp/") != 0)
+      continue;
+    const size_t end = decorations.find_first_of(",", pos);
+    std::string ref =
+        decorations.substr(pos, end == std::string::npos ? end : end - pos);
+    while (!ref.empty() && (ref.back() == ' ' || ref.back() == '\r'))
+      ref.pop_back();
+    return ref;
   }
-  return false;
+  return "";
 }
 
 } // namespace
@@ -279,9 +341,10 @@ std::vector<LogEntry> Log(const std::string& dir, int limit) {
     if (t1 == std::string::npos || t2 == std::string::npos ||
         t3 == std::string::npos)
       continue;
+    const std::string tagRef = VersionTagRef(line.substr(t2 + 1, t3 - t2 - 1));
     out.push_back({line.substr(0, t1), line.substr(t3 + 1),
                    std::stoll(line.substr(t1 + 1, t2 - t1 - 1)),
-                   HasVersionTag(line.substr(t2 + 1, t3 - t2 - 1))});
+                   !tagRef.empty(), tagRef});
   }
   return out;
 }
@@ -610,6 +673,172 @@ bool CommitMerge(const std::string& dir, const std::string& message,
           &out) != 0) {
     if (error)
       *error = out.empty() ? "git commit failed" : FirstLine(out);
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Remotes (F9 C2)
+// ---------------------------------------------------------------------------
+
+std::vector<Remote> Remotes(const std::string& dir) {
+  std::vector<Remote> out;
+  if (!Available() || !IsRepo(dir))
+    return out;
+  std::string text;
+  if (RunGit(dir, "remote -v", &text) != 0)
+    return out;
+  // "origin\tURL (fetch)" / "origin\tURL (push)" — the fetch line is the one
+  // that matters, and listing each remote twice would be a UI bug.
+  for (const std::string& line : Lines(text)) {
+    const size_t tab = line.find('\t');
+    if (tab == std::string::npos)
+      continue;
+    const size_t space = line.find(' ', tab);
+    if (space == std::string::npos ||
+        line.compare(space + 1, 7, "(fetch)") != 0)
+      continue;
+    out.push_back({line.substr(0, tab), line.substr(tab + 1, space - tab - 1)});
+  }
+  return out;
+}
+
+bool AddRemote(const std::string& dir, const std::string& name,
+               const std::string& url, std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  std::string out;
+  if (RunGitVerbose(dir, "remote add " + Quote(name) + " " + Quote(url),
+                    &out) != 0) {
+    if (error)
+      *error = out.empty() ? "could not add that remote" : FirstLine(out);
+    return false;
+  }
+  return true;
+}
+
+bool RemoveRemote(const std::string& dir, const std::string& name,
+                  std::string* error) {
+  std::string out;
+  if (!Available() || !IsRepo(dir) ||
+      RunGitVerbose(dir, "remote remove " + Quote(name), &out) != 0) {
+    if (error)
+      *error = out.empty() ? "could not remove that remote" : FirstLine(out);
+    return false;
+  }
+  return true;
+}
+
+std::string Upstream(const std::string& dir) {
+  if (!Available() || !IsRepo(dir))
+    return "";
+  std::string text;
+  if (RunGit(dir, "rev-parse --abbrev-ref --symbolic-full-name @{u}", &text) !=
+      0)
+    return "";
+  return FirstLine(text);
+}
+
+Divergence AheadBehind(const std::string& dir) {
+  Divergence out;
+  if (Upstream(dir).empty())
+    return out;
+  out.hasUpstream = true;
+  std::string text;
+  // "<behind>\t<ahead>" — left is the upstream side.
+  if (RunGit(dir, "rev-list --left-right --count @{u}...HEAD", &text) != 0)
+    return out;
+  const std::string line = FirstLine(text);
+  const size_t tab = line.find('\t');
+  if (tab == std::string::npos)
+    return out;
+  try {
+    out.behind = std::stoi(line.substr(0, tab));
+    out.ahead = std::stoi(line.substr(tab + 1));
+  } catch (const std::exception&) {
+    out.behind = out.ahead = 0;
+  }
+  return out;
+}
+
+bool Fetch(const std::string& dir, const std::string& remote,
+           std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  std::string out;
+  // --tags: a named version is a tag, and a teammate's names should arrive
+  // with their commits (F9 C5).
+  if (RunGitNetwork(dir, "fetch --tags --quiet " + Quote(remote), &out) != 0) {
+    if (error)
+      *error = out.empty() ? "could not reach " + remote : FirstLine(out);
+    return false;
+  }
+  return true;
+}
+
+PushResult Push(const std::string& dir, const std::string& remote,
+                const std::string& branch, bool setUpstream,
+                std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return PushResult::Failed;
+  }
+  std::string out;
+  const std::string args = std::string("push --follow-tags --porcelain ") +
+                           (setUpstream ? "--set-upstream " : "") +
+                           Quote(remote) + " " + Quote(branch);
+  const int code = RunGitNetwork(dir, args, &out);
+  if (code == 0) {
+    // --porcelain marks an unchanged ref with "=".
+    return out.find("\n=") != std::string::npos ||
+                   out.find("Everything up-to-date") != std::string::npos
+               ? PushResult::UpToDate
+               : PushResult::Pushed;
+  }
+  // The upstream moved. Not a failure — it means get their work first, and
+  // merging on the user's behalf here would be a surprise.
+  if (out.find("[rejected]") != std::string::npos ||
+      out.find("non-fast-forward") != std::string::npos ||
+      out.find("fetch first") != std::string::npos) {
+    if (error)
+      *error = "someone else has pushed since you last got their changes";
+    return PushResult::Rejected;
+  }
+  if (error)
+    *error = out.empty() ? "could not push to " + remote : FirstLine(out);
+  return PushResult::Failed;
+}
+
+bool Clone(const std::string& url, const std::string& dir, std::string* error) {
+  if (!Available()) {
+    if (error)
+      *error = "git is not available";
+    return false;
+  }
+  std::error_code ec;
+  if (std::filesystem::exists(dir, ec)) {
+    if (error)
+      *error = "there is already something at " + dir;
+    return false;
+  }
+  // `-C .` is meaningless for clone, so run it from the parent and name the
+  // target explicitly.
+  const std::filesystem::path target(dir);
+  std::filesystem::create_directories(target.parent_path(), ec);
+  std::string out;
+  if (RunGitNetwork(target.parent_path().string(),
+                    "clone --quiet " + Quote(url) + " " + Quote(dir),
+                    &out) != 0) {
+    if (error)
+      *error = out.empty() ? "could not clone " + url : FirstLine(out);
     return false;
   }
   return true;

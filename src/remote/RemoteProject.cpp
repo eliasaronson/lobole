@@ -67,6 +67,18 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"merge_finish", "Verify the merged project LOADS AND REGENERATES, then "
                      "keep it. Refuses with {broken} when it does not."},
     {"merge_abort", "Throw an in-progress merge away."},
+    {"remote_list", "The project's remotes, and how far ahead/behind this "
+                    "branch is."},
+    {"remote_add", "Give the project a remote {name?:origin, url}. A shared "
+                   "project stops committing built geometry."},
+    {"remote_remove", "Forget a remote {name}."},
+    {"fetch", "Bring down refs from {remote?:origin} without touching the "
+              "working tree."},
+    {"pull", "Fetch {remote?:origin} and merge it in. A 'conflicted' status "
+             "is an outcome — see conflict_list."},
+    {"push", "Send this branch to {remote?:origin}. 'rejected' means someone "
+             "else pushed first; pull, then push again."},
+    {"clone_project", "Clone {url} into {path} and open it."},
     {"project_changed_on_disk",
      "Has anything else written to the project since it was opened or last "
      "saved? (a terminal command, another editor, a second instance)"},
@@ -140,7 +152,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       for (const auto& e : GitVault::Log(state.projectPath, 200))
         if (e.named)
           list.push_back({{"name", e.subject},
-                          {"ref", GitVault::TagRef(e.subject)},
+                          {"ref", e.tagRef}, // READ, not recomputed (F9 C5)
                           {"modified_unix", e.unixTime}});
     } else {
       for (const auto& info : Checkpoints::List(state.projectPath))
@@ -155,7 +167,16 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (ui::ProjectHasHistory(state)) {
       // The whole project goes back to the tagged version, and the restore
       // is committed on top so history stays linear.
-      const std::string ref = GitVault::TagRef(name);
+      // The ref may have been disambiguated when someone else had already
+      // used this name (F9 C5), so find the one that exists rather than
+      // recomputing it from the name.
+      std::string ref = GitVault::TagRef(name);
+      for (const auto& e : GitVault::Log(state.projectPath, 200)) {
+        if (e.named && e.subject == name) {
+          ref = e.tagRef;
+          break;
+        }
+      }
       if (ref.empty() || !ui::RestoreVersion(state, ref, name, &error))
         throw std::runtime_error(error.empty() ? "no such version: " + name
                                                : error);
@@ -199,6 +220,94 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
   if (m == "project_changed_on_disk") {
     return json{{"changed", ui::ProjectChangedOnDisk(state)},
                 {"path", state.projectPath}};
+  }
+  if (m == "remote_list") {
+    json list = json::array();
+    for (const auto& r : GitVault::Remotes(state.projectPath))
+      list.push_back({{"name", r.name}, {"url", r.url}});
+    const auto d = GitVault::AheadBehind(state.projectPath);
+    return json{{"remotes", list},
+                {"upstream", GitVault::Upstream(state.projectPath)},
+                {"has_upstream", d.hasUpstream},
+                {"ahead", d.ahead},
+                {"behind", d.behind}};
+  }
+  if (m == "remote_add") {
+    std::string error;
+    if (!ui::AddProjectRemote(state, p.value("name", "origin"),
+                              p.at("url").get<std::string>(), &error))
+      throw std::runtime_error(error);
+    return json::object();
+  }
+  if (m == "remote_remove") {
+    std::string error;
+    if (!GitVault::RemoveRemote(state.projectPath,
+                                p.at("name").get<std::string>(), &error))
+      throw std::runtime_error(error);
+    return json::object();
+  }
+  if (m == "fetch") {
+    // Synchronous here on purpose: the RPC has no frame to keep drawing, and
+    // a caller that asked for a fetch is waiting for its answer. The worker
+    // thread exists for the GUI (ui::SyncJob).
+    std::string error;
+    if (!GitVault::Fetch(state.projectPath, p.value("remote", "origin"),
+                         &error))
+      throw std::runtime_error(error);
+    const auto d = GitVault::AheadBehind(state.projectPath);
+    return json{{"ahead", d.ahead}, {"behind", d.behind}};
+  }
+  if (m == "pull") {
+    const std::string remote = p.value("remote", "origin");
+    std::string error;
+    if (!GitVault::Fetch(state.projectPath, remote, &error))
+      throw std::runtime_error(error);
+    const std::string upstream = GitVault::Upstream(state.projectPath);
+    if (upstream.empty())
+      throw std::runtime_error(
+          "this branch does not track a remote yet — push it first");
+    const GitVault::MergeStatus status =
+        GitVault::Merge(state.projectPath, upstream, &error);
+    if (status == GitVault::MergeStatus::Failed)
+      throw std::runtime_error(error);
+    static constexpr const char* kStatusName[] = {"up_to_date", "fast_forward",
+                                                  "merged", "conflicted"};
+    if (status != GitVault::MergeStatus::Conflicted &&
+        status != GitVault::MergeStatus::UpToDate) {
+      std::string openError;
+      if (!ui::OpenProject(state, state.projectPath, &openError))
+        throw std::runtime_error(openError);
+    }
+    ui::InvalidateConflicts(state);
+    const auto report = ProjectMerge::Scan(state.projectPath);
+    return json{{"status", kStatusName[static_cast<int>(status)]},
+                {"conflicts", report.conflicts.size()},
+                {"needs_decision", report.NeedsDecision()}};
+  }
+  if (m == "push") {
+    const std::string remote = p.value("remote", "origin");
+    const std::string branch = GitVault::CurrentBranch(state.projectPath);
+    std::string error;
+    const GitVault::PushResult result =
+        GitVault::Push(state.projectPath, remote, branch,
+                       GitVault::Upstream(state.projectPath).empty(), &error);
+    if (result == GitVault::PushResult::Failed)
+      throw std::runtime_error(error);
+    if (result == GitVault::PushResult::Rejected)
+      throw std::runtime_error(error + " — pull, then push again");
+    return json{{"status", result == GitVault::PushResult::UpToDate
+                               ? "up_to_date"
+                               : "pushed"}};
+  }
+  if (m == "clone_project") {
+    const std::string path = p.at("path").get<std::string>();
+    std::string error;
+    if (!GitVault::Clone(p.at("url").get<std::string>(), path, &error))
+      throw std::runtime_error(error);
+    if (!ui::OpenProject(state, path, &error))
+      throw std::runtime_error(error);
+    ui::MarkProjectOpened(state, path);
+    return json{{"path", path}};
   }
   if (m == "branch_list") {
     json names = json::array();

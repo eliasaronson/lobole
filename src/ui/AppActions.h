@@ -437,6 +437,15 @@ void ApplyExplodeTransforms(AppState& state);
 bool SaveProject(AppState& state, const std::string& path, std::string* error,
                  bool overwriteExternalChanges = false);
 
+// Give the project a remote (F9 C2), and stop it committing built geometry
+// (F9 C4) — for one person the baked bodies make opening a load instead of a
+// rebuild, but on a shared project they are megabytes of binary pushed on
+// every save, conflicting on every concurrent edit, and discarded either way
+// because the chain hash decides at load. Saves and commits that change, so
+// the remote's first push does not carry them.
+bool AddProjectRemote(AppState& state, const std::string& name,
+                      const std::string& url, std::string* error = nullptr);
+
 // Record what the project directory at `path` looks like NOW, as the thing
 // later saves compare against. Called wherever the app and the disk are known
 // to agree: after LOADING one (we just read it), and after saving one

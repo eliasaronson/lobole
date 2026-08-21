@@ -2080,6 +2080,46 @@ void MarkProjectOpened(AppState& state, const std::string& path) {
   StampDiskState(state, path); // F8: memory and disk agree as of now
 }
 
+bool AddProjectRemote(AppState& state, const std::string& name,
+                      const std::string& url, std::string* error) {
+  if (state.projectPath.empty()) {
+    if (error)
+      *error = "save the project before sharing it";
+    return false;
+  }
+  if (!GitVault::AddRemote(state.projectPath, name, url, error))
+    return false;
+
+  // C4: built geometry stops travelling. The flag is per DOCUMENT while this
+  // is a decision about the project, so it is set across every part — and
+  // then the ordinary save path does the rest, because SaveDir already knows
+  // how to remove `geometry/` and write the .gitignore that keeps it out.
+  bool hadGeometry = false;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].kind != DocKind::Part)
+      continue; // only parts bake geometry
+    if (Document* doc = SlotDoc(state, i)) {
+      hadGeometry = hadGeometry || doc->CommitGeometry();
+      doc->SetCommitGeometry(false);
+    }
+  }
+  if (!hadGeometry)
+    return true;
+
+  std::string saveError;
+  if (!SaveProject(state, state.projectPath, &saveError)) {
+    // The remote is added either way; say what did not happen rather than
+    // pretending the whole thing failed.
+    LOG_WARN("Remote added, but could not stop committing geometry: {}",
+             saveError);
+    return true;
+  }
+  MarkProjectSaved(state, state.projectPath, "Stop sharing built geometry");
+  LOG_INFO("{} now has a remote; built geometry is no longer committed",
+           state.projectPath);
+  return true;
+}
+
 void StampDiskState(AppState& state, const std::string& path) {
   state.diskStampPath = path;
   state.diskStamp = DocumentIO::StampProject(path);

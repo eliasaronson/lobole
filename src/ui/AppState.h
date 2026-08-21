@@ -16,6 +16,7 @@
 #include "core/sketch/SketchSolver.h"
 #include "render/ClipPlanes.h"
 #include "render/FrameTimer.h"
+#include "ui/SyncJob.h"
 #include "ui/TopoJob.h"
 #include "ui/ViewportHandle.h"
 
@@ -947,6 +948,18 @@ struct AppState {
   // stores the result at completion. One run at a time. See ui::TopoJob and the
   // Start/Poll/Cancel TopologyRun helpers.
   std::unique_ptr<TopoJob> topoJob;
+
+  // A running fetch/push/clone (F9 C2). One at a time; PollSync joins it and
+  // applies the result on the main thread.
+  std::unique_ptr<SyncJob> syncJob;
+  // What the last one said, kept until the next one starts, so the panel has
+  // something to show instead of the message flashing past.
+  std::string syncMessage;
+  bool syncFailed = false;
+  // Cached so the panel does not spawn `git` every frame to draw a label.
+  GitVault::Divergence divergence;
+  std::vector<GitVault::Remote> remotes;
+  double remotesStamp = -1.0;
   // The active async static/modal solve, or null. One study run at a time
   // across both job slots (see Start{Topology,Study}Run's shared guard).
   std::unique_ptr<StudyJob> studyJob;

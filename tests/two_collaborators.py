@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Two people, one shared project, no network (F9).
+
+A bare repository in a temp directory is a real remote as far as git is
+concerned, so two clones of it are a real two-person scenario — and the whole
+thing runs in CI with nothing to reach.
+
+The bar is the same one F7 set: after everything, the project LOADS AND
+REGENERATES on the other person's machine.
+"""
+import json
+import os
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+from designer_remote import Designer  # noqa: E402
+
+_PHASE = "startup"
+
+
+def phase(name):
+    global _PHASE
+    _PHASE = name
+    print(f"  [{name}]")
+
+
+def expect(condition, message):
+    if not condition:
+        raise AssertionError(f"[phase: {_PHASE}] {message}")
+
+
+def free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def start(binary, env):
+    port = free_port()
+    proc = subprocess.Popen([binary, "--headless", "--remote", str(port)],
+                            env=env, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    for _ in range(120):
+        try:
+            return proc, Designer(port)
+        except OSError:
+            if proc.poll() is not None:
+                raise RuntimeError("designer exited before serving")
+            time.sleep(0.25)
+    raise RuntimeError("designer never came up")
+
+
+def box(name, width):
+    return {"type": "Box", "name": name, "position": [0, 0, 0],
+            "width": width, "height": 20, "depth": 20}
+
+
+def main():
+    binary = sys.argv[1] if len(sys.argv) > 1 else "build/designer"
+    tmp = tempfile.mkdtemp(prefix="designer-collab-")
+    env = dict(os.environ)
+    # Two instances, and neither should touch the developer's real config.
+    env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
+    env["XDG_STATE_HOME"] = os.path.join(tmp, "state")
+
+    bare = os.path.join(tmp, "shared.git")
+    subprocess.run(["git", "init", "--bare", "-q", bare], check=True)
+
+    alice_proc = bob_proc = None
+    alice = bob = None
+    try:
+        alice_proc, alice = start(binary, env)
+        bob_proc, bob = start(binary, env)
+
+        phase("Alice makes a project and shares it")
+        alice_dir = os.path.join(tmp, "alice.dsgn")
+        alice.call("new_project")
+        alice.call("add_feature", feature=box("Body", 40))
+        alice.call("save_project", path=alice_dir)
+        alice.call("remote_add", url=bare)
+        # C4: a shared project stops committing built geometry.
+        expect(not os.path.isdir(os.path.join(alice_dir, "geometry")),
+               "built geometry is no longer committed once shared")
+        expect(alice.call("push")["status"] == "pushed", "first push")
+
+        phase("Bob clones it")
+        bob_dir = os.path.join(tmp, "bob.dsgn")
+        bob.call("clone_project", url=bare, path=bob_dir)
+        state = bob.call("get_state")
+        expect(len(state["features"]) == 1, "Bob has Alice's feature")
+        expect(abs(state["features"][0]["width"] - 40.0) < 1e-6, "and its size")
+
+        phase("Both change the same feature")
+        alice.call("modify_feature", index=0, feature=box("Body", 50))
+        alice.call("save_project", path=alice_dir)
+        expect(alice.call("push")["status"] == "pushed", "Alice pushes first")
+
+        bob.call("modify_feature", index=0, feature=box("Body", 60))
+        bob.call("save_project", path=bob_dir)
+
+        phase("Bob's push is rejected, because Alice got there first")
+        try:
+            bob.call("push")
+            raise AssertionError("push should have been rejected")
+        except RuntimeError as e:
+            expect("someone else" in str(e), f"rejected for the right reason: {e}")
+
+        phase("Bob pulls, and the conflict is described in CAD terms")
+        pulled = bob.call("pull")
+        expect(pulled["status"] == "conflicted", f"conflicted: {pulled}")
+        conflicts = bob.call("conflict_list")
+        items = [c for c in conflicts["conflicts"] if c["kind"] == "item"]
+        expect(len(items) == 1, f"one item conflict: {conflicts}")
+        expect(items[0]["item_kind"] == "Box", f"a Box: {items[0]}")
+        widths = {f["field"]: (f["mine"], f["theirs"])
+                  for f in items[0]["fields"]}
+        expect("width" in widths, f"about the width: {items[0]}")
+        expect(widths["width"] == ("60", "50"), f"his vs hers: {widths}")
+
+        phase("Bob keeps his, finishes, and pushes")
+        bob.call("conflict_resolve", path=items[0]["path"], take="mine")
+        bob.call("merge_finish")
+        expect(bob.call("push")["status"] == "pushed", "Bob pushes the merge")
+
+        phase("Alice pulls, and her project still works")
+        pulled = alice.call("pull")
+        expect(pulled["status"] in ("fast_forward", "merged", "up_to_date"),
+               f"clean for Alice: {pulled}")
+        state = alice.call("get_state")
+        expect(abs(state["features"][0]["width"] - 60.0) < 1e-6,
+               f"Bob's resolution arrived: {state['features'][0]}")
+        # THE BAR: not "git exited 0" but "the project still works".
+        expect(len(state["bodies"]) == 1, "and it regenerates to a body")
+        expect(state["bodies"][0]["volume"] > 0, "with real volume")
+
+        phase("Both name a version the same thing, and both names survive")
+        alice.call("checkpoint_create", name="before the lid")
+        alice.call("push")
+        bob.call("pull")
+        bob.call("modify_feature", index=0, feature=box("Body", 70))
+        bob.call("save_project", path=bob_dir)
+        bob.call("checkpoint_create", name="before the lid")
+        named = [c for c in bob.call("checkpoint_list")["checkpoints"]
+                 if c["name"] == "before the lid"]
+        expect(len(named) == 2, f"two versions, one name: {named}")
+        expect(named[0]["ref"] != named[1]["ref"],
+               f"different addresses: {named}")
+
+        phase("Commits say who made them")
+        log = subprocess.run(
+            ["git", "-C", bob_dir, "log", "--pretty=format:%ae"],
+            capture_output=True, text=True, check=True).stdout.split()
+        expect(all(a for a in log), "every commit has an author")
+
+        print("two_collaborators: all assertions passed")
+        return 0
+    finally:
+        for client in (alice, bob):
+            try:
+                client.close()
+            except Exception:
+                pass
+        for proc in (alice_proc, bob_proc):
+            if proc and proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except Exception:
+                    proc.kill()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

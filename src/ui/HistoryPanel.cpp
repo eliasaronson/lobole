@@ -6,6 +6,7 @@
 #include "ui/AppActions.h"
 #include "ui/ConflictsPanel.h"
 #include "ui/FileDialogs.h"
+#include "ui/SyncJob.h"
 
 #include "imgui.h"
 
@@ -103,6 +104,18 @@ void PollDiskState(AppState& state) {
 }
 
 namespace {
+
+// Remotes and the ahead/behind counts, cached: each is a `git` process, and
+// the panel draws them as labels.
+void RefreshRemotes(AppState& state, bool force) {
+  const double now = ImGui::GetTime();
+  if (!force && state.remotesStamp >= 0.0 &&
+      now - state.remotesStamp < kRefreshSeconds)
+    return;
+  state.remotesStamp = now;
+  state.remotes = GitVault::Remotes(state.projectPath);
+  state.divergence = GitVault::AheadBehind(state.projectPath);
+}
 
 void RefreshBranches(AppState& state, bool force) {
   if (!force && !state.branches.empty() &&
@@ -452,25 +465,25 @@ void DrawHistoryPanel(AppState& state) {
   // — which is why the conflict UI F5 and F6 both deferred had no state to
   // serve for four weeks.
   ImGui::Separator();
-  if (ImGui::TreeNode("Lines of work")) {
+  if (ImGui::TreeNode("Branches")) {
     RefreshBranches(state, false);
     // Wrapped, not a fixed line: a branch name is user prose and the panel
     // can be dragged narrow.
     ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextDisabled("Working on: %s", state.currentBranch.empty()
-                                              ? "(none)"
-                                              : state.currentBranch.c_str());
+    ImGui::TextDisabled("On branch: %s", state.currentBranch.empty()
+                                             ? "(none)"
+                                             : state.currentBranch.c_str());
     ImGui::PopTextWrapPos();
     static char branchBuf[96] = {};
     const float startWidth =
         ImGui::CalcTextSize("Start").x + style.FramePadding.x * 2.0f;
     ImGui::SetNextItemWidth(-(startWidth + style.ItemSpacing.x));
     const bool named = ImGui::InputTextWithHint(
-        "###hist_branch", "Start a separate line...", branchBuf,
-        sizeof(branchBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+        "###hist_branch", "New branch...", branchBuf, sizeof(branchBuf),
+        ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::SameLine();
     ImGui::BeginDisabled(branchBuf[0] == '\0' || dirty);
-    const bool start = ImGui::Button("Start###hist_branch_go");
+    const bool start = ImGui::Button("Create###hist_branch_go");
     ImGui::EndDisabled();
     if ((named || start) && branchBuf[0] != '\0') {
       std::string error;
@@ -491,7 +504,7 @@ void DrawHistoryPanel(AppState& state) {
       const std::string rowId = std::to_string(i);
       ImGui::TextUnformatted(branch.c_str());
       ImGui::BeginDisabled(dirty);
-      if (statusButton("Switch to", ("###hist_switch" + rowId).c_str())) {
+      if (statusButton("Checkout", ("###hist_switch" + rowId).c_str())) {
         std::string error;
         if (SwitchToBranch(state, branch, &error)) {
           actionError.clear();
@@ -500,7 +513,7 @@ void DrawHistoryPanel(AppState& state) {
           actionError = error;
         }
       }
-      if (statusButton("Bring in", ("###hist_merge" + rowId).c_str())) {
+      if (statusButton("Merge", ("###hist_merge" + rowId).c_str())) {
         std::string error;
         if (!MergeBranch(state, branch, &error))
           actionError = error;
@@ -510,6 +523,90 @@ void DrawHistoryPanel(AppState& state) {
       ImGui::EndDisabled();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && dirty)
         ImGui::SetTooltip("Save first.");
+    }
+    ImGui::TreePop();
+  }
+
+  // Sharing (F9 C2). This section names git's operations — remote, fetch,
+  // push — against the rest of the panel's rule of speaking CAD. Decided
+  // deliberately (see f9-collaboration.md): a rejected push is a real thing
+  // with a git cause, and inventing a word for it would teach the wrong one
+  // the moment git's own message appears.
+  ImGui::Separator();
+  if (ImGui::TreeNode("Sharing")) {
+    RefreshRemotes(state, false);
+    PollSync(state);
+
+    if (state.remotes.empty()) {
+      ImGui::TextWrapped("This project has no remote. Add one to share it "
+                         "with other people.");
+      static char urlBuf[512] = {};
+      const float addWidth =
+          ImGui::CalcTextSize("Add").x + style.FramePadding.x * 2.0f;
+      ImGui::SetNextItemWidth(-(addWidth + style.ItemSpacing.x));
+      const bool entered = ImGui::InputTextWithHint(
+          "###hist_remote_url", "Remote URL...", urlBuf, sizeof(urlBuf),
+          ImGuiInputTextFlags_EnterReturnsTrue);
+      ImGui::SameLine();
+      ImGui::BeginDisabled(urlBuf[0] == '\0');
+      const bool add = ImGui::Button("Add###hist_remote_add");
+      ImGui::EndDisabled();
+      if ((entered || add) && urlBuf[0] != '\0') {
+        std::string error;
+        if (AddProjectRemote(state, "origin", urlBuf, &error)) {
+          urlBuf[0] = '\0';
+          actionError.clear();
+        } else {
+          actionError = error;
+        }
+      }
+    } else {
+      const GitVault::Remote& remote = state.remotes[0];
+      ImGui::TextDisabled("%s", remote.name.c_str());
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextDisabled("%s", remote.url.c_str());
+      ImGui::PopTextWrapPos();
+
+      // What is waiting in each direction. Cached: asking git costs a
+      // process, and this is a label.
+      const GitVault::Divergence& d = state.divergence;
+      if (!d.hasUpstream)
+        ImGui::TextDisabled("Not pushed yet");
+      else if (d.ahead == 0 && d.behind == 0)
+        ImGui::TextDisabled("Up to date");
+      else
+        ImGui::TextDisabled("%d ahead, %d behind", d.ahead, d.behind);
+
+      const bool busy = SyncRunning(state);
+      ImGui::BeginDisabled(busy || dirty);
+      if (ImGui::SmallButton("Fetch###hist_fetch"))
+        StartFetch(state, remote.name, false);
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Pull###hist_pull"))
+        StartFetch(state, remote.name, true);
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Push###hist_push"))
+        StartPush(state, remote.name);
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && dirty)
+        ImGui::SetTooltip("Save first.");
+
+      if (busy) {
+        ImGui::TextDisabled("Working...");
+      } else if (!state.syncMessage.empty()) {
+        ImGui::PushTextWrapPos(0.0f);
+        if (state.syncFailed) {
+          ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
+                             state.syncMessage.c_str());
+          ImGui::TextDisabled(
+              "Designer does not ask for passwords. If this is about "
+              "credentials, set them up the way you normally would — the "
+              "terminal panel opens in this project.");
+        } else {
+          ImGui::TextDisabled("%s", state.syncMessage.c_str());
+        }
+        ImGui::PopTextWrapPos();
+      }
     }
     ImGui::TreePop();
   }

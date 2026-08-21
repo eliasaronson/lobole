@@ -1176,7 +1176,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
                               &error));
     IM_CHECK(gcode.find("G90 G91.1 G21") != std::string::npos);
     IM_CHECK(gcode.find("nan") == std::string::npos);
-
   };
 #endif // HAVE_CAM
 
@@ -6435,16 +6434,18 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->SetRef("//History");
     ctx->ItemClick("Reload###hist_disk_reload");
     ctx->Yield(3);
+
+    // Put Model back in front HERE — immediately after the last interaction
+    // that needed the History tab, and BEFORE the remaining assertions.
+    // These panels share one dock node, and a test that leaves its own tab
+    // selected changes what the next test starts from; a test that fails
+    // partway never reaches cleanup written at the end.
+    ctx->ItemClick(model->TabId);
+    ctx->Yield(2);
+
     // Reloading agrees with the disk again, so the banner goes.
     IM_CHECK(!s_App->diskChanged);
     IM_CHECK(!ui::ProjectChangedOnDisk(*s_App));
-
-    // Put Model back in front: these panels share one dock node, and a test
-    // that leaves its own tab selected changes what the next test starts from.
-    if (ImGuiWindow* model = ImGui::FindWindowByName("Model")) {
-      ctx->ItemClick(model->TabId);
-      ctx->Yield(2);
-    }
   };
 
   // Conflicts (F7): two lines of work that changed the same thing, brought
@@ -6485,13 +6486,13 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!firstLine.empty());
 
     ctx->SetRef("//History");
-    ctx->ItemOpen("Lines of work");
+    ctx->ItemOpen("Branches");
     ctx->Yield();
     // A TreeNode pushes an id scope, so its contents are addressed THROUGH
     // it — "//History/###hist_branch" finds nothing.
-    ctx->ItemClick("Lines of work/###hist_branch");
+    ctx->ItemClick("Branches/###hist_branch");
     ctx->KeyCharsReplace("alt");
-    ctx->ItemClick("Lines of work/Start###hist_branch_go");
+    ctx->ItemClick("Branches/Create###hist_branch_go");
     ctx->Yield(2);
     IM_CHECK_STR_EQ(GitVault::CurrentBranch(s_App->projectPath).c_str(), "alt");
 

@@ -17,6 +17,11 @@ struct LogEntry {
   // True when a "cp/" tag points at this commit: the user NAMED this version
   // (F6), and `subject` is the name they typed. Ordinary saves have none.
   bool named = false;
+  // The ref that tag actually landed on. Usually TagRef(subject) — but two
+  // people can name a version the same thing, and the second one is
+  // disambiguated (F9 C5), so the address has to be READ rather than
+  // recomputed from the name.
+  std::string tagRef;
 };
 
 // Who commits this app makes are BY (F9 C1).
@@ -175,5 +180,66 @@ bool AbortMerge(const std::string& dir, std::string* error = nullptr);
 // being committed as if it were finished.
 bool CommitMerge(const std::string& dir, const std::string& message,
                  std::string* error = nullptr);
+
+// ---------------------------------------------------------------------------
+// Remotes (F9 C2). For a small team who already understand git.
+//
+// AUTHENTICATION IS DELIBERATELY NOT HANDLED HERE. Every network call runs
+// with GIT_TERMINAL_PROMPT=0 and no askpass, so a credential prompt FAILS
+// instead of hanging a frame forever, and the failure carries git's own
+// message. A team that can `git push` in a terminal can push here; one that
+// cannot has a terminal panel inside the app to fix it in. The alternative —
+// SSH agents, passphrase prompts, host-key verification, token storage — is
+// a week of work for an audience that has already paid it.
+//
+// THESE BLOCK. Fetch, push and clone are network calls, and RunGit is
+// synchronous. Callers must run them off the UI thread (ui::SyncJob does).
+// Merge is deliberately NOT here: it is local, fast, and it moves the working
+// tree under an open document, so it belongs on the main thread.
+// ---------------------------------------------------------------------------
+
+struct Remote {
+  std::string name; // "origin"
+  std::string url;
+};
+
+std::vector<Remote> Remotes(const std::string& dir);
+bool AddRemote(const std::string& dir, const std::string& name,
+               const std::string& url, std::string* error = nullptr);
+bool RemoveRemote(const std::string& dir, const std::string& name,
+                  std::string* error = nullptr);
+
+// The branch this one tracks, as "origin/main", or "" when it tracks nothing.
+std::string Upstream(const std::string& dir);
+
+// How far apart this branch and its upstream are: commits we have that the
+// upstream does not, and the reverse. Both zero when there is no upstream —
+// "nothing to send, nothing to get" is the honest reading of that.
+struct Divergence {
+  int ahead = 0;
+  int behind = 0;
+  bool hasUpstream = false;
+};
+Divergence AheadBehind(const std::string& dir);
+
+// BLOCKS. Bring refs down without touching the working tree — which is why
+// this half is safe to run on a worker thread while the app keeps drawing.
+bool Fetch(const std::string& dir, const std::string& remote,
+           std::string* error = nullptr);
+
+// BLOCKS. `setUpstream` on the first push of a branch, so later pushes need
+// no arguments. A REJECTED push is a normal outcome, not a bug: it means the
+// upstream moved, and the answer is to get those changes first — never to
+// merge on the user's behalf, which is a surprise.
+enum class PushResult { Pushed, UpToDate, Rejected, Failed };
+PushResult Push(const std::string& dir, const std::string& remote,
+                const std::string& branch, bool setUpstream,
+                std::string* error = nullptr);
+
+// BLOCKS. Clone `url` into `dir` (which must not exist yet). This is the
+// second person's entire first-run experience; without it the story starts
+// with "use the terminal".
+bool Clone(const std::string& url, const std::string& dir,
+           std::string* error = nullptr);
 
 } // namespace GitVault

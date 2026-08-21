@@ -543,3 +543,213 @@ TEST_CASE("GitVault: a repo with no identity still commits", "[git]") {
   CHECK(GitVault::Log(repo.path()).size() == 1);
   CHECK(AuthorOf(repo) == "Designer|designer@local");
 }
+
+// ---------------------------------------------------------------------------
+// Remotes (F9 C2). No network anywhere: a bare repository in a temp directory
+// is a real remote as far as git is concerned, so two clones of it are a real
+// two-person scenario.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A bare repo to push to, plus a scratch clone helper.
+struct BareRemote {
+  fs::path dir;
+
+  explicit BareRemote(const char* name) {
+    dir = fs::temp_directory_path() / ("designer-bare-" + std::string(name) +
+                                       "-" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::string cmd =
+        "git init --bare -q '" + dir.string() + "' 2>/dev/null";
+    (void)std::system(cmd.c_str());
+  }
+  ~BareRemote() {
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    if (ec)
+      fs::remove_all(dir, ec);
+  }
+  std::string url() const { return dir.string(); }
+};
+
+} // namespace
+
+TEST_CASE("GitVault: add a remote, push, and clone it back", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  BareRemote remote("push");
+  ScratchRepo repo("push");
+  REQUIRE(GitVault::Init(repo.path()));
+  repo.Write("index.json", R"({"features":[1]})");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+
+  CHECK(GitVault::Remotes(repo.path()).empty());
+  REQUIRE(GitVault::AddRemote(repo.path(), "origin", remote.url()));
+  const auto remotes = GitVault::Remotes(repo.path());
+  REQUIRE(remotes.size() == 1); // once, not once per direction
+  CHECK(remotes[0].name == "origin");
+  CHECK(remotes[0].url == remote.url());
+
+  // No upstream yet: nothing to send, nothing to get, honestly reported.
+  CHECK_FALSE(GitVault::AheadBehind(repo.path()).hasUpstream);
+
+  const std::string branch = GitVault::CurrentBranch(repo.path());
+  std::string error;
+  REQUIRE(GitVault::Push(repo.path(), "origin", branch, true, &error) ==
+          GitVault::PushResult::Pushed);
+  CHECK(GitVault::Upstream(repo.path()) == "origin/" + branch);
+  CHECK(GitVault::Push(repo.path(), "origin", branch, false, &error) ==
+        GitVault::PushResult::UpToDate);
+
+  // And someone else can get it.
+  const fs::path clone = fs::temp_directory_path() /
+                         ("designer-clone-" + std::to_string(::getpid()));
+  fs::remove_all(clone);
+  REQUIRE(GitVault::Clone(remote.url(), clone.string(), &error));
+  CHECK(fs::exists(clone / "index.json"));
+  // Cloning onto something that exists must refuse rather than merge into it.
+  CHECK_FALSE(GitVault::Clone(remote.url(), clone.string(), &error));
+  std::error_code ec;
+  fs::remove_all(clone, ec);
+}
+
+TEST_CASE("GitVault: a push whose upstream moved is rejected, not failed",
+          "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  BareRemote remote("reject");
+  ScratchRepo alice("alice");
+  REQUIRE(GitVault::Init(alice.path()));
+  alice.Write("index.json", R"({"features":[1]})");
+  REQUIRE(GitVault::CommitAll(alice.path(), "save"));
+  REQUIRE(GitVault::AddRemote(alice.path(), "origin", remote.url()));
+  const std::string branch = GitVault::CurrentBranch(alice.path());
+  std::string error;
+  REQUIRE(GitVault::Push(alice.path(), "origin", branch, true, &error) ==
+          GitVault::PushResult::Pushed);
+
+  // Bob clones, both commit, Bob pushes first.
+  const fs::path bobDir = fs::temp_directory_path() /
+                          ("designer-bob-" + std::to_string(::getpid()));
+  fs::remove_all(bobDir);
+  REQUIRE(GitVault::Clone(remote.url(), bobDir.string(), &error));
+  const std::string bob = bobDir.string();
+  std::ofstream(bobDir / "features" / "2-box.json");
+  fs::create_directories(bobDir / "features");
+  std::ofstream(bobDir / "features/2-box.json") << R"({"id":2})";
+  REQUIRE(GitVault::CommitAll(bob, "bob adds a box"));
+  REQUIRE(GitVault::Push(bob, "origin", branch, false, &error) ==
+          GitVault::PushResult::Pushed);
+
+  alice.Write("features/3-hole.json", R"({"id":3})");
+  REQUIRE(GitVault::CommitAll(alice.path(), "alice adds a hole"));
+  // Alice is 1 ahead and does not yet know she is 1 behind.
+  CHECK(GitVault::Push(alice.path(), "origin", branch, false, &error) ==
+        GitVault::PushResult::Rejected);
+  CHECK(error.find("someone else") != std::string::npos);
+
+  // Fetch tells her the truth without touching her working tree.
+  REQUIRE(GitVault::Fetch(alice.path(), "origin", &error));
+  const auto divergence = GitVault::AheadBehind(alice.path());
+  CHECK(divergence.hasUpstream);
+  CHECK(divergence.ahead == 1);
+  CHECK(divergence.behind == 1);
+  CHECK(alice.Has("features/3-hole.json")); // fetch changed nothing here
+
+  // Get their work, then send: the loop a rejected push asks for.
+  REQUIRE(GitVault::Merge(alice.path(), "origin/" + branch, &error) ==
+          GitVault::MergeStatus::Merged);
+  CHECK(GitVault::Push(alice.path(), "origin", branch, false, &error) ==
+        GitVault::PushResult::Pushed);
+  CHECK(alice.Has("features/2-box.json")); // bob's work arrived
+
+  std::error_code ec;
+  fs::remove_all(bobDir, ec);
+}
+
+// Auth that is not set up must FAIL, quickly, rather than hang a frame
+// forever waiting for a password nobody can type.
+TEST_CASE("GitVault: an unreachable remote fails instead of hanging", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchRepo repo("noauth");
+  REQUIRE(GitVault::Init(repo.path()));
+  repo.Write("index.json", "{}");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+  REQUIRE(GitVault::AddRemote(repo.path(), "origin",
+                              "/nonexistent/designer/remote.git"));
+  std::string error;
+  CHECK_FALSE(GitVault::Fetch(repo.path(), "origin", &error));
+  CHECK_FALSE(error.empty()); // git's own message, not "it did not work"
+}
+
+// Two people naming a version the same thing is ordinary — "before the hinge
+// rework" is what anyone would call it. `tag -f` would have moved theirs onto
+// our commit, silently. F6 already made the NAME the commit subject and the
+// ref only an address, so the address is what gets disambiguated (F9 C5).
+TEST_CASE("GitVault: two versions can share a name", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchRepo repo("samename");
+  REQUIRE(GitVault::Init(repo.path()));
+  repo.Write("index.json", R"({"v":1})");
+  REQUIRE(GitVault::CommitAll(repo.path(), "before the hinge rework"));
+  REQUIRE(GitVault::Tag(repo.path(), "before the hinge rework"));
+  const std::string firstHash = GitVault::Log(repo.path())[0].hash;
+
+  repo.Write("index.json", R"({"v":2})");
+  REQUIRE(GitVault::CommitAll(repo.path(), "before the hinge rework"));
+  REQUIRE(GitVault::Tag(repo.path(), "before the hinge rework"));
+
+  const auto log = GitVault::Log(repo.path());
+  REQUIRE(log.size() == 2);
+  // Both are named, both kept the person's prose, and neither tag moved.
+  CHECK(log[0].named);
+  CHECK(log[1].named);
+  CHECK(log[0].subject == "before the hinge rework");
+  CHECK(log[1].subject == "before the hinge rework");
+  CHECK(log[1].hash == firstHash);
+  // Different addresses, and the reader gets the one that exists rather than
+  // recomputing it from the name.
+  CHECK(log[0].tagRef != log[1].tagRef);
+  CHECK(log[1].tagRef == GitVault::TagRef("before the hinge rework"));
+  CHECK(log[0].tagRef.rfind(GitVault::TagRef("before the hinge rework"), 0) ==
+        0);
+
+  // And each address restores its own state.
+  std::string error;
+  REQUIRE(GitVault::RestoreTo(repo.path(), log[1].tagRef, &error));
+}
+
+// A named version has to travel: a teammate who pulls should see the names,
+// not just the commits.
+TEST_CASE("GitVault: named versions reach the remote", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  BareRemote remote("tags");
+  ScratchRepo repo("tagpush");
+  REQUIRE(GitVault::Init(repo.path()));
+  repo.Write("index.json", "{}");
+  REQUIRE(GitVault::CommitAll(repo.path(), "before the lid"));
+  REQUIRE(GitVault::Tag(repo.path(), "before the lid"));
+  REQUIRE(GitVault::AddRemote(repo.path(), "origin", remote.url()));
+
+  std::string error;
+  const std::string branch = GitVault::CurrentBranch(repo.path());
+  REQUIRE(GitVault::Push(repo.path(), "origin", branch, true, &error) ==
+          GitVault::PushResult::Pushed);
+
+  const fs::path clone = fs::temp_directory_path() /
+                         ("designer-tagclone-" + std::to_string(::getpid()));
+  fs::remove_all(clone);
+  REQUIRE(GitVault::Clone(remote.url(), clone.string(), &error));
+  const auto log = GitVault::Log(clone.string());
+  REQUIRE(log.size() == 1);
+  CHECK(log[0].named); // the name arrived with the commit
+  CHECK(log[0].subject == "before the lid");
+
+  std::error_code ec;
+  fs::remove_all(clone, ec);
+}

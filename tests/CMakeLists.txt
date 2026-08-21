@@ -153,6 +153,15 @@ add_test(NAME headless_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
 
+# Two people, one shared project, NO NETWORK (F9): a bare repository in a temp
+# directory is a real remote as far as git is concerned, so two clones of it
+# are a real two-person scenario that runs anywhere, CI included. Two headless
+# instances at once, so it is also the second-client case under load.
+add_test(NAME two_collaborators
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/two_collaborators.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(two_collaborators PROPERTIES TIMEOUT 300)
+
 # Drawings D1/D2: a drawing tab (third DocKind), sheet + title block, projected
 # part views (HLR), v30 round-trip, and SVG export. Headless (no display).
 add_test(NAME drawing_smoke
