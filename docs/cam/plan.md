@@ -135,13 +135,15 @@ re-derivation, or the picture and the file can disagree).
 ```
 cam::Setup                     // a document object, like fem::Study
   name, stockRef | stock box (derived from the model's bbox + margins)
-  frame          // work origin + orientation. THE 4-axis seam (see below)
+  frame          // origin + rotationA. THE 4-axis seam — see C9
   machine        // post id: "mach3" | "linuxcnc"
+  fitArcs        // post curves as G2/G3 (C7). A machine property, so it
+                 // lives here and persists
   tools[]        // number, diameter, flutes, length, feeds/speeds
   operations[]
 
 cam::Operation
-  type      // Profile | Pocket | Face | Drill   (v1)
+  type      // Profile | Pocket | Face | Drill | Adaptive
   targets[] // ElementRef — faces/edges/pockets, stable across edits
   toolIndex
   depths    // top, bottom, stepdown, stock-to-leave
@@ -151,7 +153,12 @@ cam::Operation
 
 A toolpath is generated **in setup space** and posted through the setup's
 frame. That single indirection is what keeps the 4th axis from being a
-rewrite.
+rewrite — and C9 proved it, at the cost of one lesson: *everything else* has
+to agree about which space it is in. The engine entry points that take a
+`Setup` now frame their bodies themselves, and the viewport transforms back
+for display (`cam::FromSetupSpace`), because leaving that to callers meant
+the verifier compared a rotated program against an unrotated part and
+reported a 25 mm gouge that was not there.
 
 ## Leaving the 4th axis open (deferred, not designed away)
 
@@ -501,9 +508,14 @@ target or two translation units disagree about a struct they pass to each
 other. The library narrates itself to `std::cout`, swallowed at the call site
 so the vendored copy stays byte-identical.
 
-**C9.** Also as designed, and the cheapest of the four in the end, because
-the frame transform is the only new idea: everything downstream already
-worked in setup space. The safe-Z rule for the index is enforced in the post.
+**C9.** Also as designed, and the cheapest of the four to *build* — the
+frame transform is the only new idea. But it was the most expensive to get
+right, because "toolpaths are in setup space" had been true and unexercised
+since C1: at `rotationA = 0` setup space and model space are identical, so
+nothing had ever depended on the distinction. Indexed, the verifier, the
+backplot, the ghost, the depth label, the stock box and the derived depths
+were each in the wrong frame. Fixed by moving the framing INSIDE the engine
+entry points that take a `Setup`, so a caller cannot forget. The safe-Z rule for the index is enforced in the post.
 
 **A trap that cost two test runs, and would cost a user more.** A GUI test
 that fails partway never reaches its own cleanup. When C7 changed the

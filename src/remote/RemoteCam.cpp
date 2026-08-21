@@ -23,15 +23,18 @@ constexpr MethodDoc kCamMethods[] = {
      "its id. A setup arrives with one 6 mm tool, because a setup with no "
      "tools can produce nothing."},
     {"list_cam_setups",
-     "Every setup: id, name, post, safe_z, tools, operations, and the stock "
-     "box derived from the model."},
+     "Every setup: id, name, post, safe_z, rotation_a, fit_arcs, tools, "
+     "operations, and the stock box derived from the model — in SETUP space, "
+     "so an indexed setup reports the box the machine sees."},
     {"set_cam_setup",
-     "Change a setup {id, name?, post?, safe_z?, rotation_a?} or one of its "
+     "Change a setup {id, name?, post?, safe_z?, rotation_a?, fit_arcs?} or "
+     "one of its "
      "tools {id, tool: {number, name?, diameter?, feed_cut?, feed_plunge?, "
      "spindle_rpm?, flutes?}} — the tool is added when the number is new."},
     {"remove_cam_setup", "Delete a setup {id} and its operations."},
     {"add_cam_op",
-     "Add an operation {setup, type: profile|pocket|face|drill, tool?, "
+     "Add an operation {setup, type: profile|pocket|face|drill|adaptive, "
+     "tool?, "
      "top_z, bottom_z, stepdown?, side?: outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
      "[{feature_id, element}]}; returns its id."},
@@ -66,30 +69,34 @@ const char* SideName(cam::Side s) {
                                 : "outside";
 }
 
+// One table, both directions. The previous pair had a `default:` on the way
+// out, so OpType::Adaptive was REPORTED as "profile" — a wrong readout,
+// which is worse than the error the way in gave.
+struct TypeRow {
+  cam::OpType type;
+  const char* name;
+};
+constexpr TypeRow kTypes[] = {
+    {cam::OpType::Profile, "profile"},   {cam::OpType::Pocket, "pocket"},
+    {cam::OpType::Face, "face"},         {cam::OpType::Drill, "drill"},
+    {cam::OpType::Adaptive, "adaptive"},
+};
+
 const char* TypeName(cam::OpType t) {
-  switch (t) {
-  case cam::OpType::Pocket:
-    return "pocket";
-  case cam::OpType::Face:
-    return "face";
-  case cam::OpType::Drill:
-    return "drill";
-  default:
-    return "profile";
-  }
+  for (const TypeRow& row : kTypes)
+    if (row.type == t)
+      return row.name;
+  return "profile";
 }
 
 cam::OpType TypeFrom(const std::string& s) {
-  if (s == "pocket")
-    return cam::OpType::Pocket;
-  if (s == "face")
-    return cam::OpType::Face;
-  if (s == "drill")
-    return cam::OpType::Drill;
-  if (s == "profile")
-    return cam::OpType::Profile;
-  throw std::runtime_error("unknown operation type '" + s +
-                           "'; use profile, pocket, face or drill");
+  for (const TypeRow& row : kTypes)
+    if (s == row.name)
+      return row.type;
+  std::string known;
+  for (const TypeRow& row : kTypes)
+    known += (known.empty() ? "" : ", ") + std::string(row.name);
+  throw std::runtime_error("unknown operation type '" + s + "'; use " + known);
 }
 
 cam::Setup& RequireSetup(Document& doc, uint64_t id) {
@@ -98,6 +105,15 @@ cam::Setup& RequireSetup(Document& doc, uint64_t id) {
     throw std::runtime_error("no CAM setup with id " + std::to_string(id) +
                              "; list_cam_setups shows the ones that exist");
   return *setup;
+}
+
+// The setup's own post options, so a file written through the RPC is the
+// file the panel would write — arc fitting is a property of the machine
+// (C7), not of who asked for the G-code.
+cam::PostOptions PostOptsOf(const cam::Setup& setup) {
+  cam::PostOptions opts;
+  opts.fitArcs = setup.fitArcs;
+  return opts;
 }
 
 // The setup that owns an operation, plus the operation itself.
@@ -225,7 +241,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  {"name", setup.name},
                  {"post", setup.post},
                  {"safe_z", setup.safeZ},
-                 {"rotation_a", setup.rotationA}};
+                 {"rotation_a", setup.rotationA},
+                 {"fit_arcs", setup.fitArcs}};
       sj["tools"] = json::array();
       for (const cam::Tool& t : setup.tools)
         sj["tools"].push_back(ToolJson(t));
@@ -255,6 +272,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       setup.safeZ = p.at("safe_z").get<double>();
     if (p.contains("rotation_a"))
       setup.rotationA = p.at("rotation_a").get<double>();
+    if (p.contains("fit_arcs"))
+      setup.fitArcs = p.at("fit_arcs").get<bool>();
     if (p.contains("tool")) {
       const json& tj = p.at("tool");
       const int number = tj.value("number", 1);
@@ -327,7 +346,8 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const std::vector<cam::Toolpath> paths =
         cam::GenerateAll(setup, doc->GetBodies());
     std::string gcode, error;
-    if (!cam::PostProcess(setup.post, setup, paths, {}, gcode, &error))
+    if (!cam::PostProcess(setup.post, setup, paths, PostOptsOf(setup), gcode,
+                          &error))
       throw std::runtime_error(error);
     const double res = p.value("resolution", 0.25);
     const cam::Verdict v =
@@ -375,7 +395,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
     const std::string post = p.value("post", setup.post);
     std::string gcode, error;
-    if (!cam::PostProcess(post, setup, paths, {}, gcode, &error))
+    if (!cam::PostProcess(post, setup, paths, PostOptsOf(setup), gcode, &error))
       throw std::runtime_error(error);
     const std::string path = p.at("path").get<std::string>();
     if (!DocumentIO::WriteTextAtomic(path, gcode, &error))

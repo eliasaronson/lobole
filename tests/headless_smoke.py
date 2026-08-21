@@ -1173,6 +1173,43 @@ def main():
         expect(len(d.call("history_log")["log"]) >= 4,
                "the restore is itself a version")
 
+        phase("CAM over the RPC")
+        # Every operation type must survive the round trip through the RPC.
+        # OpType::Adaptive was REPORTED as "profile" for a while — the way in
+        # rejected an unknown name loudly, but the way out had a `default:`,
+        # so a script that wrote an adaptive op read back a profile and had no
+        # way to know.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Plate", "position": [0, 0, 0],
+            "width": 40, "height": 30, "depth": 20})
+        cam_setup = d.call("add_cam_setup", name="Job")["id"]
+        for kind in ("profile", "pocket", "face", "drill", "adaptive"):
+            op = d.call("add_cam_op", setup=cam_setup, type=kind,
+                        top_z=20.0, bottom_z=10.0)["id"]
+            back = [o for s_ in d.call("list_cam_setups")["setups"]
+                    for o in s_["operations"] if o["id"] == op]
+            expect(len(back) == 1, f"{kind} op came back")
+            expect(back[0]["type"] == kind,
+                   f"{kind} op read back as {back[0]['type']}")
+            d.call("remove_cam_op", id=op)
+        # Arc fitting is a property of the machine, so it persists and the
+        # posted file honours it (C7).
+        d.call("add_cam_op", setup=cam_setup, type="profile",
+               top_z=21.0, bottom_z=0.0, stepdown=8.0)
+        d.call("set_cam_setup", id=cam_setup, fit_arcs=False)
+        expect(d.call("list_cam_setups")["setups"][0]["fit_arcs"] is False,
+               "fit_arcs round-trips")
+        nc = os.path.join(tmp, "arcs.nc")
+        d.call("cam_post", setup=cam_setup, path=nc)
+        plain = open(nc).read()
+        expect("G2 " not in plain, "arcs off means no arcs in the file")
+        d.call("set_cam_setup", id=cam_setup, fit_arcs=True)
+        d.call("cam_post", setup=cam_setup, path=nc)
+        curved = open(nc).read()
+        expect("G2 " in curved, "arcs on means arcs in the file")
+        expect(len(curved) < len(plain), "and a smaller file")
+
         phase("Autosave + crash recovery")
         # Autosave + crash recovery (F2): save clean, dirty the doc, let the
         # 1s autosave fire, SIGKILL (a real crash — no signal handler), then

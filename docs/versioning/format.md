@@ -105,6 +105,10 @@ sidecar `.expect.json`, then round-trip through the current writer.
 | … | | (v39–v51: split, curves/sweep/pipe, images, refine, XCAF import, patterns/mirror — see golden corpus) |
 | 52 | | Extrude `end_mode: "through_all"` (cut only; sweeps past every body along ±normal per `reversed`, `distance` ignored) |
 | 53 | | Drawing dim kinds `hole_callout` (text derived from the drilling HoleFeature) and `pattern_callout` (N× + uniform pitch over picked circles) |
+| … | | (v54–v57: sub-assemblies, reference images — see golden corpus) |
+| 58 | (CAM C1) | `cam` setups: stock, work origin, `rotation_a`, tools, operations (inline in both formats — a setup is parameters, not a mesh) |
+| 59 | (CAM C8) | Operation `type: "adaptive"` (constant-engagement clearing) |
+| 60 | (CAM C7) | Setup `fit_arcs` (default true; false posts curves as line moves, for a controller that mishandles G2/G3) |
 
 ## The directory format (F3, default for new saves)
 
