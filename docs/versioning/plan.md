@@ -8,9 +8,9 @@
 > shipped 2026-08-21** — branch/merge plus a Conflicts panel; scoping it found
 > that the app had no verb that could *produce* a conflict, so the UI F5 and
 > F6 both deferred needed a merge engine under it first. Its scoping also
-> surfaced [F8](f8-external-changes.md) (planned, not built): nothing notices
-> the project changing on disk, so a `git` command in the app's own terminal
-> is overwritten by the next Ctrl+S. Later work: **insert-feature-at-marker**
+> surfaced [F8](f8-external-changes.md), **also shipped 2026-08-21**: nothing
+> noticed the project changing on disk, so a `git` command in the app's own
+> terminal was overwritten by the next Ctrl+S. Later work: **insert-feature-at-marker**
 > (F4 v2). Nothing here blocks other
 > workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
 > history — the number has moved well past this doc's original snapshot as
@@ -117,7 +117,7 @@ Two decisions the build settled:
 - **The panel exists only when there is something to resolve.** No format
   change; `kVersion` does not move (git objects are not the document format).
 
-### F8 — When the project changes underneath you — **planned, not built** — [design: f8-external-changes.md](f8-external-changes.md)
+### F8 — When the project changes underneath you — **shipped 2026-08-21** — [design: f8-external-changes.md](f8-external-changes.md)
 Nothing compares the project in memory with the project on disk:
 `ProjectDirty` weighs document versions, and the only filesystem comparison
 anywhere is the autosave sidecar's mtime. So an external write — the terminal
@@ -129,8 +129,9 @@ A `{fileCount, maxMtime, totalSize}` stamp of the project directory
 settled is derived), recorded beside `StampAllSaved` and checked at the one
 place every save funnels through (`ui::SaveProject`). A save on a moved
 project refuses and offers Reload or Overwrite instead of overwriting
-silently. **D1 the guard (~half a day), D2 the banner (~2 h), D3 the stable-id
-invariant F7's `ReplaceFeature` bug argues for (~1 h).**
+silently. **D1 the guard, D2 the banner (focus regain plus a slow timer,
+gated on git HEAD when there is one), D3 the stable-id invariant F7's
+`ReplaceFeature` bug argued for — no id-0 item can reach disk.**
 
 ## Recommended order
 

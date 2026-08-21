@@ -1,8 +1,10 @@
 # F8 — When the project changes underneath you — design
 
-> **Status: not built.** Planned 2026-08-21, out of [F7](f7-merge-and-conflicts.md)'s
-> scoping, which found this gap while looking for something else. Half a day
-> for the part that prevents data loss; the rest is polish.
+> **SHIPPED 2026-08-21** — D1, D2 and D3. Planned out of
+> [F7](f7-merge-and-conflicts.md)'s scoping, which found this gap while
+> looking for something else. The sections below are the design as written,
+> with "What shipped" at the end recording where building it changed the
+> plan.
 
 ## Why this exists
 
@@ -160,18 +162,73 @@ enforceable":
 
 D1 + D3 ship together. D2 can follow.
 
-## Open decisions (for Elias)
+## Decisions (settled 2026-08-21)
 
-1. **Is "Save anyway" offered at all?** Reload-only is safer and simpler, and
-   for a git project nothing is truly lost either way. But refusing to let
-   someone overwrite their own project is the kind of paternalism that makes
-   people work around the app.
-2. **Does the stamp cover `geometry/`?** Excluded above, for consistency with
-   F7's Derived class. The counter-argument is that a stamp of "the project
-   directory" which skips part of the project directory is a rule to remember.
-3. **Poll on focus only, or a slow timer too?** Focus-only misses a change
-   made by a headless agent while the window stays focused — which is a real
-   workflow here, not a hypothetical.
+1. **"Save anyway" IS offered**, worded per project type — a `.dsgn` under git
+   says the version on disk is already in History, a single-file project makes
+   no such promise. Refusing to let someone overwrite their own project is the
+   kind of paternalism people work around.
+2. **The stamp excludes `geometry/`**, for consistency with F7's Derived
+   class. The rule to remember is short: the stamp covers the recipe.
+3. **Focus regain AND a slow timer.** Focus-only would miss a headless agent
+   writing while the window stays focused, which is a real workflow here.
+
+## What shipped, and what building it changed
+
+D1, D2 and D3, 2026-08-21. `core/io/ProjectStamp` is the stamp;
+`ui::StampDiskState`/`ProjectChangedOnDisk` and a guard in `ui::SaveProject`
+are D1; `GLFW_FOCUSED` + `PollDiskState` + the History banner are D2; the
+`modify_feature` doc string and `IdForFile` are D3. Seven `[stamp]` cases,
+two `disk/*` GUI tests, and a phase in `headless_smoke.py`.
+
+**The stamp belongs in `OpenProject`, not in each caller.** The plan put it
+beside `StampAllSaved` in `MarkProjectOpened` and `MarkProjectSaved`. But
+`OpenProject` is the *loader* and `MarkProjectOpened` is separate bookkeeping
+the callers do — and the reload paths (restore, branch switch, finishing a
+merge, and this feature's own Reload button) call `OpenProject` alone. The
+banner reappeared one frame after Reload until the stamp moved into
+`OpenProject` itself, where the invariant is simply true: we just read the
+disk, so we agree with it.
+
+**And `OpenProject` has two success paths.** A single-part `.dsgn` returns
+from an early branch that never reaches the container-format code below it.
+Stamping only the second one left flat projects — which is what most test
+fixtures and most small projects are — never clearing the banner at all.
+
+**The poll cannot live inside the panel that shows it.** It was first called
+from `DrawHistoryPanel`, which returns early when its tab is behind another —
+so it only ran while you were *looking at* the History tab, and would have
+missed every change made while you were looking at your model, which is all
+of them. It runs once a frame from the top of the UI now.
+
+**And the banner alone is not enough, for the same reason.** A person working
+on a model does not have the History tab in front, so there is a
+`Changed on disk` notice in the main menu bar, which is always visible. It is
+deliberately *text*, not a button: both actions this state offers throw
+something away, and the menu bar is the one place you can hit by accident.
+Reload and Save-anyway live where they can be read first — the History
+banner, and the modal the next save raises.
+
+**The banner had to move above the History panel's git gates.** It was first
+placed after them, next to the save status. That reads well, but the panel
+returns early for a project with no git and for one that is not a `.dsgn`
+folder — so exactly the projects with *no* version history to fall back on
+were the ones that got no warning. "Something else wrote to your project" is
+true whether or not the project has a history.
+
+**A GUI test that leaves a dock tab selected changes the next test.** The
+History, Conflicts and Model panels share one dock node, and F6's
+`name_and_restore_a_version` opened by *asserting* that Model was in front —
+a precondition it had inherited from whatever ran before it, and which held
+only because nothing had ever left another tab selected. The `disk/*` cases
+do exactly that. Both halves are fixed: that test now *selects* Model rather
+than assuming it, and the new tests put Model back when they are done.
+
+**`force` on the RPC, and a query beside it.** `save_project` grows
+`{force:true}` because an agent that just did the changing may legitimately
+want to save over it, and `project_changed_on_disk` lets a script ask before
+it tries. Without those, the guard would simply be an obstacle to the
+scripting surface rather than a safeguard for it.
 
 ## Verification
 
@@ -181,8 +238,15 @@ D1 + D3 ship together. D2 can follow.
 - Headless: open a project, `git checkout` another branch behind the app's
   back, call `save_project` → refused, with a reason that names the cause;
   then reload and the external state is what is in memory.
-- GUI: the dialog appears on Ctrl+S after an external change; Reload picks the
-  change up; Save anyway overwrites.
+- GUI: the dialog appears on Ctrl+S after an external change; Cancel leaves
+  the project still moved (dismissing a save does not un-move it); Reload
+  picks the change up; Save anyway overwrites and re-stamps, so the same
+  change is not reported twice.
+- **Not covered by an assertion:** the menu-bar notice itself. A disabled
+  `MenuItem` in the main menu bar does not resolve through the test engine's
+  item paths (three forms tried), so the test asserts the flag that drives it
+  while another tab owns the dock node, and the notice was verified by
+  screenshot instead. It is fifteen lines of ImGui reading one bool.
 - The one that matters, as a regression test: **the terminal-panel scenario
   end to end** — move the working tree the way a shell command would, press
   Ctrl+S, and assert the external state survives and the user was told.
