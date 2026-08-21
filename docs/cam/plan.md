@@ -243,7 +243,9 @@ Two things this surfaced, both worth knowing:
   whose `topZ` was the part top rather than the stock top — with 1 mm of
   margin above the part, the entry rapid drops into it. A true finding about
   the job, and an argument for the panel's default to derive `topZ` from the
-  stock rather than the model.
+  stock rather than the model. **Done** with the GUI round: both entry points
+  (the verbs and the panel's `Add operation`) now call one
+  `cam::DeriveOperation`, so there is a single place a depth comes from.
 - The reported cut length is ~0.4% above twice the perimeter, because the
   ramp ends mid-segment and the lap restarts there. The test tolerance says
   so rather than hiding it.

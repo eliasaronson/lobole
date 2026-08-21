@@ -1094,7 +1094,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(live->operations.size(), (size_t)1);
     const cam::Operation& op = live->operations[0];
     IM_CHECK(op.topZ > op.bottomZ);
-    IM_CHECK(op.topZ <= 12.0 + 1e-6); // inside the stock, not at z=0
+    // The STOCK top (plate 12 + 1 mm of margin), not the model top: material
+    // sits above the part, and a cut that starts below it leaves a skin.
+    IM_CHECK(std::abs(op.topZ - 13.0) < 1e-6);
     IM_CHECK(op.stepdown > 0.0);
 
     // A second tool AND a second operation: tool numbers and operation ids

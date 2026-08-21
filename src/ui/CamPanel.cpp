@@ -418,21 +418,28 @@ void DrawCamPanel(AppState& state) {
   }
 
   if (ImGui::SmallButton("Add operation###cam_add_op")) {
-    cam::Operation op;
-    op.id = state.document->AllocateId();
-    op.toolNumber = setup->tools.empty() ? 1 : setup->tools.front().number;
-    op.name = "Operation " + std::to_string(setup->operations.size() + 1);
-    // Depths derived from the model, not zeros: a default that cuts nothing
-    // (or everything) is the u10 rule this app already holds itself to.
-    glm::dvec3 lo(0.0), hi(0.0);
-    if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi)) {
-      op.topZ = hi.z - setup->stock.margin.z;
-      op.bottomZ = lo.z + setup->stock.bottomMargin;
-      op.stepdown = std::max(0.5, (op.topZ - op.bottomZ) / 4.0);
+    // ONE derivation, two entry points: the same engine call the verbs use
+    // (docs/cam/gui.md). This path used to start the cut at the MODEL top,
+    // which leaves the stock above it uncut and was the last residue of the
+    // `2 -> -0` default — and it derived a stepdown from the depth rather
+    // than from the cutter. A refusal is shown rather than an operation that
+    // cannot cut (the u10 rule).
+    const cam::DerivedOp derived = cam::DeriveOperation(
+        *setup, state.document->GetBodies(), cam::OpType::Profile, {});
+    if (derived.ok) {
+      cam::Operation op = derived.op;
+      op.id = state.document->AllocateId();
+      op.name = "Operation " + std::to_string(setup->operations.size() + 1);
+      setup->operations.push_back(op);
+      state.camRefusal.clear();
+      dirty = true;
+    } else {
+      state.camRefusal = derived.why;
     }
-    setup->operations.push_back(op);
-    dirty = true;
   }
+  if (!state.camRefusal.empty())
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s",
+                       state.camRefusal.c_str());
 
   // --- generate / post ---------------------------------------------------
   ImGui::Separator();
