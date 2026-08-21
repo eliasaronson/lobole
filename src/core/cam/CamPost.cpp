@@ -45,6 +45,17 @@ struct Emitter {
     return std::isnan(before) || std::abs(now - before) > 1e-9;
   }
 
+  // A Z-only rapid. Retracts happen BEFORE anything has moved (the first
+  // tool change) and after the last move, and passing the modal X/Y through
+  // Motion() emitted "G0 Xnan Ynan Z20" — a line that is at best rejected and
+  // at worst interpreted. Retract touches Z and nothing else.
+  void Retract(double zTo) {
+    if (!Differs(zTo, z))
+      return;
+    out << "G0 Z" << Num(zTo, decimals) << "\n";
+    z = zTo;
+  }
+
   void Motion(const char* code, const glm::dvec3& to, double f, bool withA,
               double aVal) {
     std::ostringstream l;
@@ -153,7 +164,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       const Tool* tool = setup.FindTool(tp.toolNumber);
       // Retract before any tool change, always: the one move that is never
       // wrong and whose absence breaks things.
-      e.Motion("G0", {e.x, e.y, setup.safeZ}, 0.0, false, 0.0);
+      e.Retract(setup.safeZ);
       std::ostringstream t;
       t << "T" << tp.toolNumber << " M6";
       e.Raw(t.str());
@@ -183,7 +194,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
   }
 
   // Retract, spindle off, done. In that order.
-  e.Motion("G0", {e.x, e.y, setup.safeZ}, 0.0, false, 0.0);
+  e.Retract(setup.safeZ);
   e.Raw("M5");
   e.Raw(dialect->end);
   out = e.out.str();

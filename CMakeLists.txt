@@ -251,6 +251,7 @@ set(core_sources
     src/core/io/Serialization.cpp
     src/core/io/SerializeFeatures.cpp
     src/core/io/SerializeStudies.cpp
+    src/core/io/SerializeCam.cpp
     src/core/io/SerializeConfigurations.cpp
     src/core/io/SerializeAssembly.cpp
     src/core/features/SketchFeature.cpp
@@ -498,6 +499,7 @@ set(app_sources
     src/remote/RemoteServer.cpp
     src/remote/RemoteConfigurations.cpp
     src/remote/RemoteSimulation.cpp
+    src/remote/RemoteCam.cpp
     src/remote/RemoteInspection.cpp
     src/remote/RemoteModeling.cpp
     src/remote/RemoteDrawings.cpp

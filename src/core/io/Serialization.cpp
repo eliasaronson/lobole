@@ -363,6 +363,15 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           fs::remove(entry.path(), ec);
       }
     }
+    // CAM setups (v58): inline in index.json, not a file each. They are
+    // parameters (a few hundred bytes), and index.json is as diffable as any
+    // other file in the directory — studies earned their own files by
+    // carrying meshes, and a setup carries none.
+    if (!doc.GetCamSetups().empty()) {
+      index["cam"] = json::array();
+      for (const cam::Setup& setup : doc.GetCamSetups())
+        index["cam"].push_back(CamSetupToJson(setup));
+    }
     // Configurations (v31): file-per-config under configurations/, id list in
     // the index (the active id is in the envelope). Absent when none, so a
     // pre-v31 document re-saves byte-identically.
@@ -608,6 +617,10 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
               id, StudyResultFromJson(ParseProjectFile(rit->second)));
         }
       }
+    }
+    for (const auto& cj : index.value("cam", json::array())) { // v58
+      doc->GetCamSetups().push_back(CamSetupFromJson(cj));
+      doc->EnsureNextIdAtLeast(doc->GetCamSetups().back().id + 1);
     }
     // Configurations (v31): id-prefix files under configurations/, index order.
     {
@@ -931,6 +944,13 @@ static bool SaveImpl(const Document& doc, const std::string& path,
       for (const fem::Study& s : doc.GetStudies())
         j["studies"].push_back(StudyToJson(s));
     }
+    // CAM setups (v58), inline in both formats: a setup is parameters, not a
+    // mesh, so it does not earn a file of its own the way a study does.
+    if (!doc.GetCamSetups().empty()) {
+      j["cam"] = json::array();
+      for (const cam::Setup& setup : doc.GetCamSetups())
+        j["cam"].push_back(CamSetupToJson(setup));
+    }
     // Configurations (v31), inline (the active id is in the envelope above).
     if (!doc.GetConfigurations().empty()) {
       j["configurations"] = json::array();
@@ -1021,6 +1041,10 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
         doc->SetAsset(name, Base64Decode(b64.get<std::string>()));
     for (const auto& sj : j.value("studies", json::array())) { // v29
       doc->RestoreStudy(StudyFromJson(sj));
+    }
+    for (const auto& cj : j.value("cam", json::array())) { // v58
+      doc->GetCamSetups().push_back(CamSetupFromJson(cj));
+      doc->EnsureNextIdAtLeast(doc->GetCamSetups().back().id + 1);
     }
     for (const auto& cj : j.value("configurations", json::array())) { // v31
       doc->RestoreConfiguration(ConfigurationFromJson(cj));

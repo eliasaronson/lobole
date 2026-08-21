@@ -21,6 +21,7 @@
 #include "core/io/Settings.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteAssembly.h"
+#include "remote/RemoteCam.h"
 #include "remote/RemoteConfigurations.h"
 #include "remote/RemoteDrawings.h"
 #include "remote/RemoteHelpers.h"
@@ -836,6 +837,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     addDocs(remote::ProjectMethodDocs());
     addDocs(remote::AssemblyMethodDocs());
     addDocs(remote::InspectionMethodDocs());
+    addDocs(remote::CamMethodDocs());
     addDocs(remote::DrawingMethodDocs());
     addDocs(remote::ConfigurationMethodDocs());
     addDocs(remote::SimulationMethodDocs());
@@ -1044,6 +1046,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   }
   // Inspection takes a nullable doc: interference works on assembly
   // occurrence pairs, list_elements/measure on any part via `part`.
+  if (auto r = remote::HandleCamRpc(state, doc, m, p))
+    return *r;
   if (auto r = remote::HandleInspectionRpc(state, doc, m, p))
     return *r;
   if (m == "undo") {

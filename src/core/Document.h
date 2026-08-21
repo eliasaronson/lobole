@@ -3,6 +3,7 @@
 #include "core/Configuration.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/cam/CamJob.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
 
@@ -159,6 +160,17 @@ public:
   // are derived data held elsewhere (never serialized); only this
   // configuration persists. Edits do NOT auto-regenerate (a study is inert
   // until explicitly meshed/solved).
+
+  // CAM setups (v58, docs/cam/plan.md). Document-level objects like studies:
+  // they describe how to cut the model, and change nothing about it — so they
+  // are deliberately OUTSIDE the regen chain hash (a new setup must not
+  // rebuild the geometry).
+  const std::vector<cam::Setup>& GetCamSetups() const { return m_camSetups; }
+  std::vector<cam::Setup>& GetCamSetups() { return m_camSetups; }
+  const cam::Setup* FindCamSetup(uint64_t id) const;
+  cam::Setup* FindCamSetup(uint64_t id);
+  cam::Setup& AddCamSetup(const std::string& name = "");
+  bool RemoveCamSetup(uint64_t id);
 
   const std::vector<fem::Study>& GetStudies() const { return m_studies; }
   std::vector<fem::Study>& GetStudies() { return m_studies; }
@@ -391,6 +403,7 @@ private:
   std::vector<Body> m_bodies;
   std::vector<Parameter> m_parameters;
   std::vector<fem::Study> m_studies;
+  std::vector<cam::Setup> m_camSetups;
   // Transient per-study mesh+results (never serialized); keyed by study id.
   std::map<uint64_t, fem::StudyRuntime> m_studyRuntime;
   uint64_t m_studyResultsEpoch = 0;

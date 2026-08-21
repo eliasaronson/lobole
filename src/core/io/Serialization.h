@@ -88,6 +88,10 @@ ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
 // files and to echo/snapshot studies from the RPCs and Commands. Throws on
 // malformed input.
 nlohmann::json StudyToJson(const fem::Study& study);
+
+// CAM setups (v58) — SerializeCam.cpp. Inline in both save formats.
+nlohmann::json CamSetupToJson(const cam::Setup& setup);
+cam::Setup CamSetupFromJson(const nlohmann::json& j);
 fem::Study StudyFromJson(const nlohmann::json& j);
 
 // Topology-study RESULT (de)serialization (v33). Unlike FEM results (derived,

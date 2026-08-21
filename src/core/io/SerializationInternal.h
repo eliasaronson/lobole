@@ -16,8 +16,8 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 57; // v57: mate connector inner_path
-                                    // (v52: extrude through_all)
+inline constexpr int kVersion = 58; // v58: CAM setups
+                                    // (v57: mate connector inner_path)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

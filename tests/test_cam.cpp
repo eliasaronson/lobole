@@ -4,11 +4,13 @@
 #include "core/Feature.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
+#include "core/io/Serialization.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <numbers>
 
 // CAM's testable half (docs/cam/plan.md): bodies in, moves out, then G-code.
@@ -235,6 +237,53 @@ TEST_CASE("cam: refusals are specific, not silent", "[cam]") {
   CHECK(tp.error.find("target holes") != std::string::npos);
 }
 
+TEST_CASE("cam: a setup survives a save and reload", "[cam]") {
+  // Setups are document objects (v58). They describe how to cut the model and
+  // change nothing about it, so they must NOT touch the regen chain hash — a
+  // new operation rebuilding the geometry would be a bug with a long tail.
+  auto doc = BlockDoc();
+  const size_t hashBefore = doc->TipChainHash();
+
+  cam::Setup& setup = doc->AddCamSetup("Side A");
+  setup.post = "linuxcnc";
+  setup.safeZ = 12.5;
+  setup.tools[0].diameter = 3.175;
+  setup.tools[0].feedCut = 450.0;
+  cam::Operation op;
+  op.id = doc->AllocateId();
+  op.name = "Outline";
+  op.type = cam::OpType::Profile;
+  op.topZ = 20.0;
+  op.bottomZ = 0.0;
+  op.stepdown = 4.0;
+  op.tabCount = 3;
+  op.targets.push_back(ElementRef{1, "F:box.side"});
+  setup.operations.push_back(op);
+
+  CHECK(doc->TipChainHash() == hashBefore); // geometry untouched
+
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_roundtrip.json";
+  REQUIRE(DocumentIO::Save(*doc, path.string()).has_value());
+  auto back = DocumentIO::Load(path.string());
+  REQUIRE(back.has_value());
+  const std::vector<cam::Setup>& setups = (*back)->GetCamSetups();
+  REQUIRE(setups.size() == 1);
+  CHECK(setups[0].name == "Side A");
+  CHECK(setups[0].post == "linuxcnc");
+  CHECK_THAT(setups[0].safeZ, WithinAbs(12.5, 1e-9));
+  REQUIRE(setups[0].tools.size() == 1);
+  CHECK_THAT(setups[0].tools[0].diameter, WithinAbs(3.175, 1e-9));
+  REQUIRE(setups[0].operations.size() == 1);
+  const cam::Operation& backOp = setups[0].operations[0];
+  CHECK(backOp.type == cam::OpType::Profile);
+  CHECK(backOp.tabCount == 3);
+  CHECK_THAT(backOp.stepdown, WithinAbs(4.0, 1e-9));
+  REQUIRE(backOp.targets.size() == 1);
+  CHECK(backOp.targets[0].name == "F:box.side");
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("cam: the post emits a program that starts and ends safely",
           "[cam]") {
   auto doc = BlockDoc();
@@ -265,6 +314,13 @@ TEST_CASE("cam: the post emits a program that starts and ends safely",
   // Feed appears on cutting moves, and modally — not on every line.
   CHECK(gcode.find("F600") != std::string::npos);
   CHECK(gcode.find("F200") != std::string::npos);
+
+  // No coordinate is ever "nan". The first retract happens before anything
+  // has moved, and passing the modal X/Y through emitted "G0 Xnan Ynan Z25"
+  // — a line a controller may reject, or worse, interpret. Caught by reading
+  // a posted file, so it is a test now.
+  CHECK(gcode.find("nan") == std::string::npos);
+  CHECK(gcode.find("inf") == std::string::npos);
 
   // LinuxCNC differs where it should and nowhere else. (`linux` is a
   // predefined GCC macro, hence the name.)
