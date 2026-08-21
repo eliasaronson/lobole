@@ -4,11 +4,14 @@
 > F3 diffable directory format, F4 checkpoints + rollback bar are shipped; F5
 > shipped git as an *engine* only, and the 2026-07-14 banner here read that as
 > "v1 complete" for four weeks while the app had no way to show a history.
-> [F6](f6-history-ui.md) builds that half. Later work: **merge and conflict
-> handling** — scoped 2026-08-21 as [F7](f7-merge-and-conflicts.md), which
-> found that the app has no verb that can *produce* a conflict, so the UI F5
-> and F6 both deferred needs a merge engine under it first — and
-> **insert-feature-at-marker** (F4 v2). Nothing here blocks other
+> [F6](f6-history-ui.md) builds that half. **[F7](f7-merge-and-conflicts.md)
+> shipped 2026-08-21** — branch/merge plus a Conflicts panel; scoping it found
+> that the app had no verb that could *produce* a conflict, so the UI F5 and
+> F6 both deferred needed a merge engine under it first. Its scoping also
+> surfaced [F8](f8-external-changes.md) (planned, not built): nothing notices
+> the project changing on disk, so a `git` command in the app's own terminal
+> is overwritten by the next Ctrl+S. Later work: **insert-feature-at-marker**
+> (F4 v2). Nothing here blocks other
 > workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
 > history — the number has moved well past this doc's original snapshot as
 > later workstreams added features/assemblies/units).
@@ -114,6 +117,21 @@ Two decisions the build settled:
 - **The panel exists only when there is something to resolve.** No format
   change; `kVersion` does not move (git objects are not the document format).
 
+### F8 — When the project changes underneath you — **planned, not built** — [design: f8-external-changes.md](f8-external-changes.md)
+Nothing compares the project in memory with the project on disk:
+`ProjectDirty` weighs document versions, and the only filesystem comparison
+anywhere is the autosave sidecar's mtime. So an external write — the terminal
+panel that ships inside the app, another editor, a second instance — is
+silently overwritten by the next save.
+
+A `{fileCount, maxMtime, totalSize}` stamp of the project directory
+(excluding `.git/`, which churns on its own, and `geometry/`, which F7 already
+settled is derived), recorded beside `StampAllSaved` and checked at the one
+place every save funnels through (`ui::SaveProject`). A save on a moved
+project refuses and offers Reload or Overwrite instead of overwriting
+silently. **D1 the guard (~half a day), D2 the banner (~2 h), D3 the stable-id
+invariant F7's `ReplaceFeature` bug argues for (~1 h).**
+
 ## Recommended order
 
 F1 + F2 **soon** (each ~a day, pure insurance). F3 after the schema settles —
@@ -132,7 +150,6 @@ useful and could be pulled forward with the modeling work.
   looks finished while resolving only same-field feature edits, and silently
   drops work on an `index.json` pick or a duplicate id. Its acceptance bar is
   "the resolved project loads and regenerates", never "git exited 0".
-- Two gaps F7's scoping found that are live *now*, independent of it: nothing
-  detects the project directory changing on disk (so a `git` command run in
-  the app's own terminal panel is clobbered by the next Ctrl+S), and the
-  versioning docs are written as if a project were a single part.
+- The remaining gap F7's scoping found is now [F8](f8-external-changes.md).
+  The other one still stands: the versioning docs are written as if a project
+  were a single part, and a conflict spans every document in it.

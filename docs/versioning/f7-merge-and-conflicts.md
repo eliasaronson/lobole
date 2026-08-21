@@ -155,6 +155,9 @@ These are real today and independent of whether F7 is ever built.
   app, a `git merge` or `git checkout` there happens while the in-memory
   document is authoritative, and the next Ctrl+S clobbers it. This is a live
   trap, not a hypothetical one, and it arrived with the terminal panel.
+  **Planned as [F8](f8-external-changes.md)** — and note what F7 does NOT
+  make worse: switch, merge and restore each reopen the project afterwards,
+  which is the discipline to keep.
 - **The versioning docs are written as if a project is one part.** A conflict
   spans 48 parts plus the assembly plus the drawings. Which tab opens? What
   does a conflict in the assembly *and* a part look like in one list? F6 hit
@@ -255,7 +258,9 @@ new section added since.
 - **Cross-document references** in the duplicate-id scan (an assembly mate
   into a part). Id spaces are per-document, so scanning the whole project
   would report collisions that are not references. `Verify` is the backstop.
-- The **disk-change gap** below is still open and still live.
+- The **disk-change gap** below is still open and still live — planned as
+  [F8](f8-external-changes.md), together with the stable-id invariant that
+  the `ReplaceFeature` bug argues for.
 
 ## Verification sketch
 
