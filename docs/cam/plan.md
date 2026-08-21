@@ -254,6 +254,12 @@ proves the file stopped changing. `DESIGNER_REFRESH_CAM_GOLDEN=1` regenerates
 them, and the diff is meant to be read before it is committed — every line of
 those files eventually moves a machine.
 
+## Making it usable
+
+The engine is done; reaching it is a parameter editor today. The redesign —
+verbs on a Tool-window session, a picked top face, derived depths and a
+visualisation ladder — is [gui.md](gui.md), awaiting sign-off.
+
 ## Turning it off
 
 `-DENABLE_CAM=OFF` and the workstream does not exist in the build: no sources,
