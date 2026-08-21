@@ -284,6 +284,19 @@ void DrawCamPanel(AppState& state) {
       dirty = true;
     }
     ImGui::SetItemTooltip("How far a through-cut goes into the spoilboard");
+    if (ImGui::Checkbox("Arcs (G2/G3)###cam_arcs", &setup->fitArcs))
+      dirty = true;
+    ImGui::SetItemTooltip("Post curves as arcs instead of many short lines. "
+                          "Turn off for a controller that mishandles them.");
+    float indexA = static_cast<float>(setup->rotationA);
+    ImGui::SetNextItemWidth(90.0f);
+    if (ImGui::DragFloat("A index###cam_index_a", &indexA, 0.5f, -360.0f,
+                         360.0f, "%.2f°")) {
+      setup->rotationA = indexA;
+      dirty = true;
+    }
+    ImGui::SetItemTooltip("Rotary 4th axis: how far the table is turned for "
+                          "this setup. 0 for a 3-axis job.");
   }
   // The struct holds a double; the widget edits a float mirror so ImGui's
   // drag behaves. Kept in sync here rather than in two places.
@@ -389,6 +402,19 @@ void DrawCamPanel(AppState& state) {
         dirty = true;
       }
       ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
+      if (op.type == cam::OpType::Pocket || op.type == cam::OpType::Face ||
+          op.type == cam::OpType::Adaptive) {
+        ImGui::SetNextItemWidth(70.0f);
+        float over = static_cast<float>(op.stepover);
+        if (ImGui::DragFloat("Stepover###stepover", &over, 0.01f, 0.05f, 0.9f,
+                             "%.2f")) {
+          op.stepover = over;
+          dirty = true;
+        }
+        ImGui::SetItemTooltip("Fraction of the cutter taken per pass "
+                              "sideways — the number adaptive clearing holds "
+                              "constant");
+      }
       if (ImGui::Checkbox("Climb###climb", &op.climb))
         dirty = true;
       ImGui::SameLine();
@@ -504,8 +530,8 @@ void DrawCamPanel(AppState& state) {
                              ? std::string("job.nc")
                              : state.projectPath + "/" + setup->name + ".nc";
       std::string gcode, error;
-      if (cam::PostProcess(setup->post, *setup, state.camToolpaths, {}, gcode,
-                           &error) &&
+      if (cam::PostProcess(setup->post, *setup, state.camToolpaths,
+                           PostOpts(*setup), gcode, &error) &&
           DocumentIO::WriteTextAtomic(path, gcode, &error)) {
         state.camLastPost = path;
         LOG_INFO("CAM: wrote {}", path);

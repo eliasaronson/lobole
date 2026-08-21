@@ -16,7 +16,7 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 59; // v59: CAM adaptive clearing op
+inline constexpr int kVersion = 60; // v60: CAM per-setup arc fitting
                                     // (v57: mate connector inner_path)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {

@@ -1170,6 +1170,7 @@ TEST_CASE("cam: an adaptive operation survives a save and reload", "[cam]") {
   REQUIRE(setups.size() == 1);
   REQUIRE(setups[0].operations.size() == 1);
   CHECK(setups[0].operations[0].type == cam::OpType::Adaptive);
+  CHECK(setups[0].fitArcs); // v60, defaulting on for a document without it
   std::filesystem::remove(path);
 }
 
@@ -1194,6 +1195,9 @@ TEST_CASE("cam: curves post as arcs, and the cut does not change", "[cam]") {
   cam::PostOptions arcs;
   cam::PostOptions lines;
   lines.fitArcs = false;
+  // The choice lives on the setup and survives a save, because a controller
+  // that mishandles arcs mishandles them every session.
+  CHECK(setup.fitArcs);
   std::string withArcs, withLines, error;
   REQUIRE(cam::PostProcess("mach3", setup, paths, arcs, withArcs, &error));
   REQUIRE(cam::PostProcess("mach3", setup, paths, lines, withLines, &error));

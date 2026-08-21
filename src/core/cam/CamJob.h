@@ -107,6 +107,10 @@ struct Setup {
   // for every 3-axis job, and nothing emits it yet.
   double rotationA = 0.0;
 
+  // Whether the post fits G2/G3 arcs (C7). A property of the MACHINE, so it
+  // lives on the setup and persists — a controller that mishandles arcs
+  // mishandles them every session.
+  bool fitArcs = true;
   std::string post = "mach3"; // post id; "linuxcnc" planned
   double safeZ = 5.0;         // rapid height above the stock top (mm)
   double rapidFeed = 0.0;     // 0 = G0; some machines want a capped G1

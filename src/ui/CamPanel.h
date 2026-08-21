@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/cam/CamPost.h"      // PostOptions
 #include "render/SketchRenderer.h" // PrimVertex
 #include "ui/AppState.h"
 
@@ -22,6 +23,14 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out);
 // on any edit (a plate profile is ~200 moves); the cache exists so the
 // overlay does not re-slice the model every frame.
 void RefreshCamToolpaths(AppState& state);
+
+// The post options a setup implies. One place, so the panel and the tool
+// session cannot disagree about whether this machine gets arcs (C7).
+[[nodiscard]] inline cam::PostOptions PostOpts(const cam::Setup& setup) {
+  cam::PostOptions opts;
+  opts.fitArcs = setup.fitArcs;
+  return opts;
+}
 
 // The setup the panel, the tool session and the overlays all act on (the one
 // selected in the combo, else the first). Null when there is none.

@@ -74,6 +74,8 @@ json CamSetupToJson(const cam::Setup& setup) {
   // key that means nothing (and the 4th axis is deferred — plan.md).
   if (setup.rotationA != 0.0)
     j["rotation_a"] = setup.rotationA;
+  if (!setup.fitArcs)
+    j["fit_arcs"] = false;
   j["stock"] = {
       {"margin",
        {setup.stock.margin.x, setup.stock.margin.y, setup.stock.margin.z}},
@@ -138,6 +140,7 @@ cam::Setup CamSetupFromJson(const json& j) {
     setup.origin = {j["origin"][0].get<double>(), j["origin"][1].get<double>(),
                     j["origin"][2].get<double>()};
   setup.rotationA = j.value("rotation_a", 0.0);
+  setup.fitArcs = j.value("fit_arcs", true);
   if (j.contains("stock")) {
     const json& sj = j["stock"];
     if (sj.contains("margin") && sj["margin"].is_array() &&
