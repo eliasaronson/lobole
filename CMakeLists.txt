@@ -345,6 +345,26 @@ execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEA
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET)
 
+# Clipper2 (vendored, Boost licence): polygon offsetting for CAM toolpaths
+# (docs/cam/plan.md). Vendored rather than found: it is packaged in nixpkgs
+# but not in Ubuntu, and three .cpp files are cheaper than an optional
+# dependency that silently drops a workstream on half the CI matrix.
+set(CLIPPER2_DIR ${CMAKE_SOURCE_DIR}/deps/clipper2/CPP/Clipper2Lib)
+if(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
+    set(HAVE_CAM ON)
+    add_library(clipper2 STATIC
+        ${CLIPPER2_DIR}/src/clipper.engine.cpp
+        ${CLIPPER2_DIR}/src/clipper.offset.cpp
+        ${CLIPPER2_DIR}/src/clipper.rectclip.cpp)
+    target_include_directories(clipper2 SYSTEM PUBLIC ${CLIPPER2_DIR}/include)
+    set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    list(APPEND core_sources src/core/cam/CamToolpath.cpp
+                             src/core/cam/CamPost.cpp)
+    message(STATUS "Clipper2 found - CAM enabled")
+else()
+    message(STATUS "deps/clipper2 missing (submodule not initialised) - CAM disabled")
+endif()
+
 # libvterm: the terminal panel's VT emulation (docs/ui/terminal-panel.md).
 # Optional — without it the panel compiles out and the preference hides,
 # because a CAD app must still build on a machine that has no terminal
@@ -368,6 +388,10 @@ target_compile_definitions(designer_core PUBLIC
     DESIGNER_GIT_COMMIT="${DESIGNER_GIT_COMMIT}")
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json fem_mesher)
+if(HAVE_CAM)
+    target_compile_definitions(designer_core PUBLIC HAVE_CAM)
+    target_link_libraries(designer_core PUBLIC clipper2)
+endif()
 if(HAVE_TERMINAL)
     target_compile_definitions(designer_core PUBLIC HAVE_TERMINAL)
     target_include_directories(designer_core PUBLIC ${VTERM_INCLUDE_DIRS})
