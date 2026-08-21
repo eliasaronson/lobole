@@ -4,6 +4,7 @@
 #include "core/Feature.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
+#include "core/cam/CamVerify.h"
 #include "core/io/Serialization.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -347,6 +348,108 @@ TEST_CASE("cam: a failed operation is skipped LOUDLY in the file", "[cam]") {
   // A part that comes off the machine missing a feature nobody noticed is
   // the failure this prevents.
   CHECK(gcode.find("SKIPPED op 9: targets vanished") != std::string::npos);
+}
+
+// --- C5: verifying the posted file ---------------------------------------
+
+TEST_CASE("cam verify: the parser reads back what the post wrote", "[cam]") {
+  const cam::GProgram p = cam::ParseGcode("(a comment with G1 X99 inside)\n"
+                                          "G90 G21\n"
+                                          "G0 X10 Y20 Z5\n"
+                                          "G1 Z-1 F300\n"
+                                          "X30\n" // modal G1, modal Y
+                                          "G0 Z5 ; trailing comment\n");
+  REQUIRE(p.errors.empty());
+  REQUIRE(p.moves.size() == 4);
+  CHECK(p.moves[0].rapid);
+  CHECK_THAT(p.moves[0].to.x, WithinAbs(10.0, 1e-9));
+  CHECK_FALSE(p.moves[1].rapid);
+  CHECK_THAT(p.moves[1].to.z, WithinAbs(-1.0, 1e-9));
+  // Modal: X30 keeps G1, keeps Y20 and Z-1.
+  CHECK_FALSE(p.moves[2].rapid);
+  CHECK_THAT(p.moves[2].to.x, WithinAbs(30.0, 1e-9));
+  CHECK_THAT(p.moves[2].to.y, WithinAbs(20.0, 1e-9));
+  CHECK_THAT(p.moves[2].to.z, WithinAbs(-1.0, 1e-9));
+
+  // The NaN line that shipped once: an axis word with no number is reported,
+  // not skipped. This is the check that catches a broken post.
+  const cam::GProgram bad = cam::ParseGcode("G0 Xnan Ynan Z20\n");
+  CHECK_FALSE(bad.errors.empty());
+}
+
+TEST_CASE("cam verify: a good job leaves neither gouge nor stock", "[cam]") {
+  // The closed loop, on the POSTED FILE: post → parse → simulate → compare
+  // against the model. Independent of the toolpath generator, so a bug in
+  // the post or in modal state is caught here and nowhere else.
+  auto doc = BlockDoc(40, 30, 10);
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 10.0;
+  op.bottomZ = 0.0;
+  op.stepdown = 5.0;
+  setup.operations.push_back(op);
+
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, setup, doc->GetBodies(), /*res=*/0.4);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover << " rapids "
+                << v.rapidsThroughStock);
+  REQUIRE(v.cells > 0);
+  // Profiling the outside cuts the margin away and must not touch the part.
+  CHECK(v.maxGouge < 0.5); // one cell of quantisation at 0.4 mm
+  CHECK(v.rapidsThroughStock == 0);
+}
+
+TEST_CASE("cam verify: a cut that is too deep is REPORTED", "[cam]") {
+  // The test that gives the loop its value: hand-written G-code that plunges
+  // through the middle of the part. A geometry test on our own toolpath
+  // cannot notice this; simulating the file does.
+  auto doc = BlockDoc(40, 30, 10);
+  cam::Setup setup = BasicSetup();
+  const std::string gouging = "G90 G21\n"
+                              "G0 X-15 Y0 Z20\n"
+                              "G1 Z-5 F200\n" // straight through the block
+                              "G1 X15 F600\n"
+                              "G0 Z20\n";
+  const cam::Verdict v =
+      cam::VerifyGcode(gouging, setup, doc->GetBodies(), 0.4);
+  CHECK(v.maxGouge > 4.0); // it cut ~5 mm below the top face
+  CHECK_FALSE(v.Ok(0.1));
+  // And it says WHERE, so the report points at a place on the part.
+  CHECK(std::abs(v.gougeAt.y) < 5.0);
+}
+
+TEST_CASE("cam verify: a rapid through the part is caught", "[cam]") {
+  // The check a shape comparison cannot make: the part can come out perfect
+  // and the tool still be broken.
+  auto doc = BlockDoc(40, 30, 10);
+  cam::Setup setup = BasicSetup();
+  const std::string crash = "G90 G21\n"
+                            "G0 X-25 Y0 Z2\n" // below the 10 mm stock top
+                            "G0 X25 Y0\n"     // ...and straight across it
+                            "G0 Z20\n";
+  const cam::Verdict v = cam::VerifyGcode(crash, setup, doc->GetBodies(), 0.5);
+  CHECK(v.rapidsThroughStock > 0);
+  CHECK(v.firstBadLine > 0);
+  CHECK_FALSE(v.Ok(1.0));
+}
+
+TEST_CASE("cam verify: unmachined stock is reported as leftover", "[cam]") {
+  // An empty program removes nothing, so the whole margin is leftover — the
+  // signal that an operation was skipped or never added.
+  auto doc = BlockDoc(40, 30, 10);
+  cam::Setup setup = BasicSetup();
+  const cam::Verdict v =
+      cam::VerifyGcode("G90 G21\nM30\n", setup, doc->GetBodies(), 0.5);
+  CHECK(v.maxLeftover > 0.5); // the stock margin above the part
+  CHECK(v.maxGouge == 0.0);   // nothing was cut at all
 }
 
 #endif // HAVE_CAM

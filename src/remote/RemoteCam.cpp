@@ -5,6 +5,7 @@
 #include "core/Document.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
+#include "core/cam/CamVerify.h"
 #include "core/io/Serialization.h"
 #include "ui/AppState.h"
 
@@ -40,6 +41,11 @@ constexpr MethodDoc kCamMethods[] = {
      "Generate toolpaths for a setup {setup} without writing a file: per "
      "operation, the move count, cut length (mm), lowest Z, and the error "
      "when it produced nothing. The cheap way to check a job."},
+    {"cam_verify",
+     "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
+     "the result with the model: {max_gouge_mm, max_leftover_mm, "
+     "rapids_through_stock, ok}. Runs on the file, not the toolpath, so it "
+     "catches post and modal-state bugs too."},
     {"cam_post",
      "Write the G-code for a setup {setup, path, post?}. Reports the line "
      "count, the ops it skipped and why. Writes a file; it does not send it "
@@ -316,6 +322,27 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     throw std::runtime_error("no CAM operation with that id");
   }
 
+  if (m == "cam_verify") {
+    const cam::Setup& setup = RequireSetup(*doc, p.at("setup").get<uint64_t>());
+    const std::vector<cam::Toolpath> paths =
+        cam::GenerateAll(setup, doc->GetBodies());
+    std::string gcode, error;
+    if (!cam::PostProcess(setup.post, setup, paths, {}, gcode, &error))
+      throw std::runtime_error(error);
+    const double res = p.value("resolution", 0.25);
+    const cam::Verdict v =
+        cam::VerifyGcode(gcode, setup, doc->GetBodies(), res);
+    const double tol = res * 1.5; // one cell of quantisation, plus slack
+    return json{{"max_gouge_mm", v.maxGouge},
+                {"max_leftover_mm", v.maxLeftover},
+                {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
+                {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
+                {"rapids_through_stock", v.rapidsThroughStock},
+                {"first_bad_line", v.firstBadLine},
+                {"resolution_mm", res},
+                {"cells", v.cells},
+                {"ok", v.Ok(tol)}};
+  }
   if (m == "cam_toolpath" || m == "cam_post") {
     const cam::Setup& setup = RequireSetup(*doc, p.at("setup").get<uint64_t>());
     const std::vector<cam::Toolpath> paths =

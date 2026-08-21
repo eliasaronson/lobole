@@ -369,7 +369,8 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     target_include_directories(clipper2 SYSTEM PUBLIC ${CLIPPER2_DIR}/include)
     set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     list(APPEND core_sources src/core/cam/CamToolpath.cpp
-                             src/core/cam/CamPost.cpp)
+                             src/core/cam/CamPost.cpp
+                             src/core/cam/CamVerify.cpp)
     message(STATUS "Clipper2 found - CAM enabled")
 else()
     message(STATUS "deps/clipper2 missing (submodule not initialised) - CAM disabled")

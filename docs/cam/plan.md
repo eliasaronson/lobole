@@ -1,8 +1,9 @@
 # CAM — 2.5D milling — plan
 
-> Status: **C1–C4 BUILT 2026-08-21** (the design below was signed off the same
-> day and implemented against it); **C5 — the camsim verification loop — is
-> outstanding**. The roadmap's "CAM out of scope" is reversed.
+> Status: **C1–C5 BUILT 2026-08-21.** The roadmap's "CAM out of scope" is
+> reversed. C5 shipped as an in-house height-map verifier rather than the
+> CAMotics dependency this doc originally planned — see "Verification, and
+> why not CAMotics".
 >
 > Scope decided at writing: **2.5D first**, with the data model shaped so a
 > **4th (rotary) axis** is an addition rather than a redesign. Continuous
@@ -63,6 +64,46 @@ research.
   the two halves of the verification loop below.
 - Line overlays for backplot, materials for feeds/speeds, headless RPC and
   golden-file tests for G-code.
+
+## Verification, and why not CAMotics (decided 2026-08-21)
+
+The plan below proposed shelling out to CAMotics' `camsim`. Building it means
+packaging **two SCons projects** (CAMotics + its own cbang library), neither
+in nixpkgs — a session of work to acquire a GPL binary, plus permanent
+maintenance of someone else's build. So the projects were read instead
+(`~/Documents/CAD/CAM`), and the survey changed the decision:
+
+- **FreeCAD's PathSimulator is a height map** — `Array2D<float>` plus a tool
+  *profile function* (radius at a height, which is how ball/bull/V tools work
+  generically) and `ApplyLinearTool`/`ApplyCircularTool`. ~1 500 lines
+  including display tessellation.
+- **CAMotics is a full implicit-field simulator** (`CutWorkpiece :
+  FieldFunction`, AABB trees of tool sweeps, marching cubes). General enough
+  for undercuts — and that generality is exactly why it needs its own build
+  system. We are 3-axis; a height map is the correct model.
+- **opencamlib's drop-cutter and PyCAM's DropCutter** are the same idea from
+  the other side: sample a mesh's height on a grid.
+
+So C5 is ~350 lines with **no dependency**: parse the posted G-code, sweep the
+tool through a height map, sample the model's surface on the same grid,
+report **max gouge** and **max leftover**. One deliberate improvement on
+FreeCAD's version: it walks the path in 0.6-pixel steps "to make sure all
+pixels in the path are visited", while this tests each cell analytically
+against the swept segment — for a check that has to be trustworthy, exact
+beats "probably hit every pixel".
+
+The decisive property is that it runs on the **posted file**, not the
+in-memory toolpath. A bug in the post, in modal state, or in linking is
+invisible to anything inspecting `std::vector<Move>` — and one of those (the
+`G0 Xnan Ynan Z20` retract) had already shipped. It also catches what a shape
+comparison cannot: **a rapid through material**, where the part comes out
+perfect and the tool does not.
+
+Honest caveat: this is our code checking our code, so a shared misconception
+could agree with itself. Going through the file removes most of that overlap
+(only the geometry libraries are shared). If CAMotics is ever installed, an
+optional cross-check that runs when `camsim` is on `PATH` — and skips
+otherwise — is the right way to add a second opinion without a dependency.
 
 ## The verification loop, which is the reason to be comfortable with this
 
@@ -152,7 +193,7 @@ tool table), arc output (see the risk below), coolant, and safe-Z retract.
 | **C2** | Slice → Clipper2 pipeline; **Profile** (with tabs) and **Drill** | **done** |
 | **C3** | **Pocket** with islands, **Face**, stepdown + ramp/helix entry | **done** (pocket + face; adaptive still deferred) |
 | **C4** | Post interface + Mach3 implementation, backplot overlay, G-code goldens | **done** (Mach3 + LinuxCNC, backplot, panel) |
-| **C5** | The camsim closed loop as a ctest, plus packaging camsim | **outstanding** |
+| **C5** | The closed loop as a ctest — **in-house, no dependency** | **done** |
 | later | LinuxCNC post · adaptive clearing (port Tusek) · indexed 4th axis · surfacing (opencamlib) · continuous 4-axis | each on demand |
 
 ## What C1–C4 shipped
