@@ -6,6 +6,9 @@
 #include "core/Feature.h"
 #include "core/io/Serialization.h"
 
+#include <filesystem>
+#include <unistd.h>
+
 using Catch::Matchers::WithinRel;
 
 static std::unique_ptr<BoxFeature> MakeBox(const std::string& name,
@@ -126,4 +129,29 @@ TEST_CASE("ReplaceFeature keeps the feature's stable id", "[document]") {
   explicitId->SetId(77);
   REQUIRE(doc.ReplaceFeature(0, std::move(explicitId)));
   CHECK(doc.GetFeature(0)->GetId() == 77);
+}
+
+// The id is the filename AND the index entry, so an item with id 0 writes
+// "0-box.json" and lists 0 — which the loader reads back as "no id" and every
+// reference to the item's real id then fails to resolve. A tripwire: ids are
+// assigned at every entry point, so this should never fire. It exists because
+// that guarantee was missing until F7 found the modify_feature path writing
+// exactly that file.
+TEST_CASE("A feature with no id is never written to disk", "[document]") {
+  Document doc;
+  doc.AddFeature(MakeBox("Box 1"));
+  // Reach past the entry points that would have assigned one.
+  doc.GetFeature(0)->SetId(0);
+
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("designer_id0_" + std::to_string(::getpid()) + ".dsgn");
+  std::filesystem::remove_all(dir);
+
+  const auto result = DocumentIO::Save(doc, dir.string());
+  REQUIRE_FALSE(result.has_value());
+  CHECK(result.error().find("has no id") != std::string::npos);
+  CHECK_FALSE(std::filesystem::exists(dir / "features" / "0-box.json"));
+
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
 }

@@ -124,8 +124,12 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"cancel_pending", "Discard the pending (preview) feature."},
     {"add_feature", "Append a feature (see feature_types for the JSON dialect) "
                     "and regenerate; returns {index, id, entity_ids?, regen}."},
-    {"modify_feature", "Replace the feature at `index` with `feature` JSON; "
-                       "one undo step; returns {regen}."},
+    {"modify_feature",
+     "Change the feature at `index` to `feature` JSON; one undo step; returns "
+     "{regen}. It keeps its IDENTITY: omit \"id\" and the feature keeps the "
+     "one it has, so references to it (sketch_id, mates, drawing dimensions) "
+     "keep resolving. Pass a different \"id\" only to mean 'this is a "
+     "different feature now', which deliberately dangles those references."},
     {"set_material",
      "Assign a material slug (see material_slugs) to a body's creating "
      "feature, by feature_id (its created_by) or by body index; '' restores "

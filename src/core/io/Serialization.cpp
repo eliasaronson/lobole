@@ -288,6 +288,32 @@ std::set<std::string> ReferencedAssets(const Document& doc) {
 // Directory format (F3, docs/versioning/f3-directory-format.md): one file
 // per feature named by stable id, an ordered index written LAST (a torn
 // save leaves a stale-but-loadable index), document-level parameters file.
+namespace {
+
+// The id IS the filename and the index entry, so an item with id 0 writes
+// "0-box.json" and lists 0 — which the loader then reads back as "no id", and
+// which every reference naming the item's real id fails to resolve. Every id
+// space starts at 1, so 0 means something upstream lost it.
+//
+// A tripwire, not an expected failure: ids are assigned at every entry point
+// (Document::InsertFeature assigns one, ReplaceFeature inherits the old one).
+// It exists because that second guarantee was MISSING until F7 found it — the
+// modify_feature RPC sends parameters with no "id", and the replacement
+// landed with 0 and wrote exactly that file. Refusing is consistent with how
+// this loader already treats an inconsistent project: say what is wrong
+// rather than write something that reads back differently.
+uint64_t IdForFile(uint64_t id, const char* what, const std::string& name) {
+  if (id == 0) {
+    throw std::runtime_error(
+        std::string("cannot save: ") + what + " \"" + name +
+        "\" has no id, so it would be written as \"0-…\" and read back as a "
+        "different thing — this is a bug, please report it");
+  }
+  return id;
+}
+
+} // namespace
+
 bool SaveDir(const Document& doc, const std::string& dirPath,
              std::string* error) {
   namespace fs = std::filesystem;
@@ -300,8 +326,10 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
     index["features"] = json::array();
     std::set<std::string> wanted;
     for (const auto& feature : doc.GetFeatures()) {
-      const std::string file = std::to_string(feature->GetId()) + "-" +
-                               KebabType(feature->TypeName()) + ".json";
+      const std::string file =
+          std::to_string(
+              IdForFile(feature->GetId(), "feature", feature->GetName())) +
+          "-" + KebabType(feature->TypeName()) + ".json";
       if (!WriteTextAtomic(featuresDir / file,
                            FeatureToJson(*feature).dump(2) + "\n", error))
         return false;
@@ -338,7 +366,9 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
       index["studies"] = json::array();
       std::set<std::string> wantedStudies;
       for (const fem::Study& s : doc.GetStudies()) {
-        const std::string base = std::to_string(s.id) + "-" + LabelSlug(s.name);
+        const std::string base =
+            std::to_string(IdForFile(s.id, "study", s.name)) + "-" +
+            LabelSlug(s.name);
         const std::string file = base + ".json";
         if (!WriteTextAtomic(studyDir / file, StudyToJson(s).dump(2) + "\n",
                              error))
@@ -382,7 +412,8 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
       std::set<std::string> wantedConfigs;
       for (const Configuration& c : doc.GetConfigurations()) {
         const std::string file =
-            std::to_string(c.id) + "-" + LabelSlug(c.name) + ".json";
+            std::to_string(IdForFile(c.id, "configuration", c.name)) + "-" +
+            LabelSlug(c.name) + ".json";
         if (!WriteTextAtomic(cfgDir / file,
                              ConfigurationToJson(c).dump(2) + "\n", error))
           return false;
@@ -687,7 +718,8 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     std::set<std::string> wantedOcc;
     for (const Occurrence& o : asmDoc.GetOccurrences()) {
       const std::string file =
-          std::to_string(o.id) + "-" + LabelSlug(o.name) + ".json";
+          std::to_string(IdForFile(o.id, "occurrence", o.name)) + "-" +
+          LabelSlug(o.name) + ".json";
       if (!WriteTextAtomic(occDir / file, OccurrenceToJson(o).dump(2) + "\n",
                            error))
         return false;
@@ -710,8 +742,8 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
       fs::create_directories(mateDir);
     std::set<std::string> wantedMate;
     for (const Mate& m : asmDoc.GetMates()) {
-      const std::string file =
-          std::to_string(m.id) + "-" + LabelSlug(m.name) + ".json";
+      const std::string file = std::to_string(IdForFile(m.id, "mate", m.name)) +
+                               "-" + LabelSlug(m.name) + ".json";
       if (!WriteTextAtomic(mateDir / file, MateToJson(m).dump(2) + "\n", error))
         return false;
       index["mates"].push_back(m.id);
@@ -733,8 +765,8 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     }
     std::set<std::string> wantedView;
     for (const ExplodedView& v : asmDoc.GetExplodedViews()) {
-      const std::string file =
-          std::to_string(v.id) + "-" + LabelSlug(v.name) + ".json";
+      const std::string file = std::to_string(IdForFile(v.id, "view", v.name)) +
+                               "-" + LabelSlug(v.name) + ".json";
       if (!WriteTextAtomic(viewDir / file, ExplodedViewToJson(v).dump(2) + "\n",
                            error))
         return false;
@@ -759,7 +791,8 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     std::set<std::string> wantedCfg;
     for (const Configuration& c : asmDoc.GetConfigurations()) {
       const std::string file =
-          std::to_string(c.id) + "-" + LabelSlug(c.name) + ".json";
+          std::to_string(IdForFile(c.id, "configuration", c.name)) + "-" +
+          LabelSlug(c.name) + ".json";
       if (!WriteTextAtomic(cfgDir / file, ConfigurationToJson(c).dump(2) + "\n",
                            error))
         return false;
@@ -1311,8 +1344,8 @@ bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
       fs::create_directories(viewDir);
     std::set<std::string> wantedView;
     for (const DrawingView& v : dwg.GetViews()) {
-      const std::string file =
-          std::to_string(v.id) + "-" + LabelSlug(v.name) + ".json";
+      const std::string file = std::to_string(IdForFile(v.id, "view", v.name)) +
+                               "-" + LabelSlug(v.name) + ".json";
       if (!WriteTextAtomic(viewDir / file, DrawingViewToJson(v).dump(2) + "\n",
                            error))
         return false;
@@ -1333,7 +1366,9 @@ bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
     std::set<std::string> wantedDim;
     for (const DrawingDim& d : dwg.GetDims()) {
       const std::string file =
-          std::to_string(d.id) + "-" + DrawingDimKindToString(d.kind) + ".json";
+          std::to_string(
+              IdForFile(d.id, "dimension", DrawingDimKindToString(d.kind))) +
+          "-" + DrawingDimKindToString(d.kind) + ".json";
       if (!WriteTextAtomic(dimDir / file, DrawingDimToJson(d).dump(2) + "\n",
                            error))
         return false;
