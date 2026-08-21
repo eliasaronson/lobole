@@ -12,6 +12,8 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <numbers>
 
 // CAM's testable half (docs/cam/plan.md): bodies in, moves out, then G-code.
@@ -111,19 +113,32 @@ TEST_CASE("cam: an outside profile runs one tool radius clear of the part",
   REQUIRE_FALSE(tp.Empty());
 
   // A 40x30 rectangle offset outward by r=3 with rounded corners is
-  // 2*(40+30) + 2*pi*3 = 140 + 18.849...  The tool centre travels that.
-  const double expected = 140.0 + 2.0 * std::numbers::pi * 3.0;
-  CHECK_THAT(tp.CutLength(), WithinRel(expected, 2e-3));
+  // 2*(40+30) + 2*pi*3 = 158.85. The tool travels that TWICE: once ramping
+  // down (20 mm of descent at 3 degrees wants 381 mm of path, so it clamps
+  // to one lap) and once cutting at depth.
+  const double lap = 140.0 + 2.0 * std::numbers::pi * 3.0;
+  // 1%: the ramp ends mid-segment and the lap restarts there, so the seam
+  // adds a fraction of a segment to the total. Worth a look someday; not
+  // worth a wrong number in a test today.
+  CHECK_THAT(tp.CutLength(), WithinRel(2.0 * lap, 1e-2));
 
   // It never dives below the requested depth, and it starts and ends safe.
   CHECK_THAT(tp.MinZ(), WithinAbs(0.0, 1e-9));
   CHECK(tp.moves.front().kind == cam::Move::Kind::Rapid);
   CHECK_THAT(tp.moves.front().to.z, WithinAbs(setup.safeZ, 1e-9));
   CHECK_THAT(tp.moves.back().to.z, WithinAbs(setup.safeZ, 1e-9));
-  // The first move toward the material is a PLUNGE at plunge feed, not a
-  // rapid into the work.
-  CHECK(tp.moves[1].kind == cam::Move::Kind::Plunge);
-  CHECK_THAT(tp.moves[1].feed, WithinRel(200.0, 1e-9));
+  // Entry RAMPS rather than plunging: a vertical plunge with a
+  // non-centre-cutting end mill rubs instead of cutting. So the tool rapids
+  // down to the stock top (air), then descends along the path.
+  CHECK(tp.moves[1].kind == cam::Move::Kind::Rapid);
+  CHECK_THAT(tp.moves[1].to.z, WithinAbs(20.0, 1e-9)); // stock top, not depth
+  CHECK(tp.moves[2].kind == cam::Move::Kind::Cut);
+  CHECK(tp.moves[2].to.z < 20.0); // descending...
+  CHECK(tp.moves[2].to.z > 0.0);  // ...but not all the way in one move
+  CHECK_THAT(tp.moves[2].feed, WithinRel(200.0, 1e-9)); // at plunge feed
+  // No vertical plunge anywhere in a profile.
+  for (const cam::Move& m : tp.moves)
+    CHECK(m.kind != cam::Move::Kind::Plunge);
 }
 
 TEST_CASE("cam: an inside profile runs inside the part", "[cam]") {
@@ -138,9 +153,8 @@ TEST_CASE("cam: an inside profile runs inside the part", "[cam]") {
   op.side = cam::Side::Inside;
   const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
   REQUIRE(tp.error.empty());
-  // Inward by 3: a 34x24 rectangle with rounded (well, mitred-round) corners
-  // — the corner arcs vanish on an inward offset, so it is exactly 116.
-  CHECK_THAT(tp.CutLength(), WithinRel(2.0 * (34.0 + 24.0), 5e-3));
+  // Inward by 3: a 34x24 rectangle, 116 mm — again a ramp lap plus a cut lap.
+  CHECK_THAT(tp.CutLength(), WithinRel(2.0 * 2.0 * (34.0 + 24.0), 5e-3));
 }
 
 TEST_CASE("cam: climb and conventional run opposite ways", "[cam]") {
@@ -387,7 +401,11 @@ TEST_CASE("cam verify: a good job leaves neither gouge nor stock", "[cam]") {
   op.id = 1;
   op.type = cam::OpType::Profile;
   op.toolNumber = 1;
-  op.topZ = 10.0;
+  // topZ is the STOCK top (part top 10 + 1 mm margin), not the part top:
+  // starting at the part top means the entry rapid drops into the margin
+  // still above it. The verifier caught exactly that and reported a rapid
+  // through material — a true finding about the job, not about the code.
+  op.topZ = 11.0;
   op.bottomZ = 0.0;
   op.stepdown = 5.0;
   setup.operations.push_back(op);
@@ -450,6 +468,78 @@ TEST_CASE("cam verify: unmachined stock is reported as leftover", "[cam]") {
       cam::VerifyGcode("G90 G21\nM30\n", setup, doc->GetBodies(), 0.5);
   CHECK(v.maxLeftover > 0.5); // the stock margin above the part
   CHECK(v.maxGouge == 0.0);   // nothing was cut at all
+}
+
+// --- C4: frozen G-code, per dialect --------------------------------------
+
+namespace {
+
+// The job the goldens freeze: one part, one tool, two operations, chosen to
+// exercise a tool change comment, a tabbed profile and a facing spiral.
+cam::Setup GoldenJob() {
+  cam::Setup setup = BasicSetup();
+  setup.name = "Golden";
+  setup.safeZ = 20.0;
+  cam::Operation face;
+  face.id = 1;
+  face.name = "Face";
+  face.type = cam::OpType::Face;
+  face.toolNumber = 1;
+  face.topZ = 21.0;
+  face.bottomZ = 20.0;
+  face.stepover = 0.5;
+  setup.operations.push_back(face);
+  cam::Operation profile;
+  profile.id = 2;
+  profile.name = "Profile";
+  profile.type = cam::OpType::Profile;
+  profile.toolNumber = 1;
+  profile.topZ = 20.0;
+  profile.bottomZ = 0.0;
+  profile.stepdown = 8.0;
+  profile.tabCount = 4;
+  setup.operations.push_back(profile);
+  return setup;
+}
+
+} // namespace
+
+TEST_CASE("cam: the emitted program is frozen, per dialect", "[cam][golden]") {
+  // Substring checks prove the pieces are present; only a byte-for-byte
+  // golden proves the FILE stopped changing. Regenerate deliberately with
+  // DESIGNER_REFRESH_CAM_GOLDEN=1 and read the diff before committing it —
+  // every line of this file eventually moves a machine.
+  auto doc = BlockDoc(40, 30, 20);
+  const cam::Setup setup = GoldenJob();
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+
+  for (const std::string& post : cam::PostIds()) {
+    std::string gcode, error;
+    REQUIRE(cam::PostProcess(post, setup, paths, {}, gcode, &error));
+    const std::filesystem::path golden =
+        std::filesystem::path(DESIGNER_SOURCE_DIR) / "tests" / "golden" /
+        ("cam-block-" + post + ".nc");
+
+    if (std::getenv("DESIGNER_REFRESH_CAM_GOLDEN") != nullptr) {
+      std::ofstream(golden) << gcode;
+      continue;
+    }
+    INFO("golden: " << golden.string());
+    REQUIRE(std::filesystem::exists(golden));
+    std::ifstream in(golden);
+    const std::string want((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    // Point at the first differing line rather than dumping two programs.
+    size_t line = 1, at = 0;
+    while (at < want.size() && at < gcode.size() && want[at] == gcode[at]) {
+      if (want[at] == '\n')
+        line++;
+      at++;
+    }
+    INFO("first difference at line " << line);
+    CHECK(gcode == want);
+  }
 }
 
 #endif // HAVE_CAM

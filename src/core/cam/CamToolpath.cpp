@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <glm/trigonometric.hpp>
+
 namespace cam {
 
 namespace {
@@ -136,27 +138,85 @@ void Emit(Toolpath& tp, Move::Kind kind, const glm::dvec3& to, double feed) {
 // loop is walked by arc length and cut at each tab boundary, with an explicit
 // vertical move there, which also makes the tab square-walled rather than a
 // diagonal ramp.
+// Entry ramp angle. Shallow enough for a non-centre-cutting end mill to
+// enter metal, steep enough not to spend a lap descending. A knob later if
+// anyone needs one; a fixed sane value beats a vertical plunge today.
+constexpr double kRampAngleDeg = 3.0;
+
+// Cut the loop at depth `z`, entering from `entryZ` by RAMPING along the path
+// rather than plunging straight down — a vertical plunge with a
+// non-centre-cutting mill rubs rather than cuts. The ramp runs along the
+// toolpath itself, so it needs no room the cut does not already have; the lap
+// then starts where the ramp finished, which is why the point list is
+// rotated rather than restarted.
 void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
               const std::vector<glm::dvec2>& pts, double z, double safeZ,
-              int tabCount, double tabWidth, double tabZ) {
+              int tabCount, double tabWidth, double tabZ, double entryZ) {
   if (pts.size() < 2)
     return;
-  Emit(tp, Move::Kind::Rapid, {pts[0].x, pts[0].y, safeZ}, 0.0);
-  Emit(tp, Move::Kind::Plunge, {pts[0].x, pts[0].y, z}, tool.feedPlunge);
-
   const double perimeter = Perimeter(pts);
+  if (perimeter < 1e-9)
+    return;
+
+  // Rapid over, then down to the height we enter from: that is either the
+  // stock top or the depth the previous pass already cut here, so it is air.
+  Emit(tp, Move::Kind::Rapid, {pts[0].x, pts[0].y, safeZ}, 0.0);
+  const double from = std::max(entryZ, z);
+  Emit(tp, Move::Kind::Rapid, {pts[0].x, pts[0].y, from}, 0.0);
+
+  const double descend = from - z;
+  double rampLen =
+      descend > 1e-9 ? descend / std::tan(glm::radians(kRampAngleDeg)) : 0.0;
+  // A loop shorter than the ramp would spiral forever: descend over one lap
+  // instead, steeper than asked but bounded and still not a plunge.
+  rampLen = std::min(rampLen, perimeter);
+
+  // Walk the loop, emitting the descent, and note where it ends.
+  double travelled = 0.0;
+  size_t idx = 0;
+  glm::dvec2 cursor = pts[0];
+  if (rampLen > 1e-9) {
+    while (travelled < rampLen - 1e-9) {
+      const glm::dvec2& next = pts[(idx + 1) % pts.size()];
+      const double seg = glm::length(next - cursor);
+      if (seg < 1e-12) {
+        idx = (idx + 1) % pts.size();
+        cursor = next;
+        continue;
+      }
+      if (travelled + seg >= rampLen - 1e-9) {
+        const double t = (rampLen - travelled) / seg;
+        cursor = cursor + (next - cursor) * t;
+        travelled = rampLen;
+      } else {
+        travelled += seg;
+        cursor = next;
+        idx = (idx + 1) % pts.size();
+      }
+      const double rz = from - descend * std::min(1.0, travelled / rampLen);
+      Emit(tp, Move::Kind::Cut, {cursor.x, cursor.y, rz}, tool.feedPlunge);
+    }
+  } else {
+    Emit(tp, Move::Kind::Plunge, {cursor.x, cursor.y, z}, tool.feedPlunge);
+  }
+
+  // The full lap at depth, starting where the ramp finished.
+  std::vector<glm::dvec2> lap;
+  lap.reserve(pts.size() + 1);
+  lap.push_back(cursor);
+  for (size_t k = 1; k <= pts.size(); k++)
+    lap.push_back(pts[(idx + k) % pts.size()]);
+  lap.push_back(cursor);
+
   const bool wantTabs =
       tabCount > 0 && tabWidth > 0.0 && perimeter > tabWidth * tabCount;
-
-  // Tab spans as arc-length intervals, and the boundaries we must cut at.
   std::vector<std::pair<double, double>> tabs;
-  if (wantTabs) {
+  if (wantTabs)
     for (int i = 0; i < tabCount; i++) {
       const double centre = perimeter * (static_cast<double>(i) + 0.5) /
                             static_cast<double>(tabCount);
       tabs.emplace_back(centre - tabWidth * 0.5, centre + tabWidth * 0.5);
     }
-  }
   const auto inTab = [&](double s) {
     for (const auto& [lo, hi] : tabs)
       if (s > lo && s < hi)
@@ -165,43 +225,37 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   };
   const auto zAt = [&](double s) { return inTab(s) ? std::max(z, tabZ) : z; };
 
-  double travelled = 0.0;
+  double s0 = 0.0;
   double currentZ = zAt(0.0);
   if (std::abs(currentZ - z) > 1e-9)
-    Emit(tp, Move::Kind::Cut, {pts[0].x, pts[0].y, currentZ}, tool.feedCut);
-
-  for (size_t i = 1; i <= pts.size(); i++) {
-    const glm::dvec2& a = pts[i - 1];
-    const glm::dvec2& b = pts[i % pts.size()];
+    Emit(tp, Move::Kind::Cut, {lap[0].x, lap[0].y, currentZ}, tool.feedCut);
+  for (size_t i = 1; i < lap.size(); i++) {
+    const glm::dvec2& a = lap[i - 1];
+    const glm::dvec2& b = lap[i];
     const double len = glm::length(b - a);
     if (len < 1e-12)
       continue;
-
-    // Every tab boundary strictly inside this segment, in order.
+    // Tab boundaries strictly inside this segment split it, so a tab is never
+    // stepped over by a long edge (the bug the first tab test caught).
     std::vector<double> cuts;
-    for (const auto& [lo, hi] : tabs) {
+    for (const auto& [lo, hi] : tabs)
       for (const double edge : {lo, hi})
-        if (edge > travelled + 1e-9 && edge < travelled + len - 1e-9)
+        if (edge > s0 + 1e-9 && edge < s0 + len - 1e-9)
           cuts.push_back(edge);
-    }
     std::sort(cuts.begin(), cuts.end());
-
-    for (const double s : cuts) {
-      const double t = (s - travelled) / len;
-      const glm::dvec2 p = a + (b - a) * t;
-      // Reach the boundary at the current height, then step Z vertically —
-      // a square tab wall, and no diagonal gouge into the tab.
+    for (const double sc : cuts) {
+      const glm::dvec2 p = a + (b - a) * ((sc - s0) / len);
       Emit(tp, Move::Kind::Cut, {p.x, p.y, currentZ}, tool.feedCut);
-      const double next = zAt(s + 1e-6);
+      const double next = zAt(sc + 1e-6);
       if (std::abs(next - currentZ) > 1e-9) {
         Emit(tp, Move::Kind::Cut, {p.x, p.y, next}, tool.feedCut);
         currentZ = next;
       }
     }
-    travelled += len;
+    s0 += len;
     Emit(tp, Move::Kind::Cut, {b.x, b.y, currentZ}, tool.feedCut);
   }
-  Emit(tp, Move::Kind::Rapid, {pts[0].x, pts[0].y, safeZ}, 0.0);
+  Emit(tp, Move::Kind::Rapid, {lap.back().x, lap.back().y, safeZ}, 0.0);
 }
 
 } // namespace
@@ -329,7 +383,8 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
     for (Clipper2Lib::Path64& path : paths) {
       Orient(path, op.climb, op.side == Side::Inside);
       EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ,
-               lastPass ? op.tabCount : 0, op.tabWidth, bottom + op.tabHeight);
+               lastPass ? op.tabCount : 0, op.tabWidth, bottom + op.tabHeight,
+               pass == 0 ? op.topZ : passes[pass - 1]);
     }
   }
 }
@@ -341,6 +396,7 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
                     const std::vector<Body>& bodies, Toolpath& tp) {
   const double radius = tool.diameter * 0.5;
   const double step = std::max(0.05, op.stepover) * tool.diameter;
+  double entryZ = op.topZ;
   for (const double z : DepthPasses(op)) {
     const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
     if (loops.empty())
@@ -359,11 +415,13 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
     while (!ring.empty()) {
       for (Clipper2Lib::Path64& path : ring) {
         Orient(path, op.climb, /*insideMaterial=*/true);
-        EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0, z);
+        EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0, z,
+                 entryZ);
       }
       inset += step;
       ring = Offset(region, -inset);
     }
+    entryZ = z;
   }
 }
 
@@ -380,6 +438,7 @@ void GenerateFace(const Setup& setup, const Operation& op, const Tool& tool,
   std::vector<glm::dvec2> rect = {
       {lo.x, lo.y}, {hi.x, lo.y}, {hi.x, hi.y}, {lo.x, hi.y}};
   const Clipper2Lib::Paths64 region{ToClipper(rect)};
+  double entryZ = op.topZ;
   for (const double z : DepthPasses(op)) {
     // Start with the cutter centred ON the stock edge so the outside is
     // cleaned up, then spiral inward.
@@ -388,13 +447,15 @@ void GenerateFace(const Setup& setup, const Operation& op, const Tool& tool,
     while (!ring.empty()) {
       for (Clipper2Lib::Path64& path : ring) {
         Orient(path, op.climb, /*insideMaterial=*/true);
-        EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0, z);
+        EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0, z,
+                 entryZ);
       }
       inset += step;
       if (inset > glm::length(hi - lo))
         break; // guard: a degenerate stock must not spin forever
       ring = Offset(region, -inset);
     }
+    entryZ = z;
     (void)radius;
   }
 }

@@ -283,8 +283,7 @@ it will list and never run.
 - ~~**2D drawings / drafting output**~~ — was "deliberately out of scope until after
   assemblies; revisit then". Assemblies shipped, revisited July 2026: now workstream 13,
   see [drawings/plan.md](drawings/plan.md).
-- ~~**CAM**~~ — **reversed and BUILT 2026-08-21** (C1–C5, minus ramp/helix
-  entry and frozen G-code goldens — see the plan's "Still to build"): 2.5D milling — profile with tabs,
+- ~~**CAM**~~ — **reversed and BUILT 2026-08-21** (C1–C5): 2.5D milling — profile with tabs,
   pocket, face, drill — on Clipper2, posting to Mach3 and LinuxCNC, with a
   backplot, setups that persist with the part (format v58), and a dependency-
   free verifier that simulates the POSTED file and reports gouge/leftover. See

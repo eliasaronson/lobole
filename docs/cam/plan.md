@@ -1,8 +1,7 @@
 # CAM — 2.5D milling — plan
 
-> Status: **C1, C2, C5 built; C3 and C4 have one unbuilt item each**
-> (2026-08-21) — vertical plunges instead of ramp/helix entry, and no frozen
-> G-code goldens. Both are named in the phase table and in "Still to build". The roadmap's "CAM out of scope" is
+> Status: **C1–C5 BUILT 2026-08-21**, including the two items this table
+> briefly claimed and did not have (ramp entry, frozen G-code goldens). The roadmap's "CAM out of scope" is
 > reversed. C5 shipped as an in-house height-map verifier rather than the
 > CAMotics dependency this doc originally planned — see "Verification, and
 > why not CAMotics".
@@ -193,8 +192,8 @@ tool table), arc output (see the risk below), coolant, and safe-Z retract.
 |---|---|---|
 | **C1** | `cam::Setup` document object: stock, work frame, tool table, panel + RPCs | **done** |
 | **C2** | Slice → Clipper2 pipeline; **Profile** (with tabs) and **Drill** | **done** |
-| **C3** | **Pocket** with islands, **Face**, stepdown + ramp/helix entry | **partly** — pocket, face and stepdown are in; **ramp/helix entry is NOT** (every plunge is still vertical) |
-| **C4** | Post interface + Mach3 implementation, backplot overlay, G-code goldens | **partly** — Mach3 + LinuxCNC, backplot and panel are in; **no frozen G-code goldens** (the tests assert on substrings) |
+| **C3** | **Pocket** with islands, **Face**, stepdown + ramp/helix entry | **done** (ramp along the path; a helix for pockets too small to ramp in is the remaining case) |
+| **C4** | Post interface + Mach3 implementation, backplot overlay, G-code goldens | **done** (Mach3 + LinuxCNC, backplot, panel, one frozen `.nc` per dialect) |
 | **C5** | The closed loop as a ctest — **in-house, no dependency** | **done** |
 | later | LinuxCNC post · adaptive clearing (port Tusek) · indexed 4th axis · surfacing (opencamlib) · continuous 4-axis | each on demand |
 
@@ -226,23 +225,34 @@ workstream exists to prevent:
 3. The final depth pass lands **exactly** on the requested depth (short,
    never deep), which is a one-line rule and a scrapped part when wrong.
 
-## Still to build
+## Entry ramps and frozen G-code (the two items the table had over-ticked)
 
-Two items from phases otherwise complete, both found by re-reading this
-table against the code rather than by trusting the ticks:
+**Ramp entry.** Loop entries descend along the toolpath at 3°, instead of
+plunging straight down — a vertical plunge with a non-centre-cutting end mill
+rubs rather than cuts. The tool rapids to the height the previous pass
+already cut (air, by construction), then ramps; the lap then starts where the
+ramp finished, which is why the point list is rotated rather than restarted.
+A loop shorter than the ramp descends over exactly one lap — steeper than
+asked, bounded, and still not a plunge. Drilling still plunges, being a
+plunge by definition. A **helix** for pockets too small to ramp around is the
+one case left.
 
-1. **Ramp / helix entry (C3).** Every plunge is vertical today
-   (`Move::Kind::Plunge` straight down). That is fine in wood and plastic and
-   poor practice in metal with a non-centre-cutting end mill. It is a change
-   to `EmitLoop`'s entry: replace the straight plunge with a ramp along the
-   first segments of the loop, or a helix for a pocket. Perhaps half a
-   session, and the verifier already in place would show the difference.
-2. **Frozen G-code goldens (C4).** The post tests assert on substrings
-   (`T1 M6`, `S12000 M3`, no `nan`), which proves the pieces are present but
-   not that the FILE stopped changing. One golden `.nc` per dialect, diffed
-   byte-for-byte and regenerated deliberately, is what catches an unintended
-   change to the emitted program — the same discipline the document format
-   already has.
+Two things this surfaced, both worth knowing:
+
+- The verifier immediately reported *a rapid through material* on a test job
+  whose `topZ` was the part top rather than the stock top — with 1 mm of
+  margin above the part, the entry rapid drops into it. A true finding about
+  the job, and an argument for the panel's default to derive `topZ` from the
+  stock rather than the model.
+- The reported cut length is ~0.4% above twice the perimeter, because the
+  ramp ends mid-segment and the lap restarts there. The test tolerance says
+  so rather than hiding it.
+
+**Frozen G-code.** `tests/golden/cam-block-{mach3,linuxcnc}.nc`, compared
+byte-for-byte; substring checks prove the pieces are present, only a golden
+proves the file stopped changing. `DESIGNER_REFRESH_CAM_GOLDEN=1` regenerates
+them, and the diff is meant to be read before it is committed — every line of
+those files eventually moves a machine.
 
 ## Turning it off
 
