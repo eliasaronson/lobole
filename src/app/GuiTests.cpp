@@ -905,6 +905,18 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(op.topZ <= 12.0 + 1e-6); // inside the stock, not at z=0
     IM_CHECK(op.stepdown > 0.0);
 
+    // A second tool AND a second operation: tool numbers and operation ids
+    // are both small ints, so PushID(int) put them in one id space and ImGui
+    // raised "2 visible items with conflicting ID" in a modal. One of each
+    // never collides — which is why the first version of this test passed
+    // while the panel was broken in front of the user.
+    ctx->ItemClick("###cam_tools"); // expand the Tools header
+    ctx->Yield();
+    ctx->ItemClick("###cam_add_tool");
+    ctx->ItemClick("###cam_add_op");
+    ctx->Yield(3);
+    IM_CHECK(!ImGui::GetCurrentContext()->DebugDrawIdConflicts);
+
     // Generate: toolpaths exist, and the backplot draws them.
     ctx->ItemClick("###cam_generate");
     ctx->Yield(2);

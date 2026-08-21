@@ -156,6 +156,10 @@ void DrawCamPanel(AppState& state) {
 
   // --- tools -------------------------------------------------------------
   if (ImGui::CollapsingHeader("Tools###cam_tools")) {
+    // Namespaced: a tool number and an operation id are both small ints, and
+    // PushID(int) hashes them into the same id space — two rows then share an
+    // id and ImGui says so in a modal.
+    ImGui::PushID("tools");
     for (cam::Tool& t : setup->tools) {
       ImGui::PushID(t.number);
       ImGui::Text("T%d", t.number);
@@ -177,6 +181,7 @@ void DrawCamPanel(AppState& state) {
                             "does not guess feeds and speeds.");
       ImGui::PopID();
     }
+    ImGui::PopID(); // "tools"
     if (ImGui::SmallButton("Add tool###cam_add_tool")) {
       cam::Tool t;
       t.number = static_cast<int>(setup->tools.size()) + 1;
@@ -189,6 +194,7 @@ void DrawCamPanel(AppState& state) {
   // --- operations --------------------------------------------------------
   ImGui::SeparatorText("Operations");
   uint64_t removeOp = 0;
+  ImGui::PushID("ops");
   for (cam::Operation& op : setup->operations) {
     ImGui::PushID(static_cast<int>(op.id));
     if (ImGui::Checkbox("###enabled", &op.enabled))
@@ -244,6 +250,7 @@ void DrawCamPanel(AppState& state) {
     }
     ImGui::PopID();
   }
+  ImGui::PopID(); // "ops"
   if (removeOp != 0) {
     auto& ops = setup->operations;
     for (auto it = ops.begin(); it != ops.end(); ++it)
