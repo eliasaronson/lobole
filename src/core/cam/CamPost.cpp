@@ -390,6 +390,15 @@ bool PostProcess(const std::string& postId, const Setup& setup,
 
     if (opts.comments)
       e.Comment("op " + std::to_string(tp.operationId));
+    // The index this setup is cut at, stated before the first move of it and
+    // at safe Z. A file that assumes the table is already at A0 is a file
+    // that cuts the wrong face.
+    if (std::abs(setup.rotationA) > 1e-9 && !e.haveA) {
+      e.Retract(setup.safeZ);
+      e.Raw("G0 A" + Num(setup.rotationA, opts.decimals));
+      e.haveA = true;
+      e.a = setup.rotationA;
+    }
     for (size_t i = 0; i < tp.moves.size();) {
       const Move& m = tp.moves[i];
       Circle circle;
@@ -401,6 +410,12 @@ bool PostProcess(const std::string& postId, const Setup& setup,
         i = last + 1;
         continue;
       }
+      // C9: a rotary index NEVER happens with the tool down. The toolpath
+      // is supposed to arrive already retracted, but "supposed to" is how a
+      // cutter ends up sweeping an arc through the part while the trunnion
+      // turns — so the post enforces it rather than trusting its caller.
+      if (m.hasA && e.haveA && Emitter::Differs(m.a, e.a))
+        e.Retract(setup.safeZ);
       const char* code = m.kind == Move::Kind::Rapid ? "G0" : "G1";
       e.Motion(code, m.to, m.kind == Move::Kind::Rapid ? 0.0 : m.feed, m.hasA,
                m.a);

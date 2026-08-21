@@ -206,6 +206,46 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     return;
   }
 
+  if (slot == PickSlot::CamIndexFace) {
+    // C9: turn the table until this face looks at the spindle. Everything
+    // downstream then works in the rotated frame, so the same verbs apply to
+    // the side of a part as to its top.
+    cam::Setup* setup = ActiveCamSetup(state);
+    if (setup == nullptr) {
+      state.slotPick.miss = "add a setup first";
+      return;
+    }
+    glm::vec3 centre(0.0f), normal(0.0f), uAxis(0.0f);
+    bool found = false;
+    for (const Body& body : state.document->GetBodies()) {
+      if (body.createdBy != item.element.featureId)
+        continue;
+      const std::optional<int> idx = body.elementMap.Resolve(item.element.name);
+      if (idx && body.shape.FacePlane(*idx, centre, normal, uAxis))
+        found = true;
+      break;
+    }
+    if (!found) {
+      state.slotPick.miss = "pick a flat face — that one is curved";
+      return;
+    }
+    double degrees = 0.0;
+    if (!cam::SolveIndexA(glm::dvec3(normal), degrees)) {
+      state.slotPick.miss = "no rotation about X can bring that face up — it "
+                            "points along the rotary axis";
+      return;
+    }
+    setup->rotationA = degrees;
+    setup->safeZ = cam::DeriveSafeZ(*setup, state.document->GetBodies());
+    state.camSafeZEdit = static_cast<float>(setup->safeZ);
+    state.slotPick = {};
+    state.projectMetaDirty = true;
+    RefreshCamToolpaths(state);
+    RunCamVerification(state);
+    LOG_INFO("CAM: indexed to A{:.3f}", degrees);
+    return;
+  }
+
   const cam::OpType type = slot == PickSlot::CamPocketFloor
                                ? cam::OpType::Pocket
                                : cam::OpType::Profile;
@@ -249,6 +289,23 @@ void DrawCamToolWindow(AppState& state) {
   else
     ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),
                        "Z zero is not set yet");
+
+  const bool armedIndex =
+      armed && state.slotPick.slot == static_cast<int>(PickSlot::CamIndexFace);
+  ImGui::BeginDisabled(armed && !armedIndex);
+  if (ImGui::Button("Turn a face up###cam_index_face"))
+    ArmCamPick(state, PickSlot::CamIndexFace,
+               "Click the face to turn up under the spindle");
+  ImGui::EndDisabled();
+  ImGui::SetItemTooltip("Rotary (4th axis) jobs: index the table so this face "
+                        "points at the spindle, then use the verbs as usual");
+  ImGui::SameLine();
+  if (armedIndex)
+    ImGui::TextDisabled("pick a face…");
+  else if (setup != nullptr && std::abs(setup->rotationA) > 1e-9)
+    ImGui::TextDisabled("A %.2f°", setup->rotationA);
+  else
+    ImGui::TextDisabled("A 0° (3-axis)");
 
   ImGui::Separator();
   ImGui::TextDisabled("Machine it");

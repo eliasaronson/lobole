@@ -926,6 +926,116 @@ TEST_CASE("cam verify: leftover comes back as points to paint", "[cam]") {
   CHECK(cam::LeftoverPoints(none, 0.2).empty());
 }
 
+// --- C9: the indexed 4th axis ---------------------------------------------
+
+TEST_CASE("cam: an indexed setup cuts the face that was turned up", "[cam]") {
+  // The strongest test available for a rotary index: a part rotated in the
+  // MODEL and machined at A=0 must produce the same toolpath as the
+  // unrotated part machined by a setup indexed to the same angle. If the
+  // setup frame is wrong, the two disagree.
+  auto flat = BlockDoc(40, 30, 20);
+  cam::Setup direct = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 10.0;
+  op.stepdown = 0.0;
+  direct.operations.push_back(op);
+  const cam::Toolpath a = cam::GenerateAll(direct, flat->GetBodies())[0];
+  REQUIRE(a.error.empty());
+
+  // The same block, rotated 90 degrees about X in the model, cut by a setup
+  // indexed 90 degrees the other way — which puts it back.
+  auto turned = std::make_unique<Document>();
+  turned->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  {
+    // Rotate the body itself, so only the setup frame can undo it.
+    std::vector<Body>& bodies = const_cast<std::vector<Body>&>(
+        static_cast<const Document&>(*turned).GetBodies());
+    glm::mat4 m(1.0f);
+    m[1][1] = 0.0f;
+    m[1][2] = 1.0f;
+    m[2][1] = -1.0f;
+    m[2][2] = 0.0f; // +90 about X
+    for (Body& b : bodies)
+      b.shape = b.shape.Transformed(m);
+  }
+  cam::Setup indexed = BasicSetup();
+  indexed.rotationA = 90.0;
+  indexed.operations.push_back(op);
+  const cam::Toolpath b = cam::GenerateAll(indexed, turned->GetBodies())[0];
+  INFO(b.error);
+  REQUIRE(b.error.empty());
+
+  CHECK_THAT(b.CutLength(), WithinRel(a.CutLength(), 1e-6));
+  REQUIRE(b.moves.size() == a.moves.size());
+  for (size_t i = 0; i < a.moves.size(); i++) {
+    INFO("move " << i);
+    CHECK_THAT(b.moves[i].to.x, WithinAbs(a.moves[i].to.x, 1e-6));
+    CHECK_THAT(b.moves[i].to.y, WithinAbs(a.moves[i].to.y, 1e-6));
+    CHECK_THAT(b.moves[i].to.z, WithinAbs(a.moves[i].to.z, 1e-6));
+  }
+
+  // Every move of an indexed setup carries its A, so the file states which
+  // way the part is facing rather than assuming.
+  for (const cam::Move& m : b.moves) {
+    CHECK(m.hasA);
+    CHECK_THAT(m.a, WithinAbs(90.0, 1e-9));
+  }
+  for (const cam::Move& m : a.moves)
+    CHECK_FALSE(m.hasA); // a 3-axis job says nothing about A
+
+  // And the posted file turns the table BEFORE it goes down.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("linuxcnc", indexed, {b}, {}, gcode, &error));
+  const size_t aWord = gcode.find("A90");
+  REQUIRE(aWord != std::string::npos);
+  const size_t firstCut = gcode.find("\nG1 ");
+  REQUIRE(firstCut != std::string::npos);
+  CHECK(aWord < firstCut);
+  // …and the tool is at safe Z when it turns. Checked as the STATE at that
+  // line rather than as "the previous line is a retract": the retract is
+  // modal, so when the tool is already clear the post correctly emits
+  // nothing, and asserting on the text would fail for the right reason.
+  double modalZ = std::nan("");
+  bool sawIndexAtSafeZ = false;
+  size_t at = 0;
+  while (at < gcode.size()) {
+    const size_t end = std::min(gcode.find('\n', at), gcode.size());
+    const std::string line = gcode.substr(at, end - at);
+    at = end + 1;
+    const size_t zAt = line.find('Z');
+    if (zAt != std::string::npos && line[0] == 'G')
+      modalZ = std::stod(line.substr(zAt + 1));
+    if (line.find('A') != std::string::npos && line[0] == 'G') {
+      INFO("index at Z " << modalZ);
+      CHECK_THAT(modalZ, WithinAbs(indexed.safeZ, 1e-9));
+      sawIndexAtSafeZ = true;
+    }
+  }
+  CHECK(sawIndexAtSafeZ);
+}
+
+TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
+  double degrees = 0.0;
+  // Straight up already: A = 0.
+  REQUIRE(cam::SolveIndexA({0.0, 0.0, 1.0}, degrees));
+  CHECK_THAT(degrees, WithinAbs(0.0, 1e-9));
+  // Pointing at +Y: turn the table 90 degrees.
+  REQUIRE(cam::SolveIndexA({0.0, 1.0, 0.0}, degrees));
+  CHECK_THAT(degrees, WithinAbs(90.0, 1e-9));
+  // Pointing down: 180.
+  REQUIRE(cam::SolveIndexA({0.0, 0.0, -1.0}, degrees));
+  CHECK_THAT(std::abs(degrees), WithinAbs(180.0, 1e-9));
+  // Along the rotary axis itself: no rotation about X can bring it up, and
+  // the honest answer is to say so rather than pick the nearest angle.
+  CHECK_FALSE(cam::SolveIndexA({1.0, 0.0, 0.0}, degrees));
+  CHECK_FALSE(cam::SolveIndexA({0.7, 0.7, 0.0}, degrees));
+}
+
 // --- C8: adaptive clearing ------------------------------------------------
 
 TEST_CASE("cam: adaptive clears the same pocket, gently", "[cam]") {

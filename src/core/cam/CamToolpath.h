@@ -89,6 +89,25 @@ struct DerivedOp {
                                         const std::vector<Body>& bodies,
                                         OpType type, const ElementRef& target);
 
+// --- C9: the setup frame (indexed 4th axis) --------------------------------
+
+// The bodies as this setup sees them: rotated by -rotationA about X, so the
+// setup's "up" is +Z again and the whole 2.5D pipeline — sectioning, face
+// regions, stock bounds, the verifier — works unchanged on a part clamped in
+// a trunnion. This is what the plan meant by generating toolpaths in SETUP
+// SPACE: an indexed axis becomes a transform and an A word, not a rewrite.
+//
+// Element names survive: only the shape is transformed, so a machining
+// selection still resolves.
+[[nodiscard]] std::vector<Body> BodiesInSetupFrame(const Setup& setup,
+                                                   const std::vector<Body>& in);
+
+// The A that would turn `normal` to face the spindle, in degrees. Returns
+// false when there is none: a face pointing along X can never face +Z under
+// a rotation about X, and saying so beats rotating to the nearest wrong
+// thing.
+[[nodiscard]] bool SolveIndexA(const glm::dvec3& normal, double& degrees);
+
 // The rapid height for this job: clear of the stock, in absolute Z (which is
 // what the toolpath emits). The default in the struct is a bare 5 mm, which
 // sits INSIDE any stock taller than that — the verifier reported it as "rapid

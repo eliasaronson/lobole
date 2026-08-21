@@ -601,6 +601,46 @@ DerivedOp DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
   return out;
 }
 
+std::vector<Body> BodiesInSetupFrame(const Setup& setup,
+                                     const std::vector<Body>& in) {
+  if (std::abs(setup.rotationA) < 1e-9)
+    return in;
+  // Rotate the WORLD by -A about X: the part turns under a spindle that
+  // always points down, which is what an indexed trunnion does.
+  const double a = glm::radians(-setup.rotationA);
+  const double c = std::cos(a), s = std::sin(a);
+  glm::mat4 m(1.0f);
+  m[1][1] = static_cast<float>(c);
+  m[1][2] = static_cast<float>(s);
+  m[2][1] = static_cast<float>(-s);
+  m[2][2] = static_cast<float>(c);
+
+  std::vector<Body> out;
+  out.reserve(in.size());
+  for (const Body& b : in) {
+    Body copy = b; // keeps createdBy and the element map: names must survive
+    if (b.shape.IsValid())
+      copy.shape = b.shape.Transformed(m);
+    out.push_back(std::move(copy));
+  }
+  return out;
+}
+
+bool SolveIndexA(const glm::dvec3& normal, double& degrees) {
+  const double len = glm::length(normal);
+  if (len < 1e-9)
+    return false;
+  const glm::dvec3 n = normal / len;
+  // A rotation about X cannot move the X component, so a face with one
+  // cannot be brought to face the spindle.
+  if (std::abs(n.x) > 1e-3)
+    return false;
+  // R_x(A) * n = +Z has the solution A = atan2(ny, nz): sin A = ny and
+  // cos A = nz, which is consistent because ny^2 + nz^2 = 1 here.
+  degrees = glm::degrees(std::atan2(n.y, n.z));
+  return true;
+}
+
 double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies) {
   glm::dvec3 lo(0.0), hi(0.0);
   if (!StockBounds(setup, bodies, lo, hi))
@@ -921,7 +961,11 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
 } // namespace
 
 Toolpath Generate(const Setup& setup, const Operation& op,
-                  const std::vector<Body>& bodies) {
+                  const std::vector<Body>& rawBodies) {
+  // Everything below runs in setup space (C9). At A = 0 this is the identity
+  // and costs a vector copy of the body handles.
+  const std::vector<Body> framed = BodiesInSetupFrame(setup, rawBodies);
+  const std::vector<Body>& bodies = framed;
   Toolpath tp;
   tp.operationId = op.id;
   tp.toolNumber = op.toolNumber;
@@ -960,6 +1004,13 @@ Toolpath Generate(const Setup& setup, const Operation& op,
   if (tp.moves.empty() && tp.error.empty())
     tp.error = "this operation produced no toolpath — check its depths "
                "against the model";
+  // The index this setup is cut at rides on every move, so the post emits it
+  // and the machine is never asked to guess which way the part is facing.
+  if (std::abs(setup.rotationA) > 1e-9)
+    for (Move& m : tp.moves) {
+      m.hasA = true;
+      m.a = setup.rotationA;
+    }
   return tp;
 }
 
