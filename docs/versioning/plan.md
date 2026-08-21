@@ -95,7 +95,7 @@ checkpoints as project-wide named commits, and the `RestoreTo` fix — it used
 `git checkout <commit> -- .`, which leaves files added *after* the target
 commit in place, so restoring past a part's creation kept the part.
 
-### F7 — Merge + conflict handling — **not built** — [design: f7-merge-and-conflicts.md](f7-merge-and-conflicts.md)
+### F7 — Merge + conflict handling — **shipped 2026-08-21 (A+B+C, local branches only)** — [design: f7-merge-and-conflicts.md](f7-merge-and-conflicts.md)
 What F5 and F6 each deferred in a sentence, costed. The finding that reorders
 it: `GitVault` is linear-only (no branch, merge, remote or fetch), so a
 conflict can only arrive from a terminal or a sync folder — the resolution UI
@@ -106,14 +106,13 @@ parsed as features, a union merge for `index.json` and the eight id-keyed
 collections, and a reference-integrity pass before the merge commit), C the
 Conflicts panel (~2–3 d). **5–9 days without remotes.**
 
-Two things the design changes about the plan above:
-- **Non-sequential feature ids are a prerequisite, not a nicety.** `nextId++`
-  lets two offline sides mint the same id, which git merges *cleanly* (two
-  files, no overlap) and no conflict UI can see. Half a day plus a `kVersion`
-  bump deletes the class.
-- **The recommended first move is triage, not resolution** (~1 day): make the
-  existing refusals useful — list the collisions in CAD language and hand the
-  project to the terminal panel, which already opens in the project directory.
+Two decisions the build settled:
+- **Feature ids stay sequential.** Random 64-bit ids would delete the
+  duplicate class, but the id IS the filename and F3 chose that for
+  readability. `RenumberDuplicate` handles the class instead — and *refuses*
+  rather than guessing when anything still points at the contested id.
+- **The panel exists only when there is something to resolve.** No format
+  change; `kVersion` does not move (git objects are not the document format).
 
 ## Recommended order
 

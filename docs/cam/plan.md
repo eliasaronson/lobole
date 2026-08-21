@@ -1,10 +1,13 @@
 # CAM — 2.5D milling — plan
 
 > Status: **C1–C5 BUILT 2026-08-21**, including the two items this table
-> briefly claimed and did not have (ramp entry, frozen G-code goldens). The roadmap's "CAM out of scope" is
+> briefly claimed and did not have (ramp entry, frozen G-code goldens), and
+> reached through the verbs of [gui.md](gui.md) rather than a parameter
+> editor. The roadmap's "CAM out of scope" is
 > reversed. C5 shipped as an in-house height-map verifier rather than the
 > CAMotics dependency this doc originally planned — see "Verification, and
-> why not CAMotics".
+> why not CAMotics". **C6–C9 are designed and not built** — see
+> [Phase 2](#phase-2--what-v1-deferred-designed).
 >
 > Scope decided at writing: **2.5D first**, with the data model shaped so a
 > **4th (rotary) axis** is an addition rather than a redesign. Continuous
@@ -192,10 +195,14 @@ tool table), arc output (see the risk below), coolant, and safe-Z retract.
 |---|---|---|
 | **C1** | `cam::Setup` document object: stock, work frame, tool table, panel + RPCs | **done** |
 | **C2** | Slice → Clipper2 pipeline; **Profile** (with tabs) and **Drill** | **done** |
-| **C3** | **Pocket** with islands, **Face**, stepdown + ramp/helix entry | **done** (ramp along the path; a helix for pockets too small to ramp in is the remaining case) |
+| **C3** | **Pocket** with islands, **Face**, stepdown + ramp/helix entry | **done** (ramp along the path; the helix for pockets too small to ramp around is C6 below) |
 | **C4** | Post interface + Mach3 implementation, backplot overlay, G-code goldens | **done** (Mach3 + LinuxCNC, backplot, panel, one frozen `.nc` per dialect) |
 | **C5** | The closed loop as a ctest — **in-house, no dependency** | **done** |
-| later | LinuxCNC post · adaptive clearing (port Tusek) · indexed 4th axis · surfacing (opencamlib) · continuous 4-axis | each on demand |
+| **C6** | Helix entry for pockets too small to ramp around | **designed, not built** — [Phase 2](#phase-2--what-v1-deferred-designed) |
+| **C7** | Arcs (`G2`/`G3`) in the posted file | **designed, not built** — [Phase 2](#phase-2--what-v1-deferred-designed) |
+| **C8** | Adaptive clearing (vendor Tusek's `Adaptive2d`) | **designed, not built** — [Phase 2](#phase-2--what-v1-deferred-designed) |
+| **C9** | Indexed 4th axis (one A per setup) | **designed, not built** — [Phase 2](#phase-2--what-v1-deferred-designed) |
+| later | 3-axis surfacing (in-house Z-map, or vendor opencamlib) · continuous 4-axis · round stock | each on demand, and none of them costed |
 
 ## What C1–C4 shipped
 
@@ -275,6 +282,198 @@ presentation:
   (`Inspection::touched`). Measuring it over the whole stock made every
   partial job report the unmachined remainder as a failure, which is the
   fastest way to teach someone to ignore a verdict.
+
+## Phase 2 — what v1 deferred, designed
+
+> Status: **design, awaiting sign-off** (2026-08-21). Nothing in this section
+> is built. Written after costing the four against the code and against the
+> clones in `~/Documents/CAD/CAM`, which changed one estimate materially: see
+> C8.
+>
+> **Cut a real part first.** Every number below assumes the current output is
+> correct in the ways a simulation can check, and the GUI round found three
+> defects that only a screenshot caught. The first piece of wood will reorder
+> this list better than any estimate.
+
+Excluded on purpose: **3-axis surfacing**, because it breaks the 2.5D framing
+(stepover semantics, the Setup model and the verb all need rethinking) and
+because it is the item least aligned with cutting plates on a hobby mill.
+When it is wanted, the in-house route is cheaper than it looks —
+`CamVerify::SampleModel` is already a flat-tool drop cutter on a grid, and
+what it lacks is a tool-profile dilation — but opencamlib (14 322 lines, not
+in nixpkgs) computes exact cutter-location points against triangles and is
+the better answer if accuracy ever matters more than the dependency.
+
+Order matters between these four: **C6 → C7 → C8 → C9**. C6 helps
+immediately and is half a session. C7 makes everything after it post
+compactly. C8 brings its own helix entry, so doing it before C6 would leave
+the concentric pocket and the profile — which keep their ramp — still
+plunging steeply on small loops. C9 is independent; do it when the machine
+has the axis.
+
+### C6 — Helix entry (~½ session)
+
+Today `EmitLoop` clamps the ramp to one lap: `rampLen = min(descend /
+tan(3°), perimeter)`. A loop shorter than the ramp descends over exactly one
+lap — bounded and not a plunge, but on a 10 mm pocket with a 6 mm cutter that
+lap is short and the descent is steep. The fix is to descend on a **helix
+inside the region** instead of on the ring.
+
+The region's largest inscribed circle comes nearly free: `GeneratePocket`
+already offsets inward until the result is empty, and a region shrinks to
+nothing exactly when the offset exceeds its inscribed radius — so the last
+non-empty `inset` brackets that radius to within one step-over, and the
+centroid of that innermost ring is where the helix goes. Enough to size a
+helix; a bisection refines it if it ever matters. This is a hint computed in
+the loop that already runs, passed into `EmitLoop`, not a new geometric pass.
+
+- Helix radius = inscribed radius − tool radius, i.e. the circle the tool
+  *centre* can walk. When that is not positive the pocket is barely wider
+  than the cutter: keep today's one-lap descent, which is correct behaviour
+  rather than a fallback to apologise for.
+- Segment count from the same chord tolerance the section uses (0.02 mm), not
+  a literal count — the defaults rule.
+- The helix is emitted at the **start** of the depth pass, then the rings;
+  the lead-out from the helix to the first ring is a cut at depth, so it must
+  stay inside the cleared circle.
+- `Drill` still plunges, being a plunge by definition. `Profile` keeps the
+  along-the-path ramp: there is no inside to helix into.
+- Once C7 lands, the post can fit the helix into real helical arcs. Until
+  then it is a polyline, which is correct and verbose.
+
+*Verification:* a pocket small enough that the ramp does not fit descends by
+helix and emits no `Plunge`; every helix point sits at least a tool radius
+inside the wall (the check that catches a helix radius computed from the wall
+instead of the tool centre); the descent angle never exceeds 3°; `MinZ` is
+still exact.
+
+### C7 — Arcs, `G2`/`G3` (~1 session)
+
+**Fit at post time, not in the toolpath.** The backplot draws `Move` lists
+and the verifier consumes the posted file; keeping `Toolpath` a polyline
+means the picture, the height-map simulator and every existing test are
+untouched, and only two places learn about arcs. A `Move::Kind::Arc` would
+instead reach serialization, the backplot, the sweep in `Simulate` and the
+goldens.
+
+- **Where:** a pass in `CamPost.cpp` over the move list before emission,
+  recognising runs of points that fit a circle, emitting `G2`/`G3 X Y I J`.
+- **Tolerance:** the same 0.02 mm chord deflection the section used to
+  produce the polyline. That is the point — the polyline is already an
+  approximation of a real arc at that tolerance, so a fit tighter than it
+  emits arcs only where an arc actually was, and never invents one across a
+  corner.
+- **`I`/`J` are incremental, and the mode word goes in the preamble.**
+  LinuxCNC defaults to incremental centres; Mach3 is settable (`G90.1` /
+  `G91.1`). Emitting `I`/`J` without stating the mode puts the arc centre at
+  the machine origin on a machine configured the other way — a full-rapid
+  arc across the table. This is the one genuinely dangerous line in the phase,
+  so the preamble states it explicitly per dialect rather than relying on a
+  default.
+- **`G17` only** (XY plane), which the preamble already emits.
+- **Flat arcs in v1.** A helical arc (an arc with a `Z` word) is legal in
+  both dialects and is a one-line extension afterwards, but its risk profile
+  is different enough to want the flat case proven on the machine first.
+- **The verifier learns to parse them** and converts each arc to chords at
+  parse time, so `Simulate` is untouched and the check stays exact for what
+  it sees.
+- Both goldens regenerate. The diff gets read before it is committed.
+
+*Verification:* a circular pocket posts as arcs rather than hundreds of `G1`s
+(line count drops, `G2|G3` appears). The strongest test available: post the
+same job twice, once with fitting off and once on, and require the verifier's
+gouge and leftover to agree within tolerance — a bad fit shows up as a
+geometry difference rather than as a file that merely looks tidier. Plus a
+rejection test: a deliberately loose tolerance must not produce an arc across
+a corner.
+
+### C8 — Adaptive clearing (~1–1½ sessions)
+
+The survey said "port Tusek's `Adaptive2d`, 4.6k lines, built on Clipper 1".
+Reading it changed the estimate: **the public interface is Clipper-free.**
+`Execute(stockPaths, paths, clearedPaths, progressFn)` takes `DPaths` —
+`vector<vector<pair<double,double>>>` in millimetres — and returns
+`AdaptiveOutput` whose `AdaptivePaths` are `(MotionType, DPath)` pairs, also
+in millimetres. Clipper1 is an internal detail. So this is vendoring and
+bridging, not porting.
+
+- **Vendor** `deps/libarea/`: `Adaptive.{cpp,hpp}` (4 618 + 291 lines,
+  LGPL-2.1-or-later, compatible with this AGPL-3.0 app) and libarea's
+  Clipper1 (`clipper.{cpp,hpp}`, 5 177 lines, BSL-1.0) because Adaptive still
+  uses it internally. Both licences go in the packaging doc. **Pin the commit
+  we copy from and record it** — FreeCAD's header currently includes *both*
+  `clipper.hpp` and `clipper2/clipper.h`, so this file is mid-migration and
+  "we copied it from FreeCAD" will not be enough to reproduce later.
+- **Bridge** ≈ 60 lines: `cam::Loop` ↔ `DPaths`, both already in millimetres.
+- **`OpType::Adaptive`** is a new serialized value ("adaptive"), so it is a
+  format change: **`kVersion` 59 plus a golden pair**, per the standing rule.
+- **Parameters map straight across:** `stepOverFactor` from `stepover`,
+  `stockToLeave`, `tolerance` from the chord deflection,
+  `helixRampTargetDiameter`/`MinDiameter` from the tool, `opType` from
+  `Side`.
+- **The output mapping is the real work.** Three motion types:
+  `mtCutting` → `Cut` at feed; `mtLinkClear` → a move at depth through
+  already-cleared material; `mtLinkNotClear` → retract to safe Z, rapid,
+  re-enter. Getting the third one wrong drags the cutter through solid
+  material at feed — which is exactly what the verifier's
+  rapid-through-material check catches, so the test already exists.
+- **Seven failure flags** (`StartPointNotFound`, `LeadPathFailed`,
+  `UnclearedAreaRemains`, …) become `Toolpath::error` strings in words. A
+  boolean would be a regression against the refusal discipline the rest of
+  the workstream holds.
+- **When it is used:** the verb stays one verb. Adaptive is chosen
+  automatically for pockets deeper than one tool diameter — the regime where
+  low radial engagement at full depth pays, and where a small spindle
+  benefits most — with the Advanced disclosure able to force either
+  strategy. "Two clicks, nothing typed" survives.
+- **Runtime:** `Execute` takes a progress callback and can be slow on a large
+  region. v1 runs it synchronously and states the region cap; if it is slow
+  in practice the app already has the `TopoJob`/`StudyJob` async pattern to
+  move it onto.
+
+*Verification:* an adaptive pocket and a concentric pocket of the same
+region leave the same material (compare through the verifier's height map,
+not by comparing move lists); no link move crosses uncleared material
+(`rapidsThroughStock == 0`); the radial engagement never exceeds the
+requested step-over, measurable as the cleared-area increment per move; and
+a golden `.nc`, because this is another file that eventually moves a machine.
+
+### C9 — Indexed 4th axis (~1–1½ sessions)
+
+The data model was shaped for this and the shape held: `Setup::rotationA`
+exists, `Move` carries an optional `A`, and the post already emits an `A`
+word when a move has one. Nothing has ever set them. What is missing is the
+frame, the pick, and the safety rule.
+
+1. **`SetupFrame(setup)`** → a transform. Slicing runs on the bodies
+   transformed by its inverse, so "up" in the rotated setup is +Z again and
+   the entire existing pipeline — `SectionLoops`, `PickedFaceRegion`,
+   `StockBounds`, the verifier — works unchanged. One
+   `BRepBuilderAPI_Transform` per setup, cached beside its toolpaths. This is
+   the whole reason the plan insisted toolpaths be generated in setup space.
+2. **"Rotate to this face"**: click a face, solve for the A that puts its
+   normal on +Z. Refuse when there is no solution — a face pointing along ±X
+   can never face the spindle under an A-only rotation, and saying so is more
+   useful than rotating to the nearest wrong thing.
+3. **Posting several setups into one file.** `PostProcess` takes one setup
+   today; it takes a list, with a retract, the `A` move, and an optional
+   `M0` between them. **The safety rule: a rotation is only ever emitted with
+   the tool at safe Z, and the post asserts that rather than trusting its
+   caller.** A rotary move with the tool down is the 4th-axis equivalent of
+   the rapid-through-stock bug, and it deserves the same treatment.
+4. **Verification per setup frame**: the height map is Z-up, so each setup is
+   checked in its own frame with the model transformed the same way —
+   `Inspect` needs no change. The strongest test: a part rotated 90° in the
+   model, machined by a setup at A=0, must produce the same toolpath as the
+   unrotated part machined by a setup at A=90°.
+5. **Stock stays a box** in v1 — an indexed job on a trunnion is usually
+   plate work. Round stock about the A axis is deferred with the rest of the
+   rotary work.
+
+Explicitly not this phase: **continuous 4-axis** (simultaneous XYZA). It
+needs a different toolpath representation, because feed along a rotary axis
+is not a linear distance, and a different verifier, because a planar height
+map cannot represent a wrapped surface. It is a workstream, not a phase.
 
 ## Turning it off
 

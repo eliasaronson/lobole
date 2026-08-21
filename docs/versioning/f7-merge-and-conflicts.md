@@ -1,8 +1,10 @@
 # F7 — Merge and conflict handling — design
 
-> **Status: not built.** This is the scoping [F5](plan.md#f5--git-integration)
-> and [F6](f6-history-ui.md) both deferred in one sentence. Written
-> 2026-08-21 against the shipped engine; nothing here is promised for a date.
+> **SHIPPED 2026-08-21** — phases A, B and C. This began as the scoping
+> [F5](plan.md#f5--git-integration) and [F6](f6-history-ui.md) both deferred
+> in one sentence; the sections below are the design as written, with a
+> "What shipped" section at the end recording where building it changed the
+> plan. Local branches only — remotes are still out.
 
 ## Why this exists
 
@@ -73,15 +75,19 @@ conflict are the same shape.
 either side can be taken and rebuilt. Worth stating explicitly so nobody
 spends a day on it.
 
-## Prerequisite: non-sequential ids
+## The id decision (settled 2026-08-21: keep them sequential)
 
-Random 64-bit ids instead of `nextId++` **delete class 3 entirely** — two
-offline sides can no longer mint the same id, so the collision that git
-cannot see stops existing. It is a format change wanting a `kVersion` bump
-and a golden pair, so roughly half a day, and it is filed today as a
-"still open, when two people actually share a project" nicety. It is not a
-nicety; it is cheaper than the code that would otherwise have to handle its
-consequences, and it should land before any of the phases below.
+Random 64-bit ids instead of `nextId++` would **delete class 3 entirely** —
+two offline sides could no longer mint the same id. The first draft of this
+doc called that a prerequisite. On a closer look the trade is not one-sided:
+**the id IS the filename**, and F3 chose `15-extrude.json` so that a git diff
+reads as "modified extrude 15". Opaque `7f3a9c2b1d4e5f60-extrude.json` names
+give that up, and every test, script and golden that assumes ids 1, 2, 3
+regenerates.
+
+Decision (Elias): keep sequential ids and handle the duplicate class in F7.
+`RenumberDuplicate` is what that costs, and it turned out cheaper than
+expected because it **refuses instead of guessing** (below).
 
 ## Phases
 
@@ -171,6 +177,85 @@ These are real today and independent of whether F7 is ever built.
 3. **Do the id change now, regardless?** It is half a day, it is a `kVersion`
    bump, and it removes a class of silent data loss whether or not F7 is
    ever built.
+
+## What shipped, and what building it changed
+
+Phases A, B and C, 2026-08-21. `GitVault` gained branch/switch/merge,
+`Unmerged`, three-stage reads, `ResolveWith`/`AbortMerge`/`CommitMerge`;
+`core/io/ProjectMerge.{h,cpp}` is the CAD-level model; `ui/ConflictsPanel`
+is the panel; ten RPCs (`branch_*`, `conflict_*`, `merge_*`). 35 new
+assertions in `test_gitvault.cpp`, 19 cases in `test_projectmerge.cpp`, two
+`conflicts/*` GUI tests.
+
+Six things the build changed about the plan above.
+
+**The panel only exists when there is something to resolve.** The first
+sketch had it as a permanent tab beside History. A tab that says "no
+conflicts" every day of the year is noise, and this is the one panel whose
+*absence* is the good news, so `DrawConflictsPanel` returns before `Begin`
+when the scan is clean. Its appearance is the notification.
+
+**"Finish" has to sweep the auto-resolvable conflicts itself.** Caught by
+the GUI test, not by reasoning: any project with baked geometry conflicts on
+`geometry/index.json` (only `*.brep` is marked binary, not the index beside
+them), so `CommitMerge` refused on an unmerged path even though the panel
+showed nothing left to decide. `FinishMerge` now resolves every
+`autoResolvable` conflict before verifying. They stay listed with a button so
+nothing is silent — but nobody clicks "Merge both" once per index.
+
+**Renumbering refuses instead of guessing, and that is the feature.** The
+plan described a graph rewrite: remint an id, then chase every reference
+(`createdBy`, toponaming, mates, drawing dims, config overrides). There is no
+reference visitor to hang that on, and a hand-maintained key table would rot
+into silent breakage. Instead `RenumberDuplicate` scans for anything still
+pointing at the contested id and **refuses when it finds one**, naming the
+file — because a `sketch_id: 15` genuinely cannot say which of two features
+it meant, and picking one would quietly re-parent someone's geometry. The
+common case (both sides appended a new feature nothing references yet)
+resolves automatically; the ambiguous case is reported. The key list is
+inverted for the same reason: only *known-foreign* id spaces (`entity_id`,
+`body_id`, `part_id`, …) are excluded, so a feature type added later
+over-reports rather than under-reports.
+
+**Ordering in the union merge is not "append".** Both sides appending after
+the same entry produced `[1,2,20,10]` — their addition in front of ours.
+Their additions now anchor to the entry that preceded them *on their side*
+and then step over ours. Order is not cosmetic in a feature list: an extrude
+regenerates after the sketch it uses.
+
+**A bug under the whole thing: `modify_feature` destroyed stable ids.**
+Found by driving the new RPCs end to end, not by any test.
+`Document::ReplaceFeature` swapped the incoming feature in wholesale, and the
+`modify_feature` RPC sends parameters with no `"id"` — so every RPC-driven
+edit silently reset the feature's identity to 0. On disk that is
+`features/0-box.json` with `"features": [0]` in the index, and every
+reference that named the old id (`sketch_id`, toponaming, mates, drawing
+dimensions) dangles. Stable, never-reused ids are the F1 contract that F3's
+one-file-per-id layout and every line of F7 rest on, so this was sand under
+the foundation. `ReplaceFeature` now inherits the old id when the
+replacement carries none, and keeps an explicit one when it does.
+
+`headless_smoke` had encoded the old behaviour — it manufactured a dangling
+datum reference by omitting the id, with a comment claiming that produced "a
+fresh feature (new id)". It produced id 0. The test now names a different id
+explicitly, which is the honest way to say "this is a different feature".
+
+**The panel's language cost a rename.** `history/rows_fit_at_a_large_font`
+(F6's guard) failed the moment the branch section landed: the collapsed
+TreeNode label "Separate lines of work" was 234 px against a 218 px panel at
+1.4× font. It is "Lines of work" now, the status line wraps, and the two
+row buttons go through the panel's existing measured-fit helper. The F6
+lesson held exactly as written — and the guard earned its keep on the first
+new section added since.
+
+### Still not done
+
+- **Remotes.** Deliberate. Local branches plus a second clone of the folder
+  covers one person with two machines; push/pull is auth misery.
+- **Cross-document references** in the duplicate-id scan (an assembly mate
+  into a part). Id spaces are per-document, so scanning the whole project
+  would report collisions that are not references. `Verify` is the backstop.
+- The **disk-change gap** below is still open and still live.
 
 ## Verification sketch
 
