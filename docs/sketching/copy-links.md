@@ -1,11 +1,14 @@
-# Linked sketch copies (design — awaiting sign-off)
+# Linked sketch copies (design + as-built)
 
-> Status: **draft 2026-07-18**. The unlinked half is shipped: Ctrl+C copies
-> the selected sketch entities, Ctrl+V pastes plain copies (fresh ids, small
-> offset) into the same or any other sketch — including another part's,
-> since the clipboard lives in AppState. This doc designs the LINKED variant
-> the user asked for: pasted copies that keep tracking their source until
-> the link is deliberately broken.
+> Status: **phase 1 SHIPPED 2026-07-19** (`700f1b4`, format v35) — the design
+> below was signed off and built as written; only **phase 2 (cross-part
+> links)** remains, and it was always scheduled after phase 1 proved the UX.
+> Ctrl+C / Ctrl+V paste plain copies; **Ctrl+Shift+V pastes linked copies**
+> that re-sync from their source until the link is broken.
+>
+> (This banner said "draft, awaiting sign-off" until 2026-08-21 — four weeks
+> after the work landed. Found by auditing the plans for unfinished projects,
+> which is exactly the kind of thing a stale status line makes impossible.)
 
 ## The ask
 
@@ -78,8 +81,36 @@ constraints survive). One undoable edit.
 A new `derived_ops` kind `"linked_copy"` on the sketch feature (format
 bump + golden when it lands, per policy).
 
-## Sign-off questions
+## Sign-off questions — all three answered yes
 
-1. Solver-fixed outputs (anchors, not free geometry) — agreed?
-2. Phase 1 = within-part only, cross-part pastes stay unlinked for now?
-3. `Ctrl+Shift+V` for paste-linked?
+1. Solver-fixed outputs (anchors, not free geometry) — **yes.**
+2. Phase 1 = within-part only, cross-part pastes stay unlinked — **yes.**
+3. `Ctrl+Shift+V` for paste-linked — **yes.**
+
+## What shipped (phase 1, 2026-07-19)
+
+Built as designed, with the phase boundary held:
+
+- `DerivedKind::LinkedCopy` + `DerivedOp::sourceSketchId`. Same-sketch
+  sources replay in `RegenerateDerived` using the existing id-stable instance
+  mapping; **cross-sketch** sources replay in `SketchFeature::Execute`, where
+  the source — required to be earlier in the history — has already executed
+  (`ReplayLinkedCopyFrom`).
+- Outputs are solver-**fixed** anchors: points, radii and arc angles are held
+  out of the unknowns (`SketchSolver.cpp`), so the target's own constraints
+  can reference them while the sync owns their position. They render violet.
+- `SketchFeature::BreakLink(opIndex)` removes the op and keeps its outputs as
+  free geometry with ids intact — one undo step, so downstream profile
+  regions and constraints survive. Reachable per op from the Sketch panel.
+- A vanished source sketch or entity **fails regeneration with a break-link
+  hint** rather than desyncing silently.
+- Cross-part pastes, and pastes whose source is later in the history, fall
+  back to a plain unlinked paste with an `actionMsg` saying why.
+- Format **v35** with a golden pair (a linked circle extruded through a
+  second sketch); core tests cover sync, break-link independence, and the
+  vanished-source error (`tests/test_sketch_feature.cpp`,
+  `tests/test_sketch_solver.cpp`).
+
+**Still phase 2:** cross-part links, for the reason stated above — regen
+would have to resolve another part's document and dirty dependents, widening
+its input surface. Unlinked cross-part paste remains the behaviour until then.
