@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "core/io/GitVault.h"
 #include "ui/AppActions.h"
+#include "ui/ConflictsPanel.h"
 #include "ui/FileDialogs.h"
 
 #include "imgui.h"
@@ -62,7 +63,49 @@ void RefreshHistory(AppState& state, bool force) {
   state.historyUncommitted = GitVault::Dirty(state.projectPath);
 }
 
+void RefreshBranches(AppState& state, bool force) {
+  if (!force && !state.branches.empty() &&
+      state.historyPath == state.projectPath)
+    return;
+  state.branches = GitVault::Branches(state.projectPath);
+  state.currentBranch = GitVault::CurrentBranch(state.projectPath);
+}
+
 } // namespace
+
+bool SwitchToBranch(AppState& state, const std::string& branch,
+                    std::string* error) {
+  if (!GitVault::SwitchBranch(state.projectPath, branch, error))
+    return false;
+  state.historyStamp = -1.0;
+  InvalidateConflicts(state);
+  // The working tree is a different project now; the documents in memory are
+  // the old one, and the next save would write them straight back over it.
+  return OpenProject(state, state.projectPath, error);
+}
+
+bool MergeBranch(AppState& state, const std::string& branch,
+                 std::string* error) {
+  std::string mergeError;
+  const GitVault::MergeStatus status =
+      GitVault::Merge(state.projectPath, branch, &mergeError);
+  state.historyStamp = -1.0;
+  InvalidateConflicts(state);
+  if (status == GitVault::MergeStatus::Failed) {
+    if (error)
+      *error = mergeError;
+    return false;
+  }
+  // A conflicted merge is not a failure — it is the state the Conflicts
+  // panel exists for, and it appears on its own as soon as the scan runs.
+  if (status == GitVault::MergeStatus::Conflicted) {
+    LOG_INFO("Merge of {} left conflicts to resolve", branch);
+    return true;
+  }
+  if (status == GitVault::MergeStatus::UpToDate)
+    return true;
+  return OpenProject(state, state.projectPath, error);
+}
 
 bool CanVersionProject(const AppState& state) {
   // `.dsgn` is always the directory format (Serialization: IsDirFormatPath),
@@ -199,7 +242,7 @@ void DrawHistoryPanel(AppState& state) {
   // room for it and on its own line when there is not — a panel dragged
   // narrow (or a large font) must not push the button off the edge.
   const auto statusButton = [&style](const char* label,
-                                     const char* id) -> bool {
+                                     const std::string& id) -> bool {
     const float width =
         ImGui::CalcTextSize(label).x + style.FramePadding.x * 2.0f;
     const float used = ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x +
@@ -336,6 +379,74 @@ void DrawHistoryPanel(AppState& state) {
       actionError.clear();
     else
       actionError = error.empty() ? "could not restore that version" : error;
+  }
+
+  // Branches (F7). Collapsed by default: the linear history above is what
+  // this panel is for, and most projects never need a second line of work.
+  // But without a way to make one, the app could not produce a merge at all
+  // — which is why the conflict UI F5 and F6 both deferred had no state to
+  // serve for four weeks.
+  ImGui::Separator();
+  if (ImGui::TreeNode("Lines of work")) {
+    RefreshBranches(state, false);
+    // Wrapped, not a fixed line: a branch name is user prose and the panel
+    // can be dragged narrow.
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("Working on: %s", state.currentBranch.empty()
+                                              ? "(none)"
+                                              : state.currentBranch.c_str());
+    ImGui::PopTextWrapPos();
+    static char branchBuf[96] = {};
+    const float startWidth =
+        ImGui::CalcTextSize("Start").x + style.FramePadding.x * 2.0f;
+    ImGui::SetNextItemWidth(-(startWidth + style.ItemSpacing.x));
+    const bool named = ImGui::InputTextWithHint(
+        "###hist_branch", "Start a separate line...", branchBuf,
+        sizeof(branchBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(branchBuf[0] == '\0' || dirty);
+    const bool start = ImGui::Button("Start###hist_branch_go");
+    ImGui::EndDisabled();
+    if ((named || start) && branchBuf[0] != '\0') {
+      std::string error;
+      if (GitVault::CreateBranch(state.projectPath, branchBuf, true, &error)) {
+        branchBuf[0] = '\0';
+        actionError.clear();
+        state.historyStamp = -1.0;
+        RefreshBranches(state, true);
+      } else {
+        actionError = error;
+      }
+    }
+
+    for (int i = 0; i < static_cast<int>(state.branches.size()); i++) {
+      const std::string& branch = state.branches[i];
+      if (branch == state.currentBranch)
+        continue;
+      const std::string rowId = std::to_string(i);
+      ImGui::TextUnformatted(branch.c_str());
+      ImGui::BeginDisabled(dirty);
+      if (statusButton("Switch to", ("###hist_switch" + rowId).c_str())) {
+        std::string error;
+        if (SwitchToBranch(state, branch, &error)) {
+          actionError.clear();
+          RefreshBranches(state, true);
+        } else {
+          actionError = error;
+        }
+      }
+      if (statusButton("Bring in", ("###hist_merge" + rowId).c_str())) {
+        std::string error;
+        if (!MergeBranch(state, branch, &error))
+          actionError = error;
+        else
+          actionError.clear();
+      }
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && dirty)
+        ImGui::SetTooltip("Save first.");
+    }
+    ImGui::TreePop();
   }
 
   if (!actionError.empty()) {

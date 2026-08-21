@@ -12,6 +12,7 @@
 #include "ui/CamTool.h"
 #include "ui/CommandPalette.h"
 #include "ui/ConfigurationsPanel.h"
+#include "ui/ConflictsPanel.h"
 #include "ui/DockLayout.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h"
@@ -714,6 +715,7 @@ void DrawUI(AppState& state) {
   // PROJECT, so the history reads the same from a part, an assembly or a
   // drawing tab (F6).
   DrawHistoryPanel(state);
+  DrawConflictsPanel(state);
   DrawCamPanel(state);
   DrawTerminalPanel(state);
   DrawSettingsWindow(state);

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 
 #if defined(_WIN32)
 // _pclose returns the child exit code directly; cmd.exe's null device is "nul".
@@ -50,6 +51,67 @@ int RunGit(const std::string& dir, const std::string& args,
   if (output)
     *output = captured;
   return status == -1 ? -1 : GIT_EXIT_STATUS(status);
+}
+
+// Like RunGit, but folds stderr into the captured output: for a merge or a
+// branch switch the REASON git refused is the message the panel shows, and
+// discarding it would leave "it did not work".
+int RunGitVerbose(const std::string& dir, const std::string& args,
+                  std::string* output) {
+  const std::string cmd = "git -C " + Quote(dir) + " " + args + " 2>&1";
+  FILE* pipe = ::popen(cmd.c_str(), "r");
+  if (!pipe)
+    return -1;
+  std::array<char, 4096> chunk{};
+  std::string captured;
+  size_t n = 0;
+  while ((n = ::fread(chunk.data(), 1, chunk.size(), pipe)) > 0)
+    captured.append(chunk.data(), n);
+  const int status = ::pclose(pipe);
+  if (output)
+    *output = captured;
+  return status == -1 ? -1 : GIT_EXIT_STATUS(status);
+}
+
+// Trailing newline off a one-line `git` answer.
+std::string FirstLine(std::string s) {
+  const size_t eol = s.find('\n');
+  if (eol != std::string::npos)
+    s.resize(eol);
+  while (!s.empty() && (s.back() == '\r' || s.back() == ' '))
+    s.pop_back();
+  return s;
+}
+
+// Split newline-separated `git` output, dropping the trailing blank.
+std::vector<std::string> Lines(const std::string& text) {
+  std::vector<std::string> out;
+  size_t pos = 0;
+  while (pos < text.size()) {
+    const size_t eol = text.find('\n', pos);
+    const std::string line =
+        text.substr(pos, eol == std::string::npos ? eol : eol - pos);
+    pos = eol == std::string::npos ? text.size() : eol + 1;
+    if (!line.empty())
+      out.push_back(line);
+  }
+  return out;
+}
+
+// Space-separated token count of one line.
+int CountTokens(const std::string& line) {
+  int n = 0;
+  size_t pos = 0;
+  while (pos < line.size()) {
+    while (pos < line.size() && line[pos] == ' ')
+      ++pos;
+    if (pos >= line.size())
+      break;
+    ++n;
+    while (pos < line.size() && line[pos] != ' ')
+      ++pos;
+  }
+  return n;
 }
 
 // Inline identity: commits must work on CI and fresh machines with no
@@ -200,6 +262,288 @@ bool RestoreTo(const std::string& dir, const std::string& commit,
   if (RunGit(dir, "read-tree --reset -u " + Quote(commit)) != 0) {
     if (error)
       *error = "git read-tree failed (unknown commit?)";
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Branch + merge (F7)
+// ---------------------------------------------------------------------------
+
+std::vector<std::string> Branches(const std::string& dir) {
+  std::vector<std::string> out;
+  if (!Available() || !IsRepo(dir))
+    return out;
+  std::string text;
+  // `--sort=-HEAD` puts the checked-out branch first; the rest keep git's
+  // own order, which is alphabetical.
+  // The format MUST be quoted: `%(refname:short)` goes through a shell, and
+  // bare parens are a syntax error there, not a format string.
+  if (RunGit(dir,
+             "for-each-ref --sort=-HEAD --format=" + Quote("%(refname:short)") +
+                 " refs/heads/",
+             &text) != 0)
+    return out;
+  return Lines(text);
+}
+
+std::string CurrentBranch(const std::string& dir) {
+  if (!Available() || !IsRepo(dir))
+    return "";
+  std::string text;
+  if (RunGit(dir, "symbolic-ref --quiet --short HEAD", &text) != 0)
+    return ""; // detached, or no commit yet
+  return FirstLine(text);
+}
+
+bool CreateBranch(const std::string& dir, const std::string& name,
+                  bool switchTo, std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  std::string out;
+  if (RunGitVerbose(dir, "branch " + Quote(name), &out) != 0) {
+    if (error)
+      *error = out.empty() ? "could not create that branch" : FirstLine(out);
+    return false;
+  }
+  return switchTo ? SwitchBranch(dir, name, error) : true;
+}
+
+bool SwitchBranch(const std::string& dir, const std::string& name,
+                  std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  // Refuse on a dirty tree rather than letting git decide: it carries
+  // changes across when it can and refuses when it cannot, and neither is
+  // what someone thinking in "versions" expects. Save first.
+  if (Dirty(dir)) {
+    if (error)
+      *error = "save the project before switching branch";
+    return false;
+  }
+  std::string out;
+  if (RunGitVerbose(dir, "checkout -q " + Quote(name), &out) != 0) {
+    if (error)
+      *error = out.empty() ? "could not switch branch" : FirstLine(out);
+    return false;
+  }
+  return true;
+}
+
+MergeStatus Merge(const std::string& dir, const std::string& branch,
+                  std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return MergeStatus::Failed;
+  }
+  if (Dirty(dir)) {
+    if (error)
+      *error = "save the project before merging";
+    return MergeStatus::Failed;
+  }
+  std::string headBefore;
+  RunGit(dir, "rev-parse HEAD", &headBefore);
+  const std::string before = FirstLine(headBefore);
+  std::string out;
+  const int code = RunGitVerbose(
+      dir, std::string(kIdentity) + " merge --no-edit " + Quote(branch), &out);
+  if (code == 0) {
+    std::string after;
+    RunGit(dir, "rev-parse HEAD", &after);
+    if (FirstLine(after) == before)
+      return MergeStatus::UpToDate;
+    // A fast-forward moves HEAD to an existing commit; a real merge makes a
+    // commit with TWO parents. `rev-list --parents -n 1` prints
+    // "<commit> <parent>..." on one line, so three tokens means a merge.
+    std::string parents;
+    RunGit(dir, "rev-list --parents -n 1 HEAD", &parents);
+    return CountTokens(FirstLine(parents)) >= 3 ? MergeStatus::Merged
+                                                : MergeStatus::FastForward;
+  }
+  // Exit 1 with unmerged paths is the conflict we came for, not a failure.
+  if (InMerge(dir) && !Unmerged(dir).empty())
+    return MergeStatus::Conflicted;
+  if (error)
+    *error = out.empty() ? "git merge failed" : FirstLine(out);
+  return MergeStatus::Failed;
+}
+
+bool InMerge(const std::string& dir) {
+  if (!Available() || !IsRepo(dir))
+    return false;
+  std::error_code ec;
+  return std::filesystem::exists(
+      std::filesystem::path(dir) / ".git" / "MERGE_HEAD", ec);
+}
+
+std::vector<std::string> Unmerged(const std::string& dir) {
+  std::vector<std::string> out;
+  if (!Available() || !IsRepo(dir))
+    return out;
+  std::string text;
+  if (RunGit(dir, "diff --name-only --diff-filter=U", &text) != 0)
+    return out;
+  return Lines(text);
+}
+
+bool ShowFile(const std::string& dir, const std::string& rev,
+              const std::string& path, std::string* out) {
+  if (!Available() || !IsRepo(dir))
+    return false;
+  std::string text;
+  if (RunGit(dir, "show " + Quote(rev + ":" + path), &text) != 0)
+    return false;
+  if (out)
+    *out = text;
+  return true;
+}
+
+bool ReadStages(const std::string& dir, const std::string& path, Stages* out) {
+  if (!out || !Available() || !IsRepo(dir))
+    return false;
+  *out = Stages{};
+  // ":1:" base, ":2:" ours, ":3:" theirs — a stage git did not record (an
+  // add/add has no base) simply fails, which is how absence is detected.
+  out->hasBase = ShowFile(dir, ":1", path, &out->base);
+  out->hasOurs = ShowFile(dir, ":2", path, &out->ours);
+  out->hasTheirs = ShowFile(dir, ":3", path, &out->theirs);
+  return out->hasBase || out->hasOurs || out->hasTheirs;
+}
+
+std::vector<std::string> ListTree(const std::string& dir,
+                                  const std::string& rev) {
+  std::vector<std::string> out;
+  if (!Available() || !IsRepo(dir))
+    return out;
+  std::string text;
+  if (RunGit(dir, "ls-tree -r --name-only " + Quote(rev), &text) != 0)
+    return out;
+  return Lines(text);
+}
+
+std::string MergeBase(const std::string& dir, const std::string& a,
+                      const std::string& b) {
+  if (!Available() || !IsRepo(dir))
+    return "";
+  std::string text;
+  if (RunGit(dir, "merge-base " + Quote(a) + " " + Quote(b), &text) != 0)
+    return "";
+  return FirstLine(text);
+}
+
+bool ResolveWithContent(const std::string& dir, const std::string& path,
+                        const std::string& content, std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  const std::filesystem::path full = std::filesystem::path(dir) / path;
+  std::error_code ec;
+  std::filesystem::create_directories(full.parent_path(), ec);
+  {
+    std::ofstream file(full, std::ios::binary | std::ios::trunc);
+    file << content;
+    if (!file) {
+      if (error)
+        *error = "could not write " + path;
+      return false;
+    }
+  }
+  if (RunGit(dir, "add -- " + Quote(path)) != 0) {
+    if (error)
+      *error = "could not stage " + path;
+    return false;
+  }
+  return true;
+}
+
+bool ResolveAsDeleted(const std::string& dir, const std::string& path,
+                      std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  // `--ignore-unmatch`: the file may already be absent from the working tree
+  // (the side that deleted it is checked out), and removing it again is not
+  // an error.
+  if (RunGit(dir, "rm -q -f --ignore-unmatch -- " + Quote(path)) != 0) {
+    if (error)
+      *error = "could not remove " + path;
+    return false;
+  }
+  return true;
+}
+
+bool ResolveWith(const std::string& dir, const std::string& path,
+                 MergeSide side, std::string* error) {
+  Stages stages;
+  if (!ReadStages(dir, path, &stages)) {
+    if (error)
+      *error = path + " is not a conflicted file";
+    return false;
+  }
+  const bool has = side == MergeSide::Ours ? stages.hasOurs : stages.hasTheirs;
+  // "That side deleted it" is a real answer, and `git checkout --ours` would
+  // have failed here rather than expressing it.
+  if (!has)
+    return ResolveAsDeleted(dir, path, error);
+  return ResolveWithContent(
+      dir, path, side == MergeSide::Ours ? stages.ours : stages.theirs, error);
+}
+
+bool AbortMerge(const std::string& dir, std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  std::string out;
+  if (RunGitVerbose(dir, "merge --abort", &out) != 0) {
+    if (error)
+      *error = out.empty() ? "could not abort the merge" : FirstLine(out);
+    return false;
+  }
+  return true;
+}
+
+bool CommitMerge(const std::string& dir, const std::string& message,
+                 std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  // The guard that stops a half-resolved tree being committed as finished.
+  const auto left = Unmerged(dir);
+  if (!left.empty()) {
+    if (error)
+      *error = std::to_string(left.size()) +
+               (left.size() == 1 ? " conflict is" : " conflicts are") +
+               " still unresolved";
+    return false;
+  }
+  if (RunGit(dir, "add -A") != 0) {
+    if (error)
+      *error = "git add failed";
+    return false;
+  }
+  std::string out;
+  if (RunGitVerbose(dir,
+                    std::string(kIdentity) + " commit -q --no-edit -m " +
+                        Quote(message),
+                    &out) != 0) {
+    if (error)
+      *error = out.empty() ? "git commit failed" : FirstLine(out);
     return false;
   }
   return true;

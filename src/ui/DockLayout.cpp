@@ -101,6 +101,7 @@ void BeginDockspace(AppState& state) {
         redock("Variables", model->DockId);
         redock("Configurations", model->DockId);
         redock("History", model->DockId);
+        redock("Conflicts", model->DockId);
         redock("CAM###CamPanel", model->DockId);
       }
     }
@@ -153,6 +154,9 @@ void BeginDockspace(AppState& state) {
     ImGui::DockBuilderDockWindow("Variables", left);      // tabbed behind Model
     ImGui::DockBuilderDockWindow("Configurations", left); // tabbed behind Model
     ImGui::DockBuilderDockWindow("History", left);        // tabbed behind Model
+    // Only ever exists when there is something to resolve (F7), so it is
+    // not a permanent tab — but when it appears it belongs here.
+    ImGui::DockBuilderDockWindow("Conflicts", left);
     ImGui::DockBuilderDockWindow("CAM###CamPanel", left); // ditto
     ImGui::DockBuilderFinish(dockspaceId);
     // The tab focused last wins the shared node; make sure that is Model —

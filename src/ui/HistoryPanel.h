@@ -23,6 +23,18 @@ bool RestoreVersion(AppState& state, const std::string& commit,
 // True when versions are possible here: a saved `.dsgn` project directory and
 // a usable `git`. The repository itself is created by the first save, so this
 // is true one moment before a history exists.
+// Check out another line of work and reopen the project — the documents in
+// memory belong to the branch being left, and the next save would write them
+// straight back over the one being entered.
+bool SwitchToBranch(AppState& state, const std::string& branch,
+                    std::string* error = nullptr);
+
+// Bring `branch` into the current one. Returns true for a CONFLICTED merge
+// as well as a clean one: conflicts are the expected outcome, not a failure,
+// and the Conflicts panel takes it from there.
+bool MergeBranch(AppState& state, const std::string& branch,
+                 std::string* error = nullptr);
+
 bool CanVersionProject(const AppState& state);
 
 // True when there is a history to show — CanVersionProject plus a repository

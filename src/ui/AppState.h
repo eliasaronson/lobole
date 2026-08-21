@@ -9,6 +9,7 @@
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/GitVault.h"
+#include "core/io/ProjectMerge.h"
 #include "core/io/Settings.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchSolver.h"
@@ -1049,6 +1050,20 @@ struct AppState {
   std::string historyPath;
   double historyStamp = -1.0; // ImGui time of the last refresh; <0 = never
   bool historyUncommitted = false;
+
+  // Conflicts (F7), cached on the same terms as the log: scanning spawns
+  // `git` AND walks the project for the duplicate ids git cannot see, so it
+  // must not run every frame. `conflictsStamp = -1` forces a rescan after any
+  // resolution.
+  ProjectMerge::Report conflicts;
+  std::string conflictsPath;
+  double conflictsStamp = -1.0;
+  // Set by "Finish merge" when the resolved project does not load or rebuild:
+  // the merge is NOT concluded and these say why.
+  std::vector<ProjectMerge::Breakage> conflictsBreakage;
+  // Local branches, for the History panel's branch controls.
+  std::vector<std::string> branches;
+  std::string currentBranch;
 
   // User preferences (docs/ui/settings.md). Exactly ONE live copy — nothing
   // else caches a field, or "it reverted when I opened a second project"

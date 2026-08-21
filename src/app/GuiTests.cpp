@@ -23,6 +23,7 @@
 #include "core/features/ThreadFeature.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/GitVault.h"
+#include "core/io/ProjectMerge.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -32,6 +33,7 @@
 #include "ui/AppState.h"
 #include "ui/CamPanel.h"
 #include "ui/CamTool.h"
+#include "ui/ConflictsPanel.h"
 #include "ui/DragMath.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot
 #include "ui/HistoryPanel.h"
@@ -6306,6 +6308,172 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
     IM_CHECK(!s_App->measure.active);
+  };
+
+  // Conflicts (F7): two lines of work that changed the same thing, brought
+  // together through the panel. The whole point is that the row reads as a
+  // FEATURE — "Box 'Box 1' ... width 5 vs 9" — and not as a path.
+  t = IM_REGISTER_TEST(engine, "conflicts", "resolve_a_merge_in_the_panel");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    if (!GitVault::Available()) {
+      ctx->LogWarning("git not on PATH — skipping");
+      return;
+    }
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_conflicts_gui.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    s_App->historyStamp = -1.0;
+    ctx->Yield(2);
+    IM_CHECK(ui::ProjectHasHistory(*s_App));
+
+    // A second line of work, started the way a user does: the History
+    // panel's own controls. Without a verb like this the app could not
+    // produce a conflict at all.
+    ImGuiWindow* history = ImGui::FindWindowByName("History");
+    IM_CHECK(history != nullptr && history->DockNode != nullptr);
+    ctx->ItemClick(history->TabId);
+    ctx->Yield(2);
+    // Whatever git called the first branch — "master" on older installs,
+    // "main" on newer ones. Never assume it.
+    const std::string firstLine = GitVault::CurrentBranch(s_App->projectPath);
+    IM_CHECK(!firstLine.empty());
+
+    ctx->SetRef("//History");
+    ctx->ItemOpen("Lines of work");
+    ctx->Yield();
+    // A TreeNode pushes an id scope, so its contents are addressed THROUGH
+    // it — "//History/###hist_branch" finds nothing.
+    ctx->ItemClick("Lines of work/###hist_branch");
+    ctx->KeyCharsReplace("alt");
+    ctx->ItemClick("Lines of work/Start###hist_branch_go");
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(GitVault::CurrentBranch(s_App->projectPath).c_str(), "alt");
+
+    // The History panel shares its dock node with Model, so Model is BEHIND
+    // it now — the feature tree has to be brought forward before its rows can
+    // be clicked, exactly as a user would.
+    const auto showModel = [&ctx]() {
+      ImGuiWindow* model = ImGui::FindWindowByName("Model");
+      IM_CHECK(model != nullptr && model->DockNode != nullptr);
+      ctx->ItemClick(model->TabId);
+      ctx->Yield(2);
+    };
+
+    // Their width, saved on the branch.
+    showModel();
+    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemInputValue("//Box###ToolWindow/##Width", 9.0f);
+    ctx->Yield();
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(2);
+
+    // Back to the first line, and a different width there.
+    IM_CHECK(ui::SwitchToBranch(*s_App, firstLine, &err));
+    ctx->Yield(2);
+    showModel();
+    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemInputValue("//Box###ToolWindow/##Width", 5.0f);
+    ctx->Yield();
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(2);
+
+    // Bring the branch in — a conflict, which is an outcome and not a
+    // failure.
+    IM_CHECK(ui::MergeBranch(*s_App, "alt", &err));
+    ui::InvalidateConflicts(*s_App);
+    ctx->Yield(3);
+
+    // The panel exists ONLY now: a permanent tab saying "no conflicts" every
+    // day would be noise, so its appearance is the signal.
+    ImGuiWindow* panel = ImGui::FindWindowByName("Conflicts");
+    IM_CHECK(panel != nullptr);
+    IM_CHECK_EQ(s_App->conflicts.NeedsDecision(), 1);
+    const ProjectMerge::Conflict& c = s_App->conflicts.conflicts[0];
+    // The row is a feature, not a file.
+    IM_CHECK_STR_EQ(c.itemKind.c_str(), "Box");
+    IM_CHECK(c.summary.find("width") != std::string::npos);
+    IM_CHECK(c.summary.find("5 vs 9") != std::string::npos);
+
+    ctx->ItemClick(panel->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//Conflicts");
+
+    // Finishing while something is undecided must do nothing: a half-resolved
+    // tree committed as if it were finished is the silent loss F7 exists to
+    // stop.
+    ctx->ItemClick("Finish###cf_finish");
+    ctx->Yield(2);
+    IM_CHECK(GitVault::InMerge(s_App->projectPath));
+    IM_CHECK_EQ(s_App->conflicts.NeedsDecision(), 1);
+
+    ctx->ItemClick("Keep theirs###cf_theirs0");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->conflicts.NeedsDecision(), 0);
+
+    ctx->ItemClick("Finish###cf_finish");
+    ctx->Yield(3);
+
+    // Concluded: the merge is committed, the project reopened, and the panel
+    // is gone because there is nothing left to say.
+    IM_CHECK(!GitVault::InMerge(s_App->projectPath));
+    IM_CHECK(s_App->conflicts.Empty());
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 9.0); // theirs, as chosen
+  };
+
+  // The bar is "the resolved project loads and regenerates", never "git
+  // exited 0". A resolution can be perfectly valid JSON and still leave the
+  // document broken.
+  t = IM_REGISTER_TEST(engine, "conflicts", "finish_refuses_a_broken_project");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    if (!GitVault::Available()) {
+      ctx->LogWarning("git not on PATH — skipping");
+      return;
+    }
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_conflicts_bad.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(2);
+
+    // Break the saved project the way a bad resolution does: a file that is
+    // valid on disk but not loadable.
+    for (const auto& entry :
+         std::filesystem::directory_iterator(dir / "features")) {
+      std::ofstream(entry.path(), std::ios::trunc)
+          << "<<<<<<< ours\n{}\n=======\n{}\n>>>>>>> theirs\n";
+      break;
+    }
+
+    s_App->conflictsBreakage.clear();
+    IM_CHECK(!ui::FinishMerge(*s_App, &err));
+    // It names the document and what broke, rather than leaving a project
+    // that opens to an error tomorrow.
+    IM_CHECK_EQ(s_App->conflictsBreakage.size(), (size_t)1);
+    IM_CHECK(s_App->conflictsBreakage[0].reason.find("conflict markers") !=
+             std::string::npos);
   };
 
   // Version history (F6): the panel is the one home for versions, it reads

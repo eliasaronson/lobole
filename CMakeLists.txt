@@ -229,6 +229,7 @@ set(core_sources
     src/remote/InstanceRegistry.cpp
     src/core/io/Checkpoints.cpp
     src/core/io/GitVault.cpp
+    src/core/io/ProjectMerge.cpp
     src/core/io/ImportAssembly.cpp
     src/core/Measure.cpp
     src/core/ThreadStandards.cpp
@@ -490,6 +491,7 @@ set(app_sources
     src/ui/ConfigurationsPanel.cpp
     src/ui/VariablesPanel.cpp
     src/ui/HistoryPanel.cpp
+    src/ui/ConflictsPanel.cpp
     src/ui/SettingsWindow.cpp
     src/ui/CamPanel.cpp
     src/ui/CamTool.cpp
