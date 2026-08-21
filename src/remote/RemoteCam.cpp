@@ -20,8 +20,10 @@ namespace {
 constexpr MethodDoc kCamMethods[] = {
     {"add_cam_setup",
      "Add a milling setup {name?, post?: mach3|linuxcnc, safe_z?}; returns "
-     "its id. A setup arrives with one 6 mm tool, because a setup with no "
-     "tools can produce nothing."},
+     "its id and the safe_z derived for it. A setup arrives with one 6 mm "
+     "tool, because a setup with no tools can produce nothing, and with a "
+     "rapid height clear of the stock, because the default 5 mm is inside "
+     "most of them."},
     {"list_cam_setups",
      "Every setup: id, name, post, safe_z, rotation_a, fit_arcs, tools, "
      "operations, and the stock box derived from the model — in SETUP space, "
@@ -223,6 +225,12 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 
   if (m == "add_cam_setup") {
     cam::Setup& setup = doc->AddCamSetup(p.value("name", std::string()));
+    // Safe Z clear of the stock, exactly as the panel does it. Without this
+    // an RPC-built job kept the struct's bare 5 mm, which sits INSIDE any
+    // stock taller than that: the first dogfooding round over the RPC
+    // produced 68 rapids through material on an 18 mm plate. The GUI got
+    // this fix in the G-round; this door did not.
+    setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
     if (p.contains("post")) {
       const std::string post = p.at("post").get<std::string>();
       if (!cam::PostExists(post))
@@ -231,7 +239,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     }
     if (p.contains("safe_z"))
       setup.safeZ = p.at("safe_z").get<double>();
-    return json{{"id", setup.id}, {"name", setup.name}, {"post", setup.post}};
+    return json{{"id", setup.id},
+                {"name", setup.name},
+                {"post", setup.post},
+                {"safe_z", setup.safeZ}};
   }
 
   if (m == "list_cam_setups") {

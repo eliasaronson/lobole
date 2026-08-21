@@ -1,6 +1,6 @@
 # CAM dogfooding — the coupon, and two rounds
 
-> Status: **planned, not run** (2026-08-21). Two rounds against one real part:
+> Status: **round 1 started** (2026-08-21) — findings at the end. Two rounds against one real part:
 > once over the RPC, once by clicking. Findings get fixed, and this doc gets
 > an as-built section saying what broke.
 >
@@ -68,3 +68,44 @@ Cut it. Watch the first rapid, check the Z-zero touch-off against what the
 panel says, and stop the machine if the tool is not where the backplot said
 it would be. Then write down what surprised you — that list is worth more
 than another simulated round.
+
+## Round 1 findings (RPC), 2026-08-21
+
+The round got as far as building the coupon and running the whole job over
+the RPC. Four findings, one of them the kind this exists to catch.
+
+**1. Setups built over the RPC rapid through the material.** `add_cam_setup`
+kept `Setup`'s bare 5 mm Safe Z, which is *inside* an 18 mm plate. The job
+posted **68 rapids through stock**, first at line 11. The GUI got this fix
+during the G-round (`DeriveSafeZ` when the panel creates a setup); the RPC
+door never did, so an agent or script building a job got the tool-breaking
+default that a human clicking no longer can. **Fixed** — `add_cam_setup`
+derives it and returns it, and the same job now reports 0. This is the third
+time a defect has hidden in "the setting whose default makes old and new
+behaviour coincide"; it will not be the last.
+
+**2. A through-cut stops at the bottom of the PART, not the stock.** The
+outline was asked for `bottom_z = -1` (1 mm into the spoilboard) with the
+model sitting on z = 0. `MinZ` came back **5.0**: the final pass is skipped
+because `GenerateProfile` sections the *model* at each depth and there is
+nothing to section below z = 0. A part cut this way stays welded to the
+sheet — the exact failure tabs exist to control, arriving by a different
+route. Not yet fixed: the profile should keep the last contour it found and
+carry it down to `bottom_z` rather than stopping when the model runs out.
+
+**3. The verbs are not reachable over the RPC.** `cam::DeriveOperation` — the
+thing that makes the GUI's "click the floor, get every depth" work — has no
+RPC. A script must supply `top_z`/`bottom_z` by hand, which is precisely the
+failure mode the G-round removed from the GUI. Given this project's goal that
+agents use the same interface as humans, that gap is the wrong way round.
+
+**4. An inside profile with no target silently means "the whole outline".**
+Asking for the bolt slot without an element to target cut a 15 mm-deep trench
+1.5 mm inside the part perimeter, and nothing said so; the verifier reported
+it as a 15 mm gouge, which is how it was found. Two things wanted here: a way
+to target the slot (see 3), and a refusal when an inside profile has no
+target and would eat the part.
+
+Still to run: the pocket (its adaptive op produced nothing with a target
+face, message unhelpfully generic — needs a look), the drilling, both
+dialects, `fit_arcs` on and off, the indexed setup, and all of round 2.
