@@ -10,9 +10,9 @@
 > F6 both deferred needed a merge engine under it first. Its scoping also
 > surfaced [F8](f8-external-changes.md), **also shipped 2026-08-21**: nothing
 > noticed the project changing on disk, so a `git` command in the app's own
-> terminal was overwritten by the next Ctrl+S. [F9](f9-collaboration.md) is planned, not
-> built: what a small team who already use git would additionally need
-> (~5 days — F7 built the expensive half without meaning to). Later work: **insert-feature-at-marker**
+> terminal was overwritten by the next Ctrl+S. [F9](f9-collaboration.md)
+> **shipped the same day**: what a small team who already use git needed on
+> top — F7 had built the expensive half without meaning to. Later work: **insert-feature-at-marker**
 > (F4 v2). Nothing here blocks other
 > workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
 > history — the number has moved well past this doc's original snapshot as
@@ -135,7 +135,7 @@ silently. **D1 the guard, D2 the banner (focus regain plus a slow timer,
 gated on git HEAD when there is one), D3 the stable-id invariant F7's
 `ReplaceFeature` bug argued for — no id-0 item can reach disk.**
 
-### F9 — A small team sharing a project — **planned, not built** — [design: f9-collaboration.md](f9-collaboration.md)
+### F9 — A small team sharing a project — **shipped 2026-08-21** — [design: f9-collaboration.md](f9-collaboration.md)
 Audience decided: a small team who **already understand git**, which is what
 makes this a week rather than a quarter. F7 built the expensive half by
 accident — `pull` is `fetch` + `merge`, and merge already understands the
@@ -151,8 +151,15 @@ document); **C3** duplicate ids attributed by side, which keeps ids sequential
 by using the merge base to know whose reference meant which; **C4** built
 geometry stops travelling once a project has a remote; **C5** named versions
 pushed, with the address disambiguated on collision rather than the name.
-**≈4.5–5 days.** Auth is deliberately not handled — the audience has git
-working, and a prompt that would hang is made to fail instead.
+Auth is deliberately not handled — the audience has git working, and a prompt
+that would hang is made to fail instead. Verified end to end without a
+network by `tests/two_collaborators.py`: a bare repo, two clones, two headless
+instances, a rejected push, a resolved conflict, and the project loading and
+regenerating on the other person's side.
+
+**A handoff for whoever picks this up is in
+[f7-handoff.md](f7-handoff.md)** — what is built, what deliberately is not,
+which tests cover what, and the traps.
 
 ## Recommended order
 

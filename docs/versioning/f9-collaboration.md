@@ -1,9 +1,10 @@
 # F9 — A small team sharing a project — design
 
-> **Status: not built.** Planned 2026-08-21. Audience decided (Elias): **a
-> small team who already understand git**. That is not a hedge — it is what
-> makes this a week rather than a quarter, and it is the assumption every
-> decision below leans on.
+> **SHIPPED 2026-08-21** — C1–C5. Audience decided (Elias): **a small team who
+> already understand git**. That is not a hedge — it is what made this a week
+> rather than a quarter, and every decision below leans on it. The sections
+> are the design as written, with "What shipped" at the end recording where
+> building it changed the plan.
 
 ## Why this is small
 
@@ -143,7 +144,7 @@ Two problems, both small, both currently silent.
   person's prose name alone. Two people can both name a version "before the
   hinge rework" and both names survive, pointing at their own commits.
 
-## The rule this reverses — for sign-off
+## The rule this reverses — approved 2026-08-21
 
 F6 was explicit: the History panel *speaks CAD, not git*. It says version,
 name this version, restore; never HEAD, ref, detached, or hash. "A user who
@@ -156,12 +157,14 @@ real cause. If the app invents words for those, then when git fails — and it
 will, on auth, on a rejected push, on a bad URL — the message will be in
 git's vocabulary and the UI will have taught the wrong one.
 
-**Proposal: the sharing surface names git operations; everything else keeps
-F6's rule.** Concretely: "Remote", "Push", "Pull"/"Fetch" appear in the
-sharing section and in its errors; the version list above it still says
-version, name, restore, and never grows a hash column. This is a deliberate
-exception with a stated reason, not a drift — hence sign-off rather than a
-decision made in passing.
+**The sharing surface names git operations; everything else keeps F6's rule.**
+"Remote", "Push", "Pull"/"Fetch" appear in the sharing section and in its
+errors; the version list above it still says version, name, restore, and never
+grows a hash column. Elias approved this, adding that it "might be more honest
+as well" — which is the argument. The branch controls moved with it, since
+they are git operations with git failure modes: "Branches", "New branch",
+"Checkout", "Merge", where they had been "Lines of work", "Start a separate
+line", "Switch to", "Bring in".
 
 ## What does not change
 
@@ -187,17 +190,61 @@ decision made in passing.
 
 **≈ 4.5–5 days.** C1 and C4 are independently useful and could ship first.
 
-## Open decisions (for Elias)
+## Decisions (settled 2026-08-21)
 
-1. **Does the sharing surface say "Push" and "Pull"?** Recommended above, as a
-   stated exception to F6's rule. The alternative is inventing words for
-   operations whose failures speak git.
-2. **Auto-disable committed geometry when a remote is added, or ask?**
-   Automatic with a line saying so is my recommendation — it is a decision
-   about derived data, not a preference — but it does silently change what a
-   project pushes.
-3. **Clone in-app, or tell people to clone in the terminal?** In-app is half a
-   day and is the entire first-run experience for the second person.
+1. **The sharing surface says "Push" and "Pull".** Approved by Elias, as a
+   stated exception to F6's rule; the branch controls moved to git's words
+   with it.
+2. **Committed geometry is disabled automatically** when a remote is added,
+   with a commit that says so. It is a decision about derived data, not a
+   preference.
+3. **Clone is in-app.** It is the entire first-run experience for the second
+   person, and without it the story starts with "use the terminal".
+
+## What shipped, and what building it changed
+
+C1–C5, 2026-08-21, over four commits. Five things the build changed or found.
+
+**Two shell-quoting traps, both the same shape.** `--pretty=format:%an|%ae`
+made the shell read a pipe; F7 had already been bitten by `%(refname:short)`,
+whose parens are a shell syntax error. **Quote every git format string** —
+they go through a shell, and the failure is silent (an empty answer), not an
+error.
+
+**Testing "git has no identity" needs the machine's own hidden.** The
+resolution order deliberately honours a global config, so on any developer
+machine there IS one, and the fallback case is unreachable without
+`GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null`. Worth knowing
+before writing a test that asserts the wrong thing and looks like a bug in
+the code.
+
+**Lightweight tags never leave the machine.** `push --follow-tags` carries
+annotated tags and silently ignores lightweight ones, so C5's "named versions
+travel" needed the tags to become annotated — which also records who named the
+version, the same question C1 answers for commits. And once an address can be
+disambiguated, `LogEntry` has to carry the ref it FOUND: recomputing it from
+the name cannot find `cp/slug-<hash>`, so a second version with a shared name
+could not be restored by name.
+
+**A joinable thread destructing calls `std::terminate`.** Quitting the app
+mid-fetch would have taken it down rather than closed it. `SyncJob` joins in
+its destructor, the same guard `TopoJob` already had — and unlike the
+optimizer there is nothing to cancel, since a fetch touches only `.git/`.
+
+**`Field` is initialised positionally.** The free-text flag the two identity
+settings needed had to go LAST in the struct: added anywhere else it silently
+re-binds every row after it (the font row's `100.0f` displayScale would have
+become a `bool`).
+
+### Not done, and why
+
+- **Locking / check-out, presence, review, a hosted service, real-time.**
+  Deferred as designed below.
+- **The GUI sharing controls have no automated test.** The engine, the RPCs
+  and the whole two-person round trip are covered headlessly
+  (`two_collaborators.py`); the panel's buttons are thin wrappers over
+  RPC-tested calls, and a GUI test would need a remote and a worker thread
+  inside the ImGui test harness. Stated rather than implied.
 
 ## Verification
 
