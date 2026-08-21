@@ -283,7 +283,17 @@ it will list and never run.
 - ~~**2D drawings / drafting output**~~ — was "deliberately out of scope until after
   assemblies; revisit then". Assemblies shipped, revisited July 2026: now workstream 13,
   see [drawings/plan.md](drawings/plan.md).
-- **CAM** — out of scope. (Simulation/FEA was listed here until July 2026;
+- **CAM** — still out of scope *as scheduled work*, but no longer a flat no:
+  [cam/plan.md](cam/plan.md) costs it out (2026-08-21, after the user bought a
+  mill), having surveyed the alternatives by reading them — FreeCAD CAM is
+  ~25k lines of ops over 14k lines of libarea, Kiri:Moto's whole CAM mode is
+  ~12k lines with individual ops at 47–135. The prerequisites that made FEA
+  reversible are present (toponaming makes machining selections survive
+  edits; `Measure::SectionCaps` is already the Z-slicer; `compare_geometry` +
+  CAMotics' `camsim` close a headless verification loop), and Clipper2 and
+  Tusek's adaptive clearing are licence-compatible with this AGPL app. It
+  stays **unscheduled** until the mill has been used enough to know what it
+  needs. (Simulation/FEA was listed here until July 2026;
   reversed once its real prerequisites — toponaming, materials, headless
   testing — had shipped. See [simulation/plan.md](simulation/plan.md).)
 - **Sketch text** — niche, out of scope (see sketching plan).

@@ -29,6 +29,7 @@ which is usually the part worth reading later.
 | [configurations/](configurations/plan.md) | part + assembly families | |
 | [topopt/](topopt/plan.md) | topology optimization | `guide.md`, `gpu-plan.md`, `gpu3-plan.md`, `gpu4-plan.md` |
 | [packaging/](packaging/plan.md) | shipping it to other machines | |
+| [cam/](cam/plan.md) | milling toolpaths + G-code — **proposal, unscheduled** | |
 
 ## Cross-cutting
 
