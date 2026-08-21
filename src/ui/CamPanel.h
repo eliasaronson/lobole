@@ -23,4 +23,11 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out);
 // overlay does not re-slice the model every frame.
 void RefreshCamToolpaths(AppState& state);
 
+// G1: arm the "pick the top face" slot. The next planar face clicked becomes
+// Z zero — the stock top and the work origin — which is the single most
+// consequential number in a CAM job and the one a beginner gets wrong.
+void ArmCamTopFacePick(AppState& state);
+// Routed here by SlotPickClicked while that slot is armed.
+void CamFacePicked(AppState& state, const SelectionItem& item);
+
 } // namespace ui

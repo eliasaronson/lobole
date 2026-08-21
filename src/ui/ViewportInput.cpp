@@ -288,10 +288,12 @@ void HandleViewportInput(AppState& state) {
   } else if (state.slotPick.Active()) {
     const bool mateSlot = state.slotPick.featureId == kMateSessionSlot;
     const bool sectionSlot = state.slotPick.featureId == kSectionToolSlot;
+    const bool camSlot = state.slotPick.featureId == kCamToolSlot;
     const bool valid =
-        mateSlot ? (state.assembly != nullptr && state.mateTool.active)
-        : sectionSlot
-            ? (state.document != nullptr && state.sectionToolOpen)
+        mateSlot      ? (state.assembly != nullptr && state.mateTool.active)
+        : sectionSlot ? (state.document != nullptr && state.sectionToolOpen)
+        : camSlot
+            ? (state.document != nullptr)
             : (state.document != nullptr &&
                state.document->FindFeatureById(state.slotPick.featureId) !=
                    nullptr);

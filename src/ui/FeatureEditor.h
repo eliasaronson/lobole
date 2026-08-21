@@ -36,6 +36,7 @@ enum class PickSlot : int {
   SplitKnifeFace, // a planar Face of that body, used as the cutting plane
   RefineBody,     // Body whose coplanar faces/seams get merged
   SectionFace,    // I3 P2: a planar Face a section cuts along (not a feature)
+  CamTopFace,     // CAM G1: the face that defines Z zero / the stock top
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —
@@ -47,6 +48,10 @@ inline constexpr uint64_t kMateSessionSlot = ~0ull;
 // so its face slot needs a sentinel of its own. SlotPickClicked routes these
 // to SectionFacePicked (AppActions).
 inline constexpr uint64_t kSectionToolSlot = ~1ull;
+
+// And the CAM tool session (docs/cam/gui.md). CAM setups are document
+// objects, not features, so its picks need a sentinel too.
+inline constexpr uint64_t kCamToolSlot = ~2ull;
 
 // A tool's pick slots, declaratively (U7): the ordered list drives arming
 // (kinds/prompt come from here, not the draw site), viewport routing, and —

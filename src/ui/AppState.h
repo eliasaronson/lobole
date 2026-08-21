@@ -967,6 +967,9 @@ struct AppState {
   bool camShowToolpath = true;
   float camSafeZEdit = 5.0f;
   std::string camLastPost;
+  // The face that set Z zero (docs/cam/gui.md G1). Empty = not picked yet,
+  // which the panel says out loud rather than defaulting to the world origin.
+  ElementRef camTopFace;
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default via
   // settings.terminalPanel; the state is created the first time it draws, so

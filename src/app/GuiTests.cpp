@@ -32,6 +32,7 @@
 #include "ui/AppState.h"
 #include "ui/CamPanel.h"
 #include "ui/DragMath.h"
+#include "ui/FeatureEditor.h" // kCamToolSlot
 #include "ui/HistoryPanel.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
@@ -877,6 +878,65 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 #ifdef HAVE_CAM
   // CAM (docs/cam/plan.md): a setup on a part, an operation with derived
   // depths, and a backplot drawn from the SAME toolpath the post consumes.
+  // G1 (docs/cam/gui.md): Z zero is PICKED, not typed. Getting it wrong —
+  // zeroing on the table instead of the stock top — is the mistake that
+  // breaks tools, so the panel refuses to guess it.
+  t = IM_REGISTER_TEST(engine, "cam", "pick_top_face_sets_z_zero");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camTopFace.IsSet()); // says so rather than assuming 0
+
+    ui::ArmCamTopFacePick(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
+
+    // A curved or downward face is refused with a reason, not accepted
+    // quietly — the work origin must be where the user pointed.
+    const Body& body = Doc()->GetBodies()[0];
+    ui::SelectionItem side;
+    side.kind = ui::SelectionItem::Kind::Face;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (body.shape.FacePlane(index, o, n, u) && std::abs(n.z) < 0.5f) {
+        side.element = ElementRef{body.createdBy, name};
+        break;
+      }
+    }
+    if (side.element.IsSet()) {
+      ui::CamFacePicked(*s_App, side);
+      IM_CHECK(!s_App->slotPick.miss.empty()); // refused, visibly
+      IM_CHECK(!s_App->camTopFace.IsSet());
+    }
+
+    // The top face sets Z zero for the job.
+    ui::SelectionItem top;
+    top.kind = ui::SelectionItem::Kind::Face;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      if (body.shape.FacePlane(index, o, n, u) && n.z > 0.99f) {
+        top.element = ElementRef{body.createdBy, name};
+        break;
+      }
+    }
+    IM_CHECK(top.element.IsSet());
+    ui::CamFacePicked(*s_App, top);
+    ctx->Yield(2);
+    IM_CHECK(s_App->camTopFace.IsSet());
+    IM_CHECK_EQ(s_App->slotPick.featureId, (uint64_t)0); // slot disarmed
+    const cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(live != nullptr);
+    IM_CHECK(std::abs(live->origin.z - 12.0) < 1e-6); // the plate's top
+    IM_CHECK(std::abs(live->stock.margin.z) < 1e-9);  // picked face IS the top
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "panel_generates_and_backplots");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

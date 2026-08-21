@@ -1,4 +1,5 @@
 #include "ui/FeatureEditor.h"
+#include "ui/CamPanel.h"
 #include <functional>
 #include <utility>
 
@@ -1099,6 +1100,10 @@ void SlotPickClicked(AppState& state, const SelectionItem& item,
                      uint32_t meshId, uint32_t index) {
   if (!state.slotPick.Active())
     return;
+  if (state.slotPick.featureId == kCamToolSlot) {
+    CamFacePicked(state, item);
+    return;
+  }
   if (state.slotPick.featureId == kSectionToolSlot) {
     SectionFacePicked(state, item);
     return;

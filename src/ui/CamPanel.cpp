@@ -8,6 +8,8 @@
 #include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
+#include "ui/FeatureEditor.h"
+#include "ui/SelectionPipeline.h"
 
 #include "imgui.h"
 
@@ -40,6 +42,51 @@ cam::Setup* ActiveSetup(AppState& state) {
 }
 
 } // namespace
+
+void ArmCamTopFacePick(AppState& state) {
+  state.slotPick = {kCamToolSlot, static_cast<int>(PickSlot::CamTopFace),
+                    SelectionKindBit(SelectionItem::Kind::Face),
+                    /*multi=*/false,
+                    "Click the top face — that sets Z zero for the job"};
+}
+
+void CamFacePicked(AppState& state, const SelectionItem& item) {
+  cam::Setup* setup = ActiveSetup(state);
+  if (setup == nullptr || !item.element.IsSet() || !state.document) {
+    state.slotPick.miss = "that is not a face this job can use";
+    return;
+  }
+  // The face must be planar and horizontal: a "top face" that is tilted has
+  // no single Z, and pretending otherwise would put the work origin
+  // somewhere the user did not point at.
+  for (const Body& body : state.document->GetBodies()) {
+    if (body.createdBy != item.element.featureId)
+      continue;
+    const std::optional<int> idx = body.elementMap.Resolve(item.element.name);
+    glm::vec3 origin(0.0f), normal(0.0f), uAxis(0.0f);
+    if (!idx || !body.shape.FacePlane(*idx, origin, normal, uAxis)) {
+      state.slotPick.miss = "pick a flat face — that one is curved";
+      return;
+    }
+    if (std::abs(normal.z) < 0.99f) {
+      state.slotPick.miss = "pick a face that points up; this job cuts in Z";
+      return;
+    }
+    // Z zero is this face. The stock top follows it, and every operation's
+    // default top comes from there — so nobody types a depth again.
+    setup->origin = glm::dvec3(0.0, 0.0, origin.z);
+    setup->stock.margin.z = 0.0; // the picked face IS the top of the stock
+    state.camTopFace = item.element;
+    for (cam::Operation& op : setup->operations)
+      if (op.topZ > origin.z)
+        op.topZ = origin.z;
+    state.slotPick = {};
+    state.projectMetaDirty = true;
+    RefreshCamToolpaths(state);
+    return;
+  }
+  state.slotPick.miss = "that face is not on a body this job can machine";
+}
 
 void RefreshCamToolpaths(AppState& state) {
   state.camToolpaths.clear();
@@ -142,6 +189,29 @@ void DrawCamPanel(AppState& state) {
     ImGui::EndCombo();
   }
   ImGui::SetItemTooltip("Which machine this job is posted for");
+
+  // G1: the highest-value single click in CAM. Z zero on the table instead of
+  // the stock top is the mistake that breaks tools, so it is the first
+  // control and it is a pick, not a number.
+  const bool arming = state.slotPick.featureId == kCamToolSlot;
+  if (arming)
+    ImGui::BeginDisabled();
+  if (ImGui::Button(state.camTopFace.IsSet() ? "Re-pick top face###cam_topface"
+                                             : "Pick top face###cam_topface"))
+    ArmCamTopFacePick(state);
+  if (arming)
+    ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (arming)
+    ImGui::TextDisabled("click the top face…");
+  else if (state.camTopFace.IsSet())
+    ImGui::TextDisabled("Z zero at %.3f", setup->origin.z);
+  else
+    ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),
+                       "Z zero is not set yet");
+  if (!state.slotPick.miss.empty() && arming)
+    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s",
+                       state.slotPick.miss.c_str());
 
   ImGui::SetNextItemWidth(90.0f);
   if (ImGui::DragFloat("Safe Z###cam_safez",
