@@ -224,6 +224,12 @@ T1–T2 were the risk; T3–T4 the value. What shipped, concretely:
   `Terminal###TerminalPanel` — silently. That is why the panel first appeared
   floating over the model tree instead of docked.
 
+## Turning it off
+
+`-DENABLE_TERMINAL=OFF` removes the panel, its preference and its tests, and
+stops the build looking for libvterm at all. The dependency is 167 KB with no
+transitive deps; the switch exists because "small today" is not a promise.
+
 ## Deferred, with reasons
 
 - **Windows (ConPTY).** The grid, renderer and input are platform-free by

@@ -1,5 +1,7 @@
 #include "remote/RemoteCam.h"
 
+#ifdef HAVE_CAM
+
 #include "core/Document.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
@@ -370,3 +372,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
 }
 
 } // namespace remote
+
+#else // !HAVE_CAM
+
+// Built without CAM (-DENABLE_CAM=OFF): the methods simply do not exist, and
+// `describe` does not list them. The dispatcher needs no #ifdef of its own.
+namespace remote {
+std::optional<nlohmann::json>
+HandleCamRpc(ui::AppState&, Document*, const std::string&, const RpcParams&) {
+  return std::nullopt;
+}
+std::span<const MethodDoc> CamMethodDocs() { return {}; }
+} // namespace remote
+
+#endif // HAVE_CAM

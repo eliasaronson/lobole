@@ -183,6 +183,14 @@ workstream exists to prevent:
 3. The final depth pass lands **exactly** on the requested depth (short,
    never deep), which is a one-line rule and a scrapped part when wrong.
 
+## Turning it off
+
+`-DENABLE_CAM=OFF` and the workstream does not exist in the build: no sources,
+no Clipper2, no RPCs in `describe`, no CAM tab, no tests. The suite passes
+either way, and `cmake` prints which features are in. The dependency it
+governs is one vendored library with no transitive deps — but a flag is
+cheaper than trusting that stays true.
+
 ## Risks
 
 - **Integer space.** Clipper2 works in scaled integers. One mm↔int scale

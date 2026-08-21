@@ -169,6 +169,7 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/${NFDE_DIR}/CMakeLists.txt)
     set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     add_subdirectory(${NFDE_DIR})
     add_definitions(-DHAVE_NATIVEFILEDIALOG)
+    set(HAVE_NATIVEFILEDIALOG ON)
     set(NFD_SOURCES "")
     set(NFD_LIBS nfd)
 else()
@@ -346,12 +347,20 @@ execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEA
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET)
 
+# Optional features that bring a dependency of their own. Both default ON
+# where the dependency is present, and both can be switched off outright —
+# a build flag is cheaper than trusting that a dependency stays small.
+option(ENABLE_CAM "Milling toolpaths + G-code (vendored Clipper2)" ON)
+option(ENABLE_TERMINAL "Embedded terminal panel (libvterm)" ON)
+
 # Clipper2 (vendored, Boost licence): polygon offsetting for CAM toolpaths
 # (docs/cam/plan.md). Vendored rather than found: it is packaged in nixpkgs
 # but not in Ubuntu, and three .cpp files are cheaper than an optional
 # dependency that silently drops a workstream on half the CI matrix.
 set(CLIPPER2_DIR ${CMAKE_SOURCE_DIR}/deps/clipper2/CPP/Clipper2Lib)
-if(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
+if(NOT ENABLE_CAM)
+    message(STATUS "CAM disabled (-DENABLE_CAM=OFF)")
+elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     set(HAVE_CAM ON)
     add_library(clipper2 STATIC
         ${CLIPPER2_DIR}/src/clipper.engine.cpp
@@ -371,10 +380,12 @@ endif()
 # because a CAD app must still build on a machine that has no terminal
 # library. Ubuntu: libvterm-dev; nix: libvterm-neovim (in shell.nix).
 find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND AND NOT WIN32)
+if(ENABLE_TERMINAL AND PkgConfig_FOUND AND NOT WIN32)
     pkg_check_modules(VTERM QUIET vterm)
 endif()
-if(VTERM_FOUND)
+if(NOT ENABLE_TERMINAL)
+    message(STATUS "Terminal panel disabled (-DENABLE_TERMINAL=OFF)")
+elseif(VTERM_FOUND)
     set(HAVE_TERMINAL ON)
     list(APPEND core_sources src/common/TerminalScreen.cpp
                              src/common/PtySession.cpp)
@@ -415,6 +426,7 @@ endif()
 if(Eigen3_FOUND)
     target_link_libraries(designer_core PUBLIC Eigen3::Eigen)
     target_compile_definitions(designer_core PUBLIC HAVE_FEM_SOLVER)
+    set(HAVE_FEM_SOLVER ON)
 endif()
 # Spectra: header-only sparse eigensolver for FEM modal analysis. Optional,
 # gated HAVE_SPECTRA on the HAVE_FEM_SOLVER template: absent it, static FEM still
@@ -423,6 +435,7 @@ find_package(Spectra QUIET)
 if(Spectra_FOUND AND Eigen3_FOUND)
     target_link_libraries(designer_core PUBLIC Spectra::Spectra)
     target_compile_definitions(designer_core PUBLIC HAVE_SPECTRA)
+    set(HAVE_SPECTRA ON)
     message(STATUS "Spectra enabled (FEM modal analysis)")
 else()
     message(WARNING "Spectra not found: FEM modal analysis disabled")
@@ -661,6 +674,7 @@ if(GLSLC AND DESIGNER_ENABLE_FEM_GPU)
         # software device).
         target_link_libraries(designer fem_gpu)
         target_compile_definitions(designer PRIVATE HAVE_FEM_GPU)
+        set(HAVE_FEM_GPU ON)
     endif()
 endif()
 
@@ -872,3 +886,29 @@ install(FILES
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/LICENSES/"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/designer/LICENSES")
 
+
+# ---------------------------------------------------------------------------
+# What this build actually contains. Printed at the end of configure because
+# "which optional pieces am I compiling in, and what do they drag along?" is
+# otherwise answered by reading this file — and a dependency you cannot see
+# is a dependency you cannot decide about.
+message(STATUS "")
+message(STATUS "Designer ${PROJECT_VERSION} — optional features")
+macro(_feature_line label state note)
+    if(${state})
+        message(STATUS "  [x] ${label}  ${note}")
+    else()
+        message(STATUS "  [ ] ${label}  ${note}")
+    endif()
+endmacro()
+_feature_line("CAM (milling, G-code)      " HAVE_CAM "deps/clipper2 (vendored, Boost)  -DENABLE_CAM=OFF")
+_feature_line("Terminal panel             " HAVE_TERMINAL "libvterm (system)  -DENABLE_TERMINAL=OFF")
+_feature_line("FEM solver                 " HAVE_FEM_SOLVER "Eigen (system)")
+_feature_line("FEM meshing                " HAVE_NETGEN "Netgen (system)")
+_feature_line("FEM modal analysis         " HAVE_SPECTRA "Spectra (system)")
+_feature_line("FEM GPU acceleration       " HAVE_FEM_GPU "Vulkan compute")
+_feature_line("Sketch constraint solver   " HAVE_PLANEGCS "deps/planegcs (vendored)")
+_feature_line("Native file dialogs        " HAVE_NATIVEFILEDIALOG "deps/nativefiledialog-extended (vendored)")
+_feature_line("GUI test engine            " ENABLE_TEST_ENGINE "deps/imgui_test_engine (vendored)  -DENABLE_TEST_ENGINE=OFF")
+_feature_line("Crash backtraces           " HAVE_STDCXX_STACKTRACE "libstdc++ <stacktrace>")
+message(STATUS "")

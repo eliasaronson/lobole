@@ -30,6 +30,28 @@ sudo apt install git cmake ninja-build build-essential python3 \
 (`libvterm-dev` is optional — without it the app builds without the terminal
 panel, and the preference for it disappears.)
 
+### Optional features, and how to leave them out
+
+`cmake` prints what it compiled in, so nothing is inferred:
+
+```
+Designer 0.1.0 — optional features
+  [x] CAM (milling, G-code)        deps/clipper2 (vendored, Boost)  -DENABLE_CAM=OFF
+  [x] Terminal panel               libvterm (system)  -DENABLE_TERMINAL=OFF
+  [x] FEM solver                   Eigen (system)
+  ...
+```
+
+Everything marked with a switch can be turned off at configure time, and the
+feature then does not exist: no sources compiled, no dependency looked for, no
+tests, no RPCs in `describe`, no preference in the window. `cmake -B build
+-DENABLE_CAM=OFF -DENABLE_TERMINAL=OFF` builds and passes its suite (643
+tests instead of 670 — the difference is exactly those features' tests).
+
+The two dependencies those flags govern are deliberately small: **Clipper2**
+is vendored (three `.cpp` files, Boost licence, nothing transitive) and
+**libvterm** is 167 KB with no dependencies of its own.
+
 **NixOS / Nix** — `shell.nix` pins every dependency including the optional
 ones: `nix-shell` in the repo root, and nothing to install. (The Vulkan ICD
 comes from your system config — `hardware.graphics.enable = true` plus your
