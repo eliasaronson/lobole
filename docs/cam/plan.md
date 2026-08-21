@@ -1,10 +1,8 @@
 # CAM — 2.5D milling — plan
 
-> Status: **design, unscheduled** (2026-08-21). The roadmap lists CAM under
-> "explicitly not planned"; this doc is the costed proposal to reverse that,
-> written after the user bought a CNC mill. It is **not** scheduled work —
-> the decision is deliberately left open until the mill has been used enough
-> to know what it needs.
+> Status: **C1–C4 BUILT 2026-08-21** (the design below was signed off the same
+> day and implemented against it); **C5 — the camsim verification loop — is
+> outstanding**. The roadmap's "CAM out of scope" is reversed.
 >
 > Scope decided at writing: **2.5D first**, with the data model shaped so a
 > **4th (rotary) axis** is an addition rather than a redesign. Continuous
@@ -150,12 +148,40 @@ tool table), arc output (see the risk below), coolant, and safe-Z retract.
 
 | | scope | size |
 |---|---|---|
-| **C1** | `cam::Setup` document object: stock, work frame, tool table, panel + RPCs | ~1 session |
-| **C2** | Slice → Clipper2 pipeline; **Profile** (with tabs) and **Drill** | 1–2 sessions — *this already cuts real parts* |
-| **C3** | **Pocket** with islands, **Face**, stepdown + ramp/helix entry | ~1 session (Clipper2 does the hard part) |
-| **C4** | Post interface + Mach3 implementation, backplot overlay, G-code goldens | ~1 session |
-| **C5** | The camsim closed loop as a ctest, plus packaging camsim | ~1 session |
+| **C1** | `cam::Setup` document object: stock, work frame, tool table, panel + RPCs | **done** |
+| **C2** | Slice → Clipper2 pipeline; **Profile** (with tabs) and **Drill** | **done** |
+| **C3** | **Pocket** with islands, **Face**, stepdown + ramp/helix entry | **done** (pocket + face; adaptive still deferred) |
+| **C4** | Post interface + Mach3 implementation, backplot overlay, G-code goldens | **done** (Mach3 + LinuxCNC, backplot, panel) |
+| **C5** | The camsim closed loop as a ctest, plus packaging camsim | **outstanding** |
 | later | LinuxCNC post · adaptive clearing (port Tusek) · indexed 4th axis · surfacing (opencamlib) · continuous 4-axis | each on demand |
+
+## What C1–C4 shipped
+
+`cam::Setup` is a document object beside `fem::Study`, deliberately outside
+the regen chain hash (asserted): describing how to cut a model must never
+rebuild it. Setups serialize inline in both formats (**v58** + golden pair)
+because a setup is parameters, not a mesh. Nine RPCs in `RemoteCam.cpp`, a
+`CAM` dock tab with per-operation verdicts, and a backplot fed from the SAME
+`std::vector<Toolpath>` the post consumes — so the picture cannot disagree
+with the file.
+
+Four operations: **profile** (outside/inside, tabs), **pocket** (voids inside
+the outline; islands fall out of the boolean), **face**, **drill** (targets
+by stable element name). Two posts, Mach3 and LinuxCNC, differing in exactly
+three places: preamble, tool change, program end.
+
+Three bugs the tests and the first real run caught, all of the kind this
+workstream exists to prevent:
+
+1. **Tabs stepped over the part.** Testing "is the END of this segment inside
+   a tab?" misses every tab on a profiled rectangle, because that path is
+   four 40 mm segments. Tabs now split the segments they cross, with an
+   explicit vertical move at the boundary (square walls, not a ramp).
+2. **`G0 Xnan Ynan Z20`** in the posted file — the retract before the first
+   tool change passed modal X/Y that nothing had set yet. Retract touches Z
+   alone now, and a test asserts no posted file ever contains `nan`.
+3. The final depth pass lands **exactly** on the requested depth (short,
+   never deep), which is a one-line rule and a scrapped part when wrong.
 
 ## Risks
 

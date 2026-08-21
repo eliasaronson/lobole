@@ -477,6 +477,7 @@ set(app_sources
     src/ui/VariablesPanel.cpp
     src/ui/HistoryPanel.cpp
     src/ui/SettingsWindow.cpp
+    src/ui/CamPanel.cpp
     src/ui/PerfHud.cpp
     src/ui/TerminalPanel.cpp
     src/ui/SketchToolbar.cpp

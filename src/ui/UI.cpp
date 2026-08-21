@@ -8,6 +8,7 @@
 #include "render/SketchRenderer.h"
 #include "render/UnderlayRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/CamPanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/ConfigurationsPanel.h"
 #include "ui/DockLayout.h"
@@ -712,6 +713,7 @@ void DrawUI(AppState& state) {
   // PROJECT, so the history reads the same from a part, an assembly or a
   // drawing tab (F6).
   DrawHistoryPanel(state);
+  DrawCamPanel(state);
   DrawTerminalPanel(state);
   DrawSettingsWindow(state);
   DrawPerfHud(state);
@@ -796,6 +798,7 @@ void DrawUI(AppState& state) {
       AppendSelectionPrimitives(state, prims);  // selected/hovered edges (U1b)
       AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
       AppendSimulationBCGlyphs(state, prims);   // FEM load/fixed/keep glyphs
+      AppendCamToolpathOverlay(state, prims);   // CAM backplot
       state.sketchRenderer->SetPrimitives(std::move(prims));
 
       // Auto-constraint snap indicator + ghost glyphs, and dimension

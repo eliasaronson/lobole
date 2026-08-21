@@ -101,6 +101,7 @@ void BeginDockspace(AppState& state) {
         redock("Variables", model->DockId);
         redock("Configurations", model->DockId);
         redock("History", model->DockId);
+        redock("CAM###CamPanel", model->DockId);
       }
     }
   }
@@ -152,6 +153,7 @@ void BeginDockspace(AppState& state) {
     ImGui::DockBuilderDockWindow("Variables", left);      // tabbed behind Model
     ImGui::DockBuilderDockWindow("Configurations", left); // tabbed behind Model
     ImGui::DockBuilderDockWindow("History", left);        // tabbed behind Model
+    ImGui::DockBuilderDockWindow("CAM###CamPanel", left); // ditto
     ImGui::DockBuilderFinish(dockspaceId);
     // The tab focused last wins the shared node; make sure that is Model —
     // with Sketch tabbed here too (U7e), it could otherwise end up on top

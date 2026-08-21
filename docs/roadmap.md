@@ -283,7 +283,12 @@ it will list and never run.
 - ~~**2D drawings / drafting output**~~ — was "deliberately out of scope until after
   assemblies; revisit then". Assemblies shipped, revisited July 2026: now workstream 13,
   see [drawings/plan.md](drawings/plan.md).
-- **CAM** — still out of scope *as scheduled work*, but no longer a flat no:
+- ~~**CAM**~~ — **reversed and BUILT 2026-08-21** (C1–C4; the camsim
+  verification loop C5 outstanding): 2.5D milling — profile with tabs,
+  pocket, face, drill — on Clipper2, posting to Mach3 and LinuxCNC, with a
+  backplot and setups that persist with the part (format v58). See
+  [cam/plan.md](cam/plan.md). The proposal that preceded it, kept because the
+  survey numbers are the reason the scope is narrow:
   [cam/plan.md](cam/plan.md) costs it out (2026-08-21, after the user bought a
   mill), having surveyed the alternatives by reading them — FreeCAD CAM is
   ~25k lines of ops over 14k lines of libarea, Kiri:Moto's whole CAM mode is

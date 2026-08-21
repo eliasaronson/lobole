@@ -6,6 +6,7 @@
 #include "core/Feature.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
+#include "core/cam/CamPost.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumPlaneFeature.h"
@@ -29,6 +30,7 @@
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
+#include "ui/CamPanel.h"
 #include "ui/DragMath.h"
 #include "ui/HistoryPanel.h"
 #include "ui/PreviewFeature.h"
@@ -871,6 +873,65 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::ExitSimulation(*s_App);
     ctx->Yield();
   };
+
+#ifdef HAVE_CAM
+  // CAM (docs/cam/plan.md): a setup on a part, an operation with derived
+  // depths, and a backplot drawn from the SAME toolpath the post consumes.
+  t = IM_REGISTER_TEST(engine, "cam", "panel_generates_and_backplots");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+
+    cam::Setup& setup = Doc()->AddCamSetup("Side A");
+    setup.safeZ = 20.0;
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+
+    // The panel's "Add operation" derives its depths from the model rather
+    // than defaulting to zeros — the u10 rule: a default that cuts nothing
+    // (or everything) is a bug.
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("###cam_add_op");
+    ctx->Yield(2);
+    cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK(live != nullptr);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    const cam::Operation& op = live->operations[0];
+    IM_CHECK(op.topZ > op.bottomZ);
+    IM_CHECK(op.topZ <= 12.0 + 1e-6); // inside the stock, not at z=0
+    IM_CHECK(op.stepdown > 0.0);
+
+    // Generate: toolpaths exist, and the backplot draws them.
+    ctx->ItemClick("###cam_generate");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+    IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
+
+    std::vector<PrimVertex> prims;
+    ui::AppendCamToolpathOverlay(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    // Turning the picture off turns it off — a backplot that cannot be
+    // hidden buries the model it is drawn over.
+    s_App->camShowToolpath = false;
+    std::vector<PrimVertex> none;
+    ui::AppendCamToolpathOverlay(*s_App, none);
+    IM_CHECK(none.empty());
+    s_App->camShowToolpath = true;
+
+    // The toolpath the overlay drew is the one the post would consume: same
+    // vector, so the picture cannot disagree with the file.
+    std::string gcode, error;
+    IM_CHECK(cam::PostProcess(live->post, *live, s_App->camToolpaths, {}, gcode,
+                              &error));
+    IM_CHECK(gcode.find("G90 G21") != std::string::npos);
+    IM_CHECK(gcode.find("nan") == std::string::npos);
+  };
+#endif // HAVE_CAM
 
 #ifdef HAVE_TERMINAL
   // The terminal panel (docs/ui/terminal-panel.md). Off by default, docked

@@ -3,6 +3,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Occurrence.h"
+#include "core/cam/CamJob.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
@@ -957,6 +958,15 @@ struct AppState {
   // before the panel existed) left floating — see BeginDockspace.
   bool dockHomesEnforced = false;
   bool runGuiTests = false;
+
+  // CAM (docs/cam/plan.md). Toolpaths are CACHED, not regenerated per frame:
+  // the backplot overlay and the panel read the same vector the post
+  // consumes, so the picture cannot disagree with the file.
+  std::vector<cam::Toolpath> camToolpaths;
+  uint64_t camActiveSetup = 0;
+  bool camShowToolpath = true;
+  float camSafeZEdit = 5.0f;
+  std::string camLastPost;
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default via
   // settings.terminalPanel; the state is created the first time it draws, so
