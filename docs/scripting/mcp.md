@@ -81,7 +81,7 @@ The exposed set is what a person asks an assistant for:
 | Meta | `describe`, `help`, `rpc` |
 | Inspect | `get_state`, `check_geometry`, `measure`, `mass_properties`, `list_elements` |
 | Variables | `list_variables`, `set_variable` |
-| Look at it | `screenshot`, `render_still`, `view`, `set_camera`, `set_section`, `set_render_options` |
+| Look at it | `screenshot`, `render_still`, `view`, `set_camera`, `set_section` (and `add/list/update/remove_section` via `rpc`), `set_render_options` |
 | Project | `new_project`, `open_project`, `save_project`, `export_stl`, `export_step` |
 | Author | `add_feature`, `modify_feature`, `delete_feature`, `undo` |
 

@@ -658,7 +658,8 @@ Nice-to-have follow-ups (see Deferred, all unscheduled): ellipse full
 constrainability, offset as a regenerating DerivedOp, extend/transform tools,
 convenience primitives (slot/polygon).
 
-Orthogonal, non-sketch work: the **quaternion camera**
-(`refactor/quaternion-camera`) — still open. (Incremental regeneration, once
-listed here, shipped: `Document` keeps a per-feature output-shape cache —
-`RegenCacheEntry`/`RegenStats`.)
+Orthogonal, non-sketch work, both since **shipped**: the **quaternion
+camera** (orientation is a unit quaternion about the orbit target —
+`render/Camera.h`; the `refactor/quaternion-camera` branch is long gone), and
+**incremental regeneration** (`Document` keeps a per-feature output-shape
+cache — `RegenCacheEntry`/`RegenStats`).

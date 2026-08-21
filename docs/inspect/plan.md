@@ -8,9 +8,17 @@
 >
 > **2026-08-19:** assembly section caps shipped, along with a fix for the
 > cutter being aimed at the world origin (any model built away from 0,0,0 cut
-> nothing). The section UI is being replaced wholesale — one plane in a View
-> menu becomes a tool with a list, drag arrows and angles: see
-> [section-tool-design.md](section-tool-design.md), awaiting sign-off.
+> nothing). The section UI was replaced wholesale — one plane in a View menu
+> became a tool with a list, drag arrows and up to four intersecting cuts
+> (P1). **2026-08-21: P2 + P3 shipped** — datum-plane and picked-face
+> sources resolved live, tilt angles that pivot about the offset point, and
+> sections that PERSIST with the project (they were session state and
+> vanished on save) plus `add/list/update/remove_section`. Details and the
+> one deliberate deviation — an unresolvable source stops its cut instead of
+> falling back — in [section-tool-design.md](section-tool-design.md).
+>
+> **2026-08-20:** contact checks run their boolean with a 1 µm fuzz, so parts
+> designed to touch report contact instead of a sliver-sized "clash".
 
 The "is it right?" toolset: measuring geometry, mass/volume properties, and
 seeing inside a part. Small, high-value, and disproportionately useful to the
@@ -62,8 +70,15 @@ into **double-sided** opaque instances (both windings so the fill shows from
 either orbit side), nudged onto the kept half so the global shader clip
 keeps them, in the body's color. Caps rebuild when the plane changes and no
 widget is being dragged (they settle on slider release; the shader clip
-previews live). Part-tab only; **hatching** stays deferred (cosmetic, wants
-the drawings hatch style), as do **assembly** section caps.
+previews live). Part-tab only when written; **assembly caps shipped
+2026-08-19**, and **hatching** stays deferred (cosmetic, wants the drawings
+hatch style).
+
+**The tool (P1–P3, August 2026):** the View menu entry is gone. Sections are
+a tool with a list — up to four intersecting cuts, each with a source (base
+plane, datum plane, or a picked planar face), an offset with a viewport drag
+arrow, two tilt angles, flip and visibility — and they are saved with the
+project. See [section-tool-design.md](section-tool-design.md).
 
 ## I4 — Later
 
