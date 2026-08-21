@@ -1,8 +1,12 @@
 #include "core/cam/CamPost.h"
 
+#include <glm/geometric.hpp>
+
 #include <cmath>
 #include <cstdio>
+#include <numbers>
 #include <sstream>
+#include <vector>
 
 namespace cam {
 
@@ -56,6 +60,30 @@ struct Emitter {
     z = zTo;
   }
 
+  // An arc in the XY plane (G17), centre given INCREMENTALLY from the arc
+  // start as I/J — which is why the preamble states G91.1. On a machine
+  // configured for absolute centres, incremental I/J puts the centre near
+  // the work origin and the tool takes a full-radius swing across the table;
+  // stating the mode is the difference between a curve and a crash.
+  void Arc(bool clockwise, const glm::dvec3& to, const glm::dvec2& centre,
+           double f) {
+    std::ostringstream l;
+    l << (clockwise ? "G2" : "G3");
+    l << " X" << Num(to.x, decimals) << " Y" << Num(to.y, decimals);
+    if (Differs(to.z, z))
+      l << " Z" << Num(to.z, decimals);
+    l << " I" << Num(centre.x - x, decimals) << " J"
+      << Num(centre.y - y, decimals);
+    if (f > 0.0 && Differs(f, feed)) {
+      l << " F" << Num(f, decimals);
+      feed = f;
+    }
+    out << l.str() << "\n";
+    x = to.x;
+    y = to.y;
+    z = to.z;
+  }
+
   void Motion(const char* code, const glm::dvec3& to, double f, bool withA,
               double aVal) {
     std::ostringstream l;
@@ -101,6 +129,178 @@ constexpr Dialect kDialects[] = {
     {"linuxcnc", true, "M2"},
 };
 
+// --- C7: fitting arcs back onto the polyline -------------------------------
+//
+// Offsetting flattens every curve, so a circular pocket leaves here as
+// hundreds of G1s. The fit runs at POST time on purpose: the toolpath stays a
+// polyline, so the backplot, the height-map verifier and every existing test
+// see exactly what they saw before, and only this file and the G-code parser
+// know arcs exist.
+//
+// An arc must fit the polyline FAR better than the polyline fits the true
+// curve it came from, or the fit is inventing curvature rather than
+// recovering it. A quarter of the chord tolerance the sectioner used.
+constexpr double kChordTolerance = 0.02; // mm, matches CamToolpath
+constexpr double kArcTolerance = kChordTolerance * 0.25;
+// Three segments minimum: two segments define a circle through three points
+// with no evidence left over to test it against.
+constexpr size_t kMinArcSegments = 3;
+
+struct Circle {
+  glm::dvec2 centre{0.0};
+  double radius = 0.0;
+  bool ok = false;
+};
+
+// Least-squares circle (Kasa) through every point of the run, then the
+// centre slid onto the perpendicular bisector of the first and last points.
+//
+// Both halves are load-bearing. A circle through three ADJACENT tessellation
+// points is ill-conditioned — the first attempt fitted a 3 mm corner arc
+// 0.014 mm off centre and broke each corner into two arcs. And a
+// least-squares centre is not exactly equidistant from the endpoints, which
+// is precisely what LinuxCNC rejects as an arc endpoint radius mismatch: the
+// projection makes |start - centre| == |end - centre| by construction.
+Circle FitCircle(const std::vector<glm::dvec2>& pts) {
+  Circle out;
+  if (pts.size() < 3)
+    return out;
+  double sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0;
+  const double n = static_cast<double>(pts.size());
+  for (const glm::dvec2& p : pts) {
+    const double zz = p.x * p.x + p.y * p.y;
+    sx += p.x;
+    sy += p.y;
+    sxx += p.x * p.x;
+    syy += p.y * p.y;
+    sxy += p.x * p.y;
+    sxz += p.x * zz;
+    syz += p.y * zz;
+    sz += zz;
+  }
+  // Normal equations for x^2 + y^2 + D x + E y + F = 0.
+  const double m11 = sxx, m12 = sxy, m13 = sx;
+  const double m22 = syy, m23 = sy;
+  const double det = m11 * (m22 * n - m23 * m23) - m12 * (m12 * n - m23 * m13) +
+                     m13 * (m12 * m23 - m22 * m13);
+  if (std::abs(det) < 1e-12)
+    return out; // collinear: a straight run declines to become an arc
+  const double r1 = -sxz, r2 = -syz, r3 = -sz;
+  const double d = (r1 * (m22 * n - m23 * m23) - m12 * (r2 * n - m23 * r3) +
+                    m13 * (r2 * m23 - m22 * r3)) /
+                   det;
+  const double e = (m11 * (r2 * n - m23 * r3) - r1 * (m12 * n - m23 * m13) +
+                    m13 * (m12 * r3 - r2 * m13)) /
+                   det;
+  glm::dvec2 centre(-d * 0.5, -e * 0.5);
+
+  // Slide onto the bisector of the endpoints so the radii match exactly.
+  const glm::dvec2& a = pts.front();
+  const glm::dvec2& b = pts.back();
+  const glm::dvec2 chord = b - a;
+  const double len2 = glm::dot(chord, chord);
+  if (len2 > 1e-18) {
+    const glm::dvec2 mid = (a + b) * 0.5;
+    const glm::dvec2 dir(-chord.y, chord.x);
+    centre = mid + dir * (glm::dot(centre - mid, dir) / glm::dot(dir, dir));
+  }
+  out.centre = centre;
+  out.radius = glm::length(a - centre);
+  // A metre-radius "arc" is a straight line with rounding noise: emitting it
+  // gains nothing and invites a controller's own arc tolerance to reject it.
+  out.ok = out.radius > 1e-6 && out.radius < 1.0e3;
+  return out;
+}
+
+// Signed turn from `from` to `to` about `centre`, in (-pi, pi].
+double SweptAngle(const glm::dvec2& centre, const glm::dvec2& from,
+                  const glm::dvec2& to) {
+  const glm::dvec2 u = from - centre, v = to - centre;
+  return std::atan2(u.x * v.y - u.y * v.x, glm::dot(u, v));
+}
+
+// Longest run of moves from `first` that lies on one circle. Returns the
+// index of the last move the arc absorbs, or `first - 1` when there is no
+// arc — so the caller emits a line and steps on.
+size_t FitArc(const std::vector<Move>& moves, size_t first, Circle& circle,
+              bool& clockwise) {
+  if (first == 0 || first + kMinArcSegments > moves.size())
+    return first - 1;
+  const glm::dvec3 start = moves[first - 1].to;
+  const double z = start.z;
+  const double feed = moves[first].feed;
+
+  const auto usable = [&](const Move& m) {
+    return m.kind == Move::Kind::Cut && !m.hasA &&
+           std::abs(m.to.z - z) < 1e-9 && std::abs(m.feed - feed) < 1e-9;
+  };
+  for (size_t k = first; k < first + kMinArcSegments; k++)
+    if (k >= moves.size() || !usable(moves[k]))
+      return first - 1;
+
+  // Grow the run one move at a time, refitting the whole thing each step: a
+  // fit is only trusted against the points it was made from.
+  std::vector<glm::dvec2> pts{glm::dvec2(start)};
+  size_t last = first - 1;
+  for (size_t k = first; k < moves.size(); k++) {
+    if (!usable(moves[k]))
+      break;
+    pts.push_back(glm::dvec2(moves[k].to));
+    if (pts.size() < kMinArcSegments + 1)
+      continue;
+
+    const Circle candidate = FitCircle(pts);
+    if (!candidate.ok)
+      break;
+    bool fits = true;
+    double swept = 0.0;
+    bool cw = false;
+    for (size_t i = 1; i < pts.size() && fits; i++) {
+      if (std::abs(glm::length(pts[i] - candidate.centre) - candidate.radius) >
+          kArcTolerance) {
+        fits = false;
+        break;
+      }
+      const double step = SweptAngle(candidate.centre, pts[i - 1], pts[i]);
+      // A reversal, a stall, or a jump past a quarter turn between samples
+      // is a different curve, not this one.
+      if (std::abs(step) < 1e-12 || std::abs(step) > std::numbers::pi * 0.5) {
+        fits = false;
+        break;
+      }
+      // How far the arc bows away from the straight segment it replaces,
+      // BETWEEN the samples. Checking only at the samples let a 1.5 mm
+      // straight edge be swallowed into a 10 mm-radius arc that passed
+      // within 5 um at every point and bulged 27 um in the middle — a curve
+      // cut where the part wants a flat. The bound is the chord tolerance
+      // the polyline itself was built to, because that is how far from the
+      // true curve these points already are.
+      if (candidate.radius * (1.0 - std::cos(std::abs(step) * 0.5)) >
+          kChordTolerance) {
+        fits = false;
+        break;
+      }
+      if (i == 1)
+        cw = step < 0.0;
+      else if ((step < 0.0) != cw)
+        fits = false;
+      swept += step;
+    }
+    // Stop short of a full turn: a G2 whose start and end coincide is
+    // ambiguous, and controllers disagree about it.
+    if (fits && std::abs(swept) > std::numbers::pi * 1.9)
+      fits = false;
+    if (!fits) {
+      pts.pop_back();
+      break;
+    }
+    circle = candidate;
+    clockwise = cw;
+    last = k;
+  }
+  return last - first + 1 >= kMinArcSegments ? last : first - 1;
+}
+
 const Dialect* Find(const std::string& id) {
   for (const Dialect& d : kDialects)
     if (id == d.id)
@@ -142,7 +342,11 @@ bool PostProcess(const std::string& postId, const Setup& setup,
   // Absolute, mm, XY plane, cancel any leftover cutter comp or canned cycle:
   // a preamble that assumes the machine is in a known state is how a job
   // starts in inches.
-  e.Raw("G90 G21 G17 G40 G49 G80");
+  // G91.1: arc centres are INCREMENTAL from the arc start. LinuxCNC defaults
+  // that way and Mach3 is configurable, so a file that does not say puts the
+  // centre wherever the machine was left — see Emitter::Arc.
+  e.Raw(opts.fitArcs ? "G90 G91.1 G21 G17 G40 G49 G80"
+                     : "G90 G21 G17 G40 G49 G80");
   if (opts.useG54)
     e.Raw("G54");
 
@@ -186,10 +390,21 @@ bool PostProcess(const std::string& postId, const Setup& setup,
 
     if (opts.comments)
       e.Comment("op " + std::to_string(tp.operationId));
-    for (const Move& m : tp.moves) {
+    for (size_t i = 0; i < tp.moves.size();) {
+      const Move& m = tp.moves[i];
+      Circle circle;
+      bool clockwise = false;
+      const size_t last =
+          opts.fitArcs ? FitArc(tp.moves, i, circle, clockwise) : i - 1;
+      if (opts.fitArcs && i > 0 && last >= i) {
+        e.Arc(clockwise, tp.moves[last].to, circle.centre, tp.moves[i].feed);
+        i = last + 1;
+        continue;
+      }
       const char* code = m.kind == Move::Kind::Rapid ? "G0" : "G1";
       e.Motion(code, m.to, m.kind == Move::Kind::Rapid ? 0.0 : m.feed, m.hasA,
                m.a);
+      i++;
     }
   }
 

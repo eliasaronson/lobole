@@ -21,6 +21,12 @@ struct PostOptions {
   // Mach3 has no tool table: a tool change is M6 and a pause for the human.
   // LinuxCNC can do it properly. Posts decide; this just carries the intent.
   bool pauseOnToolChange = true;
+  // C7: fit runs of straight moves back into G2/G3 arcs. Offsetting flattens
+  // every curve to a polyline, so a circular pocket posts as hundreds of G1s
+  // that the controller then has to look ahead through. Off is the escape
+  // hatch for a controller that mishandles arcs — and the way the test proves
+  // the fit changes the file without changing the cut.
+  bool fitArcs = true;
 };
 
 // Every dialect this build can emit, by id ("mach3", "linuxcnc").

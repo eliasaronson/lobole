@@ -7,10 +7,16 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <numbers>
 
 namespace cam {
 
 namespace {
+
+// How finely an arc is re-expanded into chords for simulation: the same
+// tolerance the toolpath was flattened at, so a fitted arc returns to the
+// polyline it came from.
+constexpr double kArcChordTolerance = 0.02;
 
 // Distance from p to segment [a,b] in XY, plus the parameter t of the closest
 // point. Exact — this is what replaces FreeCAD's 0.6-pixel path walk.
@@ -57,6 +63,9 @@ GProgram ParseGcode(std::string_view text) {
   GProgram out;
   glm::dvec3 pos(0.0);
   bool rapid = true;
+  // 0 = G0, 1 = G1, 2 = G2 (clockwise arc), 3 = G3. Modal, like everything
+  // else here: a block with only coordinates repeats the last motion.
+  int mode = 0;
   int tool = 1;
   int lineNo = 0;
   bool havePos = false;
@@ -88,6 +97,8 @@ GProgram ParseGcode(std::string_view text) {
     glm::dvec3 to = pos;
     bool motion = false;
     bool sawAxis = false;
+    // Arc centre, INCREMENTAL from the arc start (the post states G91.1).
+    glm::dvec2 ij(0.0);
     for (size_t k = 0; k < clean.size(); k++) {
       const char word = clean[k];
       if (!std::isalpha(static_cast<unsigned char>(word)))
@@ -116,13 +127,15 @@ GProgram ParseGcode(std::string_view text) {
       }
       switch (word) {
       case 'G':
-        if (value == 0.0) {
-          rapid = true;
-          motion = true;
-        } else if (value == 1.0) {
-          rapid = false;
+        if (value == 0.0 || value == 1.0 || value == 2.0 || value == 3.0) {
+          mode = static_cast<int>(value);
+          rapid = mode == 0;
           motion = true;
         }
+        // Everything else (G17/G21/G90/G91.1/G40…) is state this simulator
+        // does not model. G91.1 in particular is ASSUMED — the post always
+        // emits incremental centres, and reading them as absolute would put
+        // every arc somewhere else entirely.
         break;
       case 'X':
         to.x = value;
@@ -136,6 +149,12 @@ GProgram ParseGcode(std::string_view text) {
         to.z = value;
         sawAxis = true;
         break;
+      case 'I':
+        ij.x = value;
+        break;
+      case 'J':
+        ij.y = value;
+        break;
       case 'T':
         tool = static_cast<int>(value);
         break;
@@ -146,6 +165,49 @@ GProgram ParseGcode(std::string_view text) {
     }
 
     if (sawAxis || (motion && havePos)) {
+      if (mode >= 2 && havePos) {
+        // An arc becomes chords here, so Simulate and every check downstream
+        // keep seeing straight segments. The sagitta bound is the same chord
+        // tolerance the toolpath was flattened at, so re-expanding an arc
+        // the post fitted returns to where it started.
+        const glm::dvec2 centre = glm::dvec2(pos) + ij;
+        const double radius = glm::length(glm::dvec2(pos) - centre);
+        if (radius > 1e-9) {
+          const glm::dvec2 u = glm::dvec2(pos) - centre;
+          const glm::dvec2 v = glm::dvec2(to) - centre;
+          double sweep = std::atan2(u.x * v.y - u.y * v.x, glm::dot(u, v));
+          // G2 is clockwise seen from +Z: a non-negative sweep means the arc
+          // goes the long way round.
+          if (mode == 2 && sweep > 0.0)
+            sweep -= 2.0 * std::numbers::pi;
+          if (mode == 3 && sweep < 0.0)
+            sweep += 2.0 * std::numbers::pi;
+          const double perSeg =
+              radius > kArcChordTolerance
+                  ? 2.0 * std::acos(1.0 - kArcChordTolerance / radius)
+                  : 1.0;
+          const int steps = std::clamp(
+              static_cast<int>(std::ceil(std::abs(sweep) / perSeg)), 1, 4096);
+          const double a0 = std::atan2(u.y, u.x);
+          for (int k = 1; k <= steps; k++) {
+            const double t = static_cast<double>(k) / steps;
+            const double a = a0 + sweep * t;
+            GMove m;
+            m.rapid = false;
+            m.to = {centre.x + radius * std::cos(a),
+                    centre.y + radius * std::sin(a),
+                    pos.z + (to.z - pos.z) * t};
+            m.tool = tool;
+            m.line = lineNo;
+            out.moves.push_back(m);
+          }
+          pos = to;
+          havePos = true;
+          continue;
+        }
+        out.errors.push_back("line " + std::to_string(lineNo) +
+                             ": arc with no radius (I/J missing?)");
+      }
       GMove m;
       m.rapid = rapid;
       m.to = to;

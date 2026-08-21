@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -318,8 +319,10 @@ TEST_CASE("cam: the post emits a program that starts and ends safely",
   REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
 
   // The preamble puts the machine in a known state — the absence of this is
-  // how a job runs in inches.
-  CHECK(gcode.find("G90 G21 G17 G40 G49 G80") != std::string::npos);
+  // how a job runs in inches. G91.1 is there because the post fits arcs, and
+  // an arc centre read in the wrong mode is a full-radius swing across the
+  // table (C7).
+  CHECK(gcode.find("G90 G91.1 G21 G17 G40 G49 G80") != std::string::npos);
   CHECK(gcode.find("G54") != std::string::npos);
   CHECK(gcode.find("T1 M6") != std::string::npos);
   CHECK(gcode.find("S12000 M3") != std::string::npos);
@@ -899,6 +902,113 @@ TEST_CASE("cam verify: leftover comes back as points to paint", "[cam]") {
   cam::Inspection none = insp;
   none.machined = none.designed;
   CHECK(cam::LeftoverPoints(none, 0.2).empty());
+}
+
+// --- C7: arcs -------------------------------------------------------------
+
+TEST_CASE("cam: curves post as arcs, and the cut does not change", "[cam]") {
+  // The profile of a rectangle offset outward has four round corners. Fitted,
+  // each is one G2 about the part corner instead of thirteen G1s.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = 0.0;
+  op.stepdown = 0.0;
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+
+  cam::PostOptions arcs;
+  cam::PostOptions lines;
+  lines.fitArcs = false;
+  std::string withArcs, withLines, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, arcs, withArcs, &error));
+  REQUIRE(cam::PostProcess("mach3", setup, paths, lines, withLines, &error));
+
+  const auto count = [](const std::string& text, const std::string& what) {
+    size_t n = 0, at = 0;
+    while ((at = text.find(what, at)) != std::string::npos) {
+      n++;
+      at += what.size();
+    }
+    return n;
+  };
+  CHECK(count(withArcs, "\nG2 ") == 4); // one per corner
+  CHECK(count(withLines, "\nG2 ") == 0);
+  // 79 lines against 127. Not half: the entry ramp descends while it turns,
+  // and a helical arc is deferred (C7 fits flat arcs only), so that lap
+  // stays as line moves.
+  const auto lines_of = [](const std::string& t) {
+    return std::count(t.begin(), t.end(), '\n');
+  };
+  CHECK(lines_of(withArcs) < lines_of(withLines) * 3 / 4);
+  CHECK(withArcs.size() < withLines.size());
+  // The mode word is not optional: incremental centres read as absolute put
+  // the arc centre at the work origin.
+  CHECK(withArcs.find("G91.1") != std::string::npos);
+  CHECK(withLines.find("G91.1") == std::string::npos);
+
+  // The centre is EXACTLY the part corner and the radius exactly the tool's:
+  // a least-squares centre that is not equidistant from the endpoints is
+  // what a controller rejects as an arc endpoint radius mismatch.
+  CHECK(withArcs.find("G2 X40 Y-3 I-3 J0") != std::string::npos);
+
+  // The load-bearing test: the same job, posted both ways, must machine the
+  // same part. A fit that is merely tidier shows up here as a difference.
+  const cam::Verdict a =
+      cam::VerifyGcode(withArcs, setup, doc->GetBodies(), 0.4);
+  const cam::Verdict l =
+      cam::VerifyGcode(withLines, setup, doc->GetBodies(), 0.4);
+  INFO("arcs gouge " << a.maxGouge << " leftover " << a.maxLeftover
+                     << " / lines gouge " << l.maxGouge << " leftover "
+                     << l.maxLeftover);
+  CHECK(std::abs(a.maxGouge - l.maxGouge) < 0.05);
+  CHECK(std::abs(a.maxLeftover - l.maxLeftover) < 0.05);
+  CHECK(a.rapidsThroughStock == l.rapidsThroughStock);
+}
+
+TEST_CASE("cam: an arc is never fitted across a straight edge", "[cam]") {
+  // The bug the first fit had: deviation checked only AT the sample points
+  // let a 1.5 mm straight segment be absorbed into a 10 mm-radius arc that
+  // passed within 5 um at every sample and bulged 27 um in between — a curve
+  // cut where the part wants a flat.
+  auto doc = BlockDoc(40, 30, 20);
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 21.0;
+  op.bottomZ = 0.0;
+  op.stepdown = 0.0;
+  setup.operations.push_back(op);
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup,
+                           cam::GenerateAll(setup, doc->GetBodies()), {}, gcode,
+                           &error));
+
+  // Re-expand the file and check every point against the true toolpath
+  // shape: the offset outline is a 46 x 36 rectangle with 3 mm corners, so
+  // every cutting point is exactly 3 mm from the part's boundary.
+  const cam::GProgram program = cam::ParseGcode(gcode);
+  REQUIRE(program.errors.empty());
+  int checked = 0;
+  for (const cam::GMove& m : program.moves) {
+    if (m.rapid || m.to.z > 19.0)
+      continue;
+    // Distance from the 0..40 x 0..30 rectangle, which must be the radius.
+    const double dx = std::max({0.0 - m.to.x, 0.0, m.to.x - 40.0});
+    const double dy = std::max({0.0 - m.to.y, 0.0, m.to.y - 30.0});
+    const double d = std::hypot(dx, dy);
+    INFO("point " << m.to.x << "," << m.to.y << " at " << d);
+    CHECK(std::abs(d - 3.0) < 0.03);
+    checked++;
+  }
+  CHECK(checked > 20); // the loop actually ran
 }
 
 // --- C4: frozen G-code, per dialect --------------------------------------
