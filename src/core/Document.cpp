@@ -81,6 +81,15 @@ bool Document::ReplaceFeature(size_t index, std::unique_ptr<Feature> feature) {
   if (index >= m_features.size() || !feature) {
     return false;
   }
+  // Replacing a feature changes what it IS, never which one it is. A
+  // replacement built from JSON that carries no "id" (the modify_feature RPC
+  // sends parameters, not identity) would otherwise land with id 0 — writing
+  // `0-box.json`, listing 0 in the index, and dangling every reference that
+  // named the old id. Stable, never-reused ids are the contract the whole
+  // directory format and merge story rest on (F1/F3/F7).
+  if (feature->GetId() == 0) {
+    feature->SetId(m_features[index]->GetId());
+  }
   m_features[index] = std::move(feature);
   Regenerate();
   return true;

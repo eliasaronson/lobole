@@ -102,3 +102,28 @@ TEST_CASE("FeatureToJson/FromJson roundtrip for every feature type",
     CHECK(DocumentIO::FeatureToJson(*restored) == j);
   }
 }
+
+// A replacement changes what a feature IS, never which one it is. The
+// modify_feature RPC sends parameters and no "id", and ReplaceFeature used to
+// take the incoming id verbatim — so the feature landed with id 0, saved
+// itself as "0-box.json", listed 0 in index.json, and dangled every reference
+// that named its old id. Stable, never-reused ids are the contract the
+// directory format and the merge machinery are built on (F1/F3/F7).
+TEST_CASE("ReplaceFeature keeps the feature's stable id", "[document]") {
+  Document doc;
+  doc.AddFeature(MakeBox("Box 1"));
+  const uint64_t id = doc.GetFeature(0)->GetId();
+  REQUIRE(id != 0);
+
+  // A replacement built from JSON that carries no identity.
+  REQUIRE(doc.ReplaceFeature(0, MakeBox("Box 1", 9.0)));
+  CHECK(doc.GetFeature(0)->GetId() == id);
+  CHECK(doc.FindFeatureById(id) == doc.GetFeature(0));
+
+  // One that DOES carry an id keeps it — undo re-inserts a feature by
+  // identity and must not be second-guessed.
+  auto explicitId = MakeBox("Box 1", 4.0);
+  explicitId->SetId(77);
+  REQUIRE(doc.ReplaceFeature(0, std::move(explicitId)));
+  CHECK(doc.GetFeature(0)->GetId() == 77);
+}

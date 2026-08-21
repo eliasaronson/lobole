@@ -607,10 +607,18 @@ def main():
         expect(after["source"]["resolved"], "source still resolves")
 
         # And a source that VANISHES stops the cut rather than silently
-        # cutting along some other plane: replacing the datum with a fresh
-        # feature (new id) leaves the reference dangling.
+        # cutting along some other plane: replacing the datum with a
+        # genuinely DIFFERENT feature (a new id) leaves the reference
+        # dangling.
+        #
+        # The id is explicit on purpose. This used to omit it and rely on
+        # ReplaceFeature taking the incoming 0 verbatim — which destroyed the
+        # identity of every feature the modify_feature RPC touched, wrote it
+        # to disk as "0-box.json", and dangled every OTHER reference to it
+        # too. Identity is now preserved unless you name a different one, so
+        # "this is a different feature" has to be said out loud.
         d.call("modify_feature", index=1, feature={
-            "type": "DatumPlane", "name": "D2", "kind": "offset",
+            "type": "DatumPlane", "id": 9001, "name": "D2", "kind": "offset",
             "base_plane": "xy", "offset": 4.0})
         dangling = [s for s in d.call("list_sections")["sections"]
                     if s["id"] == a["id"]][0]
