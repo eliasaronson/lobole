@@ -10,7 +10,9 @@
 > F6 both deferred needed a merge engine under it first. Its scoping also
 > surfaced [F8](f8-external-changes.md), **also shipped 2026-08-21**: nothing
 > noticed the project changing on disk, so a `git` command in the app's own
-> terminal was overwritten by the next Ctrl+S. Later work: **insert-feature-at-marker**
+> terminal was overwritten by the next Ctrl+S. [F9](f9-collaboration.md) is planned, not
+> built: what a small team who already use git would additionally need
+> (~5 days — F7 built the expensive half without meaning to). Later work: **insert-feature-at-marker**
 > (F4 v2). Nothing here blocks other
 > workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
 > history — the number has moved well past this doc's original snapshot as
@@ -133,6 +135,25 @@ silently. **D1 the guard, D2 the banner (focus regain plus a slow timer,
 gated on git HEAD when there is one), D3 the stable-id invariant F7's
 `ReplaceFeature` bug argued for — no id-0 item can reach disk.**
 
+### F9 — A small team sharing a project — **planned, not built** — [design: f9-collaboration.md](f9-collaboration.md)
+Audience decided: a small team who **already understand git**, which is what
+makes this a week rather than a quarter. F7 built the expensive half by
+accident — `pull` is `fetch` + `merge`, and merge already understands the
+format, so a teammate's incoming work is the same five conflict classes, the
+same panel, the same integrity pass.
+
+What remains: **C1** commits authored by the person who made them (the inline
+identity is applied on every commit, so it overrides the one git already has);
+**C2** remotes + clone, whose substance is that fetch/push are network calls
+and `RunGit` blocks — fetch and push go to a worker thread (they touch `.git/`
+only), merge stays on the main thread (it moves the working tree under an open
+document); **C3** duplicate ids attributed by side, which keeps ids sequential
+by using the merge base to know whose reference meant which; **C4** built
+geometry stops travelling once a project has a remote; **C5** named versions
+pushed, with the address disambiguated on collision rather than the name.
+**≈4.5–5 days.** Auth is deliberately not handled — the audience has git
+working, and a prompt that would hang is made to fail instead.
+
 ## Recommended order
 
 F1 + F2 **soon** (each ~a day, pure insurance). F3 after the schema settles —
@@ -154,3 +175,8 @@ useful and could be pulled forward with the modeling work.
 - The remaining gap F7's scoping found is now [F8](f8-external-changes.md).
   The other one still stands: the versioning docs are written as if a project
   were a single part, and a conflict spans every document in it.
+- **Toponaming divergence is F9's real risk**, and it is not a line item:
+  everything F7/F8 do fails loudly, but two people editing one feature can
+  leave downstream references bound to different-but-valid faces on each
+  side. `Verify()` proves the merge loads and rebuilds, not that it means
+  what either person intended.

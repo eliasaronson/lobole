@@ -18,7 +18,7 @@ which is usually the part worth reading later.
 | [modeling/](modeling/plan.md) | 3D features | `toponaming.md` + `toponaming-design.md` (persistent face/edge refs), `m3-extrude.md`, `curves-3d-plan.md`, `thread-rib.md`, `regeneration.md` |
 | [variables/](variables/plan.md) | parameters + expressions | |
 | [scripting/](scripting/plan.md) | the LLM/automation interface | `mcp.md`, `s1-mcp.md`, `s2-headless.md`, `error-style.md` (what a failed call must tell an agent) |
-| [versioning/](versioning/plan.md) | format, autosave, git | `f1-f2.md`, `f3-directory-format.md`, `f6-history-ui.md`, `f7-merge-and-conflicts.md`, `f8-external-changes.md`, `baked-geometry.md`, `format.md` |
+| [versioning/](versioning/plan.md) | format, autosave, git | `f1-f2.md`, `f3-directory-format.md`, `f6-history-ui.md`, `f7-merge-and-conflicts.md`, `f8-external-changes.md`, `f9-collaboration.md`, `baked-geometry.md`, `format.md` |
 | [ui/](ui/plan.md) | selection, tools, layout | `u7`–`u11` rounds, `settings.md` (user preferences), `viewport-handles.md` (drag arrows + hover), `terminal-panel.md` (an embedded terminal for Claude Code — design), `gui-coverage.md` |
 | [inspect/](inspect/plan.md) | measure, mass properties, sections | `section-tool-design.md`, `review-checklist.md`, `agent-validation-plan.md` |
 | [interchange/](interchange/plan.md) | import + export | `import-plan.md`, `feature-gaps-plan.md`, `onshape-terms.md` |
