@@ -6,7 +6,8 @@
 > editor. The roadmap's "CAM out of scope" is
 > reversed. C5 shipped as an in-house height-map verifier rather than the
 > CAMotics dependency this doc originally planned — see "Verification, and
-> why not CAMotics". **C6–C9 are designed and not built** — see
+> why not CAMotics". **C6–C9 BUILT 2026-08-21** — helix entry, arcs, adaptive
+> clearing and an indexed 4th axis, see
 > [Phase 2](#phase-2--what-v1-deferred-designed).
 >
 > Scope decided at writing: **2.5D first**, with the data model shaped so a
@@ -198,10 +199,10 @@ tool table), arc output (see the risk below), coolant, and safe-Z retract.
 | **C3** | **Pocket** with islands, **Face**, stepdown + ramp/helix entry | **done** (ramp along the path; the helix for pockets too small to ramp around is C6 below) |
 | **C4** | Post interface + Mach3 implementation, backplot overlay, G-code goldens | **done** (Mach3 + LinuxCNC, backplot, panel, one frozen `.nc` per dialect) |
 | **C5** | The closed loop as a ctest — **in-house, no dependency** | **done** |
-| **C6** | Helix entry for pockets too small to ramp around | **designed, not built** — [Phase 2](#phase-2--what-v1-deferred-designed) |
-| **C7** | Arcs (`G2`/`G3`) in the posted file | **designed, not built** — [Phase 2](#phase-2--what-v1-deferred-designed) |
-| **C8** | Adaptive clearing (vendor Tusek's `Adaptive2d`) | **designed, not built** — [Phase 2](#phase-2--what-v1-deferred-designed) |
-| **C9** | Indexed 4th axis (one A per setup) | **designed, not built** — [Phase 2](#phase-2--what-v1-deferred-designed) |
+| **C6** | Helix entry for pockets too small to ramp around | **done** `b00cbf9` |
+| **C7** | Arcs (`G2`/`G3`) in the posted file | **done** `6c73990` (flat arcs; helical deferred) |
+| **C8** | Adaptive clearing (vendor Tusek's `Adaptive2d`) | **done** `27033f2` (LGPL, linked as a shared library) |
+| **C9** | Indexed 4th axis (one A per setup) | **done** `ee530f9` |
 | later | 3-axis surfacing (in-house Z-map, or vendor opencamlib) · continuous 4-axis · round stock | each on demand, and none of them costed |
 
 ## What C1–C4 shipped
@@ -285,10 +286,12 @@ presentation:
 
 ## Phase 2 — what v1 deferred, designed
 
-> Status: **design, awaiting sign-off** (2026-08-21). Nothing in this section
-> is built. Written after costing the four against the code and against the
-> clones in `~/Documents/CAD/CAM`, which changed one estimate materially: see
-> C8.
+> Status: **BUILT** (2026-08-21), C6-C9. Written as a design after costing
+> the four against the code and against the clones in `~/Documents/CAD/CAM`
+> — which changed one estimate materially (see C8) — then built in that
+> order. What each phase says below is what shipped; the
+> [as-built notes](#as-built-notes) at the end record where reality argued
+> back.
 >
 > **Cut a real part first.** Every number below assumes the current output is
 > correct in the ways a simulation can check, and the GUI round found three
@@ -474,6 +477,41 @@ Explicitly not this phase: **continuous 4-axis** (simultaneous XYZA). It
 needs a different toolpath representation, because feed along a rotary axis
 is not a linear distance, and a different verifier, because a planar height
 map cannot represent a wrapped surface. It is a workstream, not a phase.
+
+### As-built notes
+
+**C6.** As designed. The inscribed radius does come free from the offsets the
+pocket already iterates.
+
+**C7.** Two bugs worth keeping in mind for any future fitting. A circle
+through three ADJACENT tessellation points is ill-conditioned — it put a
+3 mm corner arc 0.014 mm off centre and split each corner in two — so the fit
+is least-squares over the whole run, refitted as the run grows. And checking
+deviation only AT the sample points let a 1.5 mm straight edge be swallowed
+into a 10 mm-radius arc that passed within 5 µm at every sample and bulged
+27 µm in between; each chord's bulge is now bounded too. The centre is slid
+onto the perpendicular bisector of the endpoints so the two radii match
+exactly, which is what a controller checks before it refuses an arc.
+
+**C8.** The estimate held: reading the interface first is what made it
+vendoring rather than porting. `USINGZ` turned out to be required — Adaptive
+uses Clipper2's Z callback to track which input edge produced each output
+vertex — and it changes `Point64`'s layout, so it has to be PUBLIC on the
+target or two translation units disagree about a struct they pass to each
+other. The library narrates itself to `std::cout`, swallowed at the call site
+so the vendored copy stays byte-identical.
+
+**C9.** Also as designed, and the cheapest of the four in the end, because
+the frame transform is the only new idea: everything downstream already
+worked in setup space. The safe-Z rule for the index is enforced in the post.
+
+**A trap that cost two test runs, and would cost a user more.** A GUI test
+that fails partway never reaches its own cleanup. When C7 changed the
+preamble, a stale `G90 G21` assertion in the CAM panel test failed, so the
+test never handed the shared dock tab back to the model tree — and an
+unrelated tree test two positions later failed with "unable to hover Model".
+Cleanup that matters to other tests belongs immediately after the last
+interaction that needs it, not at the end of the test.
 
 ## Turning it off
 

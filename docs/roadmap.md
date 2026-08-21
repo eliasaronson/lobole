@@ -294,9 +294,12 @@ it will list and never run.
   parameter editor: two clicks make a pocket, every depth is derived from the
   face you clicked, the removed volume is ghosted before you commit, and
   Generate verifies without being asked ([cam/gui.md](cam/gui.md)). See
-  [cam/plan.md](cam/plan.md), whose Phase 2 costs out the four things v1
-  deferred — helix entry, arcs, adaptive clearing, an indexed 4th axis —
-  at ~4-5 sessions total, **awaiting sign-off and a first real cut**. The proposal that preceded it, kept because the
+  [cam/plan.md](cam/plan.md). **Phase 2 (C6–C9) also shipped**: helix entry
+  for small pockets, arcs fitted at post time, Kresimir Tusek's adaptive
+  clearing (LGPL, deliberately linked as a separate shared library so this
+  app's own licence stays a choice), and an indexed 4th axis. Only 3-axis
+  surfacing and continuous 4-axis remain, both unscheduled. **Nothing has cut
+  a real part yet** — that is the check simulation cannot stand in for. The proposal that preceded it, kept because the
   survey numbers are the reason the scope is narrow:
   [cam/plan.md](cam/plan.md) costs it out (2026-08-21, after the user bought a
   mill), having surveyed the alternatives by reading them — FreeCAD CAM is
