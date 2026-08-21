@@ -354,6 +354,9 @@ execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEA
 # a build flag is cheaper than trusting that a dependency stays small.
 option(ENABLE_CAM "Milling toolpaths + G-code (vendored Clipper2)" ON)
 option(ENABLE_TERMINAL "Embedded terminal panel (libvterm)" ON)
+# Adaptive clearing is the one LGPL dependency: separable on purpose, both
+# so it can be dropped and so the licence boundary stays a dynamic link.
+option(ENABLE_CAM_ADAPTIVE "Adaptive clearing (LGPL libarea, linked as a shared library)" ON)
 
 # Clipper2 (vendored, Boost licence): polygon offsetting for CAM toolpaths
 # (docs/cam/plan.md). Vendored rather than found: it is packaged in nixpkgs
@@ -369,11 +372,50 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
         ${CLIPPER2_DIR}/src/clipper.offset.cpp
         ${CLIPPER2_DIR}/src/clipper.rectclip.cpp)
     target_include_directories(clipper2 SYSTEM PUBLIC ${CLIPPER2_DIR}/include)
+    # USINGZ gives Point64 a `z` field and Clipper64 a SetZCallback, which
+    # libarea's Adaptive relies on to track which input edge produced each
+    # output vertex. It changes the LAYOUT of Point64, so it has to be PUBLIC:
+    # one translation unit compiled without it and the two disagree about a
+    # struct they both pass around.
+    target_compile_definitions(clipper2 PUBLIC USINGZ)
     set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     list(APPEND core_sources src/core/cam/CamToolpath.cpp
                              src/core/cam/CamPost.cpp
                              src/core/cam/CamVerify.cpp)
     message(STATUS "Clipper2 found - CAM enabled")
+
+    # Adaptive clearing (C8): Kresimir Tusek's Adaptive2d from FreeCAD's
+    # libarea, vendored at deps/libarea/ from FreeCAD b2da06bf.
+    #
+    # It is **LGPL-2.1-or-later**, and this is the one dependency here that is
+    # copyleft. It is therefore built as its OWN SHARED LIBRARY and linked
+    # dynamically, never absorbed into designer_core: the LGPL's relinking
+    # condition is satisfied by a boundary a user can replace, which keeps
+    # this application's own licence a decision we can still make later. Do
+    # not "simplify" this to a static library or fold the sources into
+    # core_sources — the arrangement is the point, not the build tidiness.
+    # (libarea's own Clipper1, which Adaptive uses internally, is BSL-1.0 and
+    # rides along inside the same .so.)
+    set(LIBAREA_DIR ${CMAKE_SOURCE_DIR}/deps/libarea)
+    if(ENABLE_CAM_ADAPTIVE AND EXISTS ${LIBAREA_DIR}/Adaptive.cpp)
+        set(HAVE_CAM_ADAPTIVE ON)
+        add_library(designer_adaptive SHARED
+            ${LIBAREA_DIR}/Adaptive.cpp
+            ${LIBAREA_DIR}/clipper.cpp)
+        target_include_directories(designer_adaptive SYSTEM PUBLIC
+            ${LIBAREA_DIR})
+        target_link_libraries(designer_adaptive PRIVATE clipper2)
+        set_target_properties(designer_adaptive PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            SOVERSION 1
+            VERSION 1.0.0)
+        list(APPEND core_sources src/core/cam/CamAdaptive.cpp)
+        message(STATUS "libarea found - adaptive clearing enabled (LGPL, shared)")
+    elseif(NOT ENABLE_CAM_ADAPTIVE)
+        message(STATUS "Adaptive clearing disabled (-DENABLE_CAM_ADAPTIVE=OFF)")
+    else()
+        message(STATUS "deps/libarea missing - adaptive clearing disabled")
+    endif()
 else()
     message(STATUS "deps/clipper2 missing (submodule not initialised) - CAM disabled")
 endif()
@@ -406,6 +448,13 @@ target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohman
 if(HAVE_CAM)
     target_compile_definitions(designer_core PUBLIC HAVE_CAM)
     target_link_libraries(designer_core PUBLIC clipper2)
+endif()
+if(HAVE_CAM_ADAPTIVE)
+    target_compile_definitions(designer_core PUBLIC HAVE_CAM_ADAPTIVE)
+    # PRIVATE would still put the .so on the link line of everything that
+    # links designer_core; the point of the boundary is that only the bridge
+    # translation unit touches the LGPL symbols.
+    target_link_libraries(designer_core PUBLIC designer_adaptive)
 endif()
 if(HAVE_TERMINAL)
     target_compile_definitions(designer_core PUBLIC HAVE_TERMINAL)
@@ -907,6 +956,7 @@ macro(_feature_line label state note)
     endif()
 endmacro()
 _feature_line("CAM (milling, G-code)      " HAVE_CAM "deps/clipper2 (vendored, Boost)  -DENABLE_CAM=OFF")
+_feature_line("CAM adaptive clearing      " HAVE_CAM_ADAPTIVE "deps/libarea (vendored, LGPL .so) -DENABLE_CAM_ADAPTIVE=OFF")
 _feature_line("Terminal panel             " HAVE_TERMINAL "libvterm (system)  -DENABLE_TERMINAL=OFF")
 _feature_line("FEM solver                 " HAVE_FEM_SOLVER "Eigen (system)")
 _feature_line("FEM meshing                " HAVE_NETGEN "Netgen (system)")

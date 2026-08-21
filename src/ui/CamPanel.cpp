@@ -28,7 +28,9 @@ constexpr glm::vec4 kCutColor(0.35f, 0.80f, 1.00f, 0.95f);
 constexpr glm::vec4 kPlungeColor(1.00f, 0.55f, 0.25f, 0.95f);
 constexpr glm::vec4 kRapidColor(0.55f, 0.55f, 0.62f, 0.45f);
 
-const char* kOpTypes[] = {"Profile", "Pocket", "Face", "Drill"};
+// Order matches cam::OpType. "Adaptive" is a pocket cut a different way,
+// so it reads as a strategy rather than as a separate kind of job.
+const char* kOpTypes[] = {"Profile", "Pocket", "Face", "Drill", "Adaptive"};
 
 } // namespace
 
@@ -346,7 +348,7 @@ void DrawCamPanel(AppState& state) {
     if (ImGui::TreeNode("Advanced###adv")) {
       int type = static_cast<int>(op.type);
       ImGui::SetNextItemWidth(90.0f);
-      if (ImGui::Combo("###type", &type, kOpTypes, 4)) {
+      if (ImGui::Combo("###type", &type, kOpTypes, IM_ARRAYSIZE(kOpTypes))) {
         op.type = static_cast<cam::OpType>(type);
         dirty = true;
       }

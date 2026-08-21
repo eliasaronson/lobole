@@ -41,6 +41,10 @@ enum class OpType {
   Pocket,  // clear a closed region, islands respected
   Face,    // clear the top of the stock
   Drill,   // plunge at points
+  // C8: clear a region at a roughly constant angle of engagement instead of
+  // in concentric rings, so the whole depth can be taken in one pass. Needs
+  // the LGPL libarea shared library; without it the pocket path is used.
+  Adaptive,
 };
 
 // Which side of a contour the tool runs on. For a pocket this is implicit

@@ -34,8 +34,12 @@ build/*
 *.out
 *.app
 
-# Dependencies
+# Dependencies (submodules, so the ignore does not affect them)
 deps/*
+# ...except libarea, which is a VENDORED COPY rather than a submodule:
+# it is a subdirectory of FreeCAD, which cannot be one. Four files,
+# pinned to a commit in deps/libarea/README.md.
+!deps/libarea
 
 # CAD files
 CAD_files/*

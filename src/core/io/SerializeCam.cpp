@@ -22,6 +22,8 @@ const char* OpTypeName(cam::OpType t) {
     return "face";
   case cam::OpType::Drill:
     return "drill";
+  case cam::OpType::Adaptive:
+    return "adaptive";
   default:
     return "profile";
   }
@@ -34,6 +36,8 @@ cam::OpType OpTypeFromName(const std::string& s) {
     return cam::OpType::Face;
   if (s == "drill")
     return cam::OpType::Drill;
+  if (s == "adaptive")
+    return cam::OpType::Adaptive;
   return cam::OpType::Profile;
 }
 

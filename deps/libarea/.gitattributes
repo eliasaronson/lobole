@@ -1,0 +1,3 @@
+# Vendored verbatim from FreeCAD (see README.md): git must not normalise
+# line endings, or "byte-identical to upstream" stops being checkable.
+* -text

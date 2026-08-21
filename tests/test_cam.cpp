@@ -2,6 +2,7 @@
 
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/cam/CamAdaptive.h"
 #include "core/cam/CamPost.h"
 #include "core/cam/CamToolpath.h"
 #include "core/cam/CamVerify.h"
@@ -600,25 +601,46 @@ TEST_CASE("cam: an island in the picked floor is machined around", "[cam]") {
   CHECK_FALSE(region.loops[0].hole);
   CHECK(region.loops[1].hole);
 
-  cam::Setup job = setup;
   cam::Operation op =
       cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
           .op;
   op.id = 1;
-  job.operations.push_back(op);
-  const cam::Toolpath tp = cam::GenerateAll(job, doc->GetBodies())[0];
-  REQUIRE(tp.error.empty());
+  // 9 mm deep with a 6 mm cutter, so the verb picks adaptive clearing (C8).
+  // Both strategies have to respect the boss, so both are checked here —
+  // with each one's own accuracy, not one number for both.
+  if (cam::AdaptiveAvailable())
+    CHECK(op.type == cam::OpType::Adaptive);
+
   // A 6 mm cutter whose centre came within 3 mm of the 5 x 5 boss would eat
   // it. Checked as a distance so a partial overlap fails too, not just a
   // centre inside the island.
-  for (const cam::Move& m : tp.moves) {
-    if (m.kind == cam::Move::Kind::Rapid)
-      continue;
-    const double dx = std::max({18.0 - m.to.x, 0.0, m.to.x - 23.0});
-    const double dy = std::max({14.0 - m.to.y, 0.0, m.to.y - 19.0});
-    INFO("cut at " << m.to.x << "," << m.to.y);
-    CHECK(std::hypot(dx, dy) > 3.0 - 1e-3);
-  }
+  const auto clearsTheBoss = [&](const cam::Toolpath& tp, double tolerance) {
+    for (const cam::Move& m : tp.moves) {
+      if (m.kind == cam::Move::Kind::Rapid)
+        continue;
+      const double dx = std::max({18.0 - m.to.x, 0.0, m.to.x - 23.0});
+      const double dy = std::max({14.0 - m.to.y, 0.0, m.to.y - 19.0});
+      INFO("cut at " << m.to.x << "," << m.to.y);
+      CHECK(std::hypot(dx, dy) > 3.0 - tolerance);
+    }
+  };
+
+  cam::Setup job = setup;
+  job.operations.push_back(op);
+  const cam::Toolpath tp = cam::GenerateAll(job, doc->GetBodies())[0];
+  REQUIRE(tp.error.empty());
+  // Adaptive2d plans to a stated 0.02 mm; asking it for micron fidelity
+  // would be measuring the tolerance rather than the island.
+  clearsTheBoss(tp, op.type == cam::OpType::Adaptive ? 0.02 : 1e-3);
+
+  // Concentric rings, which offset exactly, get the tight bound.
+  cam::Operation rings = op;
+  rings.type = cam::OpType::Pocket;
+  cam::Setup ringJob = setup;
+  ringJob.operations.push_back(rings);
+  const cam::Toolpath ringPath = cam::GenerateAll(ringJob, doc->GetBodies())[0];
+  REQUIRE(ringPath.error.empty());
+  clearsTheBoss(ringPath, 1e-3);
 }
 
 TEST_CASE("cam: a pocket too small to ramp around descends on a helix",
@@ -902,6 +924,90 @@ TEST_CASE("cam verify: leftover comes back as points to paint", "[cam]") {
   cam::Inspection none = insp;
   none.machined = none.designed;
   CHECK(cam::LeftoverPoints(none, 0.2).empty());
+}
+
+// --- C8: adaptive clearing ------------------------------------------------
+
+TEST_CASE("cam: adaptive clears the same pocket, gently", "[cam]") {
+  auto doc = PocketDoc(); // 20 x 14 pocket, floor at z = 12
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  const ElementRef floor = UpFaceAt(*doc, 12.0);
+  REQUIRE(floor.IsSet());
+
+  cam::Operation base =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
+          .op;
+  base.id = 1;
+
+  cam::Setup concentric = setup;
+  concentric.operations.push_back(base);
+  cam::Operation adaptiveOp = base;
+  adaptiveOp.type = cam::OpType::Adaptive;
+  cam::Setup adaptive = setup;
+  adaptive.operations.push_back(adaptiveOp);
+
+  const cam::Toolpath a = cam::GenerateAll(adaptive, doc->GetBodies())[0];
+  INFO(a.error);
+  if (!cam::AdaptiveAvailable()) {
+    // -DENABLE_CAM_ADAPTIVE=OFF: the job still cuts, by the other strategy.
+    CHECK(a.CutLength() > 0.0);
+    return;
+  }
+  REQUIRE(a.error.empty());
+  CHECK(a.CutLength() > 0.0);
+  CHECK_THAT(a.MinZ(), WithinAbs(12.0, 1e-6));
+
+  // It stays inside the pocket, cutter radius and all.
+  for (const cam::Move& m : a.moves) {
+    if (m.kind == cam::Move::Kind::Rapid)
+      continue;
+    INFO("cut at " << m.to.x << "," << m.to.y);
+    CHECK(m.to.x >= 10.0 + 3.0 - 0.05);
+    CHECK(m.to.x <= 30.0 - 3.0 + 0.05);
+    CHECK(m.to.y >= 8.0 + 3.0 - 0.05);
+    CHECK(m.to.y <= 22.0 - 3.0 + 0.05);
+  }
+
+  // And it machines the part: posted, simulated, compared against the model.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", adaptive, {a}, {}, gcode, &error));
+  const cam::Verdict v =
+      cam::VerifyGcode(gcode, adaptive, doc->GetBodies(), 0.5);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover << " rapids "
+                << v.rapidsThroughStock);
+  CHECK(v.maxGouge < 0.6); // one cell of quantisation at 0.5 mm
+  // The link moves are the whole safety story: a link across material this
+  // pass has not cut must happen at safe Z, not at depth.
+  CHECK(v.rapidsThroughStock == 0);
+}
+
+TEST_CASE("cam: an adaptive operation survives a save and reload", "[cam]") {
+  // v59: a new OpType is a format change, so it needs the round trip and the
+  // golden pair that go with one.
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 40, 30, 10));
+  cam::Setup& s = doc.AddCamSetup("Job");
+  cam::Operation op;
+  op.id = doc.AllocateId();
+  op.name = "Rough";
+  op.type = cam::OpType::Adaptive;
+  op.topZ = 10.0;
+  op.bottomZ = 4.0;
+  op.stepover = 0.25;
+  s.operations.push_back(op);
+
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_adaptive_roundtrip.json";
+  REQUIRE(DocumentIO::Save(doc, path.string()).has_value());
+  auto back = DocumentIO::Load(path.string());
+  REQUIRE(back.has_value());
+  const std::vector<cam::Setup>& setups = (*back)->GetCamSetups();
+  REQUIRE(setups.size() == 1);
+  REQUIRE(setups[0].operations.size() == 1);
+  CHECK(setups[0].operations[0].type == cam::OpType::Adaptive);
+  std::filesystem::remove(path);
 }
 
 // --- C7: arcs -------------------------------------------------------------

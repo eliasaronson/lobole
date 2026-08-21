@@ -6,6 +6,7 @@
 #include "core/Feature.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
+#include "core/cam/CamAdaptive.h"
 #include "core/cam/CamPost.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/CurveFeature.h"
@@ -1018,7 +1019,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(live != nullptr);
     IM_CHECK_EQ(live->operations.size(), (size_t)1);
     const cam::Operation& op = live->operations[0];
-    IM_CHECK(op.type == cam::OpType::Pocket);
+    // 9 mm deep with a 6 mm cutter, so the verb chose adaptive clearing —
+    // one verb, the strategy a consequence of the geometry (C8). Without the
+    // LGPL library this build clears it concentrically instead.
+    IM_CHECK(op.type == (cam::AdaptiveAvailable() ? cam::OpType::Adaptive
+                                                  : cam::OpType::Pocket));
     IM_CHECK(std::abs(op.bottomZ - 12.0) < 1e-4);
     IM_CHECK(op.topZ > op.bottomZ);
     IM_CHECK_EQ(op.targets.size(), (size_t)1);
@@ -1117,6 +1122,16 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Generate: toolpaths exist, and the backplot draws them.
     ctx->ItemClick("###cam_generate");
     ctx->Yield(2);
+
+    // Hand the shared dock node back to Model NOW, not at the end. A test
+    // that fails partway never reaches its own cleanup, and the tab it left
+    // selected covers the model tree for everything after it in the shard —
+    // which is how a stale assertion here broke tree/context_rename two
+    // tests later. Everything below asserts on app state, not on widgets.
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName("Model")) {
+      ctx->ItemClick(modelWin->TabId);
+      ctx->Yield(2);
+    }
     IM_CHECK(!s_App->camToolpaths.empty());
     IM_CHECK(s_App->camToolpaths[0].error.empty());
     IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
@@ -1159,17 +1174,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     std::string gcode, error;
     IM_CHECK(cam::PostProcess(live->post, *live, s_App->camToolpaths, {}, gcode,
                               &error));
-    IM_CHECK(gcode.find("G90 G21") != std::string::npos);
+    IM_CHECK(gcode.find("G90 G91.1 G21") != std::string::npos);
     IM_CHECK(gcode.find("nan") == std::string::npos);
 
-    // Hand the shared dock node back to Model. A selected tab outlives the
-    // test that selected it, and the next test in the shard looks for the
-    // model tree — this is the same "CAM covers the tree" failure, arriving
-    // by a different route.
-    if (ImGuiWindow* modelWin = ImGui::FindWindowByName("Model")) {
-      ctx->ItemClick(modelWin->TabId);
-      ctx->Yield(2);
-    }
   };
 #endif // HAVE_CAM
 

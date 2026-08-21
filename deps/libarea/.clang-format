@@ -1,0 +1,4 @@
+# Vendored verbatim (see README.md). Formatting it would break the
+# byte-identity that makes "unmodified from upstream" checkable.
+DisableFormat: true
+SortIncludes: Never

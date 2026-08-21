@@ -1,6 +1,7 @@
 #include "core/cam/CamToolpath.h"
 
 #include "core/Measure.h"
+#include "core/cam/CamAdaptive.h"
 
 #include <clipper2/clipper.h>
 
@@ -537,6 +538,14 @@ DerivedOp DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
     op.bottomZ = region.z;  // the floor is the face you clicked
     op.topZ = hi.z;         // …down from the top of the stock
     op.side = Side::Inside; // a pocket is cut from inside its own boundary
+    // Deeper than one cutter diameter is the regime where adaptive clearing
+    // pays: a constant angle of engagement lets a small spindle take the
+    // whole depth, where concentric rings take the cutter's full width on
+    // the first lap of every pass. Still one verb — the strategy is a
+    // consequence of the geometry, not a question for the user (C8). The
+    // Advanced disclosure can force either.
+    if (AdaptiveAvailable() && op.topZ - op.bottomZ > tool.diameter)
+      op.type = OpType::Adaptive;
     if (op.bottomZ >= op.topZ - 1e-9) {
       out.why = "that face is already the top of the stock — there is "
                 "nothing above it to clear";
@@ -785,6 +794,64 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
   }
 }
 
+void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
+                    const std::vector<Body>& bodies, Toolpath& tp);
+
+// Adaptive: the same region a pocket clears, handed to libarea's Adaptive2d
+// (C8). Everything about WHICH region and at what depths is shared with the
+// pocket; only the clearing strategy differs, which is the point of putting
+// the split here rather than in a second operation type's worth of geometry.
+void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
+                      const std::vector<Body>& bodies, Toolpath& tp) {
+  if (!AdaptiveAvailable()) {
+    // Not a refusal: the job still has to cut. The concentric pocket is the
+    // strategy this build has, and saying so beats producing nothing.
+    GeneratePocket(setup, op, tool, bodies, tp);
+    return;
+  }
+  std::string why;
+  const Clipper2Lib::Paths64 picked =
+      TargetPaths(op, bodies, /*holesToo=*/true, why);
+  if (!why.empty()) {
+    tp.error = why;
+    return;
+  }
+  double entryZ = op.topZ;
+  for (const double z : DepthPasses(op)) {
+    Clipper2Lib::Paths64 region = picked;
+    if (region.empty()) {
+      const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
+      Clipper2Lib::Paths64 holes;
+      for (const Loop& l : loops)
+        if (l.hole)
+          holes.push_back(ToClipper(l.pts));
+      if (holes.empty())
+        continue;
+      region = Clipper2Lib::Difference(holes, Clipper2Lib::Paths64{},
+                                       Clipper2Lib::FillRule::NonZero);
+    }
+    if (region.empty())
+      continue;
+    std::vector<Loop> asLoops;
+    for (const Clipper2Lib::Path64& path : region) {
+      Loop l;
+      l.pts = FromClipper(path);
+      l.hole = false;
+      asLoops.push_back(std::move(l));
+    }
+    const AdaptiveResult cleared =
+        AdaptiveClear(setup, op, tool, asLoops, z, entryZ);
+    if (!cleared.error.empty() && cleared.moves.empty()) {
+      tp.error = cleared.error;
+      return;
+    }
+    if (!cleared.error.empty() && tp.error.empty())
+      tp.error = cleared.error; // partial: say so, keep what it did cut
+    tp.moves.insert(tp.moves.end(), cleared.moves.begin(), cleared.moves.end());
+    entryZ = z;
+  }
+}
+
 // Face: clear the stock top down to topZ over the whole stock rectangle.
 void GenerateFace(const Setup& setup, const Operation& op, const Tool& tool,
                   const std::vector<Body>& bodies, Toolpath& tp) {
@@ -885,6 +952,9 @@ Toolpath Generate(const Setup& setup, const Operation& op,
     break;
   case OpType::Drill:
     GenerateDrill(setup, op, *tool, bodies, tp);
+    break;
+  case OpType::Adaptive:
+    GenerateAdaptive(setup, op, *tool, bodies, tp);
     break;
   }
   if (tp.moves.empty() && tp.error.empty())
