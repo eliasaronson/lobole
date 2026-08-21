@@ -8,9 +8,11 @@
 #include "core/cam/CamToolpath.h"
 #include "core/io/Serialization.h"
 #include "ui/AppActions.h"
+#include "ui/CamTool.h"
 #include "ui/FeatureEditor.h"
 #include "ui/SelectionPipeline.h"
 
+#include "IconsFontAwesome6.h"
 #include "imgui.h"
 
 #include <cstdio>
@@ -28,9 +30,9 @@ constexpr glm::vec4 kRapidColor(0.55f, 0.55f, 0.62f, 0.45f);
 
 const char* kOpTypes[] = {"Profile", "Pocket", "Face", "Drill"};
 
-const cam::Setup* ActiveSetupConst(const AppState& state);
+} // namespace
 
-cam::Setup* ActiveSetup(AppState& state) {
+cam::Setup* ActiveCamSetup(AppState& state) {
   if (!state.document)
     return nullptr;
   std::vector<cam::Setup>& setups = state.document->GetCamSetups();
@@ -43,67 +45,9 @@ cam::Setup* ActiveSetup(AppState& state) {
   return &setups.front();
 }
 
-const cam::Setup* ActiveSetupConst(const AppState& state) {
-  if (!state.document)
-    return nullptr;
-  for (const cam::Setup& s : state.document->GetCamSetups())
-    if (s.id == state.camActiveSetup)
-      return &s;
-  return state.document->GetCamSetups().empty()
-             ? nullptr
-             : &state.document->GetCamSetups().front();
-}
-
-} // namespace
-
-void ArmCamTopFacePick(AppState& state) {
-  state.slotPick = {kCamToolSlot, static_cast<int>(PickSlot::CamTopFace),
-                    SelectionKindBit(SelectionItem::Kind::Face),
-                    /*multi=*/false,
-                    "Click the top face — that sets Z zero for the job"};
-}
-
-void CamFacePicked(AppState& state, const SelectionItem& item) {
-  cam::Setup* setup = ActiveSetup(state);
-  if (setup == nullptr || !item.element.IsSet() || !state.document) {
-    state.slotPick.miss = "that is not a face this job can use";
-    return;
-  }
-  // The face must be planar and horizontal: a "top face" that is tilted has
-  // no single Z, and pretending otherwise would put the work origin
-  // somewhere the user did not point at.
-  for (const Body& body : state.document->GetBodies()) {
-    if (body.createdBy != item.element.featureId)
-      continue;
-    const std::optional<int> idx = body.elementMap.Resolve(item.element.name);
-    glm::vec3 origin(0.0f), normal(0.0f), uAxis(0.0f);
-    if (!idx || !body.shape.FacePlane(*idx, origin, normal, uAxis)) {
-      state.slotPick.miss = "pick a flat face — that one is curved";
-      return;
-    }
-    if (std::abs(normal.z) < 0.99f) {
-      state.slotPick.miss = "pick a face that points up; this job cuts in Z";
-      return;
-    }
-    // Z zero is this face. The stock top follows it, and every operation's
-    // default top comes from there — so nobody types a depth again.
-    setup->origin = glm::dvec3(0.0, 0.0, origin.z);
-    setup->stock.margin.z = 0.0; // the picked face IS the top of the stock
-    state.camTopFace = item.element;
-    for (cam::Operation& op : setup->operations)
-      if (op.topZ > origin.z)
-        op.topZ = origin.z;
-    state.slotPick = {};
-    state.projectMetaDirty = true;
-    RefreshCamToolpaths(state);
-    return;
-  }
-  state.slotPick.miss = "that face is not on a body this job can machine";
-}
-
 void RefreshCamToolpaths(AppState& state) {
   state.camToolpaths.clear();
-  cam::Setup* setup = ActiveSetup(state);
+  cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr || !state.document)
     return;
   state.camToolpaths = cam::GenerateAll(*setup, state.document->GetBodies());
@@ -173,13 +117,19 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
       from = m.to;
       have = true;
     }
-    if (const cam::Setup* setup = ActiveSetupConst(state))
+    if (const cam::Setup* setup = ActiveCamSetup(state))
       AppendToolGlyph(state, *setup, tp, out);
   }
 }
 
 void DrawCamPanel(AppState& state) {
-  if (!ImGui::Begin("CAM###CamPanel")) {
+  // NoFocusOnAppearing, like every other panel tabbed into the left node: a
+  // window that appears in a shared dock node becomes the SELECTED tab, and
+  // this one shipped without the flag — so the first launch after CAM landed
+  // put the job list in front of the model tree. Three GUI tests caught it as
+  // "unable to hover Model"; a user would have called it "my tree is gone".
+  if (!ImGui::Begin("CAM###CamPanel", nullptr,
+                    ImGuiWindowFlags_NoFocusOnAppearing)) {
     ImGui::End();
     return;
   }
@@ -198,6 +148,10 @@ void DrawCamPanel(AppState& state) {
     if (ImGui::Button("Add setup###cam_add_setup")) {
       cam::Setup& fresh = state.document->AddCamSetup();
       state.camActiveSetup = fresh.id;
+      // Safe Z clear of the stock, not the struct's bare 5 mm — which sits
+      // inside anything taller than that (docs/cam/gui.md).
+      fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
+      state.camSafeZEdit = static_cast<float>(fresh.safeZ);
       // CAM edits live in the document but bump no document version (the
       // same as study edits), so this is what keeps the save prompt honest.
       state.projectMetaDirty = true;
@@ -206,7 +160,7 @@ void DrawCamPanel(AppState& state) {
     return;
   }
 
-  cam::Setup* setup = ActiveSetup(state);
+  cam::Setup* setup = ActiveCamSetup(state);
   bool dirty = false;
 
   // --- setup row ---------------------------------------------------------
@@ -224,6 +178,8 @@ void DrawCamPanel(AppState& state) {
   if (ImGui::SmallButton("+###cam_add_setup2")) {
     cam::Setup& fresh = state.document->AddCamSetup();
     state.camActiveSetup = fresh.id;
+    fresh.safeZ = cam::DeriveSafeZ(fresh, state.document->GetBodies());
+    state.camSafeZEdit = static_cast<float>(fresh.safeZ);
     state.projectMetaDirty = true;
     ImGui::End();
     return; // `setups` may have reallocated
@@ -258,7 +214,8 @@ void DrawCamPanel(AppState& state) {
     ImGui::BeginDisabled();
   if (ImGui::Button(state.camTopFace.IsSet() ? "Re-pick top face###cam_topface"
                                              : "Pick top face###cam_topface"))
-    ArmCamTopFacePick(state);
+    ArmCamPick(state, PickSlot::CamTopFace,
+               "Click the top face — that sets Z zero for the job");
   if (arming)
     ImGui::EndDisabled();
   ImGui::SameLine();
@@ -272,11 +229,48 @@ void DrawCamPanel(AppState& state) {
   if (!state.slotPick.miss.empty() && arming)
     ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s",
                        state.slotPick.miss.c_str());
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Verbs###cam_open_tool"))
+    state.camToolOpen = true;
+  ImGui::SetItemTooltip("The one-click way in: clear a pocket, cut it out, "
+                        "face the top");
 
-  ImGui::SetNextItemWidth(90.0f);
-  if (ImGui::DragFloat("Safe Z###cam_safez",
-                       reinterpret_cast<float*>(&state.camSafeZEdit), 0.5f))
-    dirty = true;
+  // The stock, and the rapid height above it. Both are properties of the JOB
+  // rather than of an operation, and the facing verb refuses without the
+  // first — so it lives where that refusal can send you.
+  if (ImGui::CollapsingHeader("Stock and safety###cam_stock")) {
+    ImGui::SetNextItemWidth(90.0f);
+    if (ImGui::DragFloat("Safe Z###cam_safez",
+                         reinterpret_cast<float*>(&state.camSafeZEdit), 0.5f))
+      dirty = true;
+    ImGui::SetItemTooltip("Rapid height above the stock top");
+    float above = static_cast<float>(setup->stock.margin.z);
+    ImGui::SetNextItemWidth(90.0f);
+    if (ImGui::DragFloat("Above the part###cam_stock_above", &above, 0.1f, 0.0f,
+                         100.0f, "%.2f")) {
+      setup->stock.margin.z = above;
+      dirty = true;
+    }
+    ImGui::SetItemTooltip("Material sitting on top of the part — what a "
+                          "facing pass removes. Picking the top face sets "
+                          "this to zero.");
+    float around = static_cast<float>(setup->stock.margin.x);
+    ImGui::SetNextItemWidth(90.0f);
+    if (ImGui::DragFloat("Around it###cam_stock_around", &around, 0.1f, 0.0f,
+                         100.0f, "%.2f")) {
+      setup->stock.margin.x = around;
+      setup->stock.margin.y = around;
+      dirty = true;
+    }
+    float below = static_cast<float>(setup->stock.bottomMargin);
+    ImGui::SetNextItemWidth(90.0f);
+    if (ImGui::DragFloat("Below it###cam_stock_below", &below, 0.1f, 0.0f,
+                         100.0f, "%.2f")) {
+      setup->stock.bottomMargin = below;
+      dirty = true;
+    }
+    ImGui::SetItemTooltip("How far a through-cut goes into the spoilboard");
+  }
   // The struct holds a double; the widget edits a float mirror so ImGui's
   // drag behaves. Kept in sync here rather than in two places.
   if (dirty)
@@ -330,40 +324,72 @@ void DrawCamPanel(AppState& state) {
     if (ImGui::Checkbox("###enabled", &op.enabled))
       dirty = true;
     ImGui::SameLine();
-    int type = static_cast<int>(op.type);
-    ImGui::SetNextItemWidth(90.0f);
-    if (ImGui::Combo("###type", &type, kOpTypes, 4)) {
-      op.type = static_cast<cam::OpType>(type);
-      dirty = true;
-    }
+    // What this operation IS, in a sentence. The numbers behind it are
+    // derived from the model and the cutter (docs/cam/gui.md); the fields
+    // that set them are one disclosure away, not the way in.
+    const cam::Tool* opTool = setup->FindTool(op.toolNumber);
+    const int passes = static_cast<int>(cam::DepthPasses(op).size());
+    ImGui::Text(
+        "%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s",
+        op.name.empty() ? kOpTypes[static_cast<int>(op.type)] : op.name.c_str(),
+        opTool != nullptr ? opTool->diameter : 0.0, op.topZ - op.bottomZ,
+        passes, passes == 1 ? "" : "es", op.climb ? "climb" : "conventional");
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(60.0f);
-    float top = static_cast<float>(op.topZ);
-    if (ImGui::DragFloat("###top", &top, 0.25f, -1000.0f, 1000.0f, "%.2f")) {
-      op.topZ = top;
-      dirty = true;
-    }
-    ImGui::SetItemTooltip("Top of the cut (Z)");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(60.0f);
-    float bottom = static_cast<float>(op.bottomZ);
-    if (ImGui::DragFloat("###bottom", &bottom, 0.25f, -1000.0f, 1000.0f,
-                         "%.2f")) {
-      op.bottomZ = bottom;
-      dirty = true;
-    }
-    ImGui::SetItemTooltip("Bottom of the cut (Z)");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(55.0f);
-    float step = static_cast<float>(op.stepdown);
-    if (ImGui::DragFloat("###stepdown", &step, 0.25f, 0.0f, 100.0f, "%.2f")) {
-      op.stepdown = step;
-      dirty = true;
-    }
-    ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
+    const bool ghosted = state.camGhostOp == op.id;
+    if (ImGui::SmallButton(ghosted ? "hide###ghost" : "show###ghost"))
+      state.camGhostOp = ghosted ? 0 : op.id;
+    ImGui::SetItemTooltip("Ghost the material this one removes");
     ImGui::SameLine();
     if (ImGui::SmallButton("x###rmop"))
       removeOp = op.id;
+
+    if (ImGui::TreeNode("Advanced###adv")) {
+      int type = static_cast<int>(op.type);
+      ImGui::SetNextItemWidth(90.0f);
+      if (ImGui::Combo("###type", &type, kOpTypes, 4)) {
+        op.type = static_cast<cam::OpType>(type);
+        dirty = true;
+      }
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(60.0f);
+      float top = static_cast<float>(op.topZ);
+      if (ImGui::DragFloat("###top", &top, 0.25f, -1000.0f, 1000.0f, "%.2f")) {
+        op.topZ = top;
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("Top of the cut (Z)");
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(60.0f);
+      float bottom = static_cast<float>(op.bottomZ);
+      if (ImGui::DragFloat("###bottom", &bottom, 0.25f, -1000.0f, 1000.0f,
+                           "%.2f")) {
+        op.bottomZ = bottom;
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("Bottom of the cut (Z)");
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(55.0f);
+      float step = static_cast<float>(op.stepdown);
+      if (ImGui::DragFloat("###stepdown", &step, 0.25f, 0.0f, 100.0f, "%.2f")) {
+        op.stepdown = step;
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("Stepdown per pass (0 = one pass)");
+      if (ImGui::Checkbox("Climb###climb", &op.climb))
+        dirty = true;
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(55.0f);
+      int tabs = op.tabCount;
+      if (ImGui::DragInt("Tabs###tabs", &tabs, 0.2f, 0, 32)) {
+        op.tabCount = tabs;
+        dirty = true;
+      }
+      ImGui::SetItemTooltip("Uncut bridges that hold the part on the last "
+                            "pass (profile only)");
+      if (!op.targets.empty())
+        ImGui::TextDisabled("boundary: %s", op.targets[0].name.c_str());
+      ImGui::TreePop();
+    }
 
     // The op's own verdict, from the last generate. A failed op says why
     // right here rather than only in the posted file.
@@ -410,10 +436,29 @@ void DrawCamPanel(AppState& state) {
 
   // --- generate / post ---------------------------------------------------
   ImGui::Separator();
-  if (ImGui::Button("Generate###cam_generate"))
+  if (ImGui::Button("Generate###cam_generate")) {
     RefreshCamToolpaths(state);
+    RunCamVerification(state);
+  }
   ImGui::SameLine();
   ImGui::Checkbox("Show path###cam_show", &state.camShowToolpath);
+
+  // G4: what the verifier found, in words, without being asked. The numbers
+  // behind these lines are in the same Verdict the RPC returns.
+  for (const cam::VerdictLine& line : state.camVerdict) {
+    const ImVec4 color = line.level == cam::VerdictLine::Level::Bad
+                             ? ImVec4(0.95f, 0.45f, 0.40f, 1.0f)
+                         : line.level == cam::VerdictLine::Level::Warn
+                             ? ImVec4(0.95f, 0.80f, 0.40f, 1.0f)
+                             : ImVec4(0.55f, 0.90f, 0.60f, 1.0f);
+    // The icon font is merged into the UI atlas, so these are real glyphs;
+    // a literal U+2713 would not be (the text font stops at Latin-1).
+    ImGui::TextColored(color, "%s %s",
+                       line.level == cam::VerdictLine::Level::Good
+                           ? ICON_FA_CIRCLE_CHECK
+                           : ICON_FA_TRIANGLE_EXCLAMATION,
+                       line.text.c_str());
+  }
 
   if (!state.camToolpaths.empty()) {
     double total = 0.0;
@@ -454,6 +499,10 @@ void DrawCamPanel(AppState& state) {
   if (dirty) {
     state.projectMetaDirty = true;
     RefreshCamToolpaths(state); // the picture always matches the parameters
+    // A verdict about the PREVIOUS toolpath is worse than no verdict: drop
+    // it, and let the next Generate produce an honest one.
+    state.camVerdict.clear();
+    state.camLeftover.clear();
   }
   ImGui::End();
 }

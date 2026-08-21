@@ -22,6 +22,35 @@ double DistToSegment(const glm::dvec2& p, const glm::dvec2& a,
   return glm::length(p - (a + ab * t));
 }
 
+// Flags every cell the swept tool covers on one cutting move. The same
+// culling Simulate uses, but recording coverage rather than depth: it is what
+// tells "the cutter left a corner" apart from "you have not programmed that
+// part of the block yet".
+void MarkSwept(const glm::dvec3& from, const GMove& m, const Setup& setup,
+               const HeightMap& grid, std::vector<uint8_t>& touched) {
+  const Tool* tool = setup.FindTool(m.tool);
+  const double radius = tool != nullptr ? tool->diameter * 0.5 : 1.0;
+  const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
+  const int i0 = std::max(
+      0, static_cast<int>((std::min(a.x, b.x) - radius - grid.x0) / grid.res));
+  const int i1 = std::min(
+      grid.nx - 1,
+      static_cast<int>((std::max(a.x, b.x) + radius - grid.x0) / grid.res) + 1);
+  const int j0 = std::max(
+      0, static_cast<int>((std::min(a.y, b.y) - radius - grid.y0) / grid.res));
+  const int j1 = std::min(
+      grid.ny - 1,
+      static_cast<int>((std::max(a.y, b.y) + radius - grid.y0) / grid.res) + 1);
+  for (int j = j0; j <= j1; j++)
+    for (int i = i0; i <= i1; i++) {
+      double t = 0.0;
+      const glm::dvec2 c(grid.CellX(i), grid.CellY(j));
+      if (DistToSegment(c, a, b, t) <= radius)
+        touched[static_cast<size_t>(j) * static_cast<size_t>(grid.nx) +
+                static_cast<size_t>(i)] = 1;
+    }
+}
+
 } // namespace
 
 GProgram ParseGcode(std::string_view text) {
@@ -238,12 +267,24 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
   return out;
 }
 
-Verdict Compare(const HeightMap& machined, const HeightMap& designed) {
+Verdict Compare(const HeightMap& machined, const HeightMap& designed,
+                const std::vector<uint8_t>* touched) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
+  size_t untouched = 0;
+  const size_t total =
+      static_cast<size_t>(machined.nx) * static_cast<size_t>(machined.ny);
   for (int j = 0; j < machined.ny; j++) {
     for (int i = 0; i < machined.nx; i++) {
+      const size_t k =
+          static_cast<size_t>(j) * static_cast<size_t>(machined.nx) +
+          static_cast<size_t>(i);
+      if (touched != nullptr && touched->size() == total &&
+          (*touched)[k] == 0) {
+        untouched++;
+        continue; // nobody asked the program to cut here
+      }
       const double got = machined.At(i, j);
       const double want = designed.At(i, j);
       v.cells++;
@@ -257,6 +298,9 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed) {
       }
     }
   }
+  v.untouchedFraction =
+      total > 0 ? static_cast<double>(untouched) / static_cast<double>(total)
+                : 0.0;
   return v;
 }
 
@@ -275,6 +319,7 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
   // make — the part can come out perfect and the tool still be broken.
   int rapidsThroughStock = 0;
   int firstBadLine = 0;
+  std::vector<uint8_t> touched(machined.z.size(), 0);
   {
     HeightMap probe = machined;
     glm::dvec3 from(0.0);
@@ -331,18 +376,21 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
       // Apply every move (cuts remove material; rapids over air do nothing).
       GProgram one;
       one.moves = {GMove{false, from, m.tool, m.line}, m};
-      if (!m.rapid)
+      if (!m.rapid) {
         Simulate(one, setup, probe);
+        MarkSwept(from, m, setup, probe, touched);
+      }
       from = m.to;
     }
     machined = probe;
   }
 
   out.designed = SampleModel(bodies, machined, lo.z);
-  out.verdict = Compare(machined, out.designed);
+  out.verdict = Compare(machined, out.designed, &touched);
   out.verdict.rapidsThroughStock = rapidsThroughStock;
   out.verdict.firstBadLine = firstBadLine;
   out.machined = std::move(machined);
+  out.touched = std::move(touched);
   out.ok = true;
   return out;
 }
@@ -355,10 +403,18 @@ std::vector<glm::dvec3> LeftoverPoints(const Inspection& insp, double tolerance,
     return pts;
   // Two passes: count first, then take every nth. Sampling on the fly would
   // paint the near corner of the part densely and the far one not at all.
+  const bool haveMask = insp.touched.size() == insp.machined.z.size();
+  const auto isLeftover = [&](int i, int j) {
+    if (haveMask && insp.touched[static_cast<size_t>(j) *
+                                     static_cast<size_t>(insp.machined.nx) +
+                                 static_cast<size_t>(i)] == 0)
+      return false; // never cut here, so nothing was "left"
+    return insp.machined.At(i, j) - insp.designed.At(i, j) > tolerance;
+  };
   size_t total = 0;
   for (int j = 0; j < insp.machined.ny; j++)
     for (int i = 0; i < insp.machined.nx; i++)
-      if (insp.machined.At(i, j) - insp.designed.At(i, j) > tolerance)
+      if (isLeftover(i, j))
         total++;
   if (total == 0)
     return pts;
@@ -370,7 +426,7 @@ std::vector<glm::dvec3> LeftoverPoints(const Inspection& insp, double tolerance,
   size_t seen = 0;
   for (int j = 0; j < insp.machined.ny; j++)
     for (int i = 0; i < insp.machined.nx; i++) {
-      if (insp.machined.At(i, j) - insp.designed.At(i, j) <= tolerance)
+      if (!isLeftover(i, j))
         continue;
       if (seen++ % stride != 0)
         continue;
@@ -391,8 +447,11 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
   char buf[256];
 
   if (v.cells == 0) {
-    out.push_back({VerdictLine::Level::Warn,
-                   "Nothing was checked — this job has no stock to cut."});
+    out.push_back(
+        {VerdictLine::Level::Warn,
+         v.untouchedFraction >= 0.999
+             ? "This program never touches the stock — it cuts nothing."
+             : "Nothing was checked — this job has no stock to cut."});
     return out;
   }
   // Gouging first: it is the one that scraps the part, and the only one a
@@ -421,7 +480,7 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
   }
   if (out.empty())
     out.push_back({VerdictLine::Level::Good,
-                   "Machines the part. No gouges, nothing "
+                   "Machines the part cleanly. No gouges, nothing "
                    "left over."});
   if (minutes > 0.0) {
     std::snprintf(buf, sizeof(buf), "~%.0f min of cutting at these feeds.",

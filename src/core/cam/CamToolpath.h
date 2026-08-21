@@ -89,6 +89,14 @@ struct DerivedOp {
                                         const std::vector<Body>& bodies,
                                         OpType type, const ElementRef& target);
 
+// The rapid height for this job: clear of the stock, in absolute Z (which is
+// what the toolpath emits). The default in the struct is a bare 5 mm, which
+// sits INSIDE any stock taller than that — the verifier reported it as "rapid
+// through material at line 11" the first time a setup was made by clicking,
+// which is a broken cutter on a real machine.
+[[nodiscard]] double DeriveSafeZ(const Setup& setup,
+                                 const std::vector<Body>& bodies);
+
 // Time spent CUTTING, from each move's own feed. Rapids are counted only when
 // the setup states a rapid feed — inventing one would be a guess about the
 // machine, and this number exists to be trusted.

@@ -9,6 +9,7 @@
 #include "render/UnderlayRenderer.h"
 #include "ui/AppActions.h"
 #include "ui/CamPanel.h"
+#include "ui/CamTool.h"
 #include "ui/CommandPalette.h"
 #include "ui/ConfigurationsPanel.h"
 #include "ui/DockLayout.h"
@@ -779,6 +780,15 @@ void DrawUI(AppState& state) {
     AppendCogMarker(state, gizmo);   // mass-props CoG cross (no-depth channel)
     AppendStudyMarker(state, gizmo); // FEM peak-field cross (no-depth channel)
 
+    // CAM's decision-time drawings (docs/cam/gui.md G3): the stock box and
+    // the removed-volume ghost are translucent surfaces, so they have to go
+    // into `quads` before it is handed over — but their outlines are
+    // primitives, which are built further down. Collect them here and splice
+    // them in below.
+    std::vector<PrimVertex> camPrims;
+    if (state.document)
+      AppendCamVisualisation(state, camPrims, quads);
+
     state.sketchRenderer->SetQuads(std::move(quads));
     state.sketchRenderer->SetOverlayLines(std::move(overlay));
     state.sketchRenderer->SetGizmoLines(std::move(gizmo));
@@ -799,6 +809,7 @@ void DrawUI(AppState& state) {
       AppendRegionPickPrimitives(state, prims); // armed Profiles slot (U2)
       AppendSimulationBCGlyphs(state, prims);   // FEM load/fixed/keep glyphs
       AppendCamToolpathOverlay(state, prims);   // CAM backplot
+      prims.insert(prims.end(), camPrims.begin(), camPrims.end());
       state.sketchRenderer->SetPrimitives(std::move(prims));
 
       // Auto-constraint snap indicator + ghost glyphs, and dimension
@@ -809,6 +820,7 @@ void DrawUI(AppState& state) {
       DrawElementNameOverlay(state); // toponaming debug: hovered face's name
       DrawDimensions(state);
       DrawDimensionOnCreate(state); // typed-number field for the last entity
+      DrawCamLabels(state);         // CAM: the derived depth, on the part
       DrawConstraintGlyphs(state);
       DrawToolPrompt(state);
       DrawInContextBanner(state);

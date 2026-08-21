@@ -293,6 +293,7 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
 void ClearHoverPreviews(AppState& state) {
   state.pick.edgeHover = false;
   state.pick.regionHoverIds.clear();
+  state.pick.hoverFace = {};
   // The connector-hover mirror (triad + snap marker overlay reads it).
   state.mateTool.hasHover = false;
   state.mateTool.hover = Connector{};
@@ -417,6 +418,7 @@ void HandleSelectionInput(AppState& state, bool overViewport,
                top.item.kind == SelectionItem::Kind::Occurrence) {
       // Occurrences hover via the hit face's range for now (a whole-instance
       // hover channel is renderer work, U5).
+      state.pick.hoverFace = top.item.element;
       uint32_t first = 0, count = 0;
       state.faceSelector->SetHoveredFace(top.meshId, top.index);
       if (state.faceSelector->GetFaceVertexRange(top.meshId, top.index, first,

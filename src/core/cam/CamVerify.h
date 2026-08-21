@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -88,6 +89,13 @@ struct Verdict {
   int rapidsThroughStock = 0; // rapid moves that pass through material
   int firstBadLine = 0;       // the G-code line of the first such rapid
   size_t cells = 0;
+  // How much of the stock the program never passed over. A pocket-only job
+  // leaves most of the block untouched and that is CORRECT, so leftover is
+  // measured only where the tool actually went — otherwise every partial job
+  // reports metres of "leftover" and the verdict becomes noise to scroll
+  // past. This number keeps the other signal (a job that machines nothing at
+  // all) available without confusing the two.
+  double untouchedFraction = 0.0;
 
   // A job is good when it cut everything it should and nothing it should not.
   [[nodiscard]] bool Ok(double tolerance) const {
@@ -96,8 +104,12 @@ struct Verdict {
   }
 };
 
+// `touched` (optional, same grid) restricts the comparison to the cells the
+// program actually swept — see Verdict::untouchedFraction. Null compares
+// every cell.
 [[nodiscard]] Verdict Compare(const HeightMap& machined,
-                              const HeightMap& designed);
+                              const HeightMap& designed,
+                              const std::vector<uint8_t>* touched = nullptr);
 
 // Everything the check produced, for a caller that wants to SHOW it rather
 // than just pass or fail (docs/cam/gui.md G4 paints the leftover on the part).
@@ -105,6 +117,7 @@ struct Inspection {
   Verdict verdict;
   HeightMap machined;
   HeightMap designed;
+  std::vector<uint8_t> touched; // 1 where a cutting move swept this cell
   bool ok = false; // false = there was nothing to check (no stock, no bodies)
 };
 

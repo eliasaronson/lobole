@@ -460,15 +460,22 @@ TEST_CASE("cam verify: a rapid through the part is caught", "[cam]") {
   CHECK_FALSE(v.Ok(1.0));
 }
 
-TEST_CASE("cam verify: unmachined stock is reported as leftover", "[cam]") {
-  // An empty program removes nothing, so the whole margin is leftover — the
-  // signal that an operation was skipped or never added.
+TEST_CASE("cam verify: a program that cuts nothing is reported as such",
+          "[cam]") {
+  // An empty program removes nothing. "Leftover" is measured only where the
+  // tool actually went — a pocket-only job leaves most of a block untouched
+  // and that is CORRECT — so the signal for "an operation was skipped or
+  // never added" is the untouched fraction, not a leftover height.
   auto doc = BlockDoc(40, 30, 10);
   cam::Setup setup = BasicSetup();
   const cam::Verdict v =
       cam::VerifyGcode("G90 G21\nM30\n", setup, doc->GetBodies(), 0.5);
-  CHECK(v.maxLeftover > 0.5); // the stock margin above the part
-  CHECK(v.maxGouge == 0.0);   // nothing was cut at all
+  CHECK(v.untouchedFraction == 1.0);
+  CHECK(v.cells == 0);      // nothing to compare: the tool never arrived
+  CHECK(v.maxGouge == 0.0); // and certainly nothing was cut
+  const std::vector<cam::VerdictLine> lines = cam::Explain(v, 0.5, 0.0);
+  REQUIRE(lines.size() == 1);
+  CHECK(lines[0].text.find("cuts nothing") != std::string::npos);
 }
 
 // --- G2: the verbs, and the depths a click derives ------------------------
@@ -732,20 +739,61 @@ TEST_CASE("cam verify: the verdict is reported in words", "[cam]") {
   CHECK(hit[0].text.find("Safe Z") != std::string::npos);
 }
 
+TEST_CASE("cam verify: leftover means unreachable, not unprogrammed", "[cam]") {
+  // The distinction that decides whether the verdict is worth reading: a job
+  // that machines one pocket in a big block must not report the rest of the
+  // block as material it failed to remove. (It did exactly that on the first
+  // run, and painted the whole part red.)
+  auto doc = PocketDoc();
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  cam::Operation op =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket,
+                           UpFaceAt(*doc, 12.0))
+          .op;
+  op.id = 1;
+  setup.operations.push_back(op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+
+  const cam::Inspection insp =
+      cam::Inspect(gcode, setup, doc->GetBodies(), 0.5);
+  REQUIRE(insp.ok);
+  INFO("leftover " << insp.verdict.maxLeftover << " untouched "
+                   << insp.verdict.untouchedFraction);
+  // Most of the block is untouched, and none of it is called leftover.
+  CHECK(insp.verdict.untouchedFraction > 0.5);
+  CHECK(insp.verdict.maxLeftover < 1.0);
+  // Nor painted: the marks are for corners a cutter cannot reach.
+  CHECK(cam::LeftoverPoints(insp, 0.75).size() < 200);
+  // And the derived Safe Z clears the stock, so no rapid crosses it.
+  CHECK(insp.verdict.rapidsThroughStock == 0);
+}
+
 TEST_CASE("cam verify: leftover comes back as points to paint", "[cam]") {
-  // An empty program removes nothing, so the whole stock margin is leftover
-  // and every point sits on the untouched stock top.
+  // A pass that crosses the part but stops 0.5 mm short of the designed top:
+  // the tool WENT there and did not finish, which is exactly what the paint
+  // is for. (The stock top is 11; the part's is 10.)
   auto doc = BlockDoc(40, 30, 10);
   const cam::Setup setup = BasicSetup();
+  const std::string shallow = "G90 G21\n"
+                              "G0 X-25 Y15 Z20\n"
+                              "G1 Z10.5 F200\n"
+                              "G1 X65 F600\n"
+                              "G0 Z20\n";
   const cam::Inspection insp =
-      cam::Inspect("G90 G21\nM30\n", setup, doc->GetBodies(), 1.0);
+      cam::Inspect(shallow, setup, doc->GetBodies(), 1.0);
   REQUIRE(insp.ok);
   const std::vector<glm::dvec3> pts = cam::LeftoverPoints(insp, 0.2, 4000);
   REQUIRE_FALSE(pts.empty());
-  for (const glm::dvec3& p : pts)
-    CHECK_THAT(p.z, WithinAbs(11.0, 1e-6)); // the stock top, uncut
+  for (const glm::dvec3& p : pts) {
+    CHECK_THAT(p.z, WithinAbs(10.5, 1e-6));    // where the cutter stopped
+    CHECK(std::abs(p.y - 15.0) < 3.0 + 1.001); // inside the swept band
+  }
 
-  // The cap is honoured, and it samples the whole part rather than one edge.
+  // The cap is honoured, and it samples the whole band rather than one end.
   const std::vector<glm::dvec3> few = cam::LeftoverPoints(insp, 0.2, 20);
   CHECK(few.size() <= 20);
   double minX = 1e9, maxX = -1e9;

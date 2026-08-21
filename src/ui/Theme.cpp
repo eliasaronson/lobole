@@ -151,6 +151,18 @@ static const ImWchar kMonoRanges[] = {
     0,
 };
 
+// The UI font's range. ImGui's default stops at U+00FF, so every em-dash and
+// ellipsis the app's own prose contains rendered as "?" — visible in a CAM
+// screenshot as "raise Safe Z ? or start higher", and equally in the section
+// tool's "source missing — this cut is off". The punctuation block is a few
+// dozen glyphs; the alternative is policing every user-visible string for
+// ASCII, forever.
+static const ImWchar kUiRanges[] = {
+    0x0020, 0x00FF, // Latin + Latin-1 (degree, superscripts, accents)
+    0x2010, 0x203A, // dashes, curly quotes, bullet, ellipsis
+    0,
+};
+
 ImFont* MonoFont() { return s_MonoFont; }
 
 void ApplyTheme(float scale) {
@@ -165,7 +177,8 @@ void ApplyTheme(float scale) {
   const std::string fontPath = (dir / "Roboto-Medium.ttf").string();
   if (std::filesystem::exists(fontPath)) {
     io.Fonts->Clear();
-    io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f * scale);
+    io.Fonts->AddFontFromFileTTF(fontPath.c_str(), 16.0f * scale, nullptr,
+                                 kUiRanges);
 
     // Merge Font Awesome icons into the same atlas so ICON_FA_* works inline
     const std::string iconPath = (dir / "fa-solid-900.ttf").string();

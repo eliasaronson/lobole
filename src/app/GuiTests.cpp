@@ -31,6 +31,7 @@
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/CamPanel.h"
+#include "ui/CamTool.h"
 #include "ui/DragMath.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot
 #include "ui/HistoryPanel.h"
@@ -894,7 +895,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(2);
     IM_CHECK(!s_App->camTopFace.IsSet()); // says so rather than assuming 0
 
-    ui::ArmCamTopFacePick(*s_App);
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
     ctx->Yield();
     IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
 
@@ -937,6 +938,127 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(std::abs(live->stock.margin.z) < 1e-9);  // picked face IS the top
   };
 
+  // G2-G4 (docs/cam/gui.md): the verbs. Two clicks — the verb, then the face
+  // — produce a machinable operation with nothing typed, the viewport shows
+  // what will be removed, and the verdict arrives without being asked for.
+  t = IM_REGISTER_TEST(engine, "cam", "verbs_two_clicks_to_a_pocket");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // A plate with a pocket cleared from its top down to z = 12.
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
+    const uint64_t plate = Doc()->GetFeature(0)->GetId();
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "Void", glm::vec3(15, 10, 12), 30, 20, 20));
+    const uint64_t voidId = Doc()->GetFeature(1)->GetId();
+    Doc()->AddFeature(std::make_unique<BooleanFeature>("Pocket", plate, voidId,
+                                                       BooleanOp::Subtract));
+    ctx->Yield(2);
+
+    // Click 1: the verb. The toolbar opens the session; no setup exists yet,
+    // and the verb makes one rather than sending the user to the panel.
+    ToolbarClick(ctx, "###tb_cam");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camToolOpen);
+    IM_CHECK(Doc()->GetCamSetups().empty());
+    ctx->ItemClick("//CAM###ToolWindow/###cam_verb_pocket");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
+    IM_CHECK_EQ(s_App->slotPick.slot, (int)ui::PickSlot::CamPocketFloor);
+
+    // Click 2: the face. (The viewport click routes here through
+    // SlotPickClicked; calling it directly keeps the test off the camera.)
+    // First a curved face, which must be refused in words rather than
+    // silently turned into a depth.
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Post", glm::vec3(200, 0, 0), glm::vec3(0, 0, 1), 5.0, 10.0));
+    ctx->Yield(2);
+    for (const Body& b : Doc()->GetBodies()) {
+      if (b.createdBy != Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetId())
+        continue;
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u))
+          continue; // planar: not the barrel
+        ui::SelectionItem curved;
+        curved.kind = ui::SelectionItem::Kind::Face;
+        curved.element = ElementRef{b.createdBy, name};
+        ui::CamFacePicked(*s_App, curved);
+        IM_CHECK(!s_App->slotPick.miss.empty());
+        IM_CHECK(s_App->slotPick.miss.find("curved") != std::string::npos);
+        break;
+      }
+      break;
+    }
+    // The slot stays armed through a refusal: the next click is almost always
+    // the face they meant, and re-pressing the verb first is a wasted step.
+    IM_CHECK_EQ(s_App->slotPick.featureId, ui::kCamToolSlot);
+
+    ui::SelectionItem floor;
+    floor.kind = ui::SelectionItem::Kind::Face;
+    for (const Body& b : Doc()->GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f &&
+            std::abs(o.z - 12.0f) < 1e-4f)
+          floor.element = ElementRef{b.createdBy, name};
+      }
+    IM_CHECK(floor.element.IsSet());
+    ui::CamFacePicked(*s_App, floor);
+    ctx->Yield(2);
+
+    // An operation with every depth derived: the floor is the face, the top
+    // is the stock, the stepdown is half the cutter. Nothing was typed.
+    const cam::Setup* live = ui::ActiveCamSetup(*s_App);
+    IM_CHECK(live != nullptr);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    const cam::Operation& op = live->operations[0];
+    IM_CHECK(op.type == cam::OpType::Pocket);
+    IM_CHECK(std::abs(op.bottomZ - 12.0) < 1e-4);
+    IM_CHECK(op.topZ > op.bottomZ);
+    IM_CHECK_EQ(op.targets.size(), (size_t)1);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camToolpaths[0].error.empty());
+    IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
+    IM_CHECK_EQ(s_App->slotPick.featureId, (uint64_t)0); // disarmed on success
+
+    // G4: the verdict arrived by itself, in words.
+    IM_CHECK(!s_App->camVerdict.empty());
+
+    // G3: the picture. While the session is open the stock box and the
+    // removed-volume ghost are drawn; the ghost's walls are translucent
+    // surfaces, so they land in the quad channel.
+    std::vector<PrimVertex> prims;
+    std::vector<LineVertex3D> quads;
+    ui::AppendCamVisualisation(*s_App, prims, quads);
+    IM_CHECK(!prims.empty());
+    IM_CHECK(!quads.empty());
+    // The ghost spans the cut, top to bottom — it is the material coming off,
+    // not an outline of the floor.
+    float lowest = 1e9f, highest = -1e9f;
+    for (const LineVertex3D& v : quads) {
+      lowest = std::min(lowest, v.position.z);
+      highest = std::max(highest, v.position.z);
+    }
+    IM_CHECK(lowest <= (float)op.bottomZ + 1e-3f);
+    IM_CHECK(highest >= (float)op.topZ - 1e-3f);
+
+    // Closing the session drops the decision-time drawings and keeps the
+    // backplot: the job survives the window that made it.
+    ctx->ItemClick("//CAM###ToolWindow/###cam_tool_done");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolOpen);
+    std::vector<PrimVertex> afterPrims;
+    std::vector<LineVertex3D> afterQuads;
+    ui::AppendCamVisualisation(*s_App, afterPrims, afterQuads);
+    IM_CHECK(afterQuads.empty()); // no stock box, no ghost
+    std::vector<PrimVertex> backplot;
+    ui::AppendCamToolpathOverlay(*s_App, backplot);
+    IM_CHECK(!backplot.empty());
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "panel_generates_and_backplots");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -949,6 +1071,16 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     cam::Setup& setup = Doc()->AddCamSetup("Side A");
     setup.safeZ = 20.0;
     s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+
+    // Reach the panel the way a user does: click its dock tab. Model owns the
+    // shared node (CAM used to steal it by appearing without
+    // NoFocusOnAppearing, which hid the model tree), so the tab click is a
+    // required step rather than a formality. A tab item's id IS the window's
+    // TabId; FocusWindow deliberately does not select dock tabs.
+    ImGuiWindow* camWin = ImGui::FindWindowByName("CAM###CamPanel");
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
 
     // The panel's "Add operation" derives its depths from the model rather
@@ -1024,6 +1156,15 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
                               &error));
     IM_CHECK(gcode.find("G90 G21") != std::string::npos);
     IM_CHECK(gcode.find("nan") == std::string::npos);
+
+    // Hand the shared dock node back to Model. A selected tab outlives the
+    // test that selected it, and the next test in the shard looks for the
+    // model tree — this is the same "CAM covers the tree" failure, arriving
+    // by a different route.
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName("Model")) {
+      ctx->ItemClick(modelWin->TabId);
+      ctx->Yield(2);
+    }
   };
 #endif // HAVE_CAM
 

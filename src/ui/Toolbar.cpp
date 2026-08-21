@@ -5,6 +5,7 @@
 #include "core/sketch/SketchProfile.h" // BuildLoops (extrude gating)
 #include "render/RayTracingRenderer.h"
 #include "ui/AppActions.h"
+#include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
 #include "ui/Placement.h"
 #include "ui/PreviewFeature.h"
@@ -291,6 +292,28 @@ void DrawModelToolbar(AppState& state) {
   if (ToolButton(ICON_FA_GAUGE_HIGH "###tb_simulation",
                  "Simulation (FEM stress study)", hasBody && idle))
     EnterSimulation(state);
+
+#ifdef HAVE_CAM
+  // CAM verbs (docs/cam/gui.md). A tool SESSION, not a mode: the backplot
+  // coexists with the model and a picked face still means "that face".
+  {
+    const bool camActive = state.camToolOpen;
+    if (camActive)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ToolButton(ICON_FA_SCREWDRIVER_WRENCH "###tb_cam",
+                   "CAM (mill this part: pocket, cut out, face)", hasBody)) {
+      state.camToolOpen = !state.camToolOpen;
+      if (!state.camToolOpen) {
+        state.camGhostOp = 0;
+        if (state.slotPick.featureId == kCamToolSlot)
+          state.slotPick = {};
+      }
+    }
+    if (camActive)
+      ImGui::PopStyleColor();
+  }
+#endif
 
   // Measure tool (C3): a viewport mode — pick a face/edge for its own measure,
   // a second element for the distance. The button reflects the armed state.

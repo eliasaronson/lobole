@@ -513,6 +513,15 @@ DerivedOp DeriveOperation(const Setup& setup, const std::vector<Body>& bodies,
   return out;
 }
 
+double DeriveSafeZ(const Setup& setup, const std::vector<Body>& bodies) {
+  glm::dvec3 lo(0.0), hi(0.0);
+  if (!StockBounds(setup, bodies, lo, hi))
+    return setup.safeZ;
+  // Clear the stock top by a fraction of the job's own height, with a floor
+  // so a thin plate still gets real clearance rather than a scrape.
+  return hi.z + std::max(2.0, (hi.z - lo.z) * 0.1);
+}
+
 double CuttingMinutes(const Setup& setup, const std::vector<Toolpath>& paths) {
   double minutes = 0.0;
   for (const Toolpath& tp : paths) {

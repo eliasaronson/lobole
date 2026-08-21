@@ -3568,6 +3568,17 @@ void AppendPrimLine(glm::vec3 a, glm::vec3 b, float halfPx,
     out.push_back(v);
 }
 
+// A constant-size dot (two triangles, SDF-round in the fragment shader).
+void AppendPrimDot(glm::vec3 p, float radiusPx, const glm::vec4& color,
+                   std::vector<PrimVertex>& out) {
+  PrimVertex c00{p, p, {-1, -1}, {radiusPx, 1}, color};
+  PrimVertex c10{p, p, {1, -1}, {radiusPx, 1}, color};
+  PrimVertex c11{p, p, {1, 1}, {radiusPx, 1}, color};
+  PrimVertex c01{p, p, {-1, 1}, {radiusPx, 1}, color};
+  for (const PrimVertex& v : {c00, c10, c11, c00, c11, c01})
+    out.push_back(v);
+}
+
 namespace {
 // Vertices exposed by an entity for dots (which, plane-UV).
 std::vector<std::pair<uint8_t, glm::vec2>> EntityDots(const sketch::Entity& e) {
@@ -3619,16 +3630,6 @@ void AppendPrimDashedLine(glm::vec3 a, glm::vec3 b, float halfPx,
   }
 }
 
-// A constant-size dot (two triangles, SDF-round in the fragment shader).
-void AppendPrimDot(glm::vec3 p, float radiusPx, const glm::vec4& color,
-                   std::vector<PrimVertex>& out) {
-  PrimVertex c00{p, p, {-1, -1}, {radiusPx, 1}, color};
-  PrimVertex c10{p, p, {1, -1}, {radiusPx, 1}, color};
-  PrimVertex c11{p, p, {1, 1}, {radiusPx, 1}, color};
-  PrimVertex c01{p, p, {-1, 1}, {radiusPx, 1}, color};
-  for (const PrimVertex& v : {c00, c10, c11, c00, c11, c01})
-    out.push_back(v);
-}
 } // namespace
 
 std::vector<LineVertex3D> BuildStaticSketchLines(AppState& state,

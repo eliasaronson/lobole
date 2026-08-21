@@ -4,6 +4,7 @@
 #include "core/Document.h"
 #include "core/Occurrence.h"
 #include "core/cam/CamJob.h"
+#include "core/cam/CamVerify.h" // cam::VerdictLine (the G4 verdict, in words)
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/features/SketchFeature.h"
@@ -751,6 +752,11 @@ struct AppState {
     // U2: hovered sketch region while a Profiles slot is armed — the outer
     // loop's entity ids (empty = none).
     std::vector<uint32_t> regionHoverIds;
+    // The face a click would take, as a stable reference (G3): the renderer's
+    // own hover is a mesh/index pair, which cannot say WHICH face of the
+    // model it is, and a preview of "the region that would be cleared" has to
+    // ask the B-Rep.
+    ElementRef hoverFace;
     glm::vec2 lastClickPos{-1e9f, -1e9f};
     int cycle = 0;
   };
@@ -970,6 +976,20 @@ struct AppState {
   // The face that set Z zero (docs/cam/gui.md G1). Empty = not picked yet,
   // which the panel says out loud rather than defaulting to the world origin.
   ElementRef camTopFace;
+  // The verb session (G2): a Tool window, NOT a mode — CAM does not take the
+  // viewport over, and modes have a known exit-bug class here (U11).
+  bool camToolOpen = false;
+  // What the last verb refused to do, in words. Cleared by the next attempt.
+  std::string camRefusal;
+  // The operation the viewport is illustrating (G3): its removed volume, its
+  // depth label. 0 = none, which is what closing the session leaves behind.
+  uint64_t camGhostOp = 0;
+  bool camShowStock = true;
+  // The last verification (G4), in the words the panel prints, plus the
+  // points where the tool could not reach. Both cleared on any edit, because
+  // a verdict about a previous toolpath is worse than no verdict.
+  std::vector<cam::VerdictLine> camVerdict;
+  std::vector<glm::dvec3> camLeftover;
 
   // The terminal panel (docs/ui/terminal-panel.md). Off by default via
   // settings.terminalPanel; the state is created the first time it draws, so
