@@ -83,8 +83,9 @@ the GUI suite on a virtual display — immune to the session-lock present
 throttling that made `ctest -R gui_smoke` time out (and the seed for the CI
 virtual-display item).
 
-Still open (folded into U5): user font-size setting; audit remaining
-screen-space pixel constants; a narrow-width toolbar GUI test.
+Still open (folded into U5): audit remaining screen-space pixel constants; a
+narrow-width toolbar GUI test. (The user font-size setting shipped in
+[settings.md](settings.md).)
 
 ## U1 — Unified selection model
 
@@ -298,12 +299,15 @@ material with the fix living outside simulation mode; a fixed support drew as
 a single stick; File > New left the mode. Verified against beam theory: a
 steel cantilever under self-weight now sags 2.05e-4 mm vs 2.08e-4 analytic.
 
-## Settings window (designed, not built)
+## Settings window — SHIPPED 2026-08-20
 
 [settings.md](settings.md) — where user preferences live, how they are stored
 and applied, and the three-bucket rule that keeps them apart from project
-settings and session state. Written because GPU device selection has nowhere
-to live; deliberately not implemented yet.
+settings and session state. Written because GPU device selection had nowhere
+to live; built a month later with GPU device, font size, render quality,
+autosave and (2026-08-20) the terminal panel as its first tenants, which took
+render quality and font size out of the View menu where they reset on every
+launch.
 
 ## GUI coverage
 
