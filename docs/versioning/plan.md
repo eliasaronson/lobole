@@ -4,9 +4,12 @@
 > F3 diffable directory format, F4 checkpoints + rollback bar are shipped; F5
 > shipped git as an *engine* only, and the 2026-07-14 banner here read that as
 > "v1 complete" for four weeks while the app had no way to show a history.
-> [F6](f6-history-ui.md) builds that half. Later work: **semantic
-> feature-list merge** (a separate project — do not promise it in v1) and
-> **insert-feature-at-marker** (F4 v2). Nothing here blocks other workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
+> [F6](f6-history-ui.md) builds that half. Later work: **merge and conflict
+> handling** — scoped 2026-08-21 as [F7](f7-merge-and-conflicts.md), which
+> found that the app has no verb that can *produce* a conflict, so the UI F5
+> and F6 both deferred needs a merge engine under it first — and
+> **insert-feature-at-marker** (F4 v2). Nothing here blocks other
+> workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
 > history — the number has moved well past this doc's original snapshot as
 > later workstreams added features/assemblies/units).
 
@@ -78,8 +81,12 @@ simpler, and this product's audience has git. Features, in order:
 - Merge: with F3's feature-per-file layout, git's own merge handles disjoint
   edits; a conflict falls back to "pick mine/theirs per feature" UI. A true
   semantic feature-list merge is a later, separate project — do not promise
-  it in v1. — **the conflict UI was not built.** The 2026-08-19 merge-safety
-  work (duplicate-id refusal, named parse errors) is the current answer:
+  it in v1. — **the conflict UI was not built**, and this bullet understated
+  it twice over: there is no branch/merge/remote either, so the app cannot
+  reach the state the UI would serve, and "pick per feature" covers only one
+  of the five conflict classes the format actually has. Scoped as
+  [F7](f7-merge-and-conflicts.md). The 2026-08-19 merge-safety work
+  (duplicate-id refusal, named parse errors) remains the current answer:
   refuse loudly rather than resolve quietly.
 
 ### F6 — Version history in the app — [design: f6-history-ui.md](f6-history-ui.md)
@@ -87,6 +94,26 @@ The user-visible half of F5: a History panel (named versions, restore),
 checkpoints as project-wide named commits, and the `RestoreTo` fix — it used
 `git checkout <commit> -- .`, which leaves files added *after* the target
 commit in place, so restoring past a part's creation kept the part.
+
+### F7 — Merge + conflict handling — **not built** — [design: f7-merge-and-conflicts.md](f7-merge-and-conflicts.md)
+What F5 and F6 each deferred in a sentence, costed. The finding that reorders
+it: `GitVault` is linear-only (no branch, merge, remote or fetch), so a
+conflict can only arrive from a terminal or a sync folder — the resolution UI
+is the *last* 20% of a collaboration workstream, not a follow-on to the
+history panel. Phases: A make a conflict reachable (~1–2 d), B teach the app
+what a conflict means in CAD terms (~2–4 d, the real work — the three stages
+parsed as features, a union merge for `index.json` and the eight id-keyed
+collections, and a reference-integrity pass before the merge commit), C the
+Conflicts panel (~2–3 d). **5–9 days without remotes.**
+
+Two things the design changes about the plan above:
+- **Non-sequential feature ids are a prerequisite, not a nicety.** `nextId++`
+  lets two offline sides mint the same id, which git merges *cleanly* (two
+  files, no overlap) and no conflict UI can see. Half a day plus a `kVersion`
+  bump deletes the class.
+- **The recommended first move is triage, not resolution** (~1 day): make the
+  existing refusals useful — list the collisions in CAD language and hand the
+  project to the terminal panel, which already opens in the project directory.
 
 ## Recommended order
 
@@ -102,3 +129,11 @@ useful and could be pulled forward with the modeling work.
   corpus existing first.
 - Checkpoint/branch UX can balloon; keep F4/F5 v1 to list + view + restore +
   branch, nothing more.
+- F7's risk is the opposite one: it is easy to build a Conflicts panel that
+  looks finished while resolving only same-field feature edits, and silently
+  drops work on an `index.json` pick or a duplicate id. Its acceptance bar is
+  "the resolved project loads and regenerates", never "git exited 0".
+- Two gaps F7's scoping found that are live *now*, independent of it: nothing
+  detects the project directory changing on disk (so a `git` command run in
+  the app's own terminal panel is clobbered by the next Ctrl+S), and the
+  versioning docs are written as if a project were a single part.
