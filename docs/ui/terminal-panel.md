@@ -204,7 +204,7 @@ that silently goes blank on exit reads as a crash of the *app*.
 | **T2** | The panel: grid rendering, monospace font, scrollback, resize→`TIOCSWINSZ` | **done** — a live `bash` and a live Claude Code, screenshotted |
 | **T3** | Input: keys, control chars, paste, and the hover gate | **done** — GUI test asserts both directions of the gate |
 | **T4** | The Claude Code launch (port, cwd, MCP config) + exited state | **done** — the button types `claude` bound to this instance into the shell |
-| **T5** | Polish: selection + copy, a font-size control, `Tools ▸ Open terminal here` (option D) | outstanding |
+| **T5** | Polish: selection + copy (**done**), a font-size control, `Tools ▸ Open terminal here` (option D) | partly done |
 
 T1–T2 were the risk; T3–T4 the value. What shipped, concretely:
 
@@ -232,10 +232,21 @@ T1–T2 were the risk; T3–T4 the value. What shipped, concretely:
 - **Multiple terminal tabs.** One session covers the request. The panel's
   session ownership is a `std::unique_ptr`, so a vector is a later change,
   not a redesign.
-- **Selection and copy-out.** Paste in works (Ctrl+Shift+V, bracketed when the
-  program asked for it); selecting text with the mouse to copy it does not.
-  It needs a selection model over the grid and is the largest single item in
-  T5.
+- ~~**Selection and copy-out.**~~ **Done 2026-08-21.** Drag to select,
+  double-click for the word (path- and flag-friendly: `.`, `/`, `-`, `_` and
+  `~` count as word characters, because a filename is what anyone is
+  double-clicking a terminal for), Ctrl+Shift+C to copy, click to clear.
+  Selection lives in **buffer** coordinates — line 0 is the oldest scrollback
+  line — so it survives scrolling and new output, and one helper
+  (`BufferLineOfRow`) maps a visual row to a buffer line for drawing,
+  hit-testing and copy alike; three subtly different versions of that mapping
+  is how off-by-one selections happen. The text extraction lives in
+  `TerminalScreen` (`TextRange`, `WordAt`) rather than the panel, so copying
+  across the scroll boundary is tested **headlessly** rather than by dragging
+  in a screenshot. Trailing blanks are trimmed per line: a terminal's blank
+  cells are padding, and pasting them back indents every line after the
+  first. The highlight is translucent over the glyphs, not an inverted
+  re-render — the text is the thing you selected in order to read.
 - **Mouse reporting.** Claude Code does not use it, and neither do git or
   ninja. If someone runs `htop` in there, they can use an external terminal.
 - **Sixel/kitty graphics, ligatures, bidi.** No.

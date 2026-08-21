@@ -76,6 +76,24 @@ public:
   }
   [[nodiscard]] std::string ScrollbackText(size_t i) const;
 
+  // --- one address space over scrollback + screen -------------------------
+  // Selection has to survive scrolling and new output, so it is expressed in
+  // BUFFER lines: 0 is the oldest scrollback line, and the visible screen is
+  // the last Rows() of them. Keeping this in the screen rather than in the
+  // panel is what makes copy testable without a display.
+  [[nodiscard]] size_t TotalLines() const {
+    return m_scrollback.size() + static_cast<size_t>(m_rows);
+  }
+  [[nodiscard]] Cell CellAtLine(size_t line, int col) const;
+  // Inclusive of `startCol`, exclusive of `endCol` on the last line; trailing
+  // blanks are trimmed per line, and lines are joined with '\n' — what a
+  // terminal puts on the clipboard.
+  [[nodiscard]] std::string TextRange(size_t startLine, int startCol,
+                                      size_t endLine, int endCol) const;
+  // The word around (line, col), as [begin, end) columns. Empty (begin ==
+  // end) over whitespace. For double-click selection.
+  void WordAt(size_t line, int col, int& begin, int& end) const;
+
   [[nodiscard]] CursorPos Cursor() const { return m_cursor; }
   [[nodiscard]] bool CursorVisible() const { return m_cursorVisible; }
   [[nodiscard]] const std::string& Title() const { return m_title; }

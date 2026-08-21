@@ -3,6 +3,7 @@
 #include <vterm.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 
 namespace term {
@@ -201,6 +202,64 @@ std::string Screen::ScrollbackText(size_t i) const {
   while (!out.empty() && out.back() == ' ')
     out.pop_back();
   return out;
+}
+
+Cell Screen::CellAtLine(size_t line, int col) const {
+  if (line < m_scrollback.size()) {
+    const std::vector<Cell>& hist = m_scrollback[line];
+    if (col < 0 || static_cast<size_t>(col) >= hist.size())
+      return Cell{};
+    return hist[static_cast<size_t>(col)];
+  }
+  return At(static_cast<int>(line - m_scrollback.size()), col);
+}
+
+std::string Screen::TextRange(size_t startLine, int startCol, size_t endLine,
+                              int endCol) const {
+  if (endLine < startLine || (endLine == startLine && endCol <= startCol))
+    return {};
+  const size_t last = std::min(endLine, TotalLines() - 1);
+  std::string out;
+  for (size_t line = startLine; line <= last; line++) {
+    const int from = (line == startLine) ? std::max(0, startCol) : 0;
+    const int to = (line == endLine) ? endCol : m_cols;
+    std::string text;
+    for (int c = from; c < std::min(to, m_cols); c++) {
+      const Cell cell = CellAtLine(line, c);
+      if (cell.width == 0)
+        continue; // trailing half of a double-width glyph
+      AppendUtf8(text, cell.ch == 0 ? U' ' : cell.ch);
+    }
+    // Per line, not once at the end: a terminal's blank cells are padding,
+    // and pasting them back would indent everything after the first line.
+    while (!text.empty() && text.back() == ' ')
+      text.pop_back();
+    if (line != startLine)
+      out.push_back('\n');
+    out += text;
+  }
+  return out;
+}
+
+void Screen::WordAt(size_t line, int col, int& begin, int& end) const {
+  begin = end = col;
+  const auto isWord = [&](int c) {
+    if (c < 0 || c >= m_cols)
+      return false;
+    const char32_t ch = CellAtLine(line, c).ch;
+    if (ch == 0 || ch == U' ')
+      return false;
+    // Path- and identifier-friendly: double-clicking a filename or a flag
+    // should take the whole thing, which is what it is usually clicked for.
+    return ch > 127 || std::isalnum(static_cast<int>(ch)) != 0 || ch == U'_' ||
+           ch == U'-' || ch == U'.' || ch == U'/' || ch == U'~';
+  };
+  if (!isWord(col))
+    return; // whitespace: an empty selection, not the whole line
+  while (begin > 0 && isWord(begin - 1))
+    begin--;
+  while (end < m_cols && isWord(end))
+    end++;
 }
 
 void Screen::SendChar(char32_t c, int mods) {

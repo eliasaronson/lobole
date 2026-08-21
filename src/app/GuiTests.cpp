@@ -933,6 +933,69 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!ui::TerminalRunning(*s_App));
   };
 
+  t = IM_REGISTER_TEST(engine, "terminal", "drag_selects_and_copies_text");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(6);
+
+    ui::StartTerminalCommand(*s_App, "/bin/sh",
+                             {"-c", "printf 'copyme-token\\n'; sleep 30"});
+    bool seen = false;
+    for (int i = 0; i < 200 && !seen; i++) {
+      ctx->Yield();
+      const term::Screen* screen = ui::TerminalScreenOf(*s_App);
+      if (screen != nullptr)
+        seen = screen->Line(0).find("copyme-token") != std::string::npos;
+    }
+    IM_CHECK(seen);
+
+    // Drag across the first line, from its start to past the token.
+    ImGuiWindow* win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
+    IM_CHECK(win != nullptr);
+    ImGuiTestItemInfo grid =
+        ctx->ItemInfo("//Terminal###TerminalPanel/###term_grid");
+    IM_CHECK(grid.ID != 0);
+    const term::Screen* screen = ui::TerminalScreenOf(*s_App);
+    IM_CHECK(screen != nullptr);
+    const float cellW = grid.RectFull.GetWidth() / (float)screen->Cols();
+    const float cellH = grid.RectFull.GetHeight() / (float)screen->Rows();
+    const ImVec2 rowStart(grid.RectFull.Min.x + cellW * 0.25f,
+                          grid.RectFull.Min.y + cellH * 0.5f);
+    const ImVec2 rowEnd(grid.RectFull.Min.x + cellW * 12.0f,
+                        grid.RectFull.Min.y + cellH * 0.5f);
+    ctx->MouseMoveToPos(rowStart);
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(rowEnd);
+    ctx->Yield(2);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+
+    // Copy needs the keyboard, which means the pointer must be over the panel
+    // — the same rule as everything else typed here.
+    ImGui::SetClipboardText("");
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_C);
+    ctx->Yield(3);
+    const char* clip = ImGui::GetClipboardText();
+    IM_CHECK(clip != nullptr);
+    IM_CHECK_STR_EQ(clip, "copyme-token");
+
+    // A click with no drag clears the selection, as a terminal does — a
+    // highlight that never goes away is worse than none.
+    ctx->MouseMoveToPos(rowStart);
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    ImGui::SetClipboardText("");
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_C);
+    ctx->Yield(3);
+    clip = ImGui::GetClipboardText();
+    IM_CHECK(clip == nullptr || clip[0] == '\0');
+
+    s_App->settings.terminalPanel = false;
+    ctx->Yield(3);
+  };
+
   t = IM_REGISTER_TEST(engine, "terminal", "hover_decides_who_gets_the_keys");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

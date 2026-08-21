@@ -95,6 +95,14 @@ struct TerminalState {
   int scrollBack = 0;     // lines scrolled up into history; 0 = live
   bool capturing = false; // the pointer is over us and a session is running
   std::string foreground; // process with the terminal, refreshed on output
+
+  // Selection, in BUFFER lines (0 = oldest scrollback) so it survives
+  // scrolling and new output. anchor is where the drag started; head follows
+  // the pointer. Equal = nothing selected.
+  size_t selAnchorLine = 0, selHeadLine = 0;
+  int selAnchorCol = 0, selHeadCol = 0;
+  bool selecting = false; // a drag is in progress
+  bool hasSelection = false;
 };
 
 namespace {
@@ -247,6 +255,38 @@ void PumpSession(TerminalState& t) {
     t.exitStatus = t.pty.ExitStatus();
 }
 
+// Selection in reading order, whichever way the drag went.
+void OrderedSelection(const TerminalState& t, size_t& l0, int& c0, size_t& l1,
+                      int& c1) {
+  const bool forward =
+      t.selAnchorLine < t.selHeadLine ||
+      (t.selAnchorLine == t.selHeadLine && t.selAnchorCol <= t.selHeadCol);
+  l0 = forward ? t.selAnchorLine : t.selHeadLine;
+  c0 = forward ? t.selAnchorCol : t.selHeadCol;
+  l1 = forward ? t.selHeadLine : t.selAnchorLine;
+  c1 = forward ? t.selHeadCol : t.selAnchorCol;
+}
+
+std::string SelectionText(const TerminalState& t) {
+  if (!t.hasSelection || t.screen == nullptr)
+    return {};
+  size_t l0 = 0, l1 = 0;
+  int c0 = 0, c1 = 0;
+  OrderedSelection(t, l0, c0, l1, c1);
+  return t.screen->TextRange(l0, c0, l1, c1);
+}
+
+// The buffer line shown at visual row `r`, given the current scrollback
+// offset. One place computing this, used by drawing, hit-testing and copy —
+// three subtly different versions of it is how off-by-one selections happen.
+size_t BufferLineOfRow(const TerminalState& t, int r, int sb) {
+  const size_t sbCount = t.screen->ScrollbackCount();
+  const int fromHistory = sb - r;
+  if (fromHistory > 0)
+    return sbCount - static_cast<size_t>(fromHistory);
+  return sbCount + static_cast<size_t>(r - sb);
+}
+
 // Keyboard, but only while the pointer is over the panel. See the header and
 // docs/ui/terminal-panel.md: hover, not focus, is what decides — an invisible
 // focus state deciding whether Ctrl+Z undoes a feature or suspends a job is
@@ -275,6 +315,9 @@ void HandleInput(TerminalState& t) {
   if (io.KeyCtrl && !io.KeySuper) {
     for (int i = 0; i < 26; i++) {
       const auto key = static_cast<ImGuiKey>(ImGuiKey_A + i);
+      // Ctrl+Shift+C/V are the copy/paste pair above, not control codes.
+      if (io.KeyShift && (key == ImGuiKey_C || key == ImGuiKey_V))
+        continue;
       if (ImGui::IsKeyPressed(key, true))
         screen.SendChar(static_cast<char32_t>('a' + i),
                         static_cast<int>(term::Screen::Mod::Ctrl));
@@ -290,11 +333,17 @@ void HandleInput(TerminalState& t) {
     }
   }
 
-  // Ctrl+Shift+V pastes, as in every terminal — Ctrl+V has to stay literal.
+  // Ctrl+Shift+V pastes and Ctrl+Shift+C copies, as in every terminal —
+  // Ctrl+C has to stay an interrupt and Ctrl+V has to stay literal.
   if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_V, false)) {
     const char* clip = ImGui::GetClipboardText();
     if (clip != nullptr && *clip != '\0')
       screen.SendPaste(clip);
+  }
+  if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_C, false)) {
+    const std::string text = SelectionText(t);
+    if (!text.empty())
+      ImGui::SetClipboardText(text.c_str());
   }
 
   const std::string keys = screen.TakeOutput();
@@ -520,6 +569,15 @@ void DrawTerminalPanel(AppState& state) {
 
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   ImDrawList* dl = ImGui::GetWindowDrawList();
+
+  // The hit area goes FIRST so it owns the mouse for the whole grid; the
+  // glyphs are drawn over it afterwards (the button paints nothing).
+  ImGui::InvisibleButton("###term_grid", avail,
+                         ImGuiButtonFlags_MouseButtonLeft |
+                             ImGuiButtonFlags_MouseButtonMiddle);
+  const bool gridHovered = ImGui::IsItemHovered();
+  ImGui::SetCursorScreenPos(origin);
+
   dl->AddRectFilled(origin, ImVec2(origin.x + avail.x, origin.y + avail.y),
                     ToImCol(t.screen->DefaultBg()));
 
@@ -547,10 +605,76 @@ void DrawTerminalPanel(AppState& state) {
             t.screen->DefaultBg());
   }
 
+  // --- selection ---------------------------------------------------------
+  // A cell address from the pointer, clamped into the grid so a drag that
+  // leaves the panel still selects to the edge rather than stopping dead.
+  const auto cellUnderMouse = [&](size_t& line, int& col) {
+    const ImVec2 m = ImGui::GetIO().MousePos;
+    int r = static_cast<int>((m.y - origin.y) / std::max(1.0f, cellH));
+    int c = static_cast<int>((m.x - origin.x) / std::max(1.0f, cellW) + 0.5f);
+    r = std::clamp(r, 0, rows - 1);
+    c = std::clamp(c, 0, cols);
+    line = BufferLineOfRow(t, r, sb);
+    col = c;
+  };
+
+  if (ImGui::IsItemActivated() && !ImGui::GetIO().KeyShift) {
+    cellUnderMouse(t.selAnchorLine, t.selAnchorCol);
+    t.selHeadLine = t.selAnchorLine;
+    t.selHeadCol = t.selAnchorCol;
+    t.selecting = true;
+    t.hasSelection = false; // a click with no drag clears, as a terminal does
+  }
+  if (t.selecting && ImGui::IsItemActive()) {
+    cellUnderMouse(t.selHeadLine, t.selHeadCol);
+    t.hasSelection =
+        t.selHeadLine != t.selAnchorLine || t.selHeadCol != t.selAnchorCol;
+  }
+  if (ImGui::IsItemDeactivated())
+    t.selecting = false;
+
+  // Double-click takes the word under the pointer — usually a path or a flag,
+  // which is what anyone is double-clicking a terminal for.
+  if (gridHovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+    size_t line = 0;
+    int col = 0;
+    cellUnderMouse(line, col);
+    int begin = 0, end = 0;
+    t.screen->WordAt(line, std::min(col, cols - 1), begin, end);
+    t.selecting = false;
+    t.hasSelection = end > begin;
+    t.selAnchorLine = t.selHeadLine = line;
+    t.selAnchorCol = begin;
+    t.selHeadCol = end;
+  }
+
+  if (t.hasSelection) {
+    size_t l0 = 0, l1 = 0;
+    int c0 = 0, c1 = 0;
+    OrderedSelection(t, l0, c0, l1, c1);
+    // Translucent, drawn over the glyphs: a solid highlight would mean
+    // re-rendering the text in an inverted colour, and the text is the thing
+    // you are selecting to read.
+    const ImU32 tint = IM_COL32(110, 145, 210, 80);
+    for (int r = 0; r < rows; r++) {
+      const size_t bufLine = BufferLineOfRow(t, r, sb);
+      if (bufLine < l0 || bufLine > l1)
+        continue;
+      const int from = (bufLine == l0) ? c0 : 0;
+      const int to = (bufLine == l1) ? c1 : cols;
+      if (to <= from)
+        continue;
+      dl->AddRectFilled(ImVec2(origin.x + static_cast<float>(from) * cellW,
+                               origin.y + static_cast<float>(r) * cellH),
+                        ImVec2(origin.x + static_cast<float>(to) * cellW,
+                               origin.y + static_cast<float>(r + 1) * cellH),
+                        tint);
+    }
+  }
+
   // The cursor: solid while we have the keyboard, hollow when we do not, so
   // "will my typing go here?" is answerable at a glance.
   const term::CursorPos cur = t.screen->Cursor();
-  const bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows);
   t.capturing = TerminalCapturesKeys(state);
   if (t.screen->CursorVisible() && sb == 0 && cur.row >= 0 && cur.row < rows) {
     const ImVec2 a(origin.x + static_cast<float>(cur.col) * cellW,
@@ -563,13 +687,7 @@ void DrawTerminalPanel(AppState& state) {
   }
   ImGui::PopFont();
 
-  // An invisible button over the grid so the panel takes clicks (focus, and
-  // later selection) without ImGui thinking the window is empty.
-  ImGui::InvisibleButton("###term_grid", avail,
-                         ImGuiButtonFlags_MouseButtonLeft |
-                             ImGuiButtonFlags_MouseButtonMiddle);
-
-  if (hovered) {
+  if (gridHovered) {
     const float wheel = ImGui::GetIO().MouseWheel;
     if (wheel != 0.0f) {
       t.scrollBack =

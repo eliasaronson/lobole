@@ -137,6 +137,45 @@ TEST_CASE("terminal: the program can hide the cursor and set a title",
   CHECK(s.Title() == "my title");
 }
 
+TEST_CASE("terminal: selection text spans scrollback and screen",
+          "[terminal]") {
+  // Copy has to work across the scroll boundary, which is the whole reason
+  // the screen exposes one address space instead of two.
+  Screen s(3, 12);
+  s.Write("alpha\r\nbravo\r\ncharlie\r\ndelta");
+  REQUIRE(s.ScrollbackCount() == 1); // "alpha" scrolled off
+  REQUIRE(s.TotalLines() == 4);
+  CHECK(s.TextRange(0, 0, 0, 12) == "alpha"); // from scrollback
+  CHECK(s.TextRange(3, 0, 3, 12) == "delta"); // from the live screen
+  CHECK(s.TextRange(0, 0, 3, 12) == "alpha\nbravo\ncharlie\ndelta");
+
+  // Partial columns: start mid-word on the first line, end mid-word on the
+  // last, full width in between.
+  CHECK(s.TextRange(1, 2, 2, 4) == "avo\nchar");
+
+  // Trailing blanks are trimmed PER LINE — otherwise every pasted line after
+  // the first arrives padded out to the terminal width.
+  const std::string two = s.TextRange(1, 0, 2, 12);
+  CHECK(two == "bravo\ncharlie");
+
+  // Degenerate ranges are empty, not reversed or clamped into nonsense.
+  CHECK(s.TextRange(2, 5, 2, 5).empty());
+  CHECK(s.TextRange(3, 0, 1, 0).empty());
+}
+
+TEST_CASE("terminal: double-click picks a word, not a line", "[terminal]") {
+  Screen s(2, 40);
+  s.Write("run ./tools/gui-tests-xvfb.sh --fast now");
+  int begin = 0, end = 0;
+  s.WordAt(0, 8, begin, end); // inside the path
+  CHECK(s.TextRange(0, begin, 0, end) == "./tools/gui-tests-xvfb.sh");
+  s.WordAt(0, 1, begin, end);
+  CHECK(s.TextRange(0, begin, 0, end) == "run");
+  // Whitespace selects nothing rather than grabbing the neighbouring word.
+  s.WordAt(0, 3, begin, end);
+  CHECK(begin == end);
+}
+
 // --- the PTY half -------------------------------------------------------
 
 namespace {
