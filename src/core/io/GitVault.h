@@ -19,6 +19,19 @@ struct LogEntry {
   bool named = false;
 };
 
+// Who commits this app makes are BY (F9 C1).
+//
+// Until F9 every commit was authored `Designer <designer@local>`, injected
+// inline on every call so that CI and a fresh machine with no git config
+// could still commit. Good reason, bad side effect: it was passed even when
+// git HAD an identity, so it overrode it — invisible with one user, and with
+// a team it makes the history say the same wrong thing about everyone.
+//
+// Resolution order, per field: git's own config, then this preference, then
+// the inline fallback. Set from Preferences; empty means "no preference",
+// which is the right answer for anyone who has configured git.
+void SetPreferredIdentity(const std::string& name, const std::string& email);
+
 bool Available();                    // `git` on PATH
 bool IsRepo(const std::string& dir); // dir/.git exists
 bool Init(const std::string& dir);   // git init -q

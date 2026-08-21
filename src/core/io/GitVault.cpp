@@ -114,12 +114,51 @@ int CountTokens(const std::string& line) {
   return n;
 }
 
-// Inline identity: commits must work on CI and fresh machines with no
-// global git config.
-constexpr const char* kIdentity =
-    "-c user.name=Designer -c user.email=designer@local";
+// The last-resort identity: commits must work on CI and on a fresh machine
+// with no git config at all. Only used for a field nothing else supplies.
+constexpr const char* kFallbackName = "Designer";
+constexpr const char* kFallbackEmail = "designer@local";
+
+// Set from Preferences (F9 C1). Empty = the person expressed no preference.
+std::string g_preferredName;
+std::string g_preferredEmail;
+
+// Does git already know this? `config <key>` exits non-zero when unset, and
+// checks the repo config then the global one — which is exactly the order a
+// person would expect.
+bool GitKnows(const std::string& dir, const char* key, std::string* value) {
+  std::string out;
+  if (RunGit(dir, std::string("config ") + key, &out) != 0)
+    return false;
+  const std::string trimmed = FirstLine(out);
+  if (trimmed.empty())
+    return false;
+  if (value)
+    *value = trimmed;
+  return true;
+}
+
+// `-c user.name=... -c user.email=...` for ONLY the fields git lacks, so a
+// person who set just one keeps it.
+std::string IdentityArgs(const std::string& dir) {
+  std::string args;
+  if (!GitKnows(dir, "user.name", nullptr)) {
+    args += " -c user.name=" +
+            Quote(g_preferredName.empty() ? kFallbackName : g_preferredName);
+  }
+  if (!GitKnows(dir, "user.email", nullptr)) {
+    args += " -c user.email=" +
+            Quote(g_preferredEmail.empty() ? kFallbackEmail : g_preferredEmail);
+  }
+  return args;
+}
 
 } // namespace
+
+void SetPreferredIdentity(const std::string& name, const std::string& email) {
+  g_preferredName = name;
+  g_preferredEmail = email;
+}
 
 bool Available() {
   static const bool available = [] {
@@ -158,7 +197,7 @@ bool CommitAll(const std::string& dir, const std::string& message,
   RunGit(dir, "status --porcelain", &status);
   if (status.empty() && !allowEmpty)
     return true; // nothing changed — a clean save is not an error
-  if (RunGit(dir, std::string(kIdentity) + " commit -q" +
+  if (RunGit(dir, IdentityArgs(dir) + " commit -q" +
                       (allowEmpty ? " --allow-empty" : "") + " -m " +
                       Quote(message)) != 0) {
     if (error)
@@ -354,7 +393,7 @@ MergeStatus Merge(const std::string& dir, const std::string& branch,
   const std::string before = FirstLine(headBefore);
   std::string out;
   const int code = RunGitVerbose(
-      dir, std::string(kIdentity) + " merge --no-edit " + Quote(branch), &out);
+      dir, IdentityArgs(dir) + " merge --no-edit " + Quote(branch), &out);
   if (code == 0) {
     std::string after;
     RunGit(dir, "rev-parse HEAD", &after);
@@ -538,10 +577,9 @@ bool CommitMerge(const std::string& dir, const std::string& message,
     return false;
   }
   std::string out;
-  if (RunGitVerbose(dir,
-                    std::string(kIdentity) + " commit -q --no-edit -m " +
-                        Quote(message),
-                    &out) != 0) {
+  if (RunGitVerbose(
+          dir, IdentityArgs(dir) + " commit -q --no-edit -m " + Quote(message),
+          &out) != 0) {
     if (error)
       *error = out.empty() ? "git commit failed" : FirstLine(out);
     return false;

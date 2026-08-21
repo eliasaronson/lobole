@@ -439,3 +439,107 @@ TEST_CASE("GitVault: same-id different-file merges clean (the blind spot)",
   CHECK(repo.Has("features/15-box.json"));
   CHECK(repo.Has("features/15-hole.json"));
 }
+
+// ---------------------------------------------------------------------------
+// Who a commit is BY (F9 C1). The inline identity used to be passed on every
+// commit, so it overrode the identity git already had — invisible with one
+// user, and with a team it makes the history say the same wrong thing about
+// everyone.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::string AuthorOf(const ScratchRepo& repo) {
+  // Not through GitVault: the point is what git RECORDED, so ask git.
+  // The format MUST be quoted: unquoted, the shell reads "|" as a pipe and
+  // the author comes back empty. (The same trap as `%(refname:short)`, whose
+  // parens are a shell syntax error — quote every git format string.)
+  const std::string cmd = "git -C '" + repo.path() +
+                          "' log -1 --pretty=format:'%an|%ae' 2>/dev/null";
+  FILE* pipe = ::popen(cmd.c_str(), "r");
+  if (!pipe)
+    return "";
+  char buffer[512] = {};
+  const size_t n = ::fread(buffer, 1, sizeof(buffer) - 1, pipe);
+  ::pclose(pipe);
+  return std::string(buffer, n);
+}
+
+// Hides the machine's own git identity for the duration of a case.
+//
+// Needed because "git has no user.email" is not something a developer
+// machine can otherwise produce — there is a global config, and the
+// resolution order deliberately honours it. These are git's documented
+// escape hatches for exactly this.
+struct NoGlobalGitConfig {
+  NoGlobalGitConfig() {
+    ::setenv("GIT_CONFIG_GLOBAL", "/dev/null", 1);
+    ::setenv("GIT_CONFIG_SYSTEM", "/dev/null", 1);
+  }
+  ~NoGlobalGitConfig() {
+    ::unsetenv("GIT_CONFIG_GLOBAL");
+    ::unsetenv("GIT_CONFIG_SYSTEM");
+  }
+};
+
+void SetGitConfig(const ScratchRepo& repo, const char* key, const char* value) {
+  const std::string cmd = "git -C '" + repo.path() + "' config " + key + " '" +
+                          value + "' 2>/dev/null";
+  (void)std::system(cmd.c_str());
+}
+
+} // namespace
+
+TEST_CASE("GitVault: git's own identity wins", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  NoGlobalGitConfig isolated;
+  ScratchRepo repo("identity");
+  REQUIRE(GitVault::Init(repo.path()));
+  SetGitConfig(repo, "user.name", "Ada Lovelace");
+  SetGitConfig(repo, "user.email", "ada@example.com");
+  // A preference is set too, and must NOT win: a person who configured git
+  // meant it.
+  GitVault::SetPreferredIdentity("Preference Name", "pref@example.com");
+
+  repo.Write("index.json", "{}");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+  CHECK(AuthorOf(repo) == "Ada Lovelace|ada@example.com");
+
+  GitVault::SetPreferredIdentity("", "");
+}
+
+TEST_CASE("GitVault: the preference fills what git lacks", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  NoGlobalGitConfig isolated;
+  ScratchRepo repo("identity-pref");
+  REQUIRE(GitVault::Init(repo.path()));
+  // Only the NAME is configured. The other field is filled without
+  // discarding this one.
+  SetGitConfig(repo, "user.name", "Grace Hopper");
+  GitVault::SetPreferredIdentity("Ignored", "grace@example.com");
+
+  repo.Write("index.json", "{}");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+  CHECK(AuthorOf(repo) == "Grace Hopper|grace@example.com");
+
+  GitVault::SetPreferredIdentity("", "");
+}
+
+// The reason the inline identity existed, and it still has to hold: ctest,
+// headless_smoke and CI all commit in repos with no configuration at all.
+TEST_CASE("GitVault: a repo with no identity still commits", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  NoGlobalGitConfig isolated;
+  ScratchRepo repo("identity-none");
+  REQUIRE(GitVault::Init(repo.path()));
+  // Nothing anywhere: no repo config, no global config, no preference. This
+  // is CI and a fresh machine, and it is why the inline fallback exists.
+  GitVault::SetPreferredIdentity("", "");
+  repo.Write("index.json", "{}");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+  CHECK(GitVault::Log(repo.path()).size() == 1);
+  CHECK(AuthorOf(repo) == "Designer|designer@local");
+}

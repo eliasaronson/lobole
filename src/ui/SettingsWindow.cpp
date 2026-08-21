@@ -1,5 +1,7 @@
 #include "ui/SettingsWindow.h"
 
+#include "core/io/GitVault.h"
+
 #include "common/Logger.h"
 #include "core/io/Settings.h"
 
@@ -74,7 +76,20 @@ bool DrawField(AppState& state, const settings::Field& f) {
     }
   } else if (auto* m =
                  std::get_if<std::string settings::Settings::*>(&f.member)) {
-    if (!f.values.empty()) {
+    if (f.freeText) {
+      // A name or an email: no list to choose from. Committed on the way out
+      // of the field rather than per keystroke, so half-typed values never
+      // reach the settings file.
+      char buffer[256] = {};
+      const std::string current = s.*(*m);
+      std::snprintf(buffer, sizeof(buffer), "%s", current.c_str());
+      if (ImGui::InputText(id.c_str(), buffer, sizeof(buffer),
+                           ImGuiInputTextFlags_EnterReturnsTrue) ||
+          ImGui::IsItemDeactivatedAfterEdit()) {
+        s.*(*m) = buffer;
+        changed = true;
+      }
+    } else if (!f.values.empty()) {
       const std::string current = s.*(*m);
       if (ImGui::BeginCombo(id.c_str(), current.c_str())) {
         for (const char* option : f.values) {
@@ -154,6 +169,9 @@ bool DrawField(AppState& state, const settings::Field& f) {
 
 void ApplySettings(AppState& state) {
   const settings::Settings& s = state.settings;
+  // Who a commit is by (F9 C1). GitVault holds it rather than reading the
+  // settings file, which would be a file read per commit.
+  GitVault::SetPreferredIdentity(s.gitUserName, s.gitUserEmail);
   state.uiFontScale = s.uiFontScale;
   state.showShadows = s.shadows;
   state.showAmbientOcclusion = s.ssao != "off";

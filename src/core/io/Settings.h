@@ -36,6 +36,12 @@ struct Settings {
   std::string ssao = "half"; // off | half | full
   int shadowMap = 2048;      // 1024 | 2048
 
+  // Sharing — who a commit is BY. Empty means "whatever git is configured
+  // with", which is the right answer for anyone who has configured it; these
+  // exist for people who have not (F9 C1).
+  std::string gitUserName;
+  std::string gitUserEmail;
+
   // General
   double autosaveInterval = 60.0; // seconds; 0 disables
   // Off by default: a CAD app should not open with a shell in it, and the
@@ -70,6 +76,11 @@ struct Field {
   // nobody anything; as "100%" it is obvious. Storage is unaffected.
   float displayScale = 1.0f;
   const char* unit = "";
+  // Genuinely free text (a name, an email). Without this a string field is a
+  // combo: either over `values`, or over the machine-supplied GPU list.
+  // LAST on purpose — Field is initialised positionally, so a member added
+  // anywhere else silently re-binds every row after it.
+  bool freeText = false;
 };
 
 std::span<const Field> Fields();
