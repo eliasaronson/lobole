@@ -618,6 +618,98 @@ TEST_CASE("cam: an island in the picked floor is machined around", "[cam]") {
   }
 }
 
+TEST_CASE("cam: a pocket too small to ramp around descends on a helix",
+          "[cam]") {
+  // C6. A 14 x 14 pocket 9 mm deep with a 6 mm cutter: the first ring is
+  // ~32 mm around, and 9 mm of descent at 3 degrees wants 172 mm of path. On
+  // the ring that is a 16-degree dive; the helix keeps it at 3.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 40, 20));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Void", glm::vec3(13, 13, 11), 14, 14, 20));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocket", block, voidId,
+                                                   BooleanOp::Subtract));
+
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  const ElementRef floor = UpFaceAt(*doc, 11.0);
+  REQUIRE(floor.IsSet());
+  cam::Operation op =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor)
+          .op;
+  op.id = 1;
+  op.stepdown = 0.0; // one pass, so the whole descent is in one entry
+  setup.operations.push_back(op);
+  const cam::Toolpath tp = cam::GenerateAll(setup, doc->GetBodies())[0];
+  INFO(tp.error);
+  REQUIRE(tp.error.empty());
+
+  // No plunge, and no cutting move steeper than the ramp angle.
+  double steepest = 0.0;
+  for (size_t i = 1; i < tp.moves.size(); i++) {
+    CHECK(tp.moves[i].kind != cam::Move::Kind::Plunge);
+    if (tp.moves[i].kind != cam::Move::Kind::Cut)
+      continue;
+    const glm::dvec3 d = tp.moves[i].to - tp.moves[i - 1].to;
+    const double flat = glm::length(glm::dvec2(d));
+    if (d.z < -1e-9 && flat > 1e-9)
+      steepest = std::max(steepest, -d.z / flat);
+  }
+  INFO("steepest descent " << steepest);
+  CHECK(steepest < std::tan(3.0 * std::numbers::pi / 180.0) * 1.05);
+  // …and a descent HAPPENED. Without this the check above passes for a
+  // toolpath that never went down at all, which is what a helix that
+  // silently emitted nothing would produce.
+  CHECK(steepest > 0.0);
+  CHECK(tp.CutLength() > 0.0);
+  // The tool goes down once and stays down: one retract to safe Z at the end
+  // of the pass, not one per ring.
+  int retracts = 0;
+  for (const cam::Move& m : tp.moves)
+    if (m.kind == cam::Move::Kind::Rapid &&
+        std::abs(m.to.z - setup.safeZ) < 1e-9)
+      retracts++;
+  CHECK(retracts == 2); // over the helix start, and out at the end
+
+  // And the cutter stayed inside the pocket: every cutting move keeps its
+  // full radius off the wall. This is the check that catches a helix sized
+  // from the wall instead of from the tool centre.
+  for (const cam::Move& m : tp.moves) {
+    if (m.kind == cam::Move::Kind::Rapid)
+      continue;
+    INFO("cut at " << m.to.x << "," << m.to.y);
+    CHECK(m.to.x >= 13.0 + 3.0 - 1e-3);
+    CHECK(m.to.x <= 27.0 - 3.0 + 1e-3);
+    CHECK(m.to.y >= 13.0 + 3.0 - 1e-3);
+    CHECK(m.to.y <= 27.0 - 3.0 + 1e-3);
+  }
+  CHECK_THAT(tp.MinZ(), WithinAbs(11.0, 1e-6));
+
+  // A pocket with room to ramp does NOT get a helix: the entry is still the
+  // along-the-path descent, which needs no clear circle in the middle.
+  auto wide = PocketDoc(); // 20 x 14 pocket, ~64 mm around
+  cam::Setup w = BasicSetup();
+  w.safeZ = cam::DeriveSafeZ(w, wide->GetBodies());
+  cam::Operation wop =
+      cam::DeriveOperation(w, wide->GetBodies(), cam::OpType::Pocket,
+                           UpFaceAt(*wide, 12.0))
+          .op;
+  wop.id = 1;
+  w.operations.push_back(wop);
+  const cam::Toolpath wtp = cam::GenerateAll(w, wide->GetBodies())[0];
+  REQUIRE(wtp.error.empty());
+  // The ramp entry retracts to safe Z before every ring; the helix path
+  // makes exactly one entry per depth pass and then stays down.
+  int entries = 0;
+  for (const cam::Move& m : wtp.moves)
+    if (m.kind == cam::Move::Kind::Rapid && std::abs(m.to.z - w.safeZ) < 1e-9)
+      entries++;
+  CHECK(entries > 2);
+}
+
 TEST_CASE("cam: a verb that cannot apply says why", "[cam]") {
   auto doc = PocketDoc();
   cam::Setup setup = BasicSetup();

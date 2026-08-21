@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <optional>
 #include <string>
 
@@ -32,6 +33,11 @@ namespace {
 // below anything a mill can hold, and far enough from int64's range that a
 // metre-scale part cannot overflow. ONE constant, because two would disagree.
 constexpr double kScale = 1.0e4;
+
+// The chord tolerance curved edges are flattened to. One constant, so a
+// helix is no coarser than the walls it sits between (it is also
+// SectionLoops' default).
+constexpr double kDeflection = 0.02;
 
 Clipper2Lib::Path64 ToClipper(const std::vector<glm::dvec2>& pts) {
   Clipper2Lib::Path64 out;
@@ -145,20 +151,93 @@ void Emit(Toolpath& tp, Move::Kind kind, const glm::dvec3& to, double feed) {
 // anyone needs one; a fixed sane value beats a vertical plunge today.
 constexpr double kRampAngleDeg = 3.0;
 
+// A helix down to depth, for a loop too short to hold the ramp (C6,
+// docs/cam/plan.md). Descending on the toolpath itself is right when the
+// path is long; on a small pocket that lap is short and the descent gets
+// steep, so instead the tool spirals down inside the region and the rings
+// are then cut from the middle outwards.
+//
+// The circle it walks is the TOOL CENTRE's, so `radius` must already have the
+// cutter's own radius taken out of it — a helix sized from the wall instead
+// of the centre is a cut through the wall.
+void EmitHelix(Toolpath& tp, const Tool& tool, const glm::dvec2& centre,
+               double radius, double fromZ, double toZ, double safeZ,
+               double deflection) {
+  const double descend = fromZ - toZ;
+  if (radius < 1e-9 || descend <= 1e-9)
+    return;
+
+  // Segments per revolution from the same chord tolerance the section used
+  // to make these loops, so the helix is no coarser than the walls it sits
+  // between. Bounded because a tiny radius would otherwise ask for hundreds.
+  const double perSeg =
+      radius > deflection ? 2.0 * std::acos(1.0 - deflection / radius) : 1.0;
+  const int segments = std::clamp(
+      static_cast<int>(std::ceil(2.0 * std::numbers::pi / perSeg)), 8, 256);
+  const double circumference = 2.0 * std::numbers::pi * radius;
+  const double perRev = circumference * std::tan(glm::radians(kRampAngleDeg));
+  const double revolutions = perRev > 1e-9 ? descend / perRev : 1.0;
+  const int steps =
+      std::max(segments, static_cast<int>(std::ceil(revolutions * segments)));
+
+  const glm::dvec2 start(centre.x + radius, centre.y);
+  Emit(tp, Move::Kind::Rapid, {start.x, start.y, safeZ}, 0.0);
+  Emit(tp, Move::Kind::Rapid, {start.x, start.y, fromZ}, 0.0);
+  for (int i = 1; i <= steps; i++) {
+    const double t = static_cast<double>(i) / steps;
+    const double a = 2.0 * std::numbers::pi * revolutions * t;
+    Emit(tp, Move::Kind::Cut,
+         {centre.x + radius * std::cos(a), centre.y + radius * std::sin(a),
+          fromZ - descend * t},
+         tool.feedPlunge);
+  }
+  // One flat turn at depth: it clears the disc the spiral only grazed, and
+  // it leaves the tool on a known circle for the first ring to join.
+  const double endAngle = 2.0 * std::numbers::pi * revolutions;
+  for (int i = 1; i <= segments; i++) {
+    const double a = endAngle + 2.0 * std::numbers::pi * i / segments;
+    Emit(
+        tp, Move::Kind::Cut,
+        {centre.x + radius * std::cos(a), centre.y + radius * std::sin(a), toZ},
+        tool.feedCut);
+  }
+}
+
 // Cut the loop at depth `z`, entering from `entryZ` by RAMPING along the path
 // rather than plunging straight down — a vertical plunge with a
 // non-centre-cutting mill rubs rather than cuts. The ramp runs along the
 // toolpath itself, so it needs no room the cut does not already have; the lap
 // then starts where the ramp finished, which is why the point list is
 // rotated rather than restarted.
+//
+// C6: `entry` says how the tool gets to depth. `Ramp` is the above.
+// `AtDepth` means the caller already descended (a helix) and the tool is
+// standing in cleared material at `z` — so the loop is joined with a cut
+// move instead of a retract-and-ramp, which is the whole point of clearing
+// inside-out after a helix.
+enum class Entry { Ramp, AtDepth };
+
 void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
               const std::vector<glm::dvec2>& pts, double z, double safeZ,
-              int tabCount, double tabWidth, double tabZ, double entryZ) {
+              int tabCount, double tabWidth, double tabZ, double entryZ,
+              Entry entry = Entry::Ramp) {
   if (pts.size() < 2)
     return;
   const double perimeter = Perimeter(pts);
   if (perimeter < 1e-9)
     return;
+
+  if (entry == Entry::AtDepth) {
+    // Straight to the start of this loop at depth. The step from the
+    // previous ring is at most one step-over through material that ring
+    // already cleared.
+    Emit(tp, Move::Kind::Cut, {pts[0].x, pts[0].y, z}, tool.feedCut);
+    std::vector<glm::dvec2> lap(pts.begin(), pts.end());
+    lap.push_back(pts[0]);
+    for (size_t i = 1; i < lap.size(); i++)
+      Emit(tp, Move::Kind::Cut, {lap[i].x, lap[i].y, z}, tool.feedCut);
+    return;
+  }
 
   // Rapid over, then down to the height we enter from: that is either the
   // stock top or the depth the previous pass already cut here, so it is air.
@@ -642,17 +721,65 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       region = Clipper2Lib::Difference(holes, Clipper2Lib::Paths64{},
                                        Clipper2Lib::FillRule::NonZero);
     }
-    // First ring sits one radius in from the wall (plus finishing stock).
+    // Collect the concentric rings before emitting any: the LAST non-empty
+    // inset brackets the region's inscribed radius (a region shrinks to
+    // nothing exactly when the offset passes it), and that is what sizes the
+    // helix. First ring sits one radius in from the wall (plus stock).
+    std::vector<Clipper2Lib::Paths64> rings;
     double inset = radius + op.stockToLeave;
+    double lastInset = 0.0;
     Clipper2Lib::Paths64 ring = Offset(region, -inset);
     while (!ring.empty()) {
-      for (Clipper2Lib::Path64& path : ring) {
-        Orient(path, op.climb, /*insideMaterial=*/true);
-        EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0, z,
-                 entryZ);
-      }
+      lastInset = inset;
+      rings.push_back(std::move(ring));
       inset += step;
       ring = Offset(region, -inset);
+    }
+    if (rings.empty())
+      continue;
+
+    // Does the ramp fit on the loop we would cut first? If not, the descent
+    // on that loop would be far steeper than asked (C6).
+    double longest = 0.0;
+    for (const Clipper2Lib::Path64& path : rings.front())
+      longest = std::max(longest, Perimeter(FromClipper(path)));
+    const double descend = std::max(0.0, entryZ - z);
+    const double rampLen =
+        descend > 1e-9 ? descend / std::tan(glm::radians(kRampAngleDeg)) : 0.0;
+    // The tool CENTRE's circle: the inscribed radius less the cutter and the
+    // stock being left. A helix narrower than a tenth of the cutter is a
+    // plunge with extra steps, so that is where the fallback stays.
+    const double helixRadius = lastInset - radius - op.stockToLeave;
+    const bool helix = rampLen > longest && helixRadius > tool.diameter * 0.1 &&
+                       descend > 1e-9;
+
+    if (helix) {
+      // The innermost ring's centroid stands in for the incentre.
+      const std::vector<glm::dvec2> inner = FromClipper(rings.back().front());
+      glm::dvec2 centre(0.0);
+      for (const glm::dvec2& p : inner)
+        centre += p;
+      centre /= static_cast<double>(inner.size());
+      EmitHelix(tp, tool, centre, helixRadius, std::max(entryZ, z), z,
+                setup.safeZ, kDeflection);
+      // Inside out: the helix cleared the middle, so each ring outward steps
+      // into fresh material by one step-over. Outside-in after a helix would
+      // drag the tool through uncut material to reach the wall.
+      for (auto it = rings.rbegin(); it != rings.rend(); ++it)
+        for (Clipper2Lib::Path64& path : *it) {
+          Orient(path, op.climb, /*insideMaterial=*/true);
+          EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0,
+                   z, z, Entry::AtDepth);
+        }
+      Emit(tp, Move::Kind::Rapid,
+           {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
+    } else {
+      for (Clipper2Lib::Paths64& paths : rings)
+        for (Clipper2Lib::Path64& path : paths) {
+          Orient(path, op.climb, /*insideMaterial=*/true);
+          EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, 0, 0.0,
+                   z, entryZ);
+        }
     }
     entryZ = z;
   }
