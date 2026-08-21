@@ -28,6 +28,8 @@ constexpr glm::vec4 kRapidColor(0.55f, 0.55f, 0.62f, 0.45f);
 
 const char* kOpTypes[] = {"Profile", "Pocket", "Face", "Drill"};
 
+const cam::Setup* ActiveSetupConst(const AppState& state);
+
 cam::Setup* ActiveSetup(AppState& state) {
   if (!state.document)
     return nullptr;
@@ -39,6 +41,17 @@ cam::Setup* ActiveSetup(AppState& state) {
       return &s;
   state.camActiveSetup = setups.front().id;
   return &setups.front();
+}
+
+const cam::Setup* ActiveSetupConst(const AppState& state) {
+  if (!state.document)
+    return nullptr;
+  for (const cam::Setup& s : state.document->GetCamSetups())
+    if (s.id == state.camActiveSetup)
+      return &s;
+  return state.document->GetCamSetups().empty()
+             ? nullptr
+             : &state.document->GetCamSetups().front();
 }
 
 } // namespace
@@ -96,6 +109,51 @@ void RefreshCamToolpaths(AppState& state) {
   state.camToolpaths = cam::GenerateAll(*setup, state.document->GetBodies());
 }
 
+namespace {
+
+// The tool, to scale, where it first enters the material (docs/cam/gui.md).
+// This is the picture that answers the question a first-time CAM user does
+// not know to ask: will my cutter fit, and what radius will it leave in the
+// corners? A circle of the real diameter plus a short shank says both.
+void AppendToolGlyph(const AppState& state, const cam::Setup& setup,
+                     const cam::Toolpath& tp, std::vector<PrimVertex>& out) {
+  const cam::Tool* tool = setup.FindTool(tp.toolNumber);
+  if (tool == nullptr)
+    return;
+  glm::dvec3 at(0.0);
+  bool found = false;
+  for (const cam::Move& m : tp.moves)
+    if (m.kind == cam::Move::Kind::Cut || m.kind == cam::Move::Kind::Plunge) {
+      at = m.to;
+      found = true;
+      break;
+    }
+  if (!found)
+    return;
+
+  const double r = tool->diameter * 0.5;
+  constexpr int kSegments = 32;
+  const glm::vec4 color(1.0f, 0.85f, 0.35f, 0.85f);
+  glm::vec3 prev(0.0f);
+  for (int i = 0; i <= kSegments; i++) {
+    const double a = 2.0 * 3.14159265358979 * i / kSegments;
+    const glm::vec3 p(at.x + r * std::cos(a), at.y + r * std::sin(a), at.z);
+    if (i > 0)
+      AppendPrimLine(prev, p, 1.4f, color, out);
+    prev = p;
+  }
+  // A stub of shank, so the circle reads as a cutter rather than a hole.
+  const double shank = std::max(2.0, tool->diameter);
+  for (int i = 0; i < 4; i++) {
+    const double a = 3.14159265358979 * 0.5 * i;
+    const glm::vec3 base(at.x + r * std::cos(a), at.y + r * std::sin(a), at.z);
+    AppendPrimLine(base, base + glm::vec3(0.0f, 0.0f, (float)shank), 1.0f,
+                   color, out);
+  }
+}
+
+} // namespace
+
 void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
   if (!state.camShowToolpath || state.camToolpaths.empty())
     return;
@@ -115,6 +173,8 @@ void AppendCamToolpathOverlay(AppState& state, std::vector<PrimVertex>& out) {
       from = m.to;
       have = true;
     }
+    if (const cam::Setup* setup = ActiveSetupConst(state))
+      AppendToolGlyph(state, *setup, tp, out);
   }
 }
 

@@ -987,6 +987,28 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     std::vector<PrimVertex> prims;
     ui::AppendCamToolpathOverlay(*s_App, prims);
     IM_CHECK(!prims.empty());
+    // The tool is drawn to scale where it enters — the "will my cutter fit"
+    // picture (docs/cam/gui.md). Its circle sits INSIDE the path's extent, so
+    // the check is its geometry: vertices one tool radius from the entry
+    // point. (A bounding-box check passed for the wrong reason and was
+    // replaced.)
+    glm::dvec3 entry(0.0);
+    for (const cam::Move& m : s_App->camToolpaths[0].moves)
+      if (m.kind == cam::Move::Kind::Cut) {
+        entry = m.to;
+        break;
+      }
+    const cam::Setup* job = Doc()->FindCamSetup(s_App->camActiveSetup);
+    IM_CHECK(job != nullptr && !job->tools.empty());
+    const float radius = (float)(job->tools.front().diameter * 0.5);
+    int onRing = 0;
+    for (const PrimVertex& v : prims) {
+      const float dx = v.posThis.x - (float)entry.x;
+      const float dy = v.posThis.y - (float)entry.y;
+      if (std::abs(std::sqrt(dx * dx + dy * dy) - radius) < 0.05f)
+        onRing++;
+    }
+    IM_CHECK(onRing > 20); // a 32-segment circle, drawn as thick lines
     // Turning the picture off turns it off — a backplot that cannot be
     // hidden buries the model it is drawn over.
     s_App->camShowToolpath = false;
