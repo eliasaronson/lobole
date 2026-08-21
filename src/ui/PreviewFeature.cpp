@@ -204,10 +204,46 @@ void DrawSectionToolWindow(AppState& state) {
     ImGui::SetItemTooltip("Show this cut");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(120.0f);
-    if (ImGui::Combo("###plane", &sec.basePlane, planes, 3))
-      sec.offset = CenteredSectionOffset(
-          state, sec.basePlane); // new normal,
-                                 // old offset means nothing
+    // Source: the three base planes, then this part's datum planes, then the
+    // picked face if there is one. Datums and faces need a part document, so
+    // an assembly tab shows the three base planes alone — which is what it
+    // has, not a bug.
+    std::vector<const char*> sources = {planes[0], planes[1], planes[2]};
+    std::vector<uint64_t> sourceIds = {0, 0, 0};
+    if (state.document != nullptr) {
+      for (size_t i = 0; i < state.document->FeatureCount(); i++) {
+        if (auto* dp = dynamic_cast<DatumPlaneFeature*>(
+                state.document->GetFeature(i))) {
+          sources.push_back(dp->GetName().c_str());
+          sourceIds.push_back(dp->GetId());
+        }
+      }
+    }
+    const bool onFace = sec.face.IsSet();
+    if (onFace)
+      sources.push_back("Picked face");
+    int sel = sec.basePlane;
+    if (onFace)
+      sel = static_cast<int>(sources.size()) - 1;
+    else if (sec.planeId != 0)
+      for (size_t i = 3; i < sourceIds.size(); i++)
+        if (sourceIds[i] == sec.planeId)
+          sel = static_cast<int>(i);
+    if (ImGui::Combo("###plane", &sel, sources.data(),
+                     static_cast<int>(sources.size()))) {
+      if (onFace && sel == static_cast<int>(sources.size()) - 1) {
+        // keeping the face
+      } else {
+        sec.face = ElementRef{};
+        sec.planeId = sourceIds[static_cast<size_t>(sel)];
+        sec.basePlane = sec.planeId == 0 ? sel : sec.basePlane;
+        // A new source makes the old offset meaningless — it was measured
+        // from a different plane.
+        sec.offset = sec.planeId == 0
+                         ? CenteredSectionOffset(state, sec.basePlane)
+                         : 0.0f;
+      }
+    }
     ImGui::SameLine();
     ImGui::SetNextItemWidth(90.0f);
     // Step from the model's own size: 0.1 fixed units was invisible on a
@@ -220,6 +256,60 @@ void DrawSectionToolWindow(AppState& state) {
     ImGui::SameLine();
     if (ImGui::Button("x###remove"))
       removeId = sec.id;
+
+    // Second row: tilt and the face pick, indented under the cut they belong
+    // to. Angles are on their own line because a six-widget row is already
+    // the widest thing in this window.
+    ImGui::Indent(24.0f);
+    ImGui::SetNextItemWidth(80.0f);
+    ImGui::DragFloat("###tiltU", &sec.tiltU, 0.5f, -89.0f, 89.0f, "%.1f°");
+    ImGui::SetItemTooltip("Tilt about the plane's first in-plane axis");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(80.0f);
+    ImGui::DragFloat("###tiltV", &sec.tiltV, 0.5f, -89.0f, 89.0f, "%.1f°");
+    ImGui::SetItemTooltip("Tilt about the second — the cut pivots about its "
+                          "offset point, so it does not slide off the model");
+    if (sec.tiltU != 0.0f || sec.tiltV != 0.0f) {
+      ImGui::SameLine();
+      if (ImGui::SmallButton("0°###untilt")) {
+        sec.tiltU = 0.0f;
+        sec.tiltV = 0.0f;
+      }
+    }
+    if (state.document != nullptr) {
+      ImGui::SameLine();
+      const bool arming = state.slotPick.featureId == kSectionToolSlot &&
+                          state.sectionActiveId == sec.id;
+      if (arming)
+        ImGui::BeginDisabled();
+      if (ImGui::SmallButton(sec.face.IsSet() ? "Reface###pickface"
+                                              : "Face###pickface"))
+        ArmSectionFacePick(state, sec.id);
+      if (arming)
+        ImGui::EndDisabled();
+      ImGui::SetItemTooltip("Cut along a planar face of the model");
+      if (arming) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("pick a face…");
+      }
+      if (sec.face.IsSet()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", sec.face.name.c_str());
+      }
+    }
+    if (!SectionSourceResolved(state, sec)) {
+      // Loud, because the alternative — cutting along some other plane — is
+      // the failure that wastes an afternoon.
+      ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f),
+                         "source missing — this cut is off");
+      ImGui::SetItemTooltip(
+          state.document == nullptr
+              ? "A datum plane or face belongs to a part, so it has no "
+                "meaning on an assembly tab. Pick a base plane here."
+              : "The datum plane or face it cut along is gone. Pick a source "
+                "again.");
+    }
+    ImGui::Unindent(24.0f);
     ImGui::PopID();
   }
   if (removeId)
@@ -243,7 +333,7 @@ void DrawSectionToolWindow(AppState& state) {
     // cuts nothing is visibly out of range rather than a mystery.
     if (const AppState::SectionView* sec =
             FindSection(state, state.sectionActiveId)) {
-      const glm::vec3 n = glm::vec3(SectionPlaneOf(*sec));
+      const glm::vec3 n = glm::vec3(SectionPlaneOf(state, *sec));
       float lo = FLT_MAX, hi = -FLT_MAX;
       for (int c = 0; c < 8; c++) {
         const glm::vec3 corner((c & 1) ? bmax.x : bmin.x,

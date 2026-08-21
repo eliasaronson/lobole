@@ -35,12 +35,18 @@ enum class PickSlot : int {
   SplitBody,      // Body to divide in two
   SplitKnifeFace, // a planar Face of that body, used as the cutting plane
   RefineBody,     // Body whose coplanar faces/seams get merged
+  SectionFace,    // I3 P2: a planar Face a section cuts along (not a feature)
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —
 // mates live on the AssemblyDocument, not the feature list. SlotPickClicked
 // routes these to MateConnectorPicked (AssemblyActions).
 inline constexpr uint64_t kMateSessionSlot = ~0ull;
+
+// The same trick for the Section tool: sections are VIEW state, not features,
+// so its face slot needs a sentinel of its own. SlotPickClicked routes these
+// to SectionFacePicked (AppActions).
+inline constexpr uint64_t kSectionToolSlot = ~1ull;
 
 // A tool's pick slots, declaratively (U7): the ordered list drives arming
 // (kinds/prompt come from here, not the draw site), viewport routing, and —

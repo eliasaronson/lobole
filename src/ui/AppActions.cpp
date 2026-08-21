@@ -1695,7 +1695,7 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error) {
   // — flat has room for one `parameters` list).
   if (state.parts.size() == 1 && state.parts[0].kind == DocKind::Part &&
       state.document->GetParameters().empty() && state.tabFolders.empty() &&
-      state.parts[0].folder.empty()) {
+      state.sections.empty() && state.parts[0].folder.empty()) {
     // Fold the project scope into the doc for the write (they reload as project
     // scope), then restore the (empty) local table.
     std::vector<Parameter> localBackup = state.document->TakeParameters();
@@ -1711,6 +1711,10 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error) {
     const fs::path dir(path);
     nlohmann::json index;
     index["format"] = "designer-project";
+    // Still 2: "sections" is an ADDITIVE key, and this envelope's precedent
+    // (folders, project parameters — both added after v2 shipped) is that a
+    // key a reader can ignore does not move the version. A bump here would
+    // only invalidate every project file for nothing.
     index["version"] = 2;
     index["active"] = state.activePart;
     // Phase V: project-scope variables live in the project envelope, beside
@@ -1729,6 +1733,30 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error) {
     // when non-empty so pre-folder projects keep byte-identical indexes.
     if (!state.tabFolders.empty())
       index["folders"] = state.tabFolders;
+    // Section cuts (I3 P3). PROJECT scope, not per-document: a cut is a view
+    // of the whole project and applies on whichever tab you switch to, so
+    // storing it per part would give the same cut several disagreeing copies.
+    // Their presence is what forces this container form above — same rule
+    // folders and project variables already follow.
+    if (!state.sections.empty()) {
+      index["sections"] = nlohmann::json::array();
+      for (const AppState::SectionView& sec : state.sections) {
+        nlohmann::json sj = {{"base_plane", sec.basePlane},
+                             {"offset", sec.offset},
+                             {"reverse", sec.reverse},
+                             {"visible", sec.visible}};
+        if (sec.planeId != 0)
+          sj["plane_id"] = sec.planeId;
+        if (sec.face.IsSet())
+          sj["face"] = {{"feature_id", sec.face.featureId},
+                        {"element", sec.face.name}};
+        if (sec.tiltU != 0.0f)
+          sj["tilt_u"] = sec.tiltU;
+        if (sec.tiltV != 0.0f)
+          sj["tilt_v"] = sec.tiltV;
+        index["sections"].push_back(std::move(sj));
+      }
+    }
     index["documents"] = nlohmann::json::array();
     for (size_t i = 0; i < state.parts.size(); i++) {
       const PartSlot& slot = state.parts[i];
@@ -1782,6 +1810,9 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error) {
 
 bool OpenProject(AppState& state, const std::string& path, std::string* error) {
   namespace fs = std::filesystem;
+  // The previous project's cuts are not this one's. Cleared for BOTH branches
+  // here; the container branch refills them from the index below.
+  ClearSections(state);
   const fs::path projFile = fs::path(path) / "project.json";
   if (!fs::exists(projFile)) {
     // Not a multi-document project: load as a single part.
@@ -1873,6 +1904,29 @@ bool OpenProject(AppState& state, const std::string& path, std::string* error) {
           std::find(state.tabFolders.begin(), state.tabFolders.end(),
                     slot.folder) == state.tabFolders.end())
         state.tabFolders.push_back(slot.folder);
+
+    // Sections (I3 P3). Absent = none, which is every project saved before
+    // this shipped; ids are re-minted because they are only row identity.
+    for (const auto& sj : index.value("sections", nlohmann::json::array())) {
+      if (!sj.is_object())
+        continue;
+      AppState::SectionView sec;
+      sec.id = state.nextSectionId++;
+      sec.basePlane = sj.value("base_plane", 0);
+      sec.planeId = sj.value("plane_id", 0ull);
+      if (sj.contains("face") && sj["face"].is_object()) {
+        sec.face.featureId = sj["face"].value("feature_id", 0ull);
+        sec.face.name = sj["face"].value("element", std::string{});
+      }
+      sec.offset = sj.value("offset", 0.0f);
+      sec.tiltU = sj.value("tilt_u", 0.0f);
+      sec.tiltV = sj.value("tilt_v", 0.0f);
+      sec.reverse = sj.value("reverse", false);
+      sec.visible = sj.value("visible", true);
+      state.sections.push_back(sec);
+    }
+    if (!state.sections.empty())
+      state.sectionActiveId = state.sections.front().id;
 
     size_t wantActive = static_cast<size_t>(index.value("active", 0));
     if (wantActive >= state.parts.size())
@@ -2208,11 +2262,147 @@ float CenteredSectionOffset(AppState& state, int basePlane) {
   return glm::dot((min + max) * 0.5f, SectionNormal(basePlane));
 }
 
-glm::vec4 SectionPlaneOf(const AppState::SectionView& s) {
-  const glm::vec3 n = SectionNormal(s.basePlane);
+namespace {
+
+// The source plane a section cuts along, BEFORE its offset and tilt: a base
+// plane through the origin, a datum plane, or a picked planar face — the
+// latter two resolved live against the document, so moving the datum or
+// editing the face moves the cut with it (P2).
+struct SectionFrame {
+  glm::vec3 origin{0.0f};
+  glm::vec3 normal{0.0f, 0.0f, 1.0f};
+  glm::vec3 u{1.0f, 0.0f, 0.0f}; // in-plane axes, for the tilt
+  glm::vec3 v{0.0f, 1.0f, 0.0f};
+};
+
+// A right-handed in-plane basis for a normal. Any choice is arbitrary; this
+// one is stable (no flipping as the normal rotates through an axis), which
+// matters because the tilt angles are expressed in it.
+void PlaneBasis(const glm::vec3& n, glm::vec3& u, glm::vec3& v) {
+  const glm::vec3 pick =
+      std::abs(n.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+  u = glm::normalize(glm::cross(pick, n));
+  v = glm::cross(n, u);
+}
+
+SectionFrame SectionSourceFrame(const AppState& state,
+                                const AppState::SectionView& s,
+                                bool* resolved = nullptr) {
+  SectionFrame f;
+  if (resolved != nullptr)
+    *resolved = true;
+  f.normal = SectionNormal(s.basePlane);
+
+  Document* doc = state.document.get();
+  if (doc != nullptr && s.face.IsSet()) {
+    // A picked planar face. Not found (an edit removed it, or the tab is an
+    // assembly with no part document) falls back to the base plane rather
+    // than dropping the cut — a section that silently stops cutting reads as
+    // a rendering bug.
+    for (const Body& body : doc->GetBodies()) {
+      if (body.createdBy != s.face.featureId)
+        continue;
+      const std::optional<int> idx = body.elementMap.Resolve(s.face.name);
+      glm::vec3 origin(0.0f), normal(0.0f), uAxis(0.0f);
+      if (idx && body.shape.FacePlane(*idx, origin, normal, uAxis)) {
+        f.origin = origin;
+        f.normal = glm::normalize(normal);
+        f.u = glm::normalize(uAxis);
+        f.v = glm::cross(f.normal, f.u);
+        return f;
+      }
+    }
+  } else if (doc != nullptr && s.planeId != 0) {
+    for (size_t i = 0; i < doc->FeatureCount(); i++) {
+      const auto* dp = dynamic_cast<DatumPlaneFeature*>(doc->GetFeature(i));
+      if (dp == nullptr || dp->GetId() != s.planeId)
+        continue;
+      const SketchPlane& p = dp->OutputPlane();
+      f.origin = p.GetOrigin();
+      f.normal = glm::normalize(p.GetNormal());
+      f.u = glm::normalize(p.GetUAxis());
+      f.v = glm::cross(f.normal, f.u);
+      return f;
+    }
+  }
+
+  // A named source that did not resolve: the datum was deleted or replaced,
+  // the face is gone, or this is an assembly tab, where a part's datum plane
+  // has no meaning. The caller stops the cut rather than quietly cutting
+  // somewhere else — see SectionSourceResolved.
+  if (resolved != nullptr && (s.planeId != 0 || s.face.IsSet()))
+    *resolved = false;
+  PlaneBasis(f.normal, f.u, f.v);
+  return f;
+}
+
+} // namespace
+
+glm::vec4 SectionPlaneOf(const AppState& state,
+                         const AppState::SectionView& s) {
+  const SectionFrame f = SectionSourceFrame(state, s);
+
+  // Offset first, along the SOURCE normal, then tilt about that offset point
+  // — so dragging the arrow slides the cut and the angles pivot it, instead
+  // of the two interacting.
+  const glm::vec3 anchor = f.origin + f.normal * s.offset;
+  glm::vec3 n = f.normal;
+  if (s.tiltU != 0.0f)
+    n = glm::angleAxis(glm::radians(s.tiltU), f.u) * n;
+  if (s.tiltV != 0.0f)
+    n = glm::angleAxis(glm::radians(s.tiltV), f.v) * n;
+  n = glm::normalize(n);
+
+  const float d = glm::dot(anchor, n);
   // Reverse keeps the other side: the same surface, the opposite half-space,
   // which is exactly {-n, -d}.
-  return s.reverse ? glm::vec4(-n, -s.offset) : glm::vec4(n, s.offset);
+  return s.reverse ? glm::vec4(-n, -d) : glm::vec4(n, d);
+}
+
+void ArmSectionFacePick(AppState& state, uint64_t sectionId) {
+  state.sectionActiveId = sectionId;
+  state.slotPick = {kSectionToolSlot, static_cast<int>(PickSlot::SectionFace),
+                    SelectionKindBit(SelectionItem::Kind::Face),
+                    /*multi=*/false, "Pick a planar face to cut along"};
+}
+
+void SectionFacePicked(AppState& state, const SelectionItem& item) {
+  AppState::SectionView* sec = FindSection(state, state.sectionActiveId);
+  if (sec == nullptr || !item.element.IsSet()) {
+    state.slotPick.miss = "that is not a face this cut can use";
+    return;
+  }
+  // Refuse a curved face rather than cutting along some arbitrary tangent
+  // plane: FacePlane only answers for planar faces, and a section along a
+  // cylinder is not a thing the user can have meant.
+  bool planar = false;
+  if (state.document != nullptr) {
+    for (const Body& body : state.document->GetBodies()) {
+      if (body.createdBy != item.element.featureId)
+        continue;
+      const std::optional<int> idx = body.elementMap.Resolve(item.element.name);
+      glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+      planar = idx && body.shape.FacePlane(*idx, o, n, u);
+      break;
+    }
+  }
+  if (!planar) {
+    state.slotPick.miss = "that face is not planar — pick a flat one";
+    return;
+  }
+  sec->face = item.element;
+  sec->planeId = 0;
+  // The offset is measured from the new source, so an offset that meant
+  // "40 mm above the origin" must not survive as "40 mm off this face".
+  sec->offset = 0.0f;
+  state.slotPick = {};
+}
+
+bool SectionSourceResolved(const AppState& state,
+                           const AppState::SectionView& s) {
+  bool resolved = true;
+  SectionSourceFrame(state, s, &resolved);
+  return resolved;
 }
 
 ClipPlaneArray SectionPlanes(const AppState& state) {
@@ -2221,7 +2411,12 @@ ClipPlaneArray SectionPlanes(const AppState& state) {
   for (const AppState::SectionView& s : state.sections) {
     if (!s.visible || slot >= planes.size())
       continue;
-    planes[slot++] = SectionPlaneOf(s);
+    // A cut whose source vanished STOPS, and the tool row says so. Cutting
+    // along the base plane instead would move the cut without telling
+    // anyone, which is the worse of the two failures.
+    if (!SectionSourceResolved(state, s))
+      continue;
+    planes[slot++] = SectionPlaneOf(state, s);
   }
   return planes;
 }

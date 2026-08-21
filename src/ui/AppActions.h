@@ -499,7 +499,22 @@ bool VisibleSceneBounds(AppState& state, glm::vec3& min, glm::vec3& max);
 // distance along that plane's normal; `reverse` keeps the other side. ONE
 // list, shared by the tool window and the RPCs, so they cannot drift apart —
 // the menu this replaces kept its own copy in function statics.
-glm::vec4 SectionPlaneOf(const AppState::SectionView& s);
+// The cut plane {n, d} a section produces: its source plane (base, datum or
+// picked face — the latter two resolved live against the document), offset
+// along that normal, then tilted about the offset point (P2).
+glm::vec4 SectionPlaneOf(const AppState& state, const AppState::SectionView& s);
+
+// False when the cut names a datum plane or a face that does not resolve —
+// deleted, replaced, or (for either) an assembly tab, where a part's plane
+// has no meaning. Such a cut stops cutting and the tool row says why.
+bool SectionSourceResolved(const AppState& state,
+                           const AppState::SectionView& s);
+
+// Arms the Section tool's face slot for `sectionId` — the next planar face
+// picked in the viewport becomes that cut's source plane (P2).
+void ArmSectionFacePick(AppState& state, uint64_t sectionId);
+// Routed here by SlotPickClicked when that slot is armed.
+void SectionFacePicked(AppState& state, const SelectionItem& item);
 ClipPlaneArray SectionPlanes(const AppState& state); // enabled ones, padded
 bool SectionActive(const AppState& state);
 AppState::SectionView* FindSection(AppState& state, uint64_t id);

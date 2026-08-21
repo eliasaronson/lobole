@@ -696,7 +696,8 @@ static const std::set<std::string> kNoPartDoc = {
     // set_section writes the global viewport clip plane (per-frame UBO,
     // world space); `section` sums the cut area over a part's bodies or,
     // on an assembly tab, over every visible occurrence in place.
-    "set_section", "section",
+    "set_section", "section", "add_section", "list_sections", "update_section",
+    "remove_section",
     // undo/redo route to the assembly's snapshot history on an assembly tab.
     "undo", "redo",
     // Project-level reads (git vault / checkpoint list act on projectPath,

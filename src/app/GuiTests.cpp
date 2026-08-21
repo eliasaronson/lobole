@@ -2289,7 +2289,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Derived, not zero: the plane sits inside the model's own span.
     glm::vec3 bmin, bmax;
     IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
-    const glm::vec4 p0 = ui::SectionPlaneOf(s_App->sections[0]);
+    const glm::vec4 p0 = ui::SectionPlaneOf(*s_App, s_App->sections[0]);
     const glm::vec3 n = glm::vec3(p0);
     IM_CHECK(p0.w > glm::dot(bmin, n) && p0.w < glm::dot(bmax, n));
 
@@ -2302,7 +2302,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->ItemClick("**/###reverse");
     ctx->Yield(3);
     IM_CHECK(s_App->sections[0].reverse);
-    const glm::vec4 p1 = ui::SectionPlaneOf(s_App->sections[0]);
+    const glm::vec4 p1 = ui::SectionPlaneOf(*s_App, s_App->sections[0]);
     IM_CHECK(glm::dot(glm::vec3(p1), n) < 0.0f);            // flipped normal
     IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)2); // still capped
 
@@ -2329,6 +2329,62 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   // FEATURE existed, so a section drag fell through to the picker and
   // selected whatever part sat behind the arrow. Testing the handler is not
   // testing the path.
+  // P2: a cut can follow a datum plane and be tilted off it, and a source
+  // that stops resolving stops the CUT rather than moving it somewhere else.
+  t = IM_REGISTER_TEST(engine, "section", "datum_source_and_tilt");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+    auto datum = std::make_unique<DatumPlaneFeature>("D");
+    datum->basePlane = PlaneType::XY;
+    datum->offset = 6.0;
+    Doc()->AddFeature(std::move(datum));
+    ctx->Yield(2);
+    // AFTER insertion: the document owns id assignment, so an id read from
+    // the feature before AddFeature is not the one it ends up with.
+    const uint64_t datumId = Doc()->GetFeature(1)->GetId();
+    IM_CHECK(datumId != 0);
+
+    ToolbarClick(ctx, "###tb_section");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->sections.size(), (size_t)1);
+    ui::AppState::SectionView& sec = s_App->sections[0];
+
+    // Point it at the datum: the cut plane lands ON the datum, not on the
+    // world origin.
+    sec.planeId = datumId;
+    sec.offset = 0.0f;
+    ctx->Yield();
+    glm::vec4 p = ui::SectionPlaneOf(*s_App, sec);
+    IM_CHECK(std::abs(p.w - 6.0f) < 1e-3f);
+    IM_CHECK(std::abs(p.z - 1.0f) < 1e-3f);
+    IM_CHECK(ui::SectionSourceResolved(*s_App, sec));
+
+    // Tilt 30 degrees: the normal turns, and the plane still passes through
+    // the point it was pivoted about (dot(anchor, n) == d). A tilt that also
+    // slid the cut would break the second check.
+    sec.tiltU = 30.0f;
+    ctx->Yield();
+    p = ui::SectionPlaneOf(*s_App, sec);
+    IM_CHECK(std::abs(p.z - 1.0f) > 1e-3f); // no longer straight up
+    const glm::vec3 anchor(0.0f, 0.0f, 6.0f);
+    IM_CHECK(std::abs(glm::dot(anchor, glm::vec3(p)) - p.w) < 1e-3f);
+
+    // Delete the datum: the reference dangles, so the cut stops and says so
+    // rather than quietly cutting along Z=0.
+    Doc()->RemoveFeature(1);
+    ctx->Yield(2);
+    IM_CHECK(!ui::SectionSourceResolved(*s_App, s_App->sections[0]));
+    const ClipPlaneArray planes = ui::SectionPlanes(*s_App);
+    IM_CHECK(planes[0].w == 0.0f && planes[0].x == 0.0f &&
+             planes[0].y == 0.0f && planes[0].z == 0.0f);
+    ui::ClearSections(*s_App);
+    s_App->sectionToolOpen = false;
+  };
+
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_the_cut");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -2345,7 +2401,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Where the arrow is on screen: anchor + half its length along the normal.
     glm::vec3 bmin, bmax;
     IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
-    const glm::vec4 plane = ui::SectionPlaneOf(s_App->sections[0]);
+    const glm::vec4 plane = ui::SectionPlaneOf(*s_App, s_App->sections[0]);
     const glm::vec3 n = glm::normalize(glm::vec3(plane));
     const glm::vec3 c = (bmin + bmax) * 0.5f;
     const glm::vec3 anchor = c - n * (glm::dot(c, n) - plane.w);
@@ -2399,7 +2455,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     glm::vec3 bmin, bmax;
     IM_CHECK(ui::VisibleSceneBounds(*s_App, bmin, bmax));
-    const glm::vec4 plane = ui::SectionPlaneOf(s_App->sections[0]);
+    const glm::vec4 plane = ui::SectionPlaneOf(*s_App, s_App->sections[0]);
     const glm::vec3 n = glm::normalize(glm::vec3(plane));
     const glm::vec3 c = (bmin + bmax) * 0.5f;
     const glm::vec3 anchor = c - n * (glm::dot(c, n) - plane.w);

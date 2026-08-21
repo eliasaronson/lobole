@@ -181,7 +181,21 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"set_section",
      "Enable/disable the live section clip {base_plane|origin+normal, "
      "offset}. Works on part AND assembly tabs, with filled cut caps on "
-     "both; omit `offset` to cut through the middle of what is shown."},
+     "both; omit `offset` to cut through the middle of what is shown. "
+     "Shorthand for one cut — add_section/update_section address several."},
+    {"add_section",
+     "Add a section cut and return its id {base_plane: xy|xz|yz, plane_id? "
+     "(a datum plane), offset?, tilt_u?, tilt_v? (degrees), reverse?}. Up to "
+     "four; they persist with the project."},
+    {"list_sections",
+     "Every section cut: id, source (base plane / datum / face, with "
+     "resolved:false when a named datum/face is gone — such a cut stops "
+     "cutting), offset, tilt, reverse, visible, and the cut plane "
+     "{normal, d}."},
+    {"update_section",
+     "Change one cut {id, base_plane?, plane_id?, offset?, tilt_u?, tilt_v?, "
+     "reverse?, visible?}. Only the fields present are touched."},
+    {"remove_section", "Remove one cut {id}, or all of them with {all: true}."},
 };
 std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
 
@@ -224,6 +238,106 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     throw std::runtime_error(
         "set_section wants base_plane (\"xy\"|\"xz\"|\"yz\") with an "
         "optional offset/reverse, or enabled=false to clear");
+  }
+  if (m == "add_section" || m == "update_section") {
+    const bool adding = m == "add_section";
+    ui::AppState::SectionView* sec = nullptr;
+    if (adding) {
+      const std::string bp = p.value("base_plane", std::string("xy"));
+      const int basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
+      const uint64_t id = ui::AddSection(state, basePlane);
+      if (id == 0)
+        throw std::runtime_error("at most " + std::to_string(kMaxClipPlanes) +
+                                 " sections at once; remove one first");
+      sec = ui::FindSection(state, id);
+    } else {
+      sec = ui::FindSection(state, p.at("id").get<uint64_t>());
+      if (sec == nullptr)
+        throw std::runtime_error("no section with that id; list_sections "
+                                 "shows the ones that exist");
+      if (p.contains("base_plane")) {
+        const std::string bp = p.at("base_plane").get<std::string>();
+        sec->basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
+        sec->planeId = 0; // a base plane and a datum are alternatives
+        sec->face = ElementRef{};
+      }
+    }
+    if (p.contains("plane_id")) {
+      // A datum plane in the ACTIVE PART; the cut then follows it when the
+      // datum moves, which is the only reason to name one.
+      sec->planeId = p.at("plane_id").get<uint64_t>();
+      sec->face = ElementRef{};
+      if (sec->planeId != 0 && doc != nullptr &&
+          doc->FindFeatureById(sec->planeId) == nullptr)
+        throw std::runtime_error("no feature with that id in this part");
+    }
+    if (p.contains("offset"))
+      sec->offset = p.at("offset").get<float>();
+    if (p.contains("tilt_u"))
+      sec->tiltU = p.at("tilt_u").get<float>();
+    if (p.contains("tilt_v"))
+      sec->tiltV = p.at("tilt_v").get<float>();
+    if (p.contains("reverse"))
+      sec->reverse = p.at("reverse").get<bool>();
+    if (p.contains("visible"))
+      sec->visible = p.at("visible").get<bool>();
+    const glm::vec4 plane = ui::SectionPlaneOf(state, *sec);
+    return json{{"id", sec->id},
+                {"offset", sec->offset},
+                {"tilt_u", sec->tiltU},
+                {"tilt_v", sec->tiltV},
+                {"reverse", sec->reverse},
+                {"visible", sec->visible},
+                {"normal", {plane.x, plane.y, plane.z}},
+                {"d", plane.w}};
+  }
+  if (m == "list_sections") {
+    json out = json::array();
+    for (const ui::AppState::SectionView& sec : state.sections) {
+      const glm::vec4 plane = ui::SectionPlaneOf(state, sec);
+      json sj = {{"id", sec.id},
+                 {"offset", sec.offset},
+                 {"tilt_u", sec.tiltU},
+                 {"tilt_v", sec.tiltV},
+                 {"reverse", sec.reverse},
+                 {"visible", sec.visible},
+                 {"normal", {plane.x, plane.y, plane.z}},
+                 {"d", plane.w}};
+      // The source, named the way the tool window names it, so a script and
+      // the window describe the same cut in the same words.
+      if (sec.face.IsSet())
+        sj["source"] =
+            json{{"kind", "face"},
+                 {"feature_id", sec.face.featureId},
+                 {"element", sec.face.name},
+                 // False = the face is gone, or this is an
+                 // assembly tab; the cut is off until it resolves.
+                 {"resolved", ui::SectionSourceResolved(state, sec)}};
+      else if (sec.planeId != 0)
+        sj["source"] =
+            json{{"kind", "datum"},
+                 {"plane_id", sec.planeId},
+                 {"resolved", ui::SectionSourceResolved(state, sec)}};
+      else
+        sj["source"] = json{{"kind", "base_plane"},
+                            {"base_plane", sec.basePlane == 1   ? "xz"
+                                           : sec.basePlane == 2 ? "yz"
+                                                                : "xy"}};
+      out.push_back(std::move(sj));
+    }
+    return json{{"sections", out}};
+  }
+  if (m == "remove_section") {
+    if (p.value("all", false)) {
+      ui::ClearSections(state);
+      return json::object();
+    }
+    const uint64_t id = p.at("id").get<uint64_t>();
+    if (ui::FindSection(state, id) == nullptr)
+      throw std::runtime_error("no section with that id; list_sections shows "
+                               "the ones that exist");
+    ui::RemoveSection(state, id);
+    return json::object();
   }
   if (m == "section") {
     // Cross-section area where a plane cuts through all bodies (I3). Plane:

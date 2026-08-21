@@ -562,6 +562,79 @@ def main():
         miss = d.call("section", base_plane="xy", offset=99.0)
         expect(abs(miss["area"]) < 1e-6, "section miss = 0 area")
 
+        # P2/P3: several cuts, a tilt, a datum source, and persistence.
+        d.call("remove_section", all=True)
+        a = d.call("add_section", base_plane="xy", offset=2.0)
+        b = d.call("add_section", base_plane="yz", offset=1.0, tilt_u=30.0)
+        expect(a["id"] != b["id"], "each cut gets its own id")
+        lst = d.call("list_sections")["sections"]
+        expect(len(lst) == 2, f"two cuts: {lst}")
+        expect(lst[0]["source"]["kind"] == "base_plane", "source named")
+        # A tilt turns the plane: the cut normal is no longer the base axis.
+        tilted = [s for s in lst if s["id"] == b["id"]][0]
+        expect(abs(tilted["normal"][0] - 1.0) > 1e-3,
+               f"30 deg tilt moved the normal off X: {tilted['normal']}")
+        # ...and pivots ABOUT the offset point rather than sliding the cut
+        # away. The test is that the tilted plane still passes through the
+        # anchor (1,0,0) — dot(anchor, n) == d — NOT that d is unchanged: d
+        # is measured along the new normal, so it is cos(30) here. A naive
+        # implementation that kept d = offset would slide the cut off the
+        # pivot and fail this.
+        anchor = [1.0, 0.0, 0.0]
+        through = sum(a * n for a, n in zip(anchor, tilted["normal"]))
+        expect(abs(through - tilted["d"]) < 1e-3,
+               f"tilt pivots about the offset point: {through} vs {tilted['d']}")
+        expect(abs(tilted["d"] - 1.0) > 1e-3,
+               "d is along the tilted normal, so it moved")
+
+        # A datum plane as the source, resolved live.
+        dat = d.call("add_feature", feature={
+            "type": "DatumPlane", "name": "D", "kind": "offset",
+            "base_plane": "xy", "offset": 1.5})
+        upd = d.call("update_section", id=a["id"], plane_id=dat["id"],
+                     offset=0.0)
+        expect(abs(upd["d"] - 1.5) < 1e-3,
+               f"cut sits on the datum: d={upd['d']}")
+        # Move the datum (keeping its id) — the cut follows it, which is the
+        # whole reason to reference one.
+        d.call("modify_feature", index=1, feature={
+            "type": "DatumPlane", "id": dat["id"], "name": "D",
+            "kind": "offset", "base_plane": "xy", "offset": 4.0})
+        after = [s for s in d.call("list_sections")["sections"]
+                 if s["id"] == a["id"]][0]
+        expect(abs(after["d"] - 4.0) < 1e-3,
+               f"the cut followed the datum: d={after['d']}")
+        expect(after["source"]["resolved"], "source still resolves")
+
+        # And a source that VANISHES stops the cut rather than silently
+        # cutting along some other plane: replacing the datum with a fresh
+        # feature (new id) leaves the reference dangling.
+        d.call("modify_feature", index=1, feature={
+            "type": "DatumPlane", "name": "D2", "kind": "offset",
+            "base_plane": "xy", "offset": 4.0})
+        dangling = [s for s in d.call("list_sections")["sections"]
+                    if s["id"] == a["id"]][0]
+        expect(not dangling["source"]["resolved"],
+               "a dangling datum reference is reported, not guessed")
+        d.call("update_section", id=a["id"], base_plane="xy", offset=2.0)
+
+        # Persistence: sections survive save + reopen (they were session
+        # state until P3, so a set-up cut vanished on every save).
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "sections.dsgn")
+            d.call("save_project", path=path)
+            d.call("new_project")
+            expect(not d.call("list_sections")["sections"], "new = no cuts")
+            d.call("open_project", path=path)
+            back = d.call("list_sections")["sections"]
+            expect(len(back) == 2, f"both cuts came back: {back}")
+            kinds = sorted(s["source"]["kind"] for s in back)
+            expect(kinds == ["base_plane", "base_plane"],
+                   f"sources kept: {kinds}")
+            tilt = [s for s in back if s["tilt_u"]][0]
+            expect(abs(tilt["tilt_u"] - 30.0) < 1e-3, "tilt kept")
+        d.call("remove_section", all=True)
+
         phase("Interference")
         # Interference: two overlapping boxes clash; disjoint ones don't.
         d.call("new_project")

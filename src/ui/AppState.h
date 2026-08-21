@@ -831,9 +831,22 @@ struct AppState {
   // thing — the menu this replaces kept its plane and offset in function
   // statics, and the two silently disagreed.
   struct SectionView {
-    uint64_t id = 0;      // stable while the app runs; row identity for tests
-    int basePlane = 0;    // 0 = XY (cut along Z), 1 = XZ, 2 = YZ
-    float offset = 0.0f;  // signed distance along that normal
+    uint64_t id = 0;   // stable while the app runs; row identity for tests
+    int basePlane = 0; // 0 = XY (cut along Z), 1 = XZ, 2 = YZ
+    // The cut's SOURCE plane (P2). 0 = the base plane above; otherwise a
+    // datum plane feature in the active part, resolved live — move the datum
+    // and the cut follows it, which is the reason to reference one at all.
+    uint64_t planeId = 0;
+    // A planar face of a body, as a stable element reference (P2). Wins over
+    // planeId when set. Also resolved live, so an edit that moves the face
+    // moves the cut.
+    ElementRef face;
+    float offset = 0.0f; // signed distance along the source normal
+    // Tilt, in degrees, about the source plane's own u and v axes. The plane
+    // pivots about its offset point, so tilting does not also translate the
+    // cut off the model.
+    float tiltU = 0.0f;
+    float tiltV = 0.0f;
     bool reverse = false; // keep the other side of the cut
     bool visible = true;  // unchecked = the row stays, the cut stops
   };

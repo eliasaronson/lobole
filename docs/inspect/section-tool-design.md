@@ -1,6 +1,10 @@
 # Section views — from a menu toggle to a tool — design
 
-> Status: **P1 shipped 2026-08-19**; P2/P3 below still open. The decisions
+> Status: **P1 shipped 2026-08-19; P2 + P3 shipped 2026-08-21** — plane
+> sources (datum plane / picked planar face), tilt angles, and persistence
+> with the project plus the four RPCs. One deliberate change from the plan
+> below: an unresolvable source stops its cut instead of falling back (see
+> "What P2/P3 shipped"). The decisions
 > carry their outcomes. Supersedes the I3 raster section UI in
 > [plan.md](plan.md): `View > Section View` is **deleted**, not kept
 > alongside. Two competing UIs for one feature is how the offset in the menu
@@ -162,6 +166,56 @@ project (`kVersion` bump + golden pair); `add_section` / `list_sections` /
 `update_section` / `remove_section` RPCs with MCP coverage, replacing
 single-plane `set_section` (kept as an alias that edits section 1, since
 scripts and `docs/` reference it).
+
+## What P2/P3 shipped (2026-08-21)
+
+**Sources.** A cut is a base plane (as before), a **datum plane** of the
+active part, or a **picked planar face**. The latter two resolve *live* every
+frame against the document — move the datum or edit the face and the cut
+follows, which is the only reason to reference one instead of typing an
+offset. The face slot reuses the mate tool's non-feature pick-slot trick
+(`kSectionToolSlot`, beside `kMateSessionSlot`), because sections are view
+state and have no feature to hang a slot on. A curved face is refused at pick
+time with a reason rather than cut along some arbitrary tangent plane.
+
+**Angles.** Two tilt fields, in degrees, about the source plane's own in-plane
+axes. The plane pivots **about its offset point**, so tilting does not also
+slide the cut off the model — asserted directly (`dot(anchor, n) == d`) in
+both the GUI and headless tests, since the naive implementation that keeps
+`d = offset` looks right until the cut wanders.
+
+**A source that stops resolving stops the CUT.** The plan implied a fallback;
+the tests argued otherwise. A deleted datum or a face that no longer exists
+would otherwise leave the cut silently cutting along the base plane —
+*somewhere else*, with no indication — and on an assembly tab (no part
+document) every datum-sourced cut would move at once. So `SectionPlanes`
+skips an unresolved cut, the tool row says "source missing — this cut is off"
+in red, and `list_sections` reports `source.resolved: false`. Same instinct as
+the regen-failure UX: refuse visibly rather than guess.
+
+**Persistence.** Sections live in the project envelope (`project.json`,
+`"sections"`), not per document: a cut is a view of the whole project and
+applies on whichever tab you switch to, so a per-part copy would be several
+disagreeing copies of one thing. Their presence forces the container form of
+a `.dsgn`, exactly as folders and project variables already do — and the
+envelope version stays **2**, because the key is additive and this envelope's
+own precedent (folders, project parameters, both added after v2) is that a
+key a reader can ignore does not move the version. No `kVersion` bump and no
+golden pair: the *document* format is untouched.
+
+Two leaks the persistence test caught, both now fixed: `new_project` and
+`open_project` left the previous project's cuts in place.
+
+**RPCs.** `add_section` / `list_sections` / `update_section` /
+`remove_section`, allowed on part and assembly tabs alike; `set_section`
+stays as the one-cut shorthand every script and doc already uses. MCP reaches
+them through the generic `rpc` tool, which is the current MCP philosophy (25
+named tools + `rpc`/`help`) rather than four more wrappers.
+
+**Still open:** a face-sourced cut on an *assembly* tab, which needs
+occurrence-aware resolution (the face's plane is part-local; the assembly
+places it by a transform). Today such a cut reports `resolved: false` there
+rather than cutting in the wrong place.
 
 Angles are in P2 only because P1 is already a day's work; they are ~2 hours
 and can move forward if the tilt is wanted first.

@@ -96,6 +96,7 @@ void DrawFileMenu(AppState& state) {
     ReplaceDocument(state, std::make_unique<Document>());
     state.parts.clear();
     state.tabFolders.clear();
+    ClearSections(state); // a new project starts uncut
     EnsureParts(state, "Part 1");
     MarkProjectOpened(state, ""); // a fresh document has no home yet
   }

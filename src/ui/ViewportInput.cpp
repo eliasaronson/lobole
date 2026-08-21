@@ -287,11 +287,14 @@ void HandleViewportInput(AppState& state) {
     escUsed = true;
   } else if (state.slotPick.Active()) {
     const bool mateSlot = state.slotPick.featureId == kMateSessionSlot;
+    const bool sectionSlot = state.slotPick.featureId == kSectionToolSlot;
     const bool valid =
         mateSlot ? (state.assembly != nullptr && state.mateTool.active)
-                 : (state.document != nullptr &&
-                    state.document->FindFeatureById(state.slotPick.featureId) !=
-                        nullptr);
+        : sectionSlot
+            ? (state.document != nullptr && state.sectionToolOpen)
+            : (state.document != nullptr &&
+               state.document->FindFeatureById(state.slotPick.featureId) !=
+                   nullptr);
     if (!valid) {
       state.slotPick = {}; // the slot ends with its feature/session
     } else if (esc) {

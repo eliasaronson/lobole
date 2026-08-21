@@ -226,7 +226,7 @@ bool ComputeSectionHandleSpec(AppState& state, HandleSpec& spec,
   glm::vec3 bmin, bmax;
   if (!VisibleSceneBounds(state, bmin, bmax))
     return false;
-  const glm::vec4 plane = SectionPlaneOf(*sec);
+  const glm::vec4 plane = SectionPlaneOf(state, *sec);
   const glm::vec3 n = glm::normalize(glm::vec3(plane));
   // Anchor where the cut actually is: the scene centre projected onto the
   // plane, so the arrow sits on the cut face rather than out at the origin.
