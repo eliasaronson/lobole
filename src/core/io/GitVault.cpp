@@ -468,6 +468,34 @@ std::vector<std::string> ListTree(const std::string& dir,
   return Lines(text);
 }
 
+std::vector<std::string> Parents(const std::string& dir,
+                                 const std::string& rev) {
+  std::vector<std::string> out;
+  if (!Available() || !IsRepo(dir))
+    return out;
+  std::string text;
+  if (RunGit(dir, "rev-list --parents -n 1 " + Quote(rev), &text) != 0)
+    return out;
+  // "<commit> <parent>..." on one line — the first token is the commit.
+  const std::string line = FirstLine(text);
+  size_t pos = 0;
+  bool first = true;
+  while (pos < line.size()) {
+    while (pos < line.size() && line[pos] == ' ')
+      ++pos;
+    const size_t start = pos;
+    while (pos < line.size() && line[pos] != ' ')
+      ++pos;
+    if (pos > start) {
+      if (first)
+        first = false;
+      else
+        out.push_back(line.substr(start, pos - start));
+    }
+  }
+  return out;
+}
+
 std::string MergeBase(const std::string& dir, const std::string& a,
                       const std::string& b) {
   if (!Available() || !IsRepo(dir))

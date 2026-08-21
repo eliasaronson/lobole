@@ -138,6 +138,12 @@ bool ShowFile(const std::string& dir, const std::string& rev,
 std::vector<std::string> ListTree(const std::string& dir,
                                   const std::string& rev);
 
+// A revision's parent hashes. Two of them means a merge commit — which is
+// how ProjectMerge learns, AFTER a clean merge, which side contributed which
+// file (F9 C3). Empty for an unknown rev or a repo with no commits.
+std::vector<std::string> Parents(const std::string& dir,
+                                 const std::string& rev);
+
 // The merge base of two revisions, or "" when they share no history.
 std::string MergeBase(const std::string& dir, const std::string& a,
                       const std::string& b);

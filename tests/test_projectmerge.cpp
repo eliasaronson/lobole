@@ -573,3 +573,139 @@ TEST_CASE("Verify names the document that will not load", "[merge]") {
   CHECK(broken[0].document == "Stand");
   CHECK(broken[0].reason.find("conflict markers") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Duplicate ids, attributed by merge side (F9 C3)
+//
+// The refusal is safe but, for a team, would become routine manual work: two
+// people adding features offline both get the next id, and each one's new
+// feature usually references their OTHER new feature. After a merge we know
+// which side contributed which file, so those references are not ambiguous
+// at all — their extrude meant their sketch.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Two people, offline, both adding a sketch + something built on it. The id
+// counter hands them both the same pair of numbers.
+void DivergeWithSameIds(ScratchProject& p, const std::string& main) {
+  REQUIRE(GitVault::CreateBranch(p.path(), "alice", true));
+  p.WriteJson("parts/Stand/features/15-sketch.json",
+              json{{"id", 15}, {"type", "Sketch"}, {"name", "Alice profile"}});
+  p.WriteJson("parts/Stand/features/16-extrude.json",
+              json{{"id", 16},
+                   {"type", "Extrude"},
+                   {"name", "Alice boss"},
+                   {"sketch_id", 15},
+                   {"distance", 4.0}});
+  json index = json::parse(p.Read("parts/Stand/index.json"));
+  index["features"].push_back(15);
+  index["features"].push_back(16);
+  p.WriteJson("parts/Stand/index.json", index);
+  REQUIRE(GitVault::CommitAll(p.path(), "alice adds a boss"));
+
+  REQUIRE(GitVault::SwitchBranch(p.path(), main));
+  REQUIRE(GitVault::CreateBranch(p.path(), "bob", true));
+  p.WriteJson("parts/Stand/features/15-circle.json",
+              json{{"id", 15}, {"type", "Sketch"}, {"name", "Bob profile"}});
+  p.WriteJson("parts/Stand/features/16-hole.json", json{{"id", 16},
+                                                        {"type", "Hole"},
+                                                        {"name", "Bob hole"},
+                                                        {"sketch_id", 15},
+                                                        {"diameter", 3.0}});
+  json bobIndex = json::parse(p.Read("parts/Stand/index.json"));
+  bobIndex["features"].push_back(15);
+  bobIndex["features"].push_back(16);
+  p.WriteJson("parts/Stand/index.json", bobIndex);
+  REQUIRE(GitVault::CommitAll(p.path(), "bob adds a hole"));
+
+  REQUIRE(GitVault::SwitchBranch(p.path(), "alice"));
+}
+
+} // namespace
+
+TEST_CASE("A duplicate id renumbers, and its own side's references follow",
+          "[merge]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchProject p("attributed");
+  SeedProject(p);
+  REQUIRE(GitVault::Init(p.path()));
+  REQUIRE(GitVault::CommitAll(p.path(), "save"));
+  const std::string main = GitVault::CurrentBranch(p.path());
+  DivergeWithSameIds(p, main);
+
+  std::string error;
+  // The index conflicts (both appended); the FEATURE files do not — different
+  // type suffixes, so git takes all four without a word.
+  const GitVault::MergeStatus status = GitVault::Merge(p.path(), "bob", &error);
+  if (status == GitVault::MergeStatus::Conflicted) {
+    for (const auto& c : ProjectMerge::Scan(p.path()).conflicts)
+      if (c.autoResolvable)
+        REQUIRE(ProjectMerge::AutoResolve(p.path(), c, &error));
+    REQUIRE(GitVault::CommitMerge(p.path(), "merge bob", &error));
+  }
+
+  ProjectMerge::Report report = ProjectMerge::Scan(p.path());
+  // Two duplicate ids: 15 and 16.
+  REQUIRE(report.conflicts.size() == 2);
+  for (const auto& c : report.conflicts)
+    CHECK(c.kind == ProjectMerge::ConflictKind::DuplicateId);
+
+  // This is the case that used to refuse: 16-hole references 15, and there
+  // are two 15s.
+  for (const auto& c : ProjectMerge::Scan(p.path()).conflicts)
+    REQUIRE(ProjectMerge::RenumberDuplicate(p.path(), c, &error));
+
+  CHECK(ProjectMerge::Scan(p.path()).Empty());
+
+  // Nobody's work was lost, and — the whole point — nobody's reference was
+  // re-parented onto the other person's sketch.
+  const auto readByName = [&](const std::string& name) {
+    for (const auto& entry :
+         fs::directory_iterator(p.dir / "parts/Stand/features")) {
+      const json item = json::parse(
+          p.Read("parts/Stand/features/" + entry.path().filename().string()));
+      if (item.value("name", "") == name)
+        return item;
+    }
+    return json();
+  };
+  const json aliceSketch = readByName("Alice profile");
+  const json aliceBoss = readByName("Alice boss");
+  const json bobSketch = readByName("Bob profile");
+  const json bobHole = readByName("Bob hole");
+  REQUIRE(aliceSketch.is_object());
+  REQUIRE(bobSketch.is_object());
+  CHECK(aliceSketch["id"] != bobSketch["id"]);
+  CHECK(aliceBoss["sketch_id"] == aliceSketch["id"]);
+  CHECK(bobHole["sketch_id"] == bobSketch["id"]);
+}
+
+// The honest half survives: with no merge to attribute against — a project
+// that arrived by rsync, a zip, or a hand-edit — a reference still cannot say
+// which of the two it meant.
+TEST_CASE("Without a merge to attribute against, it still refuses", "[merge]") {
+  ScratchProject p("unattributed");
+  SeedProject(p);
+  p.WriteJson("parts/Stand/index.json",
+              json{{"format", "designer-document"},
+                   {"version", 53},
+                   {"features", json::array({1, 2, 15, 15, 16})}});
+  p.WriteJson("parts/Stand/features/15-sketch.json",
+              json{{"id", 15}, {"type", "Sketch"}, {"name", "One"}});
+  p.WriteJson("parts/Stand/features/15-circle.json",
+              json{{"id", 15}, {"type", "Sketch"}, {"name", "Two"}});
+  p.WriteJson("parts/Stand/features/16-extrude.json", json{{"id", 16},
+                                                           {"type", "Extrude"},
+                                                           {"name", "Boss"},
+                                                           {"sketch_id", 15},
+                                                           {"distance", 4.0}});
+
+  ProjectMerge::Report report = ProjectMerge::Scan(p.path());
+  REQUIRE(report.conflicts.size() == 1);
+  std::string error;
+  CHECK_FALSE(
+      ProjectMerge::RenumberDuplicate(p.path(), report.conflicts[0], &error));
+  CHECK(error.find("which of the two") != std::string::npos);
+}

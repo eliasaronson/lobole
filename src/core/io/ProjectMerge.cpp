@@ -626,6 +626,81 @@ bool ReferencesId(const json& node, uint64_t id) {
   return false;
 }
 
+// Which side of the last merge contributed which file (F9 C3).
+//
+// The duplicate-id case is a merge git was HAPPY with — two adds, no overlap
+// — so it is already committed and MERGE_HEAD is gone. The attribution lives
+// in the merge commit's two parents instead: everything in parent 1's tree
+// and not in the base was added by us, everything in parent 2's likewise by
+// them.
+//
+// `valid` is false for a project that did not arrive by merge at all (rsync,
+// a zip, a hand-edit), where nothing can be attributed and the honest answer
+// is the refusal that was there before.
+struct SideAttribution {
+  bool valid = false;
+  std::set<std::string> addedByOurs;
+  std::set<std::string> addedByTheirs;
+  std::set<std::string> inBase;
+};
+
+SideAttribution AttributeSides(const std::string& projectDir) {
+  SideAttribution out;
+  const auto parents = GitVault::Parents(projectDir, "HEAD");
+  if (parents.size() < 2)
+    return out; // not a merge commit: nothing to attribute against
+  const std::string base =
+      GitVault::MergeBase(projectDir, parents[0], parents[1]);
+  if (base.empty())
+    return out;
+
+  const auto baseFiles = GitVault::ListTree(projectDir, base);
+  out.inBase.insert(baseFiles.begin(), baseFiles.end());
+  for (const std::string& path : GitVault::ListTree(projectDir, parents[0]))
+    if (!out.inBase.count(path))
+      out.addedByOurs.insert(path);
+  for (const std::string& path : GitVault::ListTree(projectDir, parents[1]))
+    if (!out.inBase.count(path))
+      out.addedByTheirs.insert(path);
+  out.valid = true;
+  return out;
+}
+
+// Point every reference to `oldId` at `newId`, under the same key rules
+// ReferencesId reads. Returns true when anything changed.
+bool RewriteId(json& node, uint64_t oldId, uint64_t newId) {
+  bool changed = false;
+  if (node.is_object()) {
+    for (auto it = node.begin(); it != node.end(); ++it) {
+      if (IsReferenceKey(it.key())) {
+        if (it->is_number_unsigned() && it->get<uint64_t>() == oldId) {
+          *it = newId;
+          changed = true;
+          continue;
+        }
+        if (it->is_array()) {
+          for (auto& element : *it) {
+            if (element.is_number_unsigned() &&
+                element.get<uint64_t>() == oldId) {
+              element = newId;
+              changed = true;
+            }
+          }
+        }
+      }
+      if (RewriteId(*it, oldId, newId))
+        changed = true;
+    }
+    return changed;
+  }
+  if (node.is_array()) {
+    for (auto& element : node)
+      if (RewriteId(element, oldId, newId))
+        changed = true;
+  }
+  return changed;
+}
+
 // The document directory a collection file sits in: the parent of its
 // collection folder ("parts/Stand" for "parts/Stand/features/15-box.json").
 fs::path DocumentDirOf(const std::string& projectDir, const std::string& path) {
@@ -673,19 +748,49 @@ bool RenumberDuplicate(const std::string& projectDir, const Conflict& conflict,
       *error = "that conflict is not a duplicate id";
     return false;
   }
-  const fs::path full = fs::path(projectDir) / conflict.path;
-  const fs::path other = fs::path(projectDir) / conflict.otherPath;
   std::error_code ec;
+  const fs::path documentDir = DocumentDirOf(projectDir, conflict.path);
+  const uint64_t oldId = conflict.id;
+
+  // Which side added which file. When we know, a reference is not ambiguous
+  // at all: their extrude meant their sketch, ours meant ours. When we do
+  // not, the refusal below is still the only safe answer.
+  const SideAttribution sides = AttributeSides(projectDir);
+  // Renumber THEIRS and keep ours stable — least surprising for the person
+  // who ran the merge. `path` is the second file the scan found, so which of
+  // the two is theirs has to be asked, not assumed.
+  std::string renumberPath = conflict.path;
+  std::string keepPath = conflict.otherPath;
+  bool attributed = false;
+  if (sides.valid) {
+    const bool pathIsTheirs = sides.addedByTheirs.count(conflict.path) > 0;
+    const bool otherIsTheirs =
+        sides.addedByTheirs.count(conflict.otherPath) > 0;
+    // Exactly one side each, and the id must be genuinely NEW — an id that
+    // already existed in the base is a different problem wearing the same
+    // clothes.
+    const bool idIsNew = !std::any_of(
+        sides.inBase.begin(), sides.inBase.end(), [&](const std::string& p) {
+          return IdFromFilename(fs::path(p).filename().string()) == oldId;
+        });
+    if (idIsNew && pathIsTheirs != otherIsTheirs) {
+      attributed = true;
+      if (otherIsTheirs)
+        std::swap(renumberPath, keepPath);
+    }
+  }
+
+  const fs::path full = fs::path(projectDir) / renumberPath;
+  const fs::path other = fs::path(projectDir) / keepPath;
   if (!fs::exists(full, ec) || !fs::exists(other, ec)) {
     if (error)
       *error = "both files must still exist to renumber one of them";
     return false;
   }
-  const fs::path documentDir = DocumentDirOf(projectDir, conflict.path);
-  const uint64_t oldId = conflict.id;
 
-  // Anything that still points at the contested id makes this unresolvable
-  // automatically: the reference cannot say which of the two it meant.
+  // Anything that still points at the contested id and CANNOT be attributed
+  // to the side being renumbered makes this unresolvable automatically.
+  std::vector<fs::path> rewrite;
   for (const Collection& collection : kCollections) {
     const fs::path dir = documentDir / collection.dir;
     if (!fs::is_directory(dir, ec))
@@ -700,11 +805,27 @@ bool RenumberDuplicate(const std::string& projectDir, const Conflict& conflict,
       const json item = ParseOrNull(ReadFile(entry.path()));
       if (item.is_null() || !ReferencesId(item, oldId))
         continue;
+
+      const std::string rel =
+          fs::relative(entry.path(), projectDir, ec).generic_string();
+      if (attributed && sides.addedByTheirs.count(rel)) {
+        // Added by the same side as the file being renumbered, so it meant
+        // THAT one. Follow it across.
+        rewrite.push_back(entry.path());
+        continue;
+      }
+      if (attributed && sides.addedByOurs.count(rel)) {
+        continue; // meant the file that keeps the id — nothing to do
+      }
       if (error) {
-        *error = entry.path().filename().string() + " still refers to id " +
-                 std::to_string(oldId) +
-                 ", and it cannot say which of the two it meant — open the "
-                 "two files and decide by hand";
+        *error =
+            entry.path().filename().string() + " still refers to id " +
+            std::to_string(oldId) +
+            (attributed
+                 ? ", and neither side added it — it cannot say which of the "
+                   "two it meant; open the two files and decide by hand"
+                 : ", and it cannot say which of the two it meant — open the "
+                   "two files and decide by hand");
       }
       return false;
     }
@@ -766,14 +887,29 @@ bool RenumberDuplicate(const std::string& projectDir, const Conflict& conflict,
     }
   }
 
+  // Every reference on the renumbered side follows it across.
+  for (const fs::path& path : rewrite) {
+    json item2 = ParseOrNull(ReadFile(path));
+    if (!item2.is_object() || !RewriteId(item2, oldId, newId))
+      continue;
+    if (!WriteText(path, item2.dump(2) + "\n", error))
+      return false;
+  }
+
   if (GitVault::IsRepo(projectDir)) {
     std::string ignored;
     GitVault::ResolveWithContent(
         projectDir, fs::relative(renamed, projectDir, ec).generic_string(),
         item.dump(2) + "\n", &ignored);
-    GitVault::ResolveAsDeleted(projectDir, conflict.path, &ignored);
+    GitVault::ResolveAsDeleted(projectDir, renumberPath, &ignored);
+    for (const fs::path& path : rewrite) {
+      GitVault::ResolveWithContent(
+          projectDir, fs::relative(path, projectDir, ec).generic_string(),
+          ReadFile(path), &ignored);
+    }
   }
-  LOG_INFO("Renumbered {} from id {} to {}", conflict.path, oldId, newId);
+  LOG_INFO("Renumbered {} from id {} to {} ({} reference(s) followed)",
+           renumberPath, oldId, newId, rewrite.size());
   return true;
 }
 
