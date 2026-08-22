@@ -249,6 +249,7 @@ void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
     // by the radius. Everything outside cannot be reached, so it is not
     // tested at all.
     const glm::dvec2 a(from.x, from.y), b(m.to.x, m.to.y);
+    const bool xyStill = glm::length(b - a) < 1e-9;
     const double lo_x = std::min(a.x, b.x) - radius;
     const double hi_x = std::max(a.x, b.x) + radius;
     const double lo_y = std::min(a.y, b.y) - radius;
@@ -269,7 +270,16 @@ void Simulate(const GProgram& program, const Setup& setup, HeightMap& stock) {
         // A flat end mill: the tool bottom is the interpolated Z. (A profile
         // function would go here for ball/bull/V — the shape FreeCAD's
         // cSimTool uses, and the reason to keep this one line separate.)
-        const double toolZ = from.z + (m.to.z - from.z) * t;
+        //
+        // `t` is the parameter of the CLOSEST point on the XY segment, which
+        // is 0 for a move that does not travel in XY at all — so a straight
+        // plunge removed material down to where it STARTED, which is to say
+        // none. Every drilled hole came out full of stock, and the retract
+        // out of it was then reported as a rapid through material. A move
+        // that stands still in XY reaches its lowest point over every cell it
+        // covers.
+        const double toolZ =
+            xyStill ? std::min(from.z, m.to.z) : from.z + (m.to.z - from.z) * t;
         if (stock.At(i, j) > toolZ)
           stock.Set(i, j, static_cast<float>(toolZ));
       }
@@ -330,13 +340,16 @@ HeightMap SampleModel(const std::vector<Body>& bodies, const HeightMap& like,
 }
 
 Verdict Compare(const HeightMap& machined, const HeightMap& designed,
-                const std::vector<uint8_t>* touched) {
+                const std::vector<uint8_t>* touched, double leftoverTolerance) {
   Verdict v;
   if (machined.nx != designed.nx || machined.ny != designed.ny)
     return v;
   size_t untouched = 0;
   const size_t total =
       static_cast<size_t>(machined.nx) * static_cast<size_t>(machined.ny);
+  const double leftTol =
+      leftoverTolerance > 0.0 ? leftoverTolerance : machined.res * 1.5;
+  std::vector<uint8_t> over(total, 0);
   for (int j = 0; j < machined.ny; j++) {
     for (int i = 0; i < machined.nx; i++) {
       const size_t k =
@@ -358,13 +371,76 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
         v.maxLeftover = got - want;
         v.leftoverAt = {machined.CellX(i), machined.CellY(j)};
       }
+      if (got - want > leftTol)
+        over[k] = 1;
     }
+  }
+  // How much, and in how many separate places. A flood fill over the cells
+  // that are over: four corner radii are four regions of a square millimetre
+  // each, and a forgotten pocket is one region of hundreds.
+  {
+    size_t cells = 0;
+    std::vector<int> stack;
+    std::vector<uint8_t> seen(total, 0);
+    for (size_t start = 0; start < total; start++) {
+      if (over[start] == 0 || seen[start] != 0)
+        continue;
+      v.leftoverRegions++;
+      stack.push_back(static_cast<int>(start));
+      seen[start] = 1;
+      Verdict::Region region;
+      double sumX = 0.0, sumY = 0.0;
+      size_t mine = 0;
+      while (!stack.empty()) {
+        const int k = stack.back();
+        stack.pop_back();
+        cells++;
+        mine++;
+        const int i = k % machined.nx, j = k / machined.nx;
+        sumX += machined.CellX(i);
+        sumY += machined.CellY(j);
+        region.depth = std::max<double>(
+            region.depth, static_cast<double>(machined.At(i, j)) -
+                              static_cast<double>(designed.At(i, j)));
+        const int neigh[4][2] = {
+            {i - 1, j}, {i + 1, j}, {i, j - 1}, {i, j + 1}};
+        for (const auto& n : neigh) {
+          if (n[0] < 0 || n[1] < 0 || n[0] >= machined.nx ||
+              n[1] >= machined.ny)
+            continue;
+          const size_t nk =
+              static_cast<size_t>(n[1]) * static_cast<size_t>(machined.nx) +
+              static_cast<size_t>(n[0]);
+          if (over[nk] == 0 || seen[nk] != 0)
+            continue;
+          seen[nk] = 1;
+          stack.push_back(static_cast<int>(nk));
+        }
+      }
+      region.area = static_cast<double>(mine) * machined.res * machined.res;
+      region.at = {sumX / static_cast<double>(mine),
+                   sumY / static_cast<double>(mine)};
+      v.biggest.push_back(region);
+    }
+    v.leftoverArea = static_cast<double>(cells) * machined.res * machined.res;
+    std::sort(v.biggest.begin(), v.biggest.end(),
+              [](const Verdict::Region& a, const Verdict::Region& b) {
+                return a.area > b.area;
+              });
+    if (v.biggest.size() > 16)
+      v.biggest.resize(16);
   }
   v.untouchedFraction =
       total > 0 ? static_cast<double>(untouched) / static_cast<double>(total)
                 : 0.0;
   return v;
 }
+
+// How far a rapid may sit inside the material before it counts. The post
+// writes four decimals, so a rapid to the exact top of the stock lands up to
+// 50 nm below it purely from rounding — and that IS the normal way to arrive
+// at a cut. A micron of graze does not break a cutter; a millimetre does.
+constexpr double kGrazeTolerance = 1e-3;
 
 Inspection Inspect(const std::string& gcode, const Setup& setup,
                    const std::vector<Body>& rawBodies, double res) {
@@ -429,7 +505,7 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
             const glm::dvec2 c(probe.CellX(i), probe.CellY(j));
             if (DistToSegment(c, a, b, t) > radius)
               continue;
-            if (probe.At(i, j) > zLow + 1e-6)
+            if (probe.At(i, j) > zLow + kGrazeTolerance)
               hit = true;
           }
         }
@@ -537,11 +613,21 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
     out.push_back({VerdictLine::Level::Bad, buf});
   }
   if (v.maxLeftover > tolerance) {
+    // The AREA is what makes this readable: four inside corners a 3 mm cutter
+    // cannot reach are four regions of about a square millimetre, and a
+    // forgotten operation is one region of hundreds. Both used to print the
+    // same sentence.
     std::snprintf(buf, sizeof(buf),
-                  "Leaves %.2f mm of material at X%.1f Y%.1f — usually an "
-                  "inside corner the cutter cannot reach. A smaller tool gets "
-                  "in there.",
-                  v.maxLeftover, v.leftoverAt.x, v.leftoverAt.y);
+                  "Leaves %.2f mm of material at X%.1f Y%.1f — %.1f mm2 in %d "
+                  "place%s. %s",
+                  v.maxLeftover, v.leftoverAt.x, v.leftoverAt.y, v.leftoverArea,
+                  v.leftoverRegions, v.leftoverRegions == 1 ? "" : "s",
+                  v.leftoverRegions >= 3 && v.leftoverArea < 25.0
+                      ? "Small and scattered, which is what inside corners "
+                        "the cutter cannot reach look like — a smaller tool "
+                        "gets in there."
+                      : "Check that every operation this part needs is in "
+                        "the job.");
     out.push_back({VerdictLine::Level::Warn, buf});
   }
   if (out.empty())

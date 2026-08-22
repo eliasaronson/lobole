@@ -144,7 +144,13 @@ TEST_CASE("cam: an outside profile runs one tool radius clear of the part",
     CHECK(m.kind != cam::Move::Kind::Plunge);
 }
 
-TEST_CASE("cam: an inside profile runs inside the part", "[cam]") {
+TEST_CASE("cam: an inside profile with nothing to cut inside of refuses",
+          "[cam]") {
+  // This used to offset the PART'S OWN outline inward by a tool radius and
+  // cut a trench a whisker inside the perimeter, full depth, all the way
+  // round — a 15 mm gouge, found by asking for a slot this way in the first
+  // dogfooding round (docs/cam/dogfood-round.md finding 4). An inside profile
+  // needs a contour to be inside OF.
   auto doc = BlockDoc();
   cam::Setup setup = BasicSetup();
   cam::Operation op;
@@ -155,9 +161,10 @@ TEST_CASE("cam: an inside profile runs inside the part", "[cam]") {
   op.bottomZ = 10.0;
   op.side = cam::Side::Inside;
   const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
-  REQUIRE(tp.error.empty());
-  // Inward by 3: a 34x24 rectangle, 116 mm — again a ramp lap plus a cut lap.
-  CHECK_THAT(tp.CutLength(), WithinRel(2.0 * 2.0 * (34.0 + 24.0), 5e-3));
+  CHECK(tp.Empty());
+  REQUIRE_FALSE(tp.error.empty());
+  INFO(tp.error);
+  CHECK(tp.error.find("pick the wall") != std::string::npos);
 }
 
 TEST_CASE("cam: climb and conventional run opposite ways", "[cam]") {
@@ -194,39 +201,53 @@ TEST_CASE("cam: climb and conventional run opposite ways", "[cam]") {
   CHECK(climbArea < 0.0);
 }
 
-TEST_CASE("cam: tabs lift the tool on the last pass only", "[cam]") {
-  auto doc = BlockDoc();
+TEST_CASE("cam: a tab is as tall as it was asked to be", "[cam]") {
+  // Tabs used to be emitted on the LAST pass only, so any pass that already
+  // ran through the tab region took the top off it: a 3 mm tab came out 1 mm
+  // tall. That is a part that breaks free under the cutter and is thrown —
+  // the one thing tabs exist to stop. Found by the second dogfooding round,
+  // as four 16 mm2 patches of "leftover" 1 mm deep where 3.8 mm was asked
+  // for (docs/cam/dogfood-round.md).
+  auto doc = BlockDoc(); // 40 x 30 x 20, stock -2..42 x -2..32 x -1..21
   cam::Setup setup = BasicSetup();
   cam::Operation op;
   op.id = 4;
   op.type = cam::OpType::Profile;
   op.toolNumber = 1;
-  op.topZ = 20.0;
-  op.bottomZ = 0.0;
-  op.stepdown = 10.0; // two passes: z=10 then z=0
+  op.topZ = 21.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 5.0; // 16, 11, 6, 1, -1 — the z=1 pass is INSIDE the tab
+  op.side = cam::Side::Outside;
   op.tabCount = 4;
   op.tabWidth = 6.0;
-  op.tabHeight = 1.5;
+  op.tabHeight = 3.0; // so the tabs stand to z = 2
+  setup.operations.push_back(op);
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
 
   const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
+  INFO(tp.error);
   REQUIRE(tp.error.empty());
-  int atTabHeight = 0, atFloor = 0, atMidPass = 0;
-  for (const cam::Move& m : tp.moves) {
-    if (m.kind != cam::Move::Kind::Cut)
-      continue;
-    if (std::abs(m.to.z - 1.5) < 1e-6)
-      atTabHeight++;
-    else if (std::abs(m.to.z) < 1e-6)
-      atFloor++;
-    else if (std::abs(m.to.z - 10.0) < 1e-6)
-      atMidPass++;
-  }
-  CHECK(atTabHeight > 0); // the tabs exist
-  CHECK(atFloor > 0);     // and the rest of the last pass is at depth
-  CHECK(atMidPass > 0);   // the earlier pass ran full depth
-  // The tabs are on the FINAL pass: no move at the intermediate depth was
-  // lifted to tab height.
-  CHECK(tp.MinZ() >= -1e-9);
+  CHECK_THAT(tp.MinZ(), WithinAbs(-1.0, 1e-9));
+
+  // The height the tabs actually reach, measured on the simulated stock
+  // rather than on the moves: material left OUTSIDE the part is either a tab
+  // or a mistake.
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, {tp}, {}, gcode, &error));
+  const cam::Inspection insp =
+      cam::Inspect(gcode, setup, doc->GetBodies(), 0.25);
+  REQUIRE(insp.ok);
+  double tallest = -100.0;
+  for (int j = 0; j < insp.machined.ny; j++)
+    for (int i = 0; i < insp.machined.nx; i++) {
+      const double x = insp.machined.CellX(i), y = insp.machined.CellY(j);
+      if (x > -0.5 && x < 40.5 && y > -0.5 && y < 30.5)
+        continue; // on the part, where the tool never went
+      tallest = std::max(tallest, static_cast<double>(insp.machined.At(i, j)));
+    }
+  // 2.0 = bottomZ + tabHeight. It used to come out at 1.0, the depth of the
+  // last pass that ran through the tab.
+  CHECK_THAT(tallest, WithinAbs(2.0, 0.3));
 }
 
 TEST_CASE("cam: refusals are specific, not silent", "[cam]") {
@@ -507,6 +528,44 @@ std::unique_ptr<Document> PocketDoc(bool island = false) {
                                                      BooleanOp::Union));
   }
   return doc;
+}
+
+// A 40 x 30 x 20 block with a 12 x 14 slot straight through it, closed on
+// every side. The case a face pick cannot reach: a through opening has no
+// floor, so its walls are the only thing to point at.
+std::unique_ptr<Document> SlottedDoc() {
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
+  const uint64_t block = doc->GetFeature(0)->GetId();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Void", glm::vec3(14, 8, -1), 12, 14, 22));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Slot", block, voidId,
+                                                   BooleanOp::Subtract));
+  return doc;
+}
+
+// The vertical planar face whose centroid is nearest (x, y) — a click on a
+// wall.
+ElementRef WallNear(const Document& doc, double x, double y) {
+  ElementRef out;
+  double best = 1e18;
+  for (const Body& b : doc.GetBodies()) {
+    for (const auto& [index, name] : b.elementMap.names) {
+      glm::vec3 c(0.0f), n(0.0f), u(0.0f);
+      if (!b.shape.FacePlane(index, c, n, u))
+        continue;
+      if (std::abs(n.z) > 0.01f)
+        continue;
+      const double d = (c.x - x) * (c.x - x) + (c.y - y) * (c.y - y);
+      if (d < best) {
+        best = d;
+        out = ElementRef{b.createdBy, name};
+      }
+    }
+  }
+  return out;
 }
 
 // The up-facing planar face whose centroid sits at height `z`. This is what
@@ -1087,6 +1146,148 @@ TEST_CASE("cam: a face that cannot face the spindle is refused", "[cam]") {
   // the honest answer is to say so rather than pick the nearest angle.
   CHECK_FALSE(cam::SolveIndexA({1.0, 0.0, 0.0}, degrees));
   CHECK_FALSE(cam::SolveIndexA({0.7, 0.7, 0.0}, degrees));
+}
+
+// --- clicking a wall (dogfooding round 1) ---------------------------------
+
+TEST_CASE("cam: clicking the wall of a through opening cuts it out", "[cam]") {
+  auto doc = SlottedDoc();
+  const cam::Setup setup = BasicSetup();
+  const ElementRef wall = WallNear(*doc, 14.0, 15.0); // the slot's -X wall
+  REQUIRE(wall.IsSet());
+
+  const cam::DerivedOp derived =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Profile, wall);
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  // An opening is cut from INSIDE, with no tabs — the slug is scrap, and
+  // tabbing it only leaves stubs on the part.
+  CHECK(derived.op.side == cam::Side::Inside);
+  CHECK(derived.op.tabCount == 0);
+  // Through: the wall reaches the bottom of the part, so the cut carries on
+  // into the spoilboard exactly as a cut-out does.
+  CHECK_THAT(derived.op.topZ, WithinAbs(21.0, 1e-6));
+  CHECK_THAT(derived.op.bottomZ, WithinAbs(-1.0, 1e-6));
+
+  cam::Setup job = setup;
+  cam::Operation op = derived.op;
+  op.id = 1;
+  job.operations.push_back(op);
+  job.safeZ = cam::DeriveSafeZ(job, doc->GetBodies());
+  const cam::Toolpath tp = cam::GenerateAll(job, doc->GetBodies())[0];
+  INFO(tp.error);
+  REQUIRE(tp.error.empty());
+  // It stays inside the slot, cutter radius and all: 14..26 x 8..22 shrunk
+  // by 3 mm.
+  for (const cam::Move& m : tp.moves) {
+    if (m.kind == cam::Move::Kind::Rapid)
+      continue;
+    INFO("cut at " << m.to.x << "," << m.to.y);
+    CHECK(m.to.x >= 14.0 + 3.0 - 0.05);
+    CHECK(m.to.x <= 26.0 - 3.0 + 0.05);
+    CHECK(m.to.y >= 8.0 + 3.0 - 0.05);
+    CHECK(m.to.y <= 22.0 - 3.0 + 0.05);
+  }
+  // And it goes all the way through, into the spoilboard.
+  CHECK_THAT(tp.MinZ(), WithinAbs(-1.0, 1e-6));
+}
+
+TEST_CASE("cam: a through cut carries the contour past the bottom of the part",
+          "[cam]") {
+  // The model stops at z = 0 and the cut is asked for z = -1. Sectioning
+  // finds nothing below the part, so the last pass used to be SKIPPED and the
+  // part stayed welded to the sheet — the exact failure tabs exist to control
+  // (docs/cam/dogfood-round.md finding 2).
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Profile;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = -1.0;
+  op.stepdown = 7.0; // 13, 6, -1: the last pass is entirely below the model
+  op.side = cam::Side::Outside;
+  const cam::Toolpath tp = cam::Generate(setup, op, doc->GetBodies());
+  INFO(tp.error);
+  REQUIRE(tp.error.empty());
+  CHECK_THAT(tp.MinZ(), WithinAbs(-1.0, 1e-9));
+}
+
+TEST_CASE("cam: clicking a wall for a pocket says what to click instead",
+          "[cam]") {
+  auto doc = SlottedDoc();
+  const cam::Setup setup = BasicSetup();
+  const ElementRef wall = WallNear(*doc, 14.0, 15.0);
+  const cam::DerivedOp derived =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, wall);
+  CHECK_FALSE(derived.ok);
+  INFO(derived.why);
+  CHECK(derived.why.find("FLOOR") != std::string::npos);
+}
+
+TEST_CASE("cam: the spindle is restated after a manual tool change", "[cam]") {
+  // Two tools at the same rpm: the S/M3 was emitted only when the SPEED
+  // changed, so the file paused for a manual tool change — which is done with
+  // the spindle stopped — and the next line was a cutting move. Found by
+  // reading the coupon's own file (docs/cam/dogfood-round.md).
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  cam::Tool second = setup.tools.front();
+  second.number = 2;
+  second.diameter = 3.0;
+  setup.tools.push_back(second); // same spindleRpm as tool 1
+  std::vector<cam::Toolpath> paths;
+  for (int t : {1, 2}) {
+    cam::Toolpath tp;
+    tp.operationId = static_cast<uint64_t>(t);
+    tp.toolNumber = t;
+    tp.moves = {{cam::Move::Kind::Rapid, {0.0, 0.0, 25.0}, false, 0.0, 0.0},
+                {cam::Move::Kind::Cut, {10.0, 0.0, 5.0}, false, 0.0, 600.0}};
+    paths.push_back(tp);
+  }
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const size_t pause = gcode.find("M0 (change tool", gcode.find("T2 M6"));
+  REQUIRE(pause != std::string::npos);
+  INFO(gcode.substr(pause, 80));
+  CHECK(gcode.find("M3", pause) != std::string::npos);
+  // …and before the first move of the new tool, not somewhere after it.
+  CHECK(gcode.find("M3", pause) < gcode.find("G1", pause));
+}
+
+TEST_CASE("cam: a drilled hole is drilled in the simulation too", "[cam]") {
+  // A plunge does not travel in XY, so the closest-point parameter along its
+  // path is 0 everywhere and the simulated tool stayed at the height it
+  // started from: every drilled hole came out full of stock, and the retract
+  // out of it was reported as a rapid through material.
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.id = 1;
+  op.type = cam::OpType::Drill;
+  op.toolNumber = 1;
+  op.topZ = 20.0;
+  op.bottomZ = 5.0;
+  cam::Toolpath tp;
+  tp.operationId = 1;
+  tp.toolNumber = 1;
+  tp.moves = {{cam::Move::Kind::Rapid, {20.0, 15.0, 25.0}, false, 0.0, 0.0},
+              {cam::Move::Kind::Plunge, {20.0, 15.0, 5.0}, false, 0.0, 200.0},
+              {cam::Move::Kind::Rapid, {20.0, 15.0, 25.0}, false, 0.0, 0.0}};
+  setup.operations.push_back(op);
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, {tp}, {}, gcode, &error));
+
+  const cam::Inspection insp =
+      cam::Inspect(gcode, setup, doc->GetBodies(), 0.5);
+  REQUIRE(insp.ok);
+  // The hole is there…
+  const int i = static_cast<int>((20.0 - insp.machined.x0) / insp.machined.res);
+  const int j = static_cast<int>((15.0 - insp.machined.y0) / insp.machined.res);
+  CHECK_THAT(static_cast<double>(insp.machined.At(i, j)), WithinAbs(5.0, 1e-4));
+  // …so climbing back out of it is not a rapid through material.
+  CHECK(insp.verdict.rapidsThroughStock == 0);
 }
 
 // --- C8: adaptive clearing ------------------------------------------------

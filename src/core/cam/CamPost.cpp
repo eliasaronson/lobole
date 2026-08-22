@@ -375,12 +375,18 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       if (opts.comments && tool != nullptr)
         e.Comment("tool " + std::to_string(tool->number) + ": " + tool->name +
                   " D" + Num(tool->diameter, 3));
-      if (!dialect->toolTable && opts.pauseOnToolChange)
+      const bool paused = !dialect->toolTable && opts.pauseOnToolChange;
+      if (paused)
         e.Raw("M0 (change tool, set Z zero, then cycle start)");
       currentTool = tp.toolNumber;
       const double rpm = tool != nullptr ? tool->spindleRpm : 0.0;
+      // Restate the spindle after a PAUSE even when the speed has not
+      // changed. A manual tool change is done with the spindle stopped, and
+      // the line after M0 was a cutting move: two tools at the same rpm
+      // produced a file that never turned the spindle back on. Found by
+      // reading the coupon's file (docs/cam/dogfood-round.md).
       if (rpm > 0.0 &&
-          (currentRpm < 0.0 || std::abs(rpm - currentRpm) > 1e-9)) {
+          (paused || currentRpm < 0.0 || std::abs(rpm - currentRpm) > 1e-9)) {
         std::ostringstream s;
         s << "S" << Num(rpm, 0) << " M3";
         e.Raw(s.str());

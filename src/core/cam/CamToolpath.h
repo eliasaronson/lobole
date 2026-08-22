@@ -78,6 +78,31 @@ struct FaceRegion {
                                           const ElementRef& ref,
                                           double deflection = 0.02);
 
+// What a click on a WALL means. An opening that goes all the way through has
+// no floor to click — a through slot's only faces are vertical — so a job
+// that can only target level faces cannot machine one at all. Clicking the
+// wall the cutter should follow says everything the operation needs: the
+// contour is the section loop that wall belongs to, the depths are the wall's
+// own extent, and whether it is an opening or the part's own perimeter is the
+// difference between cutting inside the contour and outside it.
+struct WallContour {
+  Loop loop;            // the contour, in setup space
+  double topZ = 0.0;    // the wall's own top …
+  double bottomZ = 0.0; // … and bottom
+  bool opening = false; // an inner boundary: cut INSIDE it
+  bool ok = false;
+  std::string why; // when !ok: what to click instead, in words
+};
+
+[[nodiscard]] WallContour PickedWallContour(const std::vector<Body>& bodies,
+                                            const ElementRef& ref,
+                                            double deflection = 0.02);
+
+// Whether `ref` names a vertical face — the question every caller asks before
+// deciding which of the two picks above applies.
+[[nodiscard]] bool IsWallFace(const std::vector<Body>& bodies,
+                              const ElementRef& ref);
+
 // The operation a verb produces from a picked face. Every depth here is
 // derived — from the face, the stock and the tool — which is the whole point:
 // the `2 -> -0` failure the panel used to allow cannot be expressed.
@@ -90,9 +115,13 @@ struct DerivedOp {
   Operation op;    // id left 0 — the caller owns id allocation
 };
 
+// `toolNumber` 0 = the setup's first tool. Every derived number is a fraction
+// of the cutter, so an operation derived for one tool and cut with another
+// carries the wrong stepdown.
 [[nodiscard]] DerivedOp DeriveOperation(const Setup& setup,
                                         const std::vector<Body>& bodies,
-                                        OpType type, const ElementRef& target);
+                                        OpType type, const ElementRef& target,
+                                        int toolNumber = 0);
 
 // --- C9: the setup frame (indexed 4th axis) --------------------------------
 

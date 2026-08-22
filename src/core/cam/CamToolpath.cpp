@@ -6,9 +6,12 @@
 #include <clipper2/clipper.h>
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_WireExplorer.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -16,10 +19,13 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
+#include <gp_Cylinder.hxx>
 #include <gp_Pnt.hxx>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -127,6 +133,14 @@ std::vector<glm::dvec2> WireToLoop(const TopoDS_Wire& wire, double deflection) {
   if (pts.size() > 2 && glm::length(pts.front() - pts.back()) < 1e-9)
     pts.pop_back();
   return pts;
+}
+
+// A millimetre figure for a message. std::to_string on a double gives
+// "3.000000", which reads as machine noise in a sentence meant for a person.
+std::string Round2(double mm) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%g", std::round(mm * 100.0) / 100.0);
+  return buf;
 }
 
 void Emit(Toolpath& tp, Move::Kind kind, const glm::dvec3& to, double feed) {
@@ -253,43 +267,12 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
   // instead, steeper than asked but bounded and still not a plunge.
   rampLen = std::min(rampLen, perimeter);
 
-  // Walk the loop, emitting the descent, and note where it ends.
-  double travelled = 0.0;
-  size_t idx = 0;
-  glm::dvec2 cursor = pts[0];
-  if (rampLen > 1e-9) {
-    while (travelled < rampLen - 1e-9) {
-      const glm::dvec2& next = pts[(idx + 1) % pts.size()];
-      const double seg = glm::length(next - cursor);
-      if (seg < 1e-12) {
-        idx = (idx + 1) % pts.size();
-        cursor = next;
-        continue;
-      }
-      if (travelled + seg >= rampLen - 1e-9) {
-        const double t = (rampLen - travelled) / seg;
-        cursor = cursor + (next - cursor) * t;
-        travelled = rampLen;
-      } else {
-        travelled += seg;
-        cursor = next;
-        idx = (idx + 1) % pts.size();
-      }
-      const double rz = from - descend * std::min(1.0, travelled / rampLen);
-      Emit(tp, Move::Kind::Cut, {cursor.x, cursor.y, rz}, tool.feedPlunge);
-    }
-  } else {
-    Emit(tp, Move::Kind::Plunge, {cursor.x, cursor.y, z}, tool.feedPlunge);
-  }
-
-  // The full lap at depth, starting where the ramp finished.
-  std::vector<glm::dvec2> lap;
-  lap.reserve(pts.size() + 1);
-  lap.push_back(cursor);
-  for (size_t k = 1; k <= pts.size(); k++)
-    lap.push_back(pts[(idx + k) % pts.size()]);
-  lap.push_back(cursor);
-
+  // Tabs, as arc-length intervals measured from pts[0]. The DESCENT has to
+  // know about them as much as the lap does: it takes most of a lap to get
+  // down, so a ramp that ran through a tab took the top off it long before
+  // the pass that was meant to leave it standing. Both the ramp and the lap
+  // are now one function of arc length, which is the only way the two can
+  // agree about where a tab is.
   const bool wantTabs =
       tabCount > 0 && tabWidth > 0.0 && perimeter > tabWidth * tabCount;
   std::vector<std::pair<double, double>> tabs;
@@ -299,45 +282,89 @@ void EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
                             static_cast<double>(tabCount);
       tabs.emplace_back(centre - tabWidth * 0.5, centre + tabWidth * 0.5);
     }
-  const auto inTab = [&](double s) {
-    for (const auto& [lo, hi] : tabs)
-      if (s > lo && s < hi)
-        return true;
-    return false;
+  const auto wrap = [&](double s) {
+    return std::fmod(std::fmod(s, perimeter) + perimeter, perimeter);
   };
-  const auto zAt = [&](double s) { return inTab(s) ? std::max(z, tabZ) : z; };
+  const auto tabTop = [&](double s) {
+    const double m = wrap(s);
+    for (const auto& [lo, hi] : tabs)
+      if (m > lo && m < hi)
+        return tabZ;
+    return -1e300;
+  };
+  // Where the tool belongs `s` mm along the loop, ignoring tabs: descending
+  // while it ramps, at depth after that.
+  const auto zPath = [&](double s) {
+    return rampLen > 1e-9 && s < rampLen ? from - descend * (s / rampLen) : z;
+  };
+  const auto pointAt = [&](double s) {
+    double m = wrap(s);
+    for (size_t i = 0; i < pts.size(); i++) {
+      const glm::dvec2& a = pts[i];
+      const glm::dvec2& b = pts[(i + 1) % pts.size()];
+      const double seg = glm::length(b - a);
+      if (m <= seg || i + 1 == pts.size())
+        return seg < 1e-12 ? a : a + (b - a) * std::clamp(m / seg, 0.0, 1.0);
+      m -= seg;
+    }
+    return pts[0];
+  };
 
-  double s0 = 0.0;
-  double currentZ = zAt(0.0);
-  if (std::abs(currentZ - z) > 1e-9)
-    Emit(tp, Move::Kind::Cut, {lap[0].x, lap[0].y, currentZ}, tool.feedCut);
-  for (size_t i = 1; i < lap.size(); i++) {
-    const glm::dvec2& a = lap[i - 1];
-    const glm::dvec2& b = lap[i];
-    const double len = glm::length(b - a);
-    if (len < 1e-12)
-      continue;
-    // Tab boundaries strictly inside this segment split it, so a tab is never
-    // stepped over by a long edge (the bug the first tab test caught).
-    std::vector<double> cuts;
+  // A full lap AFTER the ramp finishes, so every millimetre of the contour is
+  // cut at depth even though the descent used most of one.
+  const double total = rampLen + perimeter;
+  std::vector<double> stations;
+  stations.reserve(pts.size() * 2 + tabs.size() * 4 + 4);
+  {
+    double acc = 0.0;
+    for (size_t i = 0; i < pts.size() && acc <= total; i++) {
+      acc += glm::length(pts[(i + 1) % pts.size()] - pts[i]);
+      for (double a = acc; a <= total + 1e-9; a += perimeter)
+        stations.push_back(a);
+    }
     for (const auto& [lo, hi] : tabs)
       for (const double edge : {lo, hi})
-        if (edge > s0 + 1e-9 && edge < s0 + len - 1e-9)
-          cuts.push_back(edge);
-    std::sort(cuts.begin(), cuts.end());
-    for (const double sc : cuts) {
-      const glm::dvec2 p = a + (b - a) * ((sc - s0) / len);
-      Emit(tp, Move::Kind::Cut, {p.x, p.y, currentZ}, tool.feedCut);
-      const double next = zAt(sc + 1e-6);
-      if (std::abs(next - currentZ) > 1e-9) {
-        Emit(tp, Move::Kind::Cut, {p.x, p.y, next}, tool.feedCut);
-        currentZ = next;
-      }
-    }
-    s0 += len;
-    Emit(tp, Move::Kind::Cut, {b.x, b.y, currentZ}, tool.feedCut);
+        for (double a = edge; a <= total + 1e-9; a += perimeter)
+          stations.push_back(a);
+    if (rampLen > 1e-9)
+      stations.push_back(rampLen);
+    stations.push_back(total);
+    std::sort(stations.begin(), stations.end());
+    stations.erase(
+        std::remove_if(stations.begin(), stations.end(),
+                       [&](double a) { return a < 1e-9 || a > total + 1e-9; }),
+        stations.end());
+    stations.erase(
+        std::unique(stations.begin(), stations.end(),
+                    [](double a, double b) { return std::abs(a - b) < 1e-9; }),
+        stations.end());
   }
-  Emit(tp, Move::Kind::Rapid, {lap.back().x, lap.back().y, safeZ}, 0.0);
+
+  if (rampLen <= 1e-9)
+    Emit(tp, Move::Kind::Plunge, {pts[0].x, pts[0].y, std::max(z, tabTop(0.0))},
+         tool.feedPlunge);
+
+  // Walk it segment by segment. Every tab edge is a station, so a segment is
+  // wholly inside a tab or wholly outside one — which is what lets the lift
+  // happen AT the edge as a vertical move instead of sloping into it.
+  double currentZ = std::max(zPath(0.0), tabTop(0.0));
+  double prev = 0.0;
+  for (const double s : stations) {
+    const double onTab = tabTop((prev + s) * 0.5);
+    const double zStart = std::max(zPath(prev), onTab);
+    const double zEnd = std::max(zPath(s), onTab);
+    const glm::dvec2 a = pointAt(prev), b = pointAt(s);
+    if (std::abs(zStart - currentZ) > 1e-9) {
+      Emit(tp, Move::Kind::Cut, {a.x, a.y, zStart}, tool.feedCut);
+      currentZ = zStart;
+    }
+    Emit(tp, Move::Kind::Cut, {b.x, b.y, zEnd},
+         s <= rampLen + 1e-9 ? tool.feedPlunge : tool.feedCut);
+    currentZ = zEnd;
+    prev = s;
+  }
+  const glm::dvec2 last = pointAt(total);
+  Emit(tp, Move::Kind::Rapid, {last.x, last.y, safeZ}, 0.0);
 }
 
 } // namespace
@@ -518,9 +545,121 @@ FaceRegion PickedFaceRegion(const std::vector<Body>& bodies,
   return out;
 }
 
+namespace {
+
+// The face `ref` names, and the body it belongs to. Both picks below need the
+// same walk, and doing it twice was how the two disagreed about which face a
+// name meant.
+bool FindFace(const std::vector<Body>& bodies, const ElementRef& ref,
+              TopoDS_Face& face, glm::vec3& centre, glm::vec3& normal) {
+  if (!ref.IsSet())
+    return false;
+  for (const Body& body : bodies) {
+    if (body.createdBy != ref.featureId || !body.shape.IsValid())
+      continue;
+    const std::optional<int> idx = body.elementMap.Resolve(ref.name);
+    if (!idx)
+      return false;
+    glm::vec3 uAxis(0.0f);
+    if (!body.shape.FacePlane(*idx, centre, normal, uAxis))
+      return false;
+    int i = 0;
+    for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+         ex.Next(), i++)
+      if (i == *idx) {
+        face = TopoDS::Face(ex.Current());
+        return !face.IsNull();
+      }
+    return false;
+  }
+  return false;
+}
+
+// The shortest distance from `p` to a loop's boundary. Which loop a wall
+// belongs to is decided by this rather than by containment: a wall lies ON
+// its own contour, and "on" is unreliable to test with point-in-polygon.
+double DistanceToLoop(const std::vector<glm::dvec2>& pts, const glm::dvec2& p) {
+  double best = std::numeric_limits<double>::max();
+  for (size_t i = 0; i < pts.size(); i++) {
+    const glm::dvec2 a = pts[i], b = pts[(i + 1) % pts.size()];
+    const glm::dvec2 ab = b - a;
+    const double len2 = glm::dot(ab, ab);
+    const double t =
+        len2 < 1e-18 ? 0.0 : std::clamp(glm::dot(p - a, ab) / len2, 0.0, 1.0);
+    best = std::min(best, glm::length(p - (a + ab * t)));
+  }
+  return best;
+}
+
+} // namespace
+
+bool IsWallFace(const std::vector<Body>& bodies, const ElementRef& ref) {
+  TopoDS_Face face;
+  glm::vec3 centre(0.0f), normal(0.0f);
+  if (!FindFace(bodies, ref, face, centre, normal))
+    return false;
+  return std::abs(normal.z) < 0.01f;
+}
+
+WallContour PickedWallContour(const std::vector<Body>& bodies,
+                              const ElementRef& ref, double deflection) {
+  WallContour out;
+  TopoDS_Face face;
+  glm::vec3 centre(0.0f), normal(0.0f);
+  if (!FindFace(bodies, ref, face, centre, normal)) {
+    out.why = "that face is not on a body this job can machine";
+    return out;
+  }
+  if (std::abs(normal.z) >= 0.01f) {
+    out.why = "pick a wall — that face is level, so it is a floor to clear "
+              "rather than a contour to follow";
+    return out;
+  }
+  Bnd_Box box;
+  BRepBndLib::Add(face, box);
+  if (box.IsVoid()) {
+    out.why = "that face has no extent";
+    return out;
+  }
+  double x0 = 0, y0 = 0, z0 = 0, x1 = 0, y1 = 0, z1 = 0;
+  box.Get(x0, y0, z0, x1, y1, z1);
+  out.topZ = z1;
+  out.bottomZ = z0;
+  if (z1 - z0 < 1e-6) {
+    out.why = "that wall has no height to cut";
+    return out;
+  }
+  // Section where the wall certainly exists. Its own mid-height, not the
+  // model's: a wall that stops half way up belongs to a different contour
+  // than the one at the part's waist.
+  const std::vector<Loop> loops =
+      SectionLoops(bodies, (z0 + z1) * 0.5, deflection);
+  const glm::dvec2 at(centre.x, centre.y);
+  double best = std::numeric_limits<double>::max();
+  const Loop* pick = nullptr;
+  for (const Loop& l : loops) {
+    const double d = DistanceToLoop(l.pts, at);
+    if (d < best) {
+      best = d;
+      pick = &l;
+    }
+  }
+  // A tolerance in millimetres, not a fraction: the wall centre lies on its
+  // own contour, so anything further away is a different loop entirely.
+  if (pick == nullptr || best > 0.5) {
+    out.why = "that wall is not on this part's cross-section at its own "
+              "height — nothing here can follow it";
+    return out;
+  }
+  out.loop = *pick;
+  out.opening = pick->hole;
+  out.ok = true;
+  return out;
+}
+
 DerivedOp DeriveOperation(const Setup& setup,
                           const std::vector<Body>& rawBodies, OpType type,
-                          const ElementRef& target) {
+                          const ElementRef& target, int toolNumber) {
   // Depths are read in the frame the machine cuts in, or an indexed setup
   // derives them from the wrong axis (C9).
   const std::vector<Body> bodies = BodiesInSetupFrame(setup, rawBodies);
@@ -529,7 +668,16 @@ DerivedOp DeriveOperation(const Setup& setup,
     out.why = "add a tool first — every depth here comes from its diameter";
     return out;
   }
-  const Tool& tool = setup.tools.front();
+  // Every derived number below is a fraction of the cutter, so deriving for
+  // one tool and cutting with another is a stepdown meant for a 6 mm end mill
+  // handed to a 3 mm one.
+  const Tool* named = toolNumber > 0 ? setup.FindTool(toolNumber) : nullptr;
+  if (toolNumber > 0 && named == nullptr) {
+    out.why =
+        "there is no tool " + std::to_string(toolNumber) + " in this setup";
+    return out;
+  }
+  const Tool& tool = named != nullptr ? *named : setup.tools.front();
   glm::dvec3 lo(0.0), hi(0.0);
   if (!StockBoundsFramed(setup, bodies, lo, hi)) {
     out.why = "there is no solid in this part yet, so there is no stock";
@@ -545,8 +693,17 @@ DerivedOp DeriveOperation(const Setup& setup,
   op.stepdown = tool.diameter * 0.5;
   op.stepover = 0.45;
 
+  // The model's own box, as opposed to the stock's: "does this wall go all
+  // the way through" is a question about the part.
+  const double modelBottom = lo.z + setup.stock.bottomMargin;
+
   switch (type) {
   case OpType::Pocket: {
+    if (IsWallFace(bodies, target)) {
+      out.why = "click the pocket's FLOOR — a wall says where to go round, "
+                "not how deep to go. Cut it out follows a wall.";
+      return out;
+    }
     const FaceRegion region = PickedFaceRegion(bodies, target);
     if (!region.ok) {
       out.why = region.why;
@@ -576,7 +733,26 @@ DerivedOp DeriveOperation(const Setup& setup,
     op.name = "Cut out";
     op.side = Side::Outside;
     op.topZ = hi.z;
-    if (target.IsSet()) {
+    // Through the part and a whisker into the spoilboard, which is what
+    // "cut it out" means — a profile that stops on the last skin leaves the
+    // part welded to the stock.
+    op.bottomZ = lo.z;
+    if (IsWallFace(bodies, target)) {
+      // A wall names the contour to follow AND how far down to follow it.
+      const WallContour wall = PickedWallContour(bodies, target);
+      if (!wall.ok) {
+        out.why = wall.why;
+        return out;
+      }
+      op.targets = {target};
+      op.side = wall.opening ? Side::Inside : Side::Outside;
+      op.name = wall.opening ? "Cut the opening" : "Cut out";
+      // A wall that stops short of the bottom of the part is a step, not a
+      // through cut: follow it exactly that far. One that reaches the bottom
+      // is through, so it carries on into the spoilboard like any cut-out.
+      if (wall.bottomZ > modelBottom + 1e-6)
+        op.bottomZ = wall.bottomZ;
+    } else if (target.IsSet()) {
       const FaceRegion region = PickedFaceRegion(bodies, target);
       if (!region.ok) {
         out.why = region.why;
@@ -584,17 +760,17 @@ DerivedOp DeriveOperation(const Setup& setup,
       }
       op.targets = {target};
     }
-    // Through the part and a whisker into the spoilboard, which is what
-    // "cut it out" means — a profile that stops on the last skin leaves the
-    // part welded to the stock.
-    op.bottomZ = lo.z;
     // Tabs, so the part does not break free under the cutter on the last
     // pass. Sized from the tool (a tab narrower than the cutter is cut away
     // as the tool passes) and from the depth, with a floor so a shallow part
-    // still gets a tab rather than a scratch.
-    op.tabCount = 4;
-    op.tabWidth = tool.diameter * 2.0;
-    op.tabHeight = std::max(0.5, (op.topZ - op.bottomZ) * 0.2);
+    // still gets a tab rather than a scratch. An OPENING needs none: the slug
+    // that falls out of it is scrap, and tabbing it only leaves stubs to
+    // clean off the part.
+    if (op.side != Side::Inside) {
+      op.tabCount = 4;
+      op.tabWidth = tool.diameter * 2.0;
+      op.tabHeight = std::max(0.5, (op.topZ - op.bottomZ) * 0.2);
+    }
     break;
   }
   case OpType::Face: {
@@ -697,6 +873,16 @@ Clipper2Lib::Paths64 TargetPaths(const Operation& op,
                                  std::string& error) {
   if (op.targets.empty())
     return {};
+  // A wall names one contour at every depth — the case an opening that goes
+  // all the way through has, because it has no floor to name.
+  if (IsWallFace(bodies, op.targets.front())) {
+    const WallContour wall = PickedWallContour(bodies, op.targets.front());
+    if (!wall.ok) {
+      error = wall.why;
+      return {};
+    }
+    return Clipper2Lib::Paths64{ToClipper(wall.loop.pts)};
+  }
   const FaceRegion region = PickedFaceRegion(bodies, op.targets.front());
   if (!region.ok) {
     error = region.why;
@@ -725,6 +911,23 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
     tp.error = why;
     return;
   }
+  // Without a target a profile follows the part's own outline, which is what
+  // "cut it out" means and is nonsense for an inside cut: offsetting the
+  // perimeter INWARD by a tool radius carves a trench a whisker inside the
+  // part, the full depth, all the way round. The first dogfooding round asked
+  // for a slot this way and got a 15 mm gouge round the whole outline.
+  if (picked.empty() && op.side == Side::Inside) {
+    tp.error = "an inside profile needs the contour to cut inside of — pick "
+               "the wall of the opening. Without one this would follow the "
+               "part's own outline and cut a trench round it.";
+    return;
+  }
+  // The contour of the LAST level that had one, kept so a through cut can
+  // carry it down past the bottom of the model. `bottomZ` is deliberately
+  // below the part — into the spoilboard — and sectioning finds nothing down
+  // there, so stopping when the model runs out leaves the part welded to the
+  // sheet: the exact failure tabs exist to control.
+  Clipper2Lib::Paths64 lastFound;
   for (size_t pass = 0; pass < passes.size(); pass++) {
     const double z = passes[pass];
     std::vector<Loop> solid;
@@ -732,8 +935,6 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       // Section slightly ABOVE the pass depth: exactly at the bottom face of
       // a through-cut the section is degenerate or empty.
       const std::vector<Loop> loops = SectionLoops(bodies, z + 1e-3);
-      if (loops.empty())
-        continue;
       for (const Loop& l : loops)
         if (!l.hole)
           solid.push_back(l);
@@ -741,17 +942,25 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
     const double delta = op.side == Side::Inside ? -(radius + op.stockToLeave)
                          : op.side == Side::On   ? 0.0
                                                  : radius + op.stockToLeave;
-    const Clipper2Lib::Paths64 contour =
-        picked.empty() ? ToClipper(solid) : picked;
+    Clipper2Lib::Paths64 contour = picked.empty() ? ToClipper(solid) : picked;
     if (contour.empty())
-      continue;
+      contour = lastFound; // below the model: keep cutting what was there
+    else
+      lastFound = contour;
+    if (contour.empty())
+      continue; // above the model, where there has never been anything
     Clipper2Lib::Paths64 paths =
         delta == 0.0 ? contour : Offset(contour, delta);
-    const bool lastPass = pass + 1 == passes.size();
     for (Clipper2Lib::Path64& path : paths) {
       Orient(path, op.climb, op.side == Side::Inside);
-      EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ,
-               lastPass ? op.tabCount : 0, op.tabWidth, bottom + op.tabHeight,
+      // Tabs on EVERY pass, not only the last one. A tab is a pillar from the
+      // bottom of the cut up to `tabHeight`, and a pass that ran through it
+      // on the way down left only the part of it below that pass — asking for
+      // a 3.8 mm tab and getting 1 mm, which is a part that breaks free under
+      // the cutter and is thrown. EmitLoop lifts to max(z, tabZ), so a pass
+      // that never reaches the tab top is unaffected.
+      EmitLoop(tp, setup, tool, FromClipper(path), z, setup.safeZ, op.tabCount,
+               op.tabWidth, bottom + op.tabHeight,
                pass == 0 ? op.topZ : passes[pass - 1]);
     }
   }
@@ -900,6 +1109,18 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
     }
     const AdaptiveResult cleared =
         AdaptiveClear(setup, op, tool, asLoops, z, entryZ);
+    if (cleared.error.empty() && cleared.moves.empty() &&
+        op.side == Side::Outside) {
+      // Adaptive is the one clearing strategy that reads `side`, and outside
+      // a region whose own boundary is the stock there is nothing to clear —
+      // it returns silence rather than a complaint. The concentric pocket
+      // ignores `side` entirely, so the same operation cut one way and
+      // vanished the other, under the generic "produced no toolpath".
+      tp.error = "this operation clears OUTSIDE its boundary, and there is "
+                 "nothing out there to cut — a pocket clears inside "
+                 "(side: inside)";
+      return;
+    }
     if (!cleared.error.empty() && cleared.moves.empty()) {
       tp.error = cleared.error;
       return;
@@ -946,6 +1167,23 @@ void GenerateFace(const Setup& setup, const Operation& op, const Tool& tool,
   }
 }
 
+// The radius of a cylindrical face, for the one question a drill has to ask:
+// is this tool the size of this hole?
+bool BoreRadius(const Body& body, int idx, double& radius) {
+  int i = 0;
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), i++) {
+    if (i != idx)
+      continue;
+    BRepAdaptor_Surface surf(TopoDS::Face(ex.Current()));
+    if (surf.GetType() != GeomAbs_Cylinder)
+      return false;
+    radius = surf.Cylinder().Radius();
+    return radius > 0.0;
+  }
+  return false;
+}
+
 // Drill: one plunge per target hole, at the hole's axis.
 void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
                    const std::vector<Body>& bodies, Toolpath& tp) {
@@ -964,9 +1202,45 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
       glm::vec3 origin(0.0f), axis(0.0f), xAxis(0.0f);
       if (!body.shape.FaceAxis(*idx, origin, axis, xAxis))
         continue; // not a cylinder: silently skipping would drill nothing
+      // A plunge goes straight down, so a bore lying on its side is not a
+      // hole this operation can make — it would be drilled somewhere the
+      // part has no hole at all.
+      if (std::abs(axis.z) < 0.99f) {
+        tp.error = "that hole does not point at the spindle — index the setup "
+                   "to bring it up, or drill it in another setup";
+        return;
+      }
+      // The size the cutter makes IS the size of the hole. A 3 mm tool
+      // plunged into a 6 mm bore leaves a 6 mm hole half cut and nothing said
+      // so: the first dogfooding round posted exactly that, and it showed up
+      // only as 42 mm2 of "leftover" among the tabs and the slug.
+      double radius = 0.0;
+      if (BoreRadius(body, *idx, radius)) {
+        const double dia = radius * 2.0;
+        if (tool.diameter > dia + 1e-6) {
+          tp.error = "tool " + std::to_string(op.toolNumber) + " is " +
+                     Round2(tool.diameter) + " mm and that hole is " +
+                     Round2(dia) + " mm — it would not fit in";
+          return;
+        }
+        if (tool.diameter < dia - 1e-3) {
+          tp.error = "tool " + std::to_string(op.toolNumber) + " is " +
+                     Round2(tool.diameter) + " mm and that hole is " +
+                     Round2(dia) +
+                     " mm — a plunge makes a hole the size of the cutter. Use "
+                     "a " +
+                     Round2(dia) + " mm tool, or clear the hole as a pocket.";
+          return;
+        }
+      }
       found++;
       const glm::dvec3 centre(origin.x, origin.y, 0.0);
       Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, setup.safeZ}, 0.0);
+      // Down to the top of the cut at rapid, and only then at feed. Feeding
+      // the whole way from Safe Z spends seconds per hole cutting air — the
+      // same reason a profile rapids to the stock top before it ramps.
+      if (op.topZ < setup.safeZ - 1e-9)
+        Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, op.topZ}, 0.0);
       Emit(tp, Move::Kind::Plunge, {centre.x, centre.y, op.bottomZ},
            tool.feedPlunge);
       Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, setup.safeZ}, 0.0);

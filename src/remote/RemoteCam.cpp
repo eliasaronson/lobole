@@ -36,12 +36,23 @@ constexpr MethodDoc kCamMethods[] = {
     {"remove_cam_setup", "Delete a setup {id} and its operations."},
     {"add_cam_op",
      "Add an operation {setup, type: profile|pocket|face|drill|adaptive, "
-     "tool?, "
-     "top_z, bottom_z, stepdown?, side?: outside|inside|on, climb?, "
+     "tool?, top_z?, bottom_z?, stepdown?, side?: outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
-     "[{feature_id, element}]}; returns its id."},
+     "[{feature_id, element}]}; returns its id and every field derived for "
+     "it. LEAVE OUT top_z/bottom_z and they are derived from what the "
+     "operation acts on — the same derivation the GUI's verbs use, so a "
+     "script does not type a depth the panel would not let a person type. "
+     "Pocket: pick the floor. Profile: pick a wall (an opening cuts inside "
+     "it, the perimeter cuts outside) or nothing at all to cut the part "
+     "free. Face: pick nothing. A refusal says what to pick instead. A "
+     "derived pocket deep enough to want adaptive clearing COMES BACK as "
+     "type adaptive; set_cam_op forces either strategy."},
     {"set_cam_op", "Change an operation {id, …the add_cam_op fields}."},
     {"remove_cam_op", "Delete an operation {id}."},
+    {"cam_derive_op",
+     "What {setup, type, tool?, target?: {feature_id, element}} would produce "
+     "WITHOUT adding it: the derived operation, or why that pick cannot make "
+     "one. The dry run behind add_cam_op's derivation."},
     {"cam_toolpath",
      "Generate toolpaths for a setup {setup} without writing a file: per "
      "operation, the move count, cut length (mm), lowest Z, and the error "
@@ -49,8 +60,14 @@ constexpr MethodDoc kCamMethods[] = {
     {"cam_verify",
      "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
-     "rapids_through_stock, ok}. Runs on the file, not the toolpath, so it "
-     "catches post and modal-state bugs too."},
+     "leftover_area_mm2, leftover_regions, rapids_through_stock, ok, says}. "
+     "Runs on the file, not the toolpath, so it catches post and modal-state "
+     "bugs too. `says` is the verdict in the same sentences the panel shows. "
+     "Leftover in several tiny regions is the inside corners a round cutter "
+     "cannot reach and is CORRECT; one large region is a missing operation. "
+     "`leftover_biggest` lists where, largest first — a height map cannot "
+     "watch a slug fall out or know a tab was asked for, so those show up "
+     "here too and are for you to recognise."},
     {"cam_post",
      "Write the G-code for a setup {setup, path, post?}. Reports the line "
      "count, the ops it skipped and why. Writes a file; it does not send it "
@@ -127,8 +144,13 @@ std::pair<cam::Setup*, cam::Operation*> FindOp(Document& doc, uint64_t opId) {
   return {nullptr, nullptr};
 }
 
-void ApplyOpFields(Document& doc, cam::Operation& op, const RpcParams& p) {
-  if (p.contains("type"))
+// `keepType` is set when the operation was DERIVED: the `type` in the params
+// was then the verb ("pocket"), and the derivation has already turned it into
+// the strategy the geometry calls for ("adaptive", C8). Applying the verb over
+// the top threw that away and cut a deep pocket in concentric rings.
+void ApplyOpFields(Document& doc, cam::Operation& op, const RpcParams& p,
+                   bool keepType = false) {
+  if (p.contains("type") && !keepType)
     op.type = TypeFrom(p.at("type").get<std::string>());
   if (p.contains("name"))
     op.name = p.at("name").get<std::string>();
@@ -190,7 +212,11 @@ json OpJson(const cam::Operation& op) {
             {"bottom_z", op.bottomZ},
             {"stepdown", op.stepdown},
             {"enabled", op.enabled}};
-  if (op.type == cam::OpType::Profile) {
+  // Side is reported for the clearing types too. It was profile-only, so a
+  // pocket built over the RPC kept the struct's Outside default INVISIBLY —
+  // and adaptive, the one strategy that reads it, then cleared outside a
+  // boundary with nothing beyond it and produced silence.
+  if (op.type != cam::OpType::Face && op.type != cam::OpType::Drill) {
     j["side"] = SideName(op.side);
     if (op.tabCount > 0)
       j["tabs"] = {{"count", op.tabCount},
@@ -317,17 +343,56 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     return json::object();
   }
 
-  if (m == "add_cam_op") {
+  if (m == "add_cam_op" || m == "cam_derive_op") {
     cam::Setup& setup = RequireSetup(*doc, p.at("setup").get<uint64_t>());
     cam::Operation op;
-    op.id = doc->AllocateId();
     op.toolNumber = setup.tools.empty() ? 1 : setup.tools.front().number;
-    ApplyOpFields(*doc, op, p);
+    if (p.contains("tool"))
+      op.toolNumber = p.at("tool").get<int>();
+    // Derive when no depth was typed. This is the door the GUI's verbs go
+    // through (cam::DeriveOperation), and until now it was GUI-only: a script
+    // had to supply top_z/bottom_z by hand, which is exactly the failure mode
+    // the panel stopped allowing. An agent should not have a worse interface
+    // than a person.
+    const bool derive =
+        m == "cam_derive_op" || !p.contains("top_z") || !p.contains("bottom_z");
+    if (derive) {
+      const cam::OpType type =
+          TypeFrom(p.value("type", std::string("profile")));
+      ElementRef target;
+      const json& tj = p.contains("target") ? p.at("target")
+                       : p.contains("targets") && !p.at("targets").empty()
+                           ? p.at("targets").at(0)
+                           : json::object();
+      target.featureId = tj.value("feature_id", uint64_t{0});
+      target.name = tj.value("element", std::string());
+      const cam::DerivedOp derived = cam::DeriveOperation(
+          setup, doc->GetBodies(), type, target, op.toolNumber);
+      if (!derived.ok)
+        throw std::runtime_error(derived.why);
+      const int tool = op.toolNumber;
+      op = derived.op;
+      op.toolNumber = tool;
+    }
+    // Anything stated explicitly still wins — the derivation is a starting
+    // point, not a cage. (To force a strategy on a derived operation, set it
+    // afterwards with set_cam_op.)
+    ApplyOpFields(*doc, op, p, /*keepType=*/derive);
+    // A clearing operation clears INSIDE its boundary; the struct's Outside
+    // default is a profile's notion and means "nothing to cut" here.
+    if (!p.contains("side") && !derive &&
+        (op.type == cam::OpType::Pocket || op.type == cam::OpType::Adaptive))
+      op.side = cam::Side::Inside;
     if (op.name.empty())
       op.name = std::string(TypeName(op.type)) + " " +
                 std::to_string(setup.operations.size() + 1);
+    if (m == "cam_derive_op")
+      return json{{"derived", derive}, {"operation", OpJson(op)}};
+    op.id = doc->AllocateId();
     setup.operations.push_back(op);
-    return json{{"id", op.id}, {"name", op.name}};
+    json out = OpJson(op);
+    out["derived"] = derive;
+    return out;
   }
 
   if (m == "set_cam_op") {
@@ -364,14 +429,33 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     const cam::Verdict v =
         cam::VerifyGcode(gcode, setup, doc->GetBodies(), res);
     const double tol = res * 1.5; // one cell of quantisation, plus slack
+    // The same sentences the panel shows. A verdict that reads as a row of
+    // numbers over the RPC and as English in the GUI is two verdicts, and the
+    // agent gets the worse one.
+    json says = json::array();
+    for (const cam::VerdictLine& line : cam::Explain(v, tol, 0.0))
+      says.push_back(line.text);
+    json biggest = json::array();
+    for (const cam::Verdict::Region& r : v.biggest)
+      biggest.push_back(json{{"at", {r.at.x, r.at.y}},
+                             {"area_mm2", r.area},
+                             {"depth_mm", r.depth}});
     return json{{"max_gouge_mm", v.maxGouge},
                 {"max_leftover_mm", v.maxLeftover},
                 {"gouge_at", {v.gougeAt.x, v.gougeAt.y}},
                 {"leftover_at", {v.leftoverAt.x, v.leftoverAt.y}},
+                // How MUCH is left over, and in how many places: corner radii
+                // a cutter cannot reach are several tiny regions, a forgotten
+                // operation is one big one, and the deepest-point number
+                // alone reads the same for both.
+                {"leftover_area_mm2", v.leftoverArea},
+                {"leftover_regions", v.leftoverRegions},
+                {"leftover_biggest", biggest},
                 {"rapids_through_stock", v.rapidsThroughStock},
                 {"first_bad_line", v.firstBadLine},
                 {"resolution_mm", res},
                 {"cells", v.cells},
+                {"says", says},
                 {"ok", v.Ok(tol)}};
   }
   if (m == "cam_toolpath" || m == "cam_post") {

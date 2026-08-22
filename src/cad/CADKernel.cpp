@@ -138,7 +138,16 @@ void CADShape::GetBoundingBox(glm::vec3& min, glm::vec3& max) const {
   }
 
   Bnd_Box box;
-  BRepBndLib::Add(m_shape, box);
+  // NOT from the triangulation. `Add` uses one when the shape has been meshed
+  // and inflates the box by its deflection, so a part with a single curved
+  // face grew ~4 um the first time anything drew or sectioned it. Nothing
+  // that reads a bounding box wants an answer that depends on whether the
+  // shape has been rendered yet: CAM derives the stock, the rapid height and
+  // every depth from this box, and a job generated before the first mesh was
+  // then verified against a stock 4 um taller than the one it was cut for —
+  // reporting a legitimate rapid to the top of the stock as a rapid THROUGH
+  // material, twelve times.
+  BRepBndLib::Add(m_shape, box, /*useTriangulation=*/Standard_False);
 
   if (!box.IsVoid()) {
     double xmin, ymin, zmin, xmax, ymax, zmax;

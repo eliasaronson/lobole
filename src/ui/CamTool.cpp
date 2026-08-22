@@ -117,9 +117,13 @@ constexpr Verb kVerbs[] = {
      "Click the flat bottom of the pocket. Its walls become the boundary and "
      "its height becomes the depth."},
     {"Cut it out", "###cam_verb_profile", cam::OpType::Profile,
-     PickSlot::CamProfileOutline, "Click the face whose outline to cut around",
-     "Cut the part free of the stock, with tabs so it does not break loose "
-     "under the cutter."},
+     PickSlot::CamProfileOutline,
+     "Click the wall to follow — the part's own side, or the inside of an "
+     "opening",
+     "Follow a wall. The part's own side cuts it free of the stock, with tabs "
+     "so it does not break loose under the cutter; the wall of an opening "
+     "cuts that opening out. An opening that goes all the way through has no "
+     "floor to click, so its wall is the only thing to point at."},
 };
 
 } // namespace

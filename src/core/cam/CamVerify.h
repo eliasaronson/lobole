@@ -96,6 +96,24 @@ struct Verdict {
   // past. This number keeps the other signal (a job that machines nothing at
   // all) available without confusing the two.
   double untouchedFraction = 0.0;
+  // How much leftover there is, not just how deep the worst of it is. A part
+  // cut correctly with a 3 mm cutter leaves 1.5 mm radii in its square inside
+  // corners — full-depth leftover, in four tiny places — and that is the
+  // right answer, not a defect. A skipped operation leaves ONE region of
+  // hundreds of square millimetres. The max alone cannot tell those apart,
+  // which is how a job whose verdict should have been read ends up being
+  // scrolled past.
+  double leftoverArea = 0.0; // mm^2 above the designed surface
+  int leftoverRegions = 0;   // separate places it sits in
+  // The biggest of those places, largest first. "341 mm2 in 12 places" is a
+  // number to worry about; "the slot's slug, two bores and four tabs" is a
+  // job to sign off. Capped, so a fine grid cannot flood a report.
+  struct Region {
+    glm::dvec2 at{0.0}; // centroid
+    double area = 0.0;  // mm^2
+    double depth = 0.0; // the worst leftover in it, mm
+  };
+  std::vector<Region> biggest;
 
   // A job is good when it cut everything it should and nothing it should not.
   [[nodiscard]] bool Ok(double tolerance) const {
@@ -107,9 +125,12 @@ struct Verdict {
 // `touched` (optional, same grid) restricts the comparison to the cells the
 // program actually swept — see Verdict::untouchedFraction. Null compares
 // every cell.
+// Leftover deeper than this counts toward `leftoverArea`/`leftoverRegions`.
+// Zero takes the grid's own quantisation (one and a half cells).
 [[nodiscard]] Verdict Compare(const HeightMap& machined,
                               const HeightMap& designed,
-                              const std::vector<uint8_t>* touched = nullptr);
+                              const std::vector<uint8_t>* touched = nullptr,
+                              double leftoverTolerance = 0.0);
 
 // Everything the check produced, for a caller that wants to SHOW it rather
 // than just pass or fail (docs/cam/gui.md G4 paints the leftover on the part).
