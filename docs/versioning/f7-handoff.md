@@ -96,20 +96,26 @@ designed — the format merges text, and text is not intent. No checker
 resolves that; it is what review is for. What is gone is the class where the
 document rebuilds perfectly while a reference quietly points somewhere else.
 
-## Planned next (2026-08-22), in order
+## Also shipped (2026-08-22)
 
-- **[F11](f11-seeing-what-changed.md) G3 (~1 h)** — `ProjectMerge::Scan` walks
-  the project tree and spawns a `git` process every second even on a clean
-  project, because the Conflicts panel refreshes before deciding not to draw.
-  A defect in F7's implementation; gate it on `InMerge()` and F8's stamp.
-- **[F10](f10-autosave-the-project.md) (~1 d)** — autosave still snapshots the
-  ACTIVE PART only, and nothing at all on an assembly or drawing tab. The same
-  class F6 fixed for checkpoints and called "wrong, not merely old"; demonstrated
-  rather than suspected. A crash recovery on a multi-document project is
-  currently more destructive than the crash.
-- **[F11](f11-seeing-what-changed.md) G1 (~1 d), then G2 (~2–3 d)** — a history
-  that says what each version changed, then a diff between versions. Both lean
-  on translation and field-diff code that already exists here.
+- **[F10](f10-autosave-the-project.md)** — autosave saved only the ACTIVE tab,
+  and nothing at all on an assembly or drawing tab. One atomic file per dirty
+  document now. It also uncovered that F9's whole sharing surface was
+  part-gated and failed on an assembly tab (`9048d58`).
+- **[F11](f11-seeing-what-changed.md)** — G3 (the conflicts scan stopped
+  running on a timer), G1 (each version says what it changed), G2 (clicking a
+  version shows what changed since it).
+- **`2eda31d`** — the terminal panel could not be turned off and on again;
+  `everStarted` latched and blocked every future start.
+
+### One known-red test, not mine
+
+`terminal/off_by_default_docks_right_on` fails after
+`cam/tool_window_follows_the_viewport` in the same process — deterministically,
+serially, no load. Diagnosed in a comment on the test: the window is created,
+active and docked, but `Hidden`, so its body is never submitted. Four fixes
+tried and rejected; the remaining suspect is which node it lands in after a
+layout rebuild. Left red on purpose rather than papered over.
 
 ## Tests, and what each covers
 

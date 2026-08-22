@@ -1,9 +1,8 @@
 # F10 — Autosave saves the project, not the open tab — design
 
-> **Status: not built.** Planned 2026-08-22. This is a **bug fix**, not a
-> feature: the crash-safety mechanism does not currently protect a
-> multi-document project, and on an assembly or drawing tab it does not run at
-> all.
+> **SHIPPED 2026-08-22.** A **bug fix**, not a feature: the crash-safety
+> mechanism did not protect a multi-document project, and on an assembly or
+> drawing tab it did not run at all.
 
 ## The bug
 
@@ -113,7 +112,24 @@ needs no new format: each file is the existing single-document form.
   fails.
 - The existing `headless_smoke` autosave assertions keep passing unchanged.
 
-## Effort
+## What shipped, and what building it changed
 
-**~1 day.** The loop and the assembly/drawing serializers are mechanical; the
-per-document dirty tracking and the recovery prompt are the real work.
+Option C as designed: `<project>.autosave.d/parts/Stand.json`, one atomic file
+per dirty document, with `ui::AutosaveProject` owning the iteration because
+only that layer knows what documents a project has — which is exactly why the
+bug existed.
+
+**The autosaver is a loop local, not state**, so `Forget()` could not be
+called from `MarkProjectOpened`. A `projectGeneration` counter on AppState
+carries "the project was replaced" across to it.
+
+**It found a second bug of the same shape.** The test switches to an assembly
+tab on purpose — that is where autosave did nothing — and the RPC it called to
+check refused with *"the active document is an assembly, not a part"*. The
+whole of F9's sharing surface (`branch_*`, `conflict_*`, `merge_*`,
+`remote_*`, `fetch`, `pull`, `push`, `clone_project`) was missing from the
+no-part list in `RemoteServer.cpp`, so a multi-part project could not be
+pushed or merged from its own assembly tab. Fixed separately (`9048d58`) so it
+is findable on its own.
+
+**Effort: ~1 day**, as estimated.

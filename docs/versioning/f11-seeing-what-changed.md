@@ -1,7 +1,8 @@
 # F11 — Seeing what changed — design
 
-> **Status: not built.** Planned 2026-08-22. Three items on one axis: a
-> history you can read, a diff you can look at, and a cost F7 left behind.
+> **SHIPPED 2026-08-22** — G1, G2 and G3. Three items on one axis: a history
+> you can read, a diff you can look at, and a cost F7 left behind. The
+> sections are the design as written, with "What shipped" at the end.
 
 ## Why this exists
 
@@ -113,19 +114,48 @@ Two gates, both reusing what already exists:
 This is a defect in F7's implementation rather than a missing feature, and it
 is mine to clean up.
 
-## Open decisions (for Elias)
+## Decisions (settled 2026-08-22)
 
-1. **Does the diff live inside the History panel or beside it?** Inside is
-   recommended above. Beside is defensible if diffs are something you leave
-   open while working.
-2. **How hard should G1 try to name things?** The recommendation reads one
-   blob only when a commit touched exactly one file. Reading more would name
-   more rows precisely, at one process per row.
-3. **Does G2 wait for `compare_geometry`?** Layers 1 and 2 stand alone; layer
-   3 needs V4, which is still awaiting sign-off in its own plan.
+1. **The diff lives inside the History panel**, replacing the list until
+   dismissed.
+2. **G1 reads one blob only for a lone changed item**, bounded to the first 20
+   rows.
+3. **G2 did not wait for `compare_geometry`.** Layers 1 and 2 stand alone and
+   are what shipped; the geometry layer is still V4's to add.
 
-## Order
+## What shipped, and what building it changed
 
-G3 first — it is an hour and it is a regression. Then G1, which is the
-foundation G2 is assembled from. G2 last, and it is the one that could be cut
-without the others losing their value.
+G3, G1 then G2, 2026-08-22, in that order.
+
+**G3 measured, not asserted.** The scan was replaced by an event trigger off
+F8's disk poll, and a gui test counts scans: **0 over 60 clean frames**, where
+it had been one per second. The plan also proposed skipping
+`GitVault::Unmerged` when `InMerge()` is false; **dropped**, because unmerged
+paths can also come from a cherry-pick or stash pop run in the terminal
+panel, which leave no `MERGE_HEAD`, and once a scan is rare the saving was a
+millisecond against a real correctness hole.
+
+**A positional-initialiser trap, twice in two days.** `LogEntry` gained
+`changed`, and `Log` built its entries with a braced list — so the new member
+silently re-bound `tagRef` and every named version lost its address. The same
+trap `settings::Field` carries a comment about. `Log` assigns by name now,
+which is the durable fix; a comment on the struct warns the next person.
+
+**The diff is opened by clicking the VERSION, not a button.** A second button
+in the action column overflowed at 1.4× font and F6's `rows_fit_at_a_large_font`
+guard said so on the first run — the third time that guard has earned its
+keep. Clicking the row costs no width, and is what anyone tries first. It must
+NOT be `SpanAllColumns`: spanning puts the selectable over the Restore button
+and swallows its clicks.
+
+**A diff belongs to its project.** Opening another project left the panel
+showing the previous one's changes, with the version list hidden behind them.
+Cleared when the path changes — found because it broke three other tests,
+which is the good version of finding it.
+
+**The working tree is the second operand, and that is the everyday question.**
+`DiffVersions(from, "")` means "what have I changed since that version",
+which needs no second pick. Note for anyone reading the field diffs: they come
+from `DiffFields`, whose `ours`/`theirs` are a merge's vocabulary — in a diff
+they are the from-side and the to-side, and the sentence says "10 to 18"
+rather than "10 vs 18" for that reason.

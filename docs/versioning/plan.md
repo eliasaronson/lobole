@@ -161,7 +161,7 @@ regenerating on the other person's side.
 [f7-handoff.md](f7-handoff.md)** — what is built, what deliberately is not,
 which tests cover what, and the traps.
 
-### F10 — Autosave saves the project, not the open tab — **planned, not built** — [design: f10-autosave-the-project.md](f10-autosave-the-project.md)
+### F10 — Autosave saves the project, not the open tab — **shipped 2026-08-22** — [design: f10-autosave-the-project.md](f10-autosave-the-project.md)
 **A bug, not a feature.** F6 found `checkpoint_create` snapshotting the ACTIVE
 PART and called it "wrong, not merely old"; autosave was never revisited and
 still does exactly that (`Autosaver::MaybeSave` takes one `Document`).
@@ -178,7 +178,7 @@ is **one atomic file per dirty document** under a sidecar directory — every
 file stays complete-or-absent, unchanged documents stop being rewritten, and
 no new format is invented. **~1 day.**
 
-### F11 — Seeing what changed — **planned, not built** — [design: f11-seeing-what-changed.md](f11-seeing-what-changed.md)
+### F11 — Seeing what changed — **shipped 2026-08-22** — [design: f11-seeing-what-changed.md](f11-seeing-what-changed.md)
 The version system works and is invisible: after a day the panel is sixty rows
 saying `save`, and F9 sharpened it — pull a teammate's work and there is no way
 to see what arrived. **G1** gives every row what it touched, in the tabs' own
@@ -188,7 +188,10 @@ between two versions, where the field-level layer is `ProjectMerge::DiffFields`
 already written — and where `compare_geometry` genuinely fits, since a diff has
 two operands by construction and a merge does not. **G3** is an hour of
 cleanup: `ProjectMerge::Scan` walks the tree and spawns `git` every second on a
-clean project. **G3 ~1 h, G1 ~1 d, G2 ~2–3 d**, in that order.
+clean project. **G3, G1, G2 — all shipped**, in that order. G3 is measured: 0 scans over 60
+clean frames, where it had been one per second. Clicking a version shows what
+changed since it, against the working tree, so the everyday question needs no
+second pick.
 
 ## Recommended order
 
