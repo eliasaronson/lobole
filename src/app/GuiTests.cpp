@@ -1440,7 +1440,20 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Off by default: the window does not exist at all.
     IM_CHECK(!s_App->settings.terminalPanel);
-    IM_CHECK(ctx->WindowInfo("//Terminal###TerminalPanel").Window == nullptr);
+    // NoError: this asks a question whose answer is expected to be "no". A
+    // bare WindowInfo LOGS an error when it cannot find the window, and
+    // ImGuiTestContext::WindowInfo starts with `if (IsError()) return
+    // ItemInfoNull()` — so one expected-null lookup poisons the context and
+    // EVERY later lookup returns null, whatever the UI is doing.
+    //
+    // It only bit after a test that had previously turned this panel on: the
+    // window object then still exists but is not being submitted, which is a
+    // different path inside WindowInfo and the one that logs. That is why it
+    // passed alone and failed behind cam/tool_window_follows_the_viewport,
+    // and why five fixes aimed at docking, timing and the PTY all missed.
+    IM_CHECK(
+        ctx->WindowInfo("//Terminal###TerminalPanel", ImGuiTestOpFlags_NoError)
+            .Window == nullptr);
 
     s_App->settings.terminalPanel = true;
     // Wait for the CONDITION, not for a frame count. Turning the panel on
@@ -1449,11 +1462,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // parallel shards the spawn misses the deadline and the test fails on a
     // null window. It passed 4/4 in isolation, which is how a load-dependent
     // wait advertises itself.
-    // 90 frames is ~1.5 s — generous for a fork+PTY and quick to fail. NOTE:
-    // when this DOES fail under parallel shards it is not a timeout. The
-    // window never appears at all, which points at state left by whatever
-    // ran before it in the shard, not at a slow spawn. Unresolved; see the
-    // handoff note.
+    // 90 frames is ~1.5 s — generous for a fork+PTY and quick to fail.
     //
     // DIAGNOSED, not fixed (2026-08-22, second session). It is NOT a timeout
     // and NOT the PTY. Instrumenting DrawTerminalPanel through the failing
