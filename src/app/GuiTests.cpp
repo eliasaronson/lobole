@@ -1443,8 +1443,24 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(ctx->WindowInfo("//Terminal###TerminalPanel").Window == nullptr);
 
     s_App->settings.terminalPanel = true;
-    ctx->Yield(6); // appear, then get docked
-    ImGuiWindow* win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
+    // Wait for the CONDITION, not for a frame count. Turning the panel on
+    // creates a window, docks it, and forks a shell through a PTY, and a
+    // fixed Yield(6) covered all three only on an idle machine — under four
+    // parallel shards the spawn misses the deadline and the test fails on a
+    // null window. It passed 4/4 in isolation, which is how a load-dependent
+    // wait advertises itself.
+    // 90 frames is ~1.5 s — generous for a fork+PTY and quick to fail. NOTE:
+    // when this DOES fail under parallel shards it is not a timeout. The
+    // window never appears at all, which points at state left by whatever
+    // ran before it in the shard, not at a slow spawn. Unresolved; see the
+    // handoff note.
+    ImGuiWindow* win = nullptr;
+    for (int i = 0; i < 90; i++) {
+      ctx->Yield();
+      win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
+      if (win != nullptr && win->DockId != 0 && ui::TerminalRunning(*s_App))
+        break;
+    }
     IM_CHECK(win != nullptr);
     IM_CHECK(win->DockId != 0); // docked, not floating over the model tree
     // And it opened a shell by itself: the chooser it used to show was a
