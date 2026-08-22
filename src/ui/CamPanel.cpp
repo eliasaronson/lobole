@@ -357,6 +357,76 @@ void DrawCamPanel(AppState& state) {
     }
   }
 
+  // --- generate / post ---------------------------------------------------
+  // ABOVE the operations list, not below it. This panel is 217 px wide and
+  // the window is 720 px tall in the default layout, and the list grows with
+  // the job: put the verdict and Save G-code after it and they are the first
+  // things to fall off the bottom, exactly as the job gets big enough to want
+  // checking (docs/cam/dogfood-round.md, round 2). The list is the part that
+  // may scroll; what the job SAYS is not.
+  ImGui::Separator();
+  if (ImGui::Button("Generate###cam_generate")) {
+    RefreshCamToolpaths(state);
+    RunCamVerification(state);
+  }
+  ImGui::SameLine();
+  ImGui::Checkbox("Show path###cam_show", &state.camShowToolpath);
+
+  // G4: what the verifier found, in words, without being asked. The numbers
+  // behind these lines are in the same Verdict the RPC returns.
+  for (const cam::VerdictLine& line : state.camVerdict) {
+    const ImVec4 color = line.level == cam::VerdictLine::Level::Bad
+                             ? ImVec4(0.95f, 0.45f, 0.40f, 1.0f)
+                         : line.level == cam::VerdictLine::Level::Warn
+                             ? ImVec4(0.95f, 0.80f, 0.40f, 1.0f)
+                             : ImVec4(0.55f, 0.90f, 0.60f, 1.0f);
+    // The icon font is merged into the UI atlas, so these are real glyphs;
+    // a literal U+2713 would not be (the text font stops at Latin-1).
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::TextWrapped("%s %s",
+                       line.level == cam::VerdictLine::Level::Good
+                           ? ICON_FA_CIRCLE_CHECK
+                           : ICON_FA_TRIANGLE_EXCLAMATION,
+                       line.text.c_str());
+    ImGui::PopStyleColor();
+  }
+
+  if (!state.camToolpaths.empty()) {
+    double total = 0.0;
+    int failed = 0;
+    for (const cam::Toolpath& tp : state.camToolpaths) {
+      total += tp.CutLength();
+      if (!tp.error.empty())
+        failed++;
+    }
+    ImGui::TextDisabled("%.0f mm of cutting", total);
+    if (failed > 0) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f),
+                         "· %d operation%s produced nothing", failed,
+                         failed == 1 ? "" : "s");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Save G-code###cam_post")) {
+      // Beside the project, named after the setup: somewhere findable, and
+      // never overwriting the model.
+      std::string path = state.projectPath.empty()
+                             ? std::string("job.nc")
+                             : state.projectPath + "/" + setup->name + ".nc";
+      std::string gcode, error;
+      if (cam::PostProcess(setup->post, *setup, state.camToolpaths,
+                           PostOpts(*setup), gcode, &error) &&
+          DocumentIO::WriteTextAtomic(path, gcode, &error)) {
+        state.camLastPost = path;
+        LOG_INFO("CAM: wrote {}", path);
+      } else {
+        state.camLastPost = "could not write: " + error;
+      }
+    }
+  }
+  if (!state.camLastPost.empty())
+    ImGui::TextDisabled("%s", state.camLastPost.c_str());
+
   // --- operations --------------------------------------------------------
   ImGui::SeparatorText("Operations");
   uint64_t removeOp = 0;
@@ -497,70 +567,6 @@ void DrawCamPanel(AppState& state) {
     ImGui::TextWrapped("%s", state.camRefusal.c_str());
     ImGui::PopStyleColor();
   }
-
-  // --- generate / post ---------------------------------------------------
-  ImGui::Separator();
-  if (ImGui::Button("Generate###cam_generate")) {
-    RefreshCamToolpaths(state);
-    RunCamVerification(state);
-  }
-  ImGui::SameLine();
-  ImGui::Checkbox("Show path###cam_show", &state.camShowToolpath);
-
-  // G4: what the verifier found, in words, without being asked. The numbers
-  // behind these lines are in the same Verdict the RPC returns.
-  for (const cam::VerdictLine& line : state.camVerdict) {
-    const ImVec4 color = line.level == cam::VerdictLine::Level::Bad
-                             ? ImVec4(0.95f, 0.45f, 0.40f, 1.0f)
-                         : line.level == cam::VerdictLine::Level::Warn
-                             ? ImVec4(0.95f, 0.80f, 0.40f, 1.0f)
-                             : ImVec4(0.55f, 0.90f, 0.60f, 1.0f);
-    // The icon font is merged into the UI atlas, so these are real glyphs;
-    // a literal U+2713 would not be (the text font stops at Latin-1).
-    ImGui::PushStyleColor(ImGuiCol_Text, color);
-    ImGui::TextWrapped("%s %s",
-                       line.level == cam::VerdictLine::Level::Good
-                           ? ICON_FA_CIRCLE_CHECK
-                           : ICON_FA_TRIANGLE_EXCLAMATION,
-                       line.text.c_str());
-    ImGui::PopStyleColor();
-  }
-
-  if (!state.camToolpaths.empty()) {
-    double total = 0.0;
-    int failed = 0;
-    for (const cam::Toolpath& tp : state.camToolpaths) {
-      total += tp.CutLength();
-      if (!tp.error.empty())
-        failed++;
-    }
-    ImGui::TextDisabled("%.0f mm of cutting", total);
-    if (failed > 0) {
-      ImGui::SameLine();
-      ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f),
-                         "· %d operation%s produced nothing", failed,
-                         failed == 1 ? "" : "s");
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Save G-code###cam_post")) {
-      // Beside the project, named after the setup: somewhere findable, and
-      // never overwriting the model.
-      std::string path = state.projectPath.empty()
-                             ? std::string("job.nc")
-                             : state.projectPath + "/" + setup->name + ".nc";
-      std::string gcode, error;
-      if (cam::PostProcess(setup->post, *setup, state.camToolpaths,
-                           PostOpts(*setup), gcode, &error) &&
-          DocumentIO::WriteTextAtomic(path, gcode, &error)) {
-        state.camLastPost = path;
-        LOG_INFO("CAM: wrote {}", path);
-      } else {
-        state.camLastPost = "could not write: " + error;
-      }
-    }
-  }
-  if (!state.camLastPost.empty())
-    ImGui::TextDisabled("%s", state.camLastPost.c_str());
 
   if (dirty) {
     state.projectMetaDirty = true;

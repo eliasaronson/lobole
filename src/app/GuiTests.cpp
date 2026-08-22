@@ -988,7 +988,103 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const cam::Setup* live = Doc()->FindCamSetup(setup.id);
     IM_CHECK(live != nullptr);
     IM_CHECK(std::abs(live->origin.z - 12.0) < 1e-6); // the plate's top
-    IM_CHECK(std::abs(live->stock.margin.z) < 1e-9);  // picked face IS the top
+    // The pick says where Z zero is, and NOTHING about how much material sits
+    // above the part — it used to zero that, which threw away an allowance
+    // already typed and made "Face the top" refuse right after the pick meant
+    // to set the job up (docs/cam/dogfood-round.md, round 2).
+    IM_CHECK(std::abs(live->stock.margin.z - 1.0) < 1e-9);
+    const cam::DerivedOp face = cam::DeriveOperation(
+        *live, Doc()->GetBodies(), cam::OpType::Face, ElementRef{});
+    IM_CHECK(face.ok); // so the first verb on a rough board just works
+  };
+
+  // The floating tool window FOLLOWS the viewport. Anchoring it once, on the
+  // appearing frame, placed it against a size AlwaysAutoResize had not
+  // computed yet, and any later layout change left it stranded over the
+  // middle of the model it is asking you to click (dogfooding round 2).
+  t = IM_REGISTER_TEST(engine, "cam", "tool_window_follows_the_viewport");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    s_App->camToolOpen = true;
+    ctx->Yield(4); // one frame to size it, one to place it against that size
+
+    const auto rightEdge = [&]() {
+      ImGuiWindow* w = ImGui::FindWindowByName("CAM###ToolWindow");
+      return w != nullptr ? w->Pos.x + w->Size.x : -1.0f;
+    };
+    const float want = s_App->viewportPos.x + s_App->viewportSize.x - 12.0f;
+    IM_CHECK(rightEdge() > 0.0f);
+    IM_CHECK(std::abs(rightEdge() - want) < 2.0f);
+
+    // Now move the viewport under it: the terminal panel docks into the
+    // central node, so turning it on genuinely narrows the 3D view. The
+    // window must come with it rather than stay where it was.
+    const bool hadTerminal = s_App->settings.terminalPanel;
+    s_App->settings.terminalPanel = true;
+    s_App->buildDefaultDockLayout = true;
+    ctx->Yield(8);
+    const float narrowed = s_App->viewportPos.x + s_App->viewportSize.x - 12.0f;
+    IM_CHECK(narrowed < want - 10.0f); // the viewport really did move
+    IM_CHECK(std::abs(rightEdge() - narrowed) < 2.0f);
+
+    s_App->settings.terminalPanel = hadTerminal;
+    s_App->buildDefaultDockLayout = true;
+    ctx->Yield(8);
+    IM_CHECK(std::abs(rightEdge() - (s_App->viewportPos.x +
+                                     s_App->viewportSize.x - 12.0f)) < 2.0f);
+    s_App->camToolOpen = false;
+  };
+
+  // The view a machinist works in. The app's up is +Y and CAM's is +Z, so the
+  // plan view — down the spindle — is filed under "Front" in Standard Views
+  // and the entry called "Top" shows the part edge-on. CAM offers the view it
+  // means, in the frame THIS setup cuts in (docs/cam/dogfood-round.md).
+  t = IM_REGISTER_TEST(engine, "cam", "look_down_the_spindle");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    s_App->camToolOpen = true;
+    ctx->Yield(3);
+
+    // 3-axis: the spindle points down the world's -Z, so the camera looks
+    // that way whatever it was doing before.
+    s_App->camera->SnapToView(glm::normalize(glm::vec3(1, 1, 0.2f)),
+                              glm::vec3(0, 1, 0));
+    ctx->Yield(2);
+    ctx->ItemClick("//CAM###ToolWindow/###cam_view_spindle");
+    ctx->Yield(150); // AlignToFace animates; wait for it to land
+    glm::vec3 fwd = glm::normalize(s_App->camera->GetForward());
+    IM_CHECK(std::abs(fwd.z + 1.0f) < 0.02f); // looking along -Z
+    IM_CHECK(std::abs(fwd.x) < 0.02f);
+    IM_CHECK(std::abs(fwd.y) < 0.02f);
+
+    // Indexed: the table has turned 90 degrees about X, so the spindle now
+    // looks down the part's +Y. Verifying against the WORLD axes here would
+    // pass for a job cut in the wrong frame.
+    Doc()->FindCamSetup(setup.id)->rotationA = 90.0;
+    ctx->Yield(2);
+    s_App->camera->SnapToView(glm::normalize(glm::vec3(1, 1, 0.2f)),
+                              glm::vec3(0, 1, 0));
+    ctx->Yield(2);
+    ctx->ItemClick("//CAM###ToolWindow/###cam_view_spindle");
+    ctx->Yield(150);
+    fwd = glm::normalize(s_App->camera->GetForward());
+    const glm::dvec3 spindle = cam::FromSetupSpace(
+        *Doc()->FindCamSetup(setup.id), glm::dvec3(0, 0, 1));
+    const glm::vec3 want = -glm::normalize(glm::vec3(spindle));
+    IM_CHECK(glm::length(fwd - want) < 0.03f);
+    s_App->camToolOpen = false; // the toolbar button TOGGLES: do not leak it
   };
 
   // G2-G4 (docs/cam/gui.md): the verbs. Two clicks — the verb, then the face

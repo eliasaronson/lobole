@@ -1,9 +1,10 @@
 # CAM dogfooding — the coupon, and two rounds
 
 > Status: **both rounds done** (2026-08-22) — findings at the end. Two rounds
-> against one real part: once over the RPC, once by clicking. Fifteen defects,
-> all but two fixed. **Nothing has been cut yet** — the last section is what to
-> watch for when it is.
+> against one real part: once over the RPC, once by clicking. Fourteen defects
+> and five papercuts, all fixed; one reported finding turned out not to be one.
+> **Nothing has been cut yet** — the last section is what to watch for when it
+> is.
 >
 > Everything CAM has shipped — C1–C9 and G1–G4 — had been verified against
 > simulated material and nothing had cut anything. That is what this was for.
@@ -193,35 +194,54 @@ Two things an agent could not do at all, and now can:
 `method` — `help` among them — because it collided with `call`'s own argument.
 `request(method, params_dict)` is the way in.
 
-### Left open
+### The papercuts, since fixed
 
-**The viewport picker will not return a wall inside a pocket or a through
-opening.** Thirty-odd clicks into the slot and around the pocket returned
-nothing at all, while the part's own outer wall and every level face pick
-first time. So "click the wall" — the only route to machining a through opening
-— works over the RPC and not by clicking, and the coupon's bolt slot cannot be
-programmed in the GUI. This is a picking bug rather than a CAM one, and it is
-the next thing to fix.
+Round 2 left five smaller things written down rather than fixed. They were
+fixed the same day; each is a line in the panel now rather than a line here.
 
-Smaller, and written down rather than fixed:
-
-- **The standard views are named for the CAD frame, not the machine's.** A
-  machinist's plan view — looking down the spindle — is "Front" here, and
-  "Top" shows the part edge-on. CAM's Z is +Z; the app's up is +Y.
-- **Picking the top face sets the facing allowance to zero**, so "Face the top"
-  then refuses and the coupon's first operation needs a detour into Stock and
-  safety. The refusal says exactly that, which is why it is a papercut and not
-  a defect.
-- **The verb window is placed once and stays put.** It anchors top-right of the
-  viewport when it opens; change the layout, or let it grow as operations are
-  added, and it can end up over the model it is asking you to click. It is
-  draggable, so a person recovers.
+- **The standard views are named for the CAD frame, not the machine's** — a
+  machinist's plan view is filed under "Front", and "Top" shows the part
+  edge-on, because CAM's Z is +Z and the app's up is +Y. Renaming the CAD
+  frame would be wrong for everything else, so CAM offers the view it means:
+  **Look down the spindle**, in the frame *this setup* cuts in. An indexed job
+  looks down its own spindle, not the world's.
+- **Picking the top face set the facing allowance to zero**, so "Face the top"
+  refused immediately after the pick meant to set the job up, and the coupon's
+  first operation needed a detour into Advanced to undo it. Worse, it threw
+  away an allowance already typed. The pick now says where Z zero is and
+  nothing about how much material sits above the part; the default 1 mm is the
+  rough board a facing pass exists for.
+- **The verb window was placed once and stayed put** — anchored on the frame it
+  appeared, against a size `AlwaysAutoResize` had not computed yet, and left
+  there. Change the layout and it sat over the middle of the model it was
+  asking you to click. It follows the viewport now, and re-anchors on reopen.
 - **`ui_items` truncates labels at 32 characters** (the test engine's own
-  limit), so for a long label the `###id` is cut off — and the truncated string
-  is exactly what one would paste into `item_click`, where it fails. The
-  numeric `id` in the same listing always works.
-- **The CAM panel's Generate / verdict / Save G-code fall below the fold** at
-  720 px with the default layout, and no RPC scrolls a panel into view.
+  buffer), so for a long label the `###id` is cut off — and the truncated
+  string is exactly what one would paste into `item_click`, where it fails.
+  The listing now says `label_truncated`, and the numeric `id` always works.
+- **The CAM panel's Generate / verdict / Save G-code fell below the fold** at
+  720 px with the default layout, and no RPC scrolls a panel into view. They
+  sit ABOVE the operations list now: the list is the part that grows with the
+  job, and what the job *says* is not the thing that should fall off the bottom
+  as the job gets big enough to want checking.
+
+### One finding that was not one
+
+Round 2 reported that the picker would not return a wall inside a pocket or a
+through opening, and that the coupon's bolt slot therefore could not be
+programmed by clicking. **That was wrong, and worth recording as the trap it
+is.** Thirty clicks into the slot returned nothing because a through opening is
+a hole: a ray down the middle of it passes clean through the part and hits
+nothing, which is the correct answer. The walls are a band at one edge of the
+opening, and how wide that band is depends entirely on the view angle — from
+straight above it is zero. Aimed at the wall rather than at the hole, the
+picker returns it first time (`face 14`, normal (1,0,0), centre X84 Y30 Z8.5),
+and the verb builds the operation: "Cut the opening: 6 mm tool, 19 mm deep in
+7 passes" with a verdict of "Machines the part cleanly."
+
+The lesson for driving the GUI from a script: a click that hits nothing looks
+exactly like a click on something that cannot be picked. When a pick is armed
+the panel does say "Nothing there", which is the difference — read it.
 
 ## Still not done: cutting it
 

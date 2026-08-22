@@ -995,6 +995,14 @@ struct AppState {
   // viewport over, and modes have a known exit-bug class here (U11).
   bool camToolOpen = false;
 
+  // Where the floating tool window was last anchored: the top-right corner of
+  // the 3D viewport at the time. Kept so the window can FOLLOW the viewport —
+  // anchoring once left it stranded over the model whenever the layout
+  // changed (docs/cam/dogfood-round.md, round 2).
+  glm::vec2 toolWindowAnchor{-1.0f, -1.0f};
+  int toolWindowAnchorFrames = 0;
+  int toolWindowLastFrame = -2; // the frame it last drew, to spot a reopen
+
   // A docked panel asked to come forward (focus_panel over the RPC). Focus
   // takes effect on the next frame, and a tab sharing a node with several
   // others needs the request repeated before it wins, so this is a countdown

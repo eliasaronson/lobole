@@ -9,6 +9,8 @@
 #include "core/cam/CamVerify.h"
 #include "ui/AppActions.h" // AppendPrimLine/Dot, WorldToScreen
 #include "ui/CamPanel.h"
+
+#include "render/Camera.h"
 #include "ui/FeatureEditor.h"
 #include "ui/PreviewFeature.h"    // BeginToolWindowFrame
 #include "ui/SketchInteraction.h" // WorldToScreen (the depth label)
@@ -194,18 +196,28 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
       state.slotPick.miss = region.why;
       return;
     }
-    // Z zero is this face. The stock top follows it, and every operation's
-    // default top comes from there — so nobody types a depth again.
+    // Z zero is this face: where the operator touches off. How much material
+    // sits ABOVE the part is a different statement, and this used to make it
+    // for them — zeroing the stock allowance on the reading that "the picked
+    // face IS the top of the stock". That threw away an allowance already
+    // typed, and it made "Face the top" refuse immediately after the pick
+    // that is meant to set the job up: the first operation on a rough board
+    // needed a detour into Advanced to undo what this had just done
+    // (docs/cam/dogfood-round.md, round 2). The default 1 mm is the rough
+    // board every facing pass exists for; a board already flat is one number.
     setup->origin = glm::dvec3(0.0, 0.0, region.z);
-    setup->stock.margin.z = 0.0; // the picked face IS the top of the stock
     state.camTopFace = item.element;
-    // The stock just changed shape, so the rapid height that cleared the old
-    // one may now be inside the new one.
+    // The stock just moved, so the rapid height that cleared the old one may
+    // now be inside the new one.
     setup->safeZ = cam::DeriveSafeZ(*setup, state.document->GetBodies());
     state.camSafeZEdit = static_cast<float>(setup->safeZ);
-    for (cam::Operation& op : setup->operations)
-      if (op.topZ > region.z)
-        op.topZ = region.z;
+    // Operations that started above the stock come down to it — never up: an
+    // operation asked for a shallower top than the stock is a choice.
+    glm::dvec3 lo(0.0), hi(0.0);
+    if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi))
+      for (cam::Operation& op : setup->operations)
+        if (op.topZ > hi.z)
+          op.topZ = hi.z;
     state.slotPick = {};
     state.projectMetaDirty = true;
     RefreshCamToolpaths(state);
@@ -313,6 +325,24 @@ void DrawCamToolWindow(AppState& state) {
     ImGui::TextDisabled("A %.2f°", setup->rotationA);
   else
     ImGui::TextDisabled("A 0° (3-axis)");
+
+  // The view a machinist works in, by the name a machinist uses. The app's up
+  // is +Y and CAM's is +Z, so the plan view — looking down the spindle — is
+  // filed under "Front" in Standard Views, and the entry called "Top" shows
+  // the part edge-on (docs/cam/dogfood-round.md, round 2). Rather than rename
+  // the CAD frame, CAM offers the view it means, in the frame this setup cuts
+  // in: an indexed job looks down ITS spindle, not the world's.
+  if (ImGui::Button("Look down the spindle###cam_view_spindle") &&
+      state.camera != nullptr && setup != nullptr) {
+    glm::dvec3 lo(0.0), hi(0.0);
+    glm::vec3 at(0.0f);
+    if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi))
+      at = glm::vec3(cam::FromSetupSpace(*setup, (lo + hi) * 0.5));
+    const glm::dvec3 down = cam::FromSetupSpace(*setup, glm::dvec3(0, 0, 1));
+    state.camera->AlignToFace(at, glm::normalize(glm::vec3(down)));
+  }
+  ImGui::SetItemTooltip("Plan view, in the frame this setup cuts in — what "
+                        "the machine sees, whatever the view cube calls it");
 
   ImGui::Separator();
   ImGui::TextDisabled("Machine it");

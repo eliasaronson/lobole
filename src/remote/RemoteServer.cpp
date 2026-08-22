@@ -481,7 +481,15 @@ struct ItemTarget {
 json ItemsToJson(const ImGuiTestItemList& items) {
   json out = json::array();
   for (const ImGuiTestItemInfo& it : items) {
+    // The test engine keeps a 32-byte DebugLabel, so a longer one arrives
+    // CUT — including its "###id" suffix, if the suffix is what falls off.
+    // A caller who pastes that back into item_click gets "unable to locate
+    // item"; the numeric id below always works. Say which labels are cut
+    // rather than let them look whole.
+    const bool cut =
+        std::strlen(it.DebugLabel) >= IM_ARRAYSIZE(it.DebugLabel) - 1;
     json e{{"label", it.DebugLabel},
+           {"label_truncated", cut},
            {"id", it.ID},
            {"depth", it.Depth},
            {"disabled", (it.ItemFlags & ImGuiItemFlags_Disabled) != 0},
@@ -794,7 +802,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
                    "survive between RPCs)."},
     {"ui_items", "UI test tier: list the widgets under {ref} (default the "
                  "focused window, {depth}): label, id, window, disabled, "
-                 "screen centre. The GUI, self-described."},
+                 "screen centre. The GUI, self-described. Labels come from a "
+                 "32-byte buffer, so a long one is CUT — `label_truncated` "
+                 "says so, and the numeric `id` is the handle item_click "
+                 "always accepts."},
     {"focus_panel",
      "UI test tier: bring a docked panel's TAB forward {name}, e.g. \"CAM\", "
      "\"Model\", \"History\". A panel tabbed behind another is invisible to "

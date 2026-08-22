@@ -115,8 +115,30 @@ void BeginToolWindowFrame(AppState& state, const std::string& title) {
   const glm::vec2 tr = state.viewportPos +
                        glm::vec2(state.viewportSize.x, 0.0f) +
                        glm::vec2(-12.0f, 12.0f);
-  ImGui::SetNextWindowPos(ImVec2(tr.x, tr.y), ImGuiCond_Appearing,
-                          ImVec2(1.0f, 0.0f));
+  // Re-anchor when the VIEWPORT moves or resizes. Placing it once, on the
+  // appearing frame, had two costs: the pivot was applied against a size
+  // AlwaysAutoResize had not computed yet (hence the clamp below), and any
+  // later layout change — docking a panel, closing the terminal — left the
+  // window stranded over the middle of the model it is asking you to click
+  // (docs/cam/dogfood-round.md, round 2). Two frames: one to learn the size,
+  // one to place it against the real size. Dragging it still sticks, until
+  // the viewport changes again.
+  // A window that has just (re)appeared is anchored afresh, whatever it was
+  // doing before: it may have been dragged, or closed in one layout and
+  // reopened in another, and "the viewport has not moved since" is then the
+  // wrong question.
+  if (state.toolWindowLastFrame + 1 != ImGui::GetFrameCount())
+    state.toolWindowAnchor = glm::vec2(-1.0f, -1.0f);
+  state.toolWindowLastFrame = ImGui::GetFrameCount();
+  if (glm::distance(state.toolWindowAnchor, tr) > 1.0f) {
+    state.toolWindowAnchor = tr;
+    state.toolWindowAnchorFrames = 2;
+  }
+  const ImGuiCond anchorCond =
+      state.toolWindowAnchorFrames > 0 ? ImGuiCond_Always : ImGuiCond_Appearing;
+  if (state.toolWindowAnchorFrames > 0)
+    state.toolWindowAnchorFrames--;
+  ImGui::SetNextWindowPos(ImVec2(tr.x, tr.y), anchorCond, ImVec2(1.0f, 0.0f));
   ImGui::SetNextWindowBgAlpha(0.96f);
   ImGuiWindowFlags flags =
       ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoResize |
