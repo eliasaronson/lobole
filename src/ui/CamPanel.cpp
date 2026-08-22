@@ -409,18 +409,27 @@ void DrawCamPanel(AppState& state) {
     ImGui::SameLine();
     if (ImGui::Button("Save G-code###cam_post")) {
       // Beside the project, named after the setup: somewhere findable, and
-      // never overwriting the model.
-      std::string path = state.projectPath.empty()
-                             ? std::string("job.nc")
-                             : state.projectPath + "/" + setup->name + ".nc";
-      std::string gcode, error;
-      if (cam::PostProcess(setup->post, *setup, state.camToolpaths,
-                           PostOpts(*setup), gcode, &error) &&
-          DocumentIO::WriteTextAtomic(path, gcode, &error)) {
-        state.camLastPost = path;
-        LOG_INFO("CAM: wrote {}", path);
+      // never overwriting the model. With no project there is no "beside",
+      // and the fallback was a bare "job.nc" — written into whatever
+      // directory the app was launched from, which for a dev build is the
+      // repo. Refuse and say where it would go instead of leaving G-code
+      // somewhere nobody will look for it (docs/cam/dogfood-round.md).
+      if (state.projectPath.empty()) {
+        state.camLastPost =
+            "save the project first — the G-code goes beside it, named after "
+            "the setup";
+        LOG_INFO("CAM: refused to post an unsaved project");
       } else {
-        state.camLastPost = "could not write: " + error;
+        std::string path = state.projectPath + "/" + setup->name + ".nc";
+        std::string gcode, error;
+        if (cam::PostProcess(setup->post, *setup, state.camToolpaths,
+                             PostOpts(*setup), gcode, &error) &&
+            DocumentIO::WriteTextAtomic(path, gcode, &error)) {
+          state.camLastPost = path;
+          LOG_INFO("CAM: wrote {}", path);
+        } else {
+          state.camLastPost = "could not write: " + error;
+        }
       }
     }
   }

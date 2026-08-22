@@ -129,7 +129,7 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
                            const char* shortcut) {
     add(std::string("View: ") + name, shortcut, true, [n](AppState& s) {
       if (s.camera)
-        s.camera->AlignToFace(glm::vec3(0.0f), n);
+        s.camera->AlignToFace(s.camera->GetTarget(), n); // pivot, not origin
     });
   };
   stdView("Front", {0, 0, 1}, "Shift+1");

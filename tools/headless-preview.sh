@@ -17,6 +17,7 @@
 #
 # Usage:
 #   tools/headless-preview.sh [port]            # serve until Ctrl-C (default 8798)
+#   tools/headless-preview.sh --stop [port]     # stop it, by the pid it announced
 #   tools/headless-preview.sh --render PROJECT OUT.png [port]
 #                                               # one-shot: open, screenshot, exit
 #
@@ -70,6 +71,26 @@ if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
     cp "$REAL_CONFIG" "$DESIGNER_PREVIEW_CONFIG/designer/settings.json"
 fi
 export XDG_CONFIG_HOME="$DESIGNER_PREVIEW_CONFIG"
+
+# --stop <port>: kill the instance on that port, by the PID IT ANNOUNCED.
+# There was no supported way to stop one, so the reflex is `pkill -f designer`
+# or `pgrep -f "remote 8842"` — and BOTH match the shell that runs them, so an
+# agent tearing down its own scratch instance kills its own session instead.
+# The instance registry has the pid; use it.
+if [ "${1:-}" = "--stop" ]; then
+  PORT="${2:-8798}"
+  REG="${XDG_STATE_HOME:-$HOME/.local/state}/designer/instances/$PORT.json"
+  [ -f "$REG" ] || { echo "headless-preview: nothing announced on $PORT" >&2; exit 1; }
+  PID="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$REG")"
+  [ -n "$PID" ] || { echo "headless-preview: no pid in $REG" >&2; exit 1; }
+  if kill "$PID" 2>/dev/null; then
+    echo "headless-preview: stopped $PID on port $PORT"
+  else
+    echo "headless-preview: $PID is already gone; clearing $PORT" >&2
+  fi
+  rm -f "$REG"
+  exit 0
+fi
 
 if [ "${1:-}" = "--render" ]; then
   PROJECT="$2"; OUT="$3"; PORT="${4:-8798}"

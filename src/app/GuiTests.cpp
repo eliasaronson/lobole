@@ -998,6 +998,36 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(face.ok); // so the first verb on a rough board just works
   };
 
+  // A standard view is an ORIENTATION, not a place. Every one of them —
+  // the menu, the view cube, the Shift+1..7 shortcuts, the command palette —
+  // passed the world origin as the point to look at, so fitting the view on a
+  // part modelled away from the origin and then pressing Front left you
+  // looking at empty space beside it (docs/cam/dogfood-round.md).
+  t = IM_REGISTER_TEST(engine, "view", "standard_views_keep_the_pivot");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // Modelled well away from the origin, which is where this went wrong.
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "Plate", glm::vec3(200, 100, 50), 60, 40, 12));
+    ctx->Yield(2);
+    ui::FitCameraToDocument(*s_App);
+    ctx->Yield(4);
+    const glm::vec3 fitted = s_App->camera->GetTarget();
+    IM_CHECK(glm::length(fitted) > 100.0f); // it really is off the origin
+
+    ctx->MenuClick("View/Standard Views/Front");
+    ctx->Yield(180); // AlignToFace animates
+    ctx->LogInfo("target after Front: %.1f %.1f %.1f",
+                 s_App->camera->GetTarget().x, s_App->camera->GetTarget().y,
+                 s_App->camera->GetTarget().z);
+    IM_CHECK(glm::length(s_App->camera->GetTarget() - fitted) < 1.0f);
+    // …and it did turn: looking along -Z, the app's "Front".
+    const glm::vec3 fwd = glm::normalize(s_App->camera->GetForward());
+    IM_CHECK(std::abs(fwd.z + 1.0f) < 0.02f);
+  };
+
   // Fitting the view with a tool window open puts the model in the band the
   // window LEAVES. The pan was the wrong way round — it pushed the model
   // under the very window the branch exists to clear — and nothing noticed,

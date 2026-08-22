@@ -249,7 +249,7 @@ void HandleViewportInput(AppState& state) {
       // Shift+1..7: standard views (camera aligned along the axis normal;
       // distance 0 keeps the current zoom).
       auto view = [&](glm::vec3 n) {
-        state.camera->AlignToFace(glm::vec3(0.0f), n);
+        state.camera->AlignToFace(state.camera->GetTarget(), n);
       };
       if (ImGui::IsKeyPressed(ImGuiKey_1))
         view({0, 0, 1}); // Front

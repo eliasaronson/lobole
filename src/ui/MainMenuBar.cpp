@@ -211,7 +211,12 @@ void DrawViewMenu(AppState& state) {
   if (ImGui::BeginMenu("Standard Views")) {
     const auto view = [&](const char* name, glm::vec3 n, const char* shortcut) {
       if (ImGui::MenuItem(name, shortcut) && state.camera)
-        state.camera->AlignToFace(glm::vec3(0.0f), n);
+        // The camera's OWN pivot, not the world origin. Every standard
+        // view used to slam the target to (0,0,0): fit the view on a part
+        // modelled away from the origin, press Front, and you are looking at
+        // empty space beside it. A standard view is an orientation, not a
+        // place (docs/cam/dogfood-round.md).
+        state.camera->AlignToFace(state.camera->GetTarget(), n);
     };
     view("Front", {0, 0, 1}, "Shift+1");
     view("Back", {0, 0, -1}, "Shift+2");

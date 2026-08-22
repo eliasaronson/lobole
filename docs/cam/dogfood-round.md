@@ -39,7 +39,7 @@ Own scratch port, `headless-preview.sh`. The sequence a person actually runs,
 in order, because that is where the last three rounds of bugs lived — not in
 the features taken one at a time.
 
-1. Build the part from features (regenerable script in `scratch/`).
+1. Build the part from features (`scratch/holddown_clamp.py`, regenerable — run it against any instance and it rebuilds the part and the job).
 2. `add_cam_setup`, pick Z zero from the top face, face the top.
 3. Pocket from its floor — assert it chose **adaptive** and that no depth was
    typed.

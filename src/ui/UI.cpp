@@ -170,7 +170,7 @@ void DrawViewCube(AppState& state) {
   if (homeHot) {
     clicked = false; // the cube must not also swallow this click
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-      state.camera->AlignToFace(glm::vec3(0.0f),
+      state.camera->AlignToFace(state.camera->GetTarget(),
                                 glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)));
     }
     ImGui::SetTooltip("Isometric view (Shift+7)");
@@ -236,7 +236,8 @@ void DrawViewCube(AppState& state) {
   if (hotAny) {
     clicked = false; // the hotspot owns this click, not the face under it
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left))
-      state.camera->AlignToFace(glm::vec3(0.0f), glm::normalize(hotDir));
+      state.camera->AlignToFace(state.camera->GetTarget(),
+                                glm::normalize(hotDir));
     ImGui::SetTooltip(hotIsCorner ? "Corner view" : "Edge view");
   }
 
@@ -266,7 +267,7 @@ void DrawViewCube(AppState& state) {
                   hot ? IM_COL32_WHITE : IM_COL32(205, 215, 230, 230), f.label);
     }
     if (hot && clicked)
-      state.camera->AlignToFace(glm::vec3(0.0f), f.normal);
+      state.camera->AlignToFace(state.camera->GetTarget(), f.normal);
   }
 
   // Draw the home corner last so it sits above the cube's faces.
