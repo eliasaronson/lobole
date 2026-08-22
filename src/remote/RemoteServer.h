@@ -159,6 +159,10 @@ private:
   int m_screenshotClient = -1;
   std::string m_screenshotPath;
   bool m_screenshotPending = false;
+  // Frames a staged capture has waited for the camera to stop moving. A
+  // capture taken mid-animation shows a view nobody asked for; the cap is so
+  // an animation that never ends cannot hold a client forever.
+  int m_screenshotHeldFrames = 0;
   uint64_t m_lastFrameHash = 0; // unchanged-frame postcondition
   SheetJob m_sheet;
 

@@ -998,6 +998,39 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(face.ok); // so the first verb on a rough board just works
   };
 
+  // A tool session belongs to the document it is editing. File > New used to
+  // leave every one of them open on a document that no longer existed —
+  // including a feature-editor session naming a feature that had just been
+  // discarded. The one that bit was camToolOpen: it is a TOGGLE, so a stale
+  // one turned OFF at the next click on the button meant to turn it on, and
+  // the failure surfaced in an unrelated test (docs/cam/dogfood-round.md).
+  t = IM_REGISTER_TEST(engine, "app", "new_document_closes_tool_sessions");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+
+    // Every transient session at once, so this test fails if a NEW one is
+    // added without being cleared alongside the rest.
+    s_App->editFeatureId = Doc()->GetFeature(0)->GetId();
+    s_App->camToolOpen = true;
+    s_App->measure.active = true;
+    s_App->dimTool.active = true;
+    s_App->mateTool.active = true;
+    ctx->Yield(2);
+
+    ctx->MenuClick("File/New");
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->editFeatureId, (uint64_t)0);
+    IM_CHECK(!s_App->camToolOpen);
+    IM_CHECK(!s_App->measure.active);
+    IM_CHECK(!s_App->dimTool.active);
+    IM_CHECK(!s_App->mateTool.active);
+  };
+
   // A standard view is an ORIENTATION, not a place. Every one of them —
   // the menu, the view cube, the Shift+1..7 shortcuts, the command palette —
   // passed the world origin as the point to look at, so fitting the view on a

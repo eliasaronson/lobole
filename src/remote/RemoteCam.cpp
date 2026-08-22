@@ -60,7 +60,11 @@ constexpr MethodDoc kCamMethods[] = {
     {"cam_verify",
      "Simulate the POSTED G-code for a setup {setup, resolution?} and compare "
      "the result with the model: {max_gouge_mm, max_leftover_mm, "
-     "leftover_area_mm2, leftover_regions, rapids_through_stock, ok, says}. "
+     "leftover_area_mm2, leftover_regions, rapids_through_stock, ok, "
+     "complete, says}. `ok` = nothing scraps the part or breaks the tool (no "
+     "gouge, no rapid through material) and is the one to gate on; `complete` "
+     "= nothing left standing, which a correct job with tabs or a dropping "
+     "slug will NOT satisfy. "
      "Runs on the file, not the toolpath, so it catches post and modal-state "
      "bugs too. `says` is the verdict in the same sentences the panel shows. "
      "Leftover in several tiny regions is the inside corners a round cutter "
@@ -456,7 +460,13 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                 {"resolution_mm", res},
                 {"cells", v.cells},
                 {"says", says},
-                {"ok", v.Ok(tol)}};
+                // Two questions. `ok` is the one that is never in doubt:
+                // nothing here scraps the part or breaks the tool. `complete`
+                // is softer — a height map cannot watch a slug fall out of a
+                // through cut or know that tabs were asked for, so a correct
+                // job routinely reports material left over.
+                {"ok", v.Safe(tol)},
+                {"complete", v.Complete(tol)}};
   }
   if (m == "cam_toolpath" || m == "cam_post") {
     const cam::Setup& setup = RequireSetup(*doc, p.at("setup").get<uint64_t>());

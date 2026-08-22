@@ -806,6 +806,14 @@ static constexpr remote::MethodDoc kServerMethods[] = {
                  "32-byte buffer, so a long one is CUT — `label_truncated` "
                  "says so, and the numeric `id` is the handle item_click "
                  "always accepts."},
+    {"scroll_panel",
+     "UI test tier: scroll a docked panel {window, to: top|bottom|<y>}; "
+     "returns the widget list afterwards. This is for SEEING — a screenshot "
+     "shows only what is on screen, so the bottom of a long panel needs "
+     "scrolling to appear in one. It is not needed to reach a widget: no "
+     "panel here uses a list clipper, so ui_items lists items below the fold "
+     "and item_click scrolls them into view by itself. (`scroll` is a "
+     "different thing: it zooms the 3D viewport.)"},
     {"focus_panel",
      "UI test tier: bring a docked panel's TAB forward {name}, e.g. \"CAM\", "
      "\"Model\", \"History\". A panel tabbed behind another is invisible to "
@@ -1396,7 +1404,7 @@ bool RemoteServer::IsUiAction(const std::string& method) {
       "menu_click", "item_click",     "item_double_click", "item_input",
       "item_hover", "item_combo",     "popup_click",       "popup_items",
       "ui_items",   "viewport_click", "viewport_drag",     "key_press",
-      "menu_items", "scroll",         "focus_panel"};
+      "menu_items", "scroll",         "focus_panel",       "scroll_panel"};
   for (const char* a : kActions)
     if (method == a)
       return true;
@@ -1530,6 +1538,33 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       // click lands on the popup.
       if (ctx->UiContext->OpenPopupStack.Size > 0)
         ImGui::ClosePopupToLevel(0, true);
+    };
+  } else if (m == "scroll_panel") {
+    // For screenshots, not for reach. Round 2 of the CAM dogfooding reported
+    // that a panel's lower half was unreachable; it was not — nothing here
+    // uses ImGuiListClipper, so every item is submitted whether or not it is
+    // on screen, and the test engine scrolls to an item before clicking it.
+    // What a script genuinely cannot do without this is LOOK at the bottom of
+    // a panel, because a capture shows the pixels that exist.
+    const std::string window = p.at("window").get<std::string>();
+    const json to = p.value("to", json("bottom"));
+    m_uiAction = [this, window, to](ImGuiTestContext* ctx) {
+      const std::string ref =
+          window.rfind("//", 0) == 0 ? window : "//" + window;
+      if (to.is_number()) {
+        ctx->ScrollToY(ref.c_str(), to.get<float>());
+      } else {
+        const std::string where = to.get<std::string>();
+        if (where == "top")
+          ctx->ScrollToTop(ref.c_str());
+        else
+          ctx->ScrollToBottom(ref.c_str());
+      }
+      ctx->Yield(2);
+      ImGuiTestItemList items;
+      ctx->GatherItems(&items, ref.c_str());
+      m_uiActionResult =
+          json{{"window", window}, {"items", ItemsToJson(items)}};
     };
   } else if (m == "focus_panel") {
     // Focusing a docked window takes effect on the NEXT frame, and a tab
@@ -1680,6 +1715,7 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
       } else {
         m_screenshotPath = m_sheet.tilePaths[m_sheet.nextView];
         m_screenshotPending = true;
+        m_screenshotHeldFrames = 0;
         m_sheet.nextView++;
       }
     } else {
@@ -1778,6 +1814,7 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
         m_screenshotClient = request.client;
         m_screenshotPath = request.params.at("path").get<std::string>();
         m_screenshotPending = true;
+        m_screenshotHeldFrames = 0;
         return; // main loop captures after this frame renders
       }
       if (request.method == "render_sheet") {
@@ -1903,6 +1940,25 @@ void RemoteServer::ProcessPending(ui::AppState& state) {
 bool RemoteServer::WantsScreenshot(std::string& path) {
   if (!m_screenshotPending)
     return false;
+  // Not while the camera is still moving. A camera move ANIMATES for about a
+  // second, so a capture taken straight after one shows a frame part way
+  // through the turn — a view nobody asked for, and one that reads as a bug in
+  // whatever was being looked at. Two false findings in one dogfooding session
+  // came from exactly this (docs/cam/dogfood-round.md). The `view` RPC already
+  // dodges it by snapping instead of animating; every other route into a
+  // camera move — menu_click, the view cube, AlignToFace — does not, so the
+  // wait belongs here, where all of them pass through.
+  //
+  // Capped, because "wait for a condition" and "wait forever" are one bug
+  // apart: 300 frames is several times the longest animation, and after it the
+  // capture goes ahead rather than leaving a client with no answer.
+  constexpr int kMaxHeldFrames = 300;
+  if (m_state != nullptr && m_state->camera != nullptr &&
+      m_state->camera->IsAnimating() &&
+      m_screenshotHeldFrames < kMaxHeldFrames) {
+    m_screenshotHeldFrames++;
+    return false;
+  }
   path = m_screenshotPath;
   return true;
 }

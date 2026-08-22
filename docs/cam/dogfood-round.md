@@ -1,8 +1,9 @@
 # CAM dogfooding — the coupon, and two rounds
 
 > Status: **both rounds done** (2026-08-22) — findings at the end. Two rounds
-> against one real part: once over the RPC, once by clicking. Fourteen defects
-> and five papercuts, all fixed; one reported finding turned out not to be one.
+> against one real part: once over the RPC, once by clicking. Fourteen defects,
+> five papercuts and six pieces of friction in the surfaces used to drive the
+> app — all fixed; two reported findings turned out not to be findings.
 > **Nothing has been cut yet** — the last section is what to watch for when it
 > is.
 >
@@ -125,7 +126,8 @@ the same for a corner radius and a forgotten operation.
 
 ### The coupon, as it verifies now
 
-    gouge 0.000 mm, rapids through stock 0, 304 mm2 of leftover in 15 places
+    ok=True (no gouge, no rapid through stock), complete=False:
+    282 mm2 of leftover in 10 places, every one of them nameable
       228.6 mm2  18.00 deep at X  90.1 Y 29.9   the slot's slug — it drops out
        16.9 mm2   3.80 deep at X  72.7 Y -0.9   a tab, at its asked-for height
        16.8 mm2   3.80 deep at X  -0.8 Y 17.3   a tab
@@ -231,23 +233,76 @@ fixed the same day; each is a line in the panel now rather than a line here.
   job, and what the job *says* is not the thing that should fall off the bottom
   as the job gets big enough to want checking.
 
-### One finding that was not one
+### The friction, since fixed
 
-Round 2 reported that the picker would not return a wall inside a pocket or a
-through opening, and that the coupon's bolt slot therefore could not be
-programmed by clicking. **That was wrong, and worth recording as the trap it
-is.** Thirty clicks into the slot returned nothing because a through opening is
-a hole: a ray down the middle of it passes clean through the part and hits
-nothing, which is the correct answer. The walls are a band at one edge of the
-opening, and how wide that band is depends entirely on the view angle — from
-straight above it is zero. Aimed at the wall rather than at the hole, the
-picker returns it first time (`face 14`, normal (1,0,0), centre X84 Y30 Z8.5),
-and the verb builds the operation: "Cut the opening: 6 mm tool, 19 mm deep in
-7 passes" with a verdict of "Machines the part cleanly."
+Six things the rounds noticed about the surfaces used to drive the app rather
+than about CAM. All of them either produced a false finding during the rounds
+or would have.
+
+- **A screenshot taken mid-animation is a lie.** A camera move animates for
+  about a second, so a capture straight after one shows a frame part way
+  through the turn. Twice this round that read as a bug in whatever was being
+  looked at ("standard views come out rolled", "Fit View doesn't fit"); both
+  were tweens. The capture is already deferred until after a frame renders —
+  it now also waits for the camera to stop, capped so an animation that never
+  ends cannot hold a client.
+- **`cam_verify`'s `ok` could never be true for a real job.** One flag answered
+  two questions, and only one of them is ever certain. `ok` now means nothing
+  scraps the part or breaks the tool — no gouge, no rapid through material —
+  and `complete` means nothing is left standing. The coupon reports
+  `ok: true, complete: false`, which is the honest answer for a job with four
+  tabs and a slug that drops out.
+- **File > New left every tool session open** on a document that no longer
+  existed, including a feature-editor session naming a feature that had just
+  been discarded. The one that bit was `camToolOpen`: it is a toggle, so a
+  stale one turned OFF at the next click on the button meant to turn it on,
+  and the failure surfaced in an unrelated test.
+- **`gui-tests-xvfb.sh -f <case>` exited 0 on a failing test.** It `exec`ed
+  straight through, so the status was xvfb-run's — which the script's own
+  comment calls unreliable, which is why the sharded path parses the log
+  instead. A filter matching nothing also read as a pass. Both are failures
+  now, and the final line says "passed" rather than "run", and stale shard
+  logs are cleared at the start of a run rather than left to be misread as
+  current.
+- **An adaptive pocket posted ~30,000 lines** with arc fitting off — the
+  setting a controller that mishandles arcs is left with, and those are the
+  slow ones. Straight runs now collapse to their endpoints, within the same
+  chord tolerance the path was flattened at: 29,860 lines to 15,463. The merge
+  runs only where the arc fitter has declined, and stops before any arc — the
+  first points of a tangentially-leaving arc are collinear with the line
+  feeding into it, and an unchecked run swallowed them and cost 316 arcs. The
+  verifier reports the same gouge, the same leftover and the same regions to
+  the digit.
+
+### Two findings that were not
+
+**The picker and walls.** Round 2 reported that the picker would not return a
+wall inside a pocket or a through opening, and that the coupon's bolt slot
+therefore could not be programmed by clicking. **That was wrong, and worth
+recording as the trap it is.** Thirty clicks into the slot returned nothing
+because a through opening is a hole: a ray down the middle of it passes clean
+through the part and hits nothing, which is the correct answer. The walls are a
+band at one edge of the opening, and how wide that band is depends entirely on
+the view angle — from straight above it is zero. Aimed at the wall rather than
+at the hole, the picker returns it first time (`face 14`, normal (1,0,0),
+centre X84 Y30 Z8.5), and the verb builds the operation: "Cut the opening:
+6 mm tool, 19 mm deep in 7 passes" with a verdict of "Machines the part
+cleanly."
 
 The lesson for driving the GUI from a script: a click that hits nothing looks
 exactly like a click on something that cannot be picked. When a pick is armed
 the panel does say "Nothing there", which is the difference — read it.
+
+**Below the fold.** Round 2 also reported that a panel's lower half was
+unreachable. It is not: nothing here uses `ImGuiListClipper`, so every widget
+is submitted whether or not it is on screen, `ui_items` lists it, and the test
+engine scrolls to an item before clicking it. Verified with a panel grown to
+20 operations — the bottom item sits at y=742 in a 690-pixel window and clicks
+fine. `scroll_panel` was added anyway, for the one thing that genuinely does
+need it: a screenshot shows the pixels that exist, so seeing the bottom of a
+long panel means scrolling it first.
+
+
 
 ## Still not done: cutting it
 

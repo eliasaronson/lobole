@@ -212,6 +212,47 @@ Circle FitCircle(const std::vector<glm::dvec2>& pts) {
   return out;
 }
 
+// The last move of the straight run starting at `i`, or `i` itself when the
+// next move turns. Everything between is dropped: the controller draws the
+// same line from one G1 as it does from forty.
+//
+// Only reached when the arc fitter has DECLINED this run, so it can never eat
+// an arc. That ordering is the whole safety argument — decimating first would
+// remove exactly the points an arc is recognised from.
+//
+// The tolerance is the same chord tolerance the toolpath was flattened at, so
+// this is not an approximation of an exact path; it is a shorter way of
+// writing an approximation that was already made. Adaptive clearing hands
+// back polylines with hundreds of nearly-collinear points, which is why a
+// 40 x 20 pocket posted 29,856 lines with arcs turned off — the setting a
+// controller that mishandles arcs is left with, and those are the slow ones.
+size_t LastCollinear(const std::vector<Move>& moves, size_t i,
+                     const glm::dvec3& from, double tol) {
+  // Bounded: a run of thousands is merged in chunks rather than costing
+  // O(n^2) over the whole thing.
+  constexpr size_t kMaxRun = 256;
+  const Move& first = moves[i];
+  size_t best = i;
+  for (size_t j = i + 1; j < moves.size() && j - i < kMaxRun; j++) {
+    const Move& m = moves[j];
+    if (m.kind != first.kind || Emitter::Differs(m.feed, first.feed) ||
+        m.hasA != first.hasA || (m.hasA && Emitter::Differs(m.a, first.a)))
+      break;
+    // Every point between `from` and this candidate end must lie on the line.
+    const glm::dvec3 dir = m.to - from;
+    const double len = glm::length(dir);
+    if (len < 1e-12)
+      break;
+    bool straight = true;
+    for (size_t k = i; k < j && straight; k++)
+      straight = glm::length(glm::cross(moves[k].to - from, dir)) / len <= tol;
+    if (!straight)
+      break;
+    best = j;
+  }
+  return best;
+}
+
 // Signed turn from `from` to `to` about `centre`, in (-pi, pi].
 double SweptAngle(const glm::dvec2& centre, const glm::dvec2& from,
                   const glm::dvec2& to) {
@@ -423,9 +464,29 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       if (m.hasA && e.haveA && Emitter::Differs(m.a, e.a))
         e.Retract(setup.safeZ);
       const char* code = m.kind == Move::Kind::Rapid ? "G0" : "G1";
-      e.Motion(code, m.to, m.kind == Move::Kind::Rapid ? 0.0 : m.feed, m.hasA,
-               m.a);
-      i++;
+      // A straight run collapses to its endpoint. Same line, fewer of them.
+      size_t straightTo =
+          i > 0 ? LastCollinear(tp.moves, i, tp.moves[i - 1].to, kArcTolerance)
+                : i;
+      // …but never past the start of an arc. The first points of an arc that
+      // leaves tangentially ARE collinear with the line feeding into it, to
+      // well inside this tolerance, so an unchecked run swallowed them and
+      // the fitter — which is only ever asked at the run's far end — lost the
+      // arc: 3633 arcs became 3317. Ask at every index the run covers, which
+      // is exactly what this loop did before the merge existed.
+      if (opts.fitArcs)
+        for (size_t k = i + 1; k <= straightTo; k++) {
+          Circle ahead;
+          bool aheadCw = false;
+          if (FitArc(tp.moves, k, ahead, aheadCw) >= k) {
+            straightTo = k - 1;
+            break;
+          }
+        }
+      const Move& end = tp.moves[straightTo];
+      e.Motion(code, end.to, end.kind == Move::Kind::Rapid ? 0.0 : end.feed,
+               end.hasA, end.a);
+      i = straightTo + 1;
     }
   }
 

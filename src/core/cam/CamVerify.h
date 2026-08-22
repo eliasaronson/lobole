@@ -115,10 +115,23 @@ struct Verdict {
   };
   std::vector<Region> biggest;
 
-  // A job is good when it cut everything it should and nothing it should not.
-  [[nodiscard]] bool Ok(double tolerance) const {
-    return maxGouge <= tolerance && maxLeftover <= tolerance &&
-           rapidsThroughStock == 0;
+  // TWO questions, because they have different answers and only one of them
+  // is ever certain.
+  //
+  // Safe: nothing here scraps the part or breaks the tool. A gouge and a rapid
+  // through material are unambiguous — no job wants either, ever.
+  [[nodiscard]] bool Safe(double tolerance) const {
+    return maxGouge <= tolerance && rapidsThroughStock == 0;
+  }
+  // Complete: nothing is left standing that the model says should be gone.
+  // This one is SOFTER, because a height map cannot watch a slug fall out of a
+  // through cut or know that four tabs were asked for — so a correct job
+  // routinely reports material left over, and the two used to be one flag that
+  // no real job could ever set (docs/cam/dogfood-round.md). Read it with
+  // leftoverArea and `biggest`: several small places are the corners a round
+  // cutter cannot reach, one large one is an operation nobody added.
+  [[nodiscard]] bool Complete(double tolerance) const {
+    return maxLeftover <= tolerance;
   }
 };
 

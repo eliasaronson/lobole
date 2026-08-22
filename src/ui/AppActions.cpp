@@ -1024,6 +1024,16 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.camGhostOp = 0;
   if (state.slotPick.featureId == kCamToolSlot)
     state.slotPick = {};
+  // Every other TOOL SESSION goes with the document too, for the same reason
+  // the assembly/drawing state above does: a session left open is editing
+  // something that no longer exists. `editFeatureId` is the sharp one — it
+  // names a feature in the document that was just discarded — and camToolOpen
+  // is the one that bit: it is a toggle, so a stale one turned OFF at the next
+  // click on the toolbar button meant to turn it on.
+  state.editFeatureId = 0;
+  state.dimTool = AppState::DimTool{};
+  state.mateTool = AppState::MateToolState{};
+  state.camToolOpen = false;
   // Force a resync even if the version counters happen to collide
   state.syncedDocumentVersion = UINT64_MAX;
 }

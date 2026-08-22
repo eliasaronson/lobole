@@ -260,7 +260,8 @@ def main():
         print(f"  at {res} mm: gouge {v['max_gouge_mm']:.3f} mm, "
               f"leftover {v['max_leftover_mm']:.3f} mm over "
               f"{v['leftover_area_mm2']:.1f} mm2 in {v['leftover_regions']} "
-              f"places, rapids {v['rapids_through_stock']}, ok={v['ok']}")
+              f"places, rapids {v['rapids_through_stock']}, "
+              f"ok={v['ok']} complete={v['complete']}")
         for line in v["says"]:
             print(f"      {line}")
         for r in v["leftover_biggest"][:8]:

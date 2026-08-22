@@ -80,11 +80,35 @@ while [ "$#" -gt 0 ]; do
     -j) SHARDS="$2"; shift 2 ;;
     --record-times) RECORD=1; SHARDS=1; shift ;;
     -f)
-      # Single named case: no sharding, no display juggling.
-      exec "$XVFB_RUN" -a -s "$SCREEN" \
+      # Single named case: no sharding, no display juggling — but the SAME
+      # verdict as the shard loop below. This used to exec straight through,
+      # so the exit code was xvfb-run's; the app exits 0 whether or not a case
+      # failed, and xvfb-run's own status is unreliable. `-f whatever` on a
+      # failing test therefore reported success, which is worse than no check
+      # at all because it looks like one.
+      FLOG="$(mktemp -t designer-gui-f-XXXXXX.log)"
+      "$XVFB_RUN" -a -s "$SCREEN" \
         nix-shell "$ROOT/shell.nix" --run \
         "cd '$ROOT/build' && ./designer --gui-tests --hidden \
-         --gui-test-filter '$2'"
+         --gui-test-filter '$2'" > "$FLOG" 2>&1 || true
+      cat "$FLOG"
+      fline="$(grep -o 'GUI tests: [0-9]*/[0-9]* passed' "$FLOG" | tail -1 ||
+               true)"
+      fok="$(echo "$fline" | sed -n 's#GUI tests: \([0-9]*\)/[0-9]* passed#\1#p')"
+      fn="$(echo "$fline" | sed -n 's#GUI tests: [0-9]*/\([0-9]*\) passed#\1#p')"
+      rm -f "$FLOG"
+      if [ -z "$fline" ]; then
+        echo "--- the run produced no verdict line ---" >&2
+        exit 1
+      fi
+      # A filter that matched nothing is not a pass, for the same reason the
+      # shard partition is checked: silence is not success.
+      if [ "${fn:-0}" = 0 ]; then
+        echo "--- no test matched '$2' ---" >&2
+        exit 1
+      fi
+      [ "$fok" = "$fn" ] || exit 1
+      exit 0
       ;;
     *)
       # Anything else is ctest's (e.g. -L gui). This script already provides
@@ -145,6 +169,11 @@ ELAPSED=$(( $(date +%s) - START ))
 # xvfb-run's wrapper returns non-zero when its server is already gone
 # ("kill: No such process"), which reported a clean 35/35 shard as a failure.
 # A shard that died before printing has no line at all, which is a failure.
+# Yesterday's failure logs are not today's. They are only written when a
+# shard fails, and nothing ever removed them — so a clean run left four stale
+# ones lying about, which is exactly long enough to be read as current.
+rm -f /tmp/designer-gui-shard*.log
+
 ran=0
 failed=0
 for c in $(seq 1 "$i"); do
@@ -163,7 +192,14 @@ for c in $(seq 1 "$i"); do
   fi
 done
 
-echo "GUI tests: $ran/$EXPECTED run in ${ELAPSED}s across $i shard(s)"
+# "run" is not "passed", and the last line is the one people read. Say which
+# it is: a suite that reports "171/171 run" after four failures is telling the
+# truth and being misunderstood, which is the same cost as being wrong.
+if [ "$failed" = 0 ]; then
+  echo "GUI tests: $ran/$EXPECTED passed in ${ELAPSED}s across $i shard(s)"
+else
+  echo "GUI tests: $ran/$EXPECTED run in ${ELAPSED}s across $i shard(s) — SOME FAILED"
+fi
 if [ "$ran" != "$EXPECTED" ]; then
   echo "MISMATCH: the shards did not run every test — the partition is wrong."
   exit 1

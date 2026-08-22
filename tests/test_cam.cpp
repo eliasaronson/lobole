@@ -464,8 +464,8 @@ TEST_CASE("cam verify: a cut that is too deep is REPORTED", "[cam]") {
                               "G0 Z20\n";
   const cam::Verdict v =
       cam::VerifyGcode(gouging, setup, doc->GetBodies(), 0.4);
-  CHECK(v.maxGouge > 4.0); // it cut ~5 mm below the top face
-  CHECK_FALSE(v.Ok(0.1));
+  CHECK(v.maxGouge > 4.0);  // it cut ~5 mm below the top face
+  CHECK_FALSE(v.Safe(0.1)); // a gouge is never acceptable
   // And it says WHERE, so the report points at a place on the part.
   CHECK(std::abs(v.gougeAt.y) < 5.0);
 }
@@ -482,7 +482,7 @@ TEST_CASE("cam verify: a rapid through the part is caught", "[cam]") {
   const cam::Verdict v = cam::VerifyGcode(crash, setup, doc->GetBodies(), 0.5);
   CHECK(v.rapidsThroughStock > 0);
   CHECK(v.firstBadLine > 0);
-  CHECK_FALSE(v.Ok(1.0));
+  CHECK_FALSE(v.Safe(1.0)); // nor is a rapid through material
 }
 
 TEST_CASE("cam verify: a program that cuts nothing is reported as such",
@@ -1224,6 +1224,34 @@ TEST_CASE("cam: clicking a wall for a pocket says what to click instead",
   CHECK_FALSE(derived.ok);
   INFO(derived.why);
   CHECK(derived.why.find("FLOOR") != std::string::npos);
+}
+
+TEST_CASE("cam verify: a job with tabs is SAFE without being COMPLETE",
+          "[cam]") {
+  // The two questions have different answers, and one flag could not carry
+  // both: tabs are material deliberately left standing, so a job that cuts
+  // the part correctly reports leftover forever. Gating on one boolean meant
+  // gating on a boolean no real job could ever set
+  // (docs/cam/dogfood-round.md).
+  auto doc = BlockDoc();
+  cam::Setup setup = BasicSetup();
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, ElementRef{});
+  REQUIRE(derived.ok);
+  REQUIRE(derived.op.tabCount > 0); // the point of the test
+  derived.op.id = 1;
+  setup.operations.push_back(derived.op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  const cam::Verdict v = cam::VerifyGcode(gcode, setup, doc->GetBodies(), 0.4);
+  INFO("gouge " << v.maxGouge << " leftover " << v.maxLeftover << " over "
+                << v.leftoverArea << " mm2 in " << v.leftoverRegions);
+  CHECK(v.Safe(0.6));            // nothing scrapped, nothing crashed…
+  CHECK_FALSE(v.Complete(0.6));  // …and the tabs are still standing
+  CHECK(v.leftoverRegions >= 3); // in several small places, as tabs are
 }
 
 TEST_CASE("cam: a wall is not a gouge, whatever the grid", "[cam]") {
