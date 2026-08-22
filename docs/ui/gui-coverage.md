@@ -79,3 +79,44 @@ Two related gotchas, since they cost time too:
 - An **`ImGui::PushID` scope** has the same effect as a hidden label: the
   widget inside it can only be reached by numeric id. Give a repeated widget a
   unique name (`"Material###material_<feature>"`) instead of wrapping it.
+
+
+## The trap 2026-08-22 turned up: a failed lookup poisons the whole test
+
+`ImGuiTestContext::WindowInfo` and `ItemInfo` **log an error when they do not
+find their target**, and the context then short-circuits every later lookup:
+
+```cpp
+ImGuiTestItemInfo ImGuiTestContext::WindowInfo(ImGuiTestRef ref, ...)
+{
+    if (IsError())
+        return ItemInfoNull();      // imgui_te_context.cpp:1095
+```
+
+So a test that asserts something is **absent** —
+
+```cpp
+IM_CHECK(ctx->WindowInfo("//Terminal###TerminalPanel").Window == nullptr);
+```
+
+— *passes*, because null is what it wanted, and from that point on every
+`WindowInfo`/`ItemInfo` in that test returns null no matter what the UI is
+doing. Ask with `ImGuiTestOpFlags_NoError` when "no" is a legitimate answer.
+`ItemExists` is already safe: it passes the flag itself.
+
+**Why it hides so well.** Run alone, the window has never existed and that
+path does not log, so the test is green. Run after a test that created the
+window, a different path inside `WindowInfo` runs — the one that logs — and
+the test fails *later*, at an assertion that looks unrelated. The default
+4-shard partition can separate the two tests, so the suite is green; the
+partition is balanced by recorded times, so **adding tests reshuffles it** and
+the failure appears and disappears for reasons that have nothing to do with
+the code under test.
+
+This cost two sessions about ten hypotheses between them — docking, tab
+selection, PTY spawn timing, stale `DockId` after a layout rebuild, load — and
+none of them was it. **`--serial` is what makes it findable**, because it puts
+every test in one process; a green sharded run is not evidence.
+
+Fixed in `terminal/*` and `perf/*` (`3dbc0c0`, `6cca9bf`). If you write a test
+that checks a window, panel or dialog is *not* there, use `NoError`.
