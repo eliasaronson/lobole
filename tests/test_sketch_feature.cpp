@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
 #include "core/Command.h"
@@ -589,11 +590,18 @@ TEST_CASE("Pre-v4 sketch migrates entity indices to stable ids",
   // Index refs shifted to the matching ids (index 0 -> id 1, index 1 -> id 2).
   CHECK(sk->constraints[0].a.entity == 1u); // Horizontal on the line
   CHECK(sk->constraints[1].a.entity == 2u); // Radius on the circle
-  CHECK(sk->nextEntityId == 3u);
-  // Re-saving now carries per-entity ids (v4 shape).
+  // Re-saving now carries per-entity ids (v4 shape). There is no
+  // `next_entity_id` any more: ids are minted collision-resistantly rather
+  // than handed out by a per-sketch counter (F9), because two people editing
+  // one sketch offline both got the same next id — and a face's stable name
+  // is "<feature>/g<entityId>", so that made face names ambiguous.
   auto j2 = DocumentIO::FeatureToJson(*sk);
   CHECK(j2["entities"][0]["id"] == 1u);
-  CHECK(j2["next_entity_id"] == 3u);
+  CHECK_FALSE(j2.contains("next_entity_id"));
+  // Anything added later cannot collide with the migrated 1..N.
+  const uint32_t fresh = sk->AddEntity(sketch::Circle{{5, 5}, 1.0});
+  CHECK(fresh != 1u);
+  CHECK(fresh != 2u);
 }
 
 TEST_CASE("Dimension label offset round-trips", "[sketch][serialization]") {
@@ -896,9 +904,16 @@ TEST_CASE("Entity ids stay stable across insert and delete", "[sketch]") {
 
   // Inserting a new entity shifts indices but not ids.
   uint32_t c = sk.AddEntity(sketch::Circle{{5, 5}, 1.0});
-  CHECK(a == 1u);
-  CHECK(b == 2u);
-  CHECK(c == 3u);
+  // Distinct and non-zero — the property. Which NUMBERS they are is not:
+  // they used to be 1, 2, 3 from a per-sketch counter, and that counter is
+  // exactly what made two people editing one sketch offline mint the same
+  // id (F9). 0 stays reserved for "none".
+  CHECK(a != 0u);
+  CHECK(b != 0u);
+  CHECK(c != 0u);
+  CHECK(a != b);
+  CHECK(b != c);
+  CHECK(a != c);
   CHECK(sk.IndexOfEntity(a) == 0u);
   CHECK(sk.IndexOfEntity(b) == 1u);
   // The A–B constraint still resolves after the insert.
@@ -1021,3 +1036,70 @@ TEST_CASE("HasUserGeometry ignores generated external geometry", "[sketch]") {
   sk.AddEntity(sketch::Point{{2.0f, 1.0f}}); // the user places a hole centre
   CHECK(HasUserGeometry(sk));
 }
+
+// ---------------------------------------------------------------------------
+// Sketch entity ids and merges (F9)
+//
+// A face's stable name is literally "<feature>/g<entityId>"
+// (SketchProfile.cpp). So two entities sharing an id make a face NAME
+// ambiguous, and every reference keyed on it — a fillet, a mate, a drawing
+// dimension — can bind to the wrong face while the document rebuilds
+// perfectly and says nothing. That was reachable: `nextEntityId++` is a
+// per-sketch counter, so two people editing one sketch offline both got the
+// same next id.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("Two sketches edited separately do not mint the same entity ids",
+          "[sketch]") {
+  // The offline-collaborator shape: one sketch, copied, both copies extended.
+  SketchFeature base("S", SketchPlane(PlaneType::XY));
+  for (int i = 0; i < 4; i++)
+    base.AddEntity(sketch::Line{{double(i), 0}, {double(i + 1), 0}});
+
+  SketchFeature alice = base;
+  SketchFeature bob = base;
+  std::set<uint32_t> aliceAdded, bobAdded;
+  for (int i = 0; i < 8; i++) {
+    aliceAdded.insert(alice.AddEntity(sketch::Line{{0, double(i)}, {1, 0}}));
+    bobAdded.insert(bob.AddEntity(sketch::Circle{{double(i), 5}, 1.0}));
+  }
+
+  // Under the old counter every one of these collided: 5,6,7... on both
+  // sides. Now nothing either of them added is a name the other also minted.
+  std::vector<uint32_t> shared;
+  std::set_intersection(aliceAdded.begin(), aliceAdded.end(), bobAdded.begin(),
+                        bobAdded.end(), std::back_inserter(shared));
+  CHECK(shared.empty());
+}
+
+// The tripwire. Ids are collision-resistant now, so this should be
+// unreachable — but a project can arrive by rsync, a zip or a hand-edit, and
+// "the face names built from it are ambiguous" must be a refusal rather than
+// a document that quietly points a fillet at the wrong face.
+TEST_CASE("A sketch with two entities sharing an id is refused",
+          "[sketch][serialization]") {
+  // Built explicitly rather than as one brace-init literal: nlohmann reads a
+  // nested initialiser list as an OBJECT, so an array of entity objects has
+  // to be pushed.
+  nlohmann::json entity = {
+      {"type", "line"}, {"a", {0.0, 0.0}}, {"b", {1.0, 0.0}}, {"id", 9}};
+  nlohmann::json j;
+  j["type"] = "Sketch";
+  j["name"] = "Profile";
+  j["plane"] = {{"origin", {0.0, 0.0, 0.0}},
+                {"normal", {0.0, 0.0, 1.0}},
+                {"uAxis", {1.0, 0.0, 0.0}}};
+  j["entities"] = nlohmann::json::array();
+  j["entities"].push_back(entity);
+  entity["b"] = {1.0, 1.0};
+  j["entities"].push_back(entity); // same id 9
+  j["constraints"] = nlohmann::json::array();
+
+  REQUIRE_THROWS_WITH(DocumentIO::FeatureFromJson(j),
+                      Catch::Matchers::ContainsSubstring("two entities") &&
+                          Catch::Matchers::ContainsSubstring("id 9"));
+}
+
+#include <iterator>
+
+#include <set>

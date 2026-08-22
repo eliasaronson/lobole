@@ -537,7 +537,6 @@ json FeatureToJson(const Feature& feature) {
       j["face_ref"] = {{"feature_id", sk->faceRef.featureId},
                        {"element", sk->faceRef.name}};
     }
-    j["next_entity_id"] = sk->nextEntityId;
     j["entities"] = json::array();
     for (const auto& entity : sk->entities) {
       json ej = EntityToJson(entity);
@@ -1014,14 +1013,28 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         c.a.entity += 1;
         c.b.entity += 1;
       }
-      sk->nextEntityId = static_cast<uint32_t>(sk->entities.size() + 1);
-    } else {
-      uint32_t maxId = 0;
-      for (const auto& e : sk->entities)
-        maxId = std::max(maxId, sketch::EntityId(e));
-      sk->nextEntityId =
-          std::max<uint32_t>({sk->nextEntityId, maxId + 1,
-                              j.value("next_entity_id", uint32_t{0})});
+    }
+    // No counter to advance any more: ids are minted collision-resistantly
+    // (SketchFeature::MintEntityId), so a document written by an older build
+    // simply keeps the small ids it has, and anything added later cannot
+    // collide with them. `next_entity_id` in such a file is ignored.
+    //
+    // Two entities sharing an id is refused rather than loaded: a face's
+    // stable name is "<feature>/g<entityId>", so a duplicate makes that name
+    // — and every fillet, mate or dimension keyed on it — ambiguous, while
+    // the document rebuilds perfectly and says nothing.
+    {
+      std::set<uint32_t> seen;
+      for (const auto& e : sk->entities) {
+        const uint32_t id = sketch::EntityId(e);
+        if (id != 0 && !seen.insert(id).second) {
+          throw std::runtime_error(
+              "sketch \"" + sk->GetName() + "\" has two entities with id " +
+              std::to_string(id) +
+              " — a merge kept both; the face names built from it would be "
+              "ambiguous, so keep one and reopen");
+        }
+      }
     }
     // Re-key the collected entity exprs by final stable id (positions are
     // still valid — the rect expansion below is what reorders).
@@ -1030,8 +1043,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       if (id != 0)
         sk->entityExprs[id] = std::move(exprs);
     }
-    // Now expand the placeholder rects into real lines (nextEntityId is final,
-    // so the new lines get fresh non-colliding ids). Drop any constraint that
+    // Now expand the placeholder rects into real lines (AddEntity mints
+    // non-colliding ids). Drop any constraint that
     // referenced a rigid rect — those were solver no-ops.
     if (!legacyRects.empty()) {
       std::vector<uint32_t> rectIds;

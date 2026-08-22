@@ -906,7 +906,24 @@ public:
   // not silently duplicate driving expressions, and the aggregate entity
   // structs (and every brace-init of them) stay untouched.
   std::map<uint32_t, std::map<std::string, std::string>> entityExprs;
-  uint32_t nextEntityId = 1; // next stable id to hand out (1-based; 0 = none)
+
+  // An id no other entity in this sketch has, and that a sketch edited
+  // SEPARATELY is not going to mint either (F9).
+  //
+  // This was `nextEntityId++`, a per-sketch counter — which meant two people
+  // editing one sketch offline both got the same next id. That matters more
+  // than it looks: a face's stable name is literally "<feature>/g<entityId>"
+  // (SketchProfile), so two entities sharing an id make a face NAME
+  // ambiguous, and every reference keyed on it — a fillet, a mate, a drawing
+  // dimension — can bind to the wrong face while the document rebuilds
+  // perfectly and says nothing.
+  //
+  // Random rather than sequential because, unlike a FEATURE id, an entity id
+  // is never a filename: it lives inside the sketch's own JSON, so the
+  // readability that kept feature ids sequential is not on the table here.
+  // Retried against this sketch's entities, so uniqueness within a sketch is
+  // exact rather than probable.
+  [[nodiscard]] uint32_t MintEntityId() const;
 
 private:
   // Shared by TrimLineAt/TrimSpanAt: for line `id` at `clickUV`, outputs the

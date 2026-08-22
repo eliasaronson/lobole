@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <random>
 #include <set>
 #include <vector>
 
@@ -206,8 +207,24 @@ SketchFeature::SketchFeature(const std::string& name, const SketchPlane& p)
   m_name = name;
 }
 
+uint32_t SketchFeature::MintEntityId() const {
+  // Seeded once per process. Not reproducible run to run, which is fine:
+  // nothing asserts a particular entity id (the tests capture what AddEntity
+  // returns), and the goldens compare counts and volumes rather than bytes.
+  static std::mt19937 rng(std::random_device{}());
+  std::uniform_int_distribution<uint32_t> pick(1, UINT32_MAX); // 0 = "none"
+  for (;;) {
+    const uint32_t id = pick(rng);
+    const bool taken = std::any_of(
+        entities.begin(), entities.end(),
+        [id](const sketch::Entity& e) { return sketch::EntityId(e) == id; });
+    if (!taken)
+      return id;
+  }
+}
+
 uint32_t SketchFeature::AddEntity(sketch::Entity e) {
-  const uint32_t id = nextEntityId++;
+  const uint32_t id = MintEntityId();
   sketch::SetEntityId(e, id);
   entities.push_back(std::move(e));
   return id;
