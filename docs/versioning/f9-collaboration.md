@@ -277,20 +277,58 @@ a real two-collaborator scenario end to end.
   pole for that.
 - **Real-time co-editing.** Not with a git-backed format.
 
-## The risk that is not a line item
+## C6 — Sketch entity ids (added 2026-08-22, after a good question)
 
-**Toponaming divergence.** Everything F7 and F8 do fails loudly — unresolved
-markers refuse, duplicate ids refuse, a merge that will not regenerate
-refuses. But face names are derived from the modeling history. If two people
-edit the same feature differently, downstream references (fillets, mates,
-drawing dimensions) can bind to *different but valid* faces on each side.
-`Verify()` proves the merged project loads and rebuilds; it does not prove it
-means what either person intended. That is the one path here to a silently
-wrong result rather than a refusal, and more collaborators make it more
-likely.
+This section replaces a warning that was too vague to act on, and a
+recommendation that was wrong.
 
-The mitigation is already designed elsewhere: `compare_geometry` (V4 in
-[../inspect/agent-validation-plan.md](../inspect/agent-validation-plan.md),
-awaiting sign-off) is a boolean diff of two solids. Run across a merge — "is
-the result still what either side had?" — it turns the silent case into a
-visible one. It is not part of C1–C5, and it is the thing I would add next.
+**What it said:** toponaming divergence is the one path to a silently wrong
+merge, and `compare_geometry` (V4 of the agent-validation plan) is the
+mitigation.
+
+**Why the recommendation was wrong, structurally.** `compare_geometry` is
+`{a, b | golden_path}` → IoU, dice, volume ratio, and it answers *does this
+solid match that known-correct one*. **A merge has no second operand.** The
+merged result is supposed to differ from both parents — that is what merging
+is — so a boolean diff fires on every successful merge, and there is no golden
+because nobody has ever seen the correct merged result; computing it for the
+first time is the whole operation. V4 remains right for its own job (goldens,
+"did my edit do what I claimed", the `golden-compare.sh` regression harness in
+its own plan). It was never a merge safety net.
+
+**What the risk actually was.** A face's stable name is literally
+`<featureTag>g<entityId>` (`SketchProfile.cpp:1130`), so it can only mislead
+if one of those two ids means different things on the two sides. Feature ids
+are C3. The other half was **sketch entity ids**: `nextEntityId++`, a
+per-sketch counter, so two people editing one sketch offline both got the same
+next id — the same class as C3 one level down, and invisible to it, because
+C3 excludes `entity_id` deliberately (a sketch-local id is not a document
+feature id, and conflating them would refuse every renumber in a document with
+sketches).
+
+Reproduced with a real git merge: two entities both `id: 9`, one a line and
+one an arc, merged cleanly, making `4/g9` ambiguous — a fillet keyed on it
+binds to one of them and the document rebuilds without a word.
+
+**What shipped.** `SketchFeature::MintEntityId` mints a collision-resistant
+id, retried against the sketch's own entities so within-sketch uniqueness is
+exact; `next_entity_id` is gone from the format (old files keep their small
+ids and are simply not added to by a counter any more); and the sketch loader
+**refuses** two entities sharing an id, joining the "refuse loudly" family
+with duplicate feature files and unresolved conflict markers — which also
+covers a project that arrived by rsync, a zip or a hand-edit, where there is
+no merge to reason about.
+
+**Why entity ids could be randomised when feature ids could not.** A feature
+id is a *filename* (`15-extrude.json`), which is what F3 chose for readable
+diffs and what kept them sequential. An entity id is never a filename — it
+lives inside the sketch's own JSON — so that argument simply does not apply.
+The asymmetry is the whole reason this was cheap.
+
+### What genuinely remains
+
+A merge can still combine two people's *intents* into a part neither of them
+designed: the format merges text, and text is not intent. No checker resolves
+that, and it is what review is for. What is gone is the narrower and nastier
+class — the document rebuilding perfectly while a reference quietly points
+somewhere else.

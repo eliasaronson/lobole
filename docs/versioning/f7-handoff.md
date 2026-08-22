@@ -54,21 +54,47 @@ is shared, and named versions that survive two people choosing one name.
   paths (three forms tried). Verified by screenshot; the test asserts the flag
   that drives it.
 
-## The one risk worth carrying forward
+## The risk I got wrong, and what it actually was
 
-**Toponaming divergence.** Everything above fails *loudly* — unresolved
-markers refuse, duplicate ids refuse, a merge that will not regenerate
-refuses. But face names are derived from modelling history, so two people
-editing one feature can leave downstream references (fillets, mates, drawing
-dimensions) bound to *different but valid* faces on each side. `Verify()`
-proves the merged project loads and rebuilds; it does not prove it means what
-either person intended. That is the only path here to a silently wrong result,
-and more collaborators make it likelier.
+An earlier version of this file named **toponaming divergence** as the one
+path to a silently wrong merge, and recommended `compare_geometry` (V4 of the
+agent-validation plan) as the mitigation. Elias pushed on whether those were
+the same thing. They were not, and chasing it changed the answer twice.
 
-The mitigation is already designed elsewhere: `compare_geometry` (V4 in
-[../inspect/agent-validation-plan.md](../inspect/agent-validation-plan.md),
-awaiting sign-off). Run across a merge it turns the silent case into a visible
-one. **That is what I would build next.**
+**`compare_geometry` is the wrong tool, structurally.** It is
+`{a, b | golden_path}` → IoU, dice, volume ratio: *does this solid match that
+known-correct one*. A merge has no second operand. The merged result is
+**supposed** to differ from both parents — that is what merging is — so a
+boolean diff fires on every successful merge, and there is no golden because
+nobody has ever seen the correct merged result. V4 is still right for its own
+job (goldens, "did my edit do what I claimed", regression against stored
+BREPs); it was never a merge safety net.
+
+**The real mechanism was narrower and fixable.** A face's stable name is
+literally `<featureTag>g<entityId>` (`SketchProfile.cpp:1130`). So a name can
+only mislead if one of those two ids means different things on the two sides:
+
+- **Feature ids** — the class F9 C3 already handles.
+- **Sketch entity ids** — a per-sketch `nextEntityId++` counter, the same
+  shape one level down, and *invisible* to C3 (which excludes `entity_id`
+  deliberately, since a sketch-local id is not a document feature id).
+  Reproduced: a clean git merge leaving two entities both `id: 9`, one a line
+  and one an arc, making `4/g9` ambiguous.
+
+**Fixed 2026-08-22.** `SketchFeature::MintEntityId` mints collision-resistant
+ids instead of counting, and the loader refuses a sketch holding two entities
+with one id — the same "refuse loudly" family as duplicate feature files and
+unresolved conflict markers, so it catches a project that arrived by rsync or
+a hand-edit too. Entity ids could be randomised where feature ids could not
+because **a feature id is a filename and an entity id never is**: the
+readability that kept feature ids sequential was simply not on the table.
+
+### What genuinely remains
+
+A merge can still combine two people's *intents* into a part neither of them
+designed — the format merges text, and text is not intent. No checker
+resolves that; it is what review is for. What is gone is the class where the
+document rebuilds perfectly while a reference quietly points somewhere else.
 
 ## Tests, and what each covers
 

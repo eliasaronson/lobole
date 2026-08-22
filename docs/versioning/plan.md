@@ -182,8 +182,10 @@ useful and could be pulled forward with the modeling work.
 - The remaining gap F7's scoping found is now [F8](f8-external-changes.md).
   The other one still stands: the versioning docs are written as if a project
   were a single part, and a conflict spans every document in it.
-- **Toponaming divergence is F9's real risk**, and it is not a line item:
-  everything F7/F8 do fails loudly, but two people editing one feature can
-  leave downstream references bound to different-but-valid faces on each
-  side. `Verify()` proves the merge loads and rebuilds, not that it means
-  what either person intended.
+- **Toponaming divergence** was recorded here as F9's unfixable risk. It was
+  narrower than that: a face name is `<feature>/g<entityId>`, so it can only
+  mislead when one of those ids means two things — feature ids (C3) or sketch
+  entity ids, which were a per-sketch counter until C6 made them
+  collision-resistant and made a duplicate a load-time refusal. What remains
+  is that a merge combines two people's *intents*, which is review's job, not
+  a checker's.
