@@ -341,9 +341,16 @@ void DrawCamToolWindow(AppState& state) {
   ImGui::SetItemTooltip("Skim the material sitting above the part");
   ImGui::EndDisabled();
 
-  if (!state.camRefusal.empty())
-    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s",
-                       state.camRefusal.c_str());
+  if (!state.camRefusal.empty()) {
+    // Wrapped at the same width the verdict uses. Unwrapped, one long refusal
+    // stretched this floating window to the width of the sentence — across
+    // the whole app, over the panel and the model both.
+    ImGui::PushTextWrapPos(320.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+    ImGui::TextWrapped("%s", state.camRefusal.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+  }
 
   // What the job is, in one sentence per operation — the numbers are derived,
   // so they are shown rather than asked for. The drag fields still exist, in

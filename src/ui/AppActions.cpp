@@ -1011,6 +1011,19 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   if (state.simulation.active)
     ExitSimulation(state);
   state.measure = MeasureState{};
+  // The CAM job belonged to the document that just went away. Leaving this
+  // behind made the panel claim "Z zero at 17.000" and offer to Save G-code
+  // for a part that no longer existed — and an armed face pick survived into
+  // the new document, where the button that would re-arm it is disabled
+  // while a pick is live, so the panel was simply stuck.
+  state.camToolpaths.clear();
+  state.camVerdict.clear();
+  state.camLeftover.clear();
+  state.camTopFace = ElementRef{};
+  state.camActiveSetup = 0;
+  state.camGhostOp = 0;
+  if (state.slotPick.featureId == kCamToolSlot)
+    state.slotPick = {};
   // Force a resync even if the version counters happen to collide
   state.syncedDocumentVersion = UINT64_MAX;
 }

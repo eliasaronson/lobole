@@ -994,6 +994,13 @@ struct AppState {
   // The verb session (G2): a Tool window, NOT a mode — CAM does not take the
   // viewport over, and modes have a known exit-bug class here (U11).
   bool camToolOpen = false;
+
+  // A docked panel asked to come forward (focus_panel over the RPC). Focus
+  // takes effect on the next frame, and a tab sharing a node with several
+  // others needs the request repeated before it wins, so this is a countdown
+  // the dock host re-applies rather than a one-shot call.
+  std::string focusPanel;
+  int focusPanelFrames = 0;
   // What the last verb refused to do, in words. Cleared by the next attempt.
   std::string camRefusal;
   // The operation the viewport is illustrating (G3): its removed volume, its

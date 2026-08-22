@@ -1,5 +1,7 @@
 #include "ui/DockLayout.h"
 
+#include <cstring>
+
 #include "ui/Toolbar.h"
 
 #include <glm/glm.hpp>
@@ -166,6 +168,31 @@ void BeginDockspace(AppState& state) {
   }
 
   ImGui::End(); // host window
+
+  // A panel asked to come forward. Repeated, because one SetWindowFocus on a
+  // shared dock node does not reliably win the tab.
+  if (state.focusPanelFrames > 0 && !state.focusPanel.empty()) {
+    // By the name a person would say. ImGui matches the WHOLE window string,
+    // "###" id and all, so asking for "CAM" would silently do nothing —
+    // resolve it to "CAM###CamPanel" by the label the tab shows.
+    const char* target = state.focusPanel.c_str();
+    if (ImGui::FindWindowByName(target) == nullptr) {
+      const ImGuiContext& g = *ImGui::GetCurrentContext();
+      for (ImGuiWindow* w : g.Windows) {
+        const char* hash = std::strstr(w->Name, "###");
+        const size_t label = hash != nullptr
+                                 ? static_cast<size_t>(hash - w->Name)
+                                 : std::strlen(w->Name);
+        if (label == state.focusPanel.size() &&
+            std::strncmp(w->Name, target, label) == 0) {
+          target = w->Name;
+          break;
+        }
+      }
+    }
+    ImGui::SetWindowFocus(target);
+    state.focusPanelFrames--;
+  }
 
   // Track the central node rect (relative to the main viewport) so the 3D
   // scene renders in the visible region between the panels.

@@ -886,6 +886,55 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   // G1 (docs/cam/gui.md): Z zero is PICKED, not typed. Getting it wrong —
   // zeroing on the table instead of the stock top — is the mistake that
   // breaks tools, so the panel refuses to guess it.
+  // A new document takes the CAM job with it. This state used to survive:
+  // the panel claimed "Z zero at 17.000" and offered to Save G-code for a
+  // part that no longer existed, and the armed face pick came along too —
+  // into a document where the button that re-arms it is DISABLED while a pick
+  // is live, so the panel was simply stuck (docs/cam/dogfood-round.md,
+  // round 2).
+  t = IM_REGISTER_TEST(engine, "cam", "new_document_takes_the_job_with_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    cam::Operation op;
+    op.id = Doc()->AllocateId();
+    op.type = cam::OpType::Profile;
+    op.topZ = 13.0;
+    op.bottomZ = -1.0;
+    Doc()->FindCamSetup(setup.id)->operations.push_back(op);
+    ctx->Yield(2);
+    for (const Body& b : Doc()->GetBodies())
+      for (const auto& [index, name] : b.elementMap.names) {
+        glm::vec3 o(0.0f), n(0.0f), u(0.0f);
+        if (b.shape.FacePlane(index, o, n, u) && n.z > 0.99f) {
+          ui::SelectionItem top;
+          top.kind = ui::SelectionItem::Kind::Face;
+          top.element = ElementRef{b.createdBy, name};
+          ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top");
+          ui::CamFacePicked(*s_App, top);
+        }
+      }
+    ctx->Yield(2);
+    IM_CHECK(s_App->camTopFace.IsSet());
+    IM_CHECK(!s_App->camToolpaths.empty());
+    // Now throw the document away.
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamPocketFloor, "Click a floor");
+    ctx->Yield();
+    ctx->MenuClick("File/New");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camTopFace.IsSet());
+    IM_CHECK(s_App->camToolpaths.empty());
+    IM_CHECK(s_App->camVerdict.empty());
+    IM_CHECK_EQ(s_App->camActiveSetup, (uint64_t)0);
+    IM_CHECK_EQ(s_App->slotPick.featureId, (uint64_t)0);
+  };
+
   t = IM_REGISTER_TEST(engine, "cam", "pick_top_face_sets_z_zero");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -1032,8 +1081,19 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->camToolpaths[0].CutLength() > 0.0);
     IM_CHECK_EQ(s_App->slotPick.featureId, (uint64_t)0); // disarmed on success
 
-    // G4: the verdict arrived by itself, in words.
+    // G4: the verdict arrived by itself, in words — and for a job that cuts
+    // the part correctly it says nothing ALARMING. The panel checks on a
+    // 0.4 mm grid and the RPC defaulted to 0.25, and a cell centre landing on
+    // the corner of an island counted the island's whole height as a gouge:
+    // "Cuts 6.00 mm INTO the part — that is scrap" about a part the RPC's own
+    // check called clean (docs/cam/dogfood-round.md, round 2). Leftover is a
+    // WARN and expected here — nothing has cut the outside yet.
     IM_CHECK(!s_App->camVerdict.empty());
+    for (const cam::VerdictLine& line : s_App->camVerdict) {
+      IM_CHECK_SILENT(line.level != cam::VerdictLine::Level::Bad);
+      if (line.level == cam::VerdictLine::Level::Bad)
+        ctx->LogError("verdict: %s", line.text.c_str());
+    }
 
     // G3: the picture. While the session is open the stock box and the
     // removed-volume ghost are drawn; the ghost's walls are translucent

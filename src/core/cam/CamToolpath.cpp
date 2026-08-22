@@ -779,8 +779,8 @@ DerivedOp DeriveOperation(const Setup& setup,
     op.bottomZ = hi.z - setup.stock.margin.z; // the part's own top
     if (setup.stock.margin.z <= 1e-9) {
       out.why = "there is no stock above the part to face — the top of the "
-                "part is already the top of the stock (Advanced sets how "
-                "much material sits above it)";
+                "part is already the top of the stock (Stock and safety > "
+                "Above the part sets how much sits above it)";
       return out;
     }
     break;

@@ -361,17 +361,37 @@ Verdict Compare(const HeightMap& machined, const HeightMap& designed,
         continue; // nobody asked the program to cut here
       }
       const double got = machined.At(i, j);
-      const double want = designed.At(i, j);
       v.cells++;
-      if (want - got > v.maxGouge) {
-        v.maxGouge = want - got;
+      // A cell that straddles a vertical WALL has no single designed height:
+      // the tool runs tangent to the wall, and whether the cell counts as
+      // inside or outside is decided by where its centre happens to fall.
+      // Compared cell-to-cell, one such cell reported the wall's whole height
+      // as a gouge — the panel said "cuts 6.00 mm INTO the part, that is
+      // scrap" about a part the RPC's own check called clean, because their
+      // grids landed differently. So a cell is gouged only if it is below
+      // everything ITS NEIGHBOURS were designed to be, and left over only if
+      // it is above all of them. In the middle of a face all nine agree and
+      // nothing changes; on a wall the ambiguity resolves in favour of not
+      // crying wolf.
+      double wantLo = designed.At(i, j), wantHi = wantLo;
+      for (int dj = -1; dj <= 1; dj++)
+        for (int di = -1; di <= 1; di++) {
+          const int ni = i + di, nj = j + dj;
+          if (ni < 0 || nj < 0 || ni >= machined.nx || nj >= machined.ny)
+            continue;
+          const double w = designed.At(ni, nj);
+          wantLo = std::min(wantLo, w);
+          wantHi = std::max(wantHi, w);
+        }
+      if (wantLo - got > v.maxGouge) {
+        v.maxGouge = wantLo - got;
         v.gougeAt = {machined.CellX(i), machined.CellY(j)};
       }
-      if (got - want > v.maxLeftover) {
-        v.maxLeftover = got - want;
+      if (got - wantHi > v.maxLeftover) {
+        v.maxLeftover = got - wantHi;
         v.leftoverAt = {machined.CellX(i), machined.CellY(j)};
       }
-      if (got - want > leftTol)
+      if (got - wantHi > leftTol)
         over[k] = 1;
     }
   }

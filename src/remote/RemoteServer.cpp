@@ -795,6 +795,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"ui_items", "UI test tier: list the widgets under {ref} (default the "
                  "focused window, {depth}): label, id, window, disabled, "
                  "screen centre. The GUI, self-described."},
+    {"focus_panel",
+     "UI test tier: bring a docked panel's TAB forward {name}, e.g. \"CAM\", "
+     "\"Model\", \"History\". A panel tabbed behind another is invisible to "
+     "item_click, so without this the only panels a script could drive were "
+     "whichever the saved layout happened to leave in front."},
     {"viewport_click",
      "Click the 3D viewport at (x, y) as 0-1 fractions OF THE VIEWPORT "
      "rect (0.5,0.5 = its centre, whatever is docked around it)."},
@@ -1380,7 +1385,7 @@ bool RemoteServer::IsUiAction(const std::string& method) {
       "menu_click", "item_click",     "item_double_click", "item_input",
       "item_hover", "item_combo",     "popup_click",       "popup_items",
       "ui_items",   "viewport_click", "viewport_drag",     "key_press",
-      "menu_items", "scroll"};
+      "menu_items", "scroll",         "focus_panel"};
   for (const char* a : kActions)
     if (method == a)
       return true;
@@ -1514,6 +1519,20 @@ bool RemoteServer::QueueUiAction(const Request& request) {
       // click lands on the popup.
       if (ctx->UiContext->OpenPopupStack.Size > 0)
         ImGui::ClosePopupToLevel(0, true);
+    };
+  } else if (m == "focus_panel") {
+    // Focusing a docked window takes effect on the NEXT frame, and a tab
+    // sharing its node with several others needs the request repeated before
+    // it wins (the same thing the History panel needed). So this sets a
+    // request the dock host re-applies, and waits for the tab to arrive.
+    const std::string name = p.at("name").get<std::string>();
+    m_uiAction = [this, name](ImGuiTestContext* ctx) {
+      if (m_state != nullptr) {
+        m_state->focusPanel = name;
+        m_state->focusPanelFrames = 60;
+      }
+      ctx->Yield(8); // let the request take, so the next RPC can address it
+      m_uiActionResult = json{{"name", name}};
     };
   } else if (m == "ui_items") {
     const std::string ref = p.value("ref", "//$FOCUSED");

@@ -220,6 +220,16 @@ void DrawCamPanel(AppState& state) {
   }
   ImGui::SetItemTooltip("Which machine this job is posted for");
 
+  // The way in, on its own line. It used to sit third on the "Pick top face"
+  // row, after a status message long enough ("Z zero is not set yet") that
+  // the whole row overflowed the panel — and the default dock layout makes
+  // this panel 217 px wide, so the one-click way into CAM was clipped off
+  // the edge where nobody could click it (dogfooding round 2).
+  if (ImGui::Button("Verbs — the one-click way in###cam_open_tool"))
+    state.camToolOpen = true;
+  ImGui::SetItemTooltip("Point at the part; every depth is derived from what "
+                        "you point at");
+
   // G1: the highest-value single click in CAM. Z zero on the table instead of
   // the stock top is the mistake that breaks tools, so it is the first
   // control and it is a pick, not a number.
@@ -234,20 +244,25 @@ void DrawCamPanel(AppState& state) {
     ImGui::EndDisabled();
   ImGui::SameLine();
   if (arming)
-    ImGui::TextDisabled("click the top face…");
+    // The prompt that is actually armed. This said "click the top face…"
+    // whatever the pick was for, so arming "clear a pocket" from the verbs
+    // window told you to click the wrong thing.
+    ImGui::TextDisabled("%s…", state.slotPick.prompt.empty()
+                                   ? "click a face"
+                                   : state.slotPick.prompt.c_str());
   else if (state.camTopFace.IsSet())
     ImGui::TextDisabled("Z zero at %.3f", setup->origin.z);
   else
     ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),
                        "Z zero is not set yet");
-  if (!state.slotPick.miss.empty() && arming)
-    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s",
-                       state.slotPick.miss.c_str());
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Verbs###cam_open_tool"))
-    state.camToolOpen = true;
-  ImGui::SetItemTooltip("The one-click way in: clear a pocket, cut it out, "
-                        "face the top");
+  if (!state.slotPick.miss.empty() && arming) {
+    // WRAPPED. A refusal is a sentence whose second half says what to do
+    // instead, and this panel is narrow: unwrapped, the useful half was
+    // clipped off the right edge where nobody could read it.
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+    ImGui::TextWrapped("%s", state.slotPick.miss.c_str());
+    ImGui::PopStyleColor();
+  }
 
   // The stock, and the rapid height above it. Both are properties of the JOB
   // rather than of an operation, and the facing verb refuses without the
@@ -477,9 +492,11 @@ void DrawCamPanel(AppState& state) {
       state.camRefusal = derived.why;
     }
   }
-  if (!state.camRefusal.empty())
-    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.40f, 1.0f), "%s",
-                       state.camRefusal.c_str());
+  if (!state.camRefusal.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+    ImGui::TextWrapped("%s", state.camRefusal.c_str());
+    ImGui::PopStyleColor();
+  }
 
   // --- generate / post ---------------------------------------------------
   ImGui::Separator();
@@ -500,11 +517,13 @@ void DrawCamPanel(AppState& state) {
                              : ImVec4(0.55f, 0.90f, 0.60f, 1.0f);
     // The icon font is merged into the UI atlas, so these are real glyphs;
     // a literal U+2713 would not be (the text font stops at Latin-1).
-    ImGui::TextColored(color, "%s %s",
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::TextWrapped("%s %s",
                        line.level == cam::VerdictLine::Level::Good
                            ? ICON_FA_CIRCLE_CHECK
                            : ICON_FA_TRIANGLE_EXCLAMATION,
                        line.text.c_str());
+    ImGui::PopStyleColor();
   }
 
   if (!state.camToolpaths.empty()) {

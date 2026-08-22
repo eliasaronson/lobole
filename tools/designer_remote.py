@@ -28,8 +28,15 @@ class Designer:
         self._id = 0
 
     def call(self, method, **params):
+        return self.request(method, params)
+
+    # Params as a DICT rather than keywords. `help` takes a parameter called
+    # "method", which collides with call()'s own argument — so help was the
+    # one RPC this client could not reach. Keeping call() as it was matters
+    # too: callers pass whole request dicts as d.call(**{"method": …, …}).
+    def request(self, method, params=None):
         self._id += 1
-        request = {"id": self._id, "method": method, "params": params}
+        request = {"id": self._id, "method": method, "params": params or {}}
         self.file.write(json.dumps(request) + "\n")
         self.file.flush()
         while True:
@@ -105,7 +112,7 @@ def main():
     params = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
     d = Designer(port)
     try:
-        print(json.dumps(d.call(method, **params), indent=2))
+        print(json.dumps(d.request(method, params), indent=2))
     finally:
         d.close()
     return 0

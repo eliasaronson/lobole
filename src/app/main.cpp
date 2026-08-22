@@ -1226,11 +1226,32 @@ int main(int argc, char** argv) {
 
   // Build the default dock layout when there is no saved one. GUI tests
   // always use the default layout and never persist, for determinism.
+  //
+  // The layout is a PREFERENCE, so it belongs beside settings.json in the
+  // config directory — not in `imgui.ini` in whatever directory the app was
+  // launched from, which is where ImGui puts it by default. That default
+  // punched a hole in the isolation headless-preview.sh exists to provide:
+  // it gives a scratch instance its own XDG_CONFIG_HOME so an agent cannot
+  // touch the human's preferences, and then the agent rewrote the human's
+  // window layout anyway, because both instances run from the repo root.
+  // A layout already sitting in the launch directory is adopted once, so
+  // nobody loses the arrangement they had.
+  static std::string s_iniPath;
   if (args.runGuiTests) {
     io.IniFilename = nullptr;
     g_App.buildDefaultDockLayout = true;
   } else {
-    g_App.buildDefaultDockLayout = !std::filesystem::exists("imgui.ini");
+    const std::filesystem::path dir(::settings::ConfigDir());
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const std::filesystem::path ini = dir / "imgui.ini";
+    if (!std::filesystem::exists(ini) && std::filesystem::exists("imgui.ini"))
+      std::filesystem::copy_file(
+          "imgui.ini", ini, std::filesystem::copy_options::overwrite_existing,
+          ec);
+    s_iniPath = ini.string();
+    io.IniFilename = s_iniPath.c_str();
+    g_App.buildDefaultDockLayout = !std::filesystem::exists(ini);
   }
   g_App.runGuiTests = args.runGuiTests;
   g_App.perfHudOpen = args.perfHud;
