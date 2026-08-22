@@ -161,6 +161,35 @@ regenerating on the other person's side.
 [f7-handoff.md](f7-handoff.md)** — what is built, what deliberately is not,
 which tests cover what, and the traps.
 
+### F10 — Autosave saves the project, not the open tab — **planned, not built** — [design: f10-autosave-the-project.md](f10-autosave-the-project.md)
+**A bug, not a feature.** F6 found `checkpoint_create` snapshotting the ACTIVE
+PART and called it "wrong, not merely old"; autosave was never revisited and
+still does exactly that (`Autosaver::MaybeSave` takes one `Document`).
+Demonstrated: on a two-part project the sidecar holds only the open tab's
+features, and **on an assembly or drawing tab nothing autosaves at all**
+(`state.document` is null there). Recovery opens the sidecar as a project, so
+accepting it on a 48-part project would replace it with one part — the
+recovery is more destructive than the crash.
+
+The decision it needs is real: F2 chose a single-file sidecar because "atomic
+rename of one file beats directory syncing for crash safety", and a tool whose
+job is surviving a crash must never offer a half-written recovery. The answer
+is **one atomic file per dirty document** under a sidecar directory — every
+file stays complete-or-absent, unchanged documents stop being rewritten, and
+no new format is invented. **~1 day.**
+
+### F11 — Seeing what changed — **planned, not built** — [design: f11-seeing-what-changed.md](f11-seeing-what-changed.md)
+The version system works and is invisible: after a day the panel is sixty rows
+saying `save`, and F9 sharpened it — pull a teammate's work and there is no way
+to see what arrived. **G1** gives every row what it touched, in the tabs' own
+words, by lifting the path→CAD-language translation ProjectMerge already has
+(paths for most rows, one blob read to name a single item). **G2** is a diff
+between two versions, where the field-level layer is `ProjectMerge::DiffFields`
+already written — and where `compare_geometry` genuinely fits, since a diff has
+two operands by construction and a merge does not. **G3** is an hour of
+cleanup: `ProjectMerge::Scan` walks the tree and spawns `git` every second on a
+clean project. **G3 ~1 h, G1 ~1 d, G2 ~2–3 d**, in that order.
+
 ## Recommended order
 
 F1 + F2 **soon** (each ~a day, pure insurance). F3 after the schema settles —
