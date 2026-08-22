@@ -183,7 +183,21 @@ void DrawConflictsPanel(AppState& state) {
     }
     const std::string rowId = std::to_string(i);
 
-    ImGui::TextWrapped("%s", c.summary.c_str());
+    // Click the row to go and look at the thing being argued about: its
+    // document is opened and it is selected, so the feature tree highlights
+    // it. Same gesture as the diff view, and the same helper.
+    const bool showable = c.id != 0 && !c.oursDeleted;
+    if (!showable)
+      ImGui::BeginDisabled();
+    if (ImGui::Selectable((c.summary + "###cf_row" + rowId).c_str(), false,
+                          ImGuiSelectableFlags_AllowDoubleClick)) {
+      RevealItem(state, c.document, c.documentKind, c.id,
+                 ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
+    }
+    if (!showable)
+      ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && showable)
+      ImGui::SetTooltip("Click to select it, double-click to frame it.");
 
     // A conflict with a right answer gets one button, not a choice: asking
     // someone to pick a side of a feature ORDER is asking them to lose work.

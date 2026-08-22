@@ -448,6 +448,17 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
 bool RecoverProject(AppState& state, const std::string& path,
                     std::string* error = nullptr);
 
+// Show the user a changed item: switch to the document that holds it and
+// select it, so the feature tree highlights the row (F11 G2 follow-on).
+// `frame` also fits the camera to it, which is the double-click gesture —
+// a single click should not move the view under someone reading a list.
+//
+// Returns false when there is nothing to show: the item was REMOVED by the
+// change, or its document is gone. Saying so beats a click that silently
+// does nothing.
+bool RevealItem(AppState& state, const std::string& document,
+                const std::string& documentKind, uint64_t itemId, bool frame);
+
 // Autosave every DIRTY document of the project, one atomic file each (F10).
 //
 // Lives here rather than in Autosaver because only this layer knows what

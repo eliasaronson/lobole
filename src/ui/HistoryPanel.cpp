@@ -428,9 +428,10 @@ void DrawHistoryPanel(AppState& state) {
     if (state.diffChanges.empty()) {
       ImGui::TextDisabled("Nothing has changed.");
     } else {
-      ImGui::PushTextWrapPos(0.0f);
+      static std::string revealError;
       std::string group;
-      for (const ProjectMerge::ItemChange& c : state.diffChanges) {
+      for (int i = 0; i < static_cast<int>(state.diffChanges.size()); i++) {
+        const ProjectMerge::ItemChange& c = state.diffChanges[i];
         const std::string label =
             c.document.empty()
                 ? std::string("The project")
@@ -440,10 +441,34 @@ void DrawHistoryPanel(AppState& state) {
           group = label;
           ImGui::SeparatorText(group.c_str());
         }
-        ImGui::Bullet();
-        ImGui::TextUnformatted(c.summary.c_str());
+        // Click to go and look at it: switch to its document and select it,
+        // so the feature tree highlights the row. Double-click also frames
+        // it — a single click must not move the view under someone who is
+        // reading the list.
+        const bool removed = c.how == ProjectMerge::ItemChange::How::Removed;
+        if (removed || c.id == 0)
+          ImGui::BeginDisabled();
+        if (ImGui::Selectable(
+                (c.summary + "###diff_row" + std::to_string(i)).c_str(), false,
+                ImGuiSelectableFlags_AllowDoubleClick)) {
+          const bool frame = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+          revealError =
+              RevealItem(state, c.document, c.documentKind, c.id, frame)
+                  ? ""
+                  : "that one is not in the project any more";
+        }
+        if (removed || c.id == 0)
+          ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+          ImGui::SetTooltip(removed     ? "Removed by this change — there is "
+                                          "nothing left to show."
+                            : c.id == 0 ? "Not a single thing to point at."
+                                        : "Click to select it, double-click "
+                                          "to frame it.");
+        }
       }
-      ImGui::PopTextWrapPos();
+      if (!revealError.empty())
+        ImGui::TextDisabled("%s", revealError.c_str());
     }
     ImGui::End();
     return;

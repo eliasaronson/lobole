@@ -159,3 +159,30 @@ which needs no second pick. Note for anyone reading the field diffs: they come
 from `DiffFields`, whose `ours`/`theirs` are a merge's vocabulary — in a diff
 they are the from-side and the to-side, and the sentence says "10 to 18"
 rather than "10 vs 18" for that reason.
+
+
+## Follow-on: clicking a change goes and finds it (2026-08-22)
+
+Reading `Extrude "Boss" in part Stand` and then hunting for it yourself is
+most of the work back. A row is clickable now: it switches to the document
+that holds the item and selects it, so the feature tree highlights it.
+Double-click also frames it in the viewport — a single click must not move
+the view under someone reading a list, which is the same reason the feature
+tree uses `AllowDoubleClick` for its own edit gesture.
+
+The cross-document case is what earns it. On a 48-part project the change you
+are looking at is usually not on the tab you are standing on, and `RevealItem`
+switches for you.
+
+**A removed item cannot be shown**, and says so rather than clicking into
+nothing — the row is disabled with a reason. Same for a change that is not a
+single thing (an index, `project.json`).
+
+The Conflicts panel got the same gesture from the same helper, since "which
+one is that?" is the same question mid-merge.
+
+**What this is NOT.** Selection highlights the tree row and drives
+`FitCameraToSelection`; it does not tint or outline the body in the 3D view,
+because feature selection here never has. Seeing the *geometry* of a change —
+material added in green, removed in red — is still layer 3, and still
+`compare_geometry`'s to add.

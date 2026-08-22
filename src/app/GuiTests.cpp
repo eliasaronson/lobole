@@ -6943,6 +6943,83 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     }
   };
 
+  // Clicking a diff row goes and finds the thing. The case that earns it is a
+  // change in a document that is NOT the open tab — on a 48-part project,
+  // "Extrude \"Boss\" in part Stand" is otherwise a sentence you have to act
+  // on yourself.
+  t = IM_REGISTER_TEST(engine, "history", "clicking_a_change_selects_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    if (!GitVault::Available()) {
+      ctx->LogWarning("git not on PATH — skipping");
+      return;
+    }
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_reveal.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    const size_t second = ui::AddPart(*s_App, "Second");
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, second);
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(3);
+
+    // Change the FIRST part, then go and stand on the second one.
+    const auto slotOf = [](const char* name) -> size_t {
+      for (size_t i = 0; i < s_App->parts.size(); i++)
+        if (s_App->parts[i].name == name)
+          return i;
+      return 0;
+    };
+    ui::SetActivePart(*s_App, slotOf("Part 1"));
+    ctx->Yield(2);
+    const uint64_t changedId = Doc()->GetFeature(0)->GetId();
+    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemInputValue("//Box###ToolWindow/##Width", 7.0f);
+    ctx->Yield(2);
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::SetActivePart(*s_App, slotOf("Second"));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->activePart, (int)slotOf("Second"));
+
+    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    IM_CHECK(panel != nullptr);
+    ctx->ItemClick(panel->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//History");
+    ctx->ItemClick("**/###hist_row0");
+    ctx->Yield(3);
+    // project.json changes too, because the active tab is stored in it —
+    // so assert the row that matters rather than the count.
+    int boxRow = -1;
+    for (int r = 0; r < (int)s_App->diffChanges.size(); r++)
+      if (s_App->diffChanges[r].itemKind == "Box")
+        boxRow = r;
+    IM_CHECK(boxRow >= 0);
+    IM_CHECK(s_App->diffChanges[boxRow].summary.find("width 2 to 7") !=
+             std::string::npos);
+
+    // The click: it switches tab AND selects, so the tree row highlights.
+    ctx->ItemClick(("**/###diff_row" + std::to_string(boxRow)).c_str());
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->activePart, (int)slotOf("Part 1"));
+    IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), changedId);
+
+    if (ImGuiWindow* model = ImGui::FindWindowByName("Model")) {
+      ctx->ItemClick(model->TabId);
+      ctx->Yield(2);
+    }
+  };
+
   // Conflicts (F7): two lines of work that changed the same thing, brought
   // together through the panel. The whole point is that the row reads as a
   // FEATURE — "Box 'Box 1' ... width 5 vs 9" — and not as a path.

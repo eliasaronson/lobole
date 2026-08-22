@@ -575,6 +575,7 @@ std::vector<ItemChange> DiffVersions(const std::string& projectDir,
 
     ItemChange change;
     change.path = path;
+    change.id = IdFromFilename(filename);
     change.how = status == 'A'   ? ItemChange::How::Added
                  : status == 'D' ? ItemChange::How::Removed
                                  : ItemChange::How::Changed;
@@ -589,6 +590,12 @@ std::vector<ItemChange> DiffVersions(const std::string& projectDir,
     if (filename == "index.json") {
       change.itemKind = "Order";
       change.summary = "the order";
+    } else if (path == "project.json") {
+      // Which documents the project has — and which tab was open, since the
+      // active one is stored here too. Named rather than shown as a
+      // filename, the same as the log summary does.
+      change.itemKind = "Project";
+      change.summary = "the project's documents";
     } else if (!collection) {
       change.itemKind = "File";
       change.name = filename;

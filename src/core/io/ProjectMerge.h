@@ -184,6 +184,9 @@ struct ItemChange {
   std::string name;              // "Boss"
   std::vector<FieldDiff> fields; // only for Changed; `base` is unset here
   std::string summary;           // one line, already in CAD language
+  // The item's stable id, so a caller can select it. 0 when the path names
+  // something that is not an id-keyed item (an index, project.json).
+  uint64_t id = 0;
 };
 
 // Every item that differs between revisions `from` and `to` of the project

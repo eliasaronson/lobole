@@ -2151,6 +2151,39 @@ std::string SlotDir(const AppState& state, size_t i) {
 
 } // namespace
 
+bool RevealItem(AppState& state, const std::string& document,
+                const std::string& documentKind, uint64_t itemId, bool frame) {
+  if (itemId == 0)
+    return false; // an index or project.json: nothing to point at
+
+  // The change may live in a document that is not the open tab, which is the
+  // whole reason this is worth a click on a multi-document project.
+  if (!document.empty()) {
+    const DocKind want = documentKind == "assembly"  ? DocKind::Assembly
+                         : documentKind == "drawing" ? DocKind::Drawing
+                                                     : DocKind::Part;
+    size_t found = state.parts.size();
+    for (size_t i = 0; i < state.parts.size(); i++)
+      if (state.parts[i].name == document && state.parts[i].kind == want)
+        found = i;
+    if (found == state.parts.size())
+      return false; // the document itself is gone
+    if (static_cast<int>(found) != state.activePart)
+      SetActivePart(state, found);
+  }
+
+  // Only a part holds features; an occurrence or a drawing dim is selected
+  // through its own set, which this does not reach into.
+  Document* doc = state.document.get();
+  if (doc == nullptr || doc->FindFeatureById(itemId) == nullptr)
+    return false; // removed by this very change, most likely
+
+  SelectFeature(state, itemId);
+  if (frame)
+    FitCameraToSelection(state);
+  return true;
+}
+
 bool RecoverProject(AppState& state, const std::string& path,
                     std::string* error) {
   namespace fs = std::filesystem;
