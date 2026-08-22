@@ -18,6 +18,8 @@
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
 
+#include <limits>
+
 #include <cmath>
 
 namespace ui {
@@ -334,12 +336,37 @@ void DrawCamToolWindow(AppState& state) {
   // in: an indexed job looks down ITS spindle, not the world's.
   if (ImGui::Button("Look down the spindle###cam_view_spindle") &&
       state.camera != nullptr && setup != nullptr) {
+    // The camera goes where the spindle is and looks the way it looks, with
+    // the setup's own +Y up the screen. Snap rather than animate: this is a
+    // "show me the job" button, not a flourish.
+    const glm::vec3 dir = glm::normalize(
+        glm::vec3(cam::FromSetupSpace(*setup, glm::dvec3(0, 0, 1))));
+    const glm::vec3 up = glm::normalize(
+        glm::vec3(cam::FromSetupSpace(*setup, glm::dvec3(0, 1, 0))));
+    state.camera->SnapToView(dir, up);
+    // …and framed on the STOCK, which is the thing being cut. Keeping the
+    // previous zoom gave a plan view of four square millimetres if that is
+    // where you happened to be.
     glm::dvec3 lo(0.0), hi(0.0);
-    glm::vec3 at(0.0f);
-    if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi))
-      at = glm::vec3(cam::FromSetupSpace(*setup, (lo + hi) * 0.5));
-    const glm::dvec3 down = cam::FromSetupSpace(*setup, glm::dvec3(0, 0, 1));
-    state.camera->AlignToFace(at, glm::normalize(glm::vec3(down)));
+    if (cam::StockBounds(*setup, state.document->GetBodies(), lo, hi)) {
+      // StockBounds reports the box in SETUP space; the camera lives in model
+      // space, so every corner comes back through the frame.
+      glm::vec3 mn(std::numeric_limits<float>::max());
+      glm::vec3 mx(std::numeric_limits<float>::lowest());
+      for (int c = 0; c < 8; c++) {
+        const glm::dvec3 corner((c & 1) ? hi.x : lo.x, (c & 2) ? hi.y : lo.y,
+                                (c & 4) ? hi.z : lo.z);
+        const glm::vec3 w(cam::FromSetupSpace(*setup, corner));
+        mn = glm::min(mn, w);
+        mx = glm::max(mx, w);
+      }
+      FitCameraToWorldBox(state, mn, mx);
+      // Fitting moves the TARGET, and Camera::SetTarget keeps the camera
+      // where it is and re-aims — so it swings the view off the axis that
+      // was just set. Aim first (so the fit's pan away from this window is
+      // computed in the right frame), fit, then aim again.
+      state.camera->SnapToView(dir, up);
+    }
   }
   ImGui::SetItemTooltip("Plan view, in the frame this setup cuts in — what "
                         "the machine sees, whatever the view cube calls it");

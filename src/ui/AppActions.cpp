@@ -2268,9 +2268,14 @@ void FitCameraToBox(AppState& state, const glm::vec3& min,
   // Ask the session state whether a window is open, not the rect: the remote
   // `fit_view` runs before the UI draws, so the rect is always a frame behind
   // and a just-closed window kept shoving the model aside.
-  const bool toolWindowOpen =
-      HasPendingFeature(state) || state.editFeatureId != 0 ||
-      state.measure.active || state.dimTool.active || state.mateTool.active;
+  // CAM's verb window counts too. It was missing from this list, so fitting
+  // the view with the verbs open parked the model under the very window that
+  // was asking you to click it — the thing this whole branch exists to stop
+  // (docs/cam/dogfood-round.md, round 2).
+  const bool toolWindowOpen = HasPendingFeature(state) ||
+                              state.editFeatureId != 0 ||
+                              state.measure.active || state.dimTool.active ||
+                              state.mateTool.active || state.camToolOpen;
   float coveredFrac = 0.0f;
   if (toolWindowOpen && state.viewportSize.x > 1.0f &&
       state.toolWindowRect.z > state.toolWindowRect.x) {
@@ -2289,11 +2294,15 @@ void FitCameraToBox(AppState& state, const glm::vec3& min,
   cam.SetMaxDistance(std::max(20.0f * distance, 1000.0f)); // let it zoom out
   cam.SetDistance(distance);
   if (coveredFrac > 0.01f) {
-    // Half the covered strip, in world units at the target's depth.
+    // Half the covered strip, in world units at the target's depth. The
+    // target moves RIGHT so the model appears LEFT of it — away from the
+    // window on the right. It moved the other way, which pushed the model
+    // under the very window this branch exists to clear (found with the CAM
+    // verbs open, docs/cam/dogfood-round.md).
     const glm::vec3 fwd = glm::normalize(center - cam.GetPosition());
     const glm::vec3 right = glm::normalize(glm::cross(fwd, cam.GetUp()));
     const float halfWidthWorld = distance * tanHalfV * aspect;
-    cam.SetTarget(center - right * (halfWidthWorld * coveredFrac));
+    cam.SetTarget(center + right * (halfWidthWorld * coveredFrac));
   }
 }
 } // namespace

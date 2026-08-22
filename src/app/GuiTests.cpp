@@ -998,6 +998,36 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(face.ok); // so the first verb on a rough board just works
   };
 
+  // Fitting the view with a tool window open puts the model in the band the
+  // window LEAVES. The pan was the wrong way round — it pushed the model
+  // under the very window the branch exists to clear — and nothing noticed,
+  // because "the model moved sideways" looks the same either way until you
+  // ask which side (docs/cam/dogfood-round.md).
+  t = IM_REGISTER_TEST(engine, "cam", "fit_keeps_the_model_clear_of_the_tool");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    s_App->camToolOpen = true;
+    ctx->Yield(4);
+    ImGuiWindow* win = ImGui::FindWindowByName("CAM###ToolWindow");
+    IM_CHECK(win != nullptr);
+    ui::FitCameraToDocument(*s_App);
+    ctx->Yield(4);
+
+    // Where the part's centre lands on screen. It must sit left of the
+    // window's left edge, not under it.
+    const glm::vec2 screen =
+        ui::WorldToScreen(*s_App, glm::vec3(30.0f, 20.0f, 6.0f));
+    ctx->LogInfo("part centre at x=%.0f, window starts at x=%.0f", screen.x,
+                 win->Pos.x);
+    IM_CHECK(screen.x < win->Pos.x);
+    s_App->camToolOpen = false;
+  };
+
   // The floating tool window FOLLOWS the viewport. Anchoring it once, on the
   // appearing frame, placed it against a size AlwaysAutoResize had not
   // computed yet, and any later layout change left it stranded over the

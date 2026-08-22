@@ -215,6 +215,12 @@ fixed the same day; each is a line in the panel now rather than a line here.
   appeared, against a size `AlwaysAutoResize` had not computed yet, and left
   there. Change the layout and it sat over the middle of the model it was
   asking you to click. It follows the viewport now, and re-anchors on reopen.
+  Chasing that turned up the real reason the model kept ending up underneath
+  it: `FitCameraToBox` already knows to put the model in the band a tool
+  window leaves — and **panned the wrong way**, pushing it under the window
+  instead of clear of it. CAM's window was also missing from the list of
+  windows it considers open at all. Both fixed; "Look down the spindle" frames
+  the whole job in the band that is left.
 - **`ui_items` truncates labels at 32 characters** (the test engine's own
   buffer), so for a long label the `###id` is cut off — and the truncated
   string is exactly what one would paste into `item_click`, where it fails.
