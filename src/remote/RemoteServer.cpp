@@ -713,6 +713,16 @@ static const std::set<std::string> kNoPartDoc = {
     // not the active document). checkpoint_create/restore snapshot the
     // ACTIVE PART document and stay part-gated.
     "history_log", "checkpoint_list",
+    // Sharing and conflicts (F7/F9) act on the project's REPOSITORY and the
+    // disk check on the project DIRECTORY — none of them read the active
+    // document. Gating them on a part meant every one of them failed with
+    // "the active document is an assembly, not a part" on an assembly or
+    // drawing tab: a 48-part project could not be pushed from its own
+    // assembly tab, which is where anyone assembling it is standing.
+    "branch_list", "branch_create", "branch_switch", "branch_merge",
+    "conflict_list", "conflict_resolve", "merge_finish", "merge_abort",
+    "remote_list", "remote_add", "remote_remove", "fetch", "pull", "push",
+    "clone_project", "project_changed_on_disk",
     // Camera / rendering act on the viewport, not the part document, so they
     // work on an assembly tab too. render_still's RT scene sync does the
     // occurrence walk itself.
