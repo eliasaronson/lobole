@@ -472,8 +472,20 @@ void StartTerminalCommand(AppState& state, const std::string& program,
 }
 
 void ShutdownTerminal(AppState& state) {
-  if (state.terminal)
-    state.terminal->pty.Terminate();
+  if (!state.terminal)
+    return;
+  state.terminal->pty.Terminate();
+  // ...and FORGET the session, not just kill it. `everStarted` is a latch
+  // that stops the shell respawning after the user presses Stop, and
+  // `screen` outlives the process on purpose so the scrollback is still
+  // readable. Both are right while the panel is open — and both meant that
+  // turning the preference off and on again produced a panel that could
+  // never start a shell, dead until the app restarted. Which is the same
+  // one-shot trap the chooser this panel replaced used to have.
+  //
+  // The preference going off already "ends the session rather than hiding
+  // it" (below); ending it means the next open is a fresh one.
+  state.terminal.reset();
 }
 
 void DrawTerminalPanel(AppState& state) {
