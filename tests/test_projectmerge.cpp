@@ -778,3 +778,90 @@ TEST_CASE("Only a lone item is worth naming", "[merge]") {
   CHECK_FALSE(IsSingleItem(
       {"parts/Stand/features/1-box.json", "parts/Stand/features/2-box.json"}));
 }
+
+// ---------------------------------------------------------------------------
+// Diffing two versions (F11 G2)
+//
+// Not a merge: two revisions are two revisions. The field-level layer is
+// DiffFields, unchanged from the Conflicts panel — two blobs are two blobs.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("A diff between versions reads as items and fields", "[merge]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchProject p("diffversions");
+  SeedProject(p);
+  REQUIRE(GitVault::Init(p.path()));
+  REQUIRE(GitVault::CommitAll(p.path(), "save"));
+  const std::string first = GitVault::Log(p.path())[0].hash;
+  const uint64_t extrude = SeededFeatureIds(p).back();
+
+  // Change one, add one, remove one — the three things a diff has to say.
+  SetField(p, extrude, "distance", 18.0);
+  p.WriteJson("parts/Stand/features/40-fillet.json",
+              json{{"id", 40}, {"type", "Fillet"}, {"name", "Edge break"}});
+  const uint64_t sketch = SeededFeatureIds(p).front();
+  fs::remove(p.dir / FeatureFile(p, sketch));
+  REQUIRE(GitVault::CommitAll(p.path(), "save"));
+  const std::string second = GitVault::Log(p.path())[0].hash;
+
+  const auto changes = ProjectMerge::DiffVersions(p.path(), first, second);
+  REQUIRE(changes.size() >= 3);
+
+  const auto find = [&](ProjectMerge::ItemChange::How how) {
+    for (const auto& c : changes)
+      if (c.how == how && c.itemKind != "Order")
+        return c;
+    return ProjectMerge::ItemChange{};
+  };
+
+  const auto changed = find(ProjectMerge::ItemChange::How::Changed);
+  CHECK(changed.itemKind == "Extrude");
+  CHECK(changed.document == "Stand");
+  REQUIRE(changed.fields.size() == 1);
+  CHECK(changed.fields[0].field == "distance");
+  // "to", not "vs" — a diff has a direction where a conflict has two sides.
+  CHECK(changed.summary.find("distance 10 to 18") != std::string::npos);
+  CHECK(changed.summary.find("in part Stand") != std::string::npos);
+
+  CHECK(find(ProjectMerge::ItemChange::How::Added).summary.find("added") !=
+        std::string::npos);
+  CHECK(find(ProjectMerge::ItemChange::How::Removed).summary.find("removed") !=
+        std::string::npos);
+}
+
+// "What have I changed since that version" — the working tree is the other
+// side, and it has no revision to name.
+TEST_CASE("A diff can end at the working tree", "[merge]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchProject p("diffworking");
+  SeedProject(p);
+  REQUIRE(GitVault::Init(p.path()));
+  REQUIRE(GitVault::CommitAll(p.path(), "save"));
+  const std::string saved = GitVault::Log(p.path())[0].hash;
+  const uint64_t extrude = SeededFeatureIds(p).back();
+
+  CHECK(ProjectMerge::DiffVersions(p.path(), saved, "").empty());
+
+  SetField(p, extrude, "distance", 33.0); // unsaved, uncommitted
+  const auto changes = ProjectMerge::DiffVersions(p.path(), saved, "");
+  REQUIRE(changes.size() == 1);
+  CHECK(changes[0].itemKind == "Extrude");
+  CHECK(changes[0].summary.find("distance 10 to 33") != std::string::npos);
+}
+
+// Baked geometry is not a change anyone made.
+TEST_CASE("A diff ignores derived files", "[merge]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchProject p("diffderived");
+  SeedProject(p);
+  REQUIRE(GitVault::Init(p.path()));
+  REQUIRE(GitVault::CommitAll(p.path(), "save"));
+  const std::string saved = GitVault::Log(p.path())[0].hash;
+
+  p.Write("parts/Stand/geometry/0.brep", "rebuilt");
+  p.Write("parts/Stand/geometry/index.json", R"({"chain":"x"})");
+  CHECK(ProjectMerge::DiffVersions(p.path(), saved, "").empty());
+}

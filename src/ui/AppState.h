@@ -1111,6 +1111,11 @@ struct AppState {
   // what F8's poll already detects. Timing it instead cost a tree walk a
   // second, forever, for an answer that was "no" every time.
   bool conflictsStale = true;
+  // The version the History panel is showing a diff against, and what it
+  // found (F11 G2). Empty hash = no diff open; empty `diffTo` = the working
+  // tree, which is "what have I changed since then".
+  std::string diffFrom, diffTo, diffLabel;
+  std::vector<ProjectMerge::ItemChange> diffChanges;
   // How many scans have actually happened. Only a counter for a test to
   // watch — but the property it guards is the whole point of the change: on
   // a clean project this must stop going up.

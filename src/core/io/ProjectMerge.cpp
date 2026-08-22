@@ -218,6 +218,31 @@ const Collection* Locate(const std::vector<std::string>& parts, Conflict& out) {
   return nullptr;
 }
 
+// Newline-split, dropping blanks — the same shape GitVault's Lines has, but
+// that one is private to it.
+std::vector<std::string> SplitLines(const std::string& text) {
+  std::vector<std::string> out;
+  size_t pos = 0;
+  while (pos < text.size()) {
+    const size_t eol = text.find('\n', pos);
+    const std::string line =
+        text.substr(pos, eol == std::string::npos ? eol : eol - pos);
+    pos = eol == std::string::npos ? text.size() : eol + 1;
+    if (!line.empty())
+      out.push_back(line);
+  }
+  return out;
+}
+
+bool ReadFileInto(const fs::path& path, std::string* out) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in)
+    return false;
+  *out = std::string((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+  return true;
+}
+
 std::string ReadFile(const fs::path& path) {
   std::ifstream in(path, std::ios::binary);
   if (!in)
@@ -513,6 +538,112 @@ std::string SummarizePaths(const std::vector<std::string>& paths,
     out += (i ? " and " : "") + pieces[i];
   if (projectLevel > 0)
     out += out.empty() ? "the project" : ", and the project";
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Diffing two versions (F11 G2)
+// ---------------------------------------------------------------------------
+
+std::vector<ItemChange> DiffVersions(const std::string& projectDir,
+                                     const std::string& from,
+                                     const std::string& to) {
+  std::vector<ItemChange> out;
+  // `to` empty = the working tree, which is what "since that version" means.
+  const std::string range = to.empty() ? from : from + " " + to;
+  std::string text;
+  if (!GitVault::DiffNames(projectDir, from, to, &text))
+    return out;
+
+  for (const std::string& line : SplitLines(text)) {
+    // "<status>\t<path>" — M, A, D, and R<score> for a rename.
+    const size_t tab = line.find('\t');
+    if (tab == std::string::npos || tab == 0)
+      continue;
+    const char status = line[0];
+    const std::string path = line.substr(tab + 1);
+    const auto parts = SplitPath(path);
+    const std::string filename = parts.empty() ? path : parts.back();
+
+    // Derived data and repository hints are not changes anyone made — the
+    // same filter the log summary applies.
+    bool derived = filename == ".gitattributes" || filename == ".gitignore";
+    for (const std::string& part : parts)
+      derived = derived || part == "geometry";
+    if (derived)
+      continue;
+
+    ItemChange change;
+    change.path = path;
+    change.how = status == 'A'   ? ItemChange::How::Added
+                 : status == 'D' ? ItemChange::How::Removed
+                                 : ItemChange::How::Changed;
+
+    Conflict located; // reuse the path -> document/collection translation
+    located.path = path;
+    const Collection* collection = Locate(parts, located);
+    change.document = located.document;
+    change.documentKind = located.documentKind;
+
+    // The order file is a real change, and it is not an item.
+    if (filename == "index.json") {
+      change.itemKind = "Order";
+      change.summary = "the order";
+    } else if (!collection) {
+      change.itemKind = "File";
+      change.name = filename;
+      change.summary = path;
+    } else {
+      // Read whichever side exists to name it, and field-diff when both do.
+      // DiffFields is the Conflicts panel's, unchanged: two blobs are two
+      // blobs, no merge required.
+      std::string beforeText, afterText;
+      const bool haveBefore =
+          change.how != ItemChange::How::Added &&
+          GitVault::ShowFile(projectDir, from, path, &beforeText);
+      const bool haveAfter =
+          change.how != ItemChange::How::Removed &&
+          (to.empty() ? ReadFileInto(fs::path(projectDir) / path, &afterText)
+                      : GitVault::ShowFile(projectDir, to, path, &afterText));
+      const json beforeJson = ParseOrNull(beforeText);
+      const json afterJson = ParseOrNull(afterText);
+      const json& present = afterJson.is_object() ? afterJson : beforeJson;
+      change.itemKind = ItemKind(present, collection);
+      change.name = ItemName(present);
+      if (haveBefore && haveAfter)
+        change.fields = DiffFields(json(), beforeJson, afterJson);
+
+      std::string s = change.itemKind;
+      if (!change.name.empty())
+        s += " \"" + change.name + "\"";
+      if (change.how == ItemChange::How::Added)
+        s += " — added";
+      else if (change.how == ItemChange::How::Removed)
+        s += " — removed";
+      else if (!change.fields.empty()) {
+        s += " — ";
+        for (size_t i = 0; i < change.fields.size() && i < 3; i++) {
+          if (i)
+            s += ", ";
+          // `ours` is the FROM side and `theirs` the TO side here; the merge
+          // vocabulary is wrong for a diff, so the sentence says it plainly.
+          s += FieldLabel(change.fields[i].field) + " " +
+               change.fields[i].ours + " to " + change.fields[i].theirs;
+        }
+        if (change.fields.size() > 3)
+          s += ", and " + std::to_string(change.fields.size() - 3) + " more";
+      }
+      change.summary = s;
+    }
+    if (!change.document.empty()) {
+      change.summary +=
+          " in " +
+          (change.documentKind.empty() ? "" : change.documentKind + " ") +
+          change.document;
+    }
+    out.push_back(std::move(change));
+  }
+  (void)range;
   return out;
 }
 

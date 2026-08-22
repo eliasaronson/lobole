@@ -583,6 +583,16 @@ bool ReadStages(const std::string& dir, const std::string& path, Stages* out) {
   return out->hasBase || out->hasOurs || out->hasTheirs;
 }
 
+bool DiffNames(const std::string& dir, const std::string& from,
+               const std::string& to, std::string* out) {
+  if (!Available() || !IsRepo(dir))
+    return false;
+  std::string args = "diff --name-status " + Quote(from);
+  if (!to.empty())
+    args += " " + Quote(to);
+  return RunGit(dir, args, out) == 0;
+}
+
 std::vector<std::string> ListTree(const std::string& dir,
                                   const std::string& rev) {
   std::vector<std::string> out;

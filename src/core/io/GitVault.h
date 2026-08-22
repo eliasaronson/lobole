@@ -161,6 +161,12 @@ bool ReadStages(const std::string& dir, const std::string& path, Stages* out);
 bool ShowFile(const std::string& dir, const std::string& rev,
               const std::string& path, std::string* out);
 
+// `git diff --name-status <from> [<to>]` into `out`. An empty `to` diffs
+// against the WORKING TREE, which is what "what have I changed since that
+// version" asks. False when git refuses (an unknown revision).
+bool DiffNames(const std::string& dir, const std::string& from,
+               const std::string& to, std::string* out);
+
 // Paths in a revision's tree (`ls-tree -r --name-only`).
 std::vector<std::string> ListTree(const std::string& dir,
                                   const std::string& rev);

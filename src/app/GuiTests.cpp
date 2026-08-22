@@ -6861,6 +6861,67 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!ui::ProjectChangedOnDisk(*s_App));
   };
 
+  // F11 G2: clicking a version shows what has changed since it. The point is
+  // that it reads as the model, not as files — "Box \"Box 1\" — width 2 to 9",
+  // not "features/1-box.json | M".
+  t = IM_REGISTER_TEST(engine, "history", "a_version_shows_what_changed_since");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    if (!GitVault::Available()) {
+      ctx->LogWarning("git not on PATH — skipping");
+      return;
+    }
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_diff_gui.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    s_App->historyStamp = -1.0;
+    ctx->Yield(3);
+
+    // Change the model AFTER that version, and write it — the diff is against
+    // what is ON DISK, which is what "since that version" means. Saved but
+    // not committed, so this is the everyday question: what have I done since
+    // the last version?
+    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemInputValue("//Box###ToolWindow/##Width", 9.0f);
+    ctx->Yield(2);
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ctx->Yield(2);
+
+    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    IM_CHECK(panel != nullptr && panel->DockNode != nullptr);
+    ctx->ItemClick(panel->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//History");
+    ctx->ItemClick("**/###hist_row0"); // the version, not a button
+    ctx->Yield(3);
+
+    IM_CHECK(!s_App->diffFrom.empty());
+    IM_CHECK_EQ(s_App->diffChanges.size(), (size_t)1);
+    const ProjectMerge::ItemChange& c = s_App->diffChanges[0];
+    IM_CHECK_STR_EQ(c.itemKind.c_str(), "Box");
+    IM_CHECK(c.summary.find("width 2 to 9") != std::string::npos);
+
+    // Back returns to the list, and the versions are still there.
+    ctx->ItemClick("Back###hist_diff_back");
+    ctx->Yield(2);
+    IM_CHECK(s_App->diffFrom.empty());
+    IM_CHECK(ctx->ItemExists("**/###hist_row0"));
+
+    // Leave Model in front for whatever runs next.
+    if (ImGuiWindow* model = ImGui::FindWindowByName("Model")) {
+      ctx->ItemClick(model->TabId);
+      ctx->Yield(2);
+    }
+  };
+
   // Conflicts (F7): two lines of work that changed the same thing, brought
   // together through the panel. The whole point is that the row reads as a
   // FEATURE — "Box 'Box 1' ... width 5 vs 9" — and not as a path.

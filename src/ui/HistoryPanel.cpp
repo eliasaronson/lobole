@@ -59,6 +59,14 @@ void RefreshHistory(AppState& state, bool force) {
                      state.historyPath != state.projectPath;
   if (!force && !stale)
     return;
+  // A diff belongs to the project it was opened in. Without this, opening
+  // another project leaves the panel showing the previous one's changes —
+  // and the version list hidden behind them.
+  if (state.historyPath != state.projectPath) {
+    state.diffFrom.clear();
+    state.diffTo.clear();
+    state.diffChanges.clear();
+  }
   state.historyStamp = now;
   state.historyPath = state.projectPath;
   // The cheap log first: one process, and it answers "has anything changed"
@@ -406,6 +414,41 @@ void DrawHistoryPanel(AppState& state) {
     ImGui::TextDisabled("Save to restore an earlier version.");
   }
 
+  // A diff, if one is open. It replaces the list rather than sitting beside
+  // it: a second panel for something only ever reached from this one is a tab
+  // too many, and the Conflicts panel earned its own window by appearing
+  // unbidden, which this does not.
+  if (!state.diffFrom.empty()) {
+    ImGui::TextWrapped("Changes since %s", state.diffLabel.c_str());
+    if (ImGui::SmallButton("Back###hist_diff_back")) {
+      state.diffFrom.clear();
+      state.diffChanges.clear();
+    }
+    ImGui::Separator();
+    if (state.diffChanges.empty()) {
+      ImGui::TextDisabled("Nothing has changed.");
+    } else {
+      ImGui::PushTextWrapPos(0.0f);
+      std::string group;
+      for (const ProjectMerge::ItemChange& c : state.diffChanges) {
+        const std::string label =
+            c.document.empty()
+                ? std::string("The project")
+                : (c.documentKind.empty() ? "" : c.documentKind + " ") +
+                      c.document;
+        if (label != group) {
+          group = label;
+          ImGui::SeparatorText(group.c_str());
+        }
+        ImGui::Bullet();
+        ImGui::TextUnformatted(c.summary.c_str());
+      }
+      ImGui::PopTextWrapPos();
+    }
+    ImGui::End();
+    return;
+  }
+
   const int64_t now = static_cast<int64_t>(std::time(nullptr));
   // The action runs after the loop: restoring reopens the project, which
   // rebuilds the very list being walked.
@@ -442,14 +485,32 @@ void DrawHistoryPanel(AppState& state) {
       // (F11 G1) — sixty identical rows is a backup, not a history. The
       // subject is the fallback for a commit whose files say nothing (the
       // first one, or a derived-only write).
-      if (e.named) {
-        ImGui::TextUnformatted(e.subject.c_str());
-      } else {
-        ImGui::TextDisabled("%s", e.changed.empty() ? e.subject.c_str()
-                                                    : e.changed.c_str());
+      const char* label = e.named             ? e.subject.c_str()
+                          : e.changed.empty() ? e.subject.c_str()
+                                              : e.changed.c_str();
+      // Clicking the VERSION shows what changed since it (F11 G2). A second
+      // button in the action column overflows at a large font — F6's
+      // rows_fit guard said so immediately — and a version list whose
+      // versions are clickable is what anyone would try first anyway.
+      //
+      // Its own column, NOT SpanAllColumns: spanning puts the selectable over
+      // the Restore button and swallows its clicks.
+      if (!e.named)
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+      if (ImGui::Selectable(
+              (std::string(label) + "###hist_row" + std::to_string(i)).c_str(),
+              state.diffFrom == e.hash)) {
+        state.diffFrom = e.hash;
+        state.diffTo.clear();
+        state.diffLabel = label;
+        state.diffChanges =
+            ProjectMerge::DiffVersions(state.projectPath, e.hash, "");
       }
-      if (!e.changed.empty() && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", e.changed.c_str());
+      if (!e.named)
+        ImGui::PopStyleColor();
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("What has changed since this version.");
 
       ImGui::TableSetColumnIndex(1);
       ImGui::TextDisabled("%s", Ago(e.unixTime, now).c_str());

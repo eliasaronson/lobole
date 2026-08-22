@@ -168,6 +168,31 @@ std::string SummarizePaths(const std::vector<std::string>& paths,
                            const std::string& singleItemKind = "",
                            const std::string& singleItemName = "");
 
+// What changed between two versions (F11 G2).
+//
+// Not a merge: two revisions are two revisions, so there is no base to
+// reason about and nothing to resolve. Which is also why compare_geometry
+// belongs HERE and not in the merge path — a diff has two operands by
+// construction, and a merge has none.
+struct ItemChange {
+  enum class How { Added, Removed, Changed };
+  How how = How::Changed;
+  std::string path;
+  std::string document;          // "Stand"
+  std::string documentKind;      // "part"
+  std::string itemKind;          // "Extrude"
+  std::string name;              // "Boss"
+  std::vector<FieldDiff> fields; // only for Changed; `base` is unset here
+  std::string summary;           // one line, already in CAD language
+};
+
+// Every item that differs between revisions `from` and `to` of the project
+// at `projectDir`. `to` may be the empty string, meaning the working tree —
+// "what have I changed since that version".
+std::vector<ItemChange> DiffVersions(const std::string& projectDir,
+                                     const std::string& from,
+                                     const std::string& to);
+
 // True when `paths` is one document-item file — the case worth spending a
 // blob read on to name it properly.
 bool IsSingleItem(const std::vector<std::string>& paths);
