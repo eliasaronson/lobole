@@ -79,6 +79,10 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"push", "Send this branch to {remote?:origin}. 'rejected' means someone "
              "else pushed first; pull, then push again."},
     {"clone_project", "Clone {url} into {path} and open it."},
+    {"autosave_now", "Autosave every dirty document immediately, ignoring "
+                     "the interval; returns how many were written."},
+    {"autosave_status", "Which documents have autosaved work waiting to be "
+                        "recovered."},
     {"project_changed_on_disk",
      "Has anything else written to the project since it was opened or last "
      "saved? (a terminal command, another editor, a second instance)"},
@@ -220,6 +224,24 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
   if (m == "project_changed_on_disk") {
     return json{{"changed", ui::ProjectChangedOnDisk(state)},
                 {"path", state.projectPath}};
+  }
+  if (m == "autosave_now") {
+    // Testing and scripting: the interval is a wall clock, and a test should
+    // not sleep for it. Uses its own Autosaver so the app's interval timing
+    // is untouched.
+    Autosaver immediate(0.001);
+    immediate.Prime(0.0);
+    const int written = ui::AutosaveProject(state, immediate, 1.0);
+    return json{{"documents", written}};
+  }
+  if (m == "autosave_status") {
+    json docs = json::array();
+    for (const std::string& rel :
+         Autosaver::RecoverableDocuments(state.projectPath))
+      docs.push_back(rel);
+    return json{
+        {"documents", docs},
+        {"single_file", Autosaver::HasNewerAutosave(state.projectPath)}};
   }
   if (m == "remote_list") {
     json list = json::array();

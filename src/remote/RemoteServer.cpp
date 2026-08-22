@@ -723,6 +723,9 @@ static const std::set<std::string> kNoPartDoc = {
     "conflict_list", "conflict_resolve", "merge_finish", "merge_abort",
     "remote_list", "remote_add", "remote_remove", "fetch", "pull", "push",
     "clone_project", "project_changed_on_disk",
+    // Autosave acts on the project directory, and gating it on a part is the
+    // shape of the bug F10 fixes.
+    "autosave_now", "autosave_status",
     // Camera / rendering act on the viewport, not the part document, so they
     // work on an assembly tab too. render_still's RT scene sync does the
     // occurrence walk itself.

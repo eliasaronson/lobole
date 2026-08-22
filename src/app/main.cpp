@@ -1623,10 +1623,11 @@ int main(int argc, char** argv) {
     // Remote-control requests act on the document/UI before this frame
     remoteServer.ProcessPending(g_App);
 
-    if (g_App.document) {
-      autosaver.MaybeSave(*g_App.document, g_App.projectPath,
-                          g_App.lastSavedVersion, glfwGetTime());
-    }
+    // The PROJECT, not the open tab (F10): this used to be handed
+    // g_App.document, so a multi-document project autosaved one part and an
+    // assembly or drawing tab — where that pointer is null — autosaved
+    // nothing at all.
+    ui::AutosaveProject(g_App, autosaver, glfwGetTime());
     // Preferences: debounced so dragging a control is one write, and never
     // during GUI tests (they run on defaults and must not touch the
     // developer's config).

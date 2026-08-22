@@ -37,6 +37,54 @@ bool Autosaver::HasNewerAutosave(const std::string& projectPath) {
 void Autosaver::Clear(const std::string& projectPath) {
   std::error_code ec;
   fs::remove(SidecarPath(projectPath), ec);
+  // A save means the disk is now the truth, for every document.
+  fs::remove_all(SidecarDir(projectPath), ec);
+}
+
+std::string Autosaver::SidecarDir(const std::string& projectPath) {
+  if (projectPath.empty())
+    return (fs::path(StateDir()) / "unsaved.autosave.d").string();
+  return projectPath + ".autosave.d";
+}
+
+std::vector<std::string>
+Autosaver::RecoverableDocuments(const std::string& projectPath) {
+  std::vector<std::string> out;
+  std::error_code ec;
+  const fs::path dir(SidecarDir(projectPath));
+  if (!fs::is_directory(dir, ec))
+    return out;
+  for (auto it = fs::recursive_directory_iterator(
+           dir, fs::directory_options::skip_permission_denied, ec);
+       it != fs::recursive_directory_iterator(); it.increment(ec)) {
+    if (ec)
+      break;
+    if (!it->is_regular_file(ec) || it->path().extension() != ".json")
+      continue;
+    // "<project>.autosave.d/parts/Stand.json" -> "parts/Stand", which is what
+    // project.json calls that document.
+    fs::path rel = fs::relative(it->path(), dir, ec);
+    if (ec)
+      continue;
+    rel.replace_extension();
+    out.push_back(rel.generic_string());
+  }
+  return out;
+}
+
+bool Autosaver::NeedsSave(uint64_t docId, uint64_t instanceId, uint64_t version,
+                          uint64_t savedVersion) const {
+  if (version == savedVersion)
+    return false; // not dirty
+  const auto it = m_saved.find(docId);
+  if (it == m_saved.end())
+    return true;
+  return it->second.instanceId != instanceId || it->second.version != version;
+}
+
+void Autosaver::NoteSaved(uint64_t docId, uint64_t instanceId,
+                          uint64_t version) {
+  m_saved[docId] = Seen{instanceId, version};
 }
 
 bool Autosaver::MaybeSave(const Document& doc, const std::string& projectPath,

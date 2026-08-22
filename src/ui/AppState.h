@@ -1052,6 +1052,10 @@ struct AppState {
   // not in any document, so they bump no document version — this flag keeps
   // them save-prompt visible. Cleared on save/open (StampAllSaved).
   bool projectMetaDirty = false;
+  // Bumped whenever the project is replaced (opened, recovered). The
+  // autosaver is a loop local rather than state, so this is how it learns
+  // that what it has been tracking no longer applies (F10).
+  uint64_t projectGeneration = 0;
   // Non-empty: OpenProjectDialog found an autosave newer than this project
   // file; the recovery modal (DrawFileBrowser) resolves it.
   std::string recoveryOffer;

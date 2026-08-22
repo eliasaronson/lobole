@@ -2098,9 +2098,159 @@ void MarkProjectSaved(AppState& state, const std::string& path,
 
 void MarkProjectOpened(AppState& state, const std::string& path) {
   state.projectPath = path;
+  state.projectGeneration++;      // the autosaver's tracking no longer applies
   RecentProjects::Remember(path); // ignores "" (the unsaved slot)
   StampAllSaved(state);
   StampDiskState(state, path); // F8: memory and disk agree as of now
+}
+
+namespace {
+
+namespace fs = std::filesystem;
+
+// Write one document to `target` the way F2 does: temp + rename, so a crash
+// between the two leaves the previous sidecar intact.
+bool WriteSidecarAtomic(AppState& state, size_t slot, const fs::path& target,
+                        std::string* error) {
+  std::error_code ec;
+  fs::create_directories(target.parent_path(), ec);
+  const fs::path tmp = target.string() + ".tmp";
+  std::expected<void, std::string> r;
+  if (Document* d = SlotDoc(state, slot))
+    r = DocumentIO::Save(*d, tmp.string());
+  else if (AssemblyDocument* a = SlotAssembly(state, slot))
+    r = DocumentIO::SaveAssembly(*a, tmp.string());
+  else if (DrawingDocument* dr = SlotDrawing(state, slot))
+    r = DocumentIO::SaveDrawing(*dr, tmp.string());
+  else
+    return false;
+  if (!r) {
+    if (error)
+      *error = r.error();
+    fs::remove(tmp, ec);
+    return false;
+  }
+  fs::rename(tmp, target, ec);
+  if (ec) {
+    if (error)
+      *error = "autosave rename failed: " + ec.message();
+    fs::remove(tmp, ec);
+    return false;
+  }
+  return true;
+}
+
+// "parts/Stand" — what project.json calls this document.
+std::string SlotDir(const AppState& state, size_t i) {
+  const PartSlot& slot = state.parts[i];
+  const char* sub = slot.kind == DocKind::Assembly  ? "assemblies/"
+                    : slot.kind == DocKind::Drawing ? "drawings/"
+                                                    : "parts/";
+  return std::string(sub) + slot.name;
+}
+
+} // namespace
+
+bool RecoverProject(AppState& state, const std::string& path,
+                    std::string* error) {
+  namespace fs = std::filesystem;
+  if (!OpenProject(state, path, error))
+    return false;
+  MarkProjectOpened(state, path);
+
+  const fs::path dir(Autosaver::SidecarDir(path));
+  int recovered = 0;
+  for (const std::string& rel : Autosaver::RecoverableDocuments(path)) {
+    // "parts/Stand" -> the slot of that kind and name.
+    const size_t slash = rel.find('/');
+    if (slash == std::string::npos)
+      continue;
+    const std::string folder = rel.substr(0, slash);
+    const std::string name = rel.substr(slash + 1);
+    const fs::path file = dir / (rel + ".json");
+
+    for (size_t i = 0; i < state.parts.size(); i++) {
+      PartSlot& slot = state.parts[i];
+      if (slot.name != name)
+        continue;
+      const bool active = static_cast<int>(i) == state.activePart;
+      if (folder == "parts" && slot.kind == DocKind::Part) {
+        auto loaded = DocumentIO::Load(file.string());
+        if (!loaded)
+          continue;
+        if (active)
+          ReplaceDocument(state, std::move(*loaded));
+        else
+          slot.doc = std::move(*loaded);
+      } else if (folder == "assemblies" && slot.kind == DocKind::Assembly) {
+        auto loaded = DocumentIO::LoadAssembly(file.string());
+        if (!loaded)
+          continue;
+        (active ? state.assembly : slot.assembly) = std::move(*loaded);
+      } else if (folder == "drawings" && slot.kind == DocKind::Drawing) {
+        auto loaded = DocumentIO::LoadDrawing(file.string());
+        if (!loaded)
+          continue;
+        (active ? state.drawing : slot.drawing) = std::move(*loaded);
+      } else {
+        continue;
+      }
+      recovered++;
+      break;
+    }
+  }
+  if (recovered > 0) {
+    LOG_INFO("Recovered {} autosaved document(s) into {}", recovered, path);
+    // Unsaved by definition: the sidecars were never a save.
+    state.projectMetaDirty = true;
+  }
+  return true;
+}
+
+int AutosaveProject(AppState& state, Autosaver& autosaver, double now) {
+  namespace fs = std::filesystem;
+  autosaver.NoteProject(state.projectPath, state.projectGeneration);
+  // One document IS the project: the single-file sidecar, unchanged. This is
+  // the shape F2 designed for and every existing autosave test covers.
+  if (state.parts.size() <= 1) {
+    if (!state.document)
+      return 0;
+    return autosaver.MaybeSave(*state.document, state.projectPath,
+                               state.lastSavedVersion, now)
+               ? 1
+               : 0;
+  }
+  if (!autosaver.Due(now))
+    return 0;
+
+  int written = 0;
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    const uint64_t version = SlotVersion(state, i);
+    const uint64_t saved = static_cast<int>(i) == state.activePart
+                               ? state.lastSavedVersion
+                               : state.parts[i].lastSavedVersion;
+    // Only a part has an instance id; the others rely on Forget() at open.
+    const Document* doc = SlotDoc(state, i);
+    const uint64_t instance = doc ? doc->InstanceId() : 0;
+    if (!autosaver.NeedsSave(state.parts[i].id, instance, version, saved))
+      continue;
+
+    const fs::path target = fs::path(Autosaver::SidecarDir(state.projectPath)) /
+                            (SlotDir(state, i) + ".json");
+    std::string error;
+    if (!WriteSidecarAtomic(state, i, target, &error)) {
+      LOG_WARN("Autosave of {} failed: {}", state.parts[i].name, error);
+      continue;
+    }
+    autosaver.NoteSaved(state.parts[i].id, instance, version);
+    written++;
+  }
+  if (written > 0) {
+    autosaver.MarkSaved(now);
+    LOG_INFO("Autosaved {} document(s) to {}", written,
+             Autosaver::SidecarDir(state.projectPath));
+  }
+  return written;
 }
 
 bool AddProjectRemote(AppState& state, const std::string& name,

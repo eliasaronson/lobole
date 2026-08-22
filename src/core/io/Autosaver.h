@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
+#include <vector>
 
 class Document;
 
@@ -22,8 +24,28 @@ public:
   void Prime(double now) { m_lastSaveTime = now; }
 
   // The sidecar for a project path; "" = the unsaved-document slot under the
-  // XDG state dir (~/.local/state/designer/unsaved.autosave.json).
+  // XDG state dir (~/.local/state/designer/unsaved.autosave.json). Used for a
+  // project that IS one document; see SidecarDir for the rest.
   static std::string SidecarPath(const std::string& projectPath);
+
+  // Where a multi-document project's sidecars live: one file per DIRTY
+  // document, mirroring the layout project.json describes
+  // (`<project>.autosave/parts/Stand.json`).
+  //
+  // A directory rather than one file, and one file per document rather than
+  // one for the project, because F2 chose atomic temp+rename for a reason
+  // that still holds: a tool whose whole job is surviving a crash must never
+  // hand a half-written recovery file to someone who has already lost work
+  // once. Writing a project tree into a sidecar would throw that away; a file
+  // each keeps every one complete-or-absent, and stops rewriting 48
+  // unchanged parts every minute.
+  static std::string SidecarDir(const std::string& projectPath);
+
+  // The documents with a sidecar newer than their saved form, as the `dir`
+  // values project.json uses ("parts/Stand"). Empty when there is nothing to
+  // recover.
+  static std::vector<std::string>
+  RecoverableDocuments(const std::string& projectPath);
 
   // The app's XDG state dir (~/.local/state/designer) — home of the unsaved
   // autosave slot and the import staging area (sidecars extracted before the
@@ -40,9 +62,46 @@ public:
   // Call regularly with a monotonic clock. Saves when enabled (interval > 0),
   // dirty (doc version != savedVersion), changed since the last autosave, and
   // the interval elapsed. Returns true when a save happened.
+  //
+  // For a project that is ONE document. A project with several is autosaved
+  // by ui::AutosaveProject, which owns the iteration because only the UI
+  // layer knows what documents a project has — this used to be handed
+  // `state.document`, the ACTIVE TAB, so a multi-document project autosaved
+  // one part and an assembly tab autosaved nothing at all (F10).
   bool MaybeSave(const Document& doc, const std::string& projectPath,
                  uint64_t savedVersion, double now,
                  std::string* error = nullptr);
+
+  // --- the pieces ui::AutosaveProject drives, for several documents -------
+
+  // Has the interval elapsed? (Whether anything is dirty is the caller's
+  // question — it knows what documents there are.)
+  [[nodiscard]] bool Due(double now) const {
+    return m_interval > 0.0 && now - m_lastSaveTime >= m_interval;
+  }
+  void MarkSaved(double now) { m_lastSaveTime = now; }
+
+  // Is this document worth writing? `instanceId` distinguishes WHICH document
+  // has been at that version — versions restart at 0 on every document
+  // replacement, so a version alone is not an identity. Assemblies and
+  // drawings have no instance id; they pass 0 and rely on Forget() at project
+  // open, which is where a replacement realistically happens for them.
+  [[nodiscard]] bool NeedsSave(uint64_t docId, uint64_t instanceId,
+                               uint64_t version, uint64_t savedVersion) const;
+  void NoteSaved(uint64_t docId, uint64_t instanceId, uint64_t version);
+
+  // A different project (or the same one reopened): nothing tracked applies.
+  void Forget() { m_saved.clear(); }
+
+  // Call before autosaving: forgets the per-document tracking when the
+  // project has been replaced under us.
+  void NoteProject(const std::string& path, uint64_t generation) {
+    if (path == m_path && generation == m_generation)
+      return;
+    m_path = path;
+    m_generation = generation;
+    Forget();
+  }
 
 private:
   double m_interval;
@@ -51,4 +110,12 @@ private:
   // at 0 on every document replacement, so a version alone is not an identity.
   uint64_t m_lastSavedDocInstance = 0;
   uint64_t m_lastSavedDocVersion = 0;
+  // The same question per document, keyed by the tab's stable id.
+  struct Seen {
+    uint64_t instanceId = 0;
+    uint64_t version = 0;
+  };
+  std::map<uint64_t, Seen> m_saved;
+  std::string m_path;
+  uint64_t m_generation = 0;
 };

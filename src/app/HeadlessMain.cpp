@@ -72,10 +72,8 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
 
   while (!g_stopRequested) {
     server.ProcessPending(state);
-    if (state.document) {
-      autosaver.MaybeSave(*state.document, state.projectPath,
-                          state.lastSavedVersion, seconds());
-    }
+    // The PROJECT, not the open tab (F10) — same fix as the windowed loop.
+    ui::AutosaveProject(state, autosaver, seconds());
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
 

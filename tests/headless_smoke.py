@@ -265,6 +265,44 @@ def main():
         d.call("delete_part", index=idx)
         d.call("reset_layout")  # harmless no-op headless (flag only)
 
+        phase("Autosave keeps the whole project, not the open tab")
+        # F10. This is the scenario that used to fail: Autosaver was handed
+        # the ACTIVE document, so a multi-document project autosaved one part
+        # and an assembly tab autosaved nothing at all.
+        multi = os.path.join(tmp, "multi.dsgn")
+        d.call("new_project")
+        d.call("add_feature", feature={"type": "Box", "name": "PartOneBody",
+                                       "position": [0, 0, 0],
+                                       "width": 10, "height": 10, "depth": 10})
+        d.call("add_part", name="Second")
+        d.call("set_active_part", name="Second")
+        d.call("add_feature", feature={"type": "Box", "name": "PartTwoBody",
+                                       "position": [0, 0, 0],
+                                       "width": 20, "height": 20, "depth": 20})
+        d.call("add_assembly", name="Asm")
+        d.call("save_project", path=multi)
+        sidecars = multi + ".autosave.d"
+        expect(not os.path.isdir(sidecars), "a clean save leaves no sidecars")
+
+        # Dirty a part that is NOT the open tab, and the assembly tab too.
+        d.call("set_active_part", name="Part 1")
+        d.call("modify_feature", index=0, feature={
+            "type": "Box", "name": "PartOneBody", "position": [0, 0, 0],
+            "width": 44, "height": 10, "depth": 10})
+        d.call("set_active_part", name="Asm")  # an assembly tab is open
+        d.call("autosave_now")
+        expect(os.path.isdir(sidecars), "the project autosaved from an "
+                                        "assembly tab (it used to autosave "
+                                        "nothing at all there)")
+        recovered = d.call("autosave_status")["documents"]
+        expect("parts/Part 1" in recovered,
+               f"the DIRTY part was kept even though another tab was open: "
+               f"{recovered}")
+
+        # And a clean save clears every sidecar.
+        d.call("save_project", path=multi)
+        expect(not os.path.isdir(sidecars), "saving clears the sidecars")
+
         phase("A project that moved on disk refuses to be overwritten")
         # F8. The scenario is the terminal panel: you run a git command (or
         # another editor writes, or a second instance saves) while the app

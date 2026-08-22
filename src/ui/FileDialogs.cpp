@@ -122,13 +122,33 @@ void DrawRecoveryModal(AppState& state) {
     ImGui::OpenPopup("Recover autosave?");
   if (ImGui::BeginPopupModal("Recover autosave?", nullptr,
                              ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::TextWrapped(
-        "An autosave newer than\n%s\nexists (probably from a crash). "
-        "Recover the autosaved changes?",
-        state.recoveryOffer.c_str());
+    const size_t documents =
+        Autosaver::RecoverableDocuments(state.recoveryOffer).size();
+    if (documents > 0) {
+      // A project with several documents autosaves one file each (F10), so
+      // say how much is on offer rather than implying a single file.
+      ImGui::TextWrapped("%zu document%s in\n%s\nhave unsaved changes from a "
+                         "previous session (probably a crash). Recover them?",
+                         documents, documents == 1 ? "" : "s",
+                         state.recoveryOffer.c_str());
+    } else {
+      ImGui::TextWrapped(
+          "An autosave newer than\n%s\nexists (probably from a crash). "
+          "Recover the autosaved changes?",
+          state.recoveryOffer.c_str());
+    }
     if (ImGui::Button("Recover autosave")) {
-      OpenProjectFile(state, Autosaver::SidecarPath(state.recoveryOffer));
-      MarkProjectRecovered(state, state.recoveryOffer);
+      if (documents > 0) {
+        // Open the project and lay the autosaved documents over it — NOT
+        // open a sidecar as if it were the project, which on a multi-part
+        // project would replace it with one part.
+        std::string error;
+        if (!RecoverProject(state, state.recoveryOffer, &error))
+          LOG_ERROR("Could not recover the project: {}", error);
+      } else {
+        OpenProjectFile(state, Autosaver::SidecarPath(state.recoveryOffer));
+        MarkProjectRecovered(state, state.recoveryOffer);
+      }
       state.recoveryOffer.clear();
       ImGui::CloseCurrentPopup();
     }
@@ -365,7 +385,8 @@ void OpenProjectDialog(AppState& state) {
   if (NFD_PickFolderU8(&outPath, nullptr) == NFD_OKAY) {
     const std::string path = NormalizeProjectPick(outPath);
     NFD_FreePathU8(outPath);
-    if (Autosaver::HasNewerAutosave(path)) {
+    if (Autosaver::HasNewerAutosave(path) ||
+        !Autosaver::RecoverableDocuments(path).empty()) {
       // Defer to the recovery modal (DrawFileBrowser) — the user picks
       // between the saved file and the newer autosave.
       state.recoveryOffer = path;

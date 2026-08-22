@@ -4,7 +4,8 @@
 #include "core/AssemblySolve.h"
 #include "core/ElementMap.h"               // ElementRef
 #include "core/drawing/DrawingDimension.h" // drawing::ResolvedDim
-#include "render/SketchRenderer.h"         // Vertex3D, PrimVertex
+#include "core/io/Autosaver.h"
+#include "render/SketchRenderer.h" // Vertex3D, PrimVertex
 #include "ui/AppState.h"
 
 #include <cstdint>
@@ -436,6 +437,28 @@ void ApplyExplodeTransforms(AppState& state);
 // the save_project RPC, so this is the one guard that covers them all.
 bool SaveProject(AppState& state, const std::string& path, std::string* error,
                  bool overwriteExternalChanges = false);
+
+// Open `path` and lay every autosaved document over it (F10). The project
+// itself comes from disk; each document with a sidecar newer than its saved
+// form is replaced by the sidecar. All-or-nothing on purpose: a project half
+// from one session and half from another is a state nobody can reason about.
+//
+// Leaves the project DIRTY — the recovered work has not been saved, and
+// pretending otherwise would invite closing without a prompt.
+bool RecoverProject(AppState& state, const std::string& path,
+                    std::string* error = nullptr);
+
+// Autosave every DIRTY document of the project, one atomic file each (F10).
+//
+// Lives here rather than in Autosaver because only this layer knows what
+// documents a project has. That is the bug it fixes: autosave was handed
+// `state.document` — the ACTIVE TAB — so a multi-document project autosaved
+// one part, and an assembly or drawing tab (where that pointer is null)
+// autosaved nothing at all, silently.
+//
+// A project that IS one document keeps the single-file sidecar unchanged.
+// Returns the number of documents written.
+int AutosaveProject(AppState& state, Autosaver& autosaver, double now);
 
 // Give the project a remote (F9 C2), and stop it committing built geometry
 // (F9 C4) — for one person the baked bodies make opening a load instead of a

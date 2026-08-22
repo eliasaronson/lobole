@@ -6566,6 +6566,75 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->measure.active);
   };
 
+  // F10: the other half. Autosave writing the right documents is only useful
+  // if recovery puts them back — and the old path opened the sidecar AS the
+  // project, which on a multi-document project would have replaced it with
+  // one part.
+  t = IM_REGISTER_TEST(engine, "autosave", "recovers_every_document");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_recover.dsgn";
+    std::filesystem::remove_all(dir);
+    std::filesystem::remove_all(dir.string() + ".autosave.d");
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    const size_t second = ui::AddPart(*s_App, "Second");
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, second);
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(2);
+
+    // Dirty the part that is NOT the open tab.
+    const auto slotOf = [](const char* name) -> size_t {
+      for (size_t i = 0; i < s_App->parts.size(); i++)
+        if (s_App->parts[i].name == name)
+          return i;
+      return 0;
+    };
+    ui::SetActivePart(*s_App, slotOf("Part 1"));
+    ctx->Yield(2);
+    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemInputValue("//Box###ToolWindow/##Width", 44.0f);
+    ctx->Yield();
+    ui::SetActivePart(*s_App, slotOf("Second")); // and look away from it
+    ctx->Yield(2);
+
+    Autosaver autosaver(0.001);
+    autosaver.Prime(0.0);
+    IM_CHECK(ui::AutosaveProject(*s_App, autosaver, 1.0) >= 1);
+    IM_CHECK(!Autosaver::RecoverableDocuments(dir.string()).empty());
+
+    // The crash: reopen from disk, which has the SAVED width, not 44.
+    IM_CHECK(ui::OpenProject(*s_App, dir.string(), &err));
+    ui::MarkProjectOpened(*s_App, dir.string());
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, slotOf("Part 1"));
+    ctx->Yield(2);
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 2.0); // the saved value — the edit is gone
+
+    // Recovery puts it back, into the right document.
+    IM_CHECK(ui::RecoverProject(*s_App, dir.string(), &err));
+    ctx->Yield(3);
+    ui::SetActivePart(*s_App, slotOf("Part 1"));
+    ctx->Yield(2);
+    box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 44.0);
+    // And it is not pretending to be saved.
+    IM_CHECK(ui::ProjectDirty(*s_App));
+  };
+
   // A clean project must stop costing anything. The conflicts scan walks the
   // whole project (for the duplicate ids git cannot report) AND spawns
   // `git` — it used to do both once a second, forever, to answer "no".
