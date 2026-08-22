@@ -1489,7 +1489,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ImGuiWindow* win = nullptr;
     for (int i = 0; i < 90; i++) {
       ctx->Yield();
-      win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
+      // NoError, or the first miss poisons the context and the loop can
+      // never succeed however long it waits (see the note above).
+      win = ctx->WindowInfo("//Terminal###TerminalPanel",
+                            ImGuiTestOpFlags_NoError)
+                .Window;
       if (win != nullptr && win->DockId != 0 && ui::TerminalRunning(*s_App))
         break;
     }
@@ -1689,7 +1693,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Hidden: nothing in the UI opened it, and the window does not exist.
     IM_CHECK(!s_App->perfHudOpen);
-    IM_CHECK(ctx->WindowInfo("//Frame time###PerfHud").Window == nullptr);
+    // NoError: asking whether a window is absent must not log an error, or
+    // every later lookup in this test returns null. Latent here — it only
+    // bites once something else in the process has opened the HUD first.
+    IM_CHECK(ctx->WindowInfo("//Frame time###PerfHud", ImGuiTestOpFlags_NoError)
+                 .Window == nullptr);
 
     // The undocumented chord is the door.
     ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F);
