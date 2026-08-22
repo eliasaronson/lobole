@@ -1226,6 +1226,60 @@ TEST_CASE("cam: clicking a wall for a pocket says what to click instead",
   CHECK(derived.why.find("FLOOR") != std::string::npos);
 }
 
+TEST_CASE("cam: a wall is not a gouge, whatever the grid", "[cam]") {
+  // A cell centre landing on the corner of an island is inside the island for
+  // the model and inside the cut for the tool — both boundary tests are
+  // inclusive — so a clean job reported the island's whole height as a gouge.
+  // The panel checks at 0.4 mm and the RPC defaulted to 0.25, so the two
+  // disagreed about the SAME job: "cuts 6.00 mm INTO the part, that is scrap"
+  // against a verdict of nothing (docs/cam/dogfood-round.md, round 2). The
+  // numbers below are the coupon's own pocket, because which grids land on a
+  // corner depends on the actual coordinates.
+  auto doc = std::make_unique<Document>();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 120, 60, 17));
+  const uint64_t plate = doc->GetFeature(0)->GetId();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Void", glm::vec3(12, 20, 11), 40, 20, 11));
+  const uint64_t voidId = doc->GetFeature(1)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("Pocket", plate, voidId,
+                                                   BooleanOp::Subtract));
+  const uint64_t pocket = doc->GetFeature(2)->GetId();
+  doc->AddFeature(
+      std::make_unique<BoxFeature>("Boss", glm::vec3(27, 25, 11), 10, 10, 6));
+  const uint64_t boss = doc->GetFeature(3)->GetId();
+  doc->AddFeature(std::make_unique<BooleanFeature>("WithBoss", pocket, boss,
+                                                   BooleanOp::Union));
+
+  cam::Setup setup = BasicSetup();
+  setup.stock.margin.z = 1.0;
+  setup.safeZ = cam::DeriveSafeZ(setup, doc->GetBodies());
+  const ElementRef floor = UpFaceAt(*doc, 11.0);
+  REQUIRE(floor.IsSet());
+  cam::DerivedOp derived =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Pocket, floor);
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  derived.op.id = 1;
+  setup.operations.push_back(derived.op);
+  const std::vector<cam::Toolpath> paths =
+      cam::GenerateAll(setup, doc->GetBodies());
+  REQUIRE(paths.size() == 1);
+  INFO(paths[0].error);
+  REQUIRE(paths[0].error.empty());
+  std::string gcode, error;
+  REQUIRE(cam::PostProcess("mach3", setup, paths, {}, gcode, &error));
+  // 0.4 mm is what the panel uses, and the grid it lands on puts a cell
+  // centre a hair inside the boss's corner at X37 Y35.
+  for (const double res : {0.25, 0.4, 0.5}) {
+    const cam::Verdict v =
+        cam::VerifyGcode(gcode, setup, doc->GetBodies(), res);
+    INFO("at " << res << " mm: gouge " << v.maxGouge << " at " << v.gougeAt.x
+               << "," << v.gougeAt.y);
+    CHECK(v.maxGouge <= res * 1.5);
+  }
+}
+
 TEST_CASE("cam: the spindle is restated after a manual tool change", "[cam]") {
   // Two tools at the same rpm: the S/M3 was emitted only when the SPEED
   // changed, so the file paused for a manual tool change — which is done with
