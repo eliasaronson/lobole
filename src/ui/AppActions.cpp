@@ -2293,6 +2293,20 @@ bool AddProjectRemote(AppState& state, const std::string& name,
       *error = "save the project before sharing it";
     return false;
   }
+  // Check BEFORE acting. Sharing a project also stops it committing built
+  // geometry (below), and that needs a save — which F8's guard refuses when
+  // the project moved on disk. This used to add the remote, have the save
+  // refused, LOG_WARN, and return success: the user got a remote, no message
+  // anywhere, and pushed .brep binaries to their team. Both features were
+  // behaving correctly; only using them together showed it.
+  //
+  // So the whole operation is one decision rather than a half-applied one.
+  if (ProjectChangedOnDisk(state)) {
+    if (error)
+      *error = "the project changed on disk — reload or save it before "
+               "sharing, so the built geometry can be left behind";
+    return false;
+  }
   if (!GitVault::AddRemote(state.projectPath, name, url, error))
     return false;
 
@@ -2314,11 +2328,18 @@ bool AddProjectRemote(AppState& state, const std::string& name,
 
   std::string saveError;
   if (!SaveProject(state, state.projectPath, &saveError)) {
-    // The remote is added either way; say what did not happen rather than
-    // pretending the whole thing failed.
-    LOG_WARN("Remote added, but could not stop committing geometry: {}",
-             saveError);
-    return true;
+    // Should not happen now that the disk state is checked above — but a
+    // save can still fail (a full disk, a read-only tree), and silently
+    // keeping geometry is what this whole fix is about. The remote IS added,
+    // so undo it: half-applied is the state nobody can reason about.
+    LOG_ERROR("Could not stop committing geometry, so the remote was not "
+              "kept: {}",
+              saveError);
+    std::string ignored;
+    GitVault::RemoveRemote(state.projectPath, name, &ignored);
+    if (error)
+      *error = "could not save the project, so it was not shared: " + saveError;
+    return false;
   }
   MarkProjectSaved(state, state.projectPath, "Stop sharing built geometry");
   LOG_INFO("{} now has a remote; built geometry is no longer committed",

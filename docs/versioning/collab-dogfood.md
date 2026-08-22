@@ -13,46 +13,48 @@ against ~800 tests, and one evening of *using* the app once surfaced six
 defects. This round found five more in an afternoon, one of them a hole
 nothing can detect.
 
-## 1. Two people adding the same part to an assembly lose one of them — silently
-
-The one worth acting on.
+## 1. Two people adding the same part to an assembly — noted, not a bug
 
 Alice and Bob both add an occurrence of `Pin` to assembly `Frame`. Both mint
 id 4 from the assembly's `nextId++`, both write `occurrences/4-pin.json`, and
-**the two files are byte-identical** — an occurrence of the same part at the
-default transform has nothing to tell them apart. Git sees one file added
-identically on both sides, merges it without a word, and the assembly ends up
-with **one** Pin where two were placed.
+the two files are **byte-identical** — an occurrence of the same part at the
+same transform has nothing to tell them apart. Git merges them into one, and
+the assembly ends with one Pin where two were placed.
+
+I wrote this up first as silent data loss. **Elias's read is better and it
+checks out:** if two people add the same part *in the same place*, one is the
+right answer — that is a deduplication, not a loss. Anything else differs in
+content, and then the machinery does its job. Measured both:
+
+| | result |
+|---|---|
+| same part, **same place** | merged, 0 conflicts, one occurrence — correct |
+| same part, **different place** | **conflicted, 1 needing a decision** |
+| different parts, colliding ids | duplicate-id conflict, resolvable (§3) |
+
+So the id collision only bites when the outcome is the one you wanted anyway.
+No change.
+
+**Kept as a note** because the reasoning is worth having written down: the
+`nextId++` collision here is *masked* by identical content rather than
+handled, so if occurrence files ever gain a field that differs between two
+otherwise-identical adds (a creation timestamp, a per-session tag), this
+becomes a conflict on every "we both added a bolt" — and the fix then is
+[C6](f9-collaboration.md)'s, applied to occurrence ids. Note that an
+occurrence id IS a filename, so C6's deciding argument does not carry over
+unchanged.
+
+**One real thing it exposed:** the different-place conflict reads
 
 ```
-pull=up_to_date  conflicts=0  needs_decision=0
-occurrences after merge: [(1,'P1'), (2,'P1')]     # 3 were placed
+Occurrence "P1" in assembly Asm — transform {"orientation":[0.0,0.0,0.0,1.0],"position":[50.0,0…
 ```
 
-Nothing can detect this after the fact. The duplicate-id scanner needs two
-files; here there is one. `Verify()` passes — the project loads and
-regenerates perfectly. The information that two were intended was destroyed
-at the git level, and no checker downstream can recover it.
+Raw JSON, because `Describe()` falls back to `dump()` for a structured value.
+"moved to (50, 0, 0)" is the sentence that belongs there. Small, and in
+`ProjectMerge`.
 
-**Why it is worse than the feature case F9 C3 handles.** Two people adding
-*identical features* is rare — features carry distinct names and parameters.
-Two people adding *the same part to an assembly* is the normal case ("we both
-added a bolt"), and identical content is guaranteed by construction.
-
-**Content-based disambiguation cannot fix it.** Both sides start from the same
-state, so any name the app derives ("P1 2") is derived identically on both.
-Only a **non-deterministic id** separates them — the [F9
-C6](f9-collaboration.md) fix, applied to occurrence ids.
-
-**The tension, and why it is Elias's call.** C6's deciding argument was that a
-sketch entity id is never a filename, where a feature id is. An occurrence id
-*is* a filename (`4-pin.json`), so the readability argument that kept feature
-ids sequential applies here too. But the failure profile is completely
-different: for features a collision is usually *detected* (different type
-suffixes → two files), while for occurrences it is usually *silent* (identical
-content → one file). Same argument, opposite risk.
-
-## 2. Adding a remote can silently keep committing geometry
+## 2. Adding a remote can silently keep committing geometry — FIXED
 
 Mine, and only visible when two features meet.
 
@@ -92,7 +94,7 @@ answers), but a caller has to know to ask.
 Worth noting the same shape exists for parts and the F7 tests never saw it:
 they scanned after the merge without reopening.
 
-## 4. Project-scope variables are gated on the active document
+## 4. Project-scope variables are gated on the active document — FIXED
 
 `set_variable`/`list_variables` with `scope: project` refuse on a drawing tab
 with *"the active document is a drawing, not a part; switch to a part tab"*.
@@ -101,7 +103,7 @@ A project-scope variable is not a property of the tab you happen to be on.
 Exactly the class fixed in `9048d58` for the F9 sharing RPCs, which were
 gated the same way and failed on an assembly tab.
 
-## 5. A missing required field comes back as a raw JSON exception
+## 5. A missing required field comes back as a raw JSON exception — FIXED
 
 `add_feature` with a Cylinder missing `direction`:
 
@@ -135,3 +137,24 @@ docs and are not.
 Two headless instances over a local bare repo, driven through the RPC —
 round 1 in the CAM rounds' style. Scripts under the session scratchpad; each
 finding above was reduced to an isolated A/B before being written down.
+
+
+## What was fixed, 2026-08-22
+
+- **§2** — sharing is one decision instead of a half-applied one. The disk
+  state is checked *before* the remote is added, so the refusal says what to
+  do ("reload or save it before sharing") rather than the geometry policy
+  failing silently afterwards. If the save fails for any other reason the
+  remote is removed again, because half-applied is the state nobody can
+  reason about.
+- **§4** — the four variable RPCs moved from the modeling module to the
+  project one. Not a gate tweak: `HandleModelingRpc` takes a `Document&`, so
+  it cannot be called at all without a part, and variables default to project
+  scope. A part-scope variable still refuses, now saying *"a part-scope
+  variable needs a part tab; scope \"project\" works from anywhere"*.
+- **§5** — `add_feature`/`modify_feature` name the type and the field:
+  *"Cylinder is missing the required field \"direction\" — describe
+  feature_types[] lists the fields each type takes"*.
+
+Left open: §1's transform rendering, and §3's `pull` ergonomics (the recovery
+path works; the entry is a raw loader error rather than a reported conflict).

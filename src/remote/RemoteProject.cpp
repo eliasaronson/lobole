@@ -67,6 +67,13 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"merge_finish", "Verify the merged project LOADS AND REGENERATES, then "
                      "keep it. Refuses with {broken} when it does not."},
     {"merge_abort", "Throw an in-progress merge away."},
+    {"set_variable", "Add or redefine a variable {name, expression, comment?, "
+                     "scope: project|part}; returns value + regen."},
+    {"list_variables", "Project variables and the active part's local ones."},
+    {"rename_variable", "Rename a variable {name, new_name, scope?}, rewriting "
+                        "every referencing expression."},
+    {"delete_variable", "Delete a variable {name, scope?}; refused while "
+                        "referenced."},
     {"remote_list", "The project's remotes, and how far ahead/behind this "
                     "branch is."},
     {"remote_add", "Give the project a remote {name?:origin, url}. A shared "
@@ -243,6 +250,153 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         {"documents", docs},
         {"single_file", Autosaver::HasNewerAutosave(state.projectPath)}};
   }
+  // --- Variables (moved here from RemoteModeling 2026-08-22) -------------
+  //
+  // They default to PROJECT scope, so they are not a property of the tab you
+  // happen to be on — and living in the modeling module meant exactly that,
+  // because HandleModelingRpc takes a Document REFERENCE and so cannot be
+  // called at all on an assembly or drawing tab. Setting a project variable
+  // from a drawing tab came back "the active document is a drawing, not a
+  // part". Here `doc` is a pointer, and the handlers ask for a part only when
+  // the scope is "part".
+  if (m == "set_variable") {
+    // Add or redefine a variable; one undoable edit, regenerates every
+    // expression-driven field. params: {name, expression, comment?,
+    // scope?}. scope defaults to "project" (Phase V: define a driving
+    // dimension once, shared by every part); "part" writes the active
+    // document's local scope, which shadows a same-named project var.
+    // Returns the evaluated value + scope (plus "error" if it didn't evaluate).
+    const std::string name = p.at("name").get<std::string>();
+    const json& expr = p.at("expression");
+    const std::string expression =
+        expr.is_string() ? expr.get<std::string>() : expr.dump();
+    const std::string scope = p.value("scope", std::string("project"));
+    if (scope != "project" && scope != "part")
+      throw std::runtime_error("scope must be \"project\" or \"part\"");
+    const bool partScope = scope == "part";
+    // A PART-scope variable needs a part; a project-scope one does not, and
+    // used to be refused on an assembly or drawing tab because the dispatch
+    // gate asked before the scope was known.
+    if (partScope && doc == nullptr)
+      throw std::runtime_error(
+          "a part-scope variable needs a part tab; scope \"project\" works "
+          "from anywhere");
+    // Omitting "comment" preserves an existing one (redefinitions usually
+    // only change the expression).
+    std::string comment;
+    if (p.contains("comment")) {
+      comment = p.at("comment").get<std::string>();
+    } else {
+      const Parameter* prior = partScope
+                                   ? doc->FindParameter(name)
+                                   : ui::FindProjectParameter(state, name);
+      if (prior)
+        comment = prior->comment;
+    }
+    if (partScope) {
+      if (!state.commands->Execute(
+              std::make_unique<SetVariableCommand>(name, expression, comment),
+              *doc))
+        throw std::runtime_error("invalid variable name: " + name);
+    } else if (!ui::SetProjectVariable(state, name, expression, comment)) {
+      throw std::runtime_error("invalid variable name: " + name);
+    }
+    const Parameter* param = partScope ? doc->FindParameter(name)
+                                       : ui::FindProjectParameter(state, name);
+    json result = {{"value", param->value}, {"scope", scope}};
+    if (!param->error.empty())
+      result["error"] = param->error;
+    if (doc != nullptr) // no active part on an assembly or drawing tab
+      result["regen"] = RegenSummaryJson(*doc);
+    return result;
+  }
+  if (m == "delete_variable") {
+    // Refused while referenced, reporting what references it. A project
+    // variable's references span every part. params: {name, scope?}. scope
+    // auto-detects (project first, then the active part's local) when omitted.
+    const std::string name = p.at("name").get<std::string>();
+    const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
+    const bool haveLocal =
+        doc != nullptr && doc->FindParameter(name) != nullptr;
+    const std::string scope =
+        p.value("scope", haveProject || !haveLocal ? "project" : "part");
+    if (scope == "part") {
+      if (!haveLocal)
+        throw std::runtime_error("no such variable: " + name);
+      std::vector<std::string> refs = doc->FindParameterReferences(name);
+      if (!refs.empty()) {
+        std::string msg = "variable is referenced by:";
+        for (const std::string& r : refs)
+          msg += " " + r + ";";
+        throw std::runtime_error(msg);
+      }
+      state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
+                              *doc);
+      return json::object();
+    }
+    if (!haveProject)
+      throw std::runtime_error("no such variable: " + name);
+    std::vector<std::string> refs;
+    if (!ui::RemoveProjectVariable(state, name, &refs)) {
+      std::string msg = "variable is referenced by:";
+      for (const std::string& r : refs)
+        msg += " " + r + ";";
+      throw std::runtime_error(msg);
+    }
+    return json::object();
+  }
+  if (m == "rename_variable") {
+    // Renames + rewrites every referencing expression (a project rename spans
+    // all parts). params: {name, new_name, scope?}. scope auto-detects like
+    // delete_variable.
+    const std::string name = p.at("name").get<std::string>();
+    const std::string newName = p.at("new_name").get<std::string>();
+    const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
+    const bool haveLocal =
+        doc != nullptr && doc->FindParameter(name) != nullptr;
+    const std::string scope =
+        p.value("scope", haveProject || !haveLocal ? "project" : "part");
+    if (scope == "part") {
+      if (!state.commands->Execute(
+              std::make_unique<RenameVariableCommand>(name, newName), *doc))
+        throw std::runtime_error(
+            "rename failed: '" + name + "' -> '" + newName +
+            "'. Either the source does not exist, the new name is not a "
+            "valid identifier, or it is already taken — list_variables "
+            "shows what exists in each scope");
+      return json::object();
+    }
+    if (!ui::RenameProjectVariable(state, name, newName))
+      throw std::runtime_error(
+          "rename failed: '" + name + "' -> '" + newName +
+          "'. Either the source does not exist, the new name is not a "
+          "valid identifier, or it is already taken — list_variables "
+          "shows what exists in each scope");
+    return json::object();
+  }
+  if (m == "list_variables") {
+    // Both scopes, each tagged. Project variables first (the default scope),
+    // then the active part's local variables. params: none.
+    json variables = json::array();
+    const auto emit = [&](const Parameter& param, const char* scope) {
+      json entry = {{"name", param.name},
+                    {"expression", param.expression},
+                    {"value", param.value},
+                    {"scope", scope}};
+      if (!param.comment.empty())
+        entry["comment"] = param.comment;
+      if (!param.error.empty())
+        entry["error"] = param.error;
+      variables.push_back(entry);
+    };
+    for (const Parameter& param : state.projectParameters)
+      emit(param, "project");
+    if (state.document)
+      for (const Parameter& param : state.document->GetParameters())
+        emit(param, "part");
+    return json{{"variables", variables}};
+  }
+
   if (m == "remote_list") {
     json list = json::array();
     for (const auto& r : GitVault::Remotes(state.projectPath))

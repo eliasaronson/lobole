@@ -726,6 +726,11 @@ static const std::set<std::string> kNoPartDoc = {
     // Autosave acts on the project directory, and gating it on a part is the
     // shape of the bug F10 fixes.
     "autosave_now", "autosave_status",
+    // Variables default to PROJECT scope — they are not a property of the tab
+    // you happen to be on, and being gated here refused them on an assembly
+    // or drawing tab. The handlers already ask for a part only when the
+    // scope is "part", and refuse with that reason.
+    "set_variable", "list_variables", "rename_variable", "delete_variable",
     // Camera / rendering act on the viewport, not the part document, so they
     // work on an assembly tab too. render_still's RT scene sync does the
     // occurrence walk itself.

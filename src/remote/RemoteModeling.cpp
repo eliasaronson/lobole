@@ -170,16 +170,40 @@ static constexpr MethodDoc ModelingMethods[] = {
                "sources: [entity ids], axis: <line entity id>, link?}."},
     {"pattern", "Sketch pattern (linear/circular) of entities; "
                 "expression-capable count/spacing."},
-    {"set_variable", "Add or redefine a variable {name, expression, comment?, "
-                     "scope: project|part}; returns value + regen."},
-    {"rename_variable",
-     "Rename a variable, rewriting every referencing expression."},
-    {"delete_variable", "Delete a variable; refused (with the referencers) "
-                        "while anything references it."},
     {"list_variables",
      "List variables with expressions, values, comments, and scope."},
 };
 std::span<const MethodDoc> ModelingMethodDocs() { return ModelingMethods; }
+
+namespace {
+
+// FeatureFromJson reads its fields with `at()`, so a MISSING required one
+// surfaces as `[json.exception.out_of_range.403] key 'direction' not found` —
+// which names neither the feature type nor where the answer is written down.
+// The same surface already names UNKNOWN fields well ("unknown parameter 'x'
+// for 'add_drawing_view'. Accepted: ..."), and `describe` documents every
+// type's params. This makes the two match.
+std::unique_ptr<Feature> FeatureFromJsonNamed(const nlohmann::json& j) {
+  try {
+    return DocumentIO::FeatureFromJson(j);
+  } catch (const nlohmann::json::out_of_range& e) {
+    const std::string type = j.value("type", "");
+    std::string missing = e.what();
+    // "...key 'direction' not found" -> direction
+    const size_t open = missing.find('\'');
+    const size_t close = open == std::string::npos
+                             ? std::string::npos
+                             : missing.find('\'', open + 1);
+    if (open != std::string::npos && close != std::string::npos)
+      missing = missing.substr(open + 1, close - open - 1);
+    throw std::runtime_error(
+        (type.empty() ? std::string("that feature") : type) +
+        " is missing the required field \"" + missing +
+        "\" — describe feature_types[] lists the fields each type takes");
+  }
+}
+
+} // namespace
 
 std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                       const std::string& m,
@@ -217,7 +241,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     return json::object();
   }
   if (m == "add_feature") {
-    auto feature = DocumentIO::FeatureFromJson(p.at("feature"));
+    auto feature = FeatureFromJsonNamed(p.at("feature"));
     RejectUnknownFeatureFields(p.at("feature"), *feature);
     // The GUI refuses a tool with missing inputs; the script API used to
     // accept one and commit a feature that does nothing (a fillet with no
@@ -745,136 +769,6 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     return json{{"dropped_constraints", dropped}};
   }
-  if (m == "set_variable") {
-    // Add or redefine a variable; one undoable edit, regenerates every
-    // expression-driven field. params: {name, expression, comment?,
-    // scope?}. scope defaults to "project" (Phase V: define a driving
-    // dimension once, shared by every part); "part" writes the active
-    // document's local scope, which shadows a same-named project var.
-    // Returns the evaluated value + scope (plus "error" if it didn't evaluate).
-    const std::string name = p.at("name").get<std::string>();
-    const json& expr = p.at("expression");
-    const std::string expression =
-        expr.is_string() ? expr.get<std::string>() : expr.dump();
-    const std::string scope = p.value("scope", std::string("project"));
-    if (scope != "project" && scope != "part")
-      throw std::runtime_error("scope must be \"project\" or \"part\"");
-    const bool partScope = scope == "part";
-    // Omitting "comment" preserves an existing one (redefinitions usually
-    // only change the expression).
-    std::string comment;
-    if (p.contains("comment")) {
-      comment = p.at("comment").get<std::string>();
-    } else {
-      const Parameter* prior = partScope
-                                   ? doc->FindParameter(name)
-                                   : ui::FindProjectParameter(state, name);
-      if (prior)
-        comment = prior->comment;
-    }
-    if (partScope) {
-      if (!state.commands->Execute(
-              std::make_unique<SetVariableCommand>(name, expression, comment),
-              *doc))
-        throw std::runtime_error("invalid variable name: " + name);
-    } else if (!ui::SetProjectVariable(state, name, expression, comment)) {
-      throw std::runtime_error("invalid variable name: " + name);
-    }
-    const Parameter* param = partScope ? doc->FindParameter(name)
-                                       : ui::FindProjectParameter(state, name);
-    json result = {{"value", param->value}, {"scope", scope}};
-    if (!param->error.empty())
-      result["error"] = param->error;
-    result["regen"] = RegenSummaryJson(*doc);
-    return result;
-  }
-  if (m == "delete_variable") {
-    // Refused while referenced, reporting what references it. A project
-    // variable's references span every part. params: {name, scope?}. scope
-    // auto-detects (project first, then the active part's local) when omitted.
-    const std::string name = p.at("name").get<std::string>();
-    const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
-    const bool haveLocal =
-        doc != nullptr && doc->FindParameter(name) != nullptr;
-    const std::string scope =
-        p.value("scope", haveProject || !haveLocal ? "project" : "part");
-    if (scope == "part") {
-      if (!haveLocal)
-        throw std::runtime_error("no such variable: " + name);
-      std::vector<std::string> refs = doc->FindParameterReferences(name);
-      if (!refs.empty()) {
-        std::string msg = "variable is referenced by:";
-        for (const std::string& r : refs)
-          msg += " " + r + ";";
-        throw std::runtime_error(msg);
-      }
-      state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
-                              *doc);
-      return json::object();
-    }
-    if (!haveProject)
-      throw std::runtime_error("no such variable: " + name);
-    std::vector<std::string> refs;
-    if (!ui::RemoveProjectVariable(state, name, &refs)) {
-      std::string msg = "variable is referenced by:";
-      for (const std::string& r : refs)
-        msg += " " + r + ";";
-      throw std::runtime_error(msg);
-    }
-    return json::object();
-  }
-  if (m == "rename_variable") {
-    // Renames + rewrites every referencing expression (a project rename spans
-    // all parts). params: {name, new_name, scope?}. scope auto-detects like
-    // delete_variable.
-    const std::string name = p.at("name").get<std::string>();
-    const std::string newName = p.at("new_name").get<std::string>();
-    const bool haveProject = ui::FindProjectParameter(state, name) != nullptr;
-    const bool haveLocal =
-        doc != nullptr && doc->FindParameter(name) != nullptr;
-    const std::string scope =
-        p.value("scope", haveProject || !haveLocal ? "project" : "part");
-    if (scope == "part") {
-      if (!state.commands->Execute(
-              std::make_unique<RenameVariableCommand>(name, newName), *doc))
-        throw std::runtime_error(
-            "rename failed: '" + name + "' -> '" + newName +
-            "'. Either the source does not exist, the new name is not a "
-            "valid identifier, or it is already taken — list_variables "
-            "shows what exists in each scope");
-      return json::object();
-    }
-    if (!ui::RenameProjectVariable(state, name, newName))
-      throw std::runtime_error(
-          "rename failed: '" + name + "' -> '" + newName +
-          "'. Either the source does not exist, the new name is not a "
-          "valid identifier, or it is already taken — list_variables "
-          "shows what exists in each scope");
-    return json::object();
-  }
-  if (m == "list_variables") {
-    // Both scopes, each tagged. Project variables first (the default scope),
-    // then the active part's local variables. params: none.
-    json variables = json::array();
-    const auto emit = [&](const Parameter& param, const char* scope) {
-      json entry = {{"name", param.name},
-                    {"expression", param.expression},
-                    {"value", param.value},
-                    {"scope", scope}};
-      if (!param.comment.empty())
-        entry["comment"] = param.comment;
-      if (!param.error.empty())
-        entry["error"] = param.error;
-      variables.push_back(entry);
-    };
-    for (const Parameter& param : state.projectParameters)
-      emit(param, "project");
-    if (state.document)
-      for (const Parameter& param : state.document->GetParameters())
-        emit(param, "part");
-    return json{{"variables", variables}};
-  }
-
   return std::nullopt;
 }
 
