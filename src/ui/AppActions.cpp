@@ -1743,6 +1743,8 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
     state.document->SetParametersRaw(std::move(localBackup));
     if (!r && error)
       *error = r.error();
+    if (r)
+      StampDiskState(state, path); // we just wrote it; disk and memory agree
     return r.has_value();
   }
   // Multi-document: project.json (v2) + parts/<name>/ and assemblies/<name>/.
@@ -1839,6 +1841,13 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
       return false;
     }
     out << index.dump(2) << "\n";
+    // Re-stamp HERE, not only in MarkProjectSaved. A save writes the project,
+    // so after it the disk is what we just put there — and leaving the stamp
+    // stale meant a caller that saved WITHOUT marking (a script, a test, an
+    // in-app step that saves twice) had its next save refused by F8's guard
+    // as though someone else had written the project. The two were paired by
+    // convention and nothing said so.
+    StampDiskState(state, path);
     return true;
   } catch (const std::exception& e) {
     if (error)
@@ -2150,6 +2159,94 @@ std::string SlotDir(const AppState& state, size_t i) {
 }
 
 } // namespace
+
+namespace {
+
+// "2 100 mm³" / "0.34 cm³" — a volume a person can read.
+std::string VolumeText(double mm3) {
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%.0f mm³", mm3);
+  return buf;
+}
+
+} // namespace
+
+GeometryChange CompareVersionGeometry(AppState& state,
+                                      const std::string& revision,
+                                      const std::string& documentDir) {
+  namespace fs = std::filesystem;
+  GeometryChange out;
+  if (state.projectPath.empty() || revision.empty())
+    return out;
+
+  // The part in front of us is one operand.
+  Document* current = state.document.get();
+  if (current == nullptr || current->GetBodies().empty()) {
+    out.summary = "no solid to compare";
+    return out;
+  }
+
+  // The other operand is the same document as it was. Extracted to a scratch
+  // directory rather than touching the working tree — the point of a diff is
+  // to look without changing anything.
+  std::error_code ec;
+  const fs::path scratch = fs::temp_directory_path() /
+                           ("designer-diff-" + std::to_string(::getpid()) +
+                            "-" + revision.substr(0, 8));
+  fs::remove_all(scratch, ec);
+  // A project with one part is saved FLAT — the document IS the project
+  // directory, with no `parts/<name>/` under it (DocumentIO's dispatch). So
+  // the caller's guess at a subdir is tried first and the root second,
+  // rather than duplicating SaveProject's rule for which form applies.
+  std::string error;
+  bool got = !documentDir.empty() &&
+             GitVault::ExtractSubtree(state.projectPath, revision, documentDir,
+                                      scratch.string(), &error);
+  if (!got) {
+    fs::remove_all(scratch, ec);
+    got = GitVault::ExtractSubtree(state.projectPath, revision, "",
+                                   scratch.string(), &error);
+  }
+  if (!got) {
+    out.summary = error;
+    return out;
+  }
+  auto older = DocumentIO::Load(scratch.string());
+  fs::remove_all(scratch, ec);
+  if (!older) {
+    out.summary = "that version of this part does not load";
+    return out;
+  }
+
+  const auto cmp =
+      Measure::CompareBodySets((*older)->GetBodies(), glm::mat4(1.0f),
+                               current->GetBodies(), glm::mat4(1.0f));
+  if (!cmp) {
+    out.summary = "the shapes could not be compared";
+    return out;
+  }
+  out.valid = true;
+  out.oldVolume = cmp->volumeA;
+  out.newVolume = cmp->volumeB;
+  out.removed = cmp->missing; // in the OLD and not the new
+  out.added = cmp->extra;     // in the NEW and not the old
+
+  // A boolean on two tessellated solids never lands exactly on zero, so
+  // "unchanged" is a proportion of the part rather than an equality.
+  const double scale = std::max(out.oldVolume, out.newVolume);
+  const double noise = scale * 1e-6;
+  const bool grew = out.added > noise, shrank = out.removed > noise;
+  if (!grew && !shrank)
+    out.summary = "same shape";
+  else if (grew && shrank)
+    out.summary = VolumeText(out.added) + " added, " + VolumeText(out.removed) +
+                  " removed";
+  else if (grew)
+    out.summary = VolumeText(out.added) + " added";
+  else
+    out.summary = VolumeText(out.removed) + " removed";
+  return out;
+}
 
 bool RevealItem(AppState& state, const std::string& document,
                 const std::string& documentKind, uint64_t itemId, bool frame) {

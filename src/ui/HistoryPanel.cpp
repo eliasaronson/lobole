@@ -423,6 +423,30 @@ void DrawHistoryPanel(AppState& state) {
     if (ImGui::SmallButton("Back###hist_diff_back")) {
       state.diffFrom.clear();
       state.diffChanges.clear();
+      state.diffGeometry = GeometryChange{};
+    }
+
+    // Layer 3: what the geometry actually did. On demand, because it
+    // extracts the old recipe, regenerates it and runs booleans — not
+    // something to do while someone scrolls a list. Only for the part in
+    // front of you: the comparison needs a document loaded to compare against.
+    if (state.document != nullptr) {
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Compare shape###hist_diff_geom")) {
+        const int slot = state.activePart;
+        const std::string dir =
+            slot >= 0 && static_cast<size_t>(slot) < state.parts.size()
+                ? "parts/" + state.parts[slot].name
+                : std::string();
+        state.diffGeometry = CompareVersionGeometry(state, state.diffFrom, dir);
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Boolean-diff this part against that version — "
+                          "how much material came and went.");
+      if (!state.diffGeometry.summary.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", state.diffGeometry.summary.c_str());
+      }
     }
     ImGui::Separator();
     if (state.diffChanges.empty()) {

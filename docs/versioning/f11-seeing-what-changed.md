@@ -187,3 +187,48 @@ one is that?" is the same question mid-merge.
 `FitCameraToSelection`; it does not tint or outline the body in the 3D view,
 because feature selection here never has. Seeing the *geometry* of a change is
 layer 3 — see below.
+
+
+## Layer 3: what the geometry did (2026-08-22)
+
+The diff view has a **Compare shape** action: it boolean-diffs the part in
+front of you against the same part as it was at the selected version, and says
+`16 mm³ added` / `340 mm³ removed` / `same shape`.
+
+**Almost none of this was new code, which is the point.** `compare_geometry`
+and `Measure::CompareBodySets` shipped with V4 on 2026-08-18 — booleans,
+metrics, verdicts, BREP export of the delta. What was missing was not a
+comparison but **the other operand**: nothing could produce a document as it
+was at a revision.
+
+`GitVault::ExtractSubtree` does that — the tree at a revision, written to a
+scratch directory a file at a time. Not `git archive | tar` (no external tar,
+nothing platform-specific) and not a worktree (F6 deferred that for good
+reasons); a document is tens of files and this is an explicit click.
+`CompareVersionGeometry` loads it, regenerates it, and hands both body sets to
+`CompareBodySets`.
+
+Two things the build changed:
+
+**A project with one part is saved FLAT**, so there is no `parts/<name>/`
+subdirectory to extract — the document *is* the project directory. Rather
+than duplicate `SaveProject`'s rule for which form applies, the extraction
+tries the caller's subdir and falls back to the root.
+
+**`SaveProject` now re-stamps for F8.** Writing the project makes the disk
+match memory, which is exactly what the stamp records — but only
+`MarkProjectSaved` was updating it, so any caller that saved *without*
+marking had its next save refused as though someone else had written the
+project. The two were paired by convention everywhere in the app and nothing
+said so; a script, or a step that saves twice, walked straight into it.
+
+**"Unchanged" is a proportion, not an equality.** Booleans on two tessellated
+solids never land exactly on zero, so `same shape` is a millionth of the
+larger volume rather than `== 0`.
+
+### Still not done
+
+`compare_geometry`'s `materialize` option — stamping the missing and extra
+solids as red/green transient bodies so a screenshot shows the delta — is in
+the V4 plan and was not built with it. That is the remaining step for seeing
+a change *on the model* rather than reading a number.

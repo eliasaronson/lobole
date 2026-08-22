@@ -47,6 +47,14 @@ struct GLFWwindow;
 
 namespace ui {
 
+struct GeometryChange {
+  bool valid = false;
+  double added = 0.0;   // volume in the new that was not in the old
+  double removed = 0.0; // volume in the old that is not in the new
+  double oldVolume = 0.0, newVolume = 0.0;
+  std::string summary; // one line, already in plain language
+};
+
 struct TerminalState; // ui/TerminalPanel.cpp — keeps libvterm out of here
 
 // A document body mirrored into the renderers. For a part tab, one per body.
@@ -1116,6 +1124,10 @@ struct AppState {
   // tree, which is "what have I changed since then".
   std::string diffFrom, diffTo, diffLabel;
   std::vector<ProjectMerge::ItemChange> diffChanges;
+  // Layer 3 (F11): what the geometry did, computed on demand — it regenerates
+  // the old recipe and runs booleans, which is not something to do while
+  // someone scrolls a list.
+  GeometryChange diffGeometry;
   // How many scans have actually happened. Only a counter for a test to
   // watch — but the property it guards is the whole point of the change: on
   // a clean project this must stop going up.

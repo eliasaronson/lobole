@@ -177,6 +177,17 @@ std::vector<std::string> ListTree(const std::string& dir,
 std::vector<std::string> Parents(const std::string& dir,
                                  const std::string& rev);
 
+// Write everything under `subdir` as it was at `rev` into `destDir`, which
+// must not exist. For loading a document as it was — the diff's geometry
+// layer regenerates the old recipe and compares the bodies (F11 layer 3).
+//
+// A file at a time rather than `git archive | tar`: no external tar, nothing
+// platform-specific, and a document is tens of files. It is an explicit
+// action, not something on a timer.
+bool ExtractSubtree(const std::string& dir, const std::string& rev,
+                    const std::string& subdir, const std::string& destDir,
+                    std::string* error = nullptr);
+
 // The merge base of two revisions, or "" when they share no history.
 std::string MergeBase(const std::string& dir, const std::string& a,
                       const std::string& b);

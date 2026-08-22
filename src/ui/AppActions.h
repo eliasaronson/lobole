@@ -448,6 +448,17 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
 bool RecoverProject(AppState& state, const std::string& path,
                     std::string* error = nullptr);
 
+// What the GEOMETRY did between a version and now, for one part document
+// (F11 layer 3). The recipe as it was is extracted from the revision,
+// regenerated, and boolean-diffed against the part in front of you.
+//
+// This is where compare_geometry's machinery belongs and a merge's does not:
+// a diff has two operands by construction. `Measure::CompareBodySets` does
+// the booleans; this only finds the other operand.
+GeometryChange CompareVersionGeometry(AppState& state,
+                                      const std::string& revision,
+                                      const std::string& documentDir);
+
 // Show the user a changed item: switch to the document that holds it and
 // select it, so the feature tree highlights the row (F11 G2 follow-on).
 // `frame` also fits the camera to it, which is the double-click gesture —

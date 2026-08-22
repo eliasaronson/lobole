@@ -632,6 +632,50 @@ std::vector<std::string> Parents(const std::string& dir,
   return out;
 }
 
+bool ExtractSubtree(const std::string& dir, const std::string& rev,
+                    const std::string& subdir, const std::string& destDir,
+                    std::string* error) {
+  if (!Available() || !IsRepo(dir)) {
+    if (error)
+      *error = "not a git project";
+    return false;
+  }
+  std::error_code ec;
+  const std::filesystem::path dest(destDir);
+  if (std::filesystem::exists(dest, ec)) {
+    if (error)
+      *error = "there is already something at " + destDir;
+    return false;
+  }
+  const std::string prefix = subdir.empty() ? "" : subdir + "/";
+  int written = 0;
+  for (const std::string& path : ListTree(dir, rev)) {
+    if (!prefix.empty() && path.rfind(prefix, 0) != 0)
+      continue;
+    std::string blob;
+    if (!ShowFile(dir, rev, path, &blob))
+      continue;
+    const std::filesystem::path out =
+        dest / std::filesystem::path(path.substr(prefix.size()));
+    std::filesystem::create_directories(out.parent_path(), ec);
+    std::ofstream file(out, std::ios::binary | std::ios::trunc);
+    file << blob;
+    if (!file) {
+      if (error)
+        *error = "could not write " + out.string();
+      return false;
+    }
+    written++;
+  }
+  if (written == 0) {
+    if (error)
+      *error = subdir.empty() ? "that version is empty"
+                              : subdir + " did not exist in that version";
+    return false;
+  }
+  return true;
+}
+
 std::string MergeBase(const std::string& dir, const std::string& a,
                       const std::string& b) {
   if (!Available() || !IsRepo(dir))
