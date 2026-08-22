@@ -709,3 +709,72 @@ TEST_CASE("Without a merge to attribute against, it still refuses", "[merge]") {
       ProjectMerge::RenumberDuplicate(p.path(), report.conflicts[0], &error));
   CHECK(error.find("which of the two") != std::string::npos);
 }
+
+// ---------------------------------------------------------------------------
+// Describing a change (F11 G1)
+//
+// The History panel showed sixty rows saying "save". These are the strings
+// that replace them — a pure function of a commit's file list, so the cases
+// live here rather than behind git.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("A change summary reads as the tabs do", "[merge]") {
+  using ProjectMerge::SummarizePaths;
+
+  // The common save: one feature, and the caller read it to name it.
+  CHECK(SummarizePaths({"parts/Stand/features/15-extrude.json"}, "Extrude",
+                       "Boss") == "Extrude \"Boss\" in part Stand");
+  // The same file without a name read is still better than "save".
+  CHECK(SummarizePaths({"parts/Stand/features/15-extrude.json"}) ==
+        "1 feature in part Stand");
+
+  // Several in one document.
+  CHECK(SummarizePaths({"parts/Dock/features/1-sketch.json",
+                        "parts/Dock/features/2-extrude.json",
+                        "parts/Dock/features/3-hole.json"}) ==
+        "3 features in part Dock");
+
+  // The order changed, which is a real thing to have done.
+  CHECK(SummarizePaths({"parts/Dock/index.json"}) == "the order in part Dock");
+
+  // Mixed collections, and an assembly reads as an assembly.
+  CHECK(SummarizePaths({"assemblies/Set/occurrences/4-body.json",
+                        "assemblies/Set/mates/7-fastened.json"}) ==
+        "1 mate, 1 occurrence in assembly Set");
+
+  // Two documents join; more than two would be a wall.
+  CHECK(SummarizePaths(
+            {"parts/A/features/1-box.json", "drawings/D/dims/2-linear.json"}) ==
+        "1 feature in part A and 1 dimension in drawing D");
+  CHECK(SummarizePaths(
+            {"parts/A/features/1-box.json", "parts/B/features/1-box.json",
+             "parts/C/features/1-box.json"}) == "3 documents changed");
+}
+
+// Baked geometry and the repository hints are not changes anyone made, and a
+// row that said "3 files in Dock" every time you saved would be worse than
+// "save".
+TEST_CASE("A change summary ignores derived files", "[merge]") {
+  using ProjectMerge::SummarizePaths;
+  CHECK(SummarizePaths({"parts/Stand/geometry/0.brep",
+                        "parts/Stand/geometry/index.json"}) == "");
+  CHECK(SummarizePaths({".gitattributes", ".gitignore"}) == "");
+  CHECK(SummarizePaths({"parts/Stand/features/1-box.json",
+                        "parts/Stand/geometry/0.brep"}) ==
+        "1 feature in part Stand");
+  // Which documents the project HAS is a change, and says so.
+  CHECK(SummarizePaths({"project.json"}) == "the project");
+}
+
+// Only one changed item is worth a blob read to name; anything else is
+// counted from the paths alone, which is what keeps a 60-row page to one
+// `git log`.
+TEST_CASE("Only a lone item is worth naming", "[merge]") {
+  using ProjectMerge::IsSingleItem;
+  CHECK(IsSingleItem({"parts/Stand/features/15-extrude.json"}));
+  CHECK(IsSingleItem({"features/15-extrude.json"})); // a lone document
+  CHECK_FALSE(IsSingleItem({"parts/Stand/index.json"}));
+  CHECK_FALSE(IsSingleItem({"project.json"}));
+  CHECK_FALSE(IsSingleItem(
+      {"parts/Stand/features/1-box.json", "parts/Stand/features/2-box.json"}));
+}

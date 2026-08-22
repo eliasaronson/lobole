@@ -22,6 +22,16 @@ struct LogEntry {
   // disambiguated (F9 C5), so the address has to be READ rather than
   // recomputed from the name.
   std::string tagRef;
+  // What this version changed, in the words the tabs use ("Extrude \"Boss\"
+  // in part Stand", "3 features in part Dock"). Empty for a commit that
+  // touched only derived files (F11 G1). Filled by LogWithChanges, not Log.
+  //
+  // LAST, like every other member added to an aggregate here: Log used to
+  // build these with a braced initialiser list, so a member inserted in the
+  // middle silently re-bound every field after it — the same trap
+  // settings::Field carries a comment about. Log now assigns by name, which
+  // is the durable fix; this note is for the next person to add a field.
+  std::string changed;
 };
 
 // Who commits this app makes are BY (F9 C1).
@@ -64,6 +74,18 @@ std::string TagRef(const std::string& name);
 bool Tag(const std::string& dir, const std::string& name);
 
 std::vector<LogEntry> Log(const std::string& dir, int limit = 20);
+
+// Log, plus what each version changed. One `git log --name-only` for the
+// whole page rather than a process per row — and one `git show` only for a
+// commit that touched a single item, which is the case worth naming
+// precisely, bounded to `maxNamed` rows so opening a project with a long
+// history is not a hundred processes. Falls back to Log() when git is
+// unavailable.
+//
+// Costs more than Log(), so callers should reach for it only when the log has
+// actually changed (the History panel compares the cheap Log() first).
+std::vector<LogEntry> LogWithChanges(const std::string& dir, int limit = 20,
+                                     int maxNamed = 20);
 
 // Set the working tree to `commit`'s tree — including DELETING tracked files
 // that commit did not have (a `git checkout <commit> -- .` would leave them,

@@ -388,6 +388,135 @@ Report Scan(const std::string& projectDir) {
 }
 
 // ---------------------------------------------------------------------------
+// Describing a change (F11 G1)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// "part Stand", "the project", "assembly Dock".
+std::string DocumentLabel(const std::vector<std::string>& parts) {
+  if (parts.size() < 2)
+    return "";
+  const std::string kind = DocumentKindFromFolder(parts[0]);
+  if (kind.empty())
+    return "";
+  return kind + " " + parts[1];
+}
+
+std::string Plural(size_t n, const std::string& one) {
+  return std::to_string(n) + " " + one + (n == 1 ? "" : "s");
+}
+
+} // namespace
+
+bool IsSingleItem(const std::vector<std::string>& paths) {
+  if (paths.size() != 1)
+    return false;
+  const auto parts = SplitPath(paths[0]);
+  if (parts.size() < 2)
+    return false;
+  const std::string filename = parts.back();
+  if (filename == "index.json" || filename == "project.json")
+    return false;
+  // The collection sits directly above the file, at either nesting depth.
+  return CollectionForDir(parts[parts.size() - 2]) != nullptr;
+}
+
+std::string SummarizePaths(const std::vector<std::string>& paths,
+                           const std::string& singleItemKind,
+                           const std::string& singleItemName) {
+  // Derived data and the repository hints are not changes anyone made.
+  std::vector<std::string> real;
+  for (const std::string& path : paths) {
+    const auto parts = SplitPath(path);
+    const std::string filename = parts.empty() ? path : parts.back();
+    if (filename == ".gitattributes" || filename == ".gitignore")
+      continue;
+    bool derived = false;
+    for (const std::string& part : parts)
+      derived = derived || part == "geometry";
+    if (!derived)
+      real.push_back(path);
+  }
+  if (real.empty())
+    return "";
+
+  // The case worth naming precisely: one item, and the caller read it.
+  if (IsSingleItem(real) && !singleItemKind.empty()) {
+    const auto parts = SplitPath(real[0]);
+    std::string s = singleItemKind;
+    if (!singleItemName.empty())
+      s += " \"" + singleItemName + "\"";
+    const std::string doc = DocumentLabel(parts);
+    return doc.empty() ? s : s + " in " + doc;
+  }
+
+  // Otherwise count by collection, per document. Keyed by (rank, label) so
+  // documents come out in the order the tab bar shows them — parts, then
+  // assemblies, then drawings — rather than alphabetically, which would put
+  // a drawing before the part it draws.
+  const auto rank = [](const std::vector<std::string>& parts) {
+    if (parts.size() < 2)
+      return 3;
+    if (parts[0] == "parts")
+      return 0;
+    if (parts[0] == "assemblies")
+      return 1;
+    if (parts[0] == "drawings")
+      return 2;
+    return 3;
+  };
+  std::map<std::pair<int, std::string>, std::map<std::string, size_t>>
+      byDocument;
+  size_t projectLevel = 0;
+  for (const std::string& path : real) {
+    const auto parts = SplitPath(path);
+    const std::string filename = parts.back();
+    if (parts.size() == 1) {
+      projectLevel++; // project.json and friends
+      continue;
+    }
+    const std::pair<int, std::string> key{rank(parts), DocumentLabel(parts)};
+    if (filename == "index.json") {
+      byDocument[key]["order"]++;
+      continue;
+    }
+    const Collection* collection = CollectionForDir(parts[parts.size() - 2]);
+    byDocument[key][collection ? collection->label : "file"]++;
+  }
+
+  std::vector<std::string> pieces;
+  for (const auto& [key, counts] : byDocument) {
+    const std::string& doc = key.second;
+    std::vector<std::string> bits;
+    for (const auto& [label, n] : counts) {
+      if (label == "order")
+        bits.push_back("the order");
+      else
+        bits.push_back(Plural(n, label));
+    }
+    std::string s;
+    for (size_t i = 0; i < bits.size(); i++)
+      s += (i ? ", " : "") + bits[i];
+    if (!doc.empty())
+      s += " in " + doc;
+    pieces.push_back(s);
+  }
+  if (projectLevel > 0 && pieces.empty())
+    return "the project";
+
+  // Two documents read fine; more is a wall, so say how many.
+  if (pieces.size() > 2)
+    return Plural(pieces.size(), "document") + " changed";
+  std::string out;
+  for (size_t i = 0; i < pieces.size(); i++)
+    out += (i ? " and " : "") + pieces[i];
+  if (projectLevel > 0)
+    out += out.empty() ? "the project" : ", and the project";
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // The index union merge
 // ---------------------------------------------------------------------------
 

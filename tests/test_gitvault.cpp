@@ -753,3 +753,40 @@ TEST_CASE("GitVault: named versions reach the remote", "[git]") {
   std::error_code ec;
   fs::remove_all(clone, ec);
 }
+
+// A history of sixty rows saying "save" is a backup, not a history (F11 G1).
+TEST_CASE("GitVault: the log says what each version changed", "[git]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchRepo repo("changes");
+  REQUIRE(GitVault::Init(repo.path()));
+  repo.Write("parts/Stand/index.json", R"({"features":[1]})");
+  repo.Write("parts/Stand/features/1-sketch.json",
+             R"({"id":1,"type":"Sketch","name":"Profile"})");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+
+  // One feature: worth naming precisely.
+  repo.Write("parts/Stand/features/2-extrude.json",
+             R"({"id":2,"type":"Extrude","name":"Boss"})");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+
+  // Several: counted, not enumerated.
+  repo.Write("parts/Stand/features/3-hole.json", R"({"id":3,"type":"Hole"})");
+  repo.Write("parts/Stand/features/4-fillet.json",
+             R"({"id":4,"type":"Fillet"})");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+
+  // Derived only: nothing a person did.
+  repo.Write("parts/Stand/geometry/0.brep", "not a recipe");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+
+  const auto log = GitVault::LogWithChanges(repo.path());
+  REQUIRE(log.size() == 4);
+  CHECK(log[0].changed.empty()); // baked geometry is not a change
+  CHECK(log[1].changed == "2 features in part Stand");
+  CHECK(log[2].changed == "Extrude \"Boss\" in part Stand");
+  // Every subject still says "save"; the descriptions are what tell them
+  // apart, which is the point.
+  for (const auto& e : log)
+    CHECK(e.subject == "save");
+}

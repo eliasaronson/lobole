@@ -1,6 +1,11 @@
 #include "core/io/GitVault.h"
 
 #include "common/Logger.h"
+#include "core/io/ProjectMerge.h"
+
+#include <nlohmann/json.hpp>
+
+#include <map>
 
 #include <array>
 #include <cstdio>
@@ -341,10 +346,68 @@ std::vector<LogEntry> Log(const std::string& dir, int limit) {
     if (t1 == std::string::npos || t2 == std::string::npos ||
         t3 == std::string::npos)
       continue;
-    const std::string tagRef = VersionTagRef(line.substr(t2 + 1, t3 - t2 - 1));
-    out.push_back({line.substr(0, t1), line.substr(t3 + 1),
-                   std::stoll(line.substr(t1 + 1, t2 - t1 - 1)),
-                   !tagRef.empty(), tagRef});
+    // By NAME, not position: a braced list here re-binds every field after
+    // any member later added to LogEntry, silently.
+    LogEntry entry;
+    entry.hash = line.substr(0, t1);
+    entry.subject = line.substr(t3 + 1);
+    entry.unixTime = std::stoll(line.substr(t1 + 1, t2 - t1 - 1));
+    entry.tagRef = VersionTagRef(line.substr(t2 + 1, t3 - t2 - 1));
+    entry.named = !entry.tagRef.empty();
+    out.push_back(std::move(entry));
+  }
+  return out;
+}
+
+std::vector<LogEntry> LogWithChanges(const std::string& dir, int limit,
+                                     int maxNamed) {
+  std::vector<LogEntry> out = Log(dir, limit);
+  if (out.empty())
+    return out;
+
+  // One process for the page. `-m --first-parent` makes a merge commit report
+  // its files too, rather than silently listing nothing.
+  std::string text;
+  if (RunGit(
+          dir,
+          "log -n " + std::to_string(limit) +
+              " --first-parent --name-only --pretty=format:" + Quote("\x01%H"),
+          &text) != 0)
+    return out;
+
+  std::map<std::string, std::vector<std::string>> byCommit;
+  std::string current;
+  for (const std::string& line : Lines(text)) {
+    if (!line.empty() && line[0] == '\x01') {
+      current = line.substr(1);
+      continue;
+    }
+    if (!current.empty())
+      byCommit[current].push_back(line);
+  }
+
+  for (LogEntry& entry : out) {
+    const auto it = byCommit.find(entry.hash);
+    if (it == byCommit.end())
+      continue;
+    std::string kind, name;
+    // Worth one more process only when a single item changed — then the row
+    // can say WHICH extrude instead of "1 feature" — and only for the rows
+    // someone is likely to be looking at.
+    if (maxNamed > 0 && ProjectMerge::IsSingleItem(it->second)) {
+      maxNamed--;
+      std::string blob;
+      if (ShowFile(dir, entry.hash, it->second[0], &blob)) {
+        try {
+          const nlohmann::json item = nlohmann::json::parse(blob);
+          kind = item.value("type", "");
+          name = item.value("name", "");
+        } catch (const std::exception&) {
+          // Not an item we can read; the path-only summary still applies.
+        }
+      }
+    }
+    entry.changed = ProjectMerge::SummarizePaths(it->second, kind, name);
   }
   return out;
 }

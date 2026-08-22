@@ -153,4 +153,23 @@ struct Breakage {
 // caller's way back is GitVault::AbortMerge.
 std::vector<Breakage> Verify(const std::string& projectDir);
 
+// What a set of changed paths amounts to, in the words the tabs use (F11 G1).
+//
+// The History panel used to show sixty rows saying "save". The translation
+// from `parts/Stand/features/15-extrude.json` to "a feature in part Stand"
+// already existed here for the Conflicts panel; this is the same knowledge
+// pointed at a commit's file list.
+//
+// Deliberately works from PATHS ALONE, because a log page is sixty commits
+// and reading a blob per file would be sixty processes. The caller supplies
+// `singleItemName` when it has cheaply read the one changed file (see
+// DescribeChange), and gets a better sentence for it.
+std::string SummarizePaths(const std::vector<std::string>& paths,
+                           const std::string& singleItemKind = "",
+                           const std::string& singleItemName = "");
+
+// True when `paths` is one document-item file — the case worth spending a
+// blob read on to name it properly.
+bool IsSingleItem(const std::vector<std::string>& paths);
+
 } // namespace ProjectMerge

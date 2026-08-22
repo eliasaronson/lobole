@@ -61,7 +61,17 @@ void RefreshHistory(AppState& state, bool force) {
     return;
   state.historyStamp = now;
   state.historyPath = state.projectPath;
-  state.historyLog = GitVault::Log(state.projectPath, kVersionsShown);
+  // The cheap log first: one process, and it answers "has anything changed"
+  // — which is what decides whether to pay for the descriptions (F11 G1).
+  std::vector<GitVault::LogEntry> fresh =
+      GitVault::Log(state.projectPath, kVersionsShown);
+  const bool unchanged =
+      fresh.size() == state.historyLog.size() &&
+      (fresh.empty() || fresh[0].hash == state.historyLog[0].hash);
+  if (!unchanged) {
+    state.historyLog =
+        GitVault::LogWithChanges(state.projectPath, kVersionsShown);
+  }
   state.historyUncommitted = GitVault::Dirty(state.projectPath);
 }
 
@@ -427,10 +437,19 @@ void DrawHistoryPanel(AppState& state) {
       ImGui::TableSetColumnIndex(0);
       // A named version is the one a person meant to keep; an ordinary save
       // is just a point in time. Colour is the whole distinction.
-      if (e.named)
+      //
+      // An unnamed save shows WHAT IT CHANGED rather than the word "save"
+      // (F11 G1) — sixty identical rows is a backup, not a history. The
+      // subject is the fallback for a commit whose files say nothing (the
+      // first one, or a derived-only write).
+      if (e.named) {
         ImGui::TextUnformatted(e.subject.c_str());
-      else
-        ImGui::TextDisabled("%s", e.subject.c_str());
+      } else {
+        ImGui::TextDisabled("%s", e.changed.empty() ? e.subject.c_str()
+                                                    : e.changed.c_str());
+      }
+      if (!e.changed.empty() && ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", e.changed.c_str());
 
       ImGui::TableSetColumnIndex(1);
       ImGui::TextDisabled("%s", Ago(e.unixTime, now).c_str());

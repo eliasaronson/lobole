@@ -1454,6 +1454,25 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // window never appears at all, which points at state left by whatever
     // ran before it in the shard, not at a slow spawn. Unresolved; see the
     // handoff note.
+    //
+    // DIAGNOSED, not fixed (2026-08-22, second session). It is NOT a timeout
+    // and NOT the PTY. Instrumenting DrawTerminalPanel through the failing
+    // pair shows the window IS created, IS active and IS docked (DockId 4) —
+    // with `Hidden` true, so Begin() returns false, the body is never
+    // submitted, and ###term_claude below cannot be found. WindowInfo also
+    // declines to return a hidden window, which is the null seen here.
+    //
+    // Reproduces deterministically and serially, no load involved:
+    //   gui-tests-xvfb.sh -f "tool_window_follows_the_viewport,\
+    //                         off_by_default_docks_right_on" --serial
+    // and that CAM test is the only one that turns this panel on and off and
+    // rebuilds the dock layout (legitimately — it narrows the viewport).
+    //
+    // Four fixes tried and REJECTED, so nobody repeats them: starting from a
+    // rebuilt default layout; waiting on FindWindowByName instead of
+    // WindowInfo; ctx->ItemClick(win->TabId); poking
+    // DockNode->SelectedTabId. None makes the body submit. The remaining
+    // suspect is which node the window lands in after a rebuild, not when.
     ImGuiWindow* win = nullptr;
     for (int i = 0; i < 90; i++) {
       ctx->Yield();
@@ -6580,6 +6599,32 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
     IM_CHECK(!s_App->measure.active);
+  };
+
+  // Turning the terminal preference off and on again must give a working
+  // shell. ShutdownTerminal terminated the PTY but kept the TerminalState,
+  // whose `everStarted` latch (there to stop the shell respawning after the
+  // user presses Stop) then blocked every future start — a panel that could
+  // never open a shell again until the app restarted. The same one-shot trap
+  // the chooser this panel replaced used to have.
+  t = IM_REGISTER_TEST(engine, "terminal", "reopens_after_being_turned_off");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const bool had = s_App->settings.terminalPanel;
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(8);
+    IM_CHECK(ui::TerminalRunning(*s_App));
+
+    s_App->settings.terminalPanel = false;
+    ctx->Yield(4);
+    IM_CHECK(!ui::TerminalRunning(*s_App)); // ended, not hidden
+
+    // And again — this is what used to be impossible.
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(8);
+    IM_CHECK(ui::TerminalRunning(*s_App));
+
+    s_App->settings.terminalPanel = had;
+    ctx->Yield(4);
   };
 
   // F10: the other half. Autosave writing the right documents is only useful
