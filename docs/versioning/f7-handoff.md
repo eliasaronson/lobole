@@ -108,14 +108,28 @@ document rebuilds perfectly while a reference quietly points somewhere else.
 - **`2eda31d`** — the terminal panel could not be turned off and on again;
   `everStarted` latched and blocked every future start.
 
-### One known-red test, not mine
+### One latent failure — GREEN in CI, and not fixed
 
 `terminal/off_by_default_docks_right_on` fails after
-`cam/tool_window_follows_the_viewport` in the same process — deterministically,
-serially, no load. Diagnosed in a comment on the test: the window is created,
-active and docked, but `Hidden`, so its body is never submitted. Four fixes
-tried and rejected; the remaining suspect is which node it lands in after a
-layout rebuild. Left red on purpose rather than papered over.
+`cam/tool_window_follows_the_viewport` **in the same process**. It is
+diagnosed in a comment on the test: the window is created, active and docked,
+but `Hidden`, so its body is never submitted. Four fixes tried and rejected.
+
+**The suite is green, and that is the trap.** Measured 2026-08-22:
+
+| how the suite runs | result |
+|---|---|
+| `gui-tests-xvfb.sh` (default, 4 shards) | **178/178 passed** |
+| `gui-tests-xvfb.sh --serial` (one process) | **177/178** — this test fails |
+
+The 4-way partition happens to put the two tests in different processes, so
+they never meet. The partition is balanced by recorded times, so **adding
+tests reshuffles it** — which is how this surfaced in the first place, and how
+it will come back. A green run is not evidence that it is fixed; run
+`--serial`, or the pair directly:
+
+    gui-tests-xvfb.sh -f "tool_window_follows_the_viewport,\
+                          off_by_default_docks_right_on" --serial
 
 ## Tests, and what each covers
 

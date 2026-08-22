@@ -1462,6 +1462,10 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // submitted, and ###term_claude below cannot be found. WindowInfo also
     // declines to return a hidden window, which is the null seen here.
     //
+    // NOTE it passes under the default 4-shard run, which puts the two tests
+    // in different processes — `--serial` is 177/178. A green suite is not
+    // evidence this is fixed.
+    //
     // Reproduces deterministically and serially, no load involved:
     //   gui-tests-xvfb.sh -f "tool_window_follows_the_viewport,\
     //                         off_by_default_docks_right_on" --serial
