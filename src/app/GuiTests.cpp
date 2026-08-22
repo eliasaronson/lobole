@@ -6566,6 +6566,40 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->measure.active);
   };
 
+  // A clean project must stop costing anything. The conflicts scan walks the
+  // whole project (for the duplicate ids git cannot report) AND spawns
+  // `git` — it used to do both once a second, forever, to answer "no".
+  t = IM_REGISTER_TEST(engine, "conflicts", "a_clean_project_stops_scanning");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_scan_cost.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box");
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(5);
+
+    const uint64_t before = s_App->conflictScans;
+    ctx->Yield(60); // a second of frames, and then some
+    const uint64_t during = s_App->conflictScans - before;
+    IM_CHECK_LE(during, (uint64_t)1); // at most the one the settle allowed
+    ctx->LogInfo("scans over 60 clean frames: %d", (int)during);
+
+    // But an actual change still gets noticed — the point is to stop asking,
+    // not to stop answering.
+    {
+      std::ofstream(dir / "NOTES.txt") << "someone else\n";
+    }
+    s_App->diskCheckStamp = -1.0;
+    ctx->Yield(5);
+    IM_CHECK(s_App->conflictScans > before + during);
+  };
+
   // F8: the project moved on disk while the app held it in memory. This is
   // the terminal-panel scenario — the panel ships inside the app and starts
   // in the project's directory, so a `git checkout` there is a normal thing

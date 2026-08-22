@@ -96,11 +96,19 @@ void PollDiskState(AppState& state) {
   if (!state.diskStampHead.empty()) {
     const auto head = GitVault::Log(state.projectPath, 1);
     if (!head.empty() && head[0].hash != state.diskStampHead) {
+      if (!state.diskChanged)
+        state.conflictsStale = true;
       state.diskChanged = true;
       return;
     }
   }
+  const bool wasChanged = state.diskChanged;
   state.diskChanged = ProjectChangedOnDisk(state);
+  // Something else wrote the project, which is the only way a conflict can
+  // appear without us doing it — so this is where the conflicts scan earns
+  // its keep, rather than on a timer.
+  if (state.diskChanged && !wasChanged)
+    state.conflictsStale = true;
 }
 
 namespace {

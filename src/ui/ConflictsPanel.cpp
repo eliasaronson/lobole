@@ -13,15 +13,13 @@ namespace ui {
 
 namespace {
 
-// Scanning spawns `git` and walks the project directory, so the panel works
-// off a cache — the same bargain the History panel makes with the log.
-constexpr double kRefreshSeconds = 1.0;
-
 // The scan itself. No ImGui: FinishMerge runs it, and FinishMerge is
 // reachable over RPC in a headless process where there is no ImGui context
 // at all — `ImGui::GetTime()` on that path was a SIGSEGV.
 void ScanNow(AppState& state) {
   state.conflictsPath = state.projectPath;
+  state.conflictsStale = false;
+  state.conflictScans++;
   if (state.projectPath.empty() || !GitVault::Available()) {
     state.conflicts = ProjectMerge::Report{};
     return;
@@ -29,15 +27,12 @@ void ScanNow(AppState& state) {
   state.conflicts = ProjectMerge::Scan(state.projectPath);
 }
 
-// The draw-path wrapper, which is the only place a frame time exists.
+// The draw-path wrapper. No frame time involved any more: a scan happens when
+// something could have changed the answer, not on a clock.
 void RefreshConflicts(AppState& state, bool force) {
-  const double now = ImGui::GetTime();
-  const bool stale = state.conflictsStamp < 0.0 ||
-                     now - state.conflictsStamp > kRefreshSeconds ||
-                     state.conflictsPath != state.projectPath;
-  if (!force && !stale)
+  if (!force && !state.conflictsStale &&
+      state.conflictsPath == state.projectPath)
     return;
-  state.conflictsStamp = now;
   ScanNow(state);
 }
 
@@ -70,7 +65,7 @@ std::string GroupLabel(const ProjectMerge::Conflict& conflict) {
 
 } // namespace
 
-void InvalidateConflicts(AppState& state) { state.conflictsStamp = -1.0; }
+void InvalidateConflicts(AppState& state) { state.conflictsStale = true; }
 
 bool ProjectHasConflicts(AppState& state) { return !state.conflicts.Empty(); }
 

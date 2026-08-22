@@ -2154,6 +2154,7 @@ void StampDiskState(AppState& state, const std::string& path) {
   }
   state.diskChanged = false;
   state.diskCheckStamp = -1.0; // let the poll re-answer from the new baseline
+  state.conflictsStale = true; // a different tree: rescan once, not on a clock
 }
 
 bool ProjectChangedOnDisk(AppState& state) {

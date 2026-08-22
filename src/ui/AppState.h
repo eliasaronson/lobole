@@ -1094,13 +1094,23 @@ struct AppState {
   double diskCheckStamp = -1.0; // ImGui time of the last poll; <0 = never
   bool windowFocused = true;    // main.cpp mirrors GLFW_FOCUSED here
 
-  // Conflicts (F7), cached on the same terms as the log: scanning spawns
-  // `git` AND walks the project for the duplicate ids git cannot see, so it
-  // must not run every frame. `conflictsStamp = -1` forces a rescan after any
-  // resolution.
+  // Conflicts (F7). A scan spawns `git` and walks the project for the
+  // duplicate ids git cannot see, so it runs on an event rather than a clock
+  // (F11 G3 — see conflictsStale).
   ProjectMerge::Report conflicts;
   std::string conflictsPath;
-  double conflictsStamp = -1.0;
+  // Rescan when this is set, and ONLY then — no timer. A scan walks the whole
+  // project (for the duplicate ids git cannot report) and spawns `git`, and
+  // on a clean project the answer cannot change on its own: a conflict
+  // appears when we merge (which invalidates explicitly), when a project is
+  // opened, or when something else writes the directory — which is exactly
+  // what F8's poll already detects. Timing it instead cost a tree walk a
+  // second, forever, for an answer that was "no" every time.
+  bool conflictsStale = true;
+  // How many scans have actually happened. Only a counter for a test to
+  // watch — but the property it guards is the whole point of the change: on
+  // a clean project this must stop going up.
+  uint64_t conflictScans = 0;
   // Set by "Finish merge" when the resolved project does not load or rebuild:
   // the merge is NOT concluded and these say why.
   std::vector<ProjectMerge::Breakage> conflictsBreakage;
