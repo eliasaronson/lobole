@@ -1,6 +1,6 @@
 # GUI tests that do not depend on each other — plan
 
-> Status: **P1 + P4 BUILT** (2026-08-22); P2 and P3 remain. From: *"I thought the
+> Status: **BUILT** (2026-08-22/23) — P1–P4. From: *"I thought the
 > tests did some setup and cleanup to not be dependent of each other?"* — they
 > do, by convention, and the convention broke three times in one day.
 >
@@ -96,8 +96,8 @@ stops the fourth being written.
 | | scope | size |
 |---|---|---|
 | **P1** | Extend `ResetAppForTest` (the wrapper already existed) to the dock layout, the feature sessions and CAM | **done** — `ResetAppForTest`, plus `isolation/a_messy_test_leaks_nothing` |
-| **P2** | Delete the redundant per-test `File/New` | ~1–2 h, mechanical |
-| **P3** | `--shuffle [SEED]` in the runner, one shuffled CI job | ~1 h |
+| **P2** | Delete the redundant per-test `File/New` | **done** — 126 removed, **21 kept** |
+| **P3** | `--shuffle [SEED]` in the runner + `--gui-test-shuffle` in the binary | **done** — found two real dependencies on its first run |
 | **P4** | Absence assertions pass `NoError` | **done** ahead of this plan (`3dbc0c0`, `6cca9bf`); the named helpers are still worth adding so the next one cannot be written bare |
 
 **~1 session**, plus however many tests turn out to have been relying on
@@ -170,3 +170,30 @@ One test relied on leaked state and had to be understood rather than
 adjusted: `terminal/hover_decides_who_gets_the_keys` moves the pointer to the
 centre of the viewport and expects the app to take the keyboard back. It was
 passing only because the layout was never rebuilt underneath it.
+
+## What P2 and P3 turned up
+
+**P3 paid for itself on the first run.** Two order dependencies that the
+time-balanced partition had been hiding:
+
+- `document/parametric_box_undo_redo` and `create_sphere_and_cylinder`
+  measured a **body** count against a **feature** count baseline. Those are
+  only the same number in a document containing nothing but solids, and the
+  shuffle put a datum test — planes and sketches, features with no body — in
+  front of them.
+- Seed 11 **segfaulted a whole shard, losing 49 tests**: an assembly test left
+  the app on an assembly tab, where `document` is null, and the next test
+  dereferenced `Doc()`. That is what made the reset create a fresh project
+  rather than merely tidy around one, which is also what makes P2 safe.
+
+**P2 needed to be less mechanical than it looked.** A blanket removal of all
+147 `MenuClick("File/New")` calls passed the compiler and broke
+`folder_empty_create`, which uses `File > New` **mid-test** on purpose — to
+prove that reopening a saved project restores its folder. Removing only the
+ones that are a test's opening setup leaves 126 gone and **21 kept**. The
+regex that distinguishes them keys on the call sitting directly after the
+lambda opening and its `SetRef`.
+
+Seeds are printed by every shuffled run and derived from one base, so
+`--shuffle <SEED>` replays a failing run exactly — which is the whole
+difference between a randomised suite and a flaky one.

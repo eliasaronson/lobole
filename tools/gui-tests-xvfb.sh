@@ -64,17 +64,28 @@ SCREEN='-screen 0 1600x1000x24'
 # can write the developer's real preferences.
 run_shard() {
   mkdir -p "$3"
+  # $4: extra args (the shuffle seed for this shard, when --shuffle is on).
   "$XVFB_RUN" -n "$1" -s "$SCREEN" \
     nix-shell "$ROOT/shell.nix" --run \
     "cd '$ROOT/build' && XDG_STATE_HOME='$3' XDG_CONFIG_HOME='$3/config' \
-     ./designer --gui-tests --hidden --gui-test-filter '$2'"
+     ./designer --gui-tests --hidden --gui-test-filter '$2' ${4:-}"
 }
 
 SHARDS=4
 SLOWER_THAN=""
 RECORD=0
+SHUFFLE=0
+SEED=0   # 0 = the binary picks one per shard and prints it
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --shuffle)
+      # Run each shard in a random order. The point is not randomness for its
+      # own sake: it is that an order dependency then fails on some run rather
+      # than lying dormant until the time-balanced partition reshuffles and
+      # takes an unrelated test down with it.
+      SHUFFLE=1
+      if [ -n "${2:-}" ] && [ "${2#-}" = "$2" ]; then SEED="$2"; shift; fi
+      shift ;;
     --fast) SLOWER_THAN="$FAST_LIMIT"; shift ;;
     --serial) SHARDS=1; shift ;;
     -j) SHARDS="$2"; shift 2 ;;
@@ -154,13 +165,27 @@ BASE=$(( 100 + ($$ % 300) ))
 i=0
 while read -r filter; do
   i=$((i + 1))
-  ( run_shard "$((BASE + i))" "$filter" "$WORK/state$i" \
+  SHUFFLE_ARG=""
+  if [ "$SHUFFLE" = "1" ]; then
+    # A distinct seed per shard, derived from one base so a whole run is
+    # replayable: --shuffle <SEED> reproduces every shard exactly.
+    if [ "$SEED" = "0" ]; then
+      SHUFFLE_ARG="--gui-test-shuffle"
+    else
+      SHUFFLE_ARG="--gui-test-shuffle $((SEED + i))"
+    fi
+  fi
+  ( run_shard "$((BASE + i))" "$filter" "$WORK/state$i" "$SHUFFLE_ARG" \
       > "$WORK/shard$i.log" 2>&1
     echo "$?" > "$WORK/shard$i.code" ) &
 done < "$WORK/filters"
 START=$(date +%s)
 wait
 ELAPSED=$(( $(date +%s) - START ))
+
+if [ "$SHUFFLE" = "1" ]; then
+  grep -h "shuffled order, seed" "$WORK"/shard*.log 2>/dev/null || true
+fi
 
 # Every shard's result, and the total: a filter that quietly matched nothing
 # would otherwise read as a pass.

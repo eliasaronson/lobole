@@ -16,6 +16,7 @@
 #include "imgui_impl_vulkan.h"
 #ifdef HAVE_TEST_ENGINE
 #include "imgui_te_engine.h"
+#include "imgui_te_internal.h" // TestsAll, for --gui-test-shuffle
 #endif
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
@@ -42,6 +43,7 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#include <random>
 #include <stdio.h>
 #include <stdlib.h>
 #include <thread>
@@ -961,6 +963,8 @@ void printUsage(const char* programName) {
   std::cout << "  --version            Show the Designer version" << std::endl;
   std::cout << "  --gui-tests          Run GUI test suite and exit"
             << std::endl;
+  std::cout << "  --gui-test-shuffle [seed]    Run GUI tests in a random "
+               "order (prints the seed)\n";
   std::cout << "  --gui-test-filter <pattern>  Run only matching GUI tests "
                "(e.g. \"fillet\", \"selection_,tree_\"; implies --gui-tests)"
             << std::endl;
@@ -998,6 +1002,9 @@ struct CommandLineArgs {
   bool runGuiTests = false;
   bool listGuiTests = false;
   std::string guiTestFilter = "all";
+  // -1 = run in registration order. >= 0 = shuffle with this seed; 0 means
+  // "pick one and tell me". See --gui-test-shuffle.
+  long guiTestShuffle = -1;
   bool headless = false;
   bool hidden = false;
   int remotePort = 0;
@@ -1038,6 +1045,14 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       exit(1);
 #endif
       args.runGuiTests = true;
+    } else if (arg == "--gui-test-shuffle") {
+      // Order-independence is a property you find out you have lost, not one
+      // you can assert once. Running the suite in a random order surfaces a
+      // dependency LOUDLY and reproducibly, instead of waiting for the shard
+      // partition to reshuffle and turn something unrelated red.
+      args.guiTestShuffle = 0;
+      if (i + 1 < argc && argv[i + 1][0] != '-')
+        args.guiTestShuffle = std::strtol(argv[++i], nullptr, 10);
     } else if (arg == "--gui-test-filter") {
       if (i + 1 < argc) {
         args.guiTestFilter = argv[++i];
@@ -1468,6 +1483,22 @@ int main(int argc, char** argv) {
   ImGuiTestEngine_Start(testEngine, ImGui::GetCurrentContext());
   RegisterGuiTests(testEngine, &g_App);
   if (args.runGuiTests) {
+    if (args.guiTestShuffle >= 0) {
+      // Shuffle the engine's own test list rather than the queue: QueueTests
+      // walks TestsAll in order, so reordering it here leaves the filter
+      // semantics entirely to the engine. (This is why imgui_te_internal.h is
+      // included — the list is not in the public header.)
+      unsigned long seed = static_cast<unsigned long>(args.guiTestShuffle);
+      if (seed == 0)
+        seed = static_cast<unsigned long>(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+      // Printed unconditionally: a shuffled failure is worthless if it cannot
+      // be replayed with --gui-test-shuffle <seed>.
+      std::cout << "GUI tests: shuffled order, seed " << seed << std::endl;
+      std::mt19937 rng(static_cast<std::mt19937::result_type>(seed));
+      std::shuffle(testEngine->TestsAll.begin(), testEngine->TestsAll.end(),
+                   rng);
+    }
     // The filter matches the test engine's syntax: substrings against
     // "category/name", comma-separated, "-" to exclude ("all" = everything).
     ImGuiTestEngine_QueueTests(testEngine, ImGuiTestGroup_Tests,

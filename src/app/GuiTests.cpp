@@ -137,6 +137,17 @@ static void ResetAppForTest() {
   // case that mattered, because a window docking itself is not an action any
   // test performs.
   s_App->buildDefaultDockLayout = true;
+  // A FRESH PROJECT, the same one File > New makes — which also returns the
+  // app to a single part tab. Without it a test ending on an ASSEMBLY tab
+  // leaves `document` null and the next test to touch Doc() segfaults. Not
+  // hypothetical: --gui-test-shuffle seed 11 crashed a whole shard that way,
+  // taking 49 tests with it, because an assembly test landed in front of one
+  // that creates a sphere.
+  ui::ReplaceDocument(*s_App, std::make_unique<Document>());
+  s_App->parts.clear();
+  s_App->tabFolders.clear();
+  ui::EnsureParts(*s_App, "Part 1");
+  ui::MarkProjectOpened(*s_App, "");
 }
 
 // Original TestFunc for each registered test, keyed by the test; the wrapper
@@ -397,11 +408,16 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "document", "parametric_box_undo_redo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     IM_CHECK(Doc() != nullptr);
+    // TWO baselines. A datum plane or a sketch is a feature that produces no
+    // body, so measuring bodies against the FEATURE count only holds for a
+    // document containing nothing but solids — found by --gui-test-shuffle
+    // putting a datum test in front of this one.
     const size_t before = Doc()->FeatureCount();
+    const size_t bodiesBefore = Doc()->GetBodies().size();
 
     ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
-    IM_CHECK_EQ(Doc()->GetBodies().size(), before + 1);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), bodiesBefore + 1);
 
     ctx->MenuClick("Edit/Undo");
     ctx->Yield();
@@ -415,11 +431,12 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "document", "create_sphere_and_cylinder");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     const size_t before = Doc()->FeatureCount();
+    const size_t bodiesBefore = Doc()->GetBodies().size(); // see above
 
     ToolbarCreateAccept(ctx, "###tb_sphere");
     ToolbarCreateAccept(ctx, "###tb_cylinder");
     IM_CHECK_EQ(Doc()->FeatureCount(), before + 2);
-    IM_CHECK_EQ(Doc()->GetBodies().size(), before + 2);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), bodiesBefore + 2);
 
     ctx->MenuClick("Edit/Undo");
     ctx->MenuClick("Edit/Undo");
@@ -471,8 +488,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "document", "feature_tree_drag_reorder");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");    // Box 1    -> index 0
     ToolbarCreateAccept(ctx, "###tb_sphere"); // Sphere 1 -> index 1
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
@@ -498,8 +513,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "properties", "edit_box_width_undo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
 
     auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
@@ -536,8 +549,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "shortcuts", "undo_redo_keyboard");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
 
@@ -553,8 +564,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "viewport", "middle_drag_rotates_camera");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
 
     const glm::vec3 posBefore = s_App->camera->GetPosition();
@@ -709,8 +718,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "measure", "cleared_on_mode_entry");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
 
     s_App->measure.active = true;
@@ -740,8 +747,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sim", "gravity_pulls_down");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ToolbarClick(ctx, "###tb_simulation"); // the button had no id before this
     ctx->Yield();
@@ -761,8 +766,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sim", "force_pushes_into_the_picked_face");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     // A study needs stiffness data, and a new body has none: the panel says
     // so and offers the fix in place, rather than sending the user out of
@@ -829,8 +832,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sim", "force_arrow_points_along_the_force");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ui::EnterSimulation(*s_App);
     ctx->Yield(2);
@@ -932,8 +933,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "cam", "new_document_takes_the_job_with_it");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
@@ -975,8 +974,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "cam", "pick_top_face_sets_z_zero");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
@@ -1044,8 +1041,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "app", "new_document_closes_tool_sessions");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
@@ -1076,8 +1071,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "view", "standard_views_keep_the_pivot");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     // Modelled well away from the origin, which is where this went wrong.
     Doc()->AddFeature(std::make_unique<BoxFeature>(
         "Plate", glm::vec3(200, 100, 50), 60, 40, 12));
@@ -1106,8 +1099,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "cam", "fit_keeps_the_model_clear_of_the_tool");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
@@ -1135,8 +1126,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "cam", "tool_window_follows_the_viewport");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
@@ -1177,8 +1166,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "cam", "look_down_the_spindle");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
@@ -1223,8 +1210,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "cam", "verbs_two_clicks_to_a_pocket");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     // A plate with a pocket cleared from its top down to z = 12.
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 20));
@@ -1356,8 +1341,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "cam", "panel_generates_and_backplots");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(2);
@@ -1472,8 +1455,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "terminal", "off_by_default_docks_right_on");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield(2);
 
     // Off by default: the window does not exist at all.
     IM_CHECK(!s_App->settings.terminalPanel);
@@ -1553,7 +1534,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "terminal", "runs_a_command_and_shows_output");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     s_App->settings.terminalPanel = true;
     ctx->Yield(6);
 
@@ -1581,7 +1561,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "terminal", "drag_selects_and_copies_text");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     s_App->settings.terminalPanel = true;
     ctx->Yield(6);
 
@@ -1644,8 +1623,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "terminal", "hover_decides_who_gets_the_keys");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box"); // one undoable feature
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
 
@@ -1712,7 +1689,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
                        "frame_stats_measure_hud_stays_hidden");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     ctx->Yield(5); // some frames to measure
 
     // Measured: the app has run frames, and the phases account for all of
@@ -1752,8 +1728,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sim", "new_document_leaves_the_mode");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ToolbarClick(ctx, "###tb_simulation");
     ctx->Yield();
@@ -1770,8 +1744,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "viewport", "click_selects_facing_face");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
@@ -1823,7 +1795,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "front_plane_enters_edit");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     IM_CHECK(!s_App->sketchEdit.IsEditing());
 
     EnterSketchOnPlane(ctx, 0);
@@ -1848,8 +1819,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "toolbar_plane_pick_enters_edit");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     const size_t before = Doc()->FeatureCount();
 
     ToolbarClick(ctx, "###tb_new_sketch");
@@ -1883,7 +1852,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "draw_line_undo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 1);
     ctx->Yield();
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -1927,7 +1895,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "rect_extrude_produces_body");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
 
@@ -1958,8 +1925,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "preview", "box_accept_commits_once");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
 
     ToolbarClick(ctx, "###tb_box");
     ctx->Yield();
@@ -1982,8 +1947,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "preview", "box_cancel_discards");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
 
     ToolbarClick(ctx, "###tb_box");
     ctx->Yield();
@@ -1999,8 +1962,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "preview", "ctrl_z_cancels_pending");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
 
     ToolbarClick(ctx, "###tb_box");
     ctx->Yield();
@@ -2019,7 +1980,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "model_toolbar_extrudes_finished");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
 
@@ -2053,8 +2013,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "preview", "tab_switch_discards_pending");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
 
     ToolbarClick(ctx, "###tb_box");
     ctx->Yield();
@@ -2077,8 +2035,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "hole", "sk_hole_button_on_existing_points");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box"); // something to drill into
     ctx->Yield();
     const double before = Doc()->GetBodies()[0].shape.Volume();
@@ -2119,8 +2075,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "hole", "enter_opens_params_without_accepting");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
@@ -2150,8 +2104,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "hole", "escape_discards_empty_keeps_drawn");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const size_t base = Doc()->FeatureCount();
@@ -2189,8 +2141,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "hole", "curved_face_refused_flat_accepted");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_cylinder");
     ctx->Yield();
     const size_t base = Doc()->FeatureCount();
@@ -2237,8 +2187,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "hole", "face_pick_to_accept");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
@@ -2295,8 +2243,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "hole", "preselected_face_skips_pick");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
@@ -2326,8 +2272,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "tree_plane_row_consumes_pick");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     const size_t before = Doc()->FeatureCount();
 
     ToolbarClick(ctx, "###tb_new_sketch");
@@ -2419,8 +2363,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "defaults", "no_op_warns_without_blocking");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box"); // a clean box: nothing to merge
     ctx->Yield();
 
@@ -2449,8 +2391,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "slots", "body_row_fills_an_armed_slot");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
@@ -2499,8 +2439,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "loft", "two_profiles_via_the_section_combo");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     // Two closed profiles on parallel planes, 6 apart.
     AddRectSketch(ctx, 1, 1.5f);
     auto* lower = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -2572,8 +2510,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "revolve", "profile_beside_the_axis_rings");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     AddRectSketch(ctx, 1, 1.0f, /*centreU=*/3.0f); // 2x2 square at u = 3
     ToolbarClick(ctx, "###tb_revolve");
     ctx->Yield();
@@ -2593,8 +2529,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sweep", "profile_along_a_path_makes_a_bar");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     AddRectSketch(ctx, 1, 1.0f); // a 2x2 profile on the top plane
     AddPathSketch(ctx, 0);       // a 6-long path rising in the front plane
     ToolbarClick(ctx, "###tb_sweep");
@@ -2614,8 +2548,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "chamfer", "edge_via_click_makes_a_chamfer");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
@@ -2652,8 +2584,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "datum", "plane_offset_then_sketch_on_its_row");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarClick(ctx, "###tb_datum_plane");
     ctx->Yield();
     IM_CHECK(ui::HasPendingFeature(*s_App));
@@ -2703,8 +2633,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "shell", "open_face_pick_hollows_the_box");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
@@ -2757,8 +2685,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "draft", "face_pick_names_the_body");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const uint64_t boxId = Doc()->GetFeature(0)->GetId();
@@ -2802,8 +2728,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "split", "default_plane_cuts_the_body_in_two");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const double solid = Doc()->GetBodies()[0].shape.Volume();
@@ -2835,8 +2759,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
                        "switching_the_plane_re_centers_the_knife");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     // A datum plane on the box's top face — the worst case, and the one hit
@@ -2911,8 +2833,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
                        "assembly_cut_is_capped_and_centered");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     // Modeled a metre from the origin: a world-origin plane misses it.
     Doc()->AddFeature(std::make_unique<BoxFeature>(
         "Block", glm::vec3(1000, 0, 0), 40, 20, 20));
@@ -2983,8 +2903,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "section", "datum_source_and_tilt");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Block", glm::vec3(0, 0, 0), 40, 30, 20));
     auto datum = std::make_unique<DatumPlaneFeature>("D");
@@ -3037,8 +2955,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_the_cut");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     ToolbarClick(ctx, "###tb_section");
@@ -3082,8 +2998,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "section", "offset_arrow_drags_on_an_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ui::AddAssembly(*s_App, "Rig");
     ctx->Yield();
@@ -3146,8 +3060,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "assembly", "insert_places_a_sub_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     // A unit holding that part, then a top assembly to place it in.
@@ -3199,8 +3111,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "assembly", "dragging_a_unit_keeps_its_shape");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     // A unit with two parts 500 mm apart, so a collapse is unmistakable.
@@ -3259,8 +3169,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "assembly", "mate_picks_a_face_inside_a_unit");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
@@ -3305,8 +3213,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "refine", "merges_the_seam_left_by_a_union");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ToolbarCreateAccept(ctx, "###tb_box");
     auto* box2 = dynamic_cast<BoxFeature*>(Doc()->GetFeature(1));
@@ -3341,7 +3247,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "handles", "extrude_arrow_drag_sets_distance");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -3431,8 +3336,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "handles", "fillet_marker_drag_sets_radius");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
@@ -3496,8 +3399,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "rib", "menu_rib_previews_and_adds_volume");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     // Box + an open-line profile above its top (the test_rib.cpp setup).
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Base", glm::vec3(0), 10.0, 10.0, 10.0));
@@ -3523,8 +3424,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "thread", "face_pick_fills_the_slot");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(std::make_unique<CylinderFeature>(
         "Boss", glm::vec3(0), glm::vec3(0, 0, 1), 4.0, 20.0));
     ctx->Yield();
@@ -3565,8 +3464,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
                        "circular_preview_param_edits_survive");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
 
@@ -3618,8 +3515,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "pattern", "linear_default_spacing_separates");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Wide", glm::vec3(0), 10.0, 4.0, 4.0));
     ctx->Yield();
@@ -3641,8 +3536,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "view", "planes_autohide_with_geometry");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     IM_CHECK(ui::EffectivePlaneVisibility(*s_App)); // empty part → planes shown
 
     ToolbarCreateAccept(ctx, "###tb_box");
@@ -3655,8 +3548,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "view", "shadow_toggle_survives_section");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->showShadows = false;
@@ -3676,8 +3567,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "view", "ssao_toggle_survives_section");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->showAmbientOcclusion = false;
@@ -3698,8 +3587,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "view", "render_quality_switches_survive");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     s_App->ssaoFullRes = true; // half -> full AO targets
@@ -3715,7 +3602,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "constraints", "coincident_merges_points");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -3754,7 +3640,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "constraints", "horizontal_levels_line");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -3781,7 +3666,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "pick", "select_line_body");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -3818,7 +3702,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "pick", "prefers_endpoint");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -3848,7 +3731,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "pick", "endpoint_cycles_to_line");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -3914,7 +3796,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "trim", "removes_middle_span");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -3948,7 +3829,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "trim", "preview_highlights_span");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -3982,7 +3862,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "fillet", "fillet_corner_via_click");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4022,7 +3901,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "fillet", "staircase_preserves_directions");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -4095,7 +3973,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "keys", "tool_switch");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select); // default
@@ -4114,7 +3991,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "keys", "constraint_on_selection");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4142,7 +4018,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "select", "box_selects_enclosed");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4170,7 +4045,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "mirror", "box_select_and_tap_advances");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4209,7 +4083,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "mirror", "preselected_construction_axis");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4240,7 +4113,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "pattern", "in_tool_select_and_tap_applies");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4284,7 +4156,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "ops_row_opens_pattern_session");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4327,7 +4198,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "select", "escape_cascade");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4352,7 +4222,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "infer", "horizontal_snaps");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4383,7 +4252,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "infer", "endpoint_coincident");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4429,7 +4297,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "infer", "endpoint_aligns_vertical");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4508,7 +4375,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "mirror", "guided_flow");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4566,7 +4432,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "mirror", "across_datum_axis");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4610,7 +4475,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "infer", "toggle_suppresses");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4637,7 +4501,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "drag", "move_whole_line");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -4685,8 +4548,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "fillet", "fillet_body_edge_via_click");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const double before = Doc()->GetBodies()[0].shape.Volume();
@@ -4771,8 +4632,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "isolation", "a_messy_test_leaks_nothing");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Mess", glm::vec3(0, 0, 0), 5, 5, 5));
     ctx->Yield(2);
@@ -4800,8 +4659,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "tree", "context_rename_and_rollback_drag");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ToolbarCreateAccept(ctx, "###tb_sphere");
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
@@ -4835,8 +4692,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "selection", "survives_sibling_delete");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ToolbarCreateAccept(ctx, "###tb_sphere");
     const uint64_t sphereId = Doc()->GetFeature(1)->GetId();
@@ -4865,8 +4720,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "selection", "pick_cycle_multiselect");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
 
     glm::vec3 min, max;
@@ -4933,8 +4786,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "slots", "boolean_via_viewport_picks");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ToolbarCreateAccept(ctx, "###tb_box");
     ToolbarCreateAccept(ctx, "###tb_box");
@@ -5001,8 +4852,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "slots", "boolean_seeded_from_preselection");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     Doc()->AddFeature(std::make_unique<BoxFeature>(
         "A", glm::vec3(-1.0f, 0.0f, 0.0f), 2.0, 2.0, 2.0));
     Doc()->AddFeature(std::make_unique<BoxFeature>(
@@ -5038,8 +4887,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "slots", "fillet_seeded_from_selected_edges");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->Yield();
     const Body& body = Doc()->GetBodies()[0];
@@ -5075,7 +4922,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "selection_seeds_extrude_regions");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
@@ -5104,8 +4950,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "region", "pick_one_of_two_regions");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     auto sk =
         std::make_unique<SketchFeature>("Profiles", SketchPlane(PlaneType::XY));
     const uint32_t c1 = sk->AddEntity(sketch::Circle{{0, 0}, 1.0});
@@ -5165,8 +5009,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "palette", "ctrl_k_creates_box");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_K);
     ctx->Yield();
     IM_CHECK(s_App->paletteOpen);
@@ -5188,7 +5030,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "dims", "label_drag");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -5256,7 +5097,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "dims", "dimension_tool_infers");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -5391,7 +5231,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "dims", "placement_zones");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -5506,7 +5345,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "dims", "select_delete");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -5626,7 +5464,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "dims", "negative_flip");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -5792,7 +5629,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "dims", "inline_editor_expression");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -5857,7 +5693,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "dims", "dimension_on_create");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -5980,7 +5815,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "sketch", "center_rectangle");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield();
     for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
@@ -6054,8 +5888,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "tabs", "folder_flyout");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ui::AddPart(*s_App, "Bolt");
     s_App->parts.back().folder = "Imported";
     ui::AddPart(*s_App, "Nut");
@@ -6099,8 +5931,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "camera", "opening_an_assembly_frames_it");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     // A part far bigger than the default camera distance, in an assembly.
     Doc()->AddFeature(
         std::make_unique<BoxFeature>("Beam", glm::vec3(0), 4000, 200, 300));
@@ -6145,8 +5975,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "camera", "first_visit_to_a_tab_frames_it");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     // A small part in tab 0 and a six-metre one in tab 1, saved and reopened
     // so both arrive unvisited — the state a project always opens in.
     Doc()->AddFeature(
@@ -6200,8 +6028,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "render", "modal_enabled_on_an_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box"); // a part with a body
     const size_t asmIdx = ui::AddAssembly(*s_App, "Rig");
     ui::SetActivePart(*s_App, asmIdx);
@@ -6248,8 +6074,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "tabs", "kind_glyphs_and_stable_ids");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ui::AddAssembly(*s_App, "Rig");
     ui::AddPart(*s_App, "Bolt");
     s_App->parts.back().folder = "Hardware";
@@ -6313,8 +6137,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "tabs", "add_menu");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ctx->ItemClick("//##PartTabs/+##addmenu");
     ctx->ItemClick("//$FOCUSED/New Part##addpart");
     ctx->Yield();
@@ -6338,8 +6160,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "tabs", "folder_empty_create");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ui::AddPart(*s_App, "Bolt");
     ctx->Yield();
     ctx->ItemClick("//##PartTabs/+##addmenu");
@@ -6381,8 +6201,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "tabs", "folder_manage");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ui::AddPart(*s_App, "Bolt");
     s_App->parts.back().folder = "Imported";
     ui::AddPart(*s_App, "Nut");
@@ -6453,8 +6271,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "assembly", "mate_hover_marker");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
     glm::vec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
@@ -6538,8 +6354,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "assembly", "mate_edit_repick_connector");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
     glm::vec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
@@ -6630,8 +6444,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "measure", "assembly_distance");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box"); // 2x2x2 at the origin
     glm::vec3 min, max;
     Doc()->GetBodies()[0].shape.GetBoundingBox(min, max);
@@ -7016,6 +6828,60 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       ctx->ItemClick(model->TabId);
       ctx->Yield(2);
     }
+  };
+
+  // F11 layer 3: what the GEOMETRY did between a version and now. The
+  // numbers have to be real — a box grown from 20 to 30 mm on one axis adds
+  // exactly the slab that appeared, and nothing is removed.
+  t = IM_REGISTER_TEST(engine, "history", "compare_shape_against_a_version");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    if (!GitVault::Available()) {
+      ctx->LogWarning("git not on PATH — skipping");
+      return;
+    }
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_geomdiff.dsgn";
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    ToolbarCreateAccept(ctx, "###tb_box"); // 2 x 2 x 2 by default
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(3);
+    const std::string version = GitVault::Log(dir.string())[0].hash;
+
+    // Grow one axis: 2x2x2 -> 6x2x2. That is +16 mm3 and nothing lost.
+    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemInputValue("//Box###ToolWindow/##Width", 6.0f);
+    ctx->Yield(2);
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ctx->Yield(2);
+
+    const ui::GeometryChange g =
+        ui::CompareVersionGeometry(*s_App, version, "parts/Part 1");
+    ctx->LogInfo("geometry diff: %s (old %.1f, new %.1f)", g.summary.c_str(),
+                 g.oldVolume, g.newVolume);
+    IM_CHECK(g.valid);
+    IM_CHECK(std::abs(g.oldVolume - 8.0) < 1e-3);
+    IM_CHECK(std::abs(g.newVolume - 24.0) < 1e-3);
+    IM_CHECK(std::abs(g.added - 16.0) < 1e-3); // the slab that appeared
+    IM_CHECK(g.removed < 1e-6);                // nothing was cut away
+    IM_CHECK(g.summary.find("added") != std::string::npos);
+    IM_CHECK(g.summary.find("removed") == std::string::npos);
+
+    // And a version compared against itself is "same shape", not noise.
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    ui::MarkProjectSaved(*s_App, dir.string(), "save");
+    ctx->Yield(3);
+    const std::string now = GitVault::Log(dir.string())[0].hash;
+    const ui::GeometryChange same =
+        ui::CompareVersionGeometry(*s_App, now, "parts/Part 1");
+    IM_CHECK(same.valid);
+    IM_CHECK_STR_EQ(same.summary.c_str(), "same shape");
   };
 
   // Clicking a diff row goes and finds the thing. The case that earns it is a
@@ -7511,8 +7377,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "handles", "hover_highlights_the_arrow");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     // A pending FILLET has the direct-manipulation handle (its radius); a
     // pending box does not — ComputeHandleSpec only serves features with a
     // headline scalar (extrude distance, blend radius, revolve angle).
@@ -7554,8 +7418,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   t = IM_REGISTER_TEST(engine, "handles", "gizmo_hover_names_the_axis");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
     ui::AddAssembly(*s_App, "Rig");
     ctx->Yield();
@@ -7622,8 +7484,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
                        "picking_a_point_does_not_light_its_line");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
-    ctx->MenuClick("File/New");
-    ctx->Yield();
     EnterSketchOnPlane(ctx, 0);
     size_t index = 0;
     SketchFeature* sk = ui::ResolveActiveSketch(*s_App, &index);
