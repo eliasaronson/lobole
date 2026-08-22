@@ -6756,14 +6756,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->ItemClick("Reload###hist_disk_reload");
     ctx->Yield(3);
 
-    // Put Model back in front HERE — immediately after the last interaction
-    // that needed the History tab, and BEFORE the remaining assertions.
-    // These panels share one dock node, and a test that leaves its own tab
-    // selected changes what the next test starts from; a test that fails
-    // partway never reaches cleanup written at the end.
-    ctx->ItemClick(model->TabId);
-    ctx->Yield(2);
-
     // Reloading agrees with the disk again, so the banner goes.
     IM_CHECK(!s_App->diskChanged);
     IM_CHECK(!ui::ProjectChangedOnDisk(*s_App));
@@ -6823,11 +6815,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->diffFrom.empty());
     IM_CHECK(ctx->ItemExists("**/###hist_row0"));
 
-    // Leave Model in front for whatever runs next.
-    if (ImGuiWindow* model = ImGui::FindWindowByName("Model")) {
-      ctx->ItemClick(model->TabId);
-      ctx->Yield(2);
-    }
   };
 
   // F11 layer 3: what the GEOMETRY did between a version and now. The
