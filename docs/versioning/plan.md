@@ -94,7 +94,7 @@ simpler, and this product's audience has git. Features, in order:
   (duplicate-id refusal, named parse errors) remains the current answer:
   refuse loudly rather than resolve quietly.
 
-### F6 — Version history in the app — [design: f6-history-ui.md](f6-history-ui.md)
+### F6 — Version history in the app — **shipped 2026-08-20** — [design: f6-history-ui.md](f6-history-ui.md)
 The user-visible half of F5: a History panel (named versions, restore),
 checkpoints as project-wide named commits, and the `RestoreTo` fix — it used
 `git checkout <commit> -- .`, which leaves files added *after* the target

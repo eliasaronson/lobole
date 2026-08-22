@@ -84,19 +84,15 @@ needs no new format: each file is the existing single-document form.
   in the same place stays outside it too — but F8's stamp deliberately walks
   only the project directory, so nothing here disturbs it either.
 
-## Open decisions (for Elias)
+## Decisions (settled 2026-08-22)
 
-1. **Sibling directory, or the state dir?** Sibling (`project.dsgn.autosave/`)
-   keeps F2's reasoning — it is obvious, and it travels with the project if
-   someone moves the folder. The state dir keeps the project folder clean.
-   I recommend sibling, for continuity.
-2. **Is recovery all-or-nothing?** Recovering some documents and not others
-   leaves a project half from one session and half from another, which is a
-   state nobody can reason about. I recommend all-or-nothing for v1, with the
-   count shown so the choice is informed.
-3. **Should a clean save clear every sidecar, or only the saved document's?**
-   Today's `Autosaver::Clear(path)` is whole-project. Keeping that is simplest
-   and matches "a save means the disk is now the truth".
+1. **A sibling directory** — `<project>.autosave.d/`, keeping F2's reasoning
+   that a sidecar should be obvious and travel with the project.
+2. **Recovery is all-or-nothing**, with the document count shown so the choice
+   is informed. Half from one session and half from another is a state nobody
+   can reason about.
+3. **A clean save clears every sidecar**, which is what "a save means the disk
+   is now the truth" means.
 
 ## Verification
 

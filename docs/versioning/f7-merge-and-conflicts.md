@@ -169,17 +169,17 @@ These are real today and independent of whether F7 is ever built.
   plan, and is plausibly worth more than conflict resolution — it serves the
   solo user, who is the only user there is.
 
-## Open decisions (for Elias)
+## Decisions (settled 2026-08-21)
 
-1. **Triage-only, or the full engine?** The recommendation above is triage
-   first. The counter-argument is that phases A–C are what "mergeable text
-   format" (roadmap goal 4) actually promises, and triage does not deliver
-   it.
-2. **Local branches only, or remotes?** v1 above says local. Remotes are what
-   makes it collaboration rather than a two-machine convenience.
-3. **Do the id change now, regardless?** It is half a day, it is a `kVersion`
-   bump, and it removes a class of silent data loss whether or not F7 is
-   ever built.
+1. **The full engine**, not triage-only — phases A–C are what roadmap goal 4's
+   "mergeable text format" actually promises.
+2. **Local branches only** here; remotes followed the next day as
+   [F9](f9-collaboration.md), where auth could be scoped deliberately.
+3. **Feature ids stayed sequential** — the id IS the filename, and F3 chose
+   that for readable diffs. F9 C3 handles the duplicate class by attributing
+   it to a merge side instead. (Sketch ENTITY ids are a different story and
+   did change: see [F9's C6](f9-collaboration.md), where the name is never a
+   filename and the argument does not apply.)
 
 ## What shipped, and what building it changed
 
