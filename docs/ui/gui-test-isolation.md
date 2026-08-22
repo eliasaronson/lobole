@@ -1,6 +1,6 @@
 # GUI tests that do not depend on each other — plan
 
-> Status: **design, awaiting sign-off** (2026-08-22). From: *"I thought the
+> Status: **P1 + P4 BUILT** (2026-08-22); P2 and P3 remain. From: *"I thought the
 > tests did some setup and cleanup to not be dependent of each other?"* — they
 > do, by convention, and the convention broke three times in one day.
 >
@@ -10,10 +10,18 @@
 
 ## What exists, and why it is not enough
 
-145 of the 155 GUI tests open with `MenuClick("File/New")`. That resets the
-**document**. There is no registered setup or teardown hook — nothing the
-engine runs between tests — so everything that is not the document is reset
-only if the test that changed it remembers to change it back.
+145 of the 155 GUI tests open with `MenuClick("File/New")`, which resets the
+**document**.
+
+*Correction, on reading the code rather than assuming:* a `ResetAppForTest()`
+already existed and was already wrapped around every registered `TestFunc` —
+the enforced-reset mechanism this document proposed as P1 was there. What it
+covered was the camera, preferences, selection, the sketch session, measure
+and sections. What it did **not** cover was the dock layout, the feature
+sessions (preview/editor/mate/dim/in-context) and the whole CAM session — and
+the dock layout is what caused two of the three failures below. So the gap
+was never the mechanism; it was that nobody extended the list when they added
+state.
 
 Three failures on 2026-08-22, each defeating a different assumption:
 
@@ -87,10 +95,10 @@ stops the fourth being written.
 
 | | scope | size |
 |---|---|---|
-| **P1** | `ResetForTest` + wrapping every registered `TestFunc` | ~half a session |
+| **P1** | Extend `ResetAppForTest` (the wrapper already existed) to the dock layout, the feature sessions and CAM | **done** — `ResetAppForTest`, plus `isolation/a_messy_test_leaks_nothing` |
 | **P2** | Delete the redundant per-test `File/New` | ~1–2 h, mechanical |
 | **P3** | `--shuffle [SEED]` in the runner, one shuffled CI job | ~1 h |
-| **P4** | `WindowAbsent`/`ItemAbsent` helpers, absence assertions moved over | ~1 h |
+| **P4** | Absence assertions pass `NoError` | **done** ahead of this plan (`3dbc0c0`, `6cca9bf`); the named helpers are still worth adding so the next one cannot be written bare |
 
 **~1 session**, plus however many tests turn out to have been relying on
 leaked state — which is the unknown, and which P3 is what surfaces.
@@ -102,18 +110,32 @@ leaked state — which is the unknown, and which P3 is what surfaces.
 - `--shuffle` green across at least five seeds, seeds printed so a failure
   reproduces exactly.
 - The known-bad pair green in **both** orders.
-- **A deliberate leak test**: a temporary test that opens every tool session,
+- **A deliberate leak test** — built as `isolation/a_messy_test_leaks_nothing`,
+  and *verified by weakening the reset*: commenting out the single line that
+  rebuilds the dock layout turns the following test red, so the guard is real
+  rather than decorative. It opens every tool session,
   turns on the terminal, selects a non-Model dock tab and dirties the
-  document, placed immediately before a sensitive test. If the reset works
-  the sensitive test does not notice. This proves the mechanism rather than
-  assuming it — and it is the check that would have caught all three of
-  today's failures.
+  document, and ends WITHOUT cleaning up, immediately before a test that
+  reads the model tree. It would have caught all three of today's failures.
 
 ## Costs and risks
 
-- **Frames.** A layout rebuild plus a few yields, 155 times, is roughly 20 s
-  at 60 fps. Acceptable against a 92 s sharded run; if it measures worse,
-  rebuild the layout only when the previous test changed it.
+- **Frames.** Decided 2026-08-22: **reset unconditionally**, do not track
+  whether the layout was touched. Two reasons.
+
+  The estimate was wrong first: 20 s assumed 60 fps, but the engine runs
+  `ImGuiTestRunSpeed_Fast`, so the real saving from skipping the rebuild is
+  ~4 s on a 92 s run.
+
+  And the tracking would be brittle in exactly the failure mode this document
+  exists to fix. The leak that started it — the CAM panel taking the shared
+  dock tab — was **not an action any test performed**; it was a side effect of
+  a window appearing for the first time. A dirty flag set by our own code
+  records what we did, not what ImGui did on our behalf, so it would have read
+  "clean" in the one case that mattered. Observing instead of inferring (a
+  hash of the dock state) means walking the node tree anyway, is more code
+  than the reset it saves, and a hash missing a field fails silently in the
+  same direction. 4 s is not worth buying that.
 - **Tests that relied on leaked state** will fail. That is the point, but it
   is unbudgeted work; expect a handful.
 - **Preferences are written to disk.** The runner already sets a per-shard
@@ -128,3 +150,23 @@ leaked state — which is the unknown, and which P3 is what surfaces.
 - **Resetting the ImGui context wholesale** (`imgui.ini`, all window state).
   Tempting, but the dock layout is part of what several tests assert about,
   and rebuilding it is what P1 already does at a fraction of the cost.
+
+## What building it turned up
+
+**The layout reset exposed a real product bug, and vindicated a fix I had
+reverted.** Rebuilding the default layout while the terminal preference is
+off deletes the node the terminal was docked in, and ImGui then re-homes the
+window into the **central** node — where it covers the entire 3D viewport.
+Measured at the failure: the terminal's rect came back exactly equal to the
+viewport rect, so a click meant for the model landed in the terminal.
+
+I had guessed at this mechanism earlier while chasing a different bug, found
+it fixed nothing, and reverted it on the grounds that an unproven change
+should not ship. That was right then and the fix is right now — the
+difference is a measurement instead of a hypothesis. A user hits it by
+turning the terminal off and using View > Reset Layout.
+
+One test relied on leaked state and had to be understood rather than
+adjusted: `terminal/hover_decides_who_gets_the_keys` moves the pointer to the
+centre of the viewport and expects the app to take the keyboard back. It was
+passing only because the layout was never rebuilt underneath it.

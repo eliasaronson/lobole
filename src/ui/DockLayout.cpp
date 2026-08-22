@@ -160,6 +160,21 @@ void BeginDockspace(AppState& state) {
     // not a permanent tab — but when it appears it belongs here.
     ImGui::DockBuilderDockWindow("Conflicts", left);
     ImGui::DockBuilderDockWindow("CAM###CamPanel", left); // ditto
+    // A window this rebuild did NOT give a home must forget its old one.
+    // The terminal is docked only when its preference is on, so rebuilding
+    // with it off deletes its node while the window keeps pointing at the
+    // dead id — and ImGui then re-homes it into the CENTRAL node, where it
+    // covers the entire 3D viewport. Measured: with the layout rebuilt while
+    // the terminal was off, its rect came back exactly equal to the viewport
+    // rect, so a click meant for the model landed in the terminal.
+    //
+    // Only the terminal is docked conditionally today; if another window ever
+    // is, it needs the same treatment.
+    if (!state.settings.terminalPanel)
+      if (ImGuiWindow* term =
+              ImGui::FindWindowByName("Terminal###TerminalPanel"))
+        if (term->DockId != 0)
+          ImGui::SetWindowDock(term, 0, ImGuiCond_Always);
     ImGui::DockBuilderFinish(dockspaceId);
     // The tab focused last wins the shared node; make sure that is Model —
     // with Sketch tabbed here too (U7e), it could otherwise end up on top

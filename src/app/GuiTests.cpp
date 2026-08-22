@@ -100,6 +100,43 @@ static void ResetAppForTest() {
   ui::ClearSections(*s_App);
   s_App->sectionToolOpen = false;
   s_App->handleDrag = {};
+  s_App->hoveredHandle = 0;
+  s_App->pick = {};
+  s_App->viewportDrag = ui::ViewportDrag::None;
+  // Feature sessions: a preview left in the document, or an open editor, is
+  // a tool window over the next test's viewport.
+  s_App->pendingFeatureId = 0;
+  s_App->editFeatureId = 0;
+  s_App->mateTool = {};
+  s_App->dimTool = {};
+  s_App->inContext = {};
+  s_App->showCog = false;
+  s_App->perfHudOpen = false;
+  // CAM is a tool session plus a pile of cached results, none of which the
+  // app clears on its own (a job outlives the window that made it, by
+  // design). Its overlays draw over the viewport the next test clicks in.
+  s_App->camToolOpen = false;
+  s_App->camGhostOp = 0;
+  s_App->camActiveSetup = 0;
+  s_App->camTopFace = {};
+  s_App->camRefusal.clear();
+  s_App->camToolpaths.clear();
+  s_App->camVerdict.clear();
+  s_App->camLeftover.clear();
+  s_App->camShowToolpath = true;
+  // THE DOCK LAYOUT, and it is the one that actually bit us. Two of the
+  // three order-dependent failures on 2026-08-22 were a left-node tab left
+  // selected over the model tree — once by a panel that appeared without
+  // NoFocusOnAppearing, once by a test that failed before its own cleanup.
+  // Neither is an app-state field anyone could have thought to clear: the
+  // state belongs to ImGui. Rebuilding the default layout is the only reset
+  // that owns it, and it re-focuses Model as its last act.
+  //
+  // Unconditional on purpose (docs/ui/gui-test-isolation.md): tracking
+  // whether a test "touched the layout" would have read clean in exactly the
+  // case that mattered, because a window docking itself is not an action any
+  // test performs.
+  s_App->buildDefaultDockLayout = true;
 }
 
 // Original TestFunc for each registered test, keyed by the test; the wrapper
@@ -4722,6 +4759,44 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
   // Feature tree affordances: context-menu rename (inline edit) and the
   // draggable rollback bar.
+  // A deliberate leak, sitting immediately before a test that reads the model
+  // tree. It opens every tool session, turns the terminal on, selects a
+  // non-Model dock tab and leaves a preview in the document — then ENDS
+  // WITHOUT CLEANING UP, on purpose. If ResetAppForTest does its job the next
+  // test never notices; if someone weakens the reset, the next test goes red
+  // and this comment says why.
+  //
+  // This is the check that would have caught all three of the 2026-08-22
+  // order-dependent failures, none of which any test was trying to find.
+  t = IM_REGISTER_TEST(engine, "isolation", "a_messy_test_leaks_nothing");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Mess", glm::vec3(0, 0, 0), 5, 5, 5));
+    ctx->Yield(2);
+
+    s_App->sectionToolOpen = true;
+    s_App->camToolOpen = true;
+    s_App->measure.active = true;
+    s_App->showCog = true;
+    s_App->perfHudOpen = true;
+    s_App->settings.terminalPanel = true; // also forks a shell
+    ui::AddSection(*s_App, 0);
+    ctx->Yield(6);
+
+    // And take the shared dock tab away from the model tree, which is the
+    // specific leak that broke three unrelated tests.
+    if (ImGuiWindow* cam = ImGui::FindWindowByName("CAM###CamPanel"))
+      if (cam->DockNode != nullptr) {
+        ctx->ItemClick(cam->TabId);
+        ctx->Yield(2);
+      }
+    IM_CHECK(s_App->camToolOpen); // the mess is real, not a no-op
+    // Deliberately no cleanup.
+  };
+
   t = IM_REGISTER_TEST(engine, "tree", "context_rename_and_rollback_drag");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
