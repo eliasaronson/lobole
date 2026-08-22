@@ -82,8 +82,10 @@ each built on the one before, and **two of the three are already written**:
    Worth stating plainly, because this doc's own history got it wrong: V4 was
    recommended as a *merge* check and is not one, since a merge has no
    reference to compare against. **A diff has two operands by construction** —
-   that is exactly the shape V4 wants. If V4 lands, layer 3 is a small
-   addition; without it, layers 1 and 2 are still most of the value.
+   that is exactly the shape V4 wants. **V4 shipped on 2026-08-18** — I wrote
+   this believing it was still awaiting sign-off, from a memory written the
+   day before it landed. `Measure::CompareBodySets` and the
+   `compare_geometry` RPC have been there all along.
 
 **UI:** inside the History panel, not a new one. Select two rows (or one, to
 compare against now) and the changes replace the list until dismissed. A
@@ -120,8 +122,8 @@ is mine to clean up.
    dismissed.
 2. **G1 reads one blob only for a lone changed item**, bounded to the first 20
    rows.
-3. **G2 did not wait for `compare_geometry`.** Layers 1 and 2 stand alone and
-   are what shipped; the geometry layer is still V4's to add.
+3. **G2 shipped layers 1 and 2.** The geometry layer followed once I noticed
+   V4 was not, in fact, unbuilt.
 
 ## What shipped, and what building it changed
 
@@ -183,6 +185,5 @@ one is that?" is the same question mid-merge.
 
 **What this is NOT.** Selection highlights the tree row and drives
 `FitCameraToSelection`; it does not tint or outline the body in the 3D view,
-because feature selection here never has. Seeing the *geometry* of a change —
-material added in green, removed in red — is still layer 3, and still
-`compare_geometry`'s to add.
+because feature selection here never has. Seeing the *geometry* of a change is
+layer 3 — see below.
