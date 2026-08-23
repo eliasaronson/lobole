@@ -2,6 +2,7 @@
 #include "ui/ExprInput.h"     // expression-capable numeric fields
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
+#include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
 
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -227,16 +229,18 @@ void DrawExplodedSection(AppState& state) {
   }
   uint64_t deleteId = 0;
   for (ExplodedView& v : asmDoc.GetExplodedViews()) {
-    ImGui::PushID(static_cast<int>(v.id));
+    // The id goes in the LABEL, not a PushID(int) scope: an integer scope is
+    // not addressable as a path segment, so no test could ever select a view
+    // (docs/ui/gui-coverage.md).
     const bool active = state.activeExplodedView == v.id;
-    if (ImGui::Selectable(v.name.empty() ? "(unnamed)" : v.name.c_str(),
-                          active)) {
+    const std::string label = (v.name.empty() ? "(unnamed)" : v.name) +
+                              "###explode_view_" + std::to_string(v.id);
+    if (ImGui::Selectable(label.c_str(), active)) {
       state.activeExplodedView = v.id;
       state.syncedDocumentVersion = UINT64_MAX;
     }
-    ImGui::PopID();
   }
-  if (ImGui::SmallButton("Add view")) {
+  if (ImGui::SmallButton("Add view###explode_add")) {
     SnapshotAssembly(state);
     ExplodedView v;
     v.name = "Exploded " + std::to_string(asmDoc.GetExplodedViews().size() + 1);
@@ -248,7 +252,8 @@ void DrawExplodedSection(AppState& state) {
           asmDoc.FindExplodedViewById(state.activeExplodedView)) {
     char name[128];
     snprintf(name, sizeof name, "%s", sel->name.c_str());
-    if (ImGui::InputText("Name##explode", name, sizeof name,
+    LeftLabel("Name");
+    if (ImGui::InputText("###explode_name", name, sizeof name,
                          ImGuiInputTextFlags_EnterReturnsTrue)) {
       SnapshotAssembly(state);
       sel->name = name;
@@ -256,16 +261,23 @@ void DrawExplodedSection(AppState& state) {
     }
     // Factor slider: cheap live path (matrix updates only); picking catches
     // up on the resync forced when the slider is released.
-    if (ImGui::SliderFloat("Factor", &state.explodeFactor, 0.0f, 1.0f))
+    LeftLabel("Factor");
+    if (ImGui::SliderFloat("###explode_factor", &state.explodeFactor, 0.0f,
+                           1.0f))
       ApplyExplodeTransforms(state);
     if (ImGui::IsItemDeactivatedAfterEdit())
       state.syncedDocumentVersion = UINT64_MAX;
-    if (ImGui::SmallButton("Auto-explode")) { // radial seed, then drag to taste
+    // SameLine does not wrap, so "Delete view" was drawn past the panel edge
+    // at the width the dock ships at.
+    WrapRow row;
+    row.Next(ButtonWidth("Auto-explode"));
+    if (ImGui::SmallButton(
+            "Auto-explode###explode_auto")) { // radial seed, then drag
       if (AutoExplode(state, sel->id))
         state.syncedDocumentVersion = UINT64_MAX;
     }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Delete view")) {
+    row.Next(ButtonWidth("Delete view"));
+    if (ImGui::SmallButton("Delete view###explode_delete")) {
       SnapshotAssembly(state);
       asmDoc.RemoveExplodedView(sel->id);
       state.activeExplodedView = 0;
@@ -339,9 +351,32 @@ void DrawConfigsSection(AppState& state) {
 }
 
 // cached and recomputed only when the assembly or a referenced part changed.
+// A mass a 40 px column can hold. The BOM printed raw grams — a 385 kg dock
+// totalled "385169.06" — and an ImGui table cell CLIPS rather than elides, so
+// what a person read was "385" under a header saying "Total g". A truncated
+// number still looks like a number, which is the worst way for a bill of
+// materials to be wrong: every unit mass on that screen was out by a factor
+// of ten to a thousand while looking perfectly reasonable.
+std::string MassText(double grams) {
+  char buf[32];
+  if (grams < 1000.0)
+    std::snprintf(buf, sizeof(buf), "%.1f g", grams);
+  else if (grams < 1.0e6)
+    std::snprintf(buf, sizeof(buf), "%.2f kg", grams / 1000.0);
+  else
+    std::snprintf(buf, sizeof(buf), "%.0f kg", grams / 1000.0);
+  return buf;
+}
+
+// Full text on hover, for whatever the column still cannot hold.
+void CellTooltip(const std::string& text) {
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    ImGui::SetTooltip("%s", text.c_str());
+}
+
 void DrawBomSection(AppState& state) {
   ImGui::Spacing();
-  if (!ImGui::CollapsingHeader("Bill of materials"))
+  if (!ImGui::CollapsingHeader("Bill of materials###bom_header"))
     return;
 
   static BomTable cache;
@@ -364,45 +399,91 @@ void DrawBomSection(AppState& state) {
     ImGui::TextDisabled("No occurrences.");
     return;
   }
-  if (ImGui::BeginTable("bom", 5,
+  // Five columns in a 210 px dock gave each about 40 characters' worth of
+  // pixels between them, so every cell clipped: three different parts all
+  // read "Gang", "stainless_steel" read "stair", and the masses lost their
+  // leading digits. The table ADAPTS the way the Variables one does — full
+  // five columns when there is room, and two rows per part when there is not
+  // (name and quantity, then material and total). Widen the dock to get the
+  // table back.
+  const float availW = ImGui::GetContentRegionAvail().x;
+  const bool wide = availW >= ImGui::GetFontSize() * 34.0f;
+  if (ImGui::BeginTable("###bom_table", wide ? 5 : 2,
                         ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                             ImGuiTableFlags_SizingStretchProp)) {
-    ImGui::TableSetupColumn("Part");
-    ImGui::TableSetupColumn("Qty");
-    ImGui::TableSetupColumn("Material");
-    ImGui::TableSetupColumn("Unit g");
-    ImGui::TableSetupColumn("Total g");
-    ImGui::TableHeadersRow();
+    // Narrow: the second column carries a MASS on the stacked row, so it
+    // needs room for "385.17 kg", not just for "19".
+    ImGui::TableSetupColumn("Part", ImGuiTableColumnFlags_WidthStretch,
+                            wide ? 1.6f : 1.3f);
+    ImGui::TableSetupColumn("Qty", ImGuiTableColumnFlags_WidthStretch,
+                            wide ? 0.4f : 1.0f);
+    if (wide) {
+      ImGui::TableSetupColumn("Material", ImGuiTableColumnFlags_WidthStretch,
+                              1.2f);
+      ImGui::TableSetupColumn("Unit", ImGuiTableColumnFlags_WidthStretch, 0.9f);
+      ImGui::TableSetupColumn("Total", ImGuiTableColumnFlags_WidthStretch,
+                              0.9f);
+      ImGui::TableHeadersRow(); // "M… U… T…" helps nobody at the narrow width
+    }
     for (const BomRow& r : cache.rows) {
+      const std::string material = r.material.empty() ? "-" : r.material;
+      const std::string unit = r.massKnown ? MassText(r.unitMassG) : "?";
+      const std::string total =
+          r.massKnown ? MassText(r.unitMassG * r.quantity) : "?";
+      // Everything about the row, for the hover — the escape hatch for
+      // whatever the column still cannot hold.
+      const std::string full = r.partName + "  x" + std::to_string(r.quantity) +
+                               "  " + material + "  " + unit + " each, " +
+                               total + " total";
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::TextUnformatted(r.partName.c_str());
+      CellTooltip(full);
       ImGui::TableNextColumn();
       ImGui::Text("%d", r.quantity);
-      ImGui::TableNextColumn();
-      ImGui::TextUnformatted(r.material.empty() ? "-" : r.material.c_str());
-      ImGui::TableNextColumn();
-      if (r.massKnown)
-        ImGui::Text("%.2f", r.unitMassG);
-      else
-        ImGui::TextDisabled("?"); // no material/density assigned
-      ImGui::TableNextColumn();
-      if (r.massKnown)
-        ImGui::Text("%.2f", r.unitMassG * r.quantity);
-      else
-        ImGui::TextDisabled("?");
+      CellTooltip(full);
+      if (wide) {
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(material.c_str());
+        CellTooltip(full);
+        ImGui::TableNextColumn();
+        if (r.massKnown)
+          ImGui::TextUnformatted(unit.c_str());
+        else
+          ImGui::TextDisabled("?"); // no material/density assigned
+        CellTooltip(full);
+        ImGui::TableNextColumn();
+        if (r.massKnown)
+          ImGui::TextUnformatted(total.c_str());
+        else
+          ImGui::TextDisabled("?");
+        CellTooltip(full);
+      } else {
+        // Second row: what the dropped columns were carrying.
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextDisabled("%s", material.c_str());
+        CellTooltip(full);
+        ImGui::TableNextColumn();
+        if (r.massKnown)
+          ImGui::TextDisabled("%s", total.c_str());
+        else
+          ImGui::TextDisabled("?");
+        CellTooltip(full);
+      }
     }
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::TextUnformatted("Total");
+    for (int c = 1; c < (wide ? 4 : 1); ++c)
+      ImGui::TableNextColumn();
     ImGui::TableNextColumn();
-    ImGui::TableNextColumn();
-    ImGui::TableNextColumn();
-    ImGui::TableNextColumn();
-    if (cache.massKnown)
-      ImGui::Text("%.2f", cache.totalMassG);
-    else
+    if (cache.massKnown) {
+      ImGui::TextUnformatted(MassText(cache.totalMassG).c_str());
+      CellTooltip(MassText(cache.totalMassG));
+    } else {
       ImGui::TextDisabled("?");
+    }
     ImGui::EndTable();
   }
   // V2: name the reason for every "?" so a null total explains itself.
@@ -410,7 +491,7 @@ void DrawBomSection(AppState& state) {
     ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f), "%s", w.c_str());
   const bool canSave = FileDialogsAvailable();
   ImGui::BeginDisabled(!canSave);
-  if (ImGui::Button("Export CSV"))
+  if (ImGui::Button("Export CSV###bom_export"))
     ExportBomDialog(state);
   ImGui::EndDisabled();
   if (!canSave && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
@@ -432,9 +513,13 @@ void DrawOccurrencePanel(AppState& state) {
     ImGui::TextDisabled("Empty - use Insert part on the toolbar.");
 
   for (const Occurrence& o : asmDoc.GetOccurrences()) {
-    ImGui::PushID(static_cast<int>(o.id));
+    // Ids in the LABELS, not a PushID(int) scope: an integer scope is not
+    // addressable as a path segment, so the assembly's primary list could
+    // only be reached by a "**" wildcard crawl that depends on the row's
+    // cosmetic decorations ("  [assembly]  (fixed)") to match.
+    const std::string suffix = std::to_string(o.id);
     bool vis = o.visible;
-    if (ImGui::Checkbox("##vis", &vis)) {
+    if (ImGui::Checkbox(("###occ_vis_" + suffix).c_str(), &vis)) {
       SnapshotAssembly(state);
       asmDoc.FindById(o.id)->visible = vis;
       asmDoc.BumpVersion();
@@ -443,10 +528,9 @@ void DrawOccurrencePanel(AppState& state) {
     const std::string label =
         (o.name.empty() ? RefNameById(state, o) : o.name) +
         (o.refKind == OccurrenceRef::Assembly ? "  [assembly]" : "") +
-        (o.fixed ? "  (fixed)" : "");
+        (o.fixed ? "  (fixed)" : "") + "###occ_" + suffix;
     if (ImGui::Selectable(label.c_str(), SelectedOccurrenceId(state) == o.id))
       SelectOccurrence(state, o.id);
-    ImGui::PopID();
   }
 
   Occurrence* sel = SelectedOccurrenceId(state)

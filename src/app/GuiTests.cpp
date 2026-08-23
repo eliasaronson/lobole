@@ -3228,6 +3228,133 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   // Inserting a SUB-ASSEMBLY through the UI. Until this landed the only way
   // to nest an assembly was the RPC — the insert popup filtered to
   // DocKind::Part and silently skipped everything else.
+
+  // The bill of materials and exploded views (A4) shipped with no clicked
+  // coverage at all, and a 2026-08-23 round found the BOM table CLIPPING its
+  // own numbers at the width the dock ships at: a 385 kg dock totalled
+  // "385169.06" grams in a 40 px column and rendered as "385", with every
+  // unit mass out by a factor of ten to a thousand and nothing to say so.
+
+  // A part placed three times — twice inside a sub-assembly, once directly —
+  // so the BOM's flattening is gated too (A5 arrived after the BOM did).
+  t = IM_REGISTER_TEST(engine, "assembly", "bom_counts_through_a_sub_assembly");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    Doc()->GetFeature(0)->SetMaterial("steel");
+    Doc()->Regenerate();
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[0].id;
+
+    const size_t unitIdx = ui::AddAssembly(*s_App, "Unit");
+    ui::SetActivePart(*s_App, unitIdx);
+    for (int i = 0; i < 2; ++i) {
+      Occurrence o;
+      o.name = "Inner " + std::to_string(i + 1);
+      o.partId = partId;
+      o.fixed = true;
+      s_App->assembly->AddOccurrence(o);
+    }
+    const size_t topIdx = ui::AddAssembly(*s_App, "Top");
+    ui::SetActivePart(*s_App, topIdx);
+    {
+      Occurrence sub;
+      sub.name = "Unit 1";
+      sub.partId = s_App->parts[unitIdx].id;
+      sub.refKind = OccurrenceRef::Assembly;
+      sub.fixed = true;
+      s_App->assembly->AddOccurrence(sub);
+      Occurrence direct;
+      direct.name = "Loose box";
+      direct.partId = partId;
+      direct.fixed = true;
+      s_App->assembly->AddOccurrence(direct);
+    }
+    ctx->Yield(3);
+
+    // The section is collapsed by default and had no id until this round.
+    ctx->ItemClick("//###Model/###bom_header");
+    ctx->Yield(2);
+    // The export button only draws inside the open section, so its presence
+    // is the proof the header actually expanded. (The table itself is an ID
+    // SCOPE, not an item — ItemExists never finds one.)
+    IM_CHECK(ctx->ItemExists("//###Model/###bom_export"));
+
+    // One row for the one part, counting through the sub-assembly.
+    const ui::BomTable bom = ui::ComputeBom(*s_App);
+    IM_CHECK_EQ(bom.rows.size(), (size_t)1);
+    IM_CHECK_EQ(bom.rows[0].quantity, 3);
+    IM_CHECK_EQ(bom.rows[0].material, std::string("steel"));
+    IM_CHECK(bom.rows[0].massKnown);
+    IM_CHECK(bom.massKnown);
+    IM_CHECK(std::abs(bom.totalMassG - 3.0 * bom.rows[0].unitMassG) < 1e-6);
+    IM_CHECK(bom.warnings.empty());
+  };
+
+  // An exploded view is pure display state: it must move what is drawn and
+  // leave the occurrence transforms alone (that invariant is what makes a
+  // saved exploded view unable to corrupt a placement).
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "an_exploded_view_moves_what_is_drawn");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Exploding");
+    ui::SetActivePart(*s_App, asmIdx);
+    for (int i = 0; i < 3; ++i) {
+      Occurrence o;
+      o.name = "Part " + std::to_string(i + 1);
+      o.partId = partId;
+      o.fixed = true;
+      o.position = glm::vec3(60.0f * static_cast<float>(i), 0.0f, 0.0f);
+      s_App->assembly->AddOccurrence(o);
+    }
+    ctx->Yield(3);
+    std::vector<glm::vec3> before;
+    for (const Occurrence& o : s_App->assembly->GetOccurrences())
+      before.push_back(o.position);
+
+    ctx->ItemClick("//###Model/###explode_add");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->GetExplodedViews().size(), (size_t)1);
+    const uint64_t viewId = s_App->assembly->GetExplodedViews()[0].id;
+    IM_CHECK_EQ(s_App->activeExplodedView, viewId);
+
+    // "Auto-explode" and "Delete view" shared a SameLine that ran past the
+    // panel edge, so the second of them could not be clicked at all.
+    IM_CHECK(ctx->ItemExists("//###Model/###explode_auto"));
+    IM_CHECK(ctx->ItemExists("//###Model/###explode_delete"));
+    ctx->ItemClick("//###Model/###explode_auto");
+    ctx->Yield(3);
+
+    const ExplodedView* view = s_App->assembly->FindExplodedViewById(viewId);
+    IM_CHECK(view != nullptr);
+    IM_CHECK_EQ(view->steps.size(), (size_t)3);
+    double moved = 0.0;
+    for (const ExplodeStep& s : view->steps)
+      moved += glm::length(s.offset);
+    IM_CHECK(moved > 0.0); // it actually pushed them apart
+
+    // ...and the placements themselves did not move.
+    for (size_t i = 0; i < before.size(); ++i)
+      IM_CHECK(s_App->assembly->GetOccurrences()[i].position == before[i]);
+
+    // A view selectable used to sit in a PushID(int) scope, so no test could
+    // pick one; naming it is what makes this reachable.
+    ctx->ItemClick(
+        ("//###Model/###explode_view_" + std::to_string(viewId)).c_str());
+    ctx->Yield();
+    IM_CHECK_EQ(s_App->activeExplodedView, viewId);
+
+    ctx->ItemClick("//###Model/###explode_delete");
+    ctx->Yield(2);
+    IM_CHECK(s_App->assembly->GetExplodedViews().empty());
+    IM_CHECK_EQ(s_App->activeExplodedView, (uint64_t)0);
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly", "insert_places_a_sub_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

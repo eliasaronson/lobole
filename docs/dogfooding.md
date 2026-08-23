@@ -19,6 +19,98 @@ and the scripting interface fail in different places, and only the dock round
 
 ---
 
+## 2026-08-23 (d) — a bill of materials and an exploded view, by clicking
+
+**Why here:** the last two features in the assemblies workstream with no
+clicked coverage at all. Of 187 GUI tests, none opened a BOM and none made an
+exploded view. The object was the real one: `scratch/marsliden-dock.json`, the
+3 x 2 m barrel dock — 17 distinct parts, 385.17 kg, two sub-assemblies.
+
+### The bill of materials printed wrong numbers, and they looked right
+
+At the width the dock ships at, this is what the BOM said:
+
+```
+Part  Q  M...  U...  T...
+Deck  16 woo   504   806
+Rim j 2  woo   978   195
+Corne 2  stee  126   253
+Corne 2  stee  126   253
+Gang  2  woo   513   102
+Gang  2  woo   228   457
+Gang  19 woo   201   383
+Total                385
+```
+
+Every one of those numbers is wrong. Deck board's unit mass is **5040.00 g**,
+not 504; the rim joist's is 9787.50, not 978; the total is **385169.06 g**,
+not 385. Five columns in a 210 px dock leave each about 40 px, and **an ImGui
+table cell clips rather than elides** — so a number loses its trailing digits
+and stays a perfectly plausible number. Reading that screen, a 385 kg floating
+dock weighs 385 g.
+
+The names fail the same way and more visibly: three different parts all read
+"Gang", two read "Corne" (one of them the mirrored "Corner mooring M"), and
+"stainless_steel" reads "stair". A bill of materials is the document a person
+orders timber from.
+
+Nothing else was wrong: `bom` over the RPC and the CSV export both carry the
+full values. The table was the only surface that lied — the one a person
+actually looks at.
+
+Fixed the way the Variables table was fixed a commit earlier (7e6a426, which
+did not reach this panel): the table **adapts** instead of clipping. Wide
+keeps the five columns; narrow drops to two rows per part — name and quantity,
+then material and total — and every cell carries the whole row in its tooltip.
+Masses are now unit-aware (`5.04 kg`, `504.0 g`, `385.17 kg`), which is both
+shorter and what a person reading a 385 kg assembly wants. The header row is
+dropped at the narrow width for the same reason the Variables table drops it:
+"M… U… T…" names nothing.
+
+### Exploded views
+
+They work, and the invariant holds — an exploded view moves what is *drawn*
+and never touches an occurrence's placement, which is what makes a saved one
+unable to corrupt an assembly. Two things around it did not:
+
+- **"Delete view" could not be clicked.** It shares a `SameLine` with
+  "Auto-explode", and the pair is wider than the dock, so the second button
+  drew past the panel edge. Same defect as the simulation panel's Pressure
+  tool, found the same afternoon; `ui::WrapRow` now breaks the line.
+- **"Name" and "Factor" were clipped** to "Name"/"Facto" — `LeftLabel` again.
+
+**Auto-explode is top-level only, by design** (`AssemblyActions.cpp` says so:
+spacing a sub-assembly by the bounds of its first part "would send a gangway
+the distance a single board deserves"). On the dock that means the exploded
+view separates five blobs — Dock, Gangway, two hinges, a ladder — and neither
+sub-assembly comes apart. That is defensible and each sub-assembly can be
+exploded on its own tab, but a product built the way A5 encourages does not
+have an exploded view of *itself*. Written down, not changed.
+
+### The panel could not be addressed either
+
+Same wall as the simulation panel, and for the same three reasons. The
+occurrence list — the assembly panel's primary control — sat in a
+`PushID(int)` scope, reachable only by a `**` wildcard crawl that matched on
+cosmetic decorations ("Ladder  (fixed)"). Exploded-view rows, the BOM header,
+the Export CSV button and the auto/delete buttons had no ids at all. All named
+now (`###occ_<id>`, `###explode_view_<id>`, `###bom_header`, `###bom_export`).
+
+Left in `PushID(int)`: the mate list and this panel's own configuration rows.
+Same one-line fix, not this round's subject.
+
+### New gates
+
+- `assembly/bom_counts_through_a_sub_assembly` — a part placed three times,
+  twice inside a sub-assembly, expanded by clicking: one row, quantity 3, the
+  total the sum of its rows, no warnings. The BOM predates A5, and nothing
+  gated its flattening.
+- `assembly/an_exploded_view_moves_what_is_drawn` — add a view, auto-explode,
+  and check both halves: the steps moved, and every occurrence's placement is
+  bit-identical to what it was.
+
+---
+
 ## 2026-08-23 (c) — a stress analysis and an optimized shape, by clicking
 
 **Why here:** the same countable gap, three rounds running. Of 185 GUI tests,

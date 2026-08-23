@@ -110,6 +110,13 @@ Two related gotchas, since they cost time too:
   `ItemInfo` resolves a path by HASH and never consults the label: with one,
   `//###Model/###study_analysis` clicks a combo that is scrolled off the top
   of the panel. Verified both ways before and after.
+- **A table cell CLIPS rather than elides.** A number that loses its trailing
+  digits still looks like a number: the BOM's 385169.06 g total rendered as
+  "385" in a 40 px column, and every unit mass on that screen was out by a
+  factor of ten to a thousand with nothing to say so. Adapt the table (the
+  Variables and BOM ones drop to two rows per item when narrow) and put the
+  whole row in a tooltip; never let a column decide how many digits a number
+  has.
 - **`SameLine()` never wraps.** Three buttons in a 210 px dock draw the third
   one past the panel edge, where it cannot be clicked or seen: the simulation
   panel lost the Pressure boundary condition and the Displacement result
