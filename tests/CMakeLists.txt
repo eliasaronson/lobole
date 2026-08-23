@@ -153,6 +153,13 @@ add_test(NAME headless_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(headless_smoke PROPERTIES TIMEOUT 300)
 
+# The part gate vs the handlers it gates: two lists that must agree, and
+# until 2026-08-23 nothing checked that they did.
+add_test(NAME rpc_gate_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_gate_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(rpc_gate_smoke PROPERTIES TIMEOUT 120)
+
 # Two people, one shared project, NO NETWORK (F9): a bare repository in a temp
 # directory is a real remote as far as git is concerned, so two clones of it
 # are a real two-person scenario that runs anywhere, CI included. Two headless
