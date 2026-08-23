@@ -6876,6 +6876,108 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
   };
 
+  // Variables and Configurations: two v1-complete workstreams with, until
+  // now, ZERO gui-test contact of any kind. That was not an oversight — the
+  // panels could not be clicked. Every row sat in an ImGui::PushID(int)
+  // scope, which leaves a widget reachable only by numeric id
+  // (docs/ui/gui-coverage.md), so no test and no agent could name a cell.
+  //
+  // Behind that, the flow was broken end to end: the Variables panel creates
+  // every variable at PROJECT scope, and the Configurations panel listed
+  // only PART-scoped ones — so the first thing anyone would try (add a
+  // variable, make a configuration of it) answered "No variables to
+  // override" immediately after they had added one. Document::Regenerate had
+  // always handled the project case; only the panel did not show it.
+  //
+  // This walks the whole parametric-family story by clicking: a variable, a
+  // dimension driven by it, a configuration that overrides it, and the
+  // geometry following in both directions.
+  t = IM_REGISTER_TEST(engine, "configs", "a_parametric_family_by_clicking");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    // A 4 x 4 profile extruded 10: something a variable can actually drive.
+    // (Box/Sphere/Cylinder cannot — the primitives carry no expression
+    // fields at all, so a part built from them can never be configured.)
+    AddRectSketch(ctx, 1, 2.0f);
+    ToolbarCreateAccept(ctx, "###tb_extrude");
+    ctx->Yield(2);
+    // A 4 x 4 profile: every volume below is that area times the length.
+    constexpr double kArea = 4.0 * 4.0;
+    const double base = Doc()->GetBodies().at(0).shape.Volume();
+    IM_CHECK(base > 0.0);
+
+    // These panels share a dock node with Model, so bring each to the front
+    // before clicking in it — and put Model back at the end, or the next
+    // test starts on the wrong tab (docs/ui/gui-coverage.md).
+    const auto showPanel = [&](const char* name) {
+      ImGuiWindow* w = ImGui::FindWindowByName(name);
+      IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+      ctx->ItemClick(w->TabId);
+      ctx->Yield(2);
+    };
+
+    // A variable, by clicking. It lands in PROJECT scope — that is what the
+    // panel's only button does.
+    showPanel("Variables");
+    ctx->ItemClick("//Variables/+ Add variable");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//Variables/###vars_table/###var_name_project_var1",
+                        "len");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//Variables/###vars_table/###var_expr_project_len",
+                        "30");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectParameters.size(), (size_t)1);
+    IM_CHECK_STR_EQ(s_App->projectParameters[0].name.c_str(), "len");
+
+    // Drive the extrude from it: fx turns the dimension into an expression.
+    // Fully qualified, never "**": a wildcard crawl through this many items
+    // runs for minutes and trips the engine watchdog.
+    showPanel("Model");
+    ctx->ItemDoubleClick("//Model/Extrude 2##1");
+    ctx->Yield(2);
+    ctx->ItemClick("//###ToolWindow/Distance/fx");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//###ToolWindow/Distance/##expr", "len");
+    ctx->Yield(3);
+    ctx->ItemClick("//###ToolWindow/Close");
+    ctx->Yield(2);
+    const double driven = Doc()->GetBodies().at(0).shape.Volume();
+    ctx->LogInfo("base %.1f -> driven by len=30: %.1f", base, driven);
+    IM_CHECK(std::abs(driven - kArea * 30.0) < 1e-3);
+
+    // A configuration that overrides it. This is the row that used to read
+    // "No variables to override".
+    showPanel("Configurations");
+    ctx->ItemClick("//Configurations/+ Add configuration");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->GetConfigurations().size(), (size_t)1);
+    const uint64_t cfgId = Doc()->GetConfigurations()[0].id;
+    ctx->ItemInputValue("//Configurations/Name", "Short");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//Configurations/cfg_overrides/###cfg_override_len",
+                        "10");
+    ctx->Yield(3);
+    const double shortVol = Doc()->GetBodies().at(0).shape.Volume();
+    ctx->LogInfo("Short (len=10): %.1f", shortVol);
+    IM_CHECK(std::abs(shortVol - kArea * 10.0) < 1e-3);
+
+    // ...and back. A configuration that cannot be left is not a
+    // configuration, it is an edit.
+    ctx->ItemClick("//Configurations/Base (as authored)");
+    ctx->Yield(3);
+    IM_CHECK(std::abs(Doc()->GetBodies().at(0).shape.Volume() - driven) < 1e-3);
+    const std::string row =
+        "//Configurations/Short###cfg_row_" + std::to_string(cfgId);
+    ctx->ItemClick(row.c_str());
+    ctx->Yield(3);
+    IM_CHECK(std::abs(Doc()->GetBodies().at(0).shape.Volume() - shortVol) <
+             1e-3);
+    showPanel("Model"); // leave the dock as the next test expects it
+  };
+
   // Two ways to do one thing, and nothing checking they agree. add_drawing_view
   // dropped every view at the sheet centre at 1:1 while the Add view button
   // fitted a standard scale and placed it clear of the others — so a scripted

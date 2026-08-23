@@ -59,12 +59,13 @@ void DrawConfigurationsPanel(AppState& state) {
     state.commands->Execute(std::make_unique<SetActiveConfigurationCommand>(0),
                             doc);
   for (const Configuration& c : doc.GetConfigurations()) {
-    ImGui::PushID(static_cast<int>(c.id));
-    const char* label = c.name.empty() ? "(unnamed)" : c.name.c_str();
-    if (ImGui::Selectable(label, active == c.id))
+    // Named, not wrapped in a PushID: a scope makes the row reachable only
+    // by numeric id, and picking a configuration is the whole panel.
+    const std::string label = (c.name.empty() ? "(unnamed)" : c.name) +
+                              "###cfg_row_" + std::to_string(c.id);
+    if (ImGui::Selectable(label.c_str(), active == c.id))
       state.commands->Execute(
           std::make_unique<SetActiveConfigurationCommand>(c.id), doc);
-    ImGui::PopID();
   }
   if (ImGui::Button("+ Add configuration")) {
     auto cmd = std::make_unique<AddConfigurationCommand>();
@@ -120,18 +121,36 @@ void DrawConfigurationsPanel(AppState& state) {
     ImGui::TableSetupColumn("Base");
     ImGui::TableSetupColumn("Override");
     ImGui::TableHeadersRow();
-    for (const Parameter& p : doc.GetParameters()) {
+    // Part-local variables AND project ones. Document::Regenerate has always
+    // handled an override that targets a project variable — it injects it as
+    // a synthetic local so it shadows the project value in this part alone
+    // (the block written for the C-clamp configuration bug). Only this table
+    // did not list them, and since the Variables panel creates every variable
+    // at PROJECT scope, that made the whole parametric-family flow dead-end
+    // at "No variables to override" right after you added one.
+    std::vector<Parameter> overridable = doc.GetParameters();
+    for (const Parameter& pp : state.projectParameters) {
+      const bool shadowed =
+          std::any_of(overridable.begin(), overridable.end(),
+                      [&](const Parameter& a) { return a.name == pp.name; });
+      if (!shadowed) // a part variable of the same name wins, as at regen
+        overridable.push_back(pp);
+    }
+    for (const Parameter& p : overridable) {
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::TextUnformatted(p.name.c_str());
       ImGui::TableNextColumn();
       ImGui::TextDisabled("%s", p.expression.c_str());
       ImGui::TableNextColumn();
-      ImGui::PushID(p.name.c_str());
+      // A stable name, not a PushID scope around a "##" label: either one
+      // leaves the cell reachable only by numeric id, and this is the cell
+      // that makes a configuration mean anything (docs/ui/gui-coverage.md).
+      const std::string ovId = "###cfg_override_" + p.name;
       char buf[128];
       std::snprintf(buf, sizeof(buf), "%s", OverrideOf(*cfg, p.name).c_str());
       ImGui::SetNextItemWidth(-FLT_MIN);
-      if (ImGui::InputText("##ov", buf, sizeof(buf),
+      if (ImGui::InputText(ovId.c_str(), buf, sizeof(buf),
                            ImGuiInputTextFlags_EnterReturnsTrue)) {
         std::string expr = buf;
         const std::string name = p.name;
@@ -148,11 +167,10 @@ void DrawConfigurationsPanel(AppState& state) {
             c.parameterOverrides.emplace_back(name, expr);
         });
       }
-      ImGui::PopID();
     }
     ImGui::EndTable();
   }
-  if (doc.GetParameters().empty())
+  if (doc.GetParameters().empty() && state.projectParameters.empty())
     ImGui::TextDisabled("No variables to override — add some in Variables.");
 
   // Feature suppression: a checkbox per feature.
@@ -162,8 +180,9 @@ void DrawConfigurationsPanel(AppState& state) {
     const Feature* f = doc.GetFeatures()[i].get();
     const uint64_t fid = f->GetId();
     bool suppressed = cfg->Suppresses(fid);
-    ImGui::PushID(static_cast<int>(fid));
-    if (ImGui::Checkbox(f->GetName().c_str(), &suppressed)) {
+    const std::string supId =
+        f->GetName() + "###cfg_suppress_" + std::to_string(fid);
+    if (ImGui::Checkbox(supId.c_str(), &suppressed)) {
       ModifyActiveConfig(state, "Toggle suppression", [&](Configuration& c) {
         auto& v = c.suppressedFeatures;
         v.erase(std::remove(v.begin(), v.end(), fid), v.end());
@@ -171,7 +190,6 @@ void DrawConfigurationsPanel(AppState& state) {
           v.push_back(fid);
       });
     }
-    ImGui::PopID();
   }
 
   ImGui::End();

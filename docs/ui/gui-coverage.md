@@ -86,6 +86,15 @@ Two related gotchas, since they cost time too:
   Orientation and Sheet-size combos could not be addressed at all, and a
   Z-up orientation table survived in a Y-up app behind them. Same fix as
   everywhere else — `"Label###stable_id"`.
+- **A `##`-hidden TABLE is an unaddressable ID scope**, so every cell inside
+  it needs a `**` wildcard — and a wildcard crawl over a table can run past
+  the test engine's 300 s watchdog. Name tables too: `BeginTable("###vars_
+  table", ...)` makes `//Variables/###vars_table/###var_expr_project_len`
+  resolve directly.
+- **`PushID(int)` vs `PushID(const char*)`**: a string scope IS addressable
+  as a path segment (`//###ToolWindow/Distance/##expr` works), an integer one
+  is not. The Variables and Configurations panels used integer scopes, which
+  is why neither had ever been clicked by a test.
 - **`ComboClick` wants a ref RELATIVE to the window.** `SetRef("//Model")`
   then `ComboClick("###dwg_orientation/front")`; the window-qualified form
   fails with `popup && IsWindowACombo(popup)`, which does not sound like an

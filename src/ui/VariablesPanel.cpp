@@ -99,7 +99,11 @@ void DrawVariablesPanel(AppState& state) {
     }
   };
 
-  if (ImGui::BeginTable("##variables", 6,
+  // Named, not "##": a hidden-label table is an unaddressable ID scope, so
+  // every cell inside it could only be reached by a "**" wildcard crawl —
+  // which the test engine can take minutes over. `//Variables/###vars_table/
+  // ###var_expr_project_len` resolves directly.
+  if (ImGui::BeginTable("###vars_table", 6,
                         ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg |
                             ImGuiTableFlags_BordersInnerV |
                             ImGuiTableFlags_SizingStretchProp)) {
@@ -125,7 +129,19 @@ void DrawVariablesPanel(AppState& state) {
       const VarRow& r = rows[i];
       const Parameter& p = r.param;
       ImGui::TableNextRow();
-      ImGui::PushID(i);
+      // Every cell carries a STABLE NAME instead of sitting in a PushID(i)
+      // scope behind a "##" label. Both of those leave a widget reachable
+      // only by numeric id (docs/ui/gui-coverage.md), and between them this
+      // panel could not be clicked by a test or an agent at all — which is
+      // why a whole workstream had zero GUI coverage. The scope is in the id
+      // because a part variable is allowed to shadow a project one, so the
+      // name alone is not unique.
+      const std::string rowId =
+          std::string(r.isProject ? "_project_" : "_part_") + p.name;
+      const std::string nameId = "###var_name" + rowId;
+      const std::string exprId = "###var_expr" + rowId;
+      const std::string commentId = "###var_comment" + rowId;
+      const std::string delId = "x###var_del" + rowId;
 
       // Scope — Project (shared) vs Part (this document, shadows project).
       ImGui::TableSetColumnIndex(0);
@@ -133,7 +149,7 @@ void DrawVariablesPanel(AppState& state) {
 
       // Name — commits a rename (rewrites referencing expressions).
       ImGui::TableSetColumnIndex(1);
-      if (const char* text = cellInput(i, 1, "##name", p.name)) {
+      if (const char* text = cellInput(i, 1, nameId.c_str(), p.name)) {
         const std::string newName = text;
         if (!newName.empty() && newName != p.name) {
           const bool ok = r.isProject
@@ -157,7 +173,7 @@ void DrawVariablesPanel(AppState& state) {
       if (hasError) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
       }
-      if (const char* text = cellInput(i, 2, "##expr", p.expression)) {
+      if (const char* text = cellInput(i, 2, exprId.c_str(), p.expression)) {
         if (p.expression != text) {
           setVar(r, text, p.comment);
           actionError.clear();
@@ -181,14 +197,14 @@ void DrawVariablesPanel(AppState& state) {
 
       // Comment
       ImGui::TableSetColumnIndex(4);
-      if (const char* text = cellInput(i, 4, "##comment", p.comment)) {
+      if (const char* text = cellInput(i, 4, commentId.c_str(), p.comment)) {
         if (p.comment != text)
           setVar(r, p.expression, text);
       }
 
       // Delete — refused (with the referencing list) while referenced.
       ImGui::TableSetColumnIndex(5);
-      if (ImGui::SmallButton("x")) {
+      if (ImGui::SmallButton(delId.c_str())) {
         std::vector<std::string> refs;
         const bool ok =
             r.isProject
@@ -208,8 +224,6 @@ void DrawVariablesPanel(AppState& state) {
             actionError.back() = '.';
         }
       }
-
-      ImGui::PopID();
     }
     ImGui::EndTable();
   }

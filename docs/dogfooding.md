@@ -19,6 +19,64 @@ and the scripting interface fail in different places, and only the dock round
 
 ---
 
+## 2026-08-23 (b) — a parametric family, by clicking
+
+**Why here:** the same countable gap the drawings round used. Configurations
+(workstream 14) and Variables (workstream 4) are both v1-complete, both have
+a smoke test through the RPC, and neither had a single GUI test touching it.
+
+### The flow dead-ended on the first thing anyone would try
+
+Add a variable, make a configuration of it, override the value. That is what
+a parametric family *is*. It answered:
+
+```
+No variables to override — add some in Variables.
+```
+
+...immediately after adding one. The Variables panel's only button creates a
+variable at **project** scope (deliberately: "define a driving dimension
+once"), and the Configurations panel listed **part**-scoped variables only.
+There is no control anywhere in the Variables panel to create a part-scoped
+one, so through the GUI the two features could never meet. Every
+configuration could suppress features and nothing else.
+
+`Document::Regenerate` has handled the project case all along — there is a
+block that injects an overridden project variable as a synthetic local so it
+shadows the project value in that part alone, written for the C-clamp
+configuration bug. Only the panel never listed them. One place, and the whole
+parametric half of a workstream came back.
+
+### Why neither panel had ever been clicked
+
+They could not be. Every row of the Variables table and every configuration
+row sat in an **`ImGui::PushID(int)`** scope, which leaves a widget reachable
+only by numeric id (`docs/ui/gui-coverage.md` already says so) — no test and
+no agent could name a cell. The tables were `##`-hidden too, which made even
+a wildcard path an ID-scope crawl. Both now carry stable `###` names, and
+`configs/a_parametric_family_by_clicking` walks the whole story: a variable, a
+dimension driven by it, a configuration overriding it, and the geometry
+following in both directions.
+
+### Left open
+
+- **The primitives are not parametric.** `BoxFeature`, `SphereFeature` and
+  `CylinderFeature` carry no expression fields at all, so no variable can
+  drive a box, and a part built from primitives can never be configured —
+  the Configurations panel will still offer overrides that change nothing.
+  Everything sketch-driven is fine. Fixing it is a format change (expression
+  fields + `kVersion` + a golden), so it is written down rather than done.
+- **The dock tabs are unreadable**: five panels in the default 210 px left
+  dock render as `M`, `V…`, `C…`, `H…`, `C…` — Configurations and CAM are
+  the same string. Two of the five features nobody had ever clicked are
+  behind tabs you cannot identify. Same truncation class as the History
+  panel rows, one level up in the navigation.
+- **A `**` wildcard ref can hang the ImGui test engine** — a crawl through
+  the variables table ran past the 300 s watchdog. Fully-qualified paths
+  only, which is now the reason both tables are named.
+
+---
+
 ## 2026-08-23 — a drawing of a plate, by clicking
 
 **Why here:** of 158 GUI tests, exactly one opened a drawing tab, and all it
