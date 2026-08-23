@@ -44,15 +44,21 @@ becomes a conflict on every "we both added a bolt" — and the fix then is
 occurrence id IS a filename, so C6's deciding argument does not carry over
 unchanged.
 
-**One real thing it exposed:** the different-place conflict reads
+**One real thing it exposed — FIXED 2026-08-23.** The different-place
+conflict read
 
 ```
 Occurrence "P1" in assembly Asm — transform {"orientation":[0.0,0.0,0.0,1.0],"position":[50.0,0…
 ```
 
-Raw JSON, because `Describe()` falls back to `dump()` for a structured value.
-"moved to (50, 0, 0)" is the sentence that belongs there. Small, and in
-`ProjectMerge`.
+Raw JSON, because `Describe()` fell back to `dump()` for a structured value.
+It now reads `transform (50, 0, 0) vs (-12.5, 0, 0) turned 90° about Z` — and
+since the Conflicts panel labels its "take mine / take theirs" buttons with
+exactly these strings, that is what you are choosing between rather than two
+truncated JSON blobs. A quaternion becomes an angle about a named axis, and
+**no rotation says nothing at all**: "turned 0°" is noise in a sentence about
+a part that moved. Covered by "An occurrence conflict reads as a place, not
+as JSON" in `test_projectmerge.cpp`.
 
 ## 2. Adding a remote can silently keep committing geometry — FIXED
 

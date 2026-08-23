@@ -248,6 +248,60 @@ TEST_CASE("Scan describes a feature conflict in CAD language", "[merge]") {
   CHECK(c.summary.find("distance 12 vs 18") != std::string::npos);
 }
 
+// The conflict the collaboration round actually produced: two people place
+// the same part in different spots. It used to read as a truncated JSON dump
+// — `transform {"orientation":[0.0,0.0,0.0,1.0],"position":[50.0,0…` — which
+// tells you a transform is involved and nothing about what to pick.
+TEST_CASE("An occurrence conflict reads as a place, not as JSON", "[merge]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchProject p("occdescribe");
+  SeedProject(p);
+  const auto occFile = [&](double x, const json& orientation) {
+    p.WriteJson(
+        "assemblies/Frame/occurrences/4-pin.json",
+        json{{"id", 4},
+             {"name", "P1"},
+             {"part_id", 1},
+             {"transform", json{{"position", json::array({x, 0.0, 0.0})},
+                                {"orientation", orientation}}}});
+  };
+  const json noTurn = json::array({0.0, 0.0, 0.0, 1.0});
+  p.WriteJson("assemblies/Frame/index.json",
+              json{{"occurrences", json::array({4})}});
+  occFile(0.0, noTurn);
+  REQUIRE(GitVault::Init(p.path()));
+  REQUIRE(GitVault::CommitAll(p.path(), "save"));
+  const std::string main = GitVault::CurrentBranch(p.path());
+
+  REQUIRE(GitVault::CreateBranch(p.path(), "alice", true));
+  occFile(50.0, noTurn);
+  REQUIRE(GitVault::CommitAll(p.path(), "alice: moved it"));
+
+  REQUIRE(GitVault::SwitchBranch(p.path(), main));
+  REQUIRE(GitVault::CreateBranch(p.path(), "bob", true));
+  // A quarter turn about Z, and somewhere else entirely.
+  occFile(-12.5, json::array({0.0, 0.0, 0.70710678, 0.70710678}));
+  REQUIRE(GitVault::CommitAll(p.path(), "bob: moved and turned it"));
+
+  REQUIRE(GitVault::SwitchBranch(p.path(), "alice"));
+  std::string error;
+  REQUIRE(GitVault::Merge(p.path(), "bob", &error) ==
+          GitVault::MergeStatus::Conflicted);
+
+  const ProjectMerge::Report report = ProjectMerge::Scan(p.path());
+  REQUIRE(report.conflicts.size() == 1);
+  const ProjectMerge::Conflict& c = report.conflicts[0];
+  CHECK(c.document == "Frame");
+  CHECK(c.documentKind == "assembly");
+  REQUIRE(c.fields.size() == 1);
+  CHECK(c.fields[0].field == "transform");
+  CHECK(c.fields[0].ours == "(50, 0, 0)"); // no rotation: no noise about it
+  CHECK(c.fields[0].theirs == "(-12.5, 0, 0) turned 90° about Z");
+  CHECK(c.fields[0].base == "(0, 0, 0)");
+  CHECK(c.summary.find("{") == std::string::npos); // no JSON anywhere in it
+}
+
 // A rename on one side and a dimension change on the other is NOT a
 // conflict: one key per line, sorted, so git merges it itself. If this ever
 // starts conflicting, the format's diffability has regressed.

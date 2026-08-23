@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -93,9 +94,71 @@ json ParseOrNull(const std::string& text) {
   }
 }
 
+// One number, without the noise: 12.000000 is not how anyone writes 12.
+std::string NumText(double v) {
+  std::string s = std::to_string(v);
+  if (s.find('.') != std::string::npos) {
+    while (s.size() > 1 && s.back() == '0')
+      s.pop_back();
+    if (!s.empty() && s.back() == '.')
+      s.pop_back();
+  }
+  return s == "-0" ? "0" : s;
+}
+
+// "(50, 0, 0)" — a position, a direction, a color. Empty when the array
+// holds anything else, so the caller can fall back to JSON.
+std::string VecText(const json& a) {
+  if (!a.is_array() || a.empty() || a.size() > 4)
+    return "";
+  std::string s = "(";
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (!a[i].is_number())
+      return "";
+    s += (i ? ", " : "") + NumText(a[i].get<double>());
+  }
+  return s + ")";
+}
+
+// A quaternion as the rotation a person would describe: "turned 90° about
+// Z". Empty for no rotation — in a sentence about a part that moved,
+// "turned 0°" is noise. Only called for a value we KNOW is an orientation;
+// a bare 4-array could as easily be an RGBA color.
+std::string RotText(const json& q) {
+  if (!q.is_array() || q.size() != 4)
+    return "";
+  double c[4];
+  for (int i = 0; i < 4; ++i) {
+    if (!q[i].is_number())
+      return "";
+    c[i] = q[i].get<double>();
+  }
+  double x = c[0], y = c[1], z = c[2], w = c[3];
+  if (w < 0) { // q and -q are the same rotation; pick the short way round
+    x = -x, y = -y, z = -z, w = -w;
+  }
+  const double len = std::sqrt(x * x + y * y + z * z);
+  const double angle = 2.0 * std::atan2(len, w) * 180.0 / M_PI;
+  if (angle < 0.05 || len < 1e-9)
+    return "";
+  std::string axis;
+  const double a[3] = {x / len, y / len, z / len};
+  const char* names[3] = {"X", "Y", "Z"};
+  for (int i = 0; i < 3; ++i)
+    if (std::abs(std::abs(a[i]) - 1.0) < 1e-3)
+      axis = (a[i] < 0 ? "-" : "") + std::string(names[i]);
+  if (axis.empty())
+    axis =
+        "(" + NumText(a[0]) + ", " + NumText(a[1]) + ", " + NumText(a[2]) + ")";
+  return "turned " + NumText(std::round(angle * 10.0) / 10.0) + "° about " +
+         axis;
+}
+
 // A value as a person would read it. Numbers lose their trailing zeros
-// (12.000000 is noise), strings lose their quotes, and anything structured
-// falls back to compact JSON — it is a label, not a round-trip.
+// (12.000000 is noise), strings lose their quotes, and the structured values
+// that actually turn up in a conflict — an occurrence's transform, a
+// position — get a sentence. Everything else falls back to compact JSON: it
+// is a label, not a round-trip.
 std::string Describe(const json& value) {
   if (value.is_null())
     return "—";
@@ -103,16 +166,23 @@ std::string Describe(const json& value) {
     return value.get<std::string>();
   if (value.is_boolean())
     return value.get<bool>() ? "yes" : "no";
-  if (value.is_number_float()) {
-    std::string s = std::to_string(value.get<double>());
-    while (s.size() > 1 && s.back() == '0')
-      s.pop_back();
-    if (!s.empty() && s.back() == '.')
-      s.pop_back();
-    return s;
-  }
+  if (value.is_number_float())
+    return NumText(value.get<double>());
   if (value.is_number())
     return std::to_string(value.get<int64_t>());
+  // An occurrence transform. This is the one every "we both placed the same
+  // part" conflict shows, and it used to read as a truncated JSON dump.
+  if (value.is_object() &&
+      (value.contains("position") || value.contains("orientation"))) {
+    std::string s = VecText(value.value("position", json()));
+    const std::string rot = RotText(value.value("orientation", json()));
+    if (!rot.empty())
+      s += (s.empty() ? "" : " ") + rot;
+    if (!s.empty())
+      return s;
+  }
+  if (const std::string v = VecText(value); !v.empty())
+    return v;
   return value.dump();
 }
 
