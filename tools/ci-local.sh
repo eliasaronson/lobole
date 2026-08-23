@@ -13,8 +13,13 @@
 # Build trees live in .ci-local/ (gitignored) and are reused, so the second
 # run of a container is a rebuild of what changed rather than a fresh compile.
 #
-# Not covered here, by design: the GUI suite (./tools/gui-tests-xvfb.sh — it
-# needs a GPU and CI never runs it) and anything needing GitHub itself.
+# The GUI suite IS covered here (--no-gui opts out), in a shuffled order.
+# GitHub never runs it — every ctest there is `-LE gui` — so this script is
+# the only automated gate it has, which is an argument for including it
+# rather than the reverse. Shuffled because three order-dependent failures in
+# one week were each invisible until the shard partition happened to move.
+#
+# Not covered here: anything needing GitHub itself.
 #
 # Alternative: `act` runs the real workflow YAML in Docker, which is more
 # faithful but pulls multi-GB runner images and emulates `container:` matrix
@@ -29,6 +34,7 @@ cd "$root"
 run_nix=1
 run_containers=1
 run_asan=0
+run_gui=1
 only_image=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -38,6 +44,9 @@ while [ $# -gt 0 ]; do
     # ~4-minute compile, which is too much to put in front of every
     # "did I break the build?" run.
     --asan) run_asan=1; run_nix=0; run_containers=0 ;;
+    # The GUI suite is ~95 s and needs a display; --no-gui is the escape
+    # hatch for a machine without one (and for --containers, which has none).
+    --no-gui) run_gui=0 ;;
     --image) only_image="$2"; shift ;;
     -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -109,6 +118,13 @@ if [ "$run_nix" = 1 ]; then
   nix-shell shell.nix --run "cmake --build .ci-local/build -j$(nproc)" > /dev/null
   run_tests headless "headless suite" \
     nix-shell shell.nix --run "ctest --test-dir .ci-local/build -LE gui -j$(nproc) --output-on-failure"
+
+  # The GUI suite. Shuffled, and its seed is in the log: a failure that
+  # cannot be replayed is a failure nobody fixes. Sharded as usual — this is
+  # a developer machine with cores to spare, unlike a hosted runner.
+  if [ "$run_gui" = 1 ]; then
+    run_tests gui "GUI suite (shuffled)" ./tools/gui-tests-xvfb.sh --shuffle
+  fi
 
   step "build without the test engine"
   nix-shell shell.nix --run "cmake -S . -B .ci-local/build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TEST_ENGINE=OFF" > /dev/null
