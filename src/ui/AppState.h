@@ -889,6 +889,26 @@ struct AppState {
   // resync, like the section caps).
   uint64_t topoGhostStudyId = 0;
   uint32_t topoGhostInstance = 0;
+  // Geometry-delta overlay (compare_geometry's `materialize`, and F11's
+  // "Compare shape"): the two boolean-diff solids drawn over the part, so
+  // ONE look answers "where did it change?" instead of eyeballing a number
+  // or two screenshots. Red = in the reference and not here, green = here
+  // and beyond the reference — the same sense as the missing/extra volumes.
+  //
+  // Transient by construction: never saved, never picked, not in
+  // documentMeshes, and dropped as soon as it stops being TRUE — when the
+  // active document changes (`deltaOwner`) or when the part is edited out
+  // from under it (`deltaVersion`). A diff belongs to the exact shape it was
+  // measured on; one that outlives it is a picture of something else.
+  // Version() restarts at 0 on document replacement, hence both keys.
+  CADShape deltaMissingShape, deltaExtraShape;
+  const Document* deltaOwner = nullptr;
+  uint64_t deltaVersion = 0;
+  uint32_t deltaMissingInstance = 0, deltaExtraInstance = 0;
+  std::string deltaSummary; // what the comparison said, for the viewport hint
+  bool HasGeometryDelta() const {
+    return deltaMissingShape.IsValid() || deltaExtraShape.IsValid();
+  }
   bool showElementNames = false; // debug: element name of the hovered face
   // Viewport-controls cheat sheet overlay (View > Viewport Controls) — U4
   // moved it out of the Properties panel, where it permanently ate space.

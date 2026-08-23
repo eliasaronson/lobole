@@ -696,6 +696,9 @@ static const std::set<std::string> kNoPartDoc = {
     "list_exploded_views", "set_explode_step", "auto_explode", "set_explode",
     // export_visual works on a part OR an assembly (occurrence walk).
     "export_visual",
+    // Clearing the compare_geometry overlay must work from any tab — the
+    // overlay is part-scoped, but switching tabs is how you leave it behind.
+    "clear_geometry_delta",
     // interference runs on occurrence pairs on an assembly tab;
     // contact_report IS assembly-only (V1 connectivity gate);
     // list_elements/measure work there when given an explicit `part`;

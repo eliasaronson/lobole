@@ -117,10 +117,13 @@ volume_ratio, center_offset, bbox_iou, surface_ratio`, topology counts,
 and a thresholded English `verdict` ("Under-generating: 17.8% of the
 reference is missing" — ~30 lines that make the numbers actionable).
 `a`/`b` are bodies, occurrences, or an imported STEP/BREP golden.
-`materialize: true` stamps the missing (A−B) and extra (B−A) solids as
-transient display bodies via the existing `displayColor` mechanism
-(red/green) so one `screenshot` shows the delta instead of two images
-to eyeball. Idea source is MIT-licensed (rawwerks/vibecad); ours is a
+`materialize: true` draws the missing (A−B) and extra (B−A) solids over
+the part in red/green so one `screenshot` shows the delta instead of two
+images to eyeball. SHIPPED 2026-08-23 — as a renderer overlay tracked
+apart from the document (the topology-ghost pattern), not as display
+bodies: the delta must never be pickable, exportable or saveable, and it
+drops itself on any edit or tab switch. See
+docs/versioning/f11-seeing-what-changed.md. Idea source is MIT-licensed (rawwerks/vibecad); ours is a
 fresh implementation on OCC regardless.
 
 **Tests:** identical-body IoU 1.0; known offset/scale cases; verdict

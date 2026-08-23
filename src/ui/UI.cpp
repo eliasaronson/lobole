@@ -79,6 +79,14 @@ void DrawInContextBanner(AppState& state) {
 void DrawModelToolPrompt(AppState& state) {
   if (state.sketchEdit.IsEditing())
     return; // the sketch prompt bar owns this spot while sketching
+  float y = state.viewportPos.y + 34.0f;
+  // A geometry-delta overlay must say what it is measured against: red and
+  // green solids on a model are not self-explanatory, and a part that looks
+  // broken but is actually carrying an annotation is the exact confusion
+  // worth spending a pill on.
+  if (state.HasGeometryDelta())
+    DrawPromptPill(state, y, state.deltaSummary, PromptPill::Status);
+
   const char* prompt = ArmedPrompt(state);
   // Plane/face picking has no armed CONTEXT (it is not a pick slot), so it
   // never had a pill — name the step, especially for the Hole tool whose
@@ -91,7 +99,6 @@ void DrawModelToolPrompt(AppState& state) {
   if (prompt == nullptr)
     return; // feedback shows only while its tool is armed
   // One shared pill renderer with the sketch prompt bar (U8b).
-  float y = state.viewportPos.y + 34.0f;
   DrawPromptPill(state, y, prompt, PromptPill::Prompt);
   DrawPromptPill(state, y, state.sketchEdit.actionMsg, PromptPill::Warning);
 }

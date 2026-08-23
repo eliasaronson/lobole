@@ -441,11 +441,19 @@ void DrawHistoryPanel(AppState& state) {
         state.diffGeometry = CompareVersionGeometry(state, state.diffFrom, dir);
       }
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Boolean-diff this part against that version — "
-                          "how much material came and went.");
+        ImGui::SetTooltip("Boolean-diff this part against that version, and "
+                          "draw the difference on it: red where material "
+                          "went away, green where it arrived.");
       if (!state.diffGeometry.summary.empty()) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", state.diffGeometry.summary.c_str());
+      }
+      // The overlay drops itself on an edit or a tab switch, but someone who
+      // just wants to look at the part again should not have to guess that.
+      if (state.HasGeometryDelta()) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Hide diff###hist_diff_clear"))
+          ClearGeometryDelta(state);
       }
     }
     ImGui::Separator();

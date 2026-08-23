@@ -6860,6 +6860,14 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(g.summary.find("added") != std::string::npos);
     IM_CHECK(g.summary.find("removed") == std::string::npos);
 
+    // The diff is also ON the model now: the slab that appeared is a green
+    // overlay solid, drawn over the part. A volume answers "how much"; only
+    // the shape answers "where", which is the question people actually ask.
+    ctx->Yield(2); // the resync that turns the shapes into instances
+    IM_CHECK(s_App->HasGeometryDelta());
+    IM_CHECK(s_App->deltaExtraInstance != 0);
+    IM_CHECK(s_App->deltaSummary.find("added") != std::string::npos);
+
     // And a version compared against itself is "same shape", not noise.
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
@@ -6869,6 +6877,21 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         ui::CompareVersionGeometry(*s_App, now, "parts/Part 1");
     IM_CHECK(same.valid);
     IM_CHECK_STR_EQ(same.summary.c_str(), "same shape");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->HasGeometryDelta()); // nothing to show, nothing shown
+
+    // The overlay is true only of the shape it was measured on. Edit the
+    // part and it has to go: a stale red/green picture of a part that has
+    // moved on is worse than no picture at all.
+    ui::CompareVersionGeometry(*s_App, version, "parts/Part 1");
+    ctx->Yield(2);
+    IM_CHECK(s_App->HasGeometryDelta());
+    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemInputValue("//Box###ToolWindow/##Width", 7.0f);
+    ctx->Yield(3);
+    IM_CHECK(!s_App->HasGeometryDelta());
+    IM_CHECK_EQ(s_App->deltaExtraInstance, 0u);
   };
 
   // Clicking a diff row goes and finds the thing. The case that earns it is a

@@ -226,9 +226,33 @@ said so; a script, or a step that saves twice, walked straight into it.
 solids never land exactly on zero, so `same shape` is a millionth of the
 larger volume rather than `== 0`.
 
-### Still not done
+### Layer 4 — the change ON the model (2026-08-23)
 
-`compare_geometry`'s `materialize` option — stamping the missing and extra
-solids as red/green transient bodies so a screenshot shows the delta — is in
-the V4 plan and was not built with it. That is the remaining step for seeing
-a change *on the model* rather than reading a number.
+`compare_geometry`'s `materialize` option, and with it the last step of
+F11: "Compare shape" no longer only prints `16 mm³ added` — it draws the
+diff solids over the part, **red where material went away, green where it
+arrived**, with a pill naming the version they were measured against.
+
+The implementation is deliberately small because the two solids already
+existed: `Measure::CompareBodySets` had produced them since V4 for the
+`missing_path`/`extra_path` BREP exports, and nobody was looking at them.
+What was missing was a place to put them.
+
+- `AppState::delta*` + `ui::SetGeometryDelta/ClearGeometryDelta/`
+  `SyncGeometryDelta` — an overlay tracked APART from `documentMeshes`,
+  the topology ghost's pattern, so it is never picked, never exported and
+  never saved.
+- **It drops itself the moment it stops being true**: on a tab switch
+  (`deltaOwner`) or on any edit to the part (`deltaVersion`). A stale
+  red/green picture of a part that has moved on is worse than no picture —
+  it looks like an answer.
+- Colors are **pre-darkened for the bright rig** (0.45 red / 0.35 green at
+  0.72 alpha). The nominal values rendered as pale pink and mint; this is
+  the same lesson the wood materials learned.
+- `materialize` refuses on an assembly tab — the overlay is drawn in the
+  active part's coordinate space, and an overlay floating somewhere
+  plausible-looking is a wrong answer, not a partial one. It also reports
+  `materialized: false` under `--headless`, where there is no renderer to
+  draw it on: claiming otherwise costs an agent a debugging round.
+- `clear_geometry_delta` is the off-switch, plus a "Hide diff" button next
+  to the summary in the History panel.

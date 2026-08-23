@@ -173,7 +173,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "active doc, or {a, b} bodies/occurrences. Returns iou/dice/precision/"
      "recall, volume_ratio, center_offset, bbox_iou, topology counts and "
      "plain-language verdicts; {missing_path}/{extra_path} export the diff "
-     "solids as BREP."},
+     "solids as BREP. materialize:true DRAWS them on the part instead — "
+     "missing red, extra green — so one screenshot shows WHERE it differs "
+     "(part tab only; clear_geometry_delta turns it off)."},
+    {"clear_geometry_delta",
+     "Remove the compare_geometry materialize overlay, leaving the plain "
+     "model. Harmless when there is none."},
     {"section",
      "Cross-section area where a plane cuts the bodies; on an assembly tab, "
      "every visible occurrence in place. Omit `offset` to cut through the "
@@ -826,8 +831,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error("compare_geometry needs {golden_path} or "
                                "{a, b} with geometry on both sides");
     CADShape missingShape, extraShape;
-    const bool wantMissing = p.contains("missing_path");
-    const bool wantExtra = p.contains("extra_path");
+    // `materialize` draws the delta on the model instead of only measuring
+    // it: one screenshot then answers WHERE it differs, which no similarity
+    // number can. It needs the same two solids the *_path exports do.
+    const bool materialize = p.value("materialize", false);
+    const bool wantMissing = p.contains("missing_path") || materialize;
+    const bool wantExtra = p.contains("extra_path") || materialize;
     const auto c =
         Measure::CompareBodySets(refA, glm::mat4(1.0f), candB, glm::mat4(1.0f),
                                  wantMissing ? &missingShape : nullptr,
@@ -911,21 +920,49 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"faces", {{"reference", c->facesA}, {"candidate", c->facesB}}},
                 {"edges", {{"reference", c->edgesA}, {"candidate", c->edgesB}}},
                 {"verdicts", verdicts}};
-    if (wantMissing) {
+    if (p.contains("missing_path")) {
       const std::string path = p.at("missing_path").get<std::string>();
       if (!CADKernel::Instance().SaveBREP(path, missingShape))
         throw std::runtime_error("cannot write " + path +
                                  " — does the parent directory exist?");
       out["missing_path"] = path;
     }
-    if (wantExtra) {
+    if (p.contains("extra_path")) {
       const std::string path = p.at("extra_path").get<std::string>();
       if (!CADKernel::Instance().SaveBREP(path, extraShape))
         throw std::runtime_error("cannot write " + path +
                                  " — does the parent directory exist?");
       out["extra_path"] = path;
     }
+    if (materialize) {
+      // The overlay is drawn in the ACTIVE PART's coordinate space, so it
+      // needs a part tab to be drawn on. Refusing beats an overlay floating
+      // somewhere plausible-looking and wrong.
+      if (doc == nullptr)
+        throw std::runtime_error(
+            "materialize needs a part tab — the delta is drawn in the active "
+            "part's coordinate space");
+      snprintf(buf, sizeof buf,
+               "iou %.3f — %.0f mm³ missing (red), %.0f mm³ extra (green)", iou,
+               c->missing, c->extra);
+      ui::SetGeometryDelta(state, missingShape, extraShape, buf);
+      // Say whether it will actually be SEEN: a --headless instance has no
+      // renderer, and "materialized: true" over an invisible overlay is the
+      // kind of half-truth that costs an agent a debugging round.
+      out["materialized"] = static_cast<bool>(state.meshRenderer);
+      if (!state.meshRenderer)
+        out["note"] = "delta recorded, but this instance has no renderer to "
+                      "draw it on — run under tools/headless-preview.sh to "
+                      "screenshot it";
+    }
     return out;
+  }
+  if (m == "clear_geometry_delta") {
+    // The off-switch for materialize. Separate from compare_geometry because
+    // an agent that wants the plain model back should not have to run a
+    // comparison to get it.
+    ui::ClearGeometryDelta(state);
+    return json{{"cleared", true}};
   }
   if (m == "contact_report") {
     // V1: the whole-assembly connectivity gate. Box prefilter over every

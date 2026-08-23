@@ -2218,9 +2218,12 @@ GeometryChange CompareVersionGeometry(AppState& state,
     return out;
   }
 
-  const auto cmp =
-      Measure::CompareBodySets((*older)->GetBodies(), glm::mat4(1.0f),
-                               current->GetBodies(), glm::mat4(1.0f));
+  // The diff SOLIDS, not just the volumes: the answer to "what changed?" is
+  // a shape, and the panel puts it straight on the model.
+  CADShape removedShape, addedShape;
+  const auto cmp = Measure::CompareBodySets(
+      (*older)->GetBodies(), glm::mat4(1.0f), current->GetBodies(),
+      glm::mat4(1.0f), &removedShape, &addedShape);
   if (!cmp) {
     out.summary = "the shapes could not be compared";
     return out;
@@ -2245,6 +2248,16 @@ GeometryChange CompareVersionGeometry(AppState& state,
     out.summary = VolumeText(out.added) + " added";
   else
     out.summary = VolumeText(out.removed) + " removed";
+
+  // Red where material went away, green where it arrived — the same sense
+  // as compare_geometry's materialize (red = in the reference and not here).
+  // "same shape" gets no overlay: two empty solids would just look broken.
+  if (grew || shrank)
+    SetGeometryDelta(state, removedShape, addedShape,
+                     "vs " + revision.substr(0, 8) + " — " + out.summary +
+                         " (red gone, green new)");
+  else
+    ClearGeometryDelta(state);
   return out;
 }
 
@@ -3515,6 +3528,73 @@ void UpdateDrawingRenders(AppState& state) {
   state.drawingRendersVersion = drawingVersion;
 }
 
+void SetGeometryDelta(AppState& state, const CADShape& missing,
+                      const CADShape& extra, const std::string& summary) {
+  state.deltaMissingShape = missing;
+  state.deltaExtraShape = extra;
+  state.deltaSummary = summary;
+  state.deltaOwner = state.document.get();
+  state.deltaVersion = state.document ? state.document->Version() : 0;
+  state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
+}
+
+void ClearGeometryDelta(AppState& state) {
+  if (!state.HasGeometryDelta() && state.deltaOwner == nullptr)
+    return;
+  state.deltaMissingShape = CADShape();
+  state.deltaExtraShape = CADShape();
+  state.deltaSummary.clear();
+  state.deltaOwner = nullptr;
+  state.deltaVersion = 0;
+  state.syncedDocumentVersion = UINT64_MAX;
+}
+
+void SyncGeometryDelta(AppState& state) {
+  if (!state.meshRenderer)
+    return; // headless: the delta is still recorded, just not drawn
+  // Remove the old instances FIRST, unconditionally — the same rule the
+  // topology ghost learned: an overlay tracked apart from documentMeshes
+  // survives a tab switch and haunts a part it was never measured on.
+  for (uint32_t* inst :
+       {&state.deltaMissingInstance, &state.deltaExtraInstance}) {
+    if (*inst != 0) {
+      state.meshRenderer->RemoveInstance(*inst);
+      *inst = 0;
+    }
+  }
+  if (!state.HasGeometryDelta())
+    return;
+  // A diff is only true of the shape it was measured on. Different document,
+  // or the same one edited since, and the honest thing is to stop drawing it.
+  if (state.deltaOwner != state.document.get() ||
+      (state.document && state.document->Version() != state.deltaVersion)) {
+    ClearGeometryDelta(state);
+    return;
+  }
+
+  const auto add = [&](const CADShape& shape, const glm::vec3& color) {
+    if (!shape.IsValid())
+      return uint32_t{0};
+    CADShape::Mesh mesh = shape.GenerateMesh(0.1);
+    if (mesh.vertices.empty())
+      return uint32_t{0};
+    const uint32_t id = state.meshRenderer->AddMesh(
+        CADMeshConverter::ConvertCADMeshToVertices(mesh), mesh.indices);
+    state.meshRenderer->SetMeshColor(id, color);
+    // Translucent so the part stays readable underneath: the delta is an
+    // annotation ON the model, not a replacement for it.
+    state.meshRenderer->SetInstanceGhost(id, 0.72f);
+    return id;
+  };
+  // Pre-darkened for the bright lighting rig, the same lesson the wood
+  // materials learned: a nominal 0.9 red renders as pale pink here, and a
+  // delta you have to squint at is not an answer.
+  state.deltaMissingInstance =
+      add(state.deltaMissingShape, glm::vec3(0.45f, 0.02f, 0.02f));
+  state.deltaExtraInstance =
+      add(state.deltaExtraShape, glm::vec3(0.02f, 0.35f, 0.06f));
+}
+
 void SyncDocumentRenderers(AppState& state) {
   if (!state.meshRenderer)
     return;
@@ -3689,6 +3769,8 @@ void SyncDocumentRenderers(AppState& state) {
       }
     }
   }
+
+  SyncGeometryDelta(state);
 
   // In-context editing (A4): ghost the context assembly around the part.
   // Appended AFTER the part bodies so documentMeshes[i] still aligns with

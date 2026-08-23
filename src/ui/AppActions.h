@@ -455,6 +455,10 @@ bool RecoverProject(AppState& state, const std::string& path,
 // This is where compare_geometry's machinery belongs and a merge's does not:
 // a diff has two operands by construction. `Measure::CompareBodySets` does
 // the booleans; this only finds the other operand.
+//
+// Also MATERIALIZES the result (SetGeometryDelta): the honest answer to
+// "what changed?" is a shape, not a number, so the diff solids go straight
+// on the model — red where material went away, green where it arrived.
 GeometryChange CompareVersionGeometry(AppState& state,
                                       const std::string& revision,
                                       const std::string& documentDir);
@@ -624,6 +628,23 @@ void FitCameraToSelection(AppState& state);
 // Mirrors document bodies into the renderers when the document version
 // changed (edit, undo, redo). Call once per frame before drawing.
 void SyncDocumentRenderers(AppState& state);
+
+// Show a boolean-diff result ON the model: `missing` (in the reference and
+// not in what you are looking at) in red, `extra` (beyond the reference) in
+// green, both translucent. This is compare_geometry's `materialize` and the
+// History panel's "Compare shape" — the answer to "where did it change?",
+// which no single number can give.
+//
+// `summary` is the comparison's own words, shown with the overlay so it is
+// never a mystery what the two colors are measured against. Setting a delta
+// forces a renderer resync; passing empty shapes is the same as clearing.
+void SetGeometryDelta(AppState& state, const CADShape& missing,
+                      const CADShape& extra, const std::string& summary);
+void ClearGeometryDelta(AppState& state);
+
+// Rebuilds the delta overlay's instances, and drops it when it has stopped
+// being true of what's on screen. Called from SyncDocumentRenderers.
+void SyncGeometryDelta(AppState& state);
 
 // Mirrors the current document bodies into the ray tracer (geometry +
 // materials) and (re)builds its acceleration structures. On-demand for the

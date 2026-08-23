@@ -69,6 +69,18 @@ def main():
         expect(os.path.getsize(miss) > 100, "missing.brep written")
         expect(os.path.getsize(extra) > 100, "extra.brep written")
 
+        # materialize: the delta becomes a drawable overlay on the part.
+        # Headless has no renderer, so it reports that instead of claiming
+        # something is on screen.
+        r = d.call("compare_geometry", a=0, b=1, materialize=True)
+        expect(r["materialized"] is False, f"headless materialize: {r}")
+        expect("no renderer" in r.get("note", ""), f"note: {r}")
+        expect(abs(r["volume_missing"] - 200.0) < 1e-3,
+               f"materialize still measures: {r}")
+        expect(d.call("clear_geometry_delta")["cleared"] is True, "cleared")
+        # Clearing when there is nothing to clear is not an error.
+        expect(d.call("clear_geometry_delta")["cleared"] is True, "re-cleared")
+
         # Golden-file regression: export the doc, compare against itself.
         golden = os.path.join(tmp, "golden.brep")
         d.call("export_brep", path=golden)
@@ -99,6 +111,14 @@ def main():
         expect(abs(r["center_offset"] - 100.0) < 1e-3,
                f"occurrence offset: {r['center_offset']}")
         expect(abs(r["volume_ratio"] - 1.0) < 1e-3, f"same part: {r}")
+
+        # materialize is drawn in the active PART's space, so an assembly tab
+        # refuses rather than putting the overlay somewhere plausible-looking.
+        try:
+            d.call("compare_geometry", a="O1", b="O2", materialize=True)
+            raise AssertionError("materialize should refuse on an assembly tab")
+        except RuntimeError as e:
+            expect("part tab" in str(e), f"refusal wording: {e}")
 
         print("compare_smoke: all checks passed")
         return 0
