@@ -1,4 +1,5 @@
 #include "ui/CamPanel.h"
+#include "ui/PanelTitles.h"
 
 #ifdef HAVE_CAM
 
@@ -142,8 +143,7 @@ void DrawCamPanel(AppState& state) {
   // this one shipped without the flag — so the first launch after CAM landed
   // put the job list in front of the model tree. Three GUI tests caught it as
   // "unable to hover Model"; a user would have called it "my tree is gone".
-  if (!ImGui::Begin("CAM###CamPanel", nullptr,
-                    ImGuiWindowFlags_NoFocusOnAppearing)) {
+  if (!ImGui::Begin(kPanelCam, nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
     ImGui::End();
     return;
   }

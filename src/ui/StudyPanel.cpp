@@ -7,7 +7,8 @@
 #include "render/Camera.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
-#include "ui/ExprInput.h"         // expression-capable numeric fields
+#include "ui/ExprInput.h" // expression-capable numeric fields
+#include "ui/PanelTitles.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 #include "ui/ViewportHandle.h"
 #include <utility>
@@ -406,7 +407,7 @@ void DrawResults(AppState& state, const fem::Study& s) {
 } // namespace
 
 void DrawStudyPanel(AppState& state) {
-  ImGui::Begin("Model");
+  ImGui::Begin(kPanelModel);
   Document* doc = state.document.get();
   if (!doc) {
     ImGui::End();

@@ -448,8 +448,33 @@ struct ItemTarget {
   std::string path;
   ImGuiID id = 0;
 
+  // A panel's DISPLAY title is not its address. Titles carry an icon and a
+  // "###id" ("<glyph> Model###Model") so they can be reworded without
+  // breaking anything, and ImGui hashes a window from the "###" onward — so
+  // the addressable form is "//###Model/...". Callers should not have to
+  // know that, and every script written before the icons landed says
+  // "//Model/...", so accept the friendly form and rewrite it.
+  static std::string ResolveWindowAlias(const std::string& ref) {
+    if (!ref.starts_with("//") || ref.starts_with("//$") ||
+        ref.starts_with("//###") || ref.starts_with("//**"))
+      return ref;
+    const size_t slash = ref.find('/', 2);
+    const std::string window = ref.substr(2, slash - 2);
+    if (window.empty() || window.find('#') != std::string::npos)
+      return ref;
+    // Only when the plain name names no window but the "###" form does —
+    // never override a window that really is called that.
+    if (ImGui::FindWindowByName(window.c_str()) != nullptr)
+      return ref;
+    const std::string hashed = "###" + window;
+    if (ImGui::FindWindowByID(ImHashStr(hashed.c_str())) == nullptr)
+      return ref;
+    return "//" + hashed +
+           (slash == std::string::npos ? "" : ref.substr(slash));
+  }
+
   ItemTarget(const json& params, const std::string& method) {
-    path = params.value("ref", std::string());
+    path = ResolveWindowAlias(params.value("ref", std::string()));
     id = params.value("id", ImGuiID(0));
     if (path.empty() && id == 0) {
       throw std::runtime_error(method + " needs {ref} or {id} (ids come from "

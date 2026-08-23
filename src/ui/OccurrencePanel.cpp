@@ -2,6 +2,7 @@
 #include "ui/ExprInput.h"     // expression-capable numeric fields
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (mate slot rows)
 #include "ui/FileDialogs.h"
+#include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
 
 #include "imgui.h"
@@ -419,7 +420,7 @@ void DrawBomSection(AppState& state) {
 }
 
 void DrawOccurrencePanel(AppState& state) {
-  ImGui::Begin("Model");
+  ImGui::Begin(kPanelModel);
   if (!state.assembly) {
     ImGui::End();
     return;

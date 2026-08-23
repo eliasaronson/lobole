@@ -1,4 +1,5 @@
 #include "ui/TerminalPanel.h"
+#include "ui/PanelTitles.h"
 
 #ifdef HAVE_TERMINAL
 
@@ -447,7 +448,7 @@ bool TerminalCapturesKeys(const AppState& state) {
     return false;
   if (!state.terminal->pty.Running())
     return false; // no session: the app keeps its shortcuts
-  ImGuiWindow* w = ImGui::FindWindowByName("Terminal###TerminalPanel");
+  ImGuiWindow* w = ImGui::FindWindowByName(kPanelTerminal);
   if (w == nullptr || !w->WasActive || w->Hidden || w->Collapsed)
     return false;
   return ImGui::IsMouseHoveringRect(
@@ -500,7 +501,7 @@ void DrawTerminalPanel(AppState& state) {
   TerminalState& t = Ensure(state);
   t.capturing = false;
 
-  if (!ImGui::Begin("Terminal###TerminalPanel", nullptr,
+  if (!ImGui::Begin(kPanelTerminal, nullptr,
                     ImGuiWindowFlags_NoScrollbar |
                         ImGuiWindowFlags_NoScrollWithMouse)) {
     ImGui::End();

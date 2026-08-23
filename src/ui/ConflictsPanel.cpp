@@ -1,4 +1,5 @@
 #include "ui/ConflictsPanel.h"
+#include "ui/PanelTitles.h"
 
 #include "common/Logger.h"
 #include "core/io/GitVault.h"
@@ -139,8 +140,8 @@ void DrawConflictsPanel(AppState& state) {
   if (state.conflicts.Empty())
     return;
 
-  const bool visible =
-      ImGui::Begin("Conflicts", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+  const bool visible = ImGui::Begin(kPanelConflicts, nullptr,
+                                    ImGuiWindowFlags_NoFocusOnAppearing);
   if (!visible) {
     ImGui::End();
     return;

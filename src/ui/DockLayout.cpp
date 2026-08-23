@@ -1,4 +1,5 @@
 #include "ui/DockLayout.h"
+#include "ui/PanelTitles.h"
 
 #include <algorithm>
 
@@ -94,7 +95,7 @@ void BeginDockspace(AppState& state) {
   // adrift, rebuild the whole default layout. Once-per-launch so users can
   // still float panels freely within a session.
   if (!state.dockHomesEnforced && !state.buildDefaultDockLayout) {
-    ImGuiWindow* model = ImGui::FindWindowByName("Model");
+    ImGuiWindow* model = ImGui::FindWindowByName(kPanelModel);
     if (model != nullptr) {
       state.dockHomesEnforced = true;
       if (model->DockId == 0) {
@@ -105,11 +106,11 @@ void BeginDockspace(AppState& state) {
           if (w != nullptr && w->DockId == 0)
             ImGui::SetWindowDock(w, home, ImGuiCond_Always);
         };
-        redock("Variables", model->DockId);
-        redock("Configurations", model->DockId);
-        redock("History", model->DockId);
-        redock("Conflicts", model->DockId);
-        redock("CAM###CamPanel", model->DockId);
+        redock(kPanelVariables, model->DockId);
+        redock(kPanelConfigurations, model->DockId);
+        redock(kPanelHistory, model->DockId);
+        redock(kPanelConflicts, model->DockId);
+        redock(kPanelCam, model->DockId);
       }
     }
   }
@@ -123,7 +124,7 @@ void BeginDockspace(AppState& state) {
     // The FULL name: ImGui hashes from the "###", so looking up "Terminal"
     // finds nothing at all — silently, which is how this first shipped
     // floating over the model tree.
-    ImGuiWindow* term = ImGui::FindWindowByName("Terminal###TerminalPanel");
+    ImGuiWindow* term = ImGui::FindWindowByName(kPanelTerminal);
     if (term != nullptr && term->DockId == 0) {
       ImGuiID right = ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Right,
                                                   0.28f, nullptr, nullptr);
@@ -155,16 +156,16 @@ void BeginDockspace(AppState& state) {
     if (state.settings.terminalPanel) {
       ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.28f,
                                                   nullptr, &center);
-      ImGui::DockBuilderDockWindow("Terminal###TerminalPanel", right);
+      ImGui::DockBuilderDockWindow(kPanelTerminal, right);
     }
-    ImGui::DockBuilderDockWindow("Model", left);
-    ImGui::DockBuilderDockWindow("Variables", left);      // tabbed behind Model
-    ImGui::DockBuilderDockWindow("Configurations", left); // tabbed behind Model
-    ImGui::DockBuilderDockWindow("History", left);        // tabbed behind Model
+    ImGui::DockBuilderDockWindow(kPanelModel, left);
+    ImGui::DockBuilderDockWindow(kPanelVariables, left);      // behind Model
+    ImGui::DockBuilderDockWindow(kPanelConfigurations, left); // behind Model
+    ImGui::DockBuilderDockWindow(kPanelHistory, left);        // behind Model
     // Only ever exists when there is something to resolve (F7), so it is
     // not a permanent tab — but when it appears it belongs here.
-    ImGui::DockBuilderDockWindow("Conflicts", left);
-    ImGui::DockBuilderDockWindow("CAM###CamPanel", left); // ditto
+    ImGui::DockBuilderDockWindow(kPanelConflicts, left);
+    ImGui::DockBuilderDockWindow(kPanelCam, left); // ditto
     // A window this rebuild did NOT give a home must forget its old one.
     // The terminal is docked only when its preference is on, so rebuilding
     // with it off deletes its node while the window keeps pointing at the
@@ -176,15 +177,14 @@ void BeginDockspace(AppState& state) {
     // Only the terminal is docked conditionally today; if another window ever
     // is, it needs the same treatment.
     if (!state.settings.terminalPanel)
-      if (ImGuiWindow* term =
-              ImGui::FindWindowByName("Terminal###TerminalPanel"))
+      if (ImGuiWindow* term = ImGui::FindWindowByName(kPanelTerminal))
         if (term->DockId != 0)
           ImGui::SetWindowDock(term, 0, ImGuiCond_Always);
     ImGui::DockBuilderFinish(dockspaceId);
     // The tab focused last wins the shared node; make sure that is Model —
     // with Sketch tabbed here too (U7e), it could otherwise end up on top
     // and hide the tree from both the user and the gui tests.
-    ImGui::SetWindowFocus("Model");
+    ImGui::SetWindowFocus(kPanelModel);
   }
 
   ImGui::End(); // host window
@@ -200,11 +200,17 @@ void BeginDockspace(AppState& state) {
       const ImGuiContext& g = *ImGui::GetCurrentContext();
       for (ImGuiWindow* w : g.Windows) {
         const char* hash = std::strstr(w->Name, "###");
-        const size_t label = hash != nullptr
-                                 ? static_cast<size_t>(hash - w->Name)
-                                 : std::strlen(w->Name);
+        const char* begin = w->Name;
+        // Skip the leading icon glyph and its space: a title reads
+        // "<glyph> Variables###Variables" and callers say "Variables".
+        while (static_cast<unsigned char>(*begin) >= 0x80)
+          begin++;
+        while (*begin == ' ')
+          begin++;
+        const size_t label = hash != nullptr ? static_cast<size_t>(hash - begin)
+                                             : std::strlen(begin);
         if (label == state.focusPanel.size() &&
-            std::strncmp(w->Name, target, label) == 0) {
+            std::strncmp(begin, target, label) == 0) {
           target = w->Name;
           break;
         }

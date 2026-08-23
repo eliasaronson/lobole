@@ -35,6 +35,7 @@
 #include "imgui_internal.h" // GetCurrentWindowRead (LeftLabel auto-resize case)
 
 #include "ui/ExprInput.h"         // expression-capable numeric fields
+#include "ui/PanelLayout.h"       // LeftLabel / SmallButtonReserve (U4)
 #include "ui/SelectionPipeline.h" // ParseRegionIds (U2 region slots)
 
 #include <algorithm>
@@ -73,43 +74,6 @@ void HandleEdit(AppState& state, Feature& feature, bool changedThisFrame,
   } else if (ImGui::IsItemDeactivated()) {
     doc.Regenerate();
   }
-}
-
-// Labels-left rows (U4): the label in a left column, the widget filling the
-// rest of the row. ImGui's default label-right layout clips labels as soon as
-// the panel narrows; this keeps them readable at any width. `reserveRight`
-// keeps room for a trailing SmallButton ("fx"/"123") on the same row.
-void LeftLabel(const char* label, float reserveRight = 0.0f) {
-  // Auto-resize windows (the preview dialog): avail-based widths are circular
-  // there (the window sizes to content), so use a fixed two-column layout —
-  // this also keeps the dialog one row per field, not towering over the
-  // viewport clicks the GUI tests make.
-  if (ImGui::GetCurrentWindowRead()->Flags &
-      ImGuiWindowFlags_AlwaysAutoResize) {
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    ImGui::SameLine(std::max(ImGui::GetFontSize() * 7.0f,
-                             ImGui::CalcTextSize(label).x +
-                                 ImGui::GetStyle().ItemSpacing.x * 2.0f));
-    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 14.0f - reserveRight);
-    return;
-  }
-  const float avail = ImGui::GetContentRegionAvail().x;
-  const float col = std::max(ImGui::GetFontSize() * 7.0f, avail * 0.40f);
-  ImGui::AlignTextToFramePadding();
-  ImGui::TextUnformatted(label);
-  // Two columns only when the field keeps a usable width; in a narrow panel
-  // stack the label above the full-width field instead of squeezing it.
-  if (avail - col >= ImGui::GetFontSize() * 8.0f)
-    ImGui::SameLine(col);
-  ImGui::SetNextItemWidth(reserveRight > 0.0f ? -reserveRight : -FLT_MIN);
-}
-
-// Width a SmallButton takes on the row, for LeftLabel's reserveRight.
-float SmallButtonReserve(const char* text) {
-  const ImGuiStyle& style = ImGui::GetStyle();
-  return ImGui::CalcTextSize(text).x + style.FramePadding.x * 2.0f +
-         style.ItemSpacing.x;
 }
 
 bool DragDim(AppState& state, const char* label, double* value,

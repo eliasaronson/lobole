@@ -1,4 +1,6 @@
 #include "ui/VariablesPanel.h"
+#include "ui/PanelLayout.h"
+#include "ui/PanelTitles.h"
 
 #include "core/Command.h"
 #include "core/Document.h"
@@ -49,7 +51,7 @@ std::string FreshName(const AppState& state) {
 void DrawVariablesPanel(AppState& state) {
   // A secondary tab must never steal the shared node from Model on its
   // first appearance (fresh layout builds select the last-appearing tab).
-  ImGui::Begin("Variables", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+  ImGui::Begin(kPanelVariables, nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
   if (!state.document) {
     ImGui::End();
     return;
@@ -69,11 +71,12 @@ void DrawVariablesPanel(AppState& state) {
   // Full-width editable cell. Returns the committed text when this cell just
   // finished an edit, nullptr otherwise.
   const auto cellInput = [&](int row, int column, const char* id,
-                             const std::string& current) -> const char* {
+                             const std::string& current,
+                             float width = -FLT_MIN) -> const char* {
     const bool editing = edit.row == row && edit.column == column;
     char tmp[sizeof(edit.buf)];
     snprintf(tmp, sizeof(tmp), "%s", current.c_str());
-    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::SetNextItemWidth(width);
     ImGui::InputText(id, editing ? edit.buf : tmp, sizeof(edit.buf));
     if (ImGui::IsItemActivated()) {
       edit.row = row;
@@ -103,19 +106,34 @@ void DrawVariablesPanel(AppState& state) {
   // every cell inside it could only be reached by a "**" wildcard crawl —
   // which the test engine can take minutes over. `//Variables/###vars_table/
   // ###var_expr_project_len` resolves directly.
-  if (ImGui::BeginTable("###vars_table", 6,
+  // The table ADAPTS instead of truncating. Six columns in a 210 px dock
+  // gave every header about 35 px, which rendered as "Sco… N… E… V C…" — a
+  // header row that names nothing is worse than no header row. So: Scope
+  // becomes a one-glyph badge (its two values are "P" and "L"), Comment
+  // appears only when there is room for it, and "Expression" shortens to
+  // "Expr" when there is not. Widen the dock and the full table comes back.
+  const float availW = ImGui::GetContentRegionAvail().x;
+  const bool wide = availW >= ImGui::GetFontSize() * 30.0f;
+  const int columns = wide ? 6 : 2;
+  if (ImGui::BeginTable("###vars_table", columns,
                         ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg |
                             ImGuiTableFlags_BordersInnerV |
                             ImGuiTableFlags_SizingStretchProp)) {
-    ImGui::TableSetupColumn("Scope", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+    // Blank header: the column is a badge, and "Scope" never fitted anyway.
+    ImGui::TableSetupColumn("###scope", ImGuiTableColumnFlags_WidthFixed,
+                            ImGui::GetFontSize() * 1.2f);
     ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.8f);
-    ImGui::TableSetupColumn("Expression", ImGuiTableColumnFlags_WidthStretch,
-                            1.4f);
-    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch, 0.7f);
-    ImGui::TableSetupColumn("Comment", ImGuiTableColumnFlags_WidthStretch,
-                            1.0f);
-    ImGui::TableSetupColumn("##del", ImGuiTableColumnFlags_WidthFixed, 22.0f);
-    ImGui::TableHeadersRow();
+    if (wide) {
+      ImGui::TableSetupColumn("Expression", ImGuiTableColumnFlags_WidthStretch,
+                              1.4f);
+      ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch,
+                              0.7f);
+      ImGui::TableSetupColumn("Comment", ImGuiTableColumnFlags_WidthStretch,
+                              1.0f);
+      ImGui::TableSetupColumn("###del", ImGuiTableColumnFlags_WidthFixed,
+                              ImGui::GetFontSize() * 1.4f);
+      ImGui::TableHeadersRow(); // a header row of "N… E… V…" helps nobody
+    }
 
     // Copy: command execution below mutates the tables mid-loop. Project
     // variables first (the default scope), then the active part's local ones.
@@ -143,13 +161,53 @@ void DrawVariablesPanel(AppState& state) {
       const std::string commentId = "###var_comment" + rowId;
       const std::string delId = "x###var_del" + rowId;
 
-      // Scope — Project (shared) vs Part (this document, shadows project).
-      ImGui::TableSetColumnIndex(0);
-      ImGui::TextUnformatted(r.isProject ? "Project" : "Part");
+      // Where each field goes. WIDE is a real table row, one column per
+      // field. NARROW is two rows of two columns — badge + name, then the
+      // expression and its value underneath — because five columns in a
+      // 210 px dock leave 30 px each, and a 30 px name field is not a field.
+      // Same reasoning as LeftLabel: when it will not fit beside, stack it.
+      const auto cell = [&](int field) {
+        if (wide) {
+          ImGui::TableSetColumnIndex(field);
+          return;
+        }
+        switch (field) {
+        case 0: // badge, first cell of row A
+          ImGui::TableSetColumnIndex(0);
+          break;
+        case 1: // name, rest of row A
+          ImGui::TableSetColumnIndex(1);
+          break;
+        case 3: // "= 60" beside the name
+          ImGui::SameLine();
+          break;
+        case 2: // the expression opens row B
+          ImGui::TableNextRow();
+          ImGui::TableSetColumnIndex(1);
+          break;
+        default: // delete, at the end of row B
+          ImGui::SameLine();
+          break;
+        }
+      };
+
+      // Scope — Project (shared) vs Local to this part (shadows project).
+      // One glyph, because the word never fitted; hover says which.
+      cell(0);
+      ImGui::TextDisabled("%s", r.isProject ? "P" : "L");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", r.isProject
+                                    ? "Project variable — shared by every part"
+                                    : "Local to this part — shadows a project "
+                                      "variable of the same name");
 
       // Name — commits a rename (rewrites referencing expressions).
-      ImGui::TableSetColumnIndex(1);
-      if (const char* text = cellInput(i, 1, nameId.c_str(), p.name)) {
+      cell(1);
+      // The evaluated value sits beside the name when narrow, so the name
+      // field gives it room; the expression below gets the whole row.
+      const float nameWidth = wide ? -FLT_MIN : -(ImGui::GetFontSize() * 3.5f);
+      if (const char* text =
+              cellInput(i, 1, nameId.c_str(), p.name, nameWidth)) {
         const std::string newName = text;
         if (!newName.empty() && newName != p.name) {
           const bool ok = r.isProject
@@ -167,13 +225,28 @@ void DrawVariablesPanel(AppState& state) {
         }
       }
 
-      // Expression — commits a redefinition.
-      ImGui::TableSetColumnIndex(2);
+      // Value — read-only result of the last evaluation. In a narrow panel
+      // this sits beside the name ("length = 60"), which is how a person
+      // reads a variable anyway; the expression gets the row below.
       const bool hasError = !p.error.empty();
+      cell(3);
+      if (hasError) {
+        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
+                           p.error.c_str());
+        if (ImGui::IsItemHovered()) // the reason is longer than the column
+          ImGui::SetTooltip("%s", p.error.c_str());
+      } else {
+        ImGui::Text("%.6g", p.value);
+      }
+
+      // Expression — commits a redefinition.
+      cell(2);
       if (hasError) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
       }
-      if (const char* text = cellInput(i, 2, exprId.c_str(), p.expression)) {
+      const float exprWidth = wide ? -FLT_MIN : -SmallButtonReserve("x");
+      if (const char* text =
+              cellInput(i, 2, exprId.c_str(), p.expression, exprWidth)) {
         if (p.expression != text) {
           setVar(r, text, p.comment);
           actionError.clear();
@@ -186,24 +259,17 @@ void DrawVariablesPanel(AppState& state) {
         }
       }
 
-      // Value — read-only result of the last evaluation.
-      ImGui::TableSetColumnIndex(3);
-      if (hasError) {
-        ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
-                           p.error.c_str());
-      } else {
-        ImGui::Text("%.6g", p.value);
-      }
-
-      // Comment
-      ImGui::TableSetColumnIndex(4);
-      if (const char* text = cellInput(i, 4, commentId.c_str(), p.comment)) {
-        if (p.comment != text)
-          setVar(r, p.expression, text);
+      // Comment — only shown when the panel is wide enough to hold it.
+      if (wide) {
+        cell(4);
+        if (const char* text = cellInput(i, 4, commentId.c_str(), p.comment)) {
+          if (p.comment != text)
+            setVar(r, p.expression, text);
+        }
       }
 
       // Delete — refused (with the referencing list) while referenced.
-      ImGui::TableSetColumnIndex(5);
+      cell(wide ? 5 : 9);
       if (ImGui::SmallButton(delId.c_str())) {
         std::vector<std::string> refs;
         const bool ok =

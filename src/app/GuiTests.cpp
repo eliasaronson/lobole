@@ -41,6 +41,7 @@
 #include "ui/FeatureEditor.h" // kCamToolSlot
 #include "ui/FileDialogs.h"
 #include "ui/HistoryPanel.h"
+#include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h"
 #include "ui/PreviewHandles.h"
 #include "ui/SettingsWindow.h"
@@ -404,7 +405,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
   t = IM_REGISTER_TEST(engine, "app", "core_windows_exist");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    IM_CHECK(ctx->GetWindowByRef("//Model") != nullptr);
+    IM_CHECK(ctx->GetWindowByRef("//###Model") != nullptr);
   };
 
   t = IM_REGISTER_TEST(engine, "document", "parametric_box_undo_redo");
@@ -498,8 +499,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Drag the second row onto the first: two independent solids reorder
     // freely, so the move commits.
-    ctx->ItemDragAndDrop(("//Model/" + b + "##1").c_str(),
-                         ("//Model/" + a + "##0").c_str());
+    ctx->ItemDragAndDrop(("//###Model/" + b + "##1").c_str(),
+                         ("//###Model/" + a + "##0").c_str());
     ctx->Yield();
     IM_CHECK_EQ(Doc()->GetFeature(0)->GetName(), b);
     IM_CHECK_EQ(Doc()->GetFeature(1)->GetName(), a);
@@ -523,7 +524,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // U7e: committed-feature editing is an explicit session — double-click
     // the tree row, edit in the Tool window.
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     // Labels-left rows (U4): the widget id is "##<label>", the visible label
     // is a separate Text item.
@@ -753,7 +754,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ToolbarClick(ctx, "###tb_simulation"); // the button had no id before this
     ctx->Yield();
     IM_CHECK(s_App->simulation.active);
-    ctx->ItemClick("//Model/Gravity (self-weight)");
+    ctx->ItemClick("//###Model/Gravity (self-weight)");
     ctx->Yield();
     const fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
@@ -776,7 +777,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     const uint64_t createdBy = Doc()->GetBodies()[0].createdBy;
     const std::string materialRef =
-        "//Model/###material_" + std::to_string(createdBy);
+        "//###Model/###material_" + std::to_string(createdBy);
     IM_CHECK(ctx->ItemExists(materialRef.c_str()));
     // Two steps, and the popup addressed by its own window name: a combo
     // popup does not take focus, and ComboClick wants one that does. Same
@@ -1357,7 +1358,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // NoFocusOnAppearing, which hid the model tree), so the tab click is a
     // required step rather than a formality. A tab item's id IS the window's
     // TabId; FocusWindow deliberately does not select dock tabs.
-    ImGuiWindow* camWin = ImGui::FindWindowByName("CAM###CamPanel");
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
     IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
     ctx->ItemClick(camWin->TabId);
     ctx->Yield(2);
@@ -1399,7 +1400,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // selected covers the model tree for everything after it in the shard —
     // which is how a stale assertion here broke tree/context_rename two
     // tests later. Everything below asserts on app state, not on widgets.
-    if (ImGuiWindow* modelWin = ImGui::FindWindowByName("Model")) {
+    if (ImGuiWindow* modelWin = ImGui::FindWindowByName(ui::kPanelModel)) {
       ctx->ItemClick(modelWin->TabId);
       ctx->Yield(2);
     }
@@ -4180,7 +4181,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(sk->derived.size(), (size_t)1);
 
     // Double-click the Operations row → the edit session opens.
-    ctx->ItemDoubleClick("//Model/###op0");
+    ctx->ItemDoubleClick("//###Model/###op0");
     ctx->Yield();
     IM_CHECK_EQ(s_App->sketchEdit.editOpIndex, 0);
     IM_CHECK(ctx->GetWindowByRef("//Linear Pattern###ToolWindow") != nullptr);
@@ -4706,7 +4707,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // And take the shared dock tab away from the model tree, which is the
     // specific leak that broke three unrelated tests.
-    if (ImGuiWindow* cam = ImGui::FindWindowByName("CAM###CamPanel"))
+    if (ImGuiWindow* cam = ImGui::FindWindowByName(ui::kPanelCam))
       if (cam->DockNode != nullptr) {
         ctx->ItemClick(cam->TabId);
         ctx->Yield(2);
@@ -4724,7 +4725,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Rename "Box 1" via right-click > Rename: the row becomes a focused
     // input; typing replaces the name, Enter commits (one undoable edit).
-    ctx->ItemClick("//Model/Box 1##0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//###Model/Box 1##0", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Rename");
     ctx->KeyCharsReplaceEnter("Chassis");
     ctx->Yield();
@@ -4734,12 +4735,12 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Drag the rollback bar (parked at the end) up above the sphere row:
     // regeneration stops at index 1 and the sphere body disappears.
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
-    ctx->ItemDragWithDelta("//Model/##RollbackBar", ImVec2(0, -30));
+    ctx->ItemDragWithDelta("//###Model/##RollbackBar", ImVec2(0, -30));
     ctx->Yield();
     IM_CHECK_EQ(Doc()->Rollback(), 1);
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
     // Drag it back past the end: full history replays.
-    ctx->ItemDragWithDelta("//Model/##RollbackBar", ImVec2(0, 60));
+    ctx->ItemDragWithDelta("//###Model/##RollbackBar", ImVec2(0, 60));
     ctx->Yield();
     IM_CHECK_EQ(Doc()->Rollback(), -1);
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
@@ -4755,19 +4756,19 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ToolbarCreateAccept(ctx, "###tb_sphere");
     const uint64_t sphereId = Doc()->GetFeature(1)->GetId();
 
-    ctx->ItemClick("//Model/Sphere 2##1");
+    ctx->ItemClick("//###Model/Sphere 2##1");
     ctx->Yield();
     IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), sphereId);
 
     // Delete the box above it: the selection stays on the sphere.
-    ctx->ItemClick("//Model/Box 1##0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//###Model/Box 1##0", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Delete");
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)1);
     IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), sphereId);
 
     // Deleting the selected feature itself clears the selection (prune).
-    ctx->ItemClick("//Model/Sphere 2##0", ImGuiMouseButton_Right);
+    ctx->ItemClick("//###Model/Sphere 2##0", ImGuiMouseButton_Right);
     ctx->ItemClick("//$FOCUSED/Delete");
     ctx->Yield();
     IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), (uint64_t)0);
@@ -6629,7 +6630,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     };
     ui::SetActivePart(*s_App, slotOf("Part 1"));
     ctx->Yield(2);
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemInputValue("//Box###ToolWindow/##Width", 44.0f);
     ctx->Yield();
@@ -6775,17 +6776,17 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
     ctx->Yield(2);
 
-    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelHistory);
     IM_CHECK(panel != nullptr && panel->DockNode != nullptr);
     ctx->ItemClick(panel->TabId);
     ctx->Yield(2);
-    ctx->SetRef("//History");
+    ctx->SetRef("//###History");
     // Nothing has happened: no banner.
     IM_CHECK(!s_App->diskChanged);
 
     // Go back to the model, which is where a person actually is when
     // somebody else writes to their project.
-    ImGuiWindow* model = ImGui::FindWindowByName("Model");
+    ImGuiWindow* model = ImGui::FindWindowByName(ui::kPanelModel);
     IM_CHECK(model != nullptr);
     ctx->ItemClick(model->TabId);
     ctx->Yield(2);
@@ -6811,7 +6812,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Now go read it.
     ctx->ItemClick(panel->TabId);
     ctx->Yield(2);
-    ctx->SetRef("//History");
+    ctx->SetRef("//###History");
     ctx->ItemClick("Reload###hist_disk_reload");
     ctx->Yield(3);
 
@@ -6847,18 +6848,18 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // what is ON DISK, which is what "since that version" means. Saved but
     // not committed, so this is the everyday question: what have I done since
     // the last version?
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemInputValue("//Box###ToolWindow/##Width", 9.0f);
     ctx->Yield(2);
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ctx->Yield(2);
 
-    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelHistory);
     IM_CHECK(panel != nullptr && panel->DockNode != nullptr);
     ctx->ItemClick(panel->TabId);
     ctx->Yield(2);
-    ctx->SetRef("//History");
+    ctx->SetRef("//###History");
     ctx->ItemClick("**/###hist_row0"); // the version, not a button
     ctx->Yield(3);
 
@@ -6911,8 +6912,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // These panels share a dock node with Model, so bring each to the front
     // before clicking in it — and put Model back at the end, or the next
     // test starts on the wrong tab (docs/ui/gui-coverage.md).
-    const auto showPanel = [&](const char* name) {
-      ImGuiWindow* w = ImGui::FindWindowByName(name);
+    const auto showPanel = [&](const char* title) {
+      ImGuiWindow* w = ImGui::FindWindowByName(title);
       IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
       ctx->ItemClick(w->TabId);
       ctx->Yield(2);
@@ -6920,13 +6921,13 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // A variable, by clicking. It lands in PROJECT scope — that is what the
     // panel's only button does.
-    showPanel("Variables");
-    ctx->ItemClick("//Variables/+ Add variable");
+    showPanel(ui::kPanelVariables);
+    ctx->ItemClick("//###Variables/+ Add variable");
     ctx->Yield(2);
-    ctx->ItemInputValue("//Variables/###vars_table/###var_name_project_var1",
+    ctx->ItemInputValue("//###Variables/###vars_table/###var_name_project_var1",
                         "len");
     ctx->Yield(2);
-    ctx->ItemInputValue("//Variables/###vars_table/###var_expr_project_len",
+    ctx->ItemInputValue("//###Variables/###vars_table/###var_expr_project_len",
                         "30");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->projectParameters.size(), (size_t)1);
@@ -6935,8 +6936,8 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Drive the extrude from it: fx turns the dimension into an expression.
     // Fully qualified, never "**": a wildcard crawl through this many items
     // runs for minutes and trips the engine watchdog.
-    showPanel("Model");
-    ctx->ItemDoubleClick("//Model/Extrude 2##1");
+    showPanel(ui::kPanelModel);
+    ctx->ItemDoubleClick("//###Model/Extrude 2##1");
     ctx->Yield(2);
     ctx->ItemClick("//###ToolWindow/Distance/fx");
     ctx->Yield(2);
@@ -6950,14 +6951,14 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // A configuration that overrides it. This is the row that used to read
     // "No variables to override".
-    showPanel("Configurations");
-    ctx->ItemClick("//Configurations/+ Add configuration");
+    showPanel(ui::kPanelConfigurations);
+    ctx->ItemClick("//###Configurations/+ Add configuration");
     ctx->Yield(2);
     IM_CHECK_EQ(Doc()->GetConfigurations().size(), (size_t)1);
     const uint64_t cfgId = Doc()->GetConfigurations()[0].id;
-    ctx->ItemInputValue("//Configurations/Name", "Short");
+    ctx->ItemInputValue("//###Configurations/###cfg_name", "Short");
     ctx->Yield(2);
-    ctx->ItemInputValue("//Configurations/cfg_overrides/###cfg_override_len",
+    ctx->ItemInputValue("//###Configurations/cfg_overrides/###cfg_override_len",
                         "10");
     ctx->Yield(3);
     const double shortVol = Doc()->GetBodies().at(0).shape.Volume();
@@ -6966,16 +6967,16 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // ...and back. A configuration that cannot be left is not a
     // configuration, it is an edit.
-    ctx->ItemClick("//Configurations/Base (as authored)");
+    ctx->ItemClick("//###Configurations/Base (as authored)");
     ctx->Yield(3);
     IM_CHECK(std::abs(Doc()->GetBodies().at(0).shape.Volume() - driven) < 1e-3);
     const std::string row =
-        "//Configurations/Short###cfg_row_" + std::to_string(cfgId);
+        "//###Configurations/Short###cfg_row_" + std::to_string(cfgId);
     ctx->ItemClick(row.c_str());
     ctx->Yield(3);
     IM_CHECK(std::abs(Doc()->GetBodies().at(0).shape.Volume() - shortVol) <
              1e-3);
-    showPanel("Model"); // leave the dock as the next test expects it
+    showPanel(ui::kPanelModel); // leave the dock as the next test expects it
   };
 
   // Two ways to do one thing, and nothing checking they agree. add_drawing_view
@@ -6996,7 +6997,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       ctx->MenuClick("File/New");
       ctx->Yield();
       ToolbarCreateAccept(ctx, "###tb_box");
-      ctx->ItemDoubleClick("//Model/Box 1##0");
+      ctx->ItemDoubleClick("//###Model/Box 1##0");
       ctx->Yield();
       ctx->ItemInputValue("//Box###ToolWindow/##Width", 80.0f);
       ctx->ItemInputValue("//Box###ToolWindow/##Height", 8.0f);
@@ -7021,7 +7022,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     };
 
     buildPart();
-    ctx->SetRef("//Model");
+    ctx->SetRef("//###Model");
     ctx->ItemInputValue("###dwg_scale", 0.0f); // 0 = choose one for me
     for (const char* orient : {"front", "top", "right"}) {
       ctx->ComboClick((std::string("###dwg_orientation/") + orient).c_str());
@@ -7070,7 +7071,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->MenuClick("File/New");
     ctx->Yield();
     ToolbarCreateAccept(ctx, "###tb_box");
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemInputValue("//Box###ToolWindow/##Width", 80.0f);
     ctx->ItemInputValue("//Box###ToolWindow/##Height", 8.0f);
@@ -7085,7 +7086,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Two views, by clicking: the orientation combo then Add view.
     // ComboClick wants a ref RELATIVE to the window (docs/ui/gui-coverage.md).
-    ctx->SetRef("//Model");
+    ctx->SetRef("//###Model");
     ctx->ItemInputValue("###dwg_scale", 0.0f); // 0 = choose a scale for me
     for (const char* orient : {"front", "top"}) {
       ctx->ComboClick((std::string("###dwg_orientation/") + orient).c_str());
@@ -7154,7 +7155,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const std::string version = GitVault::Log(dir.string())[0].hash;
 
     // Grow one axis: 2x2x2 -> 6x2x2. That is +16 mm3 and nothing lost.
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemInputValue("//Box###ToolWindow/##Width", 6.0f);
     ctx->Yield(2);
@@ -7199,7 +7200,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::CompareVersionGeometry(*s_App, version, "parts/Part 1");
     ctx->Yield(2);
     IM_CHECK(s_App->HasGeometryDelta());
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemInputValue("//Box###ToolWindow/##Width", 7.0f);
     ctx->Yield(3);
@@ -7246,7 +7247,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::SetActivePart(*s_App, slotOf("Part 1"));
     ctx->Yield(2);
     const uint64_t changedId = Doc()->GetFeature(0)->GetId();
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemInputValue("//Box###ToolWindow/##Width", 7.0f);
     ctx->Yield(2);
@@ -7255,11 +7256,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->activePart, (int)slotOf("Second"));
 
-    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelHistory);
     IM_CHECK(panel != nullptr);
     ctx->ItemClick(panel->TabId);
     ctx->Yield(2);
-    ctx->SetRef("//History");
+    ctx->SetRef("//###History");
     ctx->ItemClick("**/###hist_row0");
     ctx->Yield(3);
     // project.json changes too, because the active tab is stored in it —
@@ -7278,7 +7279,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK_EQ(s_App->activePart, (int)slotOf("Part 1"));
     IM_CHECK_EQ(ui::SelectedFeatureId(*s_App), changedId);
 
-    if (ImGuiWindow* model = ImGui::FindWindowByName("Model")) {
+    if (ImGuiWindow* model = ImGui::FindWindowByName(ui::kPanelModel)) {
       ctx->ItemClick(model->TabId);
       ctx->Yield(2);
     }
@@ -7312,7 +7313,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // A second line of work, started the way a user does: the History
     // panel's own controls. Without a verb like this the app could not
     // produce a conflict at all.
-    ImGuiWindow* history = ImGui::FindWindowByName("History");
+    ImGuiWindow* history = ImGui::FindWindowByName(ui::kPanelHistory);
     IM_CHECK(history != nullptr && history->DockNode != nullptr);
     ctx->ItemClick(history->TabId);
     ctx->Yield(2);
@@ -7321,11 +7322,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const std::string firstLine = GitVault::CurrentBranch(s_App->projectPath);
     IM_CHECK(!firstLine.empty());
 
-    ctx->SetRef("//History");
+    ctx->SetRef("//###History");
     ctx->ItemOpen("Branches");
     ctx->Yield();
     // A TreeNode pushes an id scope, so its contents are addressed THROUGH
-    // it — "//History/###hist_branch" finds nothing.
+    // it — "//###History/###hist_branch" finds nothing.
     ctx->ItemClick("Branches/###hist_branch");
     ctx->KeyCharsReplace("alt");
     ctx->ItemClick("Branches/Create###hist_branch_go");
@@ -7336,7 +7337,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // it now — the feature tree has to be brought forward before its rows can
     // be clicked, exactly as a user would.
     const auto showModel = [&ctx]() {
-      ImGuiWindow* model = ImGui::FindWindowByName("Model");
+      ImGuiWindow* model = ImGui::FindWindowByName(ui::kPanelModel);
       IM_CHECK(model != nullptr && model->DockNode != nullptr);
       ctx->ItemClick(model->TabId);
       ctx->Yield(2);
@@ -7344,7 +7345,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Their width, saved on the branch.
     showModel();
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemInputValue("//Box###ToolWindow/##Width", 9.0f);
     ctx->Yield();
@@ -7356,7 +7357,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(ui::SwitchToBranch(*s_App, firstLine, &err));
     ctx->Yield(2);
     showModel();
-    ctx->ItemDoubleClick("//Model/Box 1##0");
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
     ctx->ItemInputValue("//Box###ToolWindow/##Width", 5.0f);
     ctx->Yield();
@@ -7372,7 +7373,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // The panel exists ONLY now: a permanent tab saying "no conflicts" every
     // day would be noise, so its appearance is the signal.
-    ImGuiWindow* panel = ImGui::FindWindowByName("Conflicts");
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelConflicts);
     IM_CHECK(panel != nullptr);
     IM_CHECK_EQ(s_App->conflicts.NeedsDecision(), 1);
     const ProjectMerge::Conflict& c = s_App->conflicts.conflicts[0];
@@ -7383,7 +7384,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     ctx->ItemClick(panel->TabId);
     ctx->Yield(2);
-    ctx->SetRef("//Conflicts");
+    ctx->SetRef("//###Conflicts");
 
     // Finishing while something is undecided must do nothing: a half-resolved
     // tree committed as if it were finished is the silent loss F7 exists to
@@ -7476,7 +7477,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // check it, which held only because no earlier test had left another tab
     // of this node in front. The disk/* cases do exactly that, and the
     // precondition then failed in whichever shard ran them first.
-    ImGuiWindow* model = ImGui::FindWindowByName("Model");
+    ImGuiWindow* model = ImGui::FindWindowByName(ui::kPanelModel);
     IM_CHECK(model != nullptr && model->DockNode != nullptr);
     ctx->ItemClick(model->TabId);
     ctx->Yield(2);
@@ -7486,7 +7487,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // id IS the window's TabId, so it addresses directly — ImGui::FocusWindow
     // deliberately does not select dock tabs, so neither a menu item nor the
     // test engine's WindowFocus can stand in for the click.)
-    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelHistory);
     IM_CHECK(panel != nullptr && panel->DockNode != nullptr);
     ctx->ItemClick(panel->TabId);
     ctx->Yield(2);
@@ -7504,7 +7505,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
     // Name the state we just saved. It is unchanged, so this only works
     // because a name gets a version of its own.
-    ctx->SetRef("//History");
+    ctx->SetRef("//###History");
     ctx->ItemClick("###hist_name");
     ctx->KeyCharsReplace("before the lid");
     ctx->ItemClick("###hist_name_go");
@@ -7528,9 +7529,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::AddPart(*s_App, "Scratch");
     ctx->Yield(2);
     IM_CHECK(ui::ProjectDirty(*s_App));
-    IM_CHECK((ctx->ItemInfo("//History/**/###hist_restore1").ItemFlags &
+    IM_CHECK((ctx->ItemInfo("//###History/**/###hist_restore1").ItemFlags &
               ImGuiItemFlags_Disabled) != 0);
-    ctx->ItemClick("//History/###hist_save");
+    ctx->ItemClick("//###History/###hist_save");
     ctx->Yield(2);
     IM_CHECK(!ui::ProjectDirty(*s_App));
 
@@ -7543,7 +7544,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         named = i;
     IM_CHECK(named >= 0);
     ctx->ItemClick(
-        ("//History/**/###hist_restore" + std::to_string(named)).c_str());
+        ("//###History/**/###hist_restore" + std::to_string(named)).c_str());
     ctx->Yield(3);
     IM_CHECK_EQ(s_App->parts.size(), (size_t)1);
     IM_CHECK(s_App->historyLog.size() > before);
@@ -7584,7 +7585,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ui::MarkSettingsChanged(*s_App);
     ctx->Yield(4); // the atlas rebuild happens between frames
 
-    ImGuiWindow* panel = ImGui::FindWindowByName("History");
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelHistory);
     IM_CHECK(panel != nullptr && panel->DockNode != nullptr);
     ctx->ItemClick(panel->TabId); // the tab, as a user would
 
@@ -7600,10 +7601,11 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(!s_App->historyLog.empty());
     const float rightEdge = panel->InnerRect.Max.x;
     // 1 px of slack: rounding, not a missing button.
-    IM_CHECK_LE(ctx->ItemInfo("//History/###hist_name_go").RectFull.Max.x,
+    IM_CHECK_LE(ctx->ItemInfo("//###History/###hist_name_go").RectFull.Max.x,
                 rightEdge + 1.0f);
-    IM_CHECK_LE(ctx->ItemInfo("//History/**/###hist_restore0").RectFull.Max.x,
-                rightEdge + 1.0f);
+    IM_CHECK_LE(
+        ctx->ItemInfo("//###History/**/###hist_restore0").RectFull.Max.x,
+        rightEdge + 1.0f);
     // And nothing else pushed the content wider than the panel, which is
     // what the sideways scroll was.
     IM_CHECK_LE(panel->ContentSize.x, panel->InnerRect.GetWidth() + 1.0f);

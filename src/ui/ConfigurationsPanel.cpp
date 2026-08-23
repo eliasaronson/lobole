@@ -1,4 +1,5 @@
 #include "ui/ConfigurationsPanel.h"
+#include "ui/PanelTitles.h"
 
 #include "core/Command.h"
 #include "core/Configuration.h"
@@ -6,6 +7,7 @@
 #include "core/io/Serialization.h"
 
 #include "imgui.h"
+#include "ui/PanelLayout.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -44,7 +46,8 @@ std::string OverrideOf(const Configuration& c, const std::string& name) {
 
 void DrawConfigurationsPanel(AppState& state) {
   // Never steal the shared node from Model on first appearance.
-  ImGui::Begin("Configurations", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+  ImGui::Begin(kPanelConfigurations, nullptr,
+               ImGuiWindowFlags_NoFocusOnAppearing);
   if (!state.document) {
     ImGui::End();
     return;
@@ -95,7 +98,8 @@ void DrawConfigurationsPanel(AppState& state) {
   {
     char buf[128];
     std::snprintf(buf, sizeof(buf), "%s", cfg->name.c_str());
-    if (ImGui::InputText("Name", buf, sizeof(buf),
+    LeftLabel("Name");
+    if (ImGui::InputText("###cfg_name", buf, sizeof(buf),
                          ImGuiInputTextFlags_EnterReturnsTrue)) {
       std::string newName = buf;
       ModifyActiveConfig(state, "Rename configuration",
@@ -113,7 +117,9 @@ void DrawConfigurationsPanel(AppState& state) {
   // Parameter overrides: one row per variable, an editable override cell
   // (empty = inherit the base). Committing sets/clears the override.
   ImGui::Spacing();
-  ImGui::TextUnformatted("Overrides (blank = base value)");
+  // Wrapped, not clipped: this sentence is the only thing that says what a
+  // blank cell means.
+  ImGui::TextWrapped("Overrides (blank = base value)");
   if (ImGui::BeginTable("cfg_overrides", 3,
                         ImGuiTableFlags_SizingStretchProp |
                             ImGuiTableFlags_BordersInnerH)) {
@@ -171,7 +177,7 @@ void DrawConfigurationsPanel(AppState& state) {
     ImGui::EndTable();
   }
   if (doc.GetParameters().empty() && state.projectParameters.empty())
-    ImGui::TextDisabled("No variables to override — add some in Variables.");
+    ImGui::TextWrapped("No variables to override — add some in Variables.");
 
   // Feature suppression: a checkbox per feature.
   ImGui::Spacing();

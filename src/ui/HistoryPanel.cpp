@@ -1,4 +1,5 @@
 #include "ui/HistoryPanel.h"
+#include "ui/PanelTitles.h"
 
 #include "common/Logger.h"
 #include "core/io/GitVault.h"
@@ -272,7 +273,7 @@ void DrawHistoryPanel(AppState& state) {
   // A secondary tab must not steal the shared dock node when it first
   // appears (see the Variables panel).
   const bool visible =
-      ImGui::Begin("History", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+      ImGui::Begin(kPanelHistory, nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
   if (!visible) {
     // Behind another tab (or collapsed). ImGui would skip the widgets anyway,
     // but RefreshHistory would not: it spawns `git` twice a second for a

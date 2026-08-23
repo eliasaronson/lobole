@@ -1,4 +1,5 @@
 #include "ui/FeatureTreePanel.h"
+#include "ui/PanelTitles.h"
 
 #include "cad/CADMaterials.h"
 #include "core/Command.h"
@@ -152,7 +153,7 @@ void RollbackBar(bool& dragging) {
 } // namespace
 
 void DrawFeatureTreePanel(AppState& state) {
-  ImGui::Begin("Model");
+  ImGui::Begin(kPanelModel);
 
   Document* doc = state.document.get();
   if (doc) {

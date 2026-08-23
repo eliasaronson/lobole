@@ -1,4 +1,6 @@
 #include "ui/AppActions.h"
+#include "ui/PanelLayout.h"
+#include "ui/PanelTitles.h"
 
 #include "imgui.h"
 
@@ -493,7 +495,11 @@ namespace {
 bool TitleField(AppState& state, const char* label, std::string& value) {
   char buf[256];
   std::snprintf(buf, sizeof(buf), "%s", value.c_str());
-  const bool changed = ImGui::InputText(label, buf, sizeof(buf));
+  // Label LEFT and the field filling the row: ImGui's default puts the label
+  // where the 210 px dock clips it, which is how "Document" became "Docume".
+  LeftLabel(label);
+  const std::string id = std::string("###dwg_title_") + label;
+  const bool changed = ImGui::InputText(id.c_str(), buf, sizeof(buf));
   if (ImGui::IsItemActivated())
     SnapshotDrawing(state);
   if (changed)
@@ -550,16 +556,18 @@ void DrawViewsSection(AppState& state) {
   } else {
     if (srcIdx >= static_cast<int>(partSlots.size()))
       srcIdx = 0;
-    if (ImGui::BeginCombo("Source###dwg_source",
-                          partSlots[srcIdx]->name.c_str())) {
+    LeftLabel("Source");
+    if (ImGui::BeginCombo("###dwg_source", partSlots[srcIdx]->name.c_str())) {
       for (int i = 0; i < static_cast<int>(partSlots.size()); ++i)
         if (ImGui::Selectable(partSlots[i]->name.c_str(), i == srcIdx))
           srcIdx = i;
       ImGui::EndCombo();
     }
-    ImGui::Combo("Orientation###dwg_orientation", &orientIdx, kOrientLabels,
+    LeftLabel("Orientation");
+    ImGui::Combo("###dwg_orientation", &orientIdx, kOrientLabels,
                  IM_ARRAYSIZE(kOrientLabels));
-    ImGui::InputFloat("Scale###dwg_scale", &addScale, 0.0f, 0.0f, "%.3f");
+    LeftLabel("Scale");
+    ImGui::InputFloat("###dwg_scale", &addScale, 0.0f, 0.0f, "%.3f");
     if (ImGui::Button("Add view###dwg_add_view")) {
       DrawingView v;
       v.name = std::string(kOrientLabels[orientIdx]);
@@ -662,7 +670,7 @@ void DrawSheetPanel(AppState& state) {
   // Docks into the left "Model" node (the DockLayout slot the feature tree and
   // occurrence panel also use), so a drawing tab reserves the same panel space
   // instead of floating over the sheet.
-  ImGui::Begin("Model");
+  ImGui::Begin(kPanelModel);
 
   Sheet& sheet = state.drawing->GetSheet();
 
@@ -670,7 +678,8 @@ void DrawSheetPanel(AppState& state) {
   ImGui::Separator();
 
   int sizeIdx = static_cast<int>(sheet.size);
-  if (ImGui::Combo("Size###dwg_sheet_size", &sizeIdx, kSizeLabels,
+  LeftLabel("Sheet size");
+  if (ImGui::Combo("###dwg_sheet_size", &sizeIdx, kSizeLabels,
                    IM_ARRAYSIZE(kSizeLabels))) {
     SnapshotDrawing(state);
     sheet.size = static_cast<SheetSize>(sizeIdx);
