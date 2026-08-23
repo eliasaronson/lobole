@@ -93,8 +93,104 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"project_changed_on_disk",
      "Has anything else written to the project since it was opened or last "
      "saved? (a terminal command, another editor, a second instance)"},
+    {"create_folder",
+     "Create a bottom-tab-bar folder {folder}, empty. Display grouping only "
+     "— ids, references and storage are unaffected. Idempotent."},
+    {"move_to_folder",
+     "Put tabs in a folder: {part, folder}. `part` is a name/id/index or an "
+     "ARRAY of them (parts, assemblies and drawings alike); folder \"\" "
+     "moves them back to the top level. The folder must already exist, so a "
+     "typo is an error instead of a new folder."},
+    {"rename_folder", "Rename folder {folder} to {new_name}, members and "
+                      "all. Renaming onto an existing folder MERGES them "
+                      "(reported as merged:true)."},
+    {"dissolve_folder",
+     "Remove folder {folder}; its tabs return to the top level. Documents "
+     "are never deleted with their folder — see delete_part for that."},
 };
 std::span<const MethodDoc> ProjectMethodDocs() { return ProjectMethods; }
+
+size_t ResolveSlotIndex(ui::AppState& state, const json& sel) {
+  ui::EnsureParts(state);
+  const auto byId = [&](uint64_t v) -> int {
+    for (size_t i = 0; i < state.parts.size(); i++)
+      if (state.parts[i].id == v)
+        return static_cast<int>(i);
+    // A stable id wins over a slot index, so echoing list_parts' `id` back
+    // can never silently address a different tab.
+    return v < state.parts.size() ? static_cast<int>(v) : -1;
+  };
+  int slot = -1;
+  if (sel.is_number_integer() || sel.is_number_unsigned()) {
+    slot = byId(sel.get<uint64_t>());
+  } else if (sel.is_string()) {
+    const std::string s = sel.get<std::string>();
+    for (size_t i = 0; i < state.parts.size(); i++)
+      if (state.parts[i].name == s) {
+        slot = static_cast<int>(i);
+        break;
+      }
+    if (slot < 0) {
+      try { // numeric string: stable id, then slot index
+        slot = byId(std::stoull(s));
+      } catch (...) {
+      }
+    }
+  }
+  if (slot < 0) {
+    std::vector<std::string> names;
+    for (const ui::PartSlot& ps : state.parts)
+      names.push_back(ps.name);
+    // "part" is this API's word for a tab of any kind (list_parts returns
+    // assemblies and drawings too), so the wording stays with it.
+    throw std::runtime_error("no part " + sel.dump() +
+                             " — pass a name, stable id or slot index; "
+                             "list_parts shows every tab. Existing: " +
+                             KnownList(names));
+  }
+  return static_cast<size_t>(slot);
+}
+
+namespace {
+
+// The tab-bar folder registry as JSON, appended to every folder RPC's reply.
+// A caller that just changed the set should not have to ask what it is now.
+json FolderList(const ui::AppState& state) {
+  json arr = json::array();
+  for (const std::string& f : state.tabFolders)
+    arr.push_back(f);
+  return arr;
+}
+
+bool FolderExists(const ui::AppState& state, const std::string& folder) {
+  if (std::find(state.tabFolders.begin(), state.tabFolders.end(), folder) !=
+      state.tabFolders.end())
+    return true;
+  // A folder can also exist only as membership — an older project, or a
+  // registry entry dropped by a merge. Treat that as existing rather than
+  // telling someone a folder they can see is not there.
+  for (const ui::PartSlot& ps : state.parts)
+    if (ps.folder == folder)
+      return true;
+  return false;
+}
+
+// Non-empty, and it exists. The error names what there is, because "no such
+// folder" without the list costs a round-trip to find a typo.
+void RequireFolder(const ui::AppState& state, const std::string& folder,
+                   const char* what) {
+  if (folder.empty())
+    throw std::runtime_error(std::string(what) + " must be a folder name");
+  if (!FolderExists(state, folder)) {
+    std::vector<std::string> known(state.tabFolders.begin(),
+                                   state.tabFolders.end());
+    throw std::runtime_error("no folder \"" + folder +
+                             "\" — existing: " + KnownList(known) +
+                             " (create_folder makes a new one)");
+  }
+}
+
+} // namespace
 
 std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
@@ -680,6 +776,77 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (!MeshExport::SaveVisual(path, items, p.value("deflection", 0.1), &err))
       throw std::runtime_error(err);
     return json{{"path", path}, {"items", items.size()}};
+  }
+  if (m == "create_folder") {
+    const std::string folder = p.at("folder").get<std::string>();
+    if (folder.empty())
+      throw std::runtime_error("folder must be a non-empty name");
+    const bool existed = FolderExists(state, folder);
+    ui::CreateFolder(state, folder);
+    return json{{"folder", folder},
+                {"created", !existed},
+                {"folders", FolderList(state)}};
+  }
+  if (m == "move_to_folder") {
+    // "" is the one legal empty folder: it means the top level, which is
+    // how a tab gets OUT of a folder without a second verb.
+    const std::string folder = p.at("folder").get<std::string>();
+    if (!folder.empty())
+      RequireFolder(state, folder, "folder");
+    const json& sel = p.at("part");
+    // One tab or many: a 100-part STEP import is the case that needs this,
+    // and one call per tab would be the whole reason to skip organising it.
+    std::vector<json> targets;
+    if (sel.is_array())
+      targets.assign(sel.begin(), sel.end());
+    else
+      targets.push_back(sel);
+    if (targets.empty())
+      throw std::runtime_error("part must name at least one tab");
+    // Resolve EVERY tab before moving any: a half-applied move over a typo
+    // in the tenth name is a mess to unpick by hand.
+    std::vector<size_t> slots;
+    for (const json& one : targets)
+      slots.push_back(ResolveSlotIndex(state, one));
+    json moved = json::array();
+    for (size_t slot : slots) {
+      ui::MoveToFolder(state, slot, folder);
+      moved.push_back({{"index", slot},
+                       {"name", state.parts[slot].name},
+                       {"id", state.parts[slot].id}});
+    }
+    return json{
+        {"folder", folder}, {"moved", moved}, {"folders", FolderList(state)}};
+  }
+  if (m == "rename_folder") {
+    const std::string from = p.at("folder").get<std::string>();
+    RequireFolder(state, from, "folder");
+    const std::string to = p.at("new_name").get<std::string>();
+    if (to.empty())
+      throw std::runtime_error("new_name must be a non-empty folder name");
+    // Renaming onto an existing folder merges the two. That is the GUI's
+    // behavior and a reasonable one, but it is not what "rename" implies —
+    // so say which of the two happened.
+    const bool merged = to != from && FolderExists(state, to);
+    ui::RenameFolder(state, from, to);
+    return json{{"folder", to},
+                {"renamed_from", from},
+                {"merged", merged},
+                {"folders", FolderList(state)}};
+  }
+  if (m == "dissolve_folder") {
+    const std::string folder = p.at("folder").get<std::string>();
+    RequireFolder(state, folder, "folder");
+    json freed = json::array();
+    for (size_t i = 0; i < state.parts.size(); i++)
+      if (state.parts[i].folder == folder)
+        freed.push_back({{"index", i},
+                         {"name", state.parts[i].name},
+                         {"id", state.parts[i].id}});
+    ui::DissolveFolder(state, folder);
+    return json{{"folder", folder},
+                {"moved_to_top_level", freed},
+                {"folders", FolderList(state)}};
   }
   if (m == "import_step") {
     if (p.value("as_assembly", false)) {

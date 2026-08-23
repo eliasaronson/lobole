@@ -678,6 +678,9 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
 static const std::set<std::string> kNoPartDoc = {
     "describe", "ping", "list_parts", "add_part", "add_assembly",
     "set_active_part", "delete_part", "rename_part",
+    // Tab-bar folders group tabs of every kind, so they must work from an
+    // assembly or drawing tab as readily as from a part.
+    "create_folder", "move_to_folder", "rename_folder", "dissolve_folder",
     // Configuration RPCs target the active tab: part-doc handling above,
     // assembly handling below. Listed here so they are allowed on an
     // assembly tab (where doc is null).
@@ -1144,43 +1147,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // isn't permanent — it feeds BOM + add_occurrence. Occurrences reference
     // parts by stable id, so a name change never breaks a reference. `part`
     // resolves by name, stable id, or slot index. params: {part, new_name}
-    ui::EnsureParts(state);
-    const json& sel = p.at("part");
-    int slot = -1;
-    if (sel.is_number_integer() || sel.is_number_unsigned()) {
-      const uint64_t v = sel.get<uint64_t>();
-      for (size_t i = 0; i < state.parts.size(); i++)
-        if (state.parts[i].id == v) {
-          slot = static_cast<int>(i);
-          break;
-        }
-      if (slot < 0 && v < state.parts.size())
-        slot = static_cast<int>(v);
-    } else if (sel.is_string()) {
-      const std::string s = sel.get<std::string>();
-      for (size_t i = 0; i < state.parts.size(); i++)
-        if (state.parts[i].name == s) {
-          slot = static_cast<int>(i);
-          break;
-        }
-      if (slot < 0) {
-        try { // numeric string: stable id, then slot index
-          const uint64_t v = std::stoull(s);
-          for (size_t i = 0; i < state.parts.size(); i++)
-            if (state.parts[i].id == v) {
-              slot = static_cast<int>(i);
-              break;
-            }
-          if (slot < 0 && v < state.parts.size())
-            slot = static_cast<int>(v);
-        } catch (...) {
-        }
-      }
-    }
-    if (slot < 0)
-      throw std::runtime_error("no part '" + sel.dump() +
-                               "' — pass a part name, stable id or slot index "
-                               "(see list_parts)");
+    const size_t slot = remote::ResolveSlotIndex(state, p.at("part"));
     const std::string newName = p.at("new_name").get<std::string>();
     if (newName.empty())
       throw std::runtime_error("new_name must be non-empty");

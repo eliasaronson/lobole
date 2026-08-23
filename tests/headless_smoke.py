@@ -545,6 +545,72 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Tab folders")
+        # Folders are display grouping for the bottom tab bar — the thing a
+        # 100-part STEP import needs so it is one flyout, not 100 tabs. They
+        # group tabs of EVERY kind, and they survive a save/reload: a folder
+        # that evaporates on open is worse than no folder.
+        d.call("new_project")
+        d.call("add_part", name="Bolt")
+        d.call("add_part", name="Nut")
+        d.call("add_assembly", name="Rig")
+        d.call("create_folder", folder="Fasteners")
+        r = d.call("create_folder", folder="Fasteners")
+        expect(r["created"] is False and r["folders"] == ["Fasteners"],
+               f"create_folder is idempotent: {r}")
+        r = d.call("move_to_folder", part=["Bolt", "Nut"], folder="Fasteners")
+        expect([m["name"] for m in r["moved"]] == ["Bolt", "Nut"],
+               f"both tabs moved in one call: {r}")
+        # A typo must be an error, not a second folder one letter apart.
+        expect_error(d, "move_to_folder", "no folder",
+                     part="Rig", folder="Fastners")
+        # ...and nothing moved: the whole call is resolved before any of it
+        # is applied.
+        expect_error(d, "move_to_folder", "no part",
+                     part=["Bolt", "ghost"], folder="Fasteners")
+        folders = {p["name"]: p.get("folder", "")
+                   for p in d.call("list_parts")["parts"]}
+        expect(folders["Bolt"] == "Fasteners" and folders["Rig"] == "",
+               f"failed move changed nothing: {folders}")
+        # An assembly or a drawing tab goes in a folder like any other —
+        # folders group tabs, not parts.
+        d.call("create_drawing", name="Sheet")
+        d.call("move_to_folder", part=["Rig", "Sheet"], folder="Fasteners")
+
+        # Survives the round trip.
+        fproj = os.path.join(tmp, "folders.dsgn")
+        d.call("save_project", path=fproj)
+        d.call("new_project")
+        d.call("open_project", path=fproj)
+        back = d.call("list_parts")
+        expect(back["folders"] == ["Fasteners"], f"folder reloaded: {back}")
+        expect(all(p.get("folder") == "Fasteners"
+                   for p in back["parts"] if p["name"] != "Part 1"),
+               f"membership reloaded: {back}")
+
+        r = d.call("rename_folder", folder="Fasteners", new_name="Hardware")
+        expect(r["merged"] is False and r["folders"] == ["Hardware"],
+               f"rename_folder: {r}")
+        # Renaming ONTO an existing folder merges — reported, because that is
+        # not what "rename" implies.
+        d.call("create_folder", folder="Spares")
+        d.call("move_to_folder", part="Nut", folder="Spares")
+        r = d.call("rename_folder", folder="Spares", new_name="Hardware")
+        expect(r["merged"] is True and r["folders"] == ["Hardware"],
+               f"rename onto an existing folder merges: {r}")
+        # "" is how a tab leaves a folder.
+        d.call("move_to_folder", part="Bolt", folder="")
+        expect(d.call("list_parts")["parts"][1].get("folder", "") == "",
+               "moved back to the top level")
+        # Dissolving frees its tabs; it never deletes documents.
+        r = d.call("dissolve_folder", folder="Hardware")
+        expect([m["name"] for m in r["moved_to_top_level"]]
+               == ["Nut", "Rig", "Sheet"], f"dissolve frees its tabs: {r}")
+        after = d.call("list_parts")
+        expect("folders" not in after, f"no folders left: {after}")
+        expect(len(after["parts"]) == 5, f"documents survive: {after}")
+        expect_error(d, "dissolve_folder", "no folder", folder="Hardware")
+
         phase("Project-wide variables")
         # Project-wide variables (Phase V): ONE variable drives geometry in two
         # parts; editing it changes both; a part-scoped var shadows it locally;

@@ -8,7 +8,9 @@
 > (index/error/warning) so read-modify-write of a get_state feature entry
 > stays legal; and render_sheet's footer font is a hand-authored 5x7
 > bitmap (ASCII-art glyph table in RenderSheet.cpp) rather than anything
-> clever. Tests: contact_smoke, strict_inputs_smoke, compare_smoke,
+> clever. **V4's `materialize` was the one piece not built that day; it
+> shipped 2026-08-23** — see the V4 section below.
+> Tests: contact_smoke, strict_inputs_smoke, compare_smoke,
 > papercuts_smoke, a render_sheet phase in remote_smoke, ContactBetween
 > cases in test_measure.cpp; build_dock.py now gates on
 > touching/clearance/connectivity and is the standing acceptance script.

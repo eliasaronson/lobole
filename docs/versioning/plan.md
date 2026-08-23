@@ -1,6 +1,6 @@
 # Versioning — file format, autosave, checkpoints, git — plan
 
-> **Status 2026-08-20.** F1 format spec + golden corpus, F2 autosave/recovery,
+> **Status 2026-08-23 — this workstream is v1-COMPLETE.** F1 format spec + golden corpus, F2 autosave/recovery,
 > F3 diffable directory format, F4 checkpoints + rollback bar are shipped; F5
 > shipped git as an *engine* only, and the 2026-07-14 banner here read that as
 > "v1 complete" for four weeks while the app had no way to show a history.
@@ -12,11 +12,17 @@
 > noticed the project changing on disk, so a `git` command in the app's own
 > terminal was overwritten by the next Ctrl+S. [F9](f9-collaboration.md)
 > **shipped the same day**: what a small team who already use git needed on
-> top — F7 had built the expensive half without meaning to. Later work: **insert-feature-at-marker**
-> (F4 v2). Nothing here blocks other
-> workstreams. `kVersion` is now 28 (see [format.md](format.md) for the full
+> top — F7 had built the expensive half without meaning to. A real-GitHub
+> dogfooding round then drove [F10](f10-autosave-the-project.md) (autosave
+> saved the open TAB, not the project) and [F11](f11-seeing-what-changed.md)
+> (sixty log rows all saying `save`), **both shipped 2026-08-22**; F11's last
+> layer — the geometry delta drawn red/green ON the part — landed 2026-08-23.
+> **Everything planned here is now built.** Deferred by choice, not blocked:
+> **insert-feature-at-marker** (F4 v2), and the History panel's row
+> truncation in the default 210 px dock. Nothing here blocks other
+> workstreams. `kVersion` is now 60 (see [format.md](format.md) for the full
 > history — the number has moved well past this doc's original snapshot as
-> later workstreams added features/assemblies/units).
+> later workstreams added features/assemblies/units/CAM).
 
 Goals 1 + 4 of the [roadmap](../roadmap.md): named checkpoints in the model's
 history, and models stored in a diffable, mergeable text format under git.
@@ -178,7 +184,7 @@ is **one atomic file per dirty document** under a sidecar directory — every
 file stays complete-or-absent, unchanged documents stop being rewritten, and
 no new format is invented. **~1 day.**
 
-### F11 — Seeing what changed — **shipped 2026-08-22** — [design: f11-seeing-what-changed.md](f11-seeing-what-changed.md)
+### F11 — Seeing what changed — **shipped 2026-08-22, layer 4 on 2026-08-23** — [design: f11-seeing-what-changed.md](f11-seeing-what-changed.md)
 The version system works and is invisible: after a day the panel is sixty rows
 saying `save`, and F9 sharpened it — pull a teammate's work and there is no way
 to see what arrived. **G1** gives every row what it touched, in the tabs' own
@@ -191,7 +197,11 @@ cleanup: `ProjectMerge::Scan` walks the tree and spawns `git` every second on a
 clean project. **G3, G1, G2 — all shipped**, in that order. G3 is measured: 0 scans over 60
 clean frames, where it had been one per second. Clicking a version shows what
 changed since it, against the working tree, so the everyday question needs no
-second pick.
+second pick. **Layer 3** boolean-diffs the part against a version
+(`CompareVersionGeometry`), and **layer 4** (2026-08-23) draws that diff *on*
+the part — red where material went away, green where it arrived — which is
+V4's `materialize`, finally built. A volume answers "how much"; only a shape
+answers "where".
 
 ## Recommended order
 
