@@ -62,6 +62,10 @@ struct TopoResult {
   bool converged = false; // true if it hit changeTol before the cap
   bool cancelled = false; // true if the progress callback stopped it
   double volumeFractionAchieved = 0.0;
+  // Empty when the injected solver carried the whole run. Otherwise: why it
+  // was dropped mid-run for the built-in path. A caller that names its solver
+  // in the UI must say so, or it reports a GPU run that the CPU finished.
+  std::string solverFallback;
 };
 
 // ---- Pluggable linear solver (the GPU seam) -------------------------------

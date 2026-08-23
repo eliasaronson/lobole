@@ -165,6 +165,21 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
   const auto t0 = std::chrono::steady_clock::now();
   if (!im.cg->Solve(im.fF, im.xF, tol, maxIter, &stats, error))
     return false;
+  // A capped or floored solve is fine — SIMP reacts to energies, not to the
+  // last digit of u, and the comment above is why the cap exists. A solve
+  // that made NO progress is a different thing: the returned "best iterate"
+  // is then the initial guess, and on the first (cold) solve that is a field
+  // of zeros, which reads downstream as a structure carrying no load at all.
+  // fp32 CG does this on ill-conditioned systems — a slender bending part
+  // defeats both the Jacobi and the multigrid preconditioner — so say so and
+  // let the caller fall back to the CPU oracle instead of returning zeros.
+  if (!stats.converged && stats.relResidual >= 0.99f) {
+    if (error)
+      *error = "GPU CG made no progress (relative residual " +
+               std::to_string(stats.relResidual) + " after " +
+               std::to_string(stats.iterations) + " iterations)";
+    return false;
+  }
   im.haveWarmStart = true;
   // FEMGPU_SOLVE_TRACE=1: one stderr line per SIMP linear solve.
   if (std::getenv("FEMGPU_SOLVE_TRACE"))

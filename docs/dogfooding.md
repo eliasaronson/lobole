@@ -19,6 +19,162 @@ and the scripting interface fail in different places, and only the dock round
 
 ---
 
+## 2026-08-23 (c) — a stress analysis and an optimized shape, by clicking
+
+**Why here:** the same countable gap, three rounds running. Of 185 GUI tests,
+four touched simulation and all four stopped at *setup* (a gravity checkbox, a
+force direction); none ran a study or read a result. Topology optimization
+(workstream 15, v1 + GPU0–GPU4) had **zero**. Both are modules whose output a
+person acts on without being able to check it by eye, which is what made the
+drawings round worth doing.
+
+The object: a steel cantilever, 200 x 10 x 20 mm — three different dimensions,
+so an axis mix-up cannot hide — fixed at one end, 100 N on the other. Beam
+theory gives the answer in closed form, so every number the app printed had
+something to be checked against.
+
+### The solver is right, and it is right to four digits
+
+Worth stating first, because the rest of this round is defects. Tip load 100 N
+on the end face: **0.7921 mm** measured against 0.800 mm from `FL^3/3EI`
+(-1.0%), peak von Mises **56.86 MPa** where beam theory at that node says
+56.83. Distributed over the top face instead: **0.29612 mm** against 0.300,
+and **27.10 MPa** where the theory at the sampled node is 26.91 (+0.7%). The
+field plot is a clean linear ramp from the clamp to the tip. The FEM core does
+not need work; everything below is the panel and the GPU path around it.
+
+### Topology optimization returned a confident wrong answer
+
+Same study, switched to Topology, defaults otherwise. It reported:
+
+```
+Iterations: 3 (converged)
+Volume fraction: 0.107        <- the target was 0.30
+Compliance: 0 -> 0            <- a loaded structure has compliance > 0
+```
+
+Every number in that block is wrong, and none of them is flagged. The same
+study solved on the CPU path (`DESIGNER_TOPO_GPU=0`) gives 60 iterations,
+compliance 4503.5, volume fraction 0.3000000. The GPU path is the DEFAULT on
+any machine with a usable device — including the one this app is developed on.
+
+The chain, from the bottom:
+
+1. The fp32 GPU CG **makes no progress at all** on this system. Traced:
+   `rel res 1.00e+00` after 128 iterations, with both the multigrid and the
+   Jacobi preconditioner (2048 iterations there, same result). A relative
+   residual of exactly 1.0 means x never left its initial guess. Per-iteration
+   scalars show the residual *growing* — 1848, 2265, 5402, 13074, 28395 — which
+   is fp32 CG breaking down on an ill-conditioned system. A slender bending
+   problem is exactly that; the femgpu gate's mesh is a chunky 100x40x40 box,
+   which is why it never saw this.
+2. `TopoCgSolver` **detects it** — the stall/restart machinery gives up after
+   two restarts with no gain and honestly returns `converged = false` with the
+   best iterate it has, which on a cold solve is a vector of zeros.
+3. `TopoGpuSolver::Solve` **threw that away**: it returned `true` and the
+   zeros, ignoring `stats.converged`. (A *floored* solve is deliberately
+   accepted — SIMP reacts to energies, not to the last digit of u — but a
+   solve that made no progress is not a floored solve, it is no solve.)
+4. `TopologyOptimize` accepted a zero displacement field: `u.allFinite()` is
+   true for zeros. Compliance `F.dot(u)` = 0, every sensitivity 0, the OC
+   update with nothing to react to walks the densities down to the bound, the
+   max density change falls under `changeTol` on iteration 3, and the loop
+   reports **converged**.
+
+Fixed at (3) and (4): a no-progress solve now fails with its residual in the
+message, and `TopologyOptimize` **drops the external solver and finishes on
+the built-in CPU path** — which its own header already called "the fallback
+and the correctness oracle", a role nothing had implemented. The result names
+the solver that actually did the work: `cpu (gpu: NVIDIA GeForce RTX 4060
+Laptop GPU failed: GPU CG made no progress (relative residual 1.000000 after
+128 iterations))`. Wrong-and-fast became slower-and-right.
+
+Gated by `femgpu: a slender cantilever solves on the GPU (GATE)`, which
+reproduces the failure deterministically on a 20x1x2-cell beam and passes
+either way — the GPU solving it, or saying it could not and the CPU finishing.
+**Not fixed: the fp32 numerics themselves.** Making the GPU path solve slender
+bending is its own project (fp64 sections, or a preconditioner that survives
+the conditioning); this round makes the failure visible and harmless.
+
+### The panel could not be clicked, and that is why none of this was known
+
+Every defect above sat behind a panel that no test could drive:
+
+- **`Run` is unreachable by name.** A widget scrolled out of a panel reports an
+  EMPTY label to `ui_items` — it is still listed, with its position and its
+  numeric id, but nameless — and arming any BC tool adds two rows, which is
+  enough to push Run below the fold. There is no RPC that scrolls a panel
+  (the dock round's open P5), so nothing could bring it back into view.
+- **The Analysis combo had no `###id`**, so it gathered with an empty label
+  (the drawings-round rule, in a second panel). It is the ONLY way to reach a
+  topology study from the GUI — which is the whole explanation for workstream
+  15 having no clicked coverage.
+- **Study rows, load rows and keep-face rows sat in `PushID(int)` scopes** —
+  the configurations-round rule, in a third panel.
+
+All of them carry stable ids now, and `//###Model/###study_analysis` clicks a
+combo that is scrolled off the top of the panel: `ItemInfo` resolves a path by
+hash and never consults the label. Both rules are in `docs/ui/gui-coverage.md`.
+
+### Three more the round found
+
+- **Clicking Run froze the whole app.** The static path called the blocking
+  `RunStudyAndCache` straight from the draw, while the topology path next door
+  ran on a worker thread with a progress bar and a Cancel — and the `run_study`
+  RPC has an async mode too. So the same action, done by clicking, behaved
+  worse than done by scripting, on a panel where the wait is measured in
+  seconds to minutes. Both Run buttons (panel and toolbar) go through
+  `StartStudyRun` / `StartTopologyRun` now, and the panel says `Solving... 4s`.
+- **Two controls could not be clicked at any width the panel ships at.**
+  `SameLine()` does not wrap, so the third item of a row drew past the panel
+  edge: the **Pressure** boundary condition and the **Displacement** result
+  field, gone. `ui::WrapRow` breaks the line when one will not fit.
+- **The labels were clipped**, the exact defect commit 7e6a426 had just fixed
+  everywhere else — "Analysi", "Mesh s", "Magn", "Direct". `LeftLabel` existed
+  and this panel had not been converted. Hovering anything then scrolled the
+  panel sideways, because the overflow made it horizontally scrollable.
+- **A stale legend.** Switching a study from Static to Topology left the von
+  Mises colorbar on screen reading `0 MPa` — a legend for a field the study
+  does not have. The displayed field resets with the analysis type now, and
+  the legend refuses to draw one that does not belong to the study.
+
+### Two refusals that were right, and one that could not be acted on
+
+Running topology on the auto mesh refuses with "volume fraction target is
+below the frozen support/load volume". That is correct — the elements touching
+a support or load face are frozen solid — but the message named no number, and
+on a part meshed one element thick the frozen skin is **100% of the part**, so
+the advice it implied (raise the target) was impossible. It now says which it
+is: below 85% it names the fraction and the target that would work; at or
+above, it says the mesh is too coarse to carry a shape at all. A topology
+result under 2000 elements also carries a warning now, because a coarse mesh
+returns a coarse design and that looks like a bad optimizer rather than a
+setting.
+
+### New gates
+
+- `sim/a_static_run_matches_beam_theory` — builds the cantilever by clicking,
+  places both boundary conditions by clicking faces in the viewport, runs, and
+  checks the displacement and stress against Euler-Bernoulli.
+- `sim/topology_holds_its_volume_target` — the same by clicking, switched to
+  Topology through the combo that had no id, and checks the two things a zero
+  displacement field destroys: the volume constraint and a compliance > 0.
+- `femgpu: a slender cantilever solves on the GPU (GATE)` — the deterministic
+  reproduction, at the solver level.
+
+### Still open
+
+- The fp32 GPU CG cannot solve slender bending problems. It falls back now, so
+  it is a performance limit rather than a correctness one.
+- The auto mesh size is chosen for a stress field and is far too coarse for a
+  topology design; the warning says so rather than the sizing being fixed.
+- `describe` still lists no parameter schema per method (the dock round's P4).
+  Third agent to reach for `describe {method: ...}` and find it absent.
+- The box tool's own dimension fields have no ids, so a test still has to set
+  a primitive's size through the command layer.
+
+---
+
 ## 2026-08-23 (b) — a parametric family, by clicking
 
 **Why here:** the same countable gap the drawings round used. Configurations

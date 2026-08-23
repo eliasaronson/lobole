@@ -521,6 +521,60 @@ TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
   CHECK(meanDiff < 0.15);
 }
 
+// A dogfooding round (2026-08-23) ran the FIRST thing anyone would try —
+// a steel cantilever, fixed at one end, 100 N on the other — and the GPU
+// solver returned a ZERO displacement field: compliance 0, every sensitivity
+// 0, the volume constraint abandoned (0.107 against a 0.30 target), and the
+// SIMP loop stopping after 3 iterations reporting "converged". The CPU path
+// on the same study was exact. The gate above missed it because its mesh is
+// a CHUNKY box (100x40x40, 10x4x4 cells); the failure needs a SLENDER one,
+// which is what a beam-shaped part meshes to.
+TEST_CASE("femgpu: a slender cantilever solves on the GPU (GATE)",
+          "[femgpu][cg]") {
+  std::string gerr;
+  auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
+  if (!solver)
+    SKIP("no usable compute device: " << gerr);
+  INFO("device: " << solver->DeviceName());
+
+  // 200 x 10 x 20 mm, the proportions of a real beam coupon.
+  fem::FemMesh mesh = GenerateBoxMesh(20, 1, 2, 200.0, 10.0, 20.0);
+  fem::Material steel{200000.0, 0.3};
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, 200.0, 1e-6);
+  load.magnitude = 100.0;
+  load.direction = glm::dvec3(0, -1, 0);
+  fem::TopoParams params;
+  params.maxIterations = 10;
+
+  std::string err;
+  auto cpuRes = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
+  REQUIRE(cpuRes.has_value());
+  auto gpuRes = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                      {}, {}, solver.get());
+  INFO(err);
+  REQUIRE(gpuRes.has_value());
+  INFO("cpu compliance " << cpuRes->complianceHistory.back() << " vf "
+                         << cpuRes->volumeFractionAchieved << " ("
+                         << cpuRes->iterations << " it), gpu "
+                         << gpuRes->complianceHistory.back() << " vf "
+                         << gpuRes->volumeFractionAchieved << " ("
+                         << gpuRes->iterations << " it)");
+  // Either the GPU solves it or it says it could not and the CPU finishes the
+  // run; both are pass. Returning zeros and calling them an answer is not.
+  INFO("solver fallback: '" << gpuRes->solverFallback << "'");
+  // A structure carrying a load has compliance > 0. Zero means the linear
+  // solve never moved off its zero initial guess.
+  CHECK(gpuRes->complianceHistory.back() > 0.0);
+  // The volume constraint is enforced by the OC bisection every iteration,
+  // so it holds whatever the compliance does — unless the sensitivities are
+  // all zero, which is exactly what a zero displacement field produces.
+  CHECK_THAT(gpuRes->volumeFractionAchieved,
+             WithinAbs(params.volumeFraction, 0.01));
+}
+
 TEST_CASE("femgpu bench: GPU CG vs CPU CG-IC on the bulky cube",
           "[.][gpubench]") {
   // Mirror of [topobench] (12x12x12 cube, 10368 tets): three SIMP-like solves

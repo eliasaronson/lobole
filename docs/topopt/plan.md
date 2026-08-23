@@ -395,3 +395,35 @@ risk for a day's work; 1 before 2 so the loop is testable synchronously
 before threading exists; display after the headless loop per the
 headless-core rule; export/ghost last because they consume the extraction
 built in 3.
+
+## The GPU path's limit, and the fallback (2026-08-23)
+
+The fp32 matrix-free CG **cannot solve a slender bending problem**. Measured
+on a 200 x 10 x 20 mm cantilever: the relative residual sits at exactly 1.00
+after 128 iterations with the multigrid preconditioner and after 2048 with
+Jacobi, and the per-iteration residual GROWS (1848 -> 2265 -> 5402 -> 13074
+-> 28395) — fp32 CG breaking down on a system whose conditioning a beam's
+aspect ratio inflates. The `femgpu` gates never saw it because their mesh is a
+chunky 100x40x40 box; `femgpu: a slender cantilever solves on the GPU (GATE)`
+now covers the other shape.
+
+What made it a correctness bug rather than a performance one: `TopoCgSolver`
+reported the failure honestly (`converged = false`, best iterate = the zero
+initial guess) and `TopoGpuSolver::Solve` returned `true` anyway. A zero
+displacement field passes `allFinite`, gives compliance `F.dot(u)` = 0 and
+zero sensitivities, and the OC update then walks the densities to the bound
+and stops on `changeTol` — reporting **converged in 3 iterations at 0.107 of
+the volume against a 0.30 target**. Confident, fast, and wrong in every number.
+
+Now: a solve whose relative residual is still >= 0.99 and unconverged fails
+with that residual in its message, and `TopologyOptimize` drops the external
+solver and finishes on the built-in Eigen path — the role its own header had
+always described ("the fallback and the correctness oracle") and nothing had
+implemented. `TopoResult::solverFallback` carries the reason so the panel can
+name the solver that actually did the work rather than the one it started on.
+A *floored* solve is still accepted: SIMP reacts to element energies, not to
+the last digit of u, and that tolerance is what the iteration cap is for.
+
+**Open:** making the GPU path actually solve these systems (fp64 sections, or
+a preconditioner that survives the conditioning) is a numerics project of its
+own and is not scheduled. Until then a beam-shaped part optimizes on the CPU.

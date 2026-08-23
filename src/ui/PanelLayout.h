@@ -52,6 +52,44 @@ inline float SmallButtonReserve(const char* text) {
          style.ItemSpacing.x;
 }
 
+// Width of a Button / RadioButton with this label, ignoring the "###id" half
+// (CalcTextSize's hide-after-double-hash does that).
+inline float ButtonWidth(const char* label) {
+  return ImGui::CalcTextSize(label, nullptr, true).x +
+         ImGui::GetStyle().FramePadding.x * 2.0f;
+}
+inline float RadioWidth(const char* label) {
+  const ImGuiStyle& style = ImGui::GetStyle();
+  return ImGui::CalcTextSize(label, nullptr, true).x + ImGui::GetFrameHeight() +
+         style.ItemInnerSpacing.x;
+}
+
+// A row of buttons that WRAPS at the panel edge instead of running past it.
+// ImGui::SameLine() never wraps, so three buttons in a 210 px dock drew the
+// third one outside the panel, where it cannot be clicked or even seen — the
+// simulation panel lost a whole boundary-condition type (Pressure) and one of
+// its two result fields (Displacement) that way.
+//
+// Usage: call Next(width) before each widget; it emits the SameLine when the
+// widget fits on the current line and starts a new one when it does not.
+class WrapRow {
+public:
+  WrapRow() : m_avail(ImGui::GetContentRegionAvail().x) {}
+  void Next(float width) {
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    if (m_x > 0.0f && m_x + spacing + width <= m_avail) {
+      ImGui::SameLine();
+      m_x += spacing + width;
+    } else {
+      m_x = width; // first on the line, or wrapped onto a fresh one
+    }
+  }
+
+private:
+  float m_avail = 0.0f;
+  float m_x = 0.0f;
+};
+
 // A labelled widget whose label sits LEFT of it and never clips. The label
 // doubles as the widget's addressable name, so pass "Orientation###dwg_
 // orientation" style ids the way the rest of the app does — the visible half

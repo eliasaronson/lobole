@@ -167,7 +167,13 @@ void PollTopologyRun(AppState& state, Document& doc) {
   if (job.result) {
     fem::StudyRuntime rt = fem::MakeTopoRuntime(job.input, *job.result);
     rt.solvedAtVersion = doc.Version();
-    rt.solver = job.solverName;
+    // Name the solver that actually did the work: TopologyOptimize drops an
+    // external solver that fails mid-run and finishes on the CPU, and a
+    // result labelled with the GPU it started on would be a lie.
+    rt.solver = job.result->solverFallback.empty()
+                    ? job.solverName
+                    : "cpu (" + job.solverName +
+                          " failed: " + job.result->solverFallback + ")";
     rt.solveSeconds = std::chrono::duration<double>(
                           std::chrono::steady_clock::now() - job.started)
                           .count();

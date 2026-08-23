@@ -914,8 +914,15 @@ void DrawSimulationToolbar(AppState& state) {
 
   if (ToolButton(ICON_FA_PLAY "###tb_sim_run", "Run study (mesh + solve)",
                  hasStudy)) {
+    // Same worker-thread paths the panel's Run uses. This called the blocking
+    // RunStudyAndCache, so the toolbar could freeze the app for the length of
+    // a solve — and on a topology study, for the length of an optimization.
+    const fem::Study* s = doc->FindStudy(sim.activeStudyId);
     std::string err;
-    if (!RunStudyAndCache(*doc, sim.activeStudyId, &err))
+    const bool ok = s && s->type == fem::AnalysisType::Topology
+                        ? StartTopologyRun(state, *doc, sim.activeStudyId, &err)
+                        : StartStudyRun(state, *doc, sim.activeStudyId, &err);
+    if (!ok)
       LOG_WARN("run study failed: {}", err);
   }
 

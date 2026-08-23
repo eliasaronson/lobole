@@ -7,7 +7,8 @@
 #include "render/Camera.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
-#include "ui/ExprInput.h" // expression-capable numeric fields
+#include "ui/ExprInput.h"   // expression-capable numeric fields
+#include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/SelectionPipeline.h" // ResolveFaceItem (BC glyphs)
 #include "ui/ViewportHandle.h"
@@ -64,7 +65,7 @@ void DrawStudyList(AppState& state) {
   SimulationState& sim = state.simulation;
 
   ImGui::SeparatorText("Studies");
-  if (ImGui::Button(ICON_FA_PLUS " Add study")) {
+  if (ImGui::Button(ICON_FA_PLUS " Add study###study_add")) {
     auto cmd = std::make_unique<AddStudyCommand>("");
     AddStudyCommand* raw = cmd.get();
     state.commands->Execute(std::move(cmd), *doc);
@@ -72,10 +73,12 @@ void DrawStudyList(AppState& state) {
   }
 
   for (const fem::Study& s : doc->GetStudies()) {
-    ImGui::PushID(static_cast<int>(s.id));
-    if (ImGui::Selectable(s.name.c_str(), sim.activeStudyId == s.id))
+    // PushID(int) leaves a row addressable only by the numeric id ui_items
+    // prints, which is why nothing had ever clicked this panel. The id goes
+    // in the label instead (docs/ui/gui-coverage.md).
+    const std::string id = s.name + "###study_sel_" + std::to_string(s.id);
+    if (ImGui::Selectable(id.c_str(), sim.activeStudyId == s.id))
       sim.activeStudyId = s.id;
-    ImGui::PopID();
   }
 }
 
@@ -104,13 +107,13 @@ void DrawMaterialCheck(AppState& state) {
     // widget addressable only by the numeric id ui_items prints, and this is
     // the control that unblocks a user's first study. One combo per body, so
     // the id carries the feature it edits.
-    const std::string comboId =
-        "Material###material_" + std::to_string(body.createdBy);
+    const std::string comboId = "###material_" + std::to_string(body.createdBy);
     ImGui::TextColored(kError,
                        ICON_FA_TRIANGLE_EXCLAMATION " %s has no "
                                                     "material",
                        body.name.c_str());
     ImGui::TextDisabled("A study needs stiffness data to solve.");
+    LeftLabel("Material");
     std::vector<const char*> labels;
     labels.reserve(types.size() + 1);
     labels.push_back("Assign a material...");
@@ -134,8 +137,10 @@ void DrawLoads(AppState& state, const fem::Study& s) {
 
   ImGui::SeparatorText("Boundary conditions");
   ImGui::TextDisabled("Arm a tool, then click a face in the viewport:");
-  auto arm = [&](const char* icon, const char* label, SimulationState::Tool t) {
+  WrapRow bcRow;
+  auto arm = [&](const char* label, SimulationState::Tool t) {
     const bool armed = sim.tool == t;
+    bcRow.Next(ButtonWidth(label));
     if (armed)
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
@@ -144,30 +149,29 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     if (armed)
       ImGui::PopStyleColor();
   };
-  arm(ICON_FA_LOCK, ICON_FA_LOCK " Fixed", SimulationState::Tool::Fixed);
-  ImGui::SameLine();
-  arm(ICON_FA_BOLT, ICON_FA_BOLT " Force", SimulationState::Tool::Force);
-  ImGui::SameLine();
-  arm(ICON_FA_DOWN_LONG, ICON_FA_DOWN_LONG " Pressure",
+  arm(ICON_FA_LOCK " Fixed###sim_bc_fixed", SimulationState::Tool::Fixed);
+  arm(ICON_FA_BOLT " Force###sim_bc_force", SimulationState::Tool::Force);
+  arm(ICON_FA_DOWN_LONG " Pressure###sim_bc_pressure",
       SimulationState::Tool::Pressure);
 
   // Pending magnitude/direction applied to the next placed force/pressure.
   if (sim.tool == SimulationState::Tool::Force ||
       sim.tool == SimulationState::Tool::Pressure) {
-    ExprInputDouble(state,
-                    sim.tool == SimulationState::Tool::Force ? "Magnitude (N)"
-                                                             : "Pressure (MPa)",
-                    &sim.pendingMagnitude, "%.1f");
+    LeftLabel(sim.tool == SimulationState::Tool::Force ? "Magnitude (N)"
+                                                       : "Pressure (MPa)");
+    ExprInputDouble(state, "###sim_magnitude", &sim.pendingMagnitude, "%.1f");
     if (sim.tool == SimulationState::Tool::Force) {
       // Off by default: the force pushes INTO whichever face is clicked, which
       // is what placing a force on a face means. A world-space vector typed
       // before the face is even picked can only be right by luck.
-      ImGui::Checkbox("Custom direction", &sim.directionOverridden);
+      ImGui::Checkbox("Custom direction###sim_custom_dir",
+                      &sim.directionOverridden);
       if (sim.directionOverridden) {
         float dir[3] = {(float)sim.pendingDirection.x,
                         (float)sim.pendingDirection.y,
                         (float)sim.pendingDirection.z};
-        if (ImGui::InputFloat3("Direction", dir))
+        LeftLabel("Direction");
+        if (ImGui::InputFloat3("###sim_direction", dir))
           sim.pendingDirection = glm::dvec3(dir[0], dir[1], dir[2]);
       } else {
         ImGui::TextDisabled("Direction: into the face you click");
@@ -180,7 +184,6 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     return;
   }
   for (const fem::Load& l : s.loads) {
-    ImGui::PushID(static_cast<int>(l.id));
     std::string line = std::string(LoadLabel(l.type)) + "  " + l.face.name;
     if (l.type != fem::LoadType::Fixed) {
       char buf[64];
@@ -198,7 +201,9 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     }
     ImGui::TextUnformatted(line.c_str());
     ImGui::SameLine();
-    if (ImGui::SmallButton(ICON_FA_TRASH)) {
+    const std::string del =
+        std::string(ICON_FA_TRASH "###load_del_") + std::to_string(l.id);
+    if (ImGui::SmallButton(del.c_str())) {
       const uint64_t loadId = l.id;
       ModifyStudy(state, s.id, "Remove load", [&](fem::Study& cs) {
         cs.loads.erase(
@@ -206,10 +211,8 @@ void DrawLoads(AppState& state, const fem::Study& s) {
                            [&](const fem::Load& x) { return x.id == loadId; }),
             cs.loads.end());
       });
-      ImGui::PopID();
       break; // list mutated; rebuild next frame
     }
-    ImGui::PopID();
   }
 }
 
@@ -238,12 +241,12 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
                 st.volumeFraction);
     ImGui::TextColored(kMuted, "%s   %.0fs", st.solver.c_str(),
                        st.elapsedSeconds);
-    if (ImGui::Button(ICON_FA_STOP " Cancel"))
+    if (ImGui::Button(ICON_FA_STOP " Cancel###topo_cancel"))
       CancelTopologyRun(state, s.id);
     return;
   }
 
-  if (ImGui::Button(ICON_FA_PLAY " Run")) {
+  if (ImGui::Button(ICON_FA_PLAY " Run###topo_run")) {
     std::string err;
     if (!StartTopologyRun(state, *doc, s.id, &err))
       LOG_WARN("topology run failed: {}", err);
@@ -270,14 +273,28 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
     elements += b.mesh.stats.tetCount;
   }
   ImGui::Text("Mesh: %zu nodes / %zu elements", nodes, elements);
+  // In a static study the mesh resolves the stress field; in a topology study
+  // it resolves the STRUCTURE — members thinner than an element cannot be
+  // found, so a coarse mesh returns a coarse shape and looks like a bad
+  // optimizer. The auto size is chosen for stress, and on a small part that
+  // is a few hundred elements, which is one to two orders below what a 3D
+  // SIMP design needs. Say it rather than let the shape speak for itself.
+  if (elements < 2000)
+    ImGui::TextColored(kStale, ICON_FA_TRIANGLE_EXCLAMATION
+                       " Coarse for a shape: set a smaller mesh size");
   ImGui::Text("Iterations: %d%s", rt->iterations,
               rt->converged   ? " (converged)"
               : rt->cancelled ? " (cancelled)"
                               : "");
   ImGui::Text("Volume fraction: %.3f", rt->volumeFractionAchieved);
-  if (!rt->solver.empty()) // transient provenance; empty on a reloaded result
+  if (!rt->solver.empty()) { // transient provenance; empty on a reload
     ImGui::TextColored(kMuted, "Solver: %s (%.0f s)", rt->solver.c_str(),
                        rt->solveSeconds);
+    // The string carries WHY a run fell back off the GPU, and that is the
+    // half a 210 px panel clips.
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", rt->solver.c_str());
+  }
   if (!rt->complianceHistory.empty()) {
     ImGui::Text("Compliance: %.4g -> %.4g", rt->complianceHistory.front(),
                 rt->complianceHistory.back());
@@ -293,23 +310,26 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   int field = sim.field == SimulationState::Field::Shape     ? 1
               : sim.field == SimulationState::Field::Density ? 2
                                                              : 0;
-  bool changed = ImGui::RadioButton("Off", &field, 0);
-  ImGui::SameLine();
-  changed |= ImGui::RadioButton("Shape", &field, 1);
-  ImGui::SameLine();
-  changed |= ImGui::RadioButton("Density", &field, 2);
+  WrapRow topoRow;
+  topoRow.Next(RadioWidth("Off"));
+  bool changed = ImGui::RadioButton("Off###topo_field_off", &field, 0);
+  topoRow.Next(RadioWidth("Shape"));
+  changed |= ImGui::RadioButton("Shape###topo_field_shape", &field, 1);
+  topoRow.Next(RadioWidth("Density"));
+  changed |= ImGui::RadioButton("Density###topo_field_density", &field, 2);
   if (changed)
     sim.field = field == 1   ? SimulationState::Field::Shape
                 : field == 2 ? SimulationState::Field::Density
                              : SimulationState::Field::None;
   float thr = sim.topoThreshold;
-  if (ImGui::SliderFloat("Threshold (0=auto)", &thr, 0.0f, 1.0f, "%.2f"))
+  LeftLabel("Threshold (0=auto)");
+  if (ImGui::SliderFloat("###topo_threshold", &thr, 0.0f, 1.0f, "%.2f"))
     sim.topoThreshold = thr;
 
   // Shape guide: show the optimized shape translucent in the modeling
   // workspace (visible after exiting simulation mode) to re-model against.
   bool ghost = state.topoGhostStudyId == s.id;
-  if (ImGui::Checkbox("Shape guide (modeling overlay)", &ghost)) {
+  if (ImGui::Checkbox("Shape guide (modeling overlay)###topo_ghost", &ghost)) {
     state.topoGhostStudyId = ghost ? s.id : 0;
     state.syncedDocumentVersion = UINT64_MAX; // rebuild renderers
   }
@@ -325,9 +345,19 @@ void DrawResults(AppState& state, const fem::Study& s) {
   }
 
   ImGui::SeparatorText("Results");
-  if (ImGui::Button(ICON_FA_PLAY " Run")) {
+  // The solve runs on a worker thread (StartStudyRun), the same as topology
+  // and the same as the run_study RPC has always done. Clicking Run used to
+  // call the blocking RunStudyAndCache straight from the draw, so the whole
+  // app — not just this panel — stopped answering for the length of a solve,
+  // with no progress and nothing to cancel. On a real part that is a hang.
+  PollStudyRun(state, *doc);
+  const StudyRunStatus run = GetStudyRunStatus(state, s.id);
+  if (run.running) {
+    ImGui::TextColored(kMuted, ICON_FA_HOURGLASS_HALF " Solving... %.0fs",
+                       run.elapsedSeconds);
+  } else if (ImGui::Button(ICON_FA_PLAY " Run###study_run")) {
     std::string err;
-    if (!RunStudyAndCache(*doc, s.id, &err))
+    if (!StartStudyRun(state, *doc, s.id, &err))
       LOG_WARN("run study failed: {}", err);
   }
   if (!s.error.empty()) {
@@ -376,10 +406,12 @@ void DrawResults(AppState& state, const fem::Study& s) {
     }
     ImGui::SeparatorText("Display");
     bool showing = sim.field != SimulationState::Field::None;
-    if (ImGui::Checkbox("Show mode shape", &showing))
+    if (ImGui::Checkbox("Show mode shape###modal_show", &showing))
       sim.field = showing ? SimulationState::Field::Displacement
                           : SimulationState::Field::None;
-    ImGui::SliderFloat("Deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
+    LeftLabel("Deform");
+    ImGui::SliderFloat("###modal_deform", &sim.deformScale, 0.0f, 100.0f,
+                       "%.0fx");
     return;
   }
 
@@ -390,18 +422,21 @@ void DrawResults(AppState& state, const fem::Study& s) {
   // draw every frame, so evaluate them independently (no short-circuit).
   ImGui::SeparatorText("Display");
   int field = std::to_underlying(sim.field);
-  bool changed = ImGui::RadioButton("Off", &field, 0);
-  ImGui::SameLine();
+  WrapRow fieldRow;
+  fieldRow.Next(RadioWidth("Off"));
+  bool changed = ImGui::RadioButton("Off###field_off", &field, 0);
+  fieldRow.Next(RadioWidth("von Mises"));
   changed |=
-      ImGui::RadioButton("von Mises", &field,
+      ImGui::RadioButton("von Mises###field_von_mises", &field,
                          std::to_underlying(SimulationState::Field::VonMises));
-  ImGui::SameLine();
+  fieldRow.Next(RadioWidth("Displacement"));
   changed |= ImGui::RadioButton(
-      "Displacement", &field,
+      "Displacement###field_displacement", &field,
       std::to_underlying(SimulationState::Field::Displacement));
   if (changed)
     sim.field = static_cast<SimulationState::Field>(field);
-  ImGui::SliderFloat("Deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
+  LeftLabel("Deform");
+  ImGui::SliderFloat("###deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
 }
 
 } // namespace
@@ -426,7 +461,8 @@ void DrawStudyPanel(AppState& state) {
   ImGui::Spacing();
   char name[128];
   std::snprintf(name, sizeof(name), "%s", s->name.c_str());
-  if (ImGui::InputText("Name", name, sizeof(name),
+  LeftLabel("Name");
+  if (ImGui::InputText("###study_name", name, sizeof(name),
                        ImGuiInputTextFlags_EnterReturnsTrue)) {
     const std::string newName = name;
     ModifyStudy(state, s->id, "Rename study",
@@ -438,18 +474,26 @@ void DrawStudyPanel(AppState& state) {
   int typeIdx = s->type == fem::AnalysisType::Modal      ? 1
                 : s->type == fem::AnalysisType::Topology ? 2
                                                          : 0;
-  if (ImGui::Combo("Analysis", &typeIdx, kTypes, 3)) {
+  LeftLabel("Analysis");
+  if (ImGui::Combo("###study_analysis", &typeIdx, kTypes, 3)) {
     const auto nt = typeIdx == 1   ? fem::AnalysisType::Modal
                     : typeIdx == 2 ? fem::AnalysisType::Topology
                                    : fem::AnalysisType::Static;
     ModifyStudy(state, s->id, "Set analysis type",
                 [&](fem::Study& cs) { cs.type = nt; });
+    // The displayed field belongs to the analysis that produced it. Leaving
+    // "von Mises" selected across a switch to Topology left a colorbar on
+    // screen titled von Mises with a 0 MPa maximum — a legend for a field
+    // this study does not have, which reads as an answer.
+    state.simulation.field = SimulationState::Field::None;
+    state.simulation.activeMode = 0;
   }
   // Numeric fields commit on deactivation (Enter OR clicking away), not only on
   // Enter — so typing a value then clicking Run applies it instead of
   // reverting.
   double meshSize = s->meshSize;
-  ExprInputDouble(state, "Mesh size (mm, 0=auto)", &meshSize, "%.3g");
+  LeftLabel("Mesh size (mm, 0=auto)");
+  ExprInputDouble(state, "###study_mesh_size", &meshSize, "%.3g");
   if (ImGui::IsItemDeactivatedAfterEdit() && meshSize != s->meshSize)
     ModifyStudy(state, s->id, "Set mesh size", [&](fem::Study& cs) {
       cs.meshSize = meshSize;
@@ -458,7 +502,8 @@ void DrawStudyPanel(AppState& state) {
 
   if (s->type == fem::AnalysisType::Modal) {
     int nm = s->numModes;
-    const bool nmChanged = ImGui::InputInt("Modes", &nm);
+    LeftLabel("Modes");
+    const bool nmChanged = ImGui::InputInt("###study_modes", &nm);
     if ((nmChanged || ImGui::IsItemDeactivatedAfterEdit()) && nm >= 1 &&
         nm != s->numModes)
       ModifyStudy(state, s->id, "Set mode count",
@@ -466,20 +511,23 @@ void DrawStudyPanel(AppState& state) {
   } else if (s->type == fem::AnalysisType::Topology) {
     // Topology: target volume, minimum-member (filter) size, iteration cap.
     float vf = static_cast<float>(s->volumeFraction);
-    if (ImGui::SliderFloat("Volume fraction", &vf, 0.05f, 0.9f, "%.2f"))
+    LeftLabel("Volume fraction");
+    if (ImGui::SliderFloat("###topo_volume_fraction", &vf, 0.05f, 0.9f, "%.2f"))
       ModifyStudy(state, s->id, "Set volume fraction", [&](fem::Study& cs) {
         cs.volumeFraction = vf;
         cs.volumeFractionExpr.clear();
       });
     double fr = s->filterRadius;
-    ExprInputDouble(state, "Filter radius (mm, 0=auto)", &fr, "%.3g");
+    LeftLabel("Filter radius (mm, 0=auto)");
+    ExprInputDouble(state, "###topo_filter_radius", &fr, "%.3g");
     if (ImGui::IsItemDeactivatedAfterEdit() && fr != s->filterRadius)
       ModifyStudy(state, s->id, "Set filter radius", [&](fem::Study& cs) {
         cs.filterRadius = fr;
         cs.filterRadiusExpr.clear();
       });
     int mi = s->maxIterations;
-    const bool miChanged = ImGui::InputInt("Max iterations", &mi);
+    LeftLabel("Max iterations");
+    const bool miChanged = ImGui::InputInt("###topo_max_iterations", &mi);
     if ((miChanged || ImGui::IsItemDeactivatedAfterEdit()) && mi >= 1 &&
         mi != s->maxIterations)
       ModifyStudy(state, s->id, "Set max iterations",
@@ -490,7 +538,7 @@ void DrawStudyPanel(AppState& state) {
     if (arming)
       ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(ICON_FA_LOCK " Keep face"))
+    if (ImGui::Button(ICON_FA_LOCK " Keep face###topo_keep_face"))
       sim.tool =
           arming ? SimulationState::Tool::None : SimulationState::Tool::Keep;
     if (arming)
@@ -520,7 +568,7 @@ void DrawStudyPanel(AppState& state) {
   } else {
     // Static: an optional gravity / self-weight load.
     bool on = s->gravity.x != 0 || s->gravity.y != 0 || s->gravity.z != 0;
-    if (ImGui::Checkbox("Gravity (self-weight)", &on)) {
+    if (ImGui::Checkbox("Gravity (self-weight)###study_gravity", &on)) {
       // -Y, not -Z: world up is +Y here (Camera::Up, the XZ "top" plane, the
       // height axis of every primitive). Self-weight pointing along -Z sagged
       // the part sideways.
@@ -531,7 +579,8 @@ void DrawStudyPanel(AppState& state) {
     if (on) {
       float g[3] = {(float)s->gravity.x, (float)s->gravity.y,
                     (float)s->gravity.z};
-      if (ImGui::InputFloat3("g (m/s^2)", g, "%.2f",
+      LeftLabel("g (m/s^2)");
+      if (ImGui::InputFloat3("###study_gravity_vec", g, "%.2f",
                              ImGuiInputTextFlags_EnterReturnsTrue))
         ModifyStudy(state, s->id, "Set gravity", [&](fem::Study& cs) {
           cs.gravity = glm::dvec3(g[0], g[1], g[2]);
@@ -543,7 +592,7 @@ void DrawStudyPanel(AppState& state) {
   DrawLoads(state, *s);
   DrawResults(state, *s);
 
-  if (ImGui::Button(ICON_FA_TRASH " Delete study")) {
+  if (ImGui::Button(ICON_FA_TRASH " Delete study###study_delete")) {
     const uint64_t id = s->id;
     state.commands->Execute(std::make_unique<RemoveStudyCommand>(id), *doc);
     state.simulation.activeStudyId =
@@ -585,6 +634,11 @@ void DrawFieldLegend(AppState& state) {
   const fem::Study* study = state.document->FindStudy(sim.activeStudyId);
   const bool modal = study && study->type == fem::AnalysisType::Modal;
   const bool density = sim.field == SimulationState::Field::Density;
+  // A stress/displacement colorbar over a topology result (or a density one
+  // over a static result) describes a field that study never computed.
+  const bool topo = study && study->type == fem::AnalysisType::Topology;
+  if (topo != density)
+    return;
   const bool vm = sim.field == SimulationState::Field::VonMises && !modal;
   // Modal shows a normalized mode shape (0..1); density is 0..1; static shows
   // the real field.

@@ -565,9 +565,29 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
   double Vfrozen = 0.0, sumVfree = 0.0;
   for (int e = 0; e < nTets; ++e)
     (frozen[e] ? Vfrozen : sumVfree) += volE[e];
-  if (Vfrozen > Vtarget)
-    return fail(
-        "volume fraction target is below the frozen support/load volume");
+  if (Vfrozen > Vtarget) {
+    // Decision-complete: the fix is a number, so give the number. Without it
+    // the user knows only that 0.30 was refused, not that 0.47 would do.
+    char msg[224];
+    const double frozen = Vfrozen / Vtot;
+    if (frozen > 0.85)
+      // Nothing the volume slider can do: the elements touching a support or
+      // load face ARE the part. That is a mesh too coarse to hold a shape,
+      // not a target set too low.
+      std::snprintf(msg, sizeof(msg),
+                    "the elements touching the support/load faces are %.0f%% "
+                    "of the part, so there is nothing left to optimize — the "
+                    "mesh is too coarse to carry a shape, set a smaller mesh "
+                    "size",
+                    frozen * 100.0);
+    else
+      std::snprintf(msg, sizeof(msg),
+                    "volume fraction target %.2f is below the frozen "
+                    "support/load volume (%.2f of the part) — raise the "
+                    "target above %.2f, or load a smaller face",
+                    params.volumeFraction, frozen, frozen);
+    return fail(msg);
+  }
   if (sumVfree <= 0)
     return fail("no free design region (every element is frozen)");
 
@@ -609,8 +629,12 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
   cg.setTolerance(1e-6);
   Eigen::VectorXd uPrev = Eigen::VectorXd::Zero(nFree);
   std::vector<Eigen::Triplet<double>> trip;
+  const auto reserveTriplets = [&] {
+    if (trip.capacity() == 0)
+      trip.reserve(static_cast<size_t>(nTets) * 900);
+  };
   if (!solver)
-    trip.reserve(static_cast<size_t>(nTets) * 900);
+    reserveTriplets();
 
   // External solver (the GPU seam): set up once, then hand it the per-element
   // scales each iteration instead of assembling K here.
@@ -662,13 +686,29 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
     if (solver) {
       // External (GPU) solver: matrix-free, warm-started via uExt.
       std::string serr;
-      if (!solver->Solve(scaleE, Fext, uExt, &serr))
-        return fail("linear solve failed: " + serr);
-      for (int i = 0; i < nFree; ++i)
-        u(i) = uExt[i];
-      if (!u.allFinite())
-        return fail("linear solve failed during optimization");
-    } else {
+      if (solver->Solve(scaleE, Fext, uExt, &serr)) {
+        for (int i = 0; i < nFree; ++i)
+          u(i) = uExt[i];
+        if (!u.allFinite())
+          serr = "solver returned a non-finite displacement";
+      }
+      if (!serr.empty()) {
+        // The built-in path is the oracle and the documented fallback, so a
+        // failed external solve DROPS the solver and finishes on the CPU
+        // rather than failing the run — and rather than the older behaviour,
+        // which was to accept whatever came back. The fp32 GPU CG makes no
+        // progress at all on a slender bending problem (a beam-shaped part
+        // is ill-conditioned enough to defeat it), and its zero displacement
+        // field read as a valid answer: zero compliance, zero sensitivities,
+        // and an OC step with nothing to react to, which reports "converged"
+        // on the second iteration with the volume constraint abandoned.
+        result.solverFallback = serr;
+        solver = nullptr;
+        reserveTriplets();
+        uPrev.setZero(); // the external warm start never reached uPrev
+      }
+    }
+    if (!solver) {
       // Built-in path: assemble K(x) and run the Eigen CG-IC.
       trip.clear();
       for (int e = 0; e < nTets; ++e) {

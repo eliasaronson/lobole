@@ -99,6 +99,23 @@ Two related gotchas, since they cost time too:
   then `ComboClick("###dwg_orientation/front")`; the window-qualified form
   fails with `popup && IsWindowACombo(popup)`, which does not sound like an
   addressing problem.
+- **A widget scrolled out of a panel reports an EMPTY label**, so anything
+  below the fold is unreachable by name — and there is no RPC that scrolls a
+  panel, so an agent cannot bring it into view either (the dock round's open
+  P5 papercut). `ui_items` still LISTS the widget, with its position and its
+  numeric id, which is what makes this one confusing: the row is there, the
+  name is not. Found 2026-08-23 in the simulation panel, where **Run** is the
+  control that drops below the fold the moment you arm a BC tool — the reason
+  no test had ever run a study by clicking. A `###id` fixes it, because
+  `ItemInfo` resolves a path by HASH and never consults the label: with one,
+  `//###Model/###study_analysis` clicks a combo that is scrolled off the top
+  of the panel. Verified both ways before and after.
+- **`SameLine()` never wraps.** Three buttons in a 210 px dock draw the third
+  one past the panel edge, where it cannot be clicked or seen: the simulation
+  panel lost the Pressure boundary condition and the Displacement result
+  field that way, both of them the last item of a row. `ui::WrapRow`
+  (`ui/PanelLayout.h`) is the shared fix — call `Next(ButtonWidth(label))`
+  before each widget and it breaks the line when one will not fit.
 
 
 ## The trap 2026-08-22 turned up: a failed lookup poisons the whole test

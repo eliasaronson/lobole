@@ -199,6 +199,104 @@ static void ToolbarCreateAccept(ImGuiTestContext* ctx, const char* tbId) {
   ctx->Yield();
 }
 
+// A steel cantilever with a fixed end and a distributed load on its top
+// face, placed by clicking, left ready to run. 200 x 10 x 20 mm: three
+// different dimensions, so an axis mix-up cannot hide (the drawings round
+// learned that on a square plate). The load goes on the TOP face so the
+// default "into the face you click" direction is the -Y transverse load
+// beam theory describes — no hand-typed world vector anywhere.
+//
+// `height` is the one thing the two callers disagree on: the stress gate
+// wants a SLENDER beam (h = 10) so Euler-Bernoulli applies, and topology
+// wants a DEEP one (h = 60) so there is an interior to carve — on a slender
+// part the frozen support/load skin IS the whole part.
+static void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
+  ctx->SetRef("//##MainMenuBar");
+  ToolbarCreateAccept(ctx, "###tb_box");
+  // The box tool's own dimension fields are not addressable yet, so the
+  // shape is set through the command layer; everything from here down is
+  // clicked, which is the half this test exists for.
+  const size_t index = Doc()->FeatureCount() - 1;
+  auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(index));
+  IM_CHECK_SILENT(box != nullptr);
+  nlohmann::json before = DocumentIO::FeatureToJson(*box);
+  box->position = glm::vec3(0.0f);
+  box->width = 200.0;
+  box->height = height;
+  box->depth = 20.0;
+  nlohmann::json after = DocumentIO::FeatureToJson(*box);
+  s_App->commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
+  ctx->Yield(2);
+
+  ToolbarClick(ctx, "###tb_simulation");
+  ctx->Yield(2);
+  const uint64_t createdBy = Doc()->GetBodies()[0].createdBy;
+  ctx->ItemClick(
+      ("//###Model/###material_" + std::to_string(createdBy)).c_str());
+  ctx->Yield();
+  IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+  ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+  IM_CHECK_SILENT(popup != nullptr);
+  ctx->ItemClick((std::string("//") + popup->Name + "/**/Steel").c_str());
+  ctx->Yield(2);
+
+  glm::vec3 lo(0.0f), hi(0.0f);
+  Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+  const glm::vec3 mid = (lo + hi) * 0.5f;
+  s_App->camera->StopAnimation();
+  s_App->camera->SetTarget(mid);
+  s_App->camera->SetUp(glm::vec3(0, 1, 0));
+
+  // Fixed on the x=0 end face, looking straight at it.
+  s_App->camera->SetPosition(mid - glm::vec3(400.0f, 0.0f, 0.0f));
+  ctx->Yield(3);
+  ctx->ItemClick("//###Model/###sim_bc_fixed");
+  ctx->Yield();
+  ctx->MouseMoveToPos(WorldToWindow(glm::vec3(lo.x, mid.y, mid.z)));
+  ctx->Yield();
+  ctx->MouseClick(ImGuiMouseButton_Left);
+  ctx->Yield(2);
+
+  // 100 N spread over the top face, from above.
+  ctx->ItemClick("//###Model/###sim_bc_force");
+  ctx->Yield();
+  ctx->ItemInputValue("//###Model/###sim_magnitude", "100");
+  ctx->Yield();
+  s_App->camera->SetUp(glm::vec3(0, 0, -1));
+  s_App->camera->SetPosition(mid + glm::vec3(0.0f, 400.0f, 0.0f));
+  ctx->Yield(3);
+  ctx->MouseMoveToPos(WorldToWindow(glm::vec3(mid.x, hi.y, mid.z)));
+  ctx->Yield();
+  ctx->MouseClick(ImGuiMouseButton_Left);
+  ctx->Yield(2);
+
+  fem::Study* st = Doc()->FindStudy(s_App->simulation.activeStudyId);
+  IM_CHECK_SILENT(st != nullptr);
+  IM_CHECK_EQ(st->loads.size(), (size_t)2);
+  // The default direction is into the picked face: -Y, from the top.
+  const fem::Load& force = st->loads[1];
+  IM_CHECK(force.type == fem::LoadType::Force);
+  IM_CHECK(std::abs(force.direction.y + 1.0) < 1e-6);
+  IM_CHECK(std::abs(force.magnitude - 100.0) < 1e-9);
+}
+
+// The solve runs on a worker thread now (clicking Run used to block the
+// draw), so pump frames until the result lands. Bounded: a hang must fail
+// the test rather than spin forever.
+static bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
+  for (int i = 0; i < 6000 && !Doc()->StudyResults(studyId); ++i)
+    ctx->Yield();
+  if (Doc()->StudyResults(studyId))
+    return true;
+  // An IM_CHECK here would return from THIS function and let the test walk on
+  // into a null result, which is a segfault rather than a failure report.
+  const fem::Study* st = Doc()->FindStudy(studyId);
+  ctx->LogError("no result for study %llu: %s", (unsigned long long)studyId,
+                st && !st->error.empty() ? st->error.c_str() : "(no error)");
+  return false;
+}
+
 // --- U10 defaults gate: the tool table and its preconditions ----------------
 
 // What the document must contain before the tool's button is even enabled.
@@ -754,7 +852,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ToolbarClick(ctx, "###tb_simulation"); // the button had no id before this
     ctx->Yield();
     IM_CHECK(s_App->simulation.active);
-    ctx->ItemClick("//###Model/Gravity (self-weight)");
+    ctx->ItemClick("//###Model/###study_gravity");
     ctx->Yield();
     const fem::Study* study = Doc()->FindStudy(s_App->simulation.activeStudyId);
     IM_CHECK(study != nullptr);
@@ -1728,6 +1826,76 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
 
   // Simulation is a mode, and its studies belong to the document. File > New
   // used to leave the simulation toolbar up over a brand-new part.
+
+  // Nothing had ever RUN a study by clicking — the four tests above all stop
+  // at setup — and nothing had ever touched topology optimization at all. A
+  // 2026-08-23 dogfooding round did both by hand and found the GPU solver
+  // returning a ZERO displacement field on a beam-shaped part, which reads
+  // downstream as a structure carrying no load: zero compliance, zero
+  // sensitivities, and a "converged" report on the third iteration with the
+  // volume constraint abandoned (0.107 against a 0.30 target). These two run
+  // the real thing end to end and check the answer.
+
+  t = IM_REGISTER_TEST(engine, "sim", "a_static_run_matches_beam_theory");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###Model/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, studyId));
+    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+
+    // Euler-Bernoulli for a uniformly distributed load, steel E = 200 GPa:
+    // I = b h^3/12 = 20*10^3/12 = 1666.7 mm^4, w = 100/200 = 0.5 N/mm, so
+    // the tip deflection w L^4 / (8 E I) = 0.300 mm. Measured: 0.2961.
+    IM_CHECK(rt->maxDisplacement > 0.255);
+    IM_CHECK(rt->maxDisplacement < 0.345);
+    // The peak stress sits at the clamp; the coarse mesh samples it at the
+    // first node inboard (x = 10.6), where w(L-x)^2/2 * c/I = 26.9 MPa.
+    // Measured: 27.1. A load along the wrong axis misses this by far more
+    // than the band.
+    IM_CHECK(rt->maxVonMises > 23.0);
+    IM_CHECK(rt->maxVonMises < 31.5);
+  };
+
+  t = IM_REGISTER_TEST(engine, "sim", "topology_holds_its_volume_target");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 60.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    // Topology is reachable ONLY through this combo, which had no ### id and
+    // so could not be clicked by a test at all — which is why the whole
+    // workstream had no clicked coverage.
+    ctx->ItemClick("//###Model/###study_analysis");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick((std::string("//") + popup->Name + "/**/Topology").c_str());
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(studyId);
+    IM_CHECK(st != nullptr);
+    IM_CHECK(st->type == fem::AnalysisType::Topology);
+
+    // The auto mesh is sized for a stress field; a shape needs one that can
+    // hold a shape. Four iterations is enough for this gate: the volume
+    // constraint is enforced by the OC bisection on every one of them.
+    ctx->ItemInputValue("//###Model/###study_mesh_size", "10");
+    ctx->Yield(2);
+    ctx->ItemInputValue("//###Model/###topo_max_iterations", "4");
+    ctx->Yield(2);
+
+    ctx->ItemClick("//###Model/###topo_run");
+    IM_CHECK(WaitForStudyResult(ctx, studyId));
+    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    // The OC bisection enforces the volume every iteration, so this holds
+    // whatever the compliance does — UNLESS every sensitivity is zero, which
+    // is exactly what a zero displacement field produces. That was the shape
+    // the GPU failure took, and it landed on 0.107 against this 0.30.
+    IM_CHECK(std::abs(rt->volumeFractionAchieved - st->volumeFraction) < 0.02);
+    // A structure carrying a load has compliance > 0.
+    IM_CHECK(!rt->complianceHistory.empty());
+    IM_CHECK(rt->complianceHistory.back() > 0.0);
+  };
+
   t = IM_REGISTER_TEST(engine, "sim", "new_document_leaves_the_mode");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -6874,7 +7042,6 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(2);
     IM_CHECK(s_App->diffFrom.empty());
     IM_CHECK(ctx->ItemExists("**/###hist_row0"));
-
   };
 
   // Variables and Configurations: two v1-complete workstreams with, until
