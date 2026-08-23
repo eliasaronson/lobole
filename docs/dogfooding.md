@@ -19,6 +19,96 @@ and the scripting interface fail in different places, and only the dock round
 
 ---
 
+## 2026-08-23 — a drawing of a plate, by clicking
+
+**Why here:** of 158 GUI tests, exactly one opened a drawing tab, and all it
+asserted was that the tab appeared. The whole D0-D4 drawing workspace — place
+a view, pick an orientation, dimension it — had never been clicked. Drawings
+were well covered by `drawing_smoke.py` and `test_drawing_hlr.cpp`, which is
+the RPC half: structurally the half that cannot find "this control is dead on
+this tab". The object was deliberately dull — an 80 x 8 x 60 mounting plate
+with two holes — because the point was the *sequence*, not the geometry.
+
+### The one that matters: every drawing view was mislabelled
+
+The front view of a plate 80 wide and 8 thick came out **80 x 60**. Measured
+against a part whose three dimensions are all different:
+
+| named view | showed | should show |
+|---|---|---|
+| front | 80 x 60 | 80 x 8 |
+| top | 80 x 8 | 80 x 60 |
+| right | 8 x 60 | 60 x 8 |
+
+Every one matches a **Z-up** convention exactly, and this app is **Y-up**
+(the view cube's Top is +Y). `OrientationAxes` in `DrawingDocument.cpp` was a
+Z-up table — its Iso case says so in a comment — so a "front" view was really
+the top, on every drawing anyone had ever made. Fixed as a pure rotation of
+the basis, which preserves handedness and therefore cannot mirror anything.
+
+**Why 753 tests missed it:** the HLR tests pass direction and up vectors in
+by hand (`kFrontDir{0,1,0}, kFrontUp{0,0,1}`) and never go through a named
+orientation. The projector was right; only the table naming the directions
+was wrong, and nothing crossed the two. This is the third module to get the
+axis convention wrong (CAM's Z, simulation's gravity) — the pattern is that
+a module written against the CAD habit meets an app that chose Y-up.
+
+### The rest
+
+- **The Hole tool's default diameter was a literal 0.5 mm** — on an 80 x 60
+  plate, holes you cannot see. Straight against the rule U10 left behind
+  (`docs/ui/u10-defaults-and-refusals.md`), and the `defaults/*` gate misses
+  it because the tool *does* change the document: it drills two invisible
+  holes rather than refusing. Now a tenth of the narrower side of the face
+  being drilled (6 mm on this plate), with blind depth following it.
+- **Six RPCs were part-gated with no cause**: `get_settings`/`set_settings`
+  (the user's preferences, not the document), `reset_layout` (the dock
+  layout — and the recovery for a wedged one, so gating it is backwards),
+  `checkpoint_create`/`checkpoint_restore`/`history_restore` and `rt_build`.
+  The last four carry comments saying they were *already* widened to cover
+  the whole project. **The gate is a list kept apart from the handlers**, so
+  widening a handler never widened its gate.
+- **A typo'd method on a non-part tab answered "switch to a part tab"** —
+  the gate ran before the unknown-method check, so any misspelling sent you
+  hunting a tab problem that was not there. It is how this round discovered
+  `list_versions` is called `checkpoint_list`.
+- **Scripted views and clicked views were placed by different rules.**
+  `add_drawing_view` dropped every view at the sheet centre at 1:1; the Add
+  view button fits a standard scale and places clear of what is there. Three
+  scripted views landed in one pile. The RPC uses the button's rule now when
+  the caller names neither position nor scale.
+- **Views of one part each chose their own scale** — exposed by the fix
+  above: the right view is the smallest face, so it was blown up to 2:1
+  beside its 1:1 siblings until it collided with the top view. A sheet's
+  views of one part share a scale now. This one was in the *shared* rule, so
+  clicking Add view three times had always done it.
+- **The ui actions answered a missing parameter with raw nlohmann**
+  (`[json.exception.out_of_range.403] key 'chord' not found`) where the rest
+  of the surface says "missing required parameter". Now they match, and name
+  the key you probably reached for instead: *missing required parameter
+  'chord' for key_press — you passed 'key'*.
+
+### Why the drawing workspace had no clicked coverage
+
+It could not have had any. `ImGui::Combo("Orientation", ...)` gathers with an
+**empty label** in the test engine, so no ref could address the two combos
+that drive the panel — `ui_items` reports them, and reports nothing you can
+click. They carry `###ids` now, and
+`drawing/build_a_drawing_by_clicking` is the first test to build a drawing
+the way a person does. It asserts what each named view shows, that the views
+share a scale, and that the sheet validator finds nothing — so all three
+defects above are now caught by clicks.
+
+### Left open
+
+- **Left-panel labels truncate** in the default 210 px dock: "Docume",
+  "Orienta", "^ or click a plane / flat face in the". Systemic (three panels
+  seen in one round), and parked by Elias until he is back at the machine.
+- **The prompt pill and the Tool window overlap** at the top of the viewport:
+  the Hole tool's "Step 2/3" pill runs underneath its own dialog.
+
+---
+
 ## 2026-07-19 — fidget spinner
 
 Collected from modeling a three-lobe 608-bearing fidget spinner end-to-end

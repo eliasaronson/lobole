@@ -102,36 +102,48 @@ SheetChrome ChromeOf(const Sheet& sheet) {
   return c;
 }
 
+// This table decides which way each NAMED view looks, so it has to agree
+// with the world the model lives in: **up is +Y** here, and the front of a
+// part faces +Z (the view cube's Top is +Y — see docs/ui/).
+//
+// It was written Z-up, which is the usual CAD convention and wrong for this
+// app: every "front" view was really the top, every "top" the front. The
+// HLR tests missed it because they pass direction/up vectors in by hand and
+// never go through a named orientation, so they agreed with the same
+// mistake. Found by making a drawing of a plate and noticing the front view
+// was 80x60 when the plate is 80 wide and 8 thick.
 void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up) {
   switch (o) {
   case ViewOrientation::Front:
-    viewDir = {0, 1, 0};
-    up = {0, 0, 1};
-    break;
-  case ViewOrientation::Back:
-    viewDir = {0, -1, 0};
-    up = {0, 0, 1};
-    break;
-  case ViewOrientation::Right:
-    viewDir = {-1, 0, 0};
-    up = {0, 0, 1};
-    break;
-  case ViewOrientation::Left:
-    viewDir = {1, 0, 0};
-    up = {0, 0, 1};
-    break;
-  case ViewOrientation::Top:
     viewDir = {0, 0, -1};
     up = {0, 1, 0};
     break;
-  case ViewOrientation::Bottom:
+  case ViewOrientation::Back:
     viewDir = {0, 0, 1};
-    up = {0, -1, 0};
+    up = {0, 1, 0};
+    break;
+  case ViewOrientation::Right:
+    viewDir = {-1, 0, 0};
+    up = {0, 1, 0};
+    break;
+  case ViewOrientation::Left:
+    viewDir = {1, 0, 0};
+    up = {0, 1, 0};
+    break;
+  case ViewOrientation::Top:
+    // Looking down, with the part's front edge at the BOTTOM of the sheet —
+    // the fold that puts a top view directly above its front view.
+    viewDir = {0, -1, 0};
+    up = {0, 0, -1};
+    break;
+  case ViewOrientation::Bottom:
+    viewDir = {0, 1, 0};
+    up = {0, 0, 1};
     break;
   case ViewOrientation::Iso:
-    // Standard Z-up isometric: camera above and to the front-right.
-    viewDir = glm::normalize(glm::dvec3(-1, 1, -1));
-    up = {0, 0, 1};
+    // Camera above, to the right, and in front of the part.
+    viewDir = glm::normalize(glm::dvec3(-1, -1, -1));
+    up = {0, 1, 0};
     break;
   }
 }

@@ -5,6 +5,7 @@
 #include "cad/CADKernel.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingProjection.h"
 #include "core/io/Serialization.h"
 
@@ -96,6 +97,64 @@ int EdgeCount(const TopoDS_Shape& shape) {
 } // namespace
 
 #ifdef HAVE_OPENCASCADE
+
+// The projector takes a direction and an up vector, and the tests around it
+// pass those in by hand — so nothing here ever checked the one table that
+// decides which direction each NAMED view means. That table was written
+// Z-up in a Y-up app, which made every "front" view a top view and every
+// "top" a front, on every drawing anyone had made. Found by drawing a plate
+// and seeing an 80x60 "front" of something 8 mm thick.
+//
+// The plate has three different dimensions on purpose: with a cube, or even
+// a square plate, a swapped axis is invisible.
+TEST_CASE("Named view orientations agree with the model's up axis",
+          "[drawing][hlr]") {
+  // Width 80 along X, height 8 along Y (up), depth 60 along Z.
+  CADShape plate = CADKernel::Instance().CreateBox(80.0, 8.0, 60.0);
+  REQUIRE(plate.IsValid());
+
+  const auto extentOf = [&](ViewOrientation o) {
+    glm::dvec3 dir, up;
+    OrientationAxes(o, dir, up);
+    std::string err;
+    auto result = ProjectView(One(plate), dir, up, {}, &err);
+    INFO(err);
+    REQUIRE(result.has_value());
+    glm::dvec2 lo(1e30), hi(-1e30);
+    for (const auto& c : result->curves)
+      for (const glm::dvec2& p : c.points)
+        lo = glm::min(lo, p), hi = glm::max(hi, p);
+    return hi - lo;
+  };
+  const auto approx = [](const glm::dvec2& v, double w, double h) {
+    return std::abs(v.x - w) < 1e-6 && std::abs(v.y - h) < 1e-6;
+  };
+
+  using O = ViewOrientation;
+  // Looking at the front of a plate: its width across, its thickness up.
+  CHECK(approx(extentOf(O::Front), 80.0, 8.0));
+  CHECK(approx(extentOf(O::Back), 80.0, 8.0));
+  // Looking down on it: the full face.
+  CHECK(approx(extentOf(O::Top), 80.0, 60.0));
+  CHECK(approx(extentOf(O::Bottom), 80.0, 60.0));
+  // From the side: depth across, thickness up.
+  CHECK(approx(extentOf(O::Right), 60.0, 8.0));
+  CHECK(approx(extentOf(O::Left), 60.0, 8.0));
+
+  // Folding depends on the SHARED axes, not just the sizes: a top view sits
+  // above its front view (same screen-right), a right view beside it (same
+  // screen-up). Getting the sizes right with a mangled basis is possible;
+  // getting these right too is not.
+  const auto axes = [](O o) {
+    glm::dvec3 dir, up;
+    OrientationAxes(o, dir, up);
+    return std::pair{glm::normalize(glm::cross(dir, up)), up};
+  };
+  const auto [frontRight, frontUp] = axes(O::Front);
+  CHECK(glm::length(axes(O::Top).first - frontRight) < 1e-9);
+  CHECK(glm::length(axes(O::Right).second - frontUp) < 1e-9);
+  CHECK(frontUp == glm::dvec3(0, 1, 0)); // the world's up, not the CAD habit
+}
 
 TEST_CASE("HLR box front view traces every curve to a source edge",
           "[drawing][hlr]") {

@@ -702,6 +702,18 @@ static const std::set<std::string> kNoPartDoc = {
     // Clearing the compare_geometry overlay must work from any tab — the
     // overlay is part-scoped, but switching tabs is how you leave it behind.
     "clear_geometry_delta",
+    // Nothing below is about the open document, and each was reachable only
+    // from a part tab until a drawing-tab dogfooding round tripped over it.
+    // The gate is a list kept apart from the handlers, so when a handler is
+    // widened nothing makes the gate follow: checkpoint_create,
+    // checkpoint_restore and history_restore all say in their own comments
+    // that they were fixed to cover the WHOLE project, and all three stayed
+    // part-gated afterwards.
+    "get_settings", "set_settings", // user preferences, not the document
+    "reset_layout",                 // the dock layout — and the recovery for
+                                    // a wedged one, so gating it is backwards
+    "checkpoint_create", "checkpoint_restore", "history_restore",
+    "rt_build", // SyncRayTracingScene renders a part OR an assembly
     // interference runs on occurrence pairs on an assembly tab;
     // contact_report IS assembly-only (V1 connectivity gate);
     // list_elements/measure work there when given an explicit `part`;
@@ -850,6 +862,30 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"scroll", "Scroll (zoom) the viewport."},
 };
 
+// Every method any module documents. The describe tables are the registry
+// (a branch without a row is caught by its own test), so this needs no
+// second list to drift out of step.
+static bool IsKnownMethod(const std::string& m) {
+  static const std::set<std::string> known = [] {
+    std::set<std::string> s;
+    const auto add = [&s](std::span<const remote::MethodDoc> docs) {
+      for (const auto& d : docs)
+        s.insert(d.name);
+    };
+    add(kServerMethods);
+    add(remote::ModelingMethodDocs());
+    add(remote::ProjectMethodDocs());
+    add(remote::AssemblyMethodDocs());
+    add(remote::InspectionMethodDocs());
+    add(remote::CamMethodDocs());
+    add(remote::DrawingMethodDocs());
+    add(remote::ConfigurationMethodDocs());
+    add(remote::SimulationMethodDocs());
+    return s;
+  }();
+  return known.count(m) != 0;
+}
+
 json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                   bool& handled, remote::RpcParams& p) {
   const std::string& m = request.method;
@@ -858,7 +894,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 
   // UI actions (item_click, viewport_click, …) fall through to QueueUiAction,
   // not HandleSemantic, so don't guard them here — they drive the assembly tab.
-  if (!doc && !kNoPartDoc.count(m) && !IsUiAction(m)) {
+  //
+  // An UNKNOWN method falls through too, or the gate answers a typo with
+  // "switch to a part tab" and sends the caller hunting a tab problem that
+  // does not exist. Whether a method needs a part is only a sensible thing
+  // to say about a method that exists.
+  if (!doc && !kNoPartDoc.count(m) && !IsUiAction(m) && IsKnownMethod(m)) {
     const char* kind = state.assembly  ? "an assembly"
                        : state.drawing ? "a drawing"
                                        : "not a part";
@@ -1413,8 +1454,24 @@ bool RemoteServer::QueueUiAction(const Request& request) {
   // key throws into ProcessPending's catch and becomes an error response. A
   // p.at() inside an action lambda would throw in the test-engine coroutine
   // instead, escape it, and std::terminate the whole app.
+  //
+  // `need` because these come off a RAW json (the lambdas capture it by
+  // value), which skips RpcParams' caller-grade message: a missing `chord`
+  // used to answer "[json.exception.out_of_range.403] key 'chord' not
+  // found". `alias` names the key someone plausibly reached for instead,
+  // since "missing 'chord'" is not much help to whoever just typed `key`.
+  const auto need = [&m](const json& obj, const char* key,
+                         const char* alias = nullptr) -> const json& {
+    if (obj.contains(key))
+      return obj.at(key);
+    std::string msg =
+        "missing required parameter '" + std::string(key) + "' for " + m;
+    if (alias != nullptr && obj.contains(alias))
+      msg += " — you passed '" + std::string(alias) + "'";
+    throw std::runtime_error(msg);
+  };
   if (m == "menu_click") {
-    const std::string path = p.at("path").get<std::string>();
+    const std::string path = need(p, "path", "menu").get<std::string>();
     m_uiAction = [path](ImGuiTestContext* ctx) {
       ctx->SetRef("//##MainMenuBar");
       ctx->MenuClick(path.c_str());
@@ -1436,7 +1493,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     };
   } else if (m == "item_input") {
     const ItemTarget target(p, m);
-    const json value = p.at("value");
+    const json value = need(p, "value", "text");
     if (!value.is_number() && !value.is_string())
       throw std::runtime_error("item_input value must be a number or string");
     m_uiAction = [target, value](ImGuiTestContext* ctx) {
@@ -1458,8 +1515,8 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     // item_combo names the entry `value`; popup_click (menus, context menus)
     // names it `item`. Same motion either way.
     const std::string entry = m == "item_combo"
-                                  ? p.at("value").get<std::string>()
-                                  : p.at("item").get<std::string>();
+                                  ? need(p, "value").get<std::string>()
+                                  : need(p, "item", "value").get<std::string>();
     const int button = p.value("button", 0); // 1 = a right-click menu
     // Open + choose in ONE action: a queued action ends with its own frames
     // and the popup closes in between, so two RPCs can never do this.
@@ -1608,7 +1665,8 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     };
   } else if (m == "key_press") {
     std::string error;
-    ImGuiKeyChord chord = ParseChord(p.at("chord").get<std::string>(), &error);
+    ImGuiKeyChord chord =
+        ParseChord(need(p, "chord", "key").get<std::string>(), &error);
     if (chord == 0) {
       // Returning false here made the dispatcher answer "unknown method:
       // key_press" — the chord is what was unknown, and it said so.

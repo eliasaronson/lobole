@@ -37,8 +37,11 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}."},
-    {"add_drawing_view", "Add an HLR view of a part/assembly {drawing, source, "
-                         "orientation, scale, position}."},
+    {"add_drawing_view",
+     "Add an HLR view of a part/assembly {drawing, source, orientation, "
+     "scale, position}. Omit BOTH scale and position and it is placed the "
+     "way the Add view button places it: fitted to the sheet, clear of the "
+     "views already there, and projected (needs_update false)."},
     {"remove_drawing_view", "Remove a view by id."},
     {"list_drawing_views", "List views with placement and scale."},
     {"update_drawing", "Re-project all views from current geometry."},
@@ -203,12 +206,29 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     v.name =
         p.value("name", std::string(ViewOrientationToString(v.orientation)));
     v.baseViewId = p.value("base_view", uint64_t{0});
+    // Say nothing about size or place and you get what the "Add view" button
+    // gives: a standard scale that fits this sheet, and a spot clear of the
+    // views already on it. This RPC dropped every view at the sheet centre at
+    // 1:1, so three scripted views landed in one pile while three clicked
+    // ones laid themselves out — the same action, two behaviours.
+    const bool autoPlace = !p.contains("position") && !p.contains("scale");
     v.scale = p.value("scale", 1.0);
     if (p.contains("position")) {
       const json& pos = p.at("position");
       v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
     } else { // default to the sheet centre
       v.position = ChromeOf(state.drawing->GetSheet()).extent * 0.5;
+    }
+    if (autoPlace) {
+      // AddDrawingViewPlaced snapshots and re-projects itself, so it goes
+      // BEFORE the snapshot below rather than alongside it.
+      v.scale = 0.0; // <= 0 asks it to choose a standard scale
+      const uint64_t id = ui::AddDrawingViewPlaced(state, v);
+      // Placing a view means measuring it, so it is already projected.
+      return json{{"id", id},
+                  {"source_id", sourceId},
+                  {"needs_update", false},
+                  {"auto_placed", true}};
     }
     ui::SnapshotDrawing(state);
     const uint64_t id = state.drawing->AddView(v);

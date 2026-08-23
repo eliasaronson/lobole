@@ -791,6 +791,46 @@ void BeginRevolveOfSketch(AppState& state, SketchFeature& sketch,
 }
 
 namespace {
+// The face being drilled, measured: a face-attached sketch carries the
+// face's outline as construction geometry, so its extent IS the face's.
+// Zero when the sketch has no such outline (a plane sketch, say).
+glm::dvec2 FaceExtent(const SketchFeature& sketch) {
+  glm::dvec2 lo(1e30), hi(-1e30);
+  bool any = false;
+  const auto note = [&](const glm::vec2& p) {
+    lo = glm::min(lo, glm::dvec2(p)), hi = glm::max(hi, glm::dvec2(p));
+    any = true;
+  };
+  for (const sketch::Entity& e : sketch.entities) {
+    if (const auto* l = std::get_if<sketch::Line>(&e); l && l->construction)
+      note(l->a), note(l->b);
+    else if (const auto* a = std::get_if<sketch::Arc>(&e); a && a->construction)
+      note(a->center - glm::vec2(a->radius)),
+          note(a->center + glm::vec2(a->radius));
+    else if (const auto* c = std::get_if<sketch::Circle>(&e);
+             c && c->construction)
+      note(c->center - glm::vec2(c->radius)),
+          note(c->center + glm::vec2(c->radius));
+  }
+  return any ? hi - lo : glm::dvec2(0.0);
+}
+
+// A first diameter for a hole in this face. The rule (docs/ui/
+// u10-defaults-and-refusals.md): a default carrying millimetres is derived
+// from what it acts on, never a literal. It used to be a literal 0.5 mm,
+// which on an 80 x 60 plate drills something you cannot see and on a 5 m
+// dock does not exist — "correct in the abstract and wrong against any real
+// part" is exactly the failure that rule names.
+//
+// A tenth of the narrower side of the face lands on ~6 mm for a 60 mm-wide
+// plate, which is a bolt hole. The fallback only applies when the face
+// could not be measured at all.
+double DefaultHoleDiameter(const SketchFeature& sketch) {
+  const glm::dvec2 ext = FaceExtent(sketch);
+  const double narrow = std::min(ext.x, ext.y);
+  return narrow > 1e-6 ? narrow * 0.1 : 1.0;
+}
+
 // Hole centres placed so far in `sketch`.
 size_t HolePointCount(const SketchFeature& sketch) {
   size_t n = 0;
@@ -822,8 +862,11 @@ void BeginSketchHole(AppState& state) {
   const int n = static_cast<int>(state.document->FeatureCount()) + 1;
   const uint64_t sketchId = edit.activeSketchId;
   edit = SketchEditState{}; // exit sketch mode so the preview + dialog show
+  const double dia = DefaultHoleDiameter(*sketch);
+  // Blind depth follows the diameter (2x is an ordinary tapped depth) so it
+  // is derived too — it only shows once "Through all" is unticked.
   auto hole = std::make_unique<HoleFeature>(
-      "Hole " + std::to_string(n), sketchId, HoleKind::Simple, 0.5, 1.0);
+      "Hole " + std::to_string(n), sketchId, HoleKind::Simple, dia, dia * 2.0);
   hole->through = true; // the bolt-hole default; the dialog offers a depth
   BeginPreviewFeature(state, std::move(hole));
 }

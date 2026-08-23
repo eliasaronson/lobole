@@ -79,6 +79,17 @@ Two related gotchas, since they cost time too:
 - An **`ImGui::PushID` scope** has the same effect as a hidden label: the
   widget inside it can only be reached by numeric id. Give a repeated widget a
   unique name (`"Material###material_<feature>"`) instead of wrapping it.
+- **A bare `ImGui::Combo("Label", ...)` gathers with an EMPTY label**, not
+  with "Label" — so it is unreachable by name even though its label is
+  visible on screen, and `ui_items` reports it as `''`. This is why the whole
+  drawing panel had no clicked coverage until 2026-08-23: its Source,
+  Orientation and Sheet-size combos could not be addressed at all, and a
+  Z-up orientation table survived in a Y-up app behind them. Same fix as
+  everywhere else — `"Label###stable_id"`.
+- **`ComboClick` wants a ref RELATIVE to the window.** `SetRef("//Model")`
+  then `ComboClick("###dwg_orientation/front")`; the window-qualified form
+  fails with `popup && IsWindowACombo(popup)`, which does not sound like an
+  addressing problem.
 
 
 ## The trap 2026-08-22 turned up: a failed lookup poisons the whole test

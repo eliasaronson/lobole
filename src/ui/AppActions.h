@@ -242,7 +242,7 @@ void UpdateDrawingRenders(AppState& state);
 // sheet (only when `v.scale` is <= 0), and a spot clear of the views already
 // placed. Snapshots for undo and re-projects. Shared by the drawing
 // toolbar's Add-view menu and the panel's Add view button.
-void AddDrawingViewPlaced(AppState& state, DrawingView v);
+uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v);
 
 // The current Document::Version() / AssemblyDocument::Version() of a source
 // document (part or assembly) by stable id, or 0 if absent. A drawing view is

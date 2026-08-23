@@ -550,16 +550,17 @@ void DrawViewsSection(AppState& state) {
   } else {
     if (srcIdx >= static_cast<int>(partSlots.size()))
       srcIdx = 0;
-    if (ImGui::BeginCombo("Source", partSlots[srcIdx]->name.c_str())) {
+    if (ImGui::BeginCombo("Source###dwg_source",
+                          partSlots[srcIdx]->name.c_str())) {
       for (int i = 0; i < static_cast<int>(partSlots.size()); ++i)
         if (ImGui::Selectable(partSlots[i]->name.c_str(), i == srcIdx))
           srcIdx = i;
       ImGui::EndCombo();
     }
-    ImGui::Combo("Orientation", &orientIdx, kOrientLabels,
+    ImGui::Combo("Orientation###dwg_orientation", &orientIdx, kOrientLabels,
                  IM_ARRAYSIZE(kOrientLabels));
-    ImGui::InputFloat("Scale", &addScale, 0.0f, 0.0f, "%.3f");
-    if (ImGui::Button("Add view")) {
+    ImGui::InputFloat("Scale###dwg_scale", &addScale, 0.0f, 0.0f, "%.3f");
+    if (ImGui::Button("Add view###dwg_add_view")) {
       DrawingView v;
       v.name = std::string(kOrientLabels[orientIdx]);
       v.sourceDocId = partSlots[srcIdx]->id;
@@ -669,7 +670,8 @@ void DrawSheetPanel(AppState& state) {
   ImGui::Separator();
 
   int sizeIdx = static_cast<int>(sheet.size);
-  if (ImGui::Combo("Size", &sizeIdx, kSizeLabels, IM_ARRAYSIZE(kSizeLabels))) {
+  if (ImGui::Combo("Size###dwg_sheet_size", &sizeIdx, kSizeLabels,
+                   IM_ARRAYSIZE(kSizeLabels))) {
     SnapshotDrawing(state);
     sheet.size = static_cast<SheetSize>(sizeIdx);
     state.drawing->BumpVersion();

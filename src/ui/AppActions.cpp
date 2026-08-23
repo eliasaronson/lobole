@@ -3397,9 +3397,9 @@ Document* DrawingSourceDocument(AppState& state, uint64_t sourceDocId) {
   return nullptr;
 }
 
-void AddDrawingViewPlaced(AppState& state, DrawingView v) {
+uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   if (!state.drawing)
-    return;
+    return 0;
   DrawingDocument& dwg = *state.drawing;
   const glm::dvec2 ext = ChromeOf(dwg.GetSheet()).extent;
 
@@ -3414,9 +3414,20 @@ void AddDrawingViewPlaced(AppState& state, DrawingView v) {
   const bool measured = sv.hasGeometry;
   const glm::dvec2 size = measured ? sv.bboxMax - sv.bboxMin : glm::dvec2(0.0);
 
-  // Scale (only when the caller did not choose one): the largest standard
-  // ratio that keeps the view inside ~45% of the sheet, so a few views fit
-  // side by side. Without this a 2 mm part is a 2 mm dot at 1:1.
+  // Scale (only when the caller did not choose one). Views of the SAME part
+  // share a scale: a right view at 2:1 beside a front view at 1:1 is a
+  // drafting error, and it is what the fit-each-view-alone rule below
+  // produced for a plate (the right view is the smallest face, so it got
+  // blown up until it collided with the top view). Matching first, fitting
+  // only when this is the part's first view.
+  if (v.scale <= 0.0) {
+    for (const DrawingView& other : dwg.GetViews()) {
+      if (other.sourceDocId == v.sourceDocId && other.scale > 0.0) {
+        v.scale = other.scale;
+        break;
+      }
+    }
+  }
   if (v.scale <= 0.0) {
     v.scale = 1.0;
     if (measured && size.x > 1e-9 && size.y > 1e-9) {
@@ -3481,8 +3492,9 @@ void AddDrawingViewPlaced(AppState& state, DrawingView v) {
   v.position = pos;
 
   SnapshotDrawing(state);
-  dwg.AddView(v);
+  const uint64_t id = dwg.AddView(v);
   UpdateDrawingRenders(state);
+  return id;
 }
 
 void UpdateDrawingRenders(AppState& state) {

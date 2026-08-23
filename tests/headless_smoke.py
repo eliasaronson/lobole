@@ -545,6 +545,50 @@ def main():
         except RuntimeError:
             pass
 
+        phase("What works on a part tab works on the others")
+        # The recurring defect shape in this codebase: something is built and
+        # tested on a part tab and is quietly dead on an assembly or drawing
+        # tab. The section arrow was this twice, autosave wrote nothing at
+        # all on a drawing tab, the sharing RPCs were part-gated, and a
+        # drawing-tab dogfooding round found six more. The part gate is a
+        # LIST kept apart from the handlers, so widening a handler does not
+        # widen its gate — three of those six say in their own comments that
+        # they were fixed to cover the whole project, and stayed gated.
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "B", "position": [0, 0, 0],
+            "width": 10, "height": 10, "depth": 10})
+        d.call("add_assembly", name="Rig")
+        d.call("create_drawing", name="Sheet")
+        proj = os.path.join(tmp, "tabkinds.dsgn")
+        d.call("save_project", path=proj)
+        for tab in ["Rig", "Sheet"]:
+            d.call("set_active_part", name=tab)
+            # Preferences are the user's, not the document's.
+            d.call("get_settings")
+            d.call("set_settings", ui_font_scale=1.2)
+            # The dock layout is the WINDOW's — and resetting it is the
+            # recovery for a wedged one, so gating it is backwards.
+            d.call("reset_layout")
+            # Versioning is whole-project: a checkpoint taken from a drawing
+            # tab still has to cover the parts.
+            d.call("checkpoint_create", name="cp-from-" + tab)
+            names = [c.get("name") for c in
+                     d.call("checkpoint_list")["checkpoints"]]
+            expect("cp-from-" + tab in names,
+                   f"checkpoint from the {tab} tab: {names}")
+        # And a typo'd method on a non-part tab has to say what is actually
+        # wrong. The gate ran before the unknown-method check, so any
+        # misspelling answered "switch to a part tab" and sent you hunting a
+        # tab problem that was not there — which is how this very test found
+        # out that list_versions is called checkpoint_list.
+        try:
+            d.call("list_versions")
+            expect(False, "list_versions should not exist")
+        except RuntimeError as e:
+            expect("unknown method" in str(e).lower(), f"typo on a {tab} tab "
+                   f"names the method, not the tab: {e}")
+
         phase("Tab folders")
         # Folders are display grouping for the bottom tab bar — the thing a
         # 100-part STEP import needs so it is one flyout, not 100 tabs. They
