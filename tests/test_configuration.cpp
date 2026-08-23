@@ -8,6 +8,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
+#include <cmath>
 
 #include <filesystem>
 
@@ -76,6 +77,50 @@ TEST_CASE("A configuration overrides a parameter during regeneration",
   REQUIRE(doc.SetActiveConfiguration(0));
   CHECK_THAT(Vol(doc), WithinRel(24.0, 1e-6));
   CHECK(doc.FindParameter("depth")->expression == "3"); // base expr intact
+}
+
+// Primitives were the one feature kind that carried no expression fields, so
+// a variable could not drive a box and a part built from primitives could not
+// be configured at all — the Configurations panel would offer overrides that
+// changed nothing. Fixed in v61; this is the case that was impossible.
+TEST_CASE("A configuration drives a primitive through a variable",
+          "[configuration]") {
+  Document doc;
+  doc.SetParameter("len", "40");
+  doc.SetParameter("wall", "6");
+  auto box =
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0.0f), 40.0, 6.0, 30.0);
+  box->widthExpr = "len";
+  box->heightExpr = "wall";
+  doc.AddFeature(std::move(box));
+  auto cyl = std::make_unique<CylinderFeature>(
+      "Boss", glm::vec3(0.0f, 6.0f, 0.0f), glm::vec3(0, 1, 0), 6.0, 12.0);
+  cyl->radiusExpr = "wall";
+  doc.AddFeature(std::move(cyl));
+  REQUIRE(doc.Regenerate());
+  // Two separate bodies — Vol() reads the first, so check each by hand.
+  const auto vols = [&] {
+    std::vector<double> v;
+    for (const Body& b : doc.GetBodies())
+      v.push_back(b.shape.Volume());
+    return v;
+  };
+  REQUIRE(vols().size() == 2);
+  CHECK_THAT(vols()[0], WithinRel(40.0 * 6.0 * 30.0, 1e-3));
+  CHECK_THAT(vols()[1], WithinRel(M_PI * 36.0 * 12.0, 1e-3));
+  const double base = vols()[0];
+
+  Configuration& small = doc.AddConfiguration("Small");
+  small.parameterOverrides = {{"len", "20"}, {"wall", "3"}};
+  REQUIRE(doc.SetActiveConfiguration(small.id));
+  // Both primitives follow: the box in two dimensions, the cylinder in its
+  // radius. A literal-only primitive would have come back unchanged.
+  REQUIRE(vols().size() == 2);
+  CHECK_THAT(vols()[0], WithinRel(20.0 * 3.0 * 30.0, 1e-3));
+  CHECK_THAT(vols()[1], WithinRel(M_PI * 9.0 * 12.0, 1e-3));
+
+  REQUIRE(doc.SetActiveConfiguration(0));
+  CHECK_THAT(vols()[0], WithinRel(base, 1e-6));
 }
 
 TEST_CASE("A configuration override propagates to dependent parameters",

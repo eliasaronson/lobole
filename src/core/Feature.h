@@ -191,8 +191,20 @@ public:
   std::string TypeName() const override { return "Box"; }
   bool Execute(RegenContext& ctx) override;
 
+  // Expression-driven dimensions, like every other feature that carries a
+  // length. Without these a primitive could not be driven by a variable —
+  // and since a configuration works by overriding variables, a part built
+  // from primitives could not be configured at all. That was true until
+  // v61, which is a strange thing for a parametric modeller to have shipped.
+  void VisitExprs(const ExprVisitor& visit) override {
+    visit(widthExpr, width);
+    visit(heightExpr, height);
+    visit(depthExpr, depth);
+  }
+
   glm::vec3 position;
   double width, height, depth;
+  std::string widthExpr, heightExpr, depthExpr;
 };
 
 class SphereFeature : public Feature {
@@ -203,8 +215,13 @@ public:
   std::string TypeName() const override { return "Sphere"; }
   bool Execute(RegenContext& ctx) override;
 
+  void VisitExprs(const ExprVisitor& visit) override {
+    visit(radiusExpr, radius);
+  }
+
   glm::vec3 center;
   double radius;
+  std::string radiusExpr;
 };
 
 class CylinderFeature : public Feature {
@@ -215,9 +232,15 @@ public:
   std::string TypeName() const override { return "Cylinder"; }
   bool Execute(RegenContext& ctx) override;
 
+  void VisitExprs(const ExprVisitor& visit) override {
+    visit(radiusExpr, radius);
+    visit(heightExpr, height);
+  }
+
   glm::vec3 center;
   glm::vec3 direction;
   double radius, height;
+  std::string radiusExpr, heightExpr;
 };
 
 // References an external STEP file. Shapes are translated so their combined

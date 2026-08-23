@@ -528,7 +528,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield();
     // Labels-left rows (U4): the widget id is "##<label>", the visible label
     // is a separate Text item.
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 5.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 5.0f);
     ctx->Yield();
 
     box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
@@ -6632,7 +6632,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(2);
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 44.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 44.0f);
     ctx->Yield();
     ui::SetActivePart(*s_App, slotOf("Second")); // and look away from it
     ctx->Yield(2);
@@ -6850,7 +6850,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // the last version?
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 9.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 9.0f);
     ctx->Yield(2);
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ctx->Yield(2);
@@ -6999,9 +6999,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
       ToolbarCreateAccept(ctx, "###tb_box");
       ctx->ItemDoubleClick("//###Model/Box 1##0");
       ctx->Yield();
-      ctx->ItemInputValue("//Box###ToolWindow/##Width", 80.0f);
-      ctx->ItemInputValue("//Box###ToolWindow/##Height", 8.0f);
-      ctx->ItemInputValue("//Box###ToolWindow/##Depth", 60.0f);
+      ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 80.0f);
+      ctx->ItemInputValue("//Box###ToolWindow/Height/##Height", 8.0f);
+      ctx->ItemInputValue("//Box###ToolWindow/Depth/##Depth", 60.0f);
       ctx->Yield(2);
       ctx->ItemClick("//##PartTabs/+##addmenu");
       ctx->ItemClick("//$FOCUSED/New Drawing##adddwg");
@@ -7073,9 +7073,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ToolbarCreateAccept(ctx, "###tb_box");
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 80.0f);
-    ctx->ItemInputValue("//Box###ToolWindow/##Height", 8.0f);
-    ctx->ItemInputValue("//Box###ToolWindow/##Depth", 60.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 80.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Height/##Height", 8.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Depth/##Depth", 60.0f);
     ctx->Yield(2); // editing a committed feature commits as you type
 
     // A drawing tab, from the tab bar's + menu.
@@ -7157,7 +7157,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     // Grow one axis: 2x2x2 -> 6x2x2. That is +16 mm3 and nothing lost.
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 6.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 6.0f);
     ctx->Yield(2);
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ctx->Yield(2);
@@ -7202,7 +7202,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->HasGeometryDelta());
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 7.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 7.0f);
     ctx->Yield(3);
     IM_CHECK(!s_App->HasGeometryDelta());
     IM_CHECK_EQ(s_App->deltaExtraInstance, 0u);
@@ -7249,7 +7249,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     const uint64_t changedId = Doc()->GetFeature(0)->GetId();
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 7.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 7.0f);
     ctx->Yield(2);
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::SetActivePart(*s_App, slotOf("Second"));
@@ -7347,7 +7347,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     showModel();
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 9.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 9.0f);
     ctx->Yield();
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "save");
@@ -7359,7 +7359,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     showModel();
     ctx->ItemDoubleClick("//###Model/Box 1##0");
     ctx->Yield();
-    ctx->ItemInputValue("//Box###ToolWindow/##Width", 5.0f);
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 5.0f);
     ctx->Yield();
     IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
     ui::MarkProjectSaved(*s_App, dir.string(), "save");

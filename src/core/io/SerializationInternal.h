@@ -16,8 +16,9 @@
 #include <string>
 
 inline constexpr const char* kFormat = "designer-document";
-inline constexpr int kVersion = 60; // v60: CAM per-setup arc fitting
-                                    // (v57: mate connector inner_path)
+inline constexpr int kVersion =
+    61; // v61: expression-driven Box/Sphere/Cylinder dimensions
+        // (v57: mate connector inner_path)
 
 inline nlohmann::json Vec3ToJson(const glm::vec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});

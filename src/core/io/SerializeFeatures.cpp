@@ -628,14 +628,29 @@ json FeatureToJson(const Feature& feature) {
     j["width"] = box->width;
     j["height"] = box->height;
     j["depth"] = box->depth;
+    // v61: the primitives became expression-driven. "<field>_expr" is the
+    // format's standing convention and is omitted when the field is a plain
+    // literal, so a file that uses none of them is byte-identical to v60.
+    if (!box->widthExpr.empty())
+      j["width_expr"] = box->widthExpr;
+    if (!box->heightExpr.empty())
+      j["height_expr"] = box->heightExpr;
+    if (!box->depthExpr.empty())
+      j["depth_expr"] = box->depthExpr;
   } else if (auto* sphere = dynamic_cast<const SphereFeature*>(&feature)) {
     j["center"] = Vec3ToJson(sphere->center);
     j["radius"] = sphere->radius;
+    if (!sphere->radiusExpr.empty())
+      j["radius_expr"] = sphere->radiusExpr;
   } else if (auto* cyl = dynamic_cast<const CylinderFeature*>(&feature)) {
     j["center"] = Vec3ToJson(cyl->center);
     j["direction"] = Vec3ToJson(cyl->direction);
     j["radius"] = cyl->radius;
     j["height"] = cyl->height;
+    if (!cyl->radiusExpr.empty())
+      j["radius_expr"] = cyl->radiusExpr;
+    if (!cyl->heightExpr.empty())
+      j["height_expr"] = cyl->heightExpr;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
@@ -889,11 +904,12 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "blind|symmetric|two_sided|up_to_face|through_all, distance2? (+_expr), "
      "reversed?, regions?, end_target?; extrudes along +plane normal"},
     {"Box", 1,
-     "position [x,y,z] = MIN corner, width/height/depth = X/Y/Z extents mm"},
-    {"Sphere", 1, "center [x,y,z], radius"},
+     "position [x,y,z] = MIN corner, width/height/depth = X/Y/Z extents mm "
+     "(each +_expr, so a variable can drive it)"},
+    {"Sphere", 1, "center [x,y,z], radius (+_expr)"},
     {"Cylinder", 1,
-     "center [x,y,z] (base), direction [x,y,z], radius, "
-     "height"},
+     "center [x,y,z] (base), direction [x,y,z], radius (+_expr), "
+     "height (+_expr)"},
     {"Import", 1, "path (STEP/STL/BREP file)"},
     {"DatumPlane", 1,
      "kind: offset|angle, base_plane: xy|xz|yz or parent_id, offset (+_expr), "
@@ -1151,16 +1167,27 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     out = std::move(ext);
   } else if (type == "Box") {
-    out = std::make_unique<BoxFeature>(
+    auto box = std::make_unique<BoxFeature>(
         name, Vec3FromJson(j.at("position")), j.at("width").get<double>(),
         j.at("height").get<double>(), j.at("depth").get<double>());
+    // v61 expression fields; absent in an older file, which just means the
+    // dimension is a literal.
+    box->widthExpr = j.value("width_expr", std::string{});
+    box->heightExpr = j.value("height_expr", std::string{});
+    box->depthExpr = j.value("depth_expr", std::string{});
+    out = std::move(box);
   } else if (type == "Sphere") {
-    out = std::make_unique<SphereFeature>(name, Vec3FromJson(j.at("center")),
-                                          j.at("radius").get<double>());
+    auto sph = std::make_unique<SphereFeature>(
+        name, Vec3FromJson(j.at("center")), j.at("radius").get<double>());
+    sph->radiusExpr = j.value("radius_expr", std::string{});
+    out = std::move(sph);
   } else if (type == "Cylinder") {
-    out = std::make_unique<CylinderFeature>(
+    auto cyl = std::make_unique<CylinderFeature>(
         name, Vec3FromJson(j.at("center")), Vec3FromJson(j.at("direction")),
         j.at("radius").get<double>(), j.at("height").get<double>());
+    cyl->radiusExpr = j.value("radius_expr", std::string{});
+    cyl->heightExpr = j.value("height_expr", std::string{});
+    out = std::move(cyl);
   } else if (type == "Import") {
     auto imp =
         std::make_unique<ImportFeature>(name, j.at("path").get<std::string>());

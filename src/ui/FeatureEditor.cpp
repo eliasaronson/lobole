@@ -1152,26 +1152,27 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
   if (auto* box = dynamic_cast<BoxFeature*>(&feature)) {
     HandleEdit(state, feature, DragFloat3Row("Position", &box->position.x),
                index, commit);
-    HandleEdit(state, feature, DragDim(state, "Width", &box->width), index,
-               commit);
-    HandleEdit(state, feature, DragDim(state, "Height", &box->height), index,
-               commit);
-    HandleEdit(state, feature, DragDim(state, "Depth", &box->depth), index,
-               commit);
+    // ExprDim, not DragDim: the "fx" button is what lets a variable drive
+    // the dimension, and without it a primitive could not be parametric —
+    // which meant a part built from primitives could not be configured.
+    ExprDim(state, feature, index, commit, "Width", box->widthExpr, box->width);
+    ExprDim(state, feature, index, commit, "Height", box->heightExpr,
+            box->height);
+    ExprDim(state, feature, index, commit, "Depth", box->depthExpr, box->depth);
   } else if (auto* sphere = dynamic_cast<SphereFeature*>(&feature)) {
     HandleEdit(state, feature, DragFloat3Row("Center", &sphere->center.x),
                index, commit);
-    HandleEdit(state, feature, DragDim(state, "Radius", &sphere->radius), index,
-               commit);
+    ExprDim(state, feature, index, commit, "Radius", sphere->radiusExpr,
+            sphere->radius);
   } else if (auto* cyl = dynamic_cast<CylinderFeature*>(&feature)) {
     HandleEdit(state, feature, DragFloat3Row("Center", &cyl->center.x), index,
                commit);
     HandleEdit(state, feature, DragFloat3Row("Direction", &cyl->direction.x),
                index, commit);
-    HandleEdit(state, feature, DragDim(state, "Radius", &cyl->radius), index,
-               commit);
-    HandleEdit(state, feature, DragDim(state, "Height", &cyl->height), index,
-               commit);
+    ExprDim(state, feature, index, commit, "Radius", cyl->radiusExpr,
+            cyl->radius);
+    ExprDim(state, feature, index, commit, "Height", cyl->heightExpr,
+            cyl->height);
   } else if (auto* import = dynamic_cast<ImportFeature*>(&feature)) {
     ImGui::TextDisabled("File: %s", import->path.c_str());
   } else if (auto* sk = dynamic_cast<SketchFeature*>(&feature)) {

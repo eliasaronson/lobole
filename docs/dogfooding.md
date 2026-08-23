@@ -60,17 +60,18 @@ following in both directions.
 
 ### Left open
 
-- **The primitives are not parametric.** `BoxFeature`, `SphereFeature` and
-  `CylinderFeature` carry no expression fields at all, so no variable can
-  drive a box, and a part built from primitives can never be configured —
-  the Configurations panel will still offer overrides that change nothing.
-  Everything sketch-driven is fine. Fixing it is a format change (expression
-  fields + `kVersion` + a golden), so it is written down rather than done.
-- **The dock tabs are unreadable**: five panels in the default 210 px left
-  dock render as `M`, `V…`, `C…`, `H…`, `C…` — Configurations and CAM are
-  the same string. Two of the five features nobody had ever clicked are
-  behind tabs you cannot identify. Same truncation class as the History
-  panel rows, one level up in the navigation.
+- ~~**The primitives are not parametric.**~~ **FIXED (v61).** `BoxFeature`,
+  `SphereFeature` and `CylinderFeature` carried no expression fields at all,
+  so no variable could drive a box and a part built from primitives could
+  never be configured — the Configurations panel would offer overrides that
+  changed nothing. They take `*_expr` fields now, the editors give them the
+  same `fx` button every other feature has, and
+  `tests/golden/v61-parametric-primitives.json` is a box and a cylinder
+  driven by variables with a configuration that changes both.
+- ~~**The dock tabs are unreadable**~~ **FIXED.** Five panels in the 210 px
+  left dock rendered as `M`, `V…`, `C…`, `H…`, `C…` — Configurations and CAM
+  the same string. Each title now leads with an icon, so the characters that
+  survive truncation are the distinguishing ones.
 - **A `**` wildcard ref can hang the ImGui test engine** — a crawl through
   the variables table ran past the 300 s watchdog. Fully-qualified paths
   only, which is now the reason both tables are named.
