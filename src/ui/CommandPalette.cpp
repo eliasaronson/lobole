@@ -105,6 +105,13 @@ std::vector<PaletteCommand> BuildCommands(AppState& state) {
       });
   add("Tool: Simulation", nullptr, hasBody,
       [](AppState& s) { EnterSimulation(s); });
+#ifdef HAVE_CAM
+  // CAM was the one mode-level tool with NO route but its toolbar button —
+  // no menu entry and no palette entry — which a dogfooding round found the
+  // hard way when the toolbar overflowed and culled the button. The toolbar
+  // wraps now; this is the second way in, which every sibling already had.
+  add("Tool: CAM", nullptr, hasBody, [](AppState& s) { s.camToolOpen = true; });
+#endif
 
   // Replaces the old View > Section View menu (deleted with the tool round).
   add("Tool: Section", nullptr, true, [](AppState& s) {

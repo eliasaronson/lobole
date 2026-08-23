@@ -28,6 +28,7 @@
 #include "core/io/ProjectMerge.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
+#include "remote/RemoteDrawings.h"
 #include "render/Camera.h"
 #include "render/FrameTimer.h"
 #include "render/RayTracingRenderer.h"
@@ -4630,6 +4631,63 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   //
   // This is the check that would have caught all three of the 2026-08-22
   // order-dependent failures, none of which any test was trying to find.
+  // Every tool on the model toolbar must be CLICKABLE at the default window
+  // size — not merely present in the source. A dogfooding round found the row
+  // overflowing at 1280x720 with the last four tools (Simulation, CAM,
+  // Section, Measure) culled rather than clipped: nothing could click them
+  // until the bar was scrolled, and CAM had no other route at all. The row
+  // wraps now, and this is what keeps it true as tools are appended — which
+  // is exactly how it broke, since new tools go on the end.
+  t = IM_REGISTER_TEST(engine, "toolbar", "every_tool_is_reachable");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // A body, so the tools that need one are enabled (a disabled button is
+    // still submitted, but this keeps the test honest about real conditions).
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(4);
+
+    static const char* kModelTools[] = {
+        "###tb_new_sketch", "###tb_box",         "###tb_sphere",
+        "###tb_cylinder",   "###tb_extrude",     "###tb_revolve",
+        "###tb_curve3d",    "###tb_sweep",       "###tb_loft",
+        "###tb_pipe",       "###tb_datum_plane", "###tb_datum_axis",
+        "###tb_boolean",    "###tb_mirror",      "###tb_pattern",
+        "###tb_fillet",     "###tb_chamfer",     "###tb_rib",
+        "###tb_hole",       "###tb_thread",      "###tb_shell",
+        "###tb_draft",      "###tb_split",       "###tb_refine",
+        "###tb_fit",        "###tb_planes",      "###tb_simulation",
+        "###tb_section",    "###tb_measure",     "###tb_render",
+    };
+    // THE load-bearing assertion, and it is structural on purpose. Probing
+    // each button with ItemExists does NOT work: the test engine SCROLLS to
+    // bring an item into view, so every id resolves whether or not it was
+    // reachable, and the test passes with the bug present (verified by
+    // removing the wrap and watching it stay green). What actually matters is
+    // that the row FITS — content no wider than the window means nothing is
+    // scrolled out, for a human or for a script.
+    // By substring: a child window's real name carries the parent's and a
+    // hashed suffix ("##DockHost/##ToolbarRow_1A2B3C4D"), so an exact lookup
+    // finds nothing.
+    ImGuiWindow* bar = nullptr;
+    for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows)
+      if (std::string(w->Name).find("##ToolbarRow") != std::string::npos) {
+        bar = w;
+        break;
+      }
+    IM_CHECK(bar != nullptr);
+    ctx->LogInfo("toolbar content %.0f px in %.0f px", bar->ContentSize.x,
+                 bar->InnerRect.GetWidth());
+    IM_CHECK(bar->ContentSize.x <= bar->InnerRect.GetWidth() + 1.0f);
+
+    // And the ids are all present, which catches a tool dropped entirely.
+    ctx->SetRef("//##DockHost");
+    for (const char* id : kModelTools)
+      IM_CHECK_SILENT(ctx->ItemExists((std::string("**/") + id).c_str()));
+#ifdef HAVE_CAM
+    IM_CHECK(ctx->ItemExists("**/###tb_cam"));
+#endif
+  };
+
   t = IM_REGISTER_TEST(engine, "isolation", "a_messy_test_leaks_nothing");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -6816,6 +6874,82 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(s_App->diffFrom.empty());
     IM_CHECK(ctx->ItemExists("**/###hist_row0"));
 
+  };
+
+  // Two ways to do one thing, and nothing checking they agree. add_drawing_view
+  // dropped every view at the sheet centre at 1:1 while the Add view button
+  // fitted a standard scale and placed it clear of the others — so a scripted
+  // sheet came out as a pile and a clicked one came out as a drawing. Nobody
+  // noticed because each path had its own test.
+  //
+  // The bar is the document state, not the code path: do it by clicking, do
+  // it by RPC, and the two documents have to match. Add a pair here whenever
+  // an action grows a second way to reach it.
+  t = IM_REGISTER_TEST(engine, "parity", "clicking_and_scripting_agree");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // The part both sheets will show: three different dimensions, so a
+    // difference in orientation or scale cannot hide.
+    const auto buildPart = [&] {
+      ctx->SetRef("//##MainMenuBar");
+      ctx->MenuClick("File/New");
+      ctx->Yield();
+      ToolbarCreateAccept(ctx, "###tb_box");
+      ctx->ItemDoubleClick("//Model/Box 1##0");
+      ctx->Yield();
+      ctx->ItemInputValue("//Box###ToolWindow/##Width", 80.0f);
+      ctx->ItemInputValue("//Box###ToolWindow/##Height", 8.0f);
+      ctx->ItemInputValue("//Box###ToolWindow/##Depth", 60.0f);
+      ctx->Yield(2);
+      ctx->ItemClick("//##PartTabs/+##addmenu");
+      ctx->ItemClick("//$FOCUSED/New Drawing##adddwg");
+      ctx->Yield(3);
+    };
+    // What a sheet IS, for comparison: every view's orientation, scale and
+    // where it sits. Ids differ between the two runs and are left out.
+    const auto sheetState = [&] {
+      std::vector<std::string> rows;
+      for (const DrawingView& v : s_App->drawing->GetViews()) {
+        char buf[160];
+        snprintf(buf, sizeof buf, "%s scale=%.4f at (%.3f, %.3f)",
+                 ViewOrientationToString(v.orientation), v.scale, v.position.x,
+                 v.position.y);
+        rows.push_back(buf);
+      }
+      return rows;
+    };
+
+    buildPart();
+    ctx->SetRef("//Model");
+    ctx->ItemInputValue("###dwg_scale", 0.0f); // 0 = choose one for me
+    for (const char* orient : {"front", "top", "right"}) {
+      ctx->ComboClick((std::string("###dwg_orientation/") + orient).c_str());
+      ctx->Yield();
+      ctx->ItemClick("###dwg_add_view");
+      ctx->Yield(3);
+    }
+    const std::vector<std::string> clicked = sheetState();
+    IM_CHECK_EQ(clicked.size(), (size_t)3);
+
+    // The same three views, asked for the way a script asks: no position and
+    // no scale, because that is what "just put a front view on it" means.
+    buildPart();
+    for (const char* orient : {"front", "top", "right"}) {
+      const nlohmann::json params = {{"source", "Part 1"},
+                                     {"orientation", orient}};
+      remote::RpcParams rp(params);
+      const auto reply =
+          remote::HandleDrawingRpc(*s_App, "add_drawing_view", rp);
+      IM_CHECK(reply.has_value());
+      ctx->Yield(2);
+    }
+    const std::vector<std::string> scripted = sheetState();
+
+    IM_CHECK_EQ(scripted.size(), clicked.size());
+    for (size_t i = 0; i < clicked.size() && i < scripted.size(); i++) {
+      ctx->LogInfo("view %d: clicked [%s] scripted [%s]", (int)i,
+                   clicked[i].c_str(), scripted[i].c_str());
+      IM_CHECK_STR_EQ(scripted[i].c_str(), clicked[i].c_str());
+    }
   };
 
   // Drawings had ONE gui test and all it asserted was that the tab appeared.

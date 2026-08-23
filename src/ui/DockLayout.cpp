@@ -1,5 +1,7 @@
 #include "ui/DockLayout.h"
 
+#include <algorithm>
+
 #include <cstring>
 
 #include "ui/Toolbar.h"
@@ -46,14 +48,17 @@ void BeginDockspace(AppState& state) {
   // When the window is narrower than the button row, scroll instead of
   // clipping (U4); the row grows by the scrollbar's height while overflowed
   // so the bar never overlays the buttons.
-  static bool toolbarOverflow = false;
-  const float toolbarH =
-      ImGui::GetFrameHeight() + 12.0f +
-      (toolbarOverflow ? ImGui::GetStyle().ScrollbarSize : 0.0f);
+  // The row WRAPS rather than scrolling (see Toolbar.cpp WrapIfNeeded), so
+  // its height depends on how many rows the current width needs. Measured
+  // from the previous frame, like the scrollbar allowance it replaces: the
+  // height has to be chosen before the content is laid out.
+  static float toolbarRowsH = 0.0f;
+  const float oneRow = ImGui::GetFrameHeight() + 12.0f;
+  const float toolbarH = std::max(oneRow, toolbarRowsH);
   ImGui::BeginChild("##ToolbarRow", ImVec2(0.0f, toolbarH),
-                    ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar);
+                    ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
   DrawToolbar(state);
-  toolbarOverflow = ImGui::GetScrollMaxX() > 0.0f;
+  toolbarRowsH = ImGui::GetCursorPosY() + ImGui::GetFrameHeight() * 0.5f;
   ImGui::EndChild();
   ImGui::PopStyleVar();
   ImGui::PopStyleColor();

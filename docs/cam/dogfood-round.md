@@ -326,3 +326,41 @@ When it does, watch these, in this order:
 
 Then write down what surprised you. That list is worth more than another
 simulated round.
+
+## Round 3 findings (GUI), 2026-08-23
+
+Driven through the GUI on a scratch instance, looking at screenshots rather
+than counting assertions. One finding, and it is the worst kind: the feature
+was unreachable, and every automated check was green.
+
+**The model toolbar did not fit, and the tools past the edge were culled.**
+At 1280x720 — the app's own default, and the size the GUI suite runs at — the
+row needed **1320 px in a 1280 px window**. U4 had chosen a horizontal
+scrollbar over clipping so that no button would be lost, but scrolled-out
+items are not submitted at all: nothing could click them, and a human would
+simply not find them. The four that fell off were the last in the row —
+**Simulation, CAM, Section, Measure** — the mode-level tools.
+
+Measured, not inferred:
+
+| toolbar scroll | `tb_box` | `tb_planes` | `tb_cam` | `tb_section` |
+|---|---|---|---|---|
+| at rest | reachable | reachable | **unreachable** | **unreachable** |
+| scrolled right | **unreachable** | reachable | reachable | reachable |
+
+**CAM was the only one with no other route.** Measure, Simulation and Section
+all have command-palette entries; CAM had none, and no menu entry either. So
+with the toolbar overflowed, an entire workstream had no way in.
+
+Fixed: the toolbar wraps to a second row instead of scrolling (keeping U4's
+actual intent — lose nothing — at the cost of one row of height), and CAM
+joins its siblings in the palette.
+
+**The guard for it is structural, after the obvious version failed.** A test
+that probes each button with `ItemExists` passes with the bug present,
+because the test engine SCROLLS to bring an item into view — verified by
+removing the wrap and watching it stay green. `toolbar/every_tool_is_reachable`
+asserts the row FITS (`ContentSize.x <= InnerRect width`) instead, and was
+verified the other way: on the unwrapped build it fails with "toolbar content
+1320 px in 1280 px". New tools are appended to that row, which is exactly how
+this broke, so the guard matters more than the fix.

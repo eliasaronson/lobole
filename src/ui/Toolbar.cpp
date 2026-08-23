@@ -120,8 +120,26 @@ void DrawRenderModal(AppState& state) {
   ImGui::EndPopup();
 }
 
+// Start a new row when the next item would not fit. U4 chose a horizontal
+// scrollbar over clipping so no button was lost — but a dogfooding round
+// measured what that costs: at 1280x720 the row overflows, and the tools
+// past the edge are not merely off-screen, they are CULLED, so nothing can
+// click them until the bar is scrolled. The ones that fall off are the last
+// in the row, which is Simulation, CAM, Section and Measure — the
+// mode-level tools, and CAM had no other route at all. Wrapping keeps U4's
+// intent (lose nothing) and costs one row of height instead.
+void WrapIfNeeded(float itemWidth) {
+  const float x = ImGui::GetCursorPosX();
+  if (x > ImGui::GetStyle().WindowPadding.x &&
+      x + itemWidth > ImGui::GetContentRegionMax().x)
+    ImGui::NewLine();
+}
+
 // An icon button with a tooltip. Returns true when clicked.
 bool ToolButton(const char* icon, const char* tooltip, bool enabled = true) {
+  WrapIfNeeded(ImGui::CalcTextSize(icon, nullptr, true).x +
+               ImGui::GetStyle().FramePadding.x * 2.0f +
+               ImGui::GetStyle().ItemSpacing.x);
   ImGui::BeginDisabled(!enabled);
   const bool clicked = ImGui::Button(icon);
   ImGui::EndDisabled();
@@ -133,8 +151,14 @@ bool ToolButton(const char* icon, const char* tooltip, bool enabled = true) {
 
 void Divider() {
   ImGui::SameLine();
-  ImGui::TextDisabled("|");
-  ImGui::SameLine();
+  // A divider that lands at the wrap point would open a row with a stray
+  // separator, so it wraps too — and then the new row starts with a button.
+  WrapIfNeeded(ImGui::CalcTextSize("|").x +
+               ImGui::GetStyle().ItemSpacing.x * 2.0f);
+  if (ImGui::GetCursorPosX() > ImGui::GetStyle().WindowPadding.x) {
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+  }
 }
 
 // The model-mode toolbar: create features, fit, planes.
