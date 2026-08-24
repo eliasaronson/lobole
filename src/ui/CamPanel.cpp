@@ -407,7 +407,13 @@ void DrawCamPanel(AppState& state) {
                          failed == 1 ? "" : "s");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Save G-code###cam_post")) {
+    // NOT "###cam_post": that is the post-DIALECT combo on the setup row, and
+    // two widgets in one window answering to one id is a real ImGui error —
+    // it raised "2 visible items with conflicting ID" over the user's job.
+    // The collision was always there; it started firing when this button
+    // moved above the operations list and the two became visible at once
+    // (docs/cam/dogfood-round.md).
+    if (ImGui::Button("Save G-code###cam_save_gcode")) {
       // Beside the project, named after the setup: somewhere findable, and
       // never overwriting the model. With no project there is no "beside",
       // and the fallback was a bare "job.nc" — written into whatever

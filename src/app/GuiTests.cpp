@@ -1133,6 +1133,65 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(face.ok); // so the first verb on a rough board just works
   };
 
+  // No two visible widgets may share an ImGuiID. ImGui detects this itself
+  // and says so in a popup — which is a popup the USER gets, not a test
+  // failure, so nothing caught "Save G-code" and the post-dialect combo both
+  // answering to ###cam_post for as long as they both existed. It only became
+  // visible when the button moved above the operations list and the two were
+  // on screen at once (docs/cam/dogfood-round.md).
+  //
+  // ui_items cannot see this: GatherItems is keyed BY id, so a collision
+  // shows up as one entry, not two. ImGui's own detection is the check.
+  t = IM_REGISTER_TEST(engine, "cam", "panel_widgets_have_distinct_ids");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    // A job with a toolpath, so the whole panel draws — Save G-code only
+    // appears once something has been generated.
+    cam::Operation op;
+    op.id = Doc()->AllocateId();
+    op.name = "Outline";
+    op.type = cam::OpType::Profile;
+    op.topZ = 13.0;
+    op.bottomZ = -1.0;
+    op.stepdown = 4.0;
+    Doc()->FindCamSetup(setup.id)->operations.push_back(op);
+    ui::RefreshCamToolpaths(*s_App);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolpaths.empty());
+
+    IM_CHECK(ImGui::FindWindowByName("CAM###CamPanel") != nullptr);
+    ctx->WindowFocus("//CAM###CamPanel");
+    ctx->Yield(4);
+
+    // Both widgets must be REACHABLE. Two items sharing an id is invisible to
+    // a listing — the test engine gathers by id, so a collision shows up as
+    // one entry rather than two, which is why nothing noticed. Asking for
+    // each of them by name is the check that does not depend on ImGui's own
+    // detection, which only fires while the mouse happens to be over one of
+    // the pair.
+    ImGuiWindow* panel = ImGui::FindWindowByName("CAM###CamPanel");
+    IM_CHECK(panel != nullptr);
+    const ImGuiID postCombo = panel->GetID("###cam_post");
+    const ImGuiID saveButton = panel->GetID("###cam_save_gcode");
+    IM_CHECK(postCombo != saveButton);
+    ImGuiTestItemList items;
+    ctx->GatherItems(&items, "//CAM###CamPanel");
+    bool sawCombo = false, sawSave = false;
+    for (const ImGuiTestItemInfo& item : items) {
+      sawCombo |= item.ID == postCombo;
+      sawSave |= item.ID == saveButton;
+    }
+    IM_CHECK(sawCombo); // the post dialect…
+    IM_CHECK(sawSave);  // …and Save G-code, as two separate widgets
+  };
+
   // An operation can be removed from the window that makes them. Removing was
   // only possible in the docked panel, which is a tab behind Model — while
   // every operation is created in the floating verb window. Adding three by
