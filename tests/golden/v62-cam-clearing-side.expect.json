@@ -1,0 +1,12 @@
+{
+  "features": 1,
+  "bodies": 1,
+  "volumes": [
+    12000.0
+  ],
+  "cam_op_sides": [
+    "outside",
+    "inside",
+    "inside"
+  ]
+}

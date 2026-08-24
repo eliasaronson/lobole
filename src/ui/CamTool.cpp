@@ -424,11 +424,39 @@ void DrawCamToolWindow(AppState& state) {
         state.camGhostOp = ghosted ? 0 : op.id;
       ImGui::SetItemTooltip("Show what this one removes");
       ImGui::SameLine();
+      // What the operation SAYS about itself, from its own fields — and then
+      // what actually came of it. This line used to be the description alone,
+      // so an operation that generated nothing rendered identically to one
+      // that cut the part: the user clicked "Clear a pocket" three times at a
+      // face that never changed, because nothing in this window ever said the
+      // op was dead (docs/cam/dogfood-round.md). The docked panel printed it;
+      // the floating window is where the work happens.
+      const cam::Toolpath* path = nullptr;
+      for (const cam::Toolpath& tp : state.camToolpaths)
+        if (tp.operationId == op.id)
+          path = &tp;
       ImGui::Text("%s: %.3g mm tool, %.3g mm deep in %d pass%s, %s%s",
                   op.name.c_str(), tool != nullptr ? tool->diameter : 0.0,
                   depth, passes, passes == 1 ? "" : "es",
                   op.climb ? "climb" : "conventional",
                   op.type == cam::OpType::Adaptive ? ", adaptive" : "");
+      if (path != nullptr && !path->error.empty()) {
+        ImGui::PushTextWrapPos(320.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+        ImGui::TextWrapped("%s cut nothing — %s", ICON_FA_TRIANGLE_EXCLAMATION,
+                           path->error.c_str());
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+      } else if (path != nullptr && !path->strategy.empty()) {
+        // It cut, but not by the strategy its type names. Feeds were chosen
+        // for one of them.
+        ImGui::PushTextWrapPos(320.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.80f, 0.40f, 1.0f));
+        ImGui::TextWrapped("%s cut %s", ICON_FA_TRIANGLE_EXCLAMATION,
+                           path->strategy.c_str());
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+      }
       ImGui::PopID();
     }
   }

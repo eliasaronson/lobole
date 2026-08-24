@@ -698,6 +698,7 @@ DerivedOp DeriveOperation(const Setup& setup,
   const double modelBottom = lo.z + setup.stock.bottomMargin;
 
   switch (type) {
+  case OpType::Adaptive: // the strategy, derived exactly like the verb it is
   case OpType::Pocket: {
     if (IsWallFace(bodies, target)) {
       out.why = "click the pocket's FLOOR — a wall says where to go round, "
@@ -757,6 +758,42 @@ DerivedOp DeriveOperation(const Setup& setup,
       if (!region.ok) {
         out.why = region.why;
         return out;
+      }
+      // "Cut it out" follows the part's OWN side, and a level face only says
+      // where that is when nothing stands around it. Click the floor of a
+      // pocket and this used to route a full-depth contour around the pocket
+      // — a slot through the middle of the board, 22 mm into a 20 mm plate,
+      // reported by the verifier as scrap (docs/cam/dogfood-round.md). The
+      // mirror of this mistake was already guarded: a pocket asked for on a
+      // WALL says "click the pocket's FLOOR".
+      //
+      // The test is what the words mean: is there material immediately
+      // outside this contour, just above its own plane? On the top of a part
+      // there is nothing above; on a pocket floor there are its walls.
+      Clipper2Lib::Paths64 outer;
+      for (const Loop& l : region.loops)
+        if (!l.hole)
+          outer.push_back(ToClipper(l.pts));
+      if (!outer.empty()) {
+        const Clipper2Lib::Paths64 ring =
+            Clipper2Lib::Difference(Offset(outer, tool.diameter), outer,
+                                    Clipper2Lib::FillRule::NonZero);
+        Clipper2Lib::Paths64 solid, voids;
+        for (const Loop& l : SectionLoops(bodies, region.z + 1e-3))
+          (l.hole ? voids : solid).push_back(ToClipper(l.pts));
+        const Clipper2Lib::Paths64 above = Clipper2Lib::Difference(
+            solid, voids, Clipper2Lib::FillRule::NonZero);
+        const double ringArea = std::abs(Clipper2Lib::Area(ring));
+        const double buried = std::abs(Clipper2Lib::Area(Clipper2Lib::Intersect(
+            ring, above, Clipper2Lib::FillRule::NonZero)));
+        if (ringArea > 0.0 && buried > ringArea * 0.25) {
+          out.why =
+              "that face has material standing around it, so it is a floor "
+              "rather than the part's own side — cutting outside it would "
+              "route a slot through the part. Clear a pocket clears it; to "
+              "cut an opening out, click the WALL of the opening.";
+          return out;
+        }
       }
       op.targets = {target};
     }
@@ -1075,6 +1112,7 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
     // Not a refusal: the job still has to cut. The concentric pocket is the
     // strategy this build has, and saying so beats producing nothing.
     GeneratePocket(setup, op, tool, bodies, tp);
+    tp.strategy = "concentric (this build has no adaptive clearing)";
     return;
   }
   std::string why;
@@ -1122,7 +1160,19 @@ void GenerateAdaptive(const Setup& setup, const Operation& op, const Tool& tool,
       return;
     }
     if (!cleared.error.empty() && cleared.moves.empty()) {
-      tp.error = cleared.error;
+      // Adaptive declined this region — a vertex layout the vendored library
+      // throws on, a shape it cannot lead into, a start point it cannot find.
+      // The pocket still has to be cleared, and the concentric strategy is
+      // right here and cuts the same region: falling back is what the
+      // no-library branch above already does, and giving up instead left the
+      // user clicking "Clear a pocket" at a face that never changed
+      // (docs/cam/dogfood-round.md). Which strategy cut it is REPORTED, not
+      // hidden — a job that quietly changed strategy is a job whose feeds
+      // were chosen for the other one.
+      tp.moves.clear();
+      GeneratePocket(setup, op, tool, bodies, tp);
+      tp.strategy =
+          "concentric — adaptive declined this shape (" + cleared.error + ")";
       return;
     }
     if (!cleared.error.empty() && tp.error.empty())

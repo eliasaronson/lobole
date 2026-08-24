@@ -145,6 +145,10 @@ struct Toolpath {
   int toolNumber = 1;
   std::vector<Move> moves;
   std::string error; // non-empty = this op produced nothing, and why
+  // Non-empty when the operation was cut by a DIFFERENT strategy than its
+  // type says — adaptive falling back to concentric clearing. Silence about
+  // that is a job whose feeds were chosen for the strategy it did not use.
+  std::string strategy;
 
   [[nodiscard]] bool Empty() const { return moves.empty(); }
   // Total distance travelled while cutting, in mm — the cheap sanity check a

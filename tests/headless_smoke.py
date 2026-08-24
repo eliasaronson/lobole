@@ -1341,6 +1341,57 @@ def main():
             expect(back[0]["type"] == kind,
                    f"{kind} op read back as {back[0]['type']}")
             d.call("remove_cam_op", id=op)
+        # An ELLIPTICAL pocket. The vendored Adaptive2d throws on particular
+        # vertex layouts — not particular shapes — and every ellipse OCC
+        # discretises at the 0.02 mm chord tolerance lands in the failing set,
+        # so from the GUI it looked ellipse-specific: three clicks on "Clear a
+        # pocket" and the face never changed. The pocket still has to be
+        # cleared, so adaptive falls back to the concentric strategy and SAYS
+        # which one cut it (docs/cam/dogfood-round.md).
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Plate", "position": [-100, -60, 0],
+            "width": 200, "height": 120, "depth": 20})
+        d.call("add_feature", feature={
+            "type": "Sketch", "name": "Pocket sketch",
+            "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "ellipse", "center": [0, 0],
+                          "r_major": 61.224365234375,
+                          "r_minor": 29.614774703979492,
+                          "rotation": -0.3941636085510254}]})
+        sk = [f for f in d.call("get_state")["features"]
+              if f["type"] == "Sketch"][-1]["id"]
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Pocket", "sketch_id": sk,
+            "distance": 11.0, "mode": "cut", "reversed": True})
+        ell_setup = d.call("add_cam_setup", name="Ellipse")["id"]
+        floor = None
+        for body in d.call("list_elements")["bodies"]:
+            for f in body["faces"]:
+                n = f.get("normal") or [0, 0, 0]
+                c = f.get("centroid") or [0, 0, 0]
+                if f.get("kind") == "plane" and n[2] > 0.99 and abs(c[2] - 9.0) < 0.5:
+                    floor = {"feature_id": body["created_by"],
+                             "element": f["name"]}
+        expect(floor is not None, "the elliptical pocket has a floor to click")
+        op = d.call("add_cam_op", setup=ell_setup, type="pocket", tool=1,
+                    target=floor)
+        expect(op["side"] == "inside", f"a pocket clears inside: {op}")
+        got = d.call("cam_toolpath", setup=ell_setup)["operations"][0]
+        expect(got["moves"] > 0,
+               f"an elliptical pocket is cleared, not skipped: {got}")
+        expect("concentric" in got.get("strategy", ""),
+               f"and it says which strategy cut it: {got}")
+        # Whatever cut it, it must cut the right thing.
+        v = d.call("cam_verify", setup=ell_setup, resolution=0.8)
+        expect(v["ok"], f"the fallback cuts cleanly: {v}")
+
+        d.call("new_project")
+        d.call("add_feature", feature={
+            "type": "Box", "name": "Plate", "position": [0, 0, 0],
+            "width": 40, "height": 30, "depth": 20})
+        cam_setup = d.call("add_cam_setup", name="Job")["id"]
         # Arc fitting is a property of the machine, so it persists and the
         # posted file honours it (C7).
         d.call("add_cam_op", setup=cam_setup, type="profile",

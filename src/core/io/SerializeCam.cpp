@@ -106,7 +106,13 @@ json CamSetupToJson(const cam::Setup& setup) {
       oj["stepdown"] = op.stepdown;
     if (op.stockToLeave != 0.0)
       oj["stock_to_leave"] = op.stockToLeave;
-    if (op.type == cam::OpType::Profile)
+    // EVERY type that reads it, not just profiles. Adaptive clearing is the
+    // one strategy that acts on `side`, and it was the one type that never
+    // wrote it: a pocket saved and reloaded came back clearing OUTSIDE its
+    // own boundary, where there is nothing, and produced no toolpath at all.
+    // A job that worked before the save did not work after it
+    // (docs/cam/dogfood-round.md).
+    if (op.type != cam::OpType::Face && op.type != cam::OpType::Drill)
       oj["side"] = SideName(op.side);
     if (!op.climb)
       oj["climb"] = false;
@@ -172,7 +178,14 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.bottomZ = oj.value("bottom_z", -1.0);
     op.stepdown = oj.value("stepdown", 0.0);
     op.stockToLeave = oj.value("stock_to_leave", 0.0);
-    op.side = SideFromName(oj.value("side", std::string("outside")));
+    // A clearing operation clears INSIDE its boundary; "outside" is a
+    // profile's notion. So the default when the key is missing depends on the
+    // type — which is what repairs the documents written before this was
+    // saved at all, without asking anyone to re-make their job.
+    const bool clears =
+        op.type == cam::OpType::Pocket || op.type == cam::OpType::Adaptive;
+    op.side = SideFromName(
+        oj.value("side", std::string(clears ? "inside" : "outside")));
     op.climb = oj.value("climb", true);
     if (oj.contains("tabs")) {
       op.tabCount = oj["tabs"].value("count", 0);

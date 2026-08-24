@@ -1428,6 +1428,148 @@ TEST_CASE("cam: adaptive clears the same pocket, gently", "[cam]") {
   CHECK(v.rapidsThroughStock == 0);
 }
 
+TEST_CASE("cam: the vendored adaptive library throws on some vertex layouts",
+          "[cam]") {
+  // Frozen because it is the reason the fallback below exists. Adaptive2d
+  // throws std::out_of_range from its finishing-pass z-tagging (map::at) for
+  // particular vertex layouts — not particular SHAPES: a 30 mm circle clears
+  // fine at 24, 60, 120 and 200 points and throws at 37. Which is why it
+  // looked ellipse-specific from the GUI: every ellipse OCC discretises at the
+  // 0.02 mm chord tolerance happened to land in the failing set
+  // (docs/cam/dogfood-round.md).
+  if (!cam::AdaptiveAvailable())
+    return;
+  cam::Setup setup = BasicSetup();
+  cam::Operation op;
+  op.type = cam::OpType::Adaptive;
+  op.side = cam::Side::Inside;
+  op.topZ = 10.0;
+  op.bottomZ = 0.0;
+  const auto circle = [](int n) {
+    cam::Loop l;
+    for (int i = 0; i < n; i++) {
+      const double a = 2.0 * std::numbers::pi * i / n;
+      l.pts.push_back({30.0 * std::cos(a), 30.0 * std::sin(a)});
+    }
+    return l;
+  };
+  for (const int n : {24, 60, 120}) {
+    const cam::AdaptiveResult r =
+        cam::AdaptiveClear(setup, op, setup.tools[0], {circle(n)}, 0.0, 10.0);
+    INFO(n << " points: " << r.error);
+    CHECK(!r.moves.empty());
+  }
+  // The one that does not. If this ever starts passing the library was fixed
+  // or replaced, and the fallback can be revisited — it is not wrong either
+  // way, which is the point of a fallback.
+  const cam::AdaptiveResult bad =
+      cam::AdaptiveClear(setup, op, setup.tools[0], {circle(37)}, 0.0, 10.0);
+  CHECK(bad.moves.empty());
+  CHECK(!bad.error.empty());
+}
+
+TEST_CASE("cam: a clearing operation keeps its side across a save", "[cam]") {
+  // `side` was written for PROFILES only, and adaptive is the one strategy
+  // that reads it — so a pocket that cut correctly came back from its own
+  // file clearing OUTSIDE its boundary, where there is nothing, and produced
+  // no toolpath at all. A job that worked before the save did not work after
+  // it (docs/cam/dogfood-round.md).
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 40, 30, 10));
+  cam::Setup& s = doc.AddCamSetup("Job");
+  for (const cam::OpType type : {cam::OpType::Pocket, cam::OpType::Adaptive}) {
+    cam::Operation op;
+    op.id = doc.AllocateId();
+    op.type = type;
+    op.side = cam::Side::Inside;
+    op.topZ = 10.0;
+    op.bottomZ = 4.0;
+    s.operations.push_back(op);
+  }
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "cam_clearing_side.json";
+  REQUIRE(DocumentIO::Save(doc, path.string()).has_value());
+  auto back = DocumentIO::Load(path.string());
+  REQUIRE(back.has_value());
+  const std::vector<cam::Setup>& setups = (*back)->GetCamSetups();
+  REQUIRE(setups.size() == 1);
+  REQUIRE(setups[0].operations.size() == 2);
+  for (const cam::Operation& op : setups[0].operations)
+    CHECK(op.side == cam::Side::Inside);
+  std::filesystem::remove(path);
+
+  // And a document written BEFORE the key was saved at all: the default
+  // depends on the type, so those files repair themselves rather than asking
+  // anyone to re-make a job. (tests/golden/v60-cam-arcs.json is a real one.)
+  const std::string old = R"({"format":"designer-document","version":61,
+    "features":[{"type":"Box","name":"P","id":1,"position":[0,0,0],
+                 "width":40,"height":30,"depth":10}],
+    "cam":[{"id":2,"name":"J","operations":[
+      {"id":3,"type":"adaptive","tool":1,"top_z":10,"bottom_z":4},
+      {"id":4,"type":"profile","tool":1,"top_z":10,"bottom_z":0}]}]})";
+  const std::filesystem::path oldPath =
+      std::filesystem::temp_directory_path() / "cam_clearing_side_old.json";
+  std::ofstream(oldPath) << old;
+  auto migrated = DocumentIO::Load(oldPath.string());
+  REQUIRE(migrated.has_value());
+  const std::vector<cam::Operation>& ops =
+      (*migrated)->GetCamSetups()[0].operations;
+  REQUIRE(ops.size() == 2);
+  CHECK(ops[0].side == cam::Side::Inside);  // a clearing op clears inside
+  CHECK(ops[1].side == cam::Side::Outside); // a profile's default is its own
+  std::filesystem::remove(oldPath);
+}
+
+TEST_CASE("cam: cut it out refuses the floor of a pocket", "[cam]") {
+  // Clicking a pocket floor and pressing "Cut it out" derived an OUTSIDE
+  // profile through the whole part — a full-depth slot routed around the
+  // pocket, in the middle of the board. The verifier called it 22 mm of gouge
+  // on a 20 mm plate, which is scrap (docs/cam/dogfood-round.md). The mirror
+  // of this mistake was already guarded: a pocket asked for on a WALL says
+  // "click the pocket's FLOOR".
+  auto doc = PocketDoc();
+  const cam::Setup setup = BasicSetup();
+  const ElementRef floor = UpFaceAt(*doc, 12.0);
+  REQUIRE(floor.IsSet());
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Profile, floor);
+  CHECK_FALSE(derived.ok);
+  INFO(derived.why);
+  CHECK(derived.why.find("floor") != std::string::npos);
+  CHECK(derived.why.find("WALL") != std::string::npos);
+
+  // The part's own top face still means what it always meant.
+  const ElementRef top = UpFaceAt(*doc, 20.0);
+  REQUIRE(top.IsSet());
+  const cam::DerivedOp out =
+      cam::DeriveOperation(setup, doc->GetBodies(), cam::OpType::Profile, top);
+  INFO(out.why);
+  REQUIRE(out.ok);
+  CHECK(out.op.side == cam::Side::Outside);
+  CHECK(out.op.tabCount > 0);
+}
+
+TEST_CASE("cam: asking for adaptive derives the pocket it is", "[cam]") {
+  // OpType::Adaptive had no case in the derivation, so it fell through the
+  // switch and returned a DEFAULT operation — top 0, bottom -1, no target —
+  // and said ok. A script asking for the strategy by name got an operation
+  // pointing at nothing (docs/cam/dogfood-round.md). Adaptive IS a pocket;
+  // only the clearing strategy differs.
+  auto doc = PocketDoc();
+  const cam::Setup setup = BasicSetup();
+  const ElementRef floor = UpFaceAt(*doc, 12.0);
+  REQUIRE(floor.IsSet());
+  const cam::DerivedOp derived = cam::DeriveOperation(
+      setup, doc->GetBodies(), cam::OpType::Adaptive, floor);
+  INFO(derived.why);
+  REQUIRE(derived.ok);
+  CHECK(derived.op.side == cam::Side::Inside);
+  CHECK_THAT(derived.op.bottomZ, WithinAbs(12.0, 1e-9));
+  CHECK(derived.op.topZ > derived.op.bottomZ);
+  REQUIRE(derived.op.targets.size() == 1);
+}
+
 TEST_CASE("cam: an adaptive operation survives a save and reload", "[cam]") {
   // v59: a new OpType is a format change, so it needs the round trip and the
   // golden pair that go with one.

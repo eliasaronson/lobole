@@ -487,6 +487,11 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
         oj["error"] = tp.error;
         failed++;
       }
+      // Cut by a different strategy than the type names — adaptive falling
+      // back to concentric clearing. Reported, because feeds are chosen for a
+      // strategy.
+      if (!tp.strategy.empty())
+        oj["strategy"] = tp.strategy;
       totalCut += tp.CutLength();
       lowest = std::min(lowest, tp.MinZ());
       ops.push_back(std::move(oj));

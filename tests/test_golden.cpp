@@ -4,6 +4,7 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/cam/CamJob.h"
 #include "core/io/Serialization.h"
 
 #include <nlohmann/json.hpp>
@@ -23,6 +24,32 @@ namespace fs = std::filesystem;
 // (new goldens are only added when kVersion bumps).
 
 namespace {
+
+// The side a clearing operation clears on, per operation, in file order.
+// Optional: only the goldens that carry CAM say anything about it.
+//
+// Worth checking because the corpus could not previously catch a CAM
+// regression at all, and one hid here: `side` was written for profiles only,
+// so a saved pocket reloaded as "clear OUTSIDE its boundary" — where there is
+// nothing — and produced no toolpath. v60-cam-arcs.json is a real pre-fix
+// file whose pocket and adaptive ops carry no `side` key, which makes it the
+// document the migration has to repair (docs/cam/dogfood-round.md).
+void AssertCamSides(const Document& doc, const nlohmann::json& expect) {
+  if (!expect.contains("cam_op_sides"))
+    return;
+  const auto want = expect.at("cam_op_sides").get<std::vector<std::string>>();
+  std::vector<std::string> got;
+  for (const cam::Setup& setup : doc.GetCamSetups())
+    for (const cam::Operation& op : setup.operations)
+      got.push_back(op.side == cam::Side::Inside ? "inside"
+                    : op.side == cam::Side::On   ? "on"
+                                                 : "outside");
+  REQUIRE(got.size() == want.size());
+  for (size_t i = 0; i < got.size(); i++) {
+    INFO("operation " << i);
+    CHECK(got[i] == want[i]);
+  }
+}
 
 void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());
@@ -66,6 +93,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       auto doc = testio::Load(golden.string());
       REQUIRE((doc != nullptr && error.empty()));
       AssertMatchesExpect(*doc, expect);
+      AssertCamSides(*doc, expect);
 
       // Round-trip through the CURRENT writer: migrations must compose
       const fs::path tmp = fs::temp_directory_path() /
@@ -74,6 +102,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       auto reloaded = testio::Load(tmp.string());
       REQUIRE((reloaded != nullptr && error.empty()));
       AssertMatchesExpect(*reloaded, expect);
+      AssertCamSides(*reloaded, expect);
       fs::remove(tmp);
     }
   }
@@ -109,6 +138,7 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       auto reloaded = testio::Load(proj.string());
       REQUIRE((reloaded != nullptr && error.empty()));
       AssertMatchesExpect(*reloaded, expect);
+      AssertCamSides(*reloaded, expect);
       fs::remove_all(proj);
     }
   }
