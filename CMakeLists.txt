@@ -210,17 +210,13 @@ set(core_sources
     src/render/Camera.cpp
     src/common/BuildInfo.cpp
     src/common/Logger.cpp
-    src/render/Scene.cpp
     src/render/OutlineEdges.cpp
-    src/cad/CADObject.cpp
     src/cad/CADKernel.cpp
     src/cad/CADMeshConverter.cpp
     src/cad/CADMaterials.cpp
     src/cad/MeshExport.cpp
     src/render/IBL.cpp
     src/cad/SketchPlane.cpp
-    src/cad/Sketch.cpp
-    src/cad/SketchManager.cpp
     src/cad/FaceSelector.cpp
     src/core/io/Autosaver.cpp
     src/core/io/RecentProjects.cpp

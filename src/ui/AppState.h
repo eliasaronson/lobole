@@ -33,7 +33,6 @@
 #include <unordered_map>
 #include <vector>
 
-class Scene;
 class Camera;
 class MeshRenderer;
 class OutlineRenderer;
@@ -652,7 +651,6 @@ struct AppState {
   ProjectVarHistory projectVarHistory; // cross-tab undo for project-var edits
 
   // Non-owning
-  Scene* scene = nullptr;
   Camera* camera = nullptr;
   MeshRenderer* meshRenderer = nullptr;
   OutlineRenderer* outlineRenderer = nullptr;

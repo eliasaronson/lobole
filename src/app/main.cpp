@@ -28,7 +28,6 @@
 #include "render/OutlineRenderer.h"
 #include "render/RayTracingRenderer.h"
 #include "render/SSAORenderer.h"
-#include "render/Scene.h"
 #include "render/Screenshot.h"
 #include "render/ShadowRenderer.h"
 #include "render/SketchRenderer.h"
@@ -123,7 +122,6 @@ static bool g_SwapChainRebuild = false;
 static bool g_DisableVSync = false;
 
 // Application objects
-static std::unique_ptr<Scene> g_Scene;
 static std::unique_ptr<Camera> g_Camera;
 static std::unique_ptr<MeshRenderer> g_MeshRenderer;
 static std::unique_ptr<OutlineRenderer> g_OutlineRenderer;
@@ -1307,12 +1305,10 @@ int main(int argc, char** argv) {
   ImGui_ImplVulkan_Init(&init_info);
 
   // Initialize application objects
-  g_Scene = std::make_unique<Scene>();
   g_Camera = std::make_unique<Camera>();
   g_App.document = std::make_unique<Document>();
   g_App.commands = std::make_unique<CommandStack>();
   ui::EnsureParts(g_App); // one part to start (assemblies A1)
-  g_App.scene = g_Scene.get();
   g_App.camera = g_Camera.get();
   g_App.window = window;
 
@@ -1648,8 +1644,6 @@ int main(int argc, char** argv) {
 
     if (g_Camera)
       g_Camera->Update(deltaTime);
-    if (g_Scene)
-      g_Scene->Update(deltaTime);
 
     // Remote-control requests act on the document/UI before this frame
     remoteServer.ProcessPending(g_App);
@@ -1856,7 +1850,6 @@ int main(int argc, char** argv) {
 
   g_App.document.reset();
   g_App.commands.reset();
-  g_Scene.reset();
   g_Camera.reset();
   g_MeshRenderer.reset();
   g_SketchRenderer.reset();

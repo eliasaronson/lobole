@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cad/CADObject.h"
+#include "cad/CADKernel.h"
 #include "render/MeshRenderer.h"
 #include <vector>
 
