@@ -25,7 +25,8 @@ constexpr MethodDoc kCamMethods[] = {
      "rapid height clear of the stock, because the default 5 mm is inside "
      "most of them."},
     {"list_cam_setups",
-     "Every setup: id, name, post, safe_z, rotation_a, fit_arcs, tools, "
+     "Every setup: id, name, post, safe_z, origin (Z zero), top_face (the "
+     "face it was picked from), rotation_a, fit_arcs, tools, "
      "operations, and the stock box derived from the model — in SETUP space, "
      "so an indexed setup reports the box the machine sees."},
     {"set_cam_setup",
@@ -283,7 +284,13 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
                  {"post", setup.post},
                  {"safe_z", setup.safeZ},
                  {"rotation_a", setup.rotationA},
+                 // Z zero, and the face it was taken from. The panel shows
+                 // both; a script could not see either.
+                 {"origin", {setup.origin.x, setup.origin.y, setup.origin.z}},
                  {"fit_arcs", setup.fitArcs}};
+      if (setup.topFace.IsSet())
+        sj["top_face"] = {{"feature_id", setup.topFace.featureId},
+                          {"element", setup.topFace.name}};
       sj["tools"] = json::array();
       for (const cam::Tool& t : setup.tools)
         sj["tools"].push_back(ToolJson(t));

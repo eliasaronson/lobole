@@ -51,6 +51,17 @@ void AssertCamSides(const Document& doc, const nlohmann::json& expect) {
   }
 }
 
+// Which face Z zero was picked from. On the SETUP, so a job reopened from its
+// own file still knows — the panel used to ask a session field and answered
+// "Z zero is not set yet" about an origin it had saved and was using.
+void AssertCamTopFace(const Document& doc, const nlohmann::json& expect) {
+  if (!expect.contains("cam_top_face"))
+    return;
+  REQUIRE(!doc.GetCamSetups().empty());
+  CHECK(doc.GetCamSetups()[0].topFace.name ==
+        expect.at("cam_top_face").get<std::string>());
+}
+
 void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());
   REQUIRE(doc.GetBodies().size() == expect.at("bodies").get<size_t>());
@@ -94,6 +105,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       REQUIRE((doc != nullptr && error.empty()));
       AssertMatchesExpect(*doc, expect);
       AssertCamSides(*doc, expect);
+      AssertCamTopFace(*doc, expect);
 
       // Round-trip through the CURRENT writer: migrations must compose
       const fs::path tmp = fs::temp_directory_path() /
@@ -103,6 +115,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       REQUIRE((reloaded != nullptr && error.empty()));
       AssertMatchesExpect(*reloaded, expect);
       AssertCamSides(*reloaded, expect);
+      AssertCamTopFace(*reloaded, expect);
       fs::remove(tmp);
     }
   }
@@ -139,6 +152,7 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       REQUIRE((reloaded != nullptr && error.empty()));
       AssertMatchesExpect(*reloaded, expect);
       AssertCamSides(*reloaded, expect);
+      AssertCamTopFace(*reloaded, expect);
       fs::remove_all(proj);
     }
   }

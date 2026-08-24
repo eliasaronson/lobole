@@ -1019,7 +1019,6 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.camToolpaths.clear();
   state.camVerdict.clear();
   state.camLeftover.clear();
-  state.camTopFace = ElementRef{};
   state.camActiveSetup = 0;
   state.camGhostOp = 0;
   if (state.slotPick.featureId == kCamToolSlot)

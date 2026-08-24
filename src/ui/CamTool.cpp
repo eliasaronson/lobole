@@ -208,7 +208,7 @@ void CamFacePicked(AppState& state, const SelectionItem& item) {
     // (docs/cam/dogfood-round.md, round 2). The default 1 mm is the rough
     // board every facing pass exists for; a board already flat is one number.
     setup->origin = glm::dvec3(0.0, 0.0, region.z);
-    state.camTopFace = item.element;
+    setup->topFace = item.element;
     // The stock just moved, so the rapid height that cleared the old one may
     // now be inside the new one.
     setup->safeZ = cam::DeriveSafeZ(*setup, state.document->GetBodies());
@@ -296,7 +296,7 @@ void DrawCamToolWindow(AppState& state) {
   const bool armedTop =
       armed && state.slotPick.slot == static_cast<int>(PickSlot::CamTopFace);
   ImGui::BeginDisabled(armed && !armedTop);
-  if (ImGui::Button(state.camTopFace.IsSet()
+  if (ImGui::Button(setup != nullptr && setup->topFace.IsSet()
                         ? "Re-pick top face###cam_tool_topface"
                         : "Pick top face###cam_tool_topface"))
     ArmCamPick(state, PickSlot::CamTopFace,
@@ -305,7 +305,7 @@ void DrawCamToolWindow(AppState& state) {
   ImGui::SameLine();
   if (armedTop)
     ImGui::TextDisabled("click the top face…");
-  else if (state.camTopFace.IsSet() && setup != nullptr)
+  else if (setup != nullptr && setup->topFace.IsSet())
     ImGui::TextDisabled("Z zero at %.3f", setup->origin.z);
   else
     ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),

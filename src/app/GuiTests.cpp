@@ -121,7 +121,6 @@ static void ResetAppForTest() {
   s_App->camToolOpen = false;
   s_App->camGhostOp = 0;
   s_App->camActiveSetup = 0;
-  s_App->camTopFace = {};
   s_App->camRefusal.clear();
   s_App->camToolpaths.clear();
   s_App->camVerdict.clear();
@@ -1058,14 +1057,14 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
         }
       }
     ctx->Yield(2);
-    IM_CHECK(s_App->camTopFace.IsSet());
+    IM_CHECK(Doc()->FindCamSetup(setup.id)->topFace.IsSet());
     IM_CHECK(!s_App->camToolpaths.empty());
     // Now throw the document away.
     ui::ArmCamPick(*s_App, ui::PickSlot::CamPocketFloor, "Click a floor");
     ctx->Yield();
     ctx->MenuClick("File/New");
     ctx->Yield(3);
-    IM_CHECK(!s_App->camTopFace.IsSet());
+    IM_CHECK(Doc()->GetCamSetups().empty()); // the whole job went with it
     IM_CHECK(s_App->camToolpaths.empty());
     IM_CHECK(s_App->camVerdict.empty());
     IM_CHECK_EQ(s_App->camActiveSetup, (uint64_t)0);
@@ -1081,7 +1080,9 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     cam::Setup& setup = Doc()->AddCamSetup("Job");
     s_App->camActiveSetup = setup.id;
     ctx->Yield(2);
-    IM_CHECK(!s_App->camTopFace.IsSet()); // says so rather than assuming 0
+    // Says so rather than assuming 0 — and says it on the SETUP, so a job
+    // reopened from its own file still knows where Z zero came from.
+    IM_CHECK(!Doc()->FindCamSetup(setup.id)->topFace.IsSet());
 
     ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
     ctx->Yield();
@@ -1102,7 +1103,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     if (side.element.IsSet()) {
       ui::CamFacePicked(*s_App, side);
       IM_CHECK(!s_App->slotPick.miss.empty()); // refused, visibly
-      IM_CHECK(!s_App->camTopFace.IsSet());
+      IM_CHECK(!Doc()->FindCamSetup(setup.id)->topFace.IsSet());
     }
 
     // The top face sets Z zero for the job.
@@ -1118,7 +1119,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(top.element.IsSet());
     ui::CamFacePicked(*s_App, top);
     ctx->Yield(2);
-    IM_CHECK(s_App->camTopFace.IsSet());
+    IM_CHECK(Doc()->FindCamSetup(setup.id)->topFace.IsSet());
     IM_CHECK_EQ(s_App->slotPick.featureId, (uint64_t)0); // slot disarmed
     const cam::Setup* live = Doc()->FindCamSetup(setup.id);
     IM_CHECK(live != nullptr);

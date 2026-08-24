@@ -236,8 +236,8 @@ void DrawCamPanel(AppState& state) {
   const bool arming = state.slotPick.featureId == kCamToolSlot;
   if (arming)
     ImGui::BeginDisabled();
-  if (ImGui::Button(state.camTopFace.IsSet() ? "Re-pick top face###cam_topface"
-                                             : "Pick top face###cam_topface"))
+  if (ImGui::Button(setup->topFace.IsSet() ? "Re-pick top face###cam_topface"
+                                           : "Pick top face###cam_topface"))
     ArmCamPick(state, PickSlot::CamTopFace,
                "Click the top face — that sets Z zero for the job");
   if (arming)
@@ -250,7 +250,7 @@ void DrawCamPanel(AppState& state) {
     ImGui::TextDisabled("%s…", state.slotPick.prompt.empty()
                                    ? "click a face"
                                    : state.slotPick.prompt.c_str());
-  else if (state.camTopFace.IsSet())
+  else if (setup->topFace.IsSet())
     ImGui::TextDisabled("Z zero at %.3f", setup->origin.z);
   else
     ImGui::TextColored(ImVec4(0.95f, 0.80f, 0.40f, 1.0f),

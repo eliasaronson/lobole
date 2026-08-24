@@ -70,6 +70,12 @@ json CamSetupToJson(const cam::Setup& setup) {
   j["safe_z"] = setup.safeZ;
   if (setup.origin != glm::dvec3(0.0))
     j["origin"] = {setup.origin.x, setup.origin.y, setup.origin.z};
+  // Which face Z zero came from. Saved because the panel says so — and said
+  // "Z zero is not set yet" about a job that had one, every time it was
+  // reopened, because the answer lived in the session rather than the job.
+  if (setup.topFace.IsSet())
+    j["top_face"] = {{"feature_id", setup.topFace.featureId},
+                     {"element", setup.topFace.name}};
   // Written only when set: every 3-axis job would otherwise carry a rotary
   // key that means nothing (and the 4th axis is deferred — plan.md).
   if (setup.rotationA != 0.0)
@@ -142,6 +148,10 @@ cam::Setup CamSetupFromJson(const json& j) {
   setup.name = j.value("name", std::string("Setup"));
   setup.post = j.value("post", std::string("mach3"));
   setup.safeZ = j.value("safe_z", 5.0);
+  if (j.contains("top_face")) {
+    setup.topFace.featureId = j["top_face"].value("feature_id", uint64_t{0});
+    setup.topFace.name = j["top_face"].value("element", std::string());
+  }
   if (j.contains("origin") && j["origin"].is_array() && j["origin"].size() == 3)
     setup.origin = {j["origin"][0].get<double>(), j["origin"][1].get<double>(),
                     j["origin"][2].get<double>()};

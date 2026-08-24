@@ -231,6 +231,15 @@ add_test(NAME contact_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(contact_smoke PROPERTIES TIMEOUT 120)
 
+# Two widgets in one window must not answer to one ImGui id. A source check,
+# because neither ImGui nor the test engine can see it: ImGui notices only
+# while the mouse is over one of the pair, and the engine gathers items BY id,
+# so a collision shows up in a listing as one entry rather than two. Needs no
+# display and no build — it reads the source.
+add_test(NAME widget_ids_lint
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/widget_ids_lint.py)
+set_tests_properties(widget_ids_lint PROPERTIES TIMEOUT 60)
+
 # V2 strict inputs + digests: unknown feature fields error, mutating
 # responses carry body digests with deltas, bom warnings. Headless.
 add_test(NAME strict_inputs_smoke

@@ -1016,9 +1016,6 @@ struct AppState {
   bool camShowToolpath = true;
   float camSafeZEdit = 5.0f;
   std::string camLastPost;
-  // The face that set Z zero (docs/cam/gui.md G1). Empty = not picked yet,
-  // which the panel says out loud rather than defaulting to the world origin.
-  ElementRef camTopFace;
   // The verb session (G2): a Tool window, NOT a mode — CAM does not take the
   // viewport over, and modes have a known exit-bug class here (U11).
   bool camToolOpen = false;

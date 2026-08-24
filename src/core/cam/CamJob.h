@@ -103,6 +103,14 @@ struct Setup {
   // rotating it is how an INDEXED 4th axis works (deferred, but the shape is
   // here so it lands as data rather than as a redesign).
   glm::dvec3 origin{0.0, 0.0, 0.0};
+  // The face Z zero was taken from. On the SETUP, not on the session: a job
+  // reopened from its own file used to say "Z zero is not set yet" about an
+  // origin it had saved and was using, because the panel asked a field that
+  // lives as long as the window does. It is also per-setup, which the session
+  // field was not — two setups in one document shared one answer between
+  // them (docs/cam/dogfood-round.md). Empty = nobody has picked one; the
+  // origin is then whatever it defaults to.
+  ElementRef topFace;
   // Rotation about X in degrees — the A axis of a typical 4th-axis mill. 0
   // for every 3-axis job, and nothing emits it yet.
   double rotationA = 0.0;
