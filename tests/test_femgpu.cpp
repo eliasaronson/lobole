@@ -583,11 +583,17 @@ TEST_CASE("femgpu probe: what zeroes the slender solve", "[.][fp32floor]") {
   }
   std::printf("(frozen elements: %d of %d)\n", frozen, sys.nElems);
 
-  for (const float sc : {1.0f, 0.027f, -1.0f}) // -1 = the mixed field
+  std::vector<float> mixedP1(sys.nElems, 0.3f);
+  for (int e = 0; e < sys.nElems; ++e)
+    if (mixed[e] == 1.0f)
+      mixedP1[e] = 1.0f;
+  for (const float sc : {1.0f, 0.027f, -1.0f, -2.0f}) // <0 = the mixed fields
     for (int rhs = 0; rhs < 2; ++rhs) {
       const std::vector<float>& f = rhs == 0 ? fRand : fTip;
       const std::vector<float> scales =
-          sc < 0.0f ? mixed : std::vector<float>(sys.nElems, sc);
+          sc == -1.0f   ? mixed
+          : sc == -2.0f ? mixedP1
+                        : std::vector<float>(sys.nElems, sc);
       std::string err;
       gpu::CgOptions opts;
       opts.mg = gpu::MakeMgGpuData(FlatNodes(mesh), sys, dofs.map, &err);
@@ -605,11 +611,143 @@ TEST_CASE("femgpu probe: what zeroes the slender solve", "[.][fp32floor]") {
       for (float v : x)
         xmax = std::max(xmax, (double)std::abs(v));
       std::printf("%-22s %-8s iters %5d  true %.2e  max|x| %.3e\n",
-                  sc < 0.0f ? "frozen skin + 0.027"
-                            : (sc == 1.0f ? "uniform 1.0" : "uniform 0.027"),
+                  sc == -1.0f   ? "frozen skin + 0.027"
+                  : sc == -2.0f ? "frozen skin + 0.3 (p=1)"
+                  : sc == 1.0f  ? "uniform 1.0"
+                                : "uniform 0.027",
                   rhs == 0 ? "random" : "bending", stats.iterations,
                   ResidualNorm(sys, scales, x, f), xmax);
     }
+}
+
+// Which mechanism actually kills the fp32 solve: the operator's conditioning,
+// or the diagonal spread the frozen skin introduces? Dense fp64 eigenvalues of
+// the reduced K, small meshes only. Measured 2026-08-24:
+//
+//   case                              diag spread   kappa     after diag-scale
+//   cube 1:1  uniform                     12        3.3e+03      2.2e+03
+//   beam 10:1 uniform                     12        3.7e+06      2.4e+06
+//   beam 10:1 frozen skin + 0.027        220        8.2e+07      1.6e+07
+//   beam 20:1 uniform                     12        1.4e+07      9.4e+06
+//   beam 20:1 frozen skin + 0.027        170        2.7e+08      5.3e+07
+//   beam 20:1 frozen skin + 0.3 (p=1)     15        3.2e+07      1.2e+07
+//
+// Both mechanisms are real and they multiply: slenderness costs ~4x in kappa
+// per doubling (1:1 -> 10:1 is ~1000x), and SIMP's frozen skin costs another
+// ~20x on top. The achieved residual floors track kappa monotonically, and
+// the case that returns ZEROS is the one at 2.7e+08 — past what 7 decimal
+// digits can do anything with.
+//
+// Symmetric diagonal scaling (what a Jacobi preconditioner does, but applied
+// to the matrix itself so the fp32 recurrence sees unit diagonals) is worth
+// only 2-5x. It is not the fix. Dropping the contrast is worth 8.5x, and
+// mixed precision is worth ~9 decimal digits — see docs/topopt/plan.md.
+TEST_CASE("femgpu probe: condition numbers", "[.][fp32floor]") {
+  struct Case {
+    const char* name;
+    int nx, ny, nz;
+    double Lx, Ly, Lz;
+    bool frozenSkin;
+  };
+  const Case cases[] = {
+      {"cube  4x4x4  1:1     uniform", 4, 4, 4, 40, 40, 40, false},
+      {"beam 20x1x2  20:1    uniform", 20, 1, 2, 200, 10, 20, false},
+      {"beam 20x1x2  20:1    frozen skin + 0.027", 20, 1, 2, 200, 10, 20, true},
+      {"beam 20x1x2  20:1    frozen skin + 0.3 (p=1)", 20, 1, 2, 200, 10, 20,
+       true},
+      {"beam 20x2x2  10:1    uniform", 20, 2, 2, 200, 20, 20, false},
+      {"beam 20x2x2  10:1    frozen skin + 0.027", 20, 2, 2, 200, 20, 20, true},
+  };
+  for (const Case& c : cases) {
+    fem::FemMesh mesh = GenerateBoxMesh(c.nx, c.ny, c.nz, c.Lx, c.Ly, c.Lz);
+    const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-9);
+    const gpu::SpmvSystem sys = PackSystem(mesh, fixed, 200000.0, 0.3);
+    const bool p1 = std::string(c.name).find("p=1") != std::string::npos;
+    std::vector<double> scale(sys.nElems,
+                              c.frozenSkin ? (p1 ? 0.3 : 0.027) : 1.0);
+    if (c.frozenSkin)
+      for (int e = 0; e < sys.nElems; ++e)
+        for (int i = 0; i < 10; ++i) {
+          const double x = mesh.nodes[mesh.tets[e][i]].x;
+          if (x < 1e-6 || x > c.Lx - 1e-6)
+            scale[e] = 1.0;
+        }
+
+    Eigen::MatrixXd K = Eigen::MatrixXd::Zero(sys.nFree, sys.nFree);
+    for (int e = 0; e < sys.nElems; ++e) {
+      const int32_t* dof = &sys.dof[static_cast<size_t>(e) * 30];
+      const float* ke = &sys.ke[static_cast<size_t>(e) * 900];
+      for (int r = 0; r < 30; ++r) {
+        if (dof[r] < 0)
+          continue;
+        for (int cc = 0; cc < 30; ++cc)
+          if (dof[cc] >= 0)
+            K(dof[r], dof[cc]) += scale[e] * (double)ke[r * 30 + cc];
+      }
+    }
+    // Symmetric diagonal (Jacobi) scaling: D^-1/2 K D^-1/2, unit diagonal.
+    Eigen::VectorXd d = K.diagonal();
+    Eigen::VectorXd s = d.array().rsqrt();
+    Eigen::MatrixXd Ks = s.asDiagonal() * K * s.asDiagonal();
+
+    auto kappa = [](const Eigen::MatrixXd& M) {
+      Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(M,
+                                                        Eigen::EigenvaluesOnly);
+      const auto& ev = es.eigenvalues();
+      return ev(ev.size() - 1) / ev(0);
+    };
+    std::printf("%-38s n %4d  diag spread %.1e  kappa %.3e  after diag-scale "
+                "%.3e\n",
+                c.name, sys.nFree, d.maxCoeff() / d.minCoeff(), kappa(K),
+                kappa(Ks));
+  }
+}
+
+// Does the existing (disabled) penalty continuation make the GPU path usable
+// on a beam, or only stop it returning zeros? ANSWER: only the latter.
+// `penaltyRampIters` starts p at 1, so the bulk sits at the volume fraction
+// itself (0.3) instead of its cube (0.027), which takes kappa from 2.7e+08 to
+// 3.2e+07 and turns the FIRST solve from zero-progress into a normal floored
+// one (1.8e-01, u sane). But the run still falls back somewhere later —
+// measured "relative residual 1.104517", i.e. a warm-started solve that ended
+// up worse than its own starting point. Reducing the contrast helps and is
+// nearly free; it does not lift the fp32 ceiling.
+TEST_CASE("femgpu probe: penalty ramp on a slender part", "[.][fp32floor]") {
+  REQUIRE_GPU();
+  fem::FemMesh mesh = GenerateBoxMesh(20, 1, 2, 200.0, 10.0, 20.0);
+  fem::Material steel{200000.0, 0.3};
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, 200.0, 1e-6);
+  load.magnitude = 100.0;
+  load.direction = glm::dvec3(0, -1, 0);
+
+  for (const double ramp : {0.0, 15.0}) {
+    fem::TopoParams params;
+    params.maxIterations = 30;
+    params.penaltyRampIters = ramp;
+    std::string err;
+    auto cpu = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err);
+    REQUIRE(cpu.has_value());
+    std::string gerr;
+    auto solver = gpu::TopoGpuSolver::Create(true, &gerr);
+    REQUIRE(solver);
+    auto gpu = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                     {}, {}, solver.get());
+    REQUIRE(gpu.has_value());
+    int flips = 0;
+    for (size_t e = 0; e < cpu->density.size(); ++e)
+      if (std::abs(gpu->density[e] - cpu->density[e]) > 0.5)
+        ++flips;
+    std::printf("ramp %4.0f  cpu C %.4g vf %.3f | gpu C %.4g vf %.3f  flips "
+                "%d/%zu  fellback: %s\n",
+                ramp, cpu->complianceHistory.back(),
+                cpu->volumeFractionAchieved, gpu->complianceHistory.back(),
+                gpu->volumeFractionAchieved, flips, cpu->density.size(),
+                gpu->solverFallback.empty() ? "no"
+                                            : gpu->solverFallback.c_str());
+  }
 }
 
 TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",

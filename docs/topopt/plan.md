@@ -467,6 +467,58 @@ name the solver that actually did the work rather than the one it started on.
 A *floored* solve is still accepted: SIMP reacts to element energies, not to
 the last digit of u, and that tolerance is what the iteration cap is for.
 
-**Open:** making the GPU path actually solve these systems (fp64 sections, or
-a preconditioner that survives the conditioning) is a numerics project of its
-own and is not scheduled. Until then a beam-shaped part optimizes on the CPU.
+### What would actually fix it (measured 2026-08-24, none of it built)
+
+Dense fp64 eigenvalues of the reduced K, from the third `[fp32floor]` probe:
+
+| case | diagonal spread | κ(K) | κ after diagonal scaling |
+|---|---|---|---|
+| cube 1:1, uniform | 12 | 3.3e+03 | 2.2e+03 |
+| beam 10:1, uniform | 12 | 3.7e+06 | 2.4e+06 |
+| beam 10:1, frozen skin + 0.027 | 220 | 8.2e+07 | 1.6e+07 |
+| beam 20:1, uniform | 12 | 1.4e+07 | 9.4e+06 |
+| beam 20:1, frozen skin + 0.027 | 170 | **2.7e+08** | 5.3e+07 |
+| beam 20:1, frozen skin + 0.3 (p=1) | 15 | 3.2e+07 | 1.2e+07 |
+
+So it is conditioning, and the two mechanisms multiply: slenderness costs
+about 4x in κ per doubling (1:1 to 10:1 is ~1000x) and the frozen skin costs
+another ~20x. The achieved residual floors track κ monotonically, and the case
+that returns zeros is the one at 2.7e+08 — past what seven decimal digits can
+do anything with. **fp32 is the binding constraint**, not the preconditioner:
+Jacobi and multigrid fail identically on it.
+
+**A different mesh will not fix it, and refining makes it worse.** κ of an
+elliptic operator grows like h^-2, and the floors show it: at 20:1, going from
+240 to 960 tets moved the floor from 2.6e-03 to 5.2e-02. Element *shape* is
+not the issue either — every probe mesh is perfect cubes, and a real Netgen
+mesh only adds sliver penalties on top. Dropping to tet4 would condition
+better per DOF and is the wrong trade exactly here: linear tets lock in
+bending, which is the load case that hurts.
+
+In rough order of value:
+
+1. **Mixed precision.** The only lever that moves the actual constraint. The
+   SpMV dominates the runtime and can stay fp32; the inner products, the
+   residual and the residual-replacement step are a small fraction of the work
+   and are where the digits are lost. fp64 reductions (or compensated fp32
+   summation, which costs nothing on any hardware) buy back most of the
+   ceiling; a CPU-side fp64 iterative refinement around the fp32 GPU solve —
+   one fp64 SpMV per outer step, against hundreds of inner iterations — buys
+   all of it. This is the standard answer to exactly this problem.
+2. **Stop manufacturing the contrast.** `TopoParams::penaltyRampIters` already
+   exists and is disabled (0). Turning it on starts p at 1, so the bulk sits
+   at the volume fraction (0.3) instead of its cube (0.027): κ 2.7e+08 →
+   3.2e+07, and the first solve goes from zero-progress to a normal floored
+   one. **Measured insufficient on its own** — the run still falls back later,
+   on a warm-started solve that ends up worse than its own starting point —
+   but it is nearly free and it removes the worst iteration.
+3. **A coarse space that represents beam bending.** The 2-level geometric MG
+   cuts iterations, not the precision ceiling, so this helps cost rather than
+   correctness. Worth it only after 1.
+4. **Symmetric diagonal scaling of the matrix itself** (unit diagonals, so the
+   fp32 recurrence sees well-scaled numbers). Measured worth 2-5x. Cheap, but
+   not on its own a fix.
+
+**Open, and not scheduled.** Until someone does 1, a beam-shaped part
+optimizes on the CPU — the fallback makes this a speed limit, not a
+correctness one.
