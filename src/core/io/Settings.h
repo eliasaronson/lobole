@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/io/Keymap.h"
+#include "core/io/WindowGeometry.h"
 
 #include <nlohmann/json_fwd.hpp>
 
@@ -56,6 +57,13 @@ struct Settings {
   // the table above is one scalar per row with a slider or a combo, and a
   // keymap is neither (docs/ui/u12-keybindings.md).
   keymap::Keymap keys;
+
+  // Where the main window was last time. Remembered state, not a preference:
+  // it is deliberately NOT in the kFields table, so it never appears in the
+  // Preferences window — nobody wants to type their window size. Restored
+  // through FitToMonitors, which drops a rect no current monitor can show
+  // (core/io/WindowGeometry.h).
+  WindowGeometry window;
 
   // Keys this build does not know, kept verbatim so an older build cannot
   // delete a newer build's preferences just by running once.

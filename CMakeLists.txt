@@ -248,6 +248,7 @@ set(core_sources
     src/core/io/GeometryCache.cpp
     src/core/io/AtomicWrite.cpp
     src/core/io/Settings.cpp
+    src/core/io/WindowGeometry.cpp
     src/core/io/Keymap.cpp
     src/core/io/Serialization.cpp
     src/core/io/SerializeFeatures.cpp

@@ -144,6 +144,43 @@ TEST_CASE("Settings: a save merges instead of clobbering", "[settings]") {
   CHECK(merged.uiFontScale == 1.4f); // and theirs survived
 }
 
+TEST_CASE("Settings: the window rect survives, and does not clobber",
+          "[settings]") {
+  ScratchConfig scratch("window");
+
+  settings::Settings s = settings::Load();
+  CHECK_FALSE(s.window.Remembered()); // a first run remembers nothing
+
+  const settings::Settings baseline = s;
+  s.window = {120, 60, 1600, 900, false};
+  REQUIRE(settings::Save(s, baseline));
+
+  const settings::Settings back = settings::Load();
+  CHECK(back.window == s.window);
+
+  // The same merge rule the rest of the file gets: two instances run here,
+  // and a blind write would teleport the other one on its next launch.
+  settings::Settings other = back;
+  other.uiFontScale = 1.4f;
+  REQUIRE(settings::Save(other, back)); // moves nothing
+  CHECK(settings::Load().window == s.window);
+
+  settings::Settings moved = back;
+  moved.window.x = 400;
+  REQUIRE(settings::Save(moved, back));
+  const settings::Settings merged = settings::Load();
+  CHECK(merged.window.x == 400);
+  CHECK(merged.uiFontScale == 1.4f); // and the other instance's change stayed
+}
+
+TEST_CASE("Settings: the window rect is not a PREFERENCE", "[settings]") {
+  // It is remembered state. If it ever appeared in the kFields table it
+  // would get a row in the Preferences window, and nobody wants to type
+  // their window size into a form.
+  for (const settings::Field& f : settings::Fields())
+    CHECK(std::string(f.key) != "window");
+}
+
 TEST_CASE("Settings: invalid values are refused by name", "[settings]") {
   settings::Settings s;
   std::string error;

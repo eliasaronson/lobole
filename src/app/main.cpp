@@ -1096,6 +1096,26 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
   return args;
 }
 
+// Where the window is now, for the next launch. Not MarkSettingsChanged():
+// that re-applies every preference and asks whether the font moved, neither
+// of which a window drag has done. Only the debounce flag is wanted here, so
+// dragging an edge is one write instead of a hundred (ui::FlushSettings).
+static void RecordWindowGeometry(GLFWwindow* w) {
+  settings::WindowGeometry g = g_App.settings.window;
+  g.maximized = glfwGetWindowAttrib(w, GLFW_MAXIMIZED) != 0;
+  // A maximised window's rect IS the screen, which is useless to restore to —
+  // un-maximise and you get a full-screen window with no memory of what it
+  // was. Keep the last un-maximised rect and the flag beside it.
+  if (!g.maximized) {
+    glfwGetWindowPos(w, &g.x, &g.y);
+    glfwGetWindowSize(w, &g.w, &g.h);
+  }
+  if (g == g_App.settings.window)
+    return;
+  g_App.settings.window = g;
+  g_App.settingsDirtyAt = ImGui::GetCurrentContext() ? ImGui::GetTime() : 0.0;
+}
+
 int main(int argc, char** argv) {
   InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
@@ -1184,8 +1204,45 @@ int main(int argc, char** argv) {
   // dev-watch instances invisibly render for nobody.)
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-  GLFWwindow* window = glfwCreateWindow(1280, 720, "Designer - 3D CAD Software",
-                                        nullptr, nullptr);
+
+  // Where to open. An INTERACTIVE run restores what it had last time, or —
+  // on a first run — takes 80% of the monitor's work area; a literal 1280x720
+  // is a third of a 1440p panel and most of a laptop's.
+  //
+  // Offscreen and GUI-test runs keep the fixed 1280x720, and that carve-out
+  // is load-bearing rather than tidiness: toolbar/every_tool_is_reachable and
+  // tabs/overflow_scrolls_and_plus_stays are assertions about what fits AT
+  // THAT SIZE, and gui-tests-xvfb.sh / headless-preview.sh both create that
+  // screen. A host-derived size here would make layout tests depend on whose
+  // monitor they ran on.
+  const bool rememberGeometry = !args.hidden && !args.runGuiTests;
+  settings::WindowGeometry geom;
+  geom.w = settings::kDefaultWidth;
+  geom.h = settings::kDefaultHeight;
+  if (rememberGeometry) {
+    std::vector<settings::MonitorRect> monitors;
+    int monitorCount = 0;
+    GLFWmonitor** found = glfwGetMonitors(&monitorCount);
+    for (int i = 0; i < monitorCount; i++) {
+      settings::MonitorRect m;
+      // The WORK area, not the video mode: a window sized to the mode opens
+      // underneath the taskbar.
+      glfwGetMonitorWorkarea(found[i], &m.x, &m.y, &m.w, &m.h);
+      if (m.w > 0 && m.h > 0)
+        monitors.push_back(m);
+    }
+    geom = settings::FitToMonitors(g_App.settings.window, monitors);
+  }
+
+  GLFWwindow* window = glfwCreateWindow(
+      geom.w, geom.h, "Designer - 3D CAD Software", nullptr, nullptr);
+  if (window && rememberGeometry) {
+    // Position after creation: the hint-based route needs a monitor handle
+    // and would make this fullscreen.
+    glfwSetWindowPos(window, geom.x, geom.y);
+    if (g_App.settings.window.maximized)
+      glfwMaximizeWindow(window);
+  }
   if (window && !args.hidden)
     ShowWindowNonBlocking(window);
 
@@ -1266,6 +1323,25 @@ int main(int argc, char** argv) {
       window, [](GLFWwindow*, float sx, float sy) {
         s_pendingContentScale = std::max(1.0f, std::max(sx, sy));
       });
+
+  // Remember where the window ends up. Recorded on move/resize/maximise and
+  // written by the SAME debounced path as every other setting
+  // (ui::FlushSettings), so dragging an edge is one write rather than a
+  // hundred — and merge-on-save means the other instance running here keeps
+  // its own rect.
+  //
+  // A MAXIMISED window's position and size are the maximised ones, which are
+  // useless to restore to: un-maximise and you get a window filling the
+  // screen with no memory of what it was. So the rect is only recorded while
+  // the window is not maximised, and `maximized` is recorded beside it.
+  if (rememberGeometry) {
+    glfwSetWindowPosCallback(
+        window, [](GLFWwindow* w, int, int) { RecordWindowGeometry(w); });
+    glfwSetWindowSizeCallback(
+        window, [](GLFWwindow* w, int, int) { RecordWindowGeometry(w); });
+    glfwSetWindowMaximizeCallback(
+        window, [](GLFWwindow* w, int) { RecordWindowGeometry(w); });
+  }
 
   ImGui_ImplGlfw_InitForVulkan(window, true);
   ImGui_ImplVulkan_InitInfo init_info = {};

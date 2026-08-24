@@ -35,6 +35,7 @@ add_executable(designer_tests
     test_keymap.cpp
     test_golden.cpp
     test_units.cpp
+    test_window_geometry.cpp
     test_assembly.cpp
     test_assembly_solve.cpp
     test_measure.cpp

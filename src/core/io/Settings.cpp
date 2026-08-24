@@ -28,6 +28,31 @@ constexpr const char* kFormatKey = "settings_format";
 // not a scalar with a range or a fixed choice list. It gets its own handling
 // in every function that walks kFields (docs/ui/u12-keybindings.md).
 constexpr const char* kKeysKey = "keys";
+// Remembered window rect. Like kKeysKey, outside the kFields table: it is
+// state, not a preference, and must not show up in Preferences.
+constexpr const char* kWindowKey = "window";
+
+nlohmann::json WindowToJson(const WindowGeometry& g) {
+  return {{"x", g.x},
+          {"y", g.y},
+          {"w", g.w},
+          {"h", g.h},
+          {"maximized", g.maximized}};
+}
+
+// A malformed entry loses the REMEMBERED RECT, not the settings file:
+// FitToMonitors treats an unremembered geometry as a first run.
+WindowGeometry WindowFromJson(const nlohmann::json& j) {
+  WindowGeometry g;
+  if (!j.is_object())
+    return g;
+  g.x = j.value("x", 0);
+  g.y = j.value("y", 0);
+  g.w = j.value("w", 0);
+  g.h = j.value("h", 0);
+  g.maximized = j.value("maximized", false);
+  return g;
+}
 
 constexpr std::array<float, 4> kFontScales{0.85f, 1.0f, 1.2f, 1.4f};
 constexpr std::array<float, 2> kShadowMaps{1024.0f, 2048.0f};
@@ -148,7 +173,7 @@ const Field kFields[] = {
 // Every key this build knows, including the format marker — anything else in
 // the file is somebody else's and gets carried through untouched.
 bool IsKnownKey(const std::string& key) {
-  if (key == kFormatKey || key == kKeysKey)
+  if (key == kFormatKey || key == kKeysKey || key == kWindowKey)
     return true;
   for (const Field& f : kFields)
     if (key == f.key)
@@ -287,6 +312,10 @@ Settings Load() {
     return s;
   }
   for (auto it = parsed->begin(); it != parsed->end(); ++it) {
+    if (it.key() == kWindowKey) {
+      s.window = WindowFromJson(it.value());
+      continue;
+    }
     if (it.key() == kKeysKey) {
       // A bad chord in a hand-edited file loses that ONE binding, not the
       // whole keymap: the same rule the scalar fields get.
@@ -317,6 +346,7 @@ nlohmann::json ToJson(const Settings& s) {
   for (const Field& f : kFields)
     j[f.key] = FieldValue(s, f);
   j[kKeysKey] = keymap::OverridesToJson(s.keys);
+  j[kWindowKey] = WindowToJson(s.window);
   return j;
 }
 
@@ -332,6 +362,12 @@ bool ApplyJson(Settings& s, const nlohmann::json& j, std::string* error) {
   for (auto it = j.begin(); it != j.end(); ++it) {
     if (it.key() == kFormatKey)
       continue;
+    if (it.key() == kWindowKey) {
+      // `candidate`, not `s`: this function's whole contract is that a
+      // rejected value later in the object leaves nothing half-applied.
+      candidate.window = WindowFromJson(it.value());
+      continue;
+    }
     if (it.key() == kKeysKey) {
       if (!keymap::ApplyOverridesJson(candidate.keys, it.value(), error))
         return false;
@@ -376,6 +412,10 @@ bool Save(const Settings& current, const Settings& before, std::string* error) {
   // this file already accepts for a single field.
   if (!out.contains(kKeysKey) || !(current.keys == before.keys))
     out[kKeysKey] = keymap::OverridesToJson(current.keys);
+  // Only when THIS instance moved its window: two instances run here, and a
+  // blind write would teleport the other one on its next launch.
+  if (current.window != before.window)
+    out[kWindowKey] = WindowToJson(current.window);
 
   // Keys from a newer build that we read earlier and must not drop.
   for (const auto& [key, raw] : current.unknown)
