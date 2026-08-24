@@ -17,7 +17,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace ui {
 
@@ -82,9 +84,11 @@ int ModsNow() {
 
 } // namespace
 
-// Session + screen + the panel's own view state. Lives behind a shared_ptr in
-// AppState so the header stays free of libvterm.
-struct TerminalState {
+// One session: a process, the screen it draws on, and how this panel is
+// looking at it. Everything here is per-tab; nothing about the panel itself
+// belongs in it.
+struct Session {
+  int id = 0; // monotonic and never reused — see kTabIdIsNotAnIndex below
   term::PtySession pty;
   std::unique_ptr<term::Screen> screen;
   int rows = 24;
@@ -106,12 +110,51 @@ struct TerminalState {
   bool hasSelection = false;
 };
 
+// The panel: a list of sessions and which one is on top. Lives behind a
+// shared_ptr in AppState so the header stays free of libvterm.
+struct TerminalState {
+  std::vector<std::unique_ptr<Session>> sessions;
+  int active = 0; // index into `sessions`
+  int nextId = 1; // never decremented, so an id is never reused
+
+  // A session id to select on the next frame, or 0.
+  //
+  // Needed because the tab bar is the AUTHORITY on which tab is selected:
+  // BeginTabItem reports it, and the loop below writes it straight back into
+  // `active` every frame. So assigning `active` from anywhere else — a
+  // keyboard chord, a test — is overwritten before it can take effect, and
+  // silently: the count is right, the selection is not. The only way to move
+  // the bar is to hand ImGui SetSelected on the tab you mean.
+  int pendingSelect = 0;
+};
+
 namespace {
+
+// What a keyboard chord asked the panel — not the session — to do. HandleInput
+// cannot act on these itself: making a session needs the project directory and
+// the instance port, which live in AppState, and closing one has to happen
+// outside the loop that is drawing them.
+enum class TabRequest { None, New, Close, Prev, Next };
 
 TerminalState& Ensure(AppState& state) {
   if (!state.terminal)
     state.terminal = std::make_shared<TerminalState>();
   return *state.terminal;
+}
+
+// The session on top, or null when every tab has been closed. Callers that
+// only want to know "is there a terminal here" go through this rather than
+// indexing, because `active` is only meaningful against a non-empty list.
+Session* Active(TerminalState& t) {
+  if (t.sessions.empty())
+    return nullptr;
+  const int i =
+      std::clamp(t.active, 0, static_cast<int>(t.sessions.size()) - 1);
+  return t.sessions[static_cast<size_t>(i)].get();
+}
+
+const Session* Active(const TerminalState& t) {
+  return Active(const_cast<TerminalState&>(t));
 }
 
 // Where a session should start: the open project's directory, else the
@@ -131,7 +174,7 @@ std::string StartDirectory(const AppState& state) {
   return ec ? std::string(".") : cwd.string();
 }
 
-void StartSession(AppState& state, TerminalState& t,
+void StartSession(AppState& state, Session& t,
                   const term::PtySession::Options& base,
                   const std::string& label) {
   t.pty.Terminate();
@@ -225,7 +268,7 @@ std::string ClaudeCommand(AppState& state) {
 // `python3 tools/designer_remote.py`, or anything else that reads
 // DESIGNER_PORT — then talks to the model on screen without being told which
 // instance to attach to.
-void StartShell(AppState& state, TerminalState& t) {
+void StartShell(AppState& state, Session& t) {
   term::PtySession::Options opts; // empty program = $SHELL
   const int port = InstancePort(state);
   if (port > 0)
@@ -238,7 +281,7 @@ void StartShell(AppState& state, TerminalState& t) {
 }
 
 // Reads what the child wrote and hands the terminal's own replies back to it.
-void PumpSession(TerminalState& t) {
+void PumpSession(Session& t) {
   if (t.screen == nullptr)
     return;
   const std::string out = t.pty.Poll();
@@ -249,6 +292,13 @@ void PumpSession(TerminalState& t) {
     // read happens then rather than every frame.
     t.foreground = t.pty.ForegroundName();
   }
+  // OSC 52: the program asked us to put something on the SYSTEM clipboard.
+  // This is Claude Code's own copy, and every other TUI's — they cannot reach
+  // the clipboard themselves, so a terminal that drops the sequence makes
+  // copying inside them do nothing at all, silently.
+  if (std::optional<std::string> clip = t.screen->TakeClipboardWrite())
+    ImGui::SetClipboardText(clip->c_str());
+
   const std::string reply = t.screen->TakeOutput();
   if (!reply.empty())
     t.pty.Write(reply.data(), reply.size());
@@ -257,7 +307,7 @@ void PumpSession(TerminalState& t) {
 }
 
 // Selection in reading order, whichever way the drag went.
-void OrderedSelection(const TerminalState& t, size_t& l0, int& c0, size_t& l1,
+void OrderedSelection(const Session& t, size_t& l0, int& c0, size_t& l1,
                       int& c1) {
   const bool forward =
       t.selAnchorLine < t.selHeadLine ||
@@ -268,7 +318,7 @@ void OrderedSelection(const TerminalState& t, size_t& l0, int& c0, size_t& l1,
   c1 = forward ? t.selHeadCol : t.selAnchorCol;
 }
 
-std::string SelectionText(const TerminalState& t) {
+std::string SelectionText(const Session& t) {
   if (!t.hasSelection || t.screen == nullptr)
     return {};
   size_t l0 = 0, l1 = 0;
@@ -280,7 +330,7 @@ std::string SelectionText(const TerminalState& t) {
 // The buffer line shown at visual row `r`, given the current scrollback
 // offset. One place computing this, used by drawing, hit-testing and copy —
 // three subtly different versions of it is how off-by-one selections happen.
-size_t BufferLineOfRow(const TerminalState& t, int r, int sb) {
+size_t BufferLineOfRow(const Session& t, int r, int sb) {
   const size_t sbCount = t.screen->ScrollbackCount();
   const int fromHistory = sb - r;
   if (fromHistory > 0)
@@ -292,9 +342,30 @@ size_t BufferLineOfRow(const TerminalState& t, int r, int sb) {
 // docs/ui/terminal-panel.md: hover, not focus, is what decides — an invisible
 // focus state deciding whether Ctrl+Z undoes a feature or suspends a job is
 // the thing that makes an embedded terminal feel dangerous.
-void HandleInput(TerminalState& t) {
+TabRequest HandleInput(Session& t) {
   ImGuiIO& io = ImGui::GetIO();
   term::Screen& screen = *t.screen;
+
+  // The tab chords, claimed before anything is forwarded. They cannot be U12
+  // commands: the panel swallows the keyboard on purpose, so a binding would
+  // never fire in here, and keymap::Context is deliberately the branch
+  // DrawToolbar takes (Part/Sketch/Assembly/…) — a Terminal context would
+  // break the invariant that the toolbar you see and the keys that work
+  // cannot disagree. So they join Ctrl+Shift+C/V as chords the terminal keeps
+  // for itself. Shift throughout, because every unshifted form means
+  // something to a program: Ctrl+W deletes a word, Ctrl+PageDown scrolls.
+  TabRequest request = TabRequest::None;
+  if (io.KeyCtrl && io.KeyShift) {
+    if (ImGui::IsKeyPressed(ImGuiKey_T, false))
+      request = TabRequest::New;
+    else if (ImGui::IsKeyPressed(ImGuiKey_W, false))
+      request = TabRequest::Close;
+    else if (ImGui::IsKeyPressed(ImGuiKey_PageUp, true))
+      request = TabRequest::Prev;
+    else if (ImGui::IsKeyPressed(ImGuiKey_PageDown, true))
+      request = TabRequest::Next;
+  }
+  const bool tabChord = request != TabRequest::None;
 
   for (ImWchar c : io.InputQueueCharacters) {
     if (c == 0)
@@ -307,6 +378,9 @@ void HandleInput(TerminalState& t) {
 
   const int mods = ModsNow();
   for (const KeyMap& k : kKeys) {
+    if (tabChord &&
+        (k.imgui == ImGuiKey_PageUp || k.imgui == ImGuiKey_PageDown))
+      continue; // this press moved between tabs; the program never sees it
     if (ImGui::IsKeyPressed(k.imgui, true))
       screen.SendKey(k.key, mods);
   }
@@ -316,8 +390,10 @@ void HandleInput(TerminalState& t) {
   if (io.KeyCtrl && !io.KeySuper) {
     for (int i = 0; i < 26; i++) {
       const auto key = static_cast<ImGuiKey>(ImGuiKey_A + i);
-      // Ctrl+Shift+C/V are the copy/paste pair above, not control codes.
-      if (io.KeyShift && (key == ImGuiKey_C || key == ImGuiKey_V))
+      // Ctrl+Shift+C/V are the copy/paste pair below, and Ctrl+Shift+T/W the
+      // tab pair above — none of them are control codes.
+      if (io.KeyShift && (key == ImGuiKey_C || key == ImGuiKey_V ||
+                          key == ImGuiKey_T || key == ImGuiKey_W))
         continue;
       if (ImGui::IsKeyPressed(key, true))
         screen.SendChar(static_cast<char32_t>('a' + i),
@@ -355,6 +431,7 @@ void HandleInput(TerminalState& t) {
   // elsewhere, not the menu's global shortcuts. The app-side gate
   // (TerminalCapturesKeys) covers our own code; this covers ImGui's.
   io.ClearInputKeys();
+  return request;
 }
 
 // One row of cells. Each glyph is drawn at ITS OWN cell origin rather than
@@ -436,6 +513,59 @@ void DrawRow(ImDrawList* dl, ImVec2 origin, float cellW, float cellH, int row,
   }
 }
 
+// Appends a session and makes it the visible one. The id is the panel's
+// counter, never the vector index: ImGui keys a tab's state — which one is
+// selected, where it sits after a reorder — off the id in its label, so
+// reusing an index hands a new session the previous occupant's state.
+Session& NewSession(AppState& state, TerminalState& panel) {
+  panel.sessions.push_back(std::make_unique<Session>());
+  Session& s = *panel.sessions.back();
+  s.id = panel.nextId++;
+  panel.active = static_cast<int>(panel.sessions.size()) - 1;
+  panel.pendingSelect = s.id;
+  StartShell(state, s);
+  return s;
+}
+
+// Moves the selection, telling the tab bar as well as ourselves. Assigning
+// `active` alone does nothing that lasts a frame — see TerminalState.
+void SelectByIndex(TerminalState& panel, int i) {
+  if (i < 0 || i >= static_cast<int>(panel.sessions.size()))
+    return;
+  panel.active = i;
+  panel.pendingSelect = panel.sessions[static_cast<size_t>(i)]->id;
+}
+
+// Kills the session at `i` and drops it. Selection lands on the tab that took
+// its place, which is what closing the tab you were looking at should feel
+// like.
+void CloseSession(TerminalState& panel, int i) {
+  if (i < 0 || i >= static_cast<int>(panel.sessions.size()))
+    return;
+  panel.sessions[static_cast<size_t>(i)]->pty.Terminate();
+  panel.sessions.erase(panel.sessions.begin() + i);
+  if (panel.active >= static_cast<int>(panel.sessions.size()))
+    panel.active = static_cast<int>(panel.sessions.size()) - 1;
+  if (panel.active < 0)
+    panel.active = 0;
+  SelectByIndex(panel, panel.active);
+}
+
+// What a tab is called: the process actually in front, so it reads `claude`
+// while Claude Code has the terminal and `zsh` at the prompt. Deliberately
+// not a name the user types — HandleInput calls io.ClearInputKeys() whenever
+// the pointer is over the panel, so an InputText in this header could not be
+// typed into without a carve-out, and a label that tracks the live process is
+// more honest than one typed once and left to go stale.
+std::string TabLabel(const Session& s) {
+  std::string name = s.foreground.empty() ? s.label : s.foreground;
+  if (name.empty())
+    name = "shell";
+  if (!s.pty.Running())
+    name += " (exited)";
+  return name;
+}
+
 } // namespace
 
 bool TerminalCapturesKeys(const AppState& state) {
@@ -446,7 +576,8 @@ bool TerminalCapturesKeys(const AppState& state) {
   // it is visible, which invisible focus is not.
   if (!state.settings.terminalPanel || !state.terminal)
     return false;
-  if (!state.terminal->pty.Running())
+  const Session* s = Active(*state.terminal);
+  if (s == nullptr || !s->pty.Running())
     return false; // no session: the app keeps its shortcuts
   ImGuiWindow* w = ImGui::FindWindowByName(kPanelTerminal);
   if (w == nullptr || !w->WasActive || w->Hidden || w->Collapsed)
@@ -455,28 +586,79 @@ bool TerminalCapturesKeys(const AppState& state) {
       w->Pos, ImVec2(w->Pos.x + w->Size.x, w->Pos.y + w->Size.y), false);
 }
 
+// The test hooks act on the VISIBLE session, which is what a test that says
+// "the terminal shows X" means by "the terminal".
 term::Screen* TerminalScreenOf(AppState& state) {
-  return state.terminal ? state.terminal->screen.get() : nullptr;
+  if (!state.terminal)
+    return nullptr;
+  Session* s = Active(*state.terminal);
+  return s != nullptr ? s->screen.get() : nullptr;
 }
 
 bool TerminalRunning(const AppState& state) {
-  return state.terminal && state.terminal->pty.Running();
+  if (!state.terminal)
+    return false;
+  const Session* s = Active(*state.terminal);
+  return s != nullptr && s->pty.Running();
+}
+
+int TerminalSessionCount(const AppState& state) {
+  return state.terminal ? static_cast<int>(state.terminal->sessions.size()) : 0;
+}
+
+void NewTerminalTab(AppState& state) { NewSession(state, Ensure(state)); }
+
+void CloseTerminalTab(AppState& state, int index) {
+  if (state.terminal)
+    CloseSession(*state.terminal, index);
+}
+
+void SelectTerminalTab(AppState& state, int index) {
+  if (state.terminal)
+    SelectByIndex(*state.terminal, index);
+}
+
+static const Session* TabAt(const AppState& state, int index) {
+  if (!state.terminal || index < 0 ||
+      index >= static_cast<int>(state.terminal->sessions.size()))
+    return nullptr;
+  return state.terminal->sessions[static_cast<size_t>(index)].get();
+}
+
+bool TerminalTabRunning(const AppState& state, int index) {
+  const Session* s = TabAt(state, index);
+  return s != nullptr && s->pty.Running();
+}
+
+int TerminalActiveTab(const AppState& state) {
+  return state.terminal ? state.terminal->active : -1;
+}
+
+const term::Screen* TerminalTabScreen(const AppState& state, int index) {
+  const Session* s = TabAt(state, index);
+  return s != nullptr ? s->screen.get() : nullptr;
 }
 
 void StartTerminalCommand(AppState& state, const std::string& program,
                           const std::vector<std::string>& args) {
-  TerminalState& t = Ensure(state);
+  TerminalState& panel = Ensure(state);
+  if (panel.sessions.empty()) {
+    panel.sessions.push_back(std::make_unique<Session>());
+    panel.sessions.back()->id = panel.nextId++;
+    panel.active = 0;
+  }
   term::PtySession::Options opts;
   opts.program = program;
   opts.args = args;
-  StartSession(state, t, opts, program);
+  StartSession(state, *Active(panel), opts, program);
 }
 
 void ShutdownTerminal(AppState& state) {
   if (!state.terminal)
     return;
-  state.terminal->pty.Terminate();
-  // ...and FORGET the session, not just kill it. `everStarted` is a latch
+  for (std::unique_ptr<Session>& s : state.terminal->sessions)
+    s->pty.Terminate();
+  // ...and FORGET the sessions, not just kill them. `everStarted` is a latch
   // that stops the shell respawning after the user presses Stop, and
   // `screen` outlives the process on purpose so the scrollback is still
   // readable. Both are right while the panel is open — and both meant that
@@ -491,23 +673,30 @@ void ShutdownTerminal(AppState& state) {
 
 void DrawTerminalPanel(AppState& state) {
   if (!state.settings.terminalPanel) {
-    // Turning the preference off ends the session rather than hiding it: a
+    // Turning the preference off ends the sessions rather than hiding them: a
     // process kept alive behind a closed panel is a process nobody can see.
-    if (state.terminal && state.terminal->pty.Running())
+    if (state.terminal && !state.terminal->sessions.empty())
       ShutdownTerminal(state);
     return;
   }
 
-  TerminalState& t = Ensure(state);
-  t.capturing = false;
+  TerminalState& panel = Ensure(state);
+
+  // EVERY session is drained, not just the visible one. A background tab
+  // nobody reads fills its pty buffer (~64 KB) and then the child BLOCKS
+  // mid-write — a build left running in tab 2 that appears to hang, with
+  // nothing on screen to explain it. Poll() is a non-blocking read, so an
+  // idle tab costs a syscall.
+  for (std::unique_ptr<Session>& s : panel.sessions) {
+    if (s->screen != nullptr)
+      PumpSession(*s);
+  }
 
   if (!ImGui::Begin(kPanelTerminal, nullptr,
                     ImGuiWindowFlags_NoScrollbar |
                         ImGuiWindowFlags_NoScrollWithMouse)) {
     ImGui::End();
-    if (t.screen != nullptr)
-      PumpSession(t); // keep draining while collapsed, or output piles up
-    return;
+    return; // already pumped above, so collapsing cannot starve anything
   }
 
   // Opening the panel opens a shell. There WAS a chooser here — "Claude Code"
@@ -515,14 +704,69 @@ void DrawTerminalPanel(AppState& state) {
   // back to it was restarting the app. That is a bad trade for a decision
   // that is really just "what do I type first", so the panel now answers it
   // the way a terminal does and leaves the rest to the prompt.
-  if (t.screen == nullptr && !t.everStarted)
-    StartShell(state, t);
+  if (panel.sessions.empty())
+    NewSession(state, panel);
+
+  // --- tabs -------------------------------------------------------------
+  // The bar appears only once there is more than one session. With a single
+  // shell — which is the usual state — a one-tab bar under the panel's own
+  // dock tab is two rows of tab chrome saying the same thing, above a
+  // terminal that wanted the height.
+  //
+  // Requests are collected and applied AFTER the bar, never inside it:
+  // erasing from `sessions` while ImGui is walking the tabs would leave it
+  // holding a pointer into a moved vector.
+  TabRequest request = TabRequest::None;
+  int closeIndex = -1;
+  if (panel.sessions.size() > 1) {
+    // ResizeDown, not Scroll: this panel is narrow by nature, and scrolling
+    // tabs behind arrows hides the one you want while shrinking them still
+    // shows it.
+    if (ImGui::BeginTabBar("###term_tabs",
+                           ImGuiTabBarFlags_Reorderable |
+                               ImGuiTabBarFlags_AutoSelectNewTabs |
+                               ImGuiTabBarFlags_FittingPolicyResizeDown)) {
+      for (size_t i = 0; i < panel.sessions.size(); i++) {
+        Session& s = *panel.sessions[i];
+        // The id, not the index — see NewSession.
+        const std::string label =
+            TabLabel(s) + "###term_tab_" + std::to_string(s.id);
+        ImGuiTabItemFlags flags = ImGuiTabItemFlags_None;
+        if (panel.pendingSelect == s.id)
+          flags |= ImGuiTabItemFlags_SetSelected;
+        bool open = true;
+        if (ImGui::BeginTabItem(label.c_str(), &open, flags)) {
+          panel.active = static_cast<int>(i);
+          ImGui::EndTabItem();
+        }
+        if (!open)
+          closeIndex = static_cast<int>(i);
+      }
+      ImGui::EndTabBar();
+    }
+  }
+  panel.pendingSelect = 0; // consumed; the bar owns the selection again
+
+  Session* activePtr = Active(panel);
+  if (activePtr == nullptr) { // every tab closed in the same frame
+    ImGui::End();
+    return;
+  }
+  Session& t = *activePtr;
+  t.capturing = false;
 
   // --- header -----------------------------------------------------------
+  // The tab already names the process in front, so the header does not: two
+  // labels saying `bash` a row apart is noise, and the one on the tab is the
+  // one that stays true when you switch away.
+  if (ImGui::SmallButton("+###term_newtab"))
+    request = TabRequest::New;
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Another shell in this project (Ctrl+Shift+T). "
+                      "Ctrl+Shift+W closes one.");
+  ImGui::SameLine();
+
   if (t.pty.Running()) {
-    ImGui::TextDisabled("%s", t.foreground.empty() ? t.label.c_str()
-                                                   : t.foreground.c_str());
-    ImGui::SameLine();
     if (ImGui::SmallButton("Claude Code###term_claude")) {
       const std::string cmd = ClaudeCommand(state) + "\n";
       t.pty.Write(cmd.data(), cmd.size());
@@ -541,8 +785,13 @@ void DrawTerminalPanel(AppState& state) {
     ImGui::SameLine();
     if (ImGui::SmallButton("Stop###term_stop"))
       t.pty.Terminate();
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Kills whatever this tab is running — SIGHUP, then "
+                        "SIGKILL. For a program that has stopped answering "
+                        "Ctrl+C; the scrollback stays readable afterwards.");
   } else {
-    ImGui::TextDisabled("%s exited (%d)", t.label.c_str(), t.exitStatus);
+    // The status code, which the tab has no room for.
+    ImGui::TextDisabled("exited (%d)", t.exitStatus);
     ImGui::SameLine();
     if (ImGui::SmallButton("New shell###term_shell"))
       StartShell(state, t);
@@ -554,8 +803,6 @@ void DrawTerminalPanel(AppState& state) {
     ImGui::End();
     return;
   }
-
-  PumpSession(t);
 
   ImFont* mono = MonoFont();
   if (mono == nullptr) {
@@ -631,7 +878,38 @@ void DrawTerminalPanel(AppState& state) {
     col = c;
   };
 
-  if (ImGui::IsItemActivated() && !ImGui::GetIO().KeyShift) {
+  // Middle-click pastes what is selected here, falling back to the system
+  // clipboard when nothing is. NOT the X11 PRIMARY selection: GLFW exposes no
+  // API for it, and for the case this is actually used for — select a path in
+  // the terminal, middle-click it back onto the command line — the two are
+  // indistinguishable.
+  //
+  // It has to run BEFORE the selection branches below. A middle press
+  // activates the invisible button too, and IsItemActivated() is the branch
+  // that CLEARS the selection — so reading the selection afterwards would
+  // find it already gone and paste the system clipboard over the thing the
+  // user middle-clicked to paste.
+  if (gridHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+    std::string text = SelectionText(t);
+    if (text.empty()) {
+      const char* clip = ImGui::GetClipboardText();
+      if (clip != nullptr)
+        text = clip;
+    }
+    if (!text.empty()) {
+      t.screen->SendPaste(text); // bracketed, if the program asked for it
+      const std::string bytes = t.screen->TakeOutput();
+      if (!bytes.empty())
+        t.pty.Write(bytes.data(), bytes.size());
+    }
+  }
+
+  // Gated on the LEFT button specifically, for the reason above: activation
+  // alone would let a middle-click start a selection and destroy the one it
+  // was about to paste.
+  if (ImGui::IsItemActivated() &&
+      ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+      !ImGui::GetIO().KeyShift) {
     cellUnderMouse(t.selAnchorLine, t.selAnchorCol);
     t.selHeadLine = t.selAnchorLine;
     t.selHeadCol = t.selAnchorCol;
@@ -709,10 +987,35 @@ void DrawTerminalPanel(AppState& state) {
     }
   }
 
-  if (t.capturing)
-    HandleInput(t);
+  if (t.capturing) {
+    const TabRequest fromKeys = HandleInput(t);
+    if (fromKeys != TabRequest::None)
+      request = fromKeys;
+  }
 
   ImGui::End();
+
+  // --- apply the tab requests, with the bar and the grid both behind us ---
+  const int count = static_cast<int>(panel.sessions.size());
+  switch (request) {
+  case TabRequest::New:
+    NewSession(state, panel);
+    break;
+  case TabRequest::Close:
+    if (count > 1)
+      closeIndex = panel.active;
+    break;
+  case TabRequest::Prev:
+    SelectByIndex(panel, (panel.active + count - 1) % count);
+    break;
+  case TabRequest::Next:
+    SelectByIndex(panel, (panel.active + 1) % count);
+    break;
+  case TabRequest::None:
+    break;
+  }
+  if (closeIndex >= 0)
+    CloseSession(panel, closeIndex);
 }
 
 } // namespace ui

@@ -329,4 +329,95 @@ TEST_CASE("pty: terminate is safe twice and kills the child",
   CHECK_FALSE(pty.Running());
 }
 
+// --- OSC 52: the clipboard, one direction only ---------------------------
+// Claude Code's own copy is an OSC 52 write. Until this landed the sequence
+// was parsed and dropped, so every copy inside it did nothing at all — while
+// the panel's own drag-and-Ctrl+Shift+C worked, which is exactly what hid it.
+
+TEST_CASE("terminal: OSC 52 puts text on the clipboard", "[terminal]") {
+  Screen s(4, 40);
+  CHECK_FALSE(
+      s.TakeClipboardWrite().has_value());   // nothing asked, nothing offered
+  s.Write("\x1b]52;c;aGVsbG8gd29ybGQ=\x07"); // "hello world"
+  auto write = s.TakeClipboardWrite();
+  REQUIRE(write.has_value());
+  CHECK(*write == "hello world");
+  // Taken means taken: the next frame must not paste it again.
+  CHECK_FALSE(s.TakeClipboardWrite().has_value());
+  // And none of it landed on the screen.
+  CHECK(s.Line(0).empty());
+}
+
+TEST_CASE("terminal: an OSC 52 write split across reads still assembles",
+          "[terminal]") {
+  // A PTY read boundary can fall anywhere, and it usually falls in the
+  // middle of a long base64 payload — which is the only kind Claude Code
+  // sends.
+  Screen s(4, 40);
+  const std::string seq = "\x1b]52;c;VGhlIHF1aWNrIGJyb3duIGZveA==\x07";
+  for (size_t i = 0; i < seq.size(); i++)
+    s.Write(seq.data() + i, 1); // one byte at a time: the worst case
+  auto write = s.TakeClipboardWrite();
+  REQUIRE(write.has_value());
+  CHECK(*write == "The quick brown fox");
+}
+
+TEST_CASE("terminal: OSC 52 terminated by ST, and to PRIMARY", "[terminal]") {
+  // ESC \ is as common a terminator as BEL, and `p` (PRIMARY) as common a
+  // target as `c` — both land on the one clipboard the platform gives us.
+  Screen s(4, 40);
+  s.Write("\x1b]52;p;cHJpbWFyeQ==\x1b\\");
+  auto write = s.TakeClipboardWrite();
+  REQUIRE(write.has_value());
+  CHECK(*write == "primary");
+}
+
+TEST_CASE("terminal: an over-long clipboard write is truncated, not honoured",
+          "[terminal]") {
+  Screen s(4, 40);
+  // 2 MiB of 'A' — past kClipboardWriteLimit, and past anything a person
+  // means to paste.
+  const std::string big(2u * 1024 * 1024, 'A');
+  std::string b64;
+  {
+    static const char* kAlphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for (size_t i = 0; i < big.size(); i += 3) {
+      const uint32_t n = (static_cast<uint32_t>(big[i]) << 16) |
+                         (static_cast<uint32_t>(big[i + 1]) << 8) |
+                         static_cast<uint32_t>(big[i + 2]);
+      b64.push_back(kAlphabet[(n >> 18) & 0x3F]);
+      b64.push_back(kAlphabet[(n >> 12) & 0x3F]);
+      b64.push_back(kAlphabet[(n >> 6) & 0x3F]);
+      b64.push_back(kAlphabet[n & 0x3F]);
+    }
+  }
+  s.Write("\x1b]52;c;" + b64 + "\x07");
+  auto write = s.TakeClipboardWrite();
+  REQUIRE(write.has_value());
+  CHECK(write->size() == term::kClipboardWriteLimit);
+  CHECK(write->front() == 'A');
+}
+
+TEST_CASE("terminal: a clipboard READ is refused, not answered", "[terminal]") {
+  // OSC 52's query form hands whatever the user last copied to whatever is
+  // running in the panel, over its own stdin. The refusal has to be silence:
+  // an empty answer is still an answer, and a program can act on it.
+  Screen s(4, 40);
+  s.Write("\x1b]52;c;?\x07");
+  CHECK(s.TakeOutput().empty()); // nothing sent back to the process
+  CHECK_FALSE(s.TakeClipboardWrite().has_value());
+}
+
+TEST_CASE("terminal: the last clipboard write wins", "[terminal]") {
+  // Two writes between drains — a background tab and a foreground one, say.
+  // The clipboard has one slot; it holds what a paste would have produced.
+  Screen s(4, 40);
+  s.Write("\x1b]52;c;Zmlyc3Q=\x07"); // "first"
+  s.Write("\x1b]52;c;c2Vjb25k\x07"); // "second"
+  auto write = s.TakeClipboardWrite();
+  REQUIRE(write.has_value());
+  CHECK(*write == "second");
+}
+
 #endif // HAVE_TERMINAL

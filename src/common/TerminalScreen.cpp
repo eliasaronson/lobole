@@ -102,6 +102,9 @@ struct ScreenCallbacks {
   static int MoveCursor(VTermPos pos, VTermPos old, int visible, void* user);
   static int SetTermProp(VTermProp prop, VTermValue* val, void* user);
   static void Output(const char* s, size_t len, void* user);
+  // OSC 52 write. There is deliberately no query counterpart — see below.
+  static int SetSelection(VTermSelectionMask mask, VTermStringFragment frag,
+                          void* user);
 };
 
 Screen::Screen(int rows, int cols)
@@ -117,6 +120,21 @@ Screen::Screen(int rows, int cols)
   vterm_screen_set_callbacks(m_impl->screen, &cbs, this);
   vterm_screen_reset(m_impl->screen, 1);
   vterm_output_set_callback(m_impl->vt, ScreenCallbacks::Output, this);
+
+  // OSC 52. `query` is left NULL on purpose, and that is a refusal rather
+  // than an omission: libvterm only answers a clipboard read if this pointer
+  // is set, so a program asking "what is on the clipboard?" gets no reply at
+  // all — not an empty one, which it could still act on. The read form of
+  // OSC 52 hands whatever the user last copied to anything running in the
+  // panel, over its own stdin; xterm ships it disabled for the same reason.
+  // Writing is a convenience, reading is a capability.
+  static VTermSelectionCallbacks selCbs = {};
+  selCbs.set = ScreenCallbacks::SetSelection;
+  selCbs.query = nullptr;
+  m_clipboardBuffer.resize(kClipboardChunk);
+  vterm_state_set_selection_callbacks(vterm_obtain_state(m_impl->vt), &selCbs,
+                                      this, m_clipboardBuffer.data(),
+                                      m_clipboardBuffer.size());
 }
 
 Screen::~Screen() {
@@ -310,6 +328,12 @@ std::string Screen::TakeOutput() {
   return out;
 }
 
+std::optional<std::string> Screen::TakeClipboardWrite() {
+  std::optional<std::string> out;
+  out.swap(m_clipboardReady);
+  return out;
+}
+
 int ScreenCallbacks::PushLine(int cols, const VTermScreenCell* cells,
                               void* user) {
   auto* self = static_cast<Screen*>(user);
@@ -364,6 +388,28 @@ int ScreenCallbacks::SetTermProp(VTermProp prop, VTermValue* val, void* user) {
 
 void ScreenCallbacks::Output(const char* s, size_t len, void* user) {
   static_cast<Screen*>(user)->m_pendingOutput.append(s, len);
+}
+
+int ScreenCallbacks::SetSelection(VTermSelectionMask /*mask*/,
+                                  VTermStringFragment frag, void* user) {
+  // The mask is ignored: it distinguishes CLIPBOARD from PRIMARY, and the
+  // platform underneath us (GLFW) has one clipboard. Inventing a second one
+  // the system will not honour is worse than merging them.
+  auto* self = static_cast<Screen*>(user);
+  if (frag.initial)
+    self->m_clipboardPending.clear();
+  const size_t room =
+      kClipboardWriteLimit -
+      std::min(kClipboardWriteLimit, self->m_clipboardPending.size());
+  self->m_clipboardPending.append(frag.str, std::min(frag.len, room));
+  if (frag.final) {
+    // A completed write replaces an earlier one nobody drained yet: the
+    // clipboard has one slot, and it is the last write that a paste would
+    // have produced.
+    self->m_clipboardReady = std::move(self->m_clipboardPending);
+    self->m_clipboardPending.clear();
+  }
+  return 1;
 }
 
 } // namespace term

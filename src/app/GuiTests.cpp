@@ -1884,6 +1884,179 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     ctx->Yield(3);
     IM_CHECK(!ui::TerminalRunning(*s_App));
   };
+
+  // T7. Middle-click pastes the panel's own selection. The trap this pins
+  // down: a middle press ACTIVATES the grid's invisible button, and the
+  // activation branch is the one that clears the selection — so the paste
+  // has to be read before it, or middle-click destroys the thing it was
+  // about to paste and silently substitutes the system clipboard.
+  t = IM_REGISTER_TEST(engine, "terminal", "middle_click_pastes_the_selection");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(6);
+
+    // `cat` echoes whatever it is given, so the paste is visible as output.
+    ui::StartTerminalCommand(*s_App, "/bin/sh",
+                             {"-c", "printf 'pasteme\n'; cat"});
+    bool seen = false;
+    for (int i = 0; i < 200 && !seen; i++) {
+      ctx->Yield();
+      const term::Screen* screen = ui::TerminalScreenOf(*s_App);
+      if (screen != nullptr)
+        seen = screen->Line(0).find("pasteme") != std::string::npos;
+    }
+    IM_CHECK(seen);
+
+    ImGuiTestItemInfo grid =
+        ctx->ItemInfo("//Terminal###TerminalPanel/###term_grid");
+    IM_CHECK(grid.ID != 0);
+    const term::Screen* screen = ui::TerminalScreenOf(*s_App);
+    IM_CHECK(screen != nullptr);
+    const float cellW = grid.RectFull.GetWidth() / (float)screen->Cols();
+    const float cellH = grid.RectFull.GetHeight() / (float)screen->Rows();
+    const ImVec2 rowStart(grid.RectFull.Min.x + cellW * 0.25f,
+                          grid.RectFull.Min.y + cellH * 0.5f);
+    const ImVec2 rowEnd(grid.RectFull.Min.x + cellW * 7.0f,
+                        grid.RectFull.Min.y + cellH * 0.5f);
+
+    // The system clipboard holds something DIFFERENT, so a test that passes
+    // by accident through the fallback path is impossible.
+    ImGui::SetClipboardText("not-the-selection");
+
+    ctx->MouseMoveToPos(rowStart);
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(rowEnd);
+    ctx->Yield(2);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+
+    ctx->MouseClick(ImGuiMouseButton_Middle);
+    ctx->KeyPress(ImGuiKey_Enter); // so `cat` flushes the line back
+    bool echoed = false;
+    for (int i = 0; i < 200 && !echoed; i++) {
+      ctx->Yield();
+      const term::Screen* sc = ui::TerminalScreenOf(*s_App);
+      if (sc == nullptr)
+        continue;
+      for (int r = 1; r < sc->Rows() && !echoed; r++)
+        echoed = sc->Line(r).find("pasteme") != std::string::npos;
+    }
+    IM_CHECK(echoed);
+    // ...and it was the SELECTION, not the clipboard.
+    bool wrong = false;
+    const term::Screen* sc = ui::TerminalScreenOf(*s_App);
+    for (int r = 0; r < sc->Rows(); r++)
+      wrong =
+          wrong || sc->Line(r).find("not-the-selection") != std::string::npos;
+    IM_CHECK(!wrong);
+
+    s_App->settings.terminalPanel = false;
+    ctx->Yield(3);
+  };
+
+  // T8. Tabs. The part worth a test is not that a second tab appears — it is
+  // that the one you are NOT looking at keeps being drained, and that closing
+  // a tab kills its process instead of orphaning it.
+  t = IM_REGISTER_TEST(engine, "terminal", "tabs_run_and_drain_in_background");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(6);
+    IM_CHECK_EQ(ui::TerminalSessionCount(*s_App), 1);
+
+    ui::NewTerminalTab(*s_App);
+    ctx->Yield(4);
+    IM_CHECK_EQ(ui::TerminalSessionCount(*s_App), 2);
+
+    // ~180 KB of output, then a marker, then exit. Well past a pty buffer
+    // (~64 KB), so a tab nobody drains BLOCKS mid-write: it never prints the
+    // marker and never exits. That is the failure this loop exists to
+    // prevent — a build left running in another tab that silently stops.
+    ui::StartTerminalCommand(
+        *s_App, "/bin/sh",
+        {"-c", "i=0; while [ $i -lt 4000 ]; do "
+               "printf 'bg-%d-padding-padding-padding-pad\n' $i; "
+               "i=$((i+1)); done; printf 'BG-FINISHED\n'"});
+    ctx->Yield(4);
+
+    // Look away: tab 1 is on screen, tab 2 is drawn by nobody.
+    ui::SelectTerminalTab(*s_App, 0);
+    ctx->Yield(4);
+    // Really looking away. The tab bar owns the selection, so asking is not
+    // the same as getting it — and if this slips back to tab 1 the rest of
+    // the test proves nothing, because the "background" tab would be the one
+    // on screen.
+    IM_CHECK_EQ(ui::TerminalActiveTab(*s_App), 0);
+    IM_CHECK(ui::TerminalTabScreen(*s_App, 1) != nullptr);
+
+    bool finished = false;
+    for (int i = 0; i < 600 && !finished; i++) {
+      ctx->Yield();
+      finished = !ui::TerminalTabRunning(*s_App, 1); // ran to completion
+    }
+    IM_CHECK(finished);
+
+    // ...and its output really landed, rather than the child having died.
+    const term::Screen* bg = ui::TerminalTabScreen(*s_App, 1);
+    IM_CHECK(bg != nullptr);
+    bool marker = false;
+    for (int r = 0; r < bg->Rows() && !marker; r++)
+      marker = bg->Line(r).find("BG-FINISHED") != std::string::npos;
+    IM_CHECK(marker);
+
+    // Closing reaps: what is left is tab 1's own shell, still alive.
+    ui::CloseTerminalTab(*s_App, 1);
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::TerminalSessionCount(*s_App), 1);
+    IM_CHECK(ui::TerminalRunning(*s_App));
+
+    s_App->settings.terminalPanel = false;
+    ctx->Yield(3);
+    IM_CHECK_EQ(ui::TerminalSessionCount(*s_App), 0); // and off means gone
+  };
+
+  t = IM_REGISTER_TEST(engine, "terminal", "ctrl_shift_t_opens_a_tab");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    s_App->settings.terminalPanel = true;
+    ctx->Yield(6);
+    ui::StartTerminalCommand(*s_App, "/bin/sh", {"-c", "cat"});
+    ctx->Yield(10);
+    IM_CHECK_EQ(ui::TerminalSessionCount(*s_App), 1);
+
+    ImGuiWindow* win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
+    IM_CHECK(win != nullptr);
+    ctx->MouseMoveToPos(ImVec2(win->Pos.x + win->Size.x * 0.5f,
+                               win->Pos.y + win->Size.y * 0.6f));
+    ctx->Yield(2);
+    IM_CHECK(ui::TerminalCapturesKeys(*s_App));
+
+    // The chord is the panel's, not the app's and not the program's: the
+    // terminal swallows the keyboard here, so this is the only layer that
+    // can claim it.
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_T);
+    ctx->Yield(6);
+    IM_CHECK_EQ(ui::TerminalSessionCount(*s_App), 2);
+
+    // Ctrl+Shift+PageUp/PageDown move between them — and the press must NOT
+    // also reach the program as a PageUp, or scrolling a TUI would jump tabs.
+    IM_CHECK_EQ(ui::TerminalActiveTab(*s_App), 1); // the new one is on top
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_PageUp);
+    ctx->Yield(4);
+    IM_CHECK_EQ(ui::TerminalActiveTab(*s_App), 0);
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_PageDown);
+    ctx->Yield(4);
+    IM_CHECK_EQ(ui::TerminalActiveTab(*s_App), 1);
+    IM_CHECK_EQ(ui::TerminalSessionCount(*s_App), 2); // moved, not closed
+
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_W);
+    ctx->Yield(6);
+    IM_CHECK_EQ(ui::TerminalSessionCount(*s_App), 1);
+
+    s_App->settings.terminalPanel = false;
+    ctx->Yield(3);
+  };
 #endif // HAVE_TERMINAL
 
   // Frame timing is always measured; the HUD is not shown unless asked for

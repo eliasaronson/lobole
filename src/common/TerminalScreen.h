@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -98,6 +99,21 @@ public:
   [[nodiscard]] bool CursorVisible() const { return m_cursorVisible; }
   [[nodiscard]] const std::string& Title() const { return m_title; }
 
+  // --- the clipboard, one direction only ---------------------------------
+  // A program inside the terminal cannot reach the system clipboard itself;
+  // it asks us to, by writing OSC 52. Claude Code's own copy is exactly this,
+  // and dropping the sequence made every copy inside it a silent no-op.
+  //
+  // Pulled rather than pushed, like TakeOutput(): the caller drains this once
+  // a frame and hands it to the platform. That keeps this class ignorant of
+  // ImGui — which is the whole reason a clipboard write can be asserted in a
+  // headless test.
+  //
+  // Nothing is offered in the other direction. OSC 52 also has a *read* form,
+  // and answering it would let anything running in the panel exfiltrate
+  // whatever the user last copied. See Screen::Screen for the refusal.
+  [[nodiscard]] std::optional<std::string> TakeClipboardWrite();
+
   // --- input ------------------------------------------------------------
   // Key encoding is libvterm's job too, so the panel never hand-writes an
   // escape sequence: it says "Up with Ctrl" and the right bytes come out of
@@ -155,10 +171,27 @@ private:
   uint32_t m_defaultBg = 0x0F1115u;
   std::vector<std::vector<Cell>> m_scrollback;
 
+  // OSC 52. libvterm base64-decodes into m_clipboardBuffer and hands it back
+  // in fragments; m_clipboardPending assembles them and m_clipboardReady
+  // holds a completed write until someone takes it.
+  std::vector<char> m_clipboardBuffer;
+  std::string m_clipboardPending;
+  std::optional<std::string> m_clipboardReady;
+
   friend struct ScreenCallbacks;
 };
 
 // How many scrollback lines a Screen keeps before dropping the oldest.
 inline constexpr size_t kScrollbackLimit = 10000;
+
+// How much decoded text libvterm hands back per OSC 52 fragment. Only the
+// chunk size — a longer payload arrives in several fragments.
+inline constexpr size_t kClipboardChunk = 64 * 1024;
+
+// The most a program may put on the clipboard in one write. Past this the
+// write is truncated rather than honoured whole: a clipboard is a thing a
+// person is about to paste somewhere, and a megabyte of it is already far
+// past anything anyone means to.
+inline constexpr size_t kClipboardWriteLimit = 1024 * 1024;
 
 } // namespace term

@@ -125,8 +125,8 @@ const Field kFields[] = {
      "General",
      "Terminal panel",
      "A terminal docked on the right, for running Claude Code (or a shell, "
-     "or git) beside the model. Typing goes to the terminal only while the "
-     "mouse is over it. Off by default.",
+     "or git) beside the model. Ctrl+Shift+T opens another tab. Typing goes "
+     "to the terminal only while the mouse is over it. Off by default.",
      Tier::Live,
      &Settings::terminalPanel,
      {},

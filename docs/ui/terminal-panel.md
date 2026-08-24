@@ -205,9 +205,9 @@ that silently goes blank on exit reads as a crash of the *app*.
 | **T3** | Input: keys, control chars, paste, and the hover gate | **done** — GUI test asserts both directions of the gate |
 | **T4** | The Claude Code launch (port, cwd, MCP config) + exited state | **done** — the button types `claude` bound to this instance into the shell |
 | **T5** | Polish: selection + copy (**done**), a font-size control, `Tools ▸ Open terminal here` (option D) | partly done |
-| **T6** | The clipboard, in both directions: honour OSC 52 writes, refuse OSC 52 reads | headless test: `\x1b]52;c;<b64>\x07` in, decoded text out; reads answered with nothing |
-| **T7** | Middle-click paste | GUI test: select, middle-click, the bytes arrive at the child |
-| **T8** | Tabs: many sessions in one panel | GUI test: two sessions, a background one still receives output, closing one kills its process |
+| **T6** | The clipboard, in both directions: honour OSC 52 writes, refuse OSC 52 reads | **done** — 6 headless tests |
+| **T7** | Middle-click paste | **done** — GUI test, verified to fail without the ordering fix |
+| **T8** | Tabs: many sessions in one panel | **done** — 2 GUI tests; the background-drain one verified to fail without the pump-all loop |
 
 T1–T2 were the risk; T3–T4 the value. What shipped, concretely:
 
@@ -253,10 +253,13 @@ the read direction.
 
 The design:
 
-- `Screen` grows a member buffer (**64 KiB**) handed to libvterm, and
-  accumulates `set` fragments into `m_pendingClipboard`. The buffer length is
-  the size cap, enforced by libvterm rather than by us: a program that tries
-  to paste 100 MB into your clipboard gets truncated, not honoured.
+- `Screen` hands libvterm a **64 KiB** member buffer and accumulates `set`
+  fragments into `m_pendingClipboard`. That buffer is the *chunk* size, not a
+  limit — libvterm flushes and calls back again when it fills — so the cap is
+  ours: `kClipboardWriteLimit` (1 MiB), past which the write is truncated
+  rather than grown. A clipboard is a thing a person is about to paste
+  somewhere, and a megabyte of it is already far past anything anyone means
+  to.
 - The panel drains it the way it already drains keystrokes —
   `TakeClipboardWrite()` next to `TakeOutput()`, pull-based, called from
   `PumpSession`. No callback from `Screen` into ImGui: the whole reason
@@ -371,6 +374,51 @@ place is how the old one-shot chooser went wrong.
 **T6 → T7 → T8.** T6 and T7 are small, independent, and fix things that are
 broken now; T8 is a refactor that touches every line they would touch, so
 landing it first means writing both fixes twice.
+
+## What building T6–T8 turned up
+
+- **The tab bar is the authority on which tab is selected, and it wins every
+  frame.** `BeginTabItem` reports the selection and the loop writes it
+  straight back into `active`, so assigning `active` from anywhere else — a
+  keyboard chord, a test — is silently overwritten before it can take effect.
+  The count is right, the selection is not. Moving it means handing ImGui
+  `ImGuiTabItemFlags_SetSelected` on the tab you mean (`pendingSelect`), which
+  is why `SelectByIndex` exists rather than three assignments.
+
+  This is worth recording because of *how* it surfaced. The
+  background-drain test passed against a deliberately broken pump loop —
+  sabotage the loop to drain only the visible session and the test still went
+  green, because `SelectTerminalTab(0)` never took and the "background" tab
+  was the one on screen the whole time. **A test for a background behaviour
+  has to prove the thing is actually in the background.** Both new GUI tests
+  were then re-run against a broken build and confirmed to fail.
+
+- **`FittingPolicyResizeDown`, not `Scroll`.** This panel is narrow by nature;
+  scrolling three tabs behind arrows clipped the first one to `h` while
+  shrinking them still shows all three.
+
+- **The header stopped naming the process.** The tab already does, and the
+  tab's copy stays true when you switch away. Two labels reading `bash` one
+  row apart is noise.
+
+- **The session bar only appears once there are two sessions**, and the `+`
+  lives on the button row rather than in the bar. First cut had it the other
+  way — a one-tab bar under the panel's own dock tab, which read as *two rows
+  of tab chrome saying the same thing*, above a terminal that wanted the
+  height. Keeping `+` off the bar is what makes the bar's appearance free:
+  nothing moves when it comes and goes. The single-session panel is now
+  exactly the pre-tabs layout plus one button.
+
+  The tab-list popup button (`ImGuiTabBarFlags_TabListPopupButton`, the `▼`)
+  went with it: it is navigation for a bar too full to read, and this bar
+  shrinks rather than scrolls.
+
+- **`Stop` needed a tooltip, which is a way of saying it needed a
+  justification.** It SIGHUPs then SIGKILLs the session's process, keeping
+  the scrollback readable — for a program that has stopped answering Ctrl+C.
+  With one session there is no tab `✕`, so it is the only button that can
+  end a runaway; that is the argument for keeping it, and the tooltip now
+  says so.
 
 ## Turning it off
 

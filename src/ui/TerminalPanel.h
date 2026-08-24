@@ -12,8 +12,8 @@
 namespace ui {
 
 // The terminal panel (docs/ui/terminal-panel.md): a dockable window on the
-// right holding one PTY session, so Claude Code — or a shell, or git — runs
-// beside the model it is editing.
+// right holding one PTY session per tab, so Claude Code — or a shell, or git
+// — runs beside the model it is editing.
 //
 // Off unless `settings.terminalPanel`. Drawing it is the whole integration:
 // there is no RPC that can start a process, and no ui_action that can type
@@ -37,6 +37,19 @@ term::Screen* TerminalScreenOf(AppState& state);
 bool TerminalRunning(const AppState& state);
 void StartTerminalCommand(AppState& state, const std::string& program,
                           const std::vector<std::string>& args);
+// How many tabs the panel has, and the two things the tab bar does.
+int TerminalSessionCount(const AppState& state);
+void NewTerminalTab(AppState& state);
+void CloseTerminalTab(AppState& state, int index);
+void SelectTerminalTab(AppState& state, int index);
+// Whether the tab at `index` still has a live process — the one way to prove
+// a BACKGROUND tab is being drained, since a child whose pty buffer filled up
+// blocks mid-write and never gets to exit.
+bool TerminalTabRunning(const AppState& state, int index);
+const term::Screen* TerminalTabScreen(const AppState& state, int index);
+// Which tab is on top. The tab bar is the authority on this, so a test that
+// asks for a tab must check it got it.
+int TerminalActiveTab(const AppState& state);
 #endif
 
 } // namespace ui
