@@ -14,6 +14,7 @@ endif()
 
 add_executable(designer_tests
     test_actions.cpp
+    test_conventions.cpp
     # The sanitizer runtime options, in the binary rather than in the caller's
     # environment (empty unless ENABLE_SANITIZERS=ON). See the top-level
     # CMakeLists for why this is per-executable.

@@ -41,6 +41,21 @@ the `defaults/*` GUI suite enforces this for creation tools (every tool must
 either change the document with its defaults or refuse visibly). See
 docs/ui/u10-defaults-and-refusals.md.
 
+## Refuse, don't substitute
+
+An input we don't recognise — an enum string, a feature type, a mate type — is
+REFUSED, naming what IS accepted. Never quietly replaced by a default: the
+substitute is always plausible, so the document loads, looks right and is
+wrong. Real cases: an A2 sheet loading as A4 (every view then placed against
+different paper), `add_mate(type:"revolut")` accepted as a RIGID joint that
+solves perfectly well with the wrong degrees of freedom, a modal study running
+as static. Bool parsers are `[[nodiscard]]`, and `tests/test_conventions.cpp`
+scans the source so a new one cannot arrive silent.
+
+Same rule for reporting: a mutating RPC that leaves a feature broken says so in
+ITS OWN response (`regen`), not in a `get_state` the caller has to know to poll
+— `tests/regen_honesty_smoke.py`.
+
 ## Tests
 
 - Headless (no GPU/display): `nix-shell shell.nix --run "cd build && ctest -LE gui -j$(nproc)"`

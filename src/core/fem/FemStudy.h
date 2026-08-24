@@ -101,9 +101,10 @@ struct Study {
 };
 
 const char* LoadTypeToString(LoadType type);
-bool LoadTypeFromString(const std::string& s, LoadType& out);
+[[nodiscard]] bool LoadTypeFromString(const std::string& s, LoadType& out);
 const char* AnalysisTypeToString(AnalysisType type);
-bool AnalysisTypeFromString(const std::string& s, AnalysisType& out);
+[[nodiscard]] bool AnalysisTypeFromString(const std::string& s,
+                                          AnalysisType& out);
 
 // Evaluates every expression-driven field (mesh size, refinement sizes, load
 // magnitudes) against `symbols`, writing results into the value fields. On a

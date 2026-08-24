@@ -1,0 +1,133 @@
+// Conventions the codebase relies on, checked against the source itself.
+//
+// These exist because the alternative is a comment, and comments do not fail
+// the build. Every rule here was written after the same bug class arrived a
+// second time:
+//
+//   - kFeatureTypes said "Keep in lockstep with the FeatureFromJson chain
+//     below" and nothing enforced it, so a type could load fine and be
+//     invisible to `describe`. That one is now enforced at runtime by
+//     FeatureFromJson itself (test_serialization.cpp).
+//
+//   - Six string-to-enum parsers silently substituted a default where eight
+//     others threw. A drawing's A2 sheet loaded as A4; add_mate(type:
+//     "revolut") produced a RIGID joint that solved perfectly well with the
+//     wrong degrees of freedom. Two of the six had ALREADY been fixed for
+//     exactly this reason years apart, which is what makes a scanning test
+//     worth its ugliness: the sweep stopped early and nothing noticed.
+//
+// A source-scanning test is a blunt instrument, so it is deliberately narrow:
+// one clearly-named family (`*FromString`), two mechanical properties. It
+// catches the NEXT parser someone adds, which no amount of fixing the current
+// ones can do.
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <regex>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace {
+
+struct SourceFile {
+  fs::path path;
+  std::string text;
+};
+
+std::vector<SourceFile> SourcesUnder(const std::string& subdir,
+                                     const std::string& ext) {
+  std::vector<SourceFile> out;
+  const fs::path root = fs::path(DESIGNER_SOURCE_DIR) / subdir;
+  REQUIRE(fs::exists(root));
+  for (const auto& e : fs::recursive_directory_iterator(root)) {
+    if (!e.is_regular_file() || e.path().extension() != ext)
+      continue;
+    if (e.path().string().find("thirdparty") != std::string::npos)
+      continue;
+    std::ifstream f(e.path());
+    std::stringstream ss;
+    ss << f.rdbuf();
+    out.push_back({e.path(), ss.str()});
+  }
+  REQUIRE(!out.empty());
+  return out;
+}
+
+std::string Relative(const fs::path& p) {
+  return fs::relative(p, fs::path(DESIGNER_SOURCE_DIR)).string();
+}
+
+} // namespace
+
+TEST_CASE("every bool *FromString parser is [[nodiscard]]", "[convention]") {
+  // A parser that reports failure through its return value is useless if the
+  // caller can drop it silently, which is exactly what SheetFromJson and
+  // StudyFromJson did. [[nodiscard]] moves that from "spot it in review" to
+  // "the compiler says so".
+  const std::regex decl(
+      R"((\[\[nodiscard\]\]\s*)?bool\s+(\w*FromString)\s*\()");
+  std::vector<std::string> unmarked;
+  for (const SourceFile& f : SourcesUnder("src", ".h")) {
+    for (std::sregex_iterator it(f.text.begin(), f.text.end(), decl), end;
+         it != end; ++it) {
+      if ((*it)[1].matched)
+        continue;
+      unmarked.push_back(Relative(f.path) + ": " + (*it)[2].str());
+    }
+  }
+  INFO("mark these [[nodiscard]] — a dropped result is a silent wrong value:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& u : unmarked)
+              s += "  " + u + "\n";
+            return s;
+          }());
+  CHECK(unmarked.empty());
+}
+
+TEST_CASE("an enum-returning *FromString parser has no silent fallback",
+          "[convention]") {
+  // The other shape of the same bug. MateTypeFromString returned MateType
+  // directly and ended `return MateType::Fastened; // default / "fastened"`,
+  // so ANY unrecognised string became a rigid joint — there was no bool for a
+  // caller to check even if it wanted to. A parser that cannot report failure
+  // must therefore throw.
+  // std::multiline, or `^` only anchors at the start of the whole FILE — the
+  // first version of this test silently matched nothing and passed against
+  // the very bug it was written for. Sabotage said so.
+  const std::regex def(
+      R"(^([A-Za-z_][\w:]*)\s+(\w*FromString)\s*\(([^)]*)\)\s*\{)",
+      std::regex_constants::ECMAScript | std::regex_constants::multiline);
+  std::vector<std::string> silent;
+  for (const SourceFile& f : SourcesUnder("src", ".cpp")) {
+    for (std::sregex_iterator it(f.text.begin(), f.text.end(), def), end;
+         it != end; ++it) {
+      const std::string ret = (*it)[1].str();
+      if (ret == "bool" || ret == "std::string" || ret == "const")
+        continue; // bool reports failure; string parsers are not enums
+      const size_t bodyStart = static_cast<size_t>(it->position()) +
+                               static_cast<size_t>(it->length());
+      const size_t bodyEnd = f.text.find("\n}\n", bodyStart);
+      const std::string body = f.text.substr(
+          bodyStart, bodyEnd == std::string::npos ? std::string::npos
+                                                  : bodyEnd - bodyStart);
+      if (body.find("throw ") != std::string::npos)
+        continue;
+      silent.push_back(Relative(f.path) + ": " + ret + " " + (*it)[2].str());
+    }
+  }
+  INFO("these return an enum with no way to report an unrecognised string, "
+       "and do not throw:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& u : silent)
+              s += "  " + u + "\n";
+            return s;
+          }());
+  CHECK(silent.empty());
+}

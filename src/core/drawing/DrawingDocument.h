@@ -175,11 +175,13 @@ SheetChrome ChromeOf(const Sheet& sheet);
 void OrientationAxes(ViewOrientation o, glm::dvec3& viewDir, glm::dvec3& up);
 
 const char* SheetSizeToString(SheetSize size);
-bool SheetSizeFromString(const std::string& s, SheetSize& out);
+[[nodiscard]] bool SheetSizeFromString(const std::string& s, SheetSize& out);
 const char* ViewOrientationToString(ViewOrientation o);
-bool ViewOrientationFromString(const std::string& s, ViewOrientation& out);
+[[nodiscard]] bool ViewOrientationFromString(const std::string& s,
+                                             ViewOrientation& out);
 const char* DrawingDimKindToString(DrawingDimKind k);
-bool DrawingDimKindFromString(const std::string& s, DrawingDimKind& out);
+[[nodiscard]] bool DrawingDimKindFromString(const std::string& s,
+                                            DrawingDimKind& out);
 // Every kind string, for describe — generated beside To/FromString so the
 // introspection can't drift from the parser.
 std::vector<const char*> DrawingDimKindNames();
