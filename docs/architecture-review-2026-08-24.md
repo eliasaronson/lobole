@@ -1,8 +1,8 @@
 # Architecture review + cleanup plan (2026-08-24)
 
-> Status: **IN PROGRESS.** Five stages, each its own commit. Stage status is
-> tracked in the table below; deferred follow-ups are recorded at the bottom so
-> they are decisions, not omissions.
+> Status: **ALL FIVE STAGES SHIPPED 2026-08-24** (3016fda, 4aaeb6b, 6e73bb6,
+> fbe53d3, 8398047). Deferred follow-ups are recorded at the bottom so they are
+> decisions, not omissions.
 
 A structural pass over the whole tree — layering, duplication, unit sizes,
 target structure, dead code. The findings are measured on the tree at
@@ -10,11 +10,26 @@ target structure, dead code. The findings are measured on the tree at
 
 | Stage | What | Risk | State |
 |---|---|---|---|
-| 1 | Dead code purge (1,125 lines) | low | pending |
-| 2 | `render/VulkanCommon` + the divergent contracts | medium | pending |
-| 3 | Split `RegisterGuiTests` by domain | low | pending |
-| 4 | `kFeatureTypes` becomes authoritative | low | pending |
-| 5 | Contained `ui/` decoupling | low | pending |
+| 1 | Dead code purge | low | **done** `3016fda` — 1,148 lines |
+| 2 | `render/VulkanCommon` + the divergent contracts | medium | **done** `4aaeb6b` — −702 lines, 3 latent bugs closed |
+| 3 | Split `RegisterGuiTests` by domain | low | **done** `6e73bb6` — 40.6 s → 3.7 s incremental |
+| 4 | `kFeatureTypes` becomes authoritative | low | **done** `fbe53d3` — both drift directions now fail |
+| 5 | Contained `ui/` decoupling | low | **done** `8398047` — `AppActions.h` 900 → 627 |
+
+**How it was verified.** Every stage ran the full headless suite (779 → 782
+tests) and the GUI suite (198). Stages 2 and 5 additionally re-rendered a
+fixed three-body scene through the real GPU and diffed the PNG: **0 of
+2,764,800 bytes differ**, with identical volumes — which is what pins the
+renderer rewrite and the `anyWidgetActive` seam, neither of which any test
+covers. Stage 3 diffed `designer --gui-test-list` against the pre-split
+binary (198 names, byte-identical). Stage 4's gate was checked against
+deliberate sabotage in both directions.
+
+One false alarm worth recording: `fem_smoke` failed once mid-round and passed
+alone. The mechanism was mine, not the code's — two GPU preview instances I
+had left running were loading the machine, and that test polls an async solve
+against a wall clock. `--headless` builds no renderer at all, so nothing stage
+2 touched even executes there.
 
 ---
 
