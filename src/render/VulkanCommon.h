@@ -1,0 +1,101 @@
+#pragma once
+
+#include <vulkan/vulkan.h>
+
+#include <string>
+#include <vector>
+
+// Vulkan boilerplate shared by every renderer.
+//
+// These existed as private members of each renderer class — FindMemoryType 11
+// times, CreateBuffer 7, shader loading 11 — and the copies had drifted into
+// three different answers for "what does FindMemoryType failure mean":
+//
+// - `throw std::runtime_error` in Mesh, Outline, RayTracing, Sketch, Field
+//   and Underlay;
+// - `return 0` in SSAO, Shadow and main.cpp;
+// - `return UINT32_MAX` in IBLTextures and Screenshot.
+//
+// `return 0` is the dangerous one: memory type 0 is a VALID index, so those
+// copies allocated from whatever heap happens to be first instead of failing —
+// a HOST_VISIBLE request silently satisfied by DEVICE_LOCAL memory, and the
+// vkMapMemory that follows fails (or the upload never lands) far from the
+// cause. Only UINT32_MAX is a value vkAllocateMemory actually rejects.
+//
+// So: one contract, stated once. Nothing here throws. Every function reports
+// failure in its return value, and every out-parameter is VK_NULL_HANDLE on
+// every failure path — a caller that ignores the result still gets a null
+// handle rather than an uninitialized one.
+//
+// The shape is deliberately free functions over explicit handles rather than a
+// base class: the renderers already each store the device/queue/pool they need
+// and share no other behavior, so inheritance would buy nothing and force
+// every one of them to change shape at once. femgpu/ComputeContext.h is the
+// same idea one level up (it owns its device); this is the borrowed-handle
+// version for renderers that are handed one.
+namespace vkutil {
+
+// No memory type satisfies the request. Passing this to vkAllocateMemory is a
+// clean failure; passing 0 is a silent wrong answer, which is why this exists.
+inline constexpr uint32_t kNoMemoryType = UINT32_MAX;
+
+// Index of a memory type matching `typeFilter` with ALL of `props`, or
+// kNoMemoryType. Logs the failure — it means the device cannot serve the
+// request at all, which is worth seeing even when the caller handles it.
+uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
+                        VkMemoryPropertyFlags props);
+
+// Create a buffer and bind fresh memory to it. `buffer` and `memory` are set
+// to VK_NULL_HANDLE on every failure path, including the one where the buffer
+// was created but its memory could not be allocated (the buffer is destroyed
+// rather than leaked).
+//
+// A usage containing VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT automatically
+// gets VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT on the allocation — required for
+// the ray-tracing SBT and acceleration structures, and harmless otherwise.
+bool CreateBuffer(VkDevice device, VkPhysicalDevice physicalDevice,
+                  VkDeviceSize size, VkBufferUsageFlags usage,
+                  VkMemoryPropertyFlags props, VkBuffer& buffer,
+                  VkDeviceMemory& memory);
+
+// Destroy a buffer and free its memory, tolerating nulls, and null both
+// handles so a double-destroy is a no-op rather than a use-after-free.
+// `mapped`, when given, is unmapped first and cleared.
+void DestroyBuffer(VkDevice device, VkBuffer& buffer, VkDeviceMemory& memory,
+                   void** mapped = nullptr);
+
+// Allocate and bind memory for an already-created image. `memory` is
+// VK_NULL_HANDLE on failure.
+bool AllocateImageMemory(VkDevice device, VkPhysicalDevice physicalDevice,
+                         VkImage image, VkMemoryPropertyFlags props,
+                         VkDeviceMemory& memory);
+
+// A primary command buffer already in the recording state, for a one-shot
+// upload or layout transition. VK_NULL_HANDLE if allocation failed.
+VkCommandBuffer BeginSingleTimeCommands(VkDevice device, VkCommandPool pool);
+
+// End, submit, WAIT FOR IDLE, and free. Pairs with BeginSingleTimeCommands;
+// tolerates VK_NULL_HANDLE so the caller need not branch.
+void EndSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue,
+                           VkCommandBuffer cb);
+
+// Staging copy: begin, vkCmdCopyBuffer, end + wait. False if the command
+// buffer could not be allocated.
+bool CopyBuffer(VkDevice device, VkCommandPool pool, VkQueue queue,
+                VkBuffer src, VkBuffer dst, VkDeviceSize size);
+
+// Whole-file read for SPIR-V. Empty on failure (logged) — callers check
+// `.empty()` rather than catching.
+std::vector<char> ReadFile(const std::string& path);
+
+// VK_NULL_HANDLE on failure (logged). Empty `code` is a failure, not a
+// zero-size module.
+VkShaderModule CreateShaderModule(VkDevice device,
+                                  const std::vector<char>& code);
+
+// ReadFile + CreateShaderModule against RuntimePaths::ShaderDir(), which is
+// how every renderer resolves its own shaders. `spvName` is a bare filename,
+// e.g. "sketch_vert.spv". VK_NULL_HANDLE on failure (logged).
+VkShaderModule LoadShaderModule(VkDevice device, const std::string& spvName);
+
+} // namespace vkutil

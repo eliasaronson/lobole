@@ -1,6 +1,8 @@
 #include "render/ShadowRenderer.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "render/VulkanCommon.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -229,18 +231,12 @@ bool ShadowRenderer::CreateShadowTarget() {
     return false;
   }
 
-  VkMemoryRequirements req;
-  vkGetImageMemoryRequirements(m_device, m_shadowImage, &req);
-  VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  alloc.allocationSize = req.size;
-  alloc.memoryTypeIndex =
-      FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  if (vkAllocateMemory(m_device, &alloc, nullptr, &m_shadowMemory) !=
-      VK_SUCCESS) {
+  if (!vkutil::AllocateImageMemory(m_device, m_physicalDevice, m_shadowImage,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                   m_shadowMemory)) {
     LOG_ERROR("ShadowRenderer: failed to allocate shadow memory");
     return false;
   }
-  vkBindImageMemory(m_device, m_shadowImage, m_shadowMemory, 0);
 
   VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   view.image = m_shadowImage;
@@ -361,15 +357,10 @@ bool ShadowRenderer::CreateRenderPass() {
 }
 
 bool ShadowRenderer::CreatePipeline() {
-  const std::string shaderDir = RuntimePaths::ShaderDir().string();
-  auto vertCode = ReadFile(shaderDir + "/shadow_vert.spv");
-  auto fragCode = ReadFile(shaderDir + "/shadow_frag.spv");
-  if (vertCode.empty() || fragCode.empty()) {
-    LOG_ERROR("ShadowRenderer: failed to load shaders from {}", shaderDir);
-    return false;
-  }
-  VkShaderModule vertModule = CreateShaderModule(vertCode);
-  VkShaderModule fragModule = CreateShaderModule(fragCode);
+  VkShaderModule vertModule =
+      vkutil::LoadShaderModule(m_device, "shadow_vert.spv");
+  VkShaderModule fragModule =
+      vkutil::LoadShaderModule(m_device, "shadow_frag.spv");
   if (vertModule == VK_NULL_HANDLE || fragModule == VK_NULL_HANDLE) {
     if (vertModule)
       vkDestroyShaderModule(m_device, vertModule, nullptr);
@@ -490,45 +481,4 @@ bool ShadowRenderer::CreatePipeline() {
     return false;
   }
   return true;
-}
-
-uint32_t ShadowRenderer::FindMemoryType(uint32_t typeFilter,
-                                        VkMemoryPropertyFlags properties) {
-  VkPhysicalDeviceMemoryProperties memProperties;
-  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
-  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags &
-                                    properties) == properties) {
-      return i;
-    }
-  }
-  return 0;
-}
-
-std::vector<char> ShadowRenderer::ReadFile(const std::string& filename) {
-  std::ifstream file(filename, std::ios::ate | std::ios::binary);
-  if (!file.is_open()) {
-    LOG_ERROR("ShadowRenderer: failed to open {}", filename);
-    return {};
-  }
-  const size_t fileSize = static_cast<size_t>(file.tellg());
-  std::vector<char> buffer(fileSize);
-  file.seekg(0);
-  file.read(buffer.data(), fileSize);
-  return buffer;
-}
-
-VkShaderModule
-ShadowRenderer::CreateShaderModule(const std::vector<char>& code) {
-  VkShaderModuleCreateInfo createInfo{
-      VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-  createInfo.codeSize = code.size();
-  createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-  VkShaderModule shaderModule = VK_NULL_HANDLE;
-  if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) !=
-      VK_SUCCESS) {
-    LOG_ERROR("ShadowRenderer: failed to create shader module");
-    return VK_NULL_HANDLE;
-  }
-  return shaderModule;
 }

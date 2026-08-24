@@ -1,5 +1,7 @@
 #include "render/SketchRenderer.h"
 
+#include "render/VulkanCommon.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "render/MeshRenderer.h" // LineVertex3D
@@ -29,19 +31,6 @@ bool SketchRenderer::Initialize(VkDevice device,
   return true;
 }
 
-uint32_t SketchRenderer::FindMemoryType(uint32_t typeFilter,
-                                        VkMemoryPropertyFlags props) {
-  VkPhysicalDeviceMemoryProperties memProps;
-  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProps);
-  for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) &&
-        (memProps.memoryTypes[i].propertyFlags & props) == props) {
-      return i;
-    }
-  }
-  throw std::runtime_error("SketchRenderer: no suitable memory type");
-}
-
 bool SketchRenderer::CreateDescriptors() {
   VkDescriptorSetLayoutBinding uboBinding{};
   uboBinding.binding = 0;
@@ -60,22 +49,13 @@ bool SketchRenderer::CreateDescriptors() {
   // Per-frame uniform buffers (host visible, persistently mapped)
   for (int i = 0; i < kFramesInFlight; i++) {
     DynamicBuffer& u = m_uniformBuffers[i];
-    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bi.size = sizeof(Ubo);
-    bi.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    if (vkCreateBuffer(m_device, &bi, nullptr, &u.buffer) != VK_SUCCESS)
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, sizeof(Ubo),
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              u.buffer, u.memory)) {
       return false;
-    VkMemoryRequirements req;
-    vkGetBufferMemoryRequirements(m_device, u.buffer, &req);
-    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    ai.allocationSize = req.size;
-    ai.memoryTypeIndex = FindMemoryType(
-        req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    if (vkAllocateMemory(m_device, &ai, nullptr, &u.memory) != VK_SUCCESS)
-      return false;
-    vkBindBufferMemory(m_device, u.buffer, u.memory, 0);
+    }
     vkMapMemory(m_device, u.memory, 0, sizeof(Ubo), 0, &u.mapped);
     u.capacity = sizeof(Ubo);
   }
@@ -118,28 +98,14 @@ bool SketchRenderer::CreateDescriptors() {
   return true;
 }
 
-VkShaderModule SketchRenderer::LoadShader(const std::string& spvName) {
-  const std::string path = (RuntimePaths::ShaderDir() / spvName).string();
-  std::ifstream file(path, std::ios::ate | std::ios::binary);
-  if (!file.is_open())
-    throw std::runtime_error("SketchRenderer: cannot open " + path);
-  size_t size = file.tellg();
-  std::vector<char> code(size);
-  file.seekg(0);
-  file.read(code.data(), size);
-
-  VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-  ci.codeSize = code.size();
-  ci.pCode = reinterpret_cast<const uint32_t*>(code.data());
-  VkShaderModule module;
-  if (vkCreateShaderModule(m_device, &ci, nullptr, &module) != VK_SUCCESS)
-    throw std::runtime_error("SketchRenderer: shader module creation failed");
-  return module;
-}
-
 bool SketchRenderer::CreatePipelines() {
-  VkShaderModule vert = LoadShader("sketch_vert.spv");
-  VkShaderModule frag = LoadShader("sketch_frag.spv");
+  VkShaderModule vert = vkutil::LoadShaderModule(m_device, "sketch_vert.spv");
+  VkShaderModule frag = vkutil::LoadShaderModule(m_device, "sketch_frag.spv");
+  if (vert == VK_NULL_HANDLE || frag == VK_NULL_HANDLE) {
+    vkDestroyShaderModule(m_device, frag, nullptr);
+    vkDestroyShaderModule(m_device, vert, nullptr);
+    return false;
+  }
 
   VkPipelineShaderStageCreateInfo stages[2] = {};
   stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -270,8 +236,15 @@ bool SketchRenderer::CreatePipelines() {
                    m_gizmoPipeline, /*depthTest=*/false); // A2.5 on-top gizmo
 
   // Screen-space-expanded primitive pipeline (thick AA lines + point dots).
-  VkShaderModule primVert = LoadShader("sketch_prim_vert.spv");
-  VkShaderModule primFrag = LoadShader("sketch_prim_frag.spv");
+  VkShaderModule primVert =
+      vkutil::LoadShaderModule(m_device, "sketch_prim_vert.spv");
+  VkShaderModule primFrag =
+      vkutil::LoadShaderModule(m_device, "sketch_prim_frag.spv");
+  if (primVert == VK_NULL_HANDLE || primFrag == VK_NULL_HANDLE) {
+    vkDestroyShaderModule(m_device, primFrag, nullptr);
+    vkDestroyShaderModule(m_device, primVert, nullptr);
+    return false;
+  }
   VkPipelineShaderStageCreateInfo primStages[2] = {stages[0], stages[1]};
   primStages[0].module = primVert;
   primStages[1].module = primFrag;
@@ -313,24 +286,21 @@ uint32_t SketchRenderer::UploadRaw(DynamicBuffer& buf, const void* data,
     return 0;
   if (bytes > buf.capacity) {
     DestroyDynamic(buf);
-    VkDeviceSize cap = bytes * 2; // grow with headroom
-    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bi.size = cap;
-    bi.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    vkCreateBuffer(m_device, &bi, nullptr, &buf.buffer);
-    VkMemoryRequirements req;
-    vkGetBufferMemoryRequirements(m_device, buf.buffer, &req);
-    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    ai.allocationSize = req.size;
-    ai.memoryTypeIndex = FindMemoryType(
-        req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    vkAllocateMemory(m_device, &ai, nullptr, &buf.memory);
-    vkBindBufferMemory(m_device, buf.buffer, buf.memory, 0);
+    const VkDeviceSize cap = bytes * 2; // grow with headroom
+    // Nothing here used to be checked, and the memcpy below writes through
+    // buf.mapped — a failed grow was a null write, not a dropped frame.
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, cap,
+                              VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              buf.buffer, buf.memory)) {
+      return 0; // nothing drawn this frame rather than a null write
+    }
     vkMapMemory(m_device, buf.memory, 0, cap, 0, &buf.mapped);
     buf.capacity = cap;
   }
+  if (buf.mapped == nullptr)
+    return 0;
   std::memcpy(buf.mapped, data, bytes);
   return count;
 }
@@ -408,18 +378,7 @@ void SketchRenderer::Render(VkCommandBuffer commandBuffer,
 }
 
 void SketchRenderer::DestroyDynamic(DynamicBuffer& buf) {
-  if (buf.mapped) {
-    vkUnmapMemory(m_device, buf.memory);
-    buf.mapped = nullptr;
-  }
-  if (buf.buffer) {
-    vkDestroyBuffer(m_device, buf.buffer, nullptr);
-    buf.buffer = VK_NULL_HANDLE;
-  }
-  if (buf.memory) {
-    vkFreeMemory(m_device, buf.memory, nullptr);
-    buf.memory = VK_NULL_HANDLE;
-  }
+  vkutil::DestroyBuffer(m_device, buf.buffer, buf.memory, &buf.mapped);
   buf.capacity = 0;
 }
 

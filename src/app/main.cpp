@@ -32,6 +32,7 @@
 #include "render/ShadowRenderer.h"
 #include "render/SketchRenderer.h"
 #include "render/UnderlayRenderer.h"
+#include "render/VulkanCommon.h"
 #include "ui/AppActions.h"
 #include "ui/AppState.h"
 #include "ui/SettingsWindow.h"
@@ -497,17 +498,6 @@ static VkSampleCountFlagBits GetMaxUsableSampleCount() {
   return VK_SAMPLE_COUNT_1_BIT;
 }
 
-static uint32_t FindMemoryTypeIndex(uint32_t typeFilter,
-                                    VkMemoryPropertyFlags props) {
-  VkPhysicalDeviceMemoryProperties mp;
-  vkGetPhysicalDeviceMemoryProperties(g_PhysicalDevice, &mp);
-  for (uint32_t i = 0; i < mp.memoryTypeCount; i++)
-    if ((typeFilter & (1u << i)) &&
-        (mp.memoryTypes[i].propertyFlags & props) == props)
-      return i;
-  return 0;
-}
-
 // Recreates the depth image at the window size and overrides ImGui's
 // color-only render pass + framebuffers with color+depth ones. Must run after
 // every ImGui_ImplVulkanH_CreateOrResizeWindow (which recreates them
@@ -545,14 +535,9 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window* wd) {
   img.tiling = VK_IMAGE_TILING_OPTIMAL;
   img.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   vkCreateImage(g_Device, &img, g_Allocator, &g_DepthImage);
-  VkMemoryRequirements req;
-  vkGetImageMemoryRequirements(g_Device, g_DepthImage, &req);
-  VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  alloc.allocationSize = req.size;
-  alloc.memoryTypeIndex = FindMemoryTypeIndex(
-      req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  vkAllocateMemory(g_Device, &alloc, g_Allocator, &g_DepthMemory);
-  vkBindImageMemory(g_Device, g_DepthImage, g_DepthMemory, 0);
+  vkutil::AllocateImageMemory(g_Device, g_PhysicalDevice, g_DepthImage,
+                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                              g_DepthMemory);
   VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   view.image = g_DepthImage;
   view.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -573,14 +558,9 @@ static void SetupDepthBuffer(ImGui_ImplVulkanH_Window* wd) {
     cimg.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                  VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
     vkCreateImage(g_Device, &cimg, g_Allocator, &g_MsaaColorImage);
-    VkMemoryRequirements creq;
-    vkGetImageMemoryRequirements(g_Device, g_MsaaColorImage, &creq);
-    VkMemoryAllocateInfo calloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    calloc.allocationSize = creq.size;
-    calloc.memoryTypeIndex = FindMemoryTypeIndex(
-        creq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    vkAllocateMemory(g_Device, &calloc, g_Allocator, &g_MsaaColorMemory);
-    vkBindImageMemory(g_Device, g_MsaaColorImage, g_MsaaColorMemory, 0);
+    vkutil::AllocateImageMemory(g_Device, g_PhysicalDevice, g_MsaaColorImage,
+                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                g_MsaaColorMemory);
     VkImageViewCreateInfo cview{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     cview.image = g_MsaaColorImage;
     cview.viewType = VK_IMAGE_VIEW_TYPE_2D;

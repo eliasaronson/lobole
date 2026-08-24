@@ -516,6 +516,7 @@ target_precompile_headers(designer_core PRIVATE
 set(app_sources
     src/app/main.cpp
     src/common/RuntimePaths.cpp
+    src/render/VulkanCommon.cpp
     src/app/CrashHandler.cpp
     src/app/HeadlessMain.cpp
     src/render/IBLTextures.cpp

@@ -94,8 +94,6 @@ private:
 
   bool CreatePipelines();
   bool CreateDescriptors();
-  uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props);
-  VkShaderModule LoadShader(const std::string& spvName);
   // Grows the buffer if needed and uploads verts; returns the vertex count.
   uint32_t Upload(DynamicBuffer& buf, const std::vector<LineVertex3D>& verts);
   // Raw-bytes variant shared by the LineVertex3D and PrimVertex upload paths.

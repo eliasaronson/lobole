@@ -378,18 +378,8 @@ private:
   bool CreateDescriptorPool();
   bool CreateDescriptorSets();
 
-  bool CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                    VkMemoryPropertyFlags properties, VkBuffer& buffer,
-                    VkDeviceMemory& bufferMemory);
-  void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-  uint32_t FindMemoryType(uint32_t typeFilter,
-                          VkMemoryPropertyFlags properties);
-
   MeshAsset* GetAsset(uint32_t assetId);
   MeshInstance* GetInstance(uint32_t instanceId);
   bool CreateAssetBuffers(MeshAsset* asset);
   void DestroyAssetBuffers(MeshAsset* asset);
-
-  VkShaderModule CreateShaderModule(const std::vector<char>& code);
-  std::vector<char> ReadFile(const std::string& filename);
 };

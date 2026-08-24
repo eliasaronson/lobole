@@ -188,12 +188,6 @@ private:
                         VkDeviceMemory& bufferMemory);
   VkDeviceAddress GetBufferDeviceAddress(VkBuffer buffer);
   void DestroyAccelerationStructure(RTAccelerationStructure& as);
-  VkCommandBuffer BeginSingleTimeCommands();
-  void EndSingleTimeCommands(VkCommandBuffer cb);
-  uint32_t FindMemoryType(uint32_t typeFilter,
-                          VkMemoryPropertyFlags properties);
-  std::vector<char> ReadShaderFile(const std::string& filename);
-  VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
   // Vulkan objects
   VkDevice m_device = VK_NULL_HANDLE;

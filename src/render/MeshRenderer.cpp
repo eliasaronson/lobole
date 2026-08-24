@@ -1,5 +1,7 @@
 #include "render/MeshRenderer.h"
 
+#include "render/VulkanCommon.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "render/FramesInFlight.h"
@@ -83,12 +85,8 @@ void MeshRenderer::Shutdown() {
 
   // Cleanup uniform buffers
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-    if (m_uniformBuffers[i] != VK_NULL_HANDLE) {
-      vkDestroyBuffer(m_device, m_uniformBuffers[i], nullptr);
-    }
-    if (m_uniformBuffersMemory[i] != VK_NULL_HANDLE) {
-      vkFreeMemory(m_device, m_uniformBuffersMemory[i], nullptr);
-    }
+    vkutil::DestroyBuffer(m_device, m_uniformBuffers[i],
+                          m_uniformBuffersMemory[i]);
   }
 
   if (m_descriptorPool != VK_NULL_HANDLE) {
@@ -604,19 +602,17 @@ bool MeshRenderer::CreateGraphicsPipeline() {
   std::string vertShaderPath = shaderDir + "/mesh_vert.spv";
   std::string fragShaderPath = shaderDir + "/mesh_frag.spv";
 
-  // Load shaders
-  auto vertShaderCode = ReadFile(vertShaderPath);
-  auto fragShaderCode = ReadFile(fragShaderPath);
-
-  if (vertShaderCode.empty() || fragShaderCode.empty()) {
-    LOG_ERROR("Failed to load shader files from: {}", shaderDir);
-    LOG_ERROR("Vertex shader path: {}", vertShaderPath);
-    LOG_ERROR("Fragment shader path: {}", fragShaderPath);
+  VkShaderModule vertShaderModule =
+      vkutil::LoadShaderModule(m_device, "mesh_vert.spv");
+  VkShaderModule fragShaderModule =
+      vkutil::LoadShaderModule(m_device, "mesh_frag.spv");
+  if (vertShaderModule == VK_NULL_HANDLE ||
+      fragShaderModule == VK_NULL_HANDLE) {
+    LOG_ERROR("Failed to load mesh shaders from: {}", shaderDir);
+    vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
     return false;
   }
-
-  VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
-  VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
 
   VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
   vertShaderStageInfo.sType =
@@ -805,10 +801,11 @@ bool MeshRenderer::CreateUniformBuffers() {
   m_uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
 
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-    if (!CreateBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                      m_uniformBuffers[i], m_uniformBuffersMemory[i])) {
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, bufferSize,
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              m_uniformBuffers[i], m_uniformBuffersMemory[i])) {
       return false;
     }
 
@@ -903,122 +900,6 @@ bool MeshRenderer::CreateDescriptorSets() {
   return true;
 }
 
-VkShaderModule MeshRenderer::CreateShaderModule(const std::vector<char>& code) {
-  VkShaderModuleCreateInfo createInfo{};
-  createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-  createInfo.codeSize = code.size();
-  createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-  VkShaderModule shaderModule;
-  if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to create shader module!");
-  }
-
-  return shaderModule;
-}
-
-std::vector<char> MeshRenderer::ReadFile(const std::string& filename) {
-  std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
-  if (!file.is_open()) {
-    LOG_ERROR("Failed to open file: {}", filename);
-    return {};
-  }
-
-  size_t fileSize = static_cast<size_t>(file.tellg());
-  std::vector<char> buffer(fileSize);
-
-  file.seekg(0);
-  file.read(buffer.data(), fileSize);
-  file.close();
-
-  return buffer;
-}
-
-bool MeshRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                                VkMemoryPropertyFlags properties,
-                                VkBuffer& buffer,
-                                VkDeviceMemory& bufferMemory) {
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = size;
-  bufferInfo.usage = usage;
-  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-  if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-    LOG_ERROR("Failed to create buffer!");
-    return false;
-  }
-
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
-
-  VkMemoryAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex =
-      FindMemoryType(memRequirements.memoryTypeBits, properties);
-
-  if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) !=
-      VK_SUCCESS) {
-    LOG_ERROR("Failed to allocate buffer memory!");
-    return false;
-  }
-
-  vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
-  return true;
-}
-
-uint32_t MeshRenderer::FindMemoryType(uint32_t typeFilter,
-                                      VkMemoryPropertyFlags properties) {
-  VkPhysicalDeviceMemoryProperties memProperties;
-  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
-
-  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags &
-                                    properties) == properties) {
-      return i;
-    }
-  }
-
-  throw std::runtime_error("failed to find suitable memory type!");
-}
-
-void MeshRenderer::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer,
-                              VkDeviceSize size) {
-  VkCommandBufferAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  allocInfo.commandPool = m_commandPool;
-  allocInfo.commandBufferCount = 1;
-
-  VkCommandBuffer commandBuffer;
-  vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
-
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-  vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-  VkBufferCopy copyRegion{};
-  copyRegion.size = size;
-  vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-  vkEndCommandBuffer(commandBuffer);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
-
-  vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(m_graphicsQueue);
-
-  vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
-}
-
 bool MeshRenderer::CreateAssetBuffers(MeshAsset* asset) {
   if (!asset || asset->vertices.empty())
     return false;
@@ -1030,61 +911,63 @@ bool MeshRenderer::CreateAssetBuffers(MeshAsset* asset) {
     asset->bboxMax = glm::max(asset->bboxMax, v.position);
   }
 
-  VkDeviceSize vertexBufferSize =
+  const VkDeviceSize vertexBufferSize =
       sizeof(asset->vertices[0]) * asset->vertices.size();
-  VkDeviceSize indexBufferSize =
+  const VkDeviceSize indexBufferSize =
       sizeof(asset->indices[0]) * asset->indices.size();
 
-  // Create staging buffers
-  VkBuffer vertexStagingBuffer;
-  VkDeviceMemory vertexStagingBufferMemory;
-  CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-               vertexStagingBuffer, vertexStagingBufferMemory);
+  // Every CreateBuffer here used to drop its bool. On an allocation failure
+  // the out-params were left UNINITIALIZED and handed straight to
+  // vkMapMemory — so an OOM on a large assembly read as a crash in the
+  // upload rather than as a failed upload. Checked now, and a partial
+  // failure tears down whatever was already built.
+  auto uploadViaStaging = [&](VkDeviceSize size, const void* src,
+                              VkBufferUsageFlags usage, VkBuffer& outBuffer,
+                              VkDeviceMemory& outMemory) {
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, size,
+                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              staging, stagingMemory)) {
+      return false;
+    }
 
-  void* data;
-  vkMapMemory(m_device, vertexStagingBufferMemory, 0, vertexBufferSize, 0,
-              &data);
-  memcpy(data, asset->vertices.data(), static_cast<size_t>(vertexBufferSize));
-  vkUnmapMemory(m_device, vertexStagingBufferMemory);
+    void* data = nullptr;
+    vkMapMemory(m_device, stagingMemory, 0, size, 0, &data);
+    memcpy(data, src, static_cast<size_t>(size));
+    vkUnmapMemory(m_device, stagingMemory);
 
-  // Create vertex buffer
-  CreateBuffer(vertexBufferSize,
-               VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asset->vertexBuffer,
-               asset->vertexBufferMemory);
+    bool ok = vkutil::CreateBuffer(m_device, m_physicalDevice, size,
+                                   VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                   outBuffer, outMemory);
+    if (ok) {
+      ok = vkutil::CopyBuffer(m_device, m_commandPool, m_graphicsQueue, staging,
+                              outBuffer, size);
+    }
+    vkutil::DestroyBuffer(m_device, staging, stagingMemory);
+    return ok;
+  };
 
-  CopyBuffer(vertexStagingBuffer, asset->vertexBuffer, vertexBufferSize);
+  if (!uploadViaStaging(vertexBufferSize, asset->vertices.data(),
+                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, asset->vertexBuffer,
+                        asset->vertexBufferMemory)) {
+    LOG_ERROR("MeshRenderer: vertex buffer upload failed ({} bytes)",
+              vertexBufferSize);
+    DestroyAssetBuffers(asset);
+    return false;
+  }
 
-  vkDestroyBuffer(m_device, vertexStagingBuffer, nullptr);
-  vkFreeMemory(m_device, vertexStagingBufferMemory, nullptr);
-
-  // Create index buffer if indices exist
-  if (!asset->indices.empty()) {
-    VkBuffer indexStagingBuffer;
-    VkDeviceMemory indexStagingBufferMemory;
-    CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                 indexStagingBuffer, indexStagingBufferMemory);
-
-    vkMapMemory(m_device, indexStagingBufferMemory, 0, indexBufferSize, 0,
-                &data);
-    memcpy(data, asset->indices.data(), static_cast<size_t>(indexBufferSize));
-    vkUnmapMemory(m_device, indexStagingBufferMemory);
-
-    CreateBuffer(indexBufferSize,
-                 VK_BUFFER_USAGE_TRANSFER_DST_BIT |
-                     VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, asset->indexBuffer,
-                 asset->indexBufferMemory);
-
-    CopyBuffer(indexStagingBuffer, asset->indexBuffer, indexBufferSize);
-
-    vkDestroyBuffer(m_device, indexStagingBuffer, nullptr);
-    vkFreeMemory(m_device, indexStagingBufferMemory, nullptr);
+  if (!asset->indices.empty() &&
+      !uploadViaStaging(indexBufferSize, asset->indices.data(),
+                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT, asset->indexBuffer,
+                        asset->indexBufferMemory)) {
+    LOG_ERROR("MeshRenderer: index buffer upload failed ({} bytes)",
+              indexBufferSize);
+    DestroyAssetBuffers(asset);
+    return false;
   }
 
   return true;
@@ -1094,20 +977,7 @@ void MeshRenderer::DestroyAssetBuffers(MeshAsset* asset) {
   if (!asset)
     return;
 
-  if (asset->vertexBuffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(m_device, asset->vertexBuffer, nullptr);
-    asset->vertexBuffer = VK_NULL_HANDLE;
-  }
-  if (asset->vertexBufferMemory != VK_NULL_HANDLE) {
-    vkFreeMemory(m_device, asset->vertexBufferMemory, nullptr);
-    asset->vertexBufferMemory = VK_NULL_HANDLE;
-  }
-  if (asset->indexBuffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(m_device, asset->indexBuffer, nullptr);
-    asset->indexBuffer = VK_NULL_HANDLE;
-  }
-  if (asset->indexBufferMemory != VK_NULL_HANDLE) {
-    vkFreeMemory(m_device, asset->indexBufferMemory, nullptr);
-    asset->indexBufferMemory = VK_NULL_HANDLE;
-  }
+  vkutil::DestroyBuffer(m_device, asset->vertexBuffer,
+                        asset->vertexBufferMemory);
+  vkutil::DestroyBuffer(m_device, asset->indexBuffer, asset->indexBufferMemory);
 }

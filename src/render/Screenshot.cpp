@@ -1,5 +1,7 @@
 #include "render/Screenshot.h"
 
+#include "render/VulkanCommon.h"
+
 #include "common/Logger.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -7,23 +9,6 @@
 
 #include <cstring>
 #include <vector>
-
-namespace {
-
-uint32_t FindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeFilter,
-                        VkMemoryPropertyFlags properties) {
-  VkPhysicalDeviceMemoryProperties memProperties;
-  vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
-  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags &
-                                    properties) == properties) {
-      return i;
-    }
-  }
-  return UINT32_MAX;
-}
-
-} // namespace
 
 bool CaptureScreenshot(
     VkDevice device, VkPhysicalDevice physicalDevice, VkQueue queue,
@@ -59,17 +44,10 @@ bool CaptureScreenshot(
   if (vkCreateImage(device, &imageInfo, nullptr, &image) != VK_SUCCESS)
     return fail("vkCreateImage");
 
-  VkMemoryRequirements memReq;
-  vkGetImageMemoryRequirements(device, image, &memReq);
-  VkMemoryAllocateInfo allocInfo{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  allocInfo.allocationSize = memReq.size;
-  allocInfo.memoryTypeIndex =
-      FindMemoryType(physicalDevice, memReq.memoryTypeBits,
-                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   VkDeviceMemory imageMemory = VK_NULL_HANDLE;
-  if (allocInfo.memoryTypeIndex == UINT32_MAX ||
-      vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) !=
-          VK_SUCCESS) {
+  if (!vkutil::AllocateImageMemory(device, physicalDevice, image,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                   imageMemory)) {
     vkDestroyImage(device, image, nullptr);
     return fail("image memory allocation");
   }
@@ -95,16 +73,9 @@ bool CaptureScreenshot(
   depthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   VkImage depthImage = VK_NULL_HANDLE;
   vkCreateImage(device, &depthInfo, nullptr, &depthImage);
-  VkMemoryRequirements depthReq;
-  vkGetImageMemoryRequirements(device, depthImage, &depthReq);
-  VkMemoryAllocateInfo depthAlloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  depthAlloc.allocationSize = depthReq.size;
-  depthAlloc.memoryTypeIndex =
-      FindMemoryType(physicalDevice, depthReq.memoryTypeBits,
-                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   VkDeviceMemory depthMemory = VK_NULL_HANDLE;
-  vkAllocateMemory(device, &depthAlloc, nullptr, &depthMemory);
-  vkBindImageMemory(device, depthImage, depthMemory, 0);
+  vkutil::AllocateImageMemory(device, physicalDevice, depthImage,
+                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthMemory);
   VkImageViewCreateInfo depthView{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   depthView.image = depthImage;
   depthView.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -131,15 +102,9 @@ bool CaptureScreenshot(
     cinfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                   VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
     vkCreateImage(device, &cinfo, nullptr, &msaaColorImage);
-    VkMemoryRequirements creq;
-    vkGetImageMemoryRequirements(device, msaaColorImage, &creq);
-    VkMemoryAllocateInfo calloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    calloc.allocationSize = creq.size;
-    calloc.memoryTypeIndex =
-        FindMemoryType(physicalDevice, creq.memoryTypeBits,
-                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    vkAllocateMemory(device, &calloc, nullptr, &msaaColorMemory);
-    vkBindImageMemory(device, msaaColorImage, msaaColorMemory, 0);
+    vkutil::AllocateImageMemory(device, physicalDevice, msaaColorImage,
+                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                msaaColorMemory);
     VkImageViewCreateInfo cview{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     cview.image = msaaColorImage;
     cview.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -174,20 +139,13 @@ bool CaptureScreenshot(
 
   // Host-visible readback buffer
   const VkDeviceSize bufferSize = VkDeviceSize(width) * height * 4;
-  VkBufferCreateInfo bufInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-  bufInfo.size = bufferSize;
-  bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   VkBuffer buffer = VK_NULL_HANDLE;
-  vkCreateBuffer(device, &bufInfo, nullptr, &buffer);
-  vkGetBufferMemoryRequirements(device, buffer, &memReq);
-  allocInfo.allocationSize = memReq.size;
-  allocInfo.memoryTypeIndex =
-      FindMemoryType(physicalDevice, memReq.memoryTypeBits,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   VkDeviceMemory bufferMemory = VK_NULL_HANDLE;
-  vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory);
-  vkBindBufferMemory(device, buffer, bufferMemory, 0);
+  vkutil::CreateBuffer(device, physicalDevice, bufferSize,
+                       VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                       buffer, bufferMemory);
 
   // One-shot command buffer: render the scene again, then copy out
   VkCommandBufferAllocateInfo cbInfo{

@@ -81,17 +81,11 @@ private:
   bool CreateDescriptors();
   void WriteTargetDescriptors(); // (re)binds target views after (re)creation
   bool CreatePipelines();
-  bool CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                    VkMemoryPropertyFlags properties, VkBuffer& buffer,
-                    VkDeviceMemory& memory);
+
   bool CreateTargetImage(uint32_t width, uint32_t height, VkFormat format,
                          VkImageUsageFlags usage, VkImageAspectFlags aspect,
                          Target& target);
   void TransitionTargetsToRead(); // one-shot: all targets -> SHADER_READ_ONLY
-  uint32_t FindMemoryType(uint32_t typeFilter,
-                          VkMemoryPropertyFlags properties);
-  std::vector<char> ReadFile(const std::string& filename);
-  VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
   VkDevice m_device = VK_NULL_HANDLE;
   VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;

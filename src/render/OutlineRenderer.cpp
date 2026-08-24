@@ -1,5 +1,7 @@
 #include "render/OutlineRenderer.h"
 
+#include "render/VulkanCommon.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "render/FramesInFlight.h"
@@ -85,17 +87,18 @@ void OutlineRenderer::Shutdown() {
   for (auto& mesh : m_meshes) {
     if (mesh) {
       if (mesh->vertexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, mesh->vertexBuffer, nullptr);
-        vkFreeMemory(m_device, mesh->vertexBufferMemory, nullptr);
+        vkutil::DestroyBuffer(m_device, mesh->vertexBuffer,
+                              mesh->vertexBufferMemory);
       }
       if (mesh->indexBuffer != VK_NULL_HANDLE) {
-        vkDestroyBuffer(m_device, mesh->indexBuffer, nullptr);
-        vkFreeMemory(m_device, mesh->indexBufferMemory, nullptr);
+        vkutil::DestroyBuffer(m_device, mesh->indexBuffer,
+                              mesh->indexBufferMemory);
       }
       for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
         if (mesh->edgeIndexBuffers[f] != VK_NULL_HANDLE) {
-          vkDestroyBuffer(m_device, mesh->edgeIndexBuffers[f], nullptr);
-          vkFreeMemory(m_device, mesh->edgeIndexBufferMemory[f], nullptr);
+          vkutil::DestroyBuffer(m_device, mesh->edgeIndexBuffers[f],
+                                mesh->edgeIndexBufferMemory[f],
+                                &mesh->edgeIndexMapped[f]);
         }
       }
     }
@@ -103,10 +106,10 @@ void OutlineRenderer::Shutdown() {
 
   // Cleanup uniform buffers
   for (size_t i = 0; i < m_outlineUniformBuffers.size(); i++) {
-    vkDestroyBuffer(m_device, m_outlineUniformBuffers[i], nullptr);
-    vkFreeMemory(m_device, m_outlineUniformBuffersMemory[i], nullptr);
-    vkDestroyBuffer(m_device, m_wireframeUniformBuffers[i], nullptr);
-    vkFreeMemory(m_device, m_wireframeUniformBuffersMemory[i], nullptr);
+    vkutil::DestroyBuffer(m_device, m_outlineUniformBuffers[i],
+                          m_outlineUniformBuffersMemory[i]);
+    vkutil::DestroyBuffer(m_device, m_wireframeUniformBuffers[i],
+                          m_wireframeUniformBuffersMemory[i]);
   }
 
   // Cleanup Vulkan objects
@@ -164,13 +167,16 @@ bool OutlineRenderer::CreateDescriptorSetLayout() {
 }
 
 bool OutlineRenderer::CreateOutlinePipeline() {
-  // Load shaders
-  const std::string shaderDir = RuntimePaths::ShaderDir().string() + "/";
-  auto vertShaderCode = ReadShaderFile(shaderDir + "outline_vert.spv");
-  auto fragShaderCode = ReadShaderFile(shaderDir + "outline_frag.spv");
-
-  VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
-  VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
+  VkShaderModule vertShaderModule =
+      vkutil::LoadShaderModule(m_device, "outline_vert.spv");
+  VkShaderModule fragShaderModule =
+      vkutil::LoadShaderModule(m_device, "outline_frag.spv");
+  if (vertShaderModule == VK_NULL_HANDLE ||
+      fragShaderModule == VK_NULL_HANDLE) {
+    vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
+    return false;
+  }
 
   VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
   vertShaderStageInfo.sType =
@@ -331,13 +337,16 @@ bool OutlineRenderer::CreateOutlinePipeline() {
 }
 
 bool OutlineRenderer::CreateWireframePipeline() {
-  // Load shaders
-  const std::string shaderDir = RuntimePaths::ShaderDir().string() + "/";
-  auto vertShaderCode = ReadShaderFile(shaderDir + "wireframe_vert.spv");
-  auto fragShaderCode = ReadShaderFile(shaderDir + "wireframe_frag.spv");
-
-  VkShaderModule vertShaderModule = CreateShaderModule(vertShaderCode);
-  VkShaderModule fragShaderModule = CreateShaderModule(fragShaderCode);
+  VkShaderModule vertShaderModule =
+      vkutil::LoadShaderModule(m_device, "wireframe_vert.spv");
+  VkShaderModule fragShaderModule =
+      vkutil::LoadShaderModule(m_device, "wireframe_frag.spv");
+  if (vertShaderModule == VK_NULL_HANDLE ||
+      fragShaderModule == VK_NULL_HANDLE) {
+    vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
+    return false;
+  }
 
   VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
   vertShaderStageInfo.sType =
@@ -510,18 +519,22 @@ bool OutlineRenderer::CreateUniformBuffers() {
   m_wireframeUniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
   m_wireframeUniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
 
+  const VkMemoryPropertyFlags hostVisible =
+      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
   for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-    m_outlineUniformBuffers[i] =
-        CreateBuffer(outlineBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                     m_outlineUniformBuffersMemory[i]);
-
-    m_wireframeUniformBuffers[i] =
-        CreateBuffer(wireframeBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                     m_wireframeUniformBuffersMemory[i]);
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, outlineBufferSize,
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, hostVisible,
+                              m_outlineUniformBuffers[i],
+                              m_outlineUniformBuffersMemory[i])) {
+      return false;
+    }
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, wireframeBufferSize,
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, hostVisible,
+                              m_wireframeUniformBuffers[i],
+                              m_wireframeUniformBuffersMemory[i])) {
+      return false;
+    }
   }
 
   return true;
@@ -628,54 +641,56 @@ uint32_t OutlineRenderer::AddMesh(const std::vector<Vertex3D>& vertices,
   mesh->vertexCount = static_cast<uint32_t>(vertices.size());
   mesh->indexCount = static_cast<uint32_t>(indices.size());
 
-  // Create vertex buffer
-  VkDeviceSize vertexBufferSize = sizeof(Vertex3D) * vertices.size();
-  VkBuffer stagingBuffer;
-  VkDeviceMemory stagingBufferMemory;
+  // Both uploads used to drop the result — the VkBuffer-returning CreateBuffer
+  // threw on failure, so nothing here checked, and a throw from inside AddMesh
+  // would have unwound through the render loop. 0 is already this class's
+  // invalid-mesh id (ids start at 1), so failure is reportable in the return.
+  auto uploadViaStaging = [&](VkDeviceSize size, const void* src,
+                              VkBufferUsageFlags usage, VkBuffer& outBuffer,
+                              VkDeviceMemory& outMemory) {
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, size,
+                              VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              staging, stagingMemory)) {
+      return false;
+    }
 
-  stagingBuffer =
-      CreateBuffer(vertexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                   stagingBufferMemory);
+    void* data = nullptr;
+    vkMapMemory(m_device, stagingMemory, 0, size, 0, &data);
+    memcpy(data, src, static_cast<size_t>(size));
+    vkUnmapMemory(m_device, stagingMemory);
 
-  void* data;
-  vkMapMemory(m_device, stagingBufferMemory, 0, vertexBufferSize, 0, &data);
-  memcpy(data, vertices.data(), (size_t)vertexBufferSize);
-  vkUnmapMemory(m_device, stagingBufferMemory);
+    bool ok = vkutil::CreateBuffer(m_device, m_physicalDevice, size,
+                                   VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                   outBuffer, outMemory);
+    if (ok) {
+      ok = vkutil::CopyBuffer(m_device, m_commandPool, m_graphicsQueue, staging,
+                              outBuffer, size);
+    }
+    vkutil::DestroyBuffer(m_device, staging, stagingMemory);
+    return ok;
+  };
 
-  mesh->vertexBuffer = CreateBuffer(
-      vertexBufferSize,
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh->vertexBufferMemory);
+  const VkDeviceSize vertexBufferSize = sizeof(Vertex3D) * vertices.size();
+  const VkDeviceSize indexBufferSize = sizeof(uint32_t) * indices.size();
 
-  CopyBuffer(stagingBuffer, mesh->vertexBuffer, vertexBufferSize);
-
-  vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-  vkFreeMemory(m_device, stagingBufferMemory, nullptr);
-
-  // Create index buffer
-  VkDeviceSize indexBufferSize = sizeof(uint32_t) * indices.size();
-
-  stagingBuffer =
-      CreateBuffer(indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                   stagingBufferMemory);
-
-  vkMapMemory(m_device, stagingBufferMemory, 0, indexBufferSize, 0, &data);
-  memcpy(data, indices.data(), (size_t)indexBufferSize);
-  vkUnmapMemory(m_device, stagingBufferMemory);
-
-  mesh->indexBuffer = CreateBuffer(
-      indexBufferSize,
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh->indexBufferMemory);
-
-  CopyBuffer(stagingBuffer, mesh->indexBuffer, indexBufferSize);
-
-  vkDestroyBuffer(m_device, stagingBuffer, nullptr);
-  vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+  if (!uploadViaStaging(vertexBufferSize, vertices.data(),
+                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh->vertexBuffer,
+                        mesh->vertexBufferMemory) ||
+      !uploadViaStaging(indexBufferSize, indices.data(),
+                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh->indexBuffer,
+                        mesh->indexBufferMemory)) {
+    LOG_ERROR("OutlineRenderer: mesh upload failed ({} vertices, {} indices)",
+              vertices.size(), indices.size());
+    vkutil::DestroyBuffer(m_device, mesh->vertexBuffer,
+                          mesh->vertexBufferMemory);
+    vkutil::DestroyBuffer(m_device, mesh->indexBuffer, mesh->indexBufferMemory);
+    return 0;
+  }
 
   // Precompute edge adjacency once; classification per view is then a flat
   // pass (see OutlineEdges.h). The per-frame edge index buffers are sized to
@@ -762,120 +777,6 @@ void OutlineRenderer::Render(VkCommandBuffer commandBuffer,
 }
 
 // Rest of utility functions (same as in MeshRenderer/RayTracingRenderer)
-VkBuffer OutlineRenderer::CreateBuffer(VkDeviceSize size,
-                                       VkBufferUsageFlags usage,
-                                       VkMemoryPropertyFlags properties,
-                                       VkDeviceMemory& bufferMemory) {
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = size;
-  bufferInfo.usage = usage;
-  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-  VkBuffer buffer;
-  if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-    throw std::runtime_error("failed to create buffer!");
-  }
-
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
-
-  VkMemoryAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex =
-      FindMemoryType(memRequirements.memoryTypeBits, properties);
-
-  if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to allocate buffer memory!");
-  }
-
-  vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
-  return buffer;
-}
-
-void OutlineRenderer::CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer,
-                                 VkDeviceSize size) {
-  VkCommandBufferAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  allocInfo.commandPool = m_commandPool;
-  allocInfo.commandBufferCount = 1;
-
-  VkCommandBuffer commandBuffer;
-  vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
-
-  VkCommandBufferBeginInfo beginInfo{};
-  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-  vkBeginCommandBuffer(commandBuffer, &beginInfo);
-
-  VkBufferCopy copyRegion{};
-  copyRegion.size = size;
-  vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
-  vkEndCommandBuffer(commandBuffer);
-
-  VkSubmitInfo submitInfo{};
-  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-  submitInfo.commandBufferCount = 1;
-  submitInfo.pCommandBuffers = &commandBuffer;
-
-  vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(m_graphicsQueue);
-
-  vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
-}
-
-uint32_t OutlineRenderer::FindMemoryType(uint32_t typeFilter,
-                                         VkMemoryPropertyFlags properties) {
-  VkPhysicalDeviceMemoryProperties memProperties;
-  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
-
-  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags &
-                                    properties) == properties) {
-      return i;
-    }
-  }
-
-  throw std::runtime_error("failed to find suitable memory type!");
-}
-
-std::vector<char> OutlineRenderer::ReadShaderFile(const std::string& filename) {
-  std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
-  if (!file.is_open()) {
-    throw std::runtime_error("failed to open file: " + filename);
-  }
-
-  size_t fileSize = (size_t)file.tellg();
-  std::vector<char> buffer(fileSize);
-
-  file.seekg(0);
-  file.read(buffer.data(), fileSize);
-  file.close();
-
-  return buffer;
-}
-
-VkShaderModule
-OutlineRenderer::CreateShaderModule(const std::vector<char>& code) {
-  VkShaderModuleCreateInfo createInfo{};
-  createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-  createInfo.codeSize = code.size();
-  createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-  VkShaderModule shaderModule;
-  if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to create shader module!");
-  }
-
-  return shaderModule;
-}
 
 // Placeholder implementations for interface methods
 void OutlineRenderer::UpdateMesh(uint32_t meshId,
@@ -897,17 +798,17 @@ void OutlineRenderer::RemoveMesh(uint32_t meshId) {
   vkDeviceWaitIdle(m_device);
 
   if (mesh->vertexBuffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(m_device, mesh->vertexBuffer, nullptr);
-    vkFreeMemory(m_device, mesh->vertexBufferMemory, nullptr);
+    vkutil::DestroyBuffer(m_device, mesh->vertexBuffer,
+                          mesh->vertexBufferMemory);
   }
   if (mesh->indexBuffer != VK_NULL_HANDLE) {
-    vkDestroyBuffer(m_device, mesh->indexBuffer, nullptr);
-    vkFreeMemory(m_device, mesh->indexBufferMemory, nullptr);
+    vkutil::DestroyBuffer(m_device, mesh->indexBuffer, mesh->indexBufferMemory);
   }
   for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
     if (mesh->edgeIndexBuffers[f] != VK_NULL_HANDLE) {
-      vkDestroyBuffer(m_device, mesh->edgeIndexBuffers[f], nullptr);
-      vkFreeMemory(m_device, mesh->edgeIndexBufferMemory[f], nullptr);
+      vkutil::DestroyBuffer(m_device, mesh->edgeIndexBuffers[f],
+                            mesh->edgeIndexBufferMemory[f],
+                            &mesh->edgeIndexMapped[f]);
     }
   }
   m_meshes[meshId - 1].reset();
@@ -939,11 +840,15 @@ void OutlineRenderer::EnsureEdgeBuffer(OutlineMesh& mesh, uint32_t slot) {
   const VkDeviceSize bytes = sizeof(uint32_t) * mesh.adjacency.MaxIndexCount();
   if (bytes == 0)
     return;
-  mesh.edgeIndexBuffers[slot] =
-      CreateBuffer(bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                   mesh.edgeIndexBufferMemory[slot]);
+  if (!vkutil::CreateBuffer(
+          m_device, m_physicalDevice, bytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+          mesh.edgeIndexBuffers[slot], mesh.edgeIndexBufferMemory[slot])) {
+    LOG_ERROR("OutlineRenderer: edge index buffer alloc failed ({} bytes)",
+              bytes);
+    return; // left null; the draw path skips a slot with no buffer
+  }
   vkMapMemory(m_device, mesh.edgeIndexBufferMemory[slot], 0, bytes, 0,
               &mesh.edgeIndexMapped[slot]);
   // Nothing uploaded into it yet; the caller's version check fills it.

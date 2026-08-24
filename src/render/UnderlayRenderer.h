@@ -94,16 +94,11 @@ private:
 
   bool CreateDescriptors();
   bool CreatePipeline();
-  uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props);
-  VkShaderModule LoadShader(const std::string& spvName);
   // Returns the cached texture for `asset`, creating it from `bytes` on first
   // sight. Null if decode/upload fails or the descriptor pool is exhausted.
   Texture* GetOrCreateTexture(const std::string& asset,
                               const std::vector<unsigned char>* bytes);
   bool UploadTexture(const unsigned char* rgba, int w, int h, Texture& out);
-  bool CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                    VkMemoryPropertyFlags props, VkBuffer& buffer,
-                    VkDeviceMemory& memory);
   uint32_t UploadVerts(DynamicBuffer& buf, const std::vector<Vertex>& verts);
   void DestroyDynamic(DynamicBuffer& buf);
   void DestroyTexture(Texture& tex);

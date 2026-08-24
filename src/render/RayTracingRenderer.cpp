@@ -1,7 +1,9 @@
 #include "render/RayTracingRenderer.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "render/MeshRenderer.h"
+#include "render/VulkanCommon.h"
 #include "thirdparty/stb_image_write.h" // declarations only; impl lives in Screenshot.cpp
 #include <algorithm>
 #include <climits>
@@ -317,18 +319,22 @@ bool RayTracingRenderer::CreateRTPipeline() {
     return false;
   }
 
-  // Load RT shaders
-  const std::string shaderDir = RuntimePaths::ShaderDir().string() + "/";
-  auto raygenCode = ReadShaderFile(shaderDir + "raygen.spv");
-  auto missCode = ReadShaderFile(shaderDir + "miss.spv");
-  auto closesthitCode = ReadShaderFile(shaderDir + "closesthit.spv");
-  auto shadowMissCode = ReadShaderFile(shaderDir + "shadow.spv");
-
-  // Create shader modules
-  VkShaderModule raygenModule = CreateShaderModule(raygenCode);
-  VkShaderModule missModule = CreateShaderModule(missCode);
-  VkShaderModule closesthitModule = CreateShaderModule(closesthitCode);
-  VkShaderModule shadowMissModule = CreateShaderModule(shadowMissCode);
+  VkShaderModule raygenModule =
+      vkutil::LoadShaderModule(m_device, "raygen.spv");
+  VkShaderModule missModule = vkutil::LoadShaderModule(m_device, "miss.spv");
+  VkShaderModule closesthitModule =
+      vkutil::LoadShaderModule(m_device, "closesthit.spv");
+  VkShaderModule shadowMissModule =
+      vkutil::LoadShaderModule(m_device, "shadow.spv");
+  if (raygenModule == VK_NULL_HANDLE || missModule == VK_NULL_HANDLE ||
+      closesthitModule == VK_NULL_HANDLE ||
+      shadowMissModule == VK_NULL_HANDLE) {
+    LOG_ERROR("Ray Tracing: failed to load RT shaders");
+    for (VkShaderModule m :
+         {raygenModule, missModule, closesthitModule, shadowMissModule})
+      vkDestroyShaderModule(m_device, m, nullptr);
+    return false;
+  }
 
   // Shader stages
   std::vector<VkPipelineShaderStageCreateInfo> shaderStages = {
@@ -710,14 +716,14 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
     LOG_ERROR("Ray Tracing: failed to create still image");
     return false;
   }
-  VkMemoryRequirements memReq{};
-  vkGetImageMemoryRequirements(m_device, m_stillImage, &memReq);
-  VkMemoryAllocateInfo memAlloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  memAlloc.allocationSize = memReq.size;
-  memAlloc.memoryTypeIndex = FindMemoryType(
-      memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  vkAllocateMemory(m_device, &memAlloc, nullptr, &m_stillImageMemory);
-  vkBindImageMemory(m_device, m_stillImage, m_stillImageMemory, 0);
+  if (!vkutil::AllocateImageMemory(m_device, m_physicalDevice, m_stillImage,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                   m_stillImageMemory)) {
+    LOG_ERROR("Ray Tracing: failed to allocate still image memory");
+    vkDestroyImage(m_device, m_stillImage, nullptr);
+    m_stillImage = VK_NULL_HANDLE;
+    return false;
+  }
 
   VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   viewInfo.image = m_stillImage;
@@ -879,7 +885,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
                          writes.data(), 0, nullptr);
 
   // --- Clear the accumulation image to zero, leave it in GENERAL ---
-  VkCommandBuffer cb = BeginSingleTimeCommands();
+  VkCommandBuffer cb = vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
   TransitionImage(
       cb, m_stillImage, VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -895,7 +901,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
                   VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
                   VK_ACCESS_TRANSFER_WRITE_BIT,
                   VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
-  EndSingleTimeCommands(cb);
+  vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
 
   m_stillActive = true;
   LOG_INFO("Ray Tracing: BeginStill {}x{} over {} bodies", desc.width,
@@ -908,7 +914,7 @@ bool RayTracingRenderer::RenderBatch(uint32_t firstSample,
   if (!m_stillActive)
     return false;
 
-  VkCommandBuffer cb = BeginSingleTimeCommands();
+  VkCommandBuffer cb = vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
   vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipeline);
   vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
                           m_rtPipelineLayout, 0, 1, &m_rtDescriptorSet, 0,
@@ -939,7 +945,7 @@ bool RayTracingRenderer::RenderBatch(uint32_t firstSample,
                            nullptr, 0, nullptr, 1, &barrier);
     }
   }
-  EndSingleTimeCommands(cb);
+  vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
   return true;
 }
 
@@ -963,7 +969,7 @@ bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                                   readMem);
 
-  VkCommandBuffer cb = BeginSingleTimeCommands();
+  VkCommandBuffer cb = vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
   TransitionImage(cb, m_stillImage, VK_IMAGE_LAYOUT_GENERAL,
                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                   VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
@@ -975,7 +981,7 @@ bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
   copy.imageExtent = {m_stillWidth, m_stillHeight, 1};
   vkCmdCopyImageToBuffer(cb, m_stillImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                          readBuf, 1, &copy);
-  EndSingleTimeCommands(cb);
+  vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
 
   void* mapped = nullptr;
   vkMapMemory(m_device, readMem, 0, bufSize, 0, &mapped);
@@ -1051,121 +1057,23 @@ void RayTracingRenderer::EndStill() {
 }
 
 // Utility functions
+// This one KEEPS its throwing shape rather than adopting vkutil's bool.
+// The RT path is entered only from render_still / rt_build, both of which
+// already report failure to their caller, and the acceleration-structure
+// builders below have a dozen call sites whose failure branches nothing here
+// can exercise — so the body is shared (including the device-address
+// allocate flag, which vkutil applies from the usage bits) while the call
+// sites stay as they were. Convert them when the RT path grows a test.
 VkBuffer RayTracingRenderer::CreateBuffer(VkDeviceSize size,
                                           VkBufferUsageFlags usage,
                                           VkMemoryPropertyFlags properties,
                                           VkDeviceMemory& bufferMemory) {
-  VkBufferCreateInfo bufferInfo{};
-  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  bufferInfo.size = size;
-  bufferInfo.usage = usage;
-  bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-  VkBuffer buffer;
-  if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-    throw std::runtime_error("failed to create buffer!");
+  VkBuffer buffer = VK_NULL_HANDLE;
+  if (!vkutil::CreateBuffer(m_device, m_physicalDevice, size, usage, properties,
+                            buffer, bufferMemory)) {
+    throw std::runtime_error("RayTracingRenderer: buffer allocation failed");
   }
-
-  VkMemoryRequirements memRequirements;
-  vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
-
-  VkMemoryAllocateInfo allocInfo{};
-  allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  allocInfo.allocationSize = memRequirements.size;
-  allocInfo.memoryTypeIndex =
-      FindMemoryType(memRequirements.memoryTypeBits, properties);
-
-  // A buffer used for a device address (e.g. the SBT) must have its memory
-  // allocated with the matching flag, or vkBindBufferMemory is invalid.
-  VkMemoryAllocateFlagsInfo flagsInfo{};
-  flagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
-  flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-  if (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
-    allocInfo.pNext = &flagsInfo;
-  }
-
-  if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to allocate buffer memory!");
-  }
-
-  vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
-
   return buffer;
-}
-
-uint32_t RayTracingRenderer::FindMemoryType(uint32_t typeFilter,
-                                            VkMemoryPropertyFlags properties) {
-  VkPhysicalDeviceMemoryProperties memProperties;
-  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
-
-  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags &
-                                    properties) == properties) {
-      return i;
-    }
-  }
-
-  throw std::runtime_error("failed to find suitable memory type!");
-}
-
-std::vector<char>
-RayTracingRenderer::ReadShaderFile(const std::string& filename) {
-  std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
-  if (!file.is_open()) {
-    throw std::runtime_error("failed to open file: " + filename);
-  }
-
-  size_t fileSize = (size_t)file.tellg();
-  std::vector<char> buffer(fileSize);
-
-  file.seekg(0);
-  file.read(buffer.data(), fileSize);
-
-  file.close();
-
-  return buffer;
-}
-
-VkShaderModule
-RayTracingRenderer::CreateShaderModule(const std::vector<char>& code) {
-  VkShaderModuleCreateInfo createInfo{};
-  createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-  createInfo.codeSize = code.size();
-  createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-  VkShaderModule shaderModule;
-  if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("failed to create shader module!");
-  }
-
-  return shaderModule;
-}
-
-VkCommandBuffer RayTracingRenderer::BeginSingleTimeCommands() {
-  VkCommandBufferAllocateInfo alloc{
-      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-  alloc.commandPool = m_commandPool;
-  alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  alloc.commandBufferCount = 1;
-  VkCommandBuffer cb = VK_NULL_HANDLE;
-  vkAllocateCommandBuffers(m_device, &alloc, &cb);
-  VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkBeginCommandBuffer(cb, &begin);
-  return cb;
-}
-
-void RayTracingRenderer::EndSingleTimeCommands(VkCommandBuffer cb) {
-  vkEndCommandBuffer(cb);
-  VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  submit.commandBufferCount = 1;
-  submit.pCommandBuffers = &cb;
-  vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
-  vkQueueWaitIdle(m_graphicsQueue);
-  vkFreeCommandBuffers(m_device, m_commandPool, 1, &cb);
 }
 
 bool RayTracingRenderer::CreateBottomLevelAS() {
@@ -1230,10 +1138,11 @@ bool RayTracingRenderer::CreateBottomLevelAS() {
     range.primitiveCount = primCount;
     const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
 
-    VkCommandBuffer cb = BeginSingleTimeCommands();
+    VkCommandBuffer cb =
+        vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
     m_rtFunctions.vkCmdBuildAccelerationStructuresKHR(cb, 1, &buildInfo,
                                                       &pRange);
-    EndSingleTimeCommands(cb);
+    vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
 
     vkDestroyBuffer(m_device, scratch, nullptr);
     vkFreeMemory(m_device, scratchMem, nullptr);
@@ -1335,9 +1244,9 @@ bool RayTracingRenderer::CreateTopLevelAS() {
   range.primitiveCount = primCount;
   const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
 
-  VkCommandBuffer cb = BeginSingleTimeCommands();
+  VkCommandBuffer cb = vkutil::BeginSingleTimeCommands(m_device, m_commandPool);
   m_rtFunctions.vkCmdBuildAccelerationStructuresKHR(cb, 1, &buildInfo, &pRange);
-  EndSingleTimeCommands(cb);
+  vkutil::EndSingleTimeCommands(m_device, m_commandPool, m_graphicsQueue, cb);
 
   vkDestroyBuffer(m_device, scratch, nullptr);
   vkFreeMemory(m_device, scratchMem, nullptr);

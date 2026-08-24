@@ -1,5 +1,7 @@
 #include "render/UnderlayRenderer.h"
 
+#include "render/VulkanCommon.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 
@@ -28,38 +30,6 @@ bool UnderlayRenderer::Initialize(VkDevice device,
     return false;
   }
   m_initialized = true;
-  return true;
-}
-
-uint32_t UnderlayRenderer::FindMemoryType(uint32_t typeFilter,
-                                          VkMemoryPropertyFlags props) {
-  VkPhysicalDeviceMemoryProperties memProps;
-  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProps);
-  for (uint32_t i = 0; i < memProps.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) &&
-        (memProps.memoryTypes[i].propertyFlags & props) == props)
-      return i;
-  }
-  throw std::runtime_error("UnderlayRenderer: no suitable memory type");
-}
-
-bool UnderlayRenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                                    VkMemoryPropertyFlags props,
-                                    VkBuffer& buffer, VkDeviceMemory& memory) {
-  VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-  bi.size = size;
-  bi.usage = usage;
-  bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  if (vkCreateBuffer(m_device, &bi, nullptr, &buffer) != VK_SUCCESS)
-    return false;
-  VkMemoryRequirements req;
-  vkGetBufferMemoryRequirements(m_device, buffer, &req);
-  VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  ai.allocationSize = req.size;
-  ai.memoryTypeIndex = FindMemoryType(req.memoryTypeBits, props);
-  if (vkAllocateMemory(m_device, &ai, nullptr, &memory) != VK_SUCCESS)
-    return false;
-  vkBindBufferMemory(m_device, buffer, memory, 0);
   return true;
 }
 
@@ -95,10 +65,11 @@ bool UnderlayRenderer::CreateDescriptors() {
   // Per-frame UBO buffers (host visible, persistently mapped).
   for (int i = 0; i < kFramesInFlight; i++) {
     DynamicBuffer& u = m_uniformBuffers[i];
-    if (!CreateBuffer(sizeof(Ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                      u.buffer, u.memory))
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, sizeof(Ubo),
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              u.buffer, u.memory))
       return false;
     vkMapMemory(m_device, u.memory, 0, sizeof(Ubo), 0, &u.mapped);
     u.capacity = sizeof(Ubo);
@@ -161,27 +132,14 @@ bool UnderlayRenderer::CreateDescriptors() {
   return true;
 }
 
-VkShaderModule UnderlayRenderer::LoadShader(const std::string& spvName) {
-  const std::string path = (RuntimePaths::ShaderDir() / spvName).string();
-  std::ifstream file(path, std::ios::ate | std::ios::binary);
-  if (!file.is_open())
-    throw std::runtime_error("UnderlayRenderer: cannot open " + path);
-  size_t size = file.tellg();
-  std::vector<char> code(size);
-  file.seekg(0);
-  file.read(code.data(), size);
-  VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-  ci.codeSize = code.size();
-  ci.pCode = reinterpret_cast<const uint32_t*>(code.data());
-  VkShaderModule module;
-  if (vkCreateShaderModule(m_device, &ci, nullptr, &module) != VK_SUCCESS)
-    throw std::runtime_error("UnderlayRenderer: shader module creation failed");
-  return module;
-}
-
 bool UnderlayRenderer::CreatePipeline() {
-  VkShaderModule vert = LoadShader("underlay_vert.spv");
-  VkShaderModule frag = LoadShader("underlay_frag.spv");
+  VkShaderModule vert = vkutil::LoadShaderModule(m_device, "underlay_vert.spv");
+  VkShaderModule frag = vkutil::LoadShaderModule(m_device, "underlay_frag.spv");
+  if (vert == VK_NULL_HANDLE || frag == VK_NULL_HANDLE) {
+    vkDestroyShaderModule(m_device, frag, nullptr);
+    vkDestroyShaderModule(m_device, vert, nullptr);
+    return false;
+  }
   VkPipelineShaderStageCreateInfo stages[2] = {};
   stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -300,10 +258,11 @@ bool UnderlayRenderer::UploadTexture(const unsigned char* rgba, int w, int h,
 
   VkBuffer staging = VK_NULL_HANDLE;
   VkDeviceMemory stagingMem = VK_NULL_HANDLE;
-  if (!CreateBuffer(bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                    staging, stagingMem))
+  if (!vkutil::CreateBuffer(m_device, m_physicalDevice, bytes,
+                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                            staging, stagingMem))
     return false;
   void* mapped = nullptr;
   vkMapMemory(m_device, stagingMem, 0, bytes, 0, &mapped);
@@ -323,18 +282,17 @@ bool UnderlayRenderer::UploadTexture(const unsigned char* rgba, int w, int h,
   imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
   imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
   if (vkCreateImage(m_device, &imageInfo, nullptr, &out.image) != VK_SUCCESS) {
-    vkDestroyBuffer(m_device, staging, nullptr);
-    vkFreeMemory(m_device, stagingMem, nullptr);
+    vkutil::DestroyBuffer(m_device, staging, stagingMem);
     return false;
   }
-  VkMemoryRequirements req;
-  vkGetImageMemoryRequirements(m_device, out.image, &req);
-  VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  ai.allocationSize = req.size;
-  ai.memoryTypeIndex =
-      FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  vkAllocateMemory(m_device, &ai, nullptr, &out.memory);
-  vkBindImageMemory(m_device, out.image, out.memory, 0);
+  if (!vkutil::AllocateImageMemory(m_device, m_physicalDevice, out.image,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                   out.memory)) {
+    vkDestroyImage(m_device, out.image, nullptr);
+    out.image = VK_NULL_HANDLE;
+    vkutil::DestroyBuffer(m_device, staging, stagingMem);
+    return false;
+  }
 
   // One-time command buffer: layout -> copy -> layout, submit, wait.
   VkCommandBufferAllocateInfo cbAlloc{
@@ -383,8 +341,7 @@ bool UnderlayRenderer::UploadTexture(const unsigned char* rgba, int w, int h,
   vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
   vkQueueWaitIdle(m_graphicsQueue);
   vkFreeCommandBuffers(m_device, m_commandPool, 1, &cb);
-  vkDestroyBuffer(m_device, staging, nullptr);
-  vkFreeMemory(m_device, stagingMem, nullptr);
+  vkutil::DestroyBuffer(m_device, staging, stagingMem);
 
   VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   viewInfo.image = out.image;
@@ -479,10 +436,11 @@ uint32_t UnderlayRenderer::UploadVerts(DynamicBuffer& buf,
   if (bytes > buf.capacity) {
     DestroyDynamic(buf);
     VkDeviceSize cap = bytes * 2;
-    if (!CreateBuffer(cap, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                      buf.buffer, buf.memory))
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, cap,
+                              VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              buf.buffer, buf.memory))
       return 0;
     vkMapMemory(m_device, buf.memory, 0, cap, 0, &buf.mapped);
     buf.capacity = cap;
@@ -555,18 +513,7 @@ void UnderlayRenderer::ReleaseTextures() {
 }
 
 void UnderlayRenderer::DestroyDynamic(DynamicBuffer& buf) {
-  if (buf.mapped) {
-    vkUnmapMemory(m_device, buf.memory);
-    buf.mapped = nullptr;
-  }
-  if (buf.buffer) {
-    vkDestroyBuffer(m_device, buf.buffer, nullptr);
-    buf.buffer = VK_NULL_HANDLE;
-  }
-  if (buf.memory) {
-    vkFreeMemory(m_device, buf.memory, nullptr);
-    buf.memory = VK_NULL_HANDLE;
-  }
+  vkutil::DestroyBuffer(m_device, buf.buffer, buf.memory, &buf.mapped);
   buf.capacity = 0;
 }
 

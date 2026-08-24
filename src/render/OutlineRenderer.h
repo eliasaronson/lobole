@@ -156,14 +156,6 @@ private:
   void RenderWireframes(VkCommandBuffer commandBuffer, uint32_t currentFrame);
 
   // Utility functions
-  VkBuffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                        VkMemoryPropertyFlags properties,
-                        VkDeviceMemory& bufferMemory);
-  void CopyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
-  uint32_t FindMemoryType(uint32_t typeFilter,
-                          VkMemoryPropertyFlags properties);
-  std::vector<char> ReadShaderFile(const std::string& filename);
-  VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
   // Vulkan objects
   VkDevice m_device = VK_NULL_HANDLE;

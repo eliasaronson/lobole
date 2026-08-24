@@ -73,9 +73,7 @@ private:
 
   bool CreateDescriptors();
   bool CreatePipeline();
-  uint32_t FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags props);
-  VkShaderModule LoadShader(const std::string& spvName);
-  void EnsureCapacity(DynamicBuffer& buf, VkDeviceSize bytes,
+  bool EnsureCapacity(DynamicBuffer& buf, VkDeviceSize bytes,
                       VkBufferUsageFlags usage);
   void DestroyDynamic(DynamicBuffer& buf);
 

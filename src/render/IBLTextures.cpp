@@ -1,5 +1,7 @@
 #include "render/IBLTextures.h"
 
+#include "render/VulkanCommon.h"
+
 #include "common/Logger.h"
 #include "render/IBL.h"
 
@@ -9,17 +11,6 @@
 #include <vector>
 
 namespace {
-
-uint32_t FindMemoryType(VkPhysicalDevice phys, uint32_t typeFilter,
-                        VkMemoryPropertyFlags props) {
-  VkPhysicalDeviceMemoryProperties mp;
-  vkGetPhysicalDeviceMemoryProperties(phys, &mp);
-  for (uint32_t i = 0; i < mp.memoryTypeCount; i++)
-    if ((typeFilter & (1u << i)) &&
-        (mp.memoryTypes[i].propertyFlags & props) == props)
-      return i;
-  return UINT32_MAX;
-}
 
 uint16_t ToHalf(float x) {
   // Public glm API: packHalf2x16 puts half(x) in the low 16 bits.
@@ -92,15 +83,11 @@ static bool UploadImage(VkDevice device, VkPhysicalDevice phys, VkQueue queue,
   if (vkCreateImage(device, &img, nullptr, &outImage) != VK_SUCCESS)
     return false;
 
-  VkMemoryRequirements req;
-  vkGetImageMemoryRequirements(device, outImage, &req);
-  VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  alloc.allocationSize = req.size;
-  alloc.memoryTypeIndex = FindMemoryType(phys, req.memoryTypeBits,
-                                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  if (vkAllocateMemory(device, &alloc, nullptr, &outMemory) != VK_SUCCESS)
+  if (!vkutil::AllocateImageMemory(device, phys, outImage,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                   outMemory)) {
     return false;
-  vkBindImageMemory(device, outImage, outMemory, 0);
+  }
 
   // Stage every mip in one host buffer.
   std::vector<std::vector<uint16_t>> halfMips(mipCount);
@@ -112,22 +99,15 @@ static bool UploadImage(VkDevice device, VkPhysicalDevice phys, VkQueue queue,
     total += halfMips[m].size() * sizeof(uint16_t);
   }
 
-  VkBufferCreateInfo buf{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-  buf.size = total;
-  buf.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
   VkBuffer staging = VK_NULL_HANDLE;
-  vkCreateBuffer(device, &buf, nullptr, &staging);
-  VkMemoryRequirements sreq;
-  vkGetBufferMemoryRequirements(device, staging, &sreq);
-  VkMemoryAllocateInfo salloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  salloc.allocationSize = sreq.size;
-  salloc.memoryTypeIndex =
-      FindMemoryType(phys, sreq.memoryTypeBits,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   VkDeviceMemory stagingMem = VK_NULL_HANDLE;
-  vkAllocateMemory(device, &salloc, nullptr, &stagingMem);
-  vkBindBufferMemory(device, staging, stagingMem, 0);
+  if (!vkutil::CreateBuffer(device, phys, total,
+                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                            staging, stagingMem)) {
+    return false;
+  }
 
   void* mapped = nullptr;
   vkMapMemory(device, stagingMem, 0, total, 0, &mapped);

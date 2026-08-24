@@ -61,10 +61,6 @@ private:
   bool CreateFramebuffer();
   bool CreateRenderPass();
   bool CreatePipeline();
-  uint32_t FindMemoryType(uint32_t typeFilter,
-                          VkMemoryPropertyFlags properties);
-  std::vector<char> ReadFile(const std::string& filename);
-  VkShaderModule CreateShaderModule(const std::vector<char>& code);
 
   VkDevice m_device = VK_NULL_HANDLE;
   VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;

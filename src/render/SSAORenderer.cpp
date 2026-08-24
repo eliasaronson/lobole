@@ -1,5 +1,7 @@
 #include "render/SSAORenderer.h"
 
+#include "render/VulkanCommon.h"
+
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "render/FramesInFlight.h"
@@ -106,16 +108,12 @@ void SSAORenderer::Shutdown() {
   if (m_blurSetLayout)
     vkDestroyDescriptorSetLayout(m_device, m_blurSetLayout, nullptr);
   for (size_t i = 0; i < m_prepassUBOs.size(); i++) {
-    if (m_prepassUBOs[i])
-      vkDestroyBuffer(m_device, m_prepassUBOs[i], nullptr);
-    if (m_prepassUBOMemory[i])
-      vkFreeMemory(m_device, m_prepassUBOMemory[i], nullptr);
+    vkutil::DestroyBuffer(m_device, m_prepassUBOs[i], m_prepassUBOMemory[i],
+                          &m_prepassUBOMapped[i]);
   }
   for (size_t i = 0; i < m_aoUBOs.size(); i++) {
-    if (m_aoUBOs[i])
-      vkDestroyBuffer(m_device, m_aoUBOs[i], nullptr);
-    if (m_aoUBOMemory[i])
-      vkFreeMemory(m_device, m_aoUBOMemory[i], nullptr);
+    vkutil::DestroyBuffer(m_device, m_aoUBOs[i], m_aoUBOMemory[i],
+                          &m_aoUBOMapped[i]);
   }
   m_prepassUBOs.clear();
   m_prepassUBOMemory.clear();
@@ -315,15 +313,11 @@ bool SSAORenderer::CreateTargetImage(uint32_t width, uint32_t height,
   img.usage = usage;
   if (vkCreateImage(m_device, &img, nullptr, &target.image) != VK_SUCCESS)
     return false;
-  VkMemoryRequirements req;
-  vkGetImageMemoryRequirements(m_device, target.image, &req);
-  VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  alloc.allocationSize = req.size;
-  alloc.memoryTypeIndex =
-      FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  if (vkAllocateMemory(m_device, &alloc, nullptr, &target.memory) != VK_SUCCESS)
+  if (!vkutil::AllocateImageMemory(m_device, m_physicalDevice, target.image,
+                                   VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                                   target.memory)) {
     return false;
-  vkBindImageMemory(m_device, target.image, target.memory, 0);
+  }
   VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   view.image = target.image;
   view.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -537,10 +531,11 @@ bool SSAORenderer::CreateNoiseTexture() {
 
   VkBuffer staging = VK_NULL_HANDLE;
   VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-  if (!CreateBuffer(sizeof(noise), VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                    staging, stagingMemory))
+  if (!vkutil::CreateBuffer(m_device, m_physicalDevice, sizeof(noise),
+                            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                            staging, stagingMemory))
     return false;
   void* data = nullptr;
   vkMapMemory(m_device, stagingMemory, 0, sizeof(noise), 0, &data);
@@ -588,8 +583,7 @@ bool SSAORenderer::CreateNoiseTexture() {
   vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
   vkQueueWaitIdle(m_graphicsQueue);
   vkFreeCommandBuffers(m_device, m_commandPool, 1, &cb);
-  vkDestroyBuffer(m_device, staging, nullptr);
-  vkFreeMemory(m_device, stagingMemory, nullptr);
+  vkutil::DestroyBuffer(m_device, staging, stagingMemory);
   return true;
 }
 
@@ -629,17 +623,19 @@ bool SSAORenderer::CreateUniformBuffers() {
   m_aoUBOMemory.resize(MAX_FRAMES_IN_FLIGHT);
   m_aoUBOMapped.resize(MAX_FRAMES_IN_FLIGHT);
   for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-    if (!CreateBuffer(sizeof(PrepassUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                      m_prepassUBOs[i], m_prepassUBOMemory[i]))
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, sizeof(PrepassUBO),
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              m_prepassUBOs[i], m_prepassUBOMemory[i]))
       return false;
     vkMapMemory(m_device, m_prepassUBOMemory[i], 0, sizeof(PrepassUBO), 0,
                 &m_prepassUBOMapped[i]);
-    if (!CreateBuffer(sizeof(SSAOParamsUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                      m_aoUBOs[i], m_aoUBOMemory[i]))
+    if (!vkutil::CreateBuffer(m_device, m_physicalDevice, sizeof(SSAOParamsUBO),
+                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                              m_aoUBOs[i], m_aoUBOMemory[i]))
       return false;
     vkMapMemory(m_device, m_aoUBOMemory[i], 0, sizeof(SSAOParamsUBO), 0,
                 &m_aoUBOMapped[i]);
@@ -837,23 +833,13 @@ void SSAORenderer::TransitionTargetsToRead() {
 }
 
 bool SSAORenderer::CreatePipelines() {
-  const std::string dir = RuntimePaths::ShaderDir().string() + "/";
-  auto load = [&](const char* name) { return ReadFile(dir + name); };
-  auto prepassVert = load("ssao_prepass_vert.spv");
-  auto prepassFrag = load("ssao_prepass_frag.spv");
-  auto fullscreenVert = load("fullscreen_vert.spv");
-  auto ssaoFrag = load("ssao_frag.spv");
-  auto blurFrag = load("ssao_blur_frag.spv");
-  if (prepassVert.empty() || prepassFrag.empty() || fullscreenVert.empty() ||
-      ssaoFrag.empty() || blurFrag.empty()) {
-    LOG_ERROR("SSAORenderer: failed to load shaders from {}", dir);
-    return false;
-  }
-
+  auto load = [&](const char* name) {
+    return vkutil::LoadShaderModule(m_device, name);
+  };
   VkShaderModule modules[5] = {
-      CreateShaderModule(prepassVert), CreateShaderModule(prepassFrag),
-      CreateShaderModule(fullscreenVert), CreateShaderModule(ssaoFrag),
-      CreateShaderModule(blurFrag)};
+      load("ssao_prepass_vert.spv"), load("ssao_prepass_frag.spv"),
+      load("fullscreen_vert.spv"), load("ssao_frag.spv"),
+      load("ssao_blur_frag.spv")};
   auto destroyModules = [&] {
     for (VkShaderModule m : modules)
       if (m)
@@ -1039,63 +1025,4 @@ bool SSAORenderer::CreatePipelines() {
 
   destroyModules();
   return true;
-}
-
-bool SSAORenderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
-                                VkMemoryPropertyFlags properties,
-                                VkBuffer& buffer, VkDeviceMemory& memory) {
-  VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-  bi.size = size;
-  bi.usage = usage;
-  bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  if (vkCreateBuffer(m_device, &bi, nullptr, &buffer) != VK_SUCCESS)
-    return false;
-  VkMemoryRequirements req;
-  vkGetBufferMemoryRequirements(m_device, buffer, &req);
-  VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-  alloc.allocationSize = req.size;
-  alloc.memoryTypeIndex = FindMemoryType(req.memoryTypeBits, properties);
-  if (vkAllocateMemory(m_device, &alloc, nullptr, &memory) != VK_SUCCESS)
-    return false;
-  vkBindBufferMemory(m_device, buffer, memory, 0);
-  return true;
-}
-
-uint32_t SSAORenderer::FindMemoryType(uint32_t typeFilter,
-                                      VkMemoryPropertyFlags properties) {
-  VkPhysicalDeviceMemoryProperties memProperties;
-  vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memProperties);
-  for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
-    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags &
-                                    properties) == properties) {
-      return i;
-    }
-  }
-  return 0;
-}
-
-std::vector<char> SSAORenderer::ReadFile(const std::string& filename) {
-  std::ifstream file(filename, std::ios::ate | std::ios::binary);
-  if (!file.is_open()) {
-    LOG_ERROR("SSAORenderer: failed to open {}", filename);
-    return {};
-  }
-  const size_t fileSize = static_cast<size_t>(file.tellg());
-  std::vector<char> buffer(fileSize);
-  file.seekg(0);
-  file.read(buffer.data(), fileSize);
-  return buffer;
-}
-
-VkShaderModule SSAORenderer::CreateShaderModule(const std::vector<char>& code) {
-  VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-  ci.codeSize = code.size();
-  ci.pCode = reinterpret_cast<const uint32_t*>(code.data());
-  VkShaderModule shaderModule = VK_NULL_HANDLE;
-  if (vkCreateShaderModule(m_device, &ci, nullptr, &shaderModule) !=
-      VK_SUCCESS) {
-    LOG_ERROR("SSAORenderer: failed to create shader module");
-    return VK_NULL_HANDLE;
-  }
-  return shaderModule;
 }
