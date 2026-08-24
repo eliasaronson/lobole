@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
 #include "core/Document.h"
@@ -9,6 +10,7 @@
 
 #include "cad/CADKernel.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 
@@ -499,4 +501,75 @@ TEST_CASE("The directory form round-trips through a folder pick", "[io]") {
   REQUIRE(loaded);
   CHECK((*loaded)->FeatureCount() == 1);
   fs::remove_all(target);
+}
+
+// --- kFeatureTypes is the authority, not a comment ------------------------
+//
+// The table beside FeatureFromJson used to carry "Keep in lockstep with the
+// FeatureFromJson chain below" and nothing enforced it. A type could gain a
+// `type ==` branch without a row and load, save and regenerate perfectly
+// while being invisible to the `describe` RPC — an agent reading describe
+// would never learn the feature exists. FeatureFromJson now rejects any type
+// missing from the table before reaching the chain, which makes a
+// branch-without-a-row unreachable; these pin both directions.
+
+TEST_CASE("every documented feature type reaches a FeatureFromJson branch",
+          "[serialization]") {
+  const auto types = DocumentIO::FeatureTypes();
+  REQUIRE(!types.empty());
+  for (const DocumentIO::FeatureTypeInfo& info : types) {
+    // A bare {type, name} is missing whatever fields the branch requires, so
+    // most types throw — but they must throw about a FIELD, never about the
+    // TYPE. "Unknown feature type" here would mean the table lists something
+    // the chain cannot build.
+    nlohmann::json j = {{"type", info.type}, {"name", "probe"}};
+    try {
+      auto f = DocumentIO::FeatureFromJson(j);
+      REQUIRE(f != nullptr);
+      CHECK(f->TypeName() == std::string(info.type));
+    } catch (const std::exception& e) {
+      const std::string msg = e.what();
+      INFO("type " << info.type << " reported: " << msg);
+      CHECK(msg.find("Unknown feature type") == std::string::npos);
+      CHECK(msg.find("no branch for it") == std::string::npos);
+    }
+  }
+}
+
+TEST_CASE("a feature type outside the table is refused by name",
+          "[serialization]") {
+  nlohmann::json j = {{"type", "Sprocket"}, {"name", "nope"}};
+  REQUIRE_THROWS_WITH(DocumentIO::FeatureFromJson(j),
+                      Catch::Matchers::ContainsSubstring("Unknown feature "
+                                                         "type: Sprocket") &&
+                          // decision-complete: the rejection names the
+                          // vocabulary, so the fix needs no second round-trip
+                          Catch::Matchers::ContainsSubstring("Known types:") &&
+                          Catch::Matchers::ContainsSubstring("Extrude"));
+}
+
+TEST_CASE("describe's feature table covers every type a document can hold",
+          "[serialization]") {
+  // The reverse direction, through the real serializer: build one of every
+  // feature the GUI can create, round-trip it, and require its TypeName to be
+  // in the table. FeatureToJson would throw "Unserializable feature type" for
+  // anything it cannot write, so this also pins To/From agreement.
+  Document doc;
+  doc.AddFeature(std::make_unique<BoxFeature>("B", glm::vec3(0), 1, 1, 1));
+  doc.AddFeature(std::make_unique<SphereFeature>("S", glm::vec3(0), 1));
+  doc.AddFeature(std::make_unique<CylinderFeature>("C", glm::vec3(0),
+                                                   glm::vec3(0, 1, 0), 1, 1));
+
+  const auto types = DocumentIO::FeatureTypes();
+  for (size_t i = 0; i < doc.FeatureCount(); i++) {
+    const Feature* f = doc.GetFeature(i);
+    const std::string name = f->TypeName();
+    const bool listed =
+        std::any_of(types.begin(), types.end(),
+                    [&](const DocumentIO::FeatureTypeInfo& info) {
+                      return name == info.type;
+                    });
+    INFO("feature type " << name << " is missing a kFeatureTypes row");
+    CHECK(listed);
+  }
 }

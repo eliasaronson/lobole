@@ -972,6 +972,34 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   const std::string type = j.at("type").get<std::string>();
   const std::string name = j.at("name").get<std::string>();
 
+  // kFeatureTypes is AUTHORITATIVE, not documentation that happens to sit
+  // near the dispatch chain. The old arrangement was a comment asking two
+  // lists to be kept in lockstep with nothing enforcing it, and a type that
+  // gained a `type ==` branch but no table row would load and save perfectly
+  // while being invisible to `describe` — the same shape as the CAM and
+  // drawings gate lists that shipped with RPCs nobody could discover.
+  //
+  // Checking the table BEFORE the chain makes both directions of drift a
+  // loud failure instead of a silent one: a branch without a row is
+  // unreachable (its golden test fails on the next run), and a row without a
+  // branch still falls through to the same error below.
+  {
+    bool known = false;
+    for (const FeatureTypeInfo& info : kFeatureTypes) {
+      if (type == info.type) {
+        known = true;
+        break;
+      }
+    }
+    if (!known) {
+      std::string accepted;
+      for (const FeatureTypeInfo& info : kFeatureTypes)
+        accepted += (accepted.empty() ? "" : ", ") + std::string(info.type);
+      throw std::runtime_error("Unknown feature type: " + type +
+                               ". Known types: " + accepted);
+    }
+  }
+
   std::unique_ptr<Feature> out;
   if (type == "Sketch") {
     const json& pl = j.at("plane");
@@ -1424,7 +1452,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   }
 
   if (!out) {
-    throw std::runtime_error("Unknown feature type: " + type);
+    // Reached only when kFeatureTypes lists a type the chain above does not
+    // build — the row-without-a-branch half of the drift the gate catches.
+    throw std::runtime_error(
+        "Feature type '" + type +
+        "' is listed in kFeatureTypes but FeatureFromJson has no branch for "
+        "it — add the branch, or drop the row.");
   }
   out->SetId(
       j.value("id", uint64_t{0})); // v1 files have no id; Document assigns
