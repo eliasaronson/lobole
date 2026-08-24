@@ -3,13 +3,17 @@
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"
 
+#include "common/Logger.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/Units.h"
 #include "ui/AppActions.h"
 
 #include "imgui.h"
 
+#include <cfloat>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -47,6 +51,65 @@ std::string FreshName(const AppState& state) {
   }
 }
 
+// Document units (U13e). Here rather than in Preferences because they are a
+// property of the DOCUMENT, not of the reader — Preferences would make a
+// part authored in inches show as millimetres to whoever opened it next.
+// This panel is already where the document's own parameters live.
+//
+// Display only: storage is millimetres, grams and degrees whatever these
+// say, so changing one cannot move a vertex — which is also why it does not
+// touch the undo stack or bump the document version. It does mark the
+// project dirty, since it is written to the file.
+void DrawUnitsSection(AppState& state, Document& doc) {
+  if (!ImGui::CollapsingHeader("Units###units_header"))
+    return;
+
+  units::System sys = doc.Units();
+  bool changed = false;
+
+  const auto combo = [&](const char* label, const char* id,
+                         const std::vector<const char*>& names,
+                         const char* current, auto&& apply) {
+    LeftLabel(label);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::BeginCombo(id, current)) {
+      for (const char* n : names)
+        if (ImGui::Selectable(n, std::strcmp(n, current) == 0)) {
+          apply(n);
+          changed = true;
+        }
+      ImGui::EndCombo();
+    }
+  };
+
+  combo("Length", "###units_length", units::LengthNames(),
+        units::ToString(sys.length), [&](const char* n) {
+          // The parser refuses rather than substitutes, and these strings
+          // come straight from its own name list — so a false here is a bug
+          // in that pairing, not bad input.
+          if (!units::LengthFromString(n, sys.length))
+            LOG_ERROR("units: unknown length '{}'", n);
+        });
+  combo("Mass", "###units_mass", units::MassNames(), units::ToString(sys.mass),
+        [&](const char* n) {
+          if (!units::MassFromString(n, sys.mass))
+            LOG_ERROR("units: unknown mass '{}'", n);
+        });
+  combo("Angle", "###units_angle", units::AngleNames(),
+        units::ToString(sys.angle), [&](const char* n) {
+          if (!units::AngleFromString(n, sys.angle))
+            LOG_ERROR("units: unknown angle '{}'", n);
+        });
+
+  if (changed) {
+    doc.SetUnits(sys);
+    // Not a document version bump: units are display-only, and bumping would
+    // mark every solved study stale over a change that moves nothing.
+    state.projectMetaDirty = true;
+  }
+  ImGui::Spacing();
+}
+
 } // namespace
 
 void DrawVariablesPanel(AppState& state) {
@@ -59,6 +122,8 @@ void DrawVariablesPanel(AppState& state) {
     return;
   }
   Document& doc = *state.document;
+
+  DrawUnitsSection(state, doc);
 
   static CellEdit edit;
   // Rename/delete refusals; shown under the table until the next action.

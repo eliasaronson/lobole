@@ -233,6 +233,7 @@ set(core_sources
     src/core/MassProps.cpp
     src/core/Feature.cpp
     src/core/Document.cpp
+    src/core/Units.cpp
     src/core/Occurrence.cpp
     src/core/AssemblySolve.cpp
     src/core/drawing/DrawingProjection.cpp

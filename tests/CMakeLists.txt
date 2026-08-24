@@ -34,6 +34,7 @@ add_executable(designer_tests
     test_settings.cpp
     test_keymap.cpp
     test_golden.cpp
+    test_units.cpp
     test_assembly.cpp
     test_assembly_solve.cpp
     test_measure.cpp

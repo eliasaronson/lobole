@@ -4,6 +4,7 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Units.h"
 #include "core/cam/CamJob.h"
 #include "core/io/Serialization.h"
 
@@ -62,6 +63,25 @@ void AssertCamTopFace(const Document& doc, const nlohmann::json& expect) {
         expect.at("cam_top_face").get<std::string>());
 }
 
+// The document's display units (v64). Optional, like the CAM assertions:
+// only the goldens that say anything about units are checked. Worth a golden
+// of its own because the failure mode is silent — a file that says "in" and
+// loads as mm is wrong in every dimension it shows and looks entirely
+// reasonable, which is why the loader REFUSES an unknown string rather than
+// substituting one.
+void AssertUnits(const Document& doc, const nlohmann::json& expect) {
+  if (!expect.contains("units"))
+    return;
+  const nlohmann::json& want = expect.at("units");
+  const units::System& got = doc.Units();
+  CHECK(std::string(units::ToString(got.length)) ==
+        want.at("length").get<std::string>());
+  CHECK(std::string(units::ToString(got.mass)) ==
+        want.at("mass").get<std::string>());
+  CHECK(std::string(units::ToString(got.angle)) ==
+        want.at("angle").get<std::string>());
+}
+
 void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());
   REQUIRE(doc.GetBodies().size() == expect.at("bodies").get<size_t>());
@@ -106,6 +126,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       AssertMatchesExpect(*doc, expect);
       AssertCamSides(*doc, expect);
       AssertCamTopFace(*doc, expect);
+      AssertUnits(*doc, expect);
 
       // Round-trip through the CURRENT writer: migrations must compose
       const fs::path tmp = fs::temp_directory_path() /
@@ -116,6 +137,7 @@ TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {
       AssertMatchesExpect(*reloaded, expect);
       AssertCamSides(*reloaded, expect);
       AssertCamTopFace(*reloaded, expect);
+      AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove(tmp);
     }
   }
@@ -153,6 +175,7 @@ TEST_CASE("Golden corpus round-trips through the directory format (F3)",
       AssertMatchesExpect(*reloaded, expect);
       AssertCamSides(*reloaded, expect);
       AssertCamTopFace(*reloaded, expect);
+      AssertUnits(*reloaded, expect); // survives a save/load round trip
       fs::remove_all(proj);
     }
   }

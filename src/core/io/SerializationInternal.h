@@ -17,7 +17,8 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    63; // v63: the cam setup remembers the face Z zero was picked from
+    64; // v64: display units (length/mass/angle) travel with the document
+        // (v63: the cam setup remembers the face Z zero was picked from)
         // (v62: cam operation `side` written for clearing ops too)
         // (v61: expression-driven Box/Sphere/Cylinder dimensions)
         // (v57: mate connector inner_path)

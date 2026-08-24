@@ -2,6 +2,7 @@
 
 #include "core/Configuration.h"
 #include "core/ElementMap.h"
+#include "core/Units.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -159,6 +160,12 @@ struct ExplodedView {
 // executing features.
 class AssemblyDocument {
 public:
+  // The units this assembly is READ in — same rule and same storage
+  // invariant as Document::Units (core/Units.h). The BOM's masses are the
+  // reason an assembly needs its own: it is where they are shown.
+  const units::System& Units() const { return m_units; }
+  void SetUnits(const units::System& u) { m_units = u; }
+
   const std::vector<Occurrence>& GetOccurrences() const {
     return m_occurrences;
   }
@@ -257,6 +264,7 @@ public:
 
 private:
   std::vector<Occurrence> m_occurrences;
+  units::System m_units;
   std::vector<Mate> m_mates;
   std::vector<ExplodedView> m_explodedViews;
   std::vector<Configuration> m_configurations;

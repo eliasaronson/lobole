@@ -910,6 +910,15 @@ struct AppState {
   uint64_t deltaVersion = 0;
   uint32_t deltaMissingInstance = 0, deltaExtraInstance = 0;
   std::string deltaSummary; // what the comparison said, for the viewport hint
+  // The units the ACTIVE document is read in (core/Units.h). An assembly tab
+  // has no `document` at all — and the BOM, which is where masses are shown,
+  // is drawn on exactly that tab — so the assembly's own system wins there.
+  units::System ActiveUnits() const {
+    if (assembly)
+      return assembly->Units();
+    return document ? document->Units() : units::System{};
+  }
+
   bool HasGeometryDelta() const {
     return deltaMissingShape.IsValid() || deltaExtraShape.IsValid();
   }
@@ -1083,9 +1092,12 @@ struct AppState {
   // Drives autosave (core/Autosaver) and its recovery sidecars.
   std::string projectPath;
   uint64_t lastSavedVersion = 0;
-  // Project-metadata edits (tab folders, tab renames) live in project.json,
-  // not in any document, so they bump no document version — this flag keeps
-  // them save-prompt visible. Cleared on save/open (StampAllSaved).
+  // Edits that must be SAVED but must not bump a document version. Tab
+  // folders and tab renames live in project.json and belong to no document
+  // at all; display units (U13e) do live in the document, but bumping its
+  // version for them would mark every solved study stale over a change that
+  // cannot move a vertex. Either way this flag is what keeps them
+  // save-prompt visible. Cleared on save/open (StampAllSaved).
   bool projectMetaDirty = false;
   // Bumped whenever the project is replaced (opened, recovered). The
   // autosaver is a loop local rather than state, so this is how it learns

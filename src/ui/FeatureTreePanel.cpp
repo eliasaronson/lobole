@@ -1,4 +1,5 @@
 #include "ui/FeatureTreePanel.h"
+#include "core/Units.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 #include "ui/TextFit.h"
@@ -61,7 +62,8 @@ void DrawMassPropertiesSection(AppState& state) {
     return;
   }
 
-  ImGui::Text("Volume: %.3f mm\xc2\xb3", cache.volume);
+  TextEllipsis("Volume: " +
+               units::FormatVolume(cache.volume, state.ActiveUnits()));
   double area = 0.0;
   for (const auto& b : cache.bodies)
     area += b.surfaceArea;
@@ -479,11 +481,8 @@ void DrawFeatureTreePanel(AppState& state) {
       ImGui::OpenPopupOnItemClick("##bodyctx",
                                   ImGuiPopupFlags_MouseButtonRight);
       ImGui::SameLine();
-      // Formatting is U13e's (core/Units); this only stops the number
-      // being cut mid-digit, which is the worse of the two problems.
-      char vol[48];
-      std::snprintf(vol, sizeof(vol), "%.2f mm\xc2\xb3", bodyVolume);
-      TextDisabledEllipsis(vol);
+      TextDisabledEllipsis(
+          units::FormatVolume(bodyVolume, state.ActiveUnits()));
 
       bool committed = false;
       if (ImGui::BeginPopup("##bodyctx")) {

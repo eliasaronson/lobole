@@ -1,4 +1,5 @@
 #include "ui/AppActions.h"
+#include "core/Units.h"
 #include <utility>
 
 #include "cad/CADMaterials.h"
@@ -2058,11 +2059,12 @@ std::string SlotDir(const AppState& state, size_t i) {
 
 namespace {
 
-// "2 100 mm³" / "0.34 cm³" — a volume a person can read.
-std::string VolumeText(double mm3) {
-  char buf[64];
-  std::snprintf(buf, sizeof(buf), "%.0f mm³", mm3);
-  return buf;
+// A volume a person can read, in the document's own units. The function this
+// replaces carried the comment "2 100 mm³ / 0.34 cm³" over a body that was
+// `%.0f mm³` and had never done either — the comment described a behaviour
+// nobody had written.
+std::string VolumeText(const AppState& state, double mm3) {
+  return units::FormatVolume(mm3, state.ActiveUnits());
 }
 
 } // namespace
@@ -2138,12 +2140,12 @@ GeometryChange CompareVersionGeometry(AppState& state,
   if (!grew && !shrank)
     out.summary = "same shape";
   else if (grew && shrank)
-    out.summary = VolumeText(out.added) + " added, " + VolumeText(out.removed) +
-                  " removed";
+    out.summary = VolumeText(state, out.added) + " added, " +
+                  VolumeText(state, out.removed) + " removed";
   else if (grew)
-    out.summary = VolumeText(out.added) + " added";
+    out.summary = VolumeText(state, out.added) + " added";
   else
-    out.summary = VolumeText(out.removed) + " removed";
+    out.summary = VolumeText(state, out.removed) + " removed";
 
   // Red where material went away, green where it arrived — the same sense
   // as compare_geometry's materialize (red = in the reference and not here).

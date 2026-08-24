@@ -778,6 +778,9 @@ static const std::set<std::string> kNoPartDoc = {
     // or drawing tab. The handlers already ask for a part only when the
     // scope is "part", and refuse with that reason.
     "set_variable", "list_variables", "rename_variable", "delete_variable",
+    // Units belong to the document, and an ASSEMBLY has its own (the BOM's
+    // masses are shown there) — so these must not be gated on a part either.
+    "set_units", "get_units",
     // Camera / rendering act on the viewport, not the part document, so they
     // work on an assembly tab too. render_still's RT scene sync does the
     // occurrence walk itself.

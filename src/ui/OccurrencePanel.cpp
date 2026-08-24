@@ -361,15 +361,12 @@ void DrawConfigsSection(AppState& state) {
 // number still looks like a number, which is the worst way for a bill of
 // materials to be wrong: every unit mass on that screen was out by a factor
 // of ten to a thousand while looking perfectly reasonable.
-std::string MassText(double grams) {
-  char buf[32];
-  if (grams < 1000.0)
-    std::snprintf(buf, sizeof(buf), "%.1f g", grams);
-  else if (grams < 1.0e6)
-    std::snprintf(buf, sizeof(buf), "%.2f kg", grams / 1000.0);
-  else
-    std::snprintf(buf, sizeof(buf), "%.0f kg", grams / 1000.0);
-  return buf;
+//
+// Now core/Units: the g/kg switch this used to make per value is exactly
+// what a document unit system replaces. A column of masses has to be
+// comparable DOWN THE COLUMN, and "1.2 kg" over "900 g" is not.
+std::string MassText(const AppState& state, double grams) {
+  return units::FormatMass(grams, state.ActiveUnits());
 }
 
 // Full text on hover, for whatever the column still cannot hold. Kept
@@ -434,9 +431,9 @@ void DrawBomSection(AppState& state) {
     }
     for (const BomRow& r : cache.rows) {
       const std::string material = r.material.empty() ? "-" : r.material;
-      const std::string unit = r.massKnown ? MassText(r.unitMassG) : "?";
+      const std::string unit = r.massKnown ? MassText(state, r.unitMassG) : "?";
       const std::string total =
-          r.massKnown ? MassText(r.unitMassG * r.quantity) : "?";
+          r.massKnown ? MassText(state, r.unitMassG * r.quantity) : "?";
       // Everything about the row, for the hover — the escape hatch for
       // whatever the column still cannot hold.
       const std::string full = r.partName + "  x" + std::to_string(r.quantity) +
@@ -486,8 +483,8 @@ void DrawBomSection(AppState& state) {
       ImGui::TableNextColumn();
     ImGui::TableNextColumn();
     if (cache.massKnown) {
-      ImGui::TextUnformatted(MassText(cache.totalMassG).c_str());
-      CellTooltip(MassText(cache.totalMassG));
+      ImGui::TextUnformatted(MassText(state, cache.totalMassG).c_str());
+      CellTooltip(MassText(state, cache.totalMassG));
     } else {
       ImGui::TextDisabled("?");
     }

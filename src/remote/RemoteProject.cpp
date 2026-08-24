@@ -6,6 +6,7 @@
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/Occurrence.h"
+#include "core/Units.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
 #include "core/io/GitVault.h"
@@ -71,6 +72,12 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"set_variable", "Add or redefine a variable {name, expression, comment?, "
                      "scope: project|part}; returns value + regen."},
     {"list_variables", "Project variables and the active part's local ones."},
+    {"set_units",
+     "The units the ACTIVE document is READ in {length?: mm|cm|m|in, mass?: "
+     "g|kg|lb, angle?: deg|rad}. Display only — storage is always mm/g/deg, "
+     "so this cannot move a vertex. Omitted keys keep their current value; "
+     "an unrecognised one is refused, naming what is accepted."},
+    {"get_units", "The active document's display units."},
     {"rename_variable", "Rename a variable {name, new_name, scope?}, rewriting "
                         "every referencing expression."},
     {"delete_variable", "Delete a variable {name, scope?}; refused while "
@@ -196,6 +203,7 @@ void RequireFolder(const ui::AppState& state, const std::string& folder,
 std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   Document* doc = state.document.get();
+  AssemblyDocument* asmDoc = state.assembly.get();
   if (m == "new_project") {
     ui::ReplaceDocument(state, std::make_unique<Document>());
     state.parts.clear(); // reset to a single fresh part (A1)
@@ -365,6 +373,50 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
   // from a drawing tab came back "the active document is a drawing, not a
   // part". Here `doc` is a pointer, and the handlers ask for a part only when
   // the scope is "part".
+  if (m == "set_units" || m == "get_units") {
+    // Units live on the DOCUMENT (core/Units.h), and an assembly tab has no
+    // `doc` at all — the BOM's masses are shown there, so the assembly needs
+    // its own. Hence the two branches rather than a Document& gate.
+    units::System sys;
+    if (asmDoc != nullptr)
+      sys = asmDoc->Units();
+    else if (doc != nullptr)
+      sys = doc->Units();
+    else
+      throw std::runtime_error("no active document");
+
+    if (m == "set_units") {
+      // Refuse, don't substitute: a caller who writes "inch" and gets
+      // millimetres is wrong in every dimension and looks fine.
+      const auto parse = [&p](const char* key, auto&& from, auto& out,
+                              const std::vector<const char*>& accepted) {
+        if (!p.contains(key))
+          return;
+        const std::string v = p.at(key).get<std::string>();
+        if (!from(v, out)) {
+          std::string list;
+          for (const char* a : accepted)
+            list += (list.empty() ? "" : ", ") + std::string(a);
+          throw std::runtime_error("unknown " + std::string(key) + " unit '" +
+                                   v + "' (expected one of: " + list + ")");
+        }
+      };
+      parse("length", units::LengthFromString, sys.length,
+            units::LengthNames());
+      parse("mass", units::MassFromString, sys.mass, units::MassNames());
+      parse("angle", units::AngleFromString, sys.angle, units::AngleNames());
+      if (asmDoc != nullptr)
+        asmDoc->SetUnits(sys);
+      else
+        doc->SetUnits(sys);
+      // Saved, but no version bump: see AppState::projectMetaDirty.
+      state.projectMetaDirty = true;
+    }
+    return json{{"length", units::ToString(sys.length)},
+                {"mass", units::ToString(sys.mass)},
+                {"angle", units::ToString(sys.angle)}};
+  }
+
   if (m == "set_variable") {
     // Add or redefine a variable; one undoable edit, regenerates every
     // expression-driven field. params: {name, expression, comment?,

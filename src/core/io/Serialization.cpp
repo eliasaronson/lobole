@@ -68,6 +68,50 @@ std::string KebabType(const std::string& type) {
   return out;
 }
 
+// Display units off an envelope (v64). Absent = the default, which is what
+// every document written before v64 means. An unknown STRING is refused, not
+// substituted: a file that says "inch" and loads as millimetres is wrong in
+// every dimension it shows and looks perfectly fine (CLAUDE.md).
+units::System UnitsFromEnvelope(const json& j) {
+  units::System sys;
+  if (!j.contains("units"))
+    return sys;
+  const json u = j.at("units");
+  const auto refuse = [](const std::string& what, const std::string& got,
+                         const std::vector<const char*>& accepted) {
+    std::string list;
+    for (const char* a : accepted)
+      list += (list.empty() ? "" : ", ") + std::string(a);
+    throw std::runtime_error("unknown " + what + " unit '" + got +
+                             "' (expected one of: " + list + ")");
+  };
+  if (u.contains("length")) {
+    const std::string v = u.at("length").get<std::string>();
+    if (!units::LengthFromString(v, sys.length))
+      refuse("length", v, units::LengthNames());
+  }
+  if (u.contains("mass")) {
+    const std::string v = u.at("mass").get<std::string>();
+    if (!units::MassFromString(v, sys.mass))
+      refuse("mass", v, units::MassNames());
+  }
+  if (u.contains("angle")) {
+    const std::string v = u.at("angle").get<std::string>();
+    if (!units::AngleFromString(v, sys.angle))
+      refuse("angle", v, units::AngleNames());
+  }
+  return sys;
+}
+
+// The same three keys, written only when they differ from the default.
+void UnitsToEnvelope(const units::System& u, json& j) {
+  if (u.IsDefault())
+    return;
+  j["units"] = {{"length", units::ToString(u.length)},
+                {"mass", units::ToString(u.mass)},
+                {"angle", units::ToString(u.angle)}};
+}
+
 json DocumentEnvelope(const Document& doc) {
   json j;
   j["format"] = kFormat;
@@ -96,6 +140,10 @@ json DocumentEnvelope(const Document& doc) {
   if (doc.ActiveConfiguration() != 0) {
     j["active_configuration"] = doc.ActiveConfiguration();
   }
+  // Display units (v64), omitted at the default (mm/kg/deg) for the same
+  // reason: every document written before this re-saves byte-identically.
+  // Presentation only — storage is mm/g/deg whatever this says.
+  UnitsToEnvelope(doc.Units(), j);
   return j;
 }
 
@@ -105,11 +153,12 @@ json DocumentEnvelope(const Document& doc) {
 // FeatureToJson); these are the internal file-layout helpers. See
 // docs/assemblies/a2-design.md.
 
-json AssemblyEnvelope() {
+json AssemblyEnvelope(const AssemblyDocument& asmDoc) {
   json j;
   j["format"] = kFormat;
   j["version"] = kVersion;
   j["kind"] = "assembly";
+  UnitsToEnvelope(asmDoc.Units(), j); // v64
   return j;
 }
 
@@ -682,6 +731,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // it.
     doc->SetActiveConfiguration(
         index.value("active_configuration", uint64_t{0}));
+    doc->SetUnits(UnitsFromEnvelope(index)); // v64
     // Adopt the baked bodies BEFORE the regeneration below: it is that
     // regeneration which decides whether they still describe the recipe.
     LoadGeometry(*doc, dirPath);
@@ -713,7 +763,7 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     const fs::path occDir = dir / "occurrences";
     fs::create_directories(occDir);
 
-    json index = AssemblyEnvelope();
+    json index = AssemblyEnvelope(asmDoc);
     index["occurrences"] = json::array();
     std::set<std::string> wantedOcc;
     for (const Occurrence& o : asmDoc.GetOccurrences()) {
@@ -944,6 +994,7 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
     }
     asmDoc->SetActiveConfiguration(
         index.value("active_configuration", uint64_t{0}));
+    asmDoc->SetUnits(UnitsFromEnvelope(index)); // v64
 
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), dirPath);
@@ -1084,6 +1135,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     }
     doc->SetRollback(j.value("rollback", -1)); // v19; absent = end
     doc->SetActiveConfiguration(j.value("active_configuration", uint64_t{0}));
+    doc->SetUnits(UnitsFromEnvelope(j)); // v64
     LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
              path);
     return doc;
@@ -1102,7 +1154,7 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
     return SaveAssemblyDir(asmDoc, normalized, error);
   }
   try {
-    json j = AssemblyEnvelope();
+    json j = AssemblyEnvelope(asmDoc);
     j["occurrences"] = json::array();
     for (const Occurrence& o : asmDoc.GetOccurrences()) {
       j["occurrences"].push_back(OccurrenceToJson(o));
@@ -1182,6 +1234,7 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
       asmDoc->RestoreConfiguration(ConfigurationFromJson(cj));
     asmDoc->SetActiveConfiguration(
         j.value("active_configuration", uint64_t{0}));
+    asmDoc->SetUnits(UnitsFromEnvelope(j)); // v64
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);
     return asmDoc;

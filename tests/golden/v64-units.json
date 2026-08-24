@@ -1,0 +1,24 @@
+{
+  "format": "designer-document",
+  "version": 64,
+  "units": {
+    "length": "in",
+    "mass": "lb",
+    "angle": "rad"
+  },
+  "features": [
+    {
+      "type": "Box",
+      "name": "Imperial plate",
+      "id": 1,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "width": 50.8,
+      "height": 25.4,
+      "depth": 12.7
+    }
+  ]
+}

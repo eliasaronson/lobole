@@ -91,6 +91,43 @@ def main():
         expect(abs(st["bodies"][0]["volume"] - 200.0) < 1e-3,
                "reopened volume still 200")
 
+        # --- DISPLAY units (v64) --------------------------------------
+        # A different thing from everything above, and worth saying so: the
+        # expressions tested so far carry units on the way IN ("2 cm"), and
+        # resolve to millimetres. This is the way OUT — what the document is
+        # read in. Storage stays mm either way, which is the invariant the
+        # volume check below is here to hold.
+        expect(d.call("get_units") == {"length": "mm", "mass": "kg",
+                                       "angle": "deg"},
+               "a fresh document is mm/kg/deg")
+
+        d.call("set_units", length="in", mass="lb")
+        expect(d.call("get_units")["length"] == "in", "length is inches")
+        expect(d.call("get_units")["mass"] == "lb", "mass is pounds")
+        expect(d.call("get_units")["angle"] == "deg", "angle untouched")
+
+        st = d.call("get_state")
+        expect(abs(st["bodies"][0]["volume"] - 200.0) < 1e-3,
+               f"a display unit did NOT convert the geometry: {st['bodies'][0]}")
+
+        # Refused, not substituted: a document that said "inches" and loaded
+        # as millimetres would be wrong in every dimension and look fine.
+        try:
+            d.call("set_units", length="inches")
+            expect(False, "set_units accepted 'inches'")
+        except RuntimeError as e:
+            expect("expected one of" in str(e), f"names what it accepts: {e}")
+        expect(d.call("get_units")["length"] == "in",
+               "a refused set_units changed nothing")
+
+        d.call("save_project", path=proj)
+        d.call("new_project")
+        expect(d.call("get_units")["length"] == "mm", "new project is mm")
+        d.call("open_project", path=proj)
+        expect(d.call("get_units") == {"length": "in", "mass": "lb",
+                                       "angle": "deg"},
+               "display units survived the round-trip")
+
         print("units_smoke: OK")
     finally:
         app.terminate()

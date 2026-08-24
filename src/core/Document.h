@@ -3,6 +3,7 @@
 #include "core/Configuration.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
+#include "core/Units.h"
 #include "core/cam/CamJob.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
@@ -212,6 +213,14 @@ public:
                                       : it->second.solvedAtVersion != m_version;
   }
 
+  // ---- Units ------------------------------------------------------------
+  // The units this document is READ in. Presentation only: storage stays
+  // millimetres, grams and degrees, so changing this cannot move a vertex.
+  // Document-level rather than a preference because a part authored in
+  // inches has to display in inches for whoever opens it (core/Units.h).
+  const units::System& Units() const { return m_units; }
+  void SetUnits(const units::System& u) { m_units = u; }
+
   // ---- Configurations ---------------------------------------------------
   // Named variants (parameter overrides + feature suppression), a sibling to
   // the parameter table like studies — not Features. The ACTIVE configuration
@@ -410,6 +419,7 @@ private:
   static uint64_t NextInstanceId();
 
   std::vector<Configuration> m_configurations;
+  units::System m_units;
   uint64_t m_activeConfiguration = 0; // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
   // Non-owning; owned by AppState (Phase V). Null for a bare Document.

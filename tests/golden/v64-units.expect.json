@@ -1,0 +1,12 @@
+{
+  "features": 1,
+  "bodies": 1,
+  "volumes": [
+    16387.064
+  ],
+  "units": {
+    "length": "in",
+    "mass": "lb",
+    "angle": "rad"
+  }
+}
