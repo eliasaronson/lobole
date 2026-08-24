@@ -1133,6 +1133,48 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
     IM_CHECK(face.ok); // so the first verb on a rough board just works
   };
 
+  // An operation can be removed from the window that makes them. Removing was
+  // only possible in the docked panel, which is a tab behind Model — while
+  // every operation is created in the floating verb window. Adding three by
+  // mistake (because the first two silently cut nothing) and being unable to
+  // take any of them back is how a job ends up with duplicates in it
+  // (docs/cam/dogfood-round.md).
+  t = IM_REGISTER_TEST(engine, "cam", "an_operation_can_be_removed_where_made");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = Doc()->AddCamSetup("Job");
+    s_App->camActiveSetup = setup.id;
+    for (int i = 0; i < 2; i++) {
+      cam::Operation op;
+      op.id = Doc()->AllocateId();
+      op.name = "Op " + std::to_string(i);
+      op.type = cam::OpType::Profile;
+      op.topZ = 13.0;
+      op.bottomZ = -1.0;
+      Doc()->FindCamSetup(setup.id)->operations.push_back(op);
+    }
+    s_App->camToolOpen = true;
+    ctx->Yield(4);
+    IM_CHECK_EQ(Doc()->FindCamSetup(setup.id)->operations.size(), (size_t)2);
+
+    const uint64_t first = Doc()->FindCamSetup(setup.id)->operations[0].id;
+    // The row PushID's the operation's id as an int, which "$$<n>" addresses.
+    const std::string ref = "//CAM###ToolWindow/$$" +
+                            std::to_string(static_cast<int>(first)) +
+                            "/###rmop";
+    ctx->ItemClick(ref.c_str());
+    ctx->Yield(3);
+    const cam::Setup* live = Doc()->FindCamSetup(setup.id);
+    IM_CHECK_EQ(live->operations.size(), (size_t)1);
+    IM_CHECK(live->operations[0].id != first);
+    s_App->camToolOpen = false;
+  };
+
   // A tool session belongs to the document it is editing. File > New used to
   // leave every one of them open on a document that no longer existed —
   // including a feature-editor session naming a feature that had just been

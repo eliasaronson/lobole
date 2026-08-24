@@ -288,7 +288,7 @@ void DrawCamToolWindow(AppState& state) {
     return;
   }
 
-  const cam::Setup* setup = ActiveCamSetup(state);
+  cam::Setup* setup = ActiveCamSetup(state);
   const bool armed = state.slotPick.featureId == kCamToolSlot;
 
   // Z zero first, and loudly, because it is the number that breaks tools.
@@ -414,6 +414,9 @@ void DrawCamToolWindow(AppState& state) {
   // the CAM panel, for anyone who wants them.
   if (setup != nullptr && !setup->operations.empty()) {
     ImGui::Separator();
+    // Deferred, so the list is not mutated while it is being walked — the
+    // same shape the docked panel uses.
+    uint64_t removeOp = 0;
     for (const cam::Operation& op : setup->operations) {
       const cam::Tool* tool = setup->FindTool(op.toolNumber);
       const double depth = op.topZ - op.bottomZ;
@@ -423,6 +426,15 @@ void DrawCamToolWindow(AppState& state) {
       if (ImGui::RadioButton("###ghost", ghosted))
         state.camGhostOp = ghosted ? 0 : op.id;
       ImGui::SetItemTooltip("Show what this one removes");
+      ImGui::SameLine();
+      // Removing an operation was only possible in the DOCKED panel, which is
+      // a tab behind Model — while every operation is made here. An operation
+      // added by mistake (or three, when the first two silently cut nothing)
+      // could not be taken back without going to find another window
+      // (docs/cam/dogfood-round.md).
+      if (ImGui::SmallButton("x###rmop"))
+        removeOp = op.id;
+      ImGui::SetItemTooltip("Remove this operation");
       ImGui::SameLine();
       // What the operation SAYS about itself, from its own fields — and then
       // what actually came of it. This line used to be the description alone,
@@ -458,6 +470,19 @@ void DrawCamToolWindow(AppState& state) {
         ImGui::PopTextWrapPos();
       }
       ImGui::PopID();
+    }
+    if (removeOp != 0) {
+      auto& ops = setup->operations;
+      for (auto it = ops.begin(); it != ops.end(); ++it)
+        if (it->id == removeOp) {
+          ops.erase(it);
+          break;
+        }
+      if (state.camGhostOp == removeOp)
+        state.camGhostOp = 0;
+      state.projectMetaDirty = true;
+      RefreshCamToolpaths(state);
+      RunCamVerification(state);
     }
   }
 

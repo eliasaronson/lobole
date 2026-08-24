@@ -787,11 +787,17 @@ DerivedOp DeriveOperation(const Setup& setup,
         const double buried = std::abs(Clipper2Lib::Area(Clipper2Lib::Intersect(
             ring, above, Clipper2Lib::FillRule::NonZero)));
         if (ringArea > 0.0 && buried > ringArea * 0.25) {
+          // Lead with the verb they want. The first version of this said
+          // what was wrong and offered two alternatives in one sentence, and
+          // was read as "pockets are picked by their walls" — which is the
+          // opposite of true. A pocket is picked by its FLOOR; a wall only
+          // comes into it for an opening that goes all the way through, and
+          // has no floor to pick.
           out.why =
-              "that face has material standing around it, so it is a floor "
-              "rather than the part's own side — cutting outside it would "
-              "route a slot through the part. Clear a pocket clears it; to "
-              "cut an opening out, click the WALL of the opening.";
+              "that is the floor of a pocket — use \"Clear a pocket\" on it. "
+              "(\"Cut it out\" follows the part's own side, or the wall of an "
+              "opening that goes all the way through. Around a pocket floor "
+              "it would route a slot through the part.)";
           return out;
         }
       }

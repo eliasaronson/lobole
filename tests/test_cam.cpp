@@ -1536,8 +1536,11 @@ TEST_CASE("cam: cut it out refuses the floor of a pocket", "[cam]") {
       setup, doc->GetBodies(), cam::OpType::Profile, floor);
   CHECK_FALSE(derived.ok);
   INFO(derived.why);
-  CHECK(derived.why.find("floor") != std::string::npos);
-  CHECK(derived.why.find("WALL") != std::string::npos);
+  // It must lead with the verb that WORKS here. Saying what is wrong and
+  // then offering two alternatives got read as "pockets are picked by their
+  // walls", which is the opposite of true.
+  CHECK(derived.why.find("floor of a pocket") != std::string::npos);
+  CHECK(derived.why.find("Clear a pocket") < derived.why.find("Cut it out"));
 
   // The part's own top face still means what it always meant.
   const ElementRef top = UpFaceAt(*doc, 20.0);
