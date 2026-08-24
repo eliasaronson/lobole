@@ -13,6 +13,7 @@
 #include "ui/CamTool.h"                  // DrawCamToolWindow (CAM verbs)
 #include "ui/FeatureEditor.h"
 #include "ui/SketchToolbar.h" // DrawSketchToolWindow (U8a)
+#include "ui/Theme.h"         // ElevatedWindowBorder, DrawWindowShadow
 
 #include "IconsFontAwesome6.h"
 #include "imgui.h"
@@ -145,7 +146,13 @@ void BeginToolWindowFrame(AppState& state, const std::string& title) {
       ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoResize |
       ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
       ImGuiWindowFlags_NoSavedSettings;
+  // This window floats over the 3D scene, and at panel-background over a
+  // dark viewport, with a 6%-white hairline and nothing under it, it read as
+  // painted ONTO the model rather than above it. A stronger edge and a soft
+  // shadow (below, once the rect is final) is what says "above" here.
+  ImGui::PushStyleColor(ImGuiCol_Border, ElevatedWindowBorder());
   ImGui::Begin((title + "###ToolWindow").c_str(), nullptr, flags);
+  ImGui::PopStyleColor();
   // Keep the window inside the app window. The pivot anchoring above uses
   // the window's size, which is UNKNOWN on the appearing frame with
   // AlwaysAutoResize — the window landed hanging off the right edge and
@@ -166,6 +173,8 @@ void BeginToolWindowFrame(AppState& state, const std::string& title) {
   const ImVec2 finalPos = ImGui::GetWindowPos();
   state.toolWindowRect = glm::vec4(finalPos.x, finalPos.y, finalPos.x + wsize.x,
                                    finalPos.y + wsize.y);
+  DrawWindowShadow(finalPos,
+                   ImVec2(finalPos.x + wsize.x, finalPos.y + wsize.y));
 }
 
 namespace {
@@ -547,21 +556,20 @@ void DrawToolWindow(AppState& state) {
     ImGui::PopTextWrapPos();
   }
 
+  // Accept carries the accent; Cancel is a plain button. They shipped as a
+  // green/red pair, and red is this app's ERROR colour — it is what a failed
+  // feature wears in the tree two panels away. Cancel is not destructive, so
+  // borrowing it made the safest thing in the window look like the loudest.
   ImGui::BeginDisabled(blocking);
-  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.20f, 0.55f, 0.25f, 1.0f));
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-                        ImVec4(0.25f, 0.65f, 0.30f, 1.0f));
+  ImGui::PushStyleColor(ImGuiCol_Button, AccentColor());
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, AccentColorHovered());
   if (ImGui::Button(ICON_FA_CHECK " Accept###tw_accept"))
     accept = true;
   ImGui::PopStyleColor(2);
   ImGui::EndDisabled();
   ImGui::SameLine();
-  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.60f, 0.22f, 0.22f, 1.0f));
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
-                        ImVec4(0.72f, 0.27f, 0.27f, 1.0f));
   if (ImGui::Button(ICON_FA_XMARK " Cancel###tw_cancel"))
     cancel = true;
-  ImGui::PopStyleColor(2);
 
   // Enter accepts, Escape cancels (when not typing in a field). While a
   // handle drag is live, Escape belongs to the drag (aborts it, preview

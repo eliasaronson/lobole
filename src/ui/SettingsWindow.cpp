@@ -380,7 +380,7 @@ void DrawSettingsWindow(AppState& state) {
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const float em = ImGui::GetFontSize();
   ImGui::SetNextWindowSize(ImVec2(std::min(em * 30.0f, vp->WorkSize.x * 0.9f),
-                                  std::min(em * 28.0f, vp->WorkSize.y * 0.85f)),
+                                  std::min(em * 38.0f, vp->WorkSize.y * 0.85f)),
                            ImGuiCond_Appearing);
   ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
                                  vp->WorkPos.y + vp->WorkSize.y * 0.5f),

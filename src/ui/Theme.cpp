@@ -219,6 +219,30 @@ void ApplyTheme(float scale) {
   }
 }
 
+ImVec4 AccentColor() { return kAccent; }
+ImVec4 AccentColorHovered() {
+  return ImVec4(kAccent.x * 1.12f, kAccent.y * 1.12f, kAccent.z * 1.12f, 1.0f);
+}
+
+ImVec4 ElevatedWindowBorder() { return ImVec4(1.0f, 1.0f, 1.0f, 0.14f); }
+
+void DrawWindowShadow(const ImVec2& min, const ImVec2& max) {
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  // The window clips its own draw list to its rect, and the shadow is
+  // entirely outside it.
+  dl->PushClipRectFullScreen();
+  const float rounding = ImGui::GetStyle().WindowRounding;
+  // Four rings, each a pixel further out and a third as strong. Cheap, and
+  // at this size indistinguishable from a blur.
+  for (int i = 1; i <= 4; i++) {
+    const float o = static_cast<float>(i);
+    dl->AddRect(ImVec2(min.x - o, min.y - o), ImVec2(max.x + o, max.y + o),
+                ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.20f / o)),
+                rounding + o, 0, 1.0f);
+  }
+  dl->PopClipRect();
+}
+
 ClearColor ViewportClearColor() {
   // Slightly lighter than the panels so the 3D canvas reads as its own
   // surface
