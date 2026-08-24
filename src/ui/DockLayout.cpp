@@ -136,27 +136,39 @@ void BeginDockspace(AppState& state) {
     }
   }
 
-  // ...and once it is docked, hide its node's tab bar while it is the only
-  // window there. A single-window node draws a tab bar saying "Terminal"
-  // directly above the panel's OWN tab bar saying "zsh" — two rows of tab
-  // chrome, one of which carries no information the other does not. ImGui
-  // replaces the hidden bar with a small corner triangle that both unhides
-  // it and drags to undock (imgui.cpp, "Unhide tab bar"), so nothing is
-  // actually lost, and it restores the bar by itself the moment a second
-  // window is docked here (DockNodeUpdate clears HiddenTabBar above one
-  // window). Every frame rather than once: the panel is usually docked by a
-  // layout that was saved before this existed, and neither branch above
-  // fires for a window that already has a home.
+  // ...and once it is docked, give its node no tab bar at all while the
+  // terminal is the only window in it. A single-window node draws a tab
+  // reading "Terminal" directly above the panel's own bar reading "zsh" —
+  // two rows of tab chrome, one of which carries nothing the other does not.
+  //
+  // NoTabBar rather than HiddenTabBar, which is a deliberate trade. ImGui
+  // draws a small corner triangle for a HIDDEN bar (imgui.cpp, "Unhide tab
+  // bar") that unhides it and drags to undock; NoTabBar skips the triangle
+  // and with it the only way to drag this panel out of its node. Asked for
+  // directly: the triangle is chrome for an affordance nobody here was
+  // reaching for, and Reset Layout still moves the panel.
+  //
+  // Cleared again above one window, because NoTabBar is NOT auto-cleared the
+  // way HiddenTabBar is — dock a second panel here and without this the two
+  // would share a node with no way to switch between them. Every frame
+  // rather than once: the panel is usually docked by a layout saved before
+  // any of this existed, and neither DockBuilder branch fires for a window
+  // that already has a home.
   if (state.settings.terminalPanel) {
     ImGuiWindow* term = ImGui::FindWindowByName(kPanelTerminal);
-    if (term != nullptr && term->DockNode != nullptr &&
-        term->DockNode->Windows.Size == 1) {
+    if (term != nullptr && term->DockNode != nullptr) {
       ImGuiDockNode* node = term->DockNode;
-      const ImGuiDockNodeFlags want =
-          ImGuiDockNodeFlags_AutoHideTabBar | ImGuiDockNodeFlags_HiddenTabBar;
+      // AutoHide/Hidden are scrubbed as well as unset: an earlier build wrote
+      // them into the saved layout, and they are what draws the triangle.
+      ImGuiDockNodeFlags want =
+          node->LocalFlags &
+          ~(ImGuiDockNodeFlags_NoTabBar | ImGuiDockNodeFlags_AutoHideTabBar |
+            ImGuiDockNodeFlags_HiddenTabBar);
+      if (node->Windows.Size == 1)
+        want |= ImGuiDockNodeFlags_NoTabBar;
       // Guarded, or SetLocalFlags marks the .ini dirty on every frame.
-      if ((node->LocalFlags & want) != want)
-        node->SetLocalFlags(node->LocalFlags | want);
+      if (want != node->LocalFlags)
+        node->SetLocalFlags(want);
     }
   }
 

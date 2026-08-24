@@ -417,14 +417,41 @@ landing it first means writing both fixes twice.
   panel's own bar at one session left the duplication intact the moment you
   opened a second — because the *other* bar is ImGui's: a single-window dock
   node draws a tab reading `Terminal` directly above a bar reading `zsh`.
-  `DockLayout` now sets `AutoHideTabBar | HiddenTabBar` on the terminal's node
-  while it is the only window in it. ImGui replaces the hidden bar with a
-  small corner triangle that both unhides it and drags to undock, so the
-  affordance survives, and it restores the bar by itself if a second window is
-  ever docked there (`DockNodeUpdate` clears `HiddenTabBar` above one window).
-  Set every frame, not once: the panel is usually docked by a layout saved
-  before any of this existed, and neither DockBuilder branch fires for a
-  window that already has a home.
+  `DockLayout` now sets `NoTabBar` on the terminal's node while it is the only
+  window in it. Set every frame, not once: the panel is usually docked by a
+  layout saved before any of this existed, and neither DockBuilder branch
+  fires for a window that already has a home — which is exactly why the first
+  attempt looked like it had not been rebuilt.
+
+  `NoTabBar` rather than `HiddenTabBar`, and the difference is a deliberate
+  trade. ImGui draws a small corner triangle for a *hidden* bar (`imgui.cpp`,
+  "Unhide tab bar") that unhides it and drags to undock; `NoTabBar` skips the
+  triangle and with it the only way to drag this panel out of its node. Reset
+  Layout still moves it. The triangle was chrome for an affordance nobody was
+  reaching for.
+
+  The cost of that choice is a real one and it is handled explicitly:
+  `NoTabBar` is **not** auto-cleared above one window the way `HiddenTabBar`
+  is, so the same per-frame code clears it when a second window docks into the
+  node — without that, two panels would share a node with no way to switch
+  between them. It also scrubs `AutoHideTabBar | HiddenTabBar`, which an
+  earlier build wrote into saved layouts.
+
+- **Terminals stayed one panel rather than becoming N dockable windows.**
+  Worth recording because it is the obvious alternative and it is not
+  obviously wrong: the app already docks Model, Variables, Configurations and
+  History into one node and lets ImGui tab them, which would give a native
+  bar, no triangle, and drag-a-terminal-anywhere for free. The reason not to
+  is that **those panels are singletons and sessions are not**. ImGui's
+  docking assumes a fixed, named set of windows and persists their state in
+  `imgui.ini` by `###` id, so a dynamically created session needs a synthetic
+  identity stable across runs while the session itself dies at exit — leaving
+  ini entries for terminals that no longer exist and new sessions inheriting
+  an unrelated one's dock position. That is the `pendingSelect` bug's family
+  (ImGui owning state we thought we owned) with process lifetime attached.
+  It also gives "close" two meanings again. Revisit if pulling one terminal
+  out to float or docking one along the bottom ever becomes a real
+  workflow — our own bar can never do that.
 
 - **`Stop` needed a tooltip, which is a way of saying it needed a
   justification.** It SIGHUPs then SIGKILLs the session's process, keeping
