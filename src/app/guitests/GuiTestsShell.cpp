@@ -6,6 +6,24 @@
 // shard partition from the binary's own --gui-test-list and asserts every
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
+
+// Every button on the model toolbar, in bar order. File scope because two
+// tests read it — "every_tool_is_reachable" (the row fits, nothing is culled)
+// and "no_duplicate_glyph" (no two of them wear the same icon). A tool added
+// to the bar and not to this list is caught by the first of those.
+static const char* const kModelTools[] = {
+    "###tb_new_sketch", "###tb_box",         "###tb_sphere",
+    "###tb_cylinder",   "###tb_extrude",     "###tb_revolve",
+    "###tb_curve3d",    "###tb_sweep",       "###tb_loft",
+    "###tb_pipe",       "###tb_datum_plane", "###tb_datum_axis",
+    "###tb_boolean",    "###tb_mirror",      "###tb_pattern",
+    "###tb_fillet",     "###tb_chamfer",     "###tb_rib",
+    "###tb_hole",       "###tb_thread",      "###tb_shell",
+    "###tb_draft",      "###tb_split",       "###tb_refine",
+    "###tb_fit",        "###tb_planes",      "###tb_simulation",
+    "###tb_section",    "###tb_measure",     "###tb_render",
+};
+
 void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
   (void)t;
@@ -336,18 +354,6 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
         std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
     ctx->Yield(4);
 
-    static const char* kModelTools[] = {
-        "###tb_new_sketch", "###tb_box",         "###tb_sphere",
-        "###tb_cylinder",   "###tb_extrude",     "###tb_revolve",
-        "###tb_curve3d",    "###tb_sweep",       "###tb_loft",
-        "###tb_pipe",       "###tb_datum_plane", "###tb_datum_axis",
-        "###tb_boolean",    "###tb_mirror",      "###tb_pattern",
-        "###tb_fillet",     "###tb_chamfer",     "###tb_rib",
-        "###tb_hole",       "###tb_thread",      "###tb_shell",
-        "###tb_draft",      "###tb_split",       "###tb_refine",
-        "###tb_fit",        "###tb_planes",      "###tb_simulation",
-        "###tb_section",    "###tb_measure",     "###tb_render",
-    };
     // THE load-bearing assertion, and it is structural on purpose. Probing
     // each button with ItemExists does NOT work: the test engine SCROLLS to
     // bring an item into view, so every id resolves whether or not it was
@@ -376,6 +382,47 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
 #ifdef HAVE_CAM
     IM_CHECK(ctx->ItemExists("**/###tb_cam"));
 #endif
+  };
+
+  // No two commands in ONE bar may wear the same glyph. Split and Section
+  // both shipped as SCISSORS, one row apart, and Datum Plane and Toggle
+  // Planes as two sizes of the same grid — a bar of 30 unlabelled icons is
+  // already a memory test, and a duplicate makes it a guess.
+  //
+  // Reuse ACROSS bars is fine and deliberate: scissors is Section here and
+  // Trim in the sketch bar, the eye is plane visibility here and glyph
+  // visibility there. One glyph, one MEANING, is the rule; this checks the
+  // stronger property that holds within a single row.
+  //
+  // Reading the glyph back from the live item, not from the source: the
+  // button's label is "<glyph>###tb_x", and DebugLabel carries it whole (the
+  // engine's buffer is 32 bytes and the longest of these is 20).
+  t = IM_REGISTER_TEST(engine, "toolbar", "no_duplicate_glyph");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(4);
+    ctx->SetRef("//##DockHost");
+
+    std::unordered_map<std::string, std::string> byGlyph; // glyph -> first id
+    for (const char* id : kModelTools) {
+      const ImGuiTestItemInfo info =
+          ctx->ItemInfo((std::string("**/") + id).c_str());
+      IM_CHECK_SILENT(info.ID != 0);
+      const std::string label = info.DebugLabel;
+      const size_t hash = label.find("###");
+      // A button with no "###" has no stable id either, which the reachability
+      // test would already have caught — but say which one, not just "0 != 0".
+      IM_CHECK_NO_RET(hash != std::string::npos && hash > 0);
+      if (hash == std::string::npos || hash == 0)
+        continue;
+      const std::string glyph = label.substr(0, hash);
+      const auto [it, fresh] = byGlyph.emplace(glyph, id);
+      // NO_RET so one run names EVERY collision, not just the first.
+      if (!fresh)
+        ctx->LogError("%s and %s share one glyph", it->second.c_str(), id);
+      IM_CHECK_NO_RET(fresh);
+    }
   };
 
   t = IM_REGISTER_TEST(engine, "palette", "ctrl_k_creates_box");

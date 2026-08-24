@@ -265,9 +265,16 @@ void DrawModelToolbar(AppState& state) {
       "Thread (cosmetic; pick a cyl. face)");
   btn(ICON_FA_BOX_OPEN "###tb_shell", "part.shell",
       "Shell (hollow a body; pick faces to open)");
-  btn(ICON_FA_ANGLES_RIGHT "###tb_draft", "part.draft",
+  // A tapered face, not ANGLES_RIGHT — that glyph is "»", which every other
+  // toolbar in the world uses to mean "more items", so a tool wearing it
+  // mid-row reads as broken chrome rather than as a modelling operation.
+  btn(ICON_FA_MOUNTAIN "###tb_draft", "part.draft",
       "Draft (taper faces for moulding)");
-  btn(ICON_FA_SCISSORS "###tb_split", "part.split",
+  // A rectangle divided in two. Split used to be SCISSORS, which Section
+  // (SectionToolButton, above) also wears — two commands, one glyph, one
+  // bar. Section keeps the scissors: it is the more-used of the two, and a
+  // view cut is what people reach for scissors expecting.
+  btn(ICON_FA_TABLE_COLUMNS "###tb_split", "part.split",
       "Split a body with a plane or one of its faces");
   btn(ICON_FA_BROOM "###tb_refine", "part.refine",
       "Refine (merge coplanar faces and boolean seams)");
@@ -276,8 +283,16 @@ void DrawModelToolbar(AppState& state) {
 
   btn(ICON_FA_UP_RIGHT_AND_DOWN_LEFT_FROM_CENTER "###tb_fit", "view.fit",
       "Fit view");
-  btn(ICON_FA_TABLE_CELLS "###tb_planes", "view.toggle_planes",
-      "Toggle planes");
+  // An eye, not a second grid: TABLE_CELLS sat one row from Datum Plane's
+  // TABLE_CELLS_LARGE, so the bar carried two near-identical grids meaning
+  // unrelated things. A visibility toggle should look like one — and it
+  // shows what the NEXT click does, which a static glyph cannot. The icon
+  // font is loaded with a fixed advance (Theme.cpp GlyphMinAdvanceX), so
+  // swapping the glyph cannot change the button width or re-wrap the row.
+  const std::string planesIcon =
+      std::string(state.showPlanes ? ICON_FA_EYE : ICON_FA_EYE_SLASH) +
+      "###tb_planes";
+  btn(planesIcon.c_str(), "view.toggle_planes", "Toggle planes");
 
   // Enter the FEM simulation workspace (needs a body to analyze).
   btn(ICON_FA_GAUGE_HIGH "###tb_simulation", "part.simulation",
