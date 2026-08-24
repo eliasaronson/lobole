@@ -8,6 +8,7 @@
 #include "ui/PanelLayout.h" // LeftLabel / WrapRow (readable at dock width)
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
+#include "ui/TextFit.h"
 
 #include "imgui.h"
 
@@ -91,7 +92,7 @@ void DrawMatesSection(AppState& state) {
 
   ImGui::SeparatorText("Mates");
   if (asmDoc.MateCount() == 0) {
-    ImGui::TextDisabled("None. Use the mate tools in the toolbar.");
+    TextDisabledWrapped("None. Use the mate tools in the toolbar.");
     return;
   }
 
@@ -287,7 +288,7 @@ void DrawExplodedSection(AppState& state) {
       state.syncedDocumentVersion = UINT64_MAX;
       asmDoc.BumpVersion();
     }
-    ImGui::TextDisabled("Drag the gizmo to set an occurrence's offset.");
+    TextDisabledWrapped("Drag the gizmo to set an occurrence's offset.");
   }
 }
 
@@ -371,7 +372,10 @@ std::string MassText(double grams) {
   return buf;
 }
 
-// Full text on hover, for whatever the column still cannot hold.
+// Full text on hover, for whatever the column still cannot hold. Kept
+// alongside TextFit's own tooltip because a TABLE cell clips on its own,
+// before any of our text lands — the column width is the table's business,
+// not the string's.
 void CellTooltip(const std::string& text) {
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     ImGui::SetTooltip("%s", text.c_str());
@@ -514,7 +518,7 @@ void DrawOccurrencePanel(AppState& state) {
 
   ImGui::SeparatorText("Occurrences");
   if (asmDoc.OccurrenceCount() == 0)
-    ImGui::TextDisabled("Empty - use Insert part on the toolbar.");
+    TextDisabledWrapped("Empty - use Insert part on the toolbar.");
 
   for (const Occurrence& o : asmDoc.GetOccurrences()) {
     // Ids in the LABELS, not a PushID(int) scope: an integer scope is not
@@ -533,7 +537,7 @@ void DrawOccurrencePanel(AppState& state) {
         (o.name.empty() ? RefNameById(state, o) : o.name) +
         (o.refKind == OccurrenceRef::Assembly ? "  [assembly]" : "") +
         (o.fixed ? "  (fixed)" : "") + "###occ_" + suffix;
-    if (ImGui::Selectable(label.c_str(), SelectedOccurrenceId(state) == o.id))
+    if (SelectableEllipsis(label, SelectedOccurrenceId(state) == o.id))
       SelectOccurrence(state, o.id);
   }
 

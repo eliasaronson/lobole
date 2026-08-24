@@ -567,6 +567,7 @@ set(app_sources
     src/ui/PreviewFeature.cpp
     src/ui/PreviewHandles.cpp
     src/ui/Overlays.cpp
+    src/ui/TextFit.cpp
     src/ui/Theme.cpp
     src/ui/ViewportInput.cpp
     src/ui/SelectionPipeline.cpp

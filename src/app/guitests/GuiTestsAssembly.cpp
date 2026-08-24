@@ -128,6 +128,52 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->activeExplodedView, (uint64_t)0);
   };
 
+  // U13d: a row too long for the dock elides and can still be READ. ImGui
+  // clips rather than elides, so the left panel used to cut names mid-word
+  // with nothing to say it had happened — `Gangway  [assembly]  (fixed` is
+  // the real one, off the Marsliden dock at the default 218 px split.
+  //
+  // The name has to survive the elision as an ID, too: SelectableEllipsis
+  // splits the "###occ_N" off and re-appends it, so the row a script or a
+  // test addresses is the same row at every panel width.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "a_long_row_elides_and_names_itself");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ToolbarCreateAccept(ctx, "###tb_box");
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Wide");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence o;
+    o.name = "A gangway hinge bracket nobody could fit in a dock panel";
+    o.partId = partId;
+    o.fixed = true;
+    const uint64_t occId = s_App->assembly->AddOccurrence(o);
+    ctx->Yield(4);
+
+    // Addressable by id, elision or not.
+    const std::string ref = "//###Model/###occ_" + std::to_string(occId);
+    ImGuiTestItemInfo row = ctx->ItemInfo(ref.c_str());
+    IM_CHECK(row.ID != 0);
+
+    // It fits the panel: the whole point. A clipped Selectable would report
+    // the same rect, so measure the TEXT that would be drawn instead.
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelModel);
+    IM_CHECK(panel != nullptr);
+    const float full = ImGui::CalcTextSize(o.name.c_str()).x;
+    ctx->LogInfo("name wants %.0f px, panel inner is %.0f px", full,
+                 panel->InnerRect.GetWidth());
+    IM_CHECK(full > panel->InnerRect.GetWidth()); // the case is real
+
+    // Hovering it gives the whole name back.
+    ctx->MouseMove(ref.c_str());
+    ctx->Yield(3);
+    ImGuiWindow* tip = ImGui::FindWindowByName("##Tooltip_00");
+    IM_CHECK(tip != nullptr);
+    IM_CHECK(tip->Active);
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly", "insert_places_a_sub_assembly");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

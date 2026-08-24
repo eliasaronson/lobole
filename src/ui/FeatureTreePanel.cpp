@@ -1,6 +1,7 @@
 #include "ui/FeatureTreePanel.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
+#include "ui/TextFit.h"
 
 #include "cad/CADMaterials.h"
 #include "core/Command.h"
@@ -478,7 +479,11 @@ void DrawFeatureTreePanel(AppState& state) {
       ImGui::OpenPopupOnItemClick("##bodyctx",
                                   ImGuiPopupFlags_MouseButtonRight);
       ImGui::SameLine();
-      ImGui::TextDisabled("%.2f mm%s", bodyVolume, "\xc2\xb3");
+      // Formatting is U13e's (core/Units); this only stops the number
+      // being cut mid-digit, which is the worse of the two problems.
+      char vol[48];
+      std::snprintf(vol, sizeof(vol), "%.2f mm\xc2\xb3", bodyVolume);
+      TextDisabledEllipsis(vol);
 
       bool committed = false;
       if (ImGui::BeginPopup("##bodyctx")) {
