@@ -80,6 +80,8 @@ const char* MateTypeToString(MateType t) {
 }
 
 MateType MateTypeFromString(const std::string& s) {
+  if (s == "fastened")
+    return MateType::Fastened;
   if (s == "revolute")
     return MateType::Revolute;
   if (s == "slider")
@@ -90,7 +92,16 @@ MateType MateTypeFromString(const std::string& s) {
     return MateType::Planar;
   if (s == "ball")
     return MateType::Ball;
-  return MateType::Fastened; // default / "fastened"
+  // Anything else used to fall through to Fastened, which made a typo the
+  // most expensive kind of mistake: add_mate(type: "revolut") was ACCEPTED
+  // and produced a RIGID joint. The assembly then solved perfectly well with
+  // the wrong degrees of freedom, so nothing looked wrong until someone tried
+  // to rotate it. Same on load, where a hand-edited or merged file silently
+  // demoted every unrecognised mate to fastened.
+  throw std::runtime_error(
+      "unknown mate type '" + s +
+      "' (expected one of: fastened, revolute, slider, cylindrical, planar, "
+      "ball)");
 }
 
 json ConnectorToJson(const Connector& c) {

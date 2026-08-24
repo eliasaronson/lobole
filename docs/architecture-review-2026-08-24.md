@@ -401,3 +401,52 @@ the configuration fix, the undo fix, and the `open_project` fix each fail it).
 **D. The panel preamble (§8)** — still deferred. A behavior change to a surface
 with live callers, and it fits the roadmap's "split what the next feature
 extends, not big-bang" policy better than a standalone sweep.
+
+---
+
+## E. Silent enum substitution in the loader — FIXED
+
+Found by hunting for the SHAPE the three earlier bugs shared: a plausible value
+returned instead of an error. The loader had two rules for an unrecognised enum
+string — **8 parsers threw, 6 silently kept the default** — and none of the six
+was referenced by a single test.
+
+The failure mode is the worst kind: the document loads, looks right, and is
+wrong.
+
+| | Silently became | Consequence |
+|---|---|---|
+| `MateTypeFromString` | `Fastened` | the assembly still SOLVES, with the wrong degrees of freedom |
+| `LoadTypeFromString` | the default | a force becomes a fixed constraint; the FEM answer changes completely and looks legitimate |
+| `AnalysisTypeFromString` | `Static` | a modal study runs the wrong physics, reported with the same confidence |
+| `SheetSizeFromString` | `A4` | every view's placement and scale relative to different paper |
+| `ViewOrientationFromString` | `Front` | exactly the class the drawings round already hit |
+
+Two of the six had ALREADY been fixed for this reason — the dimension-kind
+loader, and `ParseSheetSizeOrThrow` on the RPC side, whose comment names it
+"the silent A3-stays-A4 bug class". So this was an incomplete sweep, not a new
+idea.
+
+**The worst instance was RPC-reachable, not just a hand-edited file.**
+`add_mate(type: "revolut")` — one character off — was **accepted** and produced
+a rigid joint:
+
+```
+add_mate(type='revolut')  →  ACCEPTED, mate_type: "fastened"
+```
+
+`RpcParams` rejects unknown request KEYS; nothing checked enum VALUES. Now:
+
+```
+add_mate(type='revolut')  →  unknown mate type 'revolut'
+                             (expected one of: fastened, revolute, slider,
+                              cylindrical, planar, ball)
+```
+
+One rule for the whole loader now: refuse, naming what IS accepted. Pinned by
+tests in `test_serialization.cpp`, `test_drawing.cpp` (through the real
+`LoadDrawing` entry point) and `test_fem.cpp`, plus an end-to-end assertion in
+`assembly_mates_smoke.py` — all five sabotage-checked.
+
+The directory format is deliberately one hand-editable file per item, so a bad
+string is a normal-workflow risk here, not a corner case.

@@ -573,3 +573,51 @@ TEST_CASE("describe's feature table covers every type a document can hold",
     CHECK(listed);
   }
 }
+
+// --- The loader refuses an enum string it does not recognise ---------------
+//
+// It used to be split: eight parsers threw, six silently kept the default. The
+// silent half produced a document that LOADED, looked right and was wrong —
+// an A2 sheet as A4, a revolute mate as fastened (solving fine, with the wrong
+// degrees of freedom), a modal study as static (the wrong physics, reported
+// with the same confidence as the right physics).
+//
+// Two of the six had already been fixed for exactly this reason — the
+// dimension-kind loader, and ParseSheetSizeOrThrow on the RPC side, whose
+// comment calls it "the silent A3-stays-A4 bug class". These pin the rest, so
+// the sweep cannot go half-done again.
+//
+// The directory format is deliberately one hand-editable file per item, so a
+// bad string is a normal-workflow risk here, not a corner case.
+
+TEST_CASE("an unknown mate type is refused, not demoted to fastened",
+          "[serialization][enums]") {
+  nlohmann::json j = {
+      {"id", 1},
+      {"mate_type", "revolut"}, // one character off
+      {"a", {{"occurrence", 1}, {"anchor", {{"origin", true}}}}},
+      {"b", {{"occurrence", 2}, {"anchor", {{"origin", true}}}}}};
+  REQUIRE_THROWS_WITH(
+      DocumentIO::MateFromJson(j),
+      Catch::Matchers::ContainsSubstring("unknown mate type 'revolut'") &&
+          Catch::Matchers::ContainsSubstring("revolute"));
+}
+
+TEST_CASE("every real mate type still round-trips", "[serialization][enums]") {
+  // The refusal must not have swallowed a legitimate value — including
+  // "fastened", which used to be the fall-through and is now explicit.
+  for (const char* name :
+       {"fastened", "revolute", "slider", "cylindrical", "planar", "ball"}) {
+    nlohmann::json j = {
+        {"id", 1},
+        {"mate_type", name},
+        {"a", {{"occurrence", 1}, {"anchor", {{"origin", true}}}}},
+        {"b", {{"occurrence", 2}, {"anchor", {{"origin", true}}}}}};
+    INFO("mate type " << name);
+    REQUIRE_NOTHROW(DocumentIO::MateFromJson(j));
+    // Round-trip through the writer, so the pair cannot drift apart.
+    CHECK(DocumentIO::MateToJson(DocumentIO::MateFromJson(j))
+              .at("mate_type")
+              .get<std::string>() == std::string(name));
+  }
+}

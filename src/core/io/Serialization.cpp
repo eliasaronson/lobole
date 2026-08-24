@@ -1221,7 +1221,15 @@ json SheetJson(const Sheet& s) {
 
 Sheet SheetFromJson(const json& j) {
   Sheet s;
-  SheetSizeFromString(j.value("size", std::string("a4")), s.size);
+  // Unknown here used to leave `s.size` at its default: an A2 sheet loaded
+  // as A4 with no complaint, and every view's placement and scale was then
+  // relative to different paper. The dimension-kind loader below and
+  // ParseSheetSizeOrThrow on the RPC side already refuse; this is the same
+  // rule, finally applied to the whole loader.
+  const std::string sizeStr = j.value("size", std::string("a4"));
+  if (!SheetSizeFromString(sizeStr, s.size))
+    throw std::runtime_error("unknown sheet size '" + sizeStr +
+                             "' (expected one of: a4, a3, a2, a1, a0, letter)");
   s.landscape = j.value("landscape", true);
   const json tb = j.value("title_block", json::object());
   s.titleBlock.project = tb.value("project", std::string{});
@@ -1285,8 +1293,11 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.id = j.value("id", uint64_t{0});
   v.name = j.value("name", std::string{});
   v.sourceDocId = j.value("source", uint64_t{0});
-  ViewOrientationFromString(j.value("orientation", std::string("front")),
-                            v.orientation);
+  const std::string orientStr = j.value("orientation", std::string("front"));
+  if (!ViewOrientationFromString(orientStr, v.orientation))
+    throw std::runtime_error(
+        "unknown view orientation '" + orientStr +
+        "' (expected one of: front, back, left, right, top, bottom, iso)");
   v.baseViewId = j.value("base_view", uint64_t{0});
   v.scale = j.value("scale", 1.0);
   v.scaleExpr = j.value("scale_expr", std::string{});

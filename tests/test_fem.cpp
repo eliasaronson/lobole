@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "cad/CADKernel.h"
 #include "core/Command.h"
@@ -1029,3 +1030,42 @@ TEST_CASE("Solver: cantilever self-weight tip deflection",
 }
 
 #endif // HAVE_NETGEN
+
+TEST_CASE("a study refuses an unknown analysis or load type", "[fem][enums]") {
+  // Both used to keep the default silently: a modal study loaded as STATIC and
+  // ran happily — the wrong physics, reported with exactly the confidence of
+  // the right physics — and a "force" that did not parse became a FIXED
+  // constraint, which changes the answer completely and still looks
+  // legitimate.
+  fem::AnalysisType at = fem::AnalysisType::Static;
+  CHECK(fem::AnalysisTypeFromString("modal", at));
+  CHECK(at == fem::AnalysisType::Modal);
+  CHECK_FALSE(fem::AnalysisTypeFromString("moodal", at));
+  CHECK(at == fem::AnalysisType::Modal); // untouched on failure, hence the
+                                         // caller MUST check — see below
+
+  fem::LoadType lt = fem::LoadType::Fixed;
+  CHECK(fem::LoadTypeFromString("pressure", lt));
+  CHECK(lt == fem::LoadType::Pressure);
+  CHECK_FALSE(fem::LoadTypeFromString("presure", lt));
+
+  // And the loader is the caller that used to drop it.
+  const nlohmann::json study = {
+      {"id", 1}, {"name", "S"}, {"analysis", "moodal"}};
+  REQUIRE_THROWS_WITH(
+      DocumentIO::StudyFromJson(study),
+      Catch::Matchers::ContainsSubstring("unknown study analysis type") &&
+          Catch::Matchers::ContainsSubstring("modal"));
+
+  const nlohmann::json withLoad = {
+      {"id", 1},
+      {"name", "S"},
+      {"analysis", "static"},
+      {"loads",
+       {{{"id", 1},
+         {"type", "forse"},
+         {"face", {{"feature_id", 1}, {"element", "1/f0"}}}}}}};
+  REQUIRE_THROWS_WITH(
+      DocumentIO::StudyFromJson(withLoad),
+      Catch::Matchers::ContainsSubstring("unknown load type 'forse'"));
+}

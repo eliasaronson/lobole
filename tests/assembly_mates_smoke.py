@@ -71,6 +71,22 @@ def main():
                     transform={"position": [50, 50, 50],
                                "orientation": [0, 0, 0, 1]})["id"]
 
+        # --- A mis-spelled mate type is REFUSED, not demoted ---------------
+        # It used to fall through to Fastened: add_mate(type="revolut") was
+        # accepted and produced a RIGID joint, and the assembly then solved
+        # perfectly well with the wrong degrees of freedom. RpcParams rejects
+        # unknown request KEYS; nothing checked enum VALUES.
+        try:
+            d.call("add_mate", type="revolut",
+                   a={"occurrence": o1, "origin": True},
+                   b={"occurrence": o2, "origin": True})
+            raise AssertionError("add_mate accepted the mis-spelled type")
+        except RuntimeError as e:
+            expect("unknown mate type 'revolut'" in str(e),
+                   f"refusal should name the typo: {e}")
+            expect("revolute" in str(e),
+                   f"refusal should name what IS accepted: {e}")
+
         # --- A slider mate: origin-to-origin, free to slide along Z --------
         mate = d.call("add_mate", type="slider", name="rail",
                       a={"occurrence": o1, "origin": True},

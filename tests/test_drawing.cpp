@@ -795,3 +795,50 @@ TEST_CASE("Drawing golden loads and round-trips (v53 callouts)",
   CHECK(reloaded->GetDims()[1].kind == DrawingDimKind::PatternCallout);
   fs::remove(tmp);
 }
+
+TEST_CASE("a drawing refuses an unknown sheet size or view orientation",
+          "[drawing][enums]") {
+  // Verified against a running instance before the fix: an A2 drawing whose
+  // size string did not parse loaded as A4 (297x210 instead of 594x420) with
+  // no error, so every view's placement and scale was silently relative to
+  // different paper. Driven through the real load entry point, which is the
+  // path a hand-edited or merged file actually takes.
+  const fs::path dir = fs::temp_directory_path() / "designer_enum_load";
+  fs::create_directories(dir);
+  const std::string ver = std::to_string(DocumentIO::DocumentFormatVersion());
+  auto write = [&](const std::string& name, const std::string& body) {
+    const fs::path p = dir / name;
+    std::ofstream(p) << body;
+    return p.string();
+  };
+  auto loadErr = [&](const std::string& path) {
+    auto r = DocumentIO::LoadDrawing(path);
+    REQUIRE_FALSE(r.has_value());
+    return r.error();
+  };
+
+  const std::string head = R"({"format":"designer-document","version":)" + ver +
+                           R"(,"kind":"drawing",)";
+
+  // A legitimate A2 sheet still loads.
+  REQUIRE(
+      testio::LoadDrawing(write(
+          "good.json",
+          head + R"("sheet":{"size":"a2","landscape":true},"views":[]})")) !=
+      nullptr);
+
+  const std::string sizeErr = loadErr(
+      write("badsize.json", head + R"("sheet":{"size":"a2plus"},"views":[]})"));
+  INFO("sheet error: " << sizeErr);
+  CHECK(sizeErr.find("a2plus") != std::string::npos);
+  CHECK(sizeErr.find("a2") != std::string::npos); // names what IS accepted
+
+  const std::string orientErr = loadErr(write(
+      "badorient.json",
+      head + R"("sheet":{"size":"a3"},)"
+             R"("views":[{"id":1,"name":"V","orientation":"frontish"}]})"));
+  INFO("orientation error: " << orientErr);
+  CHECK(orientErr.find("frontish") != std::string::npos);
+
+  fs::remove_all(dir);
+}

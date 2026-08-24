@@ -85,8 +85,14 @@ fem::Study StudyFromJson(const json& j) {
   fem::Study s;
   s.id = j.at("id").get<uint64_t>();
   s.name = j.value("name", std::string{});
-  fem::AnalysisTypeFromString(j.value("analysis", std::string{"static"}),
-                              s.type);
+  // A study whose analysis type did not parse used to load as STATIC and run
+  // happily — the wrong physics, reported with the same confidence as the
+  // right physics. Same for a load below: a force silently becoming a fixed
+  // constraint changes the answer completely and looks legitimate.
+  const std::string analysisStr = j.value("analysis", std::string{"static"});
+  if (!fem::AnalysisTypeFromString(analysisStr, s.type))
+    throw std::runtime_error("unknown study analysis type '" + analysisStr +
+                             "' (expected one of: static, modal, topology)");
   s.numModes = j.value("num_modes", 6);
   if (j.contains("gravity")) {
     const auto& g = j.at("gravity");
@@ -114,7 +120,10 @@ fem::Study StudyFromJson(const json& j) {
   for (const json& lj : j.value("loads", json::array())) {
     fem::Load l;
     l.id = lj.at("id").get<uint64_t>();
-    fem::LoadTypeFromString(lj.value("type", std::string{"fixed"}), l.type);
+    const std::string loadStr = lj.value("type", std::string{"fixed"});
+    if (!fem::LoadTypeFromString(loadStr, l.type))
+      throw std::runtime_error("unknown load type '" + loadStr +
+                               "' (expected one of: fixed, force, pressure)");
     l.face = ElementRefFromJson(lj.at("face"));
     l.magnitude = lj.value("magnitude", 0.0);
     l.magnitudeExpr = lj.value("magnitude_expr", std::string{});
